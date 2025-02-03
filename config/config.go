@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"go.sia.tech/indexd/persist/postgres"
 	"gopkg.in/yaml.v3"
 )
 
@@ -51,9 +52,10 @@ type (
 		Directory      string `yaml:"directory,omitempty"`
 		RecoveryPhrase string `yaml:"recoveryPhrase,omitempty"`
 
-		Syncer    Syncer    `yaml:"syncer"`
-		Consensus Consensus `yaml:"consensus"`
-		Log       Log       `yaml:"log"`
+		Syncer    Syncer                  `yaml:"syncer"`
+		Consensus Consensus               `yaml:"consensus"`
+		Log       Log                     `yaml:"log"`
+		Database  postgres.ConnectionInfo `yaml:"database"`
 	}
 )
 

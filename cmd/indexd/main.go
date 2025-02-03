@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/build"
 	"go.sia.tech/indexd/config"
+	"go.sia.tech/indexd/persist/postgres"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/flagg"
@@ -309,6 +310,13 @@ func main() {
 		}
 		defer log.Sync()
 		zap.RedirectStdLog(log.Named("stdlib"))
+
+		connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
+		defer connectCancel()
+
+		store, err := postgres.Connect(connectCtx, cfg.Database, log.Named("postgres"))
+		checkFatalError("failed to connect to postgre database", err)
+		defer store.Close()
 
 		<-ctx.Done() // TODO: do stuff
 	}
