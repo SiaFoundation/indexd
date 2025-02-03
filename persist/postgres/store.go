@@ -56,7 +56,9 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-// Connect connects to a running PostgresSQL server
+// Connect connects to a running PostgresSQL server. The passed in context
+// determines the lifecycle of necessary migrations. If the context is cancelled,
+// the running migration will be interupted and an error returned.
 func Connect(ctx context.Context, ci ConnectionInfo, log *zap.Logger) (*Store, error) {
 	db, err := sql.Open("postgres", ci.String())
 	if err != nil {

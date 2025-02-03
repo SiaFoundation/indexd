@@ -311,10 +311,7 @@ func main() {
 		defer log.Sync()
 		zap.RedirectStdLog(log.Named("stdlib"))
 
-		connectCtx, connectCancel := context.WithTimeout(ctx, 30*time.Second)
-		defer connectCancel()
-
-		store, err := postgres.Connect(connectCtx, cfg.Database, log.Named("postgres"))
+		store, err := postgres.Connect(ctx, cfg.Database, log.Named("postgres"))
 		checkFatalError("failed to connect to postgre database", err)
 		defer store.Close()
 
