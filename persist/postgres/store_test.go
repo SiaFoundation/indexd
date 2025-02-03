@@ -2,15 +2,11 @@ package postgres
 
 import (
 	"context"
-	"math"
 	"os"
 	"testing"
 	"time"
 
-	"go.sia.tech/core/types"
 	"go.uber.org/zap"
-	"go.uber.org/zap/zaptest"
-	"lukechampine.com/frand"
 )
 
 func initPostgres(t *testing.T, log *zap.Logger) *Store {
@@ -37,28 +33,4 @@ func initPostgres(t *testing.T, log *zap.Logger) *Store {
 		}
 	})
 	return db
-}
-
-func TestPostgresCurrency(t *testing.T) {
-	amount := types.Siacoins(uint32(frand.Uint64n(math.MaxUint32)))
-	log := zaptest.NewLogger(t)
-
-	store := initPostgres(t, log.Named("postgres"))
-
-	err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(`INSERT INTO hello_world VALUES ($1)`, sqlCurrency(amount))
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var value types.Currency
-	err = store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		err := tx.QueryRow(`SELECT * FROM hello_world`).Scan((*sqlCurrency)(&value))
-		return err
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
 }

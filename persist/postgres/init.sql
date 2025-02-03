@@ -1,7 +1,3 @@
-CREATE TABLE hello_world ( -- TODO: remove
-    sc_value NUMERIC(50, 0) NOT NULL
-);
-
 CREATE TABLE syncer_peers (
     peer_address INET PRIMARY KEY,
     first_seen TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
