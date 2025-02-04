@@ -32,7 +32,7 @@ VOLUME [ "/data" ]
 
 # API port
 EXPOSE 9980/tcp
-# RPC port
+# Syncer port
 EXPOSE 9981/tcp
 
 ENTRYPOINT [ "indexd" ]
