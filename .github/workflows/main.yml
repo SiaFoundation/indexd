@@ -9,5 +9,55 @@ env:
   CGO_ENABLED: 1
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Configure git
+        run: git config --global core.autocrlf false # required on Windows
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v3
+        with:
+          go-version: ${{ matrix.go-version }}
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          skip-cache: true
   test:
-    uses: SiaFoundation/workflows/.github/workflows/go-test.yml@master
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      POSTGRES_USER: indexd_test
+      POSTGRES_PASSWORD: indexd_test
+      POSTGRES_DB: indexd_test
+    strategy:
+      matrix:
+        go-version: ["1.23"]
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_USER: indexd_test
+          POSTGRES_PASSWORD: indexd_test
+          POSTGRES_DB: indexd_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Configure git
+        run: git config --global core.autocrlf false # required on Windows
+      - uses: actions/checkout@v3
+      - uses: actions/setup-go@v3
+        with:
+          go-version: 1.23
+      - name: Test
+        uses: n8maninger/action-golang-test@v2
+        with:
+          args: -race;-failfast
+      - name: Build
+        run: go build -o bin/ ./cmd/indexd
