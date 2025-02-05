@@ -65,23 +65,18 @@ jobs:
         include:
           - OS: ubuntu-latest
             GOARCH: amd64
-            BUILD_LD_FLAGS: -s -w -linkmode external -extldflags "-static"
             RELEASE_PLATFORM: linux
           - OS: ubuntu-latest
             GOARCH: arm64
-            BUILD_LD_FLAGS: -s -w -linkmode external -extldflags "-static"
             RELEASE_PLATFORM: linux
           - OS: macos-latest
             GOARCH: amd64
-            BUILD_LD_FLAGS: -s -w
             RELEASE_PLATFORM: macos
           - OS: macos-latest
             GOARCH: arm64
-            BUILD_LD_FLAGS: -s -w
             RELEASE_PLATFORM: macos
           - OS: windows-latest
             GOARCH: amd64
-            BUILD_LD_FLAGS: -s -w -linkmode external -extldflags "-static"
             RELEASE_PLATFORM: windows
     runs-on: ${{ matrix.OS }}
     env:
@@ -134,7 +129,7 @@ jobs:
       - name: Build
         env:
           GOARCH: ${{ matrix.GOARCH }}
-        run: go build -o bin/ -tags='netgo timetzdata' -trimpath -a -ldflags '${{ matrix.BUILD_LD_FLAGS }}' ./...
+        run: go build -o bin/ -tags='netgo timetzdata' -trimpath -a -ldflags '-s -w' ./...
       - name: Sign macOS
         if: ${{ matrix.OS == 'macos-latest' }}
         env:
