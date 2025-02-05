@@ -191,3 +191,19 @@ func (sc *sqlCurrency) Scan(src any) error {
 		return fmt.Errorf("cannot scan %T to Currency", src)
 	}
 }
+
+type sqlDurationMS time.Duration
+
+func (sd sqlDurationMS) Value() (driver.Value, error) {
+	return time.Duration(sd).Milliseconds(), nil
+}
+
+func (sd *sqlDurationMS) Scan(src any) error {
+	switch src := src.(type) {
+	case int64:
+		*sd = sqlDurationMS(time.Duration(src) * time.Millisecond)
+		return nil
+	default:
+		return fmt.Errorf("cannot scan %T to Duration", src)
+	}
+}

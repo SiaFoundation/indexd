@@ -1,6 +1,10 @@
 CREATE TABLE syncer_peers (
-    peer_address INET PRIMARY KEY,
-    first_seen TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    ip_address INET PRIMARY KEY,
+    port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
+    first_seen TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_connect TIMESTAMP WITH TIME ZONE NOT NULL,
+    synced_blocks INTEGER NOT NULL DEFAULT 0 CHECK (synced_blocks >= 0),
+    sync_duration INTEGER NOT NULL DEFAULT 0 CHECK (sync_duration >= 0)
 );
 
 CREATE TABLE syncer_bans (

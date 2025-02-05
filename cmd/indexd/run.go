@@ -6,8 +6,16 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
+	"strconv"
 	"time"
 
+	"go.sia.tech/core/consensus"
+	"go.sia.tech/core/gateway"
+	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/config"
 	"go.sia.tech/indexd/persist/postgres"
@@ -22,11 +30,87 @@ func runRootCmd(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 	}
 	defer store.Close()
 
+	var network *consensus.Network
+	var genesisBlock types.Block
+	switch cfg.Consensus.Network {
+	case "mainnet":
+		network, genesisBlock = chain.Mainnet()
+		if cfg.Syncer.Bootstrap {
+			cfg.Syncer.Peers = append(cfg.Syncer.Peers, syncer.MainnetBootstrapPeers...)
+		}
+	case "zen":
+		network, genesisBlock = chain.TestnetZen()
+		if cfg.Syncer.Bootstrap {
+			cfg.Syncer.Peers = append(cfg.Syncer.Peers, syncer.ZenBootstrapPeers...)
+		}
+	case "anagami":
+		network, genesisBlock = chain.TestnetAnagami()
+		if cfg.Syncer.Bootstrap {
+			cfg.Syncer.Peers = append(cfg.Syncer.Peers, syncer.AnagamiBootstrapPeers...)
+		}
+	default:
+		return errors.New("invalid network: must be one of 'mainnet' or 'zen'")
+	}
+
+	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(cfg.Directory, "consensus.db"))
+	if err != nil {
+		return fmt.Errorf("failed to open consensus database: %w", err)
+	}
+	defer bdb.Close()
+
+	dbstore, tipState, err := chain.NewDBStore(bdb, network, genesisBlock)
+	if err != nil {
+		return fmt.Errorf("failed to create chain store: %w", err)
+	}
+	cm := chain.NewManager(dbstore, tipState, chain.WithLog(log.Named("chain")))
+
 	httpListener, err := startLocalhostListener(cfg.HTTP.Address, log.Named("listener"))
 	if err != nil {
 		return fmt.Errorf("failed to listen on http address: %w", err)
 	}
 	defer httpListener.Close()
+
+	syncerListener, err := net.Listen("tcp", cfg.Syncer.Address)
+	if err != nil {
+		return fmt.Errorf("failed to listen on syncer address: %w", err)
+	}
+	defer syncerListener.Close()
+
+	syncerAddr := syncerListener.Addr().String()
+	if cfg.Syncer.EnableUPnP {
+		_, portStr, _ := net.SplitHostPort(cfg.Syncer.Address)
+		port, err := strconv.ParseUint(portStr, 10, 16)
+		if err != nil {
+			return fmt.Errorf("failed to parse syncer port: %w", err)
+		}
+
+		ip, err := setupUPNP(context.Background(), uint16(port), log)
+		if err != nil {
+			log.Warn("failed to set up UPnP", zap.Error(err))
+		} else {
+			syncerAddr = net.JoinHostPort(ip, portStr)
+		}
+	}
+	// peers will reject us if our hostname is empty or unspecified, so use loopback
+	host, port, _ := net.SplitHostPort(syncerAddr)
+	if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
+		syncerAddr = net.JoinHostPort("127.0.0.1", port)
+	}
+
+	for _, peer := range cfg.Syncer.Peers {
+		if err := store.AddPeer(peer); err != nil {
+			log.Warn("failed to add peer", zap.String("address", peer), zap.Error(err))
+		}
+	}
+
+	log.Debug("starting syncer", zap.String("syncer address", syncerAddr))
+	s := syncer.New(syncerListener, cm, store, gateway.Header{
+		GenesisID:  genesisBlock.ID(),
+		UniqueID:   gateway.GenerateUniqueID(),
+		NetAddress: syncerAddr,
+	}, syncer.WithLogger(log.Named("syncer")))
+	go s.Run(ctx)
+	defer s.Close()
 
 	apiOpts := []api.ServerOption{
 		api.WithLogger(log.Named("api")),
@@ -34,7 +118,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 
 	web := http.Server{
 		Handler: webRouter{
-			api: jape.BasicAuth(cfg.HTTP.Password)(api.NewServer(apiOpts...)),
+			api: jape.BasicAuth(cfg.HTTP.Password)(api.NewServer(cm, s, store, apiOpts...)),
 		},
 		ReadTimeout: 30 * time.Second,
 	}
@@ -47,7 +131,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 		}
 	}()
 
-	log.Info("node started", zap.String("http", httpListener.Addr().String()))
+	log.Info("node started", zap.String("http", httpListener.Addr().String()), zap.String("p2p", string(s.Addr())))
 	<-ctx.Done()
 	log.Info("shutting down...")
 
