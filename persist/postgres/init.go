@@ -36,7 +36,7 @@ func setDBVersion(tx *txn, version int64) error {
 }
 
 func (s *Store) initNewDatabase(ctx context.Context, target int64) error {
-	return s.transaction(ctx, func(tx *txn) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		if _, err := tx.Exec(initDatabase); err != nil {
 			return err
 		} else if err := initSettings(ctx, tx); err != nil {
@@ -55,7 +55,7 @@ func (s *Store) upgradeDatabase(ctx context.Context, current, target int64) erro
 		log := log.With(zap.Int64("version", version))
 		start := time.Now()
 		fn := migrations[current-1]
-		err := s.transaction(ctx, func(tx *txn) error {
+		err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 			if err := fn(tx, log); err != nil {
 				return err
 			}

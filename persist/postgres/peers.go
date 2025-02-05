@@ -20,7 +20,7 @@ func (s *Store) AddPeer(addr string) error {
 	if err != nil {
 		return fmt.Errorf("invalid peer address: %w", err)
 	}
-	return s.transaction(context.Background(), func(tx *txn) error {
+	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		const query = `INSERT INTO syncer_peers (ip_address, port, first_seen, last_connect, synced_blocks, sync_duration) VALUES ($1, $2, $3, '0001-01-01'::TIMESTAMP WITH TIME ZONE, 0, 0) ON CONFLICT (ip_address) DO NOTHING`
 		_, err := tx.Exec(query, host, port, time.Now())
 		return err
@@ -35,7 +35,7 @@ func (s *Store) PeerInfo(addr string) (info syncer.PeerInfo, err error) {
 		err = fmt.Errorf("invalid peer address: %w", err)
 		return
 	}
-	err = s.transaction(context.Background(), func(tx *txn) error {
+	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		const query = `SELECT first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers WHERE ip_address=$1 AND port=$2`
 		err = tx.QueryRow(query, host, port).Scan(&info.FirstSeen, &info.LastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -50,7 +50,7 @@ func (s *Store) PeerInfo(addr string) (info syncer.PeerInfo, err error) {
 
 // Peers returns the set of known peers.
 func (s *Store) Peers() (infos []syncer.PeerInfo, err error) {
-	err = s.transaction(context.Background(), func(tx *txn) error {
+	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		const query = `SELECT ip_address, port, first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers`
 		rows, err := tx.Query(query)
 		if err != nil {
@@ -79,7 +79,7 @@ func (s *Store) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error {
 		return fmt.Errorf("invalid peer address: %w", err)
 	}
 
-	return s.transaction(context.Background(), func(tx *txn) error {
+	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		var info syncer.PeerInfo
 		err := tx.
 			QueryRow(`SELECT first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers WHERE ip_address=$1 AND port=$2`, host, port).
@@ -114,7 +114,7 @@ func (s *Store) Ban(addr string, duration time.Duration, reason string) error {
 	}
 	expiration := time.Now().Add(duration)
 	s.log.Debug("banning peer", zap.String("peer", addr), zap.Time("expiration", expiration), zap.Duration("duration", duration), zap.String("reason", reason))
-	return s.transaction(context.Background(), func(tx *txn) error {
+	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		const query = `INSERT INTO syncer_bans (net_cidr, expiration, reason) VALUES ($1::INET, $2, $3) ON CONFLICT (net_cidr) DO UPDATE SET expiration=EXCLUDED.expiration, reason=EXCLUDED.reason RETURNING net_cidr`
 		var updatedSubnet string
 		err := tx.QueryRow(query, address, expiration, reason).Scan(&updatedSubnet)
@@ -139,7 +139,7 @@ func (s *Store) Banned(peer string) (bool, error) {
 	}
 
 	var banned bool
-	err = s.transaction(context.Background(), func(tx *txn) error {
+	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		var subnet string
 		var expiration time.Time
 		query := `SELECT net_cidr, expiration FROM syncer_bans WHERE net_cidr >>= $1::INET ORDER BY expiration DESC LIMIT 1`

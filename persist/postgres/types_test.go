@@ -32,7 +32,7 @@ func TestCurrencyEncoding(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			err = store.transaction(context.Background(), func(tx *txn) error {
+			err = store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 				_, err := tx.Exec(`INSERT INTO currency_encoding_temp VALUES ($1)`, sqlCurrency(test.expected))
 				return err
 			})
@@ -41,7 +41,7 @@ func TestCurrencyEncoding(t *testing.T) {
 			}
 
 			var value types.Currency
-			err = store.transaction(context.Background(), func(tx *txn) error {
+			err = store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 				err := tx.QueryRow(`SELECT * FROM currency_encoding_temp`).Scan((*sqlCurrency)(&value))
 				return err
 			})
