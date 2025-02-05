@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"go.sia.tech/coreutils/syncer"
-	"go.uber.org/zap"
 )
 
 // AddPeer adds a peer to the store. If the peer already exists, nil is
@@ -21,8 +20,8 @@ func (s *Store) AddPeer(addr string) error {
 		return fmt.Errorf("invalid peer address: %w", err)
 	}
 	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		const query = `INSERT INTO syncer_peers (ip_address, port, first_seen, last_connect, synced_blocks, sync_duration) VALUES ($1, $2, $3, '0001-01-01'::TIMESTAMP WITH TIME ZONE, 0, 0) ON CONFLICT (ip_address) DO NOTHING`
-		_, err := tx.Exec(query, host, port, time.Now())
+		const query = `INSERT INTO syncer_peers (ip_address, port, first_seen, last_connect) VALUES ($1, $2, NOW(), '0001-01-01'::TIMESTAMP WITH TIME ZONE) ON CONFLICT (ip_address) DO NOTHING`
+		_, err := tx.Exec(query, host, port)
 		return err
 	})
 }
@@ -113,12 +112,9 @@ func (s *Store) Ban(addr string, duration time.Duration, reason string) error {
 		return fmt.Errorf("failed to normalize peer: %w", err)
 	}
 	expiration := time.Now().Add(duration)
-	s.log.Debug("banning peer", zap.String("peer", addr), zap.Time("expiration", expiration), zap.Duration("duration", duration), zap.String("reason", reason))
 	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		const query = `INSERT INTO syncer_bans (net_cidr, expiration, reason) VALUES ($1::INET, $2, $3) ON CONFLICT (net_cidr) DO UPDATE SET expiration=EXCLUDED.expiration, reason=EXCLUDED.reason RETURNING net_cidr`
-		var updatedSubnet string
-		err := tx.QueryRow(query, address, expiration, reason).Scan(&updatedSubnet)
-		s.log.Debug("banned peer", zap.String("subnet", updatedSubnet), zap.Time("expiration", expiration), zap.String("reason", reason))
+		const query = `INSERT INTO syncer_bans (net_cidr, expiration, reason) VALUES ($1::INET, $2, $3) ON CONFLICT (net_cidr) DO UPDATE SET expiration=EXCLUDED.expiration, reason=EXCLUDED.reason`
+		_, err := tx.Exec(query, address, expiration, reason)
 		return err
 	})
 }
@@ -128,33 +124,27 @@ func (s *Store) Banned(peer string) (bool, error) {
 	// normalize the peer into a CIDR subnet
 	peer, err := normalizePeer(peer)
 	if err != nil {
-		s.log.Error("failed to normalize peer", zap.Error(err))
-		return false, err
+		return false, fmt.Errorf("failed to normalize peer: %w", err)
 	}
 
 	_, net, err := net.ParseCIDR(peer)
 	if err != nil {
-		s.log.Error("failed to parse CIDR", zap.Error(err))
-		return false, err
+		return false, fmt.Errorf("failed to parse CIDR: %w", err)
 	}
 
 	var banned bool
 	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		var subnet string
 		var expiration time.Time
-		query := `SELECT net_cidr, expiration FROM syncer_bans WHERE net_cidr >>= $1::INET ORDER BY expiration DESC LIMIT 1`
-		err := tx.QueryRow(query, net.String()).Scan(&subnet, &expiration)
+		query := `SELECT expiration FROM syncer_bans WHERE net_cidr >>= $1::INET ORDER BY expiration DESC LIMIT 1`
+		err := tx.QueryRow(query, net.String()).Scan(&expiration)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		} else if err != nil {
-			s.log.Error("failed to check ban status", zap.Error(err))
 			return err
 		}
 
-		remaining := time.Until(expiration)
-		banned = remaining > 0 // will be true even if err != nil
-		s.log.Debug("found ban", zap.Bool("banned", banned), zap.Stringer("peer", net), zap.String("subnet", subnet), zap.Time("expiration", expiration), zap.Duration("remaining", remaining))
-		return err
+		banned = time.Now().Before(expiration)
+		return nil
 	})
 	return banned, err
 }

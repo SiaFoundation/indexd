@@ -35,7 +35,7 @@ func TestPeerStore(t *testing.T) {
 		t.Fatal("unexpected SyncDuration", info.SyncDuration)
 	}
 
-	lastConnect := time.Now().Add(-time.Minute)
+	lastConnect := time.Now().Add(-time.Minute).Truncate(time.Second)
 	syncedBlocks := uint64(15)
 	syncDuration := 5 * time.Second
 	if err := db.UpdatePeerInfo(addr, func(info *syncer.PeerInfo) {
