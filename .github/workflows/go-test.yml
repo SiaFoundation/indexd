@@ -30,9 +30,6 @@ jobs:
       POSTGRES_USER: indexd_test
       POSTGRES_PASSWORD: indexd_test
       POSTGRES_DB: indexd_test
-    strategy:
-      matrix:
-        go-version: ["1.23"]
     services:
       postgres:
         image: postgres
