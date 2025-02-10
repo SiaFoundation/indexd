@@ -11,6 +11,10 @@ import (
 	"go.uber.org/zap"
 )
 
+func TestMain(m *testing.M) {
+	VerifyTestMain(m)
+}
+
 func TestHost(t *testing.T) {
 	tt := NewTT(t)
 	n, genesis := testutil.V2Network()
