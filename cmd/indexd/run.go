@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -133,8 +136,28 @@ func runRootCmd(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 
 	log.Info("node started", zap.String("http", httpListener.Addr().String()), zap.String("p2p", string(s.Addr())))
 	<-ctx.Done()
-	log.Info("shutting down...")
+	log.Info("shutdown signal received...attempting graceful shutdown...")
 
+	// attempt to gracefully shut down the http server but allow another signal
+	// to interrupt shutdown. That way, indexd behaves in a more Linux-like way
+	// as expected by tools like Docker and Kubernetes which first try to
+	// trigger a graceful shutdown with SIGTERM followed by a user-configurable
+	// timeout after which they send a SIGKILL which causes the OS to kill the
+	// process without the process being able to catch the signal itself. For
+	// convenience, we allow the user to send a second SIGTERM to force similar
+	// behavior as if SIGKILL was sent.
+	shutdownCtx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	if err := web.Shutdown(shutdownCtx); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Error("graceful shutdown failed", zap.Error(err))
+	}
+	select {
+	case <-shutdownCtx.Done():
+		log.Info("graceful shutdown was interrupted")
+	default:
+	}
+
+	log.Info("...shutdown complete")
 	return nil
 }
 

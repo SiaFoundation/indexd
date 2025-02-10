@@ -1,5 +1,11 @@
 package testutils
 
+import (
+	"testing"
+
+	"go.uber.org/goleak"
+)
+
 type (
 	// TT is a wrapper around testing.T that provides additional helper methods.
 	TT interface {
@@ -53,4 +59,10 @@ func (t impl) OKAll(vs ...interface{}) {
 			t.Fatal(err)
 		}
 	}
+}
+
+// VerifyTestMain contains any setup and teardown code that should be run
+// before/after running all tests that belong to a package.
+func VerifyTestMain(m *testing.M) {
+	goleak.VerifyTestMain(m)
 }

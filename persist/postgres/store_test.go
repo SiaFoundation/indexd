@@ -6,8 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/indexd/internal/testutils"
 	"go.uber.org/zap"
 )
+
+func TestMain(m *testing.M) {
+	testutils.VerifyTestMain(m)
+}
 
 func initPostgres(t *testing.T, log *zap.Logger) *Store {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
