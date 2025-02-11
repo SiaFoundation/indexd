@@ -19,11 +19,8 @@ CREATE TABLE wallet_events (
     id BYTEA PRIMARY KEY,
     chain_index BYTEA NOT NULL,
     maturity_height INTEGER NOT NULL,
-    confirmations INTEGER NOT NULL,
     event_type TEXT NOT NULL,
-    event_data BYTEA NOT NULL,
-    event_time TIMESTAMP WITH TIME ZONE NOT NULL,
-    relevant BYTEA
+    event_data BYTEA NOT NULL
 );
 CREATE INDEX wallet_events_chain_index ON wallet_events(chain_index);
 CREATE INDEX wallet_events_maturity_height ON wallet_events(maturity_height DESC);

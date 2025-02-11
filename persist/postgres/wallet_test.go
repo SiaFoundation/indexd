@@ -4,7 +4,6 @@ import (
 	"context"
 	"reflect"
 	"testing"
-	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
@@ -98,15 +97,12 @@ func testSingleAddressWalletStoreWalletEventsAndWalletEventCount(store *Store) f
 		}
 
 		update := newTestEvent()
-		if _, err := store.pool.Exec(context.Background(), `INSERT INTO wallet_events (id, chain_index, maturity_height, confirmations, event_type, event_data, event_time, relevant) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		if _, err := store.pool.Exec(context.Background(), `INSERT INTO wallet_events (id, chain_index, maturity_height, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`,
 			encode(update.ID),
 			encode(update.Index),
 			update.MaturityHeight,
-			update.Confirmations,
 			update.Type,
 			encode(update.Data),
-			update.Timestamp,
-			encode(update.Relevant),
 		); err != nil {
 			t.Fatal(err)
 		}
@@ -140,12 +136,9 @@ func newTestEvent() wallet.Event {
 			Height: 2,
 			ID:     types.BlockID{3},
 		},
-		Confirmations:  3,
 		Type:           wallet.EventTypeSiafundClaim,
 		Data:           wallet.EventPayout{SiacoinElement: newTestSiacoinElement()},
 		MaturityHeight: 4,
-		Timestamp:      time.Now().Round(time.Millisecond), // allows reflect.DeepEqual
-		Relevant:       []types.Address{types.StandardAddress(types.GeneratePrivateKey().PublicKey())},
 	}
 }
 
