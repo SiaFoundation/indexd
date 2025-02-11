@@ -109,7 +109,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerAddr,
 	}, syncer.WithLogger(log.Named("syncer")))
-	go s.Run(ctx)
+	go s.Run()
 	defer s.Close()
 
 	apiOpts := []api.ServerOption{
