@@ -123,7 +123,8 @@ func runRootCmd(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 		Handler: webRouter{
 			api: jape.BasicAuth(cfg.HTTP.Password)(api.NewServer(cm, s, store, apiOpts...)),
 		},
-		ReadTimeout: 30 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
 	}
 	defer web.Close()
 
