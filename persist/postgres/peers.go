@@ -36,7 +36,7 @@ func (s *Store) PeerInfo(addr string) (info syncer.PeerInfo, err error) {
 	}
 	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		const query = `SELECT first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers WHERE ip_address=$1 AND port=$2`
-		err = tx.QueryRow(ctx, query, host, port).Scan(&info.FirstSeen, &info.LastConnect, &info.SyncedBlocks, decode(&info.SyncDuration))
+		err = tx.QueryRow(ctx, query, host, port).Scan(&info.FirstSeen, &info.LastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration))
 		if errors.Is(err, sql.ErrNoRows) {
 			err = syncer.ErrPeerNotFound
 		} else if err == nil {
@@ -60,7 +60,7 @@ func (s *Store) Peers() (infos []syncer.PeerInfo, err error) {
 			var host string
 			var port int
 			var info syncer.PeerInfo
-			if err := rows.Scan(&host, &port, &info.FirstSeen, &info.LastConnect, &info.SyncedBlocks, decode(&info.SyncDuration)); err != nil {
+			if err := rows.Scan(&host, &port, &info.FirstSeen, &info.LastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration)); err != nil {
 				return err
 			}
 			info.Address = net.JoinHostPort(host, fmt.Sprint(port))
@@ -82,7 +82,7 @@ func (s *Store) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error {
 		var info syncer.PeerInfo
 		err := tx.
 			QueryRow(ctx, `SELECT first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers WHERE ip_address=$1 AND port=$2`, host, port).
-			Scan(&info.FirstSeen, &info.LastConnect, &info.SyncedBlocks, decode(&info.SyncDuration))
+			Scan(&info.FirstSeen, &info.LastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration))
 		if errors.Is(err, sql.ErrNoRows) {
 			return syncer.ErrPeerNotFound
 		} else if err != nil {
@@ -92,7 +92,7 @@ func (s *Store) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error {
 
 		fn(&info)
 
-		res, err := tx.Exec(ctx, `UPDATE syncer_peers SET first_seen=$1, last_connect=$2, synced_blocks=$3, sync_duration=$4 WHERE ip_address=$5 AND port=$6`, info.FirstSeen, info.LastConnect, info.SyncedBlocks, encode(info.SyncDuration), host, port)
+		res, err := tx.Exec(ctx, `UPDATE syncer_peers SET first_seen=$1, last_connect=$2, synced_blocks=$3, sync_duration=$4 WHERE ip_address=$5 AND port=$6`, info.FirstSeen, info.LastConnect, info.SyncedBlocks, sqlDurationMS(info.SyncDuration), host, port)
 		if err != nil {
 			return fmt.Errorf("failed to update peer info: %w", err)
 		} else if res.RowsAffected() != 1 {
