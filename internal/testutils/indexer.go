@@ -105,7 +105,7 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 func initTestDB(t testing.TB, log *zap.Logger) *postgres.Store {
 	// parse connection info from env vars
 	ci := postgres.ConnectionInfo{
-		Host:     "localhost",
+		Host:     "127.0.0.1",
 		Port:     5432,
 		User:     os.Getenv("POSTGRES_USER"),
 		Password: os.Getenv("POSTGRES_PASSWORD"),
@@ -121,9 +121,9 @@ func initTestDB(t testing.TB, log *zap.Logger) *postgres.Store {
 	}
 	defer pool.Close()
 
-	if _, err := pool.Exec(context.Background(), "DROP DATABASE IF EXISTS "+dbName); err != nil {
+	if _, err := pool.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS %q", dbName)); err != nil {
 		t.Fatal(err)
-	} else if _, err := pool.Exec(context.Background(), "CREATE DATABASE "+dbName); err != nil {
+	} else if _, err := pool.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %q", dbName)); err != nil {
 		t.Fatal(err)
 	}
 	pool.Close()
