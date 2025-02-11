@@ -19,9 +19,9 @@ performing host scans. Scanning a host includes the following steps:
   - Increment the number of successful, failed and total scans in the store
   - Update the next scan time to be in 24 +- 6 hours to spread scans out
 
-- Perform the following checks on the host to determine whether it's good for having contracts with:
+- Perform the following checks on the host to determine whether it's good. If
+any of the following checks fail, the host is considered "bad":
   - More than 1 week of uptime and a 90%+ uptime overall
-  - Collateral ratio of at least 2.0
   - MaxCollateral per contract of at least 1TB worth of data
   - Perform [Gouging Checks](003_gouging_checks.md)
   - Protocol version of at least 1.0.0
@@ -31,6 +31,7 @@ performing host scans. Scanning a host includes the following steps:
 - Update database
   - Store breakdown of checks in the database
   - Store host settings in the database
+  - Store IP subnet of the host in the database (to compute health of slabs)
 
 #### Scheduled Scans
 
