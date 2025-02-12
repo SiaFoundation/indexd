@@ -87,7 +87,7 @@ func (s *Store) WalletEventCount() (count uint64, err error) {
 }
 
 func (u *updateTx) UpdateWalletSiacoinElementProofs(updater wallet.ProofUpdater) error {
-	rows, err := u.tx.Query(u.ctx, `SELECT id, leaf_index, merkle_proof FROM wallet_siacoin_elements`)
+	rows, err := u.tx.Query(u.ctx, `SELECT output_id, leaf_index, merkle_proof FROM wallet_siacoin_elements`)
 	if err != nil {
 		return fmt.Errorf("failed to query siacoin elements: %w", err)
 	}
@@ -116,7 +116,7 @@ func (u *updateTx) UpdateWalletSiacoinElementProofs(updater wallet.ProofUpdater)
 	}
 
 	const stmt = "update_sce_stmt"
-	if _, err := u.tx.Prepare(u.ctx, stmt, `UPDATE wallet_siacoin_elements SET leaf_index = $1, merkle_proof = $2 WHERE id = $3`); err != nil {
+	if _, err := u.tx.Prepare(u.ctx, stmt, `UPDATE wallet_siacoin_elements SET leaf_index = $1, merkle_proof = $2 WHERE output_id = $3`); err != nil {
 		return fmt.Errorf("failed to prepare update statement: %w", err)
 	}
 
@@ -141,7 +141,7 @@ func (u *updateTx) WalletApplyIndex(index types.ChainIndex, created, spent []typ
 
 	if len(spent) > 0 {
 		const stmt = "delete_sce_stmt"
-		if _, err := u.tx.Prepare(u.ctx, "delete_sce_stmt", `DELETE FROM wallet_siacoin_elements WHERE id = $1`); err != nil {
+		if _, err := u.tx.Prepare(u.ctx, "delete_sce_stmt", `DELETE FROM wallet_siacoin_elements WHERE output_id = $1`); err != nil {
 			return fmt.Errorf("failed to prepare delete statement: %w", err)
 		}
 		for _, se := range spent {
@@ -155,7 +155,7 @@ func (u *updateTx) WalletApplyIndex(index types.ChainIndex, created, spent []typ
 
 	if len(created) > 0 {
 		const stmt = "insert_sce_stmt"
-		if _, err := u.tx.Prepare(u.ctx, stmt, `INSERT INTO wallet_siacoin_elements (id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`); err != nil {
+		if _, err := u.tx.Prepare(u.ctx, stmt, `INSERT INTO wallet_siacoin_elements (output_id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`); err != nil {
 			return fmt.Errorf("failed to prepare insert statement: %w", err)
 		}
 		for _, se := range created {
@@ -167,12 +167,11 @@ func (u *updateTx) WalletApplyIndex(index types.ChainIndex, created, spent []typ
 
 	if len(events) > 0 {
 		const stmt = "insert_event_stmt"
-		if _, err := u.tx.Prepare(u.ctx, stmt, `INSERT INTO wallet_events (id, chain_index, maturity_height, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`); err != nil {
+		if _, err := u.tx.Prepare(u.ctx, stmt, `INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`); err != nil {
 			return fmt.Errorf("failed to prepare insert statement: %w", err)
 		}
 		for _, e := range events {
-			fmt.Println("insert event with index", e.Index)
-			if _, err := u.tx.Exec(u.ctx, stmt, sqlHash256(e.ID), sqlChainIndex(e.Index), e.MaturityHeight, e.Type, sqlEncodeEvent(e.Type, e.Data)); err != nil {
+			if _, err := u.tx.Exec(u.ctx, stmt, sqlChainIndex(e.Index), e.MaturityHeight, sqlHash256(e.ID), e.Type, sqlEncodeEvent(e.Type, e.Data)); err != nil {
 				return fmt.Errorf("failed to insert event: %w", err)
 			}
 		}
@@ -193,7 +192,7 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 
 	if len(removed) > 0 {
 		const stmt = "delete_sce_stmt"
-		if _, err := u.tx.Prepare(u.ctx, stmt, `DELETE FROM wallet_siacoin_elements WHERE id = $1`); err != nil {
+		if _, err := u.tx.Prepare(u.ctx, stmt, `DELETE FROM wallet_siacoin_elements WHERE output_id = $1`); err != nil {
 			return fmt.Errorf("failed to prepare delete statement: %w", err)
 		}
 		for _, se := range removed {
@@ -207,7 +206,7 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 
 	if len(unspent) > 0 {
 		const stmt = "insert_sce_stmt"
-		if _, err := u.tx.Prepare(u.ctx, stmt, `INSERT INTO wallet_siacoin_elements (id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`); err != nil {
+		if _, err := u.tx.Prepare(u.ctx, stmt, `INSERT INTO wallet_siacoin_elements (output_id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`); err != nil {
 			return fmt.Errorf("failed to prepare insert statement: %w", err)
 		}
 		for _, se := range unspent {
@@ -217,7 +216,6 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 		}
 	}
 
-	fmt.Println("remove event with index", index)
 	_, err = u.tx.Exec(u.ctx, `DELETE FROM wallet_events WHERE chain_index = $1`, sqlChainIndex(index))
 	if err != nil {
 		return fmt.Errorf("failed to delete events: %w", err)
