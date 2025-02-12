@@ -10,16 +10,20 @@ import (
 	rhp "go.sia.tech/coreutils/rhp/v4"
 )
 
+// Client is a client for RHP4. It is a wrapper around the coreutils client that
+// adds pooling of transports to reuse TCP connections.
 type Client struct {
 	tpool *transportPool
 }
 
+// New creates a new RHP4 client.
 func New() *Client {
 	return &Client{
 		tpool: newTransportPool(),
 	}
 }
 
+// Settings executes the RPCSettings RPC on the host.
 func (c *Client) Settings(ctx context.Context, hk types.PublicKey, addr string) (hs rhp4.HostSettings, _ error) {
 	err := c.tpool.withTransport(ctx, hk, addr, func(c rhp.TransportClient) (err error) {
 		hs, err = rhp.RPCSettings(ctx, c)
