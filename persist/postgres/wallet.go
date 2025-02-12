@@ -23,7 +23,7 @@ func (s *Store) Tip() (ci types.ChainIndex, err error) {
 // including immature outputs.
 func (s *Store) UnspentSiacoinElements() (sces []types.SiacoinElement, err error) {
 	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		rows, err := tx.Query(ctx, `SELECT id, value, address, merkle_proof, leaf_index, maturity_height FROM wallet_siacoin_elements`)
+		rows, err := tx.Query(ctx, `SELECT output_id, value, address, merkle_proof, leaf_index, maturity_height FROM wallet_siacoin_elements`)
 		if err != nil {
 			return fmt.Errorf("failed to query unspent siacoin elements: %w", err)
 		}
@@ -49,7 +49,7 @@ func (s *Store) WalletEvents(offset, limit int) (events []wallet.Event, err erro
 		limit = math.MaxInt64
 	}
 	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		rows, err := tx.Query(ctx, `SELECT id, chain_index, maturity_height, event_type, event_data FROM wallet_events ORDER BY maturity_height DESC LIMIT $1 OFFSET $2`, limit, offset)
+		rows, err := tx.Query(ctx, `SELECT chain_index, maturity_height, event_id, event_type, event_data FROM wallet_events ORDER BY maturity_height DESC LIMIT $1 OFFSET $2`, limit, offset)
 		if err != nil {
 			return fmt.Errorf("failed to query wallet events: %w", err)
 		}
@@ -57,7 +57,7 @@ func (s *Store) WalletEvents(offset, limit int) (events []wallet.Event, err erro
 
 		for rows.Next() {
 			var event wallet.Event
-			err := rows.Scan((*sqlHash256)(&event.ID), (*sqlChainIndex)(&event.Index), &event.MaturityHeight, &event.Type, sqlDecodeEvent(&event.Data))
+			err := rows.Scan((*sqlChainIndex)(&event.Index), &event.MaturityHeight, (*sqlHash256)(&event.ID), &event.Type, sqlDecodeEvent(&event.Data))
 			if err != nil {
 				return fmt.Errorf("failed to scan wallet event: %w", err)
 			}

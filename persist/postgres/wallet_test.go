@@ -61,7 +61,7 @@ func testSingleAddressWalletStoreUnspentSiacoinElements(store *Store) func(t *te
 		}
 
 		update := newTestSiacoinElement()
-		if _, err := store.pool.Exec(context.Background(), `INSERT INTO wallet_siacoin_elements (id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`,
+		if _, err := store.pool.Exec(context.Background(), `INSERT INTO wallet_siacoin_elements (output_id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`,
 			sqlHash256(update.ID),
 			sqlCurrency(update.SiacoinOutput.Value),
 			sqlHash256(update.SiacoinOutput.Address),
@@ -97,10 +97,10 @@ func testSingleAddressWalletStoreWalletEventsAndWalletEventCount(store *Store) f
 		}
 
 		update := newTestEvent()
-		if _, err := store.pool.Exec(context.Background(), `INSERT INTO wallet_events (id, chain_index, maturity_height, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`,
-			sqlHash256(update.ID),
+		if _, err := store.pool.Exec(context.Background(), `INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`,
 			sqlChainIndex(update.Index),
 			update.MaturityHeight,
+			sqlHash256(update.ID),
 			update.Type,
 			sqlEncodeEvent(update.Type, update.Data),
 		); err != nil {
