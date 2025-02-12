@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/testutil"
@@ -29,6 +30,9 @@ import (
 // indexer and useful helpers for testing.
 type Indexer struct {
 	*api.Client
+
+	cm     *chain.Manager
+	syncer *syncer.Syncer
 }
 
 // NewIndexer creates a new indexer for testing that is automatically closed up
@@ -92,6 +96,26 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 	})
 	return &Indexer{
 		Client: api.NewClient(fmt.Sprintf("http://%s", httpListener.Addr().String()), password),
+	}
+}
+
+// MineBlocks is a helper to mine blocks and broadcast the headers
+func (idx *Indexer) MineBlocks(t testing.TB, addr types.Address, n int) {
+	t.Helper()
+
+	for i := 0; i < n; i++ {
+		b, ok := coreutils.MineBlock(idx.cm, addr, 5*time.Second)
+		if !ok {
+			t.Fatal("failed to mine block")
+		} else if err := idx.cm.AddBlocks([]types.Block{b}); err != nil {
+			t.Fatal(err)
+		}
+
+		if b.V2 == nil {
+			idx.syncer.BroadcastHeader(b.Header())
+		} else {
+			idx.syncer.BroadcastV2BlockOutline(gateway.OutlineBlock(b, idx.cm.PoolTransactions(), cn.Chain.V2PoolTransactions()))
+		}
 	}
 }
 
