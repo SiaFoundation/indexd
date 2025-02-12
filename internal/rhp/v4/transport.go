@@ -3,7 +3,6 @@ package rhp
 import (
 	"context"
 	"fmt"
-	"net"
 	"sync"
 
 	"go.sia.tech/core/types"
@@ -73,15 +72,7 @@ func (t *transport) Dial(ctx context.Context, hk types.PublicKey, addr string) (
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.t == nil {
-		// dial host
-		var d net.Dialer
-		conn, err := d.DialContext(ctx, "tcp", addr)
-		if err != nil {
-			return nil, err
-		}
-
-		// upgrade conn
-		newTransport, err := rhp.UpgradeConnSiamux(ctx, conn, hk)
+		newTransport, err := rhp.DialSiaMux(ctx, addr, hk)
 		if err != nil {
 			return nil, fmt.Errorf("failed to upgrade connection: %w", err)
 		}

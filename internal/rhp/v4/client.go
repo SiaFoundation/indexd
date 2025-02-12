@@ -3,18 +3,11 @@ package rhp
 import (
 	"context"
 	"io"
-	"net"
 
 	"go.sia.tech/core/consensus"
 	rhp4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	rhp "go.sia.tech/coreutils/rhp/v4"
-)
-
-type (
-	Dialer interface {
-		Dial(ctx context.Context, hk types.PublicKey, address string) (net.Conn, error)
-	}
 )
 
 type Client struct {
