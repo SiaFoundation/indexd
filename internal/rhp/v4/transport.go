@@ -11,22 +11,22 @@ import (
 
 type transportPool struct {
 	mu   sync.Mutex
-	pool map[string]*transport
+	pool map[types.PublicKey]*transport
 }
 
 func newTransportPool() *transportPool {
 	return &transportPool{
-		pool: make(map[string]*transport),
+		pool: make(map[types.PublicKey]*transport),
 	}
 }
 
 func (p *transportPool) withTransport(ctx context.Context, hk types.PublicKey, addr string, fn func(rhp.TransportClient) error) (err error) {
 	// fetch or create transport
 	p.mu.Lock()
-	t, found := p.pool[addr]
+	t, found := p.pool[hk]
 	if !found {
 		t = &transport{}
-		p.pool[addr] = t
+		p.pool[hk] = t
 	}
 	t.refCount++
 	p.mu.Unlock()
@@ -54,7 +54,7 @@ func (p *transportPool) withTransport(ctx context.Context, hk types.PublicKey, a
 			_ = t.t.Close()
 			t.t = nil
 		}
-		delete(p.pool, addr)
+		delete(p.pool, hk)
 	}
 	p.mu.Unlock()
 	return err
