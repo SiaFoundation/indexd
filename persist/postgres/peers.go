@@ -50,7 +50,7 @@ func (s *Store) PeerInfo(addr string) (info syncer.PeerInfo, err error) {
 // Peers returns the set of known peers.
 func (s *Store) Peers() (infos []syncer.PeerInfo, err error) {
 	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		const query = `SELECT ip_address, port, first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers`
+		const query = `SELECT host(ip_address), port, first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers`
 		rows, err := tx.Query(ctx, query)
 		if err != nil {
 			return err
