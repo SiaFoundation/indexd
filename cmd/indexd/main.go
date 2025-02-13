@@ -11,7 +11,10 @@ import (
 	"syscall"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/build"
 	"go.sia.tech/indexd/config"
@@ -234,7 +237,7 @@ func main() {
 
 		var seed [32]byte
 		checkFatalError("failed to load wallet seed", wallet.SeedFromPhrase(&seed, cfg.RecoveryPhrase))
-		_ = wallet.KeyFromSeed(&seed, 0) // TODO: load wallet key
+		walletKey := wallet.KeyFromSeed(&seed, 0)
 
 		if cfg.Directory != "" {
 			// create the data directory if it does not already exist
@@ -281,6 +284,30 @@ func main() {
 			logCores = append(logCores, zapcore.NewCore(encoder, zapcore.Lock(fileWriter), cfg.Log.File.Level))
 		}
 
+		if cfg.Syncer.Bootstrap {
+			switch cfg.Consensus.Network {
+			case "mainnet":
+				cfg.Syncer.Peers = append(cfg.Syncer.Peers, syncer.MainnetBootstrapPeers...)
+			case "zen":
+				cfg.Syncer.Peers = append(cfg.Syncer.Peers, syncer.ZenBootstrapPeers...)
+			case "anagami":
+				cfg.Syncer.Peers = append(cfg.Syncer.Peers, syncer.AnagamiBootstrapPeers...)
+			}
+		}
+
+		var network *consensus.Network
+		var genesis types.Block
+		switch cfg.Consensus.Network {
+		case "mainnet":
+			network, genesis = chain.Mainnet()
+		case "zen":
+			network, genesis = chain.TestnetZen()
+		case "anagami":
+			network, genesis = chain.TestnetAnagami()
+		default:
+			checkFatalError("invalid network", errors.New("must be one of 'mainnet', 'zen' or 'anagami'"))
+		}
+
 		var log *zap.Logger
 		if len(logCores) == 1 {
 			log = zap.New(logCores[0], zap.AddCaller())
@@ -290,6 +317,6 @@ func main() {
 		defer log.Sync()
 		zap.RedirectStdLog(log.Named("stdlib"))
 
-		checkFatalError("daemon startup failed", runRootCmd(ctx, cfg, log))
+		checkFatalError("daemon startup failed", runRootCmd(ctx, cfg, walletKey, network, genesis, log))
 	}
 }

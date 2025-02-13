@@ -20,10 +20,7 @@ var _ wallet.SingleAddressStore = (*Store)(nil)
 
 // Tip returns the last scanned index.
 func (s *Store) Tip() (ci types.ChainIndex, err error) {
-	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, `SELECT last_scanned_index FROM global_settings`).Scan((*sqlChainIndex)(&ci))
-	})
-	return
+	return s.LastScannedIndex(context.Background())
 }
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs

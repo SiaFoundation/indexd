@@ -19,41 +19,21 @@ import (
 	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/config"
 	"go.sia.tech/indexd/persist/postgres"
+	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 )
 
-func runRootCmd(ctx context.Context, cfg config.Config, log *zap.Logger) error {
+func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateKey, network *consensus.Network, genesis types.Block, log *zap.Logger) error {
 	store, err := postgres.Connect(ctx, cfg.Database, log.Named("postgres"))
 	if err != nil {
 		return fmt.Errorf("failed to connect to postgres database: %w", err)
 	}
 	defer store.Close()
-
-	var network *consensus.Network
-	var genesisBlock types.Block
-	switch cfg.Consensus.Network {
-	case "mainnet":
-		network, genesisBlock = chain.Mainnet()
-		if cfg.Syncer.Bootstrap {
-			cfg.Syncer.Peers = append(cfg.Syncer.Peers, syncer.MainnetBootstrapPeers...)
-		}
-	case "zen":
-		network, genesisBlock = chain.TestnetZen()
-		if cfg.Syncer.Bootstrap {
-			cfg.Syncer.Peers = append(cfg.Syncer.Peers, syncer.ZenBootstrapPeers...)
-		}
-	case "anagami":
-		network, genesisBlock = chain.TestnetAnagami()
-		if cfg.Syncer.Bootstrap {
-			cfg.Syncer.Peers = append(cfg.Syncer.Peers, syncer.AnagamiBootstrapPeers...)
-		}
-	default:
-		return errors.New("invalid network: must be one of 'mainnet' or 'zen'")
-	}
 
 	bdb, err := coreutils.OpenBoltChainDB(filepath.Join(cfg.Directory, "consensus.db"))
 	if err != nil {
@@ -61,11 +41,20 @@ func runRootCmd(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 	}
 	defer bdb.Close()
 
-	dbstore, tipState, err := chain.NewDBStore(bdb, network, genesisBlock)
+	dbstore, tipState, err := chain.NewDBStore(bdb, network, genesis)
 	if err != nil {
 		return fmt.Errorf("failed to create chain store: %w", err)
 	}
 	cm := chain.NewManager(dbstore, tipState, chain.WithLog(log.Named("chain")))
+
+	wm, err := wallet.NewSingleAddressWallet(walletKey, cm, store, wallet.WithLogger(log.Named("wallet")), wallet.WithReservationDuration(3*time.Hour))
+	if err != nil {
+		return fmt.Errorf("failed to create wallet: %w", err)
+	}
+	defer wm.Close()
+
+	sub := subscriber.New(cm, wm, store, subscriber.WithLogger(log.Named("subscriber")))
+	defer sub.Close()
 
 	httpListener, err := startLocalhostListener(cfg.HTTP.Address, log.Named("listener"))
 	if err != nil {
@@ -108,7 +97,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, log *zap.Logger) error {
 
 	log.Debug("starting syncer", zap.String("syncer address", syncerAddr))
 	s := syncer.New(syncerListener, cm, store, gateway.Header{
-		GenesisID:  genesisBlock.ID(),
+		GenesisID:  genesis.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerAddr,
 	}, syncer.WithLogger(log.Named("syncer")))
