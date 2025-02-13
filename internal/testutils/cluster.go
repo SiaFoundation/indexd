@@ -62,7 +62,7 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	indexer := NewIndexer(t, n, genesis, zap.NewNop())
 
 	// mine until after v2 height to reach v2 and to fund indexer
-	indexer.MineBlocks(t, types.Address{}, int(n.HardforkV2.AllowHeight)) // TODO: add wallet to indexer and actually fund it
+	indexer.MineBlocks(t, types.Address{}, int(n.HardforkV2.AllowHeight))
 
 	// create hosts and connect them to the indexer
 	var hosts []*Host

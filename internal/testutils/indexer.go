@@ -96,6 +96,9 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 	})
 	return &Indexer{
 		Client: api.NewClient(fmt.Sprintf("http://%s", httpListener.Addr().String()), password),
+
+		cm:     cm,
+		syncer: s,
 	}
 }
 
