@@ -84,7 +84,7 @@ func (a *api) handleGETWalletPending(jc jape.Context) {
 }
 
 func (a *api) handlePOSTWalletSend(jc jape.Context) {
-	var req WalletSendRequest
+	var req WalletSendSiacoinsRequest
 	if err := jc.Decode(&req); err != nil {
 		return
 	} else if req.Address == types.VoidAddress {

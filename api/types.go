@@ -13,8 +13,9 @@ type (
 		Address types.Address `json:"address"`
 	}
 
-	// WalletSendRequest is the request body for the [POST] /wallet/send endpoint.
-	WalletSendRequest struct {
+	// WalletSendSiacoinsRequest is the request body for the [POST] /wallet/send
+	// endpoint.
+	WalletSendSiacoinsRequest struct {
 		Address          types.Address  `json:"address"`
 		Amount           types.Currency `json:"amount"`
 		SubtractMinerFee bool           `json:"subtractMinerFee"`
