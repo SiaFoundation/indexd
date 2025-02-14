@@ -70,7 +70,7 @@ func TestSingleAddressWalletStoreUnspentSiacoinElements(t *testing.T) {
 func TestSingleAddressWalletStoreWalletEventsAndWalletEventCount(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	if events, err := store.WalletEvents(0, 1); err != nil {
+	if events, err := store.WalletEvents(0, 10); err != nil {
 		t.Fatal(err)
 	} else if len(events) != 0 {
 		t.Fatal("unexpected number of events", len(events))
@@ -99,7 +99,7 @@ func TestSingleAddressWalletStoreWalletEventsAndWalletEventCount(t *testing.T) {
 		t.Fatal("unexpected number of events", count)
 	}
 
-	if events, err := store.WalletEvents(0, 1); err != nil {
+	if events, err := store.WalletEvents(0, 10); err != nil {
 		t.Fatal(err)
 	} else if len(events) != 1 {
 		t.Fatal("unexpected number of events", len(events))
@@ -107,7 +107,7 @@ func TestSingleAddressWalletStoreWalletEventsAndWalletEventCount(t *testing.T) {
 		t.Fatal("unexpected event", update, events[0])
 	}
 
-	if events, err := store.WalletEvents(1, 1); err != nil {
+	if events, err := store.WalletEvents(1, 10); err != nil {
 		t.Fatal(err)
 	} else if len(events) != 0 {
 		t.Fatal("unexpected number of events", len(events))

@@ -45,7 +45,7 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatal(err)
 	} else if len(utxos) != 1 {
 		t.Fatal("unexpected number of utxos", len(utxos))
-	} else if events, err := store.WalletEvents(0, -1); err != nil {
+	} else if events, err := store.WalletEvents(0, 10); err != nil {
 		t.Fatal(err)
 	} else if len(events) != 1 {
 		t.Fatal("unexpected number of events", len(events))
@@ -71,7 +71,7 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatal(err)
 	} else if len(utxos) != 1 {
 		t.Fatal("unexpected number of utxos", len(utxos))
-	} else if events, err := store.WalletEvents(0, -1); err != nil {
+	} else if events, err := store.WalletEvents(0, 10); err != nil {
 		t.Fatal(err)
 	} else if len(events) != 1 {
 		t.Fatal("unexpected number of events", len(events))
@@ -105,7 +105,7 @@ func TestProcessChainUpdate(t *testing.T) {
 		t.Fatal(err)
 	} else if len(utxos) != 0 {
 		t.Fatal("unexpected number of utxos", len(utxos))
-	} else if events, err := store.WalletEvents(0, -1); err != nil {
+	} else if events, err := store.WalletEvents(0, 10); err != nil {
 		t.Fatal(err)
 	} else if len(events) != 0 {
 		t.Fatal("unexpected number of events", len(events))
