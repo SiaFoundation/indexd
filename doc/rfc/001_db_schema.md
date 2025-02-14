@@ -115,8 +115,16 @@ CREATE TABLE host_addresses {
         ON DELETE CASCADE,
 
     net_address TEXT NOT NULL,
-    cidrs CIDR[] NOT NULL,
     protocol SMALLINT NOT NULL,
+}
+
+CREATE TABLE host_resolved_cidrs {
+    id SERIAL PRIMARY KEY,
+    host_id INTEGER
+        REFERENCES hosts(id)
+        ON DELETE CASCADE,
+
+    cidr CIDR NOT NULL,
 }
 
 CREATE TABLE host_settings {
