@@ -1,7 +1,6 @@
 package api
 
 import (
-	"go.sia.tech/core/consensus"
 	"go.sia.tech/jape"
 )
 
@@ -21,11 +20,5 @@ func NewClient(addr, password string) *Client {
 // State returns the current state of the indexer.
 func (c *Client) State() (state State, err error) {
 	err = c.c.GET("/state", &state)
-	return
-}
-
-// TipState returns the consensus tip of the indexer.
-func (c *Client) TipState() (state consensus.State, err error) {
-	err = c.c.GET("/consensus/tip", &state)
 	return
 }

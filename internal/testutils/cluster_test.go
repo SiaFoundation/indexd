@@ -1,9 +1,7 @@
 package testutils
 
 import (
-	"errors"
 	"testing"
-	"time"
 )
 
 func TestNewCluster(t *testing.T) {
@@ -11,10 +9,8 @@ func TestNewCluster(t *testing.T) {
 
 	// assert blocks were mined
 	indexer := cluster.Indexer
-	state, err := indexer.TipState()
-	if err != nil {
-		t.Fatal(err)
-	} else if n := indexer.cm.TipState().Network; state.Index.Height < n.HardforkV2.AllowHeight+n.MaturityDelay {
+	state := indexer.cm.TipState()
+	if n := state.Network; state.Index.Height < n.HardforkV2.AllowHeight+n.MaturityDelay {
 		t.Fatal("no blocks were mined")
 	}
 
@@ -24,17 +20,14 @@ func TestNewCluster(t *testing.T) {
 	}
 
 	// assert hosts were funded
-	Retry(t, 100, 100*time.Millisecond, func() error {
-		for _, h := range cluster.Hosts {
-			b, err := h.w.Balance()
-			if err != nil {
-				t.Fatal(err)
-			} else if b.Confirmed.IsZero() {
-				return errors.New("host not funded")
-			}
+	for _, h := range cluster.Hosts {
+		b, err := h.w.Balance()
+		if err != nil {
+			t.Fatal(err)
+		} else if b.Confirmed.IsZero() {
+			t.Fatal("host not funded")
 		}
-		return nil
-	})
+	}
 
 	// assert all peers are synced
 	tip := indexer.cm.Tip()

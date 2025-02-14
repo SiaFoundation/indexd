@@ -42,7 +42,6 @@ func NewServer(chain ChainManager, syncer Syncer, store Store, opts ...ServerOpt
 	}
 
 	return jape.Mux(map[string]jape.Handler{
-		"GET /state":         a.handleGETState,
-		"GET /consensus/tip": a.handleGETConsensusTip,
+		"GET /state": a.handleGETState,
 	})
 }
