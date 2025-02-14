@@ -29,7 +29,7 @@ CREATE TABLE global_settings (
 );
 ```
 
-### 2.1 Wallet
+### 2.2 Wallet
 
 The wallet stores events as well as the state of the wallet in the form of its
 outputs. There's several types of events, the raw event data is stored in the
@@ -61,7 +61,7 @@ CREATE TABLE wallet_siacoin_elements (
 CREATE INDEX wallet_siacoin_elements_output_id_idx ON wallet_siacoin_elements(output_id);
 ```
 
-### 2.2 Syncer
+### 2.3 Syncer
 
 The syncer connects to other peers and syncs the Sia blockchain. It keeps a list
 of peers alongside some information per peer, as well as a list of peers it
@@ -90,3 +90,56 @@ CREATE TABLE syncer_bans (
 CREATE INDEX syncer_bans_expiration_idx ON syncer_bans (expiration);
 CREATE INDEX syncer_bans_net_cidr_idx ON syncer_bans USING gist (net_cidr inet_ops); -- fast subnet matches
 ```
+
+### 2.4 Hosts
+
+```postgresql
+CREATE TABLE hosts {
+    id SERIAL PRIMARY KEY,
+    public_key BYTEA NOT NULL,
+
+    total_scans INTEGER NOT NULL DEFAULT 0,
+    successful_scans INTEGER NOT NULL DEFAULT 0,
+    failed_scans INTEGER NOT NULL DEFAULT 0,
+    consecutive_failed_scans INTEGER NOT NULL DEFAULT 0,
+    last_scan_success BOOLEAN NOT NULL,
+    next_scan TIMESTAMP WITH TIME ZONE NOT NULL,
+    uptime INTERVAL NOT NULL DEFAULT '0 seconds',
+    downtime INTERVAL NOT NULL DEFAULT '0 seconds',
+}
+
+CREATE TABLE host_addresses {
+    id SERIAL PRIMARY KEY,
+    host_id INTEGER PRIMARY KEY
+        REFERENCES hosts(id)
+        ON DELETE CASCADE,
+
+    net_address TEXT NOT NULL,
+    cidrs CIDR[] NOT NULL,
+    protocol SMALLINT NOT NULL,
+}
+
+CREATE TABLE host_settings {
+    host_id INTEGER PRIMARY KEY
+        REFERENCES hosts(id)
+        ON DELETE CASCADE,
+
+    protocol_version BYTEA NOT NULL,
+    release TEXT NOT NULL,
+    wallet_address BYTEA NOT NULL,
+    accepting_contracts BOOLEAN NOT NULL,
+    max_collateral NUMERIC(50,0) NOT NULL,
+    max_contract_duration NUMERIC(50,0) NOT NULL,
+    remaining_storage BIGINT NOT NULL,
+    total_storage BIGINT NOT NULL,
+
+    contract_price NUMERIC(50,0) NOT NULL,
+    collateral NUMERIC(50,0) NOT NULL,
+    storage_price NUMERIC(50,0) NOT NULL,
+    ingress_price NUMERIC(50,0) NOT NULL,
+    egress_price NUMERIC(50,0) NOT NULL,
+    free_sector_price NUMERIC(50,0) NOT NULL,
+    tip_height BIGINT NOT NULL,
+    valid_until TIMESTAMP WITH TIME ZONE NOT NULL,
+}
+´´´
