@@ -96,14 +96,15 @@ CREATE INDEX syncer_bans_net_cidr_idx ON syncer_bans USING gist (net_cidr inet_o
 ```postgresql
 CREATE TABLE hosts {
     id SERIAL PRIMARY KEY,
-    public_key BYTEA NOT NULL,
+    public_key BYTEA UNIQUE NOT NULL,
 
     total_scans INTEGER NOT NULL DEFAULT 0,
     successful_scans INTEGER NOT NULL DEFAULT 0,
     failed_scans INTEGER NOT NULL DEFAULT 0,
     consecutive_failed_scans INTEGER NOT NULL DEFAULT 0,
-    last_scan_success BOOLEAN NOT NULL,
-    next_scan TIMESTAMP WITH TIME ZONE NOT NULL,
+    last_scan_success BOOLEAN NOT NULL DEFAULT FALSE,
+    next_announcement TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     uptime INTERVAL NOT NULL DEFAULT '0 seconds',
     downtime INTERVAL NOT NULL DEFAULT '0 seconds',
 }
