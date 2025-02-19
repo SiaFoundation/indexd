@@ -94,7 +94,7 @@ CREATE INDEX syncer_bans_net_cidr_idx ON syncer_bans USING gist (net_cidr inet_o
 ### 2.4 Hosts
 
 ```postgresql
-CREATE TABLE hosts {
+CREATE TABLE hosts (
     id SERIAL PRIMARY KEY,
     public_key BYTEA UNIQUE NOT NULL,
 
@@ -106,25 +106,25 @@ CREATE TABLE hosts {
     last_announcement TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     uptime INTERVAL NOT NULL DEFAULT '0 seconds',
-    downtime INTERVAL NOT NULL DEFAULT '0 seconds',
-}
+    downtime INTERVAL NOT NULL DEFAULT '0 seconds'
+)
 
-CREATE TABLE host_addresses {
+CREATE TABLE host_addresses (
     id SERIAL PRIMARY KEY,
     host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
 
     net_address TEXT NOT NULL,
-    protocol SMALLINT NOT NULL,
-}
+    protocol SMALLINT NOT NULL
+)
 
-CREATE TABLE host_resolved_cidrs {
+CREATE TABLE host_resolved_cidrs (
     id SERIAL PRIMARY KEY,
     host_id INTEGER REFERENCES hosts(id) ON DELETE CASCADE,
 
-    cidr CIDR NOT NULL,
-}
+    cidr CIDR NOT NULL
+)
 
-CREATE TABLE host_settings {
+CREATE TABLE host_settings (
     host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
 
     protocol_version BYTEA NOT NULL,
@@ -143,6 +143,6 @@ CREATE TABLE host_settings {
     egress_price NUMERIC(50,0) NOT NULL,
     free_sector_price NUMERIC(50,0) NOT NULL,
     tip_height BIGINT NOT NULL,
-    valid_until TIMESTAMP WITH TIME ZONE NOT NULL,
-}
-´´´
+    valid_until TIMESTAMP WITH TIME ZONE NOT NULL
+)
+```
