@@ -21,6 +21,7 @@ import (
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
@@ -33,6 +34,7 @@ import (
 type Indexer struct {
 	*api.Client
 
+	db     *postgres.Store
 	cm     *chain.Manager
 	syncer *syncer.Syncer
 	wallet *wallet.SingleAddressWallet
@@ -56,7 +58,12 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 		t.Fatalf("failed to create wallet: %v", err)
 	}
 
-	sub := subscriber.New(cm, wm, store, subscriber.WithLogger(log.Named("subscriber")))
+	hm, err := hosts.NewManager(hosts.WithLogger(log.Named("hosts")))
+	if err != nil {
+		t.Fatalf("failed to create host manager: %v", err)
+	}
+
+	sub := subscriber.New(cm, hm, wm, store, subscriber.WithLogger(log.Named("subscriber")))
 
 	syncerListener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -104,6 +111,9 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 		if err := closeWithTimeout(wm.Close); err != nil {
 			t.Errorf("failed to close wallet: %v", err)
 		}
+		if err := closeWithTimeout(hm.Close); err != nil {
+			t.Errorf("failed to close host manager: %v", err)
+		}
 		if err := closeWithTimeout(sub.Close); err != nil {
 			t.Errorf("failed to close subscriber: %v", err)
 		}
@@ -114,6 +124,7 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 	return &Indexer{
 		Client: api.NewClient(fmt.Sprintf("http://%s", httpListener.Addr().String()), password),
 
+		db:     store,
 		cm:     cm,
 		syncer: s,
 		wallet: wm,

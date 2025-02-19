@@ -1,8 +1,29 @@
+CREATE TABLE hosts (
+    id SERIAL PRIMARY KEY,
+    public_key BYTEA UNIQUE NOT NULL,
+    total_scans INTEGER NOT NULL DEFAULT 0,
+    successful_scans INTEGER NOT NULL DEFAULT 0,
+    failed_scans INTEGER NOT NULL DEFAULT 0,
+    consecutive_failed_scans INTEGER NOT NULL DEFAULT 0,
+    last_announcement TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    last_scan_success BOOLEAN NOT NULL DEFAULT FALSE,
+    next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    uptime INTERVAL NOT NULL DEFAULT '0 seconds',
+    downtime INTERVAL NOT NULL DEFAULT '0 seconds'
+);
+
+CREATE TABLE host_addresses (
+    id SERIAL PRIMARY KEY,
+    host_id INTEGER REFERENCES hosts(id) ON DELETE CASCADE,
+    net_address TEXT NOT NULL,
+    protocol SMALLINT NOT NULL
+);
+
 CREATE TABLE syncer_peers (
     ip_address INET PRIMARY KEY,
     port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
     first_seen TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    last_connect TIMESTAMP WITH TIME ZONE NOT NULL,
+    last_connect TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     synced_blocks INTEGER NOT NULL DEFAULT 0 CHECK (synced_blocks >= 0),
     sync_duration INTEGER NOT NULL DEFAULT 0 CHECK (sync_duration >= 0)
 );

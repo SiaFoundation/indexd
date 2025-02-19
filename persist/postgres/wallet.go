@@ -50,10 +50,8 @@ func (s *Store) UnspentSiacoinElements() (sces []types.SiacoinElement, err error
 // be returned.
 func (s *Store) WalletEvents(offset, limit int) (events []wallet.Event, err error) {
 	// sanity check input
-	if offset < 0 {
-		return nil, errors.New("offset can not be negative")
-	} else if limit < 0 {
-		return nil, errors.New("limit can not be negative")
+	if err := validateOffsetLimit(offset, limit); err != nil {
+		return nil, err
 	} else if limit == 0 {
 		return nil, nil
 	}
@@ -205,6 +203,15 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 	_, err := u.tx.Exec(u.ctx, `DELETE FROM wallet_events WHERE chain_index = $1`, sqlChainIndex(index))
 	if err != nil {
 		return fmt.Errorf("failed to delete events: %w", err)
+	}
+	return nil
+}
+
+func validateOffsetLimit(offset, limit int) error {
+	if offset < 0 {
+		return errors.New("offset can not be negative")
+	} else if limit < 0 {
+		return errors.New("limit can not be negative")
 	}
 	return nil
 }

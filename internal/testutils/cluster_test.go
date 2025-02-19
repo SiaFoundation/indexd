@@ -66,5 +66,15 @@ func TestNewCluster(t *testing.T) {
 		t.Fatalf("expected miner payout, %+v", events[0])
 	}
 
+	// assert host announcements were persisted
+	hosts, err := indexer.db.Hosts(context.Background(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != defaultClusterOpts.hosts {
+		t.Fatalf("expected %d hosts, got %d", defaultClusterOpts.hosts, len(hosts))
+	} else if len(hosts[0].Addresses) == 0 {
+		t.Fatal("no addresses")
+	}
+
 	// TODO: extend this as features get implemented
 }
