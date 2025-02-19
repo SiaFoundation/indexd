@@ -4,8 +4,8 @@
 
 ## API
 
-For user apps the API to pin uploaded slab is pretty straightforward. All we
-need is a `POST /slabs/pin` endpoint its `DELETE` counterpart.
+For user apps, the API to pin uploaded slabs is pretty straightforward. All we
+need is a `POST /slabs/pin` endpoint and its `DELETE` counterpart.
 
 ### Request
 
@@ -29,7 +29,7 @@ Where every slab is an object of the following form:
 
 The `Key` is necessary because the `indexer` can't repair slabs without the
 ability to decrypt shards. However, the first layer of encryption is applied by
-the client the corresponding key is never sent to the `indexer`.
+the client, so the corresponding key is never sent to the `indexer`.
 
 Each shard within a slab is an object of the following form:
 
@@ -59,8 +59,8 @@ The `ID` is special because it is derived from the roots of the shards and key.
 This means that two slabs with the same shards are effectively the same. The
 reason for including the key is to prevent two slabs from being treated as the
 same if one of them was purposefully created with the wrong key. One nice
-side-effect of this way of creating the `ID` is that slabs shared between
-accounts will have the same `ID`.
+side-effect creating the `ID` this way is that slabs shared between accounts
+will have the same `ID`.
 
 If everything goes well, the slabs are now in the `indexer`'s database and
 uniquely identified via their `ID`s. The shards are also persisted as "unpinned
