@@ -1,28 +1,83 @@
-package hosts_test
+package hosts
 
 import (
 	"context"
+	"errors"
+	"net"
 	"testing"
 	"time"
 
 	"go.sia.tech/core/consensus"
+	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
-	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/internal/testutils"
-	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 )
 
+// mockStore is a mock that implements the Store interface.
+type mockStore struct {
+	hosts map[types.PublicKey]chain.V2HostAnnouncement
+}
+
+func (s *mockStore) AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnouncement, _ time.Time) error {
+	s.hosts[hk] = ha
+	return nil
+}
+
+func (s *mockStore) HostAddresses(ctx context.Context, hk types.PublicKey) ([]chain.NetAddress, error) {
+	ha, ok := s.hosts[hk]
+	if !ok {
+		return nil, errors.New("not found")
+	}
+	return ha, nil
+}
+
+func (s *mockStore) HostsForScanning(ctx context.Context) ([]types.PublicKey, error) { return nil, nil }
+func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks []string, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error {
+	return nil
+}
+
+// mockResolver is a mock that implements the Resolver interface.
+type mockResolver struct {
+	ips map[string][]net.IPAddr
+}
+
+func (r *mockResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
+	return r.ips[host], nil
+}
+
+// mockClient is a mock that implements the RHP4Client interface.
+type mockClient struct {
+	settings map[string]proto4.HostSettings
+}
+
+func (c *mockClient) Settings(ctx context.Context, hk types.PublicKey, addr string) (proto4.HostSettings, error) {
+	select {
+	case <-ctx.Done():
+		return proto4.HostSettings{}, ctx.Err()
+	default:
+	}
+
+	hs, ok := c.settings[addr]
+	if ok {
+		return hs, nil
+	}
+	return proto4.HostSettings{}, errors.New("") // mock host being unavailable on unknown address
+}
+
 func TestHostManager(t *testing.T) {
-	// create db
-	db := testutils.NewDB(t, zap.NewNop())
-	defer db.Close()
+	db := &mockStore{hosts: make(map[types.PublicKey]chain.V2HostAnnouncement)}
 
 	// create host manager
-	mgr, err := hosts.NewManager(hosts.WithAnnouncementMaxAge(time.Minute))
+	mgr, err := NewManager(db, WithAnnouncementMaxAge(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,153 +89,236 @@ func TestHostManager(t *testing.T) {
 	h3 := types.GeneratePrivateKey()
 	h4 := types.GeneratePrivateKey()
 
-	// create a helper to find addresses for a host by public key
-	addresses := func(hk types.PublicKey, hosts []hosts.Host) []chain.NetAddress {
-		t.Helper()
-		for _, h := range hosts {
-			if h.PublicKey == hk {
-				return h.Addresses
-			}
-		}
-		t.Fatal("host not found", hk)
-		return nil
-	}
-
-	// create a helper to count number of addresses of given protocol
-	count := func(protocol chain.Protocol, addresses []chain.NetAddress) (cnt int) {
-		t.Helper()
-		for _, na := range addresses {
-			if na.Protocol == protocol {
-				cnt++
-			}
-		}
-		return
-	}
-
 	// process chain update
 	cs := consensus.State{}
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return mgr.UpdateChainState(tx, []chain.ApplyUpdate{
-			{
-				Block: types.Block{
-					Timestamp: time.Now(),
-					V2: &types.V2BlockData{
-						Transactions: []types.V2Transaction{
-							{
-								// invalid protocol
-								Attestations: []types.Attestation{
-									chain.V2HostAnnouncement{
-										{Protocol: "invalid", Address: "1.2.3.4:5678"},
-										{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"},
-									}.ToAttestation(cs, h1),
-								},
+	err = mgr.UpdateChainState(db, []chain.ApplyUpdate{
+		{
+			Block: types.Block{
+				Timestamp: time.Now(),
+				V2: &types.V2BlockData{
+					Transactions: []types.V2Transaction{
+						{
+							// invalid protocol
+							Attestations: []types.Attestation{
+								chain.V2HostAnnouncement{
+									{Protocol: "invalid", Address: "1.2.3.4:5678"},
+									{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"},
+								}.ToAttestation(cs, h1),
 							},
-							{
-								// empty address
-								Attestations: []types.Attestation{
-									chain.V2HostAnnouncement{
-										{Protocol: siamux.Protocol, Address: ""},
-									}.ToAttestation(cs, h2),
-								},
+						},
+						{
+							// empty address
+							Attestations: []types.Attestation{
+								chain.V2HostAnnouncement{
+									{Protocol: siamux.Protocol, Address: ""},
+								}.ToAttestation(cs, h2),
 							},
-							{
-								// too many addresses per protocol
-								Attestations: []types.Attestation{
-									chain.V2HostAnnouncement{
-										{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"},
-										{Protocol: siamux.Protocol, Address: "2.2.3.4:5678"},
-										{Protocol: siamux.Protocol, Address: "3.2.3.4:5678"},
-										{Protocol: quic.Protocol, Address: "1.2.3.4:5678"},
-										{Protocol: quic.Protocol, Address: "2.2.3.4:5678"},
-										{Protocol: quic.Protocol, Address: "3.2.3.4:5678"},
-									}.ToAttestation(cs, h3),
-								},
+						},
+						{
+							// too many addresses per protocol
+							Attestations: []types.Attestation{
+								chain.V2HostAnnouncement{
+									{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"},
+									{Protocol: siamux.Protocol, Address: "2.2.3.4:5678"},
+									{Protocol: siamux.Protocol, Address: "3.2.3.4:5678"},
+									{Protocol: quic.Protocol, Address: "1.2.3.4:5678"},
+									{Protocol: quic.Protocol, Address: "2.2.3.4:5678"},
+									{Protocol: quic.Protocol, Address: "3.2.3.4:5678"},
+								}.ToAttestation(cs, h3),
 							},
 						},
 					},
 				},
 			},
-			{
-				// old announcement
-				Block: types.Block{
-					Timestamp: time.Now().Add(-2 * time.Minute),
-					V2: &types.V2BlockData{
-						Transactions: []types.V2Transaction{
-							{
-								Attestations: []types.Attestation{
-									chain.V2HostAnnouncement{
-										{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"},
-									}.ToAttestation(cs, h4),
-								},
+		},
+		{
+			// old announcement
+			Block: types.Block{
+				Timestamp: time.Now().Add(-2 * time.Minute),
+				V2: &types.V2BlockData{
+					Transactions: []types.V2Transaction{
+						{
+							Attestations: []types.Attestation{
+								chain.V2HostAnnouncement{
+									{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"},
+								}.ToAttestation(cs, h4),
 							},
 						},
 					},
 				},
 			},
-		})
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// assert two hosts got indexed
-	hosts, err := db.Hosts(context.Background(), 0, 10)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(hosts) != 2 {
-		t.Fatal("unexpected number of hosts", len(hosts))
-	}
-
-	// assert h1 got indexed
-	h1Addr := addresses(h1.PublicKey(), hosts)
-	if len(h1Addr) != 1 {
-		t.Fatal("unexpected", len(h1Addr))
-	} else if h1Addr[0].Address != "1.2.3.4:5678" || h1Addr[0].Protocol != siamux.Protocol {
-		t.Fatalf("unexpected address %+v", h1Addr[0])
-	}
-
-	// assert h3 got indexed
-	h3Addr := addresses(h3.PublicKey(), hosts)
-	if len(h3Addr) != 4 {
-		t.Fatal("unexpected", len(h3Addr))
-	} else if cnt := count(quic.Protocol, h3Addr); cnt != 2 {
-		t.Fatal("unexpected QUIC addresses", cnt)
-	} else if count(siamux.Protocol, h3Addr) != 2 {
-		t.Fatal("unexpected siamux addresses", cnt)
-	}
-
-	// process chain update that updates h1 addresses
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return mgr.UpdateChainState(tx, []chain.ApplyUpdate{
-			{
-				Block: types.Block{
-					Timestamp: time.Now(),
-					V2: &types.V2BlockData{
-						Transactions: []types.V2Transaction{
-							{
-								Attestations: []types.Attestation{
-									chain.V2HostAnnouncement{
-										{Protocol: quic.Protocol, Address: "[::]:4848"},
-									}.ToAttestation(cs, h1),
-								},
-							},
-						},
-					},
-				},
-			},
-		})
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// assert it was updated
-	indexed, err := db.Hosts(context.Background(), 0, 10)
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h1Addr = addresses(h1.PublicKey(), indexed)
-	if len(h1Addr) != 1 {
-		t.Fatal("unexpected", len(h1Addr))
-	} else if h1Addr[0].Address != "[::]:4848" || h1Addr[0].Protocol != quic.Protocol {
-		t.Fatalf("unexpected address %+v", h1Addr[0])
+
+	// assert h1 and h3 got added
+	if len(db.hosts) != 2 {
+		t.Fatal("unexpected number of hosts", len(db.hosts))
+	} else if _, ok := db.hosts[h1.PublicKey()]; !ok {
+		t.Fatal("unexpected")
+	} else if _, ok := db.hosts[h3.PublicKey()]; !ok {
+		t.Fatal("unexpected")
 	}
+}
+
+func TestFetchSettings(t *testing.T) {
+	c := &mockClient{
+		settings: map[string]proto4.HostSettings{
+			"foo.bar": {Release: t.Name()},
+		},
+	}
+
+	// assert [context.Cancelled] is returned when context is cancelled
+	_, err := fetchSettings(cancelledCtx(), c, types.PublicKey{}, []chain.NetAddress{testMuxAddr("foo.bar")}, zap.NewNop())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+
+	// assert host has to be available on all addresses
+	hs, err := fetchSettings(context.Background(), c, types.PublicKey{}, []chain.NetAddress{testMuxAddr("foo.bar"), testMuxAddr("bar.baz")}, zap.NewNop())
+	if err != nil {
+		t.Fatal("unexpected", err)
+	} else if hs != (proto4.HostSettings{}) {
+		t.Fatal("unexpected", hs)
+	}
+
+	// assert host settings are returned
+	hs, err = fetchSettings(context.Background(), c, types.PublicKey{}, []chain.NetAddress{testMuxAddr("foo.bar")}, zap.NewNop())
+	if err != nil {
+		t.Fatal("unexpected", err)
+	} else if hs.Release != t.Name() {
+		t.Fatal("unexpected", hs)
+	}
+}
+
+func TestCalculateNextScanTime(t *testing.T) {
+	now := time.Now().Round(time.Minute)
+	interval := 24 * time.Hour
+
+	tests := []struct {
+		name                string
+		success             bool
+		consecScanFailures  int
+		interval            time.Duration
+		offsetHours         int
+		expBackoffHours     int
+		expBackoffHoursMax  int
+		expectedMinNextScan time.Time
+		expectedMaxNextScan time.Time
+	}{
+		{
+			name:                "random next scan",
+			success:             true,
+			offsetHours:         6,
+			expectedMinNextScan: now.Add(18 * time.Hour),
+			expectedMaxNextScan: now.Add(30 * time.Hour),
+		},
+		{
+			name:                "exact next scan",
+			success:             true,
+			offsetHours:         0,
+			expectedMinNextScan: now.Add(24 * time.Hour),
+			expectedMaxNextScan: now.Add(24 * time.Hour),
+		},
+		{
+			name:                "first exp backoff",
+			success:             false,
+			consecScanFailures:  1,
+			expBackoffHours:     8,
+			expBackoffHoursMax:  128,
+			expectedMinNextScan: now.Add(8 * time.Hour),
+			expectedMaxNextScan: now.Add(8 * time.Hour),
+		},
+		{
+			name:                "max exp backoff",
+			success:             false,
+			consecScanFailures:  16,
+			expBackoffHours:     8,
+			expBackoffHoursMax:  128,
+			expectedMinNextScan: now.Add(128 * time.Hour),
+			expectedMaxNextScan: now.Add(128 * time.Hour),
+		},
+		{
+			name:                "capped exp backoff",
+			success:             false,
+			consecScanFailures:  17,
+			expBackoffHours:     8,
+			expBackoffHoursMax:  128,
+			expectedMinNextScan: now.Add(128 * time.Hour),
+			expectedMaxNextScan: now.Add(128 * time.Hour),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for range 100 {
+				nextScan := calculateNextScanTime(
+					now,
+					tt.success,
+					tt.consecScanFailures,
+					interval,
+					tt.offsetHours,
+					tt.expBackoffHours,
+					tt.expBackoffHoursMax,
+				)
+				if nextScan.Before(tt.expectedMinNextScan) || nextScan.After(tt.expectedMaxNextScan) {
+					t.Errorf("Expected next scan time between %v and %v, got %v", tt.expectedMinNextScan, tt.expectedMaxNextScan, nextScan)
+				}
+			}
+		})
+	}
+}
+
+// TestResolveHost unit tests the functionality of ResolveHost.
+func TestResolveHost(t *testing.T) {
+	r := &mockResolver{
+		ips: map[string][]net.IPAddr{
+			"h1.com": {{IP: net.IPv4(127, 0, 0, 1)}, {IP: net.IPv4(1, 2, 3, 4)}},
+			"h2.com": {{IP: net.IPv4(8, 8, 8, 8)}},
+		},
+	}
+
+	// assert [context.Cancelled] is returned when context is cancelled
+	_, _, err := resolveHost(cancelledCtx(), r, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
+	if !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+
+	// assert incorrect addresses are filtered out
+	addrs, _, err := resolveHost(context.Background(), r, []chain.NetAddress{testMuxAddr("h1.com")}, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(addrs) != 0 {
+		t.Fatal("unexpected", len(addrs))
+	}
+
+	// assert net addresses with private IPs are filtered out
+	addrs, _, err = resolveHost(context.Background(), r, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(addrs) != 0 {
+		t.Fatal("unexpected", len(addrs))
+	}
+
+	// assert networks are parsed and added
+	addrs, networks, err := resolveHost(context.Background(), r, []chain.NetAddress{testMuxAddr("h2.com:1234")}, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(addrs) != 1 {
+		t.Fatal("unexpected", len(addrs))
+	} else if len(networks) != 1 {
+		t.Fatal("unexpected", len(networks))
+	}
+}
+
+func testMuxAddr(addr string) chain.NetAddress {
+	return chain.NetAddress{Protocol: siamux.Protocol, Address: addr}
+}
+
+func cancelledCtx() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
 }

@@ -112,20 +112,16 @@ CREATE TABLE hosts (
     public_key BYTEA UNIQUE NOT NULL,
 
     total_scans INTEGER NOT NULL DEFAULT 0,
-    successful_scans INTEGER NOT NULL DEFAULT 0,
     failed_scans INTEGER NOT NULL DEFAULT 0,
     consecutive_failed_scans INTEGER NOT NULL DEFAULT 0,
-    last_scan_success BOOLEAN NOT NULL DEFAULT FALSE,
     last_announcement TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
-    uptime INTERVAL NOT NULL DEFAULT '0 seconds',
-    downtime INTERVAL NOT NULL DEFAULT '0 seconds'
-    lost_sectors INTEGER NOT NULL DEFAULT 0,
+    lost_sectors INTEGER NOT NULL DEFAULT 0
 )
 
 CREATE TABLE host_addresses (
     id SERIAL PRIMARY KEY,
-    host_id INTEGER PRIMARY KEY REFERENCES hosts(id) NOT NULL ON DELETE CASCADE,
+    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
 
     net_address TEXT NOT NULL,
     protocol SMALLINT NOT NULL

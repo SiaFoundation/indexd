@@ -25,8 +25,8 @@ var (
 	_ scannerValuer = (*sqlMerkleProof)(nil)
 	_ scannerValuer = (*sqlNetworkProtocol)(nil)
 	_ scannerValuer = (*sqlPublicKey)(nil)
-	_ scannerValuer = (*sqlPublicKey)(nil)
 	_ scannerValuer = (*sqlFileContract)(nil)
+	_ scannerValuer = (*sqlProtocolVersion)(nil)
 
 	_ sql.Scanner = (*nullable[*sqlHash256])(nil)
 )
@@ -336,4 +336,23 @@ func (n nullable[S]) Scan(src any) error {
 
 func asNullable[S sql.Scanner](s S) sql.Scanner {
 	return nullable[S]{inner: s}
+}
+
+type sqlProtocolVersion [3]uint8
+
+func (pv sqlProtocolVersion) Value() (driver.Value, error) {
+	return pv[:], nil
+}
+
+func (pv *sqlProtocolVersion) Scan(src interface{}) error {
+	switch src := src.(type) {
+	case []byte:
+		if len(src) != len(sqlProtocolVersion{}) {
+			return fmt.Errorf("failed to scan source into ProtocolVersion due to invalid number of bytes %v != %v: %v", len(src), len(sqlProtocolVersion{}), src)
+		}
+		copy(pv[:], src)
+		return nil
+	default:
+		return fmt.Errorf("cannot scan %T to ProtocolVersion", src)
+	}
 }

@@ -51,7 +51,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		t.Fatalf("failed to create wallet: %v", err)
 	}
 
-	hm, err := hosts.NewManager(hosts.WithLogger(log.Named("hosts")))
+	hm, err := hosts.NewManager(store, hosts.WithLogger(log.Named("hosts")))
 	if err != nil {
 		t.Fatalf("failed to create host manager: %v", err)
 	}

@@ -1,23 +1,56 @@
 package hosts
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net"
+	"sync"
 	"time"
 
+	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/coreutils/threadgroup"
+	"go.sia.tech/indexd/internal/rhp/v4"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 const (
-	// maxAddrsPerProtocol is the maximum number of announced addresses we will
-	// track per host, per protocol
-	maxAddrsPerProtocol = 2
+	announcementMaxAddressesPerProtocol = 2
+
+	ipv4FilterRange = 24
+	ipv6FilterRange = 32
+
+	scanThreads                    = 50
+	scanTimeout                    = time.Minute
+	scanIntervalOffsetHours        = 6
+	scanExponentialBackoffHours    = 8
+	scanExponentialBackoffMaxHours = 128
 )
 
 type (
+	// Store defines an interface to fetch hosts that need to be scanned and
+	// persist the scan results in the database.
+	Store interface {
+		HostAddresses(ctx context.Context, hk types.PublicKey) ([]chain.NetAddress, error)
+		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
+		UpdateHost(ctx context.Context, hk types.PublicKey, networks []string, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
+	}
+
+	// Resolver defines an interface to resolve hostnames.
+	Resolver interface {
+		LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+	}
+
+	// RHP4Client defines an interface to scan hosts.
+	RHP4Client interface {
+		Settings(context.Context, types.PublicKey, string) (proto4.HostSettings, error)
+	}
+
 	// UpdateTx defines what the host manager needs to atomically process a
 	// chain update in the database.
 	UpdateTx interface {
@@ -27,32 +60,87 @@ type (
 	// HostManager manages the host announcements.
 	HostManager struct {
 		announcementMaxAge time.Duration
+		scanFrequency      time.Duration
+		scanInterval       time.Duration
 
+		resolver Resolver
+		client   RHP4Client
+		store    Store
+
+		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
+
+		mu                      sync.Mutex
+		consecutiveScanFailures map[types.PublicKey]int
 	}
 )
 
 // NewManager creates a new host manager.
-func NewManager(opts ...Option) (*HostManager, error) {
+func NewManager(store Store, opts ...Option) (*HostManager, error) {
 	m := &HostManager{
 		announcementMaxAge: time.Hour * 24 * 365,
-		log:                zap.NewNop(),
+		scanFrequency:      time.Hour,
+		scanInterval:       time.Hour * 24,
+
+		resolver: &net.Resolver{},
+		client:   rhp.New(),
+		store:    store,
+		tg:       threadgroup.New(),
+		log:      zap.NewNop(),
+
+		consecutiveScanFailures: make(map[types.PublicKey]int),
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
 
-	// sanity check options
 	if m.announcementMaxAge == 0 {
 		return nil, fmt.Errorf("announcementMaxAge can not be zero")
+	} else if m.scanFrequency == 0 {
+		return nil, fmt.Errorf("scanFrequency can not be zero")
+	} else if m.scanInterval == 0 {
+		return nil, fmt.Errorf("scanInterval can not be zero")
 	}
+
+	ctx, cancel, err := m.tg.AddContext(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		defer cancel()
+		for {
+			m.scanHosts(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(m.scanFrequency):
+			}
+		}
+	}()
+
+	// TODO: add host pruning
 
 	return m, nil
 }
 
 // Close closes the manager.
 func (m *HostManager) Close() error {
+	m.tg.Stop()
 	return nil
+}
+
+// ScanHost scans the host with given host key and returns its settings.
+func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (proto4.HostSettings, error) {
+	networks, hs, err := m.performHostScan(ctx, hk)
+	if err != nil {
+		return proto4.HostSettings{}, err
+	}
+
+	err = m.persistHostScan(ctx, hk, networks, hs)
+	if err != nil {
+		m.log.Error("failed to persist host scan", zap.Stringer("hk", hk), zap.Error(err))
+	}
+	return hs, nil
 }
 
 // UpdateChainState updates the host announcements in the database.
@@ -69,7 +157,7 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 			for _, addr := range addrs {
 				if err := validateAddress(addr); err != nil {
 					m.log.Debug("ignoring host announcement", zap.Stringer("hk", hk), zap.Error(err))
-				} else if len(filtered[addr.Protocol]) < maxAddrsPerProtocol {
+				} else if len(filtered[addr.Protocol]) < announcementMaxAddressesPerProtocol {
 					filtered[addr.Protocol] = append(filtered[addr.Protocol], addr)
 				}
 			}
@@ -85,6 +173,236 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 		}
 	}
 	return nil
+}
+
+func (m *HostManager) performHostScan(ctx context.Context, hk types.PublicKey) ([]string, proto4.HostSettings, error) {
+	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
+	defer cancel()
+
+	addrs, err := m.store.HostAddresses(ctx, hk)
+	if err != nil {
+		return nil, proto4.HostSettings{}, fmt.Errorf("failed to get host addresses, %w", err)
+	}
+
+	logger := m.log.With(zap.Stringer("hk", hk))
+
+	var networks []string
+	addrs, networks, err = resolveHost(ctx, m.resolver, addrs, logger)
+	if err != nil {
+		return nil, proto4.HostSettings{}, fmt.Errorf("failed to resolve host, %w", err)
+	}
+
+	settings, err := fetchSettings(ctx, m.client, hk, addrs, logger)
+	if err != nil {
+		return nil, proto4.HostSettings{}, fmt.Errorf("failed to fetch settings, %w", err)
+	}
+
+	return networks, settings, nil
+}
+
+func (m *HostManager) persistHostScan(ctx context.Context, hk types.PublicKey, networks []string, settings proto4.HostSettings) error {
+	var consecScanFailures int
+	success := settings != (proto4.HostSettings{})
+
+	m.mu.Lock()
+	if success {
+		delete(m.consecutiveScanFailures, hk)
+	} else {
+		m.consecutiveScanFailures[hk]++
+		consecScanFailures = m.consecutiveScanFailures[hk]
+	}
+	m.mu.Unlock()
+
+	nextScan := calculateNextScanTime(
+		time.Now(),
+		success,
+		consecScanFailures,
+		m.scanInterval,
+		scanIntervalOffsetHours,
+		scanExponentialBackoffHours,
+		scanExponentialBackoffMaxHours,
+	)
+
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	return m.store.UpdateHost(ctx, hk, networks, settings, success, nextScan)
+}
+
+func (m *HostManager) scanHosts(ctx context.Context) {
+	start := time.Now()
+
+	hosts, err := m.store.HostsForScanning(ctx)
+	if err != nil {
+		m.log.Error("failed to get hosts for scanning", zap.Error(err))
+		return
+	} else if len(hosts) == 0 {
+		m.log.Debug("scan skipped")
+		return
+	}
+	m.log.Debug("scan started")
+
+	sema := make(chan struct{}, scanThreads)
+	defer close(sema)
+
+	var wg sync.WaitGroup
+	for _, hk := range hosts {
+		select {
+		case <-ctx.Done():
+			break
+		case sema <- struct{}{}:
+		}
+
+		wg.Add(1)
+		go func(ctx context.Context, hk types.PublicKey) {
+			defer func() {
+				<-sema
+				wg.Done()
+			}()
+
+			logger := m.log.With(zap.Stringer("hk", hk))
+			if networks, hs, err := m.performHostScan(ctx, hk); errors.Is(err, context.Canceled) {
+				return
+			} else if err != nil {
+				logger.Error("failed to perform host scan", zap.Error(err))
+			} else if err := m.persistHostScan(ctx, hk, networks, hs); err != nil {
+				logger.Error("failed to persist host scan", zap.Error(err))
+			}
+		}(ctx, hk)
+	}
+
+	wg.Wait()
+
+	m.log.Debug("host scans finished", zap.Int("hosts", len(hosts)), zap.Duration("duration", time.Since(start)))
+}
+
+// fetchSettings uses the given client to fetch the settings of the host with
+// given public key. It only returns the settings if the host is available on
+// every address. The only error this function returns is [context.Canceled],
+// other errors that occur during the resolving and parsing are debug logged but
+// otherwise ignored.
+func fetchSettings(ctx context.Context, client RHP4Client, hk types.PublicKey, addresses []chain.NetAddress, log *zap.Logger) (proto4.HostSettings, error) {
+	var settings []proto4.HostSettings
+	for _, addr := range addresses {
+		if addr.Protocol == siamux.Protocol {
+			hs, err := client.Settings(ctx, hk, addr.Address)
+			if errors.Is(err, context.Canceled) {
+				return proto4.HostSettings{}, err
+			} else if err != nil {
+				log.Debug("failed to get host settings", zap.String("address", addr.Address), zap.Error(err))
+				settings = nil // require host to be available on all addresses
+				break
+			}
+			settings = append(settings, hs)
+		}
+		// TODO: add support for QUIC
+	}
+
+	// return a random setting to avoid the host cheating us by providing
+	// different settings over different addresses or protocols
+	if len(settings) == 0 {
+		return proto4.HostSettings{}, nil
+	}
+	return settings[frand.Intn(len(settings))], nil
+}
+
+// calculateNextScanTime calculates the time of the next scan based on the given
+// parameters.
+func calculateNextScanTime(lastScan time.Time, success bool, consecScanFailures int, interval time.Duration, offsetHours, expBackoffHours, expBackoffHoursMax int) time.Time {
+	// sanity check input
+	if interval == 0 {
+		panic("interval can not be zero")
+	} else if offsetHours < 0 {
+		panic("invalid offset hours")
+	}
+
+	if success {
+		randomOffset := time.Duration(frand.Intn(2*offsetHours+1)-offsetHours) * time.Hour
+		return lastScan.Add(interval).Add(randomOffset)
+	}
+
+	expBackoff := time.Duration(min(expBackoffHours*consecScanFailures, expBackoffHoursMax)) * time.Hour
+	return lastScan.Add(expBackoff)
+}
+
+// resolveHost uses the given resolver to resolve the given list of host
+// addresses. It returns a filtered list of addresses, leaving out any invalid
+// and/or private addresses, and a list of networks in CIDR notation. The only
+// error this function returns is [context.Canceled], other errors that occur
+// during the resolving and parsing are debug logged but otherwise ignored.
+func resolveHost(ctx context.Context, resolver Resolver, addresses []chain.NetAddress, log *zap.Logger) ([]chain.NetAddress, []string, error) {
+	var filtered []chain.NetAddress
+	var networks []string
+	for _, na := range addresses {
+		host, _, err := net.SplitHostPort(na.Address)
+		if err != nil {
+			log.Debug("failed to split host port", zap.String("address", na.Address), zap.Error(err))
+			continue
+		}
+
+		ips, err := resolver.LookupIPAddr(ctx, host)
+		if errors.Is(err, context.Canceled) {
+			return nil, nil, err
+		} else if err != nil {
+			log.Debug("failed to resolve host", zap.String("host", host), zap.Error(err))
+			continue
+		}
+
+		var hasPrivateIP bool
+		for _, ip := range ips {
+			if isPrivateIP(ip.IP) {
+				hasPrivateIP = true
+				break
+			}
+		}
+		if hasPrivateIP {
+			log.Debug("host has private IP", zap.String("host", host))
+			continue
+		}
+
+		var ipnets []string
+		for _, ip := range ips {
+			ipRange := ipv6FilterRange
+			if ip.IP.To4() != nil {
+				ipRange = ipv4FilterRange
+			}
+
+			cidr := fmt.Sprintf("%s/%d", ip.IP.String(), ipRange)
+			_, ipnet, err := net.ParseCIDR(cidr)
+			if err != nil {
+				log.Debug("failed to parse CIDR", zap.String("CIDR", cidr), zap.Error(err))
+				continue
+			}
+			ipnets = append(ipnets, ipnet.String())
+		}
+
+		if len(ipnets) > 0 {
+			networks = append(networks, ipnets...)
+			filtered = append(filtered, na)
+		}
+	}
+	return filtered, networks, nil
+}
+
+func isPrivateIP(ip net.IP) bool {
+	if ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true
+	}
+
+	privateIPBlocks := []net.IPNet{
+		{IP: net.IPv4(10, 0, 0, 0), Mask: net.CIDRMask(8, 32)},
+		{IP: net.IPv4(172, 16, 0, 0), Mask: net.CIDRMask(12, 32)},
+		{IP: net.IPv4(192, 168, 0, 0), Mask: net.CIDRMask(16, 32)},
+		{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}, // CGNAT
+		{IP: net.ParseIP("fc00::"), Mask: net.CIDRMask(7, 128)},
+		{IP: net.ParseIP("fe80::"), Mask: net.CIDRMask(10, 128)},
+	}
+
+	for _, block := range privateIPBlocks {
+		if block.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func validateAddress(na chain.NetAddress) error {

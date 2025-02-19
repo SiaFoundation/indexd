@@ -23,3 +23,17 @@ func WithAnnouncementMaxAge(maxAge time.Duration) Option {
 		m.announcementMaxAge = maxAge
 	}
 }
+
+// WithScanFrequency sets the scanning frequency.
+func WithScanFrequency(d time.Duration) Option {
+	return func(m *HostManager) {
+		m.scanFrequency = d
+	}
+}
+
+// WithScanInterval sets the interval between scans.
+func WithScanInterval(d time.Duration) Option {
+	return func(m *HostManager) {
+		m.scanInterval = d
+	}
+}
