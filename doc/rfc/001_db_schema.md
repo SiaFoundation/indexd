@@ -103,7 +103,7 @@ CREATE TABLE hosts {
     failed_scans INTEGER NOT NULL DEFAULT 0,
     consecutive_failed_scans INTEGER NOT NULL DEFAULT 0,
     last_scan_success BOOLEAN NOT NULL DEFAULT FALSE,
-    next_announcement TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    last_announcement TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     uptime INTERVAL NOT NULL DEFAULT '0 seconds',
     downtime INTERVAL NOT NULL DEFAULT '0 seconds',
@@ -111,9 +111,7 @@ CREATE TABLE hosts {
 
 CREATE TABLE host_addresses {
     id SERIAL PRIMARY KEY,
-    host_id INTEGER PRIMARY KEY
-        REFERENCES hosts(id)
-        ON DELETE CASCADE,
+    host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
 
     net_address TEXT NOT NULL,
     protocol SMALLINT NOT NULL,
@@ -121,17 +119,13 @@ CREATE TABLE host_addresses {
 
 CREATE TABLE host_resolved_cidrs {
     id SERIAL PRIMARY KEY,
-    host_id INTEGER
-        REFERENCES hosts(id)
-        ON DELETE CASCADE,
+    host_id INTEGER REFERENCES hosts(id) ON DELETE CASCADE,
 
     cidr CIDR NOT NULL,
 }
 
 CREATE TABLE host_settings {
-    host_id INTEGER PRIMARY KEY
-        REFERENCES hosts(id)
-        ON DELETE CASCADE,
+    host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
 
     protocol_version BYTEA NOT NULL,
     release TEXT NOT NULL,
