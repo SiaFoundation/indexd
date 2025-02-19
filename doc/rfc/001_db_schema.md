@@ -165,7 +165,9 @@ CREATE TABLE slabs (
 
     digest BYTEA UNIQUE NOT NULL, -- unique identifier for the slab derived from sector roots
     encryption_key BYTEA NOT NULL,
-    min_shards SMALLINT NOT NULL
+    health SMALLINT NOT NULL DEFAULT 100 CHECK(health >= 0 AND health <= 100), -- 0 unhealthy, 100 healthy
+    health_refresh_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    min_shards SMALLINT NOT NULL CHECK(min_shards > 0)
 )
 
 CREATE TABLE sectors (
