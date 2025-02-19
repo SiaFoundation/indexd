@@ -178,7 +178,7 @@ CREATE TABLE sectors (
 )
 
 CREATE TABLE host_sectors (
-    host_id INTEGER REFERENCES hosts(id) NOT NULL ON DELETE CASCADE,
+    host_id INTEGER REFERENCES hosts(id) NOT NULL,
     sector_id BIGINT REFERENCES sectors(id) NOT NULL ON DELETE CASCADE,
     PRIMARY KEY (host_id, sector_id), -- a sector should only exist once per host
 
