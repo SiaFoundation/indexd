@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
@@ -21,6 +22,11 @@ type (
 		UpdatesSince(index types.ChainIndex, maxBlocks int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
 	}
 
+	// HostManager manages host announcements.
+	HostManager interface {
+		UpdateChainState(tx hosts.UpdateTx, applied []chain.ApplyUpdate) error
+	}
+
 	// Store is a persistent store for the chain subscriber.
 	Store interface {
 		UpdateChainState(ctx context.Context, fn func(tx UpdateTx) error) error
@@ -30,6 +36,7 @@ type (
 	// UpdateTx allows atomically processing a chain update.
 	UpdateTx interface {
 		wallet.UpdateTx
+		hosts.UpdateTx
 
 		UpdateLastScannedIndex(context.Context, types.ChainIndex) error
 	}
@@ -47,6 +54,7 @@ type Subscriber struct {
 	shutdownFn      func()
 
 	cm    ChainManager
+	hm    HostManager
 	wm    WalletManager
 	store Store
 
@@ -64,9 +72,10 @@ func (s *Subscriber) Close() error {
 
 // New creates a new chain subscriber. The returned subscriber is already
 // processing chain updates and needs to be closed.
-func New(cm ChainManager, wm WalletManager, store Store, opts ...Option) *Subscriber {
+func New(cm ChainManager, hm HostManager, wm WalletManager, store Store, opts ...Option) *Subscriber {
 	s := &Subscriber{
 		cm:    cm,
+		hm:    hm,
 		wm:    wm,
 		store: store,
 		tg:    threadgroup.New(),
@@ -133,7 +142,9 @@ func (s *Subscriber) syncDB() error {
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		if err := s.store.UpdateChainState(ctx, func(tx UpdateTx) error {
-			if err := s.wm.UpdateChainState(tx, rus, aus); err != nil {
+			if err := s.hm.UpdateChainState(tx, aus); err != nil {
+				return fmt.Errorf("failed to update host chain state: %w", err)
+			} else if err := s.wm.UpdateChainState(tx, rus, aus); err != nil {
 				return fmt.Errorf("failed to update wallet chain state: %w", err)
 			}
 

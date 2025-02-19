@@ -2,6 +2,7 @@ package testutils
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -84,9 +85,40 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	// mine more blocks to get outputs to mature
 	indexer.MineBlocks(t, types.Address{}, int(n.MaturityDelay))
 
+	// wait for hosts to be funded
+	Retry(t, 100, 100*time.Millisecond, func() error {
+		for _, h := range hosts {
+			res, err := h.w.Balance()
+			if err != nil {
+				t.Fatal(err)
+			} else if res.Confirmed.IsZero() {
+				return errors.New("host wallet not funded")
+			}
+		}
+		return nil
+	})
+
+	// announce hosts
+	for _, h := range hosts {
+		if err := h.Announce(); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// wait for hosts to be announced
+	Retry(t, 100, 100*time.Millisecond, func() error {
+		hosts, err := indexer.db.Hosts(context.Background(), 0, cfg.hosts)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(hosts) != cfg.hosts {
+			indexer.MineBlocks(t, types.Address{}, 1)
+			return fmt.Errorf("expected %v hosts, got %v", cfg.hosts, len(hosts))
+		}
+		return nil
+	})
+
 	// TODO: implement as needed
 	// - add volumes to hosts
-	// - announce hosts
 	// - wait for contracts
 	// - sync cluster
 
@@ -101,7 +133,7 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 		if state, err := indexer.State(context.Background()); err != nil {
 			return err
 		} else if state.ScanHeight < tip.Height {
-			return fmt.Errorf("indexer's scan height doesn't match tip: %v %v", tip, state.ScanHeight)
+			return fmt.Errorf("indexer's scan height doesn't match tip: %v < %v", state.ScanHeight, tip.Height)
 		}
 
 		return nil

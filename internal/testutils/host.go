@@ -1,6 +1,7 @@
 package testutils
 
 import (
+	"fmt"
 	"net"
 	"testing"
 	"time"
@@ -26,6 +27,8 @@ type (
 		c  *testutil.EphemeralContractor
 		ss *testutil.EphemeralSectorStore
 		sr *testutil.EphemeralSettingsReporter
+
+		cm *chain.Manager
 		s  *syncer.Syncer
 		w  *wallet.SingleAddressWallet
 	}
@@ -34,6 +37,48 @@ type (
 // Addr returns the host's address.
 func (h *Host) Addr() string {
 	return h.l.Addr().String()
+}
+
+// Announce announces the host on the network.
+func (h *Host) Announce() error {
+	// prepare announcement
+	ha := chain.V2HostAnnouncement{
+		{
+			Protocol: rhp4.ProtocolTCPSiaMux,
+			Address:  h.l.Addr().String(),
+		},
+	}
+
+	// prepare transaction
+	cs := h.cm.TipState()
+	minerFee := h.cm.RecommendedFee().Mul64(1e3)
+	txn := types.V2Transaction{
+		Attestations: []types.Attestation{
+			ha.ToAttestation(cs, h.pk),
+		},
+		MinerFee: minerFee,
+	}
+
+	// fund transaction
+	basis, toSign, err := h.w.FundV2Transaction(&txn, minerFee, true)
+	if err != nil {
+		return fmt.Errorf("failed to fund transaction: %w", err)
+	}
+
+	// sign transaction
+	h.w.SignV2Inputs(&txn, toSign)
+	basis, txnset, err := h.cm.V2TransactionSet(basis, txn)
+	if err != nil {
+		h.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+		return fmt.Errorf("failed to create transaction set: %w", err)
+	} else if _, err := h.cm.AddV2PoolTransactions(basis, txnset); err != nil {
+		h.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+		return fmt.Errorf("failed to add transaction to pool: %w", err)
+	}
+
+	// broadcast transaction set
+	h.s.BroadcastV2TransactionSet(cs.Index, txnset)
+	return nil
 }
 
 // PublicKey returns the host's public key.
@@ -133,6 +178,7 @@ func NewHost(t testing.TB, pk types.PrivateKey, n *consensus.Network, genesis ty
 
 		c:  c,
 		s:  s,
+		cm: cm,
 		ss: ss,
 		sr: sr,
 		w:  w,

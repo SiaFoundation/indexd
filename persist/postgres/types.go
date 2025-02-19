@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/wallet"
 )
 
@@ -18,6 +20,8 @@ var (
 	_ scannerValuer = (*sqlEventData)(nil)
 	_ scannerValuer = (*sqlHash256)(nil)
 	_ scannerValuer = (*sqlMerkleProof)(nil)
+	_ scannerValuer = (*sqlNetworkProtocol)(nil)
+	_ scannerValuer = (*sqlPublicKey)(nil)
 )
 
 type scannerValuer interface {
@@ -113,7 +117,7 @@ func (event sqlEventData) Value() (driver.Value, error) {
 	case wallet.EventV2ContractResolution:
 		data.EncodeTo(e)
 	case wallet.EventV2Transaction:
-		types.V2Transaction(data).EncodeTo(e)
+		data.EncodeTo(e)
 	default:
 		panic(fmt.Sprintf("unknown event type %v", event.eventType)) // developer error
 	}
@@ -170,7 +174,7 @@ func (h *sqlHash256) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		if len(src) != len(sqlHash256{}) {
-			return fmt.Errorf("failed to unmarshal Hash256 value due to invalid number of bytes %v != %v: %v", len(src), len(sqlHash256{}), src)
+			return fmt.Errorf("failed to scan source into Hash256 due to invalid number of bytes %v != %v: %v", len(src), len(sqlHash256{}), src)
 		}
 		copy(h[:], src)
 		return nil
@@ -204,4 +208,60 @@ func (mp sqlMerkleProof) Value() (driver.Value, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+type sqlNetworkProtocol chain.Protocol
+
+const (
+	networkProtocolInvalid = iota
+	networkProtocolTCPSiaMux
+	networkProtocolQUIC
+)
+
+func (np sqlNetworkProtocol) Value() (driver.Value, error) {
+	switch chain.Protocol(np) {
+	case rhp4.ProtocolTCPSiaMux:
+		return int64(networkProtocolTCPSiaMux), nil
+	case rhp4.ProtocolQUIC:
+		return int64(networkProtocolQUIC), nil
+	default:
+		return nil, fmt.Errorf("unknown network protocol %q", np)
+	}
+}
+
+func (np *sqlNetworkProtocol) Scan(src interface{}) error {
+	switch src := src.(type) {
+	case int64:
+		switch src {
+		case networkProtocolTCPSiaMux:
+			*np = sqlNetworkProtocol(rhp4.ProtocolTCPSiaMux)
+			return nil
+		case networkProtocolQUIC:
+			*np = sqlNetworkProtocol(rhp4.ProtocolQUIC)
+			return nil
+		default:
+			return fmt.Errorf("invalid network protocol %v", src)
+		}
+	default:
+		return fmt.Errorf("cannot scan %T to network protocol", src)
+	}
+}
+
+type sqlPublicKey types.PublicKey
+
+func (pk sqlPublicKey) Value() (driver.Value, error) {
+	return pk[:], nil
+}
+
+func (pk sqlPublicKey) Scan(src interface{}) error {
+	switch src := src.(type) {
+	case []byte:
+		if len(src) != len(sqlPublicKey{}) {
+			return fmt.Errorf("failed to scan source into PublicKey due to invalid number of bytes %v != %v: %v", len(src), len(sqlPublicKey{}), src)
+		}
+		copy(pk[:], src)
+		return nil
+	default:
+		return fmt.Errorf("cannot scan %T to PublicKey", src)
+	}
 }
