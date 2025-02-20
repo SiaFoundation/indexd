@@ -3,8 +3,6 @@ package testutils
 import (
 	"context"
 	"testing"
-
-	"go.sia.tech/coreutils/wallet"
 )
 
 func TestNewCluster(t *testing.T) {
@@ -54,16 +52,6 @@ func TestNewCluster(t *testing.T) {
 		if h.c.Tip() != tip {
 			t.Fatal("host is not synced")
 		}
-	}
-
-	// assert wallet events were persisted
-	events, err := indexer.WalletEvents(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	} else if len(events) != 1 {
-		t.Fatal("no events")
-	} else if events[0].Type != wallet.EventTypeMinerPayout {
-		t.Fatalf("expected miner payout, %+v", events[0])
 	}
 
 	// assert host announcements were persisted

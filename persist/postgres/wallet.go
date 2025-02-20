@@ -48,7 +48,7 @@ func (s *Store) UnspentSiacoinElements() (sces []types.SiacoinElement, err error
 // WalletEvents returns a paginated list of transactions ordered by maturity
 // height, descending. If no more transactions are available, (nil, nil) should
 // be returned.
-func (s *Store) WalletEvents(offset, limit int) (events []wallet.Event, err error) {
+func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 	// sanity check input
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
@@ -56,7 +56,8 @@ func (s *Store) WalletEvents(offset, limit int) (events []wallet.Event, err erro
 		return nil, nil
 	}
 
-	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	var events []wallet.Event
+	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		var tip types.ChainIndex
 		err := tx.QueryRow(ctx, `SELECT last_scanned_index FROM global_settings`).Scan((*sqlChainIndex)(&tip))
 		if err != nil {
@@ -81,8 +82,10 @@ func (s *Store) WalletEvents(offset, limit int) (events []wallet.Event, err erro
 			events = append(events, event)
 		}
 		return rows.Err()
-	})
-	return
+	}); err != nil {
+		return nil, err
+	}
+	return events, nil
 }
 
 // WalletEventCount returns the total number of events relevant to the wallet.
@@ -145,7 +148,7 @@ func (u *updateTx) WalletApplyIndex(index types.ChainIndex, created, spent []typ
 
 	if len(created) > 0 {
 		for _, se := range created {
-			if _, err := u.tx.Exec(u.ctx, `INSERT INTO wallet_siacoin_elements (output_id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`,
+			if res, err := u.tx.Exec(u.ctx, `INSERT INTO wallet_siacoin_elements (output_id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`,
 				sqlHash256(se.ID),
 				sqlCurrency(se.SiacoinOutput.Value),
 				sqlHash256(se.SiacoinOutput.Address),
@@ -154,13 +157,15 @@ func (u *updateTx) WalletApplyIndex(index types.ChainIndex, created, spent []typ
 				se.MaturityHeight,
 			); err != nil {
 				return fmt.Errorf("failed to insert siacoin element: %w", err)
+			} else if res.RowsAffected() != 1 {
+				return errors.New("failed to insert siacoin element")
 			}
 		}
 	}
 
 	if len(events) > 0 {
 		for _, e := range events {
-			if _, err := u.tx.Exec(u.ctx, `INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`,
+			if res, err := u.tx.Exec(u.ctx, `INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`,
 				sqlChainIndex(e.Index),
 				e.MaturityHeight,
 				sqlHash256(e.ID),
@@ -168,6 +173,8 @@ func (u *updateTx) WalletApplyIndex(index types.ChainIndex, created, spent []typ
 				sqlEncodeEvent(e.Type, e.Data),
 			); err != nil {
 				return fmt.Errorf("failed to insert event: %w", err)
+			} else if res.RowsAffected() != 1 {
+				return errors.New("failed to insert event")
 			}
 		}
 	}
@@ -187,7 +194,7 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 
 	if len(unspent) > 0 {
 		for _, se := range unspent {
-			if _, err := u.tx.Exec(u.ctx, `INSERT INTO wallet_siacoin_elements (output_id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`,
+			if res, err := u.tx.Exec(u.ctx, `INSERT INTO wallet_siacoin_elements (output_id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`,
 				sqlHash256(se.ID),
 				sqlCurrency(se.SiacoinOutput.Value),
 				sqlHash256(se.SiacoinOutput.Address),
@@ -196,6 +203,8 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 				se.MaturityHeight,
 			); err != nil {
 				return fmt.Errorf("failed to insert siacoin element: %w", err)
+			} else if res.RowsAffected() != 1 {
+				return errors.New("failed to insert siacoin element")
 			}
 		}
 	}

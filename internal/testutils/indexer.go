@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -129,11 +131,29 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 	}
 }
 
-// MineBlocks is a helper to mine blocks and broadcast the headers
-func (idx *Indexer) MineBlocks(t testing.TB, addr types.Address, n int) {
+// BlockUntilSynced blocks until the indexer is synced with the peer.
+func (idx *Indexer) BlockUntilSynced(ctx context.Context, t testing.TB, peer interface {
+	Tip() (types.ChainIndex, error)
+}) {
 	t.Helper()
 
-	for i := 0; i < n; i++ {
+	Retry(t, 100, 100*time.Millisecond, func() error {
+		if state, err := idx.State(ctx); err != nil {
+			t.Fatal(err)
+		} else if tip, err := peer.Tip(); err != nil {
+			t.Fatal(err)
+		} else if tip.Height != state.ScanHeight {
+			return fmt.Errorf("peer unsynced %d != %d", tip.Height, state.ScanHeight)
+		}
+		return nil
+	})
+}
+
+// MineBlocks is a helper to mine blocks and broadcast the headers
+func (idx *Indexer) MineBlocks(t testing.TB, addr types.Address, n uint64) {
+	t.Helper()
+
+	for i := uint64(0); i < n; i++ {
 		b, ok := coreutils.MineBlock(idx.cm, addr, 5*time.Second)
 		if !ok {
 			t.Fatal("failed to mine block")
@@ -147,6 +167,66 @@ func (idx *Indexer) MineBlocks(t testing.TB, addr types.Address, n int) {
 			idx.syncer.BroadcastV2BlockOutline(gateway.OutlineBlock(b, idx.cm.PoolTransactions(), idx.cm.V2PoolTransactions()))
 		}
 	}
+}
+
+// MineBlocksBlocking is a helper to mine blocks and broadcast the headers, this
+// method will block until the scan height reaches the target height after n
+// blocks got mined.
+func (idx *Indexer) MineBlocksBlocking(ctx context.Context, t testing.TB, addr types.Address, n uint64) {
+	t.Helper()
+
+	idx.MineBlocks(t, addr, n)
+	idx.BlockUntilSynced(ctx, t, idx)
+}
+
+// SyncerAddr returns the address of the syncer.
+func (idx *Indexer) SyncerAddr() string {
+	return idx.syncer.Addr()
+}
+
+// Tip returns the current tip of the chain.
+func (idx *Indexer) Tip() (types.ChainIndex, error) {
+	return idx.cm.Tip(), nil
+}
+
+// WalletAddr returns the address of the wallet.
+func (idx *Indexer) WalletAddr() types.Address {
+	return idx.wallet.Address()
+}
+
+func initTestDB(t testing.TB, log *zap.Logger) *postgres.Store {
+	// parse connection info from env vars
+	ci := postgres.ConnectionInfo{
+		Host:     "127.0.0.1",
+		Port:     5432,
+		User:     os.Getenv("POSTGRES_USER"),
+		Password: os.Getenv("POSTGRES_PASSWORD"),
+		Database: os.Getenv("POSTGRES_DB"),
+		SSLMode:  "disable",
+	}
+
+	// create test-specific database
+	dbName := t.Name()
+	pool, err := pgxpool.New(context.Background(), ci.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+
+	if _, err := pool.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS %q", dbName)); err != nil {
+		t.Fatal(err)
+	} else if _, err := pool.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %q", dbName)); err != nil {
+		t.Fatal(err)
+	}
+	pool.Close()
+	ci.Database = dbName
+
+	// connect
+	store, err := postgres.Connect(context.Background(), ci, log.Named("postgres"))
+	if err != nil {
+		t.Fatalf("failed to connect to postgres database: %v", err)
+	}
+	return store
 }
 
 // closeWithTimeout is a helper which closes a resource and panics if it takes

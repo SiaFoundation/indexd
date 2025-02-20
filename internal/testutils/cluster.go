@@ -2,7 +2,6 @@ package testutils
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"testing"
@@ -69,6 +68,9 @@ func WithHosts(n int) ClusterOpt {
 // NewCluster creates a cluster for testing. A cluster contains an indexer and
 // multiple hosts.
 func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
 	cfg := defaultClusterCfg(testutil.V2Network)
 	for _, opt := range opts {
 		opt(&cfg)
@@ -76,7 +78,7 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 
 	// create indexer and mine until after V2 allowheight
 	indexer := NewIndexer(t, cfg.network, cfg.genesis, cfg.logger.Named("indexer"))
-	indexer.MineBlocks(t, indexer.wallet.Address(), int(cfg.network.HardforkV2.AllowHeight))
+	indexer.MineBlocks(t, indexer.wallet.Address(), cfg.network.HardforkV2.AllowHeight)
 
 	// create cluster
 	cluster := &Cluster{
@@ -89,9 +91,9 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 
 	// add hosts
 	hosts := cluster.NewHosts(t, cfg.hosts)
-	cluster.AddHosts(t, hosts...)
-	cluster.FundHosts(t, hosts...)
-	cluster.AnnounceHosts(t, hosts...)
+	cluster.AddHosts(ctx, t, hosts...)
+	cluster.FundHosts(ctx, t, hosts...)
+	cluster.AnnounceHosts(ctx, t, hosts...)
 
 	// TODO: implement as needed
 	// - add volumes to hosts
@@ -102,11 +104,11 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 }
 
 // AddHosts adds the given hosts to the cluster.
-func (c *Cluster) AddHosts(t testing.TB, hosts ...*Host) {
+func (c *Cluster) AddHosts(ctx context.Context, t testing.TB, hosts ...*Host) {
 	t.Helper()
 
 	for _, h := range hosts {
-		err := h.Connect(c.Indexer.syncer.Addr())
+		err := h.Connect(ctx, c.Indexer.syncer.Addr())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -115,7 +117,7 @@ func (c *Cluster) AddHosts(t testing.TB, hosts ...*Host) {
 }
 
 // AnnounceHosts announces the hosts and blocks until they are indexed.
-func (c *Cluster) AnnounceHosts(t testing.TB, hosts ...*Host) {
+func (c *Cluster) AnnounceHosts(ctx context.Context, t testing.TB, hosts ...*Host) {
 	t.Helper()
 
 	start := time.Now().Round(time.Second)
@@ -131,7 +133,7 @@ func (c *Cluster) AnnounceHosts(t testing.TB, hosts ...*Host) {
 	}
 
 	Retry(t, 100, 100*time.Millisecond, func() error {
-		hosts, err := c.Indexer.db.Hosts(context.Background(), 0, math.MaxInt)
+		hosts, err := c.Indexer.db.Hosts(ctx, 0, math.MaxInt)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -153,24 +155,21 @@ func (c *Cluster) AnnounceHosts(t testing.TB, hosts ...*Host) {
 }
 
 // FundHosts funds the hosts with one block, then waits for the funds to mature.
-func (c *Cluster) FundHosts(t testing.TB, hosts ...*Host) {
+func (c *Cluster) FundHosts(ctx context.Context, t testing.TB, hosts ...*Host) {
 	t.Helper()
 
 	for _, h := range hosts {
 		c.Indexer.MineBlocks(t, h.w.Address(), 1)
 	}
-	c.Indexer.MineBlocks(t, types.Address{}, int(c.Network.MaturityDelay))
+	c.Indexer.MineBlocksBlocking(ctx, t, types.Address{}, c.Network.MaturityDelay)
 
-	Retry(t, 100, 100*time.Millisecond, func() error {
-		for _, h := range hosts {
-			if res, err := h.w.Balance(); err != nil {
-				t.Fatal(err)
-			} else if res.Confirmed.IsZero() {
-				return errors.New("host not funded")
-			}
+	for _, h := range hosts {
+		if res, err := h.w.Balance(); err != nil {
+			t.Fatal(err)
+		} else if res.Confirmed.IsZero() {
+			t.Fatal("host not funded")
 		}
-		return nil
-	})
+	}
 }
 
 // NewHosts creates n new hosts using the cluster's network and genesis block.
