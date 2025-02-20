@@ -1,6 +1,7 @@
 package testutils
 
 import (
+	"context"
 	"testing"
 
 	"go.sia.tech/coreutils/testutil"
@@ -12,7 +13,7 @@ func TestIndexer(t *testing.T) {
 	n, genesis := testutil.V2Network()
 	indexer := NewIndexer(t, n, genesis, zap.NewNop())
 
-	state, err := indexer.State()
+	state, err := indexer.State(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if state.BuildState == (api.BuildState{}) {

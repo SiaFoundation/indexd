@@ -13,7 +13,9 @@ type (
 
 	// State is the response body for the [GET] /state endpoint.
 	State struct {
-		StartTime time.Time `json:"startTime"`
 		BuildState
+
+		ScanHeight uint64    `json:"scanHeight"`
+		StartTime  time.Time `json:"startTime"`
 	}
 )

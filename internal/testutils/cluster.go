@@ -62,7 +62,7 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	indexer := NewIndexer(t, n, genesis, cfg.logger.Named("indexer"))
 
 	// mine until after v2 height to reach v2 and to fund indexer
-	indexer.MineBlocks(t, types.Address{}, int(n.HardforkV2.AllowHeight))
+	indexer.MineBlocks(t, indexer.wallet.Address(), int(n.HardforkV2.AllowHeight))
 
 	// create hosts and connect them to the indexer
 	var hosts []*Host
@@ -97,6 +97,13 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 				return fmt.Errorf("host's tip doesn't match indexer's: %v %v", tip, h.c.Tip())
 			}
 		}
+
+		if state, err := indexer.State(context.Background()); err != nil {
+			return err
+		} else if state.ScanHeight < tip.Height {
+			return fmt.Errorf("indexer's scan height doesn't match tip: %v %v", tip, state.ScanHeight)
+		}
+
 		return nil
 	})
 

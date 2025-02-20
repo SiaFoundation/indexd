@@ -51,9 +51,9 @@ func (s *Store) UnspentSiacoinElements() (sces []types.SiacoinElement, err error
 func (s *Store) WalletEvents(offset, limit int) (events []wallet.Event, err error) {
 	// sanity check input
 	if offset < 0 {
-		return nil, fmt.Errorf("offset must be positive")
+		return nil, errors.New("offset can not be negative")
 	} else if limit < 0 {
-		return nil, fmt.Errorf("limit must be positive")
+		return nil, errors.New("limit can not be negative")
 	} else if limit == 0 {
 		return nil, nil
 	}

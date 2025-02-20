@@ -19,8 +19,10 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/testutil"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/persist/postgres"
+	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -33,16 +35,28 @@ type Indexer struct {
 
 	cm     *chain.Manager
 	syncer *syncer.Syncer
+	wallet *wallet.SingleAddressWallet
 }
 
 // NewIndexer creates a new indexer for testing that is automatically closed up
 // after the test is finished.
 func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *zap.Logger) *Indexer {
+	// prepare store
+	store := initTestDB(t, log)
+
 	dbstore, tipState, err := chain.NewDBStore(chain.NewMemDB(), n, genesis)
 	if err != nil {
 		t.Fatalf("failed to create chain store: %v", err)
 	}
 	cm := chain.NewManager(dbstore, tipState, chain.WithLog(log.Named("chain")))
+
+	walletKey := types.GeneratePrivateKey()
+	wm, err := wallet.NewSingleAddressWallet(walletKey, cm, store, wallet.WithLogger(log.Named("wallet")), wallet.WithReservationDuration(3*time.Hour))
+	if err != nil {
+		t.Fatalf("failed to create wallet: %v", err)
+	}
+
+	sub := subscriber.New(cm, wm, store, subscriber.WithLogger(log.Named("subscriber")))
 
 	syncerListener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -64,12 +78,9 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 		api.WithLogger(log.Named("api")),
 	}
 
-	// prepare store
-	store := initTestDB(t, log)
-
 	password := hex.EncodeToString(frand.Bytes(16))
 	web := http.Server{
-		Handler: jape.BasicAuth(password)(api.NewServer(cm, s, store, apiOpts...)),
+		Handler: jape.BasicAuth(password)(api.NewServer(cm, s, wm, store, apiOpts...)),
 	}
 
 	httpListener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -90,6 +101,12 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 		if err := closeWithTimeout(s.Close); err != nil {
 			t.Errorf("failed to close syncer: %v", err)
 		}
+		if err := closeWithTimeout(wm.Close); err != nil {
+			t.Errorf("failed to close wallet: %v", err)
+		}
+		if err := closeWithTimeout(sub.Close); err != nil {
+			t.Errorf("failed to close subscriber: %v", err)
+		}
 		if err := closeWithTimeout(store.Close); err != nil {
 			t.Errorf("failed to close store: %v", err)
 		}
@@ -99,6 +116,7 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 
 		cm:     cm,
 		syncer: s,
+		wallet: wm,
 	}
 }
 
