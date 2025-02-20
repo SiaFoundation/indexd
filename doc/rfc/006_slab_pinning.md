@@ -72,26 +72,18 @@ However, the slabs are not yet pinned to contracts. That happens asynchronously.
 Slabs are scoped to the account key that pinned them. So one account can't unpin
 another account's slabs or even fetch that slab's metadata.
 
-## Pinning Loops
+## Pinning
 
-The pinning loops are the goroutines within the `indexer` that actually pin
-slabs to hosts. We run one loop for each host we have a contract with. Since the
-`indexer` stores the unpinned sectors alongside their expiry, the pinning loops
-are pretty straightforward.
+Pinning slabs happens as part of periodic maintenance that the indexer performs
+on contracts (see [Pinning and Pruning](006_slab_pinning.md). The process looks
+like this:
 
 For each host we have a contract with we do the following:
 1. Fetch a batch of unpinned sectors (at most 1<<40) sorted by expiration time
 2. Attempt to append the sectors to any of the contracts we have with the host
 3. Update the database
-  a. For successful appends: Atomically remove the unpinned sectors from the database and add the sector<->contract link
+  a. For successful appends: Update the sector<->host link to contain the contract ID the sector was pinned to
   b. For "missing sectors" errors: Remove the sectors from the database
-
-Every host gets its own loop since contracts can only be interacted with
-sequentially and we usually only have one contract with each host that we want
-to use. The biggest advantage of this approach is its simplicity. Where
-`renterd` required distributed locking since contracts were used by multiple
-entities, every contract in the `indexer` is only modified within the pinning
-loop. So we don't need any contract locking at all.
 
 ## Slab Health and unpinned Sectors
 
