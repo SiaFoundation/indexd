@@ -253,7 +253,7 @@ func (pk sqlPublicKey) Value() (driver.Value, error) {
 	return pk[:], nil
 }
 
-func (pk sqlPublicKey) Scan(src interface{}) error {
+func (pk *sqlPublicKey) Scan(src interface{}) error {
 	switch src := src.(type) {
 	case []byte:
 		if len(src) != len(sqlPublicKey{}) {

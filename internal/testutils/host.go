@@ -1,6 +1,7 @@
 package testutils
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"testing"
@@ -40,15 +41,7 @@ func (h *Host) Addr() string {
 }
 
 // Announce announces the host on the network.
-func (h *Host) Announce() error {
-	// prepare announcement
-	ha := chain.V2HostAnnouncement{
-		{
-			Protocol: rhp4.ProtocolTCPSiaMux,
-			Address:  h.l.Addr().String(),
-		},
-	}
-
+func (h *Host) Announce(ha chain.V2HostAnnouncement) error {
 	// prepare transaction
 	cs := h.cm.TipState()
 	minerFee := h.cm.RecommendedFee().Mul64(1e3)
@@ -84,6 +77,14 @@ func (h *Host) Announce() error {
 // PublicKey returns the host's public key.
 func (h *Host) PublicKey() types.PublicKey {
 	return h.pk.PublicKey()
+}
+
+// Connect connects the host's syncer with the given peer.
+func (h *Host) Connect(addr string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	_, err := h.s.Connect(ctx, addr)
+	cancel()
+	return err
 }
 
 // NewHost creates a new host.

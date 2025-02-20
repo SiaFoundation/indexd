@@ -18,6 +18,7 @@ CREATE TABLE host_addresses (
     net_address TEXT NOT NULL,
     protocol SMALLINT NOT NULL
 );
+CREATE INDEX  host_addresses_host_id_idx ON host_addresses (host_id);
 
 CREATE TABLE syncer_peers (
     ip_address INET PRIMARY KEY,

@@ -38,7 +38,7 @@ func (u *updateTx) AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnoun
 }
 
 // Hosts returns a list of hosts.
-func (s *Store) Hosts(ctx context.Context, offset, limit int) (hosts []api.Host, err error) {
+func (s *Store) Hosts(ctx context.Context, offset, limit int) ([]api.Host, error) {
 	// sanity check input
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
@@ -46,7 +46,8 @@ func (s *Store) Hosts(ctx context.Context, offset, limit int) (hosts []api.Host,
 		return nil, nil
 	}
 
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	var hosts []api.Host
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		dbHosts, err := queryHosts(ctx, tx, offset, limit)
 		if err != nil {
 			return err
@@ -59,8 +60,11 @@ func (s *Store) Hosts(ctx context.Context, offset, limit int) (hosts []api.Host,
 			hosts = append(hosts, h.Host)
 		}
 		return nil
-	})
-	return
+	}); err != nil {
+		return nil, err
+	}
+
+	return hosts, nil
 }
 
 func queryHosts(ctx context.Context, tx *txn, offset, limit int) ([]dbHost, error) {

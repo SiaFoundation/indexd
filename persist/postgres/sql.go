@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	longQueryDuration = 10 * time.Millisecond
+	longQueryDuration = 100 * time.Millisecond
 	longTxnDuration   = time.Second
 )
 

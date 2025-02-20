@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
@@ -44,7 +42,7 @@ type Indexer struct {
 // after the test is finished.
 func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *zap.Logger) *Indexer {
 	// prepare store
-	store := initTestDB(t, log)
+	store := NewDB(t, log)
 
 	dbstore, tipState, err := chain.NewDBStore(chain.NewMemDB(), n, genesis)
 	if err != nil {
@@ -149,41 +147,6 @@ func (idx *Indexer) MineBlocks(t testing.TB, addr types.Address, n int) {
 			idx.syncer.BroadcastV2BlockOutline(gateway.OutlineBlock(b, idx.cm.PoolTransactions(), idx.cm.V2PoolTransactions()))
 		}
 	}
-}
-
-func initTestDB(t testing.TB, log *zap.Logger) *postgres.Store {
-	// parse connection info from env vars
-	ci := postgres.ConnectionInfo{
-		Host:     "127.0.0.1",
-		Port:     5432,
-		User:     os.Getenv("POSTGRES_USER"),
-		Password: os.Getenv("POSTGRES_PASSWORD"),
-		Database: os.Getenv("POSTGRES_DB"),
-		SSLMode:  "disable",
-	}
-
-	// create test-specific database
-	dbName := t.Name()
-	pool, err := pgxpool.New(context.Background(), ci.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-
-	if _, err := pool.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS %q", dbName)); err != nil {
-		t.Fatal(err)
-	} else if _, err := pool.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %q", dbName)); err != nil {
-		t.Fatal(err)
-	}
-	pool.Close()
-	ci.Database = dbName
-
-	// connect
-	store, err := postgres.Connect(context.Background(), ci, log.Named("postgres"))
-	if err != nil {
-		t.Fatalf("failed to connect to postgres database: %v", err)
-	}
-	return store
 }
 
 // closeWithTimeout is a helper which closes a resource and panics if it takes

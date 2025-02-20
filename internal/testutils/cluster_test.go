@@ -34,8 +34,8 @@ func TestNewCluster(t *testing.T) {
 	}
 
 	// assert hosts were created
-	if len(cluster.Hosts) != defaultClusterOpts.hosts {
-		t.Fatalf("expected %d hosts, got %d", defaultClusterOpts.hosts, len(cluster.Hosts))
+	if len(cluster.Hosts) != 5 {
+		t.Fatalf("expected 5 hosts, got %d", len(cluster.Hosts))
 	}
 
 	// assert hosts were funded
@@ -70,8 +70,8 @@ func TestNewCluster(t *testing.T) {
 	hosts, err := indexer.db.Hosts(context.Background(), 0, 10)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(hosts) != defaultClusterOpts.hosts {
-		t.Fatalf("expected %d hosts, got %d", defaultClusterOpts.hosts, len(hosts))
+	} else if len(hosts) != 5 {
+		t.Fatalf("expected 5 hosts, got %d", len(hosts))
 	} else if len(hosts[0].Addresses) == 0 {
 		t.Fatal("no addresses")
 	}

@@ -66,12 +66,8 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 		chain.ForEachV2HostAnnouncement(update.Block, func(hk types.PublicKey, addrs []chain.NetAddress) {
 			filtered := make(map[chain.Protocol][]chain.NetAddress)
 			for _, addr := range addrs {
-				if addr.Address == "" {
-					m.log.Debug("ignoring host announcement with empty address", zap.Stringer("hk", hk))
-					continue
-				} else if !(addr.Protocol == rhp4.ProtocolTCPSiaMux || addr.Protocol == rhp4.ProtocolQUIC) {
-					m.log.Debug(fmt.Sprintf("ignoring host announcement with unknown protocol %q", addr.Protocol), zap.Stringer("hk", hk))
-					continue
+				if err := validateAddress(addr); err != nil {
+					m.log.Debug("ignoring host announcement", zap.Stringer("hk", hk), zap.Error(err))
 				} else if len(filtered[addr.Protocol]) < maxAddrsPerProtocol {
 					filtered[addr.Protocol] = append(filtered[addr.Protocol], addr)
 				}
@@ -86,6 +82,16 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 				return fmt.Errorf("failed to add host announcement: %w", err)
 			}
 		}
+	}
+	return nil
+}
+
+func validateAddress(na chain.NetAddress) error {
+	if !(na.Protocol == rhp4.ProtocolTCPSiaMux || na.Protocol == rhp4.ProtocolQUIC) {
+		return fmt.Errorf("unknown protocol %q", na.Protocol)
+	}
+	if na.Address == "" {
+		return fmt.Errorf("empty address")
 	}
 	return nil
 }
