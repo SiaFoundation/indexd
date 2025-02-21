@@ -78,22 +78,25 @@ Bad contracts are contracts that don't contribute to the health of a slab. A con
 - The host is considered "bad" (see [Host Scanning](002_host_scanning.md))
 - The contract fails to renew and has reached the second half of the renew window
 
-### Pinning and Pruning
+### Funding, Pinning and Pruning
 
 Apart from forming and renewing contracts, the contract maintenance is also
-responsible for pinning data to contracts and pruning data that is no longer
-needed.
+responsible for funding accounts, pinning data to contracts and pruning data
+that is no longer needed.
 
-Both these tasks can only be performed sequentially on a single contract, but we
-can perform it in parallel for multiple contracts. So we use the following loop to do so:
+All of these tasks can only be performed sequentially on a single contract, but
+we can perform it in parallel for multiple contracts. So we use the following
+loop to do so:
 
 1. Create a semaphore/channel that limits our goroutines to 50
-2. Loop over all hosts with contracts and launch a goroutine to perform a batch
-of pinning limited to 60s per host (see [Slab Pinning](006_slab_pinning.md))
+2. Loop over all hosts with contracts and launch a goroutine to perform account
+funding on all accounts that require it
 3. Wait for goroutines to finish
-4. Do the same again but this time for pruning using the same 60s timeout
-5. Wait for goroutines to finish
-6. Repeat from step 1 until there is no more work to perform
+4. Do the same thing again but for a batch (1TiB) of pinning limited to 60s per
+host (see [Slab Pinning](006_slab_pinning.md)) 3. Wait for goroutines to finish
+5. Do the same again but this time for pruning using the same 60s timeout
+6. Wait for goroutines to finish
+7. Repeat from step 1 until there is no more work to perform
 
 The biggest advantage of this approach is its simplicity. Where `renterd`
 required distributed locking since contracts were used by multiple entities,
