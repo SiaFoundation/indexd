@@ -19,6 +19,7 @@ func TestWalletAPI(t *testing.T) {
 	// create indexer
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := c.NewIndexer(t, zap.NewNop())
+	c.MineBlocks(indexer.WalletAddr(), 1)
 
 	// assert events are being persisted
 	events, err := indexer.WalletEvents(ctx)
