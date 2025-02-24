@@ -4,7 +4,7 @@ go 1.23.4
 
 require (
 	github.com/jackc/pgx/v5 v5.7.2
-	go.sia.tech/core v0.10.1
+	go.sia.tech/core v0.10.2
 	go.sia.tech/coreutils v0.11.2-0.20250213103346-58d6c22440ed
 	go.sia.tech/jape v0.12.2-0.20241010144215-1468bf476af6
 	go.uber.org/goleak v1.3.0
