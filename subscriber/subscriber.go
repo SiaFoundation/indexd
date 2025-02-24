@@ -3,6 +3,7 @@ package subscriber
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -52,6 +53,7 @@ type (
 type Subscriber struct {
 	updateBatchSize int
 	shutdownFn      func()
+	syncMu          sync.Mutex
 
 	cm    ChainManager
 	hm    HostManager
@@ -106,7 +108,7 @@ func New(cm ChainManager, hm HostManager, wm WalletManager, store Store, opts ..
 		for range reorgCh {
 			select {
 			case <-reorgCh:
-				err := s.syncDB()
+				err := s.Sync()
 				if err != nil {
 					s.log.Panic("failed to sync database", zap.Error(err))
 				}
@@ -118,7 +120,10 @@ func New(cm ChainManager, hm HostManager, wm WalletManager, store Store, opts ..
 	return s
 }
 
-func (s *Subscriber) syncDB() error {
+func (s *Subscriber) Sync() error {
+	s.syncMu.Lock()
+	defer s.syncMu.Unlock()
+
 	index, err := s.tip()
 	if err != nil {
 		return fmt.Errorf("failed to get last scanned index: %w", err)
