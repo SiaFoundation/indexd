@@ -165,8 +165,6 @@ CREATE TABLE slabs (
 
     digest BYTEA UNIQUE NOT NULL, -- unique identifier for the slab derived from sector roots
     encryption_key BYTEA NOT NULL,
-    health SMALLINT NOT NULL DEFAULT 100 CHECK(health >= 0 AND health <= 100), -- 0 unhealthy, 100 healthy
-    next_health_refresh TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     min_shards SMALLINT NOT NULL CHECK(min_shards > 0)
 )
 
@@ -176,13 +174,21 @@ CREATE TABLE sectors (
     slab_index SMALLINT NOT NULL, -- index within corresponding slab to retrieve sectors in right order
     root BYTEA UNIQUE NOT NULL
 )
+-- enforce one sector per index per slab
+CREATE UNIQUE INDEX sectors_slab_id_slab_index_idx ON sectors(slab_id, slab_index ASC)
+```
 
 CREATE TABLE host_sectors (
+    id BIGSERIAL PRIMARY KEY,
     host_id INTEGER REFERENCES hosts(id) NOT NULL,
-    sector_id BIGINT REFERENCES sectors(id) NOT NULL,
-    PRIMARY KEY (host_id, sector_id), -- a sector should only exist once per host
 
-    contract_id INTEGER REFERENCES contracts(id), -- determines whether the sector is pinned
+    -- NULL if sector isn't pinned yet
+    contract_id INTEGER REFERENCES contracts(id),
+
+    -- a sector should only ever be stored on one host and pinned to one contract
+    -- which is why this is UNIQUE. If a sector is migrated, the previous row is
+    -- overwritten.
+    sector_id BIGINT REFERENCES sectors(id) UNIQUE NOT NULL,
 
     -- NOTE: instead of expiration, we track the upload time and update
     -- contract_id after successfully pinning them or when the host reports that
@@ -191,5 +197,6 @@ CREATE TABLE host_sectors (
     -- expiration date.
     uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 )
-CREATE INDEX host_sectors_contract_id_uploaded_at_idx ON host_sectors(contract_id, uploaded_at ASC) -- quick lookup of sectors to pin prioritized by upload time
+-- quick lookup of sectors to pin prioritized by upload time
+CREATE INDEX host_sectors_contract_id_uploaded_at_idx ON host_sectors(contract_id, uploaded_at ASC)
 ```
