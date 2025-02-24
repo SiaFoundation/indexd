@@ -120,6 +120,9 @@ func New(cm ChainManager, hm HostManager, wm WalletManager, store Store, opts ..
 	return s
 }
 
+// Sync syncs the subscriber with the chain manager. It's usually not necessary
+// to manually call this since the Subscriber will do that itself but it can be
+// used to guarantee the subscriber is synced at a given point in time.
 func (s *Subscriber) Sync() error {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
