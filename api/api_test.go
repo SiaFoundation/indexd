@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.uber.org/zap"
@@ -18,11 +17,8 @@ func TestWalletAPI(t *testing.T) {
 	defer cancel()
 
 	// create indexer
-	network, genesis := testutil.V2Network()
-	indexer := testutils.NewIndexer(t, network, genesis, zap.NewNop())
-
-	// mine until v2 and fund the indexer
-	indexer.MineBlocksBlocking(ctx, t, indexer.WalletAddr(), network.HardforkV2.AllowHeight)
+	c := testutils.NewConsensusNode(t, zap.NewNop())
+	indexer := c.NewIndexer(t, zap.NewNop())
 
 	// assert events are being persisted
 	events, err := indexer.WalletEvents(ctx)
@@ -43,7 +39,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// mine until funds mature
-	indexer.MineBlocksBlocking(ctx, t, types.Address{}, network.MaturityDelay)
+	c.MineBlocks(types.Address{}, c.Network().MaturityDelay)
 
 	// assert wallet is funded
 	res, err = indexer.Wallet(ctx)
@@ -60,11 +56,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// create a wallet
-	w := testutils.NewWallet(t, network, genesis)
-	err = w.Connect(ctx, indexer.SyncerAddr())
-	if err != nil {
-		t.Fatal(err)
-	}
+	w := c.NewWallet()
 
 	// assert host wallet is empty
 	bal, err := w.Balance()
@@ -93,8 +85,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// mine a block
-	indexer.MineBlocks(t, types.Address{}, 1)
-	indexer.BlockUntilSynced(ctx, t, w)
+	c.MineBlocks(types.Address{}, 1)
 
 	// assert siacons arrived successfully
 	bal, err = w.Balance()

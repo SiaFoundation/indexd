@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -86,21 +85,15 @@ func (h *Host) PublicKey() types.PublicKey {
 }
 
 // NewHost creates a new host.
-func NewHost(t testing.TB, pk types.PrivateKey, n *consensus.Network, genesis types.Block, log *zap.Logger) *Host {
-	db, tipstate, err := chain.NewDBStore(chain.NewMemDB(), n, genesis)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cm := chain.NewManager(db, tipstate)
-
+func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logger) *Host {
 	syncerListener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { syncerListener.Close() })
 
-	s := syncer.New(syncerListener, cm, testutil.NewEphemeralPeerStore(), gateway.Header{
-		GenesisID:  genesis.ID(),
+	s := syncer.New(syncerListener, c.cm, testutil.NewEphemeralPeerStore(), gateway.Header{
+		GenesisID:  c.genesis.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerListener.Addr().String(),
 	},
@@ -112,7 +105,7 @@ func NewHost(t testing.TB, pk types.PrivateKey, n *consensus.Network, genesis ty
 	go s.Run()
 
 	ws := testutil.NewEphemeralWalletStore()
-	w, err := wallet.NewSingleAddressWallet(types.GeneratePrivateKey(), cm, ws)
+	w, err := wallet.NewSingleAddressWallet(types.GeneratePrivateKey(), c.cm, ws)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,34 +129,26 @@ func NewHost(t testing.TB, pk types.PrivateKey, n *consensus.Network, genesis ty
 		},
 	})
 	ss := testutil.NewEphemeralSectorStore()
-	c := testutil.NewEphemeralContractor(cm)
-	t.Cleanup(func() { c.Close() })
+	contractor := testutil.NewEphemeralContractor(c.cm)
+	t.Cleanup(func() { contractor.Close() })
 
-	reorgCh := make(chan struct{}, 1)
-	t.Cleanup(func() { close(reorgCh) })
-	go func() {
-		for range reorgCh {
-			reverted, applied, err := cm.UpdatesSince(w.Tip(), 1000)
-			if err != nil {
-				panic(err)
-			}
-
-			if err := ws.UpdateChainState(func(tx wallet.UpdateTx) error {
-				return w.UpdateChainState(tx, reverted, applied)
-			}); err != nil {
-				panic(err)
-			}
+	syncFn := func() {
+		c.tb.Helper()
+		reverted, applied, err := c.cm.UpdatesSince(w.Tip(), 1000)
+		if err != nil {
+			c.tb.Fatal(err)
 		}
-	}()
-	stop := cm.OnReorg(func(index types.ChainIndex) {
-		select {
-		case reorgCh <- struct{}{}:
-		default:
-		}
-	})
-	t.Cleanup(stop)
 
-	rs := rhp4.NewServer(pk, cm, s, c, w, sr, ss, rhp4.WithPriceTableValidity(2*time.Minute))
+		if err := ws.UpdateChainState(func(tx wallet.UpdateTx) error {
+			return w.UpdateChainState(tx, reverted, applied)
+		}); err != nil {
+			c.tb.Fatal(err)
+		}
+	}
+	syncFn()
+	c.syncFns = append(c.syncFns, syncFn)
+
+	rs := rhp4.NewServer(pk, c.cm, s, contractor, w, sr, ss, rhp4.WithPriceTableValidity(2*time.Minute))
 	rhp4Listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatal(err)
@@ -175,9 +160,9 @@ func NewHost(t testing.TB, pk types.PrivateKey, n *consensus.Network, genesis ty
 		pk: pk,
 		l:  rhp4Listener,
 
-		c:  c,
+		c:  contractor,
 		s:  s,
-		cm: cm,
+		cm: c.cm,
 		ss: ss,
 		sr: sr,
 		w:  w,

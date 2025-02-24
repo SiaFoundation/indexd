@@ -12,10 +12,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/testutil"
@@ -42,18 +40,12 @@ type Indexer struct {
 
 // NewIndexer creates a new indexer for testing that is automatically closed up
 // after the test is finished.
-func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *zap.Logger) *Indexer {
+func (c *ConsensusNode) NewIndexer(t testing.TB, log *zap.Logger) *Indexer {
 	// prepare store
 	store := NewDB(t, log)
 
-	dbstore, tipState, err := chain.NewDBStore(chain.NewMemDB(), n, genesis)
-	if err != nil {
-		t.Fatalf("failed to create chain store: %v", err)
-	}
-	cm := chain.NewManager(dbstore, tipState, chain.WithLog(log.Named("chain")))
-
 	walletKey := types.GeneratePrivateKey()
-	wm, err := wallet.NewSingleAddressWallet(walletKey, cm, store, wallet.WithLogger(log.Named("wallet")), wallet.WithReservationDuration(3*time.Hour))
+	wm, err := wallet.NewSingleAddressWallet(walletKey, c.cm, store, wallet.WithLogger(log.Named("wallet")), wallet.WithReservationDuration(3*time.Hour))
 	if err != nil {
 		t.Fatalf("failed to create wallet: %v", err)
 	}
@@ -63,7 +55,16 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 		t.Fatalf("failed to create host manager: %v", err)
 	}
 
-	sub := subscriber.New(cm, hm, wm, store, subscriber.WithLogger(log.Named("subscriber")))
+	sub := subscriber.New(c.cm, hm, wm, store, subscriber.WithLogger(log.Named("subscriber")))
+
+	// sync subscriber
+	syncFn := func() {
+		c.tb.Helper()
+		if err := sub.Sync(); err != nil {
+			c.tb.Fatal(err)
+		}
+	}
+	c.syncFns = append(c.syncFns, syncFn)
 
 	syncerListener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
@@ -71,8 +72,8 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 	}
 
 	// peers will reject us if our hostname is empty or unspecified, so use loopback
-	s := syncer.New(syncerListener, cm, testutil.NewEphemeralPeerStore(), gateway.Header{
-		GenesisID:  genesis.ID(),
+	s := syncer.New(syncerListener, c.cm, testutil.NewEphemeralPeerStore(), gateway.Header{
+		GenesisID:  c.genesis.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerListener.Addr().String(),
 	},
@@ -87,7 +88,7 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 
 	password := hex.EncodeToString(frand.Bytes(16))
 	web := http.Server{
-		Handler: jape.BasicAuth(password)(api.NewServer(cm, s, wm, store, apiOpts...)),
+		Handler: jape.BasicAuth(password)(api.NewServer(c.cm, s, wm, store, apiOpts...)),
 	}
 
 	httpListener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -125,58 +126,10 @@ func NewIndexer(t testing.TB, n *consensus.Network, genesis types.Block, log *za
 		Client: api.NewClient(fmt.Sprintf("http://%s", httpListener.Addr().String()), password),
 
 		db:     store,
-		cm:     cm,
+		cm:     c.cm,
 		syncer: s,
 		wallet: wm,
 	}
-}
-
-// BlockUntilSynced blocks until the indexer is synced with the peer.
-func (idx *Indexer) BlockUntilSynced(ctx context.Context, t testing.TB, peer interface {
-	Tip() (types.ChainIndex, error)
-}) {
-	t.Helper()
-
-	Retry(t, 100, 100*time.Millisecond, func() error {
-		if state, err := idx.State(ctx); err != nil {
-			t.Fatal(err)
-		} else if tip, err := peer.Tip(); err != nil {
-			t.Fatal(err)
-		} else if tip.Height != state.ScanHeight {
-			return fmt.Errorf("peer unsynced %d != %d", tip.Height, state.ScanHeight)
-		}
-		return nil
-	})
-}
-
-// MineBlocks is a helper to mine blocks and broadcast the headers
-func (idx *Indexer) MineBlocks(t testing.TB, addr types.Address, n uint64) {
-	t.Helper()
-
-	for i := uint64(0); i < n; i++ {
-		b, ok := coreutils.MineBlock(idx.cm, addr, 5*time.Second)
-		if !ok {
-			t.Fatal("failed to mine block")
-		} else if err := idx.cm.AddBlocks([]types.Block{b}); err != nil {
-			t.Fatal(err)
-		}
-
-		if b.V2 == nil {
-			idx.syncer.BroadcastHeader(b.Header())
-		} else {
-			idx.syncer.BroadcastV2BlockOutline(gateway.OutlineBlock(b, idx.cm.PoolTransactions(), idx.cm.V2PoolTransactions()))
-		}
-	}
-}
-
-// MineBlocksBlocking is a helper to mine blocks and broadcast the headers, this
-// method will block until the scan height reaches the target height after n
-// blocks got mined.
-func (idx *Indexer) MineBlocksBlocking(ctx context.Context, t testing.TB, addr types.Address, n uint64) {
-	t.Helper()
-
-	idx.MineBlocks(t, addr, n)
-	idx.BlockUntilSynced(ctx, t, idx)
 }
 
 // SyncerAddr returns the address of the syncer.

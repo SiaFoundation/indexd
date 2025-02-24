@@ -4,14 +4,13 @@ import (
 	"context"
 	"testing"
 
-	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/indexd/api"
 	"go.uber.org/zap"
 )
 
 func TestIndexer(t *testing.T) {
-	n, genesis := testutil.V2Network()
-	indexer := NewIndexer(t, n, genesis, zap.NewNop())
+	c := NewConsensusNode(t, zap.NewNop())
+	indexer := c.NewIndexer(t, zap.NewNop())
 
 	state, err := indexer.State(context.Background())
 	if err != nil {

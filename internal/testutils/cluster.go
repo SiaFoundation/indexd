@@ -30,10 +30,9 @@ type (
 // Cluster is a test cluster that contains an indexer, hosts and other helper
 // types as needed for integration testing.
 type Cluster struct {
-	Network *consensus.Network
-	Genesis types.Block
-	Hosts   []*Host
-	Indexer *Indexer
+	ConsensusNode *ConsensusNode
+	Hosts         []*Host
+	Indexer       *Indexer
 
 	log *zap.Logger
 }
@@ -77,13 +76,17 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	}
 
 	// create indexer and mine until after V2 allowheight
-	indexer := NewIndexer(t, cfg.network, cfg.genesis, cfg.logger.Named("indexer"))
-	indexer.MineBlocks(t, indexer.wallet.Address(), cfg.network.HardforkV2.AllowHeight)
+	cn := NewConsensusNode(t, cfg.logger)
+	indexer := cn.NewIndexer(t, cfg.logger.Named("indexer"))
+	w, err := indexer.Wallet(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cn.MineBlocks(w.Address, 1)
 
 	// create cluster
 	cluster := &Cluster{
-		Network: cfg.network,
-		Genesis: cfg.genesis,
+		ConsensusNode: cn,
 
 		Indexer: indexer,
 		log:     cfg.logger,
@@ -132,26 +135,21 @@ func (c *Cluster) AnnounceHosts(ctx context.Context, t testing.TB, hosts ...*Hos
 		announced[h.PublicKey()] = struct{}{}
 	}
 
-	Retry(t, 100, 100*time.Millisecond, func() error {
-		hosts, err := c.Indexer.db.Hosts(ctx, 0, math.MaxInt)
-		if err != nil {
-			t.Fatal(err)
+	c.ConsensusNode.MineBlocks(types.VoidAddress, 1) // mine attestations
+	knownHosts, err := c.Indexer.db.Hosts(ctx, 0, math.MaxInt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	for _, h := range knownHosts {
+		if _, ok := announced[h.PublicKey]; !ok || h.LastAnnouncement.Before(start) {
+			continue
 		}
-
-		var n int
-		for _, h := range hosts {
-			if _, ok := announced[h.PublicKey]; !ok || h.LastAnnouncement.Before(start) {
-				continue
-			}
-			n++
-		}
-
-		if n != len(announced) {
-			c.Indexer.MineBlocks(t, types.Address{}, 1)
-			return fmt.Errorf("expected %d hosts to be announced, got %d", len(announced), n)
-		}
-		return nil
-	})
+		n++
+	}
+	if n != len(announced) {
+		t.Fatalf("expected %d hosts to be announced, got %d", len(announced), n)
+	}
 }
 
 // FundHosts funds the hosts with one block, then waits for the funds to mature.
@@ -159,9 +157,9 @@ func (c *Cluster) FundHosts(ctx context.Context, t testing.TB, hosts ...*Host) {
 	t.Helper()
 
 	for _, h := range hosts {
-		c.Indexer.MineBlocks(t, h.w.Address(), 1)
+		c.ConsensusNode.MineBlocks(h.w.Address(), 1)
 	}
-	c.Indexer.MineBlocksBlocking(ctx, t, types.Address{}, c.Network.MaturityDelay)
+	c.ConsensusNode.MineBlocks(types.Address{}, c.ConsensusNode.network.MaturityDelay)
 
 	for _, h := range hosts {
 		if res, err := h.w.Balance(); err != nil {
@@ -175,11 +173,12 @@ func (c *Cluster) FundHosts(ctx context.Context, t testing.TB, hosts ...*Host) {
 // NewHosts creates n new hosts using the cluster's network and genesis block.
 func (c *Cluster) NewHosts(t testing.TB, n int) []*Host {
 	t.Helper()
+	cn := c.ConsensusNode
 
 	var hosts []*Host
 	for i := 0; i < n; i++ {
 		pk := types.GeneratePrivateKey()
-		hosts = append(hosts, NewHost(t, pk, c.Network, c.Genesis, c.log.Named("host-"+pk.PublicKey().String())))
+		hosts = append(hosts, cn.NewHost(t, pk, c.log.Named("host-"+pk.PublicKey().String())))
 	}
 	return hosts
 }
