@@ -178,7 +178,7 @@ CREATE TABLE contracts (
 
   -- metrics for visualization (not ACID)
   capacity BIGINT NOT NULL DEFAULT 0 CHECK(capacity >= size),
-  size BIGINT NOT NULL DEFAULT 0,
+  size BIGINT NOT NULL DEFAULT 0 CHECK(size >= 0),
 
   -- costs
   contract_price DECIMAL(50, 0) NOT NULL, -- used to display cost of forming contract
