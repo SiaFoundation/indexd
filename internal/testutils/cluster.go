@@ -77,11 +77,7 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	// create indexer and mine until after V2 allowheight
 	cn := NewConsensusNode(t, cfg.logger)
 	indexer := cn.NewIndexer(t, cfg.logger.Named("indexer"))
-	w, err := indexer.Wallet(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	cn.MineBlocks(w.Address, 1)
+	cn.MineBlocks(indexer.WalletAddr(), 1)
 
 	// create cluster
 	cluster := &Cluster{
