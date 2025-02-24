@@ -8,6 +8,8 @@ import (
 	"go.sia.tech/coreutils/wallet"
 )
 
+// NewWallet creates a new SingleAddressWallet for testing which is connected to
+// all the other components created via the ConsensusNode.
 func (c *ConsensusNode) NewWallet() *wallet.SingleAddressWallet {
 	ws := testutil.NewEphemeralWalletStore()
 	w, err := wallet.NewSingleAddressWallet(types.GeneratePrivateKey(), c.cm, ws)
