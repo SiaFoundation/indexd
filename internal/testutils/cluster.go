@@ -2,7 +2,6 @@ package testutils
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -102,7 +101,6 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	// - add volumes to hosts
 	// - wait for contracts
 
-	cluster.Sync(t)
 	return cluster
 }
 
@@ -181,44 +179,4 @@ func (c *Cluster) NewHosts(t testing.TB, n int) []*Host {
 		hosts = append(hosts, cn.NewHost(t, pk, c.log.Named("host-"+pk.PublicKey().String())))
 	}
 	return hosts
-}
-
-// Sync waits for the cluster to be in sync.
-func (c *Cluster) Sync(t testing.TB) {
-	t.Helper()
-
-	Retry(t, 100, 100*time.Millisecond, func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-
-		tip := c.Indexer.cm.Tip()
-		for _, h := range c.Hosts {
-			if h.c.Tip() != tip {
-				return fmt.Errorf("host's tip doesn't match indexer's: %v %v", tip, h.c.Tip())
-			}
-		}
-
-		if state, err := c.Indexer.State(ctx); err != nil {
-			return err
-		} else if state.ScanHeight < tip.Height {
-			return fmt.Errorf("indexer's scan height doesn't match tip: %v < %v", state.ScanHeight, tip.Height)
-		}
-
-		return nil
-	})
-}
-
-// Retry retries a function until it returns nil or the number of tries is
-// reached.
-func Retry(t testing.TB, tries int, durationBetweenAttempts time.Duration, fn func() error) {
-	t.Helper()
-	var err error
-	for i := 0; i < tries; i++ {
-		err = fn()
-		if err == nil {
-			return
-		}
-		time.Sleep(durationBetweenAttempts)
-	}
-	t.Fatal(err)
 }
