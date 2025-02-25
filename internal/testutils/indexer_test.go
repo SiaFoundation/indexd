@@ -10,7 +10,7 @@ import (
 
 func TestIndexer(t *testing.T) {
 	c := NewConsensusNode(t, zap.NewNop())
-	indexer := c.NewIndexer(t, zap.NewNop())
+	indexer := NewIndexer(t, c, zap.NewNop())
 
 	state, err := indexer.State(context.Background())
 	if err != nil {

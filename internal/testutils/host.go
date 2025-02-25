@@ -133,20 +133,19 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 	t.Cleanup(func() { contractor.Close() })
 
 	syncFn := func() {
-		c.tb.Helper()
+		t.Helper()
 		reverted, applied, err := c.cm.UpdatesSince(w.Tip(), 1000)
 		if err != nil {
-			c.tb.Fatal(err)
+			t.Fatal(err)
 		}
 
 		if err := ws.UpdateChainState(func(tx wallet.UpdateTx) error {
 			return w.UpdateChainState(tx, reverted, applied)
 		}); err != nil {
-			c.tb.Fatal(err)
+			t.Fatal(err)
 		}
 	}
-	syncFn()
-	c.syncFns = append(c.syncFns, syncFn)
+	c.addSyncFn(syncFn)
 
 	rs := rhp4.NewServer(pk, c.cm, s, contractor, w, sr, ss, rhp4.WithPriceTableValidity(2*time.Minute))
 	rhp4Listener, err := net.Listen("tcp", ":0")
