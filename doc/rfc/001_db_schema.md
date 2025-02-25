@@ -169,12 +169,11 @@ CREATE TABLE contracts (
   contract_id BYTEA NOT NULL UNIQUE,
 
   -- lifetime related columns
-  archived BOOLEAN NOT NULL DEFAULT FALSE, -- whether the contract is archived
   proof_height BIGINT NOT NULL, -- start of proof window
   expiration_height BIGINT NOT NULL, -- end of proof window
   renewed_from INTEGER REFERENCES contracts(id),
   renewed_to INTEGER REFERENCES contracts(id),
-  state SMALLINT NOT NULL, -- 0 = pending, 1 = active, 2 = resolved, 3 = expired, 4 = rejected
+  state SMALLINT NOT NULL, -- 0 = 'pending', 1 = 'active', 2 = 'awaiting proof', 3 = 'resolved', 4 = 'expired', 5 = 'rejected'
 
   -- metrics for visualization (not ACID)
   capacity BIGINT NOT NULL DEFAULT 0 CHECK(capacity >= size),
