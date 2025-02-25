@@ -18,8 +18,8 @@ func TestWalletAPI(t *testing.T) {
 
 	// create indexer
 	c := testutils.NewConsensusNode(t, zap.NewNop())
-	indexer := c.NewIndexer(t, zap.NewNop())
-	c.MineBlocks(indexer.WalletAddr(), 1)
+	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	c.MineBlocks(t, indexer.WalletAddr(), 1)
 
 	// assert events are being persisted
 	events, err := indexer.WalletEvents(ctx)
@@ -40,7 +40,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// mine until funds mature
-	c.MineBlocks(types.Address{}, c.Network().MaturityDelay)
+	c.MineBlocks(t, types.Address{}, c.Network().MaturityDelay)
 
 	// assert wallet is funded
 	res, err = indexer.Wallet(ctx)
@@ -57,7 +57,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// create a wallet
-	w := c.NewWallet()
+	w := testutils.NewWallet(t, c)
 
 	// assert host wallet is empty
 	bal, err := w.Balance()
@@ -86,7 +86,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// mine a block
-	c.MineBlocks(types.Address{}, 1)
+	c.MineBlocks(t, types.Address{}, 1)
 
 	// assert siacons arrived successfully
 	bal, err = w.Balance()

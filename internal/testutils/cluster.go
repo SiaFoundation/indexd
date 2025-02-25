@@ -75,13 +75,13 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	}
 
 	// create indexer and mine until after V2 allowheight
-	cn := NewConsensusNode(t, cfg.logger)
-	indexer := cn.NewIndexer(t, cfg.logger.Named("indexer"))
-	cn.MineBlocks(indexer.WalletAddr(), 1)
+	c := NewConsensusNode(t, cfg.logger)
+	indexer := NewIndexer(t, c, cfg.logger.Named("indexer"))
+	c.MineBlocks(t, indexer.WalletAddr(), 1)
 
 	// create cluster
 	cluster := &Cluster{
-		ConsensusNode: cn,
+		ConsensusNode: c,
 
 		Indexer: indexer,
 		log:     cfg.logger,
@@ -129,7 +129,7 @@ func (c *Cluster) AnnounceHosts(ctx context.Context, t testing.TB, hosts ...*Hos
 		announced[h.PublicKey()] = struct{}{}
 	}
 
-	c.ConsensusNode.MineBlocks(types.VoidAddress, 1) // mine attestations
+	c.ConsensusNode.MineBlocks(t, types.VoidAddress, 1) // mine attestations
 	knownHosts, err := c.Indexer.db.Hosts(ctx, 0, math.MaxInt)
 	if err != nil {
 		t.Fatal(err)
@@ -151,9 +151,9 @@ func (c *Cluster) FundHosts(ctx context.Context, t testing.TB, hosts ...*Host) {
 	t.Helper()
 
 	for _, h := range hosts {
-		c.ConsensusNode.MineBlocks(h.w.Address(), 1)
+		c.ConsensusNode.MineBlocks(t, h.w.Address(), 1)
 	}
-	c.ConsensusNode.MineBlocks(types.Address{}, c.ConsensusNode.network.MaturityDelay)
+	c.ConsensusNode.MineBlocks(t, types.Address{}, c.ConsensusNode.network.MaturityDelay)
 
 	for _, h := range hosts {
 		if res, err := h.w.Balance(); err != nil {
