@@ -166,7 +166,7 @@ CREATE TABLE slabs (
 
     digest BYTEA UNIQUE NOT NULL, -- unique identifier for the slab derived from sector roots
     encryption_key BYTEA NOT NULL,
-    last_repair_attempt TIMESTAMP WITH TIME ZONE DEFAULT DEFAULT '0001-01-01 00:00:00+00',
+    last_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     min_shards SMALLINT NOT NULL CHECK(min_shards > 0)
 )
 
@@ -184,7 +184,6 @@ CREATE TABLE sectors (
     slab_index SMALLINT NOT NULL, -- index within corresponding slab to retrieve sectors in right order
     UNIQUE(slab_id, slab_index) -- enforce one sector per index per slab
 )
-CREATE INDEX sectors_host_id_idx ON sectors(host_id)
 -- quick lookup of sectors to pin prioritized by upload time
 CREATE INDEX sectors_contract_id_uploaded_at_idx ON host_sectors(contract_id, uploaded_at ASC)
 ```
