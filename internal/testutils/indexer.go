@@ -40,7 +40,7 @@ type Indexer struct {
 
 // NewIndexer creates a new indexer for testing that is automatically closed up
 // after the test is finished.
-func (c *ConsensusNode) NewIndexer(t testing.TB, log *zap.Logger) *Indexer {
+func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	// prepare store
 	store := NewDB(t, log)
 
@@ -59,12 +59,12 @@ func (c *ConsensusNode) NewIndexer(t testing.TB, log *zap.Logger) *Indexer {
 
 	// sync subscriber
 	syncFn := func() {
-		c.tb.Helper()
+		t.Helper()
 		if err := sub.Sync(); err != nil {
-			c.tb.Fatal(err)
+			t.Fatal(err)
 		}
 	}
-	c.syncFns = append(c.syncFns, syncFn)
+	c.addSyncFn(syncFn)
 
 	syncerListener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
