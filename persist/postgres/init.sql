@@ -63,3 +63,34 @@ CREATE TABLE global_settings (
     db_version INTEGER NOT NULL, -- used for migrations
     last_scanned_index BYTEA -- chain index of the last scanned block
 );
+
+CREATE TABLE contracts (
+  id SERIAL PRIMARY KEY,
+  host_id INTEGER REFERENCES hosts(id) NOT NULL,
+  contract_id BYTEA NOT NULL UNIQUE DEFERRABLE,
+
+  -- lifetime related columns
+  proof_height BIGINT NOT NULL, -- start of proof window
+  expiration_height BIGINT NOT NULL, -- end of proof window
+  renewed_from INTEGER REFERENCES contracts(id) UNIQUE DEFAULT NULL,
+  renewed_to INTEGER REFERENCES contracts(id) UNIQUE DEFAULT NULL,
+  state SMALLINT NOT NULL DEFAULT 0, -- 0 = 'pending', 1 = 'active', 2 = 'resolved', 3 = 'expired', 4 = 'rejected'
+
+  -- metrics for visualization (not ACID)
+  capacity BIGINT NOT NULL DEFAULT 0 CHECK(capacity >= size),
+  size BIGINT NOT NULL DEFAULT 0 CHECK(size >= 0),
+
+  -- costs
+  contract_price DECIMAL(50, 0) NOT NULL, -- used to display cost of forming contract
+  initial_allowance DECIMAL(50, 0) NOT NULL, -- used when refreshing contract to increase budget
+  miner_fee DECIMAL(50, 0) NOT NULL, -- miner fee added when forming/renewing contract
+
+  -- contract state
+  usable BOOLEAN NOT NULL DEFAULT TRUE,
+
+  -- spending (not ACID)
+  append_sector_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
+  free_sector_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
+  fund_account_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
+  sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0
+)

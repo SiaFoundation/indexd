@@ -164,16 +164,16 @@ CREATE TABLE host_settings (
 
 ```postgresql
 CREATE TABLE contracts (
-  id SERIAL PRIMARY KEY
+  id SERIAL PRIMARY KEY,
   host_id INTEGER REFERENCES hosts(id) NOT NULL,
   contract_id BYTEA NOT NULL UNIQUE,
 
   -- lifetime related columns
   proof_height BIGINT NOT NULL, -- start of proof window
   expiration_height BIGINT NOT NULL, -- end of proof window
-  renewed_from INTEGER REFERENCES contracts(id),
-  renewed_to INTEGER REFERENCES contracts(id),
-  state SMALLINT NOT NULL, -- 0 = 'pending', 1 = 'active', 2 = 'resolved', 3 = 'expired', 4 = 'rejected'
+  renewed_from INTEGER REFERENCES contracts(id) UNIQUE DEFAULT NULL,
+  renewed_to INTEGER REFERENCES contracts(id) UNIQUE DEFAULT NULL,
+  state SMALLINT NOT NULL DEFAULT 0, -- 0 = 'pending', 1 = 'active', 2 = 'resolved', 3 = 'expired', 4 = 'rejected'
 
   -- metrics for visualization (not ACID)
   capacity BIGINT NOT NULL DEFAULT 0 CHECK(capacity >= size),
@@ -191,7 +191,7 @@ CREATE TABLE contracts (
   append_sector_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
   free_sector_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
   fund_account_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
-  sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
+  sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0
 )
 ```
 

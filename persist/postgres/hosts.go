@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -9,6 +10,8 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/indexd/api"
 )
+
+var ErrHostNotFound = errors.New("host not found")
 
 type dbHost struct {
 	id int64

@@ -11,10 +11,12 @@ import (
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/api"
 )
 
 var (
 	_ scannerValuer = (*sqlChainIndex)(nil)
+	_ scannerValuer = (*sqlContractState)(nil)
 	_ scannerValuer = (*sqlCurrency)(nil)
 	_ scannerValuer = (*sqlDurationMS)(nil)
 	_ scannerValuer = (*sqlEventData)(nil)
@@ -54,6 +56,52 @@ func (ci *sqlChainIndex) Scan(src any) error {
 		return dec.Err()
 	default:
 		return fmt.Errorf("cannot scan %T to ChainIndex", src)
+	}
+}
+
+type sqlContractState api.ContractState
+
+func (s sqlContractState) Value() (driver.Value, error) {
+	switch api.ContractState(s) {
+	case api.ContractStatePending:
+		return 0, nil
+	case api.ContractStateActive:
+		return 1, nil
+	case api.ContractStateResolved:
+		return 2, nil
+	case api.ContractStateExpired:
+		return 3, nil
+	case api.ContractStateRejected:
+		return 4, nil
+	default:
+		return nil, fmt.Errorf("unknown contract state %v", s)
+	}
+}
+
+func (s *sqlContractState) Scan(src any) error {
+	switch src := src.(type) {
+	case int64:
+		switch src {
+		case 0:
+			*s = sqlContractState(api.ContractStatePending)
+			return nil
+		case 1:
+			*s = sqlContractState(api.ContractStateActive)
+			return nil
+		case 2:
+			*s = sqlContractState(api.ContractStateResolved)
+			return nil
+		case 3:
+			*s = sqlContractState(api.ContractStateExpired)
+			return nil
+		case 4:
+			*s = sqlContractState(api.ContractStateRejected)
+			return nil
+		default:
+			return fmt.Errorf("unknown contract state %v", s)
+		}
+	default:
+		return fmt.Errorf("cannot scan %T to ContractState", src)
 	}
 }
 
@@ -177,6 +225,8 @@ func (h *sqlHash256) Scan(src any) error {
 			return fmt.Errorf("failed to scan source into Hash256 due to invalid number of bytes %v != %v: %v", len(src), len(sqlHash256{}), src)
 		}
 		copy(h[:], src)
+		return nil
+	case nil:
 		return nil
 	default:
 		return fmt.Errorf("cannot scan %T to Hash256", src)
