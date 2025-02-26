@@ -69,32 +69,43 @@ func (s *Store) AddFormedContract(ctx context.Context, contractID types.FileCont
 // foreign key constraints need to be updated.
 func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee types.Currency) error {
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		// fetch the existing row of the contract, which will become the row of the new contract
+		// defer the evaluation of the NOT NULL and UNIQUE contract_id
+		if _, err := tx.Exec(ctx, "SET CONSTRAINTS contracts_contract_id_key, contracts_renewed_from_key, contracts_renewed_to_key DEFERRED"); err != nil {
+			return fmt.Errorf("failed to defer contract_id key constraint: %w", err)
+		}
+
+		// fetch the existing row of the contract
 		var renewedToID int64
 		if err := tx.QueryRow(ctx, `SELECT id FROM contracts WHERE contract_id = $1`, sqlHash256(renewedFrom)).Scan(&renewedToID); err != nil {
 			return fmt.Errorf("failed to fetch existing contract: %w", err)
 		}
 
-		// defer the evaluation of the NOT NULL and UNIQUE contract_id
-		if _, err := tx.Exec(ctx, "SET CONSTRAINTS contracts_contract_id_key DEFERRED"); err != nil {
-			return fmt.Errorf("failed to defer contract_id key constraint: %w", err)
-		}
-
-		// copy existing contract and set renewed_to to the row id we just queried to link them, this becomes the new row of the old contract
+		// duplicate it and set it to have renewed_to the original row
 		var renewedFromID int64
+		var prevRenewedFromID *int64
 		if err := tx.QueryRow(ctx, `
 INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, renewed_from, renewed_to, state, capacity, size, contract_price, initial_allowance, miner_fee, usable, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending) (
 	SELECT host_id, contract_id, proof_height, expiration_height, renewed_from, $1, state, capacity, size, contract_price, initial_allowance, miner_fee, usable, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending
 	FROM contracts
 	WHERE contracts.id = $1
-) RETURNING id
-`, renewedToID).Scan(&renewedFromID); err != nil {
+) RETURNING id, renewed_from
+`, renewedToID).Scan(&renewedFromID, &prevRenewedFromID); err != nil {
 			return fmt.Errorf("failed to copy renewed contract: %w", err)
+		}
+
+		// update a potential contract that renewed to the old row to renew to the new row instead
+		if prevRenewedFromID != nil {
+			resp, err := tx.Exec(context.Background(), `UPDATE contracts SET renewed_to = $1 WHERE renewed_to = $2`, renewedFromID, *prevRenewedFromID)
+			if err != nil {
+				return fmt.Errorf("failed to update renewed_to: %w", err)
+			} else if resp.RowsAffected() > 1 {
+				return fmt.Errorf("too many rows were affected, should be 0 or 1 but was %d", resp.RowsAffected())
+			}
 		}
 
 		// init the new contract and link it to the old contract
 		resp, err := tx.Exec(ctx, `
-UPDATE contracts SET contract_id = $1, proof_height = $2, expiration_height = $3, renewed_from = $4, state = 0, capacity = CASE WHEN $2 = contracts.proof_height THEN contracts.capacity ELSE contracts.size END, contract_price = $5, initial_allowance = $6, miner_fee = $7, usable = TRUE, append_sector_spending = 0, free_sector_spending = 0, fund_account_spending = 0, sector_roots_spending = 0
+UPDATE contracts SET contract_id = $1, proof_height = $2, expiration_height = $3, renewed_from = $4, renewed_to = NULL, state = 0, capacity = CASE WHEN $2 = contracts.proof_height THEN contracts.capacity ELSE contracts.size END, contract_price = $5, initial_allowance = $6, miner_fee = $7, usable = TRUE, append_sector_spending = 0, free_sector_spending = 0, fund_account_spending = 0, sector_roots_spending = 0
 WHERE id = $8`, sqlHash256(renewedTo), proofHeight, expirationHeight, renewedFromID, sqlCurrency(contractPrice), sqlCurrency(allowance), sqlCurrency(minerFee), renewedToID)
 		if err != nil {
 			return fmt.Errorf("failed to init renewed contract: %w", err)

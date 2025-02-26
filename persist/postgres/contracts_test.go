@@ -37,7 +37,7 @@ func TestFormRenewContract(t *testing.T) {
 	}
 
 	// form contract
-	expected_formed := api.Contract{
+	expectedFormed := api.Contract{
 		ID:               types.FileContractID{1, 2, 3},
 		HostKey:          hk,
 		ProofHeight:      100,
@@ -50,11 +50,11 @@ func TestFormRenewContract(t *testing.T) {
 
 		Usable: true,
 	}
-	err = store.AddFormedContract(context.Background(), expected_formed.ID, expected_formed.HostKey, expected_formed.ProofHeight, expected_formed.ExpirationHeight, expected_formed.ContractPrice, expected_formed.InitialAllowance, expected_formed.MinerFee)
+	err = store.AddFormedContract(context.Background(), expectedFormed.ID, expectedFormed.HostKey, expectedFormed.ProofHeight, expectedFormed.ExpirationHeight, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee)
 	if err != nil {
 		t.Fatal("failed to add formed contract", err)
 	}
-	assertContract(expected_formed.ID, expected_formed)
+	assertContract(expectedFormed.ID, expectedFormed)
 
 	// simulate using the contract and marking it unusable
 	modifyContract := func(contractID types.FileContractID) {
@@ -75,35 +75,80 @@ func TestFormRenewContract(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	modifyContract(expected_formed.ID)
+	modifyContract(expectedFormed.ID)
 
-	expected_formed.State = api.ContractStateActive
-	expected_formed.Capacity = 2000
-	expected_formed.Size = 1000
-	expected_formed.Usable = false
-	expected_formed.Spending = api.ContractSpending{
+	expectedFormed.State = api.ContractStateActive
+	expectedFormed.Capacity = 2000
+	expectedFormed.Size = 1000
+	expectedFormed.Usable = false
+	expectedFormed.Spending = api.ContractSpending{
 		AppendSector: types.NewCurrency64(1),
 		FreeSector:   types.NewCurrency64(2),
 		FundAccount:  types.NewCurrency64(3),
 		SectorRoots:  types.NewCurrency64(4),
 	}
-	assertContract(expected_formed.ID, expected_formed)
+	assertContract(expectedFormed.ID, expectedFormed)
 
 	// refresh the contract
-	expectedRefreshed := expected_formed
-	expectedRefreshed.ID = types.FileContractID{4, 5, 6}
-	expectedRefreshed.State = api.ContractStatePending
-	expectedRefreshed.ContractPrice = types.Siacoins(2)
-	expectedRefreshed.InitialAllowance = types.Siacoins(3)
-	expectedRefreshed.MinerFee = types.Siacoins(4)
-	expectedRefreshed.Usable = true
-	expectedRefreshed.RenewedFrom = expected_formed.ID
-	expectedRefreshed.Spending = api.ContractSpending{}
+	expectedRefreshed := api.Contract{
+		ID:               types.FileContractID{4, 5, 6},
+		Capacity:         expectedFormed.Capacity,         // same capacity after refresh
+		Size:             expectedFormed.Size,             // same size after refresh
+		HostKey:          expectedFormed.HostKey,          // same host
+		ProofHeight:      expectedFormed.ProofHeight,      // same proof height for refresh
+		ExpirationHeight: expectedFormed.ExpirationHeight, // same expiration height for refresh
+		State:            api.ContractStatePending,        // refresh resets state
+		ContractPrice:    types.Siacoins(2),               // new contract price
+		InitialAllowance: types.Siacoins(3),               // new initial allowance
+		MinerFee:         types.Siacoins(4),               // new miner fee
+		Usable:           true,                            // refreshed contract is usable
+		RenewedFrom:      expectedFormed.ID,               // refreshed from formed contract
+		Spending:         api.ContractSpending{},          // spending is reset
+	}
 	err = store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, expectedRefreshed.ProofHeight, expectedRefreshed.ExpirationHeight, expectedRefreshed.ContractPrice, expectedRefreshed.InitialAllowance, expectedRefreshed.MinerFee)
 	if err != nil {
 		t.Fatal("failed to add refreshed contract", err)
 	}
-	expected_formed.RenewedTo = expectedRefreshed.ID
-	assertContract(expected_formed.ID, expected_formed)
+	expectedFormed.RenewedTo = expectedRefreshed.ID
+	assertContract(expectedFormed.ID, expectedFormed)
 	assertContract(expectedRefreshed.ID, expectedRefreshed)
+
+	// modify the refreshed contract
+	modifyContract(expectedRefreshed.ID)
+	expectedRefreshed.State = api.ContractStateActive
+	expectedRefreshed.Capacity = 2000
+	expectedRefreshed.Size = 1000
+	expectedRefreshed.Usable = false
+	expectedRefreshed.Spending = api.ContractSpending{
+		AppendSector: types.NewCurrency64(1),
+		FreeSector:   types.NewCurrency64(2),
+		FundAccount:  types.NewCurrency64(3),
+		SectorRoots:  types.NewCurrency64(4),
+	}
+	assertContract(expectedRefreshed.ID, expectedRefreshed)
+
+	// renew the refreshed contract
+	expectedRenewed := api.Contract{
+		ID:               types.FileContractID{7, 8, 9},
+		Capacity:         expectedRefreshed.Size,                 // capacity shrinks to size upon renewal
+		Size:             expectedRefreshed.Size,                 // same size after renewal
+		HostKey:          expectedRefreshed.HostKey,              // same host
+		ProofHeight:      expectedRefreshed.ProofHeight * 2,      // higher proof height for renew
+		ExpirationHeight: expectedRefreshed.ExpirationHeight * 2, // higher expiration height for renew
+		State:            api.ContractStatePending,               // renewal resets state
+		ContractPrice:    types.Siacoins(5),                      // new contract price
+		InitialAllowance: types.Siacoins(6),                      // new initial allowance
+		MinerFee:         types.Siacoins(7),                      // new miner fee
+		Usable:           true,                                   // renewed contract is usable
+		RenewedFrom:      expectedRefreshed.ID,                   // renewed from refreshed contract
+		Spending:         api.ContractSpending{},                 // spending is reset
+	}
+	err = store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, expectedRenewed.ProofHeight, expectedRenewed.ExpirationHeight, expectedRenewed.ContractPrice, expectedRenewed.InitialAllowance, expectedRenewed.MinerFee)
+	if err != nil {
+		t.Fatal("failed to add refreshed contract", err)
+	}
+	expectedRefreshed.RenewedTo = expectedRenewed.ID
+	assertContract(expectedFormed.ID, expectedFormed)
+	assertContract(expectedRefreshed.ID, expectedRefreshed)
+	assertContract(expectedRenewed.ID, expectedRenewed)
 }
