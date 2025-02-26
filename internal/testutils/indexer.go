@@ -132,11 +132,6 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	}
 }
 
-// SyncerAddr returns the address of the syncer.
-func (idx *Indexer) SyncerAddr() string {
-	return idx.syncer.Addr()
-}
-
 // Tip returns the current tip of the chain.
 func (idx *Indexer) Tip() (types.ChainIndex, error) {
 	return idx.cm.Tip(), nil

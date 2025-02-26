@@ -48,6 +48,8 @@ func TestWalletAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if res.Confirmed.IsZero() {
 		t.Fatal("expected wallet to be funded")
+	} else if res.Address != indexer.WalletAddr() {
+		t.Fatal("invalid address")
 	}
 
 	// assert sending siacoins to void address fails
