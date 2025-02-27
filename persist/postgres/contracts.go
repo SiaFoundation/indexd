@@ -68,8 +68,6 @@ func (s *Store) AddFormedContract(ctx context.Context, contractID types.FileCont
 // 'renewed_to' columns, and updates the renewed contract's fields. That way, no
 // foreign key constraints need to be updated.
 func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee types.Currency) error {
-	fmt.Println("start add renewed")
-	defer fmt.Println("stop add renewed")
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		// defer the evaluation of the UNIQUE constraints while swapping contracts
 		if _, err := tx.Exec(ctx, "SET CONSTRAINTS contracts_contract_id_key, contracts_renewed_from_key, contracts_renewed_to_key DEFERRED"); err != nil {
@@ -82,11 +80,11 @@ func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo t
 			return fmt.Errorf("failed to fetch existing contract: %w", err)
 		}
 
-		// duplicate it
+		// duplicate it and make sure the new row renews to the existing row
 		var newID int64
 		if err := tx.QueryRow(ctx, `
 INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, renewed_from, renewed_to, state, capacity, size, contract_price, initial_allowance, miner_fee, usable, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending) (
-	SELECT host_id, contract_id, proof_height, expiration_height, renewed_from, renewed_to, state, capacity, size, contract_price, initial_allowance, miner_fee, usable, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending
+	SELECT host_id, contract_id, proof_height, expiration_height, renewed_from, $1, state, capacity, size, contract_price, initial_allowance, miner_fee, usable, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending
 	FROM contracts
 	WHERE contracts.id = $1
 ) RETURNING id
@@ -95,15 +93,11 @@ INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, re
 		}
 
 		// update any row that referenced the existing contract to point to the new row
-		_, err := tx.Exec(context.Background(), `UPDATE contracts SET renewed_to = $1 WHERE renewed_to = $2`, newID, existingID)
+		// NOTE: ignore the new row when updating 'renewed_to' since that one actually needs to point to the existing row
+		_, err := tx.Exec(context.Background(), `UPDATE contracts SET renewed_to = $1 WHERE renewed_to = $2 AND id != $1`, newID, existingID)
 		if err != nil {
 			return fmt.Errorf("failed to update renewed_to: %w", err)
 		} else if _, err := tx.Exec(context.Background(), `UPDATE contracts SET renewed_from = $1 WHERE renewed_from = $2`, newID, existingID); err != nil {
-			return fmt.Errorf("failed to update renewed_to: %w", err)
-		}
-
-		// update the new row to have renewed to the existing row
-		if _, err := tx.Exec(context.Background(), `UPDATE contracts SET renewed_to = $1 WHERE id = $2`, existingID, newID); err != nil {
 			return fmt.Errorf("failed to update renewed_to: %w", err)
 		}
 
