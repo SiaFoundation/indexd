@@ -152,3 +152,73 @@ func TestFormRenewContract(t *testing.T) {
 	assertContract(expectedRefreshed.ID, expectedRefreshed)
 	assertContract(expectedRenewed.ID, expectedRenewed)
 }
+
+func TestSetContractGood(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := types.PublicKey{1, 1, 1}
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// helpers
+	assertContractGood := func(id int64, good bool) {
+		t.Helper()
+		err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+			var got bool
+			if err := tx.QueryRow(ctx, `SELECT good FROM contracts WHERE id = $1`, id).Scan(&got); err != nil {
+				t.Fatal(err)
+			} else if got != good {
+				t.Fatalf("expected good=%v, got %v", good, got)
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	setContractGood := func(id int64, good bool) {
+		t.Helper()
+		if err := store.SetContractGood(types.FileContractID{byte(id)}, good); err != nil {
+			t.Fatal("failed to set contract.'good'", err)
+		}
+	}
+
+	// form contracts
+	for i := 0; i < 3; i++ {
+		expectedFormed := api.Contract{
+			ID:      types.FileContractID{byte(i + 1)},
+			HostKey: hk,
+		}
+		err = store.AddFormedContract(context.Background(), expectedFormed.ID, expectedFormed.HostKey, expectedFormed.ProofHeight, expectedFormed.ExpirationHeight, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee)
+		if err != nil {
+			t.Fatal("failed to add formed contract", err)
+		}
+		assertContractGood(int64(i+1), true) // good by default
+		setContractGood(int64(i+1), false)   // set bad
+	}
+
+	// all bad
+	assertContractGood(1, false)
+	assertContractGood(2, false)
+	assertContractGood(3, false)
+
+	// 1 and 3 good
+	setContractGood(1, true)
+	setContractGood(3, true)
+	assertContractGood(1, true)
+	assertContractGood(2, false)
+	assertContractGood(3, true)
+
+	// 2 good
+	setContractGood(1, false)
+	setContractGood(2, true)
+	setContractGood(3, false)
+	assertContractGood(1, false)
+	assertContractGood(2, true)
+	assertContractGood(3, false)
+}
