@@ -166,13 +166,13 @@ CREATE TABLE host_settings (
 CREATE TABLE contracts (
   id SERIAL PRIMARY KEY,
   host_id INTEGER REFERENCES hosts(id) NOT NULL,
-  contract_id BYTEA NOT NULL UNIQUE,
+  contract_id BYTEA NOT NULL UNIQUE DEFERRABLE,
 
   -- lifetime related columns
   proof_height BIGINT NOT NULL, -- start of proof window
   expiration_height BIGINT NOT NULL, -- end of proof window
-  renewed_from INTEGER REFERENCES contracts(id) UNIQUE DEFAULT NULL,
-  renewed_to INTEGER REFERENCES contracts(id) UNIQUE DEFAULT NULL,
+  renewed_from INTEGER REFERENCES contracts(id) UNIQUE DEFERRABLE DEFAULT NULL,
+  renewed_to INTEGER REFERENCES contracts(id) UNIQUE DEFERRABLE DEFAULT NULL,
   state SMALLINT NOT NULL DEFAULT 0, -- 0 = 'pending', 1 = 'active', 2 = 'resolved', 3 = 'expired', 4 = 'rejected'
 
   -- metrics for visualization (not ACID)
