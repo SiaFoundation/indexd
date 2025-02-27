@@ -11,6 +11,8 @@ import (
 	"go.sia.tech/indexd/api"
 )
 
+// ErrHostNotFound is returned by database operations that fail due to a host
+// not being found.
 var ErrHostNotFound = errors.New("host not found")
 
 type dbHost struct {

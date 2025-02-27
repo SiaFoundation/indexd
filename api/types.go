@@ -26,6 +26,7 @@ type (
 	}
 )
 
+// The following consts define the various states a contract can be in.
 const (
 	ContractStatePending  = ContractState("pending")
 	ContractStateActive   = ContractState("active")
@@ -43,6 +44,9 @@ type (
 	// - rejected: the contract didn't make it into a block
 	ContractState string
 
+	// ContractSpending describes the spending of a contract. Every time
+	// contract funds are moved from the indexer to a host, the spending is
+	// recorded.
 	ContractSpending struct {
 		AppendSector types.Currency `json:"appendSector"`
 		FreeSector   types.Currency `json:"freeSector"`
@@ -61,21 +65,21 @@ type (
 		RenewedTo        types.FileContractID `json:"renewedTo"`
 		State            ContractState        `json:"state"`
 
-		Capacity uint64 `json:"capacity` // already paid for capacity (always >=Size)
-		Size     uint64 `json:"size"`    // current size of the contract
+		Capacity uint64 `json:"capacity"` // already paid for capacity (always >=Size)
+		Size     uint64 `json:"size"`     // current size of the contract
 
 		ContractPrice    types.Currency   `json:"contractPrice"`    // price of the contract creation as charged by the host
 		InitialAllowance types.Currency   `json:"initialAllowance"` // initial renter allowance locked in contract
 		MinerFee         types.Currency   `json:"minerFee"`         // miner fee spent on formation txn
 		Spending         ContractSpending `json:"spending"`
 
-		// Usable determines whether a contract is good or bad. A contract that
-		// is not usable, will have its data migrated to a new contract.
+		// Good determines whether a contract is good or bad. A contract that
+		// is not good, will have its data migrated to a new contract.
 		//
-		// A contract can be unusable for multiple reasons such as the host
-		// being considered bad or failing to renew when being too close to its
+		// A contract can be bad for multiple reasons such as the host being
+		// considered bad or failing to renew when being too close to its
 		// ProofHeight. This field is set by the contract maintenance code.
-		Usable bool `json:"usable"`
+		Good bool `json:"good"`
 	}
 )
 
