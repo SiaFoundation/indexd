@@ -86,7 +86,7 @@ CREATE TABLE contracts (
   miner_fee DECIMAL(50, 0) NOT NULL, -- miner fee added when forming/renewing contract
 
   -- contract state
-  usable BOOLEAN NOT NULL DEFAULT TRUE,
+  good BOOLEAN NOT NULL DEFAULT TRUE,
 
   -- spending (not ACID)
   append_sector_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,

@@ -48,7 +48,7 @@ func TestFormRenewContract(t *testing.T) {
 		InitialAllowance: types.Siacoins(2),
 		MinerFee:         types.Siacoins(3),
 
-		Usable: true,
+		Good: true,
 	}
 	err = store.AddFormedContract(context.Background(), expectedFormed.ID, expectedFormed.HostKey, expectedFormed.ProofHeight, expectedFormed.ExpirationHeight, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee)
 	if err != nil {
@@ -56,12 +56,12 @@ func TestFormRenewContract(t *testing.T) {
 	}
 	assertContract(expectedFormed.ID, expectedFormed)
 
-	// simulate using the contract and marking it unusable
+	// simulate using the contract and marking it not good
 	modifyContract := func(contractID types.FileContractID) {
 		err = store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 			resp, err := tx.Exec(context.Background(), `
 					UPDATE contracts
-					SET state = 1, capacity = 2000, size = 1000, usable = FALSE, append_sector_spending = 1, free_sector_spending = 2, fund_account_spending = 3, sector_roots_spending = 4
+					SET state = 1, capacity = 2000, size = 1000, good = FALSE, append_sector_spending = 1, free_sector_spending = 2, fund_account_spending = 3, sector_roots_spending = 4
 					WHERE contract_id = $1
 					`, sqlHash256(contractID))
 			if err != nil {
@@ -80,7 +80,7 @@ func TestFormRenewContract(t *testing.T) {
 	expectedFormed.State = api.ContractStateActive
 	expectedFormed.Capacity = 2000
 	expectedFormed.Size = 1000
-	expectedFormed.Usable = false
+	expectedFormed.Good = false
 	expectedFormed.Spending = api.ContractSpending{
 		AppendSector: types.NewCurrency64(1),
 		FreeSector:   types.NewCurrency64(2),
@@ -101,7 +101,7 @@ func TestFormRenewContract(t *testing.T) {
 		ContractPrice:    types.Siacoins(2),               // new contract price
 		InitialAllowance: types.Siacoins(3),               // new initial allowance
 		MinerFee:         types.Siacoins(4),               // new miner fee
-		Usable:           true,                            // refreshed contract is usable
+		Good:             true,                            // refreshed contract is good
 		RenewedFrom:      expectedFormed.ID,               // refreshed from formed contract
 		Spending:         api.ContractSpending{},          // spending is reset
 	}
@@ -118,7 +118,7 @@ func TestFormRenewContract(t *testing.T) {
 	expectedRefreshed.State = api.ContractStateActive
 	expectedRefreshed.Capacity = 2000
 	expectedRefreshed.Size = 1000
-	expectedRefreshed.Usable = false
+	expectedRefreshed.Good = false
 	expectedRefreshed.Spending = api.ContractSpending{
 		AppendSector: types.NewCurrency64(1),
 		FreeSector:   types.NewCurrency64(2),
@@ -139,7 +139,7 @@ func TestFormRenewContract(t *testing.T) {
 		ContractPrice:    types.Siacoins(5),                      // new contract price
 		InitialAllowance: types.Siacoins(6),                      // new initial allowance
 		MinerFee:         types.Siacoins(7),                      // new miner fee
-		Usable:           true,                                   // renewed contract is usable
+		Good:             true,                                   // renewed contract is good
 		RenewedFrom:      expectedRefreshed.ID,                   // renewed from refreshed contract
 		Spending:         api.ContractSpending{},                 // spending is reset
 	}

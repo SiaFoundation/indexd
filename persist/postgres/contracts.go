@@ -12,22 +12,27 @@ import (
 
 type (
 	contractQueryOpts struct {
-		active *bool
-		usable *bool
+		revisable *bool
+		good      *bool
 	}
 
+	// ContractQueryOpt is a functional option for querying contracts.
 	ContractQueryOpt func(*contractQueryOpts)
 )
 
-func WithActive(active bool) ContractQueryOpt {
+// WithRevisable filters contracts by whether they can still be revised. This
+// defaults to 'true'.
+func WithRevisable(active bool) ContractQueryOpt {
 	return func(opts *contractQueryOpts) {
-		opts.active = &active
+		opts.revisable = &active
 	}
 }
 
-func WithUsable(usable bool) ContractQueryOpt {
+// WithGood filters contracts by whether they are considered good or bad. The
+// default behavior is to return both.
+func WithGood(good bool) ContractQueryOpt {
 	return func(opts *contractQueryOpts) {
-		opts.usable = &usable
+		opts.good = &good
 	}
 }
 
@@ -35,14 +40,14 @@ var (
 	optTrue = true
 
 	defaultContractQueryOpts = contractQueryOpts{
-		active: &optTrue, // return active contracts
-		usable: nil,      // return both usable and unusable contracts
+		revisable: &optTrue, // return active contracts
+		good:      nil,      // return both good and bad contracts
 	}
 )
 
 // AddFormedContract adds a freshly formed contract to the database.
 func (s *Store) AddFormedContract(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee types.Currency) error {
-	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var hostID int64
 		if err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = $1`, sqlPublicKey(hostKey)).Scan(&hostID); errors.Is(err, pgx.ErrNoRows) {
 			return ErrHostNotFound
@@ -57,10 +62,7 @@ func (s *Store) AddFormedContract(ctx context.Context, contractID types.FileCont
 			return fmt.Errorf("expected 1 row to be affected, got %d", resp.RowsAffected())
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }
 
 // AddRenewedContract adds a renewed contract to the database using the
@@ -84,8 +86,8 @@ func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo t
 		// duplicate it and make sure the new row renews to the existing row
 		var newID int64
 		if err := tx.QueryRow(ctx, `
-INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, renewed_from, renewed_to, state, capacity, size, contract_price, initial_allowance, miner_fee, usable, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending) (
-	SELECT host_id, contract_id, proof_height, expiration_height, renewed_from, $1, state, capacity, size, contract_price, initial_allowance, miner_fee, usable, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending
+INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, renewed_from, renewed_to, state, capacity, size, contract_price, initial_allowance, miner_fee, good, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending) (
+	SELECT host_id, contract_id, proof_height, expiration_height, renewed_from, $1, state, capacity, size, contract_price, initial_allowance, miner_fee, good, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending
 	FROM contracts
 	WHERE contracts.id = $1
 ) RETURNING id
@@ -101,7 +103,7 @@ INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, re
 
 		// update the existing row to match the new contract
 		resp, err := tx.Exec(ctx, `
-UPDATE contracts SET contract_id = $1, proof_height = $2, expiration_height = $3, renewed_from = $4, renewed_to = NULL, state = 0, capacity = CASE WHEN $2 = contracts.proof_height THEN contracts.capacity ELSE contracts.size END, contract_price = $5, initial_allowance = $6, miner_fee = $7, usable = TRUE, append_sector_spending = 0, free_sector_spending = 0, fund_account_spending = 0, sector_roots_spending = 0
+UPDATE contracts SET contract_id = $1, proof_height = $2, expiration_height = $3, renewed_from = $4, renewed_to = NULL, state = 0, capacity = CASE WHEN $2 = contracts.proof_height THEN contracts.capacity ELSE contracts.size END, contract_price = $5, initial_allowance = $6, miner_fee = $7, good = TRUE, append_sector_spending = 0, free_sector_spending = 0, fund_account_spending = 0, sector_roots_spending = 0
 WHERE id = $8`, sqlHash256(renewedTo), proofHeight, expirationHeight, newID, sqlCurrency(contractPrice), sqlCurrency(allowance), sqlCurrency(minerFee), existingID)
 		if err != nil {
 			return fmt.Errorf("failed to init renewed contract: %w", err)
@@ -115,11 +117,12 @@ WHERE id = $8`, sqlHash256(renewedTo), proofHeight, expirationHeight, newID, sql
 	return nil
 }
 
+// Contract returns a single contract
 func (s *Store) Contract(ctx context.Context, contractID types.FileContractID) (api.Contract, error) {
 	var contract api.Contract
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		contract, err = scanContract(tx.QueryRow(ctx, `
-SELECT c.contract_id, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.miner_fee, c.usable, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
+SELECT c.contract_id, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.miner_fee, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 LEFT JOIN contracts c_from ON c.renewed_from = c_from.id
@@ -140,8 +143,8 @@ func (s *Store) Contracts(queryOpts ...ContractQueryOpt) ([]api.Contract, error)
 	panic("not implemented")
 }
 
-// SetContractUsable updates the "usable" column of a contract.
-func (s *Store) SetContractUsable(usable bool) error {
+// SetContractGood updates the "good" column of a contract.
+func (s *Store) SetContractGood(good bool) error {
 	panic("not implemented")
 }
 
@@ -158,7 +161,7 @@ func scanContract(row scanner) (api.Contract, error) {
 		(*sqlCurrency)(&c.ContractPrice),
 		(*sqlCurrency)(&c.InitialAllowance),
 		(*sqlCurrency)(&c.MinerFee),
-		&c.Usable,
+		&c.Good,
 		(*sqlCurrency)(&c.Spending.AppendSector),
 		(*sqlCurrency)(&c.Spending.FreeSector),
 		(*sqlCurrency)(&c.Spending.FundAccount),
