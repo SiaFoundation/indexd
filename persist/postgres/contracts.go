@@ -144,8 +144,14 @@ func (s *Store) Contracts(queryOpts ...ContractQueryOpt) ([]api.Contract, error)
 }
 
 // SetContractGood updates the "good" column of a contract.
-func (s *Store) SetContractGood(good bool) error {
-	panic("not implemented")
+func (s *Store) SetContractGood(contractID types.FileContractID, good bool) error {
+	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `UPDATE contracts SET good = $1 WHERE contract_id = $2`, good, sqlHash256(contractID))
+		if err != nil {
+			return fmt.Errorf("failed to update contract.'good': %w", err)
+		}
+		return nil
+	})
 }
 
 func scanContract(row scanner) (api.Contract, error) {
