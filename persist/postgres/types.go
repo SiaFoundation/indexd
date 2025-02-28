@@ -292,3 +292,20 @@ func (pk *sqlPublicKey) Scan(src interface{}) error {
 		return fmt.Errorf("cannot scan %T to PublicKey", src)
 	}
 }
+
+type nullable[S sql.Scanner] struct {
+	inner S
+}
+
+func (n nullable[S]) Scan(src any) error {
+	switch src := src.(type) {
+	case nil:
+		return nil
+	default:
+		return n.inner.Scan(src)
+	}
+}
+
+func asNullable[S sql.Scanner](s S) sql.Scanner {
+	return nullable[S]{inner: s}
+}
