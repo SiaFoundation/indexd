@@ -2,13 +2,14 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap/zaptest"
 )
@@ -26,7 +27,7 @@ func TestFormRenewContract(t *testing.T) {
 	}
 
 	// helper to assert contract in db
-	assertContract := func(id types.FileContractID, expected api.Contract) {
+	assertContract := func(id types.FileContractID, expected contracts.Contract) {
 		t.Helper()
 		contract, err := store.Contract(context.Background(), id)
 		if err != nil {
@@ -37,12 +38,12 @@ func TestFormRenewContract(t *testing.T) {
 	}
 
 	// form contract
-	expectedFormed := api.Contract{
+	expectedFormed := contracts.Contract{
 		ID:               types.FileContractID{1, 2, 3},
 		HostKey:          hk,
 		ProofHeight:      100,
 		ExpirationHeight: 200,
-		State:            api.ContractStatePending,
+		State:            contracts.ContractStatePending,
 
 		ContractPrice:    types.Siacoins(1),
 		InitialAllowance: types.Siacoins(2),
@@ -77,11 +78,11 @@ func TestFormRenewContract(t *testing.T) {
 	}
 	modifyContract(expectedFormed.ID)
 
-	expectedFormed.State = api.ContractStateActive
+	expectedFormed.State = contracts.ContractStateActive
 	expectedFormed.Capacity = 2000
 	expectedFormed.Size = 1000
 	expectedFormed.Good = false
-	expectedFormed.Spending = api.ContractSpending{
+	expectedFormed.Spending = contracts.ContractSpending{
 		AppendSector: types.NewCurrency64(1),
 		FreeSector:   types.NewCurrency64(2),
 		FundAccount:  types.NewCurrency64(3),
@@ -90,20 +91,20 @@ func TestFormRenewContract(t *testing.T) {
 	assertContract(expectedFormed.ID, expectedFormed)
 
 	// refresh the contract
-	expectedRefreshed := api.Contract{
+	expectedRefreshed := contracts.Contract{
 		ID:               types.FileContractID{4, 5, 6},
 		Capacity:         expectedFormed.Capacity,         // same capacity after refresh
 		Size:             expectedFormed.Size,             // same size after refresh
 		HostKey:          expectedFormed.HostKey,          // same host
 		ProofHeight:      expectedFormed.ProofHeight,      // same proof height for refresh
 		ExpirationHeight: expectedFormed.ExpirationHeight, // same expiration height for refresh
-		State:            api.ContractStatePending,        // refresh resets state
+		State:            contracts.ContractStatePending,  // refresh resets state
 		ContractPrice:    types.Siacoins(2),               // new contract price
 		InitialAllowance: types.Siacoins(3),               // new initial allowance
 		MinerFee:         types.Siacoins(4),               // new miner fee
 		Good:             true,                            // refreshed contract is good
 		RenewedFrom:      expectedFormed.ID,               // refreshed from formed contract
-		Spending:         api.ContractSpending{},          // spending is reset
+		Spending:         contracts.ContractSpending{},    // spending is reset
 	}
 	err = store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, expectedRefreshed.ProofHeight, expectedRefreshed.ExpirationHeight, expectedRefreshed.ContractPrice, expectedRefreshed.InitialAllowance, expectedRefreshed.MinerFee)
 	if err != nil {
@@ -115,11 +116,11 @@ func TestFormRenewContract(t *testing.T) {
 
 	// modify the refreshed contract
 	modifyContract(expectedRefreshed.ID)
-	expectedRefreshed.State = api.ContractStateActive
+	expectedRefreshed.State = contracts.ContractStateActive
 	expectedRefreshed.Capacity = 2000
 	expectedRefreshed.Size = 1000
 	expectedRefreshed.Good = false
-	expectedRefreshed.Spending = api.ContractSpending{
+	expectedRefreshed.Spending = contracts.ContractSpending{
 		AppendSector: types.NewCurrency64(1),
 		FreeSector:   types.NewCurrency64(2),
 		FundAccount:  types.NewCurrency64(3),
@@ -128,20 +129,20 @@ func TestFormRenewContract(t *testing.T) {
 	assertContract(expectedRefreshed.ID, expectedRefreshed)
 
 	// renew the refreshed contract
-	expectedRenewed := api.Contract{
+	expectedRenewed := contracts.Contract{
 		ID:               types.FileContractID{7, 8, 9},
 		Capacity:         expectedRefreshed.Size,                 // capacity shrinks to size upon renewal
 		Size:             expectedRefreshed.Size,                 // same size after renewal
 		HostKey:          expectedRefreshed.HostKey,              // same host
 		ProofHeight:      expectedRefreshed.ProofHeight * 2,      // higher proof height for renew
 		ExpirationHeight: expectedRefreshed.ExpirationHeight * 2, // higher expiration height for renew
-		State:            api.ContractStatePending,               // renewal resets state
+		State:            contracts.ContractStatePending,         // renewal resets state
 		ContractPrice:    types.Siacoins(5),                      // new contract price
 		InitialAllowance: types.Siacoins(6),                      // new initial allowance
 		MinerFee:         types.Siacoins(7),                      // new miner fee
 		Good:             true,                                   // renewed contract is good
 		RenewedFrom:      expectedRefreshed.ID,                   // renewed from refreshed contract
-		Spending:         api.ContractSpending{},                 // spending is reset
+		Spending:         contracts.ContractSpending{},           // spending is reset
 	}
 	err = store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, expectedRenewed.ProofHeight, expectedRenewed.ExpirationHeight, expectedRenewed.ContractPrice, expectedRenewed.InitialAllowance, expectedRenewed.MinerFee)
 	if err != nil {
@@ -183,14 +184,26 @@ func TestSetContractGood(t *testing.T) {
 	}
 	setContractGood := func(id int64, good bool) {
 		t.Helper()
-		if err := store.SetContractGood(types.FileContractID{byte(id)}, good); err != nil {
-			t.Fatal("failed to set contract.'good'", err)
+		if !good {
+			if err := store.SetContractBad(types.FileContractID{byte(id)}); err != nil {
+				t.Fatal("failed to set contract.'good'", err)
+			}
+		} else {
+			if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+				_, err := tx.Exec(ctx, `UPDATE contracts SET good = TRUE WHERE contract_id = $1`, sqlHash256{byte(id)})
+				if err != nil {
+					return fmt.Errorf("failed to update contract.'good': %w", err)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 
 	// form contracts
 	for i := 0; i < 3; i++ {
-		expectedFormed := api.Contract{
+		expectedFormed := contracts.Contract{
 			ID:      types.FileContractID{byte(i + 1)},
 			HostKey: hk,
 		}

@@ -8,7 +8,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/hosts"
 )
 
 // ErrHostNotFound is returned by database operations that fail due to a host
@@ -17,7 +17,7 @@ var ErrHostNotFound = errors.New("host not found")
 
 type dbHost struct {
 	id int64
-	api.Host
+	hosts.Host
 }
 
 func (u *updateTx) AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnouncement, ts time.Time) error {
@@ -43,7 +43,7 @@ func (u *updateTx) AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnoun
 }
 
 // Hosts returns a list of hosts.
-func (s *Store) Hosts(ctx context.Context, offset, limit int) ([]api.Host, error) {
+func (s *Store) Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error) {
 	// sanity check input
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
@@ -51,7 +51,7 @@ func (s *Store) Hosts(ctx context.Context, offset, limit int) ([]api.Host, error
 		return nil, nil
 	}
 
-	var hosts []api.Host
+	var hosts []hosts.Host
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		dbHosts, err := queryHosts(ctx, tx, offset, limit)
 		if err != nil {
