@@ -7,7 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/contracts"
 )
 
 type (
@@ -118,8 +118,8 @@ WHERE id = $8`, sqlHash256(renewedTo), proofHeight, expirationHeight, newID, sql
 }
 
 // Contract returns a single contract
-func (s *Store) Contract(ctx context.Context, contractID types.FileContractID) (api.Contract, error) {
-	var contract api.Contract
+func (s *Store) Contract(ctx context.Context, contractID types.FileContractID) (contracts.Contract, error) {
+	var contract contracts.Contract
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		contract, err = scanContract(tx.QueryRow(ctx, `
 SELECT c.contract_id, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.miner_fee, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
@@ -135,7 +135,7 @@ WHERE c.contract_id = $1`, sqlHash256(contractID)))
 
 // Contracts queries the contracts in the database. By default, only active
 // contracts are returned.
-func (s *Store) Contracts(queryOpts ...ContractQueryOpt) ([]api.Contract, error) {
+func (s *Store) Contracts(queryOpts ...ContractQueryOpt) ([]contracts.Contract, error) {
 	opts := defaultContractQueryOpts
 	for _, opt := range queryOpts {
 		opt(&opts)
@@ -143,10 +143,10 @@ func (s *Store) Contracts(queryOpts ...ContractQueryOpt) ([]api.Contract, error)
 	panic("not implemented")
 }
 
-// SetContractGood updates the "good" column of a contract.
-func (s *Store) SetContractGood(contractID types.FileContractID, good bool) error {
+// SetContractBad marks a contract as bad.
+func (s *Store) SetContractBad(contractID types.FileContractID) error {
 	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `UPDATE contracts SET good = $1 WHERE contract_id = $2`, good, sqlHash256(contractID))
+		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(contractID))
 		if err != nil {
 			return fmt.Errorf("failed to update contract.'good': %w", err)
 		}
@@ -154,8 +154,8 @@ func (s *Store) SetContractGood(contractID types.FileContractID, good bool) erro
 	})
 }
 
-func scanContract(row scanner) (api.Contract, error) {
-	var c api.Contract
+func scanContract(row scanner) (contracts.Contract, error) {
+	var c contracts.Contract
 	err := row.Scan((*sqlHash256)(&c.ID),
 		(*sqlPublicKey)(&c.HostKey),
 		&c.ProofHeight, &c.ExpirationHeight,

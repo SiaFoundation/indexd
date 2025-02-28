@@ -9,7 +9,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/subscriber"
@@ -35,7 +34,7 @@ func TestHostManager(t *testing.T) {
 	h4 := types.GeneratePrivateKey()
 
 	// create a helper to find addresses for a host by public key
-	addresses := func(hk types.PublicKey, hosts []api.Host) []chain.NetAddress {
+	addresses := func(hk types.PublicKey, hosts []hosts.Host) []chain.NetAddress {
 		t.Helper()
 		for _, h := range hosts {
 			if h.PublicKey == hk {
