@@ -120,6 +120,7 @@ CREATE TABLE hosts (
     next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     uptime INTERVAL NOT NULL DEFAULT '0 seconds',
     downtime INTERVAL NOT NULL DEFAULT '0 seconds'
+    lost_sectors INTEGER NOT NULL DEFAULT 0,
 )
 
 CREATE TABLE host_addresses (
@@ -219,8 +220,15 @@ CREATE TABLE sectors (
     -- slab
     slab_id BIGINT REFERENCES slabs(id) NOT NULL,
     slab_index SMALLINT NOT NULL, -- index within corresponding slab to retrieve sectors in right order
-    UNIQUE(slab_id, slab_index) -- enforce one sector per index per slab
+    UNIQUE(slab_id, slab_index), -- enforce one sector per index per slab
+
+    -- data integrity
+    next_integrity_check TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    consecutive_failed_checks SMALLINT NOT NULL DEFAULT 0
 )
 -- quick lookup of sectors to pin prioritized by upload time
 CREATE INDEX sectors_contract_id_uploaded_at_idx ON host_sectors(contract_id, uploaded_at ASC)
+
+-- index over contract_id and next_integrity_check since we only check pinned sectors
+CREATE INDEX sectors_contract_id_next_integrity_check_idx ON host_sectors(contract_id, next_integrity_check ASC)
 ```
