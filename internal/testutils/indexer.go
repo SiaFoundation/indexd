@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/subscriber"
@@ -55,7 +56,12 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
 
-	sub := subscriber.New(c.cm, hm, wm, store, subscriber.WithLogger(log.Named("subscriber")))
+	contracts, err := contracts.NewManager(contracts.WithLogger(log.Named("contracts")))
+	if err != nil {
+		t.Fatalf("failed to create contract manager: %v", err)
+	}
+
+	sub := subscriber.New(c.cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
 
 	// sync subscriber
 	syncFn := func() {
@@ -114,6 +120,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		}
 		if err := closeWithTimeout(hm.Close); err != nil {
 			t.Errorf("failed to close host manager: %v", err)
+		}
+		if err := closeWithTimeout(contracts.Close); err != nil {
+			t.Errorf("failed to close contract manager: %v", err)
 		}
 		if err := closeWithTimeout(sub.Close); err != nil {
 			t.Errorf("failed to close subscriber: %v", err)

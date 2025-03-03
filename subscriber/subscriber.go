@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -25,7 +26,7 @@ type (
 
 	// ContractManager manages contract state.
 	ContractManager interface {
-		UpdateChainState(tx hosts.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
+		UpdateChainState(tx contracts.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 	}
 
 	// HostManager manages host announcements.
@@ -41,6 +42,7 @@ type (
 
 	// UpdateTx allows atomically processing a chain update.
 	UpdateTx interface {
+		contracts.UpdateTx
 		wallet.UpdateTx
 		hosts.UpdateTx
 
@@ -80,14 +82,15 @@ func (s *Subscriber) Close() error {
 
 // New creates a new chain subscriber. The returned subscriber is already
 // processing chain updates and needs to be closed.
-func New(cm ChainManager, hm HostManager, wm WalletManager, store Store, opts ...Option) *Subscriber {
+func New(cm ChainManager, hm HostManager, contracts ContractManager, wm WalletManager, store Store, opts ...Option) *Subscriber {
 	s := &Subscriber{
-		cm:    cm,
-		hm:    hm,
-		wm:    wm,
-		store: store,
-		tg:    threadgroup.New(),
-		log:   zap.NewNop(),
+		cm:        cm,
+		contracts: contracts,
+		hm:        hm,
+		wm:        wm,
+		store:     store,
+		tg:        threadgroup.New(),
+		log:       zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(s)
