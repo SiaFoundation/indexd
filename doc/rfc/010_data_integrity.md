@@ -31,16 +31,22 @@ that fetches all sectors that are due for an integrity check as indicated by the
 performed by the contract maintenance since we don't need a contract for the
 check. The actual steps look like this:
 
-1. Fetch all pinned sectors that require an integrity check
-2. Figure out which hosts these sectors are on and perform the checks in batches of 50 hosts
-3. For each sector on each host call `RPCVerifySector` after making sure the account is funded
+1. Fetch up to 10 pinned sector per contract per host from the database
+2. For each one, call `RPCVerifySector` after making sure the account is funded.
+We process contracts in parallel but wait for the whole batch to finish before
+launching a new one. Apply a sane timeout of 60 seconds per batch and remove
+timed out hosts from subsequent batches of this iteration. Also, ignore hosts
+for subsequent batches if they time out or fail to prevent slowing down the
+other integrity checks or failing in a loop on the same sectors over and over
+again.
   a. If the proof was successful, update the time of the next check to 1 week from now
   b. If the host reports the sector as lost, move on to 4.
   b. If the proof failed for any other reason after a successful dial and sending of the initial request,
-  set the next check time 24 hours from now and increment the count of failed checks.
-4. If the sector has failed its check 3 times in a row, set `host_id` and
+  set the next check time 6 hours from now and increment the count of failed checks.
+3. If the sector has failed its check 3 times in a row, set `host_id` and
 `contract_id` on the `sectors` table to `NULL` and increment the `lost_sectors`
-count on the `hosts` table.
+count on the `hosts` table. This will lead to the sector being picked up by the
+data migration code (see [Data Migration](007_data_migration.md)).
 
 ### Host penalty
 
