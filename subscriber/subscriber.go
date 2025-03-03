@@ -23,6 +23,11 @@ type (
 		UpdatesSince(index types.ChainIndex, maxBlocks int) (rus []chain.RevertUpdate, aus []chain.ApplyUpdate, err error)
 	}
 
+	// ContractManager manages contract state.
+	ContractManager interface {
+		UpdateChainState(tx hosts.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
+	}
+
 	// HostManager manages host announcements.
 	HostManager interface {
 		UpdateChainState(tx hosts.UpdateTx, applied []chain.ApplyUpdate) error
@@ -55,10 +60,11 @@ type Subscriber struct {
 	shutdownFn      func()
 	syncMu          sync.Mutex
 
-	cm    ChainManager
-	hm    HostManager
-	wm    WalletManager
-	store Store
+	cm        ChainManager
+	contracts ContractManager
+	hm        HostManager
+	wm        WalletManager
+	store     Store
 
 	tg  *threadgroup.ThreadGroup
 	log *zap.Logger
@@ -152,6 +158,8 @@ func (s *Subscriber) Sync() error {
 		if err := s.store.UpdateChainState(ctx, func(tx UpdateTx) error {
 			if err := s.hm.UpdateChainState(tx, aus); err != nil {
 				return fmt.Errorf("failed to update host chain state: %w", err)
+			} else if err := s.contracts.UpdateChainState(tx, rus, aus); err != nil {
+				return fmt.Errorf("failed to update contract chain state: %w", err)
 			} else if err := s.wm.UpdateChainState(tx, rus, aus); err != nil {
 				return fmt.Errorf("failed to update wallet chain state: %w", err)
 			}
