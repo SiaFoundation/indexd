@@ -63,21 +63,30 @@ type (
 	}
 )
 
-// MarshalText implements the encoding.TextMarshaler interface.
-func (s ContractState) MarshalText() ([]byte, error) {
+// String implements the fmt.Stringer interface.
+func (s ContractState) String() string {
 	switch s {
 	case ContractStatePending:
-		return []byte("pending"), nil
+		return "pending"
 	case ContractStateActive:
-		return []byte("active"), nil
+		return "active"
 	case ContractStateResolved:
-		return []byte("resolved"), nil
+		return "resolved"
 	case ContractStateExpired:
-		return []byte("expired"), nil
+		return "expired"
 	case ContractStateRejected:
-		return []byte("rejected"), nil
+		return "rejected"
 	default:
+		return ""
+	}
+}
+
+// MarshalText implements the encoding.TextMarshaler interface.
+func (s ContractState) MarshalText() ([]byte, error) {
+	if str := s.String(); str == "" {
 		return nil, fmt.Errorf("unknown contract state %v", s)
+	} else {
+		return []byte(str), nil
 	}
 }
 

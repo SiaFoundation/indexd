@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/config"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/subscriber"
@@ -60,7 +61,13 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer hm.Close()
 
-	sub := subscriber.New(cm, hm, wm, store, subscriber.WithLogger(log.Named("subscriber")))
+	contracts, err := contracts.NewManager(contracts.WithLogger(log.Named("contracts")))
+	if err != nil {
+		return fmt.Errorf("failed to create contracts manager: %w", err)
+	}
+	defer contracts.Close()
+
+	sub := subscriber.New(cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
 	defer sub.Close()
 
 	httpListener, err := startLocalhostListener(cfg.HTTP.Address, log.Named("listener"))
