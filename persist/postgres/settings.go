@@ -9,7 +9,7 @@ import (
 // LastScannedIndex returns the last scanned index.
 func (s *Store) LastScannedIndex(ctx context.Context) (ci types.ChainIndex, err error) {
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, `SELECT last_scanned_index FROM global_settings`).Scan(asSiaEncoded(&ci))
+		return tx.QueryRow(ctx, `SELECT last_scanned_index FROM global_settings`).Scan(asNullable(asSiaEncoded(&ci)))
 	})
 	return
 }
