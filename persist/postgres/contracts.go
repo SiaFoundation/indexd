@@ -155,12 +155,14 @@ func (s *Store) SetContractBad(contractID types.FileContractID) error {
 	})
 }
 
-func (tx *updateTx) ContractState(contractID types.FileContractID) (contracts.ContractState, error) {
-	panic("not implemented")
-}
-
 func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, error) {
-	panic("not implemented")
+	var exists bool
+	err := tx.tx.QueryRow(tx.ctx, `SELECT EXISTS (SELECT 1 FROM contracts WHERE contract_id = $1)`, sqlHash256(contractID)).
+		Scan(&exists)
+	if err != nil {
+		return false, fmt.Errorf("failed to check if contract is known: %w", err)
+	}
+	return exists, nil
 }
 
 func (tx *updateTx) RejectContracts(duration time.Duration) error {

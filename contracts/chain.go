@@ -14,7 +14,6 @@ type (
 	// UpdateTx defines what the contract manager needs to atomically process a
 	// chain update in the database.
 	UpdateTx interface {
-		ContractState(contractID types.FileContractID) (ContractState, error)
 		IsKnownContract(contractID types.FileContractID) (bool, error)
 		RejectContracts(time.Duration) error
 		UpdateContractElement(fce types.V2FileContractElement) error
@@ -91,24 +90,18 @@ func (m *ContractManager) applyChainUpdate(tx *updateTx, cau chain.ApplyUpdate) 
 }
 
 func (m *ContractManager) applyContractDiff(tx *updateTx, diff consensus.V2FileContractElementDiff) error {
-	stateBefore, err := tx.ContractState(diff.V2FileContractElement.ID)
-	if err != nil {
-		return fmt.Errorf("failed to get contract state: %w", err)
-	}
-
 	// update contract state
-	var stateAfter ContractState
+	var state ContractState
 	if resolution := diff.Resolution; resolution != nil {
-		stateAfter = ContractStateResolved
+		state = ContractStateResolved
 	} else if diff.Created {
-		stateAfter = ContractStateActive
+		state = ContractStateActive
 	}
-	if err := tx.UpdateContractState(diff.V2FileContractElement.ID, stateAfter); err != nil {
+	if err := tx.UpdateContractState(diff.V2FileContractElement.ID, state); err != nil {
 		return fmt.Errorf("failed to update contract state for new contract: %w", err)
 	}
 	m.log.Info("contract state changed", zap.Stringer("contractID", diff.V2FileContractElement.ID),
-		zap.Stringer("from", stateBefore),
-		zap.Stringer("to", stateAfter))
+		zap.Stringer("state", state))
 
 	// update contract elements
 	var fce types.V2FileContractElement
@@ -138,24 +131,18 @@ func (m *ContractManager) revertChainUpdate(tx *updateTx, cru chain.RevertUpdate
 }
 
 func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2FileContractElementDiff) error {
-	stateBefore, err := tx.ContractState(diff.V2FileContractElement.ID)
-	if err != nil {
-		return fmt.Errorf("failed to get contract state: %w", err)
-	}
-
 	// update contract state
-	var stateAfter ContractState
+	var state ContractState
 	if diff.Created {
-		stateAfter = ContractStatePending
+		state = ContractStatePending
 	} else if resolution := diff.Resolution; resolution != nil {
-		stateAfter = ContractStateActive
+		state = ContractStateActive
 	}
-	if err := tx.UpdateContractState(diff.V2FileContractElement.ID, stateAfter); err != nil {
+	if err := tx.UpdateContractState(diff.V2FileContractElement.ID, state); err != nil {
 		return fmt.Errorf("failed to update contract state for new contract: %w", err)
 	}
 	m.log.Info("contract state changed", zap.Stringer("contractID", diff.V2FileContractElement.ID),
-		zap.Stringer("from", stateBefore),
-		zap.Stringer("to", stateAfter))
+		zap.Stringer("state", state))
 
 	// update contract elements
 	var fce types.V2FileContractElement
