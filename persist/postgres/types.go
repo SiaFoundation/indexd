@@ -15,6 +15,7 @@ import (
 )
 
 var (
+	_ scannerValuer = (*sqlChainIndex)(nil)
 	_ scannerValuer = (*sqlContractState)(nil)
 	_ scannerValuer = (*sqlCurrency)(nil)
 	_ scannerValuer = (*sqlDurationMS)(nil)
@@ -23,7 +24,8 @@ var (
 	_ scannerValuer = (*sqlMerkleProof)(nil)
 	_ scannerValuer = (*sqlNetworkProtocol)(nil)
 	_ scannerValuer = (*sqlPublicKey)(nil)
-	_ scannerValuer = (*siaEncoded[*types.V2FileContract])(nil)
+	_ scannerValuer = (*sqlPublicKey)(nil)
+	_ scannerValuer = (*sqlFileContract)(nil)
 
 	_ sql.Scanner = (*nullable[*sqlHash256])(nil)
 )
@@ -31,6 +33,34 @@ var (
 type scannerValuer interface {
 	driver.Valuer
 	sql.Scanner
+}
+
+type sqlChainIndex types.ChainIndex
+
+func (ci sqlChainIndex) Value() (driver.Value, error) {
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	types.ChainIndex(ci).EncodeTo(e)
+	if err := e.Flush(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (ci *sqlChainIndex) Scan(src any) error {
+	if src == nil {
+		*ci = sqlChainIndex{}
+		return nil
+	}
+
+	switch src := src.(type) {
+	case []byte:
+		dec := types.NewBufDecoder(src)
+		(*types.ChainIndex)(ci).DecodeFrom(dec)
+		return dec.Err()
+	default:
+		return fmt.Errorf("cannot scan %T to ChainIndex", src)
+	}
 }
 
 type sqlContractState contracts.ContractState
@@ -169,6 +199,29 @@ func (ed *sqlEventData) Scan(src any) error {
 	}
 }
 
+type sqlFileContract types.V2FileContract
+
+func (c sqlFileContract) Value() (driver.Value, error) {
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	types.V2FileContract(c).EncodeTo(e)
+	if err := e.Flush(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (c *sqlFileContract) Scan(src any) error {
+	switch src := src.(type) {
+	case []byte:
+		dec := types.NewBufDecoder(src)
+		(*types.V2FileContract)(c).DecodeFrom(dec)
+		return dec.Err()
+	default:
+		return fmt.Errorf("cannot scan %T to V2FileContract", src)
+	}
+}
+
 type sqlHash256 types.Hash256
 
 func (h *sqlHash256) Scan(src any) error {
@@ -265,40 +318,6 @@ func (pk *sqlPublicKey) Scan(src interface{}) error {
 	default:
 		return fmt.Errorf("cannot scan %T to PublicKey", src)
 	}
-}
-
-type encoderToDecoderFrom interface {
-	types.EncoderTo
-	types.DecoderFrom
-}
-
-type siaEncoded[T encoderToDecoderFrom] struct {
-	inner T
-}
-
-func (s siaEncoded[T]) Scan(src any) error {
-	switch src := src.(type) {
-	case []byte:
-		dec := types.NewBufDecoder(src)
-		s.inner.DecodeFrom(dec)
-		return dec.Err()
-	default:
-		return fmt.Errorf("cannot scan %T to %T", src, s.inner)
-	}
-}
-
-func (s siaEncoded[T]) Value() (driver.Value, error) {
-	var buf bytes.Buffer
-	e := types.NewEncoder(&buf)
-	s.inner.EncodeTo(e)
-	if err := e.Flush(); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
-func asSiaEncoded[T encoderToDecoderFrom](t T) siaEncoded[T] {
-	return siaEncoded[T]{inner: t}
 }
 
 type nullable[S sql.Scanner] struct {
