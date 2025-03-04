@@ -124,5 +124,48 @@ func (m *ContractManager) applyContractDiff(tx *updateTx, diff consensus.V2FileC
 }
 
 func (m *ContractManager) revertChainUpdate(tx *updateTx, cru chain.RevertUpdate) error {
-	panic("not implemented")
+	for _, diff := range cru.V2FileContractElementDiffs() {
+		if known, err := tx.IsKnownContract(diff.V2FileContractElement.ID); err != nil {
+			return fmt.Errorf("failed to determine whether contract is known: %w", err)
+		} else if !known {
+			continue // ignore unknown contracts
+		}
+		if err := m.revertContractDiff(tx, diff); err != nil {
+			return fmt.Errorf("failed to apply contract diff: %w", err)
+		}
+	}
+	return nil
+}
+
+func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2FileContractElementDiff) error {
+	stateBefore, err := tx.ContractState(diff.V2FileContractElement.ID)
+	if err != nil {
+		return fmt.Errorf("failed to get contract state: %w", err)
+	}
+
+	// update contract state
+	var stateAfter ContractState
+	if diff.Created {
+		stateAfter = ContractStatePending
+	} else if resolution := diff.Resolution; resolution != nil {
+		stateAfter = ContractStateActive
+	}
+	if err := tx.UpdateContractState(diff.V2FileContractElement.ID, stateAfter); err != nil {
+		return fmt.Errorf("failed to update contract state for new contract: %w", err)
+	}
+	m.log.Info("contract state changed", zap.Stringer("contractID", diff.V2FileContractElement.ID),
+		zap.Stringer("from", stateBefore),
+		zap.Stringer("to", stateAfter))
+
+	// update contract elements
+	var fce types.V2FileContractElement
+	if rev, ok := diff.V2RevisionElement(); !ok {
+		fce = diff.V2FileContractElement
+	} else {
+		fce = rev
+	}
+	if err := tx.UpdateContractElement(fce); err != nil {
+		return fmt.Errorf("failed to update contract element: %w", err)
+	}
+	return nil
 }
