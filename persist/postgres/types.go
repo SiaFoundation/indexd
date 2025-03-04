@@ -24,11 +24,32 @@ var (
 	_ scannerValuer = (*sqlMerkleProof)(nil)
 	_ scannerValuer = (*sqlNetworkProtocol)(nil)
 	_ scannerValuer = (*sqlPublicKey)(nil)
+	_ scannerValuer = (*sqlFileContract)(nil)
 )
 
 type scannerValuer interface {
 	driver.Valuer
 	sql.Scanner
+}
+
+type sqlFileContract types.V2FileContract
+
+func (c sqlFileContract) Value() (driver.Value, error) {
+	buf := new(bytes.Buffer)
+	enc := types.NewEncoder(buf)
+	types.V2FileContract(c).EncodeTo(enc)
+	return buf.Bytes(), enc.Flush()
+}
+
+func (c *sqlFileContract) Scan(src any) error {
+	switch src := src.(type) {
+	case []byte:
+		dec := types.NewBufDecoder(src)
+		(*types.V2FileContract)(c).DecodeFrom(dec)
+		return dec.Err()
+	default:
+		return fmt.Errorf("cannot scan %T to V2FileContract", src)
+	}
 }
 
 type sqlChainIndex types.ChainIndex

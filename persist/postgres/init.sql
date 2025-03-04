@@ -94,4 +94,12 @@ CREATE TABLE contracts (
   free_sector_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
   fund_account_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
   sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0
-)
+);
+
+CREATE TABLE contract_elements (
+    id SERIAL PRIMARY KEY,
+    contract_id INTEGER UNIQUE NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    contract BYTEA NOT NULL,
+    leaf_index INTEGER NOT NULL,
+    merkle_proof BYTEA NOT NULL
+);

@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/contracts"
 )
 
@@ -170,6 +171,20 @@ func (tx *updateTx) RejectContracts(duration time.Duration) error {
 }
 
 func (tx *updateTx) UpdateContractElement(fce types.V2FileContractElement) error {
+	_, err := tx.tx.Exec(tx.ctx, `
+INSERT INTO contract_elements (contract_id, contract, leaf_index, merkle_proof)
+VALUES (
+  (SELECT id FROM contracts WHERE contracts.contract_id = $1),
+  $2, $3, $4
+) ON CONFLICT (contract_id) DO UPDATE SET contract = EXCLUDED.contract, leaf_index = EXCLUDED.leaf_index, merkle_proof = EXCLUDED.merkle_proof
+`, sqlHash256(fce.ID), sqlFileContract(fce.V2FileContract), fce.StateElement.LeafIndex, fce.StateElement.MerkleProof)
+	if err != nil {
+		return fmt.Errorf("failed to update contract element: %w", err)
+	}
+	return nil
+}
+
+func (tx *updateTx) UpdateContractElementProofs(wallet.ProofUpdater) error {
 	panic("not implemented")
 }
 

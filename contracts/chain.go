@@ -7,6 +7,7 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/wallet"
 	"go.uber.org/zap"
 )
 
@@ -17,6 +18,7 @@ type (
 		IsKnownContract(contractID types.FileContractID) (bool, error)
 		RejectContracts(time.Duration) error
 		UpdateContractElement(fce types.V2FileContractElement) error
+		UpdateContractElementProofs(wallet.ProofUpdater) error
 		UpdateContractState(contractID types.FileContractID, state ContractState) error
 	}
 

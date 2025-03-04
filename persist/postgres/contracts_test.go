@@ -235,3 +235,38 @@ func TestSetContractGood(t *testing.T) {
 	assertContractGood(2, true)
 	assertContractGood(3, false)
 }
+
+func TestUpdateContractElement(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := types.PublicKey{1, 1, 1}
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fce := types.V2FileContractElement{
+		ID: types.FileContractID{1, 2, 3},
+		StateElement: types.StateElement{
+			LeafIndex:   1,
+			MerkleProof: []types.Hash256{{3}, {2}, {1}},
+		},
+		V2FileContract: types.V2FileContract{}, // can be empty
+	}
+
+	updateElement := func() {
+		t.Helper()
+		err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.UpdateContractElement(fce)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// insert contract
+	updateElement()
+}
