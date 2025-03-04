@@ -40,18 +40,19 @@ for subsequent batches if they time out or fail to prevent slowing down the
 other integrity checks or failing in a loop on the same sectors over and over
 again.
   a. If the proof was successful, update the time of the next check to 1 week from now
-  b. If the host reports the sector as lost, move on to 4.
+  b. If the host reports the sector as lost, move on to 3.
   b. If the proof failed for any other reason after a successful dial and sending of the initial request,
   set the next check time 6 hours from now and increment the count of failed checks.
-3. If the sector has failed its check 3 times in a row, set `host_id` and
-`contract_id` on the `sectors` table to `NULL` and increment the `lost_sectors`
-count on the `hosts` table. This will lead to the sector being picked up by the
-data migration code (see [Data Migration](007_data_migration.md)).
+3. If the sector has failed its check 3 times in a row or has reported it as
+lost, set `host_id` and `contract_id` on the `sectors` table to `NULL` and
+increment the `lost_sectors` count on the `hosts` table. This will lead to the
+sector being picked up by the data migration code (see [Data
+Migration](007_data_migration.md)).
 
 ### Host penalty
 
 Using the `lost_sectors` field on a host we can theoretically penalize hosts.
-This this is a potentially severe measure to automate, we should resort to
-manual user intervention. To make it clear to the user that some sort of action
-should be taken, we alert them in case a host has lost more than `10GB` worth of
+This is a potentially severe measure to automate, we should resort to manual
+user intervention. To make it clear to the user that some sort of action should
+be taken, we alert them in case a host has lost more than `10GB` worth of
 sectors. They can then decide whether they want to "forgive" the host or ban it.
