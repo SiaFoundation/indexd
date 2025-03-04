@@ -24,7 +24,6 @@ var (
 	_ scannerValuer = (*sqlMerkleProof)(nil)
 	_ scannerValuer = (*sqlNetworkProtocol)(nil)
 	_ scannerValuer = (*sqlPublicKey)(nil)
-	_ scannerValuer = (*siaEncoded[*types.ChainIndex])(nil)
 	_ scannerValuer = (*siaEncoded[*types.V2FileContract])(nil)
 
 	_ sql.Scanner = (*nullable[*sqlHash256])(nil)

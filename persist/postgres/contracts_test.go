@@ -257,6 +257,40 @@ func TestUpdateContractElement(t *testing.T) {
 		V2FileContract: types.V2FileContract{}, // can be empty
 	}
 
+	assertFileContractElement := func() {
+		t.Helper()
+		ele, err := store.FileContractElement(fce.ID)
+		if err != nil {
+			t.Fatal(err)
+		} else if !reflect.DeepEqual(ele, fce) {
+			t.Fatalf("mismatch: \n%v+\n%v+", fce, ele)
+		}
+	}
+
+	// contract shouldn't exist
+	isKnownContract := func() (known bool) {
+		t.Helper()
+		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
+			known, err = tx.IsKnownContract(fce.ID)
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return known
+	}
+	if isKnownContract() {
+		t.Fatal("contract shouldn't be known yet")
+	}
+
+	// add a contract
+	if err := store.AddFormedContract(context.Background(), fce.ID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3)); err != nil {
+		t.Fatal(err)
+	}
+	if !isKnownContract() {
+		t.Fatal("contract should be known")
+	}
+
 	updateElement := func() {
 		t.Helper()
 		err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
@@ -267,6 +301,31 @@ func TestUpdateContractElement(t *testing.T) {
 		}
 	}
 
-	// insert contract
+	// insert contract and assert state in db
 	updateElement()
+	assertFileContractElement()
+
+	// update the elements fields
+	fce.V2FileContract = types.V2FileContract{RevisionNumber: 12345}
+	fce.StateElement.LeafIndex = 99
+	fce.StateElement.MerkleProof = []types.Hash256{{9}, {8}, {7}}
+	updateElement()
+	assertFileContractElement()
+}
+
+// FileContractElement is a helper for fetching a types.V2FileContractElement
+// from the database. It is within the test package since it's currently not
+// used in production where we fetch elements in batches. If needed, this can be
+// moved to `contracts.go` after adding a context to its list of args.
+func (s *Store) FileContractElement(contractID types.FileContractID) (types.V2FileContractElement, error) {
+	var fce types.V2FileContractElement
+	err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) (err error) {
+		fce, err = scanContractElement(tx.QueryRow(ctx, `
+SELECT c.contract_id, fce.contract, fce.leaf_index, fce.merkle_proof
+FROM contract_elements fce
+INNER JOIN contracts c ON c.id = fce.contract_id
+WHERE c.contract_id = $1`, sqlHash256(contractID)))
+		return err
+	})
+	return fce, err
 }
