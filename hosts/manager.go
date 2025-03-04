@@ -6,7 +6,8 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/quic"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.uber.org/zap"
 )
 
@@ -87,7 +88,7 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 }
 
 func validateAddress(na chain.NetAddress) error {
-	if !(na.Protocol == rhp4.ProtocolTCPSiaMux || na.Protocol == rhp4.ProtocolQUIC) {
+	if !(na.Protocol == siamux.Protocol || na.Protocol == quic.Protocol) {
 		return fmt.Errorf("unknown protocol %q", na.Protocol)
 	}
 	if na.Address == "" {

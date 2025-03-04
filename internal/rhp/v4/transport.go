@@ -7,6 +7,7 @@ import (
 
 	"go.sia.tech/core/types"
 	rhp "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 )
 
 type transportPool struct {
@@ -72,7 +73,7 @@ func (t *transport) Dial(ctx context.Context, hk types.PublicKey, addr string) (
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.t == nil {
-		newTransport, err := rhp.DialSiaMux(ctx, addr, hk)
+		newTransport, err := siamux.Dial(ctx, addr, hk)
 		if err != nil {
 			return nil, fmt.Errorf("failed to upgrade connection: %w", err)
 		}

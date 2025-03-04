@@ -9,7 +9,8 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/quic"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/contracts"
 )
@@ -247,9 +248,9 @@ const (
 
 func (np sqlNetworkProtocol) Value() (driver.Value, error) {
 	switch chain.Protocol(np) {
-	case rhp4.ProtocolTCPSiaMux:
+	case siamux.Protocol:
 		return int64(networkProtocolTCPSiaMux), nil
-	case rhp4.ProtocolQUIC:
+	case quic.Protocol:
 		return int64(networkProtocolQUIC), nil
 	default:
 		return nil, fmt.Errorf("unknown network protocol %q", np)
@@ -261,10 +262,10 @@ func (np *sqlNetworkProtocol) Scan(src interface{}) error {
 	case int64:
 		switch src {
 		case networkProtocolTCPSiaMux:
-			*np = sqlNetworkProtocol(rhp4.ProtocolTCPSiaMux)
+			*np = sqlNetworkProtocol(siamux.Protocol)
 			return nil
 		case networkProtocolQUIC:
-			*np = sqlNetworkProtocol(rhp4.ProtocolQUIC)
+			*np = sqlNetworkProtocol(quic.Protocol)
 			return nil
 		default:
 			return fmt.Errorf("invalid network protocol %v", src)

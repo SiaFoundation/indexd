@@ -8,7 +8,8 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/quic"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/subscriber"
@@ -70,7 +71,7 @@ func TestHostManager(t *testing.T) {
 								Attestations: []types.Attestation{
 									chain.V2HostAnnouncement{
 										{Protocol: "invalid", Address: "1.2.3.4:5678"},
-										{Protocol: rhp4.ProtocolTCPSiaMux, Address: "1.2.3.4:5678"},
+										{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"},
 									}.ToAttestation(cs, h1),
 								},
 							},
@@ -78,7 +79,7 @@ func TestHostManager(t *testing.T) {
 								// empty address
 								Attestations: []types.Attestation{
 									chain.V2HostAnnouncement{
-										{Protocol: rhp4.ProtocolTCPSiaMux, Address: ""},
+										{Protocol: siamux.Protocol, Address: ""},
 									}.ToAttestation(cs, h2),
 								},
 							},
@@ -86,12 +87,12 @@ func TestHostManager(t *testing.T) {
 								// too many addresses per protocol
 								Attestations: []types.Attestation{
 									chain.V2HostAnnouncement{
-										{Protocol: rhp4.ProtocolTCPSiaMux, Address: "1.2.3.4:5678"},
-										{Protocol: rhp4.ProtocolTCPSiaMux, Address: "2.2.3.4:5678"},
-										{Protocol: rhp4.ProtocolTCPSiaMux, Address: "3.2.3.4:5678"},
-										{Protocol: rhp4.ProtocolQUIC, Address: "1.2.3.4:5678"},
-										{Protocol: rhp4.ProtocolQUIC, Address: "2.2.3.4:5678"},
-										{Protocol: rhp4.ProtocolQUIC, Address: "3.2.3.4:5678"},
+										{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"},
+										{Protocol: siamux.Protocol, Address: "2.2.3.4:5678"},
+										{Protocol: siamux.Protocol, Address: "3.2.3.4:5678"},
+										{Protocol: quic.Protocol, Address: "1.2.3.4:5678"},
+										{Protocol: quic.Protocol, Address: "2.2.3.4:5678"},
+										{Protocol: quic.Protocol, Address: "3.2.3.4:5678"},
 									}.ToAttestation(cs, h3),
 								},
 							},
@@ -108,7 +109,7 @@ func TestHostManager(t *testing.T) {
 							{
 								Attestations: []types.Attestation{
 									chain.V2HostAnnouncement{
-										{Protocol: rhp4.ProtocolTCPSiaMux, Address: "1.2.3.4:5678"},
+										{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"},
 									}.ToAttestation(cs, h4),
 								},
 							},
@@ -133,7 +134,7 @@ func TestHostManager(t *testing.T) {
 	h1Addr := addresses(h1.PublicKey(), hosts)
 	if len(h1Addr) != 1 {
 		t.Fatal("unexpected", len(h1Addr))
-	} else if h1Addr[0].Address != "1.2.3.4:5678" || h1Addr[0].Protocol != rhp4.ProtocolTCPSiaMux {
+	} else if h1Addr[0].Address != "1.2.3.4:5678" || h1Addr[0].Protocol != siamux.Protocol {
 		t.Fatalf("unexpected address %+v", h1Addr[0])
 	}
 
@@ -141,9 +142,9 @@ func TestHostManager(t *testing.T) {
 	h3Addr := addresses(h3.PublicKey(), hosts)
 	if len(h3Addr) != 4 {
 		t.Fatal("unexpected", len(h3Addr))
-	} else if cnt := count(rhp4.ProtocolQUIC, h3Addr); cnt != 2 {
+	} else if cnt := count(quic.Protocol, h3Addr); cnt != 2 {
 		t.Fatal("unexpected QUIC addresses", cnt)
-	} else if count(rhp4.ProtocolTCPSiaMux, h3Addr) != 2 {
+	} else if count(siamux.Protocol, h3Addr) != 2 {
 		t.Fatal("unexpected siamux addresses", cnt)
 	}
 
@@ -158,7 +159,7 @@ func TestHostManager(t *testing.T) {
 							{
 								Attestations: []types.Attestation{
 									chain.V2HostAnnouncement{
-										{Protocol: rhp4.ProtocolQUIC, Address: "[::]:4848"},
+										{Protocol: quic.Protocol, Address: "[::]:4848"},
 									}.ToAttestation(cs, h1),
 								},
 							},
@@ -179,7 +180,7 @@ func TestHostManager(t *testing.T) {
 	h1Addr = addresses(h1.PublicKey(), indexed)
 	if len(h1Addr) != 1 {
 		t.Fatal("unexpected", len(h1Addr))
-	} else if h1Addr[0].Address != "[::]:4848" || h1Addr[0].Protocol != rhp4.ProtocolQUIC {
+	} else if h1Addr[0].Address != "[::]:4848" || h1Addr[0].Protocol != quic.Protocol {
 		t.Fatalf("unexpected address %+v", h1Addr[0])
 	}
 }

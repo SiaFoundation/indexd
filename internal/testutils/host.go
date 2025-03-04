@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
@@ -153,7 +154,7 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { rhp4Listener.Close() })
-	go rhp4.ServeSiaMux(rhp4Listener, rs, log)
+	go siamux.Serve(rhp4Listener, rs, log)
 
 	return &Host{
 		pk: pk,
