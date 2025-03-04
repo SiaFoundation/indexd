@@ -59,7 +59,7 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 	var events []wallet.Event
 	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		var tip types.ChainIndex
-		err := tx.QueryRow(ctx, `SELECT last_scanned_index FROM global_settings`).Scan((*sqlChainIndex)(&tip))
+		err := tx.QueryRow(ctx, `SELECT last_scanned_index FROM global_settings`).Scan(asSiaEncoded(&tip))
 		if err != nil {
 			return fmt.Errorf("failed to query last scanned index: %w", err)
 		}
@@ -72,7 +72,7 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 
 		for rows.Next() {
 			var event wallet.Event
-			err := rows.Scan((*sqlChainIndex)(&event.Index), &event.MaturityHeight, (*sqlHash256)(&event.ID), &event.Type, sqlDecodeEvent(&event.Data))
+			err := rows.Scan(asSiaEncoded(&event.Index), &event.MaturityHeight, (*sqlHash256)(&event.ID), &event.Type, sqlDecodeEvent(&event.Data))
 			if err != nil {
 				return fmt.Errorf("failed to scan wallet event: %w", err)
 			}
@@ -166,7 +166,7 @@ func (u *updateTx) WalletApplyIndex(index types.ChainIndex, created, spent []typ
 	if len(events) > 0 {
 		for _, e := range events {
 			if res, err := u.tx.Exec(u.ctx, `INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`,
-				sqlChainIndex(e.Index),
+				asSiaEncoded(&e.Index),
 				e.MaturityHeight,
 				sqlHash256(e.ID),
 				e.Type,
@@ -209,7 +209,7 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 		}
 	}
 
-	_, err := u.tx.Exec(u.ctx, `DELETE FROM wallet_events WHERE chain_index = $1`, sqlChainIndex(index))
+	_, err := u.tx.Exec(u.ctx, `DELETE FROM wallet_events WHERE chain_index = $1`, asSiaEncoded(&index))
 	if err != nil {
 		return fmt.Errorf("failed to delete events: %w", err)
 	}

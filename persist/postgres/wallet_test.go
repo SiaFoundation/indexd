@@ -25,7 +25,7 @@ func TestSingleAddressWalletStoreTip(t *testing.T) {
 	}
 
 	update := types.ChainIndex{Height: 1, ID: types.BlockID{1}}
-	if _, err := store.pool.Exec(context.Background(), `UPDATE global_settings SET last_scanned_index = $1`, sqlChainIndex(update)); err != nil {
+	if _, err := store.pool.Exec(context.Background(), `UPDATE global_settings SET last_scanned_index = $1`, asSiaEncoded(&update)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -84,7 +84,7 @@ func TestSingleAddressWalletStoreWalletEventsAndWalletEventCount(t *testing.T) {
 
 	update := newTestEvent()
 	if _, err := store.pool.Exec(context.Background(), `INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`,
-		sqlChainIndex(update.Index),
+		asSiaEncoded(&update.Index),
 		update.MaturityHeight,
 		sqlHash256(update.ID),
 		update.Type,
