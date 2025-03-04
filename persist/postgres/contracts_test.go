@@ -329,3 +329,48 @@ WHERE c.contract_id = $1`, sqlHash256(contractID)))
 	})
 	return fce, err
 }
+
+func TestUpdateContractState(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := types.PublicKey{1, 1, 1}
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create a contract
+	contractID := types.FileContractID{1, 2, 3}
+
+	updateState := func(state contracts.ContractState) {
+		err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.UpdateContractState(contractID, state)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	assertState := func(state contracts.ContractState) {
+		t.Helper()
+		c, err := store.Contract(context.Background(), contractID)
+		if err != nil {
+			t.Fatal(err)
+		} else if c.State != state {
+			t.Fatalf("expected state %v, got %v", state, c.State)
+		}
+	}
+
+	// add a contract
+	if err := store.AddFormedContract(context.Background(), contractID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3)); err != nil {
+		t.Fatal(err)
+	}
+
+	// run tests
+	assertState(contracts.ContractStatePending) // fresh contract state
+	updateState(contracts.ContractStateActive)  // set to active
+	assertState(contracts.ContractStateActive)  // assert active
+}

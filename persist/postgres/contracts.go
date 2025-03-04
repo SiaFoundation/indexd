@@ -188,8 +188,13 @@ func (tx *updateTx) UpdateContractElementProofs(wallet.ProofUpdater) error {
 	panic("not implemented")
 }
 
+// UpdateContractState updates the state of a contract to the provided one.
 func (tx *updateTx) UpdateContractState(contractID types.FileContractID, state contracts.ContractState) error {
-	panic("not implemented")
+	_, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET state = $1 WHERE contract_id = $2`, sqlContractState(state), sqlHash256(contractID))
+	if err != nil {
+		return fmt.Errorf("failed to update contract state: %w", err)
+	}
+	return nil
 }
 
 func scanContract(row scanner) (contracts.Contract, error) {
