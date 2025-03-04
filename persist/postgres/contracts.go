@@ -177,7 +177,7 @@ VALUES (
   (SELECT id FROM contracts WHERE contracts.contract_id = $1),
   $2, $3, $4
 ) ON CONFLICT (contract_id) DO UPDATE SET contract = EXCLUDED.contract, leaf_index = EXCLUDED.leaf_index, merkle_proof = EXCLUDED.merkle_proof
-`, sqlHash256(fce.ID), asSiaEncoded(&fce.V2FileContract), fce.StateElement.LeafIndex, fce.StateElement.MerkleProof)
+`, sqlHash256(fce.ID), asSiaEncoded(&fce.V2FileContract), fce.StateElement.LeafIndex, sqlMerkleProof(fce.StateElement.MerkleProof))
 	if err != nil {
 		return fmt.Errorf("failed to update contract element: %w", err)
 	}
@@ -211,4 +211,10 @@ func scanContract(row scanner) (contracts.Contract, error) {
 		(*sqlCurrency)(&c.Spending.FundAccount),
 		(*sqlCurrency)(&c.Spending.SectorRoots))
 	return c, err
+}
+
+func scanContractElement(row scanner) (types.V2FileContractElement, error) {
+	var fce types.V2FileContractElement
+	err := row.Scan((*sqlHash256)(&fce.ID), asSiaEncoded(&fce.V2FileContract), &fce.StateElement.LeafIndex, (*sqlMerkleProof)(&fce.StateElement.MerkleProof))
+	return fce, err
 }
