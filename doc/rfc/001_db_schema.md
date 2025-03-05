@@ -1,6 +1,6 @@
-# Request for Comments (RFC): Indexer Database Schema
+# Indexer Database Schema
 
-## 1. Introduction
+## 1. Abstract
 
 This RFC outlines the database schema for the `indexer`, which is a service
 storing and maintaing data on the Sia network. The schema is designed for
@@ -196,7 +196,22 @@ CREATE TABLE contracts (
 )
 ```
 
-### 2.5 Slabs and Sectors
+### 2.5 Accounts
+
+```postgresql
+CREATE TABLE accounts (
+    id BIGSERIAL PRIMARY KEY,
+    public_key BYTEA UNIQUE NOT NULL,
+);
+
+CREATE TABLE account_slabs (
+    account_id INTEGER REFERENCES accounts(id) NOT NULL,
+    slab_id BIGSERIAL REFERENCES slabs(id) NOT NULL,
+    CONSTRAINT account_slabs_pk PRIMARY KEY (account_id, slab_id)
+);
+```
+
+### 2.6 Slabs and Sectors
 
 ```postgresql
 CREATE TABLE slabs (
