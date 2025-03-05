@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"go.sia.tech/core/types"
@@ -104,7 +103,7 @@ INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, re
 
 		// update the existing row to match the new contract
 		resp, err := tx.Exec(ctx, `
-UPDATE contracts SET contract_id = $1, formation_time = NOW(), proof_height = $2, expiration_height = $3, renewed_from = $4, renewed_to = NULL, state = 0, capacity = CASE WHEN $2 = contracts.proof_height THEN contracts.capacity ELSE contracts.size END, contract_price = $5, initial_allowance = $6, miner_fee = $7, good = TRUE, append_sector_spending = 0, free_sector_spending = 0, fund_account_spending = 0, sector_roots_spending = 0
+UPDATE contracts SET contract_id = $1, formation = NOW(), proof_height = $2, expiration_height = $3, renewed_from = $4, renewed_to = NULL, state = 0, capacity = CASE WHEN $2 = contracts.proof_height THEN contracts.capacity ELSE contracts.size END, contract_price = $5, initial_allowance = $6, miner_fee = $7, good = TRUE, append_sector_spending = 0, free_sector_spending = 0, fund_account_spending = 0, sector_roots_spending = 0
 WHERE id = $8`, sqlHash256(renewedTo), proofHeight, expirationHeight, newID, sqlCurrency(contractPrice), sqlCurrency(allowance), sqlCurrency(minerFee), existingID)
 		if err != nil {
 			return fmt.Errorf("failed to init renewed contract: %w", err)
@@ -165,22 +164,15 @@ func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, erro
 	return exists, nil
 }
 
-func (tx *updateTx) RejectContracts(duration time.Duration) error {
-	panic("not implemented")
-}
-
 func (tx *updateTx) UpdateContractElement(fce types.V2FileContractElement) error {
 	_, err := tx.tx.Exec(tx.ctx, `
 INSERT INTO contract_elements (contract_id, contract, leaf_index, merkle_proof)
 VALUES (
-  (SELECT id FROM contracts WHERE contracts.contract_id = $1),
+  (SELECT id FROM contracts WHERE contract_id = $1),
   $2, $3, $4
 ) ON CONFLICT (contract_id) DO UPDATE SET contract = EXCLUDED.contract, leaf_index = EXCLUDED.leaf_index, merkle_proof = EXCLUDED.merkle_proof
 `, sqlHash256(fce.ID), (*sqlFileContract)(&fce.V2FileContract), fce.StateElement.LeafIndex, sqlMerkleProof(fce.StateElement.MerkleProof))
-	if err != nil {
-		return fmt.Errorf("failed to update contract element: %w", err)
-	}
-	return nil
+	return err
 }
 
 // UpdateContractState updates the state of a contract to the provided one.

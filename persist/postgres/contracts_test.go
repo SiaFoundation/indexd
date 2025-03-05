@@ -268,28 +268,26 @@ func TestUpdateContractElement(t *testing.T) {
 	}
 
 	// contract shouldn't exist
-	isKnownContract := func() (known bool) {
+	assertKnownContract := func(known bool) {
 		t.Helper()
+		var storedKnown bool
 		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
-			known, err = tx.IsKnownContract(fce.ID)
+			storedKnown, err = tx.IsKnownContract(fce.ID)
 			return err
 		})
 		if err != nil {
 			t.Fatal(err)
+		} else if storedKnown != known {
+			t.Fatalf("expected known=%v, got %v", known, storedKnown)
 		}
-		return known
 	}
-	if isKnownContract() {
-		t.Fatal("contract shouldn't be known yet")
-	}
+	assertKnownContract(false)
 
 	// add a contract
 	if err := store.AddFormedContract(context.Background(), fce.ID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3)); err != nil {
 		t.Fatal(err)
 	}
-	if !isKnownContract() {
-		t.Fatal("contract should be known")
-	}
+	assertKnownContract(true)
 
 	updateElement := func() {
 		t.Helper()
@@ -346,6 +344,7 @@ func TestUpdateContractState(t *testing.T) {
 	contractID := types.FileContractID{1, 2, 3}
 
 	updateState := func(state contracts.ContractState) {
+		t.Helper()
 		err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 			return tx.UpdateContractState(contractID, state)
 		})

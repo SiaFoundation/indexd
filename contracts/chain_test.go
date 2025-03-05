@@ -4,7 +4,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
@@ -45,10 +44,6 @@ func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileC
 func (tx *mockUpdateTx) IsKnownContract(contractID types.FileContractID) (bool, error) {
 	_, ok := tx.contracts[contractID]
 	return ok, nil
-}
-
-func (tx *mockUpdateTx) RejectContracts(time.Duration) error {
-	panic("not implemented")
 }
 
 func (tx *mockUpdateTx) UpdateContractElement(fce types.V2FileContractElement) error {
@@ -103,12 +98,14 @@ func TestApplyRevertDiff(t *testing.T) {
 
 	// helper to apply/revert diff
 	applyDiff := func(diff consensus.V2FileContractElementDiff) {
+		t.Helper()
 		err := contracts.applyContractDiff(updateTx, diff)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	revertDiff := func(diff consensus.V2FileContractElementDiff) {
+		t.Helper()
 		err := contracts.revertContractDiff(updateTx, diff)
 		if err != nil {
 			t.Fatal(err)
@@ -136,6 +133,14 @@ func TestApplyRevertDiff(t *testing.T) {
 	})
 	assertContract(ContractStateActive)
 
+	// revise contract
+	fce.V2FileContract.RevisionNumber++
+	applyDiff(consensus.V2FileContractElementDiff{
+		V2FileContractElement: fce,
+		Revision:              &fce.V2FileContract,
+	})
+	assertContract(ContractStateActive)
+
 	// resolve contract
 	fce.V2FileContract.RevisionNumber++
 	applyDiff(consensus.V2FileContractElementDiff{
@@ -152,6 +157,14 @@ func TestApplyRevertDiff(t *testing.T) {
 	})
 	assertContract(ContractStateActive)
 
+	// revert revision
+	fce.V2FileContract.RevisionNumber--
+	applyDiff(consensus.V2FileContractElementDiff{
+		V2FileContractElement: fce,
+		Revision:              &fce.V2FileContract,
+	})
+	assertContract(ContractStateActive)
+
 	// revert contract
 	fce.V2FileContract.RevisionNumber--
 	revertDiff(consensus.V2FileContractElementDiff{
@@ -159,6 +172,4 @@ func TestApplyRevertDiff(t *testing.T) {
 		V2FileContractElement: fce,
 	})
 	assertContract(ContractStatePending)
-
-	// TODO: test expiration once implemented
 }

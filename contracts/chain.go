@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"fmt"
-	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
@@ -15,7 +14,6 @@ type (
 	// chain update in the database.
 	UpdateTx interface {
 		IsKnownContract(contractID types.FileContractID) (bool, error)
-		RejectContracts(time.Duration) error
 		UpdateContractElement(fce types.V2FileContractElement) error
 		UpdateContractState(contractID types.FileContractID, state ContractState) error
 	}
@@ -43,19 +41,19 @@ func (tx *updateTx) IsKnownContract(fcid types.FileContractID) (bool, error) {
 // UpdateChainState state updates the contracts' state in the database and
 // broadcasts revisions for failed expired contracts.
 func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
-	cTx := &updateTx{
+	uTx := &updateTx{
 		UpdateTx: tx,
 	}
 
 	for _, cru := range reverted {
-		err := m.revertChainUpdate(cTx, cru)
+		err := m.revertChainUpdate(uTx, cru)
 		if err != nil {
 			return fmt.Errorf("failed to revert chain update: %w", err)
 		}
 	}
 
 	for _, cau := range applied {
-		err := m.applyChainUpdate(cTx, cau)
+		err := m.applyChainUpdate(uTx, cau)
 		if err != nil {
 			return fmt.Errorf("failed to apply chain update: %w", err)
 		}
@@ -91,23 +89,26 @@ func (m *ContractManager) applyChainUpdate(tx *updateTx, cau chain.ApplyUpdate) 
 
 func (m *ContractManager) applyContractDiff(tx *updateTx, diff consensus.V2FileContractElementDiff) error {
 	// update contract state
-	var state ContractState
-	if resolution := diff.Resolution; resolution != nil {
-		state = ContractStateResolved
-	} else if diff.Created {
-		state = ContractStateActive
+	if diff.Resolution != nil || diff.Created {
+		var state ContractState
+		switch {
+		case diff.Resolution != nil:
+			state = ContractStateResolved
+		case diff.Created:
+			state = ContractStateActive
+		default:
+			panic("unknown state") // unreachable
+		}
+		if err := tx.UpdateContractState(diff.V2FileContractElement.ID, state); err != nil {
+			return fmt.Errorf("failed to update contract state for %v: %w", diff.V2FileContractElement.ID, err)
+		}
+		m.log.Info("contract state changed", zap.Stringer("contractID", diff.V2FileContractElement.ID),
+			zap.Stringer("state", state))
 	}
-	if err := tx.UpdateContractState(diff.V2FileContractElement.ID, state); err != nil {
-		return fmt.Errorf("failed to update contract state for new contract: %w", err)
-	}
-	m.log.Info("contract state changed", zap.Stringer("contractID", diff.V2FileContractElement.ID),
-		zap.Stringer("state", state))
 
 	// update contract elements
-	var fce types.V2FileContractElement
-	if rev, ok := diff.V2RevisionElement(); !ok {
-		fce = diff.V2FileContractElement
-	} else {
+	fce := diff.V2FileContractElement
+	if rev, ok := diff.V2RevisionElement(); ok {
 		fce = rev
 	}
 	if err := tx.UpdateContractElement(fce); err != nil {
@@ -132,23 +133,26 @@ func (m *ContractManager) revertChainUpdate(tx *updateTx, cru chain.RevertUpdate
 
 func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2FileContractElementDiff) error {
 	// update contract state
-	var state ContractState
-	if diff.Created {
-		state = ContractStatePending
-	} else if resolution := diff.Resolution; resolution != nil {
-		state = ContractStateActive
+	if diff.Resolution != nil || diff.Created {
+		var state ContractState
+		switch {
+		case diff.Created:
+			state = ContractStatePending
+		case diff.Resolution != nil:
+			state = ContractStateActive
+		default:
+			panic("unknown state") // unreachable
+		}
+		if err := tx.UpdateContractState(diff.V2FileContractElement.ID, state); err != nil {
+			return fmt.Errorf("failed to update contract state for %v: %w", diff.V2FileContractElement.ID, err)
+		}
+		m.log.Info("contract state changed", zap.Stringer("contractID", diff.V2FileContractElement.ID),
+			zap.Stringer("state", state))
 	}
-	if err := tx.UpdateContractState(diff.V2FileContractElement.ID, state); err != nil {
-		return fmt.Errorf("failed to update contract state for new contract: %w", err)
-	}
-	m.log.Info("contract state changed", zap.Stringer("contractID", diff.V2FileContractElement.ID),
-		zap.Stringer("state", state))
 
 	// update contract elements
-	var fce types.V2FileContractElement
-	if rev, ok := diff.V2RevisionElement(); !ok {
-		fce = diff.V2FileContractElement
-	} else {
+	fce := diff.V2FileContractElement
+	if rev, ok := diff.V2RevisionElement(); ok {
 		fce = rev
 	}
 	if err := tx.UpdateContractElement(fce); err != nil {

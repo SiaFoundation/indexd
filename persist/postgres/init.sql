@@ -70,7 +70,7 @@ CREATE TABLE contracts (
   contract_id BYTEA NOT NULL UNIQUE DEFERRABLE,
 
   -- lifetime related columns
-  formation_time TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+  formation TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   proof_height BIGINT NOT NULL, -- start of proof window
   expiration_height BIGINT NOT NULL, -- end of proof window
   renewed_from INTEGER REFERENCES contracts(id) UNIQUE DEFERRABLE,
