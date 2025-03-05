@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/contracts"
 )
 
@@ -182,10 +181,6 @@ VALUES (
 		return fmt.Errorf("failed to update contract element: %w", err)
 	}
 	return nil
-}
-
-func (tx *updateTx) UpdateContractElementProofs(wallet.ProofUpdater) error {
-	panic("not implemented")
 }
 
 // UpdateContractState updates the state of a contract to the provided one.

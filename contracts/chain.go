@@ -7,7 +7,6 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/coreutils/wallet"
 	"go.uber.org/zap"
 )
 
@@ -18,7 +17,6 @@ type (
 		IsKnownContract(contractID types.FileContractID) (bool, error)
 		RejectContracts(time.Duration) error
 		UpdateContractElement(fce types.V2FileContractElement) error
-		UpdateContractElementProofs(wallet.ProofUpdater) error
 		UpdateContractState(contractID types.FileContractID, state ContractState) error
 	}
 
@@ -62,6 +60,18 @@ func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertU
 			return fmt.Errorf("failed to apply chain update: %w", err)
 		}
 	}
+
+	// TODO: update file contract element proofs
+
+	// TODO: reject all contracts that have been pending for more than 'contractRejectBuffer'
+
+	// TODO: broadcast resolutions for expired contracts
+	// 'expiredContractBroadcastBuffer' blocks after their window end to give
+	// hosts a chance to do it themselves before we do it
+
+	// TODO: prune expired contracts 'expiredContractPruneBuffer' blocks after
+	// we begin broadcasting resolutions
+
 	return nil
 }
 
@@ -76,18 +86,6 @@ func (m *ContractManager) applyChainUpdate(tx *updateTx, cau chain.ApplyUpdate) 
 			return fmt.Errorf("failed to apply contract diff: %w", err)
 		}
 	}
-
-	// TODO: update file contract element proofs
-
-	// TODO: reject all contracts that have been pending for more than 'contractRejectBuffer'
-
-	// TODO: broadcast resolutions for expired contracts
-	// 'expiredContractBroadcastBuffer' blocks after their window end to give
-	// hosts a chance to do it themselves before we do it
-
-	// TODO: prune expired contracts 'expiredContractPruneBuffer' blocks after
-	// we begin broadcasting resolutions
-
 	return nil
 }
 
