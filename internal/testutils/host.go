@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/testutil"
@@ -22,7 +23,7 @@ import (
 type (
 	// A Host is an ephemeral host that can be used for testing.
 	Host struct {
-		l  net.Listener
+		ha chain.V2HostAnnouncement
 		pk types.PrivateKey
 
 		c  *testutil.EphemeralContractor
@@ -35,19 +36,24 @@ type (
 	}
 )
 
-// Addr returns the host's address.
-func (h *Host) Addr() string {
-	return h.l.Addr().String()
+// SiamuxAddress returns the host's siamux address.
+func (h *Host) SiamuxAddress() chain.NetAddress {
+	return h.ha[0]
+}
+
+// QUICAddress returns the host's QUIC address.
+func (h *Host) QUICAddress() chain.NetAddress {
+	return h.ha[1]
 }
 
 // Announce announces the host on the network.
-func (h *Host) Announce(ha chain.V2HostAnnouncement) error {
+func (h *Host) Announce() error {
 	// prepare transaction
 	cs := h.cm.TipState()
 	minerFee := h.cm.RecommendedFee().Mul64(1e3)
 	txn := types.V2Transaction{
 		Attestations: []types.Attestation{
-			ha.ToAttestation(cs, h.pk),
+			h.ha.ToAttestation(cs, h.pk),
 		},
 		MinerFee: minerFee,
 	}
@@ -149,17 +155,14 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 	c.addSyncFn(syncFn)
 
 	rs := rhp4.NewServer(pk, c.cm, s, contractor, w, sr, ss, rhp4.WithPriceTableValidity(2*time.Minute))
-	rhp4Listener, err := net.Listen("tcp", ":0")
-	if err != nil {
-		t.Fatal(err)
+	ha := chain.V2HostAnnouncement{
+		{Protocol: siamux.Protocol, Address: testutil.ServeSiaMux(t, rs, log)},
+		{Protocol: quic.Protocol, Address: testutil.ServeQUIC(t, rs, log)},
 	}
-	t.Cleanup(func() { rhp4Listener.Close() })
-	go siamux.Serve(rhp4Listener, rs, log)
 
 	return &Host{
 		pk: pk,
-		l:  rhp4Listener,
-
+		ha: ha,
 		c:  contractor,
 		s:  s,
 		cm: c.cm,
