@@ -12,8 +12,7 @@ serves the following purposes:
 
 ### Authentication
 
-TODO: Probably don't need special authentication for now. Probably fine to add
-that right before we allow users to access third party indexers
+See [API Authentication](011_api_authentication.md)
 
 ### Account Funding
 

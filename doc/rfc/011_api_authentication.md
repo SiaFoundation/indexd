@@ -30,62 +30,35 @@ key. This public key serves for identifying the app as well as the account the
 
 To create a signed URL, follow the steps below:
 
-1. Construct the canonical request like so
+1. Construct the payload to sign using the following format
 
 ```
-HTTP_VERB\n
-PATH_TO_RESOURCE\n
-CANONICAL_QUERY_STRING\n
-CANONICAL_HEADERS\n
-
-SIGNED_HEADERS
+HOST: <hostname> // e.g. indexer.sia.tech
+ValidFrom: <unix timestamp>
+Validity: <seconds>
 ```
 
-- `HTTP_VERB`: The HTTP verb like `GET`, `POST`, etc.
-- `PATH_TO_RESOURCE`: The path to the resource like `/api/slab/pin`
-- `CANONICAL_QUERY_STRING`: The query string sorted by name using a lexicographical sort by code point value, separated by '&' or a \n if there are no query parameters.
-- `CANONICAL_HEADERS`: One line per header, lowercase name for each header, sorted like the query strings, duplicate headers collapsed into comma-separated list, folding whitespaces or newlines replaced with single space
-- `SIGNED_HEADERS`: List of lowercase header names to be signed, separated by semicolon (TODO: not sure if that is actually necessary considering that we have the CANONICAL_HEADERS)
+- `Host`: Makes sure a request for indexer.sia.tech can't be reused for indexer.thirdparty.tech
+- `X-SiaIdx-ValidFrom`: The time at which the request becomes usable in Unix timestamp format
+- `X-SiaIdx-Validity`: The time after which the request expires in seconds (e.g. 10)
 
-The following canonical query strings are required:
-`X-SiaIdx-Credential` - The public key of the user
-`X-SiaIdx-Date` - The date at which the request becomes usable in ISO8601 format
-`X-SiaIdx-Expires` - The time after which the request expires in seconds (max 24 hours)
-`X-SiaIdx-SignedHeaders` - A semicolon-separated list of headers that are signed
+2. Sign the payload using ED25519
 
-The following canonical headers are required:
-`host`: The hostname the request gets sent to like `indexer.sia.tech`
-`x-siaidx-` prefixed headers: All potential `indexer`-specific headers to be consumed by the API
+3. Construct the signed URL by attaching the query parameters:
+- `X-SiaIdx-Credential`: The public key used to verify the signature
+- `X-SiaIdx-Signature`: The signature from step 2
+- `X-SiaIdx-ValidFrom`: The time at which the request becomes usable in Unix timestamp format
+- `X-SiaIdx-Validity`: The time after which the request expires in seconds
 
+#### Trade-offs:
 
-2. Construct the string to sign:
+Compared to other signed URL schemes, like AWS's V4, this scheme is much
+simpler. It assumes that the client always uses https to connect to the server
+to make sure the request isn't tampered with and that requests aren't pre-signed
+for third parties.
+That means we can drop the signing of headers, url path or query parameters
+since we don't need to be able to restrict access to certain resources for thid
+parties.
 
-NOTE: AWS creates this string from the signing algorithm, the date (same as
-`X-SiaIdx-Date`), the credential scope and the hashed request. It is not quite
-clear why but it seems like we can simplify this by just using the canonical
-request directly for signing.
-
-3. Sign the string
-
-We use ED25519 to sign the string rather than RSA, which is used by AWS.
-
-4. Construct the signed URL using the following concatenation:
-
-```
-HOSTNAME + PATH_TO_RESOURCE + '?' + CANONICAL_QUERY_STRING + '&X-SiaIdx-Signature=' + REQUEST_SIGNATURE
-```
-
-Example:
-
-```
-https://indexer.googleapis.com/slabs/pin?X-SiaIdx-Credential=example&X-SiaIdx-Date=20181026T211942Z&X-SiaIdx-expires=60&X-SiaIdx-Signedheaders=host&X-SiaIdx-Signature=<hex-encoded-sig>
-```
-
-NOTE: This section is heavily inspired by v4 signatures used by AWS or actually
-Google Cloud's documentation on it. For more information see the
-[overview](https://cloud.google.com/storage/docs/access-control/signed-urls),
-[canonical
-requests](https://cloud.google.com/storage/docs/authentication/canonical-requests)
-and [manual
-signing](https://cloud.google.com/storage/docs/access-control/signing-urls-manually)
-pages of their docs.
+If needed, it should be easy enough to include additional functionality by
+versioning this scheme and adding more fields to the payload.
