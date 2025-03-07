@@ -292,7 +292,7 @@ func TestUpdateContractElement(t *testing.T) {
 	updateElement := func() {
 		t.Helper()
 		err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.UpdateContractElement(fce)
+			return tx.UpdateContractElements(fce)
 		})
 		if err != nil {
 			t.Fatal(err)

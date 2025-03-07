@@ -154,6 +154,22 @@ func (s *Store) SetContractBad(contractID types.FileContractID) error {
 	})
 }
 
+func (tx *updateTx) ContractElements() ([]types.V2FileContractElement, error) {
+	rows, err := tx.tx.Query(tx.ctx, `SELECT contract_id, contract, leaf_index, merkle_proof FROM contract_elements`)
+	if err != nil {
+		return nil, err
+	}
+	var fces []types.V2FileContractElement
+	for rows.Next() {
+		fce, err := scanContractElement(rows)
+		if err != nil {
+			return nil, err
+		}
+		fces = append(fces, fce)
+	}
+	return fces, rows.Err()
+}
+
 func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, error) {
 	var exists bool
 	err := tx.tx.QueryRow(tx.ctx, `SELECT EXISTS (SELECT 1 FROM contracts WHERE contract_id = $1)`, sqlHash256(contractID)).
@@ -164,15 +180,20 @@ func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, erro
 	return exists, nil
 }
 
-func (tx *updateTx) UpdateContractElement(fce types.V2FileContractElement) error {
-	_, err := tx.tx.Exec(tx.ctx, `
+func (tx *updateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
+	for _, fce := range fces {
+		_, err := tx.tx.Exec(tx.ctx, `
 INSERT INTO contract_elements (contract_id, contract, leaf_index, merkle_proof)
 VALUES (
   (SELECT id FROM contracts WHERE contract_id = $1),
   $2, $3, $4
 ) ON CONFLICT (contract_id) DO UPDATE SET contract = EXCLUDED.contract, leaf_index = EXCLUDED.leaf_index, merkle_proof = EXCLUDED.merkle_proof
 `, sqlHash256(fce.ID), (*sqlFileContract)(&fce.V2FileContract), fce.StateElement.LeafIndex, sqlMerkleProof(fce.StateElement.MerkleProof))
-	return err
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // UpdateContractState updates the state of a contract to the provided one.
