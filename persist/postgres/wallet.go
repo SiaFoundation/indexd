@@ -166,7 +166,7 @@ func (u *updateTx) WalletApplyIndex(index types.ChainIndex, created, spent []typ
 	if len(events) > 0 {
 		for _, e := range events {
 			if res, err := u.tx.Exec(u.ctx, `INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`,
-				(*sqlChainIndex)(&e.Index),
+				sqlChainIndex(e.Index),
 				e.MaturityHeight,
 				sqlHash256(e.ID),
 				e.Type,
@@ -209,7 +209,7 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 		}
 	}
 
-	_, err := u.tx.Exec(u.ctx, `DELETE FROM wallet_events WHERE chain_index = $1`, (*sqlChainIndex)(&index))
+	_, err := u.tx.Exec(u.ctx, `DELETE FROM wallet_events WHERE chain_index = $1`, sqlChainIndex(index))
 	if err != nil {
 		return fmt.Errorf("failed to delete events: %w", err)
 	}
