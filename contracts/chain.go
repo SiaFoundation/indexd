@@ -6,6 +6,7 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/wallet"
 	"go.uber.org/zap"
 )
 
@@ -13,8 +14,9 @@ type (
 	// UpdateTx defines what the contract manager needs to atomically process a
 	// chain update in the database.
 	UpdateTx interface {
+		ContractElements() ([]types.V2FileContractElement, error)
 		IsKnownContract(contractID types.FileContractID) (bool, error)
-		UpdateContractElement(fce types.V2FileContractElement) error
+		UpdateContractElements(fces ...types.V2FileContractElement) error
 		UpdateContractState(contractID types.FileContractID, state ContractState) error
 	}
 
@@ -59,8 +61,6 @@ func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertU
 		}
 	}
 
-	// TODO: update file contract element proofs
-
 	// TODO: reject all contracts that have been pending for more than 'contractRejectBuffer'
 
 	// TODO: broadcast resolutions for expired contracts
@@ -84,7 +84,9 @@ func (m *ContractManager) applyChainUpdate(tx *updateTx, cau chain.ApplyUpdate) 
 			return fmt.Errorf("failed to apply contract diff: %w", err)
 		}
 	}
-	return nil
+
+	// update state element proofs
+	return updateContractElementProofs(tx, cau)
 }
 
 func (m *ContractManager) applyContractDiff(tx *updateTx, diff consensus.V2FileContractElementDiff) error {
@@ -111,7 +113,7 @@ func (m *ContractManager) applyContractDiff(tx *updateTx, diff consensus.V2FileC
 	if rev, ok := diff.V2RevisionElement(); ok {
 		fce = rev
 	}
-	if err := tx.UpdateContractElement(fce); err != nil {
+	if err := tx.UpdateContractElements(fce); err != nil {
 		return fmt.Errorf("failed to update contract element: %w", err)
 	}
 	return nil
@@ -128,7 +130,7 @@ func (m *ContractManager) revertChainUpdate(tx *updateTx, cru chain.RevertUpdate
 			return fmt.Errorf("failed to apply contract diff: %w", err)
 		}
 	}
-	return nil
+	return updateContractElementProofs(tx, cru)
 }
 
 func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2FileContractElementDiff) error {
@@ -155,8 +157,22 @@ func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2File
 	if rev, ok := diff.V2RevisionElement(); ok {
 		fce = rev
 	}
-	if err := tx.UpdateContractElement(fce); err != nil {
+	if err := tx.UpdateContractElements(fce); err != nil {
 		return fmt.Errorf("failed to update contract element: %w", err)
+	}
+	return nil
+}
+
+func updateContractElementProofs(tx *updateTx, updater wallet.ProofUpdater) error {
+	fces, err := tx.ContractElements()
+	if err != nil {
+		return err
+	}
+	for i := range fces {
+		updater.UpdateElementProof(&fces[i].StateElement)
+	}
+	if err := tx.UpdateContractElements(fces...); err != nil {
+		return fmt.Errorf("failed to update contract state elements: %w", err)
 	}
 	return nil
 }

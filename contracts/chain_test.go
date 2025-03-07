@@ -24,6 +24,14 @@ func newMockUpdateTx() *mockUpdateTx {
 	}
 }
 
+func (tx *mockUpdateTx) ContractElements() ([]types.V2FileContractElement, error) {
+	var stateElements []types.V2FileContractElement
+	for _, fce := range tx.contracts {
+		stateElements = append(stateElements, fce)
+	}
+	return stateElements, nil
+}
+
 func (tx *mockUpdateTx) AddContract(fce types.V2FileContractElement) {
 	tx.contracts[fce.ID] = fce
 	tx.state[fce.ID] = ContractStatePending
@@ -46,8 +54,10 @@ func (tx *mockUpdateTx) IsKnownContract(contractID types.FileContractID) (bool, 
 	return ok, nil
 }
 
-func (tx *mockUpdateTx) UpdateContractElement(fce types.V2FileContractElement) error {
-	tx.contracts[fce.ID] = fce
+func (tx *mockUpdateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
+	for _, fce := range fces {
+		tx.contracts[fce.ID] = fce
+	}
 	return nil
 }
 
