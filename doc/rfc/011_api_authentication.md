@@ -21,10 +21,10 @@ of virtual network over docker, K8s or similar.
 
 ## User API
 
-The user API is a bit more tricky. Users or rather their apps need to be able to
-authenticate via a private key corresponding to a previously registered public
-key. This public key serves for identifying the app as well as the account the
-`indexer` funds for the user with its hosts.
+The user API is a bit more tricky. Users, or rather their apps, need to be able
+to authenticate via a private key corresponding to a previously registered
+public key. This public key serves for identifying the app as well as the
+account the `indexer` funds for the user with its hosts.
 
 ### Signed URLs
 
