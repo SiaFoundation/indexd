@@ -263,7 +263,7 @@ func TestUpdateContractElement(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		} else if !reflect.DeepEqual(ele, fce) {
-			t.Fatalf("mismatch: \n%v+\n%v+", fce, ele)
+			t.Fatalf("mismatch: \n%+v\n%+v", fce, ele)
 		}
 	}
 

@@ -10,6 +10,20 @@ import (
 	"go.sia.tech/coreutils/wallet"
 )
 
+type mockProofUpdater struct {
+	updateFn func(*types.StateElement)
+}
+
+func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) {
+	u.updateFn(stateElement)
+}
+
+// newMockProofUpdater creates a mock implementation of ProofUpdater with a custom
+// update function.
+func newMockProofUpdater(updateFn func(*types.StateElement)) wallet.ProofUpdater {
+	return &mockProofUpdater{updateFn}
+}
+
 // mockUpdateTx is a mocked implementation of UpdateTx which allows for unit
 // testing the contract manager's chain updates without a full database.
 type mockUpdateTx struct {
@@ -17,6 +31,7 @@ type mockUpdateTx struct {
 	state     map[types.FileContractID]ContractState
 }
 
+// newMockUpdateTx creates a new mock UpdateTx.
 func newMockUpdateTx() *mockUpdateTx {
 	return &mockUpdateTx{
 		contracts: make(map[types.FileContractID]types.V2FileContractElement),
@@ -182,4 +197,41 @@ func TestApplyRevertDiff(t *testing.T) {
 		V2FileContractElement: fce,
 	})
 	assertContract(ContractStatePending)
+}
+
+func TestUpdateContractElementProofs(t *testing.T) {
+	contract := types.V2FileContractElement{
+		ID: types.FileContractID{1},
+		StateElement: types.StateElement{
+			LeafIndex:   uint64(1),
+			MerkleProof: []types.Hash256{{1}},
+		},
+		V2FileContract: types.V2FileContract{
+			HostPublicKey:   types.PublicKey{1},
+			RenterPublicKey: types.PublicKey{1},
+		},
+	}
+
+	// mock the update tx and add a contract
+	mock := newMockUpdateTx()
+	mock.AddContract(contract)
+	updateTx := &updateTx{
+		UpdateTx:       mock,
+		knownContracts: make(map[types.FileContractID]bool),
+	}
+
+	// check initial contract
+	if fce, _ := mock.Contract(contract.ID); !reflect.DeepEqual(fce, contract) {
+		t.Fatalf("mismatch \n%+v\n%+v", fce, contract)
+	}
+
+	// update proof on contract
+	contract2 := contract
+	contract2.StateElement.MerkleProof = []types.Hash256{{2}}
+	updateContractElementProofs(updateTx, &mockProofUpdater{updateFn: func(stateElement *types.StateElement) {
+		stateElement.MerkleProof = contract2.StateElement.MerkleProof
+	}})
+	if fce, _ := mock.Contract(contract2.ID); !reflect.DeepEqual(fce, contract2) {
+		t.Fatalf("mismatch \n%+v\n%+v", fce, contract2)
+	}
 }
