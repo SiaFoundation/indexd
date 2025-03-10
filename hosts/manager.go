@@ -25,6 +25,10 @@ const (
 	ipv4FilterRange = 24
 	ipv6FilterRange = 32
 
+	pruneFrequency                  = time.Hour * 24
+	pruneMinConsecutiveScanFailures = 10
+	pruneMinDowntime                = time.Hour * 24 * 365 // 1 year
+
 	scanThreads                    = 50
 	scanTimeout                    = time.Minute
 	scanIntervalOffsetHours        = 6
@@ -38,6 +42,7 @@ type (
 	Store interface {
 		Host(ctx context.Context, hk types.PublicKey) (Host, error)
 		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
+		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
 		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
 	}
 
@@ -101,7 +106,23 @@ func NewManager(store Store, opts ...Option) (*HostManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	go func() {
+	go func(ctx context.Context, cancel context.CancelFunc) {
+		defer cancel()
+		for {
+			m.pruneHosts(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(pruneFrequency):
+			}
+		}
+	}(ctx, cancel)
+
+	ctx, cancel, err = m.tg.AddContext(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	go func(ctx context.Context, cancel context.CancelFunc) {
 		defer cancel()
 		for {
 			m.scanHosts(ctx)
@@ -111,9 +132,7 @@ func NewManager(store Store, opts ...Option) (*HostManager, error) {
 			case <-time.After(m.scanFrequency):
 			}
 		}
-	}()
-
-	// TODO: add host pruning
+	}(ctx, cancel)
 
 	return m, nil
 }
@@ -200,6 +219,25 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 		}
 	}
 	return nil
+}
+
+func (m *HostManager) pruneHosts(ctx context.Context) {
+	cutoff := time.Now().Add(-pruneMinDowntime)
+	n, err := m.store.PruneHosts(ctx, time.Now().Add(-pruneMinDowntime), pruneMinConsecutiveScanFailures)
+	if err != nil {
+		m.log.Error("failed to prune hosts",
+			zap.Time("minLastSuccessfulScan", cutoff),
+			zap.Int("minConsecutiveFailures", pruneMinConsecutiveScanFailures),
+			zap.Error(err),
+		)
+		return
+	} else if n > 0 {
+		m.log.Debug("pruned hosts",
+			zap.Time("minLastSuccessfulScan", cutoff),
+			zap.Int("minConsecutiveFailures", pruneMinConsecutiveScanFailures),
+			zap.Int64("removed", n),
+		)
+	}
 }
 
 func (m *HostManager) scanHosts(ctx context.Context) {

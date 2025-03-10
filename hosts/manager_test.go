@@ -35,6 +35,11 @@ func (s *mockStore) Host(ctx context.Context, hk types.PublicKey) (Host, error) 
 }
 
 func (s *mockStore) HostsForScanning(ctx context.Context) ([]types.PublicKey, error) { return nil, nil }
+
+func (s *mockStore) PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error) {
+	return 0, nil
+}
+
 func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error {
 	return nil
 }

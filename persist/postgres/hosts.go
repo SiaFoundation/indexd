@@ -145,6 +145,24 @@ func (s *Store) HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
 	return hosts, nil
 }
 
+// PruneHosts removes hosts that have not been successfully scanned since the
+// given cutoff time and have failed scans consecutively for at least
+// minConsecutiveFailedScans times.
+func (s *Store) PruneHosts(ctx context.Context, minLastSuccessfulScan time.Time, minConsecutiveFailedScans int) (int64, error) {
+	var n int64
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		res, err := tx.Exec(ctx, `DELETE FROM hosts WHERE last_successful_scan <= $1 AND consecutive_failed_scans >= $2 AND NOT EXISTS (SELECT * FROM contracts WHERE host_id = hosts.id)`, minLastSuccessfulScan, minConsecutiveFailedScans)
+		if err != nil {
+			return fmt.Errorf("failed to prune hosts: %w", err)
+		}
+		n = res.RowsAffected()
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
 // UpdateHost updates a host in the database, the given parameters are the result of scanning the host.
 func (s *Store) UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
