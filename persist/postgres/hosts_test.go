@@ -173,6 +173,131 @@ func TestHostsForScanning(t *testing.T) {
 	}
 }
 
+func TestPruneHosts(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// create helper to add a host
+	addHost := func() types.PublicKey {
+		t.Helper()
+		hk := types.GeneratePrivateKey().PublicKey()
+		if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return hk
+	}
+
+	// add two hosts
+	addHost()
+	addHost()
+
+	// assert both get pruned when no params are given
+	n, err := db.PruneHosts(context.Background(), time.Time{}, 0)
+	if err != nil {
+		t.Fatal(err)
+	} else if n != 2 {
+		t.Fatal("unexpected", n)
+	}
+
+	// re-add the hosts
+	h1 := addHost()
+	h2 := addHost()
+
+	// assert none get pruned when we require at least one failed scan
+	n, err = db.PruneHosts(context.Background(), time.Now().Add(time.Second), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal("unexpected", n)
+	}
+
+	// simulate failed scan for h1
+	err = db.UpdateHost(context.Background(), h1, nil, proto4.HostSettings{}, false, time.Time{})
+	if err != nil {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert h1 gets pruned
+	n, err = db.PruneHosts(context.Background(), time.Now().Add(time.Second), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal("unexpected", n)
+	} else if _, err = db.Host(context.Background(), h1); !errors.Is(err, ErrHostNotFound) {
+		t.Fatal("expected ErrHostNotFound, got", err)
+	}
+
+	// simulate failed scan for h2
+	err = db.UpdateHost(context.Background(), h2, nil, proto4.HostSettings{}, false, time.Time{})
+	if err != nil {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert h2 gets pruned
+	n, err = db.PruneHosts(context.Background(), time.Now().Add(time.Second), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal("unexpected", n)
+	}
+
+	// re-add both hosts, simulate both a successful and failed scan
+	h1 = addHost()
+	h2 = addHost()
+	err = errors.Join(
+		db.UpdateHost(context.Background(), h1, nil, proto4.HostSettings{}, true, time.Time{}),
+		db.UpdateHost(context.Background(), h1, nil, proto4.HostSettings{}, false, time.Time{}),
+		db.UpdateHost(context.Background(), h2, nil, proto4.HostSettings{}, true, time.Time{}),
+		db.UpdateHost(context.Background(), h2, nil, proto4.HostSettings{}, false, time.Time{}),
+	)
+	if err != nil {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert both do not get pruned if we set the cutoff in the past
+	n, err = db.PruneHosts(context.Background(), time.Now().Add(-time.Second), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatal("unexpected", n)
+	}
+
+	// add contract to h2
+	err = db.AddFormedContract(context.Background(), types.FileContractID{1}, h2, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert only h1 got pruned if we set the cutoff in the future
+	n, err = db.PruneHosts(context.Background(), time.Now().Add(time.Second), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal("unexpected", n)
+	} else if _, err = db.Host(context.Background(), h1); !errors.Is(err, ErrHostNotFound) {
+		t.Fatal("expected ErrHostNotFound, got", err)
+	}
+
+	// delete all contracts
+	if err := db.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, "DELETE FROM contracts")
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert h2 gets pruned now as well
+	n, err = db.PruneHosts(context.Background(), time.Now().Add(time.Second), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatal("unexpected", n)
+	}
+}
+
 func TestUpdateHost(t *testing.T) {
 	// create database
 	log := zaptest.NewLogger(t)
