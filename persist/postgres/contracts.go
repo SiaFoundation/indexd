@@ -175,6 +175,29 @@ INNER JOIN contracts c ON fces.contract_id = c.id
 	return fces, rows.Err()
 }
 
+func (tx *updateTx) ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
+	rows, err := tx.tx.Query(tx.ctx, `
+WITH current_height AS (SELECT height FROM global_settings)
+SELECT fces.contract_id, fces.contract, fces.leaf_index, fces.merkle_proof
+FROM contracts
+INNER JOIN contract_elements ON contracts.id = contract_elements.contract_id
+SELECT contract_id, contract, leaf_index, merkle_proof
+WHERE current_height + $1 >= expiration_height
+`)
+	if err != nil {
+		return nil, err
+	}
+	var fces []types.V2FileContractElement
+	for rows.Next() {
+		fce, err := scanContractElement(rows)
+		if err != nil {
+			return nil, err
+		}
+		fces = append(fces, fce)
+	}
+	return fces, rows.Err()
+}
+
 func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, error) {
 	var exists bool
 	err := tx.tx.QueryRow(tx.ctx, `SELECT EXISTS (SELECT 1 FROM contracts WHERE contract_id = $1)`, sqlHash256(contractID)).
