@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
@@ -16,6 +17,7 @@ type (
 	UpdateTx interface {
 		ContractElements() ([]types.V2FileContractElement, error)
 		IsKnownContract(contractID types.FileContractID) (bool, error)
+		RejectPendingContracts(maxAge time.Duration) error
 		UpdateContractElements(fces ...types.V2FileContractElement) error
 		UpdateContractState(contractID types.FileContractID, state ContractState) error
 	}
@@ -61,7 +63,10 @@ func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertU
 		}
 	}
 
-	// TODO: reject all contracts that have been pending for more than 'contractRejectBuffer'
+	// reject all contracts that have been pending for more than 'contractRejectBuffer'
+	if err := tx.RejectPendingContracts(m.contractRejectBuffer); err != nil {
+		return fmt.Errorf("failed to reject pending contracts: %w", err)
+	}
 
 	// TODO: broadcast resolutions for expired contracts
 	// 'expiredContractBroadcastBuffer' blocks after their window end to give

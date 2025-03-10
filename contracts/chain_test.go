@@ -4,6 +4,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
@@ -39,17 +40,17 @@ func newMockUpdateTx() *mockUpdateTx {
 	}
 }
 
+func (tx *mockUpdateTx) AddContract(fce types.V2FileContractElement) {
+	tx.contracts[fce.ID] = fce
+	tx.state[fce.ID] = ContractStatePending
+}
+
 func (tx *mockUpdateTx) ContractElements() ([]types.V2FileContractElement, error) {
 	var stateElements []types.V2FileContractElement
 	for _, fce := range tx.contracts {
 		stateElements = append(stateElements, fce)
 	}
 	return stateElements, nil
-}
-
-func (tx *mockUpdateTx) AddContract(fce types.V2FileContractElement) {
-	tx.contracts[fce.ID] = fce
-	tx.state[fce.ID] = ContractStatePending
 }
 
 func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileContractElement, ContractState) {
@@ -67,6 +68,10 @@ func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileC
 func (tx *mockUpdateTx) IsKnownContract(contractID types.FileContractID) (bool, error) {
 	_, ok := tx.contracts[contractID]
 	return ok, nil
+}
+
+func (tx *mockUpdateTx) RejectPendingContracts(time.Duration) error {
+	panic("not implemented")
 }
 
 func (tx *mockUpdateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
