@@ -146,11 +146,16 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (proto4.
 		return proto4.HostSettings{}, fmt.Errorf("failed to fetch settings, %w", err)
 	}
 
+	consecutiveFailures := host.ConsecutiveFailedScans
 	success := settings != (proto4.HostSettings{})
+	if !success {
+		consecutiveFailures++
+	}
+
 	nextScan := calculateNextScanTime(
 		time.Now(),
 		success,
-		host.ConsecutiveFailedScans,
+		consecutiveFailures,
 		m.scanInterval,
 		scanIntervalOffsetHours,
 		scanExponentialBackoffHours,
@@ -286,7 +291,6 @@ func calculateNextScanTime(lastScan time.Time, success bool, consecScanFailures 
 		return lastScan.Add(interval).Add(randomOffset)
 	}
 
-	consecScanFailures++
 	expBackoff := time.Duration(min(expBackoffHours*consecScanFailures, expBackoffHoursMax)) * time.Hour
 	return lastScan.Add(expBackoff)
 }
