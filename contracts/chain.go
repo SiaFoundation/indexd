@@ -16,6 +16,7 @@ type (
 	// chain update in the database.
 	UpdateTx interface {
 		ContractElements() ([]types.V2FileContractElement, error)
+		ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		IsKnownContract(contractID types.FileContractID) (bool, error)
 		RejectPendingContracts(maxFormation time.Time) error
 		UpdateContractElements(fces ...types.V2FileContractElement) error
