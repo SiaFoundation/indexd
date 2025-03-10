@@ -156,7 +156,11 @@ func (s *Store) SetContractBad(contractID types.FileContractID) error {
 }
 
 func (tx *updateTx) ContractElements() ([]types.V2FileContractElement, error) {
-	rows, err := tx.tx.Query(tx.ctx, `SELECT contract_id, contract, leaf_index, merkle_proof FROM contract_elements`)
+	rows, err := tx.tx.Query(tx.ctx, `
+SELECT c.contract_id, fces.contract, fces.leaf_index, fces.merkle_proof
+FROM contract_elements fces
+INNER JOIN contracts c ON fces.contract_id = c.id
+`)
 	if err != nil {
 		return nil, err
 	}

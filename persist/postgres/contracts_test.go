@@ -354,6 +354,20 @@ func TestUpdateContractElement(t *testing.T) {
 		} else if !reflect.DeepEqual(ele, fce) {
 			t.Fatalf("mismatch: \n%+v\n%+v", fce, ele)
 		}
+		var fces []types.V2FileContractElement
+		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
+			fces, err = tx.ContractElements()
+			return
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ele := range fces {
+			if reflect.DeepEqual(ele, fce) {
+				return // found
+			}
+		}
+		t.Fatal("contract element not found")
 	}
 
 	// contract shouldn't exist
