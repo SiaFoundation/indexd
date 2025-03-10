@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"time"
 
 	"go.sia.tech/core/types"
 )
@@ -39,6 +40,7 @@ type (
 		ID      types.FileContractID `json:"id"`
 		HostKey types.PublicKey      `json:"hostKey"`
 
+		Formation        time.Time            `json:"formation"`
 		ProofHeight      uint64               `json:"proofHeight"`      // start of the contract's proof window
 		ExpirationHeight uint64               `json:"expirationHeight"` // end of the contract's proof window
 		RenewedFrom      types.FileContractID `json:"renewedFrom"`

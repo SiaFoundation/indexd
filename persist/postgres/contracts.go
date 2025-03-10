@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"go.sia.tech/core/types"
@@ -122,7 +123,7 @@ func (s *Store) Contract(ctx context.Context, contractID types.FileContractID) (
 	var contract contracts.Contract
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		contract, err = scanContract(tx.QueryRow(ctx, `
-SELECT c.contract_id, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.miner_fee, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
+SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.miner_fee, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 LEFT JOIN contracts c_from ON c.renewed_from = c_from.id
@@ -180,6 +181,12 @@ func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, erro
 	return exists, nil
 }
 
+func (tx *updateTx) RejectPendingContracts(maxAge time.Duration) error {
+	_, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET state = $1 WHERE state = $2 AND NOW() > formation + $3`,
+		sqlContractState(contracts.ContractStateRejected), sqlContractState(contracts.ContractStatePending), maxAge)
+	return err
+}
+
 func (tx *updateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
 	for _, fce := range fces {
 		_, err := tx.tx.Exec(tx.ctx, `
@@ -208,6 +215,7 @@ func (tx *updateTx) UpdateContractState(contractID types.FileContractID, state c
 func scanContract(row scanner) (contracts.Contract, error) {
 	var c contracts.Contract
 	err := row.Scan((*sqlHash256)(&c.ID),
+		&c.Formation,
 		(*sqlPublicKey)(&c.HostKey),
 		&c.ProofHeight, &c.ExpirationHeight,
 		asNullable((*sqlHash256)(&c.RenewedFrom)),

@@ -15,6 +15,7 @@ import (
 )
 
 func TestFormRenewContract(t *testing.T) {
+	start := time.Now()
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
@@ -32,7 +33,11 @@ func TestFormRenewContract(t *testing.T) {
 		contract, err := store.Contract(context.Background(), id)
 		if err != nil {
 			t.Fatal("failed to fetch contract", err)
-		} else if !reflect.DeepEqual(contract, expected) {
+		} else if contract.Formation.Before(start) || contract.Formation.After(time.Now()) {
+			t.Fatalf("expected formation time to be after start time but not in the future")
+		}
+		contract.Formation = time.Time{}
+		if !reflect.DeepEqual(contract, expected) {
 			t.Fatalf("mismatch: \n%+v\n%+v", contract, expected)
 		}
 	}
