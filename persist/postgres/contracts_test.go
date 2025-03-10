@@ -159,6 +159,90 @@ func TestFormRenewContract(t *testing.T) {
 	assertContract(expectedRenewed.ID, expectedRenewed)
 }
 
+func TestRejectContracts(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := types.PublicKey{1, 1, 1}
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// helper to assert contract state
+	assertContractState := func(id types.FileContractID, state contracts.ContractState) {
+		t.Helper()
+		contract, err := store.Contract(context.Background(), id)
+		if err != nil {
+			t.Fatal("failed to fetch contract", err)
+		} else if contract.State != state {
+			t.Fatalf("expected state %v, got %v", state, contract.State)
+		}
+	}
+
+	// helper to modify contract
+	updateStateAndFormation := func(id types.FileContractID, state contracts.ContractState, formation time.Time) {
+		t.Helper()
+		err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.UpdateContractState(id, state)
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+			_, err := tx.Exec(ctx, `UPDATE contracts SET formation = $1 WHERE contract_id = $2`, formation, sqlHash256(id))
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// form 3 contracts
+	now := time.Now()
+	for i := 0; i < 3; i++ {
+		contractID := types.FileContractID{byte(i + 1)}
+		err = store.AddFormedContract(context.Background(), contractID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3))
+		if err != nil {
+			t.Fatal("failed to add formed contract", err)
+		}
+		switch i {
+		case 0:
+			updateStateAndFormation(contractID, contracts.ContractStatePending, now) // recently formed
+		case 1:
+			updateStateAndFormation(contractID, contracts.ContractStatePending, now.Add(-time.Hour)) // formed an hour ago
+		case 2:
+			updateStateAndFormation(contractID, contracts.ContractStateActive, now.Add(-time.Hour)) // formed an hour ago but active
+		}
+	}
+
+	// assert initial state of contracts
+	recentID := types.FileContractID{1}
+	assertContractState(recentID, contracts.ContractStatePending)
+	oldID := types.FileContractID{2}
+	assertContractState(oldID, contracts.ContractStatePending)
+	activeID := types.FileContractID{3}
+	assertContractState(activeID, contracts.ContractStateActive)
+
+	// reject pending contracts older than 30 minutes
+	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.RejectPendingContracts(30 * time.Minute)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert state of contracts after rejection
+	// 'recentID' should still be pending
+	// 'oldID' should be rejected
+	// 'activeID' should still be active
+	assertContractState(recentID, contracts.ContractStatePending)
+	assertContractState(oldID, contracts.ContractStateRejected)
+	assertContractState(activeID, contracts.ContractStateActive)
+}
+
 func TestSetContractGood(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
