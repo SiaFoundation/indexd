@@ -25,7 +25,10 @@ configuration entry.
 CREATE TABLE global_settings (
     id INTEGER PRIMARY KEY NOT NULL DEFAULT 0 CHECK (id = 0), -- enforce a single row
     db_version INTEGER NOT NULL, -- used for migrations
-    last_scanned_index BYTEA, -- chain index of the last scanned block
+
+    -- chain index of the last scanned block
+    scanned_height BIGINT NOT NULL DEFAULT 0,
+    scanned_block_id BYTEA
 
     -- pinned price limits in currency's base unit (e.g. ¢ for USD)
     pinned_currency TEXT, -- e.g. USD, EUR, etc.
