@@ -120,6 +120,7 @@ CREATE TABLE contracts (
   fund_account_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
   sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0
 );
+CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- for rejecting expired contracts
 
 CREATE TABLE contract_elements (
     id SERIAL PRIMARY KEY,

@@ -167,6 +167,7 @@ CREATE TABLE contracts (
   contract_id BYTEA NOT NULL UNIQUE DEFERRABLE,
 
   -- lifetime related columns
+  formation TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   proof_height BIGINT NOT NULL, -- start of proof window
   expiration_height BIGINT NOT NULL, -- end of proof window
   renewed_from INTEGER REFERENCES contracts(id) UNIQUE DEFERRABLE,
@@ -191,6 +192,7 @@ CREATE TABLE contracts (
   fund_account_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
   sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0
 );
+CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- for rejecting expired contracts
 
 CREATE TABLE contract_elements (
     id SERIAL PRIMARY KEY,
