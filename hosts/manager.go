@@ -106,33 +106,27 @@ func NewManager(store Store, opts ...Option) (*HostManager, error) {
 	if err != nil {
 		return nil, err
 	}
-	go func(ctx context.Context, cancel context.CancelFunc) {
+	go func() {
 		defer cancel()
-		for {
-			m.pruneHosts(ctx)
-			select {
-			case <-ctx.Done():
-				return
-			case <-time.After(pruneFrequency):
-			}
-		}
-	}(ctx, cancel)
 
-	ctx, cancel, err = m.tg.AddContext(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	go func(ctx context.Context, cancel context.CancelFunc) {
-		defer cancel()
+		pruneTicker := time.NewTicker(pruneFrequency)
+		scanTicker := time.NewTicker(m.scanFrequency)
+		defer func() {
+			pruneTicker.Stop()
+			scanTicker.Stop()
+		}()
+
 		for {
-			m.scanHosts(ctx)
 			select {
+			case <-pruneTicker.C:
+				m.pruneHosts(ctx)
+			case <-scanTicker.C:
+				m.scanHosts(ctx)
 			case <-ctx.Done():
 				return
-			case <-time.After(m.scanFrequency):
 			}
 		}
-	}(ctx, cancel)
+	}()
 
 	return m, nil
 }
