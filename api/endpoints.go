@@ -9,6 +9,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/build"
+	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 )
@@ -53,6 +54,33 @@ func (a *api) handleGETState(jc jape.Context) {
 		},
 		ScanHeight: ci.Height,
 	})
+}
+
+func (a *api) handleGETHost(jc jape.Context) {
+	var hk types.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
+		return
+	}
+	host, err := a.store.Host(jc.Request.Context(), hk)
+	if errors.Is(err, postgres.ErrHostNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get host", err) != nil {
+		return
+	}
+	jc.Encode(host)
+}
+
+func (a *api) handleGETHosts(jc jape.Context) {
+	offset, limit, ok := parseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+	hosts, err := a.store.Hosts(jc.Request.Context(), offset, limit)
+	if jc.Check("failed to get hosts", err) != nil {
+		return
+	}
+	jc.Encode(hosts)
 }
 
 func (a *api) handleGETWallet(jc jape.Context) {
