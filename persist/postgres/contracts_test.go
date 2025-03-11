@@ -15,7 +15,7 @@ import (
 )
 
 func TestFormRenewContract(t *testing.T) {
-	start := time.Now()
+	start := time.Now().Round(time.Microsecond)
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
@@ -33,7 +33,7 @@ func TestFormRenewContract(t *testing.T) {
 		contract, err := store.Contract(context.Background(), id)
 		if err != nil {
 			t.Fatal("failed to fetch contract", err)
-		} else if contract.Formation.Before(start) || contract.Formation.After(time.Now()) {
+		} else if contract.Formation.Before(start) || contract.Formation.After(time.Now().Round(time.Microsecond)) {
 			t.Fatalf("expected formation time to be after start time but not in the future")
 		}
 		contract.Formation = time.Time{}
@@ -202,7 +202,7 @@ func TestRejectContracts(t *testing.T) {
 
 	// form 3 contracts
 	now := time.Now()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		contractID := types.FileContractID{byte(i + 1)}
 		err = store.AddFormedContract(context.Background(), contractID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3))
 		if err != nil {
@@ -228,16 +228,13 @@ func TestRejectContracts(t *testing.T) {
 
 	// reject pending contracts older than 30 minutes
 	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.RejectPendingContracts(30 * time.Minute)
+		return tx.RejectPendingContracts(now.Add(-30 * time.Minute))
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert state of contracts after rejection
-	// 'recentID' should still be pending
-	// 'oldID' should be rejected
-	// 'activeID' should still be active
 	assertContractState(recentID, contracts.ContractStatePending)
 	assertContractState(oldID, contracts.ContractStateRejected)
 	assertContractState(activeID, contracts.ContractStateActive)

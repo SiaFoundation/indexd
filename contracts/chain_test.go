@@ -70,7 +70,7 @@ func (tx *mockUpdateTx) IsKnownContract(contractID types.FileContractID) (bool, 
 	return ok, nil
 }
 
-func (tx *mockUpdateTx) RejectPendingContracts(time.Duration) error {
+func (tx *mockUpdateTx) RejectPendingContracts(time.Time) error {
 	panic("not implemented")
 }
 

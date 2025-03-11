@@ -17,7 +17,7 @@ type (
 	UpdateTx interface {
 		ContractElements() ([]types.V2FileContractElement, error)
 		IsKnownContract(contractID types.FileContractID) (bool, error)
-		RejectPendingContracts(maxAge time.Duration) error
+		RejectPendingContracts(maxFormation time.Time) error
 		UpdateContractElements(fces ...types.V2FileContractElement) error
 		UpdateContractState(contractID types.FileContractID, state ContractState) error
 	}
@@ -64,7 +64,8 @@ func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertU
 	}
 
 	// reject all contracts that have been pending for more than 'contractRejectBuffer'
-	if err := tx.RejectPendingContracts(m.contractRejectBuffer); err != nil {
+	maxFormation := time.Now().Add(-m.contractRejectBuffer)
+	if err := tx.RejectPendingContracts(maxFormation); err != nil {
 		return fmt.Errorf("failed to reject pending contracts: %w", err)
 	}
 
