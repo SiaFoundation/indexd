@@ -33,28 +33,18 @@ const (
 )
 
 type (
-	// Store defines an interface to fetch hosts that need to be scanned and
-	// persist the scan results in the database.
-	Store interface {
-		Host(ctx context.Context, hk types.PublicKey) (Host, error)
-		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
-		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
-	}
-
-	// Resolver defines an interface to resolve hostnames.
-	Resolver interface {
-		LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
-	}
-
-	// RHP4Client defines an interface to scan hosts.
-	RHP4Client interface {
-		Settings(context.Context, types.PublicKey, string) (proto4.HostSettings, error)
-	}
-
-	// UpdateTx defines what the host manager needs to atomically process a
-	// chain update in the database.
-	UpdateTx interface {
-		AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnouncement, ts time.Time) error
+	// Host is a host on the network.
+	Host struct {
+		PublicKey              types.PublicKey     `json:"publicKey"`
+		LastAnnouncement       time.Time           `json:"lastAnnouncement"`
+		LastSuccessfulScan     time.Time           `json:"lastSuccessfulScan"`
+		NextScan               time.Time           `json:"nextScan"`
+		TotalScans             int                 `json:"totalScans"`
+		FailedScans            int                 `json:"failedScans"`
+		ConsecutiveFailedScans int                 `json:"consecutiveFailedScans"`
+		Addresses              []chain.NetAddress  `json:"addresses"`
+		Networks               []net.IPNet         `json:"networks"`
+		Settings               proto4.HostSettings `json:"settings"`
 	}
 
 	// HostManager manages the host announcements.
@@ -69,6 +59,30 @@ type (
 
 		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
+	}
+
+	// Resolver defines an interface to resolve hostnames.
+	Resolver interface {
+		LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+	}
+
+	// RHP4Client defines an interface to scan hosts.
+	RHP4Client interface {
+		Settings(context.Context, types.PublicKey, string) (proto4.HostSettings, error)
+	}
+
+	// Store defines an interface to fetch hosts that need to be scanned and
+	// persist the scan results in the database.
+	Store interface {
+		Host(ctx context.Context, hk types.PublicKey) (Host, error)
+		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
+		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
+	}
+
+	// UpdateTx defines what the host manager needs to atomically process a
+	// chain update in the database.
+	UpdateTx interface {
+		AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnouncement, ts time.Time) error
 	}
 )
 

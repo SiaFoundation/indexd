@@ -302,7 +302,7 @@ func TestResolveHost(t *testing.T) {
 		t.Fatal("unexpected", len(addrs))
 	}
 
-	// assert networks are parsed and added
+	// assert net addresses get resolved and networks are returned
 	addrs, networks, err := resolveHost(context.Background(), r, []chain.NetAddress{testMuxAddr("h2.com:1234")}, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
