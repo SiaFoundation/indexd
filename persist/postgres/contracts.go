@@ -167,7 +167,7 @@ INNER JOIN contracts c ON fces.contract_id = c.id
 	for rows.Next() {
 		fce, err := scanContractElement(rows)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to scan contract element: %w", err)
 		}
 		fces = append(fces, fce)
 	}
@@ -194,7 +194,7 @@ VALUES (
 ) ON CONFLICT (contract_id) DO UPDATE SET contract = EXCLUDED.contract, leaf_index = EXCLUDED.leaf_index, merkle_proof = EXCLUDED.merkle_proof
 `, sqlHash256(fce.ID), (*sqlFileContract)(&fce.V2FileContract), fce.StateElement.LeafIndex, sqlMerkleProof(fce.StateElement.MerkleProof))
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to update contract element for contract %v: %w", fce.ID, err)
 		}
 	}
 	return nil

@@ -18,12 +18,6 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 	u.updateFn(stateElement)
 }
 
-// newMockProofUpdater creates a mock implementation of ProofUpdater with a custom
-// update function.
-func newMockProofUpdater(updateFn func(*types.StateElement)) wallet.ProofUpdater {
-	return &mockProofUpdater{updateFn}
-}
-
 // mockUpdateTx is a mocked implementation of UpdateTx which allows for unit
 // testing the contract manager's chain updates without a full database.
 type mockUpdateTx struct {
