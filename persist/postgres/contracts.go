@@ -185,9 +185,9 @@ func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, erro
 	return exists, nil
 }
 
-func (tx *updateTx) RejectPendingContracts(maxAge time.Duration) error {
-	_, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET state = $1 WHERE state = $2 AND NOW() > formation + $3`,
-		sqlContractState(contracts.ContractStateRejected), sqlContractState(contracts.ContractStatePending), maxAge)
+func (tx *updateTx) RejectPendingContracts(maxFormation time.Time) error {
+	_, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET state = $1 WHERE state = $2 AND formation < $3`,
+		sqlContractState(contracts.ContractStateRejected), sqlContractState(contracts.ContractStatePending), maxFormation)
 	return err
 }
 
