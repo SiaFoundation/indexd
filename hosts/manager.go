@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/threadgroup"
-	"go.sia.tech/indexd/internal/rhp/v4"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -54,7 +53,7 @@ type (
 		scanInterval       time.Duration
 
 		resolver Resolver
-		client   RHP4Client
+		scanner  Scanner
 		store    Store
 
 		tg  *threadgroup.ThreadGroup
@@ -66,8 +65,8 @@ type (
 		LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
 	}
 
-	// RHP4Client defines an interface to scan hosts.
-	RHP4Client interface {
+	// Scanner defines an interface to scan hosts.
+	Scanner interface {
 		Settings(context.Context, types.PublicKey, string) (proto4.HostSettings, error)
 	}
 
@@ -94,7 +93,7 @@ func NewManager(store Store, opts ...Option) (*HostManager, error) {
 		scanInterval:       time.Hour * 24,
 
 		resolver: &net.Resolver{},
-		client:   rhp.New(),
+		scanner:  &scanner{},
 		store:    store,
 		tg:       threadgroup.New(),
 		log:      zap.NewNop(),
@@ -155,7 +154,7 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (proto4.
 		return proto4.HostSettings{}, fmt.Errorf("failed to resolve host, %w", err)
 	}
 
-	settings, err := fetchSettings(scanCtx, m.client, hk, addrs, logger)
+	settings, err := fetchSettings(scanCtx, m.scanner, hk, addrs, logger)
 	if err != nil {
 		return proto4.HostSettings{}, fmt.Errorf("failed to fetch settings, %w", err)
 	}
@@ -260,16 +259,16 @@ func (m *HostManager) scanHosts(ctx context.Context) {
 	m.log.Debug("host scans finished", zap.Int("hosts", len(hosts)), zap.Duration("duration", time.Since(start)))
 }
 
-// fetchSettings uses the given client to fetch the settings of the host with
+// fetchSettings uses the given scanner to fetch the settings of the host with
 // given public key. It only returns the settings if the host is available on
 // every address. The only error this function returns is [context.Canceled],
 // other errors that occur during the resolving and parsing are debug logged but
 // otherwise ignored.
-func fetchSettings(ctx context.Context, client RHP4Client, hk types.PublicKey, addresses []chain.NetAddress, log *zap.Logger) (proto4.HostSettings, error) {
+func fetchSettings(ctx context.Context, scanner Scanner, hk types.PublicKey, addresses []chain.NetAddress, log *zap.Logger) (proto4.HostSettings, error) {
 	var settings []proto4.HostSettings
 	for _, addr := range addresses {
 		if addr.Protocol == siamux.Protocol {
-			hs, err := client.Settings(ctx, hk, addr.Address)
+			hs, err := scanner.Settings(ctx, hk, addr.Address)
 			if errors.Is(err, context.Canceled) {
 				return proto4.HostSettings{}, err
 			} else if err != nil {
