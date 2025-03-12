@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/threadgroup"
 	"go.uber.org/zap"
 )
 
@@ -41,6 +42,7 @@ type (
 		w  Wallet
 
 		log *zap.Logger
+		tg  *threadgroup.ThreadGroup
 
 		contractRejectBuffer           time.Duration
 		expiredContractBroadcastBuffer uint64
@@ -65,6 +67,7 @@ func NewManager(chainManager ChainManager, syncer Syncer, wallet Wallet, opts ..
 		w:  wallet,
 
 		log: zap.NewNop(),
+		tg:  threadgroup.New(),
 
 		contractRejectBuffer:           6 * time.Hour, // 6 hours after formation
 		expiredContractBroadcastBuffer: 144,           // 144 block after expiration
@@ -79,5 +82,6 @@ func NewManager(chainManager ChainManager, syncer Syncer, wallet Wallet, opts ..
 // Close closes the contract manager, terminates any background tasks and waits
 // for them to exit.
 func (cm *ContractManager) Close() error {
+	cm.tg.Stop()
 	return nil
 }
