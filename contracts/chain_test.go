@@ -3,6 +3,7 @@ package contracts
 import (
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -108,12 +109,21 @@ func (tx *mockUpdateTx) UpdateHeight(height uint64) {
 }
 
 type chainManagerMock struct {
+	mu    sync.Mutex
 	tpool []types.V2Transaction
 }
 
 func (cm *chainManagerMock) AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error) {
+	cm.mu.Lock()
 	cm.tpool = append(cm.tpool, txns...)
+	cm.mu.Unlock()
 	return false, nil
+}
+
+func (cm *chainManagerMock) V2PoolTransactions() []types.V2Transaction {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return append([]types.V2Transaction(nil), cm.tpool...)
 }
 
 func (cm *chainManagerMock) RecommendedFee() types.Currency {
@@ -121,11 +131,20 @@ func (cm *chainManagerMock) RecommendedFee() types.Currency {
 }
 
 type syncerMock struct {
+	mu          sync.Mutex
 	broadcasted []types.V2Transaction
 }
 
 func (s *syncerMock) BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) {
+	s.mu.Lock()
 	s.broadcasted = append(s.broadcasted, txns...)
+	s.mu.Unlock()
+}
+
+func (s *syncerMock) BroadcastedSets() []types.V2Transaction {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]types.V2Transaction(nil), s.broadcasted...)
 }
 
 type walletMock struct {
@@ -308,9 +327,9 @@ func TestBroadcastExpiredContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if len(cmMock.tpool) != 0 {
+	if len(cmMock.V2PoolTransactions()) != 0 {
 		t.Fatalf("expected 0 contract in tpool, got %v", len(cmMock.tpool))
-	} else if len(syncerMock.broadcasted) != 0 {
+	} else if len(syncerMock.BroadcastedSets()) != 0 {
 		t.Fatalf("expected 0 broadcasted contracts, got %v", len(syncerMock.broadcasted))
 	}
 
@@ -320,11 +339,11 @@ func TestBroadcastExpiredContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
-	if len(cmMock.tpool) != 1 {
+	if len(cmMock.V2PoolTransactions()) != 1 {
 		t.Fatalf("expected 1 contract in tpool, got %v", len(cmMock.tpool))
-	} else if len(syncerMock.broadcasted) != 1 {
+	} else if sets := syncerMock.BroadcastedSets(); len(sets) != 1 {
 		t.Fatalf("expected 1 broadcasted contracts, got %v", len(syncerMock.broadcasted))
-	} else if len(syncerMock.broadcasted[0].FileContractResolutions) != 1 {
-		t.Fatalf("expected 1 contract resolution in broadcast, got %v", len(syncerMock.broadcasted[0].FileContracts))
+	} else if len(sets[0].FileContractResolutions) != 1 {
+		t.Fatalf("expected 1 contract resolution in broadcast, got %v", len(sets[0].FileContracts))
 	}
 }

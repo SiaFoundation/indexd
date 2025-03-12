@@ -181,6 +181,12 @@ func (m *ContractManager) broadcastExpiredContracts(tx UpdateTx) error {
 	}
 	for _, fce := range expiredFCEs {
 		go func(fce types.V2FileContractElement) {
+			done, err := m.tg.Add()
+			if err != nil {
+				return
+			}
+			defer done()
+
 			const contractResolutionTxnWeight = 1000
 			txn := types.V2Transaction{
 				MinerFee: m.cm.RecommendedFee().Mul64(contractResolutionTxnWeight),
