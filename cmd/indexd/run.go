@@ -61,24 +61,6 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer hm.Close()
 
-	contracts, err := contracts.NewManager(contracts.WithLogger(log.Named("contracts")))
-	if err != nil {
-		return fmt.Errorf("failed to create contracts manager: %w", err)
-	}
-	defer contracts.Close()
-
-	subscriber, err := subscriber.New(cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
-	if err != nil {
-		return fmt.Errorf("failed to create subscriber: %w", err)
-	}
-	defer subscriber.Close()
-
-	httpListener, err := startLocalhostListener(cfg.HTTP.Address, log.Named("listener"))
-	if err != nil {
-		return fmt.Errorf("failed to listen on http address: %w", err)
-	}
-	defer httpListener.Close()
-
 	syncerListener, err := net.Listen("tcp", cfg.Syncer.Address)
 	if err != nil {
 		return fmt.Errorf("failed to listen on syncer address: %w", err)
@@ -120,6 +102,24 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}, syncer.WithLogger(log.Named("syncer")))
 	go s.Run()
 	defer s.Close()
+
+	contracts, err := contracts.NewManager(cm, s, wm, contracts.WithLogger(log.Named("contracts")))
+	if err != nil {
+		return fmt.Errorf("failed to create contracts manager: %w", err)
+	}
+	defer contracts.Close()
+
+	subscriber, err := subscriber.New(cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
+	if err != nil {
+		return fmt.Errorf("failed to create subscriber: %w", err)
+	}
+	defer subscriber.Close()
+
+	httpListener, err := startLocalhostListener(cfg.HTTP.Address, log.Named("listener"))
+	if err != nil {
+		return fmt.Errorf("failed to listen on http address: %w", err)
+	}
+	defer httpListener.Close()
 
 	apiOpts := []api.ServerOption{
 		api.WithLogger(log.Named("api")),

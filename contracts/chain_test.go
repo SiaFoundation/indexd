@@ -47,6 +47,10 @@ func (tx *mockUpdateTx) ContractElements() ([]types.V2FileContractElement, error
 	return stateElements, nil
 }
 
+func (tx *mockUpdateTx) ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
+	panic("not implemented")
+}
+
 func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileContractElement, ContractState) {
 	fce, ok := tx.contracts[contractID]
 	if !ok {
@@ -93,7 +97,7 @@ func (tx *mockUpdateTx) UpdateContractState(contractID types.FileContractID, sta
 }
 
 func TestApplyRevertDiff(t *testing.T) {
-	contracts, err := NewManager()
+	contracts, err := NewManager(nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

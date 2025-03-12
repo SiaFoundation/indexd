@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -70,9 +71,12 @@ func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertU
 		return fmt.Errorf("failed to reject pending contracts: %w", err)
 	}
 
-	// TODO: broadcast resolutions for expired contracts
+	// broadcast resolutions for expired contracts
 	// 'expiredContractBroadcastBuffer' blocks after their window end to give
 	// hosts a chance to do it themselves before we do it
+	if err := m.broadcastExpiredContracts(tx); err != nil {
+		return fmt.Errorf("failed to broadcast expired contracts: %w", err)
+	}
 
 	// TODO: prune expired contracts 'expiredContractPruneBuffer' blocks after
 	// we begin broadcasting resolutions
@@ -166,6 +170,51 @@ func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2File
 	}
 	if err := tx.UpdateContractElements(fce); err != nil {
 		return fmt.Errorf("failed to update contract element: %w", err)
+	}
+	return nil
+}
+
+func (m *ContractManager) broadcastExpiredContracts(tx UpdateTx) error {
+	expiredFCEs, err := tx.ContractElementsForBroadcast(m.expiredContractBroadcastBuffer)
+	if err != nil {
+		return fmt.Errorf("failed to get expired contracts for broadcast: %w", err)
+	}
+	for _, fce := range expiredFCEs {
+		go func(fce types.V2FileContractElement) {
+			const contractResolutionTxnWeight = 1000
+			txn := types.V2Transaction{
+				MinerFee: m.cm.RecommendedFee().Mul64(contractResolutionTxnWeight),
+				FileContractResolutions: []types.V2FileContractResolution{
+					{
+						Parent:     fce,
+						Resolution: &types.V2FileContractExpiration{},
+					},
+				},
+			}
+
+			// fund and sign txn
+			basis, toSign, err := m.w.FundV2Transaction(&txn, txn.MinerFee, true)
+			if err != nil {
+				m.log.Error("failed to fund contract expiration txn", zap.Error(err))
+				return
+			}
+			m.w.SignV2Inputs(&txn, toSign)
+
+			// verify txn and broadcast it
+			_, err = m.cm.AddV2PoolTransactions(basis, []types.V2Transaction{txn})
+			if err != nil &&
+				(strings.Contains(err.Error(), "has already been resolved") ||
+					strings.Contains(err.Error(), "not present in the accumulator")) {
+				m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+				m.log.Debug("failed to broadcast contract expiration txn", zap.Error(err))
+				return
+			} else if err != nil {
+				m.log.Error("failed to broadcast contract expiration txn", zap.Error(err))
+				m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+				return
+			}
+			m.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn})
+		}(fce)
 	}
 	return nil
 }

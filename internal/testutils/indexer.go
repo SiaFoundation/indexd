@@ -43,6 +43,22 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	// prepare store
 	store := NewDB(t, log)
 
+	syncerListener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// peers will reject us if our hostname is empty or unspecified, so use loopback
+	s := syncer.New(syncerListener, c.cm, testutil.NewEphemeralPeerStore(), gateway.Header{
+		GenesisID:  c.genesis.ID(),
+		UniqueID:   gateway.GenerateUniqueID(),
+		NetAddress: syncerListener.Addr().String(),
+	},
+		syncer.WithSendBlocksTimeout(2*time.Second),
+		syncer.WithRPCTimeout(2*time.Second),
+	)
+	go s.Run()
+
 	walletKey := types.GeneratePrivateKey()
 	wm, err := wallet.NewSingleAddressWallet(walletKey, c.cm, store, wallet.WithLogger(log.Named("wallet")), wallet.WithReservationDuration(3*time.Hour))
 	if err != nil {
@@ -54,7 +70,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
 
-	contracts, err := contracts.NewManager(contracts.WithLogger(log.Named("contracts")))
+	contracts, err := contracts.NewManager(c.cm, s, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
@@ -72,22 +88,6 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		}
 	}
 	c.addSyncFn(syncFn)
-
-	syncerListener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// peers will reject us if our hostname is empty or unspecified, so use loopback
-	s := syncer.New(syncerListener, c.cm, testutil.NewEphemeralPeerStore(), gateway.Header{
-		GenesisID:  c.genesis.ID(),
-		UniqueID:   gateway.GenerateUniqueID(),
-		NetAddress: syncerListener.Addr().String(),
-	},
-		syncer.WithSendBlocksTimeout(2*time.Second),
-		syncer.WithRPCTimeout(2*time.Second),
-	)
-	go s.Run()
 
 	apiOpts := []api.ServerOption{
 		api.WithLogger(log.Named("api")),
