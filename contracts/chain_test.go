@@ -22,8 +22,9 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 // mockUpdateTx is a mocked implementation of UpdateTx which allows for unit
 // testing the contract manager's chain updates without a full database.
 type mockUpdateTx struct {
-	contracts map[types.FileContractID]types.V2FileContractElement
-	state     map[types.FileContractID]ContractState
+	currentHeight uint64
+	contracts     map[types.FileContractID]types.V2FileContractElement
+	state         map[types.FileContractID]ContractState
 }
 
 // newMockUpdateTx creates a new mock UpdateTx.
@@ -48,7 +49,13 @@ func (tx *mockUpdateTx) ContractElements() ([]types.V2FileContractElement, error
 }
 
 func (tx *mockUpdateTx) ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
-	panic("not implemented")
+	var fces []types.V2FileContractElement
+	for _, fce := range tx.contracts {
+		if tx.currentHeight >= fce.V2FileContract.ExpirationHeight+maxBlocksSinceExpiry {
+			fces = append(fces, fce)
+		}
+	}
+	return fces, nil
 }
 
 func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileContractElement, ContractState) {
@@ -95,6 +102,40 @@ func (tx *mockUpdateTx) UpdateContractState(contractID types.FileContractID, sta
 	tx.state[contractID] = state
 	return nil
 }
+
+func (tx *mockUpdateTx) UpdateHeight(height uint64) {
+	tx.currentHeight = height
+}
+
+type chainManagerMock struct {
+	tpool []types.V2Transaction
+}
+
+func (cm *chainManagerMock) AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error) {
+	cm.tpool = append(cm.tpool, txns...)
+	return false, nil
+}
+
+func (cm *chainManagerMock) RecommendedFee() types.Currency {
+	return types.ZeroCurrency
+}
+
+type syncerMock struct {
+	broadcasted []types.V2Transaction
+}
+
+func (s *syncerMock) BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) {
+	s.broadcasted = append(s.broadcasted, txns...)
+}
+
+type walletMock struct {
+}
+
+func (w *walletMock) FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error) {
+	return types.ChainIndex{}, nil, nil
+}
+func (w *walletMock) ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) {}
+func (w *walletMock) SignV2Inputs(txn *types.V2Transaction, toSign []int)                  {}
 
 func TestApplyRevertDiff(t *testing.T) {
 	contracts, err := NewManager(nil, nil, nil)
@@ -236,5 +277,54 @@ func TestUpdateContractElementProofs(t *testing.T) {
 	}})
 	if fce, _ := mock.Contract(contract2.ID); !reflect.DeepEqual(fce, contract2) {
 		t.Fatalf("mismatch \n%+v\n%+v", fce, contract2)
+	}
+}
+
+func TestBroadcastExpiredContracts(t *testing.T) {
+	cmMock := &chainManagerMock{}
+	syncerMock := &syncerMock{}
+	contracts, err := NewManager(cmMock, syncerMock, &walletMock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	contract := types.V2FileContractElement{
+		ID: types.FileContractID{1},
+		V2FileContract: types.V2FileContract{
+			ExpirationHeight: 100,
+		},
+	}
+
+	// mock the update tx and add a contract
+	mock := newMockUpdateTx()
+	mock.AddContract(contract)
+	updateTx := &updateTx{
+		UpdateTx:       mock,
+		knownContracts: make(map[types.FileContractID]bool),
+	}
+
+	// broadcast when no contract should be broadcasted
+	if err := contracts.broadcastExpiredContracts(updateTx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if len(cmMock.tpool) != 0 {
+		t.Fatalf("expected 0 contract in tpool, got %v", len(cmMock.tpool))
+	} else if len(syncerMock.broadcasted) != 0 {
+		t.Fatalf("expected 0 broadcasted contracts, got %v", len(syncerMock.broadcasted))
+	}
+
+	// broadcast with 1 contract to broadcast
+	mock.UpdateHeight(1000)
+	if err := contracts.broadcastExpiredContracts(updateTx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if len(cmMock.tpool) != 1 {
+		t.Fatalf("expected 1 contract in tpool, got %v", len(cmMock.tpool))
+	} else if len(syncerMock.broadcasted) != 1 {
+		t.Fatalf("expected 1 broadcasted contracts, got %v", len(syncerMock.broadcasted))
+	} else if len(syncerMock.broadcasted[0].FileContractResolutions) != 1 {
+		t.Fatalf("expected 1 contract resolution in broadcast, got %v", len(syncerMock.broadcasted[0].FileContracts))
 	}
 }
