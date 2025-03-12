@@ -1,6 +1,6 @@
 CREATE TABLE hosts (
     id SERIAL PRIMARY KEY,
-    public_key BYTEA UNIQUE NOT NULL,
+    public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32),
     total_scans INTEGER NOT NULL DEFAULT 0,
     failed_scans INTEGER NOT NULL DEFAULT 0,
     consecutive_failed_scans INTEGER NOT NULL DEFAULT 0,
@@ -27,9 +27,9 @@ CREATE TABLE host_resolved_cidrs (
 
 CREATE TABLE host_settings (
     host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
-    protocol_version BYTEA NOT NULL,
+    protocol_version BYTEA NOT NULL CHECK (LENGTH(protocol_version) = 3),
     release TEXT NOT NULL,
-    wallet_address BYTEA NOT NULL,
+    wallet_address BYTEA NOT NULL CHECK (LENGTH(wallet_address) = 32),
     accepting_contracts BOOLEAN NOT NULL,
     max_collateral NUMERIC(50,0) NOT NULL,
     max_contract_duration NUMERIC(50,0) NOT NULL,
@@ -64,9 +64,9 @@ CREATE INDEX syncer_bans_net_cidr_idx ON syncer_bans USING gist (net_cidr inet_o
 
 CREATE TABLE wallet_events (
     id SERIAL PRIMARY KEY,
-    chain_index BYTEA NOT NULL,
+    chain_index BYTEA NOT NULL CHECK (LENGTH(chain_index) = 8+32),
     maturity_height INTEGER NOT NULL,
-    event_id BYTEA UNIQUE NOT NULL,
+    event_id BYTEA UNIQUE NOT NULL CHECK (LENGTH(event_id) = 32),
     event_type TEXT NOT NULL,
     event_data BYTEA NOT NULL
 );
@@ -75,9 +75,9 @@ CREATE INDEX wallet_events_maturity_height_id_idx ON wallet_events(maturity_heig
 
 CREATE TABLE wallet_siacoin_elements (
     id SERIAL PRIMARY KEY,
-    output_id BYTEA UNIQUE NOT NULL,
+    output_id BYTEA UNIQUE NOT NULL CHECK (LENGTH(output_id) = 32),
     value NUMERIC(50,0) NOT NULL,
-    address BYTEA NOT NULL,
+    address BYTEA NOT NULL CHECK (LENGTH(address) = 32),
     merkle_proof BYTEA NOT NULL,
     leaf_index INTEGER NOT NULL,
     maturity_height INTEGER NOT NULL
@@ -86,13 +86,13 @@ CREATE TABLE wallet_siacoin_elements (
 CREATE TABLE global_settings (
     id INTEGER PRIMARY KEY NOT NULL DEFAULT 0 CHECK (id = 0), -- enforce a single row
     db_version INTEGER NOT NULL, -- used for migrations
-    last_scanned_index BYTEA -- chain index of the last scanned block
+    last_scanned_index BYTEA CHECK (LENGTH(last_scanned_index) = 8+32) -- chain index of the last scanned block
 );
 
 CREATE TABLE contracts (
   id SERIAL PRIMARY KEY,
   host_id INTEGER REFERENCES hosts(id) NOT NULL,
-  contract_id BYTEA NOT NULL UNIQUE DEFERRABLE,
+  contract_id BYTEA UNIQUE DEFERRABLE NOT NULL CHECK (LENGTH(contract_id) = 32),
 
   -- lifetime related columns
   formation TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
