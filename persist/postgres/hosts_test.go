@@ -80,7 +80,7 @@ func TestHost(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
 
-	hk := types.PublicKey{1}
+	hk := types.GeneratePrivateKey().PublicKey()
 	hs := testHostSettings(hk)
 
 	// assert [ErrHostNotFound] is returned
@@ -108,7 +108,7 @@ func TestHost(t *testing.T) {
 	if h, err := db.Host(context.Background(), hk); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(h.Settings, hs) {
-		t.Fatal("expected settings to match")
+		t.Fatal("expected settings to match", h.Settings)
 	} else if len(h.Addresses) != 1 {
 		t.Fatal("unexpected", len(h.Addresses))
 	} else if len(h.Networks) != 1 {
@@ -304,7 +304,7 @@ func TestUpdateHost(t *testing.T) {
 	db := initPostgres(t, log.Named("postgres"))
 
 	// assert [ErrHostNotFound] is returned
-	hk := types.PublicKey{1}
+	hk := types.GeneratePrivateKey().PublicKey()
 	err := db.UpdateHost(context.Background(), hk, nil, proto4.HostSettings{}, false, time.Time{})
 	if !errors.Is(err, ErrHostNotFound) {
 		t.Fatal("expected ErrHostNotFound, got", err)
@@ -324,8 +324,8 @@ func TestUpdateHost(t *testing.T) {
 		t.Fatal(err)
 	} else if h, err := db.Host(context.Background(), hk); err != nil {
 		t.Fatal(err)
-	} else if h.Settings != (proto4.HostSettings{}) {
-		t.Fatal("expected no settings")
+	} else if h.Settings != (proto4.HostSettings{Prices: proto4.HostPrices{ValidUntil: time.Time{}.Local()}}) {
+		t.Fatal("expected no settings", h.Settings, proto4.HostSettings{})
 	} else if !h.LastSuccessfulScan.IsZero() {
 		t.Fatal("expected no last successful scan")
 	}

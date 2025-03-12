@@ -7,7 +7,24 @@ CREATE TABLE hosts (
     last_successful_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     last_announcement TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
     next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
-    lost_sectors INTEGER NOT NULL DEFAULT 0
+    lost_sectors INTEGER NOT NULL DEFAULT 0,
+
+    settings_protocol_version BYTEA NOT NULL DEFAULT '\x000000'::bytea CHECK (LENGTH(settings_protocol_version) = 3),
+    settings_release TEXT NOT NULL DEFAULT '',
+    settings_wallet_address BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(settings_wallet_address) = 32),
+    settings_accepting_contracts BOOLEAN NOT NULL DEFAULT FALSE,
+    settings_max_collateral NUMERIC(50,0) NOT NULL DEFAULT 0,
+    settings_max_contract_duration NUMERIC(50,0) NOT NULL DEFAULT 0,
+    settings_remaining_storage BIGINT NOT NULL DEFAULT 0,
+    settings_total_storage BIGINT NOT NULL DEFAULT 0,
+    settings_contract_price NUMERIC(50,0) NOT NULL DEFAULT 0,
+    settings_collateral NUMERIC(50,0) NOT NULL DEFAULT 0,
+    settings_storage_price NUMERIC(50,0) NOT NULL DEFAULT 0,
+    settings_ingress_price NUMERIC(50,0) NOT NULL DEFAULT 0,
+    settings_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0,
+    settings_free_sector_price NUMERIC(50,0) NOT NULL DEFAULT 0,
+    settings_tip_height BIGINT NOT NULL DEFAULT 0,
+    settings_valid_until TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00'
 );
 CREATE INDEX idx_hosts_next_scan_idx ON hosts(next_scan);
 
@@ -23,26 +40,6 @@ CREATE TABLE host_resolved_cidrs (
     id SERIAL PRIMARY KEY,
     host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
     cidr CIDR NOT NULL
-);
-
-CREATE TABLE host_settings (
-    host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
-    protocol_version BYTEA NOT NULL CHECK (LENGTH(protocol_version) = 3),
-    release TEXT NOT NULL,
-    wallet_address BYTEA NOT NULL CHECK (LENGTH(wallet_address) = 32),
-    accepting_contracts BOOLEAN NOT NULL,
-    max_collateral NUMERIC(50,0) NOT NULL,
-    max_contract_duration NUMERIC(50,0) NOT NULL,
-    remaining_storage BIGINT NOT NULL,
-    total_storage BIGINT NOT NULL,
-    contract_price NUMERIC(50,0) NOT NULL,
-    collateral NUMERIC(50,0) NOT NULL,
-    storage_price NUMERIC(50,0) NOT NULL,
-    ingress_price NUMERIC(50,0) NOT NULL,
-    egress_price NUMERIC(50,0) NOT NULL,
-    free_sector_price NUMERIC(50,0) NOT NULL,
-    tip_height BIGINT NOT NULL,
-    valid_until TIMESTAMP WITH TIME ZONE NOT NULL
 );
 
 CREATE TABLE syncer_peers (
