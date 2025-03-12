@@ -25,6 +25,9 @@ type (
 	Store interface {
 		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
+		HostsBlocklist(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
+		HostsBlocklistAdd(ctx context.Context, hks []types.PublicKey) error
+		HostsBlocklistRemove(ctx context.Context, hk types.PublicKey) error
 		LastScannedIndex(context.Context) (types.ChainIndex, error)
 	}
 
@@ -75,7 +78,12 @@ func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, op
 
 		// host endpoints
 		"GET    /host/:hostkey": a.handleGETHost,
-		"GET    /hosts":         a.handleGETHosts,
+
+		// hosts endpoints
+		"GET    /hosts":                    a.handleGETHosts,
+		"GET    /hosts/blocklist":          a.handleGETHostsBlocklist,
+		"PUT    /hosts/blocklist":          a.handlePUTHostsBlocklist,
+		"DELETE /hosts/blocklist/:hostkey": a.handleDELETEHostsBlocklist,
 
 		// wallet endpoints
 		"GET /wallet":         a.handleGETWallet,

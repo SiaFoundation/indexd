@@ -48,6 +48,7 @@ type (
 		Addresses              []chain.NetAddress  `json:"addresses"`
 		Networks               []net.IPNet         `json:"networks"`
 		Settings               proto4.HostSettings `json:"settings"`
+		Blocked                bool                `json:"blocked"`
 	}
 
 	// HostManager manages the host announcements.
