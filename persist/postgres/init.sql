@@ -28,6 +28,11 @@ CREATE TABLE hosts (
 );
 CREATE INDEX idx_hosts_next_scan_idx ON hosts(next_scan);
 
+CREATE TABLE hosts_blocklist (
+    public_key BYTEA PRIMARY KEY CHECK (LENGTH(public_key) = 32),
+    added TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE host_addresses (
     id SERIAL PRIMARY KEY,
     host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,

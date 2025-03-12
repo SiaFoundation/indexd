@@ -1,4 +1,4 @@
-# Host Scanning
+# Host Maintenance
 
 ## Abstract
 
@@ -67,3 +67,10 @@ we consider the host as "bad".
   - Protocol version of at least 1.0.0
   - Prices should be valid for at least 1 hour
   - Accepts contracts
+
+### Host Blocking
+
+Hosts can be malicious or just not good enough to be used for forming contracts.
+To prevent interacting with those hosts entirely, a host can be blocked using
+its public key. If a host is blocked, the indexer will still return it in the
+hosts API, but it will be marked as "blocked".

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -73,6 +74,83 @@ func TestAddHostAnnouncement(t *testing.T) {
 	} else if h.Addresses[0].Address != ha3.Address || h.Addresses[0].Protocol != ha3.Protocol {
 		t.Fatal("unexpected", h.Addresses[0])
 	}
+}
+
+func TestBlocklist(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// add two hosts
+	hk1 := types.PublicKey{1}
+	hk2 := types.PublicKey{2}
+	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return errors.Join(
+			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
+			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
+		)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertBlocked := func(hk types.PublicKey, blocked bool) {
+		t.Helper()
+		h, err := db.Host(context.Background(), hk)
+		if err != nil {
+			t.Fatal(err)
+		} else if h.Blocked != blocked {
+			t.Fatal("unexpected", h.Blocked)
+		}
+		hks, err := db.HostsBlocklist(context.Background(), 0, 10)
+		if err != nil {
+			t.Fatal(err)
+		} else if slices.Contains(hks, hk) != blocked {
+			t.Fatal("expected host to be in blocklist")
+		}
+	}
+
+	updateBlocklist := func(add, remove types.PublicKey) {
+		t.Helper()
+		if add != (types.PublicKey{}) {
+			if err := db.HostsBlocklistAdd(context.Background(), []types.PublicKey{add}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if remove != (types.PublicKey{}) {
+			if err := db.HostsBlocklistRemove(context.Background(), remove); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	// assert both are returned
+	assertBlocked(hk1, false)
+	assertBlocked(hk2, false)
+
+	// block h1 and assert only h2 is returned
+	updateBlocklist(hk1, types.PublicKey{})
+	updateBlocklist(hk1, types.PublicKey{}) // assert noop on duplicate insert
+	assertBlocked(hk1, true)
+	assertBlocked(hk2, false)
+
+	// block h2 and assert no hosts are returned
+	updateBlocklist(hk2, types.PublicKey{})
+	assertBlocked(hk1, true)
+	assertBlocked(hk2, true)
+
+	// unblock h2, and assert it's returned
+	updateBlocklist(types.PublicKey{}, hk2)
+	updateBlocklist(types.PublicKey{}, hk2) // assert noop on duplicate remove
+	assertBlocked(hk1, true)
+	assertBlocked(hk2, false)
+
+	// unblock h1 and assert we're back to normal
+	updateBlocklist(types.PublicKey{}, hk1)
+	assertBlocked(hk1, false)
+	assertBlocked(hk2, false)
+
+	// assert noop on unknown remove
+	updateBlocklist(types.PublicKey{}, types.GeneratePrivateKey().PublicKey())
 }
 
 func TestHost(t *testing.T) {
