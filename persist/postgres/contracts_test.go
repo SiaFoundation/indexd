@@ -45,7 +45,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	// helper to assert contracts to broadcast
 	assertContractsToBroadcast := func(maxBlocksSinceExpiry uint64, n int) {
 		t.Helper()
-		var fces []types.V2FileContractElement
+		fces, err := store.ContractElementsForBroadcast(context.Background(), maxBlocksSinceExpiry)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(fces) != n {

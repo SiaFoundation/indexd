@@ -166,7 +166,6 @@ WHERE current_height.scanned_height >= contracts.expiration_height + $1;
 		if err != nil {
 			return err
 		}
-		var fces []types.V2FileContractElement
 		for rows.Next() {
 			fce, err := scanContractElement(rows)
 			if err != nil {
