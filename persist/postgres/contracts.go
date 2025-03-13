@@ -144,6 +144,8 @@ func (s *Store) Contracts(queryOpts ...ContractQueryOpt) ([]contracts.Contract, 
 	panic("not implemented")
 }
 
+// ContractElementsForBroadcast returns the contract elements of contracts that
+// have been expired for at least 'maxBlocksSinceExpiry' blocks.
 func (s *Store) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
 	var fces []types.V2FileContractElement
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {

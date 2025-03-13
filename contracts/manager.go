@@ -17,6 +17,8 @@ type (
 		RecommendedFee() types.Currency
 	}
 
+	// Store is the minimal interface of Store functionality the ContractManager
+	// requires.
 	Store interface {
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 	}
