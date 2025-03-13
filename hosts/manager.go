@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/threadgroup"
-	"go.sia.tech/indexd/internal/rhp/v4"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -37,29 +36,18 @@ const (
 )
 
 type (
-	// Store defines an interface to fetch hosts that need to be scanned and
-	// persist the scan results in the database.
-	Store interface {
-		Host(ctx context.Context, hk types.PublicKey) (Host, error)
-		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
-		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
-		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
-	}
-
-	// Resolver defines an interface to resolve hostnames.
-	Resolver interface {
-		LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
-	}
-
-	// RHP4Client defines an interface to scan hosts.
-	RHP4Client interface {
-		Settings(context.Context, types.PublicKey, string) (proto4.HostSettings, error)
-	}
-
-	// UpdateTx defines what the host manager needs to atomically process a
-	// chain update in the database.
-	UpdateTx interface {
-		AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnouncement, ts time.Time) error
+	// Host is a host on the network.
+	Host struct {
+		PublicKey              types.PublicKey     `json:"publicKey"`
+		LastAnnouncement       time.Time           `json:"lastAnnouncement"`
+		LastSuccessfulScan     time.Time           `json:"lastSuccessfulScan"`
+		NextScan               time.Time           `json:"nextScan"`
+		TotalScans             int                 `json:"totalScans"`
+		FailedScans            int                 `json:"failedScans"`
+		ConsecutiveFailedScans int                 `json:"consecutiveFailedScans"`
+		Addresses              []chain.NetAddress  `json:"addresses"`
+		Networks               []net.IPNet         `json:"networks"`
+		Settings               proto4.HostSettings `json:"settings"`
 	}
 
 	// HostManager manages the host announcements.
@@ -69,11 +57,36 @@ type (
 		scanInterval       time.Duration
 
 		resolver Resolver
-		client   RHP4Client
+		scanner  Scanner
 		store    Store
 
 		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
+	}
+
+	// Resolver defines an interface to resolve hostnames.
+	Resolver interface {
+		LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error)
+	}
+
+	// Scanner defines an interface to scan hosts.
+	Scanner interface {
+		Settings(context.Context, types.PublicKey, string) (proto4.HostSettings, error)
+	}
+
+	// Store defines an interface to fetch hosts that need to be scanned and
+	// persist the scan results in the database.
+	Store interface {
+		Host(ctx context.Context, hk types.PublicKey) (Host, error)
+		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
+		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
+		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
+	}
+
+	// UpdateTx defines what the host manager needs to atomically process a
+	// chain update in the database.
+	UpdateTx interface {
+		AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnouncement, ts time.Time) error
 	}
 )
 
@@ -85,7 +98,7 @@ func NewManager(store Store, opts ...Option) (*HostManager, error) {
 		scanInterval:       time.Hour * 24,
 
 		resolver: &net.Resolver{},
-		client:   rhp.New(),
+		scanner:  &scanner{},
 		store:    store,
 		tg:       threadgroup.New(),
 		log:      zap.NewNop(),
@@ -154,7 +167,7 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (proto4.
 		return proto4.HostSettings{}, fmt.Errorf("failed to resolve host, %w", err)
 	}
 
-	settings, err := fetchSettings(scanCtx, m.client, hk, addrs, logger)
+	settings, err := fetchSettings(scanCtx, m.scanner, hk, addrs, logger)
 	if err != nil {
 		return proto4.HostSettings{}, fmt.Errorf("failed to fetch settings, %w", err)
 	}
@@ -278,16 +291,16 @@ func (m *HostManager) scanHosts(ctx context.Context) {
 	m.log.Debug("host scans finished", zap.Int("hosts", len(hosts)), zap.Duration("duration", time.Since(start)))
 }
 
-// fetchSettings uses the given client to fetch the settings of the host with
+// fetchSettings uses the given scanner to fetch the settings of the host with
 // given public key. It only returns the settings if the host is available on
 // every address. The only error this function returns is [context.Canceled],
 // other errors that occur during the resolving and parsing are debug logged but
 // otherwise ignored.
-func fetchSettings(ctx context.Context, client RHP4Client, hk types.PublicKey, addresses []chain.NetAddress, log *zap.Logger) (proto4.HostSettings, error) {
+func fetchSettings(ctx context.Context, scanner Scanner, hk types.PublicKey, addresses []chain.NetAddress, log *zap.Logger) (proto4.HostSettings, error) {
 	var settings []proto4.HostSettings
 	for _, addr := range addresses {
 		if addr.Protocol == siamux.Protocol {
-			hs, err := client.Settings(ctx, hk, addr.Address)
+			hs, err := scanner.Settings(ctx, hk, addr.Address)
 			if errors.Is(err, context.Canceled) {
 				return proto4.HostSettings{}, err
 			} else if err != nil {

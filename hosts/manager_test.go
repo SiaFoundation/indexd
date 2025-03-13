@@ -16,6 +16,12 @@ import (
 	"go.uber.org/zap"
 )
 
+var cancelledCtx = func() context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	return ctx
+}()
+
 // mockStore is a mock that implements the Store interface.
 type mockStore struct {
 	hosts map[types.PublicKey]Host
@@ -176,7 +182,7 @@ func TestFetchSettings(t *testing.T) {
 	}
 
 	// assert [context.Cancelled] is returned when context is cancelled
-	_, err := fetchSettings(cancelledCtx(), c, types.PublicKey{}, []chain.NetAddress{testMuxAddr("foo.bar")}, zap.NewNop())
+	_, err := fetchSettings(cancelledCtx, c, types.PublicKey{}, []chain.NetAddress{testMuxAddr("foo.bar")}, zap.NewNop())
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
@@ -286,7 +292,7 @@ func TestResolveHost(t *testing.T) {
 	}
 
 	// assert [context.Cancelled] is returned when context is cancelled
-	_, _, err := resolveHost(cancelledCtx(), r, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
+	_, _, err := resolveHost(cancelledCtx, r, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
@@ -307,7 +313,7 @@ func TestResolveHost(t *testing.T) {
 		t.Fatal("unexpected", len(addrs))
 	}
 
-	// assert networks are parsed and added
+	// assert net addresses get resolved and networks are returned
 	addrs, networks, err := resolveHost(context.Background(), r, []chain.NetAddress{testMuxAddr("h2.com:1234")}, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
@@ -320,10 +326,4 @@ func TestResolveHost(t *testing.T) {
 
 func testMuxAddr(addr string) chain.NetAddress {
 	return chain.NetAddress{Protocol: siamux.Protocol, Address: addr}
-}
-
-func cancelledCtx() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	return ctx
 }
