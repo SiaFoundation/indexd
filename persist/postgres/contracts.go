@@ -144,6 +144,39 @@ func (s *Store) Contracts(queryOpts ...ContractQueryOpt) ([]contracts.Contract, 
 	panic("not implemented")
 }
 
+func (s *Store) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
+	var fces []types.V2FileContractElement
+	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+WITH current_height AS (
+    SELECT scanned_height FROM global_settings
+)
+SELECT
+    contracts.contract_id,
+    fces.contract,
+    fces.leaf_index,
+    fces.merkle_proof
+FROM contracts
+INNER JOIN contract_elements fces ON contracts.id = fces.contract_id
+CROSS JOIN current_height
+WHERE current_height.scanned_height >= contracts.expiration_height + $1;
+`, maxBlocksSinceExpiry)
+		if err != nil {
+			return err
+		}
+		var fces []types.V2FileContractElement
+		for rows.Next() {
+			fce, err := scanContractElement(rows)
+			if err != nil {
+				return err
+			}
+			fces = append(fces, fce)
+		}
+		return rows.Err()
+	})
+	return fces, err
+}
+
 // SetContractBad marks a contract as bad.
 func (s *Store) SetContractBad(contractID types.FileContractID) error {
 	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
@@ -169,35 +202,6 @@ INNER JOIN contracts c ON fces.contract_id = c.id
 		fce, err := scanContractElement(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan contract element: %w", err)
-		}
-		fces = append(fces, fce)
-	}
-	return fces, rows.Err()
-}
-
-func (tx *updateTx) ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
-	rows, err := tx.tx.Query(tx.ctx, `
-WITH current_height AS (
-    SELECT scanned_height FROM global_settings
-)
-SELECT
-    contracts.contract_id,
-    fces.contract,
-    fces.leaf_index,
-    fces.merkle_proof
-FROM contracts
-INNER JOIN contract_elements fces ON contracts.id = fces.contract_id
-CROSS JOIN current_height
-WHERE current_height.scanned_height >= contracts.expiration_height + $1;
-`, maxBlocksSinceExpiry)
-	if err != nil {
-		return nil, err
-	}
-	var fces []types.V2FileContractElement
-	for rows.Next() {
-		fce, err := scanContractElement(rows)
-		if err != nil {
-			return nil, err
 		}
 		fces = append(fces, fce)
 	}

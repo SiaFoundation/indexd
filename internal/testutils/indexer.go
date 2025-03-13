@@ -70,7 +70,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
 
-	contracts, err := contracts.NewManager(c.cm, s, wm, contracts.WithLogger(log.Named("contracts")))
+	contracts, err := contracts.NewManager(c.cm, store, s, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}

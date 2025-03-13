@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -17,7 +18,6 @@ type (
 	// chain update in the database.
 	UpdateTx interface {
 		ContractElements() ([]types.V2FileContractElement, error)
-		ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		IsKnownContract(contractID types.FileContractID) (bool, error)
 		RejectPendingContracts(maxFormation time.Time) error
 		UpdateContractElements(fces ...types.V2FileContractElement) error
@@ -42,6 +42,26 @@ func (tx *updateTx) IsKnownContract(fcid types.FileContractID) (bool, error) {
 	}
 	tx.knownContracts[fcid] = known
 	return known, nil
+}
+
+// ProcessActions performs any post-processing actions required after a call to
+// UpdateChainState that don't need to be atomic with the chain update. It is
+// not guaranteed to be called on every update but will eventually be called
+// after applying all batches of a sync.
+func (m *ContractManager) ProcessActions() error {
+	ctx, cancel, err := m.tg.AddContext(context.Background())
+	if err != nil {
+		return err
+	}
+	defer cancel()
+
+	// broadcast resolutions for expired contracts
+	// 'expiredContractBroadcastBuffer' blocks after their window end to give
+	// hosts a chance to do it themselves before we do it
+	if err := m.broadcastExpiredContracts(ctx); err != nil {
+		return fmt.Errorf("failed to broadcast expired contracts: %w", err)
+	}
+	return nil
 }
 
 // UpdateChainState state updates the contracts' state in the database and
@@ -69,13 +89,6 @@ func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertU
 	maxFormation := time.Now().Add(-m.contractRejectBuffer)
 	if err := tx.RejectPendingContracts(maxFormation); err != nil {
 		return fmt.Errorf("failed to reject pending contracts: %w", err)
-	}
-
-	// broadcast resolutions for expired contracts
-	// 'expiredContractBroadcastBuffer' blocks after their window end to give
-	// hosts a chance to do it themselves before we do it
-	if err := m.broadcastExpiredContracts(tx); err != nil {
-		return fmt.Errorf("failed to broadcast expired contracts: %w", err)
 	}
 
 	// TODO: prune expired contracts 'expiredContractPruneBuffer' blocks after
@@ -174,53 +187,45 @@ func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2File
 	return nil
 }
 
-func (m *ContractManager) broadcastExpiredContracts(tx UpdateTx) error {
-	expiredFCEs, err := tx.ContractElementsForBroadcast(m.expiredContractBroadcastBuffer)
+func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
+	expiredFCEs, err := m.store.ContractElementsForBroadcast(ctx, m.expiredContractBroadcastBuffer)
 	if err != nil {
 		return fmt.Errorf("failed to get expired contracts for broadcast: %w", err)
 	}
 	for _, fce := range expiredFCEs {
-		go func(fce types.V2FileContractElement) {
-			done, err := m.tg.Add()
-			if err != nil {
-				return
-			}
-			defer done()
-
-			const contractResolutionTxnWeight = 1000
-			txn := types.V2Transaction{
-				MinerFee: m.cm.RecommendedFee().Mul64(contractResolutionTxnWeight),
-				FileContractResolutions: []types.V2FileContractResolution{
-					{
-						Parent:     fce,
-						Resolution: &types.V2FileContractExpiration{},
-					},
+		const contractResolutionTxnWeight = 1000
+		txn := types.V2Transaction{
+			MinerFee: m.cm.RecommendedFee().Mul64(contractResolutionTxnWeight),
+			FileContractResolutions: []types.V2FileContractResolution{
+				{
+					Parent:     fce,
+					Resolution: &types.V2FileContractExpiration{},
 				},
-			}
+			},
+		}
 
-			// fund and sign txn
-			basis, toSign, err := m.w.FundV2Transaction(&txn, txn.MinerFee, true)
-			if err != nil {
-				m.log.Error("failed to fund contract expiration txn", zap.Error(err))
-				return
-			}
-			m.w.SignV2Inputs(&txn, toSign)
+		// fund and sign txn
+		basis, toSign, err := m.w.FundV2Transaction(&txn, txn.MinerFee, true)
+		if err != nil {
+			m.log.Error("failed to fund contract expiration txn", zap.Error(err))
+			continue
+		}
+		m.w.SignV2Inputs(&txn, toSign)
 
-			// verify txn and broadcast it
-			_, err = m.cm.AddV2PoolTransactions(basis, []types.V2Transaction{txn})
-			if err != nil &&
-				(strings.Contains(err.Error(), "has already been resolved") ||
-					strings.Contains(err.Error(), "not present in the accumulator")) {
-				m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
-				m.log.Debug("failed to broadcast contract expiration txn", zap.Error(err))
-				return
-			} else if err != nil {
-				m.log.Error("failed to broadcast contract expiration txn", zap.Error(err))
-				m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
-				return
-			}
-			m.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn})
-		}(fce)
+		// verify txn and broadcast it
+		_, err = m.cm.AddV2PoolTransactions(basis, []types.V2Transaction{txn})
+		if err != nil &&
+			(strings.Contains(err.Error(), "has already been resolved") ||
+				strings.Contains(err.Error(), "not present in the accumulator")) {
+			m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			m.log.Debug("failed to broadcast contract expiration txn", zap.Error(err))
+			continue
+		} else if err != nil {
+			m.log.Error("failed to broadcast contract expiration txn", zap.Error(err))
+			m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			continue
+		}
+		go m.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn})
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"sync"
@@ -20,12 +21,19 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 	u.updateFn(stateElement)
 }
 
+type storeMock struct {
+	toBroadcast []types.V2FileContractElement
+}
+
+func (s *storeMock) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
+	return s.toBroadcast, nil
+}
+
 // mockUpdateTx is a mocked implementation of UpdateTx which allows for unit
 // testing the contract manager's chain updates without a full database.
 type mockUpdateTx struct {
-	currentHeight uint64
-	contracts     map[types.FileContractID]types.V2FileContractElement
-	state         map[types.FileContractID]ContractState
+	contracts map[types.FileContractID]types.V2FileContractElement
+	state     map[types.FileContractID]ContractState
 }
 
 // newMockUpdateTx creates a new mock UpdateTx.
@@ -47,16 +55,6 @@ func (tx *mockUpdateTx) ContractElements() ([]types.V2FileContractElement, error
 		stateElements = append(stateElements, fce)
 	}
 	return stateElements, nil
-}
-
-func (tx *mockUpdateTx) ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
-	var fces []types.V2FileContractElement
-	for _, fce := range tx.contracts {
-		if tx.currentHeight >= fce.V2FileContract.ExpirationHeight+maxBlocksSinceExpiry {
-			fces = append(fces, fce)
-		}
-	}
-	return fces, nil
 }
 
 func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileContractElement, ContractState) {
@@ -102,10 +100,6 @@ func (tx *mockUpdateTx) UpdateContractState(contractID types.FileContractID, sta
 	}
 	tx.state[contractID] = state
 	return nil
-}
-
-func (tx *mockUpdateTx) UpdateHeight(height uint64) {
-	tx.currentHeight = height
 }
 
 type chainManagerMock struct {
@@ -157,7 +151,7 @@ func (w *walletMock) ReleaseInputs(txns []types.Transaction, v2txns []types.V2Tr
 func (w *walletMock) SignV2Inputs(txn *types.V2Transaction, toSign []int)                  {}
 
 func TestApplyRevertDiff(t *testing.T) {
-	contracts, err := NewManager(nil, nil, nil)
+	contracts, err := NewManager(nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +296,8 @@ func TestUpdateContractElementProofs(t *testing.T) {
 func TestBroadcastExpiredContracts(t *testing.T) {
 	cmMock := &chainManagerMock{}
 	syncerMock := &syncerMock{}
-	contracts, err := NewManager(cmMock, syncerMock, &walletMock{})
+	store := &storeMock{}
+	contracts, err := NewManager(cmMock, store, syncerMock, &walletMock{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,16 +309,8 @@ func TestBroadcastExpiredContracts(t *testing.T) {
 		},
 	}
 
-	// mock the update tx and add a contract
-	mock := newMockUpdateTx()
-	mock.AddContract(contract)
-	updateTx := &updateTx{
-		UpdateTx:       mock,
-		knownContracts: make(map[types.FileContractID]bool),
-	}
-
 	// broadcast when no contract should be broadcasted
-	if err := contracts.broadcastExpiredContracts(updateTx); err != nil {
+	if err := contracts.broadcastExpiredContracts(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
@@ -334,8 +321,8 @@ func TestBroadcastExpiredContracts(t *testing.T) {
 	}
 
 	// broadcast with 1 contract to broadcast
-	mock.UpdateHeight(1000)
-	if err := contracts.broadcastExpiredContracts(updateTx); err != nil {
+	store.toBroadcast = []types.V2FileContractElement{contract}
+	if err := contracts.broadcastExpiredContracts(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)

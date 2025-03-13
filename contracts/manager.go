@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"context"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -14,6 +15,10 @@ type (
 	ChainManager interface {
 		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		RecommendedFee() types.Currency
+	}
+
+	Store interface {
+		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 	}
 
 	// Syncer is the minimal interface of Syncer functionality the
@@ -37,9 +42,10 @@ type (
 
 	// ContractManager manages the host announcements.
 	ContractManager struct {
-		cm ChainManager
-		s  Syncer
-		w  Wallet
+		cm    ChainManager
+		s     Syncer
+		w     Wallet
+		store Store
 
 		log *zap.Logger
 		tg  *threadgroup.ThreadGroup
@@ -60,11 +66,13 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(chainManager ChainManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+func NewManager(chainManager ChainManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
 	cm := &ContractManager{
 		cm: chainManager,
 		s:  syncer,
 		w:  wallet,
+
+		store: store,
 
 		log: zap.NewNop(),
 		tg:  threadgroup.New(),

@@ -46,10 +46,6 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	assertContractsToBroadcast := func(maxBlocksSinceExpiry uint64, n int) {
 		t.Helper()
 		var fces []types.V2FileContractElement
-		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
-			fces, err = tx.ContractElementsForBroadcast(maxBlocksSinceExpiry)
-			return err
-		})
 		if err != nil {
 			t.Fatal(err)
 		} else if len(fces) != n {
@@ -80,19 +76,13 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	assertContractsToBroadcast(10, 1) // not within bounds
 
 	// assert fce matches expected
-	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
-		fces, err := tx.ContractElementsForBroadcast(9)
-		if err != nil {
-			return err
-		} else if len(fces) != 1 {
-			t.Fatalf("expected 1 contract to broadcast, got %d", len(fces))
-		} else if !reflect.DeepEqual(fces[0], fce) {
-			t.Fatalf("mismatch: \n%+v\n%+v", fce, fces[0])
-		}
-		return nil
-	})
+	fces, err := store.ContractElementsForBroadcast(context.Background(), 9)
 	if err != nil {
 		t.Fatal(err)
+	} else if len(fces) != 1 {
+		t.Fatalf("expected 1 contract to broadcast, got %d", len(fces))
+	} else if !reflect.DeepEqual(fces[0], fce) {
+		t.Fatalf("mismatch: \n%+v\n%+v", fce, fces[0])
 	}
 }
 
