@@ -23,12 +23,12 @@ type (
 
 	// A Store is a persistent store for the indexer.
 	Store interface {
+		BlockHosts(ctx context.Context, hks []types.PublicKey) error
+		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
-		HostsBlocklist(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
-		HostsBlocklistAdd(ctx context.Context, hks []types.PublicKey) error
-		HostsBlocklistRemove(ctx context.Context, hk types.PublicKey) error
 		LastScannedIndex(context.Context) (types.ChainIndex, error)
+		UnblockHost(ctx context.Context, hk types.PublicKey) error
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.

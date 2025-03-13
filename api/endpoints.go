@@ -88,7 +88,7 @@ func (a *api) handleGETHostsBlocklist(jc jape.Context) {
 	if !ok {
 		return
 	}
-	hosts, err := a.store.HostsBlocklist(jc.Request.Context(), offset, limit)
+	hosts, err := a.store.BlockedHosts(jc.Request.Context(), offset, limit)
 	if jc.Check("failed to get blocklist", err) != nil {
 		return
 	}
@@ -100,7 +100,7 @@ func (a *api) handlePUTHostsBlocklist(jc jape.Context) {
 	if jc.Decode(&hks) != nil {
 		return
 	}
-	jc.Check("failed to add host keys to blocklist", a.store.HostsBlocklistAdd(jc.Request.Context(), hks))
+	jc.Check("failed to add host keys to blocklist", a.store.BlockHosts(jc.Request.Context(), hks))
 }
 
 func (a *api) handleDELETEHostsBlocklist(jc jape.Context) {
@@ -108,7 +108,7 @@ func (a *api) handleDELETEHostsBlocklist(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
-	jc.Check("failed to unblock host", a.store.HostsBlocklistRemove(jc.Request.Context(), hk))
+	jc.Check("failed to unblock host", a.store.UnblockHost(jc.Request.Context(), hk))
 }
 
 func (a *api) handleGETWallet(jc jape.Context) {

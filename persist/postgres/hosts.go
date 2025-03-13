@@ -57,7 +57,8 @@ SELECT
 	settings_max_collateral, settings_max_contract_duration, settings_remaining_storage, settings_total_storage,
 	settings_contract_price, settings_collateral, settings_storage_price, settings_ingress_price, settings_egress_price,
 	settings_free_sector_price, settings_tip_height, settings_valid_until
-FROM hosts LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key WHERE hosts.public_key = $1`, sqlPublicKey(hk)))
+FROM hosts LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
+WHERE hosts.public_key = $1`, sqlPublicKey(hk)))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("host %q: %w", hk, ErrHostNotFound)
 		} else if err != nil {
@@ -116,8 +117,8 @@ func (s *Store) Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, err
 	return hosts, nil
 }
 
-// HostsBlocklist returns a list of blocked hostkeys.
-func (s *Store) HostsBlocklist(ctx context.Context, offset, limit int) ([]types.PublicKey, error) {
+// BlockedHosts returns a list of blocked hostkeys.
+func (s *Store) BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error) {
 	// sanity check input
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
@@ -147,8 +148,8 @@ func (s *Store) HostsBlocklist(ctx context.Context, offset, limit int) ([]types.
 	return blocklist, nil
 }
 
-// HostsBlocklistAdd adds the given host keys to the blocklist.
-func (s *Store) HostsBlocklistAdd(ctx context.Context, hks []types.PublicKey) error {
+// BlockHosts adds the given host keys to the blocklist.
+func (s *Store) BlockHosts(ctx context.Context, hks []types.PublicKey) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		for _, hk := range hks {
 			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key) VALUES ($1) ON CONFLICT (public_key) DO NOTHING", sqlPublicKey(hk))
@@ -160,8 +161,8 @@ func (s *Store) HostsBlocklistAdd(ctx context.Context, hks []types.PublicKey) er
 	})
 }
 
-// HostsBlocklistRemove removes the given host key from the blocklist.
-func (s *Store) HostsBlocklistRemove(ctx context.Context, hk types.PublicKey) error {
+// UnblockHost removes the given host key from the blocklist.
+func (s *Store) UnblockHost(ctx context.Context, hk types.PublicKey) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, "DELETE FROM hosts_blocklist WHERE public_key = $1", sqlPublicKey(hk))
 		if err != nil {
@@ -305,7 +306,8 @@ SELECT
 	settings_max_collateral, settings_max_contract_duration, settings_remaining_storage, settings_total_storage,
 	settings_contract_price, settings_collateral, settings_storage_price, settings_ingress_price, settings_egress_price,
 	settings_free_sector_price, settings_tip_height, settings_valid_until
-FROM hosts LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key LIMIT $1 OFFSET $2`, limit, offset)
+FROM hosts LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key 
+LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query hosts: %w", err)
 	}
