@@ -20,7 +20,6 @@ type (
 	UpdateTx interface {
 		ContractElements() ([]types.V2FileContractElement, error)
 		IsKnownContract(contractID types.FileContractID) (bool, error)
-		RejectPendingContracts(maxFormation time.Time) error
 		UpdateContractElements(fces ...types.V2FileContractElement) error
 		UpdateContractState(contractID types.FileContractID, state ContractState) error
 	}
@@ -55,6 +54,12 @@ func (m *ContractManager) ProcessActions() error {
 		return err
 	}
 	defer cancel()
+
+	// reject all contracts that have been pending for more than 'contractRejectBuffer'
+	maxFormation := time.Now().Add(-m.contractRejectBuffer)
+	if err := m.store.RejectPendingContracts(ctx, maxFormation); err != nil {
+		return fmt.Errorf("failed to reject pending contracts: %w", err)
+	}
 
 	// broadcast resolutions for expired contracts
 	// 'expiredContractBroadcastBuffer' blocks after their window end to give
@@ -91,12 +96,6 @@ func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertU
 		if err != nil {
 			return fmt.Errorf("failed to apply chain update: %w", err)
 		}
-	}
-
-	// reject all contracts that have been pending for more than 'contractRejectBuffer'
-	maxFormation := time.Now().Add(-m.contractRejectBuffer)
-	if err := tx.RejectPendingContracts(maxFormation); err != nil {
-		return fmt.Errorf("failed to reject pending contracts: %w", err)
 	}
 
 	return nil

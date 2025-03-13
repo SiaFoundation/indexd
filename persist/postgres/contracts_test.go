@@ -400,9 +400,7 @@ func TestRejectContracts(t *testing.T) {
 	assertContractState(activeID, contracts.ContractStateActive)
 
 	// reject pending contracts older than 30 minutes
-	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.RejectPendingContracts(now.Add(-30 * time.Minute))
-	})
+	err = store.RejectPendingContracts(context.Background(), now.Add(-30*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}

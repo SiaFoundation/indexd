@@ -21,6 +21,7 @@ type (
 	// requires.
 	Store interface {
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
+		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
 	}
 

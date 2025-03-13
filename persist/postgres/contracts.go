@@ -235,10 +235,12 @@ func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, erro
 	return exists, nil
 }
 
-func (tx *updateTx) RejectPendingContracts(maxFormation time.Time) error {
-	_, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET state = $1 WHERE state = $2 AND formation < $3`,
-		sqlContractState(contracts.ContractStateRejected), sqlContractState(contracts.ContractStatePending), maxFormation)
-	return err
+func (s *Store) RejectPendingContracts(ctx context.Context, maxFormation time.Time) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `UPDATE contracts SET state = $1 WHERE state = $2 AND formation < $3`,
+			sqlContractState(contracts.ContractStateRejected), sqlContractState(contracts.ContractStatePending), maxFormation)
+		return err
+	})
 }
 
 func (tx *updateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {

@@ -24,28 +24,28 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 }
 
 type storeMock struct {
-	height    uint64
-	contracts []types.V2FileContractElement
+	toBroadcast []types.V2FileContractElement
+	pruneCalls  int
+	rejectCalls int
 }
 
 func (s *storeMock) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
-	var toBroadcast []types.V2FileContractElement
-	for _, c := range s.contracts {
-		if c.V2FileContract.ExpirationHeight+maxBlocksSinceExpiry <= s.height {
-			toBroadcast = append(toBroadcast, c)
-		}
+	return slices.Clone(s.toBroadcast), nil
+}
+
+func (s *storeMock) RejectPendingContracts(_ context.Context, t time.Time) error {
+	if t.IsZero() {
+		panic("invalid time")
 	}
-	return toBroadcast, nil
+	s.rejectCalls++
+	return nil
 }
 
 func (s *storeMock) PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error {
-	var filtered []types.V2FileContractElement
-	for _, c := range s.contracts {
-		if c.V2FileContract.ExpirationHeight+maxBlocksSinceExpiry > s.height {
-			filtered = append(filtered, c)
-		}
+	if maxBlocksSinceExpiry == 0 {
+		panic("invalid maxBlocksSinceExpiry")
 	}
-	s.contracts = filtered
+	s.pruneCalls++
 	return nil
 }
 
@@ -92,10 +92,6 @@ func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileC
 func (tx *mockUpdateTx) IsKnownContract(contractID types.FileContractID) (bool, error) {
 	_, ok := tx.contracts[contractID]
 	return ok, nil
-}
-
-func (tx *mockUpdateTx) RejectPendingContracts(time.Time) error {
-	panic("not implemented")
 }
 
 func (tx *mockUpdateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
@@ -333,7 +329,7 @@ func TestProcessActions(t *testing.T) {
 	// broadcasted transactions in the mocked syncer, the number of resolutions
 	// in the latest broadcasted transactions and the contract elements in the
 	// store.
-	assert := func(poolTxns, broadcastedTxns, resolutions, fces int) {
+	assert := func(poolTxns, broadcastedTxns, resolutions, pruneCalls, rejectCalls int) {
 		t.Helper()
 		if len(cmMock.V2PoolTransactions()) != poolTxns {
 			t.Fatalf("expected 0 contract in tpool, got %v", len(cmMock.tpool))
@@ -341,8 +337,10 @@ func TestProcessActions(t *testing.T) {
 			t.Fatalf("expected 0 broadcasted contracts, got %v", len(syncerMock.broadcasted))
 		} else if broadcastedTxns > 0 && len(sets[broadcastedTxns-1].FileContractResolutions) != resolutions {
 			t.Fatalf("expected 1 contract resolution in broadcast, got %v", len(sets[0].FileContracts))
-		} else if len(store.contracts) != fces {
-			t.Fatalf("expected 1 contract in store, got %v", len(store.contracts))
+		} else if store.pruneCalls != pruneCalls {
+			t.Fatalf("expected %v calls to PruneExpiredContractElements, got %v", pruneCalls, store.pruneCalls)
+		} else if store.rejectCalls != rejectCalls {
+			t.Fatalf("expected %v calls to RejectPendingContracts, got %v", rejectCalls, store.rejectCalls)
 		}
 	}
 
@@ -350,27 +348,12 @@ func TestProcessActions(t *testing.T) {
 	if err := contracts.ProcessActions(); err != nil {
 		t.Fatal(err)
 	}
-	assert(0, 0, 0, 0)
-
-	// broadcast with 1 contract not yet expired
-	store.contracts = []types.V2FileContractElement{contract}
-	store.height = contract.V2FileContract.ExpirationHeight + 143
-	if err := contracts.ProcessActions(); err != nil {
-		t.Fatal(err)
-	}
-	assert(0, 0, 0, 1)
+	assert(0, 0, 0, 1, 1)
 
 	// broadcast with 1 contract to broadcast
-	store.height++
+	store.toBroadcast = []types.V2FileContractElement{contract}
 	if err := contracts.ProcessActions(); err != nil {
 		t.Fatal(err)
 	}
-	assert(1, 1, 1, 1)
-
-	// increase the height even more to get the contract pruned
-	store.height += 144
-	if err := contracts.ProcessActions(); err != nil {
-		t.Fatal(err)
-	}
-	assert(2, 2, 1, 0)
+	assert(1, 1, 1, 2, 2)
 }
