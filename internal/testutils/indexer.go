@@ -7,11 +7,9 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"os"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgxpool"
 	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
@@ -51,7 +49,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		t.Fatalf("failed to create wallet: %v", err)
 	}
 
-	hm, err := hosts.NewManager(store, hosts.WithLogger(log.Named("hosts")))
+	hm, err := hosts.NewManager(store, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(500*time.Millisecond), hosts.WithScanInterval(time.Second))
 	if err != nil {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
@@ -149,41 +147,6 @@ func (idx *Indexer) Tip() (types.ChainIndex, error) {
 // WalletAddr returns the address of the wallet.
 func (idx *Indexer) WalletAddr() types.Address {
 	return idx.wallet.Address()
-}
-
-func initTestDB(t testing.TB, log *zap.Logger) *postgres.Store {
-	// parse connection info from env vars
-	ci := postgres.ConnectionInfo{
-		Host:     "127.0.0.1",
-		Port:     5432,
-		User:     os.Getenv("POSTGRES_USER"),
-		Password: os.Getenv("POSTGRES_PASSWORD"),
-		Database: os.Getenv("POSTGRES_DB"),
-		SSLMode:  "disable",
-	}
-
-	// create test-specific database
-	dbName := t.Name()
-	pool, err := pgxpool.New(context.Background(), ci.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer pool.Close()
-
-	if _, err := pool.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS %q", dbName)); err != nil {
-		t.Fatal(err)
-	} else if _, err := pool.Exec(context.Background(), fmt.Sprintf("CREATE DATABASE %q", dbName)); err != nil {
-		t.Fatal(err)
-	}
-	pool.Close()
-	ci.Database = dbName
-
-	// connect
-	store, err := postgres.Connect(context.Background(), ci, log.Named("postgres"))
-	if err != nil {
-		t.Fatalf("failed to connect to postgres database: %v", err)
-	}
-	return store
 }
 
 // closeWithTimeout is a helper which closes a resource and panics if it takes

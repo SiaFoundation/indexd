@@ -329,6 +329,8 @@ func calculateNextScanTime(lastScan time.Time, success bool, consecScanFailures 
 		panic("interval can not be zero")
 	} else if offsetHours < 0 {
 		panic("invalid offset hours")
+	} else if interval < time.Duration(offsetHours)*time.Hour {
+		offsetHours = 0
 	}
 
 	if success {

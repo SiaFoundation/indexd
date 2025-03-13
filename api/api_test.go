@@ -2,6 +2,7 @@ package api_test
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -12,17 +13,56 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestWalletAPI(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
+func TestHostsAPI(t *testing.T) {
+	// create cluster
+	c := testutils.NewConsensusNode(t, zap.NewNop())
+	h1 := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
+	h2 := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
+	indexer := testutils.NewIndexer(t, c, zap.NewNop())
 
+	// fund hosts
+	c.MineBlocks(t, h1.WalletAddress(), 1)
+	c.MineBlocks(t, h2.WalletAddress(), 1)
+	c.MineBlocks(t, types.Address{}, c.Network().MaturityDelay)
+
+	// announce hosts
+	err := errors.Join(h1.Announce(), h2.Announce())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// mine a block and allow hosts to be scanned
+	c.MineBlocks(t, types.Address{}, 1)
+	time.Sleep(time.Second)
+
+	// assert both hosts got scanned
+	if hosts, err := indexer.Hosts(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 2 {
+		t.Fatal("expected 2 hosts", len(hosts))
+	} else if h1, err := indexer.Host(context.Background(), h1.PublicKey()); err != nil {
+		t.Fatal(err)
+	} else if h1.TotalScans != 1 {
+		t.Fatal("expected 1 scan", h1.TotalScans)
+	} else if h1.FailedScans != 0 {
+		t.Fatal("expected 0 failed scans", h1.FailedScans)
+	} else if h2, err := indexer.Host(context.Background(), h2.PublicKey()); err != nil {
+		t.Fatal(err)
+	} else if h2.TotalScans != 1 {
+		t.Fatal("expected 1 scan", h2.TotalScans)
+	} else if h2.FailedScans != 0 {
+		t.Fatal("expected 0 failed scans", h2.FailedScans)
+	}
+}
+
+func TestWalletAPI(t *testing.T) {
 	// create indexer
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
 	c.MineBlocks(t, indexer.WalletAddr(), 1)
 
 	// assert events are being persisted
-	events, err := indexer.WalletEvents(ctx)
+	events, err := indexer.WalletEvents(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(events) != 1 {
@@ -32,7 +72,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// assert wallet is empty
-	res, err := indexer.Wallet(ctx)
+	res, err := indexer.Wallet(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if !res.Confirmed.Add(res.Unconfirmed).IsZero() {
@@ -43,7 +83,7 @@ func TestWalletAPI(t *testing.T) {
 	c.MineBlocks(t, types.Address{}, c.Network().MaturityDelay)
 
 	// assert wallet is funded
-	res, err = indexer.Wallet(ctx)
+	res, err = indexer.Wallet(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if res.Confirmed.IsZero() {
@@ -53,7 +93,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// assert sending siacoins to void address fails
-	_, err = indexer.WalletSendSiacoins(ctx, types.VoidAddress, types.Siacoins(1), false, false)
+	_, err = indexer.WalletSendSiacoins(context.Background(), types.VoidAddress, types.Siacoins(1), false, false)
 	if err == nil || !strings.Contains(err.Error(), "cannot send to void address") {
 		t.Fatal("unexpected error", err)
 	}
@@ -70,13 +110,13 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// assert we can send siacoins to that host
-	txnID, err := indexer.WalletSendSiacoins(ctx, w.Address(), types.Siacoins(1), false, false)
+	txnID, err := indexer.WalletSendSiacoins(context.Background(), w.Address(), types.Siacoins(1), false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert the transaction is pending
-	pending, err := indexer.WalletPending(ctx)
+	pending, err := indexer.WalletPending(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(pending) != 1 {
@@ -99,7 +139,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// assert the transaction is no longer pending
-	pending, err = indexer.WalletPending(ctx)
+	pending, err = indexer.WalletPending(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(pending) != 0 {

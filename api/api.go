@@ -7,6 +7,7 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 )
@@ -22,6 +23,8 @@ type (
 
 	// A Store is a persistent store for the indexer.
 	Store interface {
+		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
+		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
 		LastScannedIndex(context.Context) (types.ChainIndex, error)
 	}
 
@@ -69,6 +72,10 @@ func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, op
 
 	return jape.Mux(map[string]jape.Handler{
 		"GET /state": a.handleGETState,
+
+		// host endpoints
+		"GET    /host/:hostkey": a.handleGETHost,
+		"GET    /hosts":         a.handleGETHosts,
 
 		// wallet endpoints
 		"GET /wallet":         a.handleGETWallet,

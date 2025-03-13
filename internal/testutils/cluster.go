@@ -8,8 +8,6 @@ import (
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/testutil"
 	"go.uber.org/zap"
 )
@@ -120,10 +118,7 @@ func (c *Cluster) AnnounceHosts(ctx context.Context, t testing.TB, hosts ...*Hos
 	start := time.Now().Round(time.Second)
 	announced := make(map[types.PublicKey]struct{})
 	for _, h := range hosts {
-		if err := h.Announce(chain.V2HostAnnouncement{{
-			Protocol: siamux.Protocol,
-			Address:  h.l.Addr().String(),
-		}}); err != nil {
+		if err := h.Announce(); err != nil {
 			t.Fatal(err)
 		}
 		announced[h.PublicKey()] = struct{}{}
@@ -170,7 +165,7 @@ func (c *Cluster) NewHosts(t testing.TB, n int) []*Host {
 	cn := c.ConsensusNode
 
 	var hosts []*Host
-	for i := 0; i < n; i++ {
+	for range n {
 		pk := types.GeneratePrivateKey()
 		hosts = append(hosts, cn.NewHost(t, pk, c.log.Named("host-"+pk.PublicKey().String())))
 	}

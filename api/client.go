@@ -2,10 +2,12 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/url"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/jape"
 )
 
@@ -25,6 +27,22 @@ func NewClient(addr, password string) *Client {
 // State returns the current state of the indexer.
 func (c *Client) State(ctx context.Context) (state State, err error) {
 	err = c.c.GET(ctx, "/state", &state)
+	return
+}
+
+// Host returns information about a particular host known to the indexer.
+func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hosts.Host, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/host/%s", hostKey), &h)
+	return
+}
+
+// Hosts returns all hosts known to the indexer.
+func (c *Client) Hosts(ctx context.Context, opts ...URLQueryParameterOption) (hosts []hosts.Host, err error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	err = c.c.GET(ctx, "/hosts?"+values.Encode(), &hosts)
 	return
 }
 

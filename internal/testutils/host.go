@@ -40,8 +40,18 @@ func (h *Host) Addr() string {
 	return h.l.Addr().String()
 }
 
+// WalletAddress returns the host's wallet address.
+func (h *Host) WalletAddress() types.Address {
+	return h.w.Address()
+}
+
 // Announce announces the host on the network.
-func (h *Host) Announce(ha chain.V2HostAnnouncement) error {
+func (h *Host) Announce() error {
+	ha := chain.V2HostAnnouncement{{
+		Protocol: siamux.Protocol,
+		Address:  h.l.Addr().String(),
+	}}
+
 	// prepare transaction
 	cs := h.cm.TipState()
 	minerFee := h.cm.RecommendedFee().Mul64(1e3)
