@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -21,6 +22,7 @@ type (
 	// requires.
 	Store interface {
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
+		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
 	}
@@ -43,6 +45,28 @@ type (
 type (
 	// ContractManagerOpt is a functional option for the ContractManager.
 	ContractManagerOpt func(*ContractManager)
+
+	// MaintenanceSettings are the settings relevant to contract maintenance.
+	MaintenanceSettings struct {
+		// Enabled indicates whether contract maintenance is enabled. If false,
+		// account funding, pinning and pruning will happen on existing
+		// contracts but no contracts will be formed/renewed/refreshed.
+		Enabled bool `json:"enabled"`
+
+		// Period is the number of blocks between a new contract's formation and
+		// proof height. It needs to be greater than the RenewWindow.
+		Period uint64 `json:"period"`
+
+		// RenewWindow is the number of blocks before a contract reaches its
+		// proof height where we start trying to renew it.
+		RenewWindow uint64 `json:"renewWindow"`
+
+		// WantedContracts is the number of good-for-upload contracts the
+		// contract manager should maintain. e.g. if a host runs out of storage,
+		// its contract(s) won't count towards this number but will still be
+		// considered good for renewing/refreshing and funding accounts.
+		WantedContracts uint `json:"wantedContracts"`
+	}
 
 	// ContractManager manages the host announcements.
 	ContractManager struct {
@@ -102,11 +126,13 @@ func (cm *ContractManager) Close() error {
 
 // Run starts the contract manager's background tasks.
 func (cm *ContractManager) Run() {
-	done, err := cm.tg.Add()
+	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {
 		return
 	}
-	defer done()
+	defer cancel()
+
+	// TODO: block until consensus is synced before starting maintenance
 
 	log := cm.log.Named("maintenance")
 	for {
@@ -116,7 +142,7 @@ func (cm *ContractManager) Run() {
 		case <-time.After(cm.maintenanceFrequency):
 		}
 
-		if err := cm.performContractMaintenance(); err != nil {
+		if err := cm.performContractMaintenance(ctx); err != nil {
 			log.Error("contract maintenance failed", zap.Error(err))
 		}
 
@@ -132,8 +158,14 @@ func (cm *ContractManager) Run() {
 	}
 }
 
-func (cm *ContractManager) performContractMaintenance() error {
-	// TODO: fetch settings for maintenance from the store
+func (cm *ContractManager) performContractMaintenance(ctx context.Context) error {
+	// fetch settings and determine if maintenance is supposed to run
+	settings, err := cm.store.MaintenanceSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch settings for contract maintenance: %w", err)
+	} else if !settings.Enabled {
+		return nil
+	}
 
 	// TODO: Use host manager to perform host checks and update results in the store
 

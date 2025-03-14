@@ -27,10 +27,15 @@ type storeMock struct {
 	toBroadcast []types.V2FileContractElement
 	pruneCalls  int
 	rejectCalls int
+	settings    MaintenanceSettings
 }
 
 func (s *storeMock) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
 	return slices.Clone(s.toBroadcast), nil
+}
+
+func (s *storeMock) MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error) {
+	return s.settings, nil
 }
 
 func (s *storeMock) RejectPendingContracts(_ context.Context, t time.Time) error {
