@@ -3,9 +3,12 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.uber.org/zap"
 )
@@ -16,6 +19,7 @@ type (
 	ChainManager interface {
 		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		RecommendedFee() types.Currency
+		TipState() consensus.State
 	}
 
 	// Store is the minimal interface of Store functionality the ContractManager
@@ -31,6 +35,7 @@ type (
 	// ContractManager requires.
 	Syncer interface {
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
+		Peers() []*syncer.Peer
 	}
 
 	// Wallet is the minimal interface of Wallet functionality the
@@ -132,9 +137,12 @@ func (cm *ContractManager) Run() {
 	}
 	defer cancel()
 
-	// TODO: block until consensus is synced before starting maintenance
-
+	// block until we are online and the consensus is synced
 	log := cm.log.Named("maintenance")
+	if !cm.blockUntilReady(log) {
+		return // shutdown
+	}
+
 	for {
 		select {
 		case <-cm.tg.Done():
@@ -155,6 +163,23 @@ func (cm *ContractManager) Run() {
 		if err := cm.performContractPruning(); err != nil {
 			log.Error("contract pruning failed", zap.Error(err))
 		}
+	}
+}
+
+func (cm *ContractManager) blockUntilReady(log *zap.Logger) bool {
+	var once sync.Once
+	for {
+		select {
+		case <-cm.tg.Done():
+			return false
+		case <-time.After(time.Second):
+		}
+		if len(cm.s.Peers()) > 0 && time.Since(cm.cm.TipState().PrevTimestamps[0]) < 3*time.Hour {
+			return true
+		}
+		once.Do(func() {
+			log.Info("waiting for consensus to be synced and syncer to be online before starting maintenance")
+		})
 	}
 }
 

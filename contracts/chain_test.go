@@ -12,6 +12,7 @@ import (
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 )
 
@@ -135,6 +136,12 @@ func (cm *chainManagerMock) AddV2PoolTransactions(basis types.ChainIndex, txns [
 	return false, nil
 }
 
+func (cm *chainManagerMock) TipState() consensus.State {
+	return consensus.State{
+		PrevTimestamps: [11]time.Time{time.Now()},
+	}
+}
+
 func (cm *chainManagerMock) V2PoolTransactions() []types.V2Transaction {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
@@ -160,6 +167,10 @@ func (s *syncerMock) BroadcastedSets() []types.V2Transaction {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.broadcasted)
+}
+
+func (s *syncerMock) Peers() []*syncer.Peer {
+	return []*syncer.Peer{{}}
 }
 
 type walletMock struct {
