@@ -5,7 +5,8 @@ import (
 	"testing"
 
 	"go.sia.tech/core/types"
-	rhp "go.sia.tech/indexd/internal/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.uber.org/goleak"
 	"go.uber.org/zap"
 )
@@ -18,7 +19,13 @@ func TestHost(t *testing.T) {
 	cn := NewConsensusNode(t, zap.NewNop())
 	h := cn.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
 
-	settings, err := rhp.New().Settings(context.Background(), h.PublicKey(), h.Addr())
+	conn, err := siamux.Dial(context.Background(), h.Addr(), h.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	settings, err := rhp.RPCSettings(context.Background(), conn)
 	if err != nil {
 		t.Fatal(err)
 	} else if settings.WalletAddress != h.w.Address() {
