@@ -46,6 +46,28 @@ func (c *Client) Hosts(ctx context.Context, opts ...URLQueryParameterOption) (ho
 	return
 }
 
+// HostsBlocklist returns the host key of all hosts on the blocklist.
+func (c *Client) HostsBlocklist(ctx context.Context, opts ...URLQueryParameterOption) (blocklist []types.PublicKey, err error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	err = c.c.GET(ctx, "/hosts/blocklist?"+values.Encode(), &blocklist)
+	return
+}
+
+// HostsBlocklistAdd adds the given host keys to the blocklist.
+func (c *Client) HostsBlocklistAdd(ctx context.Context, hostKeys []types.PublicKey) (err error) {
+	err = c.c.PUT(ctx, "/hosts/blocklist", hostKeys)
+	return
+}
+
+// HostsBlocklistRemove removes the host with given host key from the blocklist.
+func (c *Client) HostsBlocklistRemove(ctx context.Context, hostKey types.PublicKey) (err error) {
+	err = c.c.DELETE(ctx, fmt.Sprintf("/hosts/blocklist/%s", hostKey))
+	return
+}
+
 // Wallet returns the state of the wallet.
 func (c *Client) Wallet(ctx context.Context) (resp WalletResponse, err error) {
 	err = c.c.GET(ctx, "/wallet", &resp)

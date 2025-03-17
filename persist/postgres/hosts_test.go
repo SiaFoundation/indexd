@@ -6,6 +6,7 @@ import (
 	"math"
 	"net"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -75,6 +76,83 @@ func TestAddHostAnnouncement(t *testing.T) {
 	} else if h.Addresses[0].Address != ha3.Address || h.Addresses[0].Protocol != ha3.Protocol {
 		t.Fatal("unexpected", h.Addresses[0])
 	}
+}
+
+func TestBlocklist(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// add two hosts
+	hk1 := types.PublicKey{1}
+	hk2 := types.PublicKey{2}
+	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return errors.Join(
+			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
+			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
+		)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertBlocked := func(hk types.PublicKey, blocked bool) {
+		t.Helper()
+		h, err := db.Host(context.Background(), hk)
+		if err != nil {
+			t.Fatal(err)
+		} else if h.Blocked != blocked {
+			t.Fatal("unexpected", h.Blocked)
+		}
+		hks, err := db.BlockedHosts(context.Background(), 0, 10)
+		if err != nil {
+			t.Fatal(err)
+		} else if slices.Contains(hks, hk) != blocked {
+			t.Fatal("expected host to be in blocklist")
+		}
+	}
+
+	block := func(hks ...types.PublicKey) {
+		t.Helper()
+		if err := db.BlockHosts(context.Background(), hks); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unblock := func(hks ...types.PublicKey) {
+		t.Helper()
+		for _, hk := range hks {
+			if err := db.UnblockHost(context.Background(), hk); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	// assert both are returned
+	assertBlocked(hk1, false)
+	assertBlocked(hk2, false)
+
+	// block h1 and assert noop on duplicate insert
+	block(hk1, hk1)
+
+	// assert only h2 is returned
+	assertBlocked(hk1, true)
+	assertBlocked(hk2, false)
+
+	// block h2 and assert no hosts are returned
+	block(hk2)
+	assertBlocked(hk1, true)
+	assertBlocked(hk2, true)
+
+	// unblock h2 assert noop on duplicate or remove of unknown key
+	unblock(hk2, hk2, types.GeneratePrivateKey().PublicKey())
+
+	// assert h2 is returned
+	assertBlocked(hk1, true)
+	assertBlocked(hk2, false)
+
+	// unblock h1 and assert we're back to normal
+	unblock(hk1)
+	assertBlocked(hk1, false)
+	assertBlocked(hk2, false)
 }
 
 func TestHost(t *testing.T) {

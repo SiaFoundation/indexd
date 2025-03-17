@@ -67,8 +67,11 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer contracts.Close()
 
-	sub := subscriber.New(cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
-	defer sub.Close()
+	subscriber, err := subscriber.New(cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
+	if err != nil {
+		return fmt.Errorf("failed to create subscriber: %w", err)
+	}
+	defer subscriber.Close()
 
 	httpListener, err := startLocalhostListener(cfg.HTTP.Address, log.Named("listener"))
 	if err != nil {

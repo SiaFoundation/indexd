@@ -53,6 +53,41 @@ func TestHostsAPI(t *testing.T) {
 	} else if h2.FailedScans != 0 {
 		t.Fatal("expected 0 failed scans", h2.FailedScans)
 	}
+
+	// assert blocklist is empty and unblocking unknown host is noop
+	if blocklist, err := indexer.HostsBlocklist(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(blocklist) != 0 {
+		t.Fatal("expected 0 blocklisted hosts", len(blocklist))
+	} else if indexer.HostsBlocklistRemove(context.Background(), types.GeneratePrivateKey().PublicKey()) != nil {
+		t.Fatal("expected error")
+	}
+
+	// block both hosts
+	if err := indexer.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey(), h2.PublicKey()}); err != nil {
+		t.Fatal(err)
+	} else if blocklist, err := indexer.HostsBlocklist(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(blocklist) != 2 {
+		t.Fatal("expected 2 blocklisted hosts", len(blocklist))
+	} else if h1, err := indexer.Host(context.Background(), h1.PublicKey()); err != nil {
+		t.Fatal(err)
+	} else if !h1.Blocked {
+		t.Fatal("expected host to be blocked", h1.Blocked)
+	} else if h2, err := indexer.Host(context.Background(), h2.PublicKey()); err != nil {
+		t.Fatal(err)
+	} else if !h2.Blocked {
+		t.Fatal("expected host to be blocked", h2.Blocked)
+	}
+
+	// unblock h1
+	if err := indexer.HostsBlocklistRemove(context.Background(), h1.PublicKey()); err != nil {
+		t.Fatal(err)
+	} else if h1, err := indexer.Host(context.Background(), h1.PublicKey()); err != nil {
+		t.Fatal(err)
+	} else if h1.Blocked {
+		t.Fatal("expected host to be unblocked", h1.Blocked)
+	}
 }
 
 func TestWalletAPI(t *testing.T) {

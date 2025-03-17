@@ -23,9 +23,12 @@ type (
 
 	// A Store is a persistent store for the indexer.
 	Store interface {
+		BlockHosts(ctx context.Context, hks []types.PublicKey) error
+		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
 		LastScannedIndex(context.Context) (types.ChainIndex, error)
+		UnblockHost(ctx context.Context, hk types.PublicKey) error
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -75,7 +78,12 @@ func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, op
 
 		// host endpoints
 		"GET    /host/:hostkey": a.handleGETHost,
-		"GET    /hosts":         a.handleGETHosts,
+
+		// hosts endpoints
+		"GET    /hosts":                    a.handleGETHosts,
+		"GET    /hosts/blocklist":          a.handleGETHostsBlocklist,
+		"PUT    /hosts/blocklist":          a.handlePUTHostsBlocklist,
+		"DELETE /hosts/blocklist/:hostkey": a.handleDELETEHostsBlocklist,
 
 		// wallet endpoints
 		"GET /wallet":         a.handleGETWallet,

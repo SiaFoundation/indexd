@@ -83,6 +83,34 @@ func (a *api) handleGETHosts(jc jape.Context) {
 	jc.Encode(hosts)
 }
 
+func (a *api) handleGETHostsBlocklist(jc jape.Context) {
+	offset, limit, ok := parseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+	hosts, err := a.store.BlockedHosts(jc.Request.Context(), offset, limit)
+	if jc.Check("failed to get blocklist", err) != nil {
+		return
+	}
+	jc.Encode(hosts)
+}
+
+func (a *api) handlePUTHostsBlocklist(jc jape.Context) {
+	var hks []types.PublicKey
+	if jc.Decode(&hks) != nil {
+		return
+	}
+	jc.Check("failed to add host keys to blocklist", a.store.BlockHosts(jc.Request.Context(), hks))
+}
+
+func (a *api) handleDELETEHostsBlocklist(jc jape.Context) {
+	var hk types.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
+		return
+	}
+	jc.Check("failed to unblock host", a.store.UnblockHost(jc.Request.Context(), hk))
+}
+
 func (a *api) handleGETWallet(jc jape.Context) {
 	balance, err := a.wallet.Balance()
 	if !a.checkServerError(jc, "failed to get wallet", err) {
