@@ -115,12 +115,15 @@ func New(cm ChainManager, hm HostManager, contracts ContractManager, wm WalletMa
 	}
 	go func() {
 		defer cancel()
-		for range reorgCh {
+		for {
 			select {
 			case <-reorgCh:
-				if err := s.Sync(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				err := s.Sync(ctx)
+				if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, threadgroup.ErrClosed) {
 					s.log.Panic("failed to sync database", zap.Error(err))
 				}
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
@@ -133,6 +136,12 @@ func New(cm ChainManager, hm HostManager, contracts ContractManager, wm WalletMa
 // to manually call this since the Subscriber will do that itself but it can be
 // used to guarantee the subscriber is synced at a given point in time.
 func (s *Subscriber) Sync(ctx context.Context) error {
+	ctx, cancel, err := s.tg.AddContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
@@ -158,7 +167,7 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 		}
 
 		updateCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		if err := s.store.UpdateChainState(updateCtx, func(tx UpdateTx) error {
+		err = s.store.UpdateChainState(updateCtx, func(tx UpdateTx) error {
 			if err := s.hm.UpdateChainState(tx, aus); err != nil {
 				return fmt.Errorf("failed to update host chain state: %w", err)
 			} else if err := s.contracts.UpdateChainState(tx, rus, aus); err != nil {
@@ -173,15 +182,15 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 				index = rus[len(rus)-1].State.Index
 			}
 
-			if err := tx.UpdateLastScannedIndex(updateCtx, aus[len(aus)-1].State.Index); err != nil {
+			if err := tx.UpdateLastScannedIndex(updateCtx, index); err != nil {
 				return fmt.Errorf("failed to update last scanned index: %w", err)
 			}
 			return nil
-		}); err != nil {
-			cancel()
+		})
+		cancel()
+		if err != nil {
 			return fmt.Errorf("failed to apply updates: %w", err)
 		}
-		cancel()
 
 		if time.Since(lastUpdate) > 5*time.Minute {
 			s.log.Debug("syncing", zap.Uint64("height", index.Height), zap.Stringer("id", index.ID))
