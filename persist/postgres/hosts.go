@@ -15,7 +15,14 @@ import (
 )
 
 const (
-	uptimeHalfLife = 60 * 60 * 24 * 6 // 6 weeks
+	// uptimeHalfLife defines the duration, in seconds, over which a host's
+	// recorded uptime value is exponentially decayed to half its influence. In
+	// practice, after uptimeHalfLife seconds, the contribution of a single scan
+	// (successful or failed) to the host's "recent uptime" metric is reduced by
+	// 50%. This decay mechanism emphasizes recent scan results, giving new
+	// hosts a fairer evaluation and ensuring that long-established hosts do not
+	// maintain high uptime scores solely based on older data.
+	uptimeHalfLife = 60 * 60 * 24 * 7 * 4 // 1 month
 )
 
 var (
@@ -277,7 +284,7 @@ WITH globals AS (
 	FROM hosts
 	WHERE public_key = $1
 ) SELECT 
-		hosts.*,
+	hosts.*,
 	scanned AND recent_uptime > 0.9 AND last_failed_scan < NOW() - INTERVAL '1 week',
 	scanned AND settings_max_contract_duration >= globals.contract_period,
 	scanned AND settings_max_collateral > globals.min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contract_period,

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"math"
 	"net"
 	"reflect"
 	"testing"
@@ -292,7 +293,7 @@ func TestHostChecks(t *testing.T) {
 	}
 }
 
-func TestHostsUptimeEMA(t *testing.T) {
+func TestHostsRecentUptime(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
 	hk := types.PublicKey{1}
@@ -345,8 +346,19 @@ func TestHostsUptimeEMA(t *testing.T) {
 		t.Fatal("unexpected", u)
 	}
 
-	// assert it takes 3 failed scans to drop the uptime below .9
-	simulateScan(false, 2)
+	// assert uptime is halved after the the half life
+	simulateScan(false, uptimeHalfLife/60/60/8)
+	if math.Round(uptime()*10)/10 != .5 {
+		t.Fatal("unexpected", uptime())
+	}
+
+	// reset uptime
+	if _, err := db.pool.Exec(context.Background(), `UPDATE hosts SET recent_uptime = 1`); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it takes 12 failed scans (~3 days) to drop the uptime below .9
+	simulateScan(false, 12)
 	if u := uptime(); u < .9 {
 		t.Fatal("unexpected", u)
 	}
@@ -355,20 +367,19 @@ func TestHostsUptimeEMA(t *testing.T) {
 		t.Fatal("unexpected", u)
 	}
 
-	// assert uptime drops below .8 after another 3 failed scan
-	simulateScan(false, 3)
-	if u := uptime(); u > .8 {
-		t.Fatal("unexpected", u)
+	// fail scans until we drop below 85% uptime (~2 days)
+	for uptime() > .85 {
+		simulateScan(false, 1)
 	}
 
-	// assert it now takes ~20 successful scans to climb back up to above .9
-	simulateScan(true, 18)
-	if u := uptime(); u > .9 {
-		t.Fatal("unexpected", u)
+	// assert it takes ~2 weeks to climb back up to above .9
+	var n int
+	for uptime() < .9 {
+		simulateScan(true, 1)
+		n++
 	}
-	simulateScan(true, 1)
-	if u := uptime(); u < .9 {
-		t.Fatal("unexpected", u)
+	if n != 51 {
+		t.Fatal("unexpected", n)
 	}
 }
 
