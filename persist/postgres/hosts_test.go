@@ -435,23 +435,23 @@ func TestHostsRecentUptime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert it takes 12 failed scans (~3 days) to drop the uptime below .9
-	simulateScan(false, 12)
-	if u := uptime(); u < .9 {
-		t.Fatal("unexpected", u)
+	// assert it takes roughly 3 days to drop the uptime below 90%
+	var n int
+	for uptime() > .9 {
+		simulateScan(false, 1)
+		n++
 	}
-	simulateScan(false, 1)
-	if u := uptime(); u > .9 {
-		t.Fatal("unexpected", u)
+	if n != 13 {
+		t.Fatal("unexpected", n)
 	}
 
-	// fail scans until we drop below 85% uptime (~2 days)
+	// assert it takes another 2 days to drop below 80%
 	for uptime() > .85 {
 		simulateScan(false, 1)
 	}
 
 	// assert it takes ~2 weeks to climb back up to above .9
-	var n int
+	n = 0
 	for uptime() < .9 {
 		simulateScan(true, 1)
 		n++
