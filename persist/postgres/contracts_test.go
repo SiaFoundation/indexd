@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -126,14 +127,10 @@ func TestPruneExpiredContractElements(t *testing.T) {
 			} else if len(fces) != len(contractIDs) {
 				t.Fatalf("expected %d contracts, got %d", len(contractIDs), len(fces))
 			}
-		outer:
 			for _, c := range fces {
-				for _, id := range contractIDs {
-					if c.ID == id {
-						continue outer
-					}
+				if !slices.Contains(contractIDs, c.ID) {
+					t.Fatalf("contract %v is missing", c.ID)
 				}
-				t.Fatalf("contract %v is missing", c.ID)
 			}
 			return nil
 		})
