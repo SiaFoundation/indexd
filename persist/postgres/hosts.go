@@ -77,7 +77,8 @@ WITH globals AS (
 		settings_remaining_storage, settings_total_storage, settings_contract_price,
 		settings_collateral, settings_storage_price, settings_ingress_price,
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until,
-		last_successful_scan != '0001-01-01 00:00:00+00'::timestamptz as scanned,
+		GREATEST(last_failed_scan, last_successful_scan) != '0001-01-01 00:00:00+00'::timestamptz as scanned,
+		last_successful_scan != '0001-01-01 00:00:00+00'::timestamptz as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
@@ -85,17 +86,17 @@ WITH globals AS (
 ) SELECT 
 	hosts.*,
 	scanned AND recent_uptime > 0.9 AND last_failed_scan < NOW() - INTERVAL '1 week',
-	scanned AND settings_max_contract_duration >= globals.contracts_period,
-	scanned AND settings_max_collateral > globals.min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
-	scanned AND settings_version >= globals.min_version,
-	scanned AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
-	scanned AND settings_accepting_contracts,
-	scanned AND settings_contract_price <= globals.one_sc,
-	scanned AND settings_collateral >= globals.min_collateral AND settings_collateral >= 2 * settings_storage_price,
-	scanned AND settings_storage_price <= globals.max_storage_price,
-	scanned AND settings_ingress_price <= globals.max_ingress_price,
-	scanned AND settings_egress_price <= globals.max_egress_price,
-	scanned AND settings_free_sector_price <= globals.one_sc / globals.one_tb
+	has_settings AND settings_max_contract_duration >= globals.contracts_period,
+	has_settings AND settings_max_collateral > globals.min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
+	has_settings AND settings_version >= globals.min_version,
+	has_settings AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
+	has_settings AND settings_accepting_contracts,
+	has_settings AND settings_contract_price <= globals.one_sc,
+	has_settings AND settings_collateral >= globals.min_collateral AND settings_collateral >= 2 * settings_storage_price,
+	has_settings AND settings_storage_price <= globals.max_storage_price,
+	has_settings AND settings_ingress_price <= globals.max_ingress_price,
+	has_settings AND settings_egress_price <= globals.max_egress_price,
+	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
 FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("host %q: %w", hk, hosts.ErrNotFound)
@@ -151,7 +152,8 @@ WITH globals AS (
 		settings_remaining_storage, settings_total_storage, settings_contract_price,
 		settings_collateral, settings_storage_price, settings_ingress_price,
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until,
-		last_successful_scan != '0001-01-01 00:00:00+00'::timestamptz as scanned,
+		GREATEST(last_failed_scan, last_successful_scan) != '0001-01-01 00:00:00+00'::timestamptz as scanned,
+		last_successful_scan != '0001-01-01 00:00:00+00'::timestamptz as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
@@ -159,17 +161,17 @@ WITH globals AS (
 ) SELECT 
  	hosts.*,
 	scanned AND recent_uptime > 0.9 AND last_failed_scan < NOW() - INTERVAL '1 week',
-	scanned AND settings_max_contract_duration >= globals.contracts_period,
-	scanned AND settings_max_collateral > globals.min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
-	scanned AND settings_version >= globals.min_version,
-	scanned AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
-	scanned AND settings_accepting_contracts,
-	scanned AND settings_contract_price <= globals.one_sc,
-	scanned AND settings_collateral >= globals.min_collateral AND settings_collateral >= 2 * settings_storage_price,
-	scanned AND settings_storage_price <= globals.max_storage_price,
-	scanned AND settings_ingress_price <= globals.max_ingress_price,
-	scanned AND settings_egress_price <= globals.max_egress_price,
-	scanned AND settings_free_sector_price <= globals.one_sc / globals.one_tb
+	has_settings AND settings_max_contract_duration >= globals.contracts_period,
+	has_settings AND settings_max_collateral > globals.min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
+	has_settings AND settings_version >= globals.min_version,
+	has_settings AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
+	has_settings AND settings_accepting_contracts,
+	has_settings AND settings_contract_price <= globals.one_sc,
+	has_settings AND settings_collateral >= globals.min_collateral AND settings_collateral >= 2 * settings_storage_price,
+	has_settings AND settings_storage_price <= globals.max_storage_price,
+	has_settings AND settings_ingress_price <= globals.max_ingress_price,
+	has_settings AND settings_egress_price <= globals.max_egress_price,
+	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
 FROM hosts CROSS JOIN globals;`, limit, offset)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts: %w", err)
@@ -503,6 +505,7 @@ func scanHost(s scanner) (host dbHost, err error) {
 		(*sqlCurrency)(&host.Settings.Prices.FreeSectorPrice),
 		&host.Settings.Prices.TipHeight,
 		&host.Settings.Prices.ValidUntil,
+		&ignore,
 		&ignore,
 		&ignore,
 		&host.Usability.Uptime,
