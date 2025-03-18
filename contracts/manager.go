@@ -15,6 +15,7 @@ type (
 	ChainManager interface {
 		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		RecommendedFee() types.Currency
+		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
 	// Store is the minimal interface of Store functionality the ContractManager
