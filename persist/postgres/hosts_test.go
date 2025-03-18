@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"net"
 	"reflect"
@@ -302,8 +303,8 @@ func TestHostChecks(t *testing.T) {
 	}
 	hs := h.Settings
 
-	// adjust last failed scan so we pass the uptime check
-	if _, err := db.pool.Exec(context.Background(), `UPDATE hosts SET last_failed_scan = NOW() - INTERVAL '8 days'`); err != nil {
+	// adjust recent uptime so we pass the check
+	if _, err := db.pool.Exec(context.Background(), `UPDATE hosts SET recent_uptime = .91`); err != nil {
 		t.Fatal(err)
 	}
 	assertCheckOK("Uptime")
@@ -377,29 +378,18 @@ func TestHostsRecentUptime(t *testing.T) {
 	db := initPostgres(t, log.Named("postgres"))
 	hk := types.PublicKey{1}
 
-	// simulateScan is a helper that sets the most recent scan time 8 hours in
-	// the past, that way we simulate a scan at our default scan interval and we
-	// can get an idea of how fast the EMA decays
-	simulateScan := func(success bool, n int) {
+	simulateScan := func(up bool, interval string) {
 		t.Helper()
-		if success {
-			for range n {
-				_, err1 := db.pool.Exec(context.Background(), `UPDATE hosts SET last_successful_scan = NOW() - INTERVAL '8 hours'`)
-				if err := errors.Join(err1, db.UpdateHost(context.Background(), hk, nil, testHostSettings(hk), true, time.Now())); err != nil {
-					t.Fatal(err)
-				}
+		if up {
+			_, err1 := db.pool.Exec(context.Background(), `UPDATE hosts SET last_failed_scan = '0001-01-01 00:00:00+00'::timestamptz, last_successful_scan = NOW() - $1::INTERVAL`, interval)
+			if err := errors.Join(err1, db.UpdateHost(context.Background(), hk, nil, testHostSettings(hk), true, time.Time{})); err != nil {
+				t.Fatal(err)
 			}
 		} else {
-			for range n {
-				_, err1 := db.pool.Exec(context.Background(), `UPDATE hosts SET last_failed_scan = NOW() - INTERVAL '8 hours'`)
-				if err := errors.Join(err1, db.UpdateHost(context.Background(), hk, nil, proto4.HostSettings{}, false, time.Now())); err != nil {
-					t.Fatal(err)
-				}
+			_, err1 := db.pool.Exec(context.Background(), `UPDATE hosts SET last_successful_scan = '0001-01-01 00:00:00+00'::timestamptz, last_failed_scan = NOW() - $1::INTERVAL`, interval)
+			if err := errors.Join(err1, db.UpdateHost(context.Background(), hk, nil, proto4.HostSettings{}, false, time.Time{})); err != nil {
+				t.Fatal(err)
 			}
-		}
-		_, err := db.pool.Exec(context.Background(), `UPDATE hosts SET last_failed_scan = NULL, last_successful_scan = NULL`)
-		if err != nil {
-			t.Fatal(err)
 		}
 	}
 
@@ -419,45 +409,46 @@ func TestHostsRecentUptime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert uptime is 1 by default
-	if u := uptime(); u != 1 {
-		t.Fatal("unexpected", u)
-	}
-
-	// assert uptime is halved after the the half life
-	simulateScan(false, uptimeHalfLife/60/60/8)
-	if math.Round(uptime()*10)/10 != .5 {
+	// assert default uptime
+	if uptime() != .895 {
 		t.Fatal("unexpected", uptime())
 	}
 
-	// reset uptime
-	if _, err := db.pool.Exec(context.Background(), `UPDATE hosts SET recent_uptime = 1`); err != nil {
+	// assert one week of uptime passes the uptime check
+	simulateScan(true, "7 days")
+	if uptime() < .9 {
+		t.Fatal("unexpected", uptime())
+	}
+
+	// assert fresh hosts don't fail check immediately
+	simulateScan(true, "30 days")
+	simulateScan(false, "2 days")
+	if uptime() < .9 {
+		t.Fatal("unexpected", uptime())
+	}
+
+	// assert good uptime hosts need 11 days to fail the check
+	simulateScan(true, "180 days")
+	simulateScan(false, "11 days")
+	if uptime() > .9 {
+		t.Fatal("unexpected", uptime())
+	}
+
+	// assert great uptime hosts aren't invincible
+	simulateScan(true, "360 days")
+	simulateScan(false, "13 days")
+	if uptime() > .9 {
+		t.Fatal("unexpected", uptime())
+	}
+
+	// assert uptime is halved after the the half life
+	_, err := db.pool.Exec(context.Background(), `UPDATE hosts SET recent_uptime = .999999999`)
+	if err != nil {
 		t.Fatal(err)
 	}
-
-	// assert it takes roughly 3 days to drop the uptime below 90%
-	var n int
-	for uptime() > .9 {
-		simulateScan(false, 1)
-		n++
-	}
-	if n != 13 {
-		t.Fatal("unexpected", n)
-	}
-
-	// assert it takes another 2 days to drop below 80%
-	for uptime() > .85 {
-		simulateScan(false, 1)
-	}
-
-	// assert it takes ~2 weeks to climb back up to above .9
-	n = 0
-	for uptime() < .9 {
-		simulateScan(true, 1)
-		n++
-	}
-	if n != 51 {
-		t.Fatal("unexpected", n)
+	simulateScan(false, fmt.Sprintf("%d months", uptimeHalfLife/60/60/24/7/4))
+	if math.Round(uptime()*10)/10 != .5 {
+		t.Fatal("unexpected", uptime())
 	}
 }
 
@@ -702,7 +693,7 @@ func TestUpdateHost(t *testing.T) {
 		t.Fatal("expected last successful scan to be set")
 	} else if !h.NextScan.Equal(nextScan) {
 		t.Fatal("unexpected next scan", h.NextScan)
-	} else if h.RecentUptime == 1 {
+	} else if h.RecentUptime == 0.895 {
 		t.Fatal("expected recent uptime to be updated")
 	} else if len(h.Networks) != 1 {
 		t.Fatal("unexpected networks", h.Networks)
