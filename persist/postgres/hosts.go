@@ -77,7 +77,7 @@ WITH globals AS (
 		settings_remaining_storage, settings_total_storage, settings_contract_price,
 		settings_collateral, settings_storage_price, settings_ingress_price,
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until,
-		GREATEST(last_failed_scan, last_successful_scan) != '0001-01-01 00:00:00+00'::timestamptz as scanned,
+		last_successful_scan != '0001-01-01 00:00:00+00'::timestamptz as scanned,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
@@ -151,7 +151,7 @@ WITH globals AS (
 		settings_remaining_storage, settings_total_storage, settings_contract_price,
 		settings_collateral, settings_storage_price, settings_ingress_price,
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until,
-		GREATEST(last_failed_scan, last_successful_scan) != '0001-01-01 00:00:00+00'::timestamptz as scanned,
+		last_successful_scan != '0001-01-01 00:00:00+00'::timestamptz as scanned,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
