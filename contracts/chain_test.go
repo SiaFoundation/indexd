@@ -114,6 +114,10 @@ func (cm *chainManagerMock) AddV2PoolTransactions(basis types.ChainIndex, txns [
 	return false, nil
 }
 
+func (cm *chainManagerMock) V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error) {
+	return basis, []types.V2Transaction{txn}, nil
+}
+
 func (cm *chainManagerMock) V2PoolTransactions() []types.V2Transaction {
 	cm.mu.Lock()
 	defer cm.mu.Unlock()
