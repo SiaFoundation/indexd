@@ -31,6 +31,12 @@ type (
 		IndexBatchSize int    `yaml:"indexBatchSize,omitempty"`
 	}
 
+	// Explorer contains the configuration for an external explorer.
+	Explorer struct {
+		Enabled bool   `yaml:"enabled,omitempty"`
+		URL     string `yaml:"url,omitempty"`
+	}
+
 	// FileLog configures the file output of the logger.
 	FileLog struct {
 		Enabled bool            `yaml:"enabled,omitempty"`
@@ -59,11 +65,12 @@ type (
 		Directory      string `yaml:"directory,omitempty"`
 		RecoveryPhrase string `yaml:"recoveryPhrase,omitempty"`
 
-		HTTP      HTTP                    `yaml:"http"`
-		Syncer    Syncer                  `yaml:"syncer"`
-		Consensus Consensus               `yaml:"consensus"`
-		Log       Log                     `yaml:"log"`
-		Database  postgres.ConnectionInfo `yaml:"database"`
+		HTTP      HTTP                    `yaml:"http,omitempty"`
+		Syncer    Syncer                  `yaml:"syncer,omitempty"`
+		Consensus Consensus               `yaml:"consensus,omitempty"`
+		Explorer  Explorer                `yaml:"explorer,omitempty"`
+		Log       Log                     `yaml:"log,omitempty"`
+		Database  postgres.ConnectionInfo `yaml:"database,omitempty"`
 	}
 )
 

@@ -21,6 +21,11 @@ type (
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
+	// Explorer retrieves data about the Sia network from an external source.
+	Explorer interface {
+		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
+	}
+
 	// A Store is a persistent store for the indexer.
 	Store interface {
 		BlockHosts(ctx context.Context, hks []types.PublicKey) error
@@ -52,11 +57,12 @@ type (
 type (
 	// An api provides an HTTP API for the indexer
 	api struct {
-		chain  ChainManager
-		store  Store
-		syncer Syncer
-		wallet Wallet
-		log    *zap.Logger
+		chain    ChainManager
+		explorer Explorer
+		store    Store
+		syncer   Syncer
+		wallet   Wallet
+		log      *zap.Logger
 	}
 )
 
@@ -75,6 +81,9 @@ func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, op
 
 	return jape.Mux(map[string]jape.Handler{
 		"GET /state": a.handleGETState,
+
+		// explorer endpoints
+		"GET /explorer/exchange-rate/siacoin/:currency": a.handleGETExplorerSiacoinExchangeRate,
 
 		// host endpoints
 		"GET    /host/:hostkey": a.handleGETHost,

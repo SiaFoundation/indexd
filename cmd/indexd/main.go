@@ -43,6 +43,10 @@ var cfg = config.Config{
 		Network:        "mainnet",
 		IndexBatchSize: 1000,
 	},
+	Explorer: config.Explorer{
+		Enabled: true,
+		URL:     "https://api.siascan.com",
+	},
 	Log: config.Log{
 		File: config.FileLog{
 			Level:   zap.NewAtomicLevelAt(zapcore.InfoLevel), // the zero-value is Info, but better to be explicit

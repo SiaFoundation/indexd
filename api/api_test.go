@@ -13,6 +13,18 @@ import (
 	"go.uber.org/zap"
 )
 
+func TestExplorerAPI(t *testing.T) {
+	c := testutils.NewConsensusNode(t, zap.NewNop())
+	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+
+	rate, err := indexer.ExplorerSiacoinExchangeRate(context.Background(), "usd")
+	if err != nil {
+		t.Fatal(err)
+	} else if rate == 0 {
+		t.Fatal("expected non-zero rate")
+	}
+}
+
 func TestHostsAPI(t *testing.T) {
 	// create cluster
 	c := testutils.NewConsensusNode(t, zap.NewNop())
