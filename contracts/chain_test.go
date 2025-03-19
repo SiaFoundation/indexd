@@ -33,6 +33,10 @@ type storeMock struct {
 	settings    MaintenanceSettings
 }
 
+func (s *storeMock) AddFormedContract(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee types.Currency) error {
+	panic("not implemented")
+}
+
 func (s *storeMock) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
 	return slices.Clone(s.toBroadcast), nil
 }
@@ -188,6 +192,10 @@ func (s *syncerMock) Peers() []*syncer.Peer {
 }
 
 type walletMock struct {
+}
+
+func (w *walletMock) Address() types.Address {
+	return types.Address{1, 2, 3}
 }
 
 func (w *walletMock) FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error) {

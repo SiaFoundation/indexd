@@ -90,6 +90,16 @@ type (
 	}
 )
 
+// SiamuxAddr returns a siamux protocol address of the host to use.
+func (h *Host) SiamuxAddr() string {
+	for _, addr := range h.Addresses {
+		if addr.Protocol == siamux.Protocol {
+			return addr.Address
+		}
+	}
+	return ""
+}
+
 // NewManager creates a new host manager.
 func NewManager(store Store, opts ...Option) (*HostManager, error) {
 	m := &HostManager{

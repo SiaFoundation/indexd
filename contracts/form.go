@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -60,7 +61,7 @@ func NewContractFormer(cm *chain.Manager, w rhp.Wallet, renterKey types.PrivateK
 	}
 }
 
-func (cf *contractFormer) FormContract(ctx context.Context, hk types.PublicKey, addr string, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
+func (cf *contractFormer) FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 	t, err := siamux.Dial(dialCtx, addr, hk)
@@ -68,18 +69,6 @@ func (cf *contractFormer) FormContract(ctx context.Context, hk types.PublicKey, 
 		return rhp.RPCFormContractResult{}, fmt.Errorf("failed to dial host: %w", err)
 	}
 	defer t.Close()
-
-	// fetch fresh settings to make sure they are valid
-	settings, err := rhp.RPCSettings(ctx, t)
-	if err != nil {
-		return rhp.RPCFormContractResult{}, fmt.Errorf("failed to fetch host settings: %w", err)
-	}
-
-	// forming a contract only requires the ContractPrice field of the settings
-	// so we make sure it's sane
-	if settings.Prices.ContractPrice.Cmp(types.Siacoins(1)) > 0 {
-		return rhp.RPCFormContractResult{}, fmt.Errorf("host's contract price is too high: %v", settings.Prices.ContractPrice)
-	}
 
 	res, err := rhp.RPCFormContract(ctx, t, cf.cm, cf.signer, cf.cm.TipState(), settings.Prices, hk, settings.WalletAddress, params)
 	if err != nil {
@@ -89,7 +78,7 @@ func (cf *contractFormer) FormContract(ctx context.Context, hk types.PublicKey, 
 	return res, nil
 }
 
-func (cm *ContractManager) performContractFormation(ctx context.Context, wanted uint, log *zap.Logger) error {
+func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted uint, log *zap.Logger) error {
 	formationLog := log.Named("formation")
 	activeContracts, err := cm.store.Contracts(ctx, WithRevisable(true))
 	if err != nil {
@@ -157,17 +146,66 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, wanted 
 	// randomize their order to avoid prefering any host
 	frand.Shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
 
-	for _, candidate := range hosts {
-		formationLog := formationLog.With(zap.Stringer("hostKey", candidate.PublicKey))
-		if !checkHost(candidate, formationLog) {
+	for i := range hosts {
+		formationLog := formationLog.With(zap.Stringer("hostKey", hosts[i].PublicKey))
+
+		// TODO: before checking the host, scan it to get valid settings we can
+		// use for forming contracts
+		host, err := hosts[i], error(nil)
+		if err != nil {
+			formationLog.Error("failed to scan host", zap.Error(err))
+			continue
+		} else if !checkHost(host, formationLog) {
 			continue // ignore host
 		}
+		hostAddr := host.SiamuxAddr()
 
-		// TODO: form contracts
+		allowance, collateral := initialContractFunding(host.Settings.Prices, period)
+		formationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		res, err := cm.cf.FormContract(formationCtx, host.PublicKey, hostAddr, host.Settings, proto.RPCFormContractParams{
+			RenterPublicKey: cm.renterKey,
+			RenterAddress:   cm.w.Address(),
+			Allowance:       allowance,
+			Collateral:      collateral,
+			ProofHeight:     cm.cm.TipState().Index.Height + period,
+		})
+		cancel()
+		if err != nil {
+			formationLog.Error("failed to form contract", zap.Error(err))
+			continue
+		}
+		contract := res.Contract
+		minerFee := res.FormationSet.Transactions[len(res.FormationSet.Transactions)].MinerFee
+
+		err = cm.store.AddFormedContract(ctx, contract.ID, host.PublicKey, contract.Revision.ProofHeight, contract.Revision.ExpirationHeight, host.Settings.Prices.ContractPrice, allowance, minerFee)
+		if err != nil {
+			formationLog.Error("failed to add formed contract", zap.Error(err))
+			continue
+		}
 
 		wanted--
 		// TODO: add cidr
 	}
 
 	return nil
+}
+
+func initialContractFunding(prices proto.HostPrices, period uint64) (allowance, collateral types.Currency) {
+	const sectorsPerGB = uint64(1<<30) / proto.SectorSize
+	var minAllowance = types.Siacoins(10)
+
+	// each 10GB of upload + download + storage
+	basePrice := prices.ContractPrice
+	writeUsage := prices.RPCWriteSectorCost(proto.SectorSize) //.Mul(10 * sectorsPerGB) TODO
+	readUsage := prices.RPCReadSectorCost(proto.SectorSize)   //.Mul(10 * sectorsPerGB) TODO
+	storageUsage := prices.RPCAppendSectorsCost(10*sectorsPerGB, period)
+	total := writeUsage.Add(readUsage).Add(storageUsage)
+	allowance, collateral = total.RenterCost().Add(basePrice), total.HostRiskedCollateral()
+
+	// don't go below a sane minimum to make sure we can fill an account without
+	// immediately draining the contract and requiring a refresh.
+	if allowance.Cmp(minAllowance) < 0 {
+		allowance = minAllowance
+	}
+	return allowance, collateral
 }

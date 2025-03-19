@@ -32,12 +32,17 @@ type (
 	}
 
 	ContractFormer interface {
-		FormContract(ctx context.Context, hk types.PublicKey, addr string, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
+		FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
+	}
+
+	Scanner interface {
+		Settings(context.Context, types.PublicKey, string) (proto.HostSettings, error)
 	}
 
 	// Store is the minimal interface of Store functionality the ContractManager
 	// requires.
 	Store interface {
+		AddFormedContract(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee types.Currency) error
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
@@ -57,6 +62,7 @@ type (
 	// Wallet is the minimal interface of Wallet functionality the
 	// ContractManager requires.
 	Wallet interface {
+		Address() types.Address
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
@@ -96,7 +102,9 @@ type (
 		w     Wallet
 		store Store
 
-		cf ContractFormer
+		cf        ContractFormer
+		scanner   Scanner
+		renterKey types.PublicKey
 
 		log *zap.Logger
 		tg  *threadgroup.ThreadGroup
@@ -231,7 +239,7 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 	// to the expiration height as bad
 
 	// form new contracts until there are enough good contracts to use
-	if err := cm.performContractFormation(ctx, settings.WantedContracts, log); err != nil {
+	if err := cm.performContractFormation(ctx, settings.Period, settings.WantedContracts, log); err != nil {
 		return fmt.Errorf("failed to form contracts: %w", err)
 	}
 
