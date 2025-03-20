@@ -284,7 +284,7 @@ func (np sqlNetworkProtocol) Value() (driver.Value, error) {
 	}
 }
 
-func (np *sqlNetworkProtocol) Scan(src interface{}) error {
+func (np *sqlNetworkProtocol) Scan(src any) error {
 	switch src := src.(type) {
 	case int64:
 		switch src {
@@ -308,7 +308,7 @@ func (pk sqlPublicKey) Value() (driver.Value, error) {
 	return pk[:], nil
 }
 
-func (pk *sqlPublicKey) Scan(src interface{}) error {
+func (pk *sqlPublicKey) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		if len(src) != len(sqlPublicKey{}) {
@@ -344,7 +344,7 @@ func (pv sqlProtocolVersion) Value() (driver.Value, error) {
 	return pv[:], nil
 }
 
-func (pv *sqlProtocolVersion) Scan(src interface{}) error {
+func (pv *sqlProtocolVersion) Scan(src any) error {
 	switch src := src.(type) {
 	case []byte:
 		if len(src) != len(sqlProtocolVersion{}) {

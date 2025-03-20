@@ -2,13 +2,14 @@ package postgres
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 )
 
 type (
@@ -50,8 +51,8 @@ var (
 func (s *Store) AddFormedContract(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee types.Currency) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var hostID int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = $1`, sqlPublicKey(hostKey)).Scan(&hostID); errors.Is(err, pgx.ErrNoRows) {
-			return ErrHostNotFound
+		if err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = $1`, sqlPublicKey(hostKey)).Scan(&hostID); errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("host %q: %w", hostKey, hosts.ErrNotFound)
 		} else if err != nil {
 			return fmt.Errorf("failed to fetch host: %w", err)
 		}
@@ -80,7 +81,9 @@ func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo t
 
 		// fetch the existing row of the contract
 		var existingID int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM contracts WHERE contract_id = $1`, sqlHash256(renewedFrom)).Scan(&existingID); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id FROM contracts WHERE contract_id = $1`, sqlHash256(renewedFrom)).Scan(&existingID); errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("contract %q: %w", renewedFrom, contracts.ErrNotFound)
+		} else if err != nil {
 			return fmt.Errorf("failed to fetch existing contract: %w", err)
 		}
 
@@ -121,7 +124,7 @@ WHERE id = $8`, sqlHash256(renewedTo), proofHeight, expirationHeight, newID, sql
 // Contract returns a single contract
 func (s *Store) Contract(ctx context.Context, contractID types.FileContractID) (contracts.Contract, error) {
 	var contract contracts.Contract
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		contract, err = scanContract(tx.QueryRow(ctx, `
 SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.miner_fee, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
 FROM contracts c
@@ -130,8 +133,12 @@ LEFT JOIN contracts c_from ON c.renewed_from = c_from.id
 LEFT JOIN contracts c_to ON c.renewed_to = c_to.id
 WHERE c.contract_id = $1`, sqlHash256(contractID)))
 		return err
-	})
-	return contract, err
+	}); errors.Is(err, sql.ErrNoRows) {
+		return contracts.Contract{}, fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
+	} else if err != nil {
+		return contracts.Contract{}, fmt.Errorf("failed to fetch contract: %w", err)
+	}
+	return contract, nil
 }
 
 // Contracts queries the contracts in the database. By default, only active

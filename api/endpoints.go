@@ -9,7 +9,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/build"
-	"go.sia.tech/indexd/persist/postgres"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 )
@@ -62,7 +62,7 @@ func (a *api) handleGETHost(jc jape.Context) {
 		return
 	}
 	host, err := a.store.Host(jc.Request.Context(), hk)
-	if errors.Is(err, postgres.ErrHostNotFound) {
+	if errors.Is(err, hosts.ErrNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to get host", err) != nil {

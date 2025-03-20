@@ -42,16 +42,12 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatal("expected 2 hosts", len(hosts))
 	} else if h1, err := indexer.Host(context.Background(), h1.PublicKey()); err != nil {
 		t.Fatal(err)
-	} else if h1.TotalScans != 1 {
-		t.Fatal("expected 1 scan", h1.TotalScans)
-	} else if h1.FailedScans != 0 {
-		t.Fatal("expected 0 failed scans", h1.FailedScans)
+	} else if h1.LastSuccessfulScan.IsZero() {
+		t.Fatal("expected h1 to be scanned successfully")
 	} else if h2, err := indexer.Host(context.Background(), h2.PublicKey()); err != nil {
 		t.Fatal(err)
-	} else if h2.TotalScans != 1 {
-		t.Fatal("expected 1 scan", h2.TotalScans)
-	} else if h2.FailedScans != 0 {
-		t.Fatal("expected 0 failed scans", h2.FailedScans)
+	} else if h2.LastSuccessfulScan.IsZero() {
+		t.Fatal("expected h2 to be scanned successfully")
 	}
 
 	// assert blocklist is empty and unblocking unknown host is noop
