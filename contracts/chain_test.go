@@ -1,8 +1,10 @@
 package contracts
 
 import (
+	"context"
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +19,14 @@ type mockProofUpdater struct {
 
 func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) {
 	u.updateFn(stateElement)
+}
+
+type storeMock struct {
+	toBroadcast []types.V2FileContractElement
+}
+
+func (s *storeMock) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
+	return s.toBroadcast, nil
 }
 
 // mockUpdateTx is a mocked implementation of UpdateTx which allows for unit
@@ -92,8 +102,60 @@ func (tx *mockUpdateTx) UpdateContractState(contractID types.FileContractID, sta
 	return nil
 }
 
+type chainManagerMock struct {
+	mu    sync.Mutex
+	tpool []types.V2Transaction
+}
+
+func (cm *chainManagerMock) AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error) {
+	cm.mu.Lock()
+	cm.tpool = append(cm.tpool, txns...)
+	cm.mu.Unlock()
+	return false, nil
+}
+
+func (cm *chainManagerMock) V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error) {
+	return basis, []types.V2Transaction{txn}, nil
+}
+
+func (cm *chainManagerMock) V2PoolTransactions() []types.V2Transaction {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
+	return append([]types.V2Transaction(nil), cm.tpool...)
+}
+
+func (cm *chainManagerMock) RecommendedFee() types.Currency {
+	return types.ZeroCurrency
+}
+
+type syncerMock struct {
+	mu          sync.Mutex
+	broadcasted []types.V2Transaction
+}
+
+func (s *syncerMock) BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) {
+	s.mu.Lock()
+	s.broadcasted = append(s.broadcasted, txns...)
+	s.mu.Unlock()
+}
+
+func (s *syncerMock) BroadcastedSets() []types.V2Transaction {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]types.V2Transaction(nil), s.broadcasted...)
+}
+
+type walletMock struct {
+}
+
+func (w *walletMock) FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error) {
+	return types.ChainIndex{}, nil, nil
+}
+func (w *walletMock) ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) {}
+func (w *walletMock) SignV2Inputs(txn *types.V2Transaction, toSign []int)                  {}
+
 func TestApplyRevertDiff(t *testing.T) {
-	contracts, err := NewManager()
+	contracts, err := NewManager(nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,5 +294,45 @@ func TestUpdateContractElementProofs(t *testing.T) {
 	}})
 	if fce, _ := mock.Contract(contract2.ID); !reflect.DeepEqual(fce, contract2) {
 		t.Fatalf("mismatch \n%+v\n%+v", fce, contract2)
+	}
+}
+
+func TestBroadcastExpiredContracts(t *testing.T) {
+	cmMock := &chainManagerMock{}
+	syncerMock := &syncerMock{}
+	store := &storeMock{}
+	contracts, err := NewManager(cmMock, store, syncerMock, &walletMock{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	contract := types.V2FileContractElement{
+		ID: types.FileContractID{1},
+		V2FileContract: types.V2FileContract{
+			ExpirationHeight: 100,
+		},
+	}
+
+	// broadcast when no contract should be broadcasted
+	if err := contracts.broadcastExpiredContracts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(cmMock.V2PoolTransactions()) != 0 {
+		t.Fatalf("expected 0 contract in tpool, got %v", len(cmMock.tpool))
+	} else if len(syncerMock.BroadcastedSets()) != 0 {
+		t.Fatalf("expected 0 broadcasted contracts, got %v", len(syncerMock.broadcasted))
+	}
+
+	// broadcast with 1 contract to broadcast
+	store.toBroadcast = []types.V2FileContractElement{contract}
+	if err := contracts.broadcastExpiredContracts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(cmMock.V2PoolTransactions()) != 1 {
+		t.Fatalf("expected 1 contract in tpool, got %v", len(cmMock.tpool))
+	} else if sets := syncerMock.BroadcastedSets(); len(sets) != 1 {
+		t.Fatalf("expected 1 broadcasted contracts, got %v", len(syncerMock.broadcasted))
+	} else if len(sets[0].FileContractResolutions) != 1 {
+		t.Fatalf("expected 1 contract resolution in broadcast, got %v", len(sets[0].FileContracts))
 	}
 }

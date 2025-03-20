@@ -1,7 +1,10 @@
 package contracts
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -42,6 +45,20 @@ func (tx *updateTx) IsKnownContract(fcid types.FileContractID) (bool, error) {
 	return known, nil
 }
 
+// ProcessActions performs any post-processing actions required after a call to
+// UpdateChainState that don't need to be atomic with the chain update. It is
+// not guaranteed to be called on every update but will eventually be called
+// after applying all batches of a sync.
+func (m *ContractManager) ProcessActions(ctx context.Context) error {
+	// broadcast resolutions for expired contracts
+	// 'expiredContractBroadcastBuffer' blocks after their window end to give
+	// hosts a chance to do it themselves before we do it
+	if err := m.broadcastExpiredContracts(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		return fmt.Errorf("failed to broadcast expired contracts: %w", err)
+	}
+	return nil
+}
+
 // UpdateChainState state updates the contracts' state in the database and
 // broadcasts revisions for failed expired contracts.
 func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
@@ -68,10 +85,6 @@ func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertU
 	if err := tx.RejectPendingContracts(maxFormation); err != nil {
 		return fmt.Errorf("failed to reject pending contracts: %w", err)
 	}
-
-	// TODO: broadcast resolutions for expired contracts
-	// 'expiredContractBroadcastBuffer' blocks after their window end to give
-	// hosts a chance to do it themselves before we do it
 
 	// TODO: prune expired contracts 'expiredContractPruneBuffer' blocks after
 	// we begin broadcasting resolutions
@@ -165,6 +178,56 @@ func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2File
 	}
 	if err := tx.UpdateContractElements(fce); err != nil {
 		return fmt.Errorf("failed to update contract element: %w", err)
+	}
+	return nil
+}
+
+func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
+	expiredFCEs, err := m.store.ContractElementsForBroadcast(ctx, m.expiredContractBroadcastBuffer)
+	if err != nil {
+		return fmt.Errorf("failed to get expired contracts for broadcast: %w", err)
+	}
+	for _, fce := range expiredFCEs {
+		const contractResolutionTxnWeight = 1000
+		txn := types.V2Transaction{
+			MinerFee: m.cm.RecommendedFee().Mul64(contractResolutionTxnWeight),
+			FileContractResolutions: []types.V2FileContractResolution{
+				{
+					Parent:     fce,
+					Resolution: &types.V2FileContractExpiration{},
+				},
+			},
+		}
+
+		// fund and sign txn
+		basis, toSign, err := m.w.FundV2Transaction(&txn, txn.MinerFee, true)
+		if err != nil {
+			m.log.Error("failed to fund contract expiration txn", zap.Error(err))
+			continue
+		}
+		m.w.SignV2Inputs(&txn, toSign)
+
+		// fetch potential parents and basis for broadcasting the txn set
+		basis, txnSet, err := m.cm.V2TransactionSet(basis, txn)
+		if err != nil {
+			m.log.Error("failed to retrieve txn set for broadcasting", zap.Error(err))
+			m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			continue
+		}
+
+		// verify txn and broadcast it
+		_, err = m.cm.AddV2PoolTransactions(basis, txnSet)
+		if err != nil {
+			if strings.Contains(err.Error(), "has already been resolved") ||
+				strings.Contains(err.Error(), "not present in the accumulator") {
+				m.log.Debug("failed to broadcast contract expiration txn", zap.Error(err))
+			} else {
+				m.log.Error("failed to broadcast contract expiration txn", zap.Error(err))
+			}
+			m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			continue
+		}
+		m.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn})
 	}
 	return nil
 }

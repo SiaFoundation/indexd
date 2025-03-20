@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -14,6 +15,12 @@ const (
 	ContractStateResolved
 	ContractStateExpired
 	ContractStateRejected
+)
+
+var (
+	// ErrNotFound is returned by database operations that fail due to a
+	// contract not being found.
+	ErrNotFound = errors.New("contract not found")
 )
 
 type (

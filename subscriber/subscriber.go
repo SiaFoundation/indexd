@@ -27,6 +27,7 @@ type (
 
 	// ContractManager manages contract state.
 	ContractManager interface {
+		ProcessActions(context.Context) error
 		UpdateChainState(tx contracts.UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error
 	}
 
@@ -196,6 +197,11 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 			s.log.Debug("syncing", zap.Uint64("height", index.Height), zap.Stringer("id", index.ID))
 			lastUpdate = time.Now()
 		}
+	}
+
+	// post-sync actions
+	if err := s.contracts.ProcessActions(ctx); err != nil {
+		s.log.Named("contracts").Error("failed to process actions", zap.Error(err))
 	}
 
 	s.log.Debug("synced", zap.Uint64("height", index.Height), zap.Stringer("id", index.ID))

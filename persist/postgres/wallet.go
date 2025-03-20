@@ -59,7 +59,7 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 	var events []wallet.Event
 	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		var tip types.ChainIndex
-		err := tx.QueryRow(ctx, `SELECT last_scanned_index FROM global_settings`).Scan((*sqlChainIndex)(&tip))
+		err := tx.QueryRow(ctx, `SELECT scanned_height, scanned_block_id FROM global_settings`).Scan(&tip.Height, (*sqlHash256)(&tip.ID))
 		if err != nil {
 			return fmt.Errorf("failed to query last scanned index: %w", err)
 		}

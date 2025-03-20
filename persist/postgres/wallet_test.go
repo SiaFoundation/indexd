@@ -13,7 +13,7 @@ import (
 func TestSingleAddressWalletStoreTip(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	if _, err := store.pool.Exec(context.Background(), `UPDATE global_settings SET last_scanned_index = NULL`); err != nil {
+	if _, err := store.pool.Exec(context.Background(), `UPDATE global_settings SET scanned_height = 0, scanned_block_id = $1`, sqlHash256{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -25,7 +25,7 @@ func TestSingleAddressWalletStoreTip(t *testing.T) {
 	}
 
 	update := types.ChainIndex{Height: 1, ID: types.BlockID{1}}
-	if _, err := store.pool.Exec(context.Background(), `UPDATE global_settings SET last_scanned_index = $1`, sqlChainIndex(update)); err != nil {
+	if _, err := store.pool.Exec(context.Background(), `UPDATE global_settings SET scanned_height = $1, scanned_block_id = $2`, update.Height, sqlHash256(update.ID)); err != nil {
 		t.Fatal(err)
 	}
 

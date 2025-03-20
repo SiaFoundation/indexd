@@ -14,6 +14,78 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
+func TestContractElementsForBroadcast(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := types.PublicKey{1, 1, 1}
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add a contract
+	fce := types.V2FileContractElement{
+		ID: types.FileContractID{1, 2, 3},
+		StateElement: types.StateElement{
+			LeafIndex:   1,
+			MerkleProof: []types.Hash256{{1}},
+		},
+		V2FileContract: types.V2FileContract{
+			ExpirationHeight: 100,
+			HostPublicKey:    hk,
+		},
+	}
+	if err := store.AddFormedContract(context.Background(), fce.ID, hk, 50, fce.V2FileContract.ExpirationHeight, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3)); err != nil {
+		t.Fatal(err)
+	}
+
+	// helper to assert contracts to broadcast
+	assertContractsToBroadcast := func(maxBlocksSinceExpiry uint64, n int) {
+		t.Helper()
+		fces, err := store.ContractElementsForBroadcast(context.Background(), maxBlocksSinceExpiry)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(fces) != n {
+			t.Fatalf("expected %d contracts to broadcast, got %d", n, len(fces))
+		}
+	}
+
+	// set height to 10 blocks after expiration
+	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: fce.V2FileContract.ExpirationHeight + 10})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// no contracts to broadcast since we haven't added the element yet
+	assertContractsToBroadcast(1, 0)
+
+	// add contract element, 1 contract to broadcast
+	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateContractElements(fce)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertContractsToBroadcast(11, 0) // still within bounds
+	assertContractsToBroadcast(10, 1) // not within bounds
+
+	// assert fce matches expected
+	fces, err := store.ContractElementsForBroadcast(context.Background(), 9)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(fces) != 1 {
+		t.Fatalf("expected 1 contract to broadcast, got %d", len(fces))
+	} else if !reflect.DeepEqual(fces[0], fce) {
+		t.Fatalf("mismatch: \n%+v\n%+v", fce, fces[0])
+	}
+}
+
 func TestFormRenewContract(t *testing.T) {
 	start := time.Now().Round(time.Microsecond)
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
