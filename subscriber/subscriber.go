@@ -156,7 +156,7 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 	for index != s.cm.Tip() {
 		select {
 		case <-ctx.Done():
-			break
+			return ctx.Err()
 		default:
 		}
 
@@ -200,7 +200,7 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 	}
 
 	// post-sync actions
-	if err := s.contracts.ProcessActions(ctx); err != nil {
+	if err := s.contracts.ProcessActions(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		s.log.Named("contracts").Error("failed to process actions", zap.Error(err))
 	}
 

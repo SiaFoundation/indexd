@@ -2,9 +2,13 @@ package contracts
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.uber.org/zap"
 )
@@ -15,6 +19,7 @@ type (
 	ChainManager interface {
 		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		RecommendedFee() types.Currency
+		TipState() consensus.State
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
@@ -22,12 +27,16 @@ type (
 	// requires.
 	Store interface {
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
+		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
+		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
+		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
 	}
 
 	// Syncer is the minimal interface of Syncer functionality the
 	// ContractManager requires.
 	Syncer interface {
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
+		Peers() []*syncer.Peer
 	}
 
 	// Wallet is the minimal interface of Wallet functionality the
@@ -43,6 +52,28 @@ type (
 	// ContractManagerOpt is a functional option for the ContractManager.
 	ContractManagerOpt func(*ContractManager)
 
+	// MaintenanceSettings are the settings relevant to contract maintenance.
+	MaintenanceSettings struct {
+		// Enabled indicates whether contract maintenance is enabled. If false,
+		// account funding, pinning and pruning will happen on existing
+		// contracts but no contracts will be formed/renewed/refreshed.
+		Enabled bool `json:"enabled"`
+
+		// Period is the number of blocks between a new contract's formation and
+		// proof height. It needs to be greater than the RenewWindow.
+		Period uint64 `json:"period"`
+
+		// RenewWindow is the number of blocks before a contract reaches its
+		// proof height where we start trying to renew it.
+		RenewWindow uint64 `json:"renewWindow"`
+
+		// WantedContracts is the number of good-for-upload contracts the
+		// contract manager should maintain. e.g. if a host runs out of storage,
+		// its contract(s) won't count towards this number but will still be
+		// considered good for renewing/refreshing and funding accounts.
+		WantedContracts uint `json:"wantedContracts"`
+	}
+
 	// ContractManager manages the host announcements.
 	ContractManager struct {
 		cm    ChainManager
@@ -56,6 +87,7 @@ type (
 		contractRejectBuffer           time.Duration
 		expiredContractBroadcastBuffer uint64
 		expiredContractPruneBuffer     uint64
+		maintenanceFrequency           time.Duration
 	}
 )
 
@@ -70,6 +102,20 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
 func NewManager(chainManager ChainManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	cm := newContractManager(chainManager, store, syncer, wallet, opts...)
+
+	ctx, cancel, err := cm.tg.AddContext(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		defer cancel()
+		cm.maintenanceLoop(ctx)
+	}()
+	return cm, nil
+}
+
+func newContractManager(chainManager ChainManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
 		cm: chainManager,
 		s:  syncer,
@@ -83,16 +129,100 @@ func NewManager(chainManager ChainManager, store Store, syncer Syncer, wallet Wa
 		contractRejectBuffer:           6 * time.Hour, // 6 hours after formation
 		expiredContractBroadcastBuffer: 144,           // 144 block after expiration
 		expiredContractPruneBuffer:     144,           // 144 blocks after broadcast
+		maintenanceFrequency:           10 * time.Minute,
 	}
 	for _, opt := range opts {
 		opt(cm)
 	}
-	return cm, nil
+	return cm
 }
 
 // Close closes the contract manager, terminates any background tasks and waits
 // for them to exit.
 func (cm *ContractManager) Close() error {
 	cm.tg.Stop()
+	return nil
+}
+
+// maintenanceLoop performs any background tasks that the contract manager needs
+// to perform on contracts
+func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
+	// block until we are online and the consensus is synced
+	log := cm.log.Named("maintenance")
+	if !cm.blockUntilReady(log) {
+		return // shutdown
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(cm.maintenanceFrequency):
+		}
+
+		if err := cm.performContractMaintenance(ctx); err != nil {
+			log.Error("contract maintenance failed", zap.Error(err))
+		}
+
+		// TODO: use account manager to fund accounts using the good contracts
+
+		if err := cm.performSlabPinning(); err != nil {
+			log.Error("slab pinning failed", zap.Error(err))
+		}
+
+		if err := cm.performContractPruning(); err != nil {
+			log.Error("contract pruning failed", zap.Error(err))
+		}
+	}
+}
+
+func (cm *ContractManager) blockUntilReady(log *zap.Logger) bool {
+	var once sync.Once
+	for {
+		select {
+		case <-cm.tg.Done():
+			return false
+		case <-time.After(time.Second):
+		}
+		if time.Since(cm.cm.TipState().PrevTimestamps[0]) < 3*time.Hour {
+			return true
+		}
+		once.Do(func() {
+			log.Info("waiting for consensus to be synced before starting maintenance")
+		})
+	}
+}
+
+func (cm *ContractManager) performContractMaintenance(ctx context.Context) error {
+	// fetch settings and determine if maintenance is supposed to run
+	settings, err := cm.store.MaintenanceSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch settings for contract maintenance: %w", err)
+	} else if !settings.Enabled {
+		return nil
+	}
+
+	// TODO: Mark hosts as well as their contracts as bad if they fail their checks
+
+	// TODO: Renew any good contracts within their renew window
+
+	// TODO: Refresh any good contracts that are either out of collateral or funds
+
+	// TODO: Mark any contracts that failed to renew/refresh and are too close
+	// to the expiration height as bad
+
+	// TODO: Form enough contracts to meet the desired number of usable
+	// contracts
+
+	return nil
+}
+
+// TODO: implement
+func (cm *ContractManager) performContractPruning() error {
+	return nil
+}
+
+// TODO: implement
+func (cm *ContractManager) performSlabPinning() error {
 	return nil
 }

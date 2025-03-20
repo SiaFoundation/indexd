@@ -31,6 +31,9 @@ CREATE TABLE global_settings (
     scanned_block_id BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(scanned_block_id) = 32),
 
     -- contract manager settings
+    contracts_maintenance_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    contracts_wanted INTEGER NOT NULL DEFAULT 50 CHECK(contracts_wanted > 0), -- number of contracts to maintain
+    contracts_renew_window INTEGER NOT NULL DEFAULT 144 * 7 * 2 CHECK(contracts_renew_window > 0), -- 2 weeks
     contracts_period INTEGER NOT NULL DEFAULT 144 * 7 * 6 CHECK(contracts_period > contracts_renew_window), -- 6 weeks
 
     -- pinned price limits in currency's base unit (e.g. ¢ for USD)
