@@ -26,6 +26,7 @@ import (
 	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
+	"go.sia.tech/indexd/settings"
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
@@ -126,9 +127,17 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		api.WithLogger(log.Named("api")),
 	}
 
+	var e *explorer.Explorer
 	if cfg.Explorer.Enabled {
-		apiOpts = append(apiOpts, api.WithExplorer(explorer.New(cfg.Explorer.URL)))
+		e = explorer.New(cfg.Explorer.URL)
+		apiOpts = append(apiOpts, api.WithExplorer(e))
 	}
+
+	settings, err := settings.NewManager(store, e, settings.WithLogger(log.Named("settings")))
+	if err != nil {
+		return fmt.Errorf("failed to create settings manager: %w", err)
+	}
+	defer settings.Close()
 
 	web := http.Server{
 		Handler: webRouter{

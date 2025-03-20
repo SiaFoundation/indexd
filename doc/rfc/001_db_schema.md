@@ -25,6 +25,7 @@ configuration entry.
 CREATE TABLE global_settings (
     id INTEGER PRIMARY KEY NOT NULL DEFAULT 0 CHECK (id = 0), -- enforce a single row
     db_version INTEGER NOT NULL, -- used for migrations
+    min_protocol_version BYTEA NOT NULL DEFAULT '\x010000', -- used for host checks
 
     -- chain index of the last scanned block
     scanned_height BIGINT NOT NULL DEFAULT 0 CHECK(scanned_height >= 0),
@@ -32,22 +33,20 @@ CREATE TABLE global_settings (
 
     -- contract manager settings
     contracts_period INTEGER NOT NULL DEFAULT 144 * 7 * 6 CHECK(contracts_period > contracts_renew_window), -- 6 weeks
+    contracts_renew_window INTEGER NOT NULL DEFAULT 144 * 7 * 2 CHECK(contracts_renew_window > 0), -- 2 weeks
 
-    -- pinned price limits in currency's base unit (e.g. ¢ for USD)
-    pinned_currency TEXT, -- e.g. USD, EUR, etc.
-    pinned_min_collateral BIGINT, -- fiat / TB / month
-    pinned_max_storage_price BIGINT, -- fiat / TB / month
-    pinned_max_ingress_price BIGINT, -- fiat / TB
-    pinned_max_egress_price BIGINT -- fiat / TB
+    -- price pin settings
+    pinned_currency CHAR(3) NOT NULL DEFAULT '',
+    pinned_min_collateral DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_min_collateral >= 0),
+    pinned_max_storage_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_max_storage_price >= 0),
+    pinned_max_ingress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_max_ingress_price >= 0),
+    pinned_max_egress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_max_egress_price >= 0),
 
-    -- current price limits
-    min_collateral NUMERIC(50,0), -- hastings / byte / block
-    max_storage_price NUMERIC(50,0), -- hastings / byte / block
-    max_ingress_price NUMERIC(50,0), -- hastings / byte
-    max_egress_price NUMERIC(50,0) -- hastings / byte
-
-    -- host checks
-    min_protocol_version BYTEA NOT NULL DEFAULT '\x010000' -- minimum protocol version
+    -- price settings
+    min_collateral NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
+    max_storage_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
+    max_ingress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
+    max_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0 -- hastings / byte
 );
 ```
 
