@@ -37,7 +37,7 @@ func (e *Explorer) BaseURL() string {
 
 // SiacoinExchangeRate returns the exchange rate for the given currency.
 func (e *Explorer) SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error) {
-	err = makeRequest(ctx, http.MethodGet, fmt.Sprintf("%s/exchange-rate/siacoin/%s", e.url, currency), nil, &rate)
+	err = request(ctx, http.MethodGet, fmt.Sprintf("%s/exchange-rate/siacoin/%s", e.url, currency), nil, &rate)
 	return
 }
 
@@ -46,7 +46,7 @@ func drainAndClose(r io.ReadCloser) {
 	r.Close()
 }
 
-func makeRequest(ctx context.Context, method, url string, requestBody, response any) error {
+func request(ctx context.Context, method, url string, requestBody, response any) error {
 	var body io.Reader
 	if requestBody != nil {
 		js, _ := json.Marshal(requestBody)
