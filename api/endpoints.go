@@ -9,6 +9,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/build"
+	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
@@ -54,6 +55,25 @@ func (a *api) handleGETState(jc jape.Context) {
 		},
 		ScanHeight: ci.Height,
 	})
+}
+
+func (a *api) handleGETExplorerSiacoinExchangeRate(jc jape.Context) {
+	if a.explorer == nil {
+		jc.Error(explorer.ErrDisabled, http.StatusServiceUnavailable)
+		return
+	}
+
+	var currency string
+	if jc.DecodeParam("currency", &currency) != nil {
+		return
+	}
+
+	rate, err := a.explorer.SiacoinExchangeRate(jc.Request.Context(), currency)
+	if jc.Check("failed to get siacoin exchange rate", err) != nil {
+		return
+	}
+
+	jc.Encode(rate)
 }
 
 func (a *api) handleGETHost(jc jape.Context) {

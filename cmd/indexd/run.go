@@ -23,6 +23,7 @@ import (
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/config"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/subscriber"
@@ -123,6 +124,10 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 
 	apiOpts := []api.ServerOption{
 		api.WithLogger(log.Named("api")),
+	}
+
+	if cfg.Explorer.Enabled {
+		apiOpts = append(apiOpts, api.WithExplorer(explorer.New(cfg.Explorer.URL)))
 	}
 
 	web := http.Server{

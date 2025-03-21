@@ -30,6 +30,12 @@ func (c *Client) State(ctx context.Context) (state State, err error) {
 	return
 }
 
+// ExplorerSiacoinExchangeRate returns the exchange rate for the given currency.
+func (c *Client) ExplorerSiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/explorer/exchange-rate/siacoin/%s", currency), &rate)
+	return
+}
+
 // Host returns information about a particular host known to the indexer.
 func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hosts.Host, err error) {
 	err = c.c.GET(ctx, fmt.Sprintf("/host/%s", hostKey), &h)

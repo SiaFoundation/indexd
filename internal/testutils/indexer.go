@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/subscriber"
@@ -91,6 +92,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 
 	apiOpts := []api.ServerOption{
 		api.WithLogger(log.Named("api")),
+		api.WithExplorer(explorer.New("https://api.siascan.com")),
 	}
 
 	password := hex.EncodeToString(frand.Bytes(16))
