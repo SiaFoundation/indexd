@@ -10,7 +10,7 @@ import (
 // PinnedSettings returns the pinned settings.
 func (s *Store) PinnedSettings(ctx context.Context) (ps settings.PinnedSettings, err error) {
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		query := `SELECT TRIM(pinned_currency), pinned_min_collateral, pinned_max_storage_price, pinned_max_ingress_price, pinned_max_egress_price FROM global_settings`
+		query := `SELECT pinned_currency, pinned_min_collateral, pinned_max_storage_price, pinned_max_ingress_price, pinned_max_egress_price FROM global_settings`
 		return tx.QueryRow(ctx, query).Scan(
 			&ps.Currency,
 			&ps.MinCollateral,

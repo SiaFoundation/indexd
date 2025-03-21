@@ -36,7 +36,7 @@ CREATE TABLE global_settings (
     contracts_renew_window INTEGER NOT NULL DEFAULT 144 * 7 * 2 CHECK(contracts_renew_window > 0), -- 2 weeks
 
     -- price pin settings
-    pinned_currency CHAR(3) NOT NULL DEFAULT '',
+    pinned_currency VARCHAR(3) NOT NULL DEFAULT '',
     pinned_min_collateral DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_min_collateral >= 0),
     pinned_max_storage_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_max_storage_price >= 0),
     pinned_max_ingress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_max_ingress_price >= 0),
