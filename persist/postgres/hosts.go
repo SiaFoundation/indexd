@@ -59,13 +59,13 @@ func (s *Store) Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error
 		dbHost, err := scanHost(tx.QueryRow(ctx, `
 WITH globals AS (
 	SELECT
-		contract_period,
-		host_min_collateral,
-		host_max_storage_price,
-		host_max_ingress_price,
-		host_max_egress_price,
-		(get_byte(host_min_protocol_version, 0) << 16) + (get_byte(host_min_protocol_version, 1) << 8) + (get_byte(host_min_protocol_version, 2)) AS host_min_version,
-		1099511627776::NUMERIC AS one_tb,
+		contracts_period,
+		hosts_min_collateral,
+		hosts_max_storage_price,
+		hosts_max_ingress_price,
+		hosts_max_egress_price,
+		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
+		1E12::NUMERIC AS one_tb,
 		1E24::NUMERIC AS one_sc
 	FROM global_settings
 ), hosts AS (
@@ -77,7 +77,7 @@ WITH globals AS (
 		settings_remaining_storage, settings_total_storage, settings_contract_price,
 		settings_collateral, settings_storage_price, settings_ingress_price,
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until,
-		last_successful_scan != '0001-01-01 00:00:00+00'::timestamptz as has_settings,
+		last_successful_scan IS NOT NULL as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
@@ -85,16 +85,16 @@ WITH globals AS (
 ) SELECT 
 	hosts.*,
 	recent_uptime > 0.9,
-	has_settings AND settings_max_contract_duration >= globals.contract_period,
-	has_settings AND settings_max_collateral > globals.host_min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contract_period,
+	has_settings AND settings_max_contract_duration >= globals.contracts_period,
+	has_settings AND settings_max_collateral > globals.hosts_min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
 	has_settings AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
 	has_settings AND settings_accepting_contracts,
 	has_settings AND settings_contract_price <= globals.one_sc,
-	has_settings AND settings_collateral >= globals.host_min_collateral AND settings_collateral >= 2 * settings_storage_price,
-	has_settings AND settings_storage_price <= globals.host_max_storage_price,
-	has_settings AND settings_ingress_price <= globals.host_max_ingress_price,
-	has_settings AND settings_egress_price <= globals.host_max_egress_price,
+	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
+	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
+	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
+	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
 	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
 FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -133,13 +133,13 @@ func (s *Store) Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, err
 		rows, err := tx.Query(ctx, `
 WITH globals AS (
     SELECT
-		contract_period,
-        host_min_collateral,
-        host_max_storage_price,
-        host_max_ingress_price,
-		host_max_egress_price,
-		(get_byte(host_min_protocol_version, 0) << 16) + (get_byte(host_min_protocol_version, 1) << 8) + (get_byte(host_min_protocol_version, 2)) AS host_min_version,
-		1099511627776::NUMERIC AS one_tb,
+		contracts_period,
+        hosts_min_collateral,
+        hosts_max_storage_price,
+        hosts_max_ingress_price,
+		hosts_max_egress_price,
+		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
+		1E12::NUMERIC AS one_tb,
 		1E24::NUMERIC AS one_sc
     FROM global_settings
 ), hosts AS (
@@ -151,7 +151,7 @@ WITH globals AS (
 		settings_remaining_storage, settings_total_storage, settings_contract_price,
 		settings_collateral, settings_storage_price, settings_ingress_price,
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until,
-		last_successful_scan != '0001-01-01 00:00:00+00'::timestamptz as has_settings,
+		last_successful_scan IS NOT NULL as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
@@ -159,16 +159,16 @@ WITH globals AS (
 ) SELECT 
  	hosts.*,
 	recent_uptime > 0.9,
-	has_settings AND settings_max_contract_duration >= globals.contract_period,
-	has_settings AND settings_max_collateral > globals.host_min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contract_period,
+	has_settings AND settings_max_contract_duration >= globals.contracts_period,
+	has_settings AND settings_max_collateral > globals.hosts_min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
 	has_settings AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
 	has_settings AND settings_accepting_contracts,
 	has_settings AND settings_contract_price <= globals.one_sc,
-	has_settings AND settings_collateral >= globals.host_min_collateral AND settings_collateral >= 2 * settings_storage_price,
-	has_settings AND settings_storage_price <= globals.host_max_storage_price,
-	has_settings AND settings_ingress_price <= globals.host_max_ingress_price,
-	has_settings AND settings_egress_price <= globals.host_max_egress_price,
+	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
+	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
+	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
+	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
 	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
 FROM hosts CROSS JOIN globals;`, limit, offset)
 		if err != nil {
@@ -297,7 +297,7 @@ func (s *Store) HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
 func (s *Store) PruneHosts(ctx context.Context, minLastSuccessfulScan time.Time, minConsecutiveFailedScans int) (int64, error) {
 	var n int64
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		res, err := tx.Exec(ctx, `DELETE FROM hosts WHERE last_successful_scan <= $1 AND consecutive_failed_scans >= $2 AND NOT EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id)`, minLastSuccessfulScan, minConsecutiveFailedScans)
+		res, err := tx.Exec(ctx, `DELETE FROM hosts WHERE (last_successful_scan IS NULL OR last_successful_scan <= $1) AND consecutive_failed_scans >= $2 AND NOT EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id)`, minLastSuccessfulScan, minConsecutiveFailedScans)
 		if err != nil {
 			return fmt.Errorf("failed to prune hosts: %w", err)
 		}
@@ -322,7 +322,7 @@ WITH computed AS (
 		SELECT
 			id,
 			CASE
-				WHEN GREATEST(last_failed_scan, last_successful_scan) = '0001-01-01 00:00:00+00'::timestamptz
+				WHEN GREATEST(last_failed_scan, last_successful_scan) IS NULL
 				THEN 0
 				ELSE EXTRACT(EPOCH FROM (NOW() - GREATEST(last_successful_scan, last_failed_scan)))
 			END AS elapsed_time
@@ -355,7 +355,7 @@ WITH computed AS (
 		SELECT
 			id,
 			CASE
-				WHEN GREATEST(last_failed_scan, last_successful_scan) = '0001-01-01 00:00:00+00'::timestamptz
+				WHEN GREATEST(last_failed_scan, last_successful_scan) IS NULL
 				THEN 0
 				ELSE EXTRACT(EPOCH FROM (NOW() - GREATEST(last_successful_scan, last_failed_scan)))
 			END AS elapsed_time
@@ -434,7 +434,7 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 // UsabilitySettings returns the usability settings used in the host's usability checks.
 func (s *Store) UsabilitySettings(ctx context.Context) (us hosts.UsabilitySettings, err error) {
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		query := `SELECT host_max_egress_price, host_max_ingress_price, host_max_storage_price, host_min_collateral, host_min_protocol_version FROM global_settings`
+		query := `SELECT hosts_max_egress_price, hosts_max_ingress_price, hosts_max_storage_price, hosts_min_collateral, hosts_min_protocol_version FROM global_settings`
 		return tx.QueryRow(ctx, query).Scan(
 			(*sqlCurrency)(&us.MaxEgressPrice),
 			(*sqlCurrency)(&us.MaxIngressPrice),
@@ -449,7 +449,7 @@ func (s *Store) UsabilitySettings(ctx context.Context) (us hosts.UsabilitySettin
 // UpdateUsabilitySettings updates the usability settings.
 func (s *Store) UpdateUsabilitySettings(ctx context.Context, us hosts.UsabilitySettings) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		query := `UPDATE global_settings SET host_max_egress_price = $1, host_max_ingress_price = $2, host_max_storage_price = $3, host_min_collateral = $4, host_min_protocol_version = $5`
+		query := `UPDATE global_settings SET hosts_max_egress_price = $1, hosts_max_ingress_price = $2, hosts_max_storage_price = $3, hosts_min_collateral = $4, hosts_min_protocol_version = $5`
 		_, err := tx.Exec(ctx, query, sqlCurrency(us.MaxEgressPrice), sqlCurrency(us.MaxIngressPrice), sqlCurrency(us.MaxStoragePrice), sqlCurrency(us.MinCollateral), sqlProtocolVersion(us.MinProtocolVersion))
 		return err
 	})
@@ -499,15 +499,17 @@ func queryHostNetworks(ctx context.Context, tx *txn, hostID int64) ([]net.IPNet,
 	return networks, nil
 }
 
-func scanHost(s scanner) (host dbHost, err error) {
+func scanHost(s scanner) (dbHost, error) {
+	var host dbHost
+	var lastFailedScan, lastSuccessfulScan, validUntil sql.NullTime
 	var ignore any
-	err = s.Scan(
+	if err := s.Scan(
 		&host.id,
 		(*sqlPublicKey)(&host.PublicKey),
 		&host.LastAnnouncement,
 		&host.Blocked,
-		&host.LastFailedScan,
-		&host.LastSuccessfulScan,
+		&lastFailedScan,
+		&lastSuccessfulScan,
 		&host.NextScan,
 		&host.ConsecutiveFailedScans,
 		&host.RecentUptime,
@@ -526,7 +528,7 @@ func scanHost(s scanner) (host dbHost, err error) {
 		(*sqlCurrency)(&host.Settings.Prices.EgressPrice),
 		(*sqlCurrency)(&host.Settings.Prices.FreeSectorPrice),
 		&host.Settings.Prices.TipHeight,
-		&host.Settings.Prices.ValidUntil,
+		&validUntil,
 		&ignore,
 		&ignore,
 		&host.Usability.Uptime,
@@ -541,6 +543,19 @@ func scanHost(s scanner) (host dbHost, err error) {
 		&host.Usability.IngressPrice,
 		&host.Usability.EgressPrice,
 		&host.Usability.FreeSectorPrice,
-	)
-	return
+	); err != nil {
+		return dbHost{}, err
+	}
+
+	if lastFailedScan.Valid {
+		host.LastFailedScan = lastFailedScan.Time
+	}
+	if lastSuccessfulScan.Valid {
+		host.LastSuccessfulScan = lastSuccessfulScan.Time
+	}
+	if validUntil.Valid {
+		host.Settings.Prices.ValidUntil = validUntil.Time
+	}
+
+	return host, nil
 }

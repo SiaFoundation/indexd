@@ -30,23 +30,25 @@ CREATE TABLE global_settings (
     scanned_height BIGINT NOT NULL DEFAULT 0 CHECK(scanned_height >= 0),
     scanned_block_id BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(scanned_block_id) = 32),
 
-    -- contract settings
-    contract_period INTEGER NOT NULL DEFAULT 144 * 7 * 6 CHECK(contract_period > contract_renew_window), -- 6 weeks
-    contract_renew_window INTEGER NOT NULL DEFAULT 144 * 7 * 2 CHECK(contract_renew_window > 0), -- 2 weeks
+    -- contract manager settings
+    contracts_maintenance_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+    contracts_wanted INTEGER NOT NULL DEFAULT 50 CHECK(contracts_wanted > 0), -- number of contracts to maintain
+    contracts_renew_window INTEGER NOT NULL DEFAULT 144 * 7 * 2 CHECK(contracts_renew_window > 0), -- 2 weeks
+    contracts_period INTEGER NOT NULL DEFAULT 144 * 7 * 6 CHECK(contracts_period > contracts_renew_window), -- 6 weeks
 
-    -- host settings
-    host_min_protocol_version BYTEA NOT NULL DEFAULT '\x010000', -- used for host checks
-    host_min_collateral NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
-    host_max_storage_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
-    host_max_ingress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
-    host_max_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
+    -- host manager settings
+    hosts_min_protocol_version BYTEA NOT NULL DEFAULT '\x010000', -- used for host checks
+    hosts_min_collateral NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
+    hosts_max_storage_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
+    hosts_max_ingress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
+    hosts_max_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
 
-    -- pinned settings
-    pinned_currency VARCHAR(3) NOT NULL DEFAULT '',
-    pinned_min_collateral DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_min_collateral >= 0),
-    pinned_max_storage_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_max_storage_price >= 0),
-    pinned_max_ingress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_max_ingress_price >= 0),
-    pinned_max_egress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pinned_max_egress_price >= 0)
+    -- pin manager settings
+    pins_currency VARCHAR(3) NOT NULL DEFAULT '',
+    pins_min_collateral DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_min_collateral >= 0),
+    pins_max_storage_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_storage_price >= 0),
+    pins_max_ingress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_ingress_price >= 0),
+    pins_max_egress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_egress_price >= 0)
 );
 ```
 
@@ -120,10 +122,10 @@ CREATE TABLE hosts (
     public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32),
     consecutive_failed_scans INTEGER NOT NULL DEFAULT 0,
     recent_uptime DOUBLE PRECISION NOT NULL DEFAULT 0.894 CHECK (recent_uptime > 0 AND recent_uptime < 1),
-    last_failed_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
-    last_successful_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
-    last_announcement TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
-    next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    last_failed_scan TIMESTAMP WITH TIME ZONE,
+    last_successful_scan TIMESTAMP WITH TIME ZONE,
+    last_announcement TIMESTAMP WITH TIME ZONE,
+    next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     lost_sectors INTEGER NOT NULL DEFAULT 0,
 
     settings_protocol_version BYTEA NOT NULL DEFAULT '\x000000'::bytea CHECK (LENGTH(settings_protocol_version) = 3),
@@ -141,7 +143,7 @@ CREATE TABLE hosts (
     settings_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0,
     settings_free_sector_price NUMERIC(50,0) NOT NULL DEFAULT 0,
     settings_tip_height BIGINT NOT NULL DEFAULT 0,
-    settings_valid_until TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00'
+    settings_valid_until TIMESTAMP WITH TIME ZONE
 )
 
 CREATE TABLE host_addresses (
@@ -228,7 +230,7 @@ CREATE TABLE slabs (
 
     digest BYTEA UNIQUE NOT NULL, -- unique identifier for the slab derived from sector roots
     encryption_key BYTEA NOT NULL,
-    last_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    last_repair_attempt TIMESTAMP WITH TIME ZONE,
     min_shards SMALLINT NOT NULL CHECK(min_shards > 0)
 )
 
@@ -247,7 +249,7 @@ CREATE TABLE sectors (
     UNIQUE(slab_id, slab_index), -- enforce one sector per index per slab
 
     -- data integrity
-    next_integrity_check TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    next_integrity_check TIMESTAMP WITH TIME ZONE,
     consecutive_failed_checks SMALLINT NOT NULL DEFAULT 0
 )
 -- quick lookup of sectors to pin prioritized by upload time

@@ -1,7 +1,6 @@
 package explorer
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -36,46 +35,32 @@ func (e *Explorer) BaseURL() string {
 }
 
 // SiacoinExchangeRate returns the exchange rate for the given currency.
-func (e *Explorer) SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error) {
-	err = makeRequest(ctx, http.MethodGet, fmt.Sprintf("%s/exchange-rate/siacoin/%s", e.url, currency), nil, &rate)
-	return
-}
-
-func drainAndClose(r io.ReadCloser) {
-	io.Copy(io.Discard, io.LimitReader(r, 1024*1024))
-	r.Close()
-}
-
-func makeRequest(ctx context.Context, method, url string, requestBody, response any) error {
-	var body io.Reader
-	if requestBody != nil {
-		js, _ := json.Marshal(requestBody)
-		body = bytes.NewReader(js)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, method, url, body)
+func (e *Explorer) SiacoinExchangeRate(ctx context.Context, currency string) (float64, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/exchange-rate/siacoin/%s", e.url, currency), nil)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
+		return 0, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer drainAndClose(resp.Body)
+	defer func() {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 1024*1024))
+		resp.Body.Close()
+	}()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errorMessage string
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 1024)).Decode(&errorMessage); err != nil {
-			return fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 		}
-		return errors.New(errorMessage)
+		return 0, errors.New(errorMessage)
 	}
 
-	if response == nil {
-		return nil
-	} else if err := json.NewDecoder(resp.Body).Decode(response); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
+	var rate float64
+	if err := json.NewDecoder(resp.Body).Decode(&rate); err != nil {
+		return 0, fmt.Errorf("failed to decode response: %w", err)
 	}
-	return nil
+	return rate, nil
 }

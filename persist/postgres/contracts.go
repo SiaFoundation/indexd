@@ -185,6 +185,32 @@ WHERE current_height.scanned_height >= contracts.expiration_height + $1;
 	return fces, err
 }
 
+// MaintenanceSettings returns the current maintenance settings.
+func (s *Store) MaintenanceSettings(ctx context.Context) (contracts.MaintenanceSettings, error) {
+	var settings contracts.MaintenanceSettings
+	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		return tx.QueryRow(ctx, `SELECT contracts_maintenance_enabled, contracts_wanted, contracts_renew_window, contracts_period FROM global_settings`).
+			Scan(&settings.Enabled, &settings.WantedContracts, &settings.RenewWindow, &settings.Period)
+	})
+	return settings, err
+}
+
+// PruneExpiredContractElements prunes contract elements for contracts that have
+// been expired for at least 'maxBlocksSinceExpiry' blocks.
+func (s *Store) PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+WITH current_height AS (
+    SELECT scanned_height FROM global_settings
+)
+DELETE FROM contract_elements fces
+USING contracts, current_height
+WHERE fces.contract_id = contracts.id AND current_height.scanned_height >= contracts.expiration_height + $1;
+`, maxBlocksSinceExpiry)
+		return err
+	})
+}
+
 // SetContractBad marks a contract as bad.
 func (s *Store) SetContractBad(contractID types.FileContractID) error {
 	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
@@ -196,11 +222,11 @@ func (s *Store) SetContractBad(contractID types.FileContractID) error {
 	})
 }
 
-// UpdateContractSettings updates the contract settings.
-func (s *Store) UpdateContractSettings(ctx context.Context, cs contracts.ContractSettings) error {
+// UpdateMaintenanceSettings updates the maintenance settings.
+func (s *Store) UpdateMaintenanceSettings(ctx context.Context, settings contracts.MaintenanceSettings) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		query := `UPDATE global_settings SET contract_period = $1, contract_renew_window = $2`
-		_, err := tx.Exec(ctx, query, cs.Period, cs.RenewWindow)
+		_, err := tx.Exec(ctx, `UPDATE global_settings SET contracts_maintenance_enabled = $1, contracts_wanted = $2, contracts_renew_window = $3, contracts_period = $4`,
+			settings.Enabled, settings.WantedContracts, settings.RenewWindow, settings.Period)
 		return err
 	})
 }
@@ -235,10 +261,14 @@ func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, erro
 	return exists, nil
 }
 
-func (tx *updateTx) RejectPendingContracts(maxFormation time.Time) error {
-	_, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET state = $1 WHERE state = $2 AND formation < $3`,
-		sqlContractState(contracts.ContractStateRejected), sqlContractState(contracts.ContractStatePending), maxFormation)
-	return err
+// RejectPendingContracts marks all contracts as rejected that are currently
+// pending and have a formation height older than 'maxFormation'.
+func (s *Store) RejectPendingContracts(ctx context.Context, maxFormation time.Time) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `UPDATE contracts SET state = $1 WHERE state = $2 AND formation < $3`,
+			sqlContractState(contracts.ContractStateRejected), sqlContractState(contracts.ContractStatePending), maxFormation)
+		return err
+	})
 }
 
 func (tx *updateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {

@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap/zaptest"
+	"lukechampine.com/frand"
 )
 
 func TestContractElementsForBroadcast(t *testing.T) {
@@ -83,6 +84,106 @@ func TestContractElementsForBroadcast(t *testing.T) {
 		t.Fatalf("expected 1 contract to broadcast, got %d", len(fces))
 	} else if !reflect.DeepEqual(fces[0], fce) {
 		t.Fatalf("mismatch: \n%+v\n%+v", fce, fces[0])
+	}
+}
+
+func TestPruneExpiredContractElements(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := types.PublicKey{1, 1, 1}
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	addContract := func(expirationHeight uint64) types.FileContractID {
+		t.Helper()
+		var contractID types.FileContractID
+		frand.Read(contractID[:])
+		if err := store.AddFormedContract(context.Background(), contractID, hk, 50, expirationHeight, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3)); err != nil {
+			t.Fatal(err)
+		}
+		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.UpdateContractElements(types.V2FileContractElement{
+				ID: contractID,
+			})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return contractID
+	}
+
+	assertContracts := func(contractIDs []types.FileContractID) {
+		t.Helper()
+		_ = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			fces, err := tx.ContractElements()
+			if err != nil {
+				t.Fatal(err)
+			} else if len(fces) != len(contractIDs) {
+				t.Fatalf("expected %d contracts, got %d", len(contractIDs), len(fces))
+			}
+		outer:
+			for _, c := range fces {
+				for _, id := range contractIDs {
+					if c.ID == id {
+						continue outer
+					}
+				}
+				t.Fatalf("contract %v is missing", c.ID)
+			}
+			return nil
+		})
+	}
+
+	// set height to block 12
+	bh := uint64(12)
+	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: bh})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add 3 contracts at different expiration heights
+	c1 := addContract(10)
+	c2 := addContract(11)
+	c3 := addContract(12)
+
+	// prune with a buffer of 3, should not prune anything
+	if err := store.PruneExpiredContractElements(context.Background(), 3); err != nil {
+		t.Fatal(err)
+	}
+	assertContracts([]types.FileContractID{c1, c2, c3})
+
+	// prune with a buffer of 1, should prune c1 and c2
+	if err := store.PruneExpiredContractElements(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	assertContracts([]types.FileContractID{c3})
+
+	// prune with a buffer of 0 to prune c3 too
+	if err := store.PruneExpiredContractElements(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	assertContracts([]types.FileContractID{})
+
+	// assert only the elements got pruned but the contracts remain
+	err = store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		var count int
+		err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM contracts").Scan(&count)
+		if err != nil {
+			return err
+		} else if count != 3 {
+			t.Fatalf("expected 3 contracts, got %d", count)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -231,6 +332,38 @@ func TestFormRenewContract(t *testing.T) {
 	assertContract(expectedRenewed.ID, expectedRenewed)
 }
 
+func TestMaintenanceSettings(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	expectedSettings := contracts.MaintenanceSettings{
+		Enabled:         false,
+		Period:          6048,
+		RenewWindow:     2016,
+		WantedContracts: 50,
+	}
+
+	// check default settings
+	settings, err := store.MaintenanceSettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(settings, expectedSettings) {
+		t.Fatalf("mismatch: \n%+v\n%+v", settings, expectedSettings)
+	}
+
+	// update and check again
+	expectedSettings.Enabled = true
+	expectedSettings.Period *= 2
+	expectedSettings.RenewWindow *= 2
+	expectedSettings.WantedContracts *= 2
+	if err := store.UpdateMaintenanceSettings(context.Background(), expectedSettings); err != nil {
+		t.Fatal(err)
+	} else if settings, err = store.MaintenanceSettings(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(settings, expectedSettings) {
+		t.Fatalf("mismatch: \n%+v\n%+v", settings, expectedSettings)
+	}
+}
+
 func TestRejectContracts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
@@ -299,9 +432,7 @@ func TestRejectContracts(t *testing.T) {
 	assertContractState(activeID, contracts.ContractStateActive)
 
 	// reject pending contracts older than 30 minutes
-	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.RejectPendingContracts(now.Add(-30 * time.Minute))
-	})
+	err = store.RejectPendingContracts(context.Background(), now.Add(-30*time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +491,7 @@ func TestSetContractGood(t *testing.T) {
 	}
 
 	// form contracts
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		expectedFormed := contracts.Contract{
 			ID:      types.FileContractID{byte(i + 1)},
 			HostKey: hk,

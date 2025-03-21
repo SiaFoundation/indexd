@@ -20,7 +20,6 @@ type (
 	UpdateTx interface {
 		ContractElements() ([]types.V2FileContractElement, error)
 		IsKnownContract(contractID types.FileContractID) (bool, error)
-		RejectPendingContracts(maxFormation time.Time) error
 		UpdateContractElements(fces ...types.V2FileContractElement) error
 		UpdateContractState(contractID types.FileContractID, state ContractState) error
 	}
@@ -50,11 +49,23 @@ func (tx *updateTx) IsKnownContract(fcid types.FileContractID) (bool, error) {
 // not guaranteed to be called on every update but will eventually be called
 // after applying all batches of a sync.
 func (m *ContractManager) ProcessActions(ctx context.Context) error {
+	// reject all contracts that have been pending for more than 'contractRejectBuffer'
+	maxFormation := time.Now().Add(-m.contractRejectBuffer)
+	if err := m.store.RejectPendingContracts(ctx, maxFormation); err != nil {
+		return fmt.Errorf("failed to reject pending contracts: %w", err)
+	}
+
 	// broadcast resolutions for expired contracts
 	// 'expiredContractBroadcastBuffer' blocks after their window end to give
 	// hosts a chance to do it themselves before we do it
 	if err := m.broadcastExpiredContracts(ctx); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("failed to broadcast expired contracts: %w", err)
+	}
+
+	// prune expired contracts 'expiredContractPruneBuffer' blocks after
+	// we begin broadcasting resolutions
+	if err := m.store.PruneExpiredContractElements(ctx, m.expiredContractBroadcastBuffer+m.expiredContractPruneBuffer); err != nil {
+		return fmt.Errorf("failed to prune expired contracts: %w", err)
 	}
 	return nil
 }
@@ -79,16 +90,6 @@ func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertU
 			return fmt.Errorf("failed to apply chain update: %w", err)
 		}
 	}
-
-	// reject all contracts that have been pending for more than 'contractRejectBuffer'
-	maxFormation := time.Now().Add(-m.contractRejectBuffer)
-	if err := tx.RejectPendingContracts(maxFormation); err != nil {
-		return fmt.Errorf("failed to reject pending contracts: %w", err)
-	}
-
-	// TODO: prune expired contracts 'expiredContractPruneBuffer' blocks after
-	// we begin broadcasting resolutions
-
 	return nil
 }
 
