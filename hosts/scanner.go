@@ -3,7 +3,7 @@ package hosts
 import (
 	"context"
 	"fmt"
-	"net/http"
+	"net"
 	"time"
 
 	"slices"
@@ -28,9 +28,9 @@ func (c *scanner) Settings(ctx context.Context, hk types.PublicKey, addr string)
 }
 
 var fallbackSites = []string{
-	"https://1.1.1.1", // cloudflare
-	"https://www.google.com",
-	"https://www.amazon.com",
+	"1.1.1.1:80", // Cloudflare
+	"www.google.com:80",
+	"www.amazon.com:80",
 }
 
 type pinger struct{}
@@ -40,12 +40,12 @@ func (pinger) Online() bool {
 	return slices.ContainsFunc(fallbackSites, isReachable)
 }
 
-// isReachable checks if the given URL is reachable via an HTTP HEAD request
-func isReachable(url string) bool {
-	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Head(url)
-	if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 400 {
-		return true
+// isReachable attempts to establish a TCP connection to the given host with a short timeout.
+func isReachable(address string) bool {
+	conn, err := net.DialTimeout("tcp", address, 2*time.Second)
+	if err != nil {
+		return false
 	}
-	return false
+	_ = conn.Close()
+	return true
 }

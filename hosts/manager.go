@@ -262,6 +262,7 @@ func (m *HostManager) scanHosts(ctx context.Context) {
 	sema := make(chan struct{}, scanThreads)
 	defer close(sema)
 
+	var once sync.Once
 	var wg sync.WaitGroup
 	for _, hk := range hosts {
 		select {
@@ -277,7 +278,10 @@ func (m *HostManager) scanHosts(ctx context.Context) {
 				wg.Done()
 			}()
 
-			if _, err := m.ScanHost(ctx, hk); errors.Is(err, context.Canceled) || errors.Is(err, errNodeOffline) {
+			if _, err := m.ScanHost(ctx, hk); errors.Is(err, context.Canceled) {
+				return
+			} else if errors.Is(err, errNodeOffline) {
+				once.Do(func() { m.log.Warn("indexer is offline, skipping scans") })
 				return
 			} else if err != nil {
 				m.log.Error("failed to perform host scan", zap.Stringer("hk", hk), zap.Error(err))
@@ -361,7 +365,6 @@ func resolveHost(ctx context.Context, pinger Pinger, resolver Resolver, addresse
 			return nil, nil, err
 		} else if err != nil {
 			if !pinger.Online() {
-				log.Warn("indexer is offline")
 				return nil, nil, errNodeOffline
 			}
 			log.Debug("failed to resolve host", zap.String("host", host), zap.Error(err))
