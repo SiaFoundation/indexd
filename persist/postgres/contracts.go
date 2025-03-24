@@ -195,15 +195,6 @@ func (s *Store) MaintenanceSettings(ctx context.Context) (contracts.MaintenanceS
 	return settings, err
 }
 
-// UpdateMaintenanceSettings updates the maintenance settings.
-func (s *Store) UpdateMaintenanceSettings(ctx context.Context, settings contracts.MaintenanceSettings) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `UPDATE global_settings SET contracts_maintenance_enabled = $1, contracts_wanted = $2, contracts_renew_window = $3, contracts_period = $4`,
-			settings.Enabled, settings.WantedContracts, settings.RenewWindow, settings.Period)
-		return err
-	})
-}
-
 // PruneExpiredContractElements prunes contract elements for contracts that have
 // been expired for at least 'maxBlocksSinceExpiry' blocks.
 func (s *Store) PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error {

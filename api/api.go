@@ -88,6 +88,8 @@ func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, op
 	}
 
 	return jape.Mux(map[string]jape.Handler{
+		"GET /state": a.handleGETState,
+
 		// explorer endpoints
 		"GET /explorer/exchange-rate/siacoin/:currency": a.handleGETExplorerSiacoinExchangeRate,
 
@@ -107,8 +109,6 @@ func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, op
 		"PUT /settings/hosts":        a.handlePUTSettingsHosts,
 		"GET /settings/pricepinning": a.handleGETSettingsPricePinning,
 		"PUT /settings/pricepinning": a.handlePUTSettingsPricePinning,
-
-		"GET /state": a.handleGETState,
 
 		// wallet endpoints
 		"GET /wallet":         a.handleGETWallet,

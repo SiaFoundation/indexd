@@ -109,6 +109,7 @@ func TestSettingsAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
 
+	// assert contract settings can be fetched and updated
 	cs, err := indexer.SettingsContracts(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -130,7 +131,7 @@ func TestSettingsAPI(t *testing.T) {
 		t.Fatal("unexpected", csUpdate)
 	}
 
-	// fetch usability settings
+	// assert host settings can be fetched and updated
 	hs, err := indexer.SettingsHosts(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -141,13 +142,11 @@ func TestSettingsAPI(t *testing.T) {
 	hs.MinCollateral = types.NewCurrency64(frand.Uint64n(1e3))
 	frand.Read(hs.MinProtocolVersion[:])
 
-	// update usability settings
 	err = indexer.SettingsHostsUpdate(context.Background(), hs)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// assert settings were updated
 	hsUpdate, err := indexer.SettingsHosts(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -155,6 +154,7 @@ func TestSettingsAPI(t *testing.T) {
 		t.Fatal("unexpected", hsUpdate)
 	}
 
+	// assert price pinning settings can be fetched and updated
 	ps, err := indexer.SettingsPricePinning(context.Background())
 	if err != nil {
 		t.Fatal(err)

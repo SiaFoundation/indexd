@@ -733,42 +733,6 @@ func TestUpdateHost(t *testing.T) {
 	}
 }
 
-func TestUpdateUsabilitySettings(t *testing.T) {
-	log := zaptest.NewLogger(t)
-	db := initPostgres(t, log.Named("postgres"))
-
-	us, err := db.UsabilitySettings(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	} else if !us.MaxEgressPrice.IsZero() {
-		t.Fatal("unexpected", us.MaxEgressPrice)
-	} else if !us.MaxIngressPrice.IsZero() {
-		t.Fatal("unexpected", us.MaxIngressPrice)
-	} else if !us.MaxStoragePrice.IsZero() {
-		t.Fatal("unexpected", us.MaxStoragePrice)
-	} else if !us.MinCollateral.IsZero() {
-		t.Fatal("unexpected", us.MinCollateral)
-	} else if us.MinProtocolVersion != ([3]uint8{1, 0, 0}) {
-		t.Fatal("unexpected", us.MinProtocolVersion)
-	}
-
-	us.MaxEgressPrice = types.NewCurrency64(frand.Uint64n(1e6))
-	us.MaxIngressPrice = types.NewCurrency64(frand.Uint64n(1e6))
-	us.MaxStoragePrice = types.NewCurrency64(frand.Uint64n(1e6))
-	us.MinCollateral = types.NewCurrency64(frand.Uint64n(1e6))
-	frand.Read(us.MinProtocolVersion[:])
-	if err := db.UpdateUsabilitySettings(context.Background(), us); err != nil {
-		t.Fatal(err)
-	}
-
-	update, err := db.UsabilitySettings(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	} else if !reflect.DeepEqual(us, update) {
-		t.Fatal("unexpected", update)
-	}
-}
-
 func testHostSettings(pk types.PublicKey) proto4.HostSettings {
 	return proto4.HostSettings{
 		Release:             "test",

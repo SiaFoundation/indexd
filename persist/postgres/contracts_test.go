@@ -332,38 +332,6 @@ func TestFormRenewContract(t *testing.T) {
 	assertContract(expectedRenewed.ID, expectedRenewed)
 }
 
-func TestMaintenanceSettings(t *testing.T) {
-	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
-
-	expectedSettings := contracts.MaintenanceSettings{
-		Enabled:         false,
-		Period:          6048,
-		RenewWindow:     2016,
-		WantedContracts: 50,
-	}
-
-	// check default settings
-	settings, err := store.MaintenanceSettings(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	} else if !reflect.DeepEqual(settings, expectedSettings) {
-		t.Fatalf("mismatch: \n%+v\n%+v", settings, expectedSettings)
-	}
-
-	// update and check again
-	expectedSettings.Enabled = true
-	expectedSettings.Period *= 2
-	expectedSettings.RenewWindow *= 2
-	expectedSettings.WantedContracts *= 2
-	if err := store.UpdateMaintenanceSettings(context.Background(), expectedSettings); err != nil {
-		t.Fatal(err)
-	} else if settings, err = store.MaintenanceSettings(context.Background()); err != nil {
-		t.Fatal(err)
-	} else if !reflect.DeepEqual(settings, expectedSettings) {
-		t.Fatalf("mismatch: \n%+v\n%+v", settings, expectedSettings)
-	}
-}
-
 func TestRejectContracts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
