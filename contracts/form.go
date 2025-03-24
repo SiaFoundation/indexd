@@ -14,6 +14,13 @@ import (
 	"go.uber.org/zap"
 )
 
+const sectorsPerGB = uint64(1<<30) / proto.SectorSize
+
+// minAllowance is a sane minimum for the allowance we put into a contract to
+// make sure forming the contract is worthwhile and we don't spend more on fees
+// than on actual usage.
+var minAllowance = types.Siacoins(10)
+
 type formContractSigner struct {
 	renterKey types.PrivateKey
 	w         rhp.Wallet
@@ -79,6 +86,8 @@ func (cf *contractFormer) FormContract(ctx context.Context, hk types.PublicKey, 
 	return res, nil
 }
 
+// performContractFormation makes sure that we have at least 'wanted' good
+// contracts with good hosts in unique CIDRs.
 func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted uint, log *zap.Logger) error {
 	formationLog := log.Named("formation")
 	activeContracts, err := cm.store.Contracts(ctx, WithRevisable(true))
@@ -86,11 +95,13 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		return fmt.Errorf("failed to fetch active contracts: %w", err)
 	}
 
+	// helpers for CIDR check
 	usedCidrs := make(map[string]struct{})
-	addHostCidrs := func(host hosts.Host) {
+	addHost := func(host hosts.Host) {
 		for _, cidr := range host.Networks {
 			usedCidrs[cidr.IP.String()] = struct{}{}
 		}
+		wanted--
 	}
 	hasCidrConflict := func(host hosts.Host) bool {
 		for _, cidr := range host.Networks {
@@ -149,8 +160,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		}
 
 		// contract is good
-		wanted--
-		addHostCidrs(host)
+		addHost(host)
 	}
 
 	// fetch all hosts
@@ -206,17 +216,14 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			continue
 		}
 
-		wanted--
-		addHostCidrs(host)
+		// contract formed successfully
+		addHost(host)
 	}
 
 	return nil
 }
 
 func initialContractFunding(prices proto.HostPrices, period uint64) (allowance, collateral types.Currency) {
-	const sectorsPerGB = uint64(1<<30) / proto.SectorSize
-	var minAllowance = types.Siacoins(10)
-
 	// each 10GB of upload + download + storage
 	basePrice := prices.ContractPrice
 	writeUsage := prices.RPCWriteSectorCost(proto.SectorSize).Mul(10 * sectorsPerGB)

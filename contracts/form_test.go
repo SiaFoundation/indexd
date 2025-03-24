@@ -182,7 +182,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 	scanner.settings[good3.PublicKey] = goodSettings
 
 	// 7th one is good again but will be ignored since we only want 3 contracts
-	good4 := goodHost(6)
+	good4 := goodHost(7)
 	scanner.settings[good4.PublicKey] = goodSettings
 
 	// populate store
@@ -235,10 +235,45 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 	// assert that we attempted to form contracts with the right hosts,
 	// settings and params
 	calls := cf.Calls()
-	if len(calls) != 3 {
-		t.Fatalf("expected 3 calls, got %v", len(calls))
+	if len(calls) != wanted {
+		t.Fatalf("expected %v calls, got %v", wanted, len(calls))
 	}
 	assertFormation(good1, calls[0])
 	assertFormation(good2, calls[1])
 	assertFormation(good3, calls[2])
+}
+
+func TestInitialContractFunding(t *testing.T) {
+	prices := proto.HostPrices{
+		ContractPrice: types.Siacoins(1),
+		Collateral:    types.NewCurrency64(1),
+		StoragePrice:  types.NewCurrency64(2),
+		IngressPrice:  types.Siacoins(3),
+		EgressPrice:   types.Siacoins(4),
+	}
+	period := uint64(100)
+
+	// manually compute funding for sane prices
+	basePrice := prices.ContractPrice
+	writeUsage := prices.RPCWriteSectorCost(proto.SectorSize).Mul(10 * sectorsPerGB)
+	readUsage := prices.RPCReadSectorCost(proto.SectorSize).Mul(10 * sectorsPerGB)
+	storageUsage := prices.RPCAppendSectorsCost(10*sectorsPerGB, period)
+	total := writeUsage.Add(readUsage).Add(storageUsage)
+	expectedAllowance := total.RenterCost().Add(basePrice)
+	expectedCollateral := total.HostRiskedCollateral()
+
+	allowance, collateral := initialContractFunding(prices, period)
+	if !allowance.Equals(expectedAllowance) {
+		t.Fatalf("expected allowance %v, got %v", expectedAllowance, allowance)
+	} else if !collateral.Equals(expectedCollateral) {
+		t.Fatalf("expected collateral %v, got %v", expectedCollateral, collateral)
+	}
+
+	// make sure the allowance doesn't go below the minimum
+	allowance, collateral = initialContractFunding(proto.HostPrices{}, period)
+	if allowance.Cmp(minAllowance) < 0 {
+		t.Fatalf("expected allowance %v, got %v", minAllowance, allowance)
+	} else if !collateral.IsZero() {
+		t.Fatalf("expected collateral %v, got %v", types.ZeroCurrency, collateral)
+	}
 }
