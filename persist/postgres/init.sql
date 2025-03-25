@@ -96,15 +96,22 @@ CREATE TABLE global_settings (
     -- contract manager settings
     contracts_maintenance_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     contracts_wanted INTEGER NOT NULL DEFAULT 50 CHECK(contracts_wanted > 0), -- number of contracts to maintain
-    contracts_period INTEGER NOT NULL DEFAULT 144 * 7 * 6 CHECK(contracts_period > contracts_renew_window), -- 6 weeks
     contracts_renew_window INTEGER NOT NULL DEFAULT 144 * 7 * 2 CHECK(contracts_renew_window > 0), -- 2 weeks
+    contracts_period INTEGER NOT NULL DEFAULT 144 * 7 * 6 CHECK(contracts_period > contracts_renew_window), -- 6 weeks
 
-    min_collateral NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
-    max_storage_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
-    max_ingress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
-    max_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
+    -- host manager settings
+    hosts_min_protocol_version BYTEA NOT NULL DEFAULT '\x010000', -- used for host checks
+    hosts_min_collateral NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
+    hosts_max_storage_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
+    hosts_max_ingress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
+    hosts_max_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
 
-    min_protocol_version BYTEA NOT NULL DEFAULT '\x010000' -- minimum protocol version
+    -- pin manager settings
+    pins_currency VARCHAR(3) NOT NULL DEFAULT '',
+    pins_min_collateral DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_min_collateral >= 0),
+    pins_max_storage_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_storage_price >= 0),
+    pins_max_ingress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_ingress_price >= 0),
+    pins_max_egress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_egress_price >= 0)
 );
 
 CREATE TABLE contracts (

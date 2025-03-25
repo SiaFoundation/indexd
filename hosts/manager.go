@@ -67,6 +67,8 @@ type (
 		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
 		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
 		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
+		UsabilitySettings(ctx context.Context) (UsabilitySettings, error)
+		UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error
 	}
 
 	// UpdateTx defines what the host manager needs to atomically process a
@@ -134,6 +136,17 @@ func NewManager(store Store, opts ...Option) (*HostManager, error) {
 func (m *HostManager) Close() error {
 	m.tg.Stop()
 	return nil
+}
+
+// UsabilitySettings returns the current usability settings.
+func (m *HostManager) UsabilitySettings(ctx context.Context) (UsabilitySettings, error) {
+	return m.store.UsabilitySettings(ctx)
+}
+
+// UpdateUsabilitySettings updates the host's usability settings.
+func (m *HostManager) UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error {
+	// perhaps this should reset next_scan to NOW() on all hosts that succeeded their last scan?
+	return m.store.UpdateUsabilitySettings(ctx, us)
 }
 
 // ScanHost scans the host with given host key and returns its settings.

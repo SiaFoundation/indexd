@@ -50,6 +50,14 @@ func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks
 	return nil
 }
 
+func (s *mockStore) UsabilitySettings(context.Context) (UsabilitySettings, error) {
+	return UsabilitySettings{}, nil
+}
+
+func (s *mockStore) UpdateUsabilitySettings(_ context.Context, us UsabilitySettings) error {
+	return nil
+}
+
 // mockResolver is a mock that implements the Resolver interface.
 type mockResolver struct {
 	ips map[string][]net.IPAddr

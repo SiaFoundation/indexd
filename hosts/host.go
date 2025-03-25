@@ -50,6 +50,16 @@ type (
 		EgressPrice     bool `json:"egressPrice"`
 		FreeSectorPrice bool `json:"freeSectorPrice"`
 	}
+
+	// UsabilitySettings contains the settings that are used to check if a host
+	// is usable.
+	UsabilitySettings struct {
+		MaxEgressPrice     types.Currency `json:"maxEgressPrice"`
+		MaxIngressPrice    types.Currency `json:"maxIngressPrice"`
+		MaxStoragePrice    types.Currency `json:"maxStoragePrice"`
+		MinCollateral      types.Currency `json:"minCollateral"`
+		MinProtocolVersion [3]uint8       `json:"minProtocolVersion"`
+	}
 )
 
 // Usable returns true if all checks passed.

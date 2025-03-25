@@ -70,6 +70,13 @@ type (
 		// ProofHeight. This field is set by the contract maintenance code.
 		Good bool `json:"good"`
 	}
+
+	// ContractSettings contains various settings used by the manager for
+	// forming and renewing contracts.
+	ContractSettings struct {
+		Period      uint64 `json:"period"`
+		RenewWindow uint64 `json:"renewWindow"`
+	}
 )
 
 // String implements the fmt.Stringer interface.

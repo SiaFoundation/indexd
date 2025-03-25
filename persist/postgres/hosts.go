@@ -59,13 +59,13 @@ func (s *Store) Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error
 		dbHost, err := scanHost(tx.QueryRow(ctx, `
 WITH globals AS (
 	SELECT
-		min_collateral,
-		max_storage_price,
-		max_ingress_price,
-		max_egress_price,
 		contracts_period,
-		(get_byte(min_protocol_version, 0) << 16) + (get_byte(min_protocol_version, 1) << 8) + (get_byte(min_protocol_version, 2)) AS min_version,
-		1099511627776::NUMERIC AS one_tb,
+		hosts_min_collateral,
+		hosts_max_storage_price,
+		hosts_max_ingress_price,
+		hosts_max_egress_price,
+		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
+		1E12::NUMERIC AS one_tb,
 		1E24::NUMERIC AS one_sc
 	FROM global_settings
 ), hosts AS (
@@ -86,15 +86,15 @@ WITH globals AS (
 	hosts.*,
 	recent_uptime > 0.9,
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
-	has_settings AND settings_max_collateral > globals.min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
-	has_settings AND settings_version >= globals.min_version,
+	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
+	has_settings AND settings_version >= globals.host_min_version,
 	has_settings AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
 	has_settings AND settings_accepting_contracts,
 	has_settings AND settings_contract_price <= globals.one_sc,
-	has_settings AND settings_collateral >= globals.min_collateral AND settings_collateral >= 2 * settings_storage_price,
-	has_settings AND settings_storage_price <= globals.max_storage_price,
-	has_settings AND settings_ingress_price <= globals.max_ingress_price,
-	has_settings AND settings_egress_price <= globals.max_egress_price,
+	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
+	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
+	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
+	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
 	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
 FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -133,13 +133,13 @@ func (s *Store) Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, err
 		rows, err := tx.Query(ctx, `
 WITH globals AS (
     SELECT
-        min_collateral,
-        max_storage_price,
-        max_ingress_price,
-		max_egress_price,
 		contracts_period,
-		(get_byte(min_protocol_version, 0) << 16) + (get_byte(min_protocol_version, 1) << 8) + (get_byte(min_protocol_version, 2)) AS min_version,
-		1099511627776::NUMERIC AS one_tb,
+        hosts_min_collateral,
+        hosts_max_storage_price,
+        hosts_max_ingress_price,
+		hosts_max_egress_price,
+		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
+		1E12::NUMERIC AS one_tb,
 		1E24::NUMERIC AS one_sc
     FROM global_settings
 ), hosts AS (
@@ -160,15 +160,15 @@ WITH globals AS (
  	hosts.*,
 	recent_uptime > 0.9,
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
-	has_settings AND settings_max_collateral > globals.min_collateral AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
-	has_settings AND settings_version >= globals.min_version,
+	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
+	has_settings AND settings_version >= globals.host_min_version,
 	has_settings AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
 	has_settings AND settings_accepting_contracts,
 	has_settings AND settings_contract_price <= globals.one_sc,
-	has_settings AND settings_collateral >= globals.min_collateral AND settings_collateral >= 2 * settings_storage_price,
-	has_settings AND settings_storage_price <= globals.max_storage_price,
-	has_settings AND settings_ingress_price <= globals.max_ingress_price,
-	has_settings AND settings_egress_price <= globals.max_egress_price,
+	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
+	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
+	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
+	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
 	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
 FROM hosts CROSS JOIN globals;`, limit, offset)
 		if err != nil {
@@ -428,6 +428,30 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 		}
 
 		return nil
+	})
+}
+
+// UsabilitySettings returns the usability settings used in the host's usability checks.
+func (s *Store) UsabilitySettings(ctx context.Context) (us hosts.UsabilitySettings, err error) {
+	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		query := `SELECT hosts_max_egress_price, hosts_max_ingress_price, hosts_max_storage_price, hosts_min_collateral, hosts_min_protocol_version FROM global_settings`
+		return tx.QueryRow(ctx, query).Scan(
+			(*sqlCurrency)(&us.MaxEgressPrice),
+			(*sqlCurrency)(&us.MaxIngressPrice),
+			(*sqlCurrency)(&us.MaxStoragePrice),
+			(*sqlCurrency)(&us.MinCollateral),
+			(*sqlProtocolVersion)(&us.MinProtocolVersion),
+		)
+	})
+	return
+}
+
+// UpdateUsabilitySettings updates the usability settings.
+func (s *Store) UpdateUsabilitySettings(ctx context.Context, us hosts.UsabilitySettings) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		query := `UPDATE global_settings SET hosts_max_egress_price = $1, hosts_max_ingress_price = $2, hosts_max_storage_price = $3, hosts_min_collateral = $4, hosts_min_protocol_version = $5`
+		_, err := tx.Exec(ctx, query, sqlCurrency(us.MaxEgressPrice), sqlCurrency(us.MaxIngressPrice), sqlCurrency(us.MaxStoragePrice), sqlCurrency(us.MinCollateral), sqlProtocolVersion(us.MinProtocolVersion))
+		return err
 	})
 }
 

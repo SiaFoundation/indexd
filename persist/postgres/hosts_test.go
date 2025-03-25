@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap/zaptest"
@@ -225,7 +226,7 @@ func TestHostChecks(t *testing.T) {
 	// define test variables
 	oneSC := types.Siacoins(1)
 	oneH := types.NewCurrency64(1)
-	oneTB := uint64(1 << 40)
+	oneTB := uint64(1e12)
 	settingPeriod := uint64(6084)
 	settingMinCollataral := types.Siacoins(1).Div64(oneTB)
 	settingMaxStoragePrice := types.Siacoins(2).Div64(oneTB)
@@ -233,13 +234,20 @@ func TestHostChecks(t *testing.T) {
 	settingMaxEgressPrice := types.Siacoins(4).Div64(oneTB)
 
 	// update global settings
-	if _, err := db.pool.Exec(context.Background(), `UPDATE global_settings SET contracts_period = $1, min_collateral = $2, max_storage_price = $3, max_ingress_price = $4, max_egress_price = $5`,
-		settingPeriod,
-		sqlCurrency(settingMinCollataral),
-		sqlCurrency(settingMaxStoragePrice),
-		sqlCurrency(settingMaxIngressPrice),
-		sqlCurrency(settingMaxEgressPrice),
-	); err != nil {
+	if err := db.UpdateUsabilitySettings(context.Background(), hosts.UsabilitySettings{
+		MaxEgressPrice:     settingMaxEgressPrice,
+		MaxIngressPrice:    settingMaxIngressPrice,
+		MaxStoragePrice:    settingMaxStoragePrice,
+		MinCollateral:      settingMinCollataral,
+		MinProtocolVersion: [3]uint8{1, 0, 0},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateMaintenanceSettings(context.Background(), contracts.MaintenanceSettings{
+		Period:          settingPeriod,
+		RenewWindow:     settingPeriod / 2,
+		WantedContracts: 1,
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -721,6 +729,42 @@ func TestUpdateHost(t *testing.T) {
 		t.Fatal("unexpected networks", h.Networks)
 	} else if h.Networks[0].String() != networks[0].String() {
 		t.Fatal("unexpected network", h.Networks)
+	}
+}
+
+func TestUpdateUsabilitySettings(t *testing.T) {
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	us, err := db.UsabilitySettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !us.MaxEgressPrice.IsZero() {
+		t.Fatal("unexpected", us.MaxEgressPrice)
+	} else if !us.MaxIngressPrice.IsZero() {
+		t.Fatal("unexpected", us.MaxIngressPrice)
+	} else if !us.MaxStoragePrice.IsZero() {
+		t.Fatal("unexpected", us.MaxStoragePrice)
+	} else if !us.MinCollateral.IsZero() {
+		t.Fatal("unexpected", us.MinCollateral)
+	} else if us.MinProtocolVersion != ([3]uint8{1, 0, 0}) {
+		t.Fatal("unexpected", us.MinProtocolVersion)
+	}
+
+	us.MaxEgressPrice = types.NewCurrency64(frand.Uint64n(1e6))
+	us.MaxIngressPrice = types.NewCurrency64(frand.Uint64n(1e6))
+	us.MaxStoragePrice = types.NewCurrency64(frand.Uint64n(1e6))
+	us.MinCollateral = types.NewCurrency64(frand.Uint64n(1e6))
+	frand.Read(us.MinProtocolVersion[:])
+	if err := db.UpdateUsabilitySettings(context.Background(), us); err != nil {
+		t.Fatal(err)
+	}
+
+	update, err := db.UsabilitySettings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(us, update) {
+		t.Fatal("unexpected", update)
 	}
 }
 

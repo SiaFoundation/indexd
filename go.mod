@@ -4,6 +4,7 @@ go 1.23.4
 
 require (
 	github.com/jackc/pgx/v5 v5.7.3
+	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.10.4
 	go.sia.tech/coreutils v0.12.1
 	go.sia.tech/jape v0.12.2-0.20241010144215-1468bf476af6
