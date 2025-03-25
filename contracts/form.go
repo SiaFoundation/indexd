@@ -14,7 +14,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const sectorsPerGB = uint64(1<<30) / proto.SectorSize
+const sectorsPerGiB = uint64(1<<30) / proto.SectorSize
 
 // minAllowance is a sane minimum for the allowance we put into a contract to
 // make sure forming the contract is worthwhile and we don't spend more on fees
@@ -51,16 +51,16 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 	s.w.SignV2Inputs(txn, toSign)
 }
 
-type contractFormer struct {
+type contractor struct {
 	cm     *chain.Manager
 	signer *formContractSigner
 }
 
-// NewContractFormer creates a production ContractFormer that forms contracts by
+// NewContractor creates a production Contractor that forms, refreshes and renews contracts by
 // dialing up hosts using the SiaMux protocol and fetching fresh settings right
-// before forming the contract.
-func NewContractFormer(cm *chain.Manager, w rhp.Wallet, renterKey types.PrivateKey) Contractor {
-	return &contractFormer{
+// before the RPC call.
+func NewContractor(cm *chain.Manager, w rhp.Wallet, renterKey types.PrivateKey) Contractor {
+	return &contractor{
 		cm: cm,
 		signer: &formContractSigner{
 			renterKey: renterKey,
@@ -69,7 +69,7 @@ func NewContractFormer(cm *chain.Manager, w rhp.Wallet, renterKey types.PrivateK
 	}
 }
 
-func (cf *contractFormer) FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
+func (cf *contractor) FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 	t, err := siamux.Dial(dialCtx, addr, hk)
@@ -96,36 +96,36 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	}
 
 	// helpers for CIDR check
-	usedCidrs := make(map[string]struct{})
+	usedCidrs := make(map[string]types.PublicKey)
 	addHost := func(host hosts.Host) {
 		for _, cidr := range host.Networks {
-			usedCidrs[cidr.IP.String()] = struct{}{}
+			usedCidrs[cidr.IP.String()] = host.PublicKey
 		}
 		wanted--
 	}
-	hasCidrConflict := func(host hosts.Host) bool {
+	hasCidrConflict := func(host hosts.Host) (types.PublicKey, bool) {
 		for _, cidr := range host.Networks {
-			if _, known := usedCidrs[cidr.IP.String()]; known {
-				return true
+			if hk, known := usedCidrs[cidr.IP.String()]; known {
+				return hk, true
 			}
 		}
-		return false
+		return types.PublicKey{}, false
 	}
 
 	// helper to check if a host is good to form a contract with
-	checkHost := func(host hosts.Host, log *zap.Logger) bool {
+	isGood := func(host hosts.Host, log *zap.Logger) bool {
 		hostLog := log.With(zap.Stringer("hostKey", host.PublicKey))
 		if good := host.Usability.Usable(); !good {
 			// host should be good
 			hostLog.Debug("host is not usable due to bad usability")
 			return false
-		} else if used := hasCidrConflict(host); used {
+		} else if usedBy, used := hasCidrConflict(host); used {
 			// host should be on a unique cidr
-			hostLog.Debug("host is not usable cidr is already in use")
+			hostLog.Debug("host is not usable cidr is already in use", zap.Stringer("usedBy", usedBy))
 			return false
 		} else if host.Settings.RemainingStorage < minRemainingStorage {
 			// host should at least have 10GB of storage left
-			hostLog.Debug("host is not usable since host has less than 10GB of storage left", zap.Uint64("remainingStorage", host.Settings.RemainingStorage))
+			hostLog.Debug("host is not usable since host has less than 10GiB of storage left", zap.Uint64("remainingStorage", host.Settings.RemainingStorage))
 			return false
 		}
 		return true
@@ -140,7 +140,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		if err != nil {
 			contractLog.Error("failed to fetch host for contract", zap.Error(err))
 			continue
-		} else if !checkHost(host, contractLog) {
+		} else if !isGood(host, contractLog) {
 			continue
 		}
 
@@ -173,7 +173,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	cm.shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
 
 	for i := range hosts {
-		formationLog := formationLog.With(zap.Stringer("hostKey", hosts[i].PublicKey))
+		hostLog := formationLog.With(zap.Stringer("hostKey", hosts[i].PublicKey))
 
 		// scan host before forming a contract and fetch it from the database to
 		// get updated settings and checks
@@ -181,21 +181,21 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		_, err := cm.scanner.ScanHost(scanCtx, hosts[i].PublicKey)
 		cancel()
 		if err != nil {
-			formationLog.Error("failed to scan host", zap.Error(err))
+			hostLog.Error("failed to scan host", zap.Error(err))
 			continue
 		}
 		host, err := cm.store.Host(ctx, hosts[i].PublicKey)
 		if err != nil {
-			formationLog.Error("failed to fetch host", zap.Error(err))
+			hostLog.Error("failed to fetch host", zap.Error(err))
 			continue
-		} else if !checkHost(host, formationLog) {
+		} else if !isGood(host, hostLog) {
 			continue // ignore bad host
 		}
 		hostAddr := host.SiamuxAddr()
 
 		allowance, collateral := initialContractFunding(host.Settings.Prices, period)
 		formationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		res, err := cm.cf.FormContract(formationCtx, host.PublicKey, hostAddr, host.Settings, proto.RPCFormContractParams{
+		res, err := cm.contractor.FormContract(formationCtx, host.PublicKey, hostAddr, host.Settings, proto.RPCFormContractParams{
 			RenterPublicKey: cm.renterKey,
 			RenterAddress:   cm.w.Address(),
 			Allowance:       allowance,
@@ -204,7 +204,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		})
 		cancel()
 		if err != nil {
-			formationLog.Error("failed to form contract", zap.Error(err))
+			hostLog.Error("failed to form contract", zap.Error(err))
 			continue
 		}
 		contract := res.Contract
@@ -226,9 +226,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 func initialContractFunding(prices proto.HostPrices, period uint64) (allowance, collateral types.Currency) {
 	// each 10GB of upload + download + storage
 	basePrice := prices.ContractPrice
-	writeUsage := prices.RPCWriteSectorCost(proto.SectorSize).Mul(10 * sectorsPerGB)
-	readUsage := prices.RPCReadSectorCost(proto.SectorSize).Mul(10 * sectorsPerGB)
-	storageUsage := prices.RPCAppendSectorsCost(10*sectorsPerGB, period)
+	writeUsage := prices.RPCWriteSectorCost(proto.SectorSize).Mul(10 * sectorsPerGiB)
+	readUsage := prices.RPCReadSectorCost(proto.SectorSize).Mul(10 * sectorsPerGiB)
+	storageUsage := prices.RPCAppendSectorsCost(10*sectorsPerGiB, period)
 	total := writeUsage.Add(readUsage).Add(storageUsage)
 	allowance, collateral = total.RenterCost().Add(basePrice), total.HostRiskedCollateral()
 

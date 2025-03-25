@@ -255,9 +255,9 @@ func TestInitialContractFunding(t *testing.T) {
 
 	// manually compute funding for sane prices
 	basePrice := prices.ContractPrice
-	writeUsage := prices.RPCWriteSectorCost(proto.SectorSize).Mul(10 * sectorsPerGB)
-	readUsage := prices.RPCReadSectorCost(proto.SectorSize).Mul(10 * sectorsPerGB)
-	storageUsage := prices.RPCAppendSectorsCost(10*sectorsPerGB, period)
+	writeUsage := prices.RPCWriteSectorCost(proto.SectorSize).Mul(10 * sectorsPerGiB)
+	readUsage := prices.RPCReadSectorCost(proto.SectorSize).Mul(10 * sectorsPerGiB)
+	storageUsage := prices.RPCAppendSectorsCost(10*sectorsPerGiB, period)
 	total := writeUsage.Add(readUsage).Add(storageUsage)
 	expectedAllowance := total.RenterCost().Add(basePrice)
 	expectedCollateral := total.HostRiskedCollateral()

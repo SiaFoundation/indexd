@@ -19,8 +19,8 @@ import (
 
 const (
 	dialTimeout         = 10 * time.Second
-	minRemainingStorage = 10e9 / uint64(proto.SectorSize) // 10GB
-	maxContractSize     = 10e12                           // 10TB
+	minRemainingStorage = (10 * 1 << 30) / uint64(proto.SectorSize) // 10GB
+	maxContractSize     = 10 * 1 << 40                              // 10TB
 )
 
 type (
@@ -39,8 +39,9 @@ type (
 		FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
 	}
 
-	// Scanner defines the interface for scanning hosts for their latest settings.
-	Scanner interface {
+	// HostManager defines the minimal interface of HostManager functionality
+	// the ContractManager requires.
+	HostManager interface {
 		ScanHost(ctx context.Context, hk types.PublicKey) (proto.HostSettings, error)
 	}
 
@@ -107,9 +108,9 @@ type (
 		w     Wallet
 		store Store
 
-		cf        Contractor
-		scanner   Scanner
-		renterKey types.PublicKey
+		contractor Contractor
+		scanner    HostManager
+		renterKey  types.PublicKey
 
 		log     *zap.Logger
 		shuffle func(int, func(i, j int))
@@ -132,7 +133,7 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PublicKey, chainManager ChainManager, contractor Contractor, scanner Scanner, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+func NewManager(renterKey types.PublicKey, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
 	cm := newContractManager(renterKey, chainManager, contractor, scanner, store, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
@@ -146,14 +147,14 @@ func NewManager(renterKey types.PublicKey, chainManager ChainManager, contractor
 	return cm, nil
 }
 
-func newContractManager(renterKey types.PublicKey, chainManager ChainManager, contractor Contractor, scanner Scanner, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
 		cm: chainManager,
 		s:  syncer,
 		w:  wallet,
 
-		cf:        contractor,
-		renterKey: renterKey,
+		contractor: contractor,
+		renterKey:  renterKey,
 
 		scanner: scanner,
 		store:   store,
