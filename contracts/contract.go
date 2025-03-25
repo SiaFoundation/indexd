@@ -114,6 +114,18 @@ type (
 	}
 )
 
+// GoodForUpload indicates whether a contract should be uploaded to
+func (c Contract) GoodForUpload(maxCollateral types.Currency) bool {
+	if !c.Good {
+		return false
+	} else if c.Size >= maxContractSize {
+		return false
+	} else if c.UsedCollateral.Cmp(maxCollateral) > 0 {
+		return false
+	}
+	return true
+}
+
 // String implements the fmt.Stringer interface.
 func (s ContractState) String() string {
 	switch s {

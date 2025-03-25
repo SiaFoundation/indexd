@@ -144,18 +144,13 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			continue
 		}
 
-		// contract checks
-		if !contract.Good {
-			// contract should be good
-			log.Debug("skipping contract since it's not good")
-			continue
-		} else if contract.Size >= maxContractSize {
-			// contracts should be smaller than 10TB
-			log.Debug("skipping contract since it is too large", zap.Uint64("size", contract.Size))
-			continue
-		} else if contract.UsedCollateral.Cmp(host.Settings.MaxCollateral) > 0 {
-			// host should be willing to put more collateral into the contract
-			contractLog.Debug("ignore contract since the host won't put more collateral into it", zap.Stringer("maxCollateral", host.Settings.MaxCollateral), zap.Stringer("usedCollateral", contract.UsedCollateral))
+		// contract is good if we can upload to it
+		if !contract.GoodForUpload(host.Settings.MaxCollateral) {
+			log.Debug("skipping contract since it's not good for uploading",
+				zap.Bool("good", contract.Good),
+				zap.Bool("maxSizeReached", contract.Size >= maxContractSize),
+				zap.Bool("maxCollateralReached", contract.UsedCollateral.Cmp(host.Settings.MaxCollateral) > 0),
+			)
 			continue
 		}
 
