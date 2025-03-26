@@ -187,15 +187,6 @@ func (s *Store) SetContractBad(contractID types.FileContractID) error {
 	})
 }
 
-// UpdateMaintenanceSettings updates the maintenance settings.
-func (s *Store) UpdateMaintenanceSettings(ctx context.Context, settings contracts.MaintenanceSettings) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `UPDATE global_settings SET contracts_maintenance_enabled = $1, contracts_wanted = $2, contracts_renew_window = $3, contracts_period = $4`,
-			settings.Enabled, settings.WantedContracts, settings.RenewWindow, settings.Period)
-		return err
-	})
-}
-
 func (tx *updateTx) ContractElements() ([]types.V2FileContractElement, error) {
 	rows, err := tx.tx.Query(tx.ctx, `
 SELECT c.contract_id, fces.contract, fces.leaf_index, fces.merkle_proof

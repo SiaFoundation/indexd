@@ -7,7 +7,9 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/pins"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 )
@@ -34,6 +36,12 @@ type (
 		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
 		LastScannedIndex(context.Context) (types.ChainIndex, error)
 		UnblockHost(ctx context.Context, hk types.PublicKey) error
+		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)
+		UpdateUsabilitySettings(ctx context.Context, us hosts.UsabilitySettings) error
+		MaintenanceSettings(ctx context.Context) (contracts.MaintenanceSettings, error)
+		UpdateMaintenanceSettings(ctx context.Context, ms contracts.MaintenanceSettings) error
+		PinnedSettings(ctx context.Context) (pins.PinnedSettings, error)
+		UpdatePinnedSettings(ctx context.Context, ps pins.PinnedSettings) error
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -93,6 +101,14 @@ func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, op
 		"GET    /hosts/blocklist":          a.handleGETHostsBlocklist,
 		"PUT    /hosts/blocklist":          a.handlePUTHostsBlocklist,
 		"DELETE /hosts/blocklist/:hostkey": a.handleDELETEHostsBlocklist,
+
+		// settings endpoints
+		"GET /settings/contracts":    a.handleGETSettingsContracts,
+		"PUT /settings/contracts":    a.handlePUTSettingsContracts,
+		"GET /settings/hosts":        a.handleGETSettingsHosts,
+		"PUT /settings/hosts":        a.handlePUTSettingsHosts,
+		"GET /settings/pricepinning": a.handleGETSettingsPricePinning,
+		"PUT /settings/pricepinning": a.handlePUTSettingsPricePinning,
 
 		// wallet endpoints
 		"GET /wallet":         a.handleGETWallet,

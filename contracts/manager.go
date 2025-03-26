@@ -98,7 +98,7 @@ type (
 		// contract manager should maintain. e.g. if a host runs out of storage,
 		// its contract(s) won't count towards this number but will still be
 		// considered good for renewing/refreshing and funding accounts.
-		WantedContracts uint `json:"wantedContracts"`
+		WantedContracts uint64 `json:"wantedContracts"`
 	}
 
 	// ContractManager manages the host announcements.

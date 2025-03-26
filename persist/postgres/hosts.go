@@ -431,30 +431,6 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 	})
 }
 
-// UsabilitySettings returns the usability settings used in the host's usability checks.
-func (s *Store) UsabilitySettings(ctx context.Context) (us hosts.UsabilitySettings, err error) {
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		query := `SELECT hosts_max_egress_price, hosts_max_ingress_price, hosts_max_storage_price, hosts_min_collateral, hosts_min_protocol_version FROM global_settings`
-		return tx.QueryRow(ctx, query).Scan(
-			(*sqlCurrency)(&us.MaxEgressPrice),
-			(*sqlCurrency)(&us.MaxIngressPrice),
-			(*sqlCurrency)(&us.MaxStoragePrice),
-			(*sqlCurrency)(&us.MinCollateral),
-			(*sqlProtocolVersion)(&us.MinProtocolVersion),
-		)
-	})
-	return
-}
-
-// UpdateUsabilitySettings updates the usability settings.
-func (s *Store) UpdateUsabilitySettings(ctx context.Context, us hosts.UsabilitySettings) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		query := `UPDATE global_settings SET hosts_max_egress_price = $1, hosts_max_ingress_price = $2, hosts_max_storage_price = $3, hosts_min_collateral = $4, hosts_min_protocol_version = $5`
-		_, err := tx.Exec(ctx, query, sqlCurrency(us.MaxEgressPrice), sqlCurrency(us.MaxIngressPrice), sqlCurrency(us.MaxStoragePrice), sqlCurrency(us.MinCollateral), sqlProtocolVersion(us.MinProtocolVersion))
-		return err
-	})
-}
-
 func queryHostAddresses(ctx context.Context, tx *txn, hostID int64) ([]chain.NetAddress, error) {
 	rows, err := tx.Query(ctx, `SELECT net_address, protocol FROM host_addresses WHERE host_id = $1`, hostID)
 	if err != nil {

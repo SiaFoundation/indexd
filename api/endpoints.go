@@ -6,11 +6,14 @@ import (
 	"net/http"
 	"runtime"
 	"time"
+	"unicode/utf8"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/build"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/pins"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 )
@@ -129,6 +132,58 @@ func (a *api) handleDELETEHostsBlocklist(jc jape.Context) {
 		return
 	}
 	jc.Check("failed to unblock host", a.store.UnblockHost(jc.Request.Context(), hk))
+}
+
+func (a *api) handleGETSettingsContracts(jc jape.Context) {
+	ms, err := a.store.MaintenanceSettings(jc.Request.Context())
+	if jc.Check("failed to get contract settings", err) != nil {
+		return
+	}
+	jc.Encode(ms)
+}
+
+func (a *api) handlePUTSettingsContracts(jc jape.Context) {
+	var ms contracts.MaintenanceSettings
+	if jc.Decode(&ms) != nil {
+		return
+	}
+	jc.Check("failed to update contract settings", a.store.UpdateMaintenanceSettings(jc.Request.Context(), ms))
+}
+
+func (a *api) handleGETSettingsHosts(jc jape.Context) {
+	s, err := a.store.UsabilitySettings(jc.Request.Context())
+	if jc.Check("failed to get host settings", err) != nil {
+		return
+	}
+	jc.Encode(s)
+}
+
+func (a *api) handlePUTSettingsHosts(jc jape.Context) {
+	var s hosts.UsabilitySettings
+	if jc.Decode(&s) != nil {
+		return
+	}
+	jc.Check("failed to update host settings", a.store.UpdateUsabilitySettings(jc.Request.Context(), s))
+}
+
+func (a *api) handleGETSettingsPricePinning(jc jape.Context) {
+	s, err := a.store.PinnedSettings(jc.Request.Context())
+	if jc.Check("failed to get price pinning settings", err) != nil {
+		return
+	}
+	jc.Encode(s)
+}
+
+func (a *api) handlePUTSettingsPricePinning(jc jape.Context) {
+	var s pins.PinnedSettings
+	if jc.Decode(&s) != nil {
+		return
+	} else if !(s.Currency == "" || utf8.RuneCountInString(s.Currency) == 3) {
+		jc.Error(errors.New("'currency' must exactly 3 characters, or left empty to disable price pinning"), http.StatusBadRequest)
+		return
+	}
+
+	jc.Check("failed to update price pinning settings", a.store.UpdatePinnedSettings(jc.Request.Context(), s))
 }
 
 func (a *api) handleGETWallet(jc jape.Context) {

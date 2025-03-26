@@ -88,7 +88,7 @@ func (cf *contractor) FormContract(ctx context.Context, hk types.PublicKey, addr
 
 // performContractFormation makes sure that we have at least 'wanted' good
 // contracts with good hosts in unique CIDRs.
-func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted uint, log *zap.Logger) error {
+func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted uint64, log *zap.Logger) error {
 	formationLog := log.Named("formation")
 	activeContracts, err := cm.store.Contracts(ctx, WithRevisable(true))
 	if err != nil {

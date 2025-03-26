@@ -3,6 +3,7 @@ package api_test
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -10,7 +11,9 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/internal/testutils"
+	"go.sia.tech/indexd/pins"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 func TestExplorerAPI(t *testing.T) {
@@ -99,6 +102,79 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if h1.Blocked {
 		t.Fatal("expected host to be unblocked", h1.Blocked)
+	}
+}
+
+func TestSettingsAPI(t *testing.T) {
+	c := testutils.NewConsensusNode(t, zap.NewNop())
+	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+
+	// assert contract settings can be fetched and updated
+	cs, err := indexer.SettingsContracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs.Enabled = frand.Uint64n(2) == 0
+	cs.Period = frand.Uint64n(100) + 2
+	cs.RenewWindow = cs.Period / 2
+	cs.WantedContracts = frand.Uint64n(1e3)
+
+	err = indexer.SettingsContractsUpdate(context.Background(), cs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	csUpdate, err := indexer.SettingsContracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(cs, csUpdate) {
+		t.Fatal("unexpected", csUpdate)
+	}
+
+	// assert host settings can be fetched and updated
+	hs, err := indexer.SettingsHosts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	hs.MaxEgressPrice = types.NewCurrency64(frand.Uint64n(1e3))
+	hs.MaxIngressPrice = types.NewCurrency64(frand.Uint64n(1e3))
+	hs.MaxStoragePrice = types.NewCurrency64(frand.Uint64n(1e3))
+	hs.MinCollateral = types.NewCurrency64(frand.Uint64n(1e3))
+	frand.Read(hs.MinProtocolVersion[:])
+
+	err = indexer.SettingsHostsUpdate(context.Background(), hs)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hsUpdate, err := indexer.SettingsHosts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(hs, hsUpdate) {
+		t.Fatal("unexpected", hsUpdate)
+	}
+
+	// assert price pinning settings can be fetched and updated
+	ps, err := indexer.SettingsPricePinning(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps.Currency = "eur"
+	ps.MaxEgressPrice = pins.Pin(frand.Float64())
+	ps.MaxIngressPrice = pins.Pin(frand.Float64())
+	ps.MaxStoragePrice = pins.Pin(frand.Float64())
+	ps.MinCollateral = pins.Pin(frand.Float64())
+
+	err = indexer.SettingsPricePinningUpdate(context.Background(), ps)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	psUpdate, err := indexer.SettingsPricePinning(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(ps, psUpdate) {
+		t.Fatal("unexpected", psUpdate)
 	}
 }
 
