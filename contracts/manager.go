@@ -232,9 +232,9 @@ func (cm *ContractManager) blockUntilReady(log *zap.Logger) bool {
 	}
 }
 
-// BlockBadHosts blocks any hosts that we have contracts with that are not
+// blockBadHosts blocks any hosts that we have contracts with that are not
 // usable.
-func (cm *ContractManager) BlockBadHosts(ctx context.Context, contracts []Contract) {
+func (cm *ContractManager) blockBadHosts(ctx context.Context, contracts []Contract) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
@@ -251,8 +251,10 @@ func (cm *ContractManager) BlockBadHosts(ctx context.Context, contracts []Contra
 		}
 
 		// if the host is not usable, we block it and mark the contract as bad
-		if !host.Usability.Usable() || host.Blocked {
-			if !host.Blocked {
+		if !host.Usability.Usable() {
+			// avoid disk io if the host is already blocked and the contract is
+			// already marked as bad
+			if !host.Blocked || c.Good {
 				if err := cm.store.BlockHosts(ctx, []types.PublicKey{host.PublicKey}); err != nil {
 					contractLog.Error("failed to block host", zap.Error(err))
 					continue
@@ -278,7 +280,7 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 	}
 
 	// block bad hosts we have contracts with
-	cm.BlockBadHosts(ctx, activeContracts)
+	cm.blockBadHosts(ctx, activeContracts)
 
 	// TODO: Renew any good contracts within their renew window
 
