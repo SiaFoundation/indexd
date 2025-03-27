@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/coreutils/syncer"
 	"go.uber.org/zap"
 )
 
@@ -60,10 +61,15 @@ func (s *mockStore) UpdateUsabilitySettings(_ context.Context, us UsabilitySetti
 
 // mockResolver is a mock that implements the Resolver interface.
 type mockResolver struct {
-	ips map[string][]net.IPAddr
+	fail bool
+	ips  map[string][]net.IPAddr
 }
 
 func (r *mockResolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
+	if r.fail {
+		return nil, errors.New("lookup failed")
+	}
+
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -96,7 +102,7 @@ func TestHostManager(t *testing.T) {
 	db := &mockStore{hosts: make(map[types.PublicKey]Host)}
 
 	// create host manager
-	mgr, err := NewManager(db, WithAnnouncementMaxAge(time.Minute))
+	mgr, err := NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, db, WithAnnouncementMaxAge(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
