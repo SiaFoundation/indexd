@@ -46,6 +46,8 @@ var (
 	}
 )
 
+// WithGood filters contracts by whether they are considered good. This defaults
+// to 'true'.
 func WithGood(good bool) ContractQueryOpt {
 	return func(opts *contractQueryOpts) {
 		opts.Good = &good

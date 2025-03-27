@@ -59,6 +59,8 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, renewWin
 	for _, contract := range contracts {
 		if contract.ProofHeight > minProofHeight {
 			continue // too early to renew
+		} else if !contract.Good {
+			continue // contract is bad
 		}
 		contractLog := renewalLog.With(zap.Stringer("hostKey", contract.HostKey), zap.Stringer("contractID", contract.ID))
 
@@ -89,10 +91,10 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, renewWin
 			contractLog.Debug("failed to renew", zap.Error(err))
 			continue
 		}
-		contract := res.Contract
+		renewed := res.Contract
 		minerFee := res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1].MinerFee
 
-		err = cm.store.AddRenewedContract(ctx, contract.ID, contract.ID, contract.Revision.ProofHeight, contract.Revision.ExpirationHeight, host.Settings.Prices.ContractPrice, contract.Revision.RenterOutput.Value, minerFee, contract.Revision.TotalCollateral)
+		err = cm.store.AddRenewedContract(ctx, contract.ID, renewed.ID, renewed.Revision.ProofHeight, renewed.Revision.ExpirationHeight, host.Settings.Prices.ContractPrice, renewed.Revision.RenterOutput.Value, minerFee, renewed.Revision.TotalCollateral)
 		if err != nil {
 			contractLog.Error("failed to store renewed contract", zap.Error(err))
 			continue
