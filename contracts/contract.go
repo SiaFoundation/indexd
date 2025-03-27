@@ -46,6 +46,12 @@ var (
 	}
 )
 
+func WithGood(good bool) ContractQueryOpt {
+	return func(opts *contractQueryOpts) {
+		opts.Good = &good
+	}
+}
+
 // WithRevisable filters contracts by whether they can still be revised. This
 // defaults to 'true'.
 func WithRevisable(revisable bool) ContractQueryOpt {

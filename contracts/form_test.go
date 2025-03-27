@@ -24,20 +24,21 @@ type formContractCall struct {
 	params   proto.RPCFormContractParams
 }
 
-type contractFormerMock struct {
-	calls []formContractCall
+type contractorMock struct {
+	formCalls  []formContractCall
+	renewCalls []renewContractCall
 }
 
-func (cf *contractFormerMock) Calls() []formContractCall {
-	calls := slices.Clone(cf.calls)
+func (c *contractorMock) Calls() []formContractCall {
+	calls := slices.Clone(c.formCalls)
 	slices.SortFunc(calls, func(a, b formContractCall) int {
 		return strings.Compare(a.hk.String(), b.hk.String())
 	})
 	return calls
 }
 
-func (cf *contractFormerMock) FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
-	cf.calls = append(cf.calls, formContractCall{
+func (c *contractorMock) FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
+	c.formCalls = append(c.formCalls, formContractCall{
 		hk:       hk,
 		addr:     addr,
 		settings: settings,
@@ -194,10 +195,10 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 		good3.PublicKey: good3,
 	}
 
-	cf := &contractFormerMock{}
+	contractor := &contractorMock{}
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, cmMock, cf, scanner, store, syncerMock, wallet)
+	contracts := newContractManager(renterKey, cmMock, contractor, scanner, store, syncerMock, wallet)
 
 	// disable randomizing hosts to make test deterministic
 	contracts.shuffle = func(int, func(i, j int)) {}
@@ -233,7 +234,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 
 	// assert that we attempted to form contracts with the right hosts,
 	// settings and params
-	calls := cf.Calls()
+	calls := contractor.Calls()
 	if len(calls) != wanted {
 		t.Fatalf("expected %v calls, got %v", wanted, len(calls))
 	}

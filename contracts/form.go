@@ -69,7 +69,7 @@ func NewContractor(cm *chain.Manager, w rhp.Wallet, renterKey types.PrivateKey) 
 	}
 }
 
-func (cf *contractor) FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
+func (c *contractor) FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 	t, err := siamux.Dial(dialCtx, addr, hk)
@@ -78,7 +78,7 @@ func (cf *contractor) FormContract(ctx context.Context, hk types.PublicKey, addr
 	}
 	defer t.Close()
 
-	res, err := rhp.RPCFormContract(ctx, t, cf.cm, cf.signer, cf.cm.TipState(), settings.Prices, hk, settings.WalletAddress, params)
+	res, err := rhp.RPCFormContract(ctx, t, c.cm, c.signer, c.cm.TipState(), settings.Prices, hk, settings.WalletAddress, params)
 	if err != nil {
 		return rhp.RPCFormContractResult{}, fmt.Errorf("failed to form contract: %w", err)
 	}
@@ -188,7 +188,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		host, err := cm.scanner.ScanHost(scanCtx, hosts[i].PublicKey)
 		cancel()
 		if err != nil {
-			hostLog.Error("failed to scan host", zap.Error(err))
+			hostLog.Warn("failed to scan host", zap.Error(err))
 			continue
 		}
 

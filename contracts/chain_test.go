@@ -59,6 +59,43 @@ func (s *storeMock) AddFormedContract(ctx context.Context, contractID types.File
 	return nil
 }
 
+func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee, totalCollateral types.Currency) error {
+	var source *Contract
+	for i := range s.contracts {
+		if s.contracts[i].ID == renewedFrom {
+			s.contracts[i].RenewedTo = renewedTo
+			source = &s.contracts[i]
+			break
+		}
+	}
+	if source == nil {
+		return ErrNotFound
+	}
+	s.contracts = append(s.contracts, Contract{
+		ID:      renewedTo,
+		HostKey: source.HostKey,
+
+		Capacity:    source.Size,
+		Size:        source.Size,
+		RenewedFrom: source.ID,
+
+		Formation:        time.Now(),
+		ProofHeight:      proofHeight,
+		ExpirationHeight: expirationHeight,
+		State:            ContractStatePending,
+
+		RemainingAllowance: allowance,
+		TotalCollateral:    totalCollateral,
+
+		ContractPrice:    contractPrice,
+		InitialAllowance: allowance,
+		MinerFee:         minerFee,
+
+		Good: true,
+	})
+	return nil
+}
+
 func (s *storeMock) BlockHosts(_ context.Context, hostKeys []types.PublicKey, reason string) error {
 	for _, hostKey := range hostKeys {
 		host, ok := s.hosts[hostKey]

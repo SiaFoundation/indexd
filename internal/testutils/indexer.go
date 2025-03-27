@@ -71,8 +71,8 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
 
-	cf := contracts.NewContractor(c.cm, wm, walletKey)
-	contracts, err := contracts.NewManager(walletKey.PublicKey(), c.cm, cf, nil, store, s, wm, contracts.WithLogger(log.Named("contracts")))
+	contractor := contracts.NewContractor(c.cm, wm, walletKey)
+	contracts, err := contracts.NewManager(walletKey.PublicKey(), c.cm, contractor, nil, store, s, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}

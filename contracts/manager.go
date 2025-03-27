@@ -39,6 +39,7 @@ type (
 	// contracts.
 	Contractor interface {
 		FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
+		RenewContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
 	}
 
 	// HostManager defines the minimal interface of HostManager functionality
@@ -51,6 +52,7 @@ type (
 	// requires.
 	Store interface {
 		AddFormedContract(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee, totalCollateral types.Currency) error
+		AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee, totalCollateral types.Currency) error
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
@@ -282,17 +284,22 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 		return nil
 	}
 
+	blockHeight := cm.cm.TipState().Index.Height
+
 	// block bad hosts we have contracts with
 	if err := cm.blockBadHosts(ctx); err != nil {
 		return fmt.Errorf("failed to block bad hosts: %w", err)
 	}
 
-	// TODO: Renew any good contracts within their renew window
+	// renew any good contracts within their renew window
+	if err := cm.performContractRenewals(ctx, settings.RenewWindow, log); err != nil {
+		return fmt.Errorf("failed to renew contracts: %w", err)
+	}
 
 	// TODO: Refresh any good contracts that are either out of collateral or funds
 
 	// mark any contracts too close to their expiration height as bad
-	cm.store.MarkUnrenewableContractsBad(ctx, cm.cm.TipState().Index.Height+settings.RenewWindow/2)
+	cm.store.MarkUnrenewableContractsBad(ctx, blockHeight+settings.RenewWindow/2)
 
 	// form new contracts until there are enough good contracts to use
 	if err := cm.performContractFormation(ctx, settings.Period, settings.WantedContracts, log); err != nil {
