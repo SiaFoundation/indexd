@@ -23,8 +23,10 @@ import (
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/config"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
+	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
@@ -103,7 +105,8 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer hm.Close()
 
-	contracts, err := contracts.NewManager(cm, store, s, wm, contracts.WithLogger(log.Named("contracts")))
+	cf := contracts.NewContractor(cm, wm, walletKey)
+	contracts, err := contracts.NewManager(walletKey.PublicKey(), cm, cf, hm, store, s, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		return fmt.Errorf("failed to create contracts manager: %w", err)
 	}
@@ -124,6 +127,18 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	apiOpts := []api.ServerOption{
 		api.WithLogger(log.Named("api")),
 	}
+
+	var e *explorer.Explorer
+	if cfg.Explorer.Enabled {
+		e = explorer.New(cfg.Explorer.URL)
+		apiOpts = append(apiOpts, api.WithExplorer(e))
+	}
+
+	pm, err := pins.NewManager(e, hm, store, pins.WithLogger(log.Named("pins")))
+	if err != nil {
+		return fmt.Errorf("failed to create pins manager: %w", err)
+	}
+	defer pm.Close()
 
 	web := http.Server{
 		Handler: webRouter{

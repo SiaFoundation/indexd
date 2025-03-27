@@ -7,7 +7,9 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/pins"
 	"go.sia.tech/jape"
 )
 
@@ -27,6 +29,12 @@ func NewClient(addr, password string) *Client {
 // State returns the current state of the indexer.
 func (c *Client) State(ctx context.Context) (state State, err error) {
 	err = c.c.GET(ctx, "/state", &state)
+	return
+}
+
+// ExplorerSiacoinExchangeRate returns the exchange rate for the given currency.
+func (c *Client) ExplorerSiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/explorer/exchange-rate/siacoin/%s", currency), &rate)
 	return
 }
 
@@ -65,6 +73,42 @@ func (c *Client) HostsBlocklistAdd(ctx context.Context, hostKeys []types.PublicK
 // HostsBlocklistRemove removes the host with given host key from the blocklist.
 func (c *Client) HostsBlocklistRemove(ctx context.Context, hostKey types.PublicKey) (err error) {
 	err = c.c.DELETE(ctx, fmt.Sprintf("/hosts/blocklist/%s", hostKey))
+	return
+}
+
+// SettingsContracts returns the contract settings used by the contract manager.
+func (c *Client) SettingsContracts(ctx context.Context) (s contracts.MaintenanceSettings, err error) {
+	err = c.c.GET(ctx, "/settings/contracts", &s)
+	return
+}
+
+// SettingsContractsUpdate updates the contract settings used by the contract manager.
+func (c *Client) SettingsContractsUpdate(ctx context.Context, s contracts.MaintenanceSettings) (err error) {
+	err = c.c.PUT(ctx, "/settings/contracts", s)
+	return
+}
+
+// SettingsHosts returns the settings used by the hosts manager.
+func (c *Client) SettingsHosts(ctx context.Context) (s hosts.UsabilitySettings, err error) {
+	err = c.c.GET(ctx, "/settings/hosts", &s)
+	return
+}
+
+// SettingsHostsUpdate updates the settings used by the hosts manager.
+func (c *Client) SettingsHostsUpdate(ctx context.Context, s hosts.UsabilitySettings) (err error) {
+	err = c.c.PUT(ctx, "/settings/hosts", s)
+	return
+}
+
+// SettingsPricePinning returns the price pinning settings used by the pins manager.
+func (c *Client) SettingsPricePinning(ctx context.Context) (s pins.PinnedSettings, err error) {
+	err = c.c.GET(ctx, "/settings/pricepinning", &s)
+	return
+}
+
+// SettingsPricePinningUpdate updates the price pinning settings used by the pins manager.
+func (c *Client) SettingsPricePinningUpdate(ctx context.Context, s pins.PinnedSettings) (err error) {
+	err = c.c.PUT(ctx, "/settings/pricepinning", s)
 	return
 }
 

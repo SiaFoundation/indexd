@@ -10,6 +10,13 @@ import (
 // ServerOption is a functional option to configure an API server.
 type ServerOption func(*api)
 
+// WithExplorer sets the explorer for the API server.
+func WithExplorer(e Explorer) ServerOption {
+	return func(a *api) {
+		a.explorer = e
+	}
+}
+
 // WithLogger sets the logger for the API server.
 func WithLogger(log *zap.Logger) ServerOption {
 	return func(a *api) {

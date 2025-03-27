@@ -7,7 +7,9 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/pins"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 )
@@ -21,6 +23,11 @@ type (
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
+	// Explorer retrieves data about the Sia network from an external source.
+	Explorer interface {
+		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
+	}
+
 	// A Store is a persistent store for the indexer.
 	Store interface {
 		BlockHosts(ctx context.Context, hks []types.PublicKey) error
@@ -29,6 +36,12 @@ type (
 		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
 		LastScannedIndex(context.Context) (types.ChainIndex, error)
 		UnblockHost(ctx context.Context, hk types.PublicKey) error
+		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)
+		UpdateUsabilitySettings(ctx context.Context, us hosts.UsabilitySettings) error
+		MaintenanceSettings(ctx context.Context) (contracts.MaintenanceSettings, error)
+		UpdateMaintenanceSettings(ctx context.Context, ms contracts.MaintenanceSettings) error
+		PinnedSettings(ctx context.Context) (pins.PinnedSettings, error)
+		UpdatePinnedSettings(ctx context.Context, ps pins.PinnedSettings) error
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -52,11 +65,12 @@ type (
 type (
 	// An api provides an HTTP API for the indexer
 	api struct {
-		chain  ChainManager
-		store  Store
-		syncer Syncer
-		wallet Wallet
-		log    *zap.Logger
+		chain    ChainManager
+		explorer Explorer
+		store    Store
+		syncer   Syncer
+		wallet   Wallet
+		log      *zap.Logger
 	}
 )
 
@@ -76,6 +90,9 @@ func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, op
 	return jape.Mux(map[string]jape.Handler{
 		"GET /state": a.handleGETState,
 
+		// explorer endpoints
+		"GET /explorer/exchange-rate/siacoin/:currency": a.handleGETExplorerSiacoinExchangeRate,
+
 		// host endpoints
 		"GET    /host/:hostkey": a.handleGETHost,
 
@@ -84,6 +101,14 @@ func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, op
 		"GET    /hosts/blocklist":          a.handleGETHostsBlocklist,
 		"PUT    /hosts/blocklist":          a.handlePUTHostsBlocklist,
 		"DELETE /hosts/blocklist/:hostkey": a.handleDELETEHostsBlocklist,
+
+		// settings endpoints
+		"GET /settings/contracts":    a.handleGETSettingsContracts,
+		"PUT /settings/contracts":    a.handlePUTSettingsContracts,
+		"GET /settings/hosts":        a.handleGETSettingsHosts,
+		"PUT /settings/hosts":        a.handlePUTSettingsHosts,
+		"GET /settings/pricepinning": a.handleGETSettingsPricePinning,
+		"PUT /settings/pricepinning": a.handlePUTSettingsPricePinning,
 
 		// wallet endpoints
 		"GET /wallet":         a.handleGETWallet,

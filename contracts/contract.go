@@ -24,6 +24,37 @@ var (
 )
 
 type (
+	// contractQueryOpts contains the options for querying contracts.
+	contractQueryOpts struct {
+		Revisable *bool
+		Good      *bool
+	}
+
+	// ContractQueryOpt is a functional option for querying contracts.
+	ContractQueryOpt func(*contractQueryOpts)
+)
+
+var (
+	optTrue = true
+
+	// DefaultContractQueryOpts are the default options applied when querying
+	// contracts. By default, only contracts that are revisable will be
+	// returned.
+	DefaultContractQueryOpts = contractQueryOpts{
+		Revisable: &optTrue, // return active contracts
+		Good:      nil,      // return both good and bad contracts
+	}
+)
+
+// WithRevisable filters contracts by whether they can still be revised. This
+// defaults to 'true'.
+func WithRevisable(revisable bool) ContractQueryOpt {
+	return func(opts *contractQueryOpts) {
+		opts.Revisable = &revisable
+	}
+}
+
+type (
 	// ContractState describes the current state of the contract on the network
 	// - pending: the contract has not yet been seen on-chain
 	// - active: the contract was mined on-chain
@@ -54,13 +85,17 @@ type (
 		RenewedTo        types.FileContractID `json:"renewedTo"`
 		State            ContractState        `json:"state"`
 
-		Capacity uint64 `json:"capacity"` // already paid for capacity (always >=Size)
-		Size     uint64 `json:"size"`     // current size of the contract
+		Capacity           uint64           `json:"capacity"`           // already paid for capacity (always >=Size)
+		RemainingAllowance types.Currency   `json:"remainingAllowance"` // remaining renter allowance
+		RevisionNumber     uint64           `json:"revisionNumber"`     // current revision number
+		Size               uint64           `json:"size"`               // current size of the contract
+		Spending           ContractSpending `json:"spending"`
+		TotalCollateral    types.Currency   `json:"totalCollateral"` // total amount of collateral locked in contract
+		UsedCollateral     types.Currency   `json:"usedCollateral"`  // used collateral
 
-		ContractPrice    types.Currency   `json:"contractPrice"`    // price of the contract creation as charged by the host
-		InitialAllowance types.Currency   `json:"initialAllowance"` // initial renter allowance locked in contract
-		MinerFee         types.Currency   `json:"minerFee"`         // miner fee spent on formation txn
-		Spending         ContractSpending `json:"spending"`
+		ContractPrice    types.Currency `json:"contractPrice"`    // price of the contract creation as charged by the host
+		InitialAllowance types.Currency `json:"initialAllowance"` // initial renter allowance locked in contract
+		MinerFee         types.Currency `json:"minerFee"`         // miner fee spent on formation txn
 
 		// Good determines whether a contract is good or bad. A contract that
 		// is not good, will have its data migrated to a new contract.
@@ -70,7 +105,26 @@ type (
 		// ProofHeight. This field is set by the contract maintenance code.
 		Good bool `json:"good"`
 	}
+
+	// ContractSettings contains various settings used by the manager for
+	// forming and renewing contracts.
+	ContractSettings struct {
+		Period      uint64 `json:"period"`
+		RenewWindow uint64 `json:"renewWindow"`
+	}
 )
+
+// GoodForUpload indicates whether a contract should be uploaded to
+func (c Contract) GoodForUpload(maxCollateral types.Currency) bool {
+	if !c.Good {
+		return false
+	} else if c.Size >= maxContractSize {
+		return false
+	} else if c.UsedCollateral.Cmp(maxCollateral) > 0 {
+		return false
+	}
+	return true
+}
 
 // String implements the fmt.Stringer interface.
 func (s ContractState) String() string {

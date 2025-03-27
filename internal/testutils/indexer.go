@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/subscriber"
@@ -70,7 +71,8 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
 
-	contracts, err := contracts.NewManager(c.cm, store, s, wm, contracts.WithLogger(log.Named("contracts")))
+	cf := contracts.NewContractor(c.cm, wm, walletKey)
+	contracts, err := contracts.NewManager(walletKey.PublicKey(), c.cm, cf, nil, store, s, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
@@ -91,6 +93,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 
 	apiOpts := []api.ServerOption{
 		api.WithLogger(log.Named("api")),
+		api.WithExplorer(explorer.New("https://api.siascan.com")),
 	}
 
 	password := hex.EncodeToString(frand.Bytes(16))

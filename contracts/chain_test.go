@@ -3,7 +3,9 @@ package contracts
 import (
 	"context"
 	"errors"
+	"maps"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,9 +13,11 @@ import (
 	"slices"
 
 	"go.sia.tech/core/consensus"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/hosts"
 )
 
 type mockProofUpdater struct {
@@ -25,14 +29,59 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 }
 
 type storeMock struct {
+	contracts   []Contract
 	toBroadcast []types.V2FileContractElement
 	pruneCalls  int
 	rejectCalls int
 	settings    MaintenanceSettings
+	hosts       map[types.PublicKey]hosts.Host
+}
+
+func (s *storeMock) AddFormedContract(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee, totalCollateral types.Currency) error {
+	s.contracts = append(s.contracts, Contract{
+		ID:      contractID,
+		HostKey: hostKey,
+
+		Formation:        time.Now(),
+		ProofHeight:      proofHeight,
+		ExpirationHeight: expirationHeight,
+		State:            ContractStatePending,
+
+		RemainingAllowance: allowance,
+		TotalCollateral:    totalCollateral,
+
+		ContractPrice:    contractPrice,
+		InitialAllowance: allowance,
+		MinerFee:         minerFee,
+
+		Good: true,
+	})
+	return nil
 }
 
 func (s *storeMock) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
 	return slices.Clone(s.toBroadcast), nil
+}
+
+func (s *storeMock) Contracts(ctx context.Context, opts ...ContractQueryOpt) ([]Contract, error) {
+	return slices.Clone(s.contracts), nil
+}
+
+func (s *storeMock) Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error) {
+	host, ok := s.hosts[hostKey]
+	if !ok {
+		return hosts.Host{}, hosts.ErrNotFound
+	}
+	return host, nil
+}
+
+func (s *storeMock) Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error) {
+	copied := slices.Collect(maps.Values(s.hosts))
+	slices.SortFunc(copied, func(a, b hosts.Host) int {
+		// sort by public key to make order in testing deterministic
+		return strings.Compare(a.PublicKey.String(), b.PublicKey.String())
+	})
+	return copied, nil
 }
 
 func (s *storeMock) MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error) {
@@ -52,6 +101,16 @@ func (s *storeMock) PruneExpiredContractElements(ctx context.Context, maxBlocksS
 		panic("invalid maxBlocksSinceExpiry")
 	}
 	s.pruneCalls++
+	return nil
+}
+
+func (s *storeMock) UpdateHostSettings(hostKey types.PublicKey, settings proto.HostSettings) error {
+	h, ok := s.hosts[hostKey]
+	if !ok {
+		return hosts.ErrNotFound
+	}
+	h.Settings = settings
+	s.hosts[hostKey] = h
 	return nil
 }
 
@@ -127,6 +186,19 @@ func (tx *mockUpdateTx) UpdateContractState(contractID types.FileContractID, sta
 type chainManagerMock struct {
 	mu    sync.Mutex
 	tpool []types.V2Transaction
+	state consensus.State
+}
+
+func newChainManagerMock() *chainManagerMock {
+	return &chainManagerMock{
+		state: consensus.State{
+			Index: types.ChainIndex{
+				Height: 100,
+				ID:     types.BlockID{1, 2, 3},
+			},
+			PrevTimestamps: [11]time.Time{time.Now()},
+		},
+	}
 }
 
 func (cm *chainManagerMock) AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error) {
@@ -137,9 +209,7 @@ func (cm *chainManagerMock) AddV2PoolTransactions(basis types.ChainIndex, txns [
 }
 
 func (cm *chainManagerMock) TipState() consensus.State {
-	return consensus.State{
-		PrevTimestamps: [11]time.Time{time.Now()},
-	}
+	return cm.state
 }
 
 func (cm *chainManagerMock) V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error) {
@@ -180,6 +250,10 @@ func (s *syncerMock) Peers() []*syncer.Peer {
 type walletMock struct {
 }
 
+func (w *walletMock) Address() types.Address {
+	return types.Address{1, 2, 3}
+}
+
 func (w *walletMock) FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error) {
 	return types.ChainIndex{}, nil, nil
 }
@@ -187,7 +261,7 @@ func (w *walletMock) ReleaseInputs(txns []types.Transaction, v2txns []types.V2Tr
 func (w *walletMock) SignV2Inputs(txn *types.V2Transaction, toSign []int)                  {}
 
 func TestApplyRevertDiff(t *testing.T) {
-	contracts := newContractManager(nil, nil, nil, nil)
+	contracts := newContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil)
 
 	// create a contract
 	contractID := types.FileContractID{1, 2, 3}
@@ -327,10 +401,10 @@ func TestUpdateContractElementProofs(t *testing.T) {
 }
 
 func TestProcessActions(t *testing.T) {
-	cmMock := &chainManagerMock{}
+	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
 	store := &storeMock{}
-	contracts := newContractManager(cmMock, store, syncerMock, &walletMock{})
+	contracts := newContractManager(types.PublicKey{}, cmMock, nil, nil, store, syncerMock, &walletMock{})
 
 	contract := types.V2FileContractElement{
 		ID: types.FileContractID{1},

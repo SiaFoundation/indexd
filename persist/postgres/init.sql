@@ -3,10 +3,10 @@ CREATE TABLE hosts (
     public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32),
     consecutive_failed_scans INTEGER NOT NULL DEFAULT 0,
     recent_uptime DOUBLE PRECISION NOT NULL DEFAULT 0.894 CHECK (recent_uptime > 0 AND recent_uptime < 1),
-    last_failed_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
-    last_successful_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
-    last_announcement TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
-    next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    last_failed_scan TIMESTAMP WITH TIME ZONE,
+    last_successful_scan TIMESTAMP WITH TIME ZONE,
+    last_announcement TIMESTAMP WITH TIME ZONE NOT NULL,
+    next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     lost_sectors INTEGER NOT NULL DEFAULT 0,
 
     settings_protocol_version BYTEA NOT NULL DEFAULT '\x000000'::bytea CHECK (LENGTH(settings_protocol_version) = 3),
@@ -24,7 +24,7 @@ CREATE TABLE hosts (
     settings_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0,
     settings_free_sector_price NUMERIC(50,0) NOT NULL DEFAULT 0,
     settings_tip_height BIGINT NOT NULL DEFAULT 0,
-    settings_valid_until TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00'
+    settings_valid_until TIMESTAMP WITH TIME ZONE
 );
 CREATE INDEX idx_hosts_next_scan_idx ON hosts(next_scan);
 
@@ -51,7 +51,7 @@ CREATE TABLE syncer_peers (
     ip_address INET PRIMARY KEY,
     port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
     first_seen TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    last_connect TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '0001-01-01 00:00:00+00',
+    last_connect TIMESTAMP WITH TIME ZONE,
     synced_blocks INTEGER NOT NULL DEFAULT 0 CHECK (synced_blocks >= 0),
     sync_duration INTEGER NOT NULL DEFAULT 0 CHECK (sync_duration >= 0)
 );
@@ -96,15 +96,22 @@ CREATE TABLE global_settings (
     -- contract manager settings
     contracts_maintenance_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     contracts_wanted INTEGER NOT NULL DEFAULT 50 CHECK(contracts_wanted > 0), -- number of contracts to maintain
-    contracts_period INTEGER NOT NULL DEFAULT 144 * 7 * 6 CHECK(contracts_period > contracts_renew_window), -- 6 weeks
     contracts_renew_window INTEGER NOT NULL DEFAULT 144 * 7 * 2 CHECK(contracts_renew_window > 0), -- 2 weeks
+    contracts_period INTEGER NOT NULL DEFAULT 144 * 7 * 6 CHECK(contracts_period > contracts_renew_window), -- 6 weeks
 
-    min_collateral NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
-    max_storage_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
-    max_ingress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
-    max_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
+    -- host manager settings
+    hosts_min_protocol_version BYTEA NOT NULL DEFAULT '\x010000', -- used for host checks
+    hosts_min_collateral NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
+    hosts_max_storage_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
+    hosts_max_ingress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
+    hosts_max_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
 
-    min_protocol_version BYTEA NOT NULL DEFAULT '\x010000' -- minimum protocol version
+    -- pin manager settings
+    pins_currency VARCHAR(3) NOT NULL DEFAULT '',
+    pins_min_collateral DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_min_collateral >= 0),
+    pins_max_storage_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_storage_price >= 0),
+    pins_max_ingress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_ingress_price >= 0),
+    pins_max_egress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_egress_price >= 0)
 );
 
 CREATE TABLE contracts (
@@ -128,6 +135,7 @@ CREATE TABLE contracts (
   contract_price DECIMAL(50, 0) NOT NULL, -- used to display cost of forming contract
   initial_allowance DECIMAL(50, 0) NOT NULL, -- used when refreshing contract to increase budget
   miner_fee DECIMAL(50, 0) NOT NULL, -- miner fee added when forming/renewing contract
+  total_collateral DECIMAL(50, 0) NOT NULL, -- total collateral (allocated+unallocated)
 
   -- contract state
   good BOOLEAN NOT NULL DEFAULT TRUE,

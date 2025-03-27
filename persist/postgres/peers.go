@@ -28,23 +28,30 @@ func (s *Store) AddPeer(addr string) error {
 
 // PeerInfo returns the metadata for the specified peer or ErrPeerNotFound if
 // the peer wasn't found in the store.
-func (s *Store) PeerInfo(addr string) (info syncer.PeerInfo, err error) {
+func (s *Store) PeerInfo(addr string) (syncer.PeerInfo, error) {
 	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		err = fmt.Errorf("invalid peer address: %w", err)
-		return
+		return syncer.PeerInfo{}, fmt.Errorf("invalid peer address: %w", err)
 	}
-	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+
+	var info syncer.PeerInfo
+	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		var lastConnect sql.NullTime
 		const query = `SELECT first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers WHERE ip_address=$1 AND port=$2`
-		err = tx.QueryRow(ctx, query, host, port).Scan(&info.FirstSeen, &info.LastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration))
-		if errors.Is(err, sql.ErrNoRows) {
-			err = syncer.ErrPeerNotFound
-		} else if err == nil {
-			info.Address = addr
+		if err := tx.QueryRow(ctx, query, host, port).Scan(&info.FirstSeen, &lastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration)); errors.Is(err, sql.ErrNoRows) {
+			return syncer.ErrPeerNotFound
+		} else if err != nil {
+			return err
 		}
-		return err
-	})
-	return
+		info.Address = addr
+		if lastConnect.Valid {
+			info.LastConnect = lastConnect.Time
+		}
+		return nil
+	}); err != nil {
+		return syncer.PeerInfo{}, err
+	}
+	return info, nil
 }
 
 // Peers returns the set of known peers.
@@ -60,10 +67,14 @@ func (s *Store) Peers() (infos []syncer.PeerInfo, err error) {
 			var host string
 			var port int
 			var info syncer.PeerInfo
-			if err := rows.Scan(&host, &port, &info.FirstSeen, &info.LastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration)); err != nil {
+			var lastConnect sql.NullTime
+			if err := rows.Scan(&host, &port, &info.FirstSeen, &lastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration)); err != nil {
 				return err
 			}
 			info.Address = net.JoinHostPort(host, fmt.Sprint(port))
+			if lastConnect.Valid {
+				info.LastConnect = lastConnect.Time
+			}
 			infos = append(infos, info)
 		}
 		return rows.Err()
@@ -79,16 +90,20 @@ func (s *Store) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error {
 	}
 
 	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		var lastConnect sql.NullTime
 		var info syncer.PeerInfo
 		err := tx.
 			QueryRow(ctx, `SELECT first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers WHERE ip_address=$1 AND port=$2`, host, port).
-			Scan(&info.FirstSeen, &info.LastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration))
+			Scan(&info.FirstSeen, &lastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration))
 		if errors.Is(err, sql.ErrNoRows) {
 			return syncer.ErrPeerNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to get peer info: %w", err)
 		}
 		info.Address = addr
+		if lastConnect.Valid {
+			info.LastConnect = lastConnect.Time
+		}
 
 		fn(&info)
 

@@ -39,7 +39,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 			HostPublicKey:    hk,
 		},
 	}
-	if err := store.AddFormedContract(context.Background(), fce.ID, hk, 50, fce.V2FileContract.ExpirationHeight, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3)); err != nil {
+	if err := store.AddFormedContract(context.Background(), fce.ID, hk, 50, fce.V2FileContract.ExpirationHeight, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -103,7 +103,7 @@ func TestPruneExpiredContractElements(t *testing.T) {
 		t.Helper()
 		var contractID types.FileContractID
 		frand.Read(contractID[:])
-		if err := store.AddFormedContract(context.Background(), contractID, hk, 50, expirationHeight, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3)); err != nil {
+		if err := store.AddFormedContract(context.Background(), contractID, hk, 50, expirationHeight, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
 			t.Fatal(err)
 		}
 		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
@@ -226,10 +226,11 @@ func TestFormRenewContract(t *testing.T) {
 		ContractPrice:    types.Siacoins(1),
 		InitialAllowance: types.Siacoins(2),
 		MinerFee:         types.Siacoins(3),
+		TotalCollateral:  types.Siacoins(4),
 
 		Good: true,
 	}
-	err = store.AddFormedContract(context.Background(), expectedFormed.ID, expectedFormed.HostKey, expectedFormed.ProofHeight, expectedFormed.ExpirationHeight, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee)
+	err = store.AddFormedContract(context.Background(), expectedFormed.ID, expectedFormed.HostKey, expectedFormed.ProofHeight, expectedFormed.ExpirationHeight, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee, expectedFormed.TotalCollateral)
 	if err != nil {
 		t.Fatal("failed to add formed contract", err)
 	}
@@ -283,8 +284,9 @@ func TestFormRenewContract(t *testing.T) {
 		Good:             true,                            // refreshed contract is good
 		RenewedFrom:      expectedFormed.ID,               // refreshed from formed contract
 		Spending:         contracts.ContractSpending{},    // spending is reset
+		TotalCollateral:  types.Siacoins(5),
 	}
-	err = store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, expectedRefreshed.ProofHeight, expectedRefreshed.ExpirationHeight, expectedRefreshed.ContractPrice, expectedRefreshed.InitialAllowance, expectedRefreshed.MinerFee)
+	err = store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, expectedRefreshed.ProofHeight, expectedRefreshed.ExpirationHeight, expectedRefreshed.ContractPrice, expectedRefreshed.InitialAllowance, expectedRefreshed.MinerFee, expectedRefreshed.TotalCollateral)
 	if err != nil {
 		t.Fatal("failed to add refreshed contract", err)
 	}
@@ -322,7 +324,7 @@ func TestFormRenewContract(t *testing.T) {
 		RenewedFrom:      expectedRefreshed.ID,                   // renewed from refreshed contract
 		Spending:         contracts.ContractSpending{},           // spending is reset
 	}
-	err = store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, expectedRenewed.ProofHeight, expectedRenewed.ExpirationHeight, expectedRenewed.ContractPrice, expectedRenewed.InitialAllowance, expectedRenewed.MinerFee)
+	err = store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, expectedRenewed.ProofHeight, expectedRenewed.ExpirationHeight, expectedRenewed.ContractPrice, expectedRenewed.InitialAllowance, expectedRenewed.MinerFee, expectedRenewed.TotalCollateral)
 	if err != nil {
 		t.Fatal("failed to add refreshed contract", err)
 	}
@@ -330,38 +332,6 @@ func TestFormRenewContract(t *testing.T) {
 	assertContract(expectedFormed.ID, expectedFormed)
 	assertContract(expectedRefreshed.ID, expectedRefreshed)
 	assertContract(expectedRenewed.ID, expectedRenewed)
-}
-
-func TestMaintenanceSettings(t *testing.T) {
-	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
-
-	expectedSettings := contracts.MaintenanceSettings{
-		Enabled:         false,
-		Period:          6048,
-		RenewWindow:     2016,
-		WantedContracts: 50,
-	}
-
-	// check default settings
-	settings, err := store.MaintenanceSettings(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	} else if !reflect.DeepEqual(settings, expectedSettings) {
-		t.Fatalf("mismatch: \n%+v\n%+v", settings, expectedSettings)
-	}
-
-	// update and check again
-	expectedSettings.Enabled = true
-	expectedSettings.Period *= 2
-	expectedSettings.RenewWindow *= 2
-	expectedSettings.WantedContracts *= 2
-	if err := store.UpdateMaintenanceSettings(context.Background(), expectedSettings); err != nil {
-		t.Fatal(err)
-	} else if settings, err = store.MaintenanceSettings(context.Background()); err != nil {
-		t.Fatal(err)
-	} else if !reflect.DeepEqual(settings, expectedSettings) {
-		t.Fatalf("mismatch: \n%+v\n%+v", settings, expectedSettings)
-	}
 }
 
 func TestRejectContracts(t *testing.T) {
@@ -409,7 +379,7 @@ func TestRejectContracts(t *testing.T) {
 	now := time.Now()
 	for i := range 3 {
 		contractID := types.FileContractID{byte(i + 1)}
-		err = store.AddFormedContract(context.Background(), contractID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3))
+		err = store.AddFormedContract(context.Background(), contractID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4))
 		if err != nil {
 			t.Fatal("failed to add formed contract", err)
 		}
@@ -496,7 +466,7 @@ func TestSetContractGood(t *testing.T) {
 			ID:      types.FileContractID{byte(i + 1)},
 			HostKey: hk,
 		}
-		err = store.AddFormedContract(context.Background(), expectedFormed.ID, expectedFormed.HostKey, expectedFormed.ProofHeight, expectedFormed.ExpirationHeight, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee)
+		err = store.AddFormedContract(context.Background(), expectedFormed.ID, expectedFormed.HostKey, expectedFormed.ProofHeight, expectedFormed.ExpirationHeight, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee, expectedFormed.TotalCollateral)
 		if err != nil {
 			t.Fatal("failed to add formed contract", err)
 		}
@@ -587,7 +557,7 @@ func TestUpdateContractElement(t *testing.T) {
 	assertKnownContract(false)
 
 	// add a contract
-	if err := store.AddFormedContract(context.Background(), fce.ID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3)); err != nil {
+	if err := store.AddFormedContract(context.Background(), fce.ID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
 		t.Fatal(err)
 	}
 	assertKnownContract(true)
@@ -667,7 +637,7 @@ func TestUpdateContractState(t *testing.T) {
 	}
 
 	// add a contract
-	if err := store.AddFormedContract(context.Background(), contractID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3)); err != nil {
+	if err := store.AddFormedContract(context.Background(), contractID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
 		t.Fatal(err)
 	}
 

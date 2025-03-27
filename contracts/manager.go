@@ -7,10 +7,20 @@ import (
 	"time"
 
 	"go.sia.tech/core/consensus"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
+)
+
+const (
+	dialTimeout         = 10 * time.Second
+	minRemainingStorage = (10 * 1 << 30) / uint64(proto.SectorSize) // 10GB
+	maxContractSize     = 10 * 1 << 40                              // 10TB
 )
 
 type (
@@ -23,10 +33,26 @@ type (
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
+	// Contractor defines the dependencies required to form, renew and refresh
+	// contracts.
+	Contractor interface {
+		FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
+	}
+
+	// HostManager defines the minimal interface of HostManager functionality
+	// the ContractManager requires.
+	HostManager interface {
+		ScanHost(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
+	}
+
 	// Store is the minimal interface of Store functionality the ContractManager
 	// requires.
 	Store interface {
+		AddFormedContract(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee, totalCollateral types.Currency) error
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
+		Contracts(ctx context.Context, queryOpts ...ContractQueryOpt) ([]Contract, error)
+		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
+		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
@@ -42,6 +68,7 @@ type (
 	// Wallet is the minimal interface of Wallet functionality the
 	// ContractManager requires.
 	Wallet interface {
+		Address() types.Address
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
@@ -71,7 +98,7 @@ type (
 		// contract manager should maintain. e.g. if a host runs out of storage,
 		// its contract(s) won't count towards this number but will still be
 		// considered good for renewing/refreshing and funding accounts.
-		WantedContracts uint `json:"wantedContracts"`
+		WantedContracts uint64 `json:"wantedContracts"`
 	}
 
 	// ContractManager manages the host announcements.
@@ -81,8 +108,13 @@ type (
 		w     Wallet
 		store Store
 
-		log *zap.Logger
-		tg  *threadgroup.ThreadGroup
+		contractor Contractor
+		scanner    HostManager
+		renterKey  types.PublicKey
+
+		log     *zap.Logger
+		shuffle func(int, func(i, j int))
+		tg      *threadgroup.ThreadGroup
 
 		contractRejectBuffer           time.Duration
 		expiredContractBroadcastBuffer uint64
@@ -101,8 +133,8 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(chainManager ChainManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	cm := newContractManager(chainManager, store, syncer, wallet, opts...)
+func NewManager(renterKey types.PublicKey, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	cm := newContractManager(renterKey, chainManager, contractor, scanner, store, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {
@@ -115,16 +147,21 @@ func NewManager(chainManager ChainManager, store Store, syncer Syncer, wallet Wa
 	return cm, nil
 }
 
-func newContractManager(chainManager ChainManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
 		cm: chainManager,
 		s:  syncer,
 		w:  wallet,
 
-		store: store,
+		contractor: contractor,
+		renterKey:  renterKey,
 
-		log: zap.NewNop(),
-		tg:  threadgroup.New(),
+		scanner: scanner,
+		store:   store,
+
+		log:     zap.NewNop(),
+		shuffle: frand.Shuffle,
+		tg:      threadgroup.New(),
 
 		contractRejectBuffer:           6 * time.Hour, // 6 hours after formation
 		expiredContractBroadcastBuffer: 144,           // 144 block after expiration
@@ -160,7 +197,7 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 		case <-time.After(cm.maintenanceFrequency):
 		}
 
-		if err := cm.performContractMaintenance(ctx); err != nil {
+		if err := cm.performContractMaintenance(ctx, log); err != nil {
 			log.Error("contract maintenance failed", zap.Error(err))
 		}
 
@@ -193,7 +230,7 @@ func (cm *ContractManager) blockUntilReady(log *zap.Logger) bool {
 	}
 }
 
-func (cm *ContractManager) performContractMaintenance(ctx context.Context) error {
+func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *zap.Logger) error {
 	// fetch settings and determine if maintenance is supposed to run
 	settings, err := cm.store.MaintenanceSettings(ctx)
 	if err != nil {
@@ -211,8 +248,10 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context) error
 	// TODO: Mark any contracts that failed to renew/refresh and are too close
 	// to the expiration height as bad
 
-	// TODO: Form enough contracts to meet the desired number of usable
-	// contracts
+	// form new contracts until there are enough good contracts to use
+	if err := cm.performContractFormation(ctx, settings.Period, settings.WantedContracts, log); err != nil {
+		return fmt.Errorf("failed to form contracts: %w", err)
+	}
 
 	return nil
 }
