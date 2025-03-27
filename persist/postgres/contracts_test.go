@@ -646,3 +646,57 @@ func TestUpdateContractState(t *testing.T) {
 	updateState(contracts.ContractStateActive)  // set to active
 	assertState(contracts.ContractStateActive)  // assert active
 }
+
+func TestMarkUnrenewableContractsBad(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	const proofHeight = 100
+
+	// prepare 2 contracts, one for testing and another one that remains good
+	// for the duration of the test to serve as a canary
+	hk := types.PublicKey{1, 1, 1}
+	fcid := types.FileContractID{1}
+	goodFCID := types.FileContractID{2}
+
+	// helper to assert state of contracts
+	assertContractGood := func(good bool) {
+		t.Helper()
+
+		// check test contract
+		contract, err := store.Contract(context.Background(), fcid)
+		if err != nil {
+			t.Fatal(err)
+		} else if contract.Good != good {
+			t.Fatalf("expected good=%v, got %v", good, contract.Good)
+		}
+
+		// check canary
+		contract, err = store.Contract(context.Background(), goodFCID)
+		if err != nil {
+			t.Fatal(err)
+		} else if contract.Good != true {
+			t.Fatal("cancary should be good")
+		}
+	}
+
+	// add a host and the contracts
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddFormedContract(context.Background(), fcid, hk, proofHeight, 9999, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
+		t.Fatal(err)
+	} else if err := store.AddFormedContract(context.Background(), goodFCID, hk, 8888, 9999, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
+		t.Fatal(err)
+	}
+
+	assertContractGood(true)
+	store.MarkUnrenewableContractsBad(context.Background(), proofHeight-1)
+	assertContractGood(true)
+	store.MarkUnrenewableContractsBad(context.Background(), proofHeight)
+	assertContractGood(false)
+	store.MarkUnrenewableContractsBad(context.Background(), proofHeight+1)
+	assertContractGood(false)
+}

@@ -217,6 +217,15 @@ func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, erro
 	return exists, nil
 }
 
+// MarkUnrenewableContractsBad marks all contracts as bad that have a proof
+// height <= minProofHeight bad.
+func (s *Store) MarkUnrenewableContractsBad(ctx context.Context, minProofHeight uint64) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE proof_height <= $1`, minProofHeight)
+		return err
+	})
+}
+
 // RejectPendingContracts marks all contracts as rejected that are currently
 // pending and have a formation height older than 'maxFormation'.
 func (s *Store) RejectPendingContracts(ctx context.Context, maxFormation time.Time) error {

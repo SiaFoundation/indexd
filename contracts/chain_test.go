@@ -119,6 +119,15 @@ func (s *storeMock) MaintenanceSettings(ctx context.Context) (MaintenanceSetting
 	return s.settings, nil
 }
 
+func (s *storeMock) MarkUnrenewableContractsBad(ctx context.Context, minProofHeight uint64) error {
+	for i := range s.contracts {
+		if s.contracts[i].ProofHeight <= minProofHeight {
+			s.contracts[i].Good = false
+		}
+	}
+	return nil
+}
+
 func (s *storeMock) RejectPendingContracts(_ context.Context, t time.Time) error {
 	if t.IsZero() {
 		panic("invalid time")

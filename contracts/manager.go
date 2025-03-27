@@ -57,6 +57,7 @@ type (
 		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
+		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
 		SetContractBad(ctx context.Context, contractID types.FileContractID) error
@@ -291,7 +292,8 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 
 	// TODO: Refresh any good contracts that are either out of collateral or funds
 
-	// TODO: Mark any contracts too close to their expiration height as bad.
+	// mark any contracts too close to their expiration height as bad
+	cm.store.MarkUnrenewableContractsBad(ctx, cm.cm.TipState().Index.Height+settings.RenewWindow/2)
 
 	// form new contracts until there are enough good contracts to use
 	if err := cm.performContractFormation(ctx, settings.Period, settings.WantedContracts, log); err != nil {
