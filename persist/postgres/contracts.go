@@ -37,7 +37,7 @@ func (s *Store) AddFormedContract(ctx context.Context, contractID types.FileCont
 // - Duplicate the existing contract/row and point the copy to the original
 // - Update a potential row that referenced the existing contract in renewed_to to point to the new row
 // - Overwrite the existing contract to match the renewed contract
-func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee, usedCollateral, totalCollateral types.Currency) error {
+func (s *Store) AddRenewedContract(ctx context.Context, params contracts.AddRenewedContractParams) error {
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		// defer the evaluation of the UNIQUE constraints while swapping contracts
 		if _, err := tx.Exec(ctx, "SET CONSTRAINTS contracts_contract_id_key, contracts_renewed_from_key, contracts_renewed_to_key DEFERRED"); err != nil {
@@ -46,8 +46,8 @@ func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo t
 
 		// fetch the existing row of the contract
 		var existingID int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM contracts WHERE contract_id = $1`, sqlHash256(renewedFrom)).Scan(&existingID); errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("contract %q: %w", renewedFrom, contracts.ErrNotFound)
+		if err := tx.QueryRow(ctx, `SELECT id FROM contracts WHERE contract_id = $1`, sqlHash256(params.RenewedFrom)).Scan(&existingID); errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("contract %q: %w", params.RenewedFrom, contracts.ErrNotFound)
 		} else if err != nil {
 			return fmt.Errorf("failed to fetch existing contract: %w", err)
 		}
@@ -73,7 +73,7 @@ INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, re
 		// update the existing row to match the new contract
 		resp, err := tx.Exec(ctx, `
 UPDATE contracts SET contract_id = $1, formation = NOW(), proof_height = $2, expiration_height = $3, renewed_from = $4, renewed_to = NULL, state = 0, capacity = CASE WHEN $2 = contracts.proof_height THEN contracts.capacity ELSE contracts.size END, contract_price = $5, initial_allowance = $6, miner_fee = $7, used_collateral = $8, total_collateral = $9, good = TRUE, append_sector_spending = 0, free_sector_spending = 0, fund_account_spending = 0, sector_roots_spending = 0
-WHERE id = $10`, sqlHash256(renewedTo), proofHeight, expirationHeight, newID, sqlCurrency(contractPrice), sqlCurrency(allowance), sqlCurrency(minerFee), sqlCurrency(usedCollateral), sqlCurrency(totalCollateral), existingID)
+WHERE id = $10`, sqlHash256(params.RenewedTo), params.ProofHeight, params.ExpirationHeight, newID, sqlCurrency(params.ContractPrice), sqlCurrency(params.Allowance), sqlCurrency(params.MinerFee), sqlCurrency(params.UsedCollateral), sqlCurrency(params.TotalCollateral), existingID)
 		if err != nil {
 			return fmt.Errorf("failed to init renewed contract: %w", err)
 		} else if resp.RowsAffected() != 1 {

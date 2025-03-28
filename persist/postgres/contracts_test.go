@@ -287,7 +287,17 @@ func TestFormRenewContract(t *testing.T) {
 		UsedCollateral:   types.Siacoins(4),
 		TotalCollateral:  types.Siacoins(5),
 	}
-	err = store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, expectedRefreshed.ProofHeight, expectedRefreshed.ExpirationHeight, expectedRefreshed.ContractPrice, expectedRefreshed.InitialAllowance, expectedRefreshed.MinerFee, expectedRefreshed.UsedCollateral, expectedRefreshed.TotalCollateral)
+	err = store.AddRenewedContract(context.Background(), contracts.AddRenewedContractParams{
+		RenewedFrom:      expectedRefreshed.RenewedFrom,
+		RenewedTo:        expectedRefreshed.ID,
+		ProofHeight:      expectedRefreshed.ProofHeight,
+		ExpirationHeight: expectedRefreshed.ExpirationHeight,
+		ContractPrice:    expectedRefreshed.ContractPrice,
+		Allowance:        expectedRefreshed.InitialAllowance,
+		MinerFee:         expectedRefreshed.MinerFee,
+		UsedCollateral:   expectedRefreshed.UsedCollateral,
+		TotalCollateral:  expectedRefreshed.TotalCollateral,
+	})
 	if err != nil {
 		t.Fatal("failed to add refreshed contract", err)
 	}
@@ -327,7 +337,17 @@ func TestFormRenewContract(t *testing.T) {
 		UsedCollateral:   types.Siacoins(4),
 		TotalCollateral:  types.Siacoins(5),
 	}
-	err = store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, expectedRenewed.ProofHeight, expectedRenewed.ExpirationHeight, expectedRenewed.ContractPrice, expectedRenewed.InitialAllowance, expectedRenewed.MinerFee, expectedRenewed.UsedCollateral, expectedRenewed.TotalCollateral)
+	err = store.AddRenewedContract(context.Background(), contracts.AddRenewedContractParams{
+		RenewedFrom:      expectedRenewed.RenewedFrom,
+		RenewedTo:        expectedRenewed.ID,
+		ProofHeight:      expectedRenewed.ProofHeight,
+		ExpirationHeight: expectedRenewed.ExpirationHeight,
+		ContractPrice:    expectedRenewed.ContractPrice,
+		Allowance:        expectedRenewed.InitialAllowance,
+		MinerFee:         expectedRenewed.MinerFee,
+		UsedCollateral:   expectedRenewed.UsedCollateral,
+		TotalCollateral:  expectedRenewed.TotalCollateral,
+	})
 	if err != nil {
 		t.Fatal("failed to add refreshed contract", err)
 	}
