@@ -17,6 +17,37 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	// goodSettings are a minimal settings instance leading to a host to be
+	// considered good
+	goodSettings = proto.HostSettings{
+		AcceptingContracts: true,
+		RemainingStorage:   minRemainingStorage,
+		Prices: proto.HostPrices{
+			ContractPrice: types.Siacoins(1),
+			Collateral:    types.NewCurrency64(1),
+			StoragePrice:  types.NewCurrency64(1),
+		},
+	}
+
+	// goodUsability is the usability of a host that passes all checks
+	goodUsability = hosts.Usability{
+		Uptime:              true,
+		MaxContractDuration: true,
+		MaxCollateral:       true,
+		ProtocolVersion:     true,
+		PriceValidity:       true,
+		AcceptingContracts:  true,
+
+		ContractPrice:   true,
+		Collateral:      true,
+		StoragePrice:    true,
+		IngressPrice:    true,
+		EgressPrice:     true,
+		FreeSectorPrice: true,
+	}
+)
+
 type formContractCall struct {
 	hk       types.PublicKey
 	addr     string
@@ -92,22 +123,6 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 	cmMock := newChainManagerMock()
 	blockHeight := cmMock.TipState().Index.Height
 	syncerMock := &syncerMock{}
-
-	goodUsability := hosts.Usability{
-		Uptime:              true,
-		MaxContractDuration: true,
-		MaxCollateral:       true,
-		ProtocolVersion:     true,
-		PriceValidity:       true,
-		AcceptingContracts:  true,
-
-		ContractPrice:   true,
-		Collateral:      true,
-		StoragePrice:    true,
-		IngressPrice:    true,
-		EgressPrice:     true,
-		FreeSectorPrice: true,
-	}
 
 	const (
 		period = 100
@@ -240,6 +255,151 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 	assertFormation(good1, calls[0])
 	assertFormation(good2, calls[1])
 	assertFormation(good3, calls[2])
+}
+
+// TestPerformContractFormationWithContracts is a unit test for
+// PerformContractFormation which takes into account existing contracts
+func TestPerformContractFormationWithContracts(t *testing.T) {
+	cmMock := newChainManagerMock()
+	blockHeight := cmMock.TipState().Index.Height
+	syncerMock := &syncerMock{}
+
+	const (
+		period = 100
+		wanted = 4
+	)
+
+	// helper to create a good host
+	goodHost := func(i int) hosts.Host {
+		return hosts.Host{
+			PublicKey: types.PublicKey{byte(i)},
+			Networks: []net.IPNet{
+				{IP: net.IP{127, 0, 0, byte(i)}, Mask: net.CIDRMask(24, 32)},
+			},
+			Addresses: []chain.NetAddress{
+				{
+					Protocol: siamux.Protocol,
+					Address:  fmt.Sprintf("host%d.com", i),
+				},
+			},
+			Settings:  goodSettings, // default to good settings to consider every host
+			Usability: goodUsability,
+		}
+	}
+
+	store := &storeMock{}
+	scanner := store.Scanner()
+
+	formContract := func(hostKey types.PublicKey, good bool) {
+		t.Helper()
+		err := store.AddFormedContract(context.Background(), types.FileContractID(hostKey), hostKey, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !good {
+			for i := range store.contracts {
+				if store.contracts[i].ID == types.FileContractID(hostKey) {
+					store.contracts[i].Good = false
+				}
+			}
+		}
+	}
+
+	// prepare hosts
+
+	// first one is good and has a good contract already -> no formation
+	good1 := goodHost(1)
+	scanner.settings[good1.PublicKey] = goodSettings
+	formContract(good1.PublicKey, true)
+
+	// second one is bad with a good contract that shouldn't count -> no formation
+	bad1 := goodHost(2)
+	bad1.Networks = append(bad1.Networks, good1.Networks[0])
+	scanner.settings[bad1.PublicKey] = goodSettings
+	formContract(bad1.PublicKey, true)
+
+	// third one is good, but shares the subnet with the first one -> no formation
+	good2 := goodHost(3)
+	good2.Networks = append(good2.Networks, good1.Networks[0])
+	scanner.settings[good2.PublicKey] = goodSettings
+
+	// fourth one is good and shares a subnet with bad1 which is ok since bad1
+	// is bad -> forms a contract
+	good3 := goodHost(4)
+	good3.Networks = append(good3.Networks, bad1.Networks[0])
+	scanner.settings[good3.PublicKey] = goodSettings
+
+	// fifth one is good -> forms a contract
+	good4 := goodHost(5)
+	scanner.settings[good4.PublicKey] = goodSettings
+
+	// sixth one is a good host with a bad contract which won't count -> forms a contract
+	good5 := goodHost(6)
+	scanner.settings[good5.PublicKey] = goodSettings
+	formContract(good5.PublicKey, false)
+
+	// populate store
+	store.hosts = map[types.PublicKey]hosts.Host{
+		good1.PublicKey: good1,
+		bad1.PublicKey:  bad1,
+		good2.PublicKey: good2,
+		good3.PublicKey: good3,
+		good4.PublicKey: good4,
+		good5.PublicKey: good5,
+	}
+
+	cf := &contractFormerMock{}
+	renterKey := types.PublicKey{1, 2, 3, 4, 5}
+	wallet := &walletMock{}
+	contracts := newContractManager(renterKey, cmMock, cf, scanner, store, syncerMock, wallet)
+
+	// disable randomizing hosts to make test deterministic
+	contracts.shuffle = func(int, func(i, j int)) {}
+
+	assertFormation := func(h hosts.Host, call formContractCall) {
+		t.Helper()
+		if call.hk != h.PublicKey {
+			t.Fatalf("expected host key %v, got %v", h.PublicKey, call.hk)
+		} else if call.addr != h.SiamuxAddr() {
+			t.Fatalf("expected address %v, got %v", h.SiamuxAddr(), call.addr)
+		} else if call.settings != goodSettings {
+			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
+		}
+		// assert params
+		allowance, collateral := initialContractFunding(goodSettings.Prices, period)
+		if !call.params.Allowance.Equals(allowance) {
+			t.Fatalf("expected allowance %v, got %v", allowance, call.params.Allowance)
+		} else if !call.params.Collateral.Equals(collateral) {
+			t.Fatalf("expected collateral %v, got %v", collateral, call.params.Collateral)
+		} else if call.params.ProofHeight != blockHeight+period {
+			t.Fatalf("expected proof height %v, got %v", blockHeight+period, call.params.ProofHeight)
+		} else if call.params.RenterPublicKey != renterKey {
+			t.Fatalf("expected renter key %v, got %v", renterKey, call.params.RenterPublicKey)
+		} else if call.params.RenterAddress != wallet.Address() {
+			t.Fatalf("expected renter address %v, got %v", wallet.Address(), call.params.RenterAddress)
+		}
+	}
+
+	// perform formations
+	if err := contracts.performContractFormation(context.Background(), period, wanted, zap.NewNop()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert that we attempted to form contracts with the right hosts,
+	// settings and params
+	calls := cf.Calls()
+	if len(calls) != wanted-1 {
+		t.Fatalf("expected %v calls, got %v", wanted-1, len(calls))
+	}
+	assertFormation(good3, calls[0])
+	assertFormation(good4, calls[1])
+	assertFormation(good5, calls[2])
+
+	// the store should now contain the right number of total contracts which is
+	// the 3 we started with plus the 3 we formed
+	if len(store.contracts) != 6 {
+		t.Fatalf("expected 6 contracts, got %v", len(store.contracts))
+	}
 }
 
 func TestInitialContractFunding(t *testing.T) {
