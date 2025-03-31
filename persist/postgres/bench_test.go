@@ -13,8 +13,8 @@ import (
 // hosts and accounts and fetch which accounts need funding for a random host in
 // every iteration.
 //
-// M1 Max | 1k accounts  | ~20 ms/op
-// M1 Max | 10k accounts | ~210 ms/op
+// M1 Max | 1k accounts  | ~6 ms/op
+// M1 Max | 10k accounts | ~110 ms/op
 func BenchmarkHostAccountsForFunding(b *testing.B) {
 	// define parameters
 	const (

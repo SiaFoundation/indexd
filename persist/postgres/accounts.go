@@ -74,9 +74,10 @@ LEFT JOIN LATERAL (
 	SELECT consecutive_failed_funds, next_fund
 	FROM account_hosts
 	INNER JOIN hosts ON hosts.id = account_hosts.host_id
-	WHERE account_id = a.id AND hosts.public_key=$1
+	WHERE account_id = a.id AND hosts.public_key=$1 AND next_fund <= NOW()
+	ORDER BY next_fund ASC
+	LIMIT $2
 ) ea ON true
-WHERE ea.next_fund IS NULL OR ea.next_fund <= NOW()
 ORDER BY ea.next_fund ASC NULLS FIRST
 LIMIT $2;`, sqlPublicKey(hk), limit)
 		if err != nil {

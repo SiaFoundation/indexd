@@ -229,7 +229,7 @@ CREATE TABLE account_hosts (
     consecutive_failed_funds INTEGER NOT NULL DEFAULT 0,
     CONSTRAINT account_hosts_pk PRIMARY KEY (account_id, host_id)
 );
-CREATE INDEX account_hosts_next_fund_idx ON account_hosts (next_fund);
+CREATE INDEX account_hosts_hostid_nextfund_idx ON account_hosts (host_id, next_fund);
 ```
 
 ### 2.6 Slabs and Sectors
