@@ -18,7 +18,7 @@ func (wr webRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		wr.api.ServeHTTP(w, req)
 	case strings.HasPrefix(req.URL.Path, "/debug/pprof"):
 		_, password, ok := req.BasicAuth()
-		if !ok || password != cfg.HTTP.Password {
+		if !ok || password != cfg.AdminAPI.Password {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}

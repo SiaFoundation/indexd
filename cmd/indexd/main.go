@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/build"
 	"go.sia.tech/indexd/config"
+	"go.sia.tech/indexd/persist/postgres"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/flagg"
@@ -31,9 +32,12 @@ const (
 
 var cfg = config.Config{
 	Directory: os.Getenv(dataDirEnvVar), // default to env variable
-	HTTP: config.HTTP{
-		Address:  "127.0.0.1:8080",
-		Password: "changeme_please",
+	AdminAPI: config.AdminAPI{
+		Address:  "127.0.0.1:9980",
+		Password: "",
+	},
+	ApplicationAPI: config.ApplicationAPI{
+		Address: ":9982",
 	},
 	Syncer: config.Syncer{
 		Address:   ":9981",
@@ -46,6 +50,14 @@ var cfg = config.Config{
 	Explorer: config.Explorer{
 		Enabled: true,
 		URL:     "https://api.siascan.com",
+	},
+	Database: postgres.ConnectionInfo{
+		Host:     "127.0.0.1",
+		Port:     5432,
+		User:     "postgres",
+		Password: "changeme",
+		Database: "indexd",
+		SSLMode:  "verify-full",
 	},
 	Log: config.Log{
 		File: config.FileLog{
@@ -181,7 +193,8 @@ func main() {
 
 	// attempt to load the config file, command line flags will override any
 	// values set in the config file
-	tryLoadConfig()
+	configPath := tryLoadConfig()
+
 	// determine the data directory
 	cfg.Directory = dataDirectory(cfg.Directory)
 
@@ -190,17 +203,20 @@ func main() {
 	rootCmd := flagg.Root
 	rootCmd.Usage = flagg.SimpleUsage(rootCmd, ``)
 	rootCmd.StringVar(&cfg.Directory, "dir", cfg.Directory, "directory to store indexd metadata in")
-	rootCmd.StringVar(&cfg.HTTP.Address, "http", cfg.HTTP.Address, "address to serve API on")
+	rootCmd.StringVar(&cfg.AdminAPI.Address, "adminAPI", cfg.AdminAPI.Address, "address to serve admin API on")
+	rootCmd.StringVar(&cfg.ApplicationAPI.Address, "applicationAPI", cfg.ApplicationAPI.Address, "address to serve application API on")
 	rootCmd.StringVar(&logLevelOverride, "log", "", "overrides the log level for all enabled loggers (debug, info, warn, error)")
 
 	versionCmd := flagg.New("version", ``)
 	seedCmd := flagg.New("seed", ``)
+	configCmd := flagg.New("config", ``)
 
 	cmd := flagg.Parse(flagg.Tree{
 		Cmd: rootCmd,
 		Sub: []flagg.Tree{
 			{Cmd: versionCmd},
 			{Cmd: seedCmd},
+			{Cmd: configCmd},
 		},
 	})
 
@@ -233,10 +249,21 @@ func main() {
 		key := wallet.KeyFromSeed(&seed, 0)
 		fmt.Println("Recovery Phrase:", phrase)
 		fmt.Println("Address", types.StandardUnlockHash(key.PublicKey()))
+	case configCmd:
+		if len(cmd.Args()) != 0 {
+			cmd.Usage()
+			return
+		}
+
+		runConfigCmd(configPath)
 	case rootCmd:
 		if len(cmd.Args()) != 0 {
 			cmd.Usage()
 			return
+		}
+
+		if cfg.AdminAPI.Password == "" {
+			setAPIPassword()
 		}
 
 		var seed [32]byte

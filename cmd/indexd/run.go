@@ -118,7 +118,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer subscriber.Close()
 
-	httpListener, err := startLocalhostListener(cfg.HTTP.Address, log.Named("listener"))
+	httpListener, err := startLocalhostListener(cfg.AdminAPI.Address, log.Named("listener"))
 	if err != nil {
 		return fmt.Errorf("failed to listen on http address: %w", err)
 	}
@@ -142,7 +142,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 
 	web := http.Server{
 		Handler: webRouter{
-			api: jape.BasicAuth(cfg.HTTP.Password)(api.NewServer(cm, s, wm, store, apiOpts...)),
+			api: jape.BasicAuth(cfg.AdminAPI.Password)(api.NewServer(cm, s, wm, store, apiOpts...)),
 		},
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -150,7 +150,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	defer web.Close()
 
 	go func() {
-		log.Debug("starting http server", zap.String("address", cfg.HTTP.Address))
+		log.Debug("starting http server", zap.String("adminAddress", cfg.AdminAPI.Address), zap.String("applicationAddress", cfg.ApplicationAPI.Address))
 		if err := web.Serve(httpListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("http server failed", zap.Error(err))
 		}

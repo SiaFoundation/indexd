@@ -11,66 +11,74 @@ import (
 )
 
 type (
-	// HTTP contains the configuration for the HTTP server.
-	HTTP struct {
-		Address  string `yaml:"address,omitempty"`
-		Password string `yaml:"password,omitempty"`
+	// AdminAPI contains the configuration for the HTTP server serving the admin
+	// UI and routes.
+	AdminAPI struct {
+		Address  string `yaml:"address"`
+		Password string `yaml:"password"`
+	}
+
+	// ApplicationAPI contains the configuration for the HTTP server serving the
+	// application API
+	ApplicationAPI struct {
+		Address string `yaml:"address"`
 	}
 
 	// Syncer contains the configuration for the p2p syncer.
 	Syncer struct {
-		Address    string   `yaml:"address,omitempty"`
-		Bootstrap  bool     `yaml:"bootstrap,omitempty"`
-		EnableUPnP bool     `yaml:"enableUPnP,omitempty"`
-		Peers      []string `yaml:"peers,omitempty"`
+		Address    string   `yaml:"address"`
+		Bootstrap  bool     `yaml:"bootstrap"`
+		EnableUPnP bool     `yaml:"enableUPnP"`
+		Peers      []string `yaml:"peers"`
 	}
 
 	// Consensus contains the configuration for the consensus set.
 	Consensus struct {
-		Network        string `yaml:"network,omitempty"`
-		IndexBatchSize int    `yaml:"indexBatchSize,omitempty"`
+		Network        string `yaml:"network"`
+		IndexBatchSize int    `yaml:"indexBatchSize"`
 	}
 
 	// Explorer contains the configuration for an external explorer.
 	Explorer struct {
-		Enabled bool   `yaml:"enabled,omitempty"`
-		URL     string `yaml:"url,omitempty"`
+		Enabled bool   `yaml:"enabled"`
+		URL     string `yaml:"url"`
 	}
 
 	// FileLog configures the file output of the logger.
 	FileLog struct {
-		Enabled bool            `yaml:"enabled,omitempty"`
-		Level   zap.AtomicLevel `yaml:"level,omitempty"`
-		Format  string          `yaml:"format,omitempty"`
+		Enabled bool            `yaml:"enabled"`
+		Level   zap.AtomicLevel `yaml:"level"`
+		Format  string          `yaml:"format"`
 		// Path is the path of the log file.
-		Path string `yaml:"path,omitempty"`
+		Path string `yaml:"path"`
 	}
 
 	// StdOutLog configures the standard output of the logger.
 	StdOutLog struct {
-		Level      zap.AtomicLevel `yaml:"level,omitempty"`
-		Enabled    bool            `yaml:"enabled,omitempty"`
-		Format     string          `yaml:"format,omitempty"`
-		EnableANSI bool            `yaml:"enableANSI,omitempty"` //nolint:tagliatelle
+		Level      zap.AtomicLevel `yaml:"level"`
+		Enabled    bool            `yaml:"enabled"`
+		Format     string          `yaml:"format"`
+		EnableANSI bool            `yaml:"enableANSI"` //nolint:tagliatelle
 	}
 
 	// Log contains the configuration for the logger.
 	Log struct {
-		StdOut StdOutLog `yaml:"stdout,omitempty"`
-		File   FileLog   `yaml:"file,omitempty"`
+		StdOut StdOutLog `yaml:"stdout"`
+		File   FileLog   `yaml:"file"`
 	}
 
 	// Config contains the configuration for the indexer
 	Config struct {
-		Directory      string `yaml:"directory,omitempty"`
-		RecoveryPhrase string `yaml:"recoveryPhrase,omitempty"`
+		Directory      string `yaml:"directory"`
+		RecoveryPhrase string `yaml:"recoveryPhrase"`
 
-		HTTP      HTTP                    `yaml:"http,omitempty"`
-		Syncer    Syncer                  `yaml:"syncer,omitempty"`
-		Consensus Consensus               `yaml:"consensus,omitempty"`
-		Explorer  Explorer                `yaml:"explorer,omitempty"`
-		Log       Log                     `yaml:"log,omitempty"`
-		Database  postgres.ConnectionInfo `yaml:"database,omitempty"`
+		AdminAPI       AdminAPI                `yaml:"adminAPI"`
+		ApplicationAPI ApplicationAPI          `yaml:"applicationAPI"`
+		Syncer         Syncer                  `yaml:"syncer"`
+		Consensus      Consensus               `yaml:"consensus"`
+		Explorer       Explorer                `yaml:"explorer"`
+		Log            Log                     `yaml:"log"`
+		Database       postgres.ConnectionInfo `yaml:"database"`
 	}
 )
 
