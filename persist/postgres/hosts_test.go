@@ -777,6 +777,36 @@ func TestHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// ip mask for testing
+	_, network, err := net.ParseCIDR("127.0.0.1/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	goodUsability := hosts.Usability{
+		Uptime:              true,
+		MaxContractDuration: true,
+		MaxCollateral:       true,
+		ProtocolVersion:     true,
+		PriceValidity:       true,
+		AcceptingContracts:  true,
+
+		ContractPrice:   true,
+		Collateral:      true,
+		StoragePrice:    true,
+		IngressPrice:    true,
+		EgressPrice:     true,
+		FreeSectorPrice: true,
+	}
+
+	// make sure all settings have the same validity to simplify the assertions
+	validUntil := time.Now().Round(time.Microsecond).Add(24 * time.Hour)
+	newSettings := func(hk types.PublicKey) proto4.HostSettings {
+		settings := newTestHostSettings(hk)
+		settings.Prices.ValidUntil = validUntil
+		return settings
+	}
+
 	// helper to add hosts
 	addHost := func(i byte, usable, blocked bool) types.PublicKey {
 		t.Helper()
@@ -789,12 +819,16 @@ func TestHosts(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// "scan" host
-		settings := newTestHostSettings(hk)
+		// "scan" host - first scan fails
+		settings := newSettings(hk)
 		if !usable {
 			settings.AcceptingContracts = false
 		}
-		err := db.UpdateHost(context.Background(), hk, nil, settings, true, time.Now().Add(time.Hour))
+		err = db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, false, time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, true, time.Now().Add(time.Hour))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -809,6 +843,17 @@ func TestHosts(t *testing.T) {
 		return hk
 	}
 
+	// add hosts
+	hk1 := addHost(1, true, false)  // good
+	hk2 := addHost(2, false, false) // bad
+	hk3 := addHost(3, true, true)   // good, blocked
+	hk4 := addHost(4, false, true)  //  bad, blocked
+
+	// make sure the hosts have a good uptime
+	if _, err := db.pool.Exec(context.Background(), `UPDATE hosts SET recent_uptime = .91`); err != nil {
+		t.Fatal(err)
+	}
+
 	assertHosts := func(hks []types.PublicKey, offset, limit int, queryOpts ...hosts.HostQueryOpt) {
 		t.Helper()
 		hosts, err := db.Hosts(context.Background(), offset, limit, queryOpts...)
@@ -820,15 +865,51 @@ func TestHosts(t *testing.T) {
 		for i, host := range hosts {
 			if host.PublicKey != hks[i] {
 				t.Fatalf("expected hk %v, got %v", hks[i], host.PublicKey)
+			} else if host.LastAnnouncement.IsZero() {
+				t.Fatal("host should be announced")
+			} else if host.LastFailedScan.IsZero() {
+				t.Fatal("should have a failed scan")
+			} else if host.LastSuccessfulScan.IsZero() {
+				t.Fatal("should have been scanned successfully")
+			} else if host.NextScan.IsZero() {
+				t.Fatal("next scan should be scheduled")
+			} else if host.ConsecutiveFailedScans != 0 {
+				t.Fatal("shouldn't have consecutive failed scan")
+			} else if host.RecentUptime == 0 {
+				t.Fatal("host should have uptime")
+			} else if host.Addresses == nil {
+				t.Fatal("host should have an address")
+			} else if host.Networks == nil {
+				t.Fatal("host should have a network")
 			}
-			// TODO: add more checks
+
+			blocked := false
+			settings := newSettings(host.PublicKey)
+			usability := goodUsability
+			switch host.PublicKey {
+			case hk1:
+			// hk1 is good and unblocked
+			case hk2:
+				settings.AcceptingContracts = false
+				usability.AcceptingContracts = false
+			case hk3:
+				blocked = true
+			case hk4:
+				blocked = true
+				settings.AcceptingContracts = false
+				usability.AcceptingContracts = false
+			default:
+				t.Fatal("unknown host")
+			}
+			if host.Settings != settings {
+				t.Fatal("invalid settings")
+			} else if host.Blocked != blocked {
+				t.Fatalf("expected blocked %v, got %v", blocked, host.Blocked)
+			} else if host.Usability != usability {
+				t.Fatalf("expected usability %+v, got %+v", usability, host.Usability)
+			}
 		}
 	}
-
-	hk1 := addHost(1, true, false)  // good
-	hk2 := addHost(2, false, false) // bad
-	hk3 := addHost(3, true, true)   // good, blocked
-	hk4 := addHost(4, false, true)  //  bad, blocked
 
 	// all hosts
 	assertHosts([]types.PublicKey{hk1, hk2, hk3, hk4}, 0, 4)
