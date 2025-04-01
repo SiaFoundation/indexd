@@ -1,7 +1,6 @@
 module go.sia.tech/indexd
 
-go 1.23.4
-toolchain go1.24.1
+go 1.24.1
 
 require (
 	github.com/jackc/pgx/v5 v5.7.4
