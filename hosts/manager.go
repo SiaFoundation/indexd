@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -35,6 +36,10 @@ const (
 	scanExponentialBackoffMaxHours = 128
 )
 
+var (
+	errNodeOffline = errors.New("node is offline")
+)
+
 type (
 	// HostManager manages the host announcements.
 	HostManager struct {
@@ -42,12 +47,20 @@ type (
 		scanFrequency      time.Duration
 		scanInterval       time.Duration
 
-		resolver Resolver
-		scanner  Scanner
-		store    Store
+		onlineChecker OnlineChecker
+		resolver      Resolver
+		scanner       Scanner
+		store         Store
 
 		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
+	}
+
+	// OnlineChecker defines an interface to check whether the indexer is online. It's
+	// used to ensure hosts aren't punished for failing a scan if the indexer is
+	// offline.
+	OnlineChecker interface {
+		IsOnline() bool
 	}
 
 	// Resolver defines an interface to resolve hostnames.
@@ -71,6 +84,11 @@ type (
 		UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error
 	}
 
+	// Syncer defines an interface that exposes the Peers method.
+	Syncer interface {
+		Peers() []*syncer.Peer
+	}
+
 	// UpdateTx defines what the host manager needs to atomically process a
 	// chain update in the database.
 	UpdateTx interface {
@@ -89,17 +107,18 @@ func (h *Host) SiamuxAddr() string {
 }
 
 // NewManager creates a new host manager.
-func NewManager(store Store, opts ...Option) (*HostManager, error) {
+func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error) {
 	m := &HostManager{
 		announcementMaxAge: time.Hour * 24 * 365,
 		scanFrequency:      time.Hour,
 		scanInterval:       time.Hour * 24,
 
-		resolver: &net.Resolver{},
-		scanner:  &scanner{},
-		store:    store,
-		tg:       threadgroup.New(),
-		log:      zap.NewNop(),
+		onlineChecker: &onlineChecker{addresses: fallbackSites, syncer: syncer},
+		resolver:      &net.Resolver{},
+		scanner:       &scanner{},
+		store:         store,
+		tg:            threadgroup.New(),
+		log:           zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -184,7 +203,9 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 
 	consecutiveFailures := host.ConsecutiveFailedScans
 	success := settings != (proto4.HostSettings{})
-	if !success {
+	if !success && !m.onlineChecker.IsOnline() {
+		return Host{}, errNodeOffline
+	} else if !success {
 		consecutiveFailures++
 	}
 
@@ -273,6 +294,7 @@ func (m *HostManager) scanHosts(ctx context.Context) {
 	sema := make(chan struct{}, scanThreads)
 	defer close(sema)
 
+	var once sync.Once
 	var wg sync.WaitGroup
 	for _, hk := range hosts {
 		select {
@@ -289,6 +311,9 @@ func (m *HostManager) scanHosts(ctx context.Context) {
 			}()
 
 			if _, err := m.ScanHost(ctx, hk); errors.Is(err, context.Canceled) {
+				return
+			} else if errors.Is(err, errNodeOffline) {
+				once.Do(func() { m.log.Warn("indexer is offline, skipping scans") })
 				return
 			} else if err != nil {
 				m.log.Error("failed to perform host scan", zap.Stringer("hk", hk), zap.Error(err))

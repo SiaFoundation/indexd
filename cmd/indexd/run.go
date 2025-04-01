@@ -57,12 +57,6 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer wm.Close()
 
-	hm, err := hosts.NewManager(store, hosts.WithLogger(log.Named("hosts")))
-	if err != nil {
-		return fmt.Errorf("failed to create host manager: %w", err)
-	}
-	defer hm.Close()
-
 	syncerListener, err := net.Listen("tcp", cfg.Syncer.Address)
 	if err != nil {
 		return fmt.Errorf("failed to listen on syncer address: %w", err)
@@ -104,6 +98,12 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}, syncer.WithLogger(log.Named("syncer")))
 	go s.Run()
 	defer s.Close()
+
+	hm, err := hosts.NewManager(s, store, hosts.WithLogger(log.Named("hosts")))
+	if err != nil {
+		return fmt.Errorf("failed to create host manager: %w", err)
+	}
+	defer hm.Close()
 
 	cf := contracts.NewContractor(cm, wm, walletKey)
 	contracts, err := contracts.NewManager(walletKey.PublicKey(), cm, cf, hm, store, s, wm, contracts.WithLogger(log.Named("contracts")))
