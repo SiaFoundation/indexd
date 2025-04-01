@@ -158,34 +158,36 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		addHost(host)
 	}
 
-	// fetch all hosts
-	var hosts []hosts.Host
+	// fetch all hosts that are usable and not blocked
+	var candidates []hosts.Host
 	const batchSize = 50
 	for offset := 0; ; offset += batchSize {
-		batch, err := cm.store.Hosts(ctx, offset, batchSize)
+		batch, err := cm.store.Hosts(ctx, offset, batchSize, hosts.WithUsable(true), hosts.WithBlocked(false))
 		if err != nil {
 			return fmt.Errorf("failed to fetch hosts to form contracts with: %w", err)
 		}
-		hosts = append(hosts, batch...)
+		candidates = append(candidates, batch...)
 		if len(batch) < batchSize {
 			break
 		}
 	}
 
 	// randomize their order to avoid preferring any host
-	cm.shuffle(len(hosts), func(i, j int) { hosts[i], hosts[j] = hosts[j], hosts[i] })
+	cm.shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
-	for i := range hosts {
-		hostLog := formationLog.With(zap.Stringer("hostKey", hosts[i].PublicKey))
+	for i := range candidates {
+		hostLog := formationLog.With(zap.Stringer("hostKey", candidates[i].PublicKey))
 
-		// filter out bad hosts
-		if !isGood(hosts[i], hostLog) {
+		// filter out bad hosts - we still need to do this even if the
+		// candidates are usable since there might be additional reasons why a
+		// host isn't good for forming contracts
+		if !isGood(candidates[i], hostLog) {
 			continue
 		}
 
 		// scan host for valid price settings
 		scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		host, err := cm.scanner.ScanHost(scanCtx, hosts[i].PublicKey)
+		host, err := cm.scanner.ScanHost(scanCtx, candidates[i].PublicKey)
 		cancel()
 		if err != nil {
 			hostLog.Error("failed to scan host", zap.Error(err))
