@@ -1,11 +1,12 @@
 module go.sia.tech/indexd
 
 go 1.23.4
+toolchain go1.24.1
 
 require (
-	github.com/jackc/pgx/v5 v5.7.3
+	github.com/jackc/pgx/v5 v5.7.4
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.10.5-0.20250320183438-fbd9976fa9ca
+	go.sia.tech/core v0.10.5
 	go.sia.tech/coreutils v0.12.1
 	go.sia.tech/jape v0.12.2-0.20241010144215-1468bf476af6
 	go.uber.org/goleak v1.3.0
@@ -34,11 +35,11 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
-	golang.org/x/mod v0.22.0 // indirect
-	golang.org/x/net v0.36.0 // indirect
+	golang.org/x/mod v0.24.0 // indirect
+	golang.org/x/net v0.37.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
 	golang.org/x/sys v0.31.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 	golang.org/x/time v0.10.0 // indirect
-	golang.org/x/tools v0.29.0 // indirect
+	golang.org/x/tools v0.31.0 // indirect
 )
