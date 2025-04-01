@@ -52,7 +52,7 @@ type (
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
-		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
+		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error

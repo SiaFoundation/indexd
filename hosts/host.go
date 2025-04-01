@@ -16,6 +16,39 @@ var (
 	ErrNotFound = errors.New("host not found")
 )
 
+// DefaultHostsQueryOpts re the default options applied when querying hosts. By
+// default no hosts are filtered out.
+var DefaultHostsQueryOpts = hostsQueryOpts{
+	Blocked: nil,
+	Good:    nil,
+}
+
+type (
+	// HostQueryOpt is a functional option for querying hosts.
+	HostQueryOpt func(*hostsQueryOpts)
+
+	hostsQueryOpts struct {
+		Blocked *bool // return (un)blocked hosts
+		Good    *bool // return good/bad hosts
+	}
+)
+
+// WithUsable causes only usable or unusable hosts being returned depending on
+// whether 'usable' is true or false.
+func WithUsable(usable bool) HostQueryOpt {
+	return func(opts *hostsQueryOpts) {
+		opts.Good = &usable
+	}
+}
+
+// WithBlocked causes only blocked or unblocked hosts being returned depending
+// on whether 'usable' is true or false.
+func WithBlocked(blocked bool) HostQueryOpt {
+	return func(opts *hostsQueryOpts) {
+		opts.Blocked = &blocked
+	}
+}
+
 type (
 	// Host is a host on the network.
 	Host struct {

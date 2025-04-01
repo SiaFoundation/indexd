@@ -75,12 +75,29 @@ func (s *storeMock) Host(ctx context.Context, hostKey types.PublicKey) (hosts.Ho
 	return host, nil
 }
 
-func (s *storeMock) Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error) {
+func (s *storeMock) Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
 	copied := slices.Collect(maps.Values(s.hosts))
 	slices.SortFunc(copied, func(a, b hosts.Host) int {
 		// sort by public key to make order in testing deterministic
 		return strings.Compare(a.PublicKey.String(), b.PublicKey.String())
 	})
+	opts := hosts.DefaultHostsQueryOpts
+	for _, opt := range queryOpts {
+		opt(&opts)
+	}
+	filter := copied[:0]
+	for _, h := range copied {
+		keep := true
+		if opts.Good != nil {
+			keep = h.Usability.Usable() == *opts.Good
+		}
+		if opts.Blocked != nil {
+			keep = keep && h.Blocked == *opts.Blocked
+		}
+		if keep {
+			filter = append(filter, h)
+		}
+	}
 	return copied, nil
 }
 
