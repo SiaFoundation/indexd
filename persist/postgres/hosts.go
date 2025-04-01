@@ -177,6 +177,7 @@ FROM hosts CROSS JOIN globals
 WHERE
 	-- good host filter
 	(($3::boolean IS NULL) OR ($3::boolean = (
+		recent_uptime > 0.9 AND
 		has_settings AND
 		settings_max_contract_duration >= globals.contracts_period AND
 		settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
