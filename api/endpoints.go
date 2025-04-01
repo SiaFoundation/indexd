@@ -99,7 +99,24 @@ func (a *api) handleGETHosts(jc jape.Context) {
 	if !ok {
 		return
 	}
-	hosts, err := a.store.Hosts(jc.Request.Context(), offset, limit)
+
+	var opts []hosts.HostQueryOpt
+	if jc.Request.FormValue("usable") != "" {
+		var usable bool
+		if jc.DecodeForm("usable", &usable) != nil {
+			return
+		}
+		opts = append(opts, hosts.WithUsable(usable))
+	}
+	if jc.Request.FormValue("blocked") != "" {
+		var blocked bool
+		if jc.DecodeForm("blocked", &blocked) != nil {
+			return
+		}
+		opts = append(opts, hosts.WithBlocked(blocked))
+	}
+
+	hosts, err := a.store.Hosts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}

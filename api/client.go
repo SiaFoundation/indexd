@@ -45,7 +45,7 @@ func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hosts.Hos
 }
 
 // Hosts returns all hosts known to the indexer.
-func (c *Client) Hosts(ctx context.Context, opts ...URLQueryParameterOption) (hosts []hosts.Host, err error) {
+func (c *Client) Hosts(ctx context.Context, opts ...HostQueryParameterOption) (hosts []hosts.Host, err error) {
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)

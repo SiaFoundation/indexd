@@ -10,6 +10,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/pins"
 	"go.uber.org/zap"
@@ -102,6 +103,34 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if h1.Blocked {
 		t.Fatal("expected host to be unblocked", h1.Blocked)
+	}
+
+	// filter by blocked hosts
+	unblocked, err := indexer.Hosts(context.Background(), api.WithBlocked(false))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unblocked) != 1 || unblocked[0].PublicKey != h1.PublicKey() {
+		t.Fatalf("invalid hosts were returned (%d): %+v", len(unblocked), unblocked)
+	}
+	blocked, err := indexer.Hosts(context.Background(), api.WithBlocked(true))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(blocked) != 1 || blocked[0].PublicKey != h2.PublicKey() {
+		t.Fatalf("invalid hosts were returned (%d): %+v", len(blocked), blocked)
+	}
+
+	// filter by usable hosts - none of them should be usable
+	usable, err := indexer.Hosts(context.Background(), api.WithUsable(true))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(usable) != 0 {
+		t.Fatalf("invalid number of hosts: %d", len(usable))
+	}
+	unusable, err := indexer.Hosts(context.Background(), api.WithUsable(false))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unusable) != 2 {
+		t.Fatalf("invalid number of hosts: %d", len(unusable))
 	}
 }
 
