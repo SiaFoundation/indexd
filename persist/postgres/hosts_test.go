@@ -748,8 +748,116 @@ func newTestHostSettings(pk types.PublicKey) proto4.HostSettings {
 			IngressPrice:  types.NewCurrency64(100),   // 100 H / byte
 			EgressPrice:   types.NewCurrency64(100),   // 100 H / byte
 			Collateral:    types.NewCurrency64(200),
-			ValidUntil:    time.Now().Add(time.Hour).Round(time.Microsecond),
+			ValidUntil:    time.Now().Add(24 * time.Hour).Round(time.Microsecond),
 			TipHeight:     1,
 		},
 	}
+}
+
+func TestHosts(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// update global settings to make hosts pass all checks
+	if err := db.UpdateUsabilitySettings(context.Background(), hosts.UsabilitySettings{
+		MaxEgressPrice:     types.MaxCurrency,
+		MaxIngressPrice:    types.MaxCurrency,
+		MaxStoragePrice:    types.MaxCurrency,
+		MinCollateral:      types.ZeroCurrency,
+		MinProtocolVersion: [3]uint8{1, 0, 0},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateMaintenanceSettings(context.Background(), contracts.MaintenanceSettings{
+		Period:          2,
+		RenewWindow:     1,
+		WantedContracts: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// helper to add hosts
+	addHost := func(i byte, usable, blocked bool) types.PublicKey {
+		t.Helper()
+		hk := types.PublicKey{i}
+
+		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+		if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+		}); err != nil {
+			t.Fatal(err)
+		}
+
+		// "scan" host
+		settings := newTestHostSettings(hk)
+		if !usable {
+			settings.AcceptingContracts = false
+		}
+		err := db.UpdateHost(context.Background(), hk, nil, settings, true, time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// block host
+		if blocked {
+			err := db.BlockHosts(context.Background(), []types.PublicKey{hk})
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		return hk
+	}
+
+	assertHosts := func(hks []types.PublicKey, offset, limit int, queryOpts ...hosts.HostQueryOpt) {
+		t.Helper()
+		hosts, err := db.Hosts(context.Background(), offset, limit, queryOpts...)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(hosts) != len(hks) {
+			t.Fatalf("expected %v hosts, got %v", len(hks), len(hosts))
+		}
+		for i, host := range hosts {
+			if host.PublicKey != hks[i] {
+				t.Fatalf("expected hk %v, got %v", hks[i], host.PublicKey)
+			}
+			// TODO: add more checks
+		}
+	}
+
+	hk1 := addHost(1, true, false)  // good
+	hk2 := addHost(2, false, false) // bad
+	hk3 := addHost(3, true, true)   // good, blocked
+	hk4 := addHost(4, false, true)  //  bad, blocked
+
+	// all hosts
+	assertHosts([]types.PublicKey{hk1, hk2, hk3, hk4}, 0, 4)
+
+	// assert limit works
+	assertHosts([]types.PublicKey{hk1, hk2, hk3}, 0, 3)
+
+	// assert offset works
+	assertHosts([]types.PublicKey{hk2, hk3, hk4}, 1, 3)
+
+	// only usable/unusable hosts
+	assertHosts([]types.PublicKey{hk1, hk3}, 0, 4, hosts.WithUsable(true))
+	assertHosts([]types.PublicKey{hk2, hk4}, 0, 4, hosts.WithUsable(false))
+
+	// only blocked/unblocked hosts
+	assertHosts([]types.PublicKey{hk3, hk4}, 0, 4, hosts.WithBlocked(true))
+	assertHosts([]types.PublicKey{hk1, hk2}, 0, 4, hosts.WithBlocked(false))
+
+	// mix filters
+	assertHosts([]types.PublicKey{hk3}, 0, 4, hosts.WithUsable(true), hosts.WithBlocked(true))
+	assertHosts([]types.PublicKey{hk2}, 0, 4, hosts.WithUsable(false), hosts.WithBlocked(false))
+
+	// mix filters and offset/limit
+	assertHosts([]types.PublicKey{hk1}, 0, 1, hosts.WithUsable(true))
+	assertHosts([]types.PublicKey{hk3}, 1, 1, hosts.WithUsable(true))
+	assertHosts([]types.PublicKey{hk2}, 0, 1, hosts.WithUsable(false))
+	assertHosts([]types.PublicKey{hk4}, 1, 1, hosts.WithUsable(false))
+	assertHosts([]types.PublicKey{hk3}, 0, 1, hosts.WithBlocked(true))
+	assertHosts([]types.PublicKey{hk4}, 1, 1, hosts.WithBlocked(true))
+	assertHosts([]types.PublicKey{hk1}, 0, 1, hosts.WithBlocked(false))
+	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithBlocked(false))
 }

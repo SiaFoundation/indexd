@@ -176,7 +176,7 @@ WITH globals AS (
 FROM hosts CROSS JOIN globals
 WHERE
 	-- good host filter
-	($3::boolean IS NULL) OR ($3::boolean = (
+	(($3::boolean IS NULL) OR ($3::boolean = (
 		has_settings AND
 		settings_max_contract_duration >= globals.contracts_period AND
 		settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
@@ -191,9 +191,9 @@ WHERE
 		settings_egress_price <= globals.hosts_max_egress_price AND
 		settings_free_sector_price <= globals.one_sc / globals.one_tb
 		)
-	)
+	))
 	-- blocked host filter
-	AND ($4::boolean IS NULL) OR ($4::boolean = hosts.blocked)
+	AND (($4::boolean IS NULL) OR ($4::boolean = hosts.blocked))
 LIMIT $1 OFFSET $2
 ;`, limit, offset, opts.Good, opts.Blocked)
 		if err != nil {
