@@ -177,6 +177,7 @@ func BenchmarkUpdateHostAccounts(b *testing.B) {
 	const (
 		batchSize   = 1000 // equals max batch size in replenish RPC
 		numAccounts = 1000
+		numHosts    = 1000
 	)
 
 	// prepare database
@@ -187,16 +188,19 @@ func BenchmarkUpdateHostAccounts(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+	var hosts []types.PublicKey
+	for range numHosts {
+		hosts = append(hosts, types.GeneratePrivateKey().PublicKey())
+		_, err := store.pool.Exec(context.Background(), `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW());`, sqlPublicKey(hosts[len(hosts)-1]))
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		hk := types.GeneratePrivateKey().PublicKey()
-		_, err := store.pool.Exec(context.Background(), `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW());`, sqlPublicKey(hk))
-		if err != nil {
-			b.Fatal(err)
-		}
-		accounts, err := store.HostAccountsForFunding(context.Background(), hk, batchSize, true)
+		accounts, err := store.HostAccountsForFunding(context.Background(), hosts[i%numHosts], batchSize, true)
 		if err != nil {
 			b.Fatal(err)
 		}
