@@ -161,7 +161,7 @@ func (tx *mockUpdateTx) IsKnownContract(contractID types.FileContractID) (bool, 
 
 func (tx *mockUpdateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
 	for _, fce := range fces {
-		tx.contracts[fce.ID] = fce
+		tx.contracts[fce.ID] = fce.Copy()
 	}
 	return nil
 }
