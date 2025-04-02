@@ -120,6 +120,7 @@ func (s *scannerMock) ScanHost(ctx context.Context, hk types.PublicKey) (hosts.H
 // performContractFormation method assuming that we don't have any contracts
 // yet.
 func TestPerformContractFormationWithoutContracts(t *testing.T) {
+	amMock := &accountsManagerMock{}
 	cmMock := newChainManagerMock()
 	blockHeight := cmMock.TipState().Index.Height
 	syncerMock := &syncerMock{}
@@ -212,7 +213,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 	cf := &contractFormerMock{}
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, cmMock, cf, scanner, store, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, cmMock, cf, scanner, store, syncerMock, wallet)
 
 	// disable randomizing hosts to make test deterministic
 	contracts.shuffle = func(int, func(i, j int)) {}
@@ -260,6 +261,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 // TestPerformContractFormationWithContracts is a unit test for
 // PerformContractFormation which takes into account existing contracts
 func TestPerformContractFormationWithContracts(t *testing.T) {
+	amMock := &accountsManagerMock{}
 	cmMock := newChainManagerMock()
 	blockHeight := cmMock.TipState().Index.Height
 	syncerMock := &syncerMock{}
@@ -351,7 +353,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 	cf := &contractFormerMock{}
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, cmMock, cf, scanner, store, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, cmMock, cf, scanner, store, syncerMock, wallet)
 
 	// disable randomizing hosts to make test deterministic
 	contracts.shuffle = func(int, func(i, j int)) {}
