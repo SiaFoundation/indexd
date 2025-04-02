@@ -115,12 +115,12 @@ func (a *api) handleGETHosts(jc jape.Context) {
 		}
 		opts = append(opts, hosts.WithBlocked(blocked))
 	}
-	if jc.Request.FormValue("contractstate") != "" {
-		var contractState contracts.ContractState
-		if jc.DecodeForm("contractstate", &contractState) != nil {
+	if jc.Request.FormValue("activecontracts") != "" {
+		var activeContracts bool
+		if jc.DecodeForm("activecontracts", &activeContracts) != nil {
 			return
 		}
-		opts = append(opts, hosts.WithContractState(uint(contractState)))
+		opts = append(opts, hosts.WithActiveContracts(activeContracts))
 	}
 
 	hosts, err := a.store.Hosts(jc.Request.Context(), offset, limit, opts...)

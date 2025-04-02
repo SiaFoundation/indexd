@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net/url"
 
-	"go.sia.tech/indexd/contracts"
 	"go.uber.org/zap"
 )
 
@@ -61,9 +60,9 @@ func WithUsable(usable bool) HostQueryParameterOption {
 	}
 }
 
-// WithContractState sets the 'contractstate' parameter.
-func WithContractState(state contracts.ContractState) HostQueryParameterOption {
+// WithActiveContracts sets the 'activecontracts' parameter.
+func WithActiveContracts(activeContracts bool) HostQueryParameterOption {
 	return func(q url.Values) {
-		q.Set("contractstate", state.String())
+		q.Set("activecontracts", fmt.Sprint(activeContracts))
 	}
 }

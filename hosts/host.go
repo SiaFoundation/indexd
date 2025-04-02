@@ -28,9 +28,9 @@ type (
 	HostQueryOpt func(*hostsQueryOpts)
 
 	hostsQueryOpts struct {
-		ContractState *uint // return hosts that have contracts with the provided state
-		Blocked       *bool // return (un)blocked hosts
-		Good          *bool // return good/bad hosts
+		ActiveContracts *bool // return hosts that have active contracts or not
+		Blocked         *bool // return (un)blocked hosts
+		Good            *bool // return good/bad hosts
 	}
 )
 
@@ -50,11 +50,11 @@ func WithBlocked(blocked bool) HostQueryOpt {
 	}
 }
 
-// WithContractState causes only hosts with contracts in the provided state
+// WithActiveContracts causes only hosts with contracts in the provided state
 // being returned
-func WithContractState(state uint) HostQueryOpt {
+func WithActiveContracts(activeContracts bool) HostQueryOpt {
 	return func(opts *hostsQueryOpts) {
-		opts.ContractState = &state
+		opts.ActiveContracts = &activeContracts
 	}
 }
 
