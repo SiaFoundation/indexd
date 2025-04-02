@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/pins"
 	"go.uber.org/zap"
@@ -131,6 +132,14 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if len(unusable) != 2 {
 		t.Fatalf("invalid number of hosts: %d", len(unusable))
+	}
+
+	// filter for hosts with contracts - none should have contracts
+	contracted, err := indexer.Hosts(context.Background(), api.WithContractState(contracts.ContractStatePending))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contracted) != 0 {
+		t.Fatalf("invalid number of hosts: %d", len(contracted))
 	}
 }
 

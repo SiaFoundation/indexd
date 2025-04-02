@@ -808,7 +808,7 @@ func TestHosts(t *testing.T) {
 	}
 
 	// helper to add hosts
-	addHost := func(i byte, usable, blocked bool) types.PublicKey {
+	addHost := func(i byte, usable, blocked bool, contract bool) types.PublicKey {
 		t.Helper()
 		hk := types.PublicKey{i}
 
@@ -840,14 +840,19 @@ func TestHosts(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
+
+		// form contract
+		if contract {
+			db.AddFormedContract(context.Background(), types.FileContractID{i}, hk, 100, 1000, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
+		}
 		return hk
 	}
 
 	// add hosts
-	hk1 := addHost(1, true, false)  // good
-	hk2 := addHost(2, false, false) // bad
-	hk3 := addHost(3, true, true)   // good, blocked
-	hk4 := addHost(4, false, true)  //  bad, blocked
+	hk1 := addHost(1, true, false, true)  // good, pending contract
+	hk2 := addHost(2, false, false, true) // bad, pending contract
+	hk3 := addHost(3, true, true, false)  // good, blocked, no contract
+	hk4 := addHost(4, false, true, false) //  bad, blocked, no contract
 
 	// make sure the hosts have a good uptime
 	if _, err := db.pool.Exec(context.Background(), `UPDATE hosts SET recent_uptime = .91`); err != nil {
@@ -928,9 +933,13 @@ func TestHosts(t *testing.T) {
 	assertHosts([]types.PublicKey{hk3, hk4}, 0, 4, hosts.WithBlocked(true))
 	assertHosts([]types.PublicKey{hk1, hk2}, 0, 4, hosts.WithBlocked(false))
 
+	// only hosts with specific contract state
+	assertHosts([]types.PublicKey{hk1, hk2}, 0, 4, hosts.WithContractState(uint(contracts.ContractStatePending)))
+	assertHosts([]types.PublicKey{}, 0, 4, hosts.WithContractState(uint(contracts.ContractStateActive)))
+
 	// mix filters
 	assertHosts([]types.PublicKey{hk3}, 0, 4, hosts.WithUsable(true), hosts.WithBlocked(true))
-	assertHosts([]types.PublicKey{hk2}, 0, 4, hosts.WithUsable(false), hosts.WithBlocked(false))
+	assertHosts([]types.PublicKey{hk2}, 0, 4, hosts.WithUsable(false), hosts.WithBlocked(false), hosts.WithContractState(uint(contracts.ContractStatePending)))
 
 	// mix filters and offset/limit
 	assertHosts([]types.PublicKey{hk1}, 0, 1, hosts.WithUsable(true))
@@ -941,4 +950,5 @@ func TestHosts(t *testing.T) {
 	assertHosts([]types.PublicKey{hk4}, 1, 1, hosts.WithBlocked(true))
 	assertHosts([]types.PublicKey{hk1}, 0, 1, hosts.WithBlocked(false))
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithBlocked(false))
+	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithContractState(uint(contracts.ContractStatePending)))
 }

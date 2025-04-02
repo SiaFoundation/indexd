@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"go.sia.tech/indexd/contracts"
 	"go.uber.org/zap"
 )
 
@@ -57,5 +58,12 @@ func WithBlocked(blocked bool) HostQueryParameterOption {
 func WithUsable(usable bool) HostQueryParameterOption {
 	return func(q url.Values) {
 		q.Set("usable", fmt.Sprint(usable))
+	}
+}
+
+// WithContractState sets the 'contractstate' parameter.
+func WithContractState(state contracts.ContractState) HostQueryParameterOption {
+	return func(q url.Values) {
+		q.Set("contractstate", state.String())
 	}
 }

@@ -115,6 +115,13 @@ func (a *api) handleGETHosts(jc jape.Context) {
 		}
 		opts = append(opts, hosts.WithBlocked(blocked))
 	}
+	if jc.Request.FormValue("contractstate") != "" {
+		var contractState contracts.ContractState
+		if jc.DecodeForm("contractstate", &contractState) != nil {
+			return
+		}
+		opts = append(opts, hosts.WithContractState(uint(contractState)))
+	}
 
 	hosts, err := a.store.Hosts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get hosts", err) != nil {
