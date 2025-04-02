@@ -11,6 +11,7 @@ import (
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 )
 
@@ -196,9 +197,9 @@ WHERE
 	-- blocked host filter
 	AND (($4::boolean IS NULL) OR ($4::boolean = hosts.blocked))
 	-- active contracts filter
-	AND (($5::integer IS NULL) OR (EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state = $5)))
+	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state >= $6 AND state <= $7)))
 LIMIT $1 OFFSET $2
-;`, limit, offset, opts.Good, opts.Blocked, opts.ContractState)
+;`, limit, offset, opts.Good, opts.Blocked, opts.ActiveContracts, contracts.ContractStatePending, contracts.ContractStateActive)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts: %w", err)
 		}
