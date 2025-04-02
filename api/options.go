@@ -46,7 +46,7 @@ func WithLimit(limit int) URLQueryParameterOption {
 // Hosts endpoint.
 type HostQueryParameterOption URLQueryParameterOption
 
-// WithBlocked sets the 'usable' parameter.
+// WithBlocked sets the 'blocked' parameter.
 func WithBlocked(blocked bool) HostQueryParameterOption {
 	return func(q url.Values) {
 		q.Set("blocked", fmt.Sprint(blocked))

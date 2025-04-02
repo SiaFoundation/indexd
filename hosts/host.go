@@ -42,7 +42,7 @@ func WithUsable(usable bool) HostQueryOpt {
 }
 
 // WithBlocked causes only blocked or unblocked hosts being returned depending
-// on whether 'usable' is true or false.
+// on whether 'blocked' is true or false.
 func WithBlocked(blocked bool) HostQueryOpt {
 	return func(opts *hostsQueryOpts) {
 		opts.Blocked = &blocked
