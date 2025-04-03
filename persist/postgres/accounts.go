@@ -70,6 +70,19 @@ func (s *Store) HasAccount(ctx context.Context, ak types.PublicKey) (bool, error
 	return exists, nil
 }
 
+// DeleteAccount deletes the account in the database with given account key.
+func (s *Store) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		res, err := tx.Exec(ctx, `DELETE FROM accounts WHERE public_key = $1`, sqlPublicKey(ak))
+		if err != nil {
+			return fmt.Errorf("failed to add account: %w", err)
+		} else if res.RowsAffected() != 1 {
+			return accounts.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // HostAccountsForFunding returns up to limit accounts for the given host key
 // that are due for funding.
 func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]accounts.HostAccount, error) {
