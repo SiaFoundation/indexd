@@ -285,7 +285,7 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 		return contracts[i].RemainingAllowance.Cmp(contracts[j].RemainingAllowance) > 0
 	})
 
-	// group contracts by contractsByHost
+	// group contracts by host
 	contractsByHost := make(map[types.PublicKey][]types.FileContractID)
 	for _, contract := range contracts {
 		contractsByHost[contract.HostKey] = append(contractsByHost[contract.HostKey], contract.ID)
@@ -323,7 +323,6 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 				<-sema
 			}()
 
-			var err error
 			err = cm.am.FundAccounts(ctx, host, contracts, log)
 			if err != nil {
 				log.Debug("failed to fund accounts", zap.Error(err))
