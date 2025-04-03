@@ -4,83 +4,86 @@ import (
 	"context"
 	"time"
 
+	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
 const dialTimeout = 10 * time.Second
 
 type (
-	// Funder dials a host and replenish a set of ephemeral accounts.
-	Funder struct {
-		target types.Currency
-		cm     *chain.Manager
-		signer rhp.ContractSigner
+	// ChainManager is the minimal interface of ChainManager functionality the
+	// Funder requires.
+	ChainManager interface {
+		TipState() consensus.State
 	}
 
-	// FundResult is the result of a funding operation.
-	FundResult struct {
-		Funded []bool
-		Usage  proto.Usage
+	// HostClient defines the interface for the funder to interact with the
+	// host.
+	HostClient interface {
+		Dial(context.Context, string, types.PublicKey) (rhp.TransportClient, error)
+		RPCLatestRevision(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error)
+		RPCReplenishAccounts(context.Context, rhp.TransportClient, rhp.RPCReplenishAccountsParams, consensus.State, rhp.ContractSigner) (rhp.RPCReplenishAccountsResult, error)
+	}
+
+	// Funder dials a host and replenish a set of ephemeral accounts.
+	Funder struct {
+		cm     ChainManager
+		host   HostClient
+		signer rhp.ContractSigner
+		target types.Currency
 	}
 )
 
-func newFundResult(accounts []HostAccount) FundResult {
-	return FundResult{
-		Funded: make([]bool, len(accounts)),
-		Usage:  proto.Usage{},
-	}
+type hostClient struct{}
+
+func (c *hostClient) Dial(ctx context.Context, addr string, peerKey types.PublicKey) (rhp.TransportClient, error) {
+	return siamux.Dial(ctx, addr, peerKey)
+}
+
+func (c *hostClient) RPCLatestRevision(ctx context.Context, t rhp.TransportClient, fcid types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+	return rhp.RPCLatestRevision(ctx, t, fcid)
+}
+
+func (c *hostClient) RPCReplenishAccounts(ctx context.Context, t rhp.TransportClient, params rhp.RPCReplenishAccountsParams, state consensus.State, signer rhp.ContractSigner) (rhp.RPCReplenishAccountsResult, error) {
+	return rhp.RPCReplenishAccounts(ctx, t, params, state, signer)
 }
 
 // NewFunder creates a new Funder.
-func NewFunder(cm *chain.Manager, signer rhp.ContractSigner, target types.Currency) *Funder {
+func NewFunder(cm ChainManager, signer rhp.ContractSigner, target types.Currency) *Funder {
 	return &Funder{
 		cm:     cm,
 		signer: signer,
 		target: target,
+		host:   &hostClient{},
 	}
 }
 
 // FundAccounts tops up the provided accounts to the target balance using the
-// specified contracts in order. It returns a result object that contains a bool
-// to indicate if the account was funded as well as the total usage.
-func (f *Funder) FundAccounts(ctx context.Context, hk types.PublicKey, addr string, accounts []HostAccount, contractIDs []types.FileContractID, log *zap.Logger) (FundResult, error) {
-	result := newFundResult(accounts)
-
-	// sanity check input
-	if len(accounts) == 0 {
-		return result, nil
-	} else if len(contractIDs) == 0 {
-		log.Debug("no contracts provided")
-		return result, nil
-	}
-
+// specified contracts in order. The number returned is the amount of accounts
+// that got funded, the accounts are funded in order.
+func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, accounts []HostAccount, contractIDs []types.FileContractID, log *zap.Logger) (int, error) {
 	// dial host
 	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
-	defer cancel()
-	t, err := siamux.Dial(dialCtx, addr, hk)
+	t, err := f.host.Dial(dialCtx, host.SiamuxAddr(), host.PublicKey)
+	cancel()
 	if err != nil {
 		log.Debug("failed to dial host", zap.Error(err))
-		return result, nil
+		return 0, nil
 	}
 	defer t.Close()
 
-	// prepare unfunded indices
-	unfunded := make([]int, 0, len(accounts))
-	for i := range accounts {
-		unfunded = append(unfunded, i)
-	}
-
 	// iterate over contracts
+	var fundedIdx int
 	for _, fcid := range contractIDs {
 		contractLog := log.With(zap.Stringer("contractID", fcid))
 
 		// fetch the latest revision, check it's revisable and has money
-		rev, err := rhp.RPCLatestRevision(ctx, t, fcid)
+		rev, err := f.host.RPCLatestRevision(ctx, t, fcid)
 		if err != nil {
 			contractLog.Debug("failed to fetch latest revision", zap.Error(err))
 			continue
@@ -90,13 +93,15 @@ func (f *Funder) FundAccounts(ctx context.Context, hk types.PublicKey, addr stri
 		} else if rev.Contract.RenterOutput.Value.IsZero() {
 			contractLog.Debug("contract is out of funds")
 			continue
+		} else if rev.Contract.RenterOutput.Value.Cmp(f.target) < 0 {
+			contractLog.Debug("contract has insufficient funds")
+			continue
 		}
 		balance := rev.Contract.RenterOutput.Value
 
 		// prepare accounts batch
 		var batch []proto.Account
-		var batchIndices []int
-		for _, i := range unfunded {
+		for i := fundedIdx; i < len(accounts); i++ {
 			var underflow bool
 			balance, underflow = balance.SubWithUnderflow(f.target)
 			if underflow {
@@ -104,7 +109,6 @@ func (f *Funder) FundAccounts(ctx context.Context, hk types.PublicKey, addr stri
 			}
 
 			batch = append(batch, accounts[i].AccountKey)
-			batchIndices = append(batchIndices, i)
 		}
 		if len(batch) == 0 {
 			continue
@@ -119,24 +123,15 @@ func (f *Funder) FundAccounts(ctx context.Context, hk types.PublicKey, addr stri
 		}
 
 		// execute replenish RPC
-		res, err := rhp.RPCReplenishAccounts(ctx, t, params, f.cm.TipState(), f.signer)
+		_, err = f.host.RPCReplenishAccounts(ctx, t, params, f.cm.TipState(), f.signer)
 		if err != nil {
 			log.Debug("failed to replenish accounts", zap.Error(err))
 			continue
 		}
 
-		// process response
-		result.Usage = result.Usage.Add(res.Usage)
-		for _, i := range batchIndices {
-			result.Funded[i] = true
-		}
-
-		// update unfunded accounts
-		unfunded = unfunded[len(batch):]
-		if len(unfunded) == 0 {
-			break
-		}
+		// update funded ix
+		fundedIdx += len(batch)
 	}
 
-	return result, nil
+	return fundedIdx, nil
 }
