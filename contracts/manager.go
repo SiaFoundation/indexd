@@ -134,6 +134,8 @@ type (
 		scanner    HostManager
 		renterKey  types.PublicKey
 
+		triggerFundingChan chan struct{}
+
 		log     *zap.Logger
 		shuffle func(int, func(i, j int))
 		tg      *threadgroup.ThreadGroup
@@ -182,6 +184,8 @@ func newContractManager(renterKey types.PublicKey, accountManager AccountManager
 		scanner: scanner,
 		store:   store,
 
+		triggerFundingChan: make(chan struct{}, 1),
+
 		log:     zap.NewNop(),
 		shuffle: frand.Shuffle,
 		tg:      threadgroup.New(),
@@ -195,6 +199,16 @@ func newContractManager(renterKey types.PublicKey, accountManager AccountManager
 		opt(cm)
 	}
 	return cm
+}
+
+// TriggerAccountFunding triggers the account funding process. This trigger is
+// used when a new account is added and ensures users don't have to wait for the
+// next maintenance loop before their account is funded.
+func (cm *ContractManager) TriggerAccountFunding() {
+	select {
+	case cm.triggerFundingChan <- struct{}{}:
+	default:
+	}
 }
 
 // Close closes the contract manager, terminates any background tasks and waits
@@ -213,11 +227,20 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 		return // shutdown
 	}
 
+	ticker := time.NewTicker(cm.maintenanceFrequency)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(cm.maintenanceFrequency):
+		case <-cm.triggerFundingChan:
+			log.Debug("triggering account funding")
+			if err := cm.performAccountFunding(ctx, log); err != nil {
+				log.Error("account funding failed", zap.Error(err))
+			}
+			continue
+		case <-ticker.C:
 		}
 
 		if err := cm.performContractMaintenance(ctx, log); err != nil {

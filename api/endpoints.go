@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/build"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/explorer"
@@ -40,6 +41,51 @@ func (a *api) checkServerError(jc jape.Context, context string, err error) bool 
 		a.log.Warn(context, zap.Error(err))
 	}
 	return err == nil
+}
+
+func (a *api) handleGETAccounts(jc jape.Context) {
+	offset, limit, ok := parseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+
+	accounts, err := a.store.Accounts(jc.Request.Context(), offset, limit)
+	if jc.Check("failed to get accounts", err) != nil {
+		return
+	}
+	jc.Encode(accounts)
+}
+
+func (a *api) handlePOSTAccount(jc jape.Context) {
+	var ak types.PublicKey
+	if jc.DecodeParam("accountkey", &ak) != nil {
+		return
+	}
+
+	err := a.store.AddAccount(jc.Request.Context(), ak)
+	if errors.Is(err, accounts.ErrExists) {
+		jc.Error(err, http.StatusConflict)
+		return
+	} else if jc.Check("failed to add account", err) != nil {
+		return
+	}
+
+	a.contracts.TriggerAccountFunding()
+}
+
+func (a *api) handleDELETEAccount(jc jape.Context) {
+	var ak types.PublicKey
+	if jc.DecodeParam("accountkey", &ak) != nil {
+		return
+	}
+
+	err := a.store.DeleteAccount(jc.Request.Context(), ak)
+	if errors.Is(err, accounts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to delete account", err) != nil {
+		return
+	}
 }
 
 func (a *api) handleGETState(jc jape.Context) {

@@ -86,6 +86,47 @@ func TestHasAccount(t *testing.T) {
 	}
 }
 
+func TestDeleteAccount(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	pk := types.GeneratePrivateKey().PublicKey()
+	err := store.DeleteAccount(context.Background(), pk)
+	if !errors.Is(err, accounts.ErrNotFound) {
+		t.Fatal("expected [accounts.ErrNotFound]")
+	}
+
+	err = store.AddAccount(context.Background(), pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	found, err := store.HasAccount(context.Background(), pk)
+	if err != nil {
+		t.Fatal(err)
+	} else if !found {
+		t.Fatal("expected account to exist")
+	}
+
+	accs, err := store.Accounts(context.Background(), 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accs) != 1 || accs[0] != pk {
+		t.Fatal("unexpected accounts", accs)
+	}
+
+	err = store.DeleteAccount(context.Background(), pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	accs, err = store.Accounts(context.Background(), 0, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accs) != 0 {
+		t.Fatal("unexpected accounts", accs)
+	}
+}
+
 func TestHostAccountsForFunding(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
