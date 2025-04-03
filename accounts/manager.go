@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	accountFundBatch            = proto.MaxAccountBatchSize // batch size must equal max batch size used in replenish RPC
+	accountFundBatch            = proto.MaxAccountBatchSize // equals max batch size used in replenish RPC
 	accountFundInterval         = time.Hour
 	accountExpBackoffMaxMinutes = 128
 )
@@ -70,8 +70,6 @@ func (m *AccountManager) Close() error {
 
 // FundAccounts attempts to fund all accounts for the given host key. It does so
 // using the provided contract IDs, which are used in the order they're given.
-// It returns a breakdown of the total costs incurred by the funding to allow
-// tracking contract spending.
 func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) error {
 	// sanity check input
 	if len(contractIDs) == 0 {
@@ -97,11 +95,11 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 			break
 		}
 
-		n, err := m.funder.FundAccounts(ctx, host, accounts, contractIDs, log)
+		funded, err := m.funder.FundAccounts(ctx, host, accounts, contractIDs, log)
 		if err != nil {
 			return fmt.Errorf("failed to fund accounts: %w", err)
 		}
-		updateFundedAccounts(accounts, n)
+		updateFundedAccounts(accounts, funded)
 
 		err = m.store.UpdateHostAccounts(ctx, accounts)
 		if err != nil {
