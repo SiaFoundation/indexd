@@ -102,7 +102,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 
 	password := hex.EncodeToString(frand.Bytes(16))
 	web := http.Server{
-		Handler: jape.BasicAuth(password)(api.NewServer(c.cm, s, wm, store, apiOpts...)),
+		Handler: jape.BasicAuth(password)(api.NewServer(c.cm, contracts, s, wm, store, apiOpts...)),
 	}
 
 	httpListener, err := net.Listen("tcp4", "127.0.0.1:0")

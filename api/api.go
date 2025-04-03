@@ -23,6 +23,13 @@ type (
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
+	// ContractManager manages contracts, but is also responsible for funding
+	// ephemeral accounts. If a new account is added we trigger account funding
+	// to ensure the account is funded as soon as possible.
+	ContractManager interface {
+		TriggerAccountFunding()
+	}
+
 	// Explorer retrieves data about the Sia network from an external source.
 	Explorer interface {
 		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
@@ -67,23 +74,25 @@ type (
 type (
 	// An api provides an HTTP API for the indexer
 	api struct {
-		chain    ChainManager
-		explorer Explorer
-		store    Store
-		syncer   Syncer
-		wallet   Wallet
-		log      *zap.Logger
+		chain     ChainManager
+		contracts ContractManager
+		explorer  Explorer
+		store     Store
+		syncer    Syncer
+		wallet    Wallet
+		log       *zap.Logger
 	}
 )
 
 // NewServer initializes the API
-func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, opts ...ServerOption) http.Handler {
+func NewServer(chain ChainManager, contracts ContractManager, syncer Syncer, wallet Wallet, store Store, opts ...ServerOption) http.Handler {
 	a := &api{
-		chain:  chain,
-		store:  store,
-		syncer: syncer,
-		wallet: wallet,
-		log:    zap.NewNop(),
+		chain:     chain,
+		contracts: contracts,
+		store:     store,
+		syncer:    syncer,
+		wallet:    wallet,
+		log:       zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(a)

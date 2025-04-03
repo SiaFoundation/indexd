@@ -66,8 +66,11 @@ func (a *api) handlePOSTAccount(jc jape.Context) {
 	if errors.Is(err, accounts.ErrExists) {
 		jc.Error(err, http.StatusConflict)
 		return
+	} else if jc.Check("failed to add account", err) != nil {
+		return
 	}
-	jc.Check("failed to add account", err)
+
+	a.contracts.TriggerAccountFunding()
 }
 
 func (a *api) handleGETState(jc jape.Context) {
