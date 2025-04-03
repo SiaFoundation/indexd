@@ -33,7 +33,7 @@ type (
 		BlockHosts(ctx context.Context, hks []types.PublicKey, reason string) error
 		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
-		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
+		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		LastScannedIndex(context.Context) (types.ChainIndex, error)
 		UnblockHost(ctx context.Context, hk types.PublicKey) error
 		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)

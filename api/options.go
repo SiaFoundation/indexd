@@ -41,3 +41,28 @@ func WithLimit(limit int) URLQueryParameterOption {
 		q.Set("limit", fmt.Sprint(limit))
 	}
 }
+
+// HostQueryParameterOption is an option to configure the query string for the
+// Hosts endpoint.
+type HostQueryParameterOption URLQueryParameterOption
+
+// WithBlocked sets the 'blocked' parameter.
+func WithBlocked(blocked bool) HostQueryParameterOption {
+	return func(q url.Values) {
+		q.Set("blocked", fmt.Sprint(blocked))
+	}
+}
+
+// WithUsable sets the 'usable' parameter.
+func WithUsable(usable bool) HostQueryParameterOption {
+	return func(q url.Values) {
+		q.Set("usable", fmt.Sprint(usable))
+	}
+}
+
+// WithActiveContracts sets the 'activecontracts' parameter.
+func WithActiveContracts(activeContracts bool) HostQueryParameterOption {
+	return func(q url.Values) {
+		q.Set("activecontracts", fmt.Sprint(activeContracts))
+	}
+}

@@ -1,3 +1,8 @@
+CREATE TABLE accounts (
+    id SERIAL PRIMARY KEY,
+    public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32)
+);
+
 CREATE TABLE hosts (
     id SERIAL PRIMARY KEY,
     public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32),
@@ -27,6 +32,15 @@ CREATE TABLE hosts (
     settings_valid_until TIMESTAMP WITH TIME ZONE
 );
 CREATE INDEX idx_hosts_next_scan_idx ON hosts(next_scan);
+
+CREATE TABLE account_hosts (
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    next_fund TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    consecutive_failed_funds INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT account_hosts_pk PRIMARY KEY (account_id, host_id)
+);
+CREATE INDEX account_hosts_host_id_next_fund_idx ON account_hosts (host_id, next_fund);
 
 CREATE TABLE hosts_blocklist (
     public_key BYTEA PRIMARY KEY CHECK (LENGTH(public_key) = 32),

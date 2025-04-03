@@ -20,6 +20,8 @@ import (
 const (
 	blockingReasonUsability = "usability"
 
+	hostsFetchLimit = 100
+
 	dialTimeout         = 10 * time.Second
 	minRemainingStorage = (10 * 1 << 30) / uint64(proto.SectorSize) // 10GB
 	maxContractSize     = 10 * 1 << 40                              // 10TB
@@ -54,7 +56,7 @@ type (
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
-		Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error)
+		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
@@ -239,36 +241,28 @@ func (cm *ContractManager) blockUntilReady(log *zap.Logger) bool {
 func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
-
-	contracts, err := cm.store.Contracts(ctx, WithRevisable(true))
-	if err != nil {
-		return fmt.Errorf("failed to fetch active contracts: %w", err)
-	}
-
 	log := cm.log.Named("blockhosts")
 
-	for _, c := range contracts {
-		contractLog := log.With(zap.Stringer("contractID", c.ID), zap.Stringer("hostKey", c.HostKey))
-
-		// fetch the host for the contract
-		host, err := cm.store.Host(ctx, c.HostKey)
+	var hostsToBlock []hosts.Host
+	for offset := 0; ; offset += hostsFetchLimit {
+		hosts, err := cm.store.Hosts(ctx, offset, hostsFetchLimit,
+			hosts.WithUsable(false), hosts.WithBlocked(false), hosts.WithActiveContracts(true))
 		if err != nil {
-			contractLog.Error("failed to fetch host for contract")
+			return fmt.Errorf("failed to fetch hosts to block: %w", err)
+		}
+		hostsToBlock = append(hostsToBlock, hosts...)
+		if len(hosts) < hostsFetchLimit {
+			break
+		}
+	}
+
+	for _, host := range hostsToBlock {
+		hostLog := log.With(zap.Stringer("hostKey", host.PublicKey))
+		if err := cm.store.BlockHosts(ctx, []types.PublicKey{host.PublicKey}, blockingReasonUsability); err != nil {
+			hostLog.Error("failed to block host", zap.Error(err))
 			continue
 		}
-
-		// if the host is not usable, we block it and mark the contract as bad
-		if !host.Usability.Usable() {
-			// avoid disk io if the host is already blocked and the contract is
-			// already marked as bad
-			if !host.Blocked || c.Good {
-				if err := cm.store.BlockHosts(ctx, []types.PublicKey{host.PublicKey}, blockingReasonUsability); err != nil {
-					contractLog.Error("failed to block host", zap.Error(err))
-					continue
-				}
-				log.Warn("blocking unusable host", zap.Any("usability", host.Usability))
-			}
-		}
+		log.Warn("blocking unusable host", zap.Any("usability", host.Usability))
 	}
 	return nil
 }

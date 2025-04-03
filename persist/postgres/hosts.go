@@ -11,6 +11,7 @@ import (
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 )
 
@@ -121,11 +122,15 @@ FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 }
 
 // Hosts returns a list of hosts.
-func (s *Store) Hosts(ctx context.Context, offset, limit int) ([]hosts.Host, error) {
+func (s *Store) Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
 	} else if limit == 0 {
 		return nil, nil
+	}
+	opts := hosts.DefaultHostsQueryOpts
+	for _, opt := range queryOpts {
+		opt(&opts)
 	}
 
 	var hosts []hosts.Host
@@ -155,7 +160,6 @@ WITH globals AS (
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
-	LIMIT $1 OFFSET $2
 ) SELECT
  	hosts.*,
 	recent_uptime > 0.9,
@@ -170,7 +174,32 @@ WITH globals AS (
 	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
 	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
 	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
-FROM hosts CROSS JOIN globals;`, limit, offset)
+FROM hosts CROSS JOIN globals
+WHERE
+	-- good host filter
+	(($3::boolean IS NULL) OR ($3::boolean = (
+		recent_uptime > 0.9 AND
+		has_settings AND
+		settings_max_contract_duration >= globals.contracts_period AND
+		settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
+		settings_version >= globals.host_min_version AND
+		settings_valid_until >= (NOW() + INTERVAL '1 hour') AND
+		settings_accepting_contracts AND
+		settings_contract_price <= globals.one_sc AND
+		settings_collateral >= globals.hosts_min_collateral AND
+		settings_collateral >= 2 * settings_storage_price AND
+		settings_storage_price <= globals.hosts_max_storage_price AND
+		settings_ingress_price <= globals.hosts_max_ingress_price AND
+		settings_egress_price <= globals.hosts_max_egress_price AND
+		settings_free_sector_price <= globals.one_sc / globals.one_tb
+		)
+	))
+	-- blocked host filter
+	AND (($4::boolean IS NULL) OR ($4::boolean = hosts.blocked))
+	-- active contracts filter
+	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state >= $6 AND state <= $7)))
+	LIMIT $1 OFFSET $2
+;`, limit, offset, opts.Good, opts.Blocked, opts.ActiveContracts, contracts.ContractStatePending, contracts.ContractStateActive)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts: %w", err)
 		}
