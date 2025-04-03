@@ -26,9 +26,16 @@ type formContractCall struct {
 }
 
 type contractorMock struct {
-	formCalls    []formContractCall
-	refreshCalls []refreshContractCall
-	renewCalls   []renewContractCall
+	formCalls       []formContractCall
+	refreshCalls    []refreshContractCall
+	renewCalls      []renewContractCall
+	latestRevisions map[types.FileContractID]proto.RPCLatestRevisionResponse
+}
+
+func newContractorMock() *contractorMock {
+	return &contractorMock{
+		latestRevisions: map[types.FileContractID]proto.RPCLatestRevisionResponse{},
+	}
 }
 
 func (c *contractorMock) Calls() []formContractCall {
@@ -63,6 +70,14 @@ func (c *contractorMock) FormContract(ctx context.Context, hk types.PublicKey, a
 			},
 		},
 	}, nil
+}
+
+func (c *contractorMock) LatestRevision(ctx context.Context, hk types.PublicKey, addr string, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+	resp, ok := c.latestRevisions[contractID]
+	if !ok {
+		return proto.RPCLatestRevisionResponse{}, fmt.Errorf("contract %v not found", contractID)
+	}
+	return resp, nil
 }
 
 type scannerMock struct {
@@ -190,7 +205,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 		good3.PublicKey: good3,
 	}
 
-	contractor := &contractorMock{}
+	contractor := newContractorMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
 	contracts := newContractManager(renterKey, cmMock, contractor, scanner, store, syncerMock, wallet)

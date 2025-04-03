@@ -156,7 +156,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 		bad.PublicKey:  bad,
 	}
 
-	contractor := &contractorMock{}
+	contractor := newContractorMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
 	contracts := newContractManager(renterKey, cmMock, contractor, scanner, store, syncerMock, wallet)

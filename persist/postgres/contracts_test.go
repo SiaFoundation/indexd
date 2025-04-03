@@ -617,3 +617,62 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 	store.MarkUnrenewableContractsBad(context.Background(), proofHeight+1)
 	assertContractGood(false)
 }
+
+func TestSyncContract(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := types.PublicKey{1, 1, 1}
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// add a contract
+	contractID := types.FileContractID{1}
+	if err := store.AddFormedContract(context.Background(), contractID, hk, 50, 100, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(10000)); err != nil {
+		t.Fatal(err)
+	}
+
+	// helper to sync and assert contract
+	assertContract := func(params contracts.ContractSyncParams) {
+		t.Helper()
+		if err := store.SyncContract(context.Background(), contractID, params); err != nil {
+			t.Fatal(err)
+		}
+		contract, err := store.Contract(context.Background(), contractID)
+		if err != nil {
+			t.Fatal(err)
+		} else if contract.Capacity != params.Capacity {
+			t.Fatalf("expected capacity %d, got %d", params.Capacity, contract.Capacity)
+		} else if contract.RemainingAllowance != params.RemainingAllowance {
+			t.Fatalf("expected remaining allowance %d, got %d", params.RemainingAllowance, contract.RemainingAllowance)
+		} else if contract.RevisionNumber != params.RevisionNumber {
+			t.Fatalf("expected revision number %d, got %d", params.RevisionNumber, contract.RevisionNumber)
+		} else if contract.Size != params.Size {
+			t.Fatalf("expected size %d, got %d", params.Size, contract.Size)
+		} else if contract.UsedCollateral != params.UsedCollateral {
+			t.Fatalf("expected used collateral %d, got %d", params.UsedCollateral, contract.UsedCollateral)
+		}
+	}
+
+	// assert setting it to some values works
+	assertContract(contracts.ContractSyncParams{
+		Capacity:           1000,
+		RemainingAllowance: types.Siacoins(1),
+		RevisionNumber:     100,
+		Size:               900,
+		UsedCollateral:     types.Siacoins(10),
+	})
+
+	// try again with different values
+	assertContract(contracts.ContractSyncParams{
+		Capacity:           2000,
+		RemainingAllowance: types.Siacoins(2),
+		RevisionNumber:     200,
+		Size:               1900,
+		UsedCollateral:     types.Siacoins(20),
+	})
+}

@@ -225,6 +225,17 @@ func (s *Store) RejectPendingContracts(ctx context.Context, maxFormation time.Ti
 	})
 }
 
+func (s *Store) SyncContract(ctx context.Context, contractID types.FileContractID, params contracts.ContractSyncParams) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+UPDATE contracts
+SET capacity = $1, remaining_allowance = $2, revision_number = $3, size = $4, used_collateral = $5
+WHERE contract_id = $6
+`, params.Capacity, params.RemainingAllowance, params.RevisionNumber, params.Size, params.UsedCollateral, sqlHash256(contractID))
+		return err
+	})
+}
+
 func (tx *updateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
 	for _, fce := range fces {
 		_, err := tx.tx.Exec(tx.ctx, `
