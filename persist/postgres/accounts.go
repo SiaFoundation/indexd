@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/hosts"
@@ -104,8 +105,8 @@ func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, 
 func (s *Store) UpdateHostAccounts(ctx context.Context, accounts []accounts.HostAccount) error {
 	if len(accounts) == 0 {
 		return nil
-	} else if len(accounts) > 1000 {
-		return errors.New("too many accounts to update") // should never happen, we call this using the max batch size of RPC replenish
+	} else if len(accounts) > proto.MaxAccountBatchSize {
+		return errors.New("too many accounts to update") // sanity check batch size against max batch size used in replenish RPC
 	}
 
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
