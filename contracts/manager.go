@@ -31,7 +31,7 @@ type (
 	// AccountManager defines an interface that allows funding accounts on the
 	// host using a given set of contracts.
 	AccountManager interface {
-		FundAccounts(ctx context.Context, hk types.PublicKey, contractIDs []types.FileContractID, log *zap.Logger) (proto.Usage, error)
+		FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) error
 	}
 
 	// ChainManager is the minimal interface of ChainManager functionality the
@@ -262,30 +262,37 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 		return contracts[i].RemainingAllowance.Cmp(contracts[j].RemainingAllowance) > 0
 	})
 
-	// group contracts by hosts
-	hosts := make(map[types.PublicKey][]types.FileContractID)
+	// group contracts by host
+	contractsByHost := make(map[types.PublicKey][]types.FileContractID)
 	for _, contract := range contracts {
-		hosts[contract.HostKey] = append(hosts[contract.HostKey], contract.ID)
+		contractsByHost[contract.HostKey] = append(contractsByHost[contract.HostKey], contract.ID)
 	}
 
-	log.Debug("funding accounts", zap.Int("hosts", len(hosts)))
+	log.Debug("funding accounts", zap.Int("hosts", len(contractsByHost)))
 
 	// fund accounts on all hosts
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, fundThreads)
 	defer close(sema)
 
-	var i int
-	usages := make([]proto.Usage, len(hosts))
-	for hk, contracts := range hosts {
+	for hk, contracts := range contractsByHost {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case sema <- struct{}{}:
 		}
 
+		host, err := cm.store.Host(ctx, hk)
+		if err != nil {
+			log.Debug("failed to fetch host", zap.Error(err))
+			continue
+		} else if host.Blocked || !host.Usability.Usable() {
+			log.Debug("skipping host", zap.String("hostKey", hk.String()), zap.Bool("blocked", host.Blocked), zap.Bool("usable", host.Usability.Usable()))
+			continue
+		}
+
 		wg.Add(1)
-		go func(ctx context.Context, i int, hk types.PublicKey, contracts []types.FileContractID, log *zap.Logger) {
+		go func(ctx context.Context, host hosts.Host, contracts []types.FileContractID, log *zap.Logger) {
 			ctx, cancel := context.WithTimeout(ctx, fundTimeout)
 			defer func() {
 				wg.Done()
@@ -293,23 +300,15 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 				<-sema
 			}()
 
-			var err error
-			usages[i], err = cm.am.FundAccounts(ctx, hk, contracts, log)
+			err = cm.am.FundAccounts(ctx, host, contracts, log)
 			if err != nil {
 				log.Debug("failed to fund accounts", zap.Error(err))
 			}
-		}(ctx, i, hk, contracts, log.With(zap.Stringer("hostKey", hk)))
-		i++
+		}(ctx, host, contracts, log.With(zap.Stringer("hostKey", hk)))
 	}
 	wg.Wait()
 
-	// TODO: record usage
-	var total proto.Usage
-	for _, usage := range usages {
-		total = total.Add(usage)
-	}
-
-	log.Debug("funding finished", zap.Int("hosts", len(hosts)), zap.Duration("duration", time.Since(start)), zap.Stringer("spent", total.AccountFunding))
+	log.Debug("funding finished", zap.Int("hosts", len(contractsByHost)), zap.Duration("duration", time.Since(start)))
 	return nil
 }
 

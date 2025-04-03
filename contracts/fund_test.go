@@ -5,13 +5,13 @@ import (
 	"sync"
 	"testing"
 
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
 type fundAccountsCall struct {
-	hk          types.PublicKey
+	host        hosts.Host
 	contractIDs []types.FileContractID
 }
 
@@ -20,19 +20,19 @@ type accountsManagerMock struct {
 	calls []fundAccountsCall
 }
 
-func (am *accountsManagerMock) FundAccounts(ctx context.Context, hk types.PublicKey, contractIDs []types.FileContractID, log *zap.Logger) (proto.Usage, error) {
+func (am *accountsManagerMock) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) error {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	am.calls = append(am.calls, fundAccountsCall{
-		hk:          hk,
+		host:        host,
 		contractIDs: contractIDs,
 	})
-	return proto.Usage{}, nil
+	return nil
 }
 
 func TestPerformAccountFunding(t *testing.T) {
 	amMock := &accountsManagerMock{}
-	store := &storeMock{}
+	store := &storeMock{hosts: make(map[types.PublicKey]hosts.Host)}
 	cm := newContractManager(types.PublicKey{}, amMock, nil, nil, nil, store, nil, nil)
 
 	// fund accounts
@@ -48,6 +48,10 @@ func TestPerformAccountFunding(t *testing.T) {
 
 	// add h1 with two contracts, c2 has more allowance
 	hk1 := types.PublicKey{1}
+	store.hosts[hk1] = hosts.Host{
+		PublicKey: hk1,
+		Usability: goodUsability,
+	}
 	store.contracts = append(store.contracts, Contract{
 		ID:                 types.FileContractID{1},
 		HostKey:            hk1,
@@ -61,6 +65,10 @@ func TestPerformAccountFunding(t *testing.T) {
 
 	// add h1 with one contract
 	hk2 := types.PublicKey{2}
+	store.hosts[hk2] = hosts.Host{
+		PublicKey: hk2,
+		Usability: goodUsability,
+	}
 	store.contracts = append(store.contracts, Contract{
 		ID:                 types.FileContractID{3},
 		HostKey:            hk2,
@@ -79,17 +87,17 @@ func TestPerformAccountFunding(t *testing.T) {
 	}
 	call1 := amMock.calls[0]
 	call2 := amMock.calls[1]
-	if call1.hk != hk1 {
+	if call1.host.PublicKey != hk1 {
 		call1, call2 = call2, call1
 	}
-	if call1.hk != hk1 {
+	if call1.host.PublicKey != hk1 {
 		t.Fatal("unexpected host key")
 	} else if call1.contractIDs[0] != (types.FileContractID{2}) {
 		t.Fatal("unexpected contract ID")
 	} else if call1.contractIDs[1] != (types.FileContractID{1}) {
 		t.Fatal("unexpected contract ID")
 	}
-	if call2.hk != hk2 {
+	if call2.host.PublicKey != hk2 {
 		t.Fatal("unexpected host key")
 	} else if call2.contractIDs[0] != (types.FileContractID{3}) {
 		t.Fatal("unexpected contract ID")
