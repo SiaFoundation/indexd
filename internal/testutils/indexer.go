@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/explorer"
@@ -71,8 +72,11 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
 
+	funder := accounts.NewFunder(c.cm, contracts.NewSigner(walletKey), types.Siacoins(1))
+	am := accounts.NewManager(store, funder, accounts.WithLogger(log.Named("accounts")))
+
 	cf := contracts.NewContractor(c.cm, wm, walletKey)
-	contracts, err := contracts.NewManager(walletKey.PublicKey(), nil, c.cm, cf, nil, store, s, wm, contracts.WithLogger(log.Named("contracts")))
+	contracts, err := contracts.NewManager(walletKey.PublicKey(), am, c.cm, cf, nil, store, s, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
@@ -127,6 +131,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		}
 		if err := closeWithTimeout(contracts.Close); err != nil {
 			t.Errorf("failed to close contract manager: %v", err)
+		}
+		if err := closeWithTimeout(am.Close); err != nil {
+			t.Errorf("failed to close account manager: %v", err)
 		}
 		if err := closeWithTimeout(subscriber.Close); err != nil {
 			t.Errorf("failed to close subscriber: %v", err)

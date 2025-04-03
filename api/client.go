@@ -26,6 +26,22 @@ func NewClient(addr, password string) *Client {
 	}}
 }
 
+// Accounts returns all accounts registered in the indexer.
+func (c *Client) Accounts(ctx context.Context, opts ...URLQueryParameterOption) (accounts []types.PublicKey, err error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	err = c.c.GET(ctx, "/accounts?"+values.Encode(), &accounts)
+	return
+}
+
+// AccountsAdd adds the account with the given account key.
+func (c *Client) AccountsAdd(ctx context.Context, accountKey types.PublicKey) (err error) {
+	err = c.c.POST(ctx, fmt.Sprintf("/account/%s", accountKey), nil, nil)
+	return
+}
+
 // State returns the current state of the indexer.
 func (c *Client) State(ctx context.Context) (state State, err error) {
 	err = c.c.GET(ctx, "/state", &state)

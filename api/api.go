@@ -30,6 +30,8 @@ type (
 
 	// A Store is a persistent store for the indexer.
 	Store interface {
+		Accounts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
+		AddAccount(ctx context.Context, ak types.PublicKey) error
 		BlockHosts(ctx context.Context, hks []types.PublicKey) error
 		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
@@ -89,6 +91,10 @@ func NewServer(chain ChainManager, syncer Syncer, wallet Wallet, store Store, op
 
 	return jape.Mux(map[string]jape.Handler{
 		"GET /state": a.handleGETState,
+
+		// accounts endpoints
+		"GET  /accounts":            a.handleGETAccounts,
+		"POST /account/:accountkey": a.handlePOSTAccount,
 
 		// explorer endpoints
 		"GET /explorer/exchange-rate/siacoin/:currency": a.handleGETExplorerSiacoinExchangeRate,
