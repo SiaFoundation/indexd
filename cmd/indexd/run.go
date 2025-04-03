@@ -106,7 +106,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	defer hm.Close()
 
 	cf := contracts.NewContractor(cm, wm, walletKey)
-	contracts, err := contracts.NewManager(walletKey.PublicKey(), cm, cf, hm, store, s, wm, contracts.WithLogger(log.Named("contracts")))
+	contracts, err := contracts.NewManager(walletKey.PublicKey(), nil, cm, cf, hm, store, s, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		return fmt.Errorf("failed to create contracts manager: %w", err)
 	}
