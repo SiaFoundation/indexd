@@ -213,8 +213,8 @@ CREATE TABLE contract_elements (
 
 ```postgresql
 CREATE TABLE accounts (
-    id BIGSERIAL PRIMARY KEY,
-    public_key BYTEA UNIQUE NOT NULL,
+    id SERIAL PRIMARY KEY,
+    public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32)
 );
 
 CREATE TABLE account_slabs (
@@ -222,6 +222,15 @@ CREATE TABLE account_slabs (
     slab_id BIGSERIAL REFERENCES slabs(id) NOT NULL,
     CONSTRAINT account_slabs_pk PRIMARY KEY (account_id, slab_id)
 );
+
+CREATE TABLE account_hosts (
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    next_fund TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    consecutive_failed_funds INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT account_hosts_pk PRIMARY KEY (account_id, host_id)
+);
+CREATE INDEX account_hosts_host_id_next_fund_idx ON account_hosts (host_id, next_fund);
 ```
 
 ### 2.6 Slabs and Sectors

@@ -19,10 +19,6 @@ func (u testProofUpdater) UpdateElementProof(se *types.StateElement) {
 	u.fn(se)
 }
 
-func proofUpdater(fn func(*types.StateElement)) testProofUpdater {
-	return testProofUpdater{fn: fn}
-}
-
 func TestUpdateChainState(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
