@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	accountFundBatch            = 1000 // equals max batch size in replenish RPC
+	accountFundBatch            = proto.MaxAccountBatchSize // batch size must equal max batch size used in replenish RPC
 	accountFundInterval         = time.Hour
 	accountExpBackoffMaxMinutes = 128
 )
@@ -29,7 +29,7 @@ type (
 
 	// AccountFunder defines an interface to fund accounts.
 	AccountFunder interface {
-		FundAccounts(ctx context.Context, hk types.PublicKey, addr string, accounts []HostAccount, contractIDs []types.FileContractID, log *zap.Logger) (FundResult, error)
+		FundAccounts(ctx context.Context, host hosts.Host, accounts []HostAccount, contractIDs []types.FileContractID, log *zap.Logger) (int, error)
 	}
 
 	// AccountManager manages accounts.
@@ -72,18 +72,24 @@ func (m *AccountManager) Close() error {
 // using the provided contract IDs, which are used in the order they're given.
 // It returns a breakdown of the total costs incurred by the funding to allow
 // tracking contract spending.
-func (m *AccountManager) FundAccounts(ctx context.Context, hk types.PublicKey, contractIDs []types.FileContractID, log *zap.Logger) (proto.Usage, error) {
-	host, err := m.store.Host(ctx, hk)
-	if err != nil {
-		return proto.Usage{}, fmt.Errorf("failed to fetch host: %w", err)
+func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) error {
+	// sanity check input
+	if len(contractIDs) == 0 {
+		log.Debug("no contracts provided")
+		return nil
+	} else if host.Blocked {
+		log.Debug("host is blocked")
+		return nil
+	} else if !host.Usability.Usable() {
+		log.Debug("host is not usable")
+		return nil
 	}
 
-	var totalUsage proto.Usage
 	var exhausted bool
 	for !exhausted {
-		accounts, err := m.store.HostAccountsForFunding(ctx, hk, accountFundBatch)
+		accounts, err := m.store.HostAccountsForFunding(ctx, host.PublicKey, accountFundBatch)
 		if err != nil {
-			return totalUsage, fmt.Errorf("failed to fetch accounts for funding: %w", err)
+			return fmt.Errorf("failed to fetch accounts for funding: %w", err)
 		} else if len(accounts) < accountFundBatch {
 			exhausted = true
 		}
@@ -91,27 +97,31 @@ func (m *AccountManager) FundAccounts(ctx context.Context, hk types.PublicKey, c
 			break
 		}
 
-		result, err := m.funder.FundAccounts(ctx, hk, host.SiamuxAddr(), accounts, contractIDs, log)
+		n, err := m.funder.FundAccounts(ctx, host, accounts, contractIDs, log)
 		if err != nil {
-			return totalUsage, fmt.Errorf("failed to fund accounts: %w", err)
+			return fmt.Errorf("failed to fund accounts: %w", err)
 		}
-
-		totalUsage = totalUsage.Add(result.Usage)
-		for i, funded := range result.Funded {
-			if funded {
-				accounts[i].ConsecutiveFailedFunds = 0
-				accounts[i].NextFund = time.Now().Add(accountFundInterval)
-			} else {
-				accounts[i].ConsecutiveFailedFunds++
-				accounts[i].NextFund = time.Now().Add(time.Duration(min(math.Pow(2, float64(accounts[i].ConsecutiveFailedFunds)), accountExpBackoffMaxMinutes)) * time.Minute)
-			}
-		}
+		updateFundedAccounts(accounts, n)
 
 		err = m.store.UpdateHostAccounts(ctx, accounts)
 		if err != nil {
-			return totalUsage, fmt.Errorf("failed to update accounts: %w", err)
+			return fmt.Errorf("failed to update accounts: %w", err)
 		}
 	}
 
-	return totalUsage, nil
+	return nil
+}
+
+func updateFundedAccounts(accounts []HostAccount, n int) {
+	if n > len(accounts) {
+		panic("illegal number of funded accounts") // developer error
+	}
+	for i := range n {
+		accounts[i].ConsecutiveFailedFunds = 0
+		accounts[i].NextFund = time.Now().Add(accountFundInterval)
+	}
+	for i := n; i < len(accounts); i++ {
+		accounts[i].ConsecutiveFailedFunds++
+		accounts[i].NextFund = time.Now().Add(time.Duration(min(math.Pow(2, float64(accounts[i].ConsecutiveFailedFunds)), accountExpBackoffMaxMinutes)) * time.Minute)
+	}
 }
