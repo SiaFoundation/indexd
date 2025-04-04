@@ -9,27 +9,11 @@ import (
 	"go.sia.tech/indexd/hosts"
 )
 
-var goodUsability = hosts.Usability{
-	Uptime:              true,
-	MaxContractDuration: true,
-	MaxCollateral:       true,
-	ProtocolVersion:     true,
-	PriceValidity:       true,
-	AcceptingContracts:  true,
-
-	ContractPrice:   true,
-	Collateral:      true,
-	StoragePrice:    true,
-	IngressPrice:    true,
-	EgressPrice:     true,
-	FreeSectorPrice: true,
-}
-
 func TestBlockBadHosts(t *testing.T) {
 	store := &storeMock{}
 	contracts := newContractManager(types.PublicKey{}, nil, nil, nil, store, nil, nil)
 
-	goodHost := hosts.Host{PublicKey: types.PublicKey{1}, Usability: goodUsability, Blocked: false}
+	goodHost := hosts.Host{PublicKey: types.PublicKey{1}, Usability: hosts.GoodUsability, Blocked: false}
 	badHost := hosts.Host{PublicKey: types.PublicKey{2}, Usability: hosts.Usability{}, Blocked: false}
 	unusedBadHost := hosts.Host{PublicKey: types.PublicKey{3}, Usability: hosts.Usability{}, Blocked: false}
 

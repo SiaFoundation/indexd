@@ -155,7 +155,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 				},
 			},
 			Settings:  goodSettings, // default to good settings to consider every host
-			Usability: goodUsability,
+			Usability: hosts.GoodUsability,
 		}
 	}
 
@@ -305,7 +305,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 				},
 			},
 			Settings:  goodSettings, // default to good settings to consider every host
-			Usability: goodUsability,
+			Usability: hosts.GoodUsability,
 		}
 	}
 

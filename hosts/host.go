@@ -105,8 +105,24 @@ type (
 	}
 )
 
+// GoodUsability is the usability struct indicating that all checks passed.
+var GoodUsability = Usability{
+	Uptime:              true,
+	MaxContractDuration: true,
+	MaxCollateral:       true,
+	ProtocolVersion:     true,
+	PriceValidity:       true,
+	AcceptingContracts:  true,
+
+	ContractPrice:   true,
+	Collateral:      true,
+	StoragePrice:    true,
+	IngressPrice:    true,
+	EgressPrice:     true,
+	FreeSectorPrice: true,
+}
+
 // Usable returns true if all checks passed.
 func (u Usability) Usable() bool {
-	return u.Uptime && u.MaxContractDuration && u.MaxCollateral && u.ProtocolVersion && u.PriceValidity && u.AcceptingContracts &&
-		u.ContractPrice && u.Collateral && u.StoragePrice && u.IngressPrice && u.EgressPrice && u.FreeSectorPrice
+	return u == GoodUsability
 }
