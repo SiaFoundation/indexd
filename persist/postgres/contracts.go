@@ -116,6 +116,14 @@ func (s *Store) Contracts(ctx context.Context, queryOpts ...contracts.ContractQu
 	panic("not implemented")
 }
 
+// ContractsForFunding returns a list of contracts, grouped by the host's public
+// key, that are good for funding. This means the host should be usable, not
+// blocked, and the contract should be good and revisable. The contracts are
+// sorted by the remaining allowance in descending fashion.
+func (s *Store) ContractsForFunding(context.Context) (map[types.PublicKey][]types.FileContractID, error) {
+	panic("not implemented")
+}
+
 // ContractElementsForBroadcast returns the contract elements of contracts that
 // have been expired for at least 'maxBlocksSinceExpiry' blocks.
 func (s *Store) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {

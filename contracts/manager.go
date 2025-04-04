@@ -3,7 +3,6 @@ package contracts
 import (
 	"context"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -68,6 +67,7 @@ type (
 		AddRenewedContract(ctx context.Context, params AddRenewedContractParams) error
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, queryOpts ...ContractQueryOpt) ([]Contract, error)
+		ContractsForFunding(ctx context.Context) (map[types.PublicKey][]types.FileContractID, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
@@ -288,51 +288,41 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 	start := time.Now()
 	log = log.Named("accounts")
 
-	// fetch all good contracts
-	contracts, err := cm.store.Contracts(ctx, WithRevisable(true), WithGood(true))
+	// fetch contracts for funding
+	hkToContractIDs, err := cm.store.ContractsForFunding(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to fetch good contracts: %w", err)
-	} else if len(contracts) == 0 {
-		log.Debug("funding skipped, no good contracts")
+		return fmt.Errorf("failed to fetch contracts for funding: %w", err)
+	} else if len(hkToContractIDs) == 0 {
+		log.Debug("funding skipped, no contracts")
 		return nil
 	}
 
-	// sort them by remaining allowance
-	sort.Slice(contracts, func(i, j int) bool {
-		return contracts[i].RemainingAllowance.Cmp(contracts[j].RemainingAllowance) > 0
-	})
-
-	// group contracts by host
-	contractsByHost := make(map[types.PublicKey][]types.FileContractID)
-	for _, contract := range contracts {
-		contractsByHost[contract.HostKey] = append(contractsByHost[contract.HostKey], contract.ID)
-	}
-
-	log.Debug("funding accounts", zap.Int("hosts", len(contractsByHost)))
+	log.Debug("funding accounts")
 
 	// fund accounts on all hosts
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, fundThreads)
 	defer close(sema)
 
-	for hk, contracts := range contractsByHost {
+	for hk, contractIDs := range hkToContractIDs {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case sema <- struct{}{}:
 		}
+		hostLogger := log.With(zap.Stringer("hostKey", hk))
 
 		host, err := cm.store.Host(ctx, hk)
 		if err != nil {
-			log.Debug("failed to fetch host", zap.Error(err))
+			hostLogger.Debug("failed to fetch host", zap.Error(err))
 			continue
 		} else if host.Blocked || !host.Usability.Usable() {
-			log.Debug("skipping host", zap.String("hostKey", hk.String()), zap.Bool("blocked", host.Blocked), zap.Bool("usable", host.Usability.Usable()))
+			hostLogger.Error("skipping host", zap.Bool("blocked", host.Blocked), zap.Bool("usable", host.Usability.Usable())) // sanity check, should have been filtered out
 			continue
 		}
 
 		wg.Add(1)
-		go func(ctx context.Context, host hosts.Host, contracts []types.FileContractID, log *zap.Logger) {
+		go func(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) {
 			ctx, cancel := context.WithTimeout(ctx, fundTimeout)
 			defer func() {
 				wg.Done()
@@ -340,15 +330,15 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 				<-sema
 			}()
 
-			err = cm.am.FundAccounts(ctx, host, contracts, log)
+			err = cm.am.FundAccounts(ctx, host, contractIDs, log)
 			if err != nil {
 				log.Debug("failed to fund accounts", zap.Error(err))
 			}
-		}(ctx, host, contracts, log.With(zap.Stringer("hostKey", hk)))
+		}(ctx, host, contractIDs, hostLogger)
 	}
 	wg.Wait()
 
-	log.Debug("funding finished", zap.Int("hosts", len(contractsByHost)), zap.Duration("duration", time.Since(start)))
+	log.Debug("funding finished", zap.Int("hosts", len(hkToContractIDs)), zap.Duration("duration", time.Since(start)))
 	return nil
 }
 
