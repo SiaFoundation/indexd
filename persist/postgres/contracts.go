@@ -91,7 +91,7 @@ func (s *Store) Contract(ctx context.Context, contractID types.FileContractID) (
 	var contract contracts.Contract
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		contract, err = scanContract(tx.QueryRow(ctx, `
-SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
+SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 LEFT JOIN contracts c_from ON c.renewed_from = c_from.id
@@ -234,7 +234,7 @@ func (s *Store) SyncContract(ctx context.Context, contractID types.FileContractI
 UPDATE contracts
 SET capacity = $1, remaining_allowance = $2, revision_number = $3, size = $4, used_collateral = $5
 WHERE contract_id = $6
-`, params.Capacity, params.RemainingAllowance, params.RevisionNumber, params.Size, params.UsedCollateral, sqlHash256(contractID))
+`, params.Capacity, sqlCurrency(params.RemainingAllowance), params.RevisionNumber, params.Size, sqlCurrency(params.UsedCollateral), sqlHash256(contractID))
 		return err
 	})
 }
@@ -272,6 +272,7 @@ func scanContract(row scanner) (contracts.Contract, error) {
 		&c.ProofHeight, &c.ExpirationHeight,
 		asNullable((*sqlHash256)(&c.RenewedFrom)),
 		asNullable((*sqlHash256)(&c.RenewedTo)),
+		&c.RevisionNumber,
 		(*sqlContractState)(&c.State),
 		&c.Capacity,
 		&c.Size,
