@@ -29,6 +29,8 @@ var (
 			Collateral:    types.NewCurrency64(1),
 			StoragePrice:  types.NewCurrency64(1),
 		},
+		MaxContractDuration: 90 * 144,
+		MaxCollateral:       types.Siacoins(1000),
 	}
 )
 
