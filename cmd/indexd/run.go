@@ -106,7 +106,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer hm.Close()
 
-	funder := accounts.NewFunder(cm, contracts.NewSigner(walletKey), types.Siacoins(1))
+	funder := accounts.NewFunder(cm, wm, types.Siacoins(1))
 	am := accounts.NewManager(store, funder, accounts.WithLogger(log.Named("accounts")))
 	defer am.Close()
 
