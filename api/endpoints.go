@@ -73,6 +73,21 @@ func (a *api) handlePOSTAccount(jc jape.Context) {
 	a.contracts.TriggerAccountFunding()
 }
 
+func (a *api) handleDELETEAccount(jc jape.Context) {
+	var ak types.PublicKey
+	if jc.DecodeParam("accountkey", &ak) != nil {
+		return
+	}
+
+	err := a.store.DeleteAccount(jc.Request.Context(), ak)
+	if errors.Is(err, accounts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to delete account", err) != nil {
+		return
+	}
+}
+
 func (a *api) handleGETState(jc jape.Context) {
 	ci, err := a.store.LastScannedIndex(jc.Request.Context())
 	if jc.Check("failed to get last scanned index", err) != nil {

@@ -39,6 +39,7 @@ type (
 	Store interface {
 		Accounts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		AddAccount(ctx context.Context, ak types.PublicKey) error
+		DeleteAccount(ctx context.Context, ak types.PublicKey) error
 		BlockHosts(ctx context.Context, hks []types.PublicKey) error
 		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
@@ -102,8 +103,9 @@ func NewServer(chain ChainManager, contracts ContractManager, syncer Syncer, wal
 		"GET /state": a.handleGETState,
 
 		// accounts endpoints
-		"GET  /accounts":            a.handleGETAccounts,
-		"POST /account/:accountkey": a.handlePOSTAccount,
+		"GET    /accounts":            a.handleGETAccounts,
+		"POST   /account/:accountkey": a.handlePOSTAccount,
+		"DELETE /account/:accountkey": a.handleDELETEAccount,
 
 		// explorer endpoints
 		"GET /explorer/exchange-rate/siacoin/:currency": a.handleGETExplorerSiacoinExchangeRate,

@@ -56,6 +56,19 @@ func TestAccountsAPI(t *testing.T) {
 	} else if len(accounts) != 0 {
 		t.Fatal("unexpected accounts", accounts)
 	}
+
+	for _, acc := range accs {
+		err = indexer.AccountsDelete(context.Background(), acc)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	accounts, err = indexer.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accounts) != 0 {
+		t.Fatal("unexpected accounts", len(accounts))
+	}
 }
 
 func TestExplorerAPI(t *testing.T) {
