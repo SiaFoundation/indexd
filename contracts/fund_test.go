@@ -65,7 +65,7 @@ func TestPerformAccountFunding(t *testing.T) {
 	hk1 := types.PublicKey{1}
 	store.hosts[hk1] = hosts.Host{
 		PublicKey: hk1,
-		Usability: goodUsability,
+		Usability: hosts.GoodUsability,
 	}
 	store.contracts = append(store.contracts, Contract{
 		ID:                 types.FileContractID{1},
@@ -78,15 +78,33 @@ func TestPerformAccountFunding(t *testing.T) {
 		RemainingAllowance: types.Siacoins(2),
 	})
 
-	// add h1 with one contract
+	// add h2 with one contract
 	hk2 := types.PublicKey{2}
 	store.hosts[hk2] = hosts.Host{
 		PublicKey: hk2,
-		Usability: goodUsability,
+		Usability: hosts.GoodUsability,
 	}
 	store.contracts = append(store.contracts, Contract{
 		ID:                 types.FileContractID{3},
 		HostKey:            hk2,
+		RemainingAllowance: types.Siacoins(1),
+	})
+
+	// add h3, which is unusable
+	hk3 := types.PublicKey{3}
+	store.hosts[hk3] = hosts.Host{PublicKey: hk3}
+	store.contracts = append(store.contracts, Contract{
+		ID:                 types.FileContractID{4},
+		HostKey:            hk3,
+		RemainingAllowance: types.Siacoins(1),
+	})
+
+	// add h4, which is blocked
+	hk4 := types.PublicKey{4}
+	store.hosts[hk4] = hosts.Host{PublicKey: hk4, Blocked: true}
+	store.contracts = append(store.contracts, Contract{
+		ID:                 types.FileContractID{5},
+		HostKey:            hk4,
 		RemainingAllowance: types.Siacoins(1),
 	})
 
@@ -96,7 +114,7 @@ func TestPerformAccountFunding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert there were two calls, one for each host
+	// assert there were two calls, one for each usable host
 	if len(amMock.calls) != 2 {
 		t.Fatal("unexpected")
 	}
