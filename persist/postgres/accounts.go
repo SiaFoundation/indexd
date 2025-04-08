@@ -58,7 +58,7 @@ func (s *Store) AddAccount(ctx context.Context, ak types.PublicKey) error {
 	})
 }
 
-// AddAccount adds a new account in the database with given account key.
+// DeleteAccount deletes the account in the database with given account key.
 func (s *Store) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		res, err := tx.Exec(ctx, `DELETE FROM accounts WHERE public_key = $1`, sqlPublicKey(ak))
