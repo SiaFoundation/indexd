@@ -190,7 +190,7 @@ CREATE INDEX slabs_digest ON slabs(digest);
 
 CREATE TABLE sectors (
     id BIGSERIAL PRIMARY KEY,
-    sector_root BYTEA UNIQUE NOT NULL,
+    sector_root BYTEA NOT NULL,
 
     -- uploading
     host_id INTEGER REFERENCES hosts(id), -- host that stores sector
