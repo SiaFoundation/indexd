@@ -92,7 +92,7 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, slabs []Sla
 }
 
 // Slabs returns the slabs with the given IDs from the database.
-func (s *Store) Slabs(ctx context.Context, slabIDs []SlabID) ([]Slab, error) {
+func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error) {
 	if len(slabIDs) == 0 {
 		return nil, nil
 	}

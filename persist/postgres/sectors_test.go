@@ -111,7 +111,7 @@ func TestPinSlabs(t *testing.T) {
 	}
 
 	// fetch inserted slabs
-	fetched, err := store.Slabs(context.Background(), slabIDs)
+	fetched, err := store.Slabs(context.Background(), account, slabIDs)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(fetched) != len(slabs) {
@@ -133,12 +133,12 @@ func TestPinSlabs(t *testing.T) {
 	}
 }
 
-// BenchmarkPinSlabs benchmarks PinSlabs in various batch sizes
-// Hardware | BatchSize |  ms/op  | Throughput    |
-// M2 Pro   |  40MiB    |   1.1ms | 36115.26 MB/s |
-// M2 Pro   | 400MiB    |   7.8ms |  5363.69 MB/s |
-// M2 Pro   |   4GiB    |  79.8ms |   528.11 MB/s |
-func BenchmarkPinSlabs(b *testing.B) {
+// BenchmarkSlabs benchmarks Slabs and PinSlabs in various batch sizes
+// Hardware |     Benchmark   |  ms/op  | Throughput    |
+// M2 Pro   | PinSlabs-40MiB  |  1.1ms | 36115.26 MB/s |
+// M2 Pro   | PinSlabs-400MiB |  7.8ms |  5363.69 MB/s |
+// M2 Pro   | PinSlabs-4GiB   | 79.8ms |   528.11 MB/s |
+func BenchmarkSlabs(b *testing.B) {
 	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
 	account := proto.Account{1}
 
@@ -184,16 +184,15 @@ func BenchmarkPinSlabs(b *testing.B) {
 	for range dbBaseSize / slabSize {
 		initialSlabs = append(initialSlabs, newSlab())
 	}
-	_, err := store.PinSlabs(context.Background(), account, []SlabPinParams{newSlab()})
+	initialSlabIDs, err := store.PinSlabs(context.Background(), account, initialSlabs)
 	if err != nil {
 		b.Fatal(err)
 	}
 
-	runBenchmark := func(b *testing.B, nSlabs int) {
+	runPinBenchmark := func(b *testing.B, nSlabs int) {
 		b.SetBytes(slabSize)
 		b.ResetTimer()
 		for b.Loop() {
-
 			b.StopTimer()
 			var slabs []SlabPinParams
 			for range nSlabs {
@@ -208,18 +207,51 @@ func BenchmarkPinSlabs(b *testing.B) {
 		}
 	}
 
+	runSlabsBenchmark := func(b *testing.B, nSlabs int) {
+		b.SetBytes(slabSize)
+		b.ResetTimer()
+		for b.Loop() {
+			b.StopTimer()
+			frand.Shuffle(len(initialSlabIDs), func(i, j int) {
+				initialSlabIDs[i], initialSlabIDs[j] = initialSlabIDs[j], initialSlabIDs[i]
+			})
+			slabIDs := initialSlabIDs[:nSlabs]
+			b.StartTimer()
+
+			_, err := store.Slabs(context.Background(), proto.Account{1}, slabIDs)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+
 	// insert 40MiB of data at a time
 	b.Run("PinSlabs-40MiB", func(b *testing.B) {
-		runBenchmark(b, 1)
+		runPinBenchmark(b, 1)
 	})
 
 	// insert 400MiB of data at a time
 	b.Run("PinSlabs-400MiB", func(b *testing.B) {
-		runBenchmark(b, 10)
+		runPinBenchmark(b, 10)
 	})
 
 	// insert 4GiB of data at a time
 	b.Run("PinSlabs-4GiB", func(b *testing.B) {
-		runBenchmark(b, 100)
+		runPinBenchmark(b, 100)
+	})
+
+	// fetch 40MiB of data at a time
+	b.Run("Slabs-40MiB", func(b *testing.B) {
+		runSlabsBenchmark(b, 1)
+	})
+
+	// fetch 400MiB of data at a time
+	b.Run("Slabs-400MiB", func(b *testing.B) {
+		runSlabsBenchmark(b, 10)
+	})
+
+	// fetch 4GiB of data at a time
+	b.Run("Slabs-4GiB", func(b *testing.B) {
+		runSlabsBenchmark(b, 100)
 	})
 }
