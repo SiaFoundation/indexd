@@ -297,16 +297,12 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 
 	var offset int
 	var exhausted bool
-	for !exhausted {
-		if err := ctx.Err(); err != nil {
-			break
-		}
-
+	for !exhausted && ctx.Err() == nil {
 		// fetch hosts
-		hostss, err := cm.store.Hosts(ctx, offset, fundThreads, opts...)
+		hostsToFund, err := cm.store.Hosts(ctx, offset, fundThreads, opts...)
 		if err != nil {
 			return fmt.Errorf("failed to fetch hosts for account funding: %w", err)
-		} else if len(hostss) < fundThreads {
+		} else if len(hostsToFund) < fundThreads {
 			exhausted = true
 		} else {
 			offset += fundThreads
@@ -314,7 +310,7 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 
 		// fund accounts on all hosts
 		var wg sync.WaitGroup
-		for _, host := range hostss {
+		for _, host := range hostsToFund {
 			wg.Add(1)
 			go func(ctx context.Context, host hosts.Host, log *zap.Logger) {
 				ctx, cancel := context.WithTimeout(ctx, fundTimeout)
