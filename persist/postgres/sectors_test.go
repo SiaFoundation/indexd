@@ -132,3 +132,94 @@ func TestPinSlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// BenchmarkPinSlabs benchmarks PinSlabs in various batch sizes
+// Hardware | BatchSize |  ms/op  | Throughput    |
+// M2 Pro   |  40MiB    |   4.1ms | 10213.82 MB/s |
+// M2 Pro   | 400MiB    |  45.2ms |   927.61 MB/s |
+// M2 Pro   |   4GiB    | 460.8ms |    91.01 MB/s |
+func BenchmarkPinSlabs(b *testing.B) {
+	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
+	account := proto.Account{1}
+
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	// 30 hosts to simulate default redundancy
+	var hks []types.PublicKey
+	for i := byte(0); i < 30; i++ {
+		hk := types.PublicKey{i}
+		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+		}); err != nil {
+			b.Fatal(err)
+		}
+		hks = append(hks, hk)
+	}
+
+	// helper to create slabs
+	newSlab := func() SlabPinParams {
+		var sectors []SectorPinParams
+		for i := range hks {
+			sectors = append(sectors, SectorPinParams{
+				Root:    frand.Entropy256(),
+				HostKey: hks[i],
+			})
+		}
+		slab := SlabPinParams{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     10,
+			Sectors:       sectors,
+		}
+		return slab
+	}
+
+	const dbBaseSize = 1 << 40    // 1TiB
+	const slabSize = 40 * 1 << 20 // 40MiB
+
+	// prepare base db
+	var initialSlabs []SlabPinParams
+	for range dbBaseSize / slabSize {
+		initialSlabs = append(initialSlabs, newSlab())
+	}
+	_, err := store.PinSlabs(context.Background(), account, []SlabPinParams{newSlab()})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	runBenchmark := func(b *testing.B, nSlabs int) {
+		b.SetBytes(slabSize)
+		b.ResetTimer()
+		for b.Loop() {
+
+			b.StopTimer()
+			var slabs []SlabPinParams
+			for range nSlabs {
+				slabs = append(slabs, newSlab())
+			}
+			b.StartTimer()
+
+			_, err := store.PinSlabs(context.Background(), proto.Account{1}, slabs)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+
+	// insert 40MiB of data at a time
+	b.Run("PinSlabs-40MiB", func(b *testing.B) {
+		runBenchmark(b, 1)
+	})
+
+	// insert 400MiB of data at a time
+	b.Run("PinSlabs-400MiB", func(b *testing.B) {
+		runBenchmark(b, 10)
+	})
+
+	// insert 4GiB of data at a time
+	b.Run("PinSlabs-4GiB", func(b *testing.B) {
+		runBenchmark(b, 100)
+	})
+}
