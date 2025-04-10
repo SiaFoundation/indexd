@@ -179,14 +179,14 @@ CREATE TABLE slabs (
     id BIGSERIAL PRIMARY KEY, -- internal db id
 
     account_id SERIAL REFERENCES accounts(id), -- account that owns slab
-    digest BYTEA NOT NULL, -- unique identifier for the slab derived from sector roots
+    digest BYTEA NOT NULL CHECK(LENGTH(digest) = 32), -- unique identifier for the slab derived from sector roots
     UNIQUE(account_id, digest), -- deduplicate slabs per account
 
     encryption_key BYTEA NOT NULL,
     last_repair_attempt TIMESTAMP WITH TIME ZONE,
     min_shards SMALLINT NOT NULL CHECK(min_shards > 0)
 );
-CREATE INDEX slabs_digest ON slabs(digest);
+CREATE INDEX slabs_digest_idx ON slabs(digest);
 
 CREATE TABLE sectors (
     id BIGSERIAL PRIMARY KEY,
