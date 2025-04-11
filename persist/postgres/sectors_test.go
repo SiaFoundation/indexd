@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
@@ -22,7 +23,7 @@ func TestPinSlabs(t *testing.T) {
 	account2 := proto.Account{2}
 
 	// pin without an account
-	slabIDs, err := store.PinSlabs(context.Background(), account, []SlabPinParams{{}})
+	slabIDs, err := store.PinSlabs(context.Background(), account, []slabs.SlabPinParams{{}})
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected ErrNotFound, got", err)
 	}
@@ -51,11 +52,11 @@ func TestPinSlabs(t *testing.T) {
 	hk2 := addHost(2)
 
 	// helper to create slabs
-	newSlab := func(i byte) (SlabID, SlabPinParams) {
-		slab := SlabPinParams{
+	newSlab := func(i byte) (slabs.SlabID, slabs.SlabPinParams) {
+		slab := slabs.SlabPinParams{
 			EncryptionKey: [32]byte{i},
 			MinShards:     10,
-			Sectors: []SectorPinParams{
+			Sectors: []slabs.SectorPinParams{
 				{
 					Root:    frand.Entropy256(),
 					HostKey: hk1,
@@ -70,24 +71,24 @@ func TestPinSlabs(t *testing.T) {
 		for _, sector := range slab.Sectors {
 			hasher.E.Write(sector.Root[:])
 		}
-		return SlabID(hasher.Sum()), slab
+		return slabs.SlabID(hasher.Sum()), slab
 	}
 
 	// pins slabs
 	slab1ID, slab1 := newSlab(1)
 	slab2ID, slab2 := newSlab(2)
-	slabs := []SlabPinParams{slab1, slab2}
-	expectedIDs := []SlabID{slab1ID, slab2ID}
-	slabIDs, err = store.PinSlabs(context.Background(), proto.Account{1}, slabs)
+	params := []slabs.SlabPinParams{slab1, slab2}
+	expectedIDs := []slabs.SlabID{slab1ID, slab2ID}
+	slabIDs, err = store.PinSlabs(context.Background(), proto.Account{1}, params)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(slabIDs) != len(slabs) {
-		t.Fatalf("expected %d slab IDs, got %d", len(slabs), len(slabIDs))
+	} else if len(slabIDs) != len(params) {
+		t.Fatalf("expected %d slab IDs, got %d", len(params), len(slabIDs))
 	} else if slabIDs[0] != expectedIDs[0] || slabIDs[1] != expectedIDs[1] {
 		t.Fatalf("expected slab IDs %v, got %v", expectedIDs, slabIDs)
 	}
 
-	assertSlab := func(slabID SlabID, params SlabPinParams, slab Slab) {
+	assertSlab := func(slabID slabs.SlabID, params slabs.SlabPinParams, slab slabs.Slab) {
 		t.Helper()
 		if slab.ID != slabID {
 			t.Fatalf("expected slab ID %v, got %v", slabID, slab.ID)
@@ -114,26 +115,26 @@ func TestPinSlabs(t *testing.T) {
 	fetched, err := store.Slabs(context.Background(), account, slabIDs)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(fetched) != len(slabs) {
-		t.Fatalf("expected %d slabs, got %d", len(slabs), len(fetched))
+	} else if len(fetched) != len(params) {
+		t.Fatalf("expected %d slabs, got %d", len(params), len(fetched))
 	}
 	assertSlab(slab1ID, slab1, fetched[0])
 	assertSlab(slab2ID, slab2, fetched[1])
 
 	// again but for wrong account
 	_, err = store.Slabs(context.Background(), account2, slabIDs)
-	if !errors.Is(err, ErrSlabNotFound) {
+	if !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatal(err)
 	}
 
 	// pin same slabs again which should return an error
-	slabIDs, err = store.PinSlabs(context.Background(), proto.Account{1}, slabs)
-	if !errors.Is(err, ErrSlabExists) {
+	slabIDs, err = store.PinSlabs(context.Background(), proto.Account{1}, params)
+	if !errors.Is(err, slabs.ErrSlabExists) {
 		t.Fatal("expected ErrSlabExists, got", err)
 	}
 
 	// pinning them under a different account id should work
-	_, err = store.PinSlabs(context.Background(), proto.Account{2}, slabs)
+	_, err = store.PinSlabs(context.Background(), proto.Account{2}, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,15 +174,15 @@ func BenchmarkSlabs(b *testing.B) {
 	}
 
 	// helper to create slabs
-	newSlab := func() SlabPinParams {
-		var sectors []SectorPinParams
+	newSlab := func() slabs.SlabPinParams {
+		var sectors []slabs.SectorPinParams
 		for i := range hks {
-			sectors = append(sectors, SectorPinParams{
+			sectors = append(sectors, slabs.SectorPinParams{
 				Root:    frand.Entropy256(),
 				HostKey: hks[i],
 			})
 		}
-		slab := SlabPinParams{
+		slab := slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
 			MinShards:     10,
 			Sectors:       sectors,
@@ -193,7 +194,7 @@ func BenchmarkSlabs(b *testing.B) {
 	const slabSize = 40 * 1 << 20 // 40MiB
 
 	// prepare base db
-	var initialSlabs []SlabPinParams
+	var initialSlabs []slabs.SlabPinParams
 	for range dbBaseSize / slabSize {
 		initialSlabs = append(initialSlabs, newSlab())
 	}
@@ -207,7 +208,7 @@ func BenchmarkSlabs(b *testing.B) {
 		b.ResetTimer()
 		for b.Loop() {
 			b.StopTimer()
-			var slabs []SlabPinParams
+			var slabs []slabs.SlabPinParams
 			for range nSlabs {
 				slabs = append(slabs, newSlab())
 			}
