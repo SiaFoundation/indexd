@@ -156,9 +156,3 @@ func requestHash(hostname string, validUntil time.Time) types.Hash256 {
 	h.E.WriteUint64(uint64(validUntil.Unix()))
 	return h.Sum()
 }
-
-func httpWriteError(w http.ResponseWriter, msg string, statusCode int) {
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(statusCode)
-	w.Write([]byte(msg))
-}

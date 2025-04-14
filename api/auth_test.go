@@ -30,7 +30,7 @@ func TestAuth(t *testing.T) {
 	server := httptest.NewServer(wrapSignedAPI(hostname, s, map[string]authedHandler{
 		"GET /foo": func(jc jape.Context, pk types.PublicKey) {
 			if pk != sk.PublicKey() {
-				httpWriteError(jc.ResponseWriter, "account key mismatch", http.StatusInternalServerError)
+				jc.ResponseWriter.WriteHeader(http.StatusInternalServerError)
 				return
 			}
 			jc.ResponseWriter.WriteHeader(http.StatusOK)
