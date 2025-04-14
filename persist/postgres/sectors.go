@@ -20,10 +20,14 @@ func (s *Store) SectorsForIntegrityCheck(ctx context.Context, hostKey types.Publ
 	var sectors []types.Hash256
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
+			WITH hid AS (
+				SELECT id FROM hosts WHERE public_key = $1
+			)
 			SELECT sector_root
 			FROM sectors
-			INNER JOIN hosts ON hosts.id = sectors.host_id
-			WHERE hosts.public_key = $1 AND next_integrity_check <= NOW()
+			WHERE
+				host_id = (SELECT id FROM hid)
+				AND next_integrity_check <= NOW()
 			ORDER BY next_integrity_check ASC
 			LIMIT $2
 		`, sqlPublicKey(hostKey), limit)

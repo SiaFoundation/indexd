@@ -370,9 +370,9 @@ func BenchmarkSlabs(b *testing.B) {
 //
 //	CPU  | BatchSize |	  Count  |     Time/op     |   Throughput
 //
-// M2 Pro |    10 	  |   2630   |    0.420636 ms  |  99713.43 MB/s
-// M2 Pro |   100     |   2253   |    0.495096 ms  | 847169.64 MB/s
-// M2 Pro |  1000     |     30   |   39.023510 ms  | 107481.47 MB/s
+// M2 Pro |    10 	  |   2857   |    0.380024 ms  |  110369.50 MB/s
+// M2 Pro |   100     |   2780   |    0.428167 ms  |  979595.01 MB/s
+// M2 Pro |  1000     |   1497   |    0.790556 ms  | 5305513.99 MB/s
 func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto.Account{1}
