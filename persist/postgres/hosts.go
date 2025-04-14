@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"strings"
 	"time"
 
 	proto4 "go.sia.tech/core/rhp/v4"
@@ -486,15 +485,11 @@ func decorateHostAddresses(ctx context.Context, tx *txn, hosts ...*dbHost) error
 	for len(hosts) > 0 {
 		batch := min(len(hosts), batchSize)
 
-		var args []any
-		var parts []string
+		var hostIds []any
 		for i := range batch {
-			args = append(args, hosts[i].id)
-			parts = append(parts, fmt.Sprintf("$%d", i+1))
+			hostIds = append(hostIds, hosts[i].id)
 		}
-		placeHolders := fmt.Sprintf("(%s)", strings.Join(parts, ","))
-
-		rows, err := tx.Query(ctx, `SELECT host_id, net_address, protocol FROM host_addresses WHERE host_id IN `+placeHolders, args...)
+		rows, err := tx.Query(ctx, `SELECT host_id, net_address, protocol FROM host_addresses WHERE host_id = ANY($1)`, hostIds)
 		if err != nil {
 			return fmt.Errorf("failed to query host addresses: %w", err)
 		}
@@ -532,15 +527,11 @@ func decorateHostNetworks(ctx context.Context, tx *txn, hosts ...*dbHost) error 
 	for len(hosts) > 0 {
 		batch := min(len(hosts), batchSize)
 
-		var args []any
-		var parts []string
+		var hostIds []any
 		for i := range batch {
-			args = append(args, hosts[i].id)
-			parts = append(parts, fmt.Sprintf("$%d", i+1))
+			hostIds = append(hostIds, hosts[i].id)
 		}
-		placeHolders := fmt.Sprintf("(%s)", strings.Join(parts, ","))
-
-		rows, err := tx.Query(ctx, `SELECT host_id, cidr FROM host_resolved_cidrs WHERE host_id IN `+placeHolders, args...)
+		rows, err := tx.Query(ctx, `SELECT host_id, cidr FROM host_resolved_cidrs WHERE host_id = ANY($1)`, hostIds)
 		if err != nil {
 			return fmt.Errorf("failed to query host networks: %w", err)
 		}
