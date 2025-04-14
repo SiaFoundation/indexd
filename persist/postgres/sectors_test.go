@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
@@ -362,4 +364,82 @@ func BenchmarkSlabs(b *testing.B) {
 	b.Run("Slabs-4GiB", func(b *testing.B) {
 		runSlabsBenchmark(b, 100)
 	})
+}
+
+// BenchmarkSectorsForIntegrityCheck benchmarks SectorsForIntegrityCheck
+//
+//	CPU  | BatchSize |	  Count  |     Time/op     |   Throughput
+//
+// M2 Pro |    10 	  |   2630   |    0.420636 ms  |  99713.43 MB/s
+// M2 Pro |   100     |   2253   |    0.495096 ms  | 847169.64 MB/s
+// M2 Pro |  1000     |     30   |   39.023510 ms  | 107481.47 MB/s
+func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+	account := proto.Account{1}
+
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	// add a host
+	hk := types.PublicKey{1}
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// prepare base db
+	const (
+		dbBaseSize = 1 << 40 // 1TiB of sectors
+		nSectors   = dbBaseSize / proto.SectorSize
+	)
+
+	// insert sectors in batches
+	for remainingSectors := nSectors; remainingSectors > 0; {
+		batchSize := min(remainingSectors, 10000)
+		remainingSectors -= batchSize
+		var sectors []slabs.SectorPinParams
+		for range batchSize {
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    frand.Entropy256(),
+				HostKey: hk,
+			})
+		}
+		slabIDs, err := store.PinSlabs(context.Background(), account, time.Now().Add(time.Hour), []slabs.SlabPinParams{{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       sectors,
+		}})
+		if err != nil {
+			b.Fatal(err)
+		} else if len(slabIDs) != 1 {
+			b.Fatal("expected 1 slab id")
+		}
+	}
+
+	// update next_integrity_check to random value in the past
+	_, err := store.pool.Exec(context.Background(), `
+		UPDATE sectors SET next_integrity_check = NOW() - interval '1 week' * random()
+	`)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for _, batchSize := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
+			b.SetBytes(int64(batchSize) * proto.SectorSize)
+			b.ResetTimer()
+
+			for b.Loop() {
+				batch, err := store.SectorsForIntegrityCheck(context.Background(), hk, batchSize)
+				if err != nil {
+					b.Fatal(err)
+				} else if len(batch) != batchSize {
+					b.Fatalf("no full batch was returned: %d", len(batch))
+				}
+			}
+		})
+	}
 }

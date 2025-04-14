@@ -14,6 +14,8 @@ import (
 	"go.sia.tech/indexd/slabs"
 )
 
+// SectorsForIntegrityCheck returns up to `limit` sectors that are due for an
+// integrity check.
 func (s *Store) SectorsForIntegrityCheck(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
 	var sectors []types.Hash256
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
