@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -26,46 +27,40 @@ func TestSectorsForIntegrityCheck(t *testing.T) {
 		t.Fatal("failed to add account:", err)
 	}
 
-	// add hosts
-	addHost := func(i byte) types.PublicKey {
-		t.Helper()
-		hk := types.PublicKey{i}
-
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			t.Fatal(err)
-		}
-		return hk
+	// add host
+	hk := types.PublicKey{1}
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
 	}
-	hk1 := addHost(1)
-	hk2 := addHost(2)
 
 	// pin a slab to add a few sectors to the database
 	root1 := frand.Entropy256()
 	root2 := frand.Entropy256()
-	nextCheck := time.Now().Add(-time.Minute) // in the past
-	_, err := store.PinSlabs(context.Background(), account, nextCheck, []slabs.SlabPinParams{
+	root3 := frand.Entropy256()
+	root4 := frand.Entropy256()
+	_, err := store.PinSlabs(context.Background(), account, time.Time{}, []slabs.SlabPinParams{
 		{
 			EncryptionKey: [32]byte{},
 			MinShards:     10,
 			Sectors: []slabs.SectorPinParams{
 				{
 					Root:    root1,
-					HostKey: hk1,
+					HostKey: hk,
 				},
 				{
 					Root:    root2,
-					HostKey: hk1,
+					HostKey: hk,
 				},
 				{
-					Root:    root1,
-					HostKey: hk2,
+					Root:    root3,
+					HostKey: hk,
 				},
 				{
-					Root:    root2,
-					HostKey: hk2,
+					Root:    root4,
+					HostKey: hk,
 				},
 			},
 		},
@@ -73,11 +68,45 @@ func TestSectorsForIntegrityCheck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sectors, err := store.SectorsForIntegrityCheck(context.Background(), hk1, 10)
+
+	// update next integrity check time for roots and assert the ordering works
+	updateNextCheck := func(root types.Hash256, nextCheck time.Time) {
+		t.Helper()
+		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET next_integrity_check = $1 WHERE sector_root = $2`, nextCheck, sqlHash256(root))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().Round(time.Microsecond)
+	updateNextCheck(root2, now.Add(-2*time.Hour))      // requires check
+	updateNextCheck(root4, now.Add(-1*time.Hour))      // requires check
+	updateNextCheck(root3, now.Add(-time.Millisecond)) // requires check
+	updateNextCheck(root1, now.Add(1*time.Hour))       // doesn't require check
+
+	// make sure limit is applied
+	assertSectors := func(limit int) {
+		t.Helper()
+		expected := []types.Hash256{root2, root4, root3}
+		sectors, err := store.SectorsForIntegrityCheck(context.Background(), hk, limit)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(sectors) != min(limit, len(expected)) {
+			t.Fatalf("expected 3 sectors, got %d", len(sectors))
+		} else if !reflect.DeepEqual(sectors, expected[:min(limit, len(expected))]) {
+			t.Fatal("sectors don't match expected roots")
+		}
+	}
+	assertSectors(10)
+	assertSectors(3)
+	assertSectors(2)
+	assertSectors(1)
+
+	// no sectors for unknown host
+	sectors, err := store.SectorsForIntegrityCheck(context.Background(), types.PublicKey{2}, 10)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(sectors) != 2 {
-		t.Fatalf("expected 2 sectors, got %d", len(sectors))
+	} else if len(sectors) != 0 {
+		t.Fatalf("expected 0 sectors, got %d", len(sectors))
 	}
 }
 
