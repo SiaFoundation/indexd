@@ -13,10 +13,108 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/contracts"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
+
+// BenchmarkContracts is a benchmark to ensure the performance of
+// Contract and Contracts.
+//
+// M1 Max | Contract | 1.1ms/op
+// M1 Max | Contracts (default) | 188ms/op
+// M1 Max | Contracts (filtered) | 95ms/op
+func BenchmarkContracts(b *testing.B) {
+	const (
+		numContractsPerHost = 100
+		numHosts            = 1000
+	)
+
+	// prepare database
+	store := initPostgres(b, zap.NewNop())
+	hosts := make([]types.PublicKey, 0, numHosts)
+	contractIDs := make([]types.FileContractID, 0, numHosts*numContractsPerHost)
+	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		for range numHosts {
+			var hostID int64
+			hk := types.GeneratePrivateKey().PublicKey()
+			err := tx.QueryRow(ctx, `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
+			if err != nil {
+				return err
+			}
+
+			var dbIds []*int64
+			dbIds = append(dbIds, nil)
+			for range numContractsPerHost {
+				var id types.FileContractID
+				frand.Read(id[:])
+				contractIDs = append(contractIDs, id)
+
+				var dbID int64
+				if err := tx.QueryRow(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9) RETURNING id;`,
+					hostID,
+					sqlHash256(id),
+					sqlCurrency(types.ZeroCurrency),
+					sqlCurrency(types.ZeroCurrency),
+					sqlCurrency(types.ZeroCurrency),
+					sqlCurrency(types.ZeroCurrency),
+					sqlCurrency(types.ZeroCurrency),
+					sqlContractState(uint8(frand.Uint64n(5))), // 40% active
+					frand.Uint64n(2) == 0,                     // 50% good
+				).Scan(&dbID); err != nil {
+					return err
+				}
+				dbIds = append(dbIds, &dbID)
+			}
+			dbIds = append(dbIds, nil)
+
+			for i := 1; i < len(dbIds)-1; i++ {
+				_, err := tx.Exec(ctx, `UPDATE contracts SET renewed_from = $1, renewed_to = $2 WHERE id = $3;`, dbIds[i-1], dbIds[i+1], dbIds[i])
+				if err != nil {
+					return err
+				}
+			}
+
+			hosts = append(hosts, hk)
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	b.Run("contract", func(b *testing.B) {
+		for b.Loop() {
+			if b.N > len(contractIDs) {
+				b.Fatalf("too many iterations, %d > %d", b.N, len(contractIDs))
+			}
+			_, err := store.Contract(context.Background(), contractIDs[b.N%len(contractIDs)])
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	// filters out active contracts
+	b.Run("contracts_default", func(b *testing.B) {
+		for b.Loop() {
+			_, err := store.Contracts(context.Background())
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	// filters out active and good contracts (so applies both filters)
+	b.Run("contracts_filtered", func(b *testing.B) {
+		for b.Loop() {
+			_, err := store.Contracts(context.Background(), contracts.WithGood(true))
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
 
 // BenchmarkHosts is a set of benchmarks that verify the performance of the host
 // methods in the store that use common table expressions.

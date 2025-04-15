@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -13,6 +14,91 @@ import (
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
+
+func TestContracts(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := types.PublicKey{1}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add three contracts
+	fcid1 := types.FileContractID{1}
+	fcid2 := types.FileContractID{2}
+	fcid3 := types.FileContractID{3}
+	if err := errors.Join(
+		store.AddFormedContract(context.Background(), fcid1, hk, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+		store.AddFormedContract(context.Background(), fcid2, hk, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+		store.AddFormedContract(context.Background(), fcid3, hk, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// mark the second one resolved so it's considered inactive
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateContractState(fcid2, contracts.ContractStateResolved)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// mark the third as bad so it's considered not good
+	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(fcid3))
+		return err
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert css returns only active css by default
+	css, err := store.Contracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(css) != 2 {
+		t.Fatal("expected 2 contracts, got", len(css))
+	}
+
+	// assert WithGood(true)
+	css, err = store.Contracts(context.Background(), contracts.WithGood(true))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(css) != 1 {
+		t.Fatal("expected 1 contract, got", len(css))
+	} else if css[0].ID != fcid1 {
+		t.Fatalf("expected contract %v, got %v", fcid1, css[0].ID)
+	}
+
+	// assert WithGood(false)
+	css, err = store.Contracts(context.Background(), contracts.WithGood(false))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(css) != 1 {
+		t.Fatal("expected 1 contract, got", len(css))
+	} else if css[0].ID != fcid3 {
+		t.Fatalf("expected contract %v, got %v", fcid3, css[0].ID)
+	}
+
+	// assert WithRevisable(true)
+	css, err = store.Contracts(context.Background(), contracts.WithRevisable(true))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(css) != 2 {
+		t.Fatal("expected 2 contracts, got", len(css))
+	}
+
+	// assert WithRevisable(false)
+	css, err = store.Contracts(context.Background(), contracts.WithRevisable(false))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(css) != 1 {
+		t.Fatal("expected 1 contract, got", len(css))
+	} else if css[0].ID != fcid2 {
+		t.Fatalf("expected contract %v, got %v", fcid2, css[0].ID)
+	}
+}
 
 func TestContractElementsForBroadcast(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))

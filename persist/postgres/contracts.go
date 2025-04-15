@@ -113,7 +113,42 @@ func (s *Store) Contracts(ctx context.Context, queryOpts ...contracts.ContractQu
 	for _, opt := range queryOpts {
 		opt(&opts)
 	}
-	panic("not implemented")
+
+	var contracts []contracts.Contract
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
+		rows, err := tx.Query(ctx, `
+SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
+FROM contracts c
+INNER JOIN hosts h ON c.host_id = h.id
+LEFT JOIN contracts c_from ON c.renewed_from = c_from.id
+LEFT JOIN contracts c_to ON c.renewed_to = c_to.id
+WHERE 
+	-- good filter
+	(($1::boolean IS NULL) OR ($1::boolean = c.good)) AND
+	-- active filter
+	(
+		$2::boolean IS NULL OR 
+		($2::boolean = TRUE AND c.state <= 1) OR 
+		($2::boolean = FALSE AND c.state > 1)
+	)`, opts.Good, opts.Revisable)
+		if err != nil {
+			return fmt.Errorf("failed to query contracts: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			contract, err := scanContract(rows)
+			if err != nil {
+				return fmt.Errorf("failed to scan contract: %w", err)
+			}
+			contracts = append(contracts, contract)
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
+	}
+
+	return contracts, nil
 }
 
 // ContractsForFunding returns a list of contracts for the given host key that
