@@ -178,15 +178,19 @@ CREATE TABLE contract_elements (
 CREATE TABLE slabs (
     id BIGSERIAL PRIMARY KEY, -- internal db id
 
-    account_id SERIAL REFERENCES accounts(id), -- account that owns slab
-    digest BYTEA NOT NULL CHECK(LENGTH(digest) = 32), -- unique identifier for the slab derived from sector roots
-    UNIQUE(account_id, digest), -- deduplicate slabs per account
+    digest BYTEA UNIQUE NOT NULL CHECK(LENGTH(digest) = 32), -- unique identifier for the slab derived from sector roots
 
     encryption_key BYTEA NOT NULL,
     last_repair_attempt TIMESTAMP WITH TIME ZONE,
     min_shards SMALLINT NOT NULL CHECK(min_shards > 0)
 );
 CREATE INDEX slabs_digest_idx ON slabs(digest);
+
+CREATE TABLE account_slabs (
+    account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns slab
+    slab_id BIGSERIAL REFERENCES slabs(id) NOT NULL,
+    CONSTRAINT account_slabs_pk PRIMARY KEY (account_id, slab_id)
+);
 
 CREATE TABLE sectors (
     id BIGSERIAL PRIMARY KEY,
