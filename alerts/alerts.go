@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.uber.org/zap"
 )
 
 const (
@@ -48,14 +47,9 @@ type (
 
 	// A Manager manages the indexer's alerts.
 	Manager struct {
-		log *zap.Logger
-
 		mu     sync.Mutex
 		alerts map[types.Hash256]Alert
 	}
-
-	// ManagerOption is a functional option for the alert manager.
-	ManagerOption func(*Manager) error
 )
 
 type (
@@ -113,24 +107,11 @@ func (s *Severity) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// WithLog sets the logger for the manager.
-func WithLog(l *zap.Logger) ManagerOption {
-	return func(m *Manager) error {
-		m.log = l
-		return nil
-	}
-}
-
 // NewManager initializes a new alerts manager.
-func NewManager(opts ...ManagerOption) *Manager {
-	m := &Manager{
+func NewManager() *Manager {
+	return &Manager{
 		alerts: make(map[types.Hash256]Alert),
-		log:    zap.NewNop(),
 	}
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
 }
 
 // Alerts returns the current alerts at requested offset and limit. The alerts
@@ -182,10 +163,7 @@ func (m *Manager) DismissAlerts(ids ...types.Hash256) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, id := range ids {
-		if _, ok := m.alerts[id]; ok {
-			delete(m.alerts, id)
-			m.log.Debug("dismissed alert", zap.Stringer("id", id))
-		}
+		delete(m.alerts, id)
 	}
 }
 
@@ -202,11 +180,6 @@ func (m *Manager) RegisterAlert(alert Alert) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.alerts[alert.ID] = alert
-	m.log.Debug("registered alert",
-		zap.Stringer("id", alert.ID),
-		zap.Stringer("severity", alert.Severity),
-		zap.String("message", alert.Message),
-	)
 	return nil
 }
 
