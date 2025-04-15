@@ -75,7 +75,7 @@ func (s *Store) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		res, err := tx.Exec(ctx, `DELETE FROM accounts WHERE public_key = $1`, sqlPublicKey(ak))
 		if err != nil {
-			return fmt.Errorf("failed to add account: %w", err)
+			return fmt.Errorf("failed to delete account: %w", err)
 		} else if res.RowsAffected() != 1 {
 			return accounts.ErrNotFound
 		}
