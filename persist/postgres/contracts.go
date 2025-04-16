@@ -32,58 +32,34 @@ func (s *Store) AddFormedContract(ctx context.Context, contractID types.FileCont
 	})
 }
 
-// AddRenewedContract adds a renewed contract to the database using the
-// following steps:
-// - Duplicate the existing contract/row and point the copy to the original
-// - Update a potential row that referenced the existing contract in renewed_to to point to the new row
-// - Overwrite the existing contract to match the renewed contract
+// AddRenewedContract adds a renewed contract to the database.
 func (s *Store) AddRenewedContract(ctx context.Context, params contracts.AddRenewedContractParams) error {
-	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		// defer the evaluation of the UNIQUE constraints while swapping contracts
-		if _, err := tx.Exec(ctx, "SET CONSTRAINTS contracts_contract_id_key, contracts_renewed_from_key, contracts_renewed_to_key DEFERRED"); err != nil {
-			return fmt.Errorf("failed to defer contract_id key constraint: %w", err)
-		}
-
-		// fetch the existing row of the contract
-		var existingID int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM contracts WHERE contract_id = $1`, sqlHash256(params.RenewedFrom)).Scan(&existingID); errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("contract %q: %w", params.RenewedFrom, contracts.ErrNotFound)
-		} else if err != nil {
-			return fmt.Errorf("failed to fetch existing contract: %w", err)
-		}
-
-		// duplicate it and make sure the new row renews to the existing row
-		var newID int64
-		if err := tx.QueryRow(ctx, `
-INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, renewed_from, renewed_to, state, capacity, size, contract_price, initial_allowance, remaining_allowance, miner_fee, used_collateral, total_collateral, good, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending) (
-	SELECT host_id, contract_id, proof_height, expiration_height, renewed_from, $1, state, capacity, size, contract_price, initial_allowance, remaining_allowance, miner_fee, used_collateral, total_collateral, good, append_sector_spending, free_sector_spending, fund_account_spending, sector_roots_spending
-	FROM contracts
-	WHERE contracts.id = $1
-) RETURNING id
-`, existingID).Scan(&newID); err != nil {
-			return fmt.Errorf("failed to copy renewed contract: %w", err)
-		}
-
-		// update a potential row that renewed to the existing contract
-		_, err := tx.Exec(context.Background(), `UPDATE contracts SET renewed_to = $1 WHERE renewed_to = $2 AND id != $1`, newID, existingID)
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+INSERT INTO contracts(contract_id, host_id, formation, proof_height, expiration_height, renewed_from, capacity, size, contract_price, initial_allowance, remaining_allowance, miner_fee, used_collateral, total_collateral)
+(SELECT $1, host_id, NOW(), $2, $3, contract_id, CASE WHEN $2 = proof_height THEN capacity ELSE size END, size, $4, $5, $5, $6, $7, $8 FROM contracts WHERE contract_id = $9)`,
+			sqlHash256(params.RenewedTo),
+			params.ProofHeight,
+			params.ExpirationHeight,
+			sqlCurrency(params.ContractPrice),
+			sqlCurrency(params.Allowance),
+			sqlCurrency(params.MinerFee),
+			sqlCurrency(params.UsedCollateral),
+			sqlCurrency(params.TotalCollateral),
+			sqlHash256(params.RenewedFrom),
+		)
 		if err != nil {
-			return fmt.Errorf("failed to update renewed_to: %w", err)
+			return fmt.Errorf("failed to add renewed contract to database: %w", err)
 		}
 
-		// update the existing row to match the new contract
-		resp, err := tx.Exec(ctx, `
-UPDATE contracts SET contract_id = $1, formation = NOW(), proof_height = $2, expiration_height = $3, renewed_from = $4, renewed_to = NULL, state = 0, capacity = CASE WHEN $2 = contracts.proof_height THEN contracts.capacity ELSE contracts.size END, contract_price = $5, initial_allowance = $6, remaining_allowance = $6, miner_fee = $7, used_collateral = $8, total_collateral = $9, good = TRUE, append_sector_spending = 0, free_sector_spending = 0, fund_account_spending = 0, sector_roots_spending = 0
-WHERE id = $10`, sqlHash256(params.RenewedTo), params.ProofHeight, params.ExpirationHeight, newID, sqlCurrency(params.ContractPrice), sqlCurrency(params.Allowance), sqlCurrency(params.MinerFee), sqlCurrency(params.UsedCollateral), sqlCurrency(params.TotalCollateral), existingID)
+		res, err := tx.Exec(ctx, `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2`, sqlHash256(params.RenewedTo), sqlHash256(params.RenewedFrom))
 		if err != nil {
-			return fmt.Errorf("failed to init renewed contract: %w", err)
-		} else if resp.RowsAffected() != 1 {
-			return fmt.Errorf("expected 1 row to be affected, got %d", resp.RowsAffected())
+			return fmt.Errorf("failed to add renewed contract to database: %w", err)
+		} else if res.RowsAffected() != 1 {
+			return fmt.Errorf("expected 1 row to be affected, got %d", res.RowsAffected())
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	return nil
+	})
 }
 
 // Contract returns a single contract
@@ -91,11 +67,9 @@ func (s *Store) Contract(ctx context.Context, contractID types.FileContractID) (
 	var contract contracts.Contract
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		contract, err = scanContract(tx.QueryRow(ctx, `
-SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
+SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
-LEFT JOIN contracts c_from ON c.renewed_from = c_from.id
-LEFT JOIN contracts c_to ON c.renewed_to = c_to.id
 WHERE c.contract_id = $1`, sqlHash256(contractID)))
 		return err
 	}); errors.Is(err, sql.ErrNoRows) {
@@ -106,10 +80,9 @@ WHERE c.contract_id = $1`, sqlHash256(contractID)))
 	return contract, nil
 }
 
-// Contracts queries the contracts in the database. By default, only active
-// contracts are returned.
-func (s *Store) Contracts(ctx context.Context, queryOpts ...contracts.ContractQueryOpt) ([]contracts.Contract, error) {
-	opts := contracts.DefaultContractQueryOpts
+// Contracts queries the contracts in the database.
+func (s *Store) Contracts(ctx context.Context, offset, limit int, queryOpts ...contracts.ContractQueryOpt) ([]contracts.Contract, error) {
+	var opts contracts.ContractQueryOpts
 	for _, opt := range queryOpts {
 		opt(&opts)
 	}
@@ -117,11 +90,9 @@ func (s *Store) Contracts(ctx context.Context, queryOpts ...contracts.ContractQu
 	var contracts []contracts.Contract
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		rows, err := tx.Query(ctx, `
-SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c_from.contract_id, c_to.contract_id, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
+SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
-LEFT JOIN contracts c_from ON c.renewed_from = c_from.id
-LEFT JOIN contracts c_to ON c.renewed_to = c_to.id
 WHERE 
 	-- good filter
 	(($1::boolean IS NULL) OR ($1::boolean = c.good)) AND
@@ -130,7 +101,8 @@ WHERE
 		$2::boolean IS NULL OR 
 		($2::boolean = TRUE AND c.state <= 1) OR 
 		($2::boolean = FALSE AND c.state > 1)
-	)`, opts.Good, opts.Revisable)
+	)
+LIMIT $3 OFFSET $4`, opts.Good, opts.Revisable, limit, offset)
 		if err != nil {
 			return fmt.Errorf("failed to query contracts: %w", err)
 		}
@@ -168,14 +140,14 @@ WITH current_height AS (
     SELECT scanned_height FROM global_settings
 )
 SELECT
-    contracts.contract_id,
+    fces.contract_id,
     fces.contract,
     fces.leaf_index,
     fces.merkle_proof
-FROM contracts
-INNER JOIN contract_elements fces ON contracts.id = fces.contract_id
+FROM contract_elements fces
+INNER JOIN contracts c ON fces.contract_id = c.contract_id
 CROSS JOIN current_height
-WHERE current_height.scanned_height >= contracts.expiration_height + $1;
+WHERE current_height.scanned_height >= c.expiration_height + $1;
 `, maxBlocksSinceExpiry)
 		if err != nil {
 			return err
@@ -212,18 +184,14 @@ WITH current_height AS (
 )
 DELETE FROM contract_elements fces
 USING contracts, current_height
-WHERE fces.contract_id = contracts.id AND current_height.scanned_height >= contracts.expiration_height + $1;
+WHERE fces.contract_id = contracts.contract_id AND current_height.scanned_height >= contracts.expiration_height + $1;
 `, maxBlocksSinceExpiry)
 		return err
 	})
 }
 
 func (tx *updateTx) ContractElements() ([]types.V2FileContractElement, error) {
-	rows, err := tx.tx.Query(tx.ctx, `
-SELECT c.contract_id, fces.contract, fces.leaf_index, fces.merkle_proof
-FROM contract_elements fces
-INNER JOIN contracts c ON fces.contract_id = c.id
-`)
+	rows, err := tx.tx.Query(tx.ctx, `SELECT contract_id, contract, leaf_index, merkle_proof FROM contract_elements fces`)
 	if err != nil {
 		return nil, err
 	}
@@ -284,11 +252,8 @@ WHERE contract_id = $6
 func (tx *updateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
 	for _, fce := range fces {
 		_, err := tx.tx.Exec(tx.ctx, `
-INSERT INTO contract_elements (contract_id, contract, leaf_index, merkle_proof)
-VALUES (
-  (SELECT id FROM contracts WHERE contract_id = $1),
-  $2, $3, $4
-) ON CONFLICT (contract_id) DO UPDATE SET contract = EXCLUDED.contract, leaf_index = EXCLUDED.leaf_index, merkle_proof = EXCLUDED.merkle_proof
+INSERT INTO contract_elements (contract_id, contract, leaf_index, merkle_proof) VALUES ($1, $2, $3, $4) 
+ON CONFLICT (contract_id) DO UPDATE SET contract = EXCLUDED.contract, leaf_index = EXCLUDED.leaf_index, merkle_proof = EXCLUDED.merkle_proof
 `, sqlHash256(fce.ID), (*sqlFileContract)(&fce.V2FileContract), fce.StateElement.LeafIndex, sqlMerkleProof(fce.StateElement.MerkleProof))
 		if err != nil {
 			return fmt.Errorf("failed to update contract element for contract %v: %w", fce.ID, err)

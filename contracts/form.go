@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -101,7 +102,7 @@ func (cf *contractor) LatestRevision(ctx context.Context, hk types.PublicKey, ad
 // contracts with good hosts in unique CIDRs.
 func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted uint64, log *zap.Logger) error {
 	formationLog := log.Named("formation")
-	activeContracts, err := cm.store.Contracts(ctx, WithRevisable(true))
+	activeContracts, err := cm.store.Contracts(ctx, 0, math.MaxInt64, WithRevisable(true)) // TODO: handle offset/limit
 	if err != nil {
 		return fmt.Errorf("failed to fetch active contracts: %w", err)
 	}

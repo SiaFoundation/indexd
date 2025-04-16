@@ -53,50 +53,47 @@ func TestContracts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert css returns only active css by default
-	css, err := store.Contracts(context.Background())
-	if err != nil {
+	// assert store returns all contracts without filters
+	if css, err := store.Contracts(context.Background(), 0, 10); err != nil {
 		t.Fatal(err)
-	} else if len(css) != 2 {
-		t.Fatal("expected 2 contracts, got", len(css))
+	} else if len(css) != 3 {
+		t.Fatal("expected 3 contracts, got", len(css))
 	}
 
-	// assert WithGood(true)
-	css, err = store.Contracts(context.Background(), contracts.WithGood(true))
-	if err != nil {
+	// assert limit and offset
+	if css, err := store.Contracts(context.Background(), 1, 1); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 1 {
 		t.Fatal("expected 1 contract, got", len(css))
-	} else if css[0].ID != fcid1 {
-		t.Fatalf("expected contract %v, got %v", fcid1, css[0].ID)
-	}
-
-	// assert WithGood(false)
-	css, err = store.Contracts(context.Background(), contracts.WithGood(false))
-	if err != nil {
+	} else if css, err := store.Contracts(context.Background(), 3, 1); err != nil {
 		t.Fatal(err)
-	} else if len(css) != 1 {
-		t.Fatal("expected 1 contract, got", len(css))
-	} else if css[0].ID != fcid3 {
-		t.Fatalf("expected contract %v, got %v", fcid3, css[0].ID)
+	} else if len(css) != 0 {
+		t.Fatal("expected no contracts, got", len(css))
 	}
 
 	// assert WithRevisable(true)
-	css, err = store.Contracts(context.Background(), contracts.WithRevisable(true))
-	if err != nil {
+	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true)); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 2 {
 		t.Fatal("expected 2 contracts, got", len(css))
 	}
 
 	// assert WithRevisable(false)
-	css, err = store.Contracts(context.Background(), contracts.WithRevisable(false))
-	if err != nil {
+	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(false)); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 1 {
 		t.Fatal("expected 1 contract, got", len(css))
 	} else if css[0].ID != fcid2 {
 		t.Fatalf("expected contract %v, got %v", fcid2, css[0].ID)
+	}
+
+	// assert WithRevisable(true) + WithGood(true)
+	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true), contracts.WithGood(true)); err != nil {
+		t.Fatal(err)
+	} else if len(css) != 1 {
+		t.Fatal("expected 1 contract, got", len(css))
+	} else if css[0].ID != fcid1 {
+		t.Fatalf("expected contract %v, got %v", fcid1, css[0].ID)
 	}
 }
 
@@ -620,11 +617,7 @@ func TestUpdateContractElement(t *testing.T) {
 func (s *Store) FileContractElement(contractID types.FileContractID) (types.V2FileContractElement, error) {
 	var fce types.V2FileContractElement
 	err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) (err error) {
-		fce, err = scanContractElement(tx.QueryRow(ctx, `
-SELECT c.contract_id, fce.contract, fce.leaf_index, fce.merkle_proof
-FROM contract_elements fce
-INNER JOIN contracts c ON c.id = fce.contract_id
-WHERE c.contract_id = $1`, sqlHash256(contractID)))
+		fce, err = scanContractElement(tx.QueryRow(ctx, `SELECT contract_id, contract, leaf_index, merkle_proof FROM contract_elements WHERE contract_id = $1`, sqlHash256(contractID)))
 		return err
 	})
 	return fce, err

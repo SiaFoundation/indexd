@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -50,7 +51,7 @@ func (cf *contractor) RenewContract(ctx context.Context, hk types.PublicKey, add
 
 func (cm *ContractManager) performContractRenewals(ctx context.Context, renewWindow uint64, log *zap.Logger) error {
 	renewalLog := log.Named("renewal")
-	contracts, err := cm.store.Contracts(ctx, WithGood(true), WithRevisable(true))
+	contracts, err := cm.store.Contracts(ctx, 0, math.MaxInt64, WithGood(true), WithRevisable(true)) // TODO: page through contracts and refresh in parallell
 	if err != nil {
 		return fmt.Errorf("failed to fetch contracts for renewal: %w", err)
 	}

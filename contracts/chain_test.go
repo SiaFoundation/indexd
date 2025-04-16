@@ -132,8 +132,15 @@ func (s *storeMock) Contract(_ context.Context, contractID types.FileContractID)
 	return Contract{}, ErrNotFound
 }
 
-func (s *storeMock) Contracts(ctx context.Context, opts ...ContractQueryOpt) ([]Contract, error) {
-	return slices.Clone(s.contracts), nil
+func (s *storeMock) Contracts(ctx context.Context, offset, limit int, opts ...ContractQueryOpt) ([]Contract, error) {
+	if offset > len(s.contracts) {
+		return nil, nil
+	}
+	copied := slices.Clone(s.contracts[offset:])
+	if limit < len(copied) {
+		copied = copied[:limit]
+	}
+	return copied, nil
 }
 
 func (s *storeMock) Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error) {

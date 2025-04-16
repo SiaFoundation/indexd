@@ -177,14 +177,14 @@ CREATE INDEX hosts_blocklist_reason_idx ON hosts_blocklist (reason);
 CREATE TABLE contracts (
   id SERIAL PRIMARY KEY,
   host_id INTEGER REFERENCES hosts(id) NOT NULL,
-  contract_id BYTEA NOT NULL UNIQUE DEFERRABLE,
+  contract_id BYTEA UNIQUE CHECK (LENGTH(contract_id) = 32),
 
   -- lifetime related columns
   formation TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
   proof_height BIGINT NOT NULL, -- start of proof window
   expiration_height BIGINT NOT NULL, -- end of proof window
-  renewed_from INTEGER REFERENCES contracts(id) UNIQUE DEFERRABLE,
-  renewed_to INTEGER REFERENCES contracts(id) UNIQUE DEFERRABLE,
+  renewed_from BYTEA UNIQUE REFERENCES contracts(contract_id),
+  renewed_to BYTEA UNIQUE REFERENCES contracts(contract_id),
   revision_number INTEGER NOT NULL DEFAULT 0 CHECK(revision_number >= 0),
   state SMALLINT NOT NULL DEFAULT 0, -- 0 = 'pending', 1 = 'active', 2 = 'resolved', 3 = 'expired', 4 = 'rejected'
 
@@ -210,10 +210,11 @@ CREATE TABLE contracts (
   sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0
 );
 CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- for rejecting expired contracts
+CREATE INDEX contracts_state_good_idx ON contracts(state) WHERE state <= 1 AND good; -- for filtering contracts
 
 CREATE TABLE contract_elements (
     id SERIAL PRIMARY KEY,
-    contract_id INTEGER UNIQUE NOT NULL REFERENCES contracts(id) ON DELETE CASCADE,
+    contract_id BYTEA UNIQUE REFERENCES contracts(contract_id) ON DELETE CASCADE,
     contract BYTEA NOT NULL,
     leaf_index INTEGER NOT NULL,
     merkle_proof BYTEA NOT NULL

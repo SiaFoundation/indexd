@@ -22,13 +22,17 @@ import (
 // BenchmarkContracts is a benchmark to ensure the performance of
 // Contract and Contracts.
 //
-// M1 Max | Contract | 1.1ms/op
-// M1 Max | Contracts (default) | 188ms/op
-// M1 Max | Contracts (filtered) | 95ms/op
+// M1 Max | Contract       |                | 1 ms/op
+// M1 Max | Contracts 100  | None           | 1.9 ms/op
+// M1 Max | Contracts 100  | Revisable      | 2.4 ms/op
+// M1 Max | Contracts 100  | Revisable+Good | 2.2 ms/op
+// M1 Max | Contracts 1000 | None           | 5.1 ms/op
+// M1 Max | Contracts 1000 | Revisable      | 4.8 ms/op
+// M1 Max | Contracts 1000 | Revisable+Good | 5.3 ms/op
 func BenchmarkContracts(b *testing.B) {
 	const (
 		numContractsPerHost = 100
-		numHosts            = 1000
+		numHosts            = 500
 	)
 
 	// prepare database
@@ -44,17 +48,12 @@ func BenchmarkContracts(b *testing.B) {
 				return err
 			}
 
-			var dbIds []*int64
-			dbIds = append(dbIds, nil)
-			for range numContractsPerHost {
-				var id types.FileContractID
-				frand.Read(id[:])
-				contractIDs = append(contractIDs, id)
-
-				var dbID int64
-				if err := tx.QueryRow(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9) RETURNING id;`,
+			hostContractIDs := make([]types.FileContractID, numContractsPerHost)
+			for i := range numContractsPerHost {
+				frand.Read(hostContractIDs[i][:])
+				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9);`,
 					hostID,
-					sqlHash256(id),
+					sqlHash256(hostContractIDs[i][:]),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
@@ -62,20 +61,16 @@ func BenchmarkContracts(b *testing.B) {
 					sqlCurrency(types.ZeroCurrency),
 					sqlContractState(uint8(frand.Uint64n(5))), // 40% active
 					frand.Uint64n(2) == 0,                     // 50% good
-				).Scan(&dbID); err != nil {
-					return err
-				}
-				dbIds = append(dbIds, &dbID)
-			}
-			dbIds = append(dbIds, nil)
-
-			for i := 1; i < len(dbIds)-1; i++ {
-				_, err := tx.Exec(ctx, `UPDATE contracts SET renewed_from = $1, renewed_to = $2 WHERE id = $3;`, dbIds[i-1], dbIds[i+1], dbIds[i])
-				if err != nil {
+				); err != nil {
 					return err
 				}
 			}
-
+			for i := 1; i < len(hostContractIDs)-1; i++ {
+				if _, err := tx.Exec(ctx, `UPDATE contracts SET renewed_from = $1, renewed_to = $2 WHERE contract_id = $3;`, hostContractIDs[i-1], hostContractIDs[i+1], hostContractIDs[i]); err != nil {
+					return err
+				}
+			}
+			contractIDs = append(contractIDs, hostContractIDs...)
 			hosts = append(hosts, hk)
 		}
 		return nil
@@ -84,10 +79,10 @@ func BenchmarkContracts(b *testing.B) {
 	}
 
 	b.Run("contract", func(b *testing.B) {
+		if b.N > len(contractIDs) {
+			b.Fatalf("too many iterations, %d > %d", b.N, len(contractIDs))
+		}
 		for b.Loop() {
-			if b.N > len(contractIDs) {
-				b.Fatalf("too many iterations, %d > %d", b.N, len(contractIDs))
-			}
 			_, err := store.Contract(context.Background(), contractIDs[b.N%len(contractIDs)])
 			if err != nil {
 				b.Fatal(err)
@@ -95,25 +90,32 @@ func BenchmarkContracts(b *testing.B) {
 		}
 	})
 
-	// filters out active contracts
-	b.Run("contracts_default", func(b *testing.B) {
-		for b.Loop() {
-			_, err := store.Contracts(context.Background())
-			if err != nil {
-				b.Fatal(err)
+	for _, limit := range []int{100, 1000} {
+		b.Run(fmt.Sprintf("contracts_%d", limit), func(b *testing.B) {
+			for b.Loop() {
+				_, err := store.Contracts(context.Background(), 0, limit)
+				if err != nil {
+					b.Fatal(err)
+				}
 			}
-		}
-	})
-
-	// filters out active and good contracts (so applies both filters)
-	b.Run("contracts_filtered", func(b *testing.B) {
-		for b.Loop() {
-			_, err := store.Contracts(context.Background(), contracts.WithGood(true))
-			if err != nil {
-				b.Fatal(err)
+		})
+		b.Run(fmt.Sprintf("contracts_revisable_%d", limit), func(b *testing.B) {
+			for b.Loop() {
+				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithRevisable(true))
+				if err != nil {
+					b.Fatal(err)
+				}
 			}
-		}
-	})
+		})
+		b.Run(fmt.Sprintf("contracts_revisable+good_%d", limit), func(b *testing.B) {
+			for b.Loop() {
+				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithRevisable(true), contracts.WithGood(true))
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }
 
 // BenchmarkHosts is a set of benchmarks that verify the performance of the host
