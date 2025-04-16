@@ -5,98 +5,28 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 
+	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/slabs"
 )
-
-var (
-	// ErrSlabExists is returned when a slab already exists in the database.
-	ErrSlabExists = errors.New("slab already exists")
-
-	// ErrSlabNotFound is returned when a slab is not found in the database.
-	ErrSlabNotFound = errors.New("slab not found")
-)
-
-type (
-	// SlabID is the ID of a slab derived from the slab's sectors' roots.
-	SlabID types.Hash256
-
-	// Sector is a 4MiB sector stored on a host.
-	Sector struct {
-		// Root is the sector root of a 4MiB sector
-		Root types.Hash256 `json:"root"`
-
-		// ContractID is the ID of the contract the sector is pinned to.
-		// 'nil' if the sector isn't pinned.
-		ContractID *types.FileContractID `json:"contractID,omitempty"`
-
-		// HostKey is the public key of the host that stores the sector data.
-		// 'nil' if a host lost the sector and the sector requires migration
-		HostKey *types.PublicKey `json:"host,omitempty"`
-	}
-
-	// Slab is a group of sectors that is encrypted, erasure-coded and uploaded
-	// to hosts.
-	Slab struct {
-		ID            SlabID   `json:"id"`
-		EncryptionKey [32]byte `json:"encryptionKey"`
-		MinShards     uint     `json:"minShards"`
-		Sectors       []Sector `json:"sectors"`
-	}
-
-	// SectorPinParams describes an uploaded sector to be pinned.
-	SectorPinParams struct {
-		Root    types.Hash256   `json:"root"`
-		HostKey types.PublicKey `json:"hostKey"`
-	}
-
-	// SlabPinParams is the input to PinSlabs
-	SlabPinParams struct {
-		EncryptionKey [32]byte          `json:"encryptionKey"`
-		MinShards     uint              `json:"minShards"`
-		Sectors       []SectorPinParams `json:"sectors"`
-	}
-)
-
-// String implements the Stringer interface for SlabID.
-func (s SlabID) String() string {
-	return types.Hash256(s).String()
-}
-
-// Digest creates a unique digest for the slab to be pinned by SlabPinParams. It
-// is important, that the same params always result in the same hash since we
-// deduplicate slabs using it. So if one user makes the mistake of pinning a
-// slab with a different encryption key, this shouldn't prevent other users from
-// pinning the same slab with the correct key.
-func (s SlabPinParams) Digest() (SlabID, error) {
-	hasher := types.NewHasher()
-	hasher.E.WriteUint64(uint64(s.MinShards))
-	hasher.E.Write(s.EncryptionKey[:])
-	for _, sector := range s.Sectors {
-		if _, err := hasher.E.Write(sector.Root[:]); err != nil {
-			return SlabID{}, fmt.Errorf("failed to write sector root to hasher: %w", err)
-		}
-	}
-	return SlabID(hasher.Sum()), nil
-}
 
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
 // with the provided account.
-func (s *Store) PinSlabs(ctx context.Context, account proto.Account, slabs []SlabPinParams) ([]SlabID, error) {
-	if len(slabs) == 0 {
+func (s *Store) PinSlabs(ctx context.Context, account proto.Account, toPin []slabs.SlabPinParams) ([]slabs.SlabID, error) {
+	if len(toPin) == 0 {
 		return nil, nil
 	}
-	var ids []SlabID
+	var ids []slabs.SlabID
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var accountID int64
 		err := tx.QueryRow(ctx, "SELECT id FROM accounts WHERE public_key = $1", sqlPublicKey(account)).Scan(&accountID)
 		if err != nil {
 			return fmt.Errorf("%w: %v", accounts.ErrNotFound, account)
 		}
-		for i, slab := range slabs {
+		for i, slab := range toPin {
 			slabID, err := s.pinSlab(ctx, tx, accountID, slab)
 			if err != nil {
 				return fmt.Errorf("failed to pin slab %d: %w", i+1, err)
@@ -109,17 +39,17 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, slabs []Sla
 }
 
 // Slabs returns the slabs with the given IDs from the database.
-func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error) {
+func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []slabs.SlabID) ([]slabs.Slab, error) {
 	if len(slabIDs) == 0 {
 		return nil, nil
 	}
 
-	slabs := make([]Slab, 0, len(slabIDs))
+	result := make([]slabs.Slab, 0, len(slabIDs))
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		for _, slabID := range slabIDs {
 			// query slab
 			var sid int64
-			slab := Slab{ID: slabID}
+			slab := slabs.Slab{ID: slabID}
 			err := tx.QueryRow(ctx, `
 				SELECT slabs.id, encryption_key, min_shards
 				FROM slabs
@@ -128,7 +58,7 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []Sl
 				WHERE digest = $1 AND a.public_key = $2
 			`, sqlHash256(slabID), sqlPublicKey(accountID)).Scan(&sid, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
 			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("%w: %v", ErrSlabNotFound, slabID)
+				return fmt.Errorf("%w: %v", slabs.ErrSlabNotFound, slabID)
 			} else if err != nil {
 				return fmt.Errorf("failed to query slab %s: %w", slabID, err)
 			}
@@ -148,7 +78,7 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []Sl
 				}
 				defer rows.Close()
 				for rows.Next() {
-					var sector Sector
+					var sector slabs.Sector
 					var hostKey sql.Null[sqlPublicKey]
 					var contractID sql.Null[sqlHash256]
 					err = rows.Scan((*sqlHash256)(&sector.Root), asNullable(&hostKey), &contractID)
@@ -168,17 +98,17 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []Sl
 			if err != nil {
 				return err
 			}
-			slabs = append(slabs, slab)
+			result = append(result, slab)
 		}
 		return nil
 	})
-	return slabs, err
+	return result, err
 }
 
-func (s *Store) pinSlab(ctx context.Context, tx *txn, accountID int64, slab SlabPinParams) (SlabID, error) {
+func (s *Store) pinSlab(ctx context.Context, tx *txn, accountID int64, slab slabs.SlabPinParams) (slabs.SlabID, error) {
 	digest, err := slab.Digest()
 	if err != nil {
-		return SlabID{}, err
+		return slabs.SlabID{}, err
 	}
 
 	// insert slab
@@ -196,7 +126,7 @@ func (s *Store) pinSlab(ctx context.Context, tx *txn, accountID int64, slab Slab
 		err = tx.QueryRow(ctx, `SELECT id FROM slabs WHERE digest = $1`, sqlHash256(digest)).Scan(&slabID)
 	}
 	if err != nil {
-		return SlabID{}, err
+		return slabs.SlabID{}, err
 	}
 
 	// insert slab into join table
@@ -205,7 +135,7 @@ func (s *Store) pinSlab(ctx context.Context, tx *txn, accountID int64, slab Slab
 		ON CONFLICT (account_id, slab_id) DO NOTHING
 	`, accountID, slabID)
 	if err != nil {
-		return SlabID{}, fmt.Errorf("failed to insert slab into account_slabs: %w", err)
+		return slabs.SlabID{}, fmt.Errorf("failed to insert slab into account_slabs: %w", err)
 	}
 
 	// if the slab already existed, we don't need to insert the sectors
@@ -214,21 +144,12 @@ func (s *Store) pinSlab(ctx context.Context, tx *txn, accountID int64, slab Slab
 	}
 
 	// insert slab's sectors in a single batch
-	var placeholders []string
-	var args []any
+	batch := &pgx.Batch{}
 	for i, sector := range slab.Sectors {
-		placeholders = append(placeholders, fmt.Sprintf("($%d, (SELECT id FROM hosts WHERE public_key = $%d), $%d, $%d)", i*4+1, i*4+2, i*4+3, i*4+4))
-		args = append(args, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), slabID, i)
+		batch.Queue(`INSERT INTO sectors (sector_root, host_id, slab_id, slab_index) VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3, $4)`, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), slabID, i)
 	}
-	values := strings.Join(placeholders, ",")
-
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO sectors (sector_root, host_id, slab_id, slab_index)
-		VALUES %s
-	`, values), args...)
-	if err != nil {
-		return SlabID{}, fmt.Errorf("failed to insert sectors: %w", err)
+	if err = tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
+		return slabs.SlabID{}, fmt.Errorf("failed to insert sectors: %w", err)
 	}
-
 	return digest, nil
 }
