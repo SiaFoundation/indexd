@@ -153,6 +153,7 @@ CREATE TABLE host_addresses (
     net_address TEXT NOT NULL,
     protocol SMALLINT NOT NULL
 )
+CREATE INDEX host_addresses_host_id_idx ON host_addresses (host_id);
 
 CREATE TABLE host_resolved_cidrs (
     id SERIAL PRIMARY KEY,
@@ -160,6 +161,7 @@ CREATE TABLE host_resolved_cidrs (
 
     cidr CIDR NOT NULL
 )
+CREATE INDEX host_resolved_cidrs_host_id_idx ON host_resolved_cidrs (host_id);
 
 CREATE TABLE hosts_blocklist (
     public_key BYTEA PRIMARY KEY CHECK (LENGTH(public_key) = 32),
