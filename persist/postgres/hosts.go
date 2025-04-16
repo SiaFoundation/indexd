@@ -217,12 +217,15 @@ WHERE
 			return nil
 		}
 
-		decorateHostAddresses(ctx, tx, dbHosts...)
-		decorateHostNetworks(ctx, tx, dbHosts...)
+		if err := decorateHostAddresses(ctx, tx, dbHosts...); err != nil {
+			return fmt.Errorf("failed to decorate host addresses: %w", err)
+		} else if err := decorateHostNetworks(ctx, tx, dbHosts...); err != nil {
+			return fmt.Errorf("failed to decorate host networks: %w", err)
+		}
+
 		for _, h := range dbHosts {
 			hosts = append(hosts, h.Host)
 		}
-
 		return nil
 	}); err != nil {
 		return nil, err
@@ -476,87 +479,55 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 }
 
 func decorateHostAddresses(ctx context.Context, tx *txn, hosts ...*dbHost) error {
+	hostIDs := make([]int64, 0, len(hosts))
 	idToIdx := make(map[int64]int64, len(hosts))
 	for i := range hosts {
 		idToIdx[hosts[i].id] = int64(i)
+		hostIDs = append(hostIDs, hosts[i].id)
 	}
 
-	const batchSize = 1000
-	for len(hosts) > 0 {
-		batch := min(len(hosts), batchSize)
-
-		var hostIds []any
-		for i := range batch {
-			hostIds = append(hostIds, hosts[i].id)
-		}
-		rows, err := tx.Query(ctx, `SELECT host_id, net_address, protocol FROM host_addresses WHERE host_id = ANY($1)`, hostIds)
-		if err != nil {
-			return fmt.Errorf("failed to query host addresses: %w", err)
-		}
-
-		addressesByHost := make(map[int64][]chain.NetAddress, batch)
-		for rows.Next() {
-			var hostID int64
-			var na chain.NetAddress
-			if err := rows.Scan(&hostID, &na.Address, (*sqlNetworkProtocol)(&na.Protocol)); err != nil {
-				rows.Close()
-				return fmt.Errorf("failed to scan host address: %w", err)
-			}
-			addressesByHost[hostID] = append(addressesByHost[hostID], na)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
-		}
-
-		for id, addresses := range addressesByHost {
-			hosts[idToIdx[id]].Addresses = addresses
-		}
-		hosts = hosts[batch:]
+	rows, err := tx.Query(ctx, `SELECT host_id, net_address, protocol FROM host_addresses WHERE host_id = ANY($1)`, hostIDs)
+	if err != nil {
+		return fmt.Errorf("failed to query host addresses: %w", err)
 	}
-	return nil
+	defer rows.Close()
+
+	for rows.Next() {
+		var hostID int64
+		var na chain.NetAddress
+		if err := rows.Scan(&hostID, &na.Address, (*sqlNetworkProtocol)(&na.Protocol)); err != nil {
+			return fmt.Errorf("failed to scan host address: %w", err)
+		}
+		hosts[idToIdx[hostID]].Addresses = append(hosts[idToIdx[hostID]].Addresses, na)
+	}
+
+	return rows.Err()
 }
 
 func decorateHostNetworks(ctx context.Context, tx *txn, hosts ...*dbHost) error {
+	hostIDs := make([]int64, 0, len(hosts))
 	idToIdx := make(map[int64]int64, len(hosts))
 	for i := range hosts {
 		idToIdx[hosts[i].id] = int64(i)
+		hostIDs = append(hostIDs, hosts[i].id)
 	}
 
-	const batchSize = 1000
-	for len(hosts) > 0 {
-		batch := min(len(hosts), batchSize)
-
-		var hostIds []any
-		for i := range batch {
-			hostIds = append(hostIds, hosts[i].id)
-		}
-		rows, err := tx.Query(ctx, `SELECT host_id, cidr FROM host_resolved_cidrs WHERE host_id = ANY($1)`, hostIds)
-		if err != nil {
-			return fmt.Errorf("failed to query host networks: %w", err)
-		}
-
-		networksByHost := make(map[int64][]net.IPNet, batch)
-		for rows.Next() {
-			var hostID int64
-			var cidr net.IPNet
-			if err := rows.Scan(&hostID, &cidr); err != nil {
-				rows.Close()
-				return fmt.Errorf("failed to scan host network: %w", err)
-			}
-			networksByHost[hostID] = append(networksByHost[hostID], cidr)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
-		}
-
-		for id, networks := range networksByHost {
-			hosts[idToIdx[id]].Networks = networks
-		}
-		hosts = hosts[batch:]
+	rows, err := tx.Query(ctx, `SELECT host_id, cidr FROM host_resolved_cidrs WHERE host_id = ANY($1)`, hostIDs)
+	if err != nil {
+		return fmt.Errorf("failed to query host networks: %w", err)
 	}
-	return nil
+	defer rows.Close()
+
+	for rows.Next() {
+		var hostID int64
+		var cidr net.IPNet
+		if err := rows.Scan(&hostID, &cidr); err != nil {
+			return fmt.Errorf("failed to scan host network: %w", err)
+		}
+		hosts[idToIdx[hostID]].Networks = append(hosts[idToIdx[hostID]].Networks, cidr)
+	}
+
+	return rows.Err()
 }
 
 func scanHost(s scanner) (dbHost, error) {
