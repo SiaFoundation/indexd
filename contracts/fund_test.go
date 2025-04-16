@@ -31,7 +31,7 @@ func (am *accountsManagerMock) FundAccounts(ctx context.Context, host hosts.Host
 	return nil
 }
 
-func (s *storeMock) ContractsForFunding(_ context.Context, hk types.PublicKey) ([]types.FileContractID, error) {
+func (s *storeMock) ContractsForFunding(_ context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error) {
 	var contracts []Contract
 	for _, c := range s.contracts {
 		if c.HostKey == hk {
@@ -45,6 +45,9 @@ func (s *storeMock) ContractsForFunding(_ context.Context, hk types.PublicKey) (
 	out := make([]types.FileContractID, len(contracts))
 	for i, c := range contracts {
 		out[i] = c.ID
+	}
+	if len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }

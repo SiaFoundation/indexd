@@ -17,7 +17,7 @@ import (
 // ContractsForFunding, we prepare the database with a certain number of
 // contracts per host, with a random state, remaining allowance and good status.
 //
-// M1 Max | 100k contracts | 1.2ms/op
+// M1 Max | 100k contracts | 1.3ms/op
 func BenchmarkContractsForFunding(b *testing.B) {
 	const (
 		numContractsPerHost = 100
@@ -62,7 +62,7 @@ func BenchmarkContractsForFunding(b *testing.B) {
 	}
 
 	for b.Loop() {
-		if _, err := store.ContractsForFunding(context.Background(), hosts[b.N%numHosts]); err != nil {
+		if _, err := store.ContractsForFunding(context.Background(), hosts[b.N%numHosts], 50); err != nil {
 			b.Fatal(err)
 		}
 	}

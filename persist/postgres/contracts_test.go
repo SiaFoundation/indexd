@@ -121,7 +121,7 @@ func TestContractsForFunding(t *testing.T) {
 
 	// assert only 3 contracts are returned for h1, in order, the fourth has no
 	// remaining allowance and h2 doesn't have contracts yet
-	if fcids, err := store.ContractsForFunding(context.Background(), hk1); err != nil {
+	if fcids, err := store.ContractsForFunding(context.Background(), hk1, 10); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(fcids) != 3 {
 		t.Fatalf("expected 3 contract, got %d", len(fcids))
@@ -131,7 +131,11 @@ func TestContractsForFunding(t *testing.T) {
 		t.Fatalf("expected contract %v, got %v", fcid3, fcids[1])
 	} else if fcids[2] != fcid1 {
 		t.Fatalf("expected contract %v, got %v", fcid1, fcids[2])
-	} else if fcids, err := store.ContractsForFunding(context.Background(), hk2); err != nil {
+	} else if fcids, err := store.ContractsForFunding(context.Background(), hk1, 1); err != nil {
+		t.Fatal("unexpected", err)
+	} else if len(fcids) != 1 {
+		t.Fatalf("expected 1 contract, got %d", len(fcids))
+	} else if fcids, err := store.ContractsForFunding(context.Background(), hk2, 10); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(fcids) != 0 {
 		t.Fatalf("expected no contracts, got %d", len(fcids))
@@ -156,13 +160,13 @@ func TestContractsForFunding(t *testing.T) {
 	fcid5 := addContract(hk2, types.Siacoins(1))
 
 	// assert we have only one contract for h1 now, and one on h2
-	if fcids, err := store.ContractsForFunding(context.Background(), hk1); err != nil {
+	if fcids, err := store.ContractsForFunding(context.Background(), hk1, 10); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(fcids) != 1 {
 		t.Fatalf("expected 1 contract, got %d", len(fcids))
 	} else if fcids[0] != fcid3 {
 		t.Fatalf("expected contract %v, got %v", fcid3, fcids[0])
-	} else if fcids, err := store.ContractsForFunding(context.Background(), hk2); err != nil {
+	} else if fcids, err := store.ContractsForFunding(context.Background(), hk2, 10); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(fcids) != 1 {
 		t.Fatalf("expected 1 contract, got %d", len(fcids))
