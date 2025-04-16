@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/hosts"
@@ -52,6 +53,31 @@ func (s *Store) AddAccount(ctx context.Context, ak types.PublicKey) error {
 			return fmt.Errorf("failed to add account: %w", err)
 		} else if res.RowsAffected() == 0 {
 			return accounts.ErrExists
+		}
+		return nil
+	})
+}
+
+// HasAccount checks if the account with the given public key exists in the
+// database.
+func (s *Store) HasAccount(ctx context.Context, ak types.PublicKey) (bool, error) {
+	var exists bool
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE public_key = $1)`, sqlPublicKey(ak)).Scan(&exists)
+	}); err != nil {
+		return false, fmt.Errorf("failed to check if account exists: %w", err)
+	}
+	return exists, nil
+}
+
+// DeleteAccount deletes the account in the database with given account key.
+func (s *Store) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		res, err := tx.Exec(ctx, `DELETE FROM accounts WHERE public_key = $1`, sqlPublicKey(ak))
+		if err != nil {
+			return fmt.Errorf("failed to delete account: %w", err)
+		} else if res.RowsAffected() != 1 {
+			return accounts.ErrNotFound
 		}
 		return nil
 	})
@@ -104,8 +130,8 @@ func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, 
 func (s *Store) UpdateHostAccounts(ctx context.Context, accounts []accounts.HostAccount) error {
 	if len(accounts) == 0 {
 		return nil
-	} else if len(accounts) > 1000 {
-		return errors.New("too many accounts to update") // should never happen, we call this using the max batch size of RPC replenish
+	} else if len(accounts) > proto.MaxAccountBatchSize {
+		return errors.New("too many accounts to update") // sanity check batch size against max batch size used in replenish RPC
 	}
 
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {

@@ -21,7 +21,8 @@ type (
 	// ApplicationAPI contains the configuration for the HTTP server serving the
 	// application API
 	ApplicationAPI struct {
-		Address string `yaml:"address"`
+		Address  string `yaml:"address"`
+		Hostname string `yaml:"hostname"`
 	}
 
 	// Syncer contains the configuration for the p2p syncer.

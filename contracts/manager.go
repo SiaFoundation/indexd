@@ -25,9 +25,18 @@ const (
 	dialTimeout         = 10 * time.Second
 	minRemainingStorage = (10 * 1 << 30) / uint64(proto.SectorSize) // 10GB
 	maxContractSize     = 10 * 1 << 40                              // 10TB
+
+	fundThreads = 50
+	fundTimeout = 2 * time.Minute
 )
 
 type (
+	// AccountManager defines an interface that allows funding accounts on the
+	// host using a given set of contracts.
+	AccountManager interface {
+		FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) error
+	}
+
 	// ChainManager is the minimal interface of ChainManager functionality the
 	// ContractManager requires.
 	ChainManager interface {
@@ -59,6 +68,7 @@ type (
 		AddRenewedContract(ctx context.Context, params AddRenewedContractParams) error
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, queryOpts ...ContractQueryOpt) ([]Contract, error)
+		ContractsForFunding(ctx context.Context, hk types.PublicKey) ([]types.FileContractID, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
@@ -114,6 +124,7 @@ type (
 
 	// ContractManager manages the host announcements.
 	ContractManager struct {
+		am    AccountManager
 		cm    ChainManager
 		s     Syncer
 		w     Wallet
@@ -122,6 +133,8 @@ type (
 		contractor Contractor
 		scanner    HostManager
 		renterKey  types.PublicKey
+
+		triggerFundingChan chan struct{}
 
 		log     *zap.Logger
 		shuffle func(int, func(i, j int))
@@ -144,8 +157,8 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PublicKey, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	cm := newContractManager(renterKey, chainManager, contractor, scanner, store, syncer, wallet, opts...)
+func NewManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	cm := newContractManager(renterKey, accountManager, chainManager, contractor, scanner, store, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {
@@ -158,8 +171,9 @@ func NewManager(renterKey types.PublicKey, chainManager ChainManager, contractor
 	return cm, nil
 }
 
-func newContractManager(renterKey types.PublicKey, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
+		am: accountManager,
 		cm: chainManager,
 		s:  syncer,
 		w:  wallet,
@@ -169,6 +183,8 @@ func newContractManager(renterKey types.PublicKey, chainManager ChainManager, co
 
 		scanner: scanner,
 		store:   store,
+
+		triggerFundingChan: make(chan struct{}, 1),
 
 		log:     zap.NewNop(),
 		shuffle: frand.Shuffle,
@@ -183,6 +199,16 @@ func newContractManager(renterKey types.PublicKey, chainManager ChainManager, co
 		opt(cm)
 	}
 	return cm
+}
+
+// TriggerAccountFunding triggers the account funding process. This trigger is
+// used when a new account is added and ensures users don't have to wait for the
+// next maintenance loop before their account is funded.
+func (cm *ContractManager) TriggerAccountFunding() {
+	select {
+	case cm.triggerFundingChan <- struct{}{}:
+	default:
+	}
 }
 
 // Close closes the contract manager, terminates any background tasks and waits
@@ -201,18 +227,29 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 		return // shutdown
 	}
 
+	ticker := time.NewTicker(cm.maintenanceFrequency)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(cm.maintenanceFrequency):
+		case <-cm.triggerFundingChan:
+			log.Debug("triggering account funding")
+			if err := cm.performAccountFunding(ctx, log); err != nil {
+				log.Error("account funding failed", zap.Error(err))
+			}
+			continue
+		case <-ticker.C:
 		}
 
 		if err := cm.performContractMaintenance(ctx, log); err != nil {
 			log.Error("contract maintenance failed", zap.Error(err))
 		}
 
-		// TODO: use account manager to fund accounts using the good contracts
+		if err := cm.performAccountFunding(ctx, log); err != nil {
+			log.Error("account funding failed", zap.Error(err))
+		}
 
 		if err := cm.performSlabPinning(); err != nil {
 			log.Error("slab pinning failed", zap.Error(err))
@@ -270,6 +307,66 @@ func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
 		log.Warn("blocking unusable host", zap.Any("usability", host.Usability))
 	}
 	return nil
+}
+
+func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.Logger) error {
+	start := time.Now()
+	log = log.Named("accounts")
+
+	// fund accounts on usable hosts with active contracts
+	opts := []hosts.HostQueryOpt{
+		hosts.WithUsable(true),
+		hosts.WithBlocked(false),
+		hosts.WithActiveContracts(true),
+	}
+
+	var offset int
+	var exhausted bool
+	for !exhausted && ctx.Err() == nil {
+		// fetch hosts
+		hostsToFund, err := cm.store.Hosts(ctx, offset, fundThreads, opts...)
+		if err != nil {
+			return fmt.Errorf("failed to fetch hosts for account funding: %w", err)
+		} else if len(hostsToFund) < fundThreads {
+			exhausted = true
+		} else {
+			offset += fundThreads
+		}
+
+		// fund accounts on all hosts
+		var wg sync.WaitGroup
+		for _, host := range hostsToFund {
+			wg.Add(1)
+			go func(ctx context.Context, host hosts.Host, log *zap.Logger) {
+				ctx, cancel := context.WithTimeout(ctx, fundTimeout)
+				defer func() {
+					wg.Done()
+					cancel()
+				}()
+
+				contractIDs, err := cm.store.ContractsForFunding(ctx, host.PublicKey)
+				if err != nil {
+					log.Error("failed to fetch contracts for funding", zap.Error(err))
+					return
+				} else if len(contractIDs) == 0 {
+					log.Debug("no contracts for funding")
+					return
+				}
+
+				err = cm.am.FundAccounts(ctx, host, contractIDs, log)
+				if err != nil {
+					log.Debug("failed to fund accounts", zap.Error(err))
+					return
+				}
+
+				log.Debug("funding successful")
+			}(ctx, host, log.With(zap.Stringer("hostKey", host.PublicKey)))
+		}
+		wg.Wait()
+	}
+
+	log.Debug("funding finished", zap.Duration("duration", time.Since(start)))
+	return ctx.Err()
 }
 
 func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *zap.Logger) error {

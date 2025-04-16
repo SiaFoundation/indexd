@@ -10,12 +10,66 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/pins"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
+
+func TestAccountsAPI(t *testing.T) {
+	c := testutils.NewConsensusNode(t, zap.NewNop())
+	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+
+	var accs []types.PublicKey
+	for range 10 {
+		accs = append(accs, types.GeneratePrivateKey().PublicKey())
+		err := indexer.AccountsAdd(context.Background(), accs[len(accs)-1])
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	err := indexer.AccountsAdd(context.Background(), accs[len(accs)-1])
+	if err == nil || !strings.Contains(err.Error(), accounts.ErrExists.Error()) {
+		t.Fatal("expected ErrExists", err)
+	}
+
+	accounts, err := indexer.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(accs, accounts) {
+		t.Fatal("unexpected accounts", accounts)
+	}
+
+	accounts, err = indexer.Accounts(context.Background(), api.WithOffset(7), api.WithLimit(2))
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(accs[7:9], accounts) {
+		t.Fatal("unexpected accounts", accounts)
+	}
+
+	accounts, err = indexer.Accounts(context.Background(), api.WithOffset(10), api.WithLimit(2))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accounts) != 0 {
+		t.Fatal("unexpected accounts", accounts)
+	}
+
+	for _, acc := range accs {
+		err = indexer.AccountsDelete(context.Background(), acc)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	accounts, err = indexer.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accounts) != 0 {
+		t.Fatal("unexpected accounts", len(accounts))
+	}
+}
 
 func TestExplorerAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())

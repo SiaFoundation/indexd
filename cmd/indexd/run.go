@@ -20,6 +20,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/config"
 	"go.sia.tech/indexd/contracts"
@@ -105,8 +106,12 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer hm.Close()
 
+	funder := accounts.NewFunder(cm, wm, types.Siacoins(1))
+	am := accounts.NewManager(store, funder, accounts.WithLogger(log.Named("accounts")))
+	defer am.Close()
+
 	cf := contracts.NewContractor(cm, wm, walletKey)
-	contracts, err := contracts.NewManager(walletKey.PublicKey(), cm, cf, hm, store, s, wm, contracts.WithLogger(log.Named("contracts")))
+	contracts, err := contracts.NewManager(walletKey.PublicKey(), am, cm, cf, hm, store, s, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		return fmt.Errorf("failed to create contracts manager: %w", err)
 	}
@@ -142,7 +147,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 
 	web := http.Server{
 		Handler: webRouter{
-			api: jape.BasicAuth(cfg.AdminAPI.Password)(api.NewServer(cm, s, wm, store, apiOpts...)),
+			api: jape.BasicAuth(cfg.AdminAPI.Password)(api.NewServer(cm, contracts, s, wm, store, apiOpts...)),
 		},
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,

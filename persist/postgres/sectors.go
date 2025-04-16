@@ -5,9 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
@@ -178,21 +178,12 @@ func (s *Store) pinSlab(ctx context.Context, tx *txn, accountID int64, nextInteg
 	}
 
 	// insert slab's sectors in a single batch
-	var placeholders []string
-	var args []any
+	batch := &pgx.Batch{}
 	for i, sector := range slab.Sectors {
-		placeholders = append(placeholders, fmt.Sprintf("($%d, (SELECT id FROM hosts WHERE public_key = $%d), $%d, $%d, $%d)", i*5+1, i*5+2, i*5+3, i*5+4, i*5+5))
-		args = append(args, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), slabID, i, nextIntegrityCheck)
+		batch.Queue(`INSERT INTO sectors (sector_root, host_id, slab_id, slab_index) VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3, $4)`, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), slabID, i)
 	}
-	values := strings.Join(placeholders, ",")
-
-	_, err = tx.Exec(ctx, fmt.Sprintf(`
-		INSERT INTO sectors (sector_root, host_id, slab_id, slab_index, next_integrity_check)
-		VALUES %s
-	`, values), args...)
-	if err != nil {
+	if err = tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
 		return slabs.SlabID{}, fmt.Errorf("failed to insert sectors: %w", err)
 	}
-
 	return digest, nil
 }

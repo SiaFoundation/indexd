@@ -34,18 +34,18 @@ To create a signed URL, follow the steps below:
 
 ```
 HOST: <hostname> // e.g. indexer.sia.tech
-X-SiaIdx-ValidUntil: <unix timestamp>
+SiaIdx-ValidUntil: <unix timestamp>
 ```
 
 - `Host`: Makes sure a request for indexer.sia.tech can't be reused for indexer.thirdparty.tech
-- `X-SiaIdx-ValidUntil`: The time at which the request expires in Unix timestamp format
+- `SiaIdx-ValidUntil`: The time at which the request expires in Unix timestamp format
 
 2. Sign the payload using ED25519
 
 3. Construct the signed URL by attaching the query parameters:
-- `X-SiaIdx-Credential`: The public key used to verify the signature
-- `X-SiaIdx-Signature`: The signature from step 2
-- `X-SiaIdx-ValidUntil`: The time at which the request expires in Unix timestamp format
+- `SiaIdx-Credential`: The public key used to verify the signature
+- `SiaIdx-Signature`: The signature from step 2
+- `SiaIdx-ValidUntil`: The time at which the request expires in Unix timestamp format
 
 #### Trade-offs:
 
