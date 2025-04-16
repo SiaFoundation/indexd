@@ -278,4 +278,7 @@ CREATE INDEX sectors_contract_id_uploaded_at_idx ON sectors(contract_id, uploade
 
 -- speed up fetching sectors for slab ordered by their position within the slab
 CREATE UNIQUE INDEX sectors_slab_id_slab_index ON sectors(slab_id, slab_index ASC);
+
+-- speed up lookup of unpinned sectors
+CREATE INDEX sectors_host_id_uploaded_at ON sectors(host_id, uploaded_at ASC) WHERE contract_id IS NULL;
 ```

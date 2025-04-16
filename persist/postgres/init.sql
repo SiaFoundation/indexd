@@ -216,4 +216,4 @@ CREATE INDEX sectors_contract_id_uploaded_at_idx ON sectors(contract_id, uploade
 CREATE UNIQUE INDEX sectors_slab_id_slab_index ON sectors(slab_id, slab_index ASC);
 
 -- speed up lookup of unpinned sectors
-CREATE INDEX sectors_contract_id_host_id_uploaded_at_idx ON sectors(contract_id, host_id, uploaded_at ASC) WHERE contract_id IS NULL;
+CREATE INDEX sectors_host_id_uploaded_at ON sectors(host_id, uploaded_at ASC) WHERE contract_id IS NULL;

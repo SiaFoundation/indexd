@@ -110,18 +110,17 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []sl
 func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
 	roots := make([]types.Hash256, 0, limit)
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		var hostID int64
-		err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = $1`, sqlPublicKey(hostKey)).Scan(&hostID)
-		if err != nil {
-			return err
-		}
 		rows, err := tx.Query(ctx, `
+			WITH hid AS (
+				SELECT id FROM hosts WHERE public_key = $1
+			)
 			SELECT sector_root
 			FROM sectors
-			WHERE host_id = $1 AND contract_id IS NULL
+				WHERE host_id = (SELECT id FROM hid)
+				AND contract_id IS NULL
 			ORDER BY uploaded_at ASC
 			LIMIT $2
-		`, hostID, limit)
+		`, sqlPublicKey(hostKey), limit)
 		if err != nil {
 			return fmt.Errorf("failed to query host sectors: %w", err)
 		}
