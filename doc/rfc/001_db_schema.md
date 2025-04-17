@@ -210,6 +210,7 @@ CREATE TABLE contracts (
   sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0
 );
 CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- for rejecting expired contracts
+CREATE INDEX contracts_host_id_remaining_allowance_idx ON contracts (host_id, remaining_allowance DESC) WHERE good = true AND remaining_allowance > 0 AND state <= 1; -- for fetching contracts for funding
 
 CREATE TABLE contract_elements (
     id SERIAL PRIMARY KEY,
