@@ -6,6 +6,12 @@ import (
 )
 
 type (
+	// AccountRotateKeyRequest is the request body for the [PUT]
+	// /account/:accountkey request.
+	AccountRotateKeyRequest struct {
+		NewAccountKey types.PublicKey `json:"newAccountKey"`
+	}
+
 	// HostsBlocklistRequest is the request body for the [POST] /hosts/blocklist.
 	HostsBlocklistRequest struct {
 		HostKeys []types.PublicKey `json:"hostKeys"`

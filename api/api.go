@@ -40,6 +40,7 @@ type (
 		Accounts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		AddAccount(ctx context.Context, ak types.PublicKey) error
 		DeleteAccount(ctx context.Context, ak types.PublicKey) error
+		UpdateAccount(ctx context.Context, oldAK, newAK types.PublicKey) error
 		BlockHosts(ctx context.Context, hks []types.PublicKey, reason string) error
 		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
@@ -105,6 +106,7 @@ func NewServer(chain ChainManager, contracts ContractManager, syncer Syncer, wal
 		// accounts endpoints
 		"GET    /accounts":            a.handleGETAccounts,
 		"POST   /account/:accountkey": a.handlePOSTAccount,
+		"PUT    /account/:accountkey": a.handlePUTAccount,
 		"DELETE /account/:accountkey": a.handleDELETEAccount,
 
 		// explorer endpoints

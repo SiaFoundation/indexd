@@ -50,3 +50,9 @@ every account with 1SC per hour. Leading to a total spending of 24SC a day or
 A potentially effective countermeasure would be some simple statistical
 analysis. By tracking how much money we pour into each of our hosts on average,
 we can block hosts that are outliers from having their accounts funded.
+
+### Account Key Rotation
+
+If you lose access to your account's secret key, you can rotate to a new key
+using the admin API. This updates the stored public key and retains all
+associated data. Rotation is only possible if the new key doesn't already exist.

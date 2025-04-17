@@ -73,6 +73,39 @@ func (a *api) handlePOSTAccount(jc jape.Context) {
 	a.contracts.TriggerAccountFunding()
 }
 
+func (a *api) handlePUTAccount(jc jape.Context) {
+	var ak types.PublicKey
+	if jc.DecodeParam("accountkey", &ak) != nil {
+		return
+	}
+
+	var req AccountRotateKeyRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	if req.NewAccountKey == (types.PublicKey{}) {
+		jc.Error(errors.New("new account key cannot be empty"), http.StatusBadRequest)
+		return
+	} else if req.NewAccountKey == ak {
+		jc.Error(errors.New("new account key cannot be the same as the old one"), http.StatusBadRequest)
+		return
+	}
+
+	err := a.store.UpdateAccount(jc.Request.Context(), ak, req.NewAccountKey)
+	if errors.Is(err, accounts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, accounts.ErrExists) {
+		jc.Error(err, http.StatusConflict)
+		return
+	} else if jc.Check("failed to rotate account key", err) != nil {
+		return
+	}
+
+	a.contracts.TriggerAccountFunding()
+}
+
 func (a *api) handleDELETEAccount(jc jape.Context) {
 	var ak types.PublicKey
 	if jc.DecodeParam("accountkey", &ak) != nil {

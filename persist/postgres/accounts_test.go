@@ -127,6 +127,57 @@ func TestDeleteAccount(t *testing.T) {
 	}
 }
 
+func TestUpdateAccount(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// define helper to check the database id
+	dbID := func(ak types.PublicKey) (accID int64) {
+		t.Helper()
+		if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+			return tx.QueryRow(ctx, `SELECT id FROM accounts WHERE public_key = $1`, sqlPublicKey(ak)).Scan(&accID)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	// add an account
+	pk1 := types.GeneratePrivateKey().PublicKey()
+	err := store.AddAccount(context.Background(), pk1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db1 := dbID(pk1)
+
+	// update the account key
+	pk2 := types.GeneratePrivateKey().PublicKey()
+	err = store.UpdateAccount(context.Background(), pk1, pk2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// check the old account key is gone
+	found, err := store.HasAccount(context.Background(), pk1)
+	if err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("expected account to not exist")
+	}
+
+	// check the new account key exists
+	found, err = store.HasAccount(context.Background(), pk2)
+	if err != nil {
+		t.Fatal(err)
+	} else if !found {
+		t.Fatal("expected account to exist")
+	}
+
+	// check db ids match
+	if dbID(pk2) != db1 {
+		t.Fatal("expected account id to have remained the same")
+	}
+}
+
 func TestHostAccountsForFunding(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

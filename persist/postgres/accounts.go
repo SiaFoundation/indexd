@@ -83,6 +83,27 @@ func (s *Store) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
 	})
 }
 
+// UpdateAccount updates the account in the database with given old account key
+// to the new account key, allowing the user to rotate his account key.
+func (s *Store) UpdateAccount(ctx context.Context, oldAK, newAK types.PublicKey) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE public_key = $1)`, sqlPublicKey(newAK)).Scan(&exists); err != nil {
+			return err
+		} else if exists {
+			return accounts.ErrExists
+		}
+
+		res, err := tx.Exec(ctx, `UPDATE accounts SET public_key = $1 WHERE public_key = $2`, sqlPublicKey(newAK), sqlPublicKey(oldAK))
+		if err != nil {
+			return fmt.Errorf("failed to update account: %w", err)
+		} else if res.RowsAffected() != 1 {
+			return accounts.ErrNotFound
+		}
+		return nil
+	})
+}
+
 // HostAccountsForFunding returns up to limit accounts for the given host key
 // that are due for funding.
 func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]accounts.HostAccount, error) {
