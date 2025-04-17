@@ -128,9 +128,28 @@ func TestUpdateAccount(t *testing.T) {
 	}
 	db1 := dbID(pk1)
 
-	// update the account key
+	// add another account
 	pk2 := types.GeneratePrivateKey().PublicKey()
+	err = store.AddAccount(context.Background(), pk2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert updating to an existing account fails
 	err = store.UpdateAccount(context.Background(), pk1, pk2)
+	if !errors.Is(accounts.ErrExists, err) {
+		t.Fatal("expected [accounts.ErrExists], got", err)
+	}
+
+	// assert updating a non existing account fails
+	pk3 := types.GeneratePrivateKey().PublicKey()
+	err = store.UpdateAccount(context.Background(), types.GeneratePrivateKey().PublicKey(), pk3)
+	if !errors.Is(accounts.ErrNotFound, err) {
+		t.Fatal("expected [accounts.ErrNotFound], got", err)
+	}
+
+	// update the account key
+	err = store.UpdateAccount(context.Background(), pk1, pk3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +163,7 @@ func TestUpdateAccount(t *testing.T) {
 	}
 
 	// check the new account key exists
-	found, err = store.HasAccount(context.Background(), pk2)
+	found, err = store.HasAccount(context.Background(), pk3)
 	if err != nil {
 		t.Fatal(err)
 	} else if !found {
@@ -152,7 +171,7 @@ func TestUpdateAccount(t *testing.T) {
 	}
 
 	// check db ids match
-	if dbID(pk2) != db1 {
+	if dbID(pk3) != db1 {
 		t.Fatal("expected account id to have remained the same")
 	}
 }
