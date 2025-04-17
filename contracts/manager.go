@@ -68,7 +68,7 @@ type (
 		AddRenewedContract(ctx context.Context, params AddRenewedContractParams) error
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, queryOpts ...ContractQueryOpt) ([]Contract, error)
-		ContractsForFunding(ctx context.Context, hk types.PublicKey) ([]types.FileContractID, error)
+		ContractsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
@@ -344,7 +344,7 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 					cancel()
 				}()
 
-				contractIDs, err := cm.store.ContractsForFunding(ctx, host.PublicKey)
+				contractIDs, err := cm.store.ContractsForFunding(ctx, host.PublicKey, 10)
 				if err != nil {
 					log.Error("failed to fetch contracts for funding", zap.Error(err))
 					return

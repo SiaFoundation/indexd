@@ -104,13 +104,10 @@ FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 			return fmt.Errorf("failed to query host: %w", err)
 		}
 
-		dbHost.Addresses, err = queryHostAddresses(ctx, tx, dbHost.id)
-		if err != nil {
-			return fmt.Errorf("failed to query host addresses: %w", err)
-		}
-		dbHost.Networks, err = queryHostNetworks(ctx, tx, dbHost.id)
-		if err != nil {
-			return fmt.Errorf("failed to query host networks: %w", err)
+		if err := decorateHostAddresses(ctx, tx, &dbHost); err != nil {
+			return fmt.Errorf("failed to decorate host addresses: %w", err)
+		} else if err := decorateHostNetworks(ctx, tx, &dbHost); err != nil {
+			return fmt.Errorf("failed to decorate host networks: %w", err)
 		}
 
 		host = dbHost.Host
@@ -205,14 +202,14 @@ WHERE
 		}
 		defer rows.Close()
 
-		var dbHosts []dbHost
+		var dbHosts []*dbHost
 		for rows.Next() {
 			var host dbHost
 			host, err := scanHost(rows)
 			if err != nil {
 				return fmt.Errorf("failed to scan host: %w", err)
 			}
-			dbHosts = append(dbHosts, host)
+			dbHosts = append(dbHosts, &host)
 		}
 		if err := rows.Err(); err != nil {
 			return err
@@ -220,19 +217,15 @@ WHERE
 			return nil
 		}
 
-		// decorate host addresses and networks
-		for _, h := range dbHosts {
-			h.Addresses, err = queryHostAddresses(ctx, tx, h.id)
-			if err != nil {
-				return fmt.Errorf("failed to query host addresses: %w", err)
-			}
-			h.Networks, err = queryHostNetworks(ctx, tx, h.id)
-			if err != nil {
-				return fmt.Errorf("failed to query host networks: %w", err)
-			}
-			hosts = append(hosts, h.Host)
+		if err := decorateHostAddresses(ctx, tx, dbHosts...); err != nil {
+			return fmt.Errorf("failed to decorate host addresses: %w", err)
+		} else if err := decorateHostNetworks(ctx, tx, dbHosts...); err != nil {
+			return fmt.Errorf("failed to decorate host networks: %w", err)
 		}
 
+		for _, h := range dbHosts {
+			hosts = append(hosts, h.Host)
+		}
 		return nil
 	}); err != nil {
 		return nil, err
@@ -485,48 +478,56 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 	})
 }
 
-func queryHostAddresses(ctx context.Context, tx *txn, hostID int64) ([]chain.NetAddress, error) {
-	rows, err := tx.Query(ctx, `SELECT net_address, protocol FROM host_addresses WHERE host_id = $1`, hostID)
+func decorateHostAddresses(ctx context.Context, tx *txn, hosts ...*dbHost) error {
+	hostIDs := make([]int64, 0, len(hosts))
+	idToIdx := make(map[int64]int64, len(hosts))
+	for i := range hosts {
+		idToIdx[hosts[i].id] = int64(i)
+		hostIDs = append(hostIDs, hosts[i].id)
+	}
+
+	rows, err := tx.Query(ctx, `SELECT host_id, net_address, protocol FROM host_addresses WHERE host_id = ANY($1)`, hostIDs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query host addresses: %w", err)
+		return fmt.Errorf("failed to query host addresses: %w", err)
 	}
 	defer rows.Close()
 
-	var addresses []chain.NetAddress
 	for rows.Next() {
+		var hostID int64
 		var na chain.NetAddress
-		if err := rows.Scan(&na.Address, (*sqlNetworkProtocol)(&na.Protocol)); err != nil {
-			return nil, fmt.Errorf("failed to scan host address: %w", err)
+		if err := rows.Scan(&hostID, &na.Address, (*sqlNetworkProtocol)(&na.Protocol)); err != nil {
+			return fmt.Errorf("failed to scan host address: %w", err)
 		}
-		addresses = append(addresses, na)
+		hosts[idToIdx[hostID]].Addresses = append(hosts[idToIdx[hostID]].Addresses, na)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return addresses, nil
+	return rows.Err()
 }
 
-func queryHostNetworks(ctx context.Context, tx *txn, hostID int64) ([]net.IPNet, error) {
-	rows, err := tx.Query(ctx, `SELECT cidr FROM host_resolved_cidrs WHERE host_id = $1`, hostID)
+func decorateHostNetworks(ctx context.Context, tx *txn, hosts ...*dbHost) error {
+	hostIDs := make([]int64, 0, len(hosts))
+	idToIdx := make(map[int64]int64, len(hosts))
+	for i := range hosts {
+		idToIdx[hosts[i].id] = int64(i)
+		hostIDs = append(hostIDs, hosts[i].id)
+	}
+
+	rows, err := tx.Query(ctx, `SELECT host_id, cidr FROM host_resolved_cidrs WHERE host_id = ANY($1)`, hostIDs)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query host resolved CIDRs: %w", err)
+		return fmt.Errorf("failed to query host networks: %w", err)
 	}
 	defer rows.Close()
 
-	var networks []net.IPNet
 	for rows.Next() {
+		var hostID int64
 		var cidr net.IPNet
-		if err := rows.Scan(&cidr); err != nil {
-			return nil, fmt.Errorf("failed to scan host address: %w", err)
+		if err := rows.Scan(&hostID, &cidr); err != nil {
+			return fmt.Errorf("failed to scan host network: %w", err)
 		}
-		networks = append(networks, cidr)
+		hosts[idToIdx[hostID]].Networks = append(hosts[idToIdx[hostID]].Networks, cidr)
 	}
 
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return networks, nil
+	return rows.Err()
 }
 
 func scanHost(s scanner) (dbHost, error) {

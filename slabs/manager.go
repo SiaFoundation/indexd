@@ -18,6 +18,8 @@ type (
 	// checking their integrity on the network and migrating their sectors if
 	// necessary.
 	SlabManager struct {
+		integrityCheckInterval time.Duration
+
 		store Store
 		tg    *threadgroup.ThreadGroup
 		log   *zap.Logger
@@ -26,7 +28,7 @@ type (
 	// Store defines an interface to store and update slab related information
 	// in the database.
 	Store interface {
-		PinSlabs(ctx context.Context, account proto.Account, slabs []SlabPinParams) ([]SlabID, error)
+		PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slabs []SlabPinParams) ([]SlabID, error)
 		Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error)
 	}
 )
@@ -44,6 +46,8 @@ func WithLogger(l *zap.Logger) Option {
 // NewManager creates a new slab manager.
 func NewManager(store Store, opts ...Option) (*SlabManager, error) {
 	m := &SlabManager{
+		integrityCheckInterval: 14 * 24 * time.Hour, // 2 weeks
+
 		store: store,
 		tg:    threadgroup.New(),
 		log:   zap.NewNop(),

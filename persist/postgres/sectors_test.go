@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -14,9 +15,102 @@ import (
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
+
+func TestSectorsForIntegrityCheck(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// add host
+	hk := types.PublicKey{1}
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// pin a slab to add a few sectors to the database
+	root1 := frand.Entropy256()
+	root2 := frand.Entropy256()
+	root3 := frand.Entropy256()
+	root4 := frand.Entropy256()
+	_, err := store.PinSlabs(context.Background(), account, time.Time{}, []slabs.SlabPinParams{
+		{
+			EncryptionKey: [32]byte{},
+			MinShards:     10,
+			Sectors: []slabs.SectorPinParams{
+				{
+					Root:    root1,
+					HostKey: hk,
+				},
+				{
+					Root:    root2,
+					HostKey: hk,
+				},
+				{
+					Root:    root3,
+					HostKey: hk,
+				},
+				{
+					Root:    root4,
+					HostKey: hk,
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// update next integrity check time for roots and assert the ordering works
+	updateNextCheck := func(root types.Hash256, nextCheck time.Time) {
+		t.Helper()
+		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET next_integrity_check = $1 WHERE sector_root = $2`, nextCheck, sqlHash256(root))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().Round(time.Microsecond)
+	updateNextCheck(root2, now.Add(-2*time.Hour))      // requires check
+	updateNextCheck(root4, now.Add(-1*time.Hour))      // requires check
+	updateNextCheck(root3, now.Add(-time.Millisecond)) // requires check
+	updateNextCheck(root1, now.Add(1*time.Hour))       // doesn't require check
+
+	// make sure limit is applied
+	assertSectors := func(limit int) {
+		t.Helper()
+		expected := []types.Hash256{root2, root4, root3}
+		sectors, err := store.SectorsForIntegrityCheck(context.Background(), hk, limit)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(sectors) != min(limit, len(expected)) {
+			t.Fatalf("expected 3 sectors, got %d", len(sectors))
+		} else if !reflect.DeepEqual(sectors, expected[:min(limit, len(expected))]) {
+			t.Fatal("sectors don't match expected roots")
+		}
+	}
+	assertSectors(10)
+	assertSectors(3)
+	assertSectors(2)
+	assertSectors(1)
+
+	// no sectors for unknown host
+	sectors, err := store.SectorsForIntegrityCheck(context.Background(), types.PublicKey{2}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(sectors) != 0 {
+		t.Fatalf("expected 0 sectors, got %d", len(sectors))
+	}
+}
 
 func TestPinSlabs(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
@@ -24,7 +118,8 @@ func TestPinSlabs(t *testing.T) {
 	account2 := proto.Account{2}
 
 	// pin without an account
-	slabIDs, err := store.PinSlabs(context.Background(), account, []slabs.SlabPinParams{{}})
+	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
+	slabIDs, err := store.PinSlabs(context.Background(), account, nextCheck, []slabs.SlabPinParams{{}})
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected ErrNotFound, got", err)
 	}
@@ -80,7 +175,7 @@ func TestPinSlabs(t *testing.T) {
 	slab2ID, slab2 := newSlab(2)
 	toPin := []slabs.SlabPinParams{slab1, slab2}
 	expectedIDs := []slabs.SlabID{slab1ID, slab2ID}
-	slabIDs, err = store.PinSlabs(context.Background(), proto.Account{1}, toPin)
+	slabIDs, err = store.PinSlabs(context.Background(), proto.Account{1}, nextCheck, toPin)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(slabIDs) != len(toPin) {
@@ -130,7 +225,7 @@ func TestPinSlabs(t *testing.T) {
 
 	// pin same slabs for account 2 again which should add links to the join
 	// table
-	slabIDs, err = store.PinSlabs(context.Background(), account2, toPin)
+	slabIDs, err = store.PinSlabs(context.Background(), account2, nextCheck, toPin)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(slabIDs) != len(toPin) {
@@ -189,7 +284,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	root1 := frand.Entropy256()
 	root2 := frand.Entropy256()
 	root3 := frand.Entropy256()
-	_, err := store.PinSlabs(context.Background(), account, []slabs.SlabPinParams{
+	_, err := store.PinSlabs(context.Background(), account, time.Time{}, []slabs.SlabPinParams{
 		{
 			EncryptionKey: [32]byte{},
 			MinShards:     10,
@@ -281,7 +376,7 @@ func BenchmarkSlabs(b *testing.B) {
 	for range dbBaseSize / slabSize {
 		initialSlabs = append(initialSlabs, newSlab())
 	}
-	initialSlabIDs, err := store.PinSlabs(context.Background(), account, initialSlabs)
+	initialSlabIDs, err := store.PinSlabs(context.Background(), account, time.Time{}, initialSlabs)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -297,7 +392,7 @@ func BenchmarkSlabs(b *testing.B) {
 			}
 			b.StartTimer()
 
-			_, err := store.PinSlabs(context.Background(), proto.Account{1}, slabs)
+			_, err := store.PinSlabs(context.Background(), proto.Account{1}, time.Time{}, slabs)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -351,4 +446,82 @@ func BenchmarkSlabs(b *testing.B) {
 	b.Run("Slabs-4GiB", func(b *testing.B) {
 		runSlabsBenchmark(b, 100)
 	})
+}
+
+// BenchmarkSectorsForIntegrityCheck benchmarks SectorsForIntegrityCheck
+//
+//	CPU  | BatchSize |	  Count  |     Time/op     |   Throughput
+//
+// M2 Pro |    10     |   2857   |    0.380024 ms  |  110369.50 MB/s
+// M2 Pro |   100     |   2780   |    0.428167 ms  |  979595.01 MB/s
+// M2 Pro |  1000     |   1497   |    0.790556 ms  | 5305513.99 MB/s
+func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+	account := proto.Account{1}
+
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	// add a host
+	hk := types.PublicKey{1}
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// prepare base db
+	const (
+		dbBaseSize = 1 << 40 // 1TiB of sectors
+		nSectors   = dbBaseSize / proto.SectorSize
+	)
+
+	// insert sectors in batches
+	for remainingSectors := nSectors; remainingSectors > 0; {
+		batchSize := min(remainingSectors, 10000)
+		remainingSectors -= batchSize
+		var sectors []slabs.SectorPinParams
+		for range batchSize {
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    frand.Entropy256(),
+				HostKey: hk,
+			})
+		}
+		slabIDs, err := store.PinSlabs(context.Background(), account, time.Now().Add(time.Hour), []slabs.SlabPinParams{{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       sectors,
+		}})
+		if err != nil {
+			b.Fatal(err)
+		} else if len(slabIDs) != 1 {
+			b.Fatal("expected 1 slab id")
+		}
+	}
+
+	// update next_integrity_check to random value in the past
+	_, err := store.pool.Exec(context.Background(), `
+		UPDATE sectors SET next_integrity_check = NOW() - interval '1 week' * random()
+	`)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for _, batchSize := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
+			b.SetBytes(int64(batchSize) * proto.SectorSize)
+			b.ResetTimer()
+
+			for b.Loop() {
+				batch, err := store.SectorsForIntegrityCheck(context.Background(), hk, batchSize)
+				if err != nil {
+					b.Fatal(err)
+				} else if len(batch) != batchSize {
+					b.Fatalf("no full batch was returned: %d", len(batch))
+				}
+			}
+		})
+	}
 }
