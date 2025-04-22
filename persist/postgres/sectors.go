@@ -11,11 +11,10 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
-	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 )
 
-// MarkSectorLost marks the sectors as lost by setting both the contract ID and
+// MarkSectorsLost marks the sectors as lost by setting both the contract ID and
 // host ID to NULL. This is meant to be used in 2 cases:
 // - The host reports that the sector is lost (e.g. when pinning it, during the integrity check or when fetching it for migration)
 // - The host has failed the integrity check for that sector enough times
@@ -41,9 +40,7 @@ func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, ro
 			SET lost_sectors = lost_sectors + $1
 			WHERE public_key = $2
 		`, resp.RowsAffected(), sqlPublicKey(hostKey))
-		if errors.Is(err, sql.ErrNoRows) {
-			return hosts.ErrNotFound
-		} else if err != nil {
+		if err != nil {
 			return fmt.Errorf("failed to increment host's lost sectors: %w", err)
 		}
 		return nil
