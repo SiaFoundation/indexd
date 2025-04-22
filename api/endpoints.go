@@ -71,6 +71,8 @@ func (a *api) handlePOSTAccount(jc jape.Context) {
 	}
 
 	a.contracts.TriggerAccountFunding()
+
+	jc.Encode(nil)
 }
 
 func (a *api) handlePUTAccount(jc jape.Context) {
@@ -104,6 +106,8 @@ func (a *api) handlePUTAccount(jc jape.Context) {
 	}
 
 	a.contracts.TriggerAccountFunding()
+
+	jc.Encode(nil)
 }
 
 func (a *api) handleDELETEAccount(jc jape.Context) {

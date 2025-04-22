@@ -137,14 +137,14 @@ func TestUpdateAccount(t *testing.T) {
 
 	// assert updating to an existing account fails
 	err = store.UpdateAccount(context.Background(), pk1, pk2)
-	if !errors.Is(accounts.ErrExists, err) {
+	if !errors.Is(err, accounts.ErrExists) {
 		t.Fatal("expected [accounts.ErrExists], got", err)
 	}
 
 	// assert updating a non existing account fails
 	pk3 := types.GeneratePrivateKey().PublicKey()
 	err = store.UpdateAccount(context.Background(), types.GeneratePrivateKey().PublicKey(), pk3)
-	if !errors.Is(accounts.ErrNotFound, err) {
+	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected [accounts.ErrNotFound], got", err)
 	}
 
