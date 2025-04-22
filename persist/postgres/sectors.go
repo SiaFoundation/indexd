@@ -79,10 +79,6 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []sl
 	}
 
 	results := make([]slabs.Slab, len(slabIDs))
-	slabIDMap := make(map[slabs.SlabID]int)
-	for i, slabID := range slabIDs {
-		slabIDMap[slabID] = i
-	}
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		dbIDMap := make(map[int64]int)
 		var dbIDs []int64
