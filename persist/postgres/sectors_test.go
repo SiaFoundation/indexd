@@ -119,7 +119,7 @@ func TestPinSlabs(t *testing.T) {
 
 	// pin without an account
 	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
-	slabIDs, err := store.PinSlabs(context.Background(), account, nextCheck, []slabs.SlabPinParams{{}})
+	_, err := store.PinSlabs(context.Background(), account, nextCheck, []slabs.SlabPinParams{{}})
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected ErrNotFound, got", err)
 	}
@@ -175,7 +175,7 @@ func TestPinSlabs(t *testing.T) {
 	slab2ID, slab2 := newSlab(2)
 	toPin := []slabs.SlabPinParams{slab1, slab2}
 	expectedIDs := []slabs.SlabID{slab1ID, slab2ID}
-	slabIDs, err = store.PinSlabs(context.Background(), proto.Account{1}, nextCheck, toPin)
+	slabIDs, err := store.PinSlabs(context.Background(), proto.Account{1}, nextCheck, toPin)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(slabIDs) != len(toPin) {
@@ -262,18 +262,112 @@ func TestPinSlabs(t *testing.T) {
 	assertCount("sectors", 4)       // 2 sectors per slab
 }
 
+func TestUnpinnedSectors(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// create account, host and contract
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+	hk := types.PublicKey{1}
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+		t.Fatal(err)
+	}
+	var mapID int64
+	if err := store.pool.QueryRow(context.Background(), `SELECT id FROM contract_sectors_map WHERE contract_id = $1`, sqlHash256(types.FileContractID(hk))).Scan(&mapID); err != nil {
+		t.Fatal(err)
+	}
+
+	// create 4 sectors
+	_, err := store.PinSlabs(context.Background(), account, time.Time{}, []slabs.SlabPinParams{
+		{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     10,
+			Sectors: []slabs.SectorPinParams{
+				{
+					HostKey: hk,
+					Root:    types.Hash256{1},
+				},
+				{
+					HostKey: hk,
+					Root:    types.Hash256{2},
+				},
+				{
+					HostKey: hk,
+					Root:    types.Hash256{3},
+				},
+				{
+					HostKey: hk,
+					Root:    types.Hash256{4},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// helper to update sector's pinned state
+	updateSector := func(sid int64, hostID, contractID *int64, uploadedAt time.Time) {
+		t.Helper()
+		res, err := store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id=$1, host_id=$2, uploaded_at=$3 WHERE id=$4`, contractID, hostID, uploadedAt, sid)
+		if err != nil {
+			t.Fatal(err)
+		} else if res.RowsAffected() != 1 {
+			t.Fatal("no rows updated")
+		}
+	}
+
+	// prepare sectors
+	one := int64(1)
+	now := time.Now().Round(time.Microsecond)
+	updateSector(1, &one, &mapID, now)              // has host and is pinned to contract
+	updateSector(2, &one, nil, now)                 // has host but is not pinned to contract
+	updateSector(3, nil, nil, now)                  // has neither host nor is it pinned
+	updateSector(4, &one, nil, now.Add(-time.Hour)) // also not pinned but older than 2
+
+	// check unpinned sectors
+	unpinned, err := store.UnpinnedSectors(context.Background(), hk, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unpinned) != 2 {
+		t.Fatalf("expected 2 unpinned sector, got %d", len(unpinned))
+	} else if unpinned[0] != (types.Hash256{4}) {
+		t.Fatalf("expected root %v, got %v", types.Hash256{4}, unpinned[0])
+	} else if unpinned[1] != (types.Hash256{2}) {
+		t.Fatalf("expected root %v, got %v", types.Hash256{2}, unpinned[1])
+	}
+
+	// again with lower limit
+	unpinned, err = store.UnpinnedSectors(context.Background(), hk, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unpinned) != 1 {
+		t.Fatalf("expected 1 unpinned sector, got %d", len(unpinned))
+	} else if unpinned[0] != (types.Hash256{4}) {
+		t.Fatalf("expected root %v, got %v", types.Hash256{4}, unpinned[0])
+	}
+}
+
 // BenchmarkSlabs benchmarks Slabs and PinSlabs in various batch sizes. The
 // results are expressed in time per operation as well as equivalent
 // upload/download throughput.
 //
 // Hardware |     Benchmark   |  ms/op  | Throughput   |
-// M2 Pro   | PinSlabs-40MiB  |  1.4ms | 28472.56 MB/s |
-// M2 Pro   | PinSlabs-400MiB |  8.9ms |  4698.53 MB/s |
-// M2 Pro   | PinSlabs-4GiB   | 89.6ms |   467.67 MB/s |
+// M2 Pro   | PinSlabs-40MiB  |  1.2ms | 33885.23 MB/s |
+// M2 Pro   | PinSlabs-400MiB |  8.6ms |  4875.42 MB/s |
+// M2 Pro   | PinSlabs-4GiB   | 86.7ms |   483.63 MB/s |
 //
-// M2 Pro   | Slabs-40MiB  |  0.6ms |    63029.04 MB/s |
-// M2 Pro   | Slabs-400MiB |  3.1ms |    13181.86 MB/s |
-// M2 Pro   | Slabs-4GiB   | 29.8ms |     1404.40 MB/s |
+// M2 Pro   | Slabs-40MiB  |  0.5ms |    70382.04 MB/s |
+// M2 Pro   | Slabs-400MiB |  0.8ms |    52154.24 MB/s |
+// M2 Pro   | Slabs-4GiB   |  3.3ms |    12668.21 MB/s |
 func BenchmarkSlabs(b *testing.B) {
 	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
 	account := proto.Account{1}
@@ -390,6 +484,120 @@ func BenchmarkSlabs(b *testing.B) {
 	b.Run("Slabs-4GiB", func(b *testing.B) {
 		runSlabsBenchmark(b, 100)
 	})
+}
+
+// BenchmarkUnpinnedSectors benchmarks UnpinnedSectors in various batch sizes.
+//
+// CPU    | BatchSize |	 Count  |    Time/op    |    Throughput
+// M2 Pro |     100   |   1357  |  0.847729 ms  |   494769.40 MB/s
+// M2 Pro |    1000   |    434  |  3.023359 ms  |  1387299.30 MB/s
+// M2 Pro |   10000   |     84  | 21.598813 ms  |  1941914.13 MB/s
+func BenchmarkUnpinnedSectors(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	// create account, host and contract
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+	hk := types.PublicKey{1}
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		b.Fatal(err)
+	}
+	if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+		b.Fatal(err)
+	}
+
+	// prepare base db
+	const (
+		dbBaseSize = 1 << 40 // 1TiB of sectors
+		nSectors   = dbBaseSize / proto.SectorSize
+	)
+
+	// insert sectors in batches
+	for remainingSectors := nSectors; remainingSectors > 0; {
+		batchSize := min(remainingSectors, 10000)
+		remainingSectors -= batchSize
+		var sectors []slabs.SectorPinParams
+		for range batchSize {
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    frand.Entropy256(),
+				HostKey: hk,
+			})
+		}
+		slabIDs, err := store.PinSlabs(context.Background(), account, time.Time{}, []slabs.SlabPinParams{{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       sectors,
+		}})
+		if err != nil {
+			b.Fatal(err)
+		} else if len(slabIDs) != 1 {
+			b.Fatal("expected 1 slab id")
+		}
+	}
+
+	// helper to pin sector
+	pinSectors := func(roots []types.Hash256) {
+		b.Helper()
+		sqlRoots := make([]sqlHash256, len(roots))
+		for i, root := range roots {
+			sqlRoots[i] = sqlHash256(root)
+		}
+		res, err := store.pool.Exec(context.Background(), `UPDATE sectors SET contract_id = 1 WHERE sector_root = ANY($1)`, sqlRoots)
+		if err != nil {
+			b.Fatal(err)
+		} else if res.RowsAffected() != int64(len(roots)) {
+			b.Fatalf("expected %d rows updated, got %d", len(roots), res.RowsAffected())
+		}
+	}
+
+	// helper to unpin all sectors
+	unpinSectors := func() {
+		b.Helper()
+		_, err := store.pool.Exec(context.Background(), `
+			UPDATE sectors
+			SET contract_id = NULL,
+			uploaded_at = NOW() - interval '1 week' * random()
+			WHERE contract_id IS NOT NULL`)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// run benchmark for various batch sizes
+	for _, batchSize := range []int{100, 1000, 10000} {
+		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
+			unpinSectors()
+			unpinnedSectors := nSectors
+			b.SetBytes(int64(batchSize) * proto.SectorSize)
+			b.ResetTimer()
+
+			for b.Loop() {
+				unpinned, err := store.UnpinnedSectors(context.Background(), hk, batchSize)
+				if err != nil {
+					b.Fatal(err)
+				} else if len(unpinned) != batchSize {
+					b.Fatalf("expected %d unpinned sector, got %d (%d unpinned)", batchSize, len(unpinned), unpinnedSectors)
+				}
+				unpinnedSectors -= batchSize
+
+				b.StopTimer()
+				if unpinnedSectors < batchSize {
+					// unpin all sectors to avoid running out
+					unpinSectors()
+					unpinnedSectors = nSectors
+				} else {
+					// pin fetched sectors to fetch different ones next
+					pinSectors(unpinned)
+				}
+				b.StartTimer()
+			}
+		})
+	}
 }
 
 // BenchmarkSectorsForIntegrityCheck benchmarks SectorsForIntegrityCheck

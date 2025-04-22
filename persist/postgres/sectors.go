@@ -78,66 +78,104 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []sl
 		return nil, nil
 	}
 
-	result := make([]slabs.Slab, 0, len(slabIDs))
+	results := make([]slabs.Slab, len(slabIDs))
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		for _, slabID := range slabIDs {
-			// query slab
-			var sid int64
-			slab := slabs.Slab{ID: slabID}
-			err := tx.QueryRow(ctx, `
-				SELECT slabs.id, encryption_key, min_shards
-				FROM slabs
-				INNER JOIN account_slabs ON slabs.id = account_slabs.slab_id
-				INNER JOIN accounts a ON a.id = account_slabs.account_id
-				WHERE digest = $1 AND a.public_key = $2
-			`, sqlHash256(slabID), sqlPublicKey(accountID)).Scan(&sid, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
-			if errors.Is(err, sql.ErrNoRows) {
-				return fmt.Errorf("%w: %v", slabs.ErrSlabNotFound, slabID)
-			} else if err != nil {
-				return fmt.Errorf("failed to query slab %s: %w", slabID, err)
-			}
-
-			// query sectors
-			err = func() error {
-				rows, err := tx.Query(ctx, `
-					SELECT sector_root, h.public_key, c.contract_id
-					FROM sectors
-					LEFT JOIN hosts h ON h.id = sectors.host_id
-					LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
-					LEFT JOIN contracts c ON c.contract_id = csm.contract_id
-					WHERE slab_id = $1
-					ORDER BY slab_index ASC
-				`, sid)
-				if err != nil {
-					return fmt.Errorf("failed to query sectors for slab %s: %w", slabID, err)
+		dbIDMap := make(map[int64]int)
+		var dbIDs []int64
+		slabBatch := &pgx.Batch{}
+		for i, slabID := range slabIDs {
+			slabBatch.Queue(`SELECT s.id, s.encryption_key, s.min_shards
+				FROM slabs s
+				INNER JOIN account_slabs ac ON s.id = ac.slab_id
+				INNER JOIN accounts a ON a.id = ac.account_id
+				WHERE digest = $1 AND a.public_key = $2`, sqlHash256(slabID), sqlPublicKey(accountID)).QueryRow(func(row pgx.Row) error {
+				results[i].ID = slabID
+				var dbID int64
+				if err := row.Scan(&dbID, (*sqlHash256)(&results[i].EncryptionKey), &results[i].MinShards); err != nil {
+					if errors.Is(err, sql.ErrNoRows) {
+						err = slabs.ErrSlabNotFound
+					}
+					return fmt.Errorf("failed to get slab %q: %w", slabID, err)
 				}
+				dbIDs = append(dbIDs, dbID)
+				dbIDMap[dbID] = i
+				return nil
+			})
+		}
+		if err := tx.Tx.SendBatch(ctx, slabBatch).Close(); err != nil {
+			return fmt.Errorf("failed to get slabs: %w", err)
+		}
+
+		sectorsBatch := &pgx.Batch{}
+		for _, slabID := range dbIDs {
+			sectorsBatch.Queue(`SELECT s.sector_root, h.public_key, c.contract_id 
+FROM sectors s
+LEFT JOIN hosts h ON h.id = s.host_id
+LEFT JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
+LEFT JOIN contracts c ON c.contract_id = csm.contract_id
+WHERE s.slab_id = $1
+ORDER BY s.slab_index ASC`, slabID).Query(func(rows pgx.Rows) error {
 				defer rows.Close()
 				for rows.Next() {
 					var sector slabs.Sector
 					var hostKey sql.Null[sqlPublicKey]
 					var contractID sql.Null[sqlHash256]
-					err = rows.Scan((*sqlHash256)(&sector.Root), asNullable(&hostKey), &contractID)
-					if err != nil {
+
+					if err := rows.Scan((*sqlHash256)(&sector.Root), &hostKey, &contractID); err != nil {
 						return fmt.Errorf("failed to scan sector: %w", err)
 					}
+
 					if hostKey.Valid {
 						sector.HostKey = (*types.PublicKey)(&hostKey.V)
 					}
 					if contractID.Valid {
 						sector.ContractID = (*types.FileContractID)(&contractID.V)
 					}
-					slab.Sectors = append(slab.Sectors, sector)
+					results[dbIDMap[slabID]].Sectors = append(results[dbIDMap[slabID]].Sectors, sector)
 				}
 				return rows.Err()
-			}()
-			if err != nil {
-				return err
-			}
-			result = append(result, slab)
+			})
 		}
+		if err := tx.Tx.SendBatch(ctx, sectorsBatch).Close(); err != nil {
+			return fmt.Errorf("failed to get slab sectors: %w", err)
+		}
+
 		return nil
 	})
-	return result, err
+	return results, err
+}
+
+// UnpinnedSectors returns up to 'limit' sectors which have been uploaded to a host but
+// not pinned to a contract yet.
+func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
+	roots := make([]types.Hash256, 0, limit)
+	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+			WITH hid AS (
+				SELECT id FROM hosts WHERE public_key = $1
+			)
+			SELECT sector_root
+			FROM sectors
+				WHERE host_id = (SELECT id FROM hid)
+				AND contract_sectors_map_id IS NULL
+			ORDER BY uploaded_at ASC
+			LIMIT $2
+		`, sqlPublicKey(hostKey), limit)
+		if err != nil {
+			return fmt.Errorf("failed to query sectors: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var root types.Hash256
+			err = rows.Scan((*sqlHash256)(&root))
+			if err != nil {
+				return fmt.Errorf("failed to scan unpinned sector: %w", err)
+			}
+			roots = append(roots, root)
+		}
+		return rows.Err()
+	})
+	return roots, err
 }
 
 func (s *Store) pinSlab(ctx context.Context, tx *txn, accountID int64, nextIntegrityCheck time.Time, slab slabs.SlabPinParams) (slabs.SlabID, error) {
