@@ -232,3 +232,6 @@ CREATE INDEX sectors_slab_id_idx ON sectors(slab_id);
 -- speed up integrity check query
 CREATE INDEX sectors_next_integrity_check_idx ON sectors(next_integrity_check ASC);
 CREATE INDEX sectors_host_id_next_integrity_check_idx ON sectors(host_id, next_integrity_check ASC);
+
+-- speed up querying sectors of a host by root
+CREATE INDEX sectors_sector_root_idx ON sectors(host_id, sector_root);
