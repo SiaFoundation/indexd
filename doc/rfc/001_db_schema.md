@@ -177,7 +177,7 @@ CREATE INDEX hosts_blocklist_reason_idx ON hosts_blocklist (reason);
 CREATE TABLE contracts (
   id SERIAL PRIMARY KEY,
   host_id INTEGER REFERENCES hosts(id) NOT NULL,
-  contract_id BYTEA UNIQUE CHECK (LENGTH(contract_id) = 32),
+  contract_id BYTEA NOT NULL UNIQUE CHECK (LENGTH(contract_id) = 32),
 
   -- lifetime related columns
   formation TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -213,9 +213,15 @@ CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- fo
 CREATE INDEX contracts_state_good_idx ON contracts(state) WHERE state <= 1 AND good; -- for filtering contracts
 CREATE INDEX contracts_host_id_remaining_allowance_idx ON contracts (host_id, remaining_allowance DESC) WHERE good = true AND remaining_allowance > 0 AND state <= 1; -- for fetching contracts for funding
 
+CREATE TABLE contract_sectors_map (
+    id SERIAL PRIMARY KEY,
+    contract_id BYTEA NOT NULL UNIQUE REFERENCES contracts(contract_id) NOT NULL
+);
+CREATE INDEX contract_sectors_map_contract_id_idx ON contract_sectors_map(contract_id);
+
 CREATE TABLE contract_elements (
     id SERIAL PRIMARY KEY,
-    contract_id BYTEA UNIQUE REFERENCES contracts(contract_id) ON DELETE CASCADE,
+    contract_id BYTEA NOT NULL UNIQUE REFERENCES contracts(contract_id) ON DELETE CASCADE,
     contract BYTEA NOT NULL,
     leaf_index INTEGER NOT NULL,
     merkle_proof BYTEA NOT NULL
@@ -268,7 +274,7 @@ CREATE TABLE sectors (
 
     -- uploading
     host_id INTEGER REFERENCES hosts(id), -- host that stores sector
-    contract_id INTEGER REFERENCES contracts(id) DEFAULT NULL, -- null if not pinned
+    contract_sectors_map_id INTEGER REFERENCES contract_sectors_map(id) DEFAULT NULL, -- null if not pinned
     uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by upload time
 
     -- slab

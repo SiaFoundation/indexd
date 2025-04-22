@@ -760,7 +760,7 @@ func TestPruneHosts(t *testing.T) {
 	}
 
 	// delete all contracts
-	if _, err := db.pool.Exec(context.Background(), "DELETE FROM contracts"); err != nil {
+	if _, err := db.pool.Exec(context.Background(), "DELETE FROM contract_sectors_map; DELETE FROM contracts;"); err != nil {
 		t.Fatal(err)
 	}
 

@@ -387,18 +387,6 @@ func TestFormRenewContract(t *testing.T) {
 		}
 	}
 
-	// helper to fetch the contract id from the db
-	fetchContractID := func(id types.FileContractID) int64 {
-		t.Helper()
-		var cid int64
-		if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-			return tx.QueryRow(ctx, `SELECT id FROM contracts WHERE contract_id = $1`, sqlHash256(id)).Scan(&cid)
-		}); err != nil {
-			t.Fatal("failed to fetch contract ID", err)
-		}
-		return cid
-	}
-
 	// form contract
 	expectedFormed := contracts.Contract{
 		ID:               types.FileContractID{1, 2, 3},
@@ -420,7 +408,13 @@ func TestFormRenewContract(t *testing.T) {
 		t.Fatal("failed to add formed contract", err)
 	}
 	assertContract(expectedFormed.ID, expectedFormed)
-	initialDBID := fetchContractID(expectedFormed.ID)
+
+	// assert `contract_sectors_map` entry was created when forming a contract
+	var mapID int64
+	err = store.pool.QueryRow(context.Background(), `SELECT id FROM contract_sectors_map WHERE contract_id = $1`, sqlHash256(expectedFormed.ID)).Scan(&mapID)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// simulate using the contract and marking it not good
 	modifyContract := func(contractID types.FileContractID) {
@@ -487,8 +481,6 @@ func TestFormRenewContract(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal("failed to add refreshed contract", err)
-	} else if currID := fetchContractID(expectedRefreshed.ID); currID != initialDBID {
-		t.Fatalf("expected contract ID %d, got %d", initialDBID, currID)
 	}
 	expectedFormed.RenewedTo = expectedRefreshed.ID
 	assertContract(expectedFormed.ID, expectedFormed)
@@ -540,13 +532,19 @@ func TestFormRenewContract(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal("failed to add refreshed contract", err)
-	} else if currID := fetchContractID(expectedRenewed.ID); currID != initialDBID {
-		t.Fatalf("expected contract ID %d, got %d", initialDBID, currID)
 	}
 	expectedRefreshed.RenewedTo = expectedRenewed.ID
 	assertContract(expectedFormed.ID, expectedFormed)
 	assertContract(expectedRefreshed.ID, expectedRefreshed)
 	assertContract(expectedRenewed.ID, expectedRenewed)
+
+	// assert `contract_sectors_map` entry was updated when renewing the contract
+	var currID int64
+	if err := store.pool.QueryRow(context.Background(), `SELECT id FROM contract_sectors_map WHERE contract_id = $1`, sqlHash256(expectedRenewed.ID)).Scan(&mapID); err != nil {
+		t.Fatal(err)
+	} else if currID == mapID {
+		t.Fatalf("expected contract_sectors_map entry to be updated, got %d", mapID)
+	}
 }
 
 func TestRejectContracts(t *testing.T) {

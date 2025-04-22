@@ -103,7 +103,8 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []sl
 					SELECT sector_root, h.public_key, c.contract_id
 					FROM sectors
 					LEFT JOIN hosts h ON h.id = sectors.host_id
-					LEFT JOIN contracts c ON c.id = sectors.contract_id
+					LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
+					LEFT JOIN contracts c ON c.contract_id = csm.contract_id
 					WHERE slab_id = $1
 					ORDER BY slab_index ASC
 				`, sid)

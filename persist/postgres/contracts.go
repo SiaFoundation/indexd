@@ -28,112 +28,24 @@ func (s *Store) AddFormedContract(ctx context.Context, contractID types.FileCont
 		} else if resp.RowsAffected() != 1 {
 			return fmt.Errorf("expected 1 row to be affected, got %d", resp.RowsAffected())
 		}
+		resp, err = tx.Exec(ctx, `INSERT INTO contract_sectors_map (contract_id) VALUES ($1)`, sqlHash256(contractID))
+		if err != nil {
+			return fmt.Errorf("failed to add entry to contract sectors map: %w", err)
+		} else if resp.RowsAffected() != 1 {
+			return fmt.Errorf("expected 1 row to be affected, got %d", resp.RowsAffected())
+		}
 		return nil
 	})
 }
 
-// AddRenewedContract adds a renewed contract to the database.
+// AddRenewedContract adds a renewed contract to the database. It will update
+// the renewed contract and point it to the renewal, as well as update the
+// contract id in the contract sectors map.
 func (s *Store) AddRenewedContract(ctx context.Context, params contracts.AddRenewedContractParams) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
-WITH renewed AS (
-  SELECT 
-    id,
-    host_id,
-    formation,
-    proof_height,
-    expiration_height,
-    renewed_from,
-    state,
-    capacity,
-    size,
-    contract_price,
-    initial_allowance,
-    remaining_allowance,
-    miner_fee,
-    used_collateral,
-    total_collateral,
-    good,
-    append_sector_spending,
-    free_sector_spending,
-    fund_account_spending,
-    sector_roots_spending
-  FROM contracts 
-  WHERE contract_id = $1
-),
-updated AS (
-  UPDATE contracts 
-  SET
-    contract_id = $2,
-    formation = NOW(),
-    proof_height = $3,
-    expiration_height = $4,
-    renewed_from = $1, 
-    renewed_to = NULL,
-	state = 0,
-    capacity = CASE WHEN $3 = renewed.proof_height THEN renewed.capacity ELSE renewed.size END,
-    contract_price = $5,
-    initial_allowance = $6,
-    remaining_allowance = $6,
-    miner_fee = $7,
-    used_collateral = $8,
-    total_collateral = $9,
-    good = TRUE,
-    append_sector_spending = 0,
-    free_sector_spending = 0,
-    fund_account_spending = 0,
-    sector_roots_spending = 0
-  FROM renewed 
-  WHERE contracts.id = renewed.id
-  RETURNING renewed.*
-),
-inserted AS (
-  INSERT INTO contracts (
-    host_id,
-    contract_id,
-    proof_height,
-    expiration_height,
-    renewed_from,
-    renewed_to,
-    state,
-    capacity,
-    size,
-    contract_price,
-    initial_allowance,
-    remaining_allowance,
-    miner_fee,
-    used_collateral,
-    total_collateral,
-    good,
-    append_sector_spending,
-    free_sector_spending,
-    fund_account_spending,
-    sector_roots_spending
-  )
-  SELECT
-    updated.host_id,
-    $1,
-    updated.proof_height,
-    updated.expiration_height,
-    updated.renewed_from,
-    $2,
-    updated.state,
-    updated.capacity,
-    updated.size,
-    updated.contract_price,
-    updated.initial_allowance,
-    updated.remaining_allowance,
-    updated.miner_fee,
-    updated.used_collateral,
-    updated.total_collateral,
-    updated.good,
-    updated.append_sector_spending,
-    updated.free_sector_spending,
-    updated.fund_account_spending,
-    updated.sector_roots_spending
-  FROM updated
-) SELECT 1;`,
-			sqlHash256(params.RenewedFrom),
+INSERT INTO contracts(contract_id, host_id, formation, proof_height, expiration_height, renewed_from, capacity, size, contract_price, initial_allowance, remaining_allowance, miner_fee, used_collateral, total_collateral)
+(SELECT $1, host_id, NOW(), $2, $3, contract_id, CASE WHEN $2 = proof_height THEN capacity ELSE size END, size, $4, $5, $5, $6, $7, $8 FROM contracts WHERE contract_id = $9)`,
 			sqlHash256(params.RenewedTo),
 			params.ProofHeight,
 			params.ExpirationHeight,
@@ -142,9 +54,22 @@ inserted AS (
 			sqlCurrency(params.MinerFee),
 			sqlCurrency(params.UsedCollateral),
 			sqlCurrency(params.TotalCollateral),
+			sqlHash256(params.RenewedFrom),
 		)
 		if err != nil {
-			return fmt.Errorf("failed to add renewed contract: %w", err)
+			return fmt.Errorf("failed to add renewal to database: %w", err)
+		}
+
+		res, err := tx.Exec(ctx, `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2`, sqlHash256(params.RenewedTo), sqlHash256(params.RenewedFrom))
+		if err != nil {
+			return fmt.Errorf("failed to update renewed contract: %w", err)
+		} else if res.RowsAffected() != 1 {
+			return fmt.Errorf("expected 1 row to be affected, got %d", res.RowsAffected())
+		}
+
+		_, err = tx.Exec(ctx, `UPDATE contract_sectors_map SET contract_id = $1 WHERE contract_id = $2`, sqlHash256(params.RenewedTo), sqlHash256(params.RenewedFrom))
+		if err != nil {
+			return fmt.Errorf("failed to update contract sectors map: %w", err)
 		}
 		return nil
 	})
