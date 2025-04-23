@@ -391,7 +391,7 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 	}
 
 	// renew any good contracts within their renew window
-	if err := cm.performContractRenewals(ctx, settings.RenewWindow, log); err != nil {
+	if err := cm.performContractRenewals(ctx, settings.Period, settings.RenewWindow, log); err != nil {
 		return fmt.Errorf("failed to renew contracts: %w", err)
 	}
 

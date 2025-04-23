@@ -48,14 +48,18 @@ func (cf *contractor) RenewContract(ctx context.Context, hk types.PublicKey, add
 	return res, nil
 }
 
-func (cm *ContractManager) performContractRenewals(ctx context.Context, renewWindow uint64, log *zap.Logger) error {
+func (cm *ContractManager) performContractRenewals(ctx context.Context, period, renewWindow uint64, log *zap.Logger) error {
 	renewalLog := log.Named("renewal")
+
 	contracts, err := cm.store.Contracts(ctx, WithGood(true), WithRevisable(true))
 	if err != nil {
 		return fmt.Errorf("failed to fetch contracts for renewal: %w", err)
 	}
 
-	minProofHeight := cm.cm.TipState().Index.Height + renewWindow
+	bh := cm.cm.TipState().Index.Height
+	minProofHeight := bh + renewWindow
+	newProofHeight := bh + period + renewWindow
+
 	for _, contract := range contracts {
 		if contract.ProofHeight > minProofHeight {
 			continue // too early to renew
@@ -86,7 +90,7 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, renewWin
 			continue
 		}
 
-		res, err := cm.contractor.RenewContract(ctx, contract.HostKey, host.SiamuxAddr(), host.Settings, contract.ID, cm.cm.TipState().Index.Height+renewWindow)
+		res, err := cm.contractor.RenewContract(ctx, contract.HostKey, host.SiamuxAddr(), host.Settings, contract.ID, newProofHeight)
 		if err != nil {
 			contractLog.Debug("failed to renew", zap.Error(err))
 			continue
