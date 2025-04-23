@@ -40,8 +40,8 @@ func TestRecordIntegrityCheck(t *testing.T) {
 
 	// pin a slab to add 2 sectors
 	pinTime := time.Now().Round(time.Microsecond)
-	root1 := frand.Entropy256()
-	root2 := frand.Entropy256()
+	root1 := types.Hash256{1}
+	root2 := types.Hash256{2}
 	_, err := store.PinSlabs(context.Background(), account, pinTime, []slabs.SlabPinParams{
 		{
 			EncryptionKey: [32]byte{},
@@ -77,6 +77,18 @@ func TestRecordIntegrityCheck(t *testing.T) {
 		}
 	}
 
+	assertFailingSectors := func(expectedRoots []types.Hash256, minChecks, limit int) {
+		t.Helper()
+		roots, err := store.FailingSectors(context.Background(), hk, minChecks, limit)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(roots) != len(expectedRoots) {
+			t.Fatalf("expected %d failing sectors, got %d", len(expectedRoots), len(roots))
+		} else if len(roots) > 0 && !reflect.DeepEqual(roots, expectedRoots) {
+			t.Fatalf("expected failing sectors %v, got %v", expectedRoots, roots)
+		}
+	}
+
 	record := func(success bool, nextCheck time.Time, roots []types.Hash256) {
 		t.Helper()
 		err := store.RecordIntegrityCheck(context.Background(), success, nextCheck, hk, roots)
@@ -88,18 +100,22 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	// check initial state - 0 failures
 	assertSectors(root1, pinTime, 0)
 	assertSectors(root2, pinTime, 0)
+	assertFailingSectors([]types.Hash256{}, 1, 10)
 
 	// record success for both
 	now := time.Now().Round(time.Microsecond)
 	record(true, now, []types.Hash256{root1, root2})
 	assertSectors(root1, now, 0)
 	assertSectors(root2, now, 0)
+	assertFailingSectors([]types.Hash256{}, 1, 10)
 
 	// record failure for both
 	now = now.Add(time.Minute)
 	record(false, now, []types.Hash256{root1, root2})
 	assertSectors(root1, now, 1)
 	assertSectors(root2, now, 1)
+	assertFailingSectors([]types.Hash256{root1, root2}, 1, 10)
+	assertFailingSectors([]types.Hash256{root1}, 1, 1)
 
 	// one more failure for root1 and success for root2
 	now = now.Add(time.Minute)
@@ -107,6 +123,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	record(true, now, []types.Hash256{root2})
 	assertSectors(root1, now, 2)
 	assertSectors(root2, now, 0)
+	assertFailingSectors([]types.Hash256{root1}, 1, 10)
 }
 
 func TestSectorsForIntegrityCheck(t *testing.T) {
