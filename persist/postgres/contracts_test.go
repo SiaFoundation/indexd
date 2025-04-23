@@ -899,6 +899,46 @@ func TestMarkSuccessfulBroadcast(t *testing.T) {
 	}
 }
 
+func TestLastUpdateOnChain(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := types.PublicKey{1, 1, 1}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add a contract
+	if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert ts is zero
+	contract, err := store.Contract(context.Background(), types.FileContractID(hk))
+	if err != nil {
+		t.Fatal(err)
+	} else if !contract.LastUpdateOnChain.IsZero() {
+		t.Fatal("unexpected", contract.LastUpdateOnChain)
+	}
+
+	// update last chain update ts
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateContractLastChainUpdate(types.FileContractID(hk), time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert ts is not zero
+	contract, err = store.Contract(context.Background(), types.FileContractID(hk))
+	if err != nil {
+		t.Fatal(err)
+	} else if contract.LastUpdateOnChain.IsZero() {
+		t.Fatal("unexpected", contract.LastUpdateOnChain)
+	}
+}
+
 func TestSyncContract(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
