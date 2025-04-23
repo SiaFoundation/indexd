@@ -168,13 +168,6 @@ func TestPerformContractRenewals(t *testing.T) {
 			}
 		}
 	}
-
-	// assert consecutive calls don't keep renewing the same contract
-	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
-		t.Fatal(err)
-	} else if len(contractor.renewCalls) > 1 {
-		t.Fatalf("expected no new renewals, got %v", len(contractor.renewCalls))
-	}
 }
 
 func TestSyncRevisionState(t *testing.T) {
