@@ -222,6 +222,10 @@ CREATE TABLE sectors (
     next_integrity_check TIMESTAMP WITH TIME ZONE NOT NULL,
     consecutive_failed_checks SMALLINT NOT NULL DEFAULT 0
 );
+
+-- quick lookup of a sector stored on a specific host
+CREATE INDEX sectors_host_id_sector_root_idx ON sectors(host_id, sector_root);
+
 -- quick lookup of sectors to pin prioritized by upload time
 CREATE INDEX sectors_contract_sectors_map_id_uploaded_at_idx ON sectors(contract_sectors_map_id, uploaded_at ASC);
 

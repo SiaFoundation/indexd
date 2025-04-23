@@ -14,7 +14,7 @@ import (
 	"go.sia.tech/indexd/slabs"
 )
 
-// RecordIntegrityCheck records the result of an integrity check for the given
+// RecordIntegrityCheck records the result of integrity checks for the given
 // sectors stored on the given host.
 func (s *Store) RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {

@@ -992,3 +992,82 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 		seenSlabs[slabID] = struct{}{}
 	}
 }
+
+// BenchmarkRecordIntegrityChecks
+//
+//	CPU  | BatchSize |	  Count  |     Time/op     |   Throughput
+//
+// M2 Pro |    10     |    957   |     3.80024 ms  |   19291.60 MB/s
+// M2 Pro |   100     |    280   |    4.057123 ms  |  103381.24 MB/s
+// M2 Pro |  1000     |     37   |   28.196233 ms  |  148754.05 MB/s
+func BenchmarkRecordIntegrityChecks(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+	account := proto.Account{1}
+
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	// add a host
+	hk := types.PublicKey{1}
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// prepare base db
+	const (
+		dbBaseSize = 1 << 40 // 1TiB of sectors
+		nSectors   = dbBaseSize / proto.SectorSize
+	)
+
+	// insert sectors in batches
+	sectorRoots := make([]types.Hash256, 0, nSectors)
+	for remainingSectors := nSectors; remainingSectors > 0; {
+		batchSize := min(remainingSectors, 10000)
+		remainingSectors -= batchSize
+		var sectors []slabs.SectorPinParams
+		for range batchSize {
+			root := frand.Entropy256()
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    root,
+				HostKey: hk,
+			})
+			sectorRoots = append(sectorRoots, root)
+		}
+		slabIDs, err := store.PinSlabs(context.Background(), account, time.Now().Add(time.Hour), []slabs.SlabPinParams{{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       sectors,
+		}})
+		if err != nil {
+			b.Fatal(err)
+		} else if len(slabIDs) != 1 {
+			b.Fatal("expected 1 slab id")
+		}
+	}
+
+	for _, batchSize := range []int{10, 100, 1000} {
+		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
+			b.SetBytes(int64(batchSize) * proto.SectorSize)
+			b.ResetTimer()
+
+			for b.Loop() {
+				b.StopTimer()
+				frand.Shuffle(len(sectorRoots), func(i, j int) {
+					sectorRoots[i], sectorRoots[j] = sectorRoots[j], sectorRoots[i]
+				})
+				batch := sectorRoots[:batchSize]
+				success := frand.Intn(2) == 0
+				b.StartTimer()
+
+				err := store.RecordIntegrityCheck(context.Background(), success, time.Now(), hk, batch)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
