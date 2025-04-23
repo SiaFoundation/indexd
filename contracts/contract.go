@@ -35,18 +35,6 @@ type (
 	ContractQueryOpt func(*ContractQueryOpts)
 )
 
-var (
-	optTrue = true
-
-	// DefaultContractQueryOpts are the default options applied when querying
-	// contracts. By default, only contracts that are revisable will be
-	// returned.
-	DefaultContractQueryOpts = ContractQueryOpts{
-		Revisable: &optTrue, // return active contracts
-		Good:      nil,      // return both good and bad contracts
-	}
-)
-
 // WithGood filters contracts by whether they are considered good. This defaults
 // to 'true'.
 func WithGood(good bool) ContractQueryOpt {

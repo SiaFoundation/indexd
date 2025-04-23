@@ -111,7 +111,8 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []sl
 			sectorsBatch.Queue(`SELECT s.sector_root, h.public_key, c.contract_id 
 FROM sectors s
 LEFT JOIN hosts h ON h.id = s.host_id
-LEFT JOIN contracts c ON c.id = s.contract_id
+LEFT JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
+LEFT JOIN contracts c ON c.contract_id = csm.contract_id
 WHERE s.slab_id = $1
 ORDER BY s.slab_index ASC`, slabID).Query(func(rows pgx.Rows) error {
 				defer rows.Close()
@@ -156,7 +157,7 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 			SELECT sector_root
 			FROM sectors
 				WHERE host_id = (SELECT id FROM hid)
-				AND contract_id IS NULL
+				AND contract_sectors_map_id IS NULL
 			ORDER BY uploaded_at ASC
 			LIMIT $2
 		`, sqlPublicKey(hostKey), limit)
@@ -198,11 +199,12 @@ func (s *Store) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (
 				SELECT slabs.id
 				FROM slabs
 				INNER JOIN sectors ON slabs.id = sectors.slab_id
-				LEFT JOIN contracts ON sectors.contract_id = contracts.id
+				LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
+				LEFT JOIN contracts ON csm.contract_id = contracts.contract_id
 				WHERE
 					(
 						-- stored on bad contract
-						(sectors.contract_id IS NOT NULL AND contracts.good = FALSE) OR
+						(sectors.contract_sectors_map_id IS NOT NULL AND contracts.good = FALSE) OR
 						-- not stored on any host
 						(sectors.host_id IS NULL)
 					)

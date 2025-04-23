@@ -326,7 +326,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// pin one sector to the contract - we should still not have any unhealthy sectors
-	if _, err := store.pool.Exec(context.Background(), "UPDATE sectors SET contract_id = 1 WHERE id = 1"); err != nil {
+	if _, err := store.pool.Exec(context.Background(), "UPDATE sectors SET contract_sectors_map_id = 1 WHERE id = 1"); err != nil {
 		t.Fatal(err)
 	}
 	_, err = store.UnhealthySlab(context.Background(), time.Now().Add(time.Hour))
@@ -431,7 +431,7 @@ func TestUnpinnedSectors(t *testing.T) {
 	// helper to update sector's pinned state
 	updateSector := func(sid int64, hostID, contractID *int64, uploadedAt time.Time) {
 		t.Helper()
-		res, err := store.pool.Exec(context.Background(), `UPDATE sectors SET contract_id=$1, host_id=$2, uploaded_at=$3 WHERE id=$4`, contractID, hostID, uploadedAt, sid)
+		res, err := store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id=$1, host_id=$2, uploaded_at=$3 WHERE id=$4`, contractID, hostID, uploadedAt, sid)
 		if err != nil {
 			t.Fatal(err)
 		} else if res.RowsAffected() != 1 {
@@ -794,9 +794,9 @@ func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
 
 // BenchmarkUnhealthySlab benchmarks UnhealthySlab
 //
-//	CPU   |	  Count  |     Time/op
+//	CPU   |	  Count  |   Time/op
 //
-// M2 Pro |   1282   |    0.618084 ms
+// M1 Max |   782   |    3.5 ms
 func BenchmarkUnhealthySlab(b *testing.B) {
 	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
 	account := proto.Account{1}
@@ -872,19 +872,19 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 	}
 
 	// default to the good contract for all sectors
-	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET contract_id = 1`)
+	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id = 1`)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	// 25% of the sectors are stored on a bad contract
-	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET contract_id = 2 WHERE id % 4 = 0`)
+	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id = 2 WHERE id % 4 = 0`)
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	// 25% of the sectors don't have a host at all
-	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = NULL, contract_id = NULL WHERE id % 4 = 1`)
+	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id % 4 = 1`)
 	if err != nil {
 		b.Fatal(err)
 	}

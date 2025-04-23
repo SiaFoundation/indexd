@@ -132,16 +132,14 @@ func (s *storeMock) Contract(_ context.Context, contractID types.FileContractID)
 	return Contract{}, ErrNotFound
 }
 
-func (s *storeMock) Contracts(ctx context.Context, queryOpts ...ContractQueryOpt) ([]Contract, error) {
-	cloned := slices.Clone(s.contracts)
-
+func (s *storeMock) Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error) {
 	var opts ContractQueryOpts
 	for _, opt := range queryOpts {
 		opt(&opts)
 	}
 
-	filtered := cloned[:0]
-	for _, c := range cloned {
+	filtered := make([]Contract, 0, len(s.contracts))
+	for _, c := range s.contracts {
 		if opts.Revisable != nil {
 			isRevisable := (c.State == ContractStatePending || c.State == ContractStateActive) && c.RenewedTo == (types.FileContractID{})
 			if isRevisable != *opts.Revisable {
@@ -154,6 +152,15 @@ func (s *storeMock) Contracts(ctx context.Context, queryOpts ...ContractQueryOpt
 			}
 		}
 		filtered = append(filtered, c)
+	}
+
+	if offset > len(filtered) {
+		return nil, nil
+	}
+	filtered = filtered[offset:]
+
+	if limit > 0 && limit < len(filtered) {
+		filtered = filtered[:limit]
 	}
 
 	return filtered, nil
