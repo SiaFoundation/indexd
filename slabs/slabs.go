@@ -79,8 +79,8 @@ func (s SlabPinParams) Digest() (SlabID, error) {
 }
 
 // PinSlab pins the given slab and associates it with the given account.
-func (m *SlabManager) PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) ([]SlabID, error) {
-	return m.store.PinSlabs(ctx, account, nextIntegrityCheck, []SlabPinParams{slab})
+func (m *SlabManager) PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error) {
+	return m.store.PinSlab(ctx, account, nextIntegrityCheck, slab)
 }
 
 // Slabs returns the slabs with the given IDs from the database.

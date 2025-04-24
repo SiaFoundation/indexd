@@ -28,7 +28,7 @@ type (
 	// Store defines an interface to store and update slab related information
 	// in the database.
 	Store interface {
-		PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slabs []SlabPinParams) ([]SlabID, error)
+		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error)
 		Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error)
 	}
 )

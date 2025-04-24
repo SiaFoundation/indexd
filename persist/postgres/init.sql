@@ -170,6 +170,9 @@ CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- fo
 CREATE INDEX contracts_state_good_idx ON contracts(state) WHERE state <= 1 AND good; -- for filtering contracts
 CREATE INDEX contracts_host_id_remaining_allowance_idx ON contracts (host_id, remaining_allowance DESC) WHERE good = true AND remaining_allowance > 0 AND state <= 1; -- for fetching contracts for funding
 
+-- foreign key constraint index
+CREATE INDEX contracts_host_id_idx ON contracts(host_id);
+
 CREATE TABLE contract_sectors_map (
     id SERIAL PRIMARY KEY,
     contract_id BYTEA UNIQUE REFERENCES contracts(contract_id) NOT NULL
@@ -239,3 +242,6 @@ CREATE INDEX sectors_slab_id_idx ON sectors(slab_id);
 -- speed up integrity check query
 CREATE INDEX sectors_next_integrity_check_idx ON sectors(next_integrity_check ASC);
 CREATE INDEX sectors_host_id_next_integrity_check_idx ON sectors(host_id, next_integrity_check ASC);
+
+-- speed up lookup of sectors by root
+CREATE INDEX sectors_sector_root_idx ON sectors(sector_root);
