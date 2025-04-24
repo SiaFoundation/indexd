@@ -287,6 +287,27 @@ func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID s
 	})
 }
 
+// UnpinSlab removes the association between the given account and the slab. If
+// a slab becomes unreferenced it will eventually be pruned by a background
+// process.
+func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID slabs.SlabID) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		var dbID int64
+		err := tx.QueryRow(ctx, "SELECT id FROM accounts WHERE public_key = $1", sqlPublicKey(accountID)).Scan(&dbID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return accounts.ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to get account id: %w", err)
+		}
+
+		_, err = tx.Exec(ctx, `DELETE FROM account_slabs WHERE account_id = $1 AND slab_id = (SELECT id FROM slabs WHERE digest = $2)`, dbID, sqlHash256(slabID))
+		if err != nil {
+			return fmt.Errorf("failed to unpin slab: %w", err)
+		}
+		return nil
+	})
+}
+
 // Slabs returns the slabs with the given IDs from the database.
 func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []slabs.SlabID) ([]slabs.Slab, error) {
 	if len(slabIDs) == 0 {

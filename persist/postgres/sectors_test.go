@@ -525,6 +525,74 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("account_slabs", 0)
 }
 
+func TestUnpinSlab(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// define helper to count number of slabs associated to the account
+	slabCount := func() (n int64) {
+		t.Helper()
+		query := `SELECT COUNT(*) FROM account_slabs INNER JOIN accounts ON account_slabs.account_id = accounts.id WHERE accounts.public_key = $1`
+		err := store.pool.QueryRow(context.Background(), query, sqlHash256(account)).Scan(&n)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	// add host
+	hk := types.PublicKey{1}
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add slab
+	slabID, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     10,
+		Sectors:       []slabs.SectorPinParams{{Root: frand.Entropy256(), HostKey: hk}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert slab count
+	if n := slabCount(); n != 1 {
+		t.Fatalf("expected 1 slab, got %d", n)
+	}
+
+	// unpin slab
+	err = store.UnpinSlab(context.Background(), account, slabID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert slab count
+	if n := slabCount(); n != 0 {
+		t.Fatalf("expected 0 slabs, got %d", n)
+	}
+
+	// consecutive calls should not error out
+	err = store.UnpinSlab(context.Background(), account, slabID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// unpinning for a non existing account should return [accounts.ErrNotFound]
+	err = store.UnpinSlab(context.Background(), proto.Account{2}, slabID)
+	if !errors.Is(err, accounts.ErrNotFound) {
+		t.Fatal("unexpected error:", err)
+	}
+}
+
 func TestPinSectors(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
