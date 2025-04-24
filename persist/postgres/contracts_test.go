@@ -806,6 +806,15 @@ func TestMarkPruned(t *testing.T) {
 	} else if contract.LastPrune.IsZero() {
 		t.Fatal("contract should be marked as pruned")
 	}
+
+	// assert field is decorated in store.Contracts as well
+	if contracts, err := store.Contracts(context.Background(), 0, 10); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatalf("expected 1 contract, got %d", len(contracts))
+	} else if contracts[0].LastPrune.IsZero() {
+		t.Fatal("contract should be marked as pruned")
+	}
 }
 
 func TestMarkUnrenewableContractsBad(t *testing.T) {
