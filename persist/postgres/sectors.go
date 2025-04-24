@@ -15,6 +15,40 @@ import (
 	"go.sia.tech/indexd/slabs"
 )
 
+// MarkSectorsLost marks the sectors as lost by setting both the contract ID and
+// host ID to NULL. This is meant to be used in 2 cases:
+// - The host reports that the sector is lost (e.g. when pinning it, during the integrity check or when fetching it for migration)
+// - The host has failed the integrity check for that sector enough times
+func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error {
+	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		sqlRoots := make([]sqlHash256, len(roots))
+		for i, root := range roots {
+			sqlRoots[i] = sqlHash256(root)
+		}
+		resp, err := tx.Exec(ctx, `
+			UPDATE sectors
+			SET contract_sectors_map_id = NULL, host_id = NULL
+			WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)
+			AND sector_root = ANY($2)
+		`, sqlPublicKey(hostKey), sqlRoots)
+		if err != nil {
+			return err
+		} else if resp.RowsAffected() == 0 {
+			return nil
+		}
+		resp, err = tx.Exec(ctx, `
+			UPDATE hosts
+			SET lost_sectors = lost_sectors + $1
+			WHERE public_key = $2
+		`, resp.RowsAffected(), sqlPublicKey(hostKey))
+		if err != nil {
+			return fmt.Errorf("failed to increment host's lost sectors: %w", err)
+		}
+		return nil
+	})
+	return err
+}
+
 // SectorsForIntegrityCheck returns up to `limit` sectors that are due for an
 // integrity check.
 func (s *Store) SectorsForIntegrityCheck(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {

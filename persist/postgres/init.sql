@@ -212,7 +212,7 @@ CREATE TABLE sectors (
     sector_root BYTEA NOT NULL,
 
     -- uploading
-    -- NOTE: contract_id should always be NULL when host_id is NULL
+    -- NOTE: contract_sectors_map_id should always be NULL when host_id is NULL
     host_id INTEGER REFERENCES hosts(id), -- host that stores sector
     contract_sectors_map_id INTEGER REFERENCES contract_sectors_map(id) DEFAULT NULL CHECK((host_id IS NULL AND contract_sectors_map_id IS NULL) OR host_id IS NOT NULL), -- null if not pinned
     uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by upload time
@@ -242,6 +242,9 @@ CREATE INDEX sectors_slab_id_idx ON sectors(slab_id);
 -- speed up integrity check query
 CREATE INDEX sectors_next_integrity_check_idx ON sectors(next_integrity_check ASC);
 CREATE INDEX sectors_host_id_next_integrity_check_idx ON sectors(host_id, next_integrity_check ASC);
+
+-- speed up querying sectors of a host by root
+CREATE INDEX sectors_host_id_sector_root_idx ON sectors(host_id, sector_root);
 
 -- speed up lookup of sectors by root
 CREATE INDEX sectors_sector_root_idx ON sectors(sector_root);

@@ -1079,3 +1079,245 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 		seenSlabs[slabID] = struct{}{}
 	}
 }
+
+func TestMarkSectorsLost(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// add hosts and contracts
+	hk1 := types.PublicKey{1}
+	hk2 := types.PublicKey{2}
+	for _, hk := range []types.PublicKey{hk1, hk2} {
+		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+		}); err != nil {
+			t.Fatal(err)
+		}
+		err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(3))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// pin a slab that adds 2 sectors to each host
+	root1 := frand.Entropy256()
+	root2 := frand.Entropy256()
+	root3 := frand.Entropy256()
+	root4 := frand.Entropy256()
+	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     10,
+		Sectors: []slabs.SectorPinParams{
+			{
+				Root:    root1,
+				HostKey: hk1,
+			},
+			{
+				Root:    root2,
+				HostKey: hk1,
+			},
+			{
+				Root:    root3,
+				HostKey: hk2,
+			},
+			{
+				Root:    root4,
+				HostKey: hk2,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertSectorLost := func(root types.Hash256, lost bool) {
+		t.Helper()
+		var isLost bool
+		err := store.pool.QueryRow(context.Background(), `SELECT host_id IS NULL FROM sectors WHERE sector_root = $1`, sqlHash256(root)).Scan(&isLost)
+		if err != nil {
+			t.Fatal(err)
+		} else if isLost != lost {
+			t.Fatalf("expected sector %x to be lost: %v, got %v", root, lost, isLost)
+		}
+	}
+
+	assertLostSectors := func(hostKey types.PublicKey, numLost int) {
+		t.Helper()
+		var count int
+		err := store.pool.QueryRow(context.Background(), `SELECT lost_sectors FROM hosts WHERE public_key = $1`, sqlHash256(hostKey)).Scan(&count)
+		if err != nil {
+			t.Fatal(err)
+		} else if count != numLost {
+			t.Fatalf("expected %d lost sectors for host %x, got %d", numLost, hostKey, count)
+		}
+	}
+
+	markSectorLost := func(hk types.PublicKey, roots []types.Hash256) {
+		t.Helper()
+		if err := store.MarkSectorsLost(context.Background(), hk, roots); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// check that no sectors are lost
+	assertLostSectors(hk1, 0)
+	assertLostSectors(hk2, 0)
+	assertSectorLost(root1, false)
+	assertSectorLost(root2, false)
+	assertSectorLost(root3, false)
+	assertSectorLost(root4, false)
+
+	// mark sectors 1 to 3 lost
+	markSectorLost(hk1, []types.Hash256{root1, root2})
+	markSectorLost(hk2, []types.Hash256{root3})
+
+	assertLostSectors(hk1, 2)
+	assertLostSectors(hk2, 1)
+	assertSectorLost(root1, true)
+	assertSectorLost(root2, true)
+	assertSectorLost(root3, true)
+	assertSectorLost(root4, false)
+
+	// mark last sector lost as well
+	markSectorLost(hk2, []types.Hash256{root4})
+
+	assertLostSectors(hk1, 2)
+	assertLostSectors(hk2, 2)
+	assertSectorLost(root1, true)
+	assertSectorLost(root2, true)
+	assertSectorLost(root3, true)
+	assertSectorLost(root4, true)
+}
+
+// BenchmarkMarkSectorsLost benchmarks MarkSectorsLost in various batch sizes.
+//
+// CPU    | BatchSize |	 Count  |     Time/op    |    Throughput
+// M2 Pro |     100   |    638  |   1.903132 ms  |   220389.59 MB/s
+// M2 Pro |    1000   |     94  |  12.430024 ms  |   337433.29 MB/s
+// M2 Pro |   10000   |     10  | 112.704779 ms  |   372149.61 MB/s
+func BenchmarkMarkSectorsLost(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	// create account, host and contract
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+	hk := types.PublicKey{1}
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		b.Fatal(err)
+	}
+	if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+		b.Fatal(err)
+	}
+
+	// prepare base db
+	const (
+		dbBaseSize = 1 << 40 // 1TiB of sectors
+		nSectors   = dbBaseSize / proto.SectorSize
+	)
+
+	// insert sectors in batches
+	for remainingSectors := nSectors; remainingSectors > 0; {
+		batchSize := min(remainingSectors, 10000)
+		remainingSectors -= batchSize
+		var sectors []slabs.SectorPinParams
+		for range batchSize {
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    frand.Entropy256(),
+				HostKey: hk,
+			})
+		}
+		_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       sectors,
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// helper to mark sectors "unlost".
+	markNotLost := func() {
+		b.Helper()
+		_, err := store.pool.Exec(context.Background(), `
+			UPDATE sectors
+			SET contract_sectors_map_id = 1, host_id = 1
+			WHERE contract_sectors_map_id IS NULL AND host_id IS NULL
+		`)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// helper to find sectors to mark as lost
+	sectorsToMark := func(batchSize int) []types.Hash256 {
+		b.Helper()
+		rows, err := store.pool.Query(context.Background(), `
+			SELECT sector_root
+			FROM sectors
+			WHERE host_id IS NOT NULL
+			LIMIT $1
+		`, batchSize)
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer rows.Close()
+		var roots []types.Hash256
+		for rows.Next() {
+			var root types.Hash256
+			if err := rows.Scan((*sqlHash256)(&root)); err != nil {
+				b.Fatal(err)
+			}
+			roots = append(roots, root)
+		}
+		if err := rows.Err(); err != nil {
+			b.Fatal(err)
+		}
+		return roots
+	}
+
+	// run benchmark for various batch sizes
+	for _, batchSize := range []int{100, 1000, 10000} {
+		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
+			markNotLost()
+			goodSectors := nSectors
+			b.SetBytes(int64(batchSize) * proto.SectorSize)
+			b.ResetTimer()
+
+			for b.Loop() {
+				b.StopTimer()
+				toMark := sectorsToMark(batchSize)
+				if len(toMark) != batchSize {
+					b.Fatalf("expected %d sectors to mark, got %d", batchSize, len(toMark))
+				}
+				goodSectors -= batchSize
+				b.StartTimer()
+
+				if goodSectors < batchSize {
+					// reset all sectors to avoid running out
+					b.StopTimer()
+					markNotLost()
+					goodSectors = nSectors
+					b.StartTimer()
+				} else {
+					// pin fetched sectors to fetch different ones next
+					err := store.MarkSectorsLost(context.Background(), hk, toMark)
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+		})
+	}
+}
