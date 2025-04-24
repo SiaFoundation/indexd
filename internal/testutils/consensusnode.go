@@ -29,7 +29,7 @@ type ConsensusNode struct {
 // blocks to reach the V2 require height before returning.
 func NewConsensusNode(t testing.TB, log *zap.Logger) *ConsensusNode {
 	network, genesis := testutil.V2Network()
-	dbstore, tipState, err := chain.NewDBStore(chain.NewMemDB(), network, genesis)
+	dbstore, tipState, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, chain.NewZapMigrationLogger(log.Named("chaindb")))
 	if err != nil {
 		t.Fatalf("failed to create chain store: %v", err)
 	}

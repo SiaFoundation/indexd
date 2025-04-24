@@ -46,7 +46,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer bdb.Close()
 
-	dbstore, tipState, err := chain.NewDBStore(bdb, network, genesis)
+	dbstore, tipState, err := chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(log.Named("chaindb")))
 	if err != nil {
 		return fmt.Errorf("failed to create chain store: %w", err)
 	}
