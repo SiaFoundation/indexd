@@ -11,6 +11,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/slabs"
 )
 
@@ -26,7 +27,7 @@ func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, ro
 		}
 		resp, err := tx.Exec(ctx, `
 			UPDATE sectors
-			SET contract_id = NULL, host_id = NULL
+			SET contract_sectors_map_id = NULL, host_id = NULL
 			WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)
 			AND sector_root = ANY($2)
 		`, sqlPublicKey(hostKey), sqlRoots)
@@ -81,29 +82,64 @@ func (s *Store) SectorsForIntegrityCheck(ctx context.Context, hostKey types.Publ
 	return sectors, err
 }
 
-// PinSlabs adds slabs to the database for pinning. The slabs are associated
+// PinSlab adds a slab to the database for pinning. The slab is associated
 // with the provided account.
-func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin []slabs.SlabPinParams) ([]slabs.SlabID, error) {
-	if len(toPin) == 0 {
-		return nil, nil
+func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab slabs.SlabPinParams) (slabs.SlabID, error) {
+	digest, err := slab.Digest()
+	if err != nil {
+		return slabs.SlabID{}, fmt.Errorf("failed to calculate slab digest: %w", err)
 	}
-	var ids []slabs.SlabID
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return digest, s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var accountID int64
 		err := tx.QueryRow(ctx, "SELECT id FROM accounts WHERE public_key = $1", sqlPublicKey(account)).Scan(&accountID)
-		if err != nil {
-			return fmt.Errorf("%w: %v", accounts.ErrNotFound, account)
+		if errors.Is(err, sql.ErrNoRows) {
+			return accounts.ErrNotFound
+		} else if err != nil {
+			return err
 		}
-		for i, slab := range toPin {
-			slabID, err := s.pinSlab(ctx, tx, accountID, nextIntegrityCheck, slab)
-			if err != nil {
-				return fmt.Errorf("failed to pin slab %d: %w", i+1, err)
-			}
-			ids = append(ids, slabID)
+
+		// insert slab
+		var slabID int64
+		var existingSlab bool
+		err = tx.QueryRow(ctx, `
+			INSERT INTO slabs (digest, encryption_key, min_shards)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (digest) DO NOTHING
+			RETURNING id
+			`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards).Scan(&slabID)
+		if errors.Is(err, sql.ErrNoRows) {
+			// slab already exists, fetch its slab id
+			existingSlab = true
+			err = tx.QueryRow(ctx, `SELECT id FROM slabs WHERE digest = $1`, sqlHash256(digest)).Scan(&slabID)
+		}
+		if err != nil {
+			return err
+		}
+
+		// insert slab into join table
+		_, err = tx.Exec(ctx, `
+			INSERT INTO account_slabs (account_id, slab_id) VALUES ($1, $2)
+			ON CONFLICT (account_id, slab_id) DO NOTHING
+		`, accountID, slabID)
+		if err != nil {
+			return fmt.Errorf("failed to insert slab into account_slabs: %w", err)
+		}
+
+		// if the slab already existed, we don't need to insert the sectors
+		if existingSlab {
+			return nil
+		}
+
+		// insert slab's sectors in a single batch
+		batch := &pgx.Batch{}
+		for i, sector := range slab.Sectors {
+			batch.Queue(`INSERT INTO sectors (sector_root, host_id, slab_id, slab_index, next_integrity_check) VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3, $4, $5)`, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), slabID, i, nextIntegrityCheck)
+		}
+		if err = tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
+			return fmt.Errorf("failed to insert sectors: %w", err)
 		}
 		return nil
 	})
-	return ids, err
 }
 
 // Slabs returns the slabs with the given IDs from the database.
@@ -145,7 +181,8 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []sl
 			sectorsBatch.Queue(`SELECT s.sector_root, h.public_key, c.contract_id
 FROM sectors s
 LEFT JOIN hosts h ON h.id = s.host_id
-LEFT JOIN contracts c ON c.id = s.contract_id
+LEFT JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
+LEFT JOIN contracts c ON c.contract_id = csm.contract_id
 WHERE s.slab_id = $1
 ORDER BY s.slab_index ASC`, slabID).Query(func(rows pgx.Rows) error {
 				defer rows.Close()
@@ -178,6 +215,45 @@ ORDER BY s.slab_index ASC`, slabID).Query(func(rows pgx.Rows) error {
 	return results, err
 }
 
+// PinSectors pins a batch of sector roots to a given contract. This also
+// updates the host the sector is associated with to the host that we have the
+// contract with. That way, we can avoid a race where the host changes in the
+// meantime and the contract then no longer matches the host.
+func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error {
+	sqlRoots := make([]sqlHash256, len(roots))
+	for i, root := range roots {
+		sqlRoots[i] = sqlHash256(root)
+	}
+
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		resp, err := tx.Exec(ctx, `
+			UPDATE sectors
+			SET (host_id, contract_sectors_map_id) = (result.host_id, result.contract_sectors_map_id)
+			FROM (
+				SELECT hosts.id AS host_id, contracts.id AS contract_sectors_map_id
+				FROM contract_sectors_map
+				INNER JOIN contracts ON contracts.contract_id = contract_sectors_map.contract_id
+				INNER JOIN hosts ON contracts.host_id = hosts.id
+				WHERE contract_sectors_map.contract_id = $1
+			) AS result
+			WHERE sector_root = ANY($2) AND result.contract_sectors_map_id IS NOT NULL
+		`, sqlHash256(contractID), sqlRoots)
+		if err != nil {
+			return err
+		} else if resp.RowsAffected() == 0 {
+			// if no sectors were updated, check if the contract exists
+			var exists bool
+			if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM contracts WHERE contracts.contract_id = $1)", sqlHash256(contractID)).
+				Scan(&exists); err != nil {
+				return fmt.Errorf("failed to check if contract exists: %w", err)
+			} else if !exists {
+				return contracts.ErrNotFound
+			}
+		}
+		return nil
+	})
+}
+
 // UnpinnedSectors returns up to 'limit' sectors which have been uploaded to a host but
 // not pinned to a contract yet.
 func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
@@ -190,7 +266,7 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 			SELECT sector_root
 			FROM sectors
 				WHERE host_id = (SELECT id FROM hid)
-				AND contract_id IS NULL
+				AND contract_sectors_map_id IS NULL
 			ORDER BY uploaded_at ASC
 			LIMIT $2
 		`, sqlPublicKey(hostKey), limit)
@@ -232,11 +308,12 @@ func (s *Store) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (
 				SELECT slabs.id
 				FROM slabs
 				INNER JOIN sectors ON slabs.id = sectors.slab_id
-				LEFT JOIN contracts ON sectors.contract_id = contracts.id
+				LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
+				LEFT JOIN contracts ON csm.contract_id = contracts.contract_id
 				WHERE
 					(
 						-- stored on bad contract
-						(sectors.contract_id IS NOT NULL AND contracts.good = FALSE) OR
+						(sectors.contract_sectors_map_id IS NOT NULL AND contracts.good = FALSE) OR
 						-- not stored on any host
 						(sectors.host_id IS NULL)
 					)
@@ -251,53 +328,4 @@ func (s *Store) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (
 		return err
 	})
 	return slabID, err
-}
-
-func (s *Store) pinSlab(ctx context.Context, tx *txn, accountID int64, nextIntegrityCheck time.Time, slab slabs.SlabPinParams) (slabs.SlabID, error) {
-	digest, err := slab.Digest()
-	if err != nil {
-		return slabs.SlabID{}, err
-	}
-
-	// insert slab
-	var slabID int64
-	var existingSlab bool
-	err = tx.QueryRow(ctx, `
-		INSERT INTO slabs (digest, encryption_key, min_shards)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (digest) DO NOTHING
-		RETURNING id
-		`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards).Scan(&slabID)
-	if errors.Is(err, sql.ErrNoRows) {
-		// slab already exists, fetch its slab id
-		existingSlab = true
-		err = tx.QueryRow(ctx, `SELECT id FROM slabs WHERE digest = $1`, sqlHash256(digest)).Scan(&slabID)
-	}
-	if err != nil {
-		return slabs.SlabID{}, err
-	}
-
-	// insert slab into join table
-	_, err = tx.Exec(ctx, `
-		INSERT INTO account_slabs (account_id, slab_id) VALUES ($1, $2)
-		ON CONFLICT (account_id, slab_id) DO NOTHING
-	`, accountID, slabID)
-	if err != nil {
-		return slabs.SlabID{}, fmt.Errorf("failed to insert slab into account_slabs: %w", err)
-	}
-
-	// if the slab already existed, we don't need to insert the sectors
-	if existingSlab {
-		return digest, nil
-	}
-
-	// insert slab's sectors in a single batch
-	batch := &pgx.Batch{}
-	for i, sector := range slab.Sectors {
-		batch.Queue(`INSERT INTO sectors (sector_root, host_id, slab_id, slab_index, next_integrity_check) VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3, $4, $5)`, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), slabID, i, nextIntegrityCheck)
-	}
-	if err = tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
-		return slabs.SlabID{}, fmt.Errorf("failed to insert sectors: %w", err)
-	}
-	return digest, nil
 }

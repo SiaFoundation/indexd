@@ -17,7 +17,8 @@ accounts for sectors that are stored redundantly on multiple hosts. The database
 schema of `indexd` is more straightforward. Since we only ever keep a single row
 per sector in the `sectors` table of our database, we can simply determine the
 number of shards until failure by counting the result of joining `slabs.id` with
-`sectors.slab_id` and `sectors.contract_id` with `contracts.id` and filtering for
+`sectors.slab_id` and `contracts.id` with `sectors.contract_sectors_map_id`
+(through the `contract_sectors_map` join table) and filtering for
 `sectors.host_id != NULL AND contract.is_good == TRUE`. Subtracting
 `slabs.min_shards` from that number gives us the remaining shards until failure.
 

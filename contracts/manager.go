@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -67,7 +68,7 @@ type (
 		AddFormedContract(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee, totalCollateral types.Currency) error
 		AddRenewedContract(ctx context.Context, params AddRenewedContractParams) error
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
-		Contracts(ctx context.Context, queryOpts ...ContractQueryOpt) ([]Contract, error)
+		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		ContractsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
@@ -391,7 +392,7 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 	}
 
 	// renew any good contracts within their renew window
-	if err := cm.performContractRenewals(ctx, settings.RenewWindow, log); err != nil {
+	if err := cm.performContractRenewals(ctx, settings.Period, settings.RenewWindow, log); err != nil {
 		return fmt.Errorf("failed to renew contracts: %w", err)
 	}
 
@@ -415,7 +416,7 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 
 func (cm *ContractManager) syncRevisionState(ctx context.Context) error {
 	// fetch all active contracts
-	contracts, err := cm.store.Contracts(ctx, WithRevisable(true))
+	contracts, err := cm.store.Contracts(ctx, 0, math.MaxInt64, WithRevisable(true)) // TODO: page through contracts and sync in parallell
 	if err != nil {
 		return fmt.Errorf("failed to fetch active contracts: %w", err)
 	}
