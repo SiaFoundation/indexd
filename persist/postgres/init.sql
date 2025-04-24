@@ -145,6 +145,9 @@ CREATE TABLE contracts (
   revision_number INTEGER NOT NULL DEFAULT 0 CHECK(revision_number >= 0),
   state SMALLINT NOT NULL DEFAULT 0, -- 0 = 'pending', 1 = 'active', 2 = 'resolved', 3 = 'expired', 4 = 'rejected'
 
+  -- contract pruning 
+  last_prune TIMESTAMP WITH TIME ZONE,
+  
   -- metrics for visualization (not ACID)
   capacity BIGINT NOT NULL DEFAULT 0 CHECK(capacity >= size),
   size BIGINT NOT NULL DEFAULT 0 CHECK(size >= 0),

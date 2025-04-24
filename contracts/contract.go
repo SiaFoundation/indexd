@@ -120,6 +120,8 @@ type (
 		InitialAllowance types.Currency `json:"initialAllowance"` // initial renter allowance locked in contract
 		MinerFee         types.Currency `json:"minerFee"`         // miner fee spent on formation txn
 
+		LastPrune time.Time `json:"lastPrune"` // last time the contract was pruned
+
 		// Good determines whether a contract is good or bad. A contract that
 		// is not good, will have its data migrated to a new contract.
 		//

@@ -774,6 +774,40 @@ func TestUpdateContractState(t *testing.T) {
 	assertState(contracts.ContractStateActive)  // assert active
 }
 
+func TestMarkPruned(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := types.PublicKey{1}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add a contract
+	fcid := types.FileContractID{1}
+	if err := store.AddFormedContract(context.Background(), fcid, hk, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert contract is not marked as pruned
+	if contract, err := store.Contract(context.Background(), fcid); err != nil {
+		t.Fatal(err)
+	} else if !contract.LastPrune.IsZero() {
+		t.Fatal("contract should not be pruned")
+	}
+
+	// mark as pruned and assert contract was updated correctly
+	if err := store.MarkPruned(context.Background(), fcid); err != nil {
+		t.Fatal(err)
+	} else if contract, err := store.Contract(context.Background(), fcid); err != nil {
+		t.Fatal(err)
+	} else if contract.LastPrune.IsZero() {
+		t.Fatal("contract should be marked as pruned")
+	}
+}
+
 func TestMarkUnrenewableContractsBad(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
