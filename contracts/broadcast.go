@@ -12,64 +12,58 @@ import (
 
 func (cm *ContractManager) performBroadcastContractRevisions(ctx context.Context, log *zap.Logger) error {
 	broadcastLog := log.Named("broadcast")
+	minBroadcast := time.Now().Add(-cm.revisionBroadcastInterval)
 
-	const batchSize = 50
-	for offset := 0; ; offset += batchSize {
-		contracts, err := cm.store.Contracts(ctx, offset, batchSize, WithGood(true), WithRevisable(true))
+	var exhausted bool
+	for !exhausted {
+		contracts, err := cm.store.ContractsForBroadcasting(ctx, minBroadcast, 10)
 		if err != nil {
 			return fmt.Errorf("failed to fetch contracts for broadcasting: %w", err)
+		} else if len(contracts) < 10 {
+			exhausted = true
 		}
 
 		var wg sync.WaitGroup
-		for _, contract := range contracts {
-			if !contract.NeedsBroadcast(cm.revisionBroadcastInterval) {
-				continue
-			}
-
+		for _, contractID := range contracts {
 			wg.Add(1)
-			go func(contract Contract, log *zap.Logger) {
+			go func(contractID types.FileContractID, log *zap.Logger) {
 				defer wg.Done()
 
-				ctx, cancel := context.WithTimeout(ctx, time.Minute)
-				defer cancel()
-
-				err := cm.broadcastContractRevision(ctx, contract, log)
-				if err != nil {
+				if err := cm.broadcastContractRevision(ctx, contractID, log); err != nil {
 					broadcastLog.Error("failed to broadcast contract revision", zap.Error(err))
-					return
 				}
-
-				err = cm.store.MarkBroadcasted(ctx, contract.ID)
-				if err != nil {
-					broadcastLog.Error("failed to mark contract as broadcasted", zap.Error(err))
-				}
-			}(contract, broadcastLog.With(zap.Stringer("contractID", contract.ID)))
+			}(contractID, broadcastLog.With(zap.Stringer("contractID", contractID)))
 		}
 		wg.Wait()
 
-		if len(contracts) < batchSize {
-			break
+		err = cm.store.MarkBroadcastAttempted(ctx, contracts)
+		if err != nil {
+			broadcastLog.Error("failed to mark broadcast attempts", zap.Error(err))
 		}
 	}
 
 	return nil
 }
 
-func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contract Contract, log *zap.Logger) error {
-	// fetch the host
-	host, err := cm.store.Host(ctx, contract.HostKey)
-	if err != nil {
-		return fmt.Errorf("failed to fetch host: %w", err)
-	}
+func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contractID types.FileContractID, log *zap.Logger) error {
+	// apply sane timeout
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
 
 	// fetch contract element
-	fce, err := cm.store.ContractElement(ctx, contract.ID)
+	fce, err := cm.store.ContractElement(ctx, contractID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contract element: %w", err)
 	}
 
+	// fetch the host
+	host, err := cm.store.Host(ctx, fce.V2FileContract.HostPublicKey)
+	if err != nil {
+		return fmt.Errorf("failed to fetch host: %w", err)
+	}
+
 	// fetch the latest revision
-	resp, err := cm.contractor.LatestRevision(ctx, contract.HostKey, host.SiamuxAddr(), contract.ID)
+	resp, err := cm.contractor.LatestRevision(ctx, host.PublicKey, host.SiamuxAddr(), contractID)
 	if err != nil {
 		log.Warn("failed to fetch latest revision", zap.Error(err))
 		return nil

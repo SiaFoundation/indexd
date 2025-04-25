@@ -27,24 +27,31 @@ var (
 type (
 	// ContractQueryOpts contains the options for querying contracts.
 	ContractQueryOpts struct {
-		Revisable *bool
-		Good      *bool
+		MinBroadcast time.Time
+		Revisable    *bool
+		Good         *bool
 	}
 
 	// ContractQueryOpt is a functional option for querying contracts.
 	ContractQueryOpt func(*ContractQueryOpts)
 )
 
-// WithGood filters contracts by whether they are considered good. This defaults
-// to 'true'.
+// WithGood filters contracts by whether they are considered good.
 func WithGood(good bool) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.Good = &good
 	}
 }
 
-// WithRevisable filters contracts by whether they can still be revised. This
-// defaults to 'true'.
+// WithMinBroadcast filters contracts by whether they have been broadcasted (or
+// seen on chain) recently.
+func WithMinBroadcast(threshold time.Time) ContractQueryOpt {
+	return func(opts *ContractQueryOpts) {
+		opts.MinBroadcast = threshold
+	}
+}
+
+// WithRevisable filters contracts by whether they can still be revised.
 func WithRevisable(revisable bool) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.Revisable = &revisable
@@ -128,8 +135,8 @@ type (
 		// ProofHeight. This field is set by the contract maintenance code.
 		Good bool `json:"good"`
 
-		LastBroadcast   time.Time `json:"lastBroadcast"`
-		LastChainUpdate time.Time `json:"lastChainUpdate"`
+		LastBroadcastAttempt time.Time `json:"lastBroadcastAttempt"`
+		LastChainUpdate      time.Time `json:"lastChainUpdate"`
 	}
 
 	// ContractSettings contains various settings used by the manager for
@@ -149,14 +156,6 @@ func (c Contract) GoodForUpload(prices proto.HostPrices, maxCollateral types.Cur
 		c.UsedCollateral.Cmp(maxCollateral) < 0 &&
 		c.RemainingAllowance.Cmp(sectorAppendCost) > 0 &&
 		c.UsedCollateral.Add(sectorAppendCollateral).Cmp(c.TotalCollateral) < 0
-}
-
-// NeedsBroadcast indicates that a contract should be broadcasted.
-func (c Contract) NeedsBroadcast(interval time.Duration) bool {
-	renewed := c.RenewedTo != (types.FileContractID{})
-	seenRecently := time.Since(c.LastChainUpdate) < interval
-	broadcastedRecently := time.Since(c.LastBroadcast) < interval
-	return !renewed && !seenRecently && !broadcastedRecently
 }
 
 // NeedsRefresh indicates that a contract should be refreshed.

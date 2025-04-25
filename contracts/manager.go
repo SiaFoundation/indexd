@@ -70,12 +70,13 @@ type (
 		ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error)
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
+		ContractsForBroadcasting(ctx context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error)
 		ContractsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
-		MarkBroadcasted(ctx context.Context, contractID types.FileContractID) error
+		MarkBroadcastAttempted(ctx context.Context, contractIDs []types.FileContractID) error
 		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		SyncContract(ctx context.Context, contractID types.FileContractID, params ContractSyncParams) error
