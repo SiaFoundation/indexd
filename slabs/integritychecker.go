@@ -44,7 +44,7 @@ func (c *hostClient) VerifySector(ctx context.Context, t rhp.TransportClient, pr
 	return rhp.RPCVerifySector(ctx, t, prices, token, root)
 }
 
-func (c *SectorChecker) CheckSectors(ctx context.Context, host hosts.Host, prices proto.HostPrices, account proto.Account, roots []types.Hash256) ([]CheckSectorsResult, error) {
+func (c *SectorChecker) CheckSectors(ctx context.Context, host hosts.Host, account proto.Account, roots []types.Hash256) ([]CheckSectorsResult, error) {
 	// dial host
 	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	t, err := c.host.Dial(dialCtx, host.SiamuxAddr(), host.PublicKey)
@@ -66,7 +66,7 @@ func (c *SectorChecker) CheckSectors(ctx context.Context, host hosts.Host, price
 		}
 
 		// verify the sector
-		_, err := c.host.VerifySector(ctx, prices, proto.AccountToken{}, root) // TODO: token
+		_, err := c.host.VerifySector(ctx, host.Settings.Prices, proto.AccountToken{}, root) // TODO: token
 
 		// check results - we need to be careful here since we can't trust the
 		// host and need to assume that anything that isn't a success is a

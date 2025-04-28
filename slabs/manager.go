@@ -23,7 +23,9 @@ type (
 	// checking their integrity on the network and migrating their sectors if
 	// necessary.
 	SlabManager struct {
-		integrityCheckInterval time.Duration
+		integrityCheckInterval       time.Duration
+		failedIntegrityCheckInterval time.Duration
+		maxFailedIntegrityChecks     int
 
 		checker IntegrityChecker
 		store   Store
@@ -61,7 +63,9 @@ func WithLogger(l *zap.Logger) Option {
 // NewManager creates a new slab manager.
 func NewManager(store Store, opts ...Option) (*SlabManager, error) {
 	m := &SlabManager{
-		integrityCheckInterval: 14 * 24 * time.Hour, // 2 weeks
+		integrityCheckInterval:       7 * 24 * time.Hour,
+		failedIntegrityCheckInterval: 6 * time.Hour,
+		maxFailedIntegrityChecks:     3,
 
 		store: store,
 		tg:    threadgroup.New(),
@@ -168,11 +172,11 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 				hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
 				return
 			}
-			if err := m.store.RecordIntegrityCheck(ctx, false, time.Now().Add(6*time.Hour), host.PublicKey, lost); err != nil {
+			if err := m.store.RecordIntegrityCheck(ctx, false, time.Now().Add(m.failedIntegrityCheckInterval), host.PublicKey, lost); err != nil {
 				hostLogger.Error("failed to record integrity check for failed sectors", zap.Error(err))
 				return
 			}
-			if err := m.store.RecordIntegrityCheck(ctx, true, time.Now().Add(7*24*time.Hour), host.PublicKey, success); err != nil {
+			if err := m.store.RecordIntegrityCheck(ctx, true, time.Now().Add(m.integrityCheckInterval), host.PublicKey, success); err != nil {
 				hostLogger.Error("failed to record integrity check for successful sectors", zap.Error(err))
 				return
 			}
@@ -181,7 +185,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 			// times and mark them lost as well
 			const batchSize = 100
 			for {
-				newlyLost, err := m.store.FailingSectors(ctx, host.PublicKey, 3, batchSize)
+				newlyLost, err := m.store.FailingSectors(ctx, host.PublicKey, m.maxFailedIntegrityChecks, batchSize)
 				if err != nil {
 					hostLogger.Error("failed to fetch failing sectors", zap.Error(err))
 					return
