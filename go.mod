@@ -3,11 +3,12 @@ module go.sia.tech/indexd
 go 1.24.1
 
 require (
+	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
 	github.com/jackc/pgx/v5 v5.7.4
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.11.0
 	go.sia.tech/coreutils v0.13.1
-	go.sia.tech/jape v0.12.2-0.20241010144215-1468bf476af6
+	go.sia.tech/jape v0.13.1
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0
 	golang.org/x/term v0.31.0
@@ -20,7 +21,6 @@ require (
 require (
 	github.com/go-task/slim-sprig v0.0.0-20230315185526-52ccab3ef572 // indirect
 	github.com/google/pprof v0.0.0-20230821062121-407c9e7a662f // indirect
-	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
