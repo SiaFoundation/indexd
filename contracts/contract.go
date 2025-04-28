@@ -27,9 +27,8 @@ var (
 type (
 	// ContractQueryOpts contains the options for querying contracts.
 	ContractQueryOpts struct {
-		MinBroadcast time.Time
-		Revisable    *bool
-		Good         *bool
+		Revisable *bool
+		Good      *bool
 	}
 
 	// ContractQueryOpt is a functional option for querying contracts.
@@ -40,14 +39,6 @@ type (
 func WithGood(good bool) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.Good = &good
-	}
-}
-
-// WithMinBroadcast filters contracts by whether they have been broadcasted (or
-// seen on chain) recently.
-func WithMinBroadcast(threshold time.Time) ContractQueryOpt {
-	return func(opts *ContractQueryOpts) {
-		opts.MinBroadcast = threshold
 	}
 }
 

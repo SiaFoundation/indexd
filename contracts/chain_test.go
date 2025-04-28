@@ -134,7 +134,7 @@ func (s *storeMock) ContractElement(ctx context.Context, contractID types.FileCo
 			}, nil
 		}
 	}
-	return types.V2FileContractElement{}, nil
+	return types.V2FileContractElement{}, ErrNotFound
 }
 
 func (s *storeMock) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {

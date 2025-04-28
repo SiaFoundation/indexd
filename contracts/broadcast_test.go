@@ -36,37 +36,28 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		},
 	}
 
-	// c1 is not broadcasted because it's bad
+	// c1 is not broadcasted because it's not revisble
 	store.contracts = append(store.contracts, Contract{
 		ID:        types.FileContractID{1},
-		HostKey:   hk,
-		Formation: time.Now(),
-		State:     ContractStateActive,
-		Good:      false,
-	})
-
-	// c2 is not broadcasted because it's not revisble
-	store.contracts = append(store.contracts, Contract{
-		ID:        types.FileContractID{2},
 		HostKey:   hk,
 		Formation: time.Now(),
 		State:     ContractStateExpired,
 		Good:      true,
 	})
 
-	// c3 is not broadcasted because it's renewed
+	// c2 is not broadcasted because it's renewed
 	store.contracts = append(store.contracts, Contract{
-		ID:        types.FileContractID{3},
+		ID:        types.FileContractID{2},
 		HostKey:   hk,
 		Formation: time.Now(),
 		State:     ContractStateActive,
 		Good:      true,
-		RenewedTo: types.FileContractID{4},
+		RenewedTo: types.FileContractID{3},
 	})
 
-	// c4 is not broadcasted because it was broadcasted recently
+	// c3 is not broadcasted because it was broadcasted recently
 	store.contracts = append(store.contracts, Contract{
-		ID:                   types.FileContractID{4},
+		ID:                   types.FileContractID{3},
 		HostKey:              hk,
 		Formation:            time.Now(),
 		State:                ContractStateActive,
@@ -74,9 +65,9 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		LastBroadcastAttempt: time.Now(),
 	})
 
-	// c5 is broadcasted
+	// c4 is broadcasted
 	store.contracts = append(store.contracts, Contract{
-		ID:        types.FileContractID{5},
+		ID:        types.FileContractID{4},
 		HostKey:   hk,
 		Formation: time.Now(),
 		State:     ContractStateActive,
@@ -85,7 +76,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 
 	// mock a latest revision
 	rev := types.V2FileContract{RevisionNumber: 1}
-	contractor.latestRevisions[types.FileContractID{5}] = proto.RPCLatestRevisionResponse{Contract: rev}
+	contractor.latestRevisions[types.FileContractID{4}] = proto.RPCLatestRevisionResponse{Contract: rev}
 
 	// assert revision was broadcasted and contract was marked as such
 	if err := contracts.performBroadcastContractRevisions(context.Background(), zap.NewNop()); err != nil {
@@ -94,7 +85,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		t.Fatal("expected 1 broadcasted contract, got", len(syncerMock.broadcasted))
 	} else if syncerMock.broadcasted[0].FileContractRevisions[0].Revision != rev {
 		t.Fatal("unexpected revision", syncerMock.broadcasted[0].FileContractRevisions[0].Revision)
-	} else if contract, err := store.Contract(context.Background(), types.FileContractID{5}); err != nil {
+	} else if contract, err := store.Contract(context.Background(), types.FileContractID{4}); err != nil {
 		t.Fatal(err)
 	} else if contract.LastBroadcastAttempt.IsZero() {
 		t.Fatal("expected last successful broadcast to be set")

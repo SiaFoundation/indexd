@@ -35,8 +35,7 @@ func (am *accountsManagerMock) FundAccounts(ctx context.Context, host hosts.Host
 func (s *storeMock) ContractsForBroadcasting(_ context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error) {
 	var contracts []Contract
 	for _, c := range s.contracts {
-		if c.Good &&
-			c.RenewedTo == (types.FileContractID{}) &&
+		if c.RenewedTo == (types.FileContractID{}) &&
 			(c.State == ContractStatePending || c.State == ContractStateActive) &&
 			c.LastBroadcastAttempt.Before(minBroadcast) {
 			contracts = append(contracts, c)
