@@ -141,7 +141,7 @@ func (s *storeMock) Contracts(ctx context.Context, offset, limit int, queryOpts 
 	filtered := make([]Contract, 0, len(s.contracts))
 	for _, c := range s.contracts {
 		if opts.Revisable != nil {
-			isRevisable := c.State == ContractStatePending || c.State == ContractStateActive
+			isRevisable := (c.State == ContractStatePending || c.State == ContractStateActive) && c.RenewedTo == (types.FileContractID{})
 			if isRevisable != *opts.Revisable {
 				continue
 			}
