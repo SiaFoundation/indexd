@@ -173,9 +173,9 @@ func TestPerformContractRefreshes(t *testing.T) {
 	} else if len(contractor.refreshCalls) != 4 {
 		t.Fatalf("expected 4 refreshes, got %v", len(contractor.refreshCalls))
 	}
-	assertRefresh(good, types.Siacoins(110), types.Siacoins(110), types.FileContractID{2}, contractor.refreshCalls[0])
+	assertRefresh(good, types.Siacoins(110), types.ZeroCurrency, types.FileContractID{2}, contractor.refreshCalls[0])
 	assertRefresh(good, types.Siacoins(110), types.Siacoins(110), types.FileContractID{3}, contractor.refreshCalls[1])
-	assertRefresh(good, types.Siacoins(110), types.Siacoins(110), types.FileContractID{4}, contractor.refreshCalls[2])
+	assertRefresh(good, types.Siacoins(110), types.ZeroCurrency, types.FileContractID{4}, contractor.refreshCalls[2])
 	assertRefresh(good, types.Siacoins(1), types.Siacoins(1), types.FileContractID{6}, contractor.refreshCalls[3])
 
 	// assert refreshes made it into the store leading to 8 existing + 4 refreshed
@@ -189,13 +189,13 @@ func TestPerformContractRefreshes(t *testing.T) {
 		switch contract.RenewedFrom {
 		case types.FileContractID{2}:
 			initialAllowance = types.Siacoins(110)
-			totalCollateral = types.Siacoins(110)
+			totalCollateral = types.ZeroCurrency
 		case types.FileContractID{3}:
 			initialAllowance = types.Siacoins(110)
 			totalCollateral = types.Siacoins(110)
 		case types.FileContractID{4}:
 			initialAllowance = types.Siacoins(110)
-			totalCollateral = types.Siacoins(110)
+			totalCollateral = types.ZeroCurrency
 		case types.FileContractID{6}:
 			initialAllowance = types.Siacoins(1)
 			totalCollateral = types.Siacoins(1)
