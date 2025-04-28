@@ -2,10 +2,15 @@ package slabs
 
 import (
 	"context"
+	"fmt"
+	"math"
+	"sync"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
+	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/threadgroup"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
@@ -20,15 +25,25 @@ type (
 	SlabManager struct {
 		integrityCheckInterval time.Duration
 
-		store Store
-		tg    *threadgroup.ThreadGroup
-		log   *zap.Logger
+		checker IntegrityChecker
+		store   Store
+		tg      *threadgroup.ThreadGroup
+		log     *zap.Logger
+	}
+
+	IntegrityChecker interface {
+		CheckSectors(ctx context.Context, prices proto.HostPrices, account proto.Account, roots []types.Hash256) ([]CheckSectorsResult, error)
 	}
 
 	// Store defines an interface to store and update slab related information
 	// in the database.
 	Store interface {
+		FailingSectors(ctx context.Context, hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error)
+		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
+		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error)
+		RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error
+		SectorsForIntegrityCheck(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 		Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error)
 	}
 )
@@ -73,7 +88,7 @@ func NewManager(store Store, opts ...Option) (*SlabManager, error) {
 				return
 			}
 
-			if err := m.performIntegrityChecks(); err != nil {
+			if err := m.performIntegrityChecks(ctx); err != nil {
 				m.log.Error("failed to perform integrity checks", zap.Error(err))
 			}
 
@@ -92,21 +107,96 @@ func (m *SlabManager) Close() error {
 	return nil
 }
 
-func (m *SlabManager) performIntegrityChecks() error {
+func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 	start := time.Now()
 	logger := m.log.Named("integrity")
 	logger.Debug("starting integrity checks", zap.Time("start", start))
 
-	// TODO: fetch sectors for integrity checks
+	usedHosts, err := m.store.Hosts(ctx, 0, math.MaxInt64,
+		hosts.WithUsable(true), hosts.WithBlocked(false), hosts.WithActiveContracts(true))
+	if err != nil {
+		return fmt.Errorf("failed to fetch hosts to block: %w", err)
+	}
 
-	// TODO: perform integrity checks - sort sector roots into success, failure and lost
+	sem := make(chan struct{}, 50)
+	var wg sync.WaitGroup
+	for _, host := range usedHosts {
+		select {
+		case <-m.tg.Done():
+			return nil
+		default:
+		}
 
-	// TODO: update lost sectors in database
+		sem <- struct{}{}
+		wg.Add(1)
+		go func(host hosts.Host) {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+			hostLogger := logger.With(zap.Stringer("hostKey", host.PublicKey))
 
-	// TODO: mark successes/failures in database
+			// TODO: batching
+			toCheck, err := m.store.SectorsForIntegrityCheck(ctx, host.PublicKey, math.MaxInt)
+			if err != nil {
+				hostLogger.Error("failed to fetch sectors for integrity check", zap.Error(err))
+				return
+			}
 
-	// TODO: fetch sector roots for sectors that have now failed the check 3+
-	// times and mark them lost as well
+			// TODO: perform integrity checks
+			results, err := m.checker.CheckSectors(ctx, host.Settings.Prices, proto.Account{}, toCheck)
+			if err != nil {
+				hostLogger.Error("failed to check sectors", zap.Error(err))
+				return
+			}
+			var lost, failed, success []types.Hash256
+			for i, result := range results {
+				switch result {
+				case SectorLost:
+					lost = append(lost, toCheck[i])
+				case SectorFailed:
+					failed = append(failed, toCheck[i])
+				case SectorSuccess:
+					success = append(success, toCheck[i])
+				default:
+					hostLogger.Fatal("unknown result", zap.Int("result", int(result)))
+				}
+			}
+
+			// update lost, failed and successful sectors
+			if err := m.store.MarkSectorsLost(ctx, host.PublicKey, lost); err != nil {
+				hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
+				return
+			}
+			if err := m.store.RecordIntegrityCheck(ctx, false, time.Now().Add(6*time.Hour), host.PublicKey, lost); err != nil {
+				hostLogger.Error("failed to record integrity check for failed sectors", zap.Error(err))
+				return
+			}
+			if err := m.store.RecordIntegrityCheck(ctx, true, time.Now().Add(7*24*time.Hour), host.PublicKey, success); err != nil {
+				hostLogger.Error("failed to record integrity check for successful sectors", zap.Error(err))
+				return
+			}
+
+			// fetch sector roots for sectors that have now failed the check 3+
+			// times and mark them lost as well
+			const batchSize = 100
+			for {
+				newlyLost, err := m.store.FailingSectors(ctx, host.PublicKey, 3, batchSize)
+				if err != nil {
+					hostLogger.Error("failed to fetch failing sectors", zap.Error(err))
+					return
+				}
+				if err := m.store.MarkSectorsLost(ctx, host.PublicKey, newlyLost); err != nil {
+					hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
+					return
+				}
+				if len(newlyLost) < batchSize {
+					return
+				}
+			}
+		}(host)
+	}
+	wg.Wait()
 
 	logger.Debug("finished integrity checks", zap.Duration("elapsed", time.Since(start)))
 	return nil
