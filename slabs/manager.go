@@ -29,6 +29,7 @@ type (
 	// in the database.
 	Store interface {
 		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error)
+		PruneSlabs(ctx context.Context) (int, error)
 		Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error)
 	}
 )
@@ -80,6 +81,10 @@ func NewManager(store Store, opts ...Option) (*SlabManager, error) {
 			if err := m.performSlabMigrations(); err != nil {
 				m.log.Error("failed to perform slab migrations", zap.Error(err))
 			}
+
+			if err := m.performSlabPruning(ctx); err != nil {
+				m.log.Error("failed to perform slab pruning", zap.Error(err))
+			}
 		}
 	}()
 
@@ -120,5 +125,19 @@ func (m *SlabManager) performSlabMigrations() error {
 	// TODO: implement
 
 	logger.Debug("finished slab migrations", zap.Duration("elapsed", time.Since(start)))
+	return nil
+}
+
+func (m *SlabManager) performSlabPruning(ctx context.Context) error {
+	start := time.Now()
+	logger := m.log.Named("pruning")
+	logger.Debug("starting slab pruning", zap.Time("start", start))
+
+	n, err := m.store.PruneSlabs(ctx)
+	if err != nil {
+		return err
+	}
+
+	logger.Debug("finished slab pruning", zap.Int("pruned", n), zap.Duration("elapsed", time.Since(start)))
 	return nil
 }

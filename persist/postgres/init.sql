@@ -262,6 +262,10 @@ CREATE INDEX slab_sectors_sector_id_idx ON slab_sectors(sector_id);
 -- speed up fetching sectors for slab ordered by their position within the slab
 CREATE UNIQUE INDEX slab_sectors_slab_id_slab_index_idx ON slab_sectors(slab_id, slab_index ASC);
 
+-- speed up slab pruning
+CREATE INDEX slab_sectors_slab_id_idx ON slab_sectors(slab_id);
+CREATE INDEX slab_sectors_sector_id_slab_id_idx ON slab_sectors(sector_id, slab_id);
+
 -- materialized view to speed up lookup of unhealthy slabs
 CREATE MATERIALIZED VIEW unhealthy_slabs AS
     SELECT slab_id
