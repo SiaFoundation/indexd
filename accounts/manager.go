@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -29,14 +30,18 @@ type (
 
 	// AccountFunder defines an interface to fund accounts.
 	AccountFunder interface {
-		FundAccounts(ctx context.Context, host hosts.Host, accounts []HostAccount, contractIDs []types.FileContractID, log *zap.Logger) (int, int, error)
+		FundAccounts(ctx context.Context, host hosts.Host, accounts []HostAccount, contractIDs []types.FileContractID, target types.Currency, log *zap.Logger) (int, int, error)
 	}
 
 	// AccountManager manages accounts.
 	AccountManager struct {
-		store  Store
-		funder AccountFunder
-		log    *zap.Logger
+		store      Store
+		funder     AccountFunder
+		fundTarget types.Currency
+		log        *zap.Logger
+
+		serviceAccountsMu sync.Mutex
+		serviceAccounts   map[proto.Account]*serviceAccount
 	}
 )
 
@@ -53,9 +58,11 @@ func WithLogger(l *zap.Logger) Option {
 // NewManager creates a new AccountManager.
 func NewManager(store Store, funder AccountFunder, opts ...Option) *AccountManager {
 	m := &AccountManager{
-		store:  store,
-		funder: funder,
-		log:    zap.NewNop(),
+		serviceAccounts: make(map[proto.Account]*serviceAccount),
+		store:           store,
+		funder:          funder,
+		fundTarget:      types.Siacoins(1),
+		log:             zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -95,15 +102,45 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 			break
 		}
 
-		funded, drained, err := m.funder.FundAccounts(ctx, host, accounts, contractIDs, log)
-		if err != nil {
-			return fmt.Errorf("failed to fund accounts: %w", err)
-		}
+		var funded, drained int
+		err = func() error {
+			// lock service accounts
+			serviceAccounts := m.lockServiceAccounts(accounts)
+			defer func() {
+				for _, acc := range serviceAccounts {
+					acc.Unlock()
+				}
+			}()
 
-		updateFundedAccounts(accounts, funded)
-		err = m.store.UpdateHostAccounts(ctx, accounts)
+			// fund accounts
+			funded, drained, err = m.funder.FundAccounts(ctx, host, accounts, contractIDs, m.fundTarget, log)
+			if err != nil {
+				return fmt.Errorf("failed to fund accounts: %w", err)
+			}
+
+			// update funded accounts
+			updateFundedAccounts(accounts, funded)
+			err = m.store.UpdateHostAccounts(ctx, accounts)
+			if err != nil {
+				return fmt.Errorf("failed to update accounts: %w", err)
+			}
+
+			// update service accounts
+			fundedAccs := make(map[proto.Account]struct{})
+			for _, acc := range accounts[:funded] {
+				fundedAccs[acc.AccountKey] = struct{}{}
+			}
+			for _, serviceAccount := range serviceAccounts {
+				if _, ok := fundedAccs[serviceAccount.Account]; ok {
+					if err := m.UpdateServiceAccountBalance(serviceAccount); err != nil {
+						m.log.Warn("failed to update service account balance", zap.Error(err))
+					}
+				}
+			}
+			return nil
+		}()
 		if err != nil {
-			return fmt.Errorf("failed to update accounts: %w", err)
+			return err
 		}
 
 		contractIDs = contractIDs[drained:]
