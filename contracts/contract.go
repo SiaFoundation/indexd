@@ -35,16 +35,14 @@ type (
 	ContractQueryOpt func(*ContractQueryOpts)
 )
 
-// WithGood filters contracts by whether they are considered good. This defaults
-// to 'true'.
+// WithGood filters contracts by whether they are considered good.
 func WithGood(good bool) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.Good = &good
 	}
 }
 
-// WithRevisable filters contracts by whether they can still be revised. This
-// defaults to 'true'.
+// WithRevisable filters contracts by whether they can still be revised.
 func WithRevisable(revisable bool) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.Revisable = &revisable

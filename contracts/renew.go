@@ -3,7 +3,6 @@ package contracts
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -51,68 +50,84 @@ func (cf *contractor) RenewContract(ctx context.Context, hk types.PublicKey, add
 
 func (cm *ContractManager) performContractRenewals(ctx context.Context, period, renewWindow uint64, log *zap.Logger) error {
 	renewalLog := log.Named("renewal")
-	contracts, err := cm.store.Contracts(ctx, 0, math.MaxInt64, WithGood(true), WithRevisable(true)) // TODO: page through contracts and refresh in parallell
-	if err != nil {
-		return fmt.Errorf("failed to fetch contracts for renewal: %w", err)
-	}
 
 	bh := cm.cm.TipState().Index.Height
 	minProofHeight := bh + renewWindow
 	newProofHeight := bh + period + renewWindow
 
-	for _, contract := range contracts {
-		if contract.ProofHeight > minProofHeight {
-			continue // too early to renew
-		} else if !contract.Good {
-			continue // contract is bad
-		}
-		contractLog := renewalLog.With(zap.Stringer("hostKey", contract.HostKey), zap.Stringer("contractID", contract.ID))
-
-		// fetch corresponding host and check if it's theoretically usable
-		host, err := cm.store.Host(ctx, contract.HostKey)
+	batchSize := 50
+	for offset := 0; ; offset += batchSize {
+		contracts, err := cm.store.Contracts(ctx, offset, batchSize, WithGood(true), WithRevisable(true))
 		if err != nil {
-			contractLog.Debug("failed to fetch host", zap.Error(err))
-			continue
-		} else if !host.Usability.Usable() {
-			contractLog.Debug("host is not usable")
-			continue
+			return fmt.Errorf("failed to fetch contracts for renewal: %w", err)
 		}
 
-		// scan host for valid price settings and make sure it's still usable
-		scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		host, err = cm.scanner.ScanHost(scanCtx, host.PublicKey)
-		cancel()
-		if err != nil {
-			contractLog.Warn("failed to scan host", zap.Error(err))
-			continue
-		} else if !host.Usability.Usable() {
-			contractLog.Debug("host is not usable after scan")
-			continue
+		for _, contract := range contracts {
+			if contract.ProofHeight > minProofHeight {
+				continue // too early to renew
+			} else if !contract.Good {
+				continue // contract is bad
+			}
+
+			if err := cm.renewContract(ctx, contract, newProofHeight, renewalLog); err != nil {
+				renewalLog.Error("failed to renew contract",
+					zap.Stringer("contractID", contract.ID),
+					zap.Error(err),
+				)
+			}
 		}
 
-		res, err := cm.contractor.RenewContract(ctx, contract.HostKey, host.SiamuxAddr(), host.Settings, contract.ID, newProofHeight)
-		if err != nil {
-			contractLog.Debug("failed to renew", zap.Error(err))
-			continue
+		if len(contracts) < batchSize {
+			break
 		}
-		renewed := res.Contract
-		minerFee := res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1].MinerFee
+	}
 
-		err = cm.store.AddRenewedContract(ctx, AddRenewedContractParams{
-			RenewedFrom:      contract.ID,
-			RenewedTo:        renewed.ID,
-			ProofHeight:      renewed.Revision.ProofHeight,
-			ExpirationHeight: renewed.Revision.ExpirationHeight,
-			ContractPrice:    host.Settings.Prices.ContractPrice,
-			Allowance:        renewed.Revision.RenterOutput.Value,
-			MinerFee:         minerFee,
-			UsedCollateral:   types.ZeroCurrency,
-			TotalCollateral:  renewed.Revision.TotalCollateral,
-		})
-		if err != nil {
-			contractLog.Error("failed to store renewed contract", zap.Error(err))
-			continue
-		}
+	return nil
+}
+
+func (cm *ContractManager) renewContract(ctx context.Context, contract Contract, proofHeight uint64, log *zap.Logger) error {
+	contractLog := log.With(zap.Stringer("hostKey", contract.HostKey), zap.Stringer("contractID", contract.ID))
+
+	// fetch corresponding host and check if it's theoretically usable
+	host, err := cm.store.Host(ctx, contract.HostKey)
+	if err != nil {
+		return fmt.Errorf("failed to fetch host: %w", err)
+	} else if !host.Usability.Usable() {
+		contractLog.Debug("host is not usable")
+		return nil
+	}
+
+	// scan host for valid price settings and make sure it's still usable
+	scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	host, err = cm.scanner.ScanHost(scanCtx, host.PublicKey)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("failed to scan host: %w", err)
+	} else if !host.Usability.Usable() {
+		contractLog.Debug("host is not usable after scan")
+		return nil
+	}
+
+	res, err := cm.contractor.RenewContract(ctx, contract.HostKey, host.SiamuxAddr(), host.Settings, contract.ID, proofHeight)
+	if err != nil {
+		contractLog.Debug("failed to renew", zap.Error(err))
+		return nil
+	}
+	renewed := res.Contract
+	minerFee := res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1].MinerFee
+
+	if err := cm.store.AddRenewedContract(ctx, AddRenewedContractParams{
+		RenewedFrom:      contract.ID,
+		RenewedTo:        renewed.ID,
+		ProofHeight:      renewed.Revision.ProofHeight,
+		ExpirationHeight: renewed.Revision.ExpirationHeight,
+		ContractPrice:    host.Settings.Prices.ContractPrice,
+		Allowance:        renewed.Revision.RenterOutput.Value,
+		MinerFee:         minerFee,
+		UsedCollateral:   types.ZeroCurrency,
+		TotalCollateral:  renewed.Revision.TotalCollateral,
+	}); err != nil {
+		return fmt.Errorf("failed to store renewed contract: %w", err)
 	}
 
 	return nil
