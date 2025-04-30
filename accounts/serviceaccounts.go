@@ -15,6 +15,7 @@ type (
 		serviceAccount *serviceAccount
 
 		Account proto.Account
+		HostKey types.PublicKey
 	}
 
 	serviceAccount struct {
@@ -29,18 +30,26 @@ func (a LockedServiceAccount) Unlock() {
 
 // LockAccount locks an account which allows for updating its balance. The
 // returned account needs to be unlocked using its 'Unlock' method.
-func (m *AccountManager) LockAccount(account proto.Account) (LockedServiceAccount, error) {
+func (m *AccountManager) LockAccount(account proto.Account, hostKey types.PublicKey) (LockedServiceAccount, error) {
 	m.serviceAccountsMu.Lock()
-	sa, ok := m.serviceAccounts[account]
+	serviceAccs, ok := m.serviceAccounts[account]
 	if !ok {
 		m.serviceAccountsMu.Unlock()
 		return LockedServiceAccount{}, ErrNotFound
 	}
+	acc, ok := serviceAccs[hostKey]
+	if !ok {
+		serviceAccs[hostKey] = &serviceAccount{}
+		acc = serviceAccs[hostKey]
+	}
+
 	m.serviceAccountsMu.Unlock()
-	sa.mu.Lock()
+	acc.mu.Lock()
 
 	return LockedServiceAccount{
-		Account: account,
+		serviceAccount: acc,
+		Account:        account,
+		HostKey:        hostKey,
 	}, nil
 }
 
@@ -53,17 +62,17 @@ func (m *AccountManager) RegisterServiceAccount(account proto.Account) {
 	if _, exists := m.serviceAccounts[account]; exists {
 		panic("service account already registered") // developer error
 	}
-	m.serviceAccounts[account] = &serviceAccount{}
+	m.serviceAccounts[account] = make(map[types.PublicKey]*serviceAccount)
 }
 
 // ServiceAccountBalance returns the balance of a locked service account.
 func (m *AccountManager) ServiceAccountBalance(ctx context.Context, account LockedServiceAccount) (types.Currency, error) {
-	return m.store.ServiceAccountBalance(ctx, account.Account)
+	return m.store.ServiceAccountBalance(ctx, account)
 }
 
 // UpdateServiceAccountBalance updates the balance of a locked service account.
 func (m *AccountManager) UpdateServiceAccountBalance(ctx context.Context, account LockedServiceAccount, balance types.Currency) error {
-	return m.store.UpdateServiceAccountBalance(ctx, account.Account, balance)
+	return m.store.UpdateServiceAccountBalance(ctx, account, balance)
 }
 
 // lockServiceAccounts locks all service accounts in the list of accounts.
@@ -72,12 +81,20 @@ func (m *AccountManager) lockServiceAccounts(accounts []HostAccount) []LockedSer
 	m.serviceAccountsMu.Lock()
 	var toLock []LockedServiceAccount
 	for _, account := range accounts {
-		if serviceAcc, ok := m.serviceAccounts[account.AccountKey]; ok {
-			toLock = append(toLock, LockedServiceAccount{
-				Account:        account.AccountKey,
-				serviceAccount: serviceAcc,
-			})
+		serviceAccs, ok := m.serviceAccounts[account.AccountKey]
+		if !ok {
+			continue
 		}
+		acc, ok := serviceAccs[account.HostKey]
+		if !ok {
+			serviceAccs[account.HostKey] = &serviceAccount{}
+			acc = serviceAccs[account.HostKey]
+		}
+		toLock = append(toLock, LockedServiceAccount{
+			serviceAccount: acc,
+			Account:        account.AccountKey,
+			HostKey:        account.HostKey,
+		})
 	}
 	m.serviceAccountsMu.Unlock()
 

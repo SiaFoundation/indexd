@@ -39,16 +39,18 @@ var (
 var _ Store = (*mockStore)(nil)
 
 type mockStore struct {
-	accounts map[types.PublicKey]struct{}
-	hosts    map[types.PublicKey]hosts.Host
-	eas      map[types.PublicKey]map[types.PublicKey]*HostAccount
+	accounts        map[types.PublicKey]struct{}
+	hosts           map[types.PublicKey]hosts.Host
+	eas             map[types.PublicKey]map[types.PublicKey]*HostAccount
+	serviceAccounts map[proto.Account]map[types.PublicKey]types.Currency
 }
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		accounts: make(map[types.PublicKey]struct{}),
-		hosts:    make(map[types.PublicKey]hosts.Host),
-		eas:      make(map[types.PublicKey]map[types.PublicKey]*HostAccount),
+		accounts:        make(map[types.PublicKey]struct{}),
+		hosts:           make(map[types.PublicKey]hosts.Host),
+		eas:             make(map[types.PublicKey]map[types.PublicKey]*HostAccount),
+		serviceAccounts: make(map[proto.Account]map[types.PublicKey]types.Currency),
 	}
 }
 
@@ -105,16 +107,6 @@ func (s *mockStore) UpdateHostAccounts(ctx context.Context, accounts []HostAccou
 		s.eas[acc.HostKey][types.PublicKey(acc.AccountKey)] = &acc
 	}
 	return nil
-}
-
-// UpdateServiceAccountBalance updates the balance of a service account.
-func (s *mockStore) UpdateServiceAccountBalance(ctx context.Context, account proto.Account, balance types.Currency) error {
-	return nil // not implemented
-}
-
-// ServiceAccountBalance returns the balance of a service account.
-func (s *mockStore) ServiceAccountBalance(ctx context.Context, account proto.Account) (types.Currency, error) {
-	return types.Currency{}, nil // not implemented
 }
 
 func (s *mockStore) resetNextFund() {
