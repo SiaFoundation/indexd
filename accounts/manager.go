@@ -26,6 +26,8 @@ type (
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		HostAccountsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]HostAccount, error)
 		UpdateHostAccounts(ctx context.Context, accounts []HostAccount) error
+		UpdateServiceAccountBalance(ctx context.Context, account proto.Account, balance types.Currency) error
+		ServiceAccountBalance(ctx context.Context, account proto.Account) (types.Currency, error)
 	}
 
 	// AccountFunder defines an interface to fund accounts.
@@ -132,7 +134,7 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 			}
 			for _, serviceAccount := range serviceAccounts {
 				if _, ok := fundedAccs[serviceAccount.Account]; ok {
-					if err := m.UpdateServiceAccountBalance(serviceAccount); err != nil {
+					if err := m.UpdateServiceAccountBalance(ctx, serviceAccount, m.fundTarget); err != nil {
 						m.log.Warn("failed to update service account balance", zap.Error(err))
 					}
 				}

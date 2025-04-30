@@ -107,6 +107,16 @@ func (s *mockStore) UpdateHostAccounts(ctx context.Context, accounts []HostAccou
 	return nil
 }
 
+// UpdateServiceAccountBalance updates the balance of a service account.
+func (s *mockStore) UpdateServiceAccountBalance(ctx context.Context, account proto.Account, balance types.Currency) error {
+	return nil // not implemented
+}
+
+// ServiceAccountBalance returns the balance of a service account.
+func (s *mockStore) ServiceAccountBalance(ctx context.Context, account proto.Account) (types.Currency, error) {
+	return types.Currency{}, nil // not implemented
+}
+
 func (s *mockStore) resetNextFund() {
 	for _, eas := range s.eas {
 		for _, ea := range eas {

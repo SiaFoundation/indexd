@@ -1,6 +1,7 @@
 package accounts
 
 import (
+	"context"
 	"sync"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -56,30 +57,33 @@ func (m *AccountManager) RegisterServiceAccount(account proto.Account) {
 }
 
 // ServiceAccountBalance returns the balance of a locked service account.
-func (m *AccountManager) ServiceAccountBalance(account LockedServiceAccount) (types.Currency, error) {
-	return types.ZeroCurrency, nil // read balance from database
+func (m *AccountManager) ServiceAccountBalance(ctx context.Context, account LockedServiceAccount) (types.Currency, error) {
+	return m.store.ServiceAccountBalance(ctx, account.Account)
 }
 
 // UpdateServiceAccountBalance updates the balance of a locked service account.
-func (m *AccountManager) UpdateServiceAccountBalance(account LockedServiceAccount) error {
-	return nil // update balance in database
+func (m *AccountManager) UpdateServiceAccountBalance(ctx context.Context, account LockedServiceAccount, balance types.Currency) error {
+	return m.store.UpdateServiceAccountBalance(ctx, account.Account, balance)
 }
 
 // lockServiceAccounts locks all service accounts in the list of accounts.
 // Non-service accounts are ignored.
 func (m *AccountManager) lockServiceAccounts(accounts []HostAccount) []LockedServiceAccount {
 	m.serviceAccountsMu.Lock()
-	defer m.serviceAccountsMu.Unlock()
-
-	var locked []LockedServiceAccount
+	var toLock []LockedServiceAccount
 	for _, account := range accounts {
 		if serviceAcc, ok := m.serviceAccounts[account.AccountKey]; ok {
-			serviceAcc.mu.Lock()
-			locked = append(locked, LockedServiceAccount{
+			toLock = append(toLock, LockedServiceAccount{
 				Account:        account.AccountKey,
 				serviceAccount: serviceAcc,
 			})
 		}
 	}
-	return locked
+	m.serviceAccountsMu.Unlock()
+
+	// lock accounts outside of the manager's mutex
+	for _, account := range toLock {
+		account.serviceAccount.mu.Lock()
+	}
+	return toLock
 }
