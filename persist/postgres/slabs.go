@@ -2,10 +2,11 @@ package postgres
 
 import (
 	"context"
-	"errors"
 	"fmt"
 )
 
+// slabPruneBatchSize is the batch size used when pruning slabs, at default
+// redundancy 35 slabs equate to roughly 1k sectors.
 const slabPruneBatchSize = 35
 
 // PruneSlabs will delete slabs (and its sectors) that are not referenced by any
@@ -18,9 +19,6 @@ func (s *Store) PruneSlabs(ctx context.Context) (int64, error) {
 	for {
 		n, err := s.pruneSlabsLimit(ctx, slabPruneBatchSize)
 		if err != nil {
-			if pruned > 0 && errors.Is(err, context.Canceled) {
-				break // ignore context cancellation if slabs were pruned
-			}
 			return pruned, err
 		}
 

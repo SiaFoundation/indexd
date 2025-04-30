@@ -2,6 +2,7 @@ package slabs
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -74,16 +75,16 @@ func NewManager(store Store, opts ...Option) (*SlabManager, error) {
 				return
 			}
 
+			if err := m.performSlabPruning(ctx); err != nil {
+				m.log.Error("failed to perform slab pruning", zap.Error(err))
+			}
+
 			if err := m.performIntegrityChecks(); err != nil {
 				m.log.Error("failed to perform integrity checks", zap.Error(err))
 			}
 
 			if err := m.performSlabMigrations(); err != nil {
 				m.log.Error("failed to perform slab migrations", zap.Error(err))
-			}
-
-			if err := m.performSlabPruning(ctx); err != nil {
-				m.log.Error("failed to perform slab pruning", zap.Error(err))
 			}
 		}
 	}()
@@ -135,6 +136,10 @@ func (m *SlabManager) performSlabPruning(ctx context.Context) error {
 
 	n, err := m.store.PruneSlabs(ctx)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			logger.Debug("slab pruning cancelled", zap.Int("pruned", n), zap.Duration("elapsed", time.Since(start)))
+			return nil
+		}
 		return err
 	}
 
