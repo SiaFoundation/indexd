@@ -221,14 +221,17 @@ func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
 		if err != nil {
 			if strings.Contains(err.Error(), "has already been resolved") ||
 				strings.Contains(err.Error(), "not present in the accumulator") {
-				m.log.Debug("failed to broadcast contract expiration txn", zap.Error(err))
+				m.log.Debug("failed to add broadcast contract expiration txn to pool", zap.Error(err))
 			} else {
-				m.log.Error("failed to broadcast contract expiration txn", zap.Error(err))
+				m.log.Error("failed to add contract expiration txn to pool", zap.Error(err))
 			}
 			m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
 			continue
+		} else if err := m.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn}); err != nil {
+			m.log.Error("failed to broadcast contract expiration txn", zap.Error(err))
+			m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			continue
 		}
-		m.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn})
 	}
 	return nil
 }

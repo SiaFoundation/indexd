@@ -7,13 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/core/gateway"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
-	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.uber.org/zap"
@@ -30,7 +28,7 @@ type (
 		sr *testutil.EphemeralSettingsReporter
 
 		cm *chain.Manager
-		s  *syncer.Syncer
+		s  *Syncer
 		w  *wallet.SingleAddressWallet
 	}
 )
@@ -80,13 +78,12 @@ func (h *Host) Announce() error {
 	}
 
 	// broadcast transaction set
-	h.s.BroadcastV2TransactionSet(cs.Index, txnset)
-	return nil
+	return h.s.BroadcastV2TransactionSet(cs.Index, txnset)
 }
 
 // Connect connects the host's syncer with the given peer.
 func (h *Host) Connect(ctx context.Context, addr string) error {
-	_, err := h.s.Connect(ctx, addr)
+	_, err := h.s.Connect(addr)
 	return err
 }
 
@@ -97,23 +94,7 @@ func (h *Host) PublicKey() types.PublicKey {
 
 // NewHost creates a new host.
 func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logger) *Host {
-	syncerListener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { syncerListener.Close() })
-
-	s := syncer.New(syncerListener, c.cm, testutil.NewEphemeralPeerStore(), gateway.Header{
-		GenesisID:  c.genesis.ID(),
-		UniqueID:   gateway.GenerateUniqueID(),
-		NetAddress: syncerListener.Addr().String(),
-	},
-		syncer.WithSendBlocksTimeout(2*time.Second),
-		syncer.WithRPCTimeout(2*time.Second),
-		syncer.WithSyncInterval(100*time.Millisecond),
-	)
-	t.Cleanup(func() { s.Close() })
-	go s.Run()
+	s := NewSyncer(t, c.genesis.ID(), c.cm)
 
 	ws := testutil.NewEphemeralWalletStore()
 	w, err := wallet.NewSingleAddressWallet(types.GeneratePrivateKey(), c.cm, ws)

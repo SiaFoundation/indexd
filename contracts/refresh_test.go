@@ -174,9 +174,9 @@ func TestPerformContractRefreshes(t *testing.T) {
 		t.Fatalf("expected 4 refreshes, got %v", len(contractor.refreshCalls))
 	}
 	assertRefresh(good, types.Siacoins(110), types.ZeroCurrency, types.FileContractID{2}, contractor.refreshCalls[0])
-	assertRefresh(good, types.ZeroCurrency, types.Siacoins(110), types.FileContractID{3}, contractor.refreshCalls[1])
-	assertRefresh(good, types.Siacoins(110), types.Siacoins(110), types.FileContractID{4}, contractor.refreshCalls[2])
-	assertRefresh(good, types.ZeroCurrency, types.Siacoins(1), types.FileContractID{6}, contractor.refreshCalls[3])
+	assertRefresh(good, types.Siacoins(110), types.Siacoins(110), types.FileContractID{3}, contractor.refreshCalls[1])
+	assertRefresh(good, types.Siacoins(110), types.ZeroCurrency, types.FileContractID{4}, contractor.refreshCalls[2])
+	assertRefresh(good, types.Siacoins(1), types.Siacoins(1), types.FileContractID{6}, contractor.refreshCalls[3])
 
 	// assert refreshes made it into the store leading to 8 existing + 4 refreshed
 	// contracts in the store
@@ -191,13 +191,13 @@ func TestPerformContractRefreshes(t *testing.T) {
 			initialAllowance = types.Siacoins(110)
 			totalCollateral = types.ZeroCurrency
 		case types.FileContractID{3}:
-			initialAllowance = types.ZeroCurrency
+			initialAllowance = types.Siacoins(110)
 			totalCollateral = types.Siacoins(110)
 		case types.FileContractID{4}:
 			initialAllowance = types.Siacoins(110)
-			totalCollateral = types.Siacoins(110)
+			totalCollateral = types.ZeroCurrency
 		case types.FileContractID{6}:
-			initialAllowance = types.ZeroCurrency
+			initialAllowance = types.Siacoins(1)
 			totalCollateral = types.Siacoins(1)
 		default:
 			continue // only check refreshed contracts
@@ -217,7 +217,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 		} else if !contract.MinerFee.Equals(types.Siacoins(1)) {
 			t.Fatalf("expected miner fee to be 1SC")
 		} else if !contract.TotalCollateral.Equals(totalCollateral) {
-			t.Fatalf("expected total collateral %v, got %v", initialAllowance, contract.TotalCollateral)
+			t.Fatalf("expected total collateral %v, got %v", totalCollateral, contract.TotalCollateral)
 		}
 	}
 }

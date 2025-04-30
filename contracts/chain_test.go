@@ -375,10 +375,11 @@ type syncerMock struct {
 	broadcasted []types.V2Transaction
 }
 
-func (s *syncerMock) BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) {
+func (s *syncerMock) BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error {
 	s.mu.Lock()
 	s.broadcasted = append(s.broadcasted, txns...)
 	s.mu.Unlock()
+	return nil
 }
 
 func (s *syncerMock) BroadcastedSets() []types.V2Transaction {

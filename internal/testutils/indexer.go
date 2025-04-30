@@ -10,11 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"go.sia.tech/core/gateway"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/coreutils/syncer"
-	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
@@ -35,7 +32,7 @@ type Indexer struct {
 
 	db     *postgres.Store
 	cm     *chain.Manager
-	syncer *syncer.Syncer
+	syncer *Syncer
 	wallet *wallet.SingleAddressWallet
 }
 
@@ -45,21 +42,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	// prepare store
 	store := NewDB(t, log)
 
-	syncerListener, err := net.Listen("tcp4", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// peers will reject us if our hostname is empty or unspecified, so use loopback
-	s := syncer.New(syncerListener, c.cm, testutil.NewEphemeralPeerStore(), gateway.Header{
-		GenesisID:  c.genesis.ID(),
-		UniqueID:   gateway.GenerateUniqueID(),
-		NetAddress: syncerListener.Addr().String(),
-	},
-		syncer.WithSendBlocksTimeout(2*time.Second),
-		syncer.WithRPCTimeout(2*time.Second),
-	)
-	go s.Run()
+	s := NewSyncer(t, c.genesis.ID(), c.cm)
 
 	walletKey := types.GeneratePrivateKey()
 	wm, err := wallet.NewSingleAddressWallet(walletKey, c.cm, store, wallet.WithLogger(log.Named("wallet")), wallet.WithReservationDuration(3*time.Hour))

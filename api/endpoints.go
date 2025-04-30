@@ -71,6 +71,43 @@ func (a *api) handlePOSTAccount(jc jape.Context) {
 	}
 
 	a.contracts.TriggerAccountFunding()
+
+	jc.Encode(nil)
+}
+
+func (a *api) handlePUTAccount(jc jape.Context) {
+	var ak types.PublicKey
+	if jc.DecodeParam("accountkey", &ak) != nil {
+		return
+	}
+
+	var req AccountRotateKeyRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	if req.NewAccountKey == (types.PublicKey{}) {
+		jc.Error(errors.New("new account key cannot be empty"), http.StatusBadRequest)
+		return
+	} else if req.NewAccountKey == ak {
+		jc.Error(errors.New("new account key cannot be the same as the old one"), http.StatusBadRequest)
+		return
+	}
+
+	err := a.store.UpdateAccount(jc.Request.Context(), ak, req.NewAccountKey)
+	if errors.Is(err, accounts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, accounts.ErrExists) {
+		jc.Error(err, http.StatusConflict)
+		return
+	} else if jc.Check("failed to rotate account key", err) != nil {
+		return
+	}
+
+	a.contracts.TriggerAccountFunding()
+
+	jc.Encode(nil)
 }
 
 func (a *api) handleDELETEAccount(jc jape.Context) {
@@ -336,7 +373,10 @@ func (a *api) handlePOSTWalletSend(jc jape.Context) {
 	}
 
 	// broadcast the transaction
-	a.syncer.BroadcastV2TransactionSet(basis, txnset)
+	if jc.Check("failed to broadcast transaction", a.syncer.BroadcastV2TransactionSet(basis, txnset)) != nil {
+		a.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
+		return
+	}
 
 	jc.Encode(txn.ID())
 }

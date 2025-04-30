@@ -170,6 +170,9 @@ CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- fo
 CREATE INDEX contracts_state_good_idx ON contracts(state) WHERE state <= 1 AND good; -- for filtering contracts
 CREATE INDEX contracts_host_id_remaining_allowance_idx ON contracts (host_id, remaining_allowance DESC) WHERE good = true AND remaining_allowance > 0 AND state <= 1; -- for fetching contracts for funding
 
+-- foreign key constraint index
+CREATE INDEX contracts_host_id_idx ON contracts(host_id);
+
 CREATE TABLE contract_sectors_map (
     id SERIAL PRIMARY KEY,
     contract_id BYTEA UNIQUE REFERENCES contracts(contract_id) NOT NULL
@@ -209,7 +212,7 @@ CREATE TABLE sectors (
     sector_root BYTEA NOT NULL,
 
     -- uploading
-    -- NOTE: contract_id should always be NULL when host_id is NULL
+    -- NOTE: contract_sectors_map_id should always be NULL when host_id is NULL
     host_id INTEGER REFERENCES hosts(id), -- host that stores sector
     contract_sectors_map_id INTEGER REFERENCES contract_sectors_map(id) DEFAULT NULL CHECK((host_id IS NULL AND contract_sectors_map_id IS NULL) OR host_id IS NOT NULL), -- null if not pinned
     uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by upload time
@@ -222,6 +225,10 @@ CREATE TABLE sectors (
     next_integrity_check TIMESTAMP WITH TIME ZONE NOT NULL,
     consecutive_failed_checks SMALLINT NOT NULL DEFAULT 0
 );
+
+-- quick lookup of sectors that failed the integrity checks too many times
+CREATE INDEX sectors_consecutive_failed_checks_idx ON sectors(host_id, consecutive_failed_checks) WHERE consecutive_failed_checks > 0;
+
 -- quick lookup of sectors to pin prioritized by upload time
 CREATE INDEX sectors_contract_sectors_map_id_uploaded_at_idx ON sectors(contract_sectors_map_id, uploaded_at ASC);
 
@@ -239,3 +246,9 @@ CREATE INDEX sectors_slab_id_idx ON sectors(slab_id);
 -- speed up integrity check query
 CREATE INDEX sectors_next_integrity_check_idx ON sectors(next_integrity_check ASC);
 CREATE INDEX sectors_host_id_next_integrity_check_idx ON sectors(host_id, next_integrity_check ASC);
+
+-- speed up querying sectors of a host by root
+CREATE INDEX sectors_host_id_sector_root_idx ON sectors(host_id, sector_root);
+
+-- speed up lookup of sectors by root
+CREATE INDEX sectors_sector_root_idx ON sectors(sector_root);

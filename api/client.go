@@ -48,6 +48,12 @@ func (c *Client) AccountsDelete(ctx context.Context, accountKey types.PublicKey)
 	return
 }
 
+// AccountsUpdate allows rotating the account key.
+func (c *Client) AccountsUpdate(ctx context.Context, oldAccountKey, newAccountKey types.PublicKey) (err error) {
+	err = c.c.PUT(ctx, fmt.Sprintf("/account/%s", oldAccountKey), AccountRotateKeyRequest{NewAccountKey: newAccountKey})
+	return
+}
+
 // State returns the current state of the indexer.
 func (c *Client) State(ctx context.Context) (state State, err error) {
 	err = c.c.GET(ctx, "/state", &state)

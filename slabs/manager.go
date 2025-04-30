@@ -28,7 +28,7 @@ type (
 	// Store defines an interface to store and update slab related information
 	// in the database.
 	Store interface {
-		PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slabs []SlabPinParams) ([]SlabID, error)
+		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error)
 		Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error)
 	}
 )
@@ -97,7 +97,16 @@ func (m *SlabManager) performIntegrityChecks() error {
 	logger := m.log.Named("integrity")
 	logger.Debug("starting integrity checks", zap.Time("start", start))
 
-	// TODO: implement
+	// TODO: fetch sectors for integrity checks
+
+	// TODO: perform integrity checks - sort sector roots into success, failure and lost
+
+	// TODO: update lost sectors in database
+
+	// TODO: mark successes/failures in database
+
+	// TODO: fetch sector roots for sectors that have now failed the check 3+
+	// times and mark them lost as well
 
 	logger.Debug("finished integrity checks", zap.Duration("elapsed", time.Since(start)))
 	return nil

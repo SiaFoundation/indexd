@@ -86,6 +86,8 @@ func (s *Subscriber) Close() error {
 // processing chain updates and needs to be closed.
 func New(cm ChainManager, hm HostManager, contracts ContractManager, wm WalletManager, store Store, opts ...Option) (*Subscriber, error) {
 	s := &Subscriber{
+		updateBatchSize: 1000,
+
 		cm:        cm,
 		contracts: contracts,
 		hm:        hm,

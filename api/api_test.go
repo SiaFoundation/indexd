@@ -69,6 +69,36 @@ func TestAccountsAPI(t *testing.T) {
 	} else if len(accounts) != 0 {
 		t.Fatal("unexpected accounts", len(accounts))
 	}
+
+	pk1 := types.GeneratePrivateKey().PublicKey()
+	err = indexer.AccountsAdd(context.Background(), pk1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	accounts, err = indexer.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accounts) != 1 {
+		t.Fatal("unexpected accounts", len(accounts))
+	} else if accounts[0] != pk1 {
+		t.Fatal("unexpected key", accounts[0])
+	}
+
+	pk2 := types.GeneratePrivateKey().PublicKey()
+	err = indexer.AccountsUpdate(context.Background(), pk1, pk2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	accounts, err = indexer.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accounts) != 1 {
+		t.Fatal("unexpected accounts", len(accounts))
+	} else if accounts[0] != pk2 {
+		t.Fatal("unexpected key", accounts[0])
+	}
 }
 
 func TestExplorerAPI(t *testing.T) {

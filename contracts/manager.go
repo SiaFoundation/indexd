@@ -81,7 +81,7 @@ type (
 	// Syncer is the minimal interface of Syncer functionality the
 	// ContractManager requires.
 	Syncer interface {
-		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction)
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 		Peers() []*syncer.Peer
 	}
 
