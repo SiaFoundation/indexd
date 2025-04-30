@@ -29,7 +29,6 @@ func (s *Store) PruneSlabs(ctx context.Context) (int64, error) {
 			break
 		}
 	}
-
 	return pruned, nil
 }
 
