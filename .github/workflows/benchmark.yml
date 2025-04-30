@@ -1,0 +1,59 @@
+name: Benchmark Check
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Install benchstat
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Run benchmarks
+        run: go test -bench=. -benchmem ./... > new_bench.txt
+
+      - name: Fetch baseline benchmark
+        run: |
+          git fetch origin main
+          git checkout origin/main -- baseline_bench.txt || echo "No baseline found, skipping"
+
+      - name: Compare benchmarks
+        run: |
+          if [ -f baseline_bench.txt ]; then
+            benchstat baseline_bench.txt new_bench.txt > benchdiff.txt
+            cat benchdiff.txt
+          else
+            echo "No baseline to compare. Skipping comparison."
+          fi
+
+      - name: Fail on regression
+        run: |
+          if [ -f benchdiff.txt ]; then
+            if grep -E '([5-9][0-9]%|[1-9][0-9][0-9]+%)' benchdiff.txt; then
+              echo "Performance regression detected! 🔥"
+              exit 1
+            else
+              echo "No significant regression detected. ✅"
+            fi
+          else
+            echo "No benchmark comparison done."
+          fi
+
+      - name: Save latest benchmark as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-benchmark
+          path: new_bench.txt
