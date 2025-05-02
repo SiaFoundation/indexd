@@ -509,6 +509,19 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 1)
 	assertCount("sectors", 2)
 	assertCount("account_slabs", 1)
+
+	// unpin third slab on second account
+	err = store.UnpinSlab(context.Background(), acc2, slab3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert counts
+	assertAccountSlabs(acc1, 0)
+	assertAccountSlabs(acc2, 0)
+	assertCount("slabs", 0)
+	assertCount("sectors", 0)
+	assertCount("account_slabs", 0)
 }
 
 func TestPinSectors(t *testing.T) {
