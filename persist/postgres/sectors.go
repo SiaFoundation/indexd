@@ -223,22 +223,57 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 }
 
 // UnpinSlab removes the association between the given account and the slab. If
-// a slab becomes unreferenced it will eventually be pruned by a background
-// process.
+// the slab was only referenced by the given account, it will also be deleted.
+// The dangling sectors are removed by a background process.
 func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID slabs.SlabID) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		var dbID int64
-		err := tx.QueryRow(ctx, "SELECT id FROM accounts WHERE public_key = $1", sqlPublicKey(accountID)).Scan(&dbID)
+		// fetch account id
+		var aID int64
+		err := tx.QueryRow(ctx, "SELECT id FROM accounts WHERE public_key = $1", sqlPublicKey(accountID)).Scan(&aID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to get account id: %w", err)
 		}
 
-		_, err = tx.Exec(ctx, `DELETE FROM account_slabs WHERE account_id = $1 AND slab_id = (SELECT id FROM slabs WHERE digest = $2)`, dbID, sqlHash256(slabID))
-		if err != nil {
+		// fetch slab id through the account_slabs table, this ensures the slab
+		// was pinned to the account, if not we return ErrSlabNotFound
+		var sID int64
+		var shared bool
+		err = tx.QueryRow(ctx, `
+			SELECT
+				slab_id,
+				EXISTS (
+					SELECT 1
+					FROM account_slabs other
+					WHERE other.slab_id = account_slabs.slab_id AND other.account_id != $1
+				) AS shared
+			 FROM account_slabs
+			 WHERE account_id = $1 AND slab_id = (SELECT id FROM slabs WHERE digest = $2)`, aID, sqlHash256(slabID)).Scan(&sID, &shared)
+		if errors.Is(err, sql.ErrNoRows) {
+			return slabs.ErrSlabNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to get slab id: %w", err)
+		}
+
+		// if slab is shared, only remove the association from the account_slabs
+		if shared {
+			_, err := tx.Exec(ctx, `DELETE FROM account_slabs WHERE account_id = $1 AND slab_id = $2`, aID, sID)
+			if err != nil {
+				return fmt.Errorf("failed to unpin slab: %w", err)
+			}
+			return nil
+		}
+
+		// otherwise remove the reference as well as the slab and its sectors
+		batch := &pgx.Batch{}
+		batch.Queue(`DELETE FROM account_slabs WHERE account_id = $1 AND slab_id = $2`, aID, sID)
+		batch.Queue(`DELETE FROM sectors WHERE slab_id = $1`, sID)
+		batch.Queue(`DELETE FROM slabs WHERE id = $1`, sID)
+		if err := tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
 			return fmt.Errorf("failed to unpin slab: %w", err)
 		}
+
 		return nil
 	})
 }

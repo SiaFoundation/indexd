@@ -383,24 +383,26 @@ func TestPinSlabs(t *testing.T) {
 func TestUnpinSlab(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	// add two accounts
-	acc1 := proto.Account{1}
-	acc2 := proto.Account{2}
-	if err := store.AddAccount(context.Background(), types.PublicKey(acc1)); err != nil {
-		t.Fatal("failed to add account:", err)
-	} else if err := store.AddAccount(context.Background(), types.PublicKey(acc2)); err != nil {
-		t.Fatal("failed to add account:", err)
-	}
-
-	// define helper to count number of slabs associated to the account
-	slabCount := func(acc proto.Account) (n int64) {
+	assertAccountSlabs := func(acc proto.Account, expected int64) {
 		t.Helper()
+		var got int64
 		query := `SELECT COUNT(*) FROM account_slabs INNER JOIN accounts ON account_slabs.account_id = accounts.id WHERE accounts.public_key = $1`
-		err := store.pool.QueryRow(context.Background(), query, sqlHash256(acc)).Scan(&n)
+		err := store.pool.QueryRow(context.Background(), query, sqlHash256(acc)).Scan(&got)
 		if err != nil {
 			t.Fatal(err)
+		} else if got != expected {
+			t.Fatalf("expected %d slabs for account %v, got %d", expected, acc, got)
 		}
-		return
+	}
+
+	assertCount := func(name string, expected int64) {
+		t.Helper()
+		var got int64
+		if err := store.pool.QueryRow(context.Background(), fmt.Sprintf("SELECT COUNT(*) FROM %s", name)).Scan(&got); err != nil {
+			t.Fatal(err)
+		} else if got != expected {
+			t.Fatalf("expected %d rows in %s, got %d", expected, name, got)
+		}
 	}
 
 	// add host
@@ -412,59 +414,101 @@ func TestUnpinSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add 2 slabs per account
-	var slabIDs []slabs.SlabID
-	for _, acc := range []proto.Account{acc1, acc2} {
-		for range 2 {
-			slabID, err := store.PinSlab(context.Background(), acc, time.Time{}, slabs.SlabPinParams{
-				EncryptionKey: [32]byte{},
-				MinShards:     10,
-				Sectors:       []slabs.SectorPinParams{{Root: frand.Entropy256(), HostKey: hk}},
-			})
-			if err != nil {
-				t.Fatal(err)
-			}
-			slabIDs = append(slabIDs, slabID)
-		}
+	// precreate 3 slabs, 2 sectors each
+	var params []slabs.SlabPinParams
+	for range 3 {
+		params = append(params, slabs.SlabPinParams{
+			EncryptionKey: [32]byte{},
+			MinShards:     2,
+			Sectors: []slabs.SectorPinParams{
+				{Root: frand.Entropy256(), HostKey: hk},
+				{Root: frand.Entropy256(), HostKey: hk},
+			},
+		})
 	}
+	slab1, _ := params[0].Digest()
+	slab2, _ := params[1].Digest()
+	slab3, _ := params[2].Digest()
 
-	// assert slab count
-	if n := slabCount(acc1); n != 2 {
-		t.Fatalf("expected 2 slabs, got %d", n)
-	} else if n := slabCount(acc2); n != 2 {
-		t.Fatalf("expected 2 slabs, got %d", n)
+	// add an account with 2 slabs, 2 sectors each
+	acc1 := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(acc1)); err != nil {
+		t.Fatal("failed to add account:", err)
 	}
-
-	// unpin first slab
-	err := store.UnpinSlab(context.Background(), acc1, slabIDs[0])
-	if err != nil {
+	if _, err := store.PinSlab(context.Background(), acc1, time.Time{}, params[0]); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.PinSlab(context.Background(), acc1, time.Time{}, params[1]); err != nil {
 		t.Fatal(err)
 	}
 
-	// assert slab count
-	if n := slabCount(acc1); n != 1 {
-		t.Fatalf("expected 1 slab, got %d", n)
-	} else if n := slabCount(acc2); n != 2 {
-		t.Fatalf("expected 2 slabs, got %d", n)
+	// add another account with 2 slabs, the first one is shared with acc1
+	acc2 := proto.Account{2}
+	if err := store.AddAccount(context.Background(), types.PublicKey(acc2)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+	if _, err := store.PinSlab(context.Background(), acc2, time.Time{}, params[1]); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.PinSlab(context.Background(), acc2, time.Time{}, params[2]); err != nil {
+		t.Fatal(err)
 	}
 
-	// consecutive calls should not error out
-	err = store.UnpinSlab(context.Background(), acc1, slabIDs[0])
-	if err != nil {
-		t.Fatal(err)
+	// assert counts
+	assertAccountSlabs(acc1, 2)
+	assertAccountSlabs(acc2, 2)
+	assertCount("slabs", 3)
+	assertCount("sectors", 6)
+	assertCount("account_slabs", 4)
+
+	// unpinning a slab that's not pinned to an account should return [slabs.ErrNotFound]
+	err := store.UnpinSlab(context.Background(), acc2, slab1)
+	if !errors.Is(err, slabs.ErrSlabNotFound) {
+		t.Fatal("unexpected error:", err)
 	}
 
 	// unpinning for a non existing account should return [accounts.ErrNotFound]
-	err = store.UnpinSlab(context.Background(), proto.Account{3}, slabIDs[0])
+	err = store.UnpinSlab(context.Background(), proto.Account{3}, slab3)
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("unexpected error:", err)
 	}
 
-	// unpinning for an existing account, but not pinned on that account should be a no-op
-	err = store.UnpinSlab(context.Background(), acc2, slabIDs[1])
+	// unpin first slab
+	err = store.UnpinSlab(context.Background(), acc1, slab1)
 	if err != nil {
-		t.Fatal("unexpected error:", err)
+		t.Fatal(err)
 	}
+
+	// assert counts
+	assertAccountSlabs(acc1, 1)
+	assertAccountSlabs(acc2, 2)
+	assertCount("slabs", 2)
+	assertCount("sectors", 4)
+	assertCount("account_slabs", 3)
+
+	// unpin second slab
+	err = store.UnpinSlab(context.Background(), acc1, slab2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert counts
+	assertAccountSlabs(acc1, 0)
+	assertAccountSlabs(acc2, 2)
+	assertCount("slabs", 2)
+	assertCount("sectors", 4)
+	assertCount("account_slabs", 2)
+
+	// unpin second slab on second account
+	err = store.UnpinSlab(context.Background(), acc2, slab2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert counts
+	assertAccountSlabs(acc1, 0)
+	assertAccountSlabs(acc2, 1)
+	assertCount("slabs", 1)
+	assertCount("sectors", 2)
+	assertCount("account_slabs", 1)
 }
 
 func TestPinSectors(t *testing.T) {
