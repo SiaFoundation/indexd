@@ -1526,11 +1526,12 @@ func BenchmarkUnpinSlab(b *testing.B) {
 
 	var iter int
 	for b.Loop() {
-		if err := store.UnpinSlab(context.Background(), account, slabIDs[iter]); err != nil {
+		rIdx := frand.Intn(nSlabs)
+		if err := store.UnpinSlab(context.Background(), account, slabIDs[rIdx]); err != nil {
 			b.Fatal(err)
 		}
 
-		slabIDs = slices.Delete(slabIDs, iter, iter+1)
+		slabIDs = slices.Delete(slabIDs, rIdx, rIdx+1)
 		if len(slabIDs) == 0 {
 			if iter < 100 {
 				b.Fatalf("expected at least 100 iterations, got %d", iter) // sanity check
