@@ -1472,9 +1472,8 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 // referenced once, that means that unpinning the slab will delete the
 // reference, as well as the slab itself and all its sectors.
 //
-//	CPU   |   Count  |   Time/op
-//
-// M1 Max |    100   |    2.197 ms
+//	CPU    |   Count  |   Time/op
+//	M1 Max |    100   |    2.197 ms
 func BenchmarkUnpinSlab(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
