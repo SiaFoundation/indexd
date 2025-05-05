@@ -383,26 +383,37 @@ func (s *Store) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (
 	var slabID slabs.SlabID
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		err := tx.QueryRow(ctx, `
-			UPDATE slabs
-			SET last_repair_attempt = NOW()
-			WHERE id = (
-				SELECT slabs.id
+			WITH candidate AS (
+				SELECT id AS slab_id
 				FROM slabs
-				INNER JOIN slab_sectors ON slabs.id = slab_sectors.slab_id
-				INNER JOIN sectors ON sectors.id = slab_sectors.sector_id 
-				LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
-				LEFT JOIN contracts ON csm.contract_id = contracts.contract_id
-				WHERE
-					(
-						-- stored on bad contract
-						(sectors.contract_sectors_map_id IS NOT NULL AND contracts.good = FALSE) OR
-						-- not stored on any host
-						(sectors.host_id IS NULL)
-					)
-					AND (slabs.last_repair_attempt <= $1)
+				WHERE last_repair_attempt <= $1
+				AND EXISTS (
+					-- not stored on any host
+					SELECT 1
+					FROM slab_sectors
+					INNER JOIN sectors ON sectors.id = slab_sectors.sector_id
+					WHERE slab_sectors.slab_id = slabs.id
+					AND sectors.host_id IS NULL
+
+					UNION ALL
+
+					-- stored on bad contract
+					SELECT 1
+					FROM slab_sectors
+					INNER JOIN sectors ON sectors.id = slab_sectors.sector_id
+					INNER JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
+					INNER JOIN contracts ON csm.contract_id = contracts.contract_id
+					WHERE slab_sectors.slab_id = slabs.id
+					AND contracts.good = FALSE
+				)
+				ORDER BY last_repair_attempt ASC
 				LIMIT 1
 			)
-			RETURNING digest
+			UPDATE slabs
+			SET last_repair_attempt = NOW()
+			FROM candidate
+			WHERE slabs.id = candidate.slab_id
+			RETURNING slabs.digest;
 		`, maxRepairAttempt).Scan((*sqlHash256)(&slabID))
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrSlabNotFound
