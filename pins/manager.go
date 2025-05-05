@@ -205,6 +205,11 @@ func (pm *PinManager) updatePrices(ctx context.Context, force bool, log *zap.Log
 		return fmt.Errorf("failed to retrieve pinned settings, %w", err)
 	}
 
+	if pins.Currency == "" {
+		// if no currency is set, default to USD
+		pins = PinnedSettings{Currency: "usd"}
+	}
+
 	if pm.explorer == nil {
 		if pins.Enabled() {
 			log.Warn("price pinning requires an explorer")

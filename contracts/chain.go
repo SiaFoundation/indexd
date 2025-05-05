@@ -74,7 +74,8 @@ func (m *ContractManager) ProcessActions(ctx context.Context) error {
 // broadcasts revisions for failed expired contracts.
 func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertUpdate, applied []chain.ApplyUpdate) error {
 	uTx := &updateTx{
-		UpdateTx: tx,
+		UpdateTx:       tx,
+		knownContracts: make(map[types.FileContractID]bool),
 	}
 
 	for _, cru := range reverted {
