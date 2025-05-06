@@ -39,9 +39,10 @@ type (
 		updatePriceFrequency time.Duration
 		rateWindow           time.Duration
 
-		mu      sync.Mutex
-		rates   []decimal.Decimal
-		average decimal.Decimal
+		mu       sync.Mutex
+		rates    []decimal.Decimal
+		average  decimal.Decimal
+		currency string
 	}
 
 	// Explorer retrieves data about the Sia network from an external source.
@@ -221,7 +222,7 @@ func (pm *PinManager) updatePrices(ctx context.Context, force bool, log *zap.Log
 		return fmt.Errorf("invalid exchange rate, %v", rate)
 	}
 
-	update := pm.addRate(rate)
+	update := pm.addRate(pins.Currency, rate)
 	if !force && !update {
 		log.Debug("no update required")
 		return nil
@@ -274,9 +275,15 @@ func (pm *PinManager) updatePrices(ctx context.Context, force bool, log *zap.Log
 // addRate adds the rate in the given currency to the list and returns a boolean
 // whether the prices should be updated, this happens when the average rate
 // exceeds a certain threshold.
-func (pm *PinManager) addRate(rate float64) bool {
+func (pm *PinManager) addRate(currency string, rate float64) bool {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
+
+	// reset rates if currency has changed
+	if pm.currency != currency {
+		pm.currency = currency
+		pm.rates = nil
+	}
 
 	// add rate to list
 	maxRates := int(pm.rateWindow / pm.updatePriceFrequency)
