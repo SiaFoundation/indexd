@@ -1708,3 +1708,93 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkMarkSectorsLost benchmarks MarkSectorsLost in various batch sizes.
+//
+// CPU    |	 Count  |     Time/op    |    Throughput
+// M2 Pro |   2508  |   0.437476 ms  |   9587.50 MB/s
+func BenchmarkMigrateSector(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	// create account, host and contract
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	// add 100 hosts and contracts
+	var hks []types.PublicKey
+	for range 100 {
+		hk := types.PublicKey(frand.Entropy256())
+		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+		}); err != nil {
+			b.Fatal(err)
+		}
+		if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+			b.Fatal(err)
+		}
+		hks = append(hks, hk)
+	}
+
+	// prepare base db
+	const (
+		dbBaseSize = 1 << 40 // 1TiB of sectors
+		nSectors   = dbBaseSize / proto.SectorSize
+	)
+
+	// insert sectors in batches
+	hostIdx := 0
+	var roots []types.Hash256
+	rootsByContract := make(map[types.FileContractID][]types.Hash256)
+	for remainingSectors := nSectors; remainingSectors > 0; {
+		batchSize := min(remainingSectors, 10000)
+		remainingSectors -= batchSize
+		var sectors []slabs.SectorPinParams
+		for range batchSize {
+			hk := hks[hostIdx]
+			root := frand.Entropy256()
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    root,
+				HostKey: hks[hostIdx],
+			})
+			rootsByContract[types.FileContractID(hk)] = append(rootsByContract[types.FileContractID(hk)], root)
+			roots = append(roots, root)
+			hostIdx = (hostIdx + 1) % len(hks)
+		}
+
+		// pin slab
+		_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       sectors,
+		})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// pin all sectors to contracts
+	for contractID, roots := range rootsByContract {
+		err := store.PinSectors(context.Background(), contractID, roots)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.Run("1", func(b *testing.B) {
+		b.SetBytes(proto.SectorSize)
+		b.ResetTimer()
+
+		for b.Loop() {
+			// migrate random sector to random host
+			root := roots[frand.Intn(len(roots))]
+			hostKey := hks[frand.Intn(len(hks))]
+			err := store.MigrateSector(context.Background(), root, hostKey)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
