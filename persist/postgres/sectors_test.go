@@ -1470,9 +1470,9 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 // BenchmarkUnpinSlab precreates slabs and benchmarks the performance of
 // UnpinSlab. All slabs are referenced by the same account, every slab is only
 // referenced once, that means that unpinning the slab will delete the
-// reference, as well as the slab itself and all its sectors.
+// reference, as well as the slab itself.
 //
-//	CPU    |   Count  |   Time/op
+//	CPU    |   Count  |    Time/op
 //	M1 Max |    100   |    2.197 ms
 func BenchmarkUnpinSlab(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
@@ -1526,7 +1526,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 
 	var iter int
 	for b.Loop() {
-		rIdx := frand.Intn(nSlabs)
+		rIdx := frand.Intn(len(slabIDs))
 		if err := store.UnpinSlab(context.Background(), account, slabIDs[rIdx]); err != nil {
 			b.Fatal(err)
 		}

@@ -223,12 +223,9 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 }
 
 // UnpinSlab removes the association between the account and the given slab. If
-// this slab was only referenced by the given account, it will also be deleted,
-// along with its sectors.
-//
-// TODO: when we deduplicate sectors, unpinning a slab will delete the reference
-// and the slab, providing it wasn't referenced by another account. The sectors
-// will be removed by a background process that removes all dangling sectors.
+// this slab was only referenced by the given account, it will also be deleted.
+// The sectors are potentially orphaned and will be removed by a background
+// process.
 func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID slabs.SlabID) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		// fetch account id
@@ -270,9 +267,17 @@ func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID s
 		}
 
 		// otherwise remove the reference as well as the slab and its sectors
+		// providing they're not referenced by any other slab
 		batch := &pgx.Batch{}
 		batch.Queue(`DELETE FROM account_slabs WHERE account_id = $1 AND slab_id = $2`, aID, sID)
-		batch.Queue(`DELETE FROM sectors WHERE slab_id = $1`, sID)
+		batch.Queue(`
+		WITH candidate_sectors AS (
+			SELECT ss.sector_id
+			FROM slab_sectors ss
+			WHERE ss.slab_id = $1 AND NOT EXISTS (SELECT 1 FROM slab_sectors ss2 WHERE ss2.sector_id = ss.sector_id AND ss2.slab_id <> $1)
+			)
+			DELETE FROM sectors
+			WHERE id IN (SELECT sector_id FROM candidate_sectors);`, sID)
 		batch.Queue(`DELETE FROM slabs WHERE id = $1`, sID)
 		if err := tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
 			return fmt.Errorf("failed to unpin slab: %w", err)
