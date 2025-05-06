@@ -22,6 +22,94 @@ import (
 	"lukechampine.com/frand"
 )
 
+func TestMigrateSector(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// add 2 hosts
+	hk1 := types.PublicKey{1}
+	hk2 := types.PublicKey{2}
+	for _, hk := range []types.PublicKey{hk1, hk2} {
+		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// add contract for first host
+	fcid1 := types.FileContractID{1}
+	if err := store.AddFormedContract(context.Background(), fcid1, hk1, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+		t.Fatal(err)
+	}
+
+	// pin a slab to add 2 sectors which are both stored on the first host
+	pinTime := time.Now().Round(time.Microsecond)
+	root1 := types.Hash256{1}
+	root2 := types.Hash256{2}
+	_, err := store.PinSlab(context.Background(), account, pinTime, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     10,
+		Sectors: []slabs.SectorPinParams{
+			{
+				Root:    root1,
+				HostKey: hk1,
+			},
+			{
+				Root:    root2,
+				HostKey: hk1,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// pin sectors to contract
+	if err := store.PinSectors(context.Background(), fcid1, []types.Hash256{root1, root2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// helper to assert sector state
+	assertSector := func(root types.Hash256, hostKey types.PublicKey, contractID types.FileContractID) {
+		t.Helper()
+
+		// TODO: check sector
+	}
+
+	migrate := func(root types.Hash256, hostKey types.PublicKey) {
+		t.Helper()
+		if err := store.MigrateSector(context.Background(), root, hostKey); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert intial state
+	assertSector(root1, hk1, fcid1)
+	assertSector(root2, hk1, fcid1)
+
+	// TODO: migrate sector 1 to host 2
+	migrate(root1, hk2)
+	assertSector(root1, hk2, types.FileContractID{})
+	assertSector(root2, hk1, fcid1)
+
+	// TODO: migrate sector 2 to unknown host, this should be a no-op
+	migrate(root1, types.PublicKey{10})
+	assertSector(root1, hk2, types.FileContractID{})
+	assertSector(root2, hk2, fcid1)
+
+	// migrate sector 2 to host 2
+	migrate(root1, hk2)
+	assertSector(root1, hk2, types.FileContractID{})
+	assertSector(root2, hk2, types.FileContractID{})
+}
+
 func TestRecordIntegrityCheck(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

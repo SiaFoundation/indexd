@@ -386,3 +386,20 @@ func (s *Store) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (
 	})
 	return slabID, err
 }
+
+// MigrateSector updates a sector that was just migrated in the database to be
+// linked to the new host identified by 'hostKey'. This will reset the contract
+// ID since a freshly migrated sector isn't pinned yet. To pin a sector
+// 'PinSectors' is used. If the host is not found, e.g. due to being deleted in
+// the meantime, this operation is a no-op.
+func (s *Store) MigrateSector(ctx context.Context, root types.Hash256, hostKey types.PublicKey) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE sectors
+			SET host_id = host.id, contract_sectors_map_id = NULL
+			FROM ( SELECT id, public_key FROM hosts ) AS host
+			WHERE sector_root = $1 AND host.public_key = $2 AND host.id IS NOT NULL
+		`, sqlHash256(root), sqlPublicKey(hostKey))
+		return err
+	})
+}
