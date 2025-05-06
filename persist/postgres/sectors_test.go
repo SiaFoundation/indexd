@@ -77,10 +77,25 @@ func TestMigrateSector(t *testing.T) {
 	}
 
 	// helper to assert sector state
-	assertSector := func(root types.Hash256, hostKey types.PublicKey, contractID types.FileContractID) {
+	assertSector := func(root types.Hash256, expectedHostKey types.PublicKey, expectedContractID types.FileContractID) {
 		t.Helper()
 
-		// TODO: check sector
+		var hostKey types.PublicKey
+		var contractID types.FileContractID
+		err := store.pool.QueryRow(context.Background(), `
+			SELECT hosts.public_key, contract_sectors_map.contract_id
+			FROM sectors
+			INNER JOIN hosts ON sectors.host_id = hosts.id
+			LEFT JOIN contract_sectors_map ON sectors.contract_sectors_map_id = contract_sectors_map.id
+			WHERE sector_root = $1
+		`, sqlHash256(root)).Scan(asNullable((*sqlPublicKey)(&hostKey)), asNullable((*sqlHash256)(&contractID)))
+		if err != nil {
+			t.Fatal(err)
+		} else if hostKey != expectedHostKey {
+			t.Fatalf("expected host key %v, got %v", expectedHostKey, hostKey)
+		} else if contractID != expectedContractID {
+			t.Fatalf("expected contract ID %v, got %v", expectedContractID, contractID)
+		}
 	}
 
 	migrate := func(root types.Hash256, hostKey types.PublicKey) {
@@ -90,22 +105,22 @@ func TestMigrateSector(t *testing.T) {
 		}
 	}
 
-	// assert intial state
+	// assert initial state
 	assertSector(root1, hk1, fcid1)
 	assertSector(root2, hk1, fcid1)
 
-	// TODO: migrate sector 1 to host 2
+	// migrate sector 1 to host 2
 	migrate(root1, hk2)
 	assertSector(root1, hk2, types.FileContractID{})
 	assertSector(root2, hk1, fcid1)
 
-	// TODO: migrate sector 2 to unknown host, this should be a no-op
-	migrate(root1, types.PublicKey{10})
+	// migrate sector 2 to unknown host, this should be a no-op
+	migrate(root2, types.PublicKey{10})
 	assertSector(root1, hk2, types.FileContractID{})
-	assertSector(root2, hk2, fcid1)
+	assertSector(root2, hk1, fcid1)
 
 	// migrate sector 2 to host 2
-	migrate(root1, hk2)
+	migrate(root2, hk2)
 	assertSector(root1, hk2, types.FileContractID{})
 	assertSector(root2, hk2, types.FileContractID{})
 }
