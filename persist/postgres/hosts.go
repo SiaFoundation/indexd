@@ -358,6 +358,9 @@ func (s *Store) PruneHosts(ctx context.Context, minLastSuccessfulScan time.Time,
 
 // UpdateHost updates a host in the database, the given parameters are the result of scanning the host.
 func (s *Store) UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error {
+	if len(networks) == 0 && scanSucceeded {
+		return hosts.ErrNoNetworks
+	}
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		if !scanSucceeded {
 			if res, err := tx.Exec(ctx, `
@@ -462,15 +465,17 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 			return errors.New("failed to return host id after successful update") // sanity check
 		}
 
-		_, err = tx.Exec(ctx, `DELETE FROM host_resolved_cidrs WHERE host_id = $1`, hostID)
-		if err != nil {
-			return err
-		}
-
-		for _, cidr := range networks {
-			_, err = tx.Exec(ctx, `INSERT INTO host_resolved_cidrs (host_id, cidr) VALUES ($1, $2)`, hostID, cidr.String())
+		if scanSucceeded {
+			_, err = tx.Exec(ctx, `DELETE FROM host_resolved_cidrs WHERE host_id = $1`, hostID)
 			if err != nil {
-				return fmt.Errorf("failed to insert host resolved CIDR: %w", err)
+				return err
+			}
+
+			for _, cidr := range networks {
+				_, err = tx.Exec(ctx, `INSERT INTO host_resolved_cidrs (host_id, cidr) VALUES ($1, $2)`, hostID, cidr.String())
+				if err != nil {
+					return fmt.Errorf("failed to insert host resolved CIDR: %w", err)
+				}
 			}
 		}
 
