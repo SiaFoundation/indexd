@@ -45,7 +45,7 @@ jobs:
         run: go install golang.org/x/perf/cmd/benchstat@latest
 
       - name: Run benchmarks
-        run: go test -bench='Benchmark' -benchtime=250x -timeout=60m ./... | tee new_bench.txt 
+        run: go test -bench='Benchmark' -count=10 -benchtime=25x -timeout=60m ./... | tee new_bench.txt 
 
       - name: Fetch baseline benchmark
         run: |
