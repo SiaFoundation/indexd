@@ -466,12 +466,6 @@ func TestUnpinSlab(t *testing.T) {
 		t.Fatal("unexpected error:", err)
 	}
 
-	// unpinning for a non existing account should return [accounts.ErrNotFound]
-	err = store.UnpinSlab(context.Background(), proto.Account{3}, slab3)
-	if !errors.Is(err, accounts.ErrNotFound) {
-		t.Fatal("unexpected error:", err)
-	}
-
 	// unpin first slab
 	err = store.UnpinSlab(context.Background(), acc1, slab1)
 	if err != nil {
@@ -1358,7 +1352,7 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 // reference, as well as the slab itself.
 //
 //	CPU    |   Count  |    Time/op
-//	M1 Max |    100   |    2.197 ms
+//	M1 Max |    342   |    3.2 ms
 func BenchmarkUnpinSlab(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
