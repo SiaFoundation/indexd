@@ -11,13 +11,14 @@ import (
 func contractsForRepair(slab Slab, goodHosts []hosts.Host, goodContracts []contracts.Contract, period uint64) ([]Sector, []contracts.Contract) {
 	goodHostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range goodHosts {
-		if host.Usability.Usable() && !host.Blocked {
+		if host.Usability.Usable() && !host.Blocked && len(host.Networks) > 0 {
 			goodHostsMap[host.PublicKey] = host
 		}
 	}
 
 	// prepare a map of good-for-upload goodContractMap
 	goodContractMap := make(map[types.FileContractID]contracts.Contract)
+	usedCIDRs := make(map[string]struct{})
 	for _, contract := range goodContracts {
 		host, ok := goodHostsMap[contract.HostKey]
 		if !ok {
@@ -26,6 +27,9 @@ func contractsForRepair(slab Slab, goodHosts []hosts.Host, goodContracts []contr
 			continue
 		}
 		goodContractMap[contract.ID] = contract
+		for _, network := range host.Networks {
+			usedCIDRs[network.String()] = struct{}{}
+		}
 	}
 
 	var toMigrate []Sector
@@ -43,9 +47,15 @@ func contractsForRepair(slab Slab, goodHosts []hosts.Host, goodContracts []contr
 		delete(goodContractMap, *sector.ContractID)
 	}
 
+	// return all contracts that are good, not in use and are not stored on hosts
 	var remainingContracts []contracts.Contract
+LOOP:
 	for _, contract := range goodContractMap {
-		// TODO: filter by used CIDRs
+		for _, network := range goodHostsMap[contract.HostKey].Networks {
+			if _, ok := usedCIDRs[network.String()]; ok {
+				continue LOOP
+			}
+		}
 		remainingContracts = append(remainingContracts, contract)
 	}
 	return toMigrate, remainingContracts
