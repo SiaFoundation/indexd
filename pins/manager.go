@@ -203,6 +203,9 @@ func (pm *PinManager) updatePrices(ctx context.Context, force bool, log *zap.Log
 	pins, err := pm.store.PinnedSettings(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to retrieve pinned settings, %w", err)
+	} else if pins.Currency == "" {
+		// if no currency is set, default to USD but ignore any pins
+		pins = PinnedSettings{Currency: "usd"}
 	}
 
 	if pm.explorer == nil {
