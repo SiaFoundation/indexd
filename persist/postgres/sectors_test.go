@@ -98,10 +98,12 @@ func TestMigrateSector(t *testing.T) {
 		}
 	}
 
-	migrate := func(root types.Hash256, hostKey types.PublicKey) {
+	migrate := func(root types.Hash256, hostKey types.PublicKey, expectedMigrated bool) {
 		t.Helper()
-		if err := store.MigrateSector(context.Background(), root, hostKey); err != nil {
+		if migrated, err := store.MigrateSector(context.Background(), root, hostKey); err != nil {
 			t.Fatal(err)
+		} else if migrated != expectedMigrated {
+			t.Fatalf("expected migrated %v, got %v", expectedMigrated, migrated)
 		}
 	}
 
@@ -110,17 +112,17 @@ func TestMigrateSector(t *testing.T) {
 	assertSector(root2, hk1, fcid1)
 
 	// migrate sector 1 to host 2
-	migrate(root1, hk2)
+	migrate(root1, hk2, true)
 	assertSector(root1, hk2, types.FileContractID{})
 	assertSector(root2, hk1, fcid1)
 
 	// migrate sector 2 to unknown host, this should be a no-op
-	migrate(root2, types.PublicKey{10})
+	migrate(root2, types.PublicKey{10}, false)
 	assertSector(root1, hk2, types.FileContractID{})
 	assertSector(root2, hk1, fcid1)
 
 	// migrate sector 2 to host 2
-	migrate(root2, hk2)
+	migrate(root2, hk2, true)
 	assertSector(root1, hk2, types.FileContractID{})
 	assertSector(root2, hk2, types.FileContractID{})
 }
@@ -1709,7 +1711,7 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 	}
 }
 
-// BenchmarkMarkSectorsLost benchmarks MarkSectorsLost in various batch sizes.
+// BenchmarkMigrateSector benchmarks MigrateSector.
 //
 // CPU    |	 Count  |     Time/op    |    Throughput
 // M2 Pro |   2508  |   0.437476 ms  |   9587.50 MB/s
@@ -1783,18 +1785,14 @@ func BenchmarkMigrateSector(b *testing.B) {
 		}
 	}
 
-	b.Run("1", func(b *testing.B) {
-		b.SetBytes(proto.SectorSize)
-		b.ResetTimer()
-
-		for b.Loop() {
-			// migrate random sector to random host
-			root := roots[frand.Intn(len(roots))]
-			hostKey := hks[frand.Intn(len(hks))]
-			err := store.MigrateSector(context.Background(), root, hostKey)
-			if err != nil {
-				b.Fatal(err)
-			}
+	b.SetBytes(proto.SectorSize)
+	for b.Loop() {
+		// migrate random sector to random host
+		root := roots[frand.Intn(len(roots))]
+		hostKey := hks[frand.Intn(len(hks))]
+		_, err := store.MigrateSector(context.Background(), root, hostKey)
+		if err != nil {
+			b.Fatal(err)
 		}
-	})
+	}
 }
