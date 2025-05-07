@@ -855,6 +855,24 @@ func TestUpdateHost(t *testing.T) {
 	} else if h.Networks[0].String() != networks[0].String() {
 		t.Fatal("unexpected network", h.Networks)
 	}
+
+	// assert successful scan needs networks
+	err = db.UpdateHost(context.Background(), hk, nil, hs, true, nextScan)
+	if !errors.Is(err, hosts.ErrNoNetworks) {
+		t.Fatalf("expected hosts.ErrNoNetworks, got %v", err)
+	}
+
+	// assert updating with a failed scan doesn't affect the host's networks
+	err = db.UpdateHost(context.Background(), hk, []net.IPNet{{IP: net.IPv4(9, 9, 9, 9)}}, hs, false, nextScan)
+	if err != nil {
+		t.Fatal(err)
+	} else if h, err := db.Host(context.Background(), hk); err != nil {
+		t.Fatal(err)
+	} else if len(h.Networks) != 1 {
+		t.Fatal("unexpected networks", h.Networks)
+	} else if h.Networks[0].String() != networks[0].String() {
+		t.Fatal("unexpected network", h.Networks)
+	}
 }
 
 // BenchmarkHosts is a set of benchmarks that verify the performance of the host
