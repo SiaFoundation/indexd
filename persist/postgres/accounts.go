@@ -189,6 +189,13 @@ DO UPDATE SET
 	})
 }
 
+// DebitServiceAccount withdraws from a service account. The balance of the
+// account can't underflow, instead it will be set to 0 if the amount withdrawn
+// exceeds the stored balance.
+func (s *Store) DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
+	return errors.New("not implemented")
+}
+
 // UpdateServiceAccountBalance updates the balance of a service account.
 func (s *Store) UpdateServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
 	return errors.New("not implemented")

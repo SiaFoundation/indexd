@@ -26,6 +26,8 @@ type (
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		HostAccountsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]HostAccount, error)
 		UpdateHostAccounts(ctx context.Context, accounts []HostAccount) error
+
+		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
 		UpdateServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account, balance types.Currency) error
 		ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error)
 	}
@@ -43,7 +45,7 @@ type (
 		log        *zap.Logger
 
 		serviceAccountsMu sync.Mutex
-		serviceAccounts   map[proto.Account]map[types.PublicKey]struct{}
+		serviceAccounts   map[proto.Account]struct{}
 	}
 )
 
@@ -60,7 +62,7 @@ func WithLogger(l *zap.Logger) Option {
 // NewManager creates a new AccountManager.
 func NewManager(store Store, funder AccountFunder, opts ...Option) *AccountManager {
 	m := &AccountManager{
-		serviceAccounts: make(map[proto.Account]map[types.PublicKey]struct{}),
+		serviceAccounts: make(map[proto.Account]struct{}),
 		store:           store,
 		funder:          funder,
 		fundTarget:      types.Siacoins(1),
