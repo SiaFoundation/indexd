@@ -176,6 +176,7 @@ CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- fo
 CREATE INDEX contracts_last_broadcast_attempt_idx ON contracts (last_broadcast_attempt ASC) WHERE renewed_to IS NULL AND state <= 1;
 CREATE INDEX contracts_state_good_idx ON contracts(state) WHERE state <= 1 AND good; -- for filtering contracts
 CREATE INDEX contracts_host_id_remaining_allowance_idx ON contracts (host_id, remaining_allowance DESC) WHERE good = true AND remaining_allowance > 0 AND state <= 1; -- for fetching contracts for funding
+CREATE INDEX contracts_size_capacity_idx ON contracts (size DESC, capacity DESC) WHERE good = true AND remaining_allowance > 0 AND state <= 1; -- for fetching contracts for pinning
 
 -- foreign key constraint index
 CREATE INDEX contracts_host_id_idx ON contracts(host_id);
