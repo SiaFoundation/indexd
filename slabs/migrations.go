@@ -8,19 +8,19 @@ import (
 
 // contractsForRepair filters the sectors of a slab and returns the sectors that
 // require migration together with the contracts to use for them.
-func contractsForRepair(slab Slab, goodHosts []hosts.Host, goodContracts []contracts.Contract, period uint64) ([]Sector, []contracts.Contract) {
+func contractsForRepair(slab Slab, availableHosts []hosts.Host, availableContracts []contracts.Contract, period uint64) ([]Sector, []contracts.Contract) {
 	// prepare a map of good hosts
-	goodHostsMap := make(map[types.PublicKey]hosts.Host)
-	for _, host := range goodHosts {
+	hostsMap := make(map[types.PublicKey]hosts.Host)
+	for _, host := range availableHosts {
 		if host.Usability.Usable() && !host.Blocked && len(host.Networks) > 0 {
-			goodHostsMap[host.PublicKey] = host
+			hostsMap[host.PublicKey] = host
 		}
 	}
 
 	// prepare a map of good contracts
 	goodContractMap := make(map[types.FileContractID]contracts.Contract)
-	for _, contract := range goodContracts {
-		host, ok := goodHostsMap[contract.HostKey]
+	for _, contract := range availableContracts {
+		host, ok := hostsMap[contract.HostKey]
 		if !ok {
 			continue
 		} else if !contract.GoodForUpload(host.Settings.Prices, host.Settings.MaxCollateral, period) {
@@ -51,7 +51,7 @@ func contractsForRepair(slab Slab, goodHosts []hosts.Host, goodContracts []contr
 		delete(goodContractMap, *sector.ContractID)
 
 		// add the CIDRs of the host to the map
-		for _, network := range goodHostsMap[*sector.HostKey].Networks {
+		for _, network := range hostsMap[*sector.HostKey].Networks {
 			usedCIDRs[network.String()] = struct{}{}
 		}
 	}
@@ -60,7 +60,7 @@ func contractsForRepair(slab Slab, goodHosts []hosts.Host, goodContracts []contr
 	var remainingContracts []contracts.Contract
 LOOP:
 	for _, contract := range goodContractMap {
-		for _, network := range goodHostsMap[contract.HostKey].Networks {
+		for _, network := range hostsMap[contract.HostKey].Networks {
 			if _, ok := usedCIDRs[network.String()]; ok {
 				continue LOOP
 			}
