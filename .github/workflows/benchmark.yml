@@ -57,9 +57,9 @@ jobs:
       - name: Check for baseline benchmark
         id: lookup_baseline
         run: |
-          git fetch origin pj/bechmarks-ci
-          if git ls-tree --name-only origin/pj/bechmarks-ci | grep -q '^baseline_bench.txt$'; then
-            git checkout origin/pj/bechmarks-ci -- baseline_bench.txt
+          git fetch origin pj/benchmarks-ci
+          if git ls-tree --name-only origin/pj/benchmarks-ci | grep -q '^baseline_bench.txt$'; then
+            git checkout origin/pj/benchmarks-ci -- baseline_bench.txt
             echo "baseline_found=true" >> $GITHUB_OUTPUT
           else
             echo "No baseline found in origin/master, skipping"
