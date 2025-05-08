@@ -190,12 +190,12 @@ DO UPDATE SET
 }
 
 // UpdateServiceAccountBalance updates the balance of a service account.
-func (s *Store) UpdateServiceAccountBalance(ctx context.Context, account accounts.LockedServiceAccount, balance types.Currency) error {
+func (s *Store) UpdateServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
 	return errors.New("not implemented")
 }
 
 // ServiceAccountBalance returns the balance of a service account.
-func (s *Store) ServiceAccountBalance(ctx context.Context, account accounts.LockedServiceAccount) (types.Currency, error) {
+func (s *Store) ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
 	return types.Currency{}, errors.New("not implemented")
 }
 
