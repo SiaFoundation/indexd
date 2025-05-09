@@ -314,30 +314,6 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 	})
 }
 
-// RemoveSectors removes the sectors for the given host from the database by
-// unsetting their host_id. This should be called when we failed to pin the
-// sectors on the host because the host could not find the sector.
-func (s *Store) RemoveSectors(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error {
-	sqlRoots := make([]sqlHash256, len(roots))
-	for i, root := range roots {
-		sqlRoots[i] = sqlHash256(root)
-	}
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
-			WITH
-				hid AS (SELECT id FROM hosts WHERE public_key = $1),
-				removed(root) AS (SELECT UNNEST($2::bytea[]))
-			UPDATE sectors
-			SET host_id = NULL
-			FROM removed, hid
-			WHERE host_id = hid.id
-				AND contract_sectors_map_id IS NULL
-				AND sector_root = removed.root;
-		`, sqlPublicKey(hostKey), sqlRoots)
-		return err
-	})
-}
-
 // UnpinnedSectors returns up to 'limit' sectors which have been uploaded to a host but
 // not pinned to a contract yet.
 func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
