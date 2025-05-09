@@ -689,8 +689,12 @@ func TestUnpinnedSectors(t *testing.T) {
 // upload/download throughput.
 //
 // Hardware |     Benchmark   |  ms/op  |  Throughput   |
+// M1 Max   |     PinSlab     |  3.8ms  | 10760.68 MB/s |
 // M2 Pro   |     PinSlab     |  1.4ms  | 26590.43 MB/s |
 //
+// M1 Max   |   Slabs-40MiB   |   1.8ms | 24220.77 MB/s |
+// M1 Max   |   Slabs-400MiB  |   3.1ms | 13591.64 MB/s |
+// M1 Max   |   Slabs-4GiB    |  12.5ms |  3344.74 MB/s |
 // M2 Pro   |   Slabs-40MiB   |   0.5ms | 64021.45 MB/s |
 // M2 Pro   |   Slabs-400MiB  |   0.8ms | 40447.43 MB/s |
 // M2 Pro   |   Slabs-4GiB    |   3.3ms |  9930.88 MB/s |
@@ -748,7 +752,14 @@ func BenchmarkSlabs(b *testing.B) {
 	runSlabsBenchmark := func(b *testing.B, nSlabs int) {
 		b.SetBytes(slabSize)
 		b.ResetTimer()
+
+		var iter int
 		for b.Loop() {
+			iter++
+			if iter%100 == 0 {
+				b.Logf("%d/%d", iter, b.N)
+			}
+
 			b.StopTimer()
 			frand.Shuffle(len(initialSlabIDs), func(i, j int) {
 				initialSlabIDs[i], initialSlabIDs[j] = initialSlabIDs[j], initialSlabIDs[i]
@@ -767,7 +778,13 @@ func BenchmarkSlabs(b *testing.B) {
 	b.Run("PinSlab", func(b *testing.B) {
 		b.SetBytes(slabSize)
 		b.ResetTimer()
+
+		var iter int
 		for b.Loop() {
+			iter++
+			if iter%100 == 0 {
+				b.Logf("%d/%d", iter, b.N)
+			}
 			_, err := store.PinSlab(context.Background(), proto.Account{1}, time.Time{}, newSlab())
 			if err != nil {
 				b.Fatal(err)
@@ -794,6 +811,9 @@ func BenchmarkSlabs(b *testing.B) {
 // BenchmarkUnpinnedSectors benchmarks UnpinnedSectors in various batch sizes.
 //
 // CPU    | BatchSize |	 Count  |    Time/op    |    Throughput
+// M1 Max |     100   |    100  |       2.2 ms  |   188111.18 MB/s
+// M1 Max |    1000   |    100  |      10.3 ms  |   407258.92 MB/s
+// M1 Max |   10000   |    100  |      48.4 ms  |   865969.10 MB/s
 // M2 Pro |     100   |   1357  |  0.847729 ms  |   494769.40 MB/s
 // M2 Pro |    1000   |    434  |  3.023359 ms  |  1387299.30 MB/s
 // M2 Pro |   10000   |     84  | 21.598813 ms  |  1941914.13 MB/s
@@ -843,14 +863,16 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 		}
 	}
 
-	// helper to unpin all sectors
+	// randomize the uploaded_at time for all sectors
+	_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET uploaded_at = NOW() - interval '1 week' * random()`)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// define a helper to unpin all sectors between runs
 	unpinSectors := func() {
 		b.Helper()
-		_, err := store.pool.Exec(context.Background(), `
-			UPDATE sectors
-			SET contract_sectors_map_id = NULL,
-			uploaded_at = NOW() - interval '1 week' * random()
-			WHERE contract_sectors_map_id IS NOT NULL`)
+		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id = NULL`)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -860,30 +882,32 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	for _, batchSize := range []int{100, 1000, 10000} {
 		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
 			unpinSectors()
-			unpinnedSectors := nSectors
 			b.SetBytes(int64(batchSize) * proto.SectorSize)
 			b.ResetTimer()
 
+			var iter int
 			for b.Loop() {
+				iter++
+
+				// fetch unpinned sectors
 				unpinned, err := store.UnpinnedSectors(context.Background(), hk, batchSize)
 				if err != nil {
 					b.Fatal(err)
-				} else if len(unpinned) != batchSize {
-					b.Fatalf("expected %d unpinned sector, got %d (%d unpinned)", batchSize, len(unpinned), unpinnedSectors)
 				}
-				unpinnedSectors -= batchSize
 
+				// check if benchmark is exhausted
 				b.StopTimer()
-				if unpinnedSectors < batchSize {
-					// unpin all sectors to avoid running out
-					unpinSectors()
-					unpinnedSectors = nSectors
-				} else {
-					// pin fetched sectors to fetch different ones next
-					err := store.PinSectors(context.Background(), types.FileContractID(hk), unpinned)
-					if err != nil {
-						b.Fatal(err)
+				if len(unpinned) < batchSize {
+					if iter >= 100 {
+						break
 					}
+					unpinSectors()
+				}
+
+				// pin sectors to ensure we fetch different ones next time
+				err = store.PinSectors(context.Background(), types.FileContractID(hk), unpinned)
+				if err != nil {
+					b.Fatal(err)
 				}
 				b.StartTimer()
 			}

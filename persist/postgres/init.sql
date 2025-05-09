@@ -240,7 +240,7 @@ CREATE INDEX sectors_host_id_uploaded_at_idx ON sectors(host_id, uploaded_at ASC
 
 -- foreign key constraint keys
 CREATE INDEX sectors_host_id_idx ON sectors(host_id);
--- CREATE INDEX sectors_contract_sectors_map_id_idx ON sectors(contract_sectors_map_id); -- covered by sectors_contract_sectors_map_id_uploaded_at_idx
+CREATE INDEX sectors_contract_sectors_map_id_idx ON sectors(contract_sectors_map_id);
 CREATE INDEX sectors_slab_id_idx ON sectors(slab_id);
 
 -- speed up integrity check query

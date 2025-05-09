@@ -2,413 +2,213 @@ goos: linux
 goarch: amd64
 pkg: go.sia.tech/indexd/persist/postgres
 cpu: AMD EPYC 7763 64-Core Processor                
-BenchmarkHostAccountsForFunding/10000_accounts-2         	      25	   5638730 ns/op
-BenchmarkHostAccountsForFunding/10000_accounts-2         	      25	   5597496 ns/op
-BenchmarkHostAccountsForFunding/10000_accounts-2         	      25	   5577771 ns/op
-BenchmarkHostAccountsForFunding/10000_accounts-2         	      25	   5606450 ns/op
-BenchmarkHostAccountsForFunding/10000_accounts-2         	      25	   5570757 ns/op
-BenchmarkHostAccountsForFunding/10000_accounts-2         	      25	   5590981 ns/op
-BenchmarkHostAccountsForFunding/10000_accounts-2         	      25	   5701589 ns/op
-BenchmarkHostAccountsForFunding/10000_accounts-2         	      25	   5711631 ns/op
-BenchmarkHostAccountsForFunding/10000_accounts-2         	      25	   5644388 ns/op
-BenchmarkHostAccountsForFunding/10000_accounts-2         	      25	   5673156 ns/op
-BenchmarkHostAccountsForFunding/100000_accounts-2        	      25	  23377331 ns/op
-BenchmarkHostAccountsForFunding/100000_accounts-2        	      25	  25880771 ns/op
-BenchmarkHostAccountsForFunding/100000_accounts-2        	      25	  25248923 ns/op
-BenchmarkHostAccountsForFunding/100000_accounts-2        	      25	  23247143 ns/op
-BenchmarkHostAccountsForFunding/100000_accounts-2        	      25	  23400055 ns/op
-BenchmarkHostAccountsForFunding/100000_accounts-2        	      25	  23787117 ns/op
-BenchmarkHostAccountsForFunding/100000_accounts-2        	      25	  24700717 ns/op
-BenchmarkHostAccountsForFunding/100000_accounts-2        	      25	  24980875 ns/op
-BenchmarkHostAccountsForFunding/100000_accounts-2        	      25	  24892541 ns/op
-BenchmarkHostAccountsForFunding/100000_accounts-2        	      25	  24793187 ns/op
-BenchmarkHostAccountsForFunding/1000000_accounts-2       	      25	  23008214 ns/op
-BenchmarkHostAccountsForFunding/1000000_accounts-2       	      25	  23109668 ns/op
-BenchmarkHostAccountsForFunding/1000000_accounts-2       	      25	  22787795 ns/op
-BenchmarkHostAccountsForFunding/1000000_accounts-2       	      25	  22952547 ns/op
-BenchmarkHostAccountsForFunding/1000000_accounts-2       	      25	  23426060 ns/op
-BenchmarkHostAccountsForFunding/1000000_accounts-2       	      25	  23243145 ns/op
-BenchmarkHostAccountsForFunding/1000000_accounts-2       	      25	  22928987 ns/op
-BenchmarkHostAccountsForFunding/1000000_accounts-2       	      25	  22881246 ns/op
-BenchmarkHostAccountsForFunding/1000000_accounts-2       	      25	  23543186 ns/op
-BenchmarkHostAccountsForFunding/1000000_accounts-2       	      25	  22814229 ns/op
-BenchmarkUpdateHostAccounts-2                            	      25	  19070697 ns/op
-BenchmarkUpdateHostAccounts-2                            	      25	  19022211 ns/op
-BenchmarkUpdateHostAccounts-2                            	      25	  20233891 ns/op
-BenchmarkUpdateHostAccounts-2                            	      25	  19150379 ns/op
-BenchmarkUpdateHostAccounts-2                            	      25	  19034390 ns/op
-BenchmarkUpdateHostAccounts-2                            	      25	  19549939 ns/op
-BenchmarkUpdateHostAccounts-2                            	      25	  19111338 ns/op
-BenchmarkUpdateHostAccounts-2                            	      25	  18962348 ns/op
-BenchmarkUpdateHostAccounts-2                            	      25	  19051693 ns/op
-BenchmarkUpdateHostAccounts-2                            	      25	  21229538 ns/op
-BenchmarkContracts/contract-2                            	      25	    547977 ns/op
-BenchmarkContracts/contract-2                            	      25	    507648 ns/op
-BenchmarkContracts/contract-2                            	      25	    491370 ns/op
-BenchmarkContracts/contract-2                            	      25	    494515 ns/op
-BenchmarkContracts/contract-2                            	      25	    502484 ns/op
-BenchmarkContracts/contract-2                            	      25	    481897 ns/op
-BenchmarkContracts/contract-2                            	      25	    491210 ns/op
-BenchmarkContracts/contract-2                            	      25	    538680 ns/op
-BenchmarkContracts/contract-2                            	      25	    514201 ns/op
-BenchmarkContracts/contract-2                            	      25	    510023 ns/op
-BenchmarkContracts/contracts_100-2                       	      25	   1726669 ns/op
-BenchmarkContracts/contracts_100-2                       	      25	   1663782 ns/op
-BenchmarkContracts/contracts_100-2                       	      25	   1673179 ns/op
-BenchmarkContracts/contracts_100-2                       	      25	   1674295 ns/op
-BenchmarkContracts/contracts_100-2                       	      25	   1688098 ns/op
-BenchmarkContracts/contracts_100-2                       	      25	   1677178 ns/op
-BenchmarkContracts/contracts_100-2                       	      25	   1667567 ns/op
-BenchmarkContracts/contracts_100-2                       	      25	   1643652 ns/op
-BenchmarkContracts/contracts_100-2                       	      25	   1635201 ns/op
-BenchmarkContracts/contracts_100-2                       	      25	   1662368 ns/op
-BenchmarkContracts/contracts_revisable_100-2             	      25	   1703426 ns/op
-BenchmarkContracts/contracts_revisable_100-2             	      25	   1696387 ns/op
-BenchmarkContracts/contracts_revisable_100-2             	      25	   1698747 ns/op
-BenchmarkContracts/contracts_revisable_100-2             	      25	   1675197 ns/op
-BenchmarkContracts/contracts_revisable_100-2             	      25	   1678467 ns/op
-BenchmarkContracts/contracts_revisable_100-2             	      25	   1694777 ns/op
-BenchmarkContracts/contracts_revisable_100-2             	      25	   1708666 ns/op
-BenchmarkContracts/contracts_revisable_100-2             	      25	   1693618 ns/op
-BenchmarkContracts/contracts_revisable_100-2             	      25	   1671947 ns/op
-BenchmarkContracts/contracts_revisable_100-2             	      25	   1672060 ns/op
-BenchmarkContracts/contracts_revisable+good_100-2        	      25	   1753087 ns/op
-BenchmarkContracts/contracts_revisable+good_100-2        	      25	   1783133 ns/op
-BenchmarkContracts/contracts_revisable+good_100-2        	      25	   1802285 ns/op
-BenchmarkContracts/contracts_revisable+good_100-2        	      25	   1774290 ns/op
-BenchmarkContracts/contracts_revisable+good_100-2        	      25	   1751438 ns/op
-BenchmarkContracts/contracts_revisable+good_100-2        	      25	   1740590 ns/op
-BenchmarkContracts/contracts_revisable+good_100-2        	      25	   1788834 ns/op
-BenchmarkContracts/contracts_revisable+good_100-2        	      25	   1742405 ns/op
-BenchmarkContracts/contracts_revisable+good_100-2        	      25	   1790744 ns/op
-BenchmarkContracts/contracts_revisable+good_100-2        	      25	   1764310 ns/op
-BenchmarkContracts/contracts_1000-2                      	      25	   9206447 ns/op
-BenchmarkContracts/contracts_1000-2                      	      25	   8959872 ns/op
-BenchmarkContracts/contracts_1000-2                      	      25	   9244991 ns/op
-BenchmarkContracts/contracts_1000-2                      	      25	   9249609 ns/op
-BenchmarkContracts/contracts_1000-2                      	      25	   9189787 ns/op
-BenchmarkContracts/contracts_1000-2                      	      25	   9300718 ns/op
-BenchmarkContracts/contracts_1000-2                      	      25	   9629406 ns/op
-BenchmarkContracts/contracts_1000-2                      	      25	   9518532 ns/op
-BenchmarkContracts/contracts_1000-2                      	      25	   9686333 ns/op
-BenchmarkContracts/contracts_1000-2                      	      25	   9566027 ns/op
-BenchmarkContracts/contracts_revisable_1000-2            	      25	   9867541 ns/op
-BenchmarkContracts/contracts_revisable_1000-2            	      25	   9594975 ns/op
-BenchmarkContracts/contracts_revisable_1000-2            	      25	   9546005 ns/op
-BenchmarkContracts/contracts_revisable_1000-2            	      25	   9657288 ns/op
-BenchmarkContracts/contracts_revisable_1000-2            	      25	   9611971 ns/op
-BenchmarkContracts/contracts_revisable_1000-2            	      25	   9843119 ns/op
-BenchmarkContracts/contracts_revisable_1000-2            	      25	   9748537 ns/op
-BenchmarkContracts/contracts_revisable_1000-2            	      25	   9714611 ns/op
-BenchmarkContracts/contracts_revisable_1000-2            	      25	   9537019 ns/op
-BenchmarkContracts/contracts_revisable_1000-2            	      25	   9506364 ns/op
-BenchmarkContracts/contracts_revisable+good_1000-2       	      25	   9885509 ns/op
-BenchmarkContracts/contracts_revisable+good_1000-2       	      25	  10224272 ns/op
-BenchmarkContracts/contracts_revisable+good_1000-2       	      25	  12853557 ns/op
-BenchmarkContracts/contracts_revisable+good_1000-2       	      25	  10069929 ns/op
-BenchmarkContracts/contracts_revisable+good_1000-2       	      25	   9997644 ns/op
-BenchmarkContracts/contracts_revisable+good_1000-2       	      25	  10180454 ns/op
-BenchmarkContracts/contracts_revisable+good_1000-2       	      25	  10109278 ns/op
-BenchmarkContracts/contracts_revisable+good_1000-2       	      25	   9893278 ns/op
-BenchmarkContracts/contracts_revisable+good_1000-2       	      25	  10016903 ns/op
-BenchmarkContracts/contracts_revisable+good_1000-2       	      25	  10081603 ns/op
-BenchmarkContractsForBroadcasting-2                      	      25	  11729962 ns/op
-BenchmarkContractsForBroadcasting-2                      	      25	  12602187 ns/op
-BenchmarkContractsForBroadcasting-2                      	      25	  10812753 ns/op
-BenchmarkContractsForBroadcasting-2                      	      25	  10697685 ns/op
-BenchmarkContractsForBroadcasting-2                      	      25	  12213107 ns/op
-BenchmarkContractsForBroadcasting-2                      	      25	  10679471 ns/op
-BenchmarkContractsForBroadcasting-2                      	      25	  10883656 ns/op
-BenchmarkContractsForBroadcasting-2                      	      25	  13998136 ns/op
-BenchmarkContractsForBroadcasting-2                      	      25	  13095261 ns/op
-BenchmarkContractsForBroadcasting-2                      	      25	  10786052 ns/op
-BenchmarkContractsForFunding-2                           	      25	    694369 ns/op
-BenchmarkContractsForFunding-2                           	      25	    683123 ns/op
-BenchmarkContractsForFunding-2                           	      25	    682532 ns/op
-BenchmarkContractsForFunding-2                           	      25	    704966 ns/op
-BenchmarkContractsForFunding-2                           	      25	    695587 ns/op
-BenchmarkContractsForFunding-2                           	      25	    700213 ns/op
-BenchmarkContractsForFunding-2                           	      25	    688142 ns/op
-BenchmarkContractsForFunding-2                           	      25	    688790 ns/op
-BenchmarkContractsForFunding-2                           	      25	    687080 ns/op
-BenchmarkContractsForFunding-2                           	      25	    733417 ns/op
-BenchmarkHosts/Host-2                                    	      25	   1070228 ns/op
-BenchmarkHosts/Host-2                                    	      25	    967887 ns/op
-BenchmarkHosts/Host-2                                    	      25	    973056 ns/op
-BenchmarkHosts/Host-2                                    	      25	    969886 ns/op
-BenchmarkHosts/Host-2                                    	      25	    971279 ns/op
-BenchmarkHosts/Host-2                                    	      25	    972526 ns/op
-BenchmarkHosts/Host-2                                    	      25	    972058 ns/op
-BenchmarkHosts/Host-2                                    	      25	    976539 ns/op
-BenchmarkHosts/Host-2                                    	      25	    983157 ns/op
-BenchmarkHosts/Host-2                                    	      25	    966720 ns/op
-BenchmarkHosts/Hosts_10-2                                	      25	   9451005 ns/op
-BenchmarkHosts/Hosts_10-2                                	      25	   8092557 ns/op
-BenchmarkHosts/Hosts_10-2                                	      25	   8214288 ns/op
-BenchmarkHosts/Hosts_10-2                                	      25	   9068167 ns/op
-BenchmarkHosts/Hosts_10-2                                	      25	   7841375 ns/op
-BenchmarkHosts/Hosts_10-2                                	      25	   8792652 ns/op
-BenchmarkHosts/Hosts_10-2                                	      25	   8179444 ns/op
-BenchmarkHosts/Hosts_10-2                                	      25	   7847396 ns/op
-BenchmarkHosts/Hosts_10-2                                	      25	   7642127 ns/op
-BenchmarkHosts/Hosts_10-2                                	      25	   7873908 ns/op
-BenchmarkHosts/Hosts_100-2                               	      25	  10524820 ns/op
-BenchmarkHosts/Hosts_100-2                               	      25	  12107592 ns/op
-BenchmarkHosts/Hosts_100-2                               	      25	  11887826 ns/op
-BenchmarkHosts/Hosts_100-2                               	      25	  12885034 ns/op
-BenchmarkHosts/Hosts_100-2                               	      25	  11411369 ns/op
-BenchmarkHosts/Hosts_100-2                               	      25	  10361724 ns/op
-BenchmarkHosts/Hosts_100-2                               	      25	   8969222 ns/op
-BenchmarkHosts/Hosts_100-2                               	      25	   9431954 ns/op
-BenchmarkHosts/Hosts_100-2                               	      25	   9207567 ns/op
-BenchmarkHosts/Hosts_100-2                               	      25	   8720763 ns/op
-BenchmarkHosts/Hosts_1000-2                              	      25	  23370351 ns/op
-BenchmarkHosts/Hosts_1000-2                              	      25	  23375348 ns/op
-BenchmarkHosts/Hosts_1000-2                              	      25	  24248190 ns/op
-BenchmarkHosts/Hosts_1000-2                              	      25	  23533520 ns/op
-BenchmarkHosts/Hosts_1000-2                              	      25	  23351262 ns/op
-BenchmarkHosts/Hosts_1000-2                              	      25	  22864631 ns/op
-BenchmarkHosts/Hosts_1000-2                              	      25	  23718816 ns/op
-BenchmarkHosts/Hosts_1000-2                              	      25	  22759541 ns/op
-BenchmarkHosts/Hosts_1000-2                              	      25	  22541285 ns/op
-BenchmarkHosts/Hosts_1000-2                              	      25	  23643967 ns/op
-BenchmarkHosts/UpdateHost-2                              	      25	   1099316 ns/op
-BenchmarkHosts/UpdateHost-2                              	      25	   1120232 ns/op
-BenchmarkHosts/UpdateHost-2                              	      25	   1113424 ns/op
-BenchmarkHosts/UpdateHost-2                              	      25	   1022383 ns/op
-BenchmarkHosts/UpdateHost-2                              	      25	   1093509 ns/op
-BenchmarkHosts/UpdateHost-2                              	      25	   1021167 ns/op
-BenchmarkHosts/UpdateHost-2                              	      25	   1111582 ns/op
-BenchmarkHosts/UpdateHost-2                              	      25	   1096386 ns/op
-BenchmarkHosts/UpdateHost-2                              	      25	   1060264 ns/op
-BenchmarkHosts/UpdateHost-2                              	      25	   1039501 ns/op
-BenchmarkSlabs/PinSlab-2                                 	      25	   3045583 ns/op	13771.76 MB/s
-BenchmarkSlabs/PinSlab-2                                 	      25	   3085251 ns/op	13594.69 MB/s
-BenchmarkSlabs/PinSlab-2                                 	      25	   3021971 ns/op	13879.36 MB/s
-BenchmarkSlabs/PinSlab-2                                 	      25	   3009500 ns/op	13936.88 MB/s
-BenchmarkSlabs/PinSlab-2                                 	      25	   3020884 ns/op	13884.36 MB/s
-BenchmarkSlabs/PinSlab-2                                 	      25	   3010855 ns/op	13930.61 MB/s
-BenchmarkSlabs/PinSlab-2                                 	      25	   4809932 ns/op	8720.09 MB/s
-BenchmarkSlabs/PinSlab-2                                 	      25	   3283121 ns/op	12775.36 MB/s
-BenchmarkSlabs/PinSlab-2                                 	      25	   3121189 ns/op	13438.16 MB/s
-BenchmarkSlabs/PinSlab-2                                 	      25	   3135602 ns/op	13376.39 MB/s
-BenchmarkSlabs/Slabs-40MiB-2                             	      25	   1052910 ns/op	39835.34 MB/s
-BenchmarkSlabs/Slabs-40MiB-2                             	      25	    826703 ns/op	50735.29 MB/s
-BenchmarkSlabs/Slabs-40MiB-2                             	      25	    851430 ns/op	49261.90 MB/s
-BenchmarkSlabs/Slabs-40MiB-2                             	      25	    834935 ns/op	50235.08 MB/s
-BenchmarkSlabs/Slabs-40MiB-2                             	      25	    823247 ns/op	50948.32 MB/s
-BenchmarkSlabs/Slabs-40MiB-2                             	      25	    835618 ns/op	50194.06 MB/s
-BenchmarkSlabs/Slabs-40MiB-2                             	      25	    824018 ns/op	50900.67 MB/s
-BenchmarkSlabs/Slabs-40MiB-2                             	      25	    824977 ns/op	50841.47 MB/s
-BenchmarkSlabs/Slabs-40MiB-2                             	      25	    824819 ns/op	50851.18 MB/s
-BenchmarkSlabs/Slabs-40MiB-2                             	      25	    848687 ns/op	49421.09 MB/s
-BenchmarkSlabs/Slabs-400MiB-2                            	      25	   2283053 ns/op	18371.47 MB/s
-BenchmarkSlabs/Slabs-400MiB-2                            	      25	   2148603 ns/op	19521.08 MB/s
-BenchmarkSlabs/Slabs-400MiB-2                            	      25	   2145050 ns/op	19553.41 MB/s
-BenchmarkSlabs/Slabs-400MiB-2                            	      25	   2085694 ns/op	20109.87 MB/s
-BenchmarkSlabs/Slabs-400MiB-2                            	      25	   2106312 ns/op	19913.02 MB/s
-BenchmarkSlabs/Slabs-400MiB-2                            	      25	   2093657 ns/op	20033.39 MB/s
-BenchmarkSlabs/Slabs-400MiB-2                            	      25	   2130824 ns/op	19683.96 MB/s
-BenchmarkSlabs/Slabs-400MiB-2                            	      25	   2133189 ns/op	19662.13 MB/s
-BenchmarkSlabs/Slabs-400MiB-2                            	      25	   2092376 ns/op	20045.65 MB/s
-BenchmarkSlabs/Slabs-400MiB-2                            	      25	   2140754 ns/op	19592.65 MB/s
-BenchmarkSlabs/Slabs-4GiB-2                              	      25	  14334793 ns/op	2925.96 MB/s
-BenchmarkSlabs/Slabs-4GiB-2                              	      25	  14040898 ns/op	2987.21 MB/s
-BenchmarkSlabs/Slabs-4GiB-2                              	      25	  14216365 ns/op	2950.34 MB/s
-BenchmarkSlabs/Slabs-4GiB-2                              	      25	  15808253 ns/op	2653.24 MB/s
-BenchmarkSlabs/Slabs-4GiB-2                              	      25	  13321392 ns/op	3148.55 MB/s
-BenchmarkSlabs/Slabs-4GiB-2                              	      25	  13262483 ns/op	3162.53 MB/s
-BenchmarkSlabs/Slabs-4GiB-2                              	      25	  13119056 ns/op	3197.11 MB/s
-BenchmarkSlabs/Slabs-4GiB-2                              	      25	  13388082 ns/op	3132.86 MB/s
-BenchmarkSlabs/Slabs-4GiB-2                              	      25	  13090053 ns/op	3204.19 MB/s
-BenchmarkSlabs/Slabs-4GiB-2                              	      25	  13061450 ns/op	3211.21 MB/s
-BenchmarkUnpinnedSectors/100-2                           	      25	  10120363 ns/op	41444.21 MB/s
-BenchmarkUnpinnedSectors/100-2                           	      25	    729273 ns/op	575135.06 MB/s
-BenchmarkUnpinnedSectors/100-2                           	      25	    721146 ns/op	581616.64 MB/s
-BenchmarkUnpinnedSectors/100-2                           	      25	    787430 ns/op	532657.60 MB/s
-BenchmarkUnpinnedSectors/100-2                           	      25	    714651 ns/op	586902.71 MB/s
-BenchmarkUnpinnedSectors/100-2                           	      25	    722304 ns/op	580684.23 MB/s
-BenchmarkUnpinnedSectors/100-2                           	      25	    709963 ns/op	590778.03 MB/s
-BenchmarkUnpinnedSectors/100-2                           	      25	    714407 ns/op	587102.74 MB/s
-BenchmarkUnpinnedSectors/100-2                           	      25	    712193 ns/op	588927.84 MB/s
-BenchmarkUnpinnedSectors/100-2                           	      25	    725537 ns/op	578096.24 MB/s
-BenchmarkUnpinnedSectors/1000-2                          	      25	   1513809 ns/op	2770695.50 MB/s
-BenchmarkUnpinnedSectors/1000-2                          	      25	   2544334 ns/op	1648487.82 MB/s
-BenchmarkUnpinnedSectors/1000-2                          	      25	   2589031 ns/op	1620028.32 MB/s
-BenchmarkUnpinnedSectors/1000-2                          	      25	   2571435 ns/op	1631113.99 MB/s
-BenchmarkUnpinnedSectors/1000-2                          	      25	   2582560 ns/op	1624087.58 MB/s
-BenchmarkUnpinnedSectors/1000-2                          	      25	   2587938 ns/op	1620712.68 MB/s
-BenchmarkUnpinnedSectors/1000-2                          	      25	   2544270 ns/op	1648529.16 MB/s
-BenchmarkUnpinnedSectors/1000-2                          	      25	   2471158 ns/op	1697303.13 MB/s
-BenchmarkUnpinnedSectors/1000-2                          	      25	   2497170 ns/op	1679622.93 MB/s
-BenchmarkUnpinnedSectors/1000-2                          	      25	   2606320 ns/op	1609282.30 MB/s
-BenchmarkUnpinnedSectors/10000-2                         	      25	  11477584 ns/op	3654344.10 MB/s
-BenchmarkUnpinnedSectors/10000-2                         	      25	  31841639 ns/op	1317238.75 MB/s
-BenchmarkUnpinnedSectors/10000-2                         	      25	  40742016 ns/op	1029478.76 MB/s
-BenchmarkUnpinnedSectors/10000-2                         	      25	  33188095 ns/op	1263797.74 MB/s
-BenchmarkUnpinnedSectors/10000-2                         	      25	  38955940 ns/op	1076678.94 MB/s
-BenchmarkUnpinnedSectors/10000-2                         	      25	  34568570 ns/op	1213328.74 MB/s
-BenchmarkUnpinnedSectors/10000-2                         	      25	  38301589 ns/op	1095073.11 MB/s
-BenchmarkUnpinnedSectors/10000-2                         	      25	  38896149 ns/op	1078334.00 MB/s
-BenchmarkUnpinnedSectors/10000-2                         	      25	  38898591 ns/op	1078266.30 MB/s
-BenchmarkUnpinnedSectors/10000-2                         	      25	  37014182 ns/op	1133161.33 MB/s
-BenchmarkSectorsForIntegrityCheck/10-2                   	      25	    674702 ns/op	62165.27 MB/s
-BenchmarkSectorsForIntegrityCheck/10-2                   	      25	    627902 ns/op	66798.69 MB/s
-BenchmarkSectorsForIntegrityCheck/10-2                   	      25	    613217 ns/op	68398.42 MB/s
-BenchmarkSectorsForIntegrityCheck/10-2                   	      25	    597797 ns/op	70162.72 MB/s
-BenchmarkSectorsForIntegrityCheck/10-2                   	      25	    597330 ns/op	70217.50 MB/s
-BenchmarkSectorsForIntegrityCheck/10-2                   	      25	    594959 ns/op	70497.34 MB/s
-BenchmarkSectorsForIntegrityCheck/10-2                   	      25	    596956 ns/op	70261.52 MB/s
-BenchmarkSectorsForIntegrityCheck/10-2                   	      25	    599416 ns/op	69973.23 MB/s
-BenchmarkSectorsForIntegrityCheck/10-2                   	      25	    594059 ns/op	70604.12 MB/s
-BenchmarkSectorsForIntegrityCheck/10-2                   	      25	    597232 ns/op	70229.04 MB/s
-BenchmarkSectorsForIntegrityCheck/100-2                  	      25	    722610 ns/op	580437.81 MB/s
-BenchmarkSectorsForIntegrityCheck/100-2                  	      25	    716029 ns/op	585772.73 MB/s
-BenchmarkSectorsForIntegrityCheck/100-2                  	      25	    710509 ns/op	590323.57 MB/s
-BenchmarkSectorsForIntegrityCheck/100-2                  	      25	    708002 ns/op	592414.31 MB/s
-BenchmarkSectorsForIntegrityCheck/100-2                  	      25	    771493 ns/op	543660.75 MB/s
-BenchmarkSectorsForIntegrityCheck/100-2                  	      25	    713848 ns/op	587562.39 MB/s
-BenchmarkSectorsForIntegrityCheck/100-2                  	      25	    716348 ns/op	585511.84 MB/s
-BenchmarkSectorsForIntegrityCheck/100-2                  	      25	    715878 ns/op	585896.41 MB/s
-BenchmarkSectorsForIntegrityCheck/100-2                  	      25	    711753 ns/op	589292.20 MB/s
-BenchmarkSectorsForIntegrityCheck/100-2                  	      25	    716447 ns/op	585431.55 MB/s
-BenchmarkSectorsForIntegrityCheck/1000-2                 	      25	  60394147 ns/op	69448.85 MB/s
-BenchmarkSectorsForIntegrityCheck/1000-2                 	      25	  24923159 ns/op	168289.42 MB/s
-BenchmarkSectorsForIntegrityCheck/1000-2                 	      25	   1524737 ns/op	2750838.55 MB/s
-BenchmarkSectorsForIntegrityCheck/1000-2                 	      25	   1537526 ns/op	2727956.33 MB/s
-BenchmarkSectorsForIntegrityCheck/1000-2                 	      25	   1510495 ns/op	2776775.31 MB/s
-BenchmarkSectorsForIntegrityCheck/1000-2                 	      25	   1509781 ns/op	2778087.24 MB/s
-BenchmarkSectorsForIntegrityCheck/1000-2                 	      25	   1539739 ns/op	2724036.19 MB/s
-BenchmarkSectorsForIntegrityCheck/1000-2                 	      25	   1559727 ns/op	2689126.46 MB/s
-BenchmarkSectorsForIntegrityCheck/1000-2                 	      25	   1541951 ns/op	2720127.66 MB/s
-BenchmarkSectorsForIntegrityCheck/1000-2                 	      25	   1529096 ns/op	2742996.15 MB/s
-BenchmarkPinSectors/10-2                                 	      25	   1549369 ns/op	27071.05 MB/s
-BenchmarkPinSectors/10-2                                 	      25	   1386736 ns/op	30245.88 MB/s
-BenchmarkPinSectors/10-2                                 	      25	   1299963 ns/op	32264.80 MB/s
-BenchmarkPinSectors/10-2                                 	      25	   1321307 ns/op	31743.61 MB/s
-BenchmarkPinSectors/10-2                                 	      25	   1308370 ns/op	32057.47 MB/s
-BenchmarkPinSectors/10-2                                 	      25	   1362335 ns/op	30787.60 MB/s
-BenchmarkPinSectors/10-2                                 	      25	   1319173 ns/op	31794.95 MB/s
-BenchmarkPinSectors/10-2                                 	      25	   1355296 ns/op	30947.51 MB/s
-BenchmarkPinSectors/10-2                                 	      25	   1397648 ns/op	30009.74 MB/s
-BenchmarkPinSectors/10-2                                 	      25	   1354179 ns/op	30973.03 MB/s
-BenchmarkPinSectors/100-2                                	      25	   5805954 ns/op	72241.43 MB/s
-BenchmarkPinSectors/100-2                                	      25	   3851591 ns/op	108897.97 MB/s
-BenchmarkPinSectors/100-2                                	      25	   4057970 ns/op	103359.67 MB/s
-BenchmarkPinSectors/100-2                                	      25	   4124048 ns/op	101703.56 MB/s
-BenchmarkPinSectors/100-2                                	      25	   4244456 ns/op	98818.42 MB/s
-BenchmarkPinSectors/100-2                                	      25	   4416524 ns/op	94968.45 MB/s
-BenchmarkPinSectors/100-2                                	      25	   4469479 ns/op	93843.24 MB/s
-BenchmarkPinSectors/100-2                                	      25	   4290140 ns/op	97766.12 MB/s
-BenchmarkPinSectors/100-2                                	      25	   4272622 ns/op	98166.98 MB/s
-BenchmarkPinSectors/100-2                                	      25	   4225849 ns/op	99253.51 MB/s
-BenchmarkPinSectors/1000-2                               	      25	  29078078 ns/op	144242.82 MB/s
-BenchmarkPinSectors/1000-2                               	      25	  34964745 ns/op	119958.09 MB/s
-BenchmarkPinSectors/1000-2                               	      25	  36955663 ns/op	113495.57 MB/s
-BenchmarkPinSectors/1000-2                               	      25	  39855416 ns/op	105237.99 MB/s
-BenchmarkPinSectors/1000-2                               	      25	  39234773 ns/op	106902.72 MB/s
-BenchmarkPinSectors/1000-2                               	      25	  39215064 ns/op	106956.45 MB/s
-BenchmarkPinSectors/1000-2                               	      25	  45695034 ns/op	91789.06 MB/s
-BenchmarkPinSectors/1000-2                               	      25	  45278364 ns/op	92633.74 MB/s
-BenchmarkPinSectors/1000-2                               	      25	  39917883 ns/op	105073.31 MB/s
-BenchmarkPinSectors/1000-2                               	      25	  40581092 ns/op	103356.11 MB/s
-BenchmarkUnhealthySlab-2                                 	      25	  33164356 ns/op
-BenchmarkUnhealthySlab-2                                 	      25	  33663505 ns/op
-BenchmarkUnhealthySlab-2                                 	      25	  65983906 ns/op
-BenchmarkUnhealthySlab-2                                 	      25	  40520443 ns/op
-BenchmarkUnhealthySlab-2                                 	      25	  33634075 ns/op
-BenchmarkUnhealthySlab-2                                 	      25	  31362199 ns/op
-BenchmarkUnhealthySlab-2                                 	      25	  34091730 ns/op
-BenchmarkUnhealthySlab-2                                 	      25	  39193485 ns/op
-BenchmarkUnhealthySlab-2                                 	      25	  36162763 ns/op
-BenchmarkUnhealthySlab-2                                 	      25	  37419026 ns/op
-BenchmarkRecordIntegrityChecks/10-2                      	      25	   1534079 ns/op	27340.87 MB/s
-BenchmarkRecordIntegrityChecks/10-2                      	      25	   1413898 ns/op	29664.83 MB/s
-BenchmarkRecordIntegrityChecks/10-2                      	      25	   1434569 ns/op	29237.38 MB/s
-BenchmarkRecordIntegrityChecks/10-2                      	      25	   1494714 ns/op	28060.91 MB/s
-BenchmarkRecordIntegrityChecks/10-2                      	      25	   1363403 ns/op	30763.49 MB/s
-BenchmarkRecordIntegrityChecks/10-2                      	      25	   1454571 ns/op	28835.33 MB/s
-BenchmarkRecordIntegrityChecks/10-2                      	      25	   1372867 ns/op	30551.42 MB/s
-BenchmarkRecordIntegrityChecks/10-2                      	      25	   1329867 ns/op	31539.26 MB/s
-BenchmarkRecordIntegrityChecks/10-2                      	      25	   1353092 ns/op	30997.92 MB/s
-BenchmarkRecordIntegrityChecks/10-2                      	      25	   1307593 ns/op	32076.52 MB/s
-BenchmarkRecordIntegrityChecks/100-2                     	      25	   5304113 ns/op	79076.44 MB/s
-BenchmarkRecordIntegrityChecks/100-2                     	      25	   6292980 ns/op	66650.52 MB/s
-BenchmarkRecordIntegrityChecks/100-2                     	      25	   6972193 ns/op	60157.60 MB/s
-BenchmarkRecordIntegrityChecks/100-2                     	      25	   6901447 ns/op	60774.27 MB/s
-BenchmarkRecordIntegrityChecks/100-2                     	      25	   6431862 ns/op	65211.35 MB/s
-BenchmarkRecordIntegrityChecks/100-2                     	      25	   6113942 ns/op	68602.28 MB/s
-BenchmarkRecordIntegrityChecks/100-2                     	      25	   6105307 ns/op	68699.31 MB/s
-BenchmarkRecordIntegrityChecks/100-2                     	      25	   6068690 ns/op	69113.83 MB/s
-BenchmarkRecordIntegrityChecks/100-2                     	      25	   6164828 ns/op	68036.02 MB/s
-BenchmarkRecordIntegrityChecks/100-2                     	      25	   6292233 ns/op	66658.44 MB/s
-BenchmarkRecordIntegrityChecks/1000-2                    	      25	  56089157 ns/op	74779.23 MB/s
-BenchmarkRecordIntegrityChecks/1000-2                    	      25	  53785967 ns/op	77981.38 MB/s
-BenchmarkRecordIntegrityChecks/1000-2                    	      25	  50171678 ns/op	83599.04 MB/s
-BenchmarkRecordIntegrityChecks/1000-2                    	      25	  49586563 ns/op	84585.50 MB/s
-BenchmarkRecordIntegrityChecks/1000-2                    	      25	  52674564 ns/op	79626.74 MB/s
-BenchmarkRecordIntegrityChecks/1000-2                    	      25	  50795505 ns/op	82572.35 MB/s
-BenchmarkRecordIntegrityChecks/1000-2                    	      25	  50503492 ns/op	83049.78 MB/s
-BenchmarkRecordIntegrityChecks/1000-2                    	      25	  49597351 ns/op	84567.10 MB/s
-BenchmarkRecordIntegrityChecks/1000-2                    	      25	  52228035 ns/op	80307.52 MB/s
-BenchmarkRecordIntegrityChecks/1000-2                    	      25	  51517926 ns/op	81414.46 MB/s
-BenchmarkFailingSectors/100-2                            	      25	    771090 ns/op	543944.52 MB/s
-BenchmarkFailingSectors/100-2                            	      25	    765645 ns/op	547812.86 MB/s
-BenchmarkFailingSectors/100-2                            	      25	    745261 ns/op	562796.90 MB/s
-BenchmarkFailingSectors/100-2                            	      25	    733582 ns/op	571756.98 MB/s
-BenchmarkFailingSectors/100-2                            	      25	    718322 ns/op	583902.81 MB/s
-BenchmarkFailingSectors/100-2                            	      25	    721991 ns/op	580935.48 MB/s
-BenchmarkFailingSectors/100-2                            	      25	    737313 ns/op	568863.27 MB/s
-BenchmarkFailingSectors/100-2                            	      25	    744686 ns/op	563231.15 MB/s
-BenchmarkFailingSectors/100-2                            	      25	    719621 ns/op	582848.90 MB/s
-BenchmarkFailingSectors/100-2                            	      25	    729604 ns/op	574874.07 MB/s
-BenchmarkFailingSectors/1000-2                           	      25	   1679516 ns/op	2497329.35 MB/s
-BenchmarkFailingSectors/1000-2                           	      25	   1774972 ns/op	2363025.98 MB/s
-BenchmarkFailingSectors/1000-2                           	      25	   1809826 ns/op	2317517.51 MB/s
-BenchmarkFailingSectors/1000-2                           	      25	   1748090 ns/op	2399363.60 MB/s
-BenchmarkFailingSectors/1000-2                           	      25	   1894755 ns/op	2213639.04 MB/s
-BenchmarkFailingSectors/1000-2                           	      25	   1895226 ns/op	2213088.58 MB/s
-BenchmarkFailingSectors/1000-2                           	      25	   1862605 ns/op	2251848.64 MB/s
-BenchmarkFailingSectors/1000-2                           	      25	   1855300 ns/op	2260715.15 MB/s
-BenchmarkFailingSectors/1000-2                           	      25	   1934100 ns/op	2168607.76 MB/s
-BenchmarkFailingSectors/1000-2                           	      25	   2028554 ns/op	2067632.70 MB/s
-BenchmarkFailingSectors/10000-2                          	      25	  11699553 ns/op	3585012.24 MB/s
-BenchmarkFailingSectors/10000-2                          	      25	  12651428 ns/op	3315281.17 MB/s
-BenchmarkFailingSectors/10000-2                          	      25	  12452484 ns/op	3368246.84 MB/s
-BenchmarkFailingSectors/10000-2                          	      25	  11882582 ns/op	3529791.64 MB/s
-BenchmarkFailingSectors/10000-2                          	      25	  13190553 ns/op	3179778.80 MB/s
-BenchmarkFailingSectors/10000-2                          	      25	  15307942 ns/op	2739952.98 MB/s
-BenchmarkFailingSectors/10000-2                          	      25	  17605012 ns/op	2382448.88 MB/s
-BenchmarkFailingSectors/10000-2                          	      25	  16697315 ns/op	2511963.18 MB/s
-BenchmarkFailingSectors/10000-2                          	      25	  16639685 ns/op	2520663.15 MB/s
-BenchmarkFailingSectors/10000-2                          	      25	  16536113 ns/op	2536451.02 MB/s
-BenchmarkMarkSectorsLost/100-2                           	      25	   3459097 ns/op	121254.32 MB/s
-BenchmarkMarkSectorsLost/100-2                           	      25	   3668601 ns/op	114329.80 MB/s
-BenchmarkMarkSectorsLost/100-2                           	      25	   3421768 ns/op	122577.09 MB/s
-BenchmarkMarkSectorsLost/100-2                           	      25	   3462639 ns/op	121130.26 MB/s
-BenchmarkMarkSectorsLost/100-2                           	      25	   3514527 ns/op	119341.91 MB/s
-BenchmarkMarkSectorsLost/100-2                           	      25	   3672424 ns/op	114210.78 MB/s
-BenchmarkMarkSectorsLost/100-2                           	      25	   3738493 ns/op	112192.38 MB/s
-BenchmarkMarkSectorsLost/100-2                           	      25	   3583165 ns/op	117055.85 MB/s
-BenchmarkMarkSectorsLost/100-2                           	      25	   3586992 ns/op	116930.94 MB/s
-BenchmarkMarkSectorsLost/100-2                           	      25	   3549148 ns/op	118177.78 MB/s
-BenchmarkMarkSectorsLost/1000-2                          	      25	  25605507 ns/op	163804.76 MB/s
-BenchmarkMarkSectorsLost/1000-2                          	      25	  26457406 ns/op	158530.43 MB/s
-BenchmarkMarkSectorsLost/1000-2                          	      25	  26161756 ns/op	160321.96 MB/s
-BenchmarkMarkSectorsLost/1000-2                          	      25	  28315937 ns/op	148125.21 MB/s
-BenchmarkMarkSectorsLost/1000-2                          	      25	  27226283 ns/op	154053.49 MB/s
-BenchmarkMarkSectorsLost/1000-2                          	      25	  26117959 ns/op	160590.80 MB/s
-BenchmarkMarkSectorsLost/1000-2                          	      25	  27560425 ns/op	152185.75 MB/s
-BenchmarkMarkSectorsLost/1000-2                          	      25	  26558623 ns/op	157926.26 MB/s
-BenchmarkMarkSectorsLost/1000-2                          	      25	  28638115 ns/op	146458.80 MB/s
-BenchmarkMarkSectorsLost/1000-2                          	      25	  27357135 ns/op	153316.64 MB/s
-BenchmarkMarkSectorsLost/10000-2                         	      25	 274458548 ns/op	152821.04 MB/s
-BenchmarkMarkSectorsLost/10000-2                         	      25	 299331077 ns/op	140122.57 MB/s
-BenchmarkMarkSectorsLost/10000-2                         	      25	 312402107 ns/op	134259.79 MB/s
-BenchmarkMarkSectorsLost/10000-2                         	      25	 322030166 ns/op	130245.69 MB/s
-BenchmarkMarkSectorsLost/10000-2                         	      25	 369000008 ns/op	113666.77 MB/s
-BenchmarkMarkSectorsLost/10000-2                         	      25	 362181472 ns/op	115806.70 MB/s
-BenchmarkMarkSectorsLost/10000-2                         	      25	 342361085 ns/op	122511.12 MB/s
-BenchmarkMarkSectorsLost/10000-2                         	      25	 363416684 ns/op	115413.08 MB/s
-BenchmarkMarkSectorsLost/10000-2                         	      25	 361729878 ns/op	115951.27 MB/s
-BenchmarkMarkSectorsLost/10000-2                         	      25	 354372908 ns/op	118358.48 MB/s
+BenchmarkHostAccountsForFunding/10000_accounts-2         	      50	   5546294 ns/op
+BenchmarkHostAccountsForFunding/10000_accounts-2         	      50	   5457292 ns/op
+BenchmarkHostAccountsForFunding/10000_accounts-2         	      50	   5428974 ns/op
+BenchmarkHostAccountsForFunding/10000_accounts-2         	      50	   5519920 ns/op
+BenchmarkHostAccountsForFunding/10000_accounts-2         	      50	   5480793 ns/op
+BenchmarkHostAccountsForFunding/100000_accounts-2        	      50	  44577688 ns/op
+BenchmarkHostAccountsForFunding/100000_accounts-2        	      50	  44876689 ns/op
+BenchmarkHostAccountsForFunding/100000_accounts-2        	      50	  45721684 ns/op
+BenchmarkHostAccountsForFunding/100000_accounts-2        	      50	  44700224 ns/op
+BenchmarkHostAccountsForFunding/100000_accounts-2        	      50	  44639051 ns/op
+BenchmarkHostAccountsForFunding/1000000_accounts-2       	      50	  34331190 ns/op
+BenchmarkHostAccountsForFunding/1000000_accounts-2       	      50	  33926553 ns/op
+BenchmarkHostAccountsForFunding/1000000_accounts-2       	      50	  33970977 ns/op
+BenchmarkHostAccountsForFunding/1000000_accounts-2       	      50	  33866768 ns/op
+BenchmarkHostAccountsForFunding/1000000_accounts-2       	      50	  33945898 ns/op
+BenchmarkUpdateHostAccounts-2                            	      50	  18774989 ns/op
+BenchmarkUpdateHostAccounts-2                            	      50	  18498671 ns/op
+BenchmarkUpdateHostAccounts-2                            	      50	  18397702 ns/op
+BenchmarkUpdateHostAccounts-2                            	      50	  19292588 ns/op
+BenchmarkUpdateHostAccounts-2                            	      50	  19983341 ns/op
+BenchmarkContracts/contract-2                            	      50	    516098 ns/op
+BenchmarkContracts/contract-2                            	      50	    488291 ns/op
+BenchmarkContracts/contract-2                            	      50	    490656 ns/op
+BenchmarkContracts/contract-2                            	      50	    515432 ns/op
+BenchmarkContracts/contract-2                            	      50	    492417 ns/op
+BenchmarkContracts/contracts_100-2                       	      50	   1641681 ns/op
+BenchmarkContracts/contracts_100-2                       	      50	   1621382 ns/op
+BenchmarkContracts/contracts_100-2                       	      50	   1600049 ns/op
+BenchmarkContracts/contracts_100-2                       	      50	   1603987 ns/op
+BenchmarkContracts/contracts_100-2                       	      50	   1616276 ns/op
+BenchmarkContracts/contracts_revisable_100-2             	      50	   1646047 ns/op
+BenchmarkContracts/contracts_revisable_100-2             	      50	   1633633 ns/op
+BenchmarkContracts/contracts_revisable_100-2             	      50	   1689440 ns/op
+BenchmarkContracts/contracts_revisable_100-2             	      50	   1654625 ns/op
+BenchmarkContracts/contracts_revisable_100-2             	      50	   1592496 ns/op
+BenchmarkContracts/contracts_revisable+good_100-2        	      50	   1680512 ns/op
+BenchmarkContracts/contracts_revisable+good_100-2        	      50	   1711497 ns/op
+BenchmarkContracts/contracts_revisable+good_100-2        	      50	   1711764 ns/op
+BenchmarkContracts/contracts_revisable+good_100-2        	      50	   1714431 ns/op
+BenchmarkContracts/contracts_revisable+good_100-2        	      50	   1715563 ns/op
+BenchmarkContracts/contracts_1000-2                      	      50	   9175333 ns/op
+BenchmarkContracts/contracts_1000-2                      	      50	   9175773 ns/op
+BenchmarkContracts/contracts_1000-2                      	      50	   9265648 ns/op
+BenchmarkContracts/contracts_1000-2                      	      50	   9205627 ns/op
+BenchmarkContracts/contracts_1000-2                      	      50	   9154723 ns/op
+BenchmarkContracts/contracts_revisable_1000-2            	      50	   9315814 ns/op
+BenchmarkContracts/contracts_revisable_1000-2            	      50	   9438470 ns/op
+BenchmarkContracts/contracts_revisable_1000-2            	      50	   9865948 ns/op
+BenchmarkContracts/contracts_revisable_1000-2            	      50	   9476561 ns/op
+BenchmarkContracts/contracts_revisable_1000-2            	      50	   9483817 ns/op
+BenchmarkContracts/contracts_revisable+good_1000-2       	      50	   9861452 ns/op
+BenchmarkContracts/contracts_revisable+good_1000-2       	      50	  11064117 ns/op
+BenchmarkContracts/contracts_revisable+good_1000-2       	      50	  11582549 ns/op
+BenchmarkContracts/contracts_revisable+good_1000-2       	      50	   9923087 ns/op
+BenchmarkContracts/contracts_revisable+good_1000-2       	      50	   9787006 ns/op
+BenchmarkContractsForBroadcasting-2                      	      50	  10853346 ns/op
+BenchmarkContractsForBroadcasting-2                      	      50	  10599943 ns/op
+BenchmarkContractsForBroadcasting-2                      	      50	  11573488 ns/op
+BenchmarkContractsForBroadcasting-2                      	      50	  11156473 ns/op
+BenchmarkContractsForBroadcasting-2                      	      50	  11709471 ns/op
+BenchmarkContractsForFunding-2                           	      50	    674763 ns/op
+BenchmarkContractsForFunding-2                           	      50	    667822 ns/op
+BenchmarkContractsForFunding-2                           	      50	    669125 ns/op
+BenchmarkContractsForFunding-2                           	      50	    667406 ns/op
+BenchmarkContractsForFunding-2                           	      50	    679505 ns/op
+BenchmarkHosts/Host-2                                    	      50	    998426 ns/op
+BenchmarkHosts/Host-2                                    	      50	    957014 ns/op
+BenchmarkHosts/Host-2                                    	      50	    954812 ns/op
+BenchmarkHosts/Host-2                                    	      50	    965937 ns/op
+BenchmarkHosts/Host-2                                    	      50	    971302 ns/op
+BenchmarkHosts/Hosts_10-2                                	      50	   8498446 ns/op
+BenchmarkHosts/Hosts_10-2                                	      50	   7803844 ns/op
+BenchmarkHosts/Hosts_10-2                                	      50	   8068019 ns/op
+BenchmarkHosts/Hosts_10-2                                	      50	   8045401 ns/op
+BenchmarkHosts/Hosts_10-2                                	      50	   8508106 ns/op
+BenchmarkHosts/Hosts_100-2                               	      50	  12406185 ns/op
+BenchmarkHosts/Hosts_100-2                               	      50	  11048038 ns/op
+BenchmarkHosts/Hosts_100-2                               	      50	  10196132 ns/op
+BenchmarkHosts/Hosts_100-2                               	      50	  10342670 ns/op
+BenchmarkHosts/Hosts_100-2                               	      50	   8374297 ns/op
+BenchmarkHosts/Hosts_1000-2                              	      50	  22638381 ns/op
+BenchmarkHosts/Hosts_1000-2                              	      50	  24758090 ns/op
+BenchmarkHosts/Hosts_1000-2                              	      50	  23530606 ns/op
+BenchmarkHosts/Hosts_1000-2                              	      50	  23187698 ns/op
+BenchmarkHosts/Hosts_1000-2                              	      50	  23364398 ns/op
+BenchmarkHosts/UpdateHost-2                              	      50	   1119239 ns/op
+BenchmarkHosts/UpdateHost-2                              	      50	    950585 ns/op
+BenchmarkHosts/UpdateHost-2                              	      50	   1049665 ns/op
+BenchmarkHosts/UpdateHost-2                              	      50	   1033818 ns/op
+BenchmarkHosts/UpdateHost-2                              	      50	   1009898 ns/op
+BenchmarkSlabs/PinSlab-2                                 	      50	   3056513 ns/op	13722.51 MB/s
+BenchmarkSlabs/PinSlab-2                                 	      50	   3052627 ns/op	13739.98 MB/s
+BenchmarkSlabs/PinSlab-2                                 	      50	   3006528 ns/op	13950.66 MB/s
+BenchmarkSlabs/PinSlab-2                                 	      50	   3071074 ns/op	13657.45 MB/s
+BenchmarkSlabs/PinSlab-2                                 	      50	   3117348 ns/op	13454.72 MB/s
+BenchmarkSlabs/Slabs-40MiB-2                             	      50	    936770 ns/op	44774.13 MB/s
+BenchmarkSlabs/Slabs-40MiB-2                             	      50	    833184 ns/op	50340.68 MB/s
+BenchmarkSlabs/Slabs-40MiB-2                             	      50	    836460 ns/op	50143.52 MB/s
+BenchmarkSlabs/Slabs-40MiB-2                             	      50	    815587 ns/op	51426.84 MB/s
+BenchmarkSlabs/Slabs-40MiB-2                             	      50	    828799 ns/op	50607.02 MB/s
+BenchmarkSlabs/Slabs-400MiB-2                            	      50	   2057848 ns/op	20382.00 MB/s
+BenchmarkSlabs/Slabs-400MiB-2                            	      50	   2010709 ns/op	20859.83 MB/s
+BenchmarkSlabs/Slabs-400MiB-2                            	      50	   2009565 ns/op	20871.70 MB/s
+BenchmarkSlabs/Slabs-400MiB-2                            	      50	   1992008 ns/op	21055.66 MB/s
+BenchmarkSlabs/Slabs-400MiB-2                            	      50	   2030944 ns/op	20652.00 MB/s
+BenchmarkSlabs/Slabs-4GiB-2                              	      50	  13157001 ns/op	3187.89 MB/s
+BenchmarkSlabs/Slabs-4GiB-2                              	      50	  12971858 ns/op	3233.39 MB/s
+BenchmarkSlabs/Slabs-4GiB-2                              	      50	  12772347 ns/op	3283.89 MB/s
+BenchmarkSlabs/Slabs-4GiB-2                              	      50	  12557978 ns/op	3339.95 MB/s
+BenchmarkSlabs/Slabs-4GiB-2                              	      50	  12462086 ns/op	3365.65 MB/s
+BenchmarkUnpinnedSectors/100-2                           	      50	    724710 ns/op	578756.53 MB/s
+BenchmarkUnpinnedSectors/100-2                           	      50	    835685 ns/op	501899.83 MB/s
+BenchmarkUnpinnedSectors/100-2                           	      50	    827758 ns/op	506706.46 MB/s
+BenchmarkUnpinnedSectors/100-2                           	      50	    832165 ns/op	504023.41 MB/s
+BenchmarkUnpinnedSectors/100-2                           	      50	    818179 ns/op	512638.65 MB/s
+BenchmarkUnpinnedSectors/1000-2                          	      50	   1565336 ns/op	2679490.87 MB/s
+BenchmarkUnpinnedSectors/1000-2                          	      50	   3224166 ns/op	1300895.85 MB/s
+BenchmarkUnpinnedSectors/1000-2                          	      50	   3219281 ns/op	1302869.92 MB/s
+BenchmarkUnpinnedSectors/1000-2                          	      50	   3206988 ns/op	1307863.90 MB/s
+BenchmarkUnpinnedSectors/1000-2                          	      50	   3133788 ns/op	1338413.62 MB/s
+BenchmarkUnpinnedSectors/10000-2                         	      50	  20195860 ns/op	2076813.74 MB/s
+BenchmarkUnpinnedSectors/10000-2                         	      50	  30647227 ns/op	1368575.37 MB/s
+BenchmarkUnpinnedSectors/10000-2                         	      50	  34656441 ns/op	1210252.39 MB/s
+BenchmarkUnpinnedSectors/10000-2                         	      50	  40486190 ns/op	1035983.88 MB/s
+BenchmarkUnpinnedSectors/10000-2                         	      50	  41468386 ns/op	1011446.17 MB/s
+BenchmarkSectorsForIntegrityCheck/10-2                   	      50	    617883 ns/op	67881.90 MB/s
+BenchmarkSectorsForIntegrityCheck/10-2                   	      50	    613851 ns/op	68327.73 MB/s
+BenchmarkSectorsForIntegrityCheck/10-2                   	      50	    597616 ns/op	70183.90 MB/s
+BenchmarkSectorsForIntegrityCheck/10-2                   	      50	    588953 ns/op	71216.27 MB/s
+BenchmarkSectorsForIntegrityCheck/10-2                   	      50	    593656 ns/op	70652.04 MB/s
+BenchmarkSectorsForIntegrityCheck/100-2                  	      50	    728152 ns/op	576020.76 MB/s
+BenchmarkSectorsForIntegrityCheck/100-2                  	      50	    714375 ns/op	587129.48 MB/s
+BenchmarkSectorsForIntegrityCheck/100-2                  	      50	    728612 ns/op	575656.89 MB/s
+BenchmarkSectorsForIntegrityCheck/100-2                  	      50	    713993 ns/op	587443.23 MB/s
+BenchmarkSectorsForIntegrityCheck/100-2                  	      50	    720039 ns/op	582510.72 MB/s
+BenchmarkSectorsForIntegrityCheck/1000-2                 	      50	  43462230 ns/op	96504.57 MB/s
+BenchmarkSectorsForIntegrityCheck/1000-2                 	      50	   1542026 ns/op	2719995.40 MB/s
+BenchmarkSectorsForIntegrityCheck/1000-2                 	      50	   1544164 ns/op	2716230.08 MB/s
+BenchmarkSectorsForIntegrityCheck/1000-2                 	      50	   1553798 ns/op	2699388.97 MB/s
+BenchmarkSectorsForIntegrityCheck/1000-2                 	      50	   1550577 ns/op	2704996.22 MB/s
+BenchmarkPinSectors/10-2                                 	      50	   1075457 ns/op	39000.19 MB/s
+BenchmarkPinSectors/10-2                                 	      50	    986299 ns/op	42525.71 MB/s
+BenchmarkPinSectors/10-2                                 	      50	    996876 ns/op	42074.49 MB/s
+BenchmarkPinSectors/10-2                                 	      50	    990172 ns/op	42359.36 MB/s
+BenchmarkPinSectors/10-2                                 	      50	    998970 ns/op	41986.27 MB/s
+BenchmarkPinSectors/100-2                                	      50	   3456703 ns/op	121338.28 MB/s
+BenchmarkPinSectors/100-2                                	      50	   3847935 ns/op	109001.43 MB/s
+BenchmarkPinSectors/100-2                                	      50	   3893378 ns/op	107729.16 MB/s
+BenchmarkPinSectors/100-2                                	      50	   3929319 ns/op	106743.80 MB/s
+BenchmarkPinSectors/100-2                                	      50	   4057477 ns/op	103372.22 MB/s
+BenchmarkPinSectors/1000-2                               	      50	  27713204 ns/op	151346.77 MB/s
+BenchmarkPinSectors/1000-2                               	      50	  36357765 ns/op	115361.99 MB/s
+BenchmarkPinSectors/1000-2                               	      50	  35988571 ns/op	116545.44 MB/s
+BenchmarkPinSectors/1000-2                               	      50	  37504003 ns/op	111836.17 MB/s
+BenchmarkPinSectors/1000-2                               	      50	  41189335 ns/op	101829.86 MB/s
+BenchmarkUnhealthySlab-2                                 	      50	  32808939 ns/op
+BenchmarkUnhealthySlab-2                                 	      50	  32971688 ns/op
+BenchmarkUnhealthySlab-2                                 	      50	  38552347 ns/op
+BenchmarkUnhealthySlab-2                                 	      50	  46895843 ns/op
+BenchmarkUnhealthySlab-2                                 	      50	  50547239 ns/op
+BenchmarkRecordIntegrityChecks/10-2                      	      50	   1129929 ns/op	37120.06 MB/s
+BenchmarkRecordIntegrityChecks/10-2                      	      50	   1105238 ns/op	37949.34 MB/s
+BenchmarkRecordIntegrityChecks/10-2                      	      50	   1094019 ns/op	38338.49 MB/s
+BenchmarkRecordIntegrityChecks/10-2                      	      50	   1063521 ns/op	39437.90 MB/s
+BenchmarkRecordIntegrityChecks/10-2                      	      50	   1054783 ns/op	39764.63 MB/s
+BenchmarkRecordIntegrityChecks/100-2                     	      50	   4867902 ns/op	86162.45 MB/s
+BenchmarkRecordIntegrityChecks/100-2                     	      50	   6834284 ns/op	61371.52 MB/s
+BenchmarkRecordIntegrityChecks/100-2                     	      50	   6019057 ns/op	69683.74 MB/s
+BenchmarkRecordIntegrityChecks/100-2                     	      50	   5796493 ns/op	72359.34 MB/s
+BenchmarkRecordIntegrityChecks/100-2                     	      50	   5983297 ns/op	70100.21 MB/s
+BenchmarkRecordIntegrityChecks/1000-2                    	      50	  54845101 ns/op	76475.45 MB/s
+BenchmarkRecordIntegrityChecks/1000-2                    	      50	  49612364 ns/op	84541.51 MB/s
+BenchmarkRecordIntegrityChecks/1000-2                    	      50	  50108158 ns/op	83705.01 MB/s
+BenchmarkRecordIntegrityChecks/1000-2                    	      50	  49128178 ns/op	85374.71 MB/s
+BenchmarkRecordIntegrityChecks/1000-2                    	      50	  51441722 ns/op	81535.06 MB/s
+BenchmarkFailingSectors/100-2                            	      50	   3371866 ns/op	124391.17 MB/s
+BenchmarkFailingSectors/100-2                            	      50	   3411710 ns/op	122938.46 MB/s
+BenchmarkFailingSectors/100-2                            	      50	   3529112 ns/op	118848.72 MB/s
+BenchmarkFailingSectors/100-2                            	      50	   3555284 ns/op	117973.81 MB/s
+BenchmarkFailingSectors/100-2                            	      50	   3623731 ns/op	115745.44 MB/s
+BenchmarkFailingSectors/1000-2                           	      50	  16835243 ns/op	249138.31 MB/s
+BenchmarkFailingSectors/1000-2                           	      50	  29402574 ns/op	142650.91 MB/s
+BenchmarkFailingSectors/1000-2                           	      50	  35558072 ns/op	117956.45 MB/s
+BenchmarkFailingSectors/1000-2                           	      50	  37422042 ns/op	112081.11 MB/s
+BenchmarkFailingSectors/1000-2                           	      50	  37245644 ns/op	112611.93 MB/s
+BenchmarkFailingSectors/10000-2                          	      50	  19602203 ns/op	2139710.54 MB/s
+BenchmarkFailingSectors/10000-2                          	      50	  14547206 ns/op	2883236.91 MB/s
+BenchmarkFailingSectors/10000-2                          	      50	  18465704 ns/op	2271402.13 MB/s
+BenchmarkFailingSectors/10000-2                          	      50	  16527011 ns/op	2537847.92 MB/s
+BenchmarkFailingSectors/10000-2                          	      50	  13775722 ns/op	3044707.16 MB/s
+BenchmarkMarkSectorsLost/100-2                           	      50	   3400417 ns/op	123346.75 MB/s
+BenchmarkMarkSectorsLost/100-2                           	      50	   3370762 ns/op	124431.93 MB/s
+BenchmarkMarkSectorsLost/100-2                           	      50	   3375936 ns/op	124241.21 MB/s
+BenchmarkMarkSectorsLost/100-2                           	      50	   3413690 ns/op	122867.16 MB/s
+BenchmarkMarkSectorsLost/100-2                           	      50	   3516627 ns/op	119270.65 MB/s
+BenchmarkMarkSectorsLost/1000-2                          	      50	  24580242 ns/op	170637.21 MB/s
+BenchmarkMarkSectorsLost/1000-2                          	      50	  32756874 ns/op	128043.48 MB/s
+BenchmarkMarkSectorsLost/1000-2                          	      50	  27143727 ns/op	154522.04 MB/s
+BenchmarkMarkSectorsLost/1000-2                          	      50	  26240933 ns/op	159838.22 MB/s
+BenchmarkMarkSectorsLost/1000-2                          	      50	  29023170 ns/op	144515.71 MB/s
+BenchmarkMarkSectorsLost/10000-2                         	      50	 284170252 ns/op	147598.28 MB/s
+BenchmarkMarkSectorsLost/10000-2                         	      50	 286335406 ns/op	146482.20 MB/s
+BenchmarkMarkSectorsLost/10000-2                         	      50	 332318804 ns/op	126213.26 MB/s
+BenchmarkMarkSectorsLost/10000-2                         	      50	 270510895 ns/op	155051.20 MB/s
+BenchmarkMarkSectorsLost/10000-2                         	      50	 336958323 ns/op	124475.45 MB/s
+BenchmarkMigrateSector-2                                 	      50	    827468 ns/op	5068.84 MB/s
+BenchmarkMigrateSector-2                                 	      50	    751655 ns/op	5580.09 MB/s
+BenchmarkMigrateSector-2                                 	      50	    771618 ns/op	5435.72 MB/s
+BenchmarkMigrateSector-2                                 	      50	    737198 ns/op	5689.52 MB/s
+BenchmarkMigrateSector-2                                 	      50	    743137 ns/op	5644.05 MB/s
