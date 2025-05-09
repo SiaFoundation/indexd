@@ -189,12 +189,86 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 
 		// insert slab's sectors in a single batch
 		batch := &pgx.Batch{}
+		sectorIDs := make([]int64, len(slab.Sectors))
 		for i, sector := range slab.Sectors {
-			batch.Queue(`INSERT INTO sectors (sector_root, host_id, slab_id, slab_index, next_integrity_check) VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3, $4, $5)`, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), slabID, i, nextIntegrityCheck)
+			batch.Queue(`
+				INSERT INTO sectors (sector_root, host_id, next_integrity_check) 
+				VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3) 
+				ON CONFLICT (sector_root) DO UPDATE SET sector_root=EXCLUDED.sector_root 
+				RETURNING id
+			`, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), nextIntegrityCheck).QueryRow(func(row pgx.Row) error {
+				return row.Scan(&sectorIDs[i])
+			})
 		}
-		if err = tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
+
+		// fetch sector IDs
+		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 			return fmt.Errorf("failed to insert sectors: %w", err)
 		}
+
+		// insert slab sectors into join table
+		batch = &pgx.Batch{}
+		for i, sectorID := range sectorIDs {
+			batch.Queue(`
+				INSERT INTO slab_sectors (slab_id, slab_index, sector_id)
+				VALUES ($1, $2, $3)
+				ON CONFLICT (slab_id, slab_index) DO NOTHING
+			`, slabID, i, sectorID)
+		}
+		if err = tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
+			return fmt.Errorf("failed to insert slab sectors: %w", err)
+		}
+		return nil
+	})
+}
+
+// UnpinSlab removes the association between the account and the given slab. If
+// this slab was only referenced by the given account, it will also be deleted.
+// The sectors are potentially orphaned and will be removed by a background
+// process.
+func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID slabs.SlabID) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		// delete the association between the account and the slab
+		var sID int64
+		err := tx.QueryRow(ctx, `
+			DELETE FROM account_slabs
+			WHERE
+				account_id = (SELECT id FROM accounts WHERE public_key = $1) AND
+				slab_id = (SELECT id FROM slabs WHERE digest = $2)
+			RETURNING slab_id`, sqlPublicKey(accountID), sqlHash256(slabID)).Scan(&sID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return slabs.ErrSlabNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to unpin slab: %w", err)
+		}
+
+		// return early if the slab is pinned by another account
+		var pinned bool
+		err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM account_slabs WHERE slab_id = $1)`, sID).Scan(&pinned)
+		if err != nil {
+			return fmt.Errorf("failed to check if slab was pinned: %w", err)
+		} else if pinned {
+			return nil
+		}
+
+		// prune the slab and its sectors
+		batch := &pgx.Batch{}
+		batch.Queue(`
+			WITH candidate_sectors AS (
+				SELECT ss.sector_id
+				FROM slab_sectors ss
+				WHERE ss.slab_id = $1 AND NOT EXISTS (
+					SELECT 1 
+					FROM slab_sectors ss2 
+					WHERE ss2.sector_id = ss.sector_id AND ss2.slab_id <> $1
+				)
+			)
+			DELETE FROM sectors WHERE id IN (SELECT sector_id FROM candidate_sectors);`, sID)
+		batch.Queue(`DELETE FROM slabs WHERE id = $1`, sID)
+		if err := tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
+			return fmt.Errorf("failed to prune slab: %w", err)
+		}
+
 		return nil
 	})
 }
@@ -237,11 +311,12 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []sl
 		for _, slabID := range dbIDs {
 			sectorsBatch.Queue(`SELECT s.sector_root, h.public_key, c.contract_id
 FROM sectors s
+INNER JOIN slab_sectors ss ON s.id = ss.sector_id
 LEFT JOIN hosts h ON h.id = s.host_id
 LEFT JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
 LEFT JOIN contracts c ON c.contract_id = csm.contract_id
-WHERE s.slab_id = $1
-ORDER BY s.slab_index ASC`, slabID).Query(func(rows pgx.Rows) error {
+WHERE ss.slab_id = $1
+ORDER BY ss.slab_index ASC`, slabID).Query(func(rows pgx.Rows) error {
 				defer rows.Close()
 				for rows.Next() {
 					var sector slabs.Sector
@@ -311,30 +386,6 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 	})
 }
 
-// RemoveSectors removes the sectors for the given host from the database by
-// unsetting their host_id. This should be called when we failed to pin the
-// sectors on the host because the host could not find the sector.
-func (s *Store) RemoveSectors(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error {
-	sqlRoots := make([]sqlHash256, len(roots))
-	for i, root := range roots {
-		sqlRoots[i] = sqlHash256(root)
-	}
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
-			WITH
-				hid AS (SELECT id FROM hosts WHERE public_key = $1),
-				removed(root) AS (SELECT UNNEST($2::bytea[]))
-			UPDATE sectors
-			SET host_id = NULL
-			FROM removed, hid
-			WHERE host_id = hid.id
-				AND contract_sectors_map_id IS NULL
-				AND sector_root = removed.root;
-		`, sqlPublicKey(hostKey), sqlRoots)
-		return err
-	})
-}
-
 // UnpinnedSectors returns up to 'limit' sectors which have been uploaded to a host but
 // not pinned to a contract yet.
 func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
@@ -388,7 +439,8 @@ func (s *Store) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (
 			WHERE id = (
 				SELECT slabs.id
 				FROM slabs
-				INNER JOIN sectors ON slabs.id = sectors.slab_id
+				INNER JOIN slab_sectors ON slabs.id = slab_sectors.slab_id
+				INNER JOIN sectors ON slab_sectors.sector_id = sectors.id
 				LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
 				LEFT JOIN contracts ON csm.contract_id = contracts.contract_id
 				WHERE

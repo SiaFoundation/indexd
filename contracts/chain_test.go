@@ -38,13 +38,13 @@ type storeMock struct {
 
 	mu        sync.Mutex
 	contracts []Contract
-	sectors   map[types.PublicKey][]*slabs.Sector
+	sectors   map[types.PublicKey][]slabs.Sector
 }
 
 func newStoreMock() *storeMock {
 	return &storeMock{
 		hosts:   make(map[types.PublicKey]hosts.Host),
-		sectors: make(map[types.PublicKey][]*slabs.Sector),
+		sectors: make(map[types.PublicKey][]slabs.Sector),
 	}
 }
 

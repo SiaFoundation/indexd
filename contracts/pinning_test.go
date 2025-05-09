@@ -48,7 +48,7 @@ func (c *contractorMock) PinSectors(ctx context.Context, host hosts.Host, contra
 	return contractIDs[len(contractIDs)-1], missing, nil
 }
 
-func (s *storeMock) ContractsForPinning(ctx context.Context, hk types.PublicKey) ([]types.FileContractID, error) {
+func (s *storeMock) ContractsForPinning(ctx context.Context, hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error) {
 	var contracts []Contract
 	for _, c := range s.contracts {
 		if c.HostKey == hk && !c.RemainingAllowance.IsZero() {
@@ -72,7 +72,7 @@ func (s *storeMock) ContractsForPinning(ctx context.Context, hk types.PublicKey)
 func (s *storeMock) PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab slabs.SlabPinParams) (slabs.SlabID, error) {
 	// only keep track of sectors
 	for _, sector := range slab.Sectors {
-		s.sectors[sector.HostKey] = append(s.sectors[sector.HostKey], &slabs.Sector{
+		s.sectors[sector.HostKey] = append(s.sectors[sector.HostKey], slabs.Sector{
 			Root:       sector.Root,
 			ContractID: nil,
 			HostKey:    &sector.HostKey,
@@ -103,19 +103,18 @@ func (s *storeMock) PinSectors(ctx context.Context, contractID types.FileContrac
 	}
 
 	// pin sectors
-	sectors, ok := s.sectors[hk]
-	if !ok {
-		return nil
-	}
-	for _, sector := range sectors {
-		if _, ok := lookup[sector.Root]; ok {
-			sector.ContractID = &contractID
+	if updated, ok := s.sectors[hk]; ok {
+		for i, sector := range updated {
+			if _, ok := lookup[sector.Root]; ok {
+				updated[i].ContractID = &contractID
+			}
 		}
+		s.sectors[hk] = updated
 	}
 	return nil
 }
 
-func (s *storeMock) RemoveSectors(ctx context.Context, hk types.PublicKey, roots []types.Hash256) error {
+func (s *storeMock) MarkSectorsLost(ctx context.Context, hk types.PublicKey, roots []types.Hash256) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -126,22 +125,27 @@ func (s *storeMock) RemoveSectors(ctx context.Context, hk types.PublicKey, roots
 	}
 
 	// remove sectors
-	sectors, ok := s.sectors[hk]
+	updated, ok := s.sectors[hk]
 	if !ok {
 		panic("no host sectors found")
 	}
-	for i, sector := range sectors {
+	for i, sector := range updated {
 		if _, ok := lookup[sector.Root]; ok {
 			if sector.HostKey == nil || *sector.HostKey != hk {
 				panic("sector host key mismatch")
 			}
-			sectors = append(sectors[:i], sectors[i+1:]...)
+			updated[i].HostKey = nil
+			updated[i].ContractID = nil
 		}
 	}
+	s.sectors[hk] = updated
 	return nil
 }
 
 func (s *storeMock) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	sectors, ok := s.sectors[hostKey]
 	if !ok {
 		return nil, nil
@@ -296,7 +300,9 @@ func TestPerformSectorPinning(t *testing.T) {
 					t.Fatalf("expected contract ID %v, got %v", fcid2, *sector.ContractID)
 				}
 			case r4:
-				t.Fatal("expected sector 4 to be removed")
+				if sector.ContractID != nil {
+					t.Fatalf("expected unpinned sector, got %v", *sector.ContractID)
+				}
 			default:
 				t.Fatalf("unexpected root %v", sector.Root)
 			}

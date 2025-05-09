@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -136,7 +137,7 @@ func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Lo
 			go func(ctx context.Context, host hosts.Host, log *zap.Logger) {
 				defer wg.Done()
 
-				contractIDs, err := cm.store.ContractsForPinning(ctx, h.PublicKey)
+				contractIDs, err := cm.store.ContractsForPinning(ctx, h.PublicKey, maxContractSize)
 				if err != nil {
 					log.Debug("failed to fetch contracts for pinning", zap.Error(err))
 					return
@@ -158,32 +159,34 @@ func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Lo
 						return
 					}
 
-					pinned := roots
-					for _, sector := range missing {
-						for i, root := range roots {
-							if root == sector {
-								pinned = append(pinned[:i], pinned[i+1:]...)
-								break
+					if len(missing) > 0 {
+						filtered := roots[:0]
+						for _, root := range roots {
+							if !slices.Contains(missing, root) {
+								filtered = append(filtered, root)
 							}
 						}
+						roots = slices.Clone(filtered)
+
+						const batchSize = 1000
+						for i := 0; i < len(missing); i += batchSize {
+							end := min(i+batchSize, len(missing))
+							err = cm.store.MarkSectorsLost(ctx, h.PublicKey, missing[i:end])
+							if err != nil {
+								log.Debug("failed to mark sectors as lost", zap.Error(err))
+								return
+							}
+						}
+						atomic.AddUint64(&sectorsMissing, uint64(len(missing)))
 					}
 
-					if len(pinned) > 0 {
+					if len(roots) > 0 {
 						err = cm.store.PinSectors(ctx, contractID, roots)
 						if err != nil {
 							log.Debug("failed to pin sectors", zap.Error(err))
 							return
 						}
-						atomic.AddUint64(&sectorsPinned, uint64(len(pinned)))
-					}
-
-					if len(missing) > 0 {
-						err = cm.store.RemoveSectors(ctx, h.PublicKey, missing)
-						if err != nil {
-							log.Debug("failed to remove missing sectors", zap.Error(err))
-							return
-						}
-						atomic.AddUint64(&sectorsMissing, uint64(len(missing)))
+						atomic.AddUint64(&sectorsPinned, uint64(len(roots)))
 					}
 				}
 			}(ctx, h, log.With(zap.Stringer("hostKey", h.PublicKey)))

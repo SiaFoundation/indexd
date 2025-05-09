@@ -39,16 +39,18 @@ var (
 var _ Store = (*mockStore)(nil)
 
 type mockStore struct {
-	accounts map[types.PublicKey]struct{}
-	hosts    map[types.PublicKey]hosts.Host
-	eas      map[types.PublicKey]map[types.PublicKey]*HostAccount
+	accounts        map[types.PublicKey]struct{}
+	hosts           map[types.PublicKey]hosts.Host
+	eas             map[types.PublicKey]map[types.PublicKey]*HostAccount
+	serviceAccounts map[proto.Account]map[types.PublicKey]types.Currency
 }
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		accounts: make(map[types.PublicKey]struct{}),
-		hosts:    make(map[types.PublicKey]hosts.Host),
-		eas:      make(map[types.PublicKey]map[types.PublicKey]*HostAccount),
+		accounts:        make(map[types.PublicKey]struct{}),
+		hosts:           make(map[types.PublicKey]hosts.Host),
+		eas:             make(map[types.PublicKey]map[types.PublicKey]*HostAccount),
+		serviceAccounts: make(map[proto.Account]map[types.PublicKey]types.Currency),
 	}
 }
 
@@ -119,6 +121,7 @@ type fundAccountCall struct {
 	host        hosts.Host
 	accounts    []HostAccount
 	contractIDs []types.FileContractID
+	target      types.Currency
 }
 
 type mockFunder struct {
@@ -126,11 +129,12 @@ type mockFunder struct {
 	fail  bool
 }
 
-func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, accounts []HostAccount, contractIDs []types.FileContractID, log *zap.Logger) (funded int, drained int, _ error) {
+func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, accounts []HostAccount, contractIDs []types.FileContractID, target types.Currency, log *zap.Logger) (funded int, drained int, _ error) {
 	f.calls = append(f.calls, fundAccountCall{
 		host:        host,
 		accounts:    accounts,
 		contractIDs: contractIDs,
+		target:      target,
 	})
 	if f.fail {
 		return 0, 0, nil
@@ -237,6 +241,10 @@ func TestAccountManager(t *testing.T) {
 		t.Fatal("expected first call to have two contract IDs")
 	} else if len(f.calls[1].contractIDs) != 1 {
 		t.Fatal("expected second call to have one contract ID")
+	} else if !f.calls[0].target.Equals(types.Siacoins(1)) {
+		t.Fatalf("expected target to be %v, got %v", types.Siacoins(1), f.calls[0].target)
+	} else if !f.calls[1].target.Equals(types.Siacoins(1)) {
+		t.Fatalf("expected target to be %v, got %v", types.Siacoins(1), f.calls[0].target)
 	}
 
 	// assert all accounts next fund was updated and consecutive failed funds was reset

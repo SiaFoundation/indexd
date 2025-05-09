@@ -75,13 +75,13 @@ func TestFunder(t *testing.T) {
 	}}
 
 	// prepare funder
-	f := NewFunder(&cmMock{}, nil, target)
+	f := NewFunder(&cmMock{}, nil)
 	f.host = h
 
 	// assert contract checks
 	core, logs := observer.New(zapcore.DebugLevel)
 	contractIDs := []types.FileContractID{{}, {1}, {2}}
-	funded, drained, err := f.FundAccounts(context.Background(), hosts.Host{}, nil, contractIDs, zap.New(core))
+	funded, drained, err := f.FundAccounts(context.Background(), hosts.Host{}, nil, contractIDs, target, zap.New(core))
 	if err != nil {
 		t.Fatal("unexpected", err)
 	} else if funded != 0 {
@@ -118,7 +118,7 @@ func TestFunder(t *testing.T) {
 
 	contractIDs = []types.FileContractID{{3}, badContractId, {4}}
 	accounts := []HostAccount{{AccountKey: proto.Account{1}}, {AccountKey: proto.Account{2}}, {AccountKey: proto.Account{3}}, {AccountKey: proto.Account{4}}}
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, accounts, contractIDs, zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, accounts, contractIDs, target, zap.NewNop())
 	if err != nil {
 		t.Fatal("unexpected", err)
 	} else if funded != 3 {

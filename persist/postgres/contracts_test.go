@@ -409,38 +409,40 @@ func TestContractsForPinning(t *testing.T) {
 	}
 
 	// add contracts for h1
+	const maxContractSize = 499
 	addContract(hk1, types.FileContractID{1}, types.ZeroCurrency, 100, 100, contracts.ContractStateActive, true)       // no allowance
 	addContract(hk1, types.FileContractID{2}, types.NewCurrency64(1), 100, 100, contracts.ContractStateResolved, true) // resolved
 	addContract(hk1, types.FileContractID{3}, types.NewCurrency64(1), 100, 100, contracts.ContractStateActive, false)  // bad
-	addContract(hk1, types.FileContractID{4}, types.NewCurrency64(1), 100, 100, contracts.ContractStateActive, true)   // ok - small size
-	addContract(hk1, types.FileContractID{5}, types.NewCurrency64(1), 200, 200, contracts.ContractStateActive, true)   // ok - big - lower capacity
-	addContract(hk1, types.FileContractID{6}, types.NewCurrency64(1), 200, 300, contracts.ContractStateActive, true)   // ok - big - highest capacity
+	addContract(hk1, types.FileContractID{4}, types.NewCurrency64(1), 500, 500, contracts.ContractStateActive, true)   // too big
+	addContract(hk1, types.FileContractID{5}, types.NewCurrency64(1), 100, 100, contracts.ContractStateActive, true)   // ok - low capacity
+	addContract(hk1, types.FileContractID{6}, types.NewCurrency64(1), 300, 400, contracts.ContractStateActive, true)   // ok - matching capacity - large contract
+	addContract(hk1, types.FileContractID{7}, types.NewCurrency64(1), 200, 400, contracts.ContractStateActive, true)   // ok - matching capacity - smaller contract
 
 	// add contracts for h2
-	addContract(hk2, types.FileContractID{7}, types.NewCurrency64(1), 100, 100, contracts.ContractStateActive, true) // ok
+	addContract(hk2, types.FileContractID{8}, types.NewCurrency64(1), 100, 100, contracts.ContractStateActive, true) // ok
 
 	// assert contracts for pinning for h1
-	contractIDs, err := store.ContractsForPinning(context.Background(), hk1)
+	contractIDs, err := store.ContractsForPinning(context.Background(), hk1, maxContractSize)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contractIDs) != 3 {
 		t.Fatalf("expected 3 contracts, got %d", len(contractIDs))
 	} else if contractIDs[0] != (types.FileContractID{6}) {
 		t.Fatalf("expected contract %v, got %v", types.FileContractID{6}, contractIDs[0])
-	} else if contractIDs[1] != (types.FileContractID{5}) {
-		t.Fatalf("expected contract %v, got %v", types.FileContractID{5}, contractIDs[1])
-	} else if contractIDs[2] != (types.FileContractID{4}) {
-		t.Fatalf("expected contract %v, got %v", types.FileContractID{4}, contractIDs[2])
+	} else if contractIDs[1] != (types.FileContractID{7}) {
+		t.Fatalf("expected contract %v, got %v", types.FileContractID{7}, contractIDs[1])
+	} else if contractIDs[2] != (types.FileContractID{5}) {
+		t.Fatalf("expected contract %v, got %v", types.FileContractID{5}, contractIDs[2])
 	}
 
 	// assert contracts for pinning for h2
-	contractIDs, err = store.ContractsForPinning(context.Background(), hk2)
+	contractIDs, err = store.ContractsForPinning(context.Background(), hk2, maxContractSize)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contractIDs) != 1 {
 		t.Fatalf("expected 1 contract, got %d", len(contractIDs))
-	} else if contractIDs[0] != (types.FileContractID{7}) {
-		t.Fatalf("expected contract %v, got %v", types.FileContractID{7}, contractIDs[0])
+	} else if contractIDs[0] != (types.FileContractID{8}) {
+		t.Fatalf("expected contract %v, got %v", types.FileContractID{8}, contractIDs[0])
 	}
 }
 
@@ -1368,8 +1370,10 @@ func BenchmarkContractsForFunding(b *testing.B) {
 
 	for b.Loop() {
 		rIdx := frand.Intn(len(hosts))
-		if _, err := store.ContractsForFunding(context.Background(), hosts[rIdx], 50); err != nil {
+		if ids, err := store.ContractsForFunding(context.Background(), hosts[rIdx], 50); err != nil {
 			b.Fatal(err)
+		} else if len(ids) == 0 {
+			b.Fatal("no contracts found for funding")
 		}
 	}
 }
@@ -1381,6 +1385,7 @@ func BenchmarkContractsForFunding(b *testing.B) {
 // M1 Max | 100k contracts | 1.41ms/op
 func BenchmarkContractsForPinning(b *testing.B) {
 	const (
+		maxContractSize     = 10 * 1 << 40 // 10TB
 		numContractsPerHost = 100
 		numHosts            = 1000
 	)
@@ -1427,8 +1432,10 @@ func BenchmarkContractsForPinning(b *testing.B) {
 
 	for b.Loop() {
 		rIdx := frand.Intn(len(hosts))
-		if _, err := store.ContractsForPinning(context.Background(), hosts[rIdx]); err != nil {
+		if ids, err := store.ContractsForPinning(context.Background(), hosts[rIdx], maxContractSize); err != nil {
 			b.Fatal(err)
+		} else if len(ids) == 0 {
+			b.Fatal("no contracts found for pinning")
 		}
 	}
 }
