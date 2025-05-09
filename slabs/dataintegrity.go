@@ -14,11 +14,26 @@ import (
 	"go.sia.tech/indexd/hosts"
 )
 
+// CheckSectorsResult is the result of a sector verification. It indicates
+// whether:
+// - the sector was lost
+// - the sector failed verification for any reason
+// - the sector was successfully verified
 type CheckSectorsResult int
 
 const (
+	// SectorLost indicates that the sector was lost. This is returned if the
+	// host admits to losing the sector.
 	SectorLost = CheckSectorsResult(iota)
+
+	// SectorFailed indicates that the sector failed verification for some
+	// reason. Since we can't trust a host to not use all means necessary for us
+	// to not track a failure, we consider anything that is not a lost sector or
+	// successfully verification a failure.
 	SectorFailed
+
+	// SectorSuccess indicates that the sector was successfully verified and is
+	// still in the host's possession.
 	SectorSuccess
 )
 
@@ -105,6 +120,12 @@ func (m *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, host
 		}
 
 		// if the host returned an insufficient balance error, reset the account
+		// NOTE: when this happens we don't interrupt on purpose. Instead we
+		// continue as if our internal balance was ok. So if we still expected
+		// to have enough balance to check 100 sectors, the next 100 sectors
+		// will probably also have a failure recorded. This means the host can't
+		// be clever about using an out-of-funds error to avoid penalties but we
+		// are also not harsher than necessary.
 		var resetErr error
 		resetOnce.Do(func() {
 			if err != nil && strings.Contains(err.Error(), proto.ErrNotEnoughFunds.Error()) {
