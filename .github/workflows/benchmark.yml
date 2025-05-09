@@ -46,7 +46,7 @@ jobs:
 
       - name: Run benchmarks
         run: |
-          go test -run='^$' -bench=. -count=10 -benchtime=15x -timeout=1h ./... 2>&1 | tee new_bench.txt
+          go test -run='^$' -bench=. -count=5 -benchtime=50x -timeout=2h ./... 2>&1 | tee new_bench.txt
 
       - name: Save latest benchmark as artifact
         uses: actions/upload-artifact@v4
