@@ -430,7 +430,7 @@ func TestContractsForPinning(t *testing.T) {
 	} else if contractIDs[1] != (types.FileContractID{5}) {
 		t.Fatalf("expected contract %v, got %v", types.FileContractID{5}, contractIDs[1])
 	} else if contractIDs[2] != (types.FileContractID{4}) {
-		t.Fatalf("expected contract %v, got %v", types.FileContractID{4}, contractIDs[1])
+		t.Fatalf("expected contract %v, got %v", types.FileContractID{4}, contractIDs[2])
 	}
 
 	// assert contracts for pinning for h2
