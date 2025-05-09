@@ -12,7 +12,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
-	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 )
 
