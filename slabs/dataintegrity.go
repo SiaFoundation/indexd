@@ -56,10 +56,10 @@ func (v *sectorVerifier) VerifySector(ctx context.Context, prices proto.HostPric
 // either errInsufficientServiceAccountBalance or context.Canceled, the caller
 // should stop handle any remaining results and then interrupt the integrity
 // checks for the host.
-func (c *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, host hosts.Host, roots []types.Hash256) ([]CheckSectorsResult, error) {
+func (m *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, host hosts.Host, roots []types.Hash256) ([]CheckSectorsResult, error) {
 	// check the account balance
 	cost := host.Settings.Prices.RPCVerifySectorCost().RenterCost()
-	balance, err := c.am.ServiceAccountBalance(ctx, host.PublicKey, c.serviceAccount)
+	balance, err := m.am.ServiceAccountBalance(ctx, host.PublicKey, m.serviceAccount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service account balance: %w", err)
 	} else if balance.Cmp(cost) < 0 {
@@ -82,14 +82,14 @@ func (c *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, host
 		}
 
 		// verify the sector
-		_, err := hc.VerifySector(ctx, host.Settings.Prices, c.serviceAccount.Token(c.serviceAccountKey, host.PublicKey), root)
+		_, err := hc.VerifySector(ctx, host.Settings.Prices, m.serviceAccount.Token(m.serviceAccountKey, host.PublicKey), root)
 		if errors.Is(err, context.Canceled) {
 			return results, err // interrupted
 		}
 
 		// adjust balance
 		balance = balance.Sub(cost)
-		if err := c.am.DebitServiceAccount(ctx, host.PublicKey, c.serviceAccount, cost); err != nil {
+		if err := m.am.DebitServiceAccount(ctx, host.PublicKey, m.serviceAccount, cost); err != nil {
 			return nil, fmt.Errorf("failed to debit service account: %w", err)
 		}
 
@@ -108,7 +108,7 @@ func (c *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, host
 		var resetErr error
 		resetOnce.Do(func() {
 			if err != nil && strings.Contains(err.Error(), proto.ErrNotEnoughFunds.Error()) {
-				resetErr = c.am.ResetAccountBalance(ctx, host.PublicKey, c.serviceAccount)
+				resetErr = m.am.ResetAccountBalance(ctx, host.PublicKey, m.serviceAccount)
 			}
 		})
 		if resetErr != nil {

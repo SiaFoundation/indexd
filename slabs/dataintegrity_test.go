@@ -11,14 +11,26 @@ import (
 )
 
 type mockSectorVerifier struct {
+	prices  proto.HostPrices
+	sectors map[types.Hash256]error
 }
 
-func newMockSectorVerifier() *mockSectorVerifier {
-	return &mockSectorVerifier{}
+func newMockSectorVerifier(prices proto.HostPrices) *mockSectorVerifier {
+	return &mockSectorVerifier{
+		prices: prices,
+	}
 }
 
 func (ht *mockSectorVerifier) VerifySector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, root types.Hash256) (rhp.RPCVerifySectorResult, error) {
-	panic("not implemented")
+	if err, ok := ht.sectors[root]; ok {
+		if err == nil {
+			return rhp.RPCVerifySectorResult{
+				Usage: prices.RPCVerifySectorCost(),
+			}, nil
+		}
+		return rhp.RPCVerifySectorResult{}, err
+	}
+	return rhp.RPCVerifySectorResult{}, proto.ErrNotEnoughFunds
 }
 
 func TestVerifySectors(t *testing.T) {
@@ -30,11 +42,24 @@ func TestVerifySectors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ht := newMockSectorVerifier()
-	_, err = sm.verifySectors(context.Background(), ht, hosts.Host{}, nil)
+	host := hosts.Host{
+		PublicKey: types.PublicKey{1},
+		Settings: proto.HostSettings{
+			Prices: proto.HostPrices{
+				EgressPrice: types.Siacoins(1).Div64(proto.SectorSize), // 1SC per sector
+			},
+		},
+	}
+
+	ht := newMockSectorVerifier(host.Settings.Prices)
+	_, err = sm.verifySectors(context.Background(), ht, host, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// TODO: implement
+	// TODO: case 1: successfully verify a bad and good sector
+
+	// TODO: case 2: verify that running out of funds returns results up until the interruption
+
+	// TODO: case 3: same but with context.Canceled
 }
