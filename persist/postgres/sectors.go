@@ -26,10 +26,13 @@ func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, ro
 			sqlRoots[i] = sqlHash256(root)
 		}
 		resp, err := tx.Exec(ctx, `
+			WITH
+				hid AS (SELECT id FROM hosts WHERE public_key = $1),
+				removed(root) AS (SELECT UNNEST($2::bytea[]))
 			UPDATE sectors
-			SET contract_sectors_map_id = NULL, host_id = NULL
-			WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)
-			AND sector_root = ANY($2)
+			SET host_id = NULL, contract_sectors_map_id = NULL
+			FROM removed, hid
+			WHERE host_id = hid.id AND sector_root = removed.root;
 		`, sqlPublicKey(hostKey), sqlRoots)
 		if err != nil {
 			return err
