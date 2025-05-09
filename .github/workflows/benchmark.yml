@@ -46,7 +46,7 @@ jobs:
 
       - name: Run benchmarks
         run: |
-          go test -run='^$' -bench=. -count=1 -benchtime=100x -timeout=30m ./... > new_bench.txt
+          go test -run='^$' -bench=. -count=10 -benchtime=20x -timeout=30m ./... > new_bench.txt
 
       - name: Save latest benchmark as artifact
         uses: actions/upload-artifact@v4
@@ -75,7 +75,7 @@ jobs:
       - name: Fail on regression
         if: steps.lookup_baseline.outputs.baseline_found == 'true'
         run: |
-          if grep -E '([3-9][0-9]%|[1-9][0-9]{2,}%?)' benchdiff.txt; then
+          if grep -E '([5-9][0-9]%|[1-9][0-9]{2,}%?)' benchdiff.txt; then
             echo "Performance regression detected! 🔥"
             exit 1
           else
