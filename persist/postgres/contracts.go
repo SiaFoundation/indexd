@@ -179,7 +179,7 @@ func (s *Store) ContractsForFunding(ctx context.Context, hk types.PublicKey, lim
 SELECT c.contract_id
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
-WHERE h.public_key = $1 AND c.good = TRUE AND c.state <= $2  AND c.remaining_allowance > 0
+WHERE h.public_key = $1 AND c.good = TRUE AND c.state <= $2 AND c.remaining_allowance > 0
 ORDER BY c.remaining_allowance DESC
 LIMIT $3
 `, sqlPublicKey(hk), sqlContractState(contracts.ContractStateActive), limit)
@@ -204,15 +204,15 @@ LIMIT $3
 // ContractsForPinning returns all contracts for the given host key that are
 // good for pinning sectors with. The contracts are sorted by size, capacity in
 // descending fashion.
-func (s *Store) ContractsForPinning(ctx context.Context, hk types.PublicKey) ([]types.FileContractID, error) {
+func (s *Store) ContractsForPinning(ctx context.Context, hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error) {
 	var fcids []types.FileContractID
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 SELECT c.contract_id
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
-WHERE h.public_key = $1 AND c.good = TRUE AND c.state <= $2  AND c.remaining_allowance > 0 AND c.size < 1E13::NUMERIC 
-ORDER BY c.size DESC, c.capacity DESC`, sqlPublicKey(hk), sqlContractState(contracts.ContractStateActive))
+WHERE h.public_key = $1 AND c.good = TRUE AND c.state <= $2 AND c.remaining_allowance > 0 AND c.size < $3
+ORDER BY c.capacity DESC, c.size DESC`, sqlPublicKey(hk), sqlContractState(contracts.ContractStateActive), maxContractSize)
 		if err != nil {
 			return fmt.Errorf("failed to fetch contracts for pinning: %w", err)
 		}
