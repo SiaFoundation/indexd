@@ -78,35 +78,15 @@ func WithLogger(l *zap.Logger) Option {
 
 // NewManager creates a new slab manager.
 func NewManager(am AccountManager, store Store, serviceAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
-	m := &SlabManager{
-		integrityCheckInterval:       7 * 24 * time.Hour,
-		failedIntegrityCheckInterval: 6 * time.Hour,
-		maxFailedIntegrityChecks:     3,
-
-		serviceAccount:    proto.Account(serviceAccount.PublicKey()),
-		serviceAccountKey: serviceAccount,
-
-		am:    am,
-		store: store,
-		tg:    threadgroup.New(),
-		log:   zap.NewNop(),
-	}
-	for _, opt := range opts {
-		opt(m)
+	m, err := newSlabManager(am, store, serviceAccount, opts...)
+	if err != nil {
+		return nil, err
 	}
 
 	ctx, cancel, err := m.tg.AddContext(context.Background())
 	if err != nil {
 		return nil, err
 	}
-
-	// add account to store
-	if err := store.AddAccount(ctx, types.PublicKey(m.serviceAccount)); err != nil && !errors.Is(err, accounts.ErrExists) {
-		return nil, fmt.Errorf("failed to add service account: %w", err)
-	}
-
-	// let AccountManager know about the service account
-	am.RegisterServiceAccount(m.serviceAccount)
 
 	go func() {
 		defer cancel()
@@ -131,6 +111,36 @@ func NewManager(am AccountManager, store Store, serviceAccount types.PrivateKey,
 		}
 	}()
 
+	return m, nil
+}
+
+func newSlabManager(am AccountManager, store Store, serviceAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+	m := &SlabManager{
+		integrityCheckInterval:       7 * 24 * time.Hour,
+		failedIntegrityCheckInterval: 6 * time.Hour,
+		maxFailedIntegrityChecks:     3,
+
+		serviceAccount:    proto.Account(serviceAccount.PublicKey()),
+		serviceAccountKey: serviceAccount,
+
+		am:    am,
+		store: store,
+		tg:    threadgroup.New(),
+		log:   zap.NewNop(),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+
+	// add account to store
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := store.AddAccount(ctx, types.PublicKey(m.serviceAccount)); err != nil && !errors.Is(err, accounts.ErrExists) {
+		return nil, fmt.Errorf("failed to add service account: %w", err)
+	}
+
+	// let AccountManager know about the service account
+	am.RegisterServiceAccount(m.serviceAccount)
 	return m, nil
 }
 
