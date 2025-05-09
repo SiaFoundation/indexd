@@ -2,6 +2,7 @@ package slabs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -10,6 +11,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/threadgroup"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -27,12 +29,25 @@ type (
 		failedIntegrityCheckInterval time.Duration
 		maxFailedIntegrityChecks     int
 
-		checker IntegrityChecker
-		store   Store
-		tg      *threadgroup.ThreadGroup
-		log     *zap.Logger
+		serviceAccount    proto.Account
+		serviceAccountKey types.PrivateKey
+
+		am    AccountManager
+		store Store
+		tg    *threadgroup.ThreadGroup
+		log   *zap.Logger
 	}
 
+	// AccountManager defines the SlabManager's dependencies on the account
+	// manager.
+	AccountManager interface {
+		RegisterServiceAccount(account proto.Account)
+		ResetAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) error
+		ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error)
+		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
+	}
+
+	// IntegrityChecker
 	IntegrityChecker interface {
 		CheckSectors(ctx context.Context, prices proto.HostPrices, account proto.Account, roots []types.Hash256) ([]CheckSectorsResult, error)
 	}
@@ -40,6 +55,7 @@ type (
 	// Store defines an interface to store and update slab related information
 	// in the database.
 	Store interface {
+		AddAccount(ctx context.Context, ak types.PublicKey) error
 		FailingSectors(ctx context.Context, hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
@@ -61,12 +77,16 @@ func WithLogger(l *zap.Logger) Option {
 }
 
 // NewManager creates a new slab manager.
-func NewManager(store Store, opts ...Option) (*SlabManager, error) {
+func NewManager(am AccountManager, store Store, serviceAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
 	m := &SlabManager{
 		integrityCheckInterval:       7 * 24 * time.Hour,
 		failedIntegrityCheckInterval: 6 * time.Hour,
 		maxFailedIntegrityChecks:     3,
 
+		serviceAccount:    proto.Account(serviceAccount.PublicKey()),
+		serviceAccountKey: serviceAccount,
+
+		am:    am,
 		store: store,
 		tg:    threadgroup.New(),
 		log:   zap.NewNop(),
@@ -79,6 +99,15 @@ func NewManager(store Store, opts ...Option) (*SlabManager, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	// add account to store
+	if err := store.AddAccount(ctx, types.PublicKey(m.serviceAccount)); err != nil && !errors.Is(err, accounts.ErrExists) {
+		return nil, fmt.Errorf("failed to add service account: %w", err)
+	}
+
+	// let AccountManager know about the service account
+	am.RegisterServiceAccount(m.serviceAccount)
+
 	go func() {
 		defer cancel()
 
@@ -131,6 +160,9 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 		default:
 		}
 
+		// TODO: dial host and get fresh prices
+		var hc HostTransport
+
 		sem <- struct{}{}
 		wg.Add(1)
 		go func(host hosts.Host) {
@@ -147,8 +179,8 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 				return
 			}
 
-			// TODO: perform integrity checks
-			results, err := m.checker.CheckSectors(ctx, host.Settings.Prices, proto.Account{}, toCheck)
+			// perform integrity checks
+			results, err := m.checkSectors(ctx, hc, host, toCheck)
 			if err != nil {
 				hostLogger.Error("failed to check sectors", zap.Error(err))
 				return
