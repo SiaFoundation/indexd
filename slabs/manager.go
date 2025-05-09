@@ -47,11 +47,6 @@ type (
 		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
 	}
 
-	// IntegrityChecker
-	IntegrityChecker interface {
-		CheckSectors(ctx context.Context, prices proto.HostPrices, account proto.Account, roots []types.Hash256) ([]CheckSectorsResult, error)
-	}
-
 	// Store defines an interface to store and update slab related information
 	// in the database.
 	Store interface {
@@ -170,8 +165,12 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 		default:
 		}
 
-		// TODO: dial host and get fresh prices
-		var hc HostTransport
+		// create verifier
+		verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey)
+		if err != nil {
+			return fmt.Errorf("failed to create sector verifier: %w", err)
+		}
+		defer verifier.Close()
 
 		sem <- struct{}{}
 		wg.Add(1)
@@ -190,7 +189,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 			}
 
 			// perform integrity checks
-			results, err := m.checkSectors(ctx, hc, host, toCheck)
+			results, err := m.verifySectors(ctx, verifier, host, toCheck)
 			if err != nil {
 				hostLogger.Error("failed to check sectors", zap.Error(err))
 				return

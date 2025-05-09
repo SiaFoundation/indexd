@@ -10,6 +10,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/hosts"
 )
 
@@ -24,13 +25,34 @@ const (
 var errInsufficientServiceAccountBalance = errors.New("insufficient service account balance")
 
 type (
-	// HostTransport defines the interface for an open connection to the host.
-	HostTransport interface {
+	// SectorVerifier defines the interface verifying a sector's integrity on a
+	// host.
+	SectorVerifier interface {
 		VerifySector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, root types.Hash256) (rhp.RPCVerifySectorResult, error)
+	}
+
+	sectorVerifier struct {
+		tc rhp.TransportClient
 	}
 )
 
-func (c *SlabManager) checkSectors(ctx context.Context, hc HostTransport, host hosts.Host, roots []types.Hash256) ([]CheckSectorsResult, error) {
+func newSectorVerifier(ctx context.Context, hostAddr string, hostKey types.PublicKey) (*sectorVerifier, error) {
+	tc, err := siamux.Dial(ctx, hostAddr, hostKey)
+	if err != nil {
+		return nil, err
+	}
+	return &sectorVerifier{tc: tc}, nil
+}
+
+func (v *sectorVerifier) Close() error {
+	return v.tc.Close()
+}
+
+func (v *sectorVerifier) VerifySector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, root types.Hash256) (rhp.RPCVerifySectorResult, error) {
+	return rhp.RPCVerifySector(ctx, v.tc, prices, token, root)
+}
+
+func (c *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, host hosts.Host, roots []types.Hash256) ([]CheckSectorsResult, error) {
 	// check the account balance
 	cost := host.Settings.Prices.RPCVerifySectorCost().RenterCost()
 	balance, err := c.am.ServiceAccountBalance(ctx, host.PublicKey, c.serviceAccount)
