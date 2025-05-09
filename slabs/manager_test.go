@@ -71,7 +71,7 @@ func (m *mockAccountManager) RegisterServiceAccount(account proto.Account) {
 }
 
 func (m *mockAccountManager) ResetAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
-	panic("not implemented")
+	return m.UpdateServiceAccountBalance(ctx, hostKey, account, types.ZeroCurrency)
 }
 
 func (m *mockAccountManager) ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error) {

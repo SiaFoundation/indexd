@@ -97,11 +97,11 @@ func TestVerifySectors(t *testing.T) {
 
 	// case 1: successfully verify a lost and a good sector
 	err = verifySectors(map[types.Hash256]error{
-		{1}: proto.ErrSectorNotFound,
-		{2}: nil,
+		{1}: proto.ErrSectorNotFound, // lost
+		{2}: nil,                     // good
 	}, []types.Hash256{
-		{1}, // lost
-		{2}, // good
+		{1},
+		{2},
 	}, []CheckSectorsResult{SectorLost, SectorSuccess})
 	if err != nil {
 		t.Fatal(err)
@@ -110,7 +110,46 @@ func TestVerifySectors(t *testing.T) {
 	// assert withdrawal: 3SC-2SC = 1SC
 	assertBalance(types.Siacoins(1))
 
-	// TODO: case 2: verify that running out of funds returns results up until the interruption
+	// case 2: running out of funds unexpectedly (malicious host) should reset the balance but
+	// should continue to verify sectors
+	updateBalance(types.Siacoins(10))
+	err = verifySectors(map[types.Hash256]error{
+		{1}: proto.ErrNotEnoughFunds, // unexpected OOF
+		{2}: nil,                     // good sector
+	}, []types.Hash256{
+		{1},
+		{2},
+	}, []CheckSectorsResult{SectorFailed, SectorSuccess})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertBalance(types.ZeroCurrency)
 
-	// TODO: case 3: same but with context.Canceled
+	// case 3: running out of funds expectedly
+	updateBalance(types.Siacoins(2))
+	err = verifySectors(map[types.Hash256]error{
+		{1}: nil, // good sector
+		{2}: nil, // good sector
+		{3}: nil, // good sector
+	}, []types.Hash256{
+		{1},
+		{2},
+		{3},
+	}, []CheckSectorsResult{SectorSuccess, SectorSuccess})
+	if !errors.Is(err, errInsufficientServiceAccountBalance) {
+		t.Fatalf("expected insufficient balance error, got %v", err)
+	}
+
+	// case 4: interruption via context
+	updateBalance(types.Siacoins(10))
+	err = verifySectors(map[types.Hash256]error{
+		{1}: nil,              // good sector
+		{2}: context.Canceled, // verification interrupted
+	}, []types.Hash256{
+		{1},
+		{2},
+	}, []CheckSectorsResult{SectorSuccess})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("expected context.Canceled error, got %v", err)
+	}
 }
