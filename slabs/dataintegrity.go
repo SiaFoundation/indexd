@@ -52,6 +52,10 @@ func (v *sectorVerifier) VerifySector(ctx context.Context, prices proto.HostPric
 	return rhp.RPCVerifySector(ctx, v.tc, prices, token, root)
 }
 
+// verifySectors verifies a list of sectors on a host. If verifySectors returns
+// either errInsufficientServiceAccountBalance or context.Canceled, the caller
+// should stop handle any remaining results and then interrupt the integrity
+// checks for the host.
 func (c *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, host hosts.Host, roots []types.Hash256) ([]CheckSectorsResult, error) {
 	// check the account balance
 	cost := host.Settings.Prices.RPCVerifySectorCost().RenterCost()

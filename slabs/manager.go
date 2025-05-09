@@ -113,7 +113,7 @@ func newSlabManager(am AccountManager, store Store, serviceAccount types.Private
 	m := &SlabManager{
 		integrityCheckInterval:       7 * 24 * time.Hour,
 		failedIntegrityCheckInterval: 6 * time.Hour,
-		maxFailedIntegrityChecks:     3,
+		maxFailedIntegrityChecks:     5,
 
 		serviceAccount:    proto.Account(serviceAccount.PublicKey()),
 		serviceAccountKey: serviceAccount,
@@ -179,72 +179,96 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 				<-sem
 				wg.Done()
 			}()
-			hostLogger := logger.With(zap.Stringer("hostKey", host.PublicKey))
-
-			// TODO: batching
-			toCheck, err := m.store.SectorsForIntegrityCheck(ctx, host.PublicKey, math.MaxInt)
-			if err != nil {
-				hostLogger.Error("failed to fetch sectors for integrity check", zap.Error(err))
-				return
-			}
-
-			// perform integrity checks
-			results, err := m.verifySectors(ctx, verifier, host, toCheck)
-			if err != nil {
-				hostLogger.Error("failed to check sectors", zap.Error(err))
-				return
-			}
-			var lost, failed, success []types.Hash256
-			for i, result := range results {
-				switch result {
-				case SectorLost:
-					lost = append(lost, toCheck[i])
-				case SectorFailed:
-					failed = append(failed, toCheck[i])
-				case SectorSuccess:
-					success = append(success, toCheck[i])
-				default:
-					hostLogger.Fatal("unknown result", zap.Int("result", int(result)))
-				}
-			}
-
-			// update lost, failed and successful sectors
-			if err := m.store.MarkSectorsLost(ctx, host.PublicKey, lost); err != nil {
-				hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
-				return
-			}
-			if err := m.store.RecordIntegrityCheck(ctx, false, time.Now().Add(m.failedIntegrityCheckInterval), host.PublicKey, lost); err != nil {
-				hostLogger.Error("failed to record integrity check for failed sectors", zap.Error(err))
-				return
-			}
-			if err := m.store.RecordIntegrityCheck(ctx, true, time.Now().Add(m.integrityCheckInterval), host.PublicKey, success); err != nil {
-				hostLogger.Error("failed to record integrity check for successful sectors", zap.Error(err))
-				return
-			}
-
-			// fetch sector roots for sectors that have now failed the check 3+
-			// times and mark them lost as well
-			const batchSize = 100
-			for {
-				newlyLost, err := m.store.FailingSectors(ctx, host.PublicKey, m.maxFailedIntegrityChecks, batchSize)
-				if err != nil {
-					hostLogger.Error("failed to fetch failing sectors", zap.Error(err))
-					return
-				}
-				if err := m.store.MarkSectorsLost(ctx, host.PublicKey, newlyLost); err != nil {
-					hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
-					return
-				}
-				if len(newlyLost) < batchSize {
-					return
-				}
-			}
+			m.performIntegrityChecksForHost(ctx, host, verifier, logger)
 		}(host)
 	}
 	wg.Wait()
 
 	logger.Debug("finished integrity checks", zap.Duration("elapsed", time.Since(start)))
 	return nil
+}
+
+func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, host hosts.Host, verifier SectorVerifier, logger *zap.Logger) {
+	hostLogger := logger.With(zap.Stringer("hostKey", host.PublicKey))
+
+	const batchSize = 100 // batch size for sector retrieval
+
+	for interrupt := false; !interrupt; {
+		toCheck, err := m.store.SectorsForIntegrityCheck(ctx, host.PublicKey, batchSize)
+		if err != nil {
+			hostLogger.Error("failed to fetch sectors for integrity check", zap.Error(err))
+			return
+		} else if len(toCheck) == 0 {
+			return
+		}
+		interrupt = len(toCheck) < batchSize
+
+		// perform integrity checks
+		results, err := m.verifySectors(ctx, verifier, host, toCheck)
+		if errors.Is(err, context.Canceled) || errors.Is(err, errInsufficientServiceAccountBalance) {
+			interrupt = true
+		}
+		if err != nil {
+			hostLogger.Error("failed to check sectors", zap.Error(err))
+			return
+		}
+		var lost, failed, success []types.Hash256
+		for i, result := range results {
+			switch result {
+			case SectorLost:
+				lost = append(lost, toCheck[i])
+			case SectorFailed:
+				failed = append(failed, toCheck[i])
+			case SectorSuccess:
+				success = append(success, toCheck[i])
+			default:
+				hostLogger.Fatal("unknown result", zap.Int("result", int(result)))
+			}
+		}
+
+		// starting from here, we use a background context with a
+		// timeout, to make sure even when the integrity checks are
+		// interrupted, we give it some time to persist the results.
+		err = func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+			defer cancel()
+
+			// update lost, failed and successful sectors
+			if err := m.store.MarkSectorsLost(ctx, host.PublicKey, lost); err != nil {
+				hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
+				return fmt.Errorf("failed to mark sectors as lost: %w", err)
+			}
+			if err := m.store.RecordIntegrityCheck(ctx, false, time.Now().Add(m.failedIntegrityCheckInterval), host.PublicKey, lost); err != nil {
+				hostLogger.Error("failed to record integrity check for failed sectors", zap.Error(err))
+				return fmt.Errorf("failed to record integrity check for failed sectors: %w", err)
+			}
+			if err := m.store.RecordIntegrityCheck(ctx, true, time.Now().Add(m.integrityCheckInterval), host.PublicKey, success); err != nil {
+				hostLogger.Error("failed to record integrity check for successful sectors", zap.Error(err))
+				return fmt.Errorf("failed to record integrity check for successful sectors: %w", err)
+			}
+
+			// fetch sector roots for sectors that have now failed the check 5+
+			// times and mark them lost as well
+			for {
+				newlyLost, err := m.store.FailingSectors(ctx, host.PublicKey, m.maxFailedIntegrityChecks, batchSize)
+				if err != nil {
+					hostLogger.Error("failed to fetch failing sectors", zap.Error(err))
+					return fmt.Errorf("failed to fetch failing sectors: %w", err)
+				}
+				if err := m.store.MarkSectorsLost(ctx, host.PublicKey, newlyLost); err != nil {
+					hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
+					return fmt.Errorf("failed to mark sectors as lost: %w", err)
+				}
+				if len(newlyLost) < batchSize {
+					return nil
+				}
+			}
+		}()
+		if err != nil {
+			hostLogger.Error("failed to persist integrity check results", zap.Error(err))
+			return
+		}
+	}
 }
 
 func (m *SlabManager) performSlabMigrations() error {
