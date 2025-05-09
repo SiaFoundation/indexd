@@ -2,6 +2,8 @@ package slabs
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"testing"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -30,12 +32,12 @@ func (ht *mockSectorVerifier) VerifySector(ctx context.Context, prices proto.Hos
 		}
 		return rhp.RPCVerifySectorResult{}, err
 	}
-	return rhp.RPCVerifySectorResult{}, proto.ErrNotEnoughFunds
+	panic("unknown sector")
 }
 
 func TestVerifySectors(t *testing.T) {
-	am := newMockAccountManager()
 	store := newMockStore()
+	am := newMockAccountManager(store)
 	account := types.GeneratePrivateKey()
 	sm, err := newSlabManager(am, store, account)
 	if err != nil {
@@ -51,13 +53,62 @@ func TestVerifySectors(t *testing.T) {
 		},
 	}
 
-	ht := newMockSectorVerifier(host.Settings.Prices)
-	_, err = sm.verifySectors(context.Background(), ht, host, nil)
+	// helper to call verify sectors
+	verifySectors := func(hostSectors map[types.Hash256]error, toVerify []types.Hash256, expectedResults []CheckSectorsResult) error {
+		verifier := newMockSectorVerifier(host.Settings.Prices)
+		verifier.sectors = hostSectors
+		results, err := sm.verifySectors(context.Background(), verifier, host, toVerify)
+		if !reflect.DeepEqual(results, expectedResults) {
+			t.Fatalf("expected %v, got %v", expectedResults, results)
+		}
+		return err
+	}
+
+	// helper to assert balance of service account
+	assertBalance := func(expected types.Currency) {
+		t.Helper()
+		balance, err := am.ServiceAccountBalance(context.Background(), host.PublicKey, proto.Account(account.PublicKey()))
+		if err != nil {
+			t.Fatal(err)
+		} else if !balance.Equals(expected) {
+			t.Fatalf("expected balance %v, got %v", expected, balance)
+		}
+	}
+
+	// helper to set balance of service account
+	updateBalance := func(amount types.Currency) {
+		t.Helper()
+		err := am.UpdateServiceAccountBalance(context.Background(), host.PublicKey, proto.Account(account.PublicKey()), amount)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// verifying sector before funding the service account fails.
+	err = verifySectors(map[types.Hash256]error{}, []types.Hash256{
+		{1},
+	}, nil)
+	if !errors.Is(err, errInsufficientServiceAccountBalance) {
+		t.Fatalf("expected insufficient balance error, got %v", err)
+	}
+
+	// add 3SC to the account
+	updateBalance(types.Siacoins(3))
+
+	// case 1: successfully verify a lost and a good sector
+	err = verifySectors(map[types.Hash256]error{
+		{1}: proto.ErrSectorNotFound,
+		{2}: nil,
+	}, []types.Hash256{
+		{1}, // lost
+		{2}, // good
+	}, []CheckSectorsResult{SectorLost, SectorSuccess})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// TODO: case 1: successfully verify a bad and good sector
+	// assert withdrawal: 3SC-2SC = 1SC
+	assertBalance(types.Siacoins(1))
 
 	// TODO: case 2: verify that running out of funds returns results up until the interruption
 

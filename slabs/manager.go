@@ -165,13 +165,6 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 		default:
 		}
 
-		// create verifier
-		verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey)
-		if err != nil {
-			return fmt.Errorf("failed to create sector verifier: %w", err)
-		}
-		defer verifier.Close()
-
 		sem <- struct{}{}
 		wg.Add(1)
 		go func(host hosts.Host) {
@@ -179,7 +172,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 				<-sem
 				wg.Done()
 			}()
-			m.performIntegrityChecksForHost(ctx, host, verifier, logger)
+			m.performIntegrityChecksForHost(ctx, host, logger)
 		}(host)
 	}
 	wg.Wait()
@@ -188,11 +181,21 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 	return nil
 }
 
-func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, host hosts.Host, verifier SectorVerifier, logger *zap.Logger) {
+func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, host hosts.Host, logger *zap.Logger) {
 	hostLogger := logger.With(zap.Stringer("hostKey", host.PublicKey))
 
-	const batchSize = 100 // batch size for sector retrieval
+	// create verifier
+	verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey)
+	if err != nil {
+		// NOTE: If we can't dial the host we don't mark sectors as lost.
+		// Instead we leave it up to the scan code to determine whether the host
+		// is offline.
+		hostLogger.Warn("failed to create sector verifier", zap.Error(err))
+		return
+	}
+	defer verifier.Close()
 
+	const batchSize = 100 // batch size for sector retrieval
 	for interrupt := false; !interrupt; {
 		toCheck, err := m.store.SectorsForIntegrityCheck(ctx, host.PublicKey, batchSize)
 		if err != nil {
