@@ -36,7 +36,6 @@ type (
 		cm     ChainManager
 		host   HostClient
 		signer rhp.ContractSigner
-		target types.Currency
 	}
 )
 
@@ -55,11 +54,10 @@ func (c *hostClient) RPCReplenishAccounts(ctx context.Context, t rhp.TransportCl
 }
 
 // NewFunder creates a new Funder.
-func NewFunder(cm ChainManager, signer rhp.ContractSigner, target types.Currency) *Funder {
+func NewFunder(cm ChainManager, signer rhp.ContractSigner) *Funder {
 	return &Funder{
 		cm:     cm,
 		signer: signer,
-		target: target,
 		host:   &hostClient{},
 	}
 }
@@ -71,7 +69,7 @@ func NewFunder(cm ChainManager, signer rhp.ContractSigner, target types.Currency
 // the number of contracts that were drained. Consecutive calls for the same
 // host should take this into account and adjust the contract IDs that are being
 // passed in.
-func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, accounts []HostAccount, contractIDs []types.FileContractID, log *zap.Logger) (funded int, drained int, _ error) {
+func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, accounts []HostAccount, contractIDs []types.FileContractID, target types.Currency, log *zap.Logger) (funded int, drained int, _ error) {
 	// sanity check
 	if len(accounts) > proto.MaxAccountBatchSize {
 		return 0, 0, errors.New("too many accounts") // developer error
@@ -106,21 +104,21 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, accounts []H
 			contractLog.Debug("contract is not revisable") // sanity check
 			drained++
 			continue
-		} else if rev.Contract.RenterOutput.Value.Cmp(f.target) < 0 {
+		} else if rev.Contract.RenterOutput.Value.Cmp(target) < 0 {
 			contractLog.Debug("contract has insufficient funds")
 			drained++
 			continue
 		}
 
 		// prepare batch
-		batchSize := int(min(rev.Contract.RenterOutput.Value.Div(f.target).Big().Uint64(), proto.MaxAccountBatchSize))
+		batchSize := int(min(rev.Contract.RenterOutput.Value.Div(target).Big().Uint64(), proto.MaxAccountBatchSize))
 		batchEndIdx := min(batchSize+funded, len(accounts))
 
 		// prepare replenish RPC params
 		revision := rhp.ContractRevision{ID: fcid, Revision: rev.Contract}
 		params := rhp.RPCReplenishAccountsParams{
 			Accounts: accountKeys[funded:batchEndIdx],
-			Target:   f.target,
+			Target:   target,
 			Contract: revision,
 		}
 
@@ -129,7 +127,7 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, accounts []H
 		if err != nil {
 			contractLog.Debug("failed to replenish accounts", zap.Error(err))
 			continue
-		} else if res.Revision.RenterOutput.Value.Cmp(f.target) < 0 {
+		} else if res.Revision.RenterOutput.Value.Cmp(target) < 0 {
 			contractLog.Debug("contract was drained by replenish RPC")
 			drained++
 		}

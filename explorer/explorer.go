@@ -36,14 +36,15 @@ func (e *Explorer) BaseURL() string {
 
 // SiacoinExchangeRate returns the exchange rate for the given currency.
 func (e *Explorer) SiacoinExchangeRate(ctx context.Context, currency string) (float64, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/exchange-rate/siacoin/%s", e.url, currency), nil)
+	url := fmt.Sprintf("%s/exchange-rate/siacoin/%s", e.url, currency)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return 0, fmt.Errorf("failed to create request: %w", err)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("failed to send request: %w", err)
+		return 0, fmt.Errorf("failed to send request to %q: %w", url, err)
 	}
 	defer func() {
 		io.Copy(io.Discard, io.LimitReader(resp.Body, 1024*1024))
@@ -53,7 +54,7 @@ func (e *Explorer) SiacoinExchangeRate(ctx context.Context, currency string) (fl
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		var errorMessage string
 		if err := json.NewDecoder(io.LimitReader(resp.Body, 1024)).Decode(&errorMessage); err != nil {
-			return 0, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+			return 0, fmt.Errorf("unexpected status code from %q: %d", url, resp.StatusCode)
 		}
 		return 0, errors.New(errorMessage)
 	}

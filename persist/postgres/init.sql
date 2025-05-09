@@ -42,6 +42,13 @@ CREATE TABLE account_hosts (
 );
 CREATE INDEX account_hosts_host_id_next_fund_idx ON account_hosts (host_id, next_fund);
 
+CREATE TABLE service_accounts (
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    balance NUMERIC(50,0) NOT NULL DEFAULT 0 CHECK (balance >= 0),
+    CONSTRAINT service_accounts_pk PRIMARY KEY (account_id, host_id)
+);
+
 CREATE TABLE hosts_blocklist (
     public_key BYTEA PRIMARY KEY CHECK (LENGTH(public_key) = 32),
     added TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
@@ -145,6 +152,12 @@ CREATE TABLE contracts (
   revision_number INTEGER NOT NULL DEFAULT 0 CHECK(revision_number >= 0),
   state SMALLINT NOT NULL DEFAULT 0, -- 0 = 'pending', 1 = 'active', 2 = 'resolved', 3 = 'expired', 4 = 'rejected'
 
+  -- revision broadcast related columns
+  last_broadcast_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+
+  -- contract pruning 
+  last_prune TIMESTAMP WITH TIME ZONE,
+  
   -- metrics for visualization (not ACID)
   capacity BIGINT NOT NULL DEFAULT 0 CHECK(capacity >= size),
   size BIGINT NOT NULL DEFAULT 0 CHECK(size >= 0),
@@ -167,8 +180,10 @@ CREATE TABLE contracts (
   sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0
 );
 CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- for rejecting expired contracts
+CREATE INDEX contracts_last_broadcast_attempt_idx ON contracts (last_broadcast_attempt ASC) WHERE renewed_to IS NULL AND state <= 1;
 CREATE INDEX contracts_state_good_idx ON contracts(state) WHERE state <= 1 AND good; -- for filtering contracts
 CREATE INDEX contracts_host_id_remaining_allowance_idx ON contracts (host_id, remaining_allowance DESC) WHERE good = true AND remaining_allowance > 0 AND state <= 1; -- for fetching contracts for funding
+CREATE INDEX contracts_capacity_size_idx ON contracts (capacity DESC, size DESC) WHERE good = true AND remaining_allowance > 0 AND state <= 1; -- for fetching contracts for pinning
 
 -- foreign key constraint index
 CREATE INDEX contracts_host_id_idx ON contracts(host_id);
@@ -199,7 +214,7 @@ CREATE TABLE slabs (
 CREATE INDEX slabs_digest_idx ON slabs(digest);
 
 -- speeds up lookup of unhealthy slabs
-CREATE INDEX slabs_id_last_repair_attempt_idx ON slabs(id, last_repair_attempt ASC);
+CREATE INDEX slabs_id_last_repair_attempt_idx ON slabs(last_repair_attempt ASC);
 
 CREATE TABLE account_slabs (
     account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns slab
@@ -209,17 +224,13 @@ CREATE TABLE account_slabs (
 
 CREATE TABLE sectors (
     id BIGSERIAL PRIMARY KEY,
-    sector_root BYTEA NOT NULL,
+    sector_root BYTEA UNIQUE NOT NULL,
 
     -- uploading
     -- NOTE: contract_sectors_map_id should always be NULL when host_id is NULL
     host_id INTEGER REFERENCES hosts(id), -- host that stores sector
     contract_sectors_map_id INTEGER REFERENCES contract_sectors_map(id) DEFAULT NULL CHECK((host_id IS NULL AND contract_sectors_map_id IS NULL) OR host_id IS NOT NULL), -- null if not pinned
     uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by upload time
-
-    -- slab
-    slab_id BIGINT REFERENCES slabs(id) NOT NULL,
-    slab_index SMALLINT NOT NULL, -- index within corresponding slab to retrieve sectors in right order
 
     -- data integrity
     next_integrity_check TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -231,9 +242,6 @@ CREATE INDEX sectors_consecutive_failed_checks_idx ON sectors(host_id, consecuti
 
 -- quick lookup of sectors to pin prioritized by upload time
 CREATE INDEX sectors_contract_sectors_map_id_uploaded_at_idx ON sectors(contract_sectors_map_id, uploaded_at ASC);
-
--- speed up fetching sectors for slab ordered by their position within the slab
-CREATE UNIQUE INDEX sectors_slab_id_slab_idx ON sectors(slab_id, slab_index ASC);
 
 -- speed up lookup of unpinned sectors
 CREATE INDEX sectors_host_id_uploaded_at_idx ON sectors(host_id, uploaded_at ASC) WHERE contract_sectors_map_id IS NULL;
@@ -250,5 +258,15 @@ CREATE INDEX sectors_host_id_next_integrity_check_idx ON sectors(host_id, next_i
 -- speed up querying sectors of a host by root
 CREATE INDEX sectors_host_id_sector_root_idx ON sectors(host_id, sector_root);
 
--- speed up lookup of sectors by root
-CREATE INDEX sectors_sector_root_idx ON sectors(sector_root);
+CREATE TABLE slab_sectors (
+    slab_id BIGINT REFERENCES slabs(id) ON DELETE CASCADE,
+    sector_id BIGINT REFERENCES sectors(id) ON DELETE CASCADE,
+    slab_index SMALLINT NOT NULL, -- index within corresponding slab to retrieve sectors in right order
+    PRIMARY KEY (slab_id, sector_id)
+);
+
+-- speeds up lookup of unhealthy slabs
+CREATE INDEX slab_sectors_sector_id_idx ON slab_sectors(sector_id);
+
+-- speed up fetching sectors for slab ordered by their position within the slab
+CREATE UNIQUE INDEX slab_sectors_slab_id_slab_index_idx ON slab_sectors(slab_id, slab_index ASC);

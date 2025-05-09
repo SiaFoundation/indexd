@@ -24,13 +24,18 @@ func TestCurrencyEncoding(t *testing.T) {
 		{"max", types.NewCurrency(math.MaxUint64, math.MaxUint64)},
 	}
 
+	store := initPostgres(t, log.Named("postgres"))
+	_, err := store.pool.Exec(context.Background(), `CREATE TEMP TABLE currency_encoding_temp (sc_value NUMERIC(50,0));`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
-			store := initPostgres(t, log.Named("postgres"))
 
-			_, err := store.pool.Exec(ctx, `CREATE TEMP TABLE currency_encoding_temp (sc_value NUMERIC(50,0));`)
+			_, err = store.pool.Exec(ctx, `DELETE FROM currency_encoding_temp`)
 			if err != nil {
 				t.Fatal(err)
 			}

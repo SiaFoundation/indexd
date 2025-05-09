@@ -55,7 +55,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
 
-	funder := accounts.NewFunder(c.cm, wm, types.Siacoins(1))
+	funder := accounts.NewFunder(c.cm, wm)
 	am := accounts.NewManager(store, funder, accounts.WithLogger(log.Named("accounts")))
 
 	contractor := contracts.NewContractor(c.cm, wm, walletKey)

@@ -2,10 +2,10 @@ package contracts
 
 import (
 	"context"
-	"slices"
 	"sort"
 	"sync"
 	"testing"
+	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/hosts"
@@ -32,12 +32,33 @@ func (am *accountsManagerMock) FundAccounts(ctx context.Context, host hosts.Host
 	return nil
 }
 
-func (s *storeMock) ContractsForFunding(_ context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error) {
-	cloned := slices.Clone(s.contracts)
-
+func (s *storeMock) ContractsForBroadcasting(_ context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error) {
 	var contracts []Contract
-	for _, c := range cloned {
-		if c.HostKey == hk {
+	for _, c := range s.contracts {
+		if c.RenewedTo == (types.FileContractID{}) &&
+			(c.State == ContractStatePending || c.State == ContractStateActive) &&
+			c.LastBroadcastAttempt.Before(minBroadcast) {
+			contracts = append(contracts, c)
+		}
+	}
+	sort.Slice(contracts, func(i, j int) bool {
+		return contracts[i].LastBroadcastAttempt.Before(contracts[j].LastBroadcastAttempt)
+	})
+
+	out := make([]types.FileContractID, len(contracts))
+	for i, c := range contracts {
+		out[i] = c.ID
+	}
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (s *storeMock) ContractsForFunding(_ context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error) {
+	var contracts []Contract
+	for _, c := range s.contracts {
+		if c.HostKey == hk && !c.RemainingAllowance.IsZero() {
 			contracts = append(contracts, c)
 		}
 	}

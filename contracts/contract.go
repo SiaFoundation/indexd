@@ -35,16 +35,14 @@ type (
 	ContractQueryOpt func(*ContractQueryOpts)
 )
 
-// WithGood filters contracts by whether they are considered good. This defaults
-// to 'true'.
+// WithGood filters contracts by whether they are considered good.
 func WithGood(good bool) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.Good = &good
 	}
 }
 
-// WithRevisable filters contracts by whether they can still be revised. This
-// defaults to 'true'.
+// WithRevisable filters contracts by whether they can still be revised.
 func WithRevisable(revisable bool) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.Revisable = &revisable
@@ -120,6 +118,8 @@ type (
 		InitialAllowance types.Currency `json:"initialAllowance"` // initial renter allowance locked in contract
 		MinerFee         types.Currency `json:"minerFee"`         // miner fee spent on formation txn
 
+		LastPrune time.Time `json:"lastPrune"` // last time the contract was pruned
+
 		// Good determines whether a contract is good or bad. A contract that
 		// is not good, will have its data migrated to a new contract.
 		//
@@ -127,6 +127,8 @@ type (
 		// considered bad or failing to renew when being too close to its
 		// ProofHeight. This field is set by the contract maintenance code.
 		Good bool `json:"good"`
+
+		LastBroadcastAttempt time.Time `json:"lastBroadcastAttempt"`
 	}
 
 	// ContractSettings contains various settings used by the manager for

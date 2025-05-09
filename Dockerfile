@@ -35,4 +35,4 @@ EXPOSE 9980/tcp
 # Syncer port
 EXPOSE 9981/tcp
 
-ENTRYPOINT [ "indexd" ]
+ENTRYPOINT [ "indexd", "-api.admin", ":9980" ]

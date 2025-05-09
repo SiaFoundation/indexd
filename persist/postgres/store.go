@@ -15,12 +15,12 @@ type (
 	// ConnectionInfo contains the information needed to connect to a PostgreSQL
 	// database.
 	ConnectionInfo struct {
-		Host     string `json:"host"`
-		Port     int    `json:"port"`
-		User     string `json:"user"`
-		Password string `json:"password"`
-		Database string `json:"database"`
-		SSLMode  string `json:"sslmode"`
+		Host     string `json:"host" yaml:"host"`
+		Port     int    `json:"port" yaml:"port"`
+		User     string `json:"user" yaml:"user"`
+		Password string `json:"password" yaml:"password"`
+		Database string `json:"database" yaml:"database"`
+		SSLMode  string `json:"sslmode" yaml:"sslmode"`
 	}
 
 	// A Store is a persistent store that uses a SQL database as its backend.

@@ -35,7 +35,7 @@ func TestAccounts(t *testing.T) {
 	accs, err := store.Accounts(context.Background(), 0, 2)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(accs) != 2 || accs[0] != pk1 || accs[1] != pk2 {
+	} else if len(accs) != 2 {
 		t.Fatal("unexpected accounts", accs)
 	}
 

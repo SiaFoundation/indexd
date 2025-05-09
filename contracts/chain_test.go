@@ -119,6 +119,24 @@ func (s *storeMock) BlockHosts(_ context.Context, hostKeys []types.PublicKey, re
 	return nil
 }
 
+func (s *storeMock) ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error) {
+	for _, c := range s.contracts {
+		if c.ID == contractID {
+			return types.V2FileContractElement{
+				ID: contractID,
+				StateElement: types.StateElement{
+					LeafIndex:   1,
+					MerkleProof: []types.Hash256{{1}},
+				},
+				V2FileContract: types.V2FileContract{
+					HostPublicKey: c.HostKey,
+				},
+			}, nil
+		}
+	}
+	return types.V2FileContractElement{}, ErrNotFound
+}
+
 func (s *storeMock) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
 	return slices.Clone(s.toBroadcast), nil
 }
@@ -213,6 +231,15 @@ func (s *storeMock) MarkUnrenewableContractsBad(ctx context.Context, minProofHei
 	for i := range s.contracts {
 		if s.contracts[i].ProofHeight <= minProofHeight {
 			s.contracts[i].Good = false
+		}
+	}
+	return nil
+}
+
+func (s *storeMock) MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error {
+	for i := range s.contracts {
+		if s.contracts[i].ID == contractID {
+			s.contracts[i].LastBroadcastAttempt = time.Now()
 		}
 	}
 	return nil
@@ -433,14 +460,14 @@ func TestApplyRevertDiff(t *testing.T) {
 	// helper to apply/revert diff
 	applyDiff := func(diff consensus.V2FileContractElementDiff) {
 		t.Helper()
-		err := contracts.applyContractDiff(updateTx, diff)
+		err := contracts.applyContractDiff(updateTx, diff, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	revertDiff := func(diff consensus.V2FileContractElementDiff) {
 		t.Helper()
-		err := contracts.revertContractDiff(updateTx, diff)
+		err := contracts.revertContractDiff(updateTx, diff, time.Now())
 		if err != nil {
 			t.Fatal(err)
 		}

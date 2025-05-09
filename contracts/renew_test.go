@@ -212,7 +212,7 @@ func TestSyncRevisionState(t *testing.T) {
 		}
 
 		// sync the state
-		if err := contracts.syncRevisionState(context.Background()); err != nil {
+		if err := contracts.performContractRevisionSyncs(context.Background()); err != nil {
 			t.Fatal(err)
 		}
 

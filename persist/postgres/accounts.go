@@ -189,13 +189,30 @@ DO UPDATE SET
 	})
 }
 
+// DebitServiceAccount withdraws from a service account. The balance of the
+// account can't underflow, instead it will be set to 0 if the amount withdrawn
+// exceeds the stored balance.
+func (s *Store) DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
+	return errors.New("not implemented")
+}
+
+// UpdateServiceAccountBalance updates the balance of a service account.
+func (s *Store) UpdateServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
+	return errors.New("not implemented")
+}
+
+// ServiceAccountBalance returns the balance of a service account.
+func (s *Store) ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
+	return types.Currency{}, errors.New("not implemented")
+}
+
 func (s *Store) newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, limit int) ([]accounts.HostAccount, error) {
 	accs := make([]accounts.HostAccount, 0, limit)
 
 	rows, err := tx.Query(ctx, `
-SELECT a.public_key 
-FROM accounts a LEFT JOIN account_hosts ah ON a.id = ah.account_id AND ah.host_id = $1 
-WHERE ah.account_id IS NULL 
+SELECT a.public_key
+FROM accounts a LEFT JOIN account_hosts ah ON a.id = ah.account_id AND ah.host_id = $1
+WHERE ah.account_id IS NULL
 LIMIT $2;`, hostID, limit)
 	if err != nil {
 		return nil, err
@@ -221,10 +238,10 @@ func (s *Store) existingHostAccountsForFunding(ctx context.Context, tx *txn, hk 
 
 	rows, err := tx.Query(ctx, `
 SELECT public_key, consecutive_failed_funds, next_fund
-FROM account_hosts ha 
-INNER JOIN accounts a ON a.id = ha.account_id 
-WHERE ha.host_id = $1 AND ha.next_fund <= NOW() 
-ORDER BY next_fund ASC 
+FROM account_hosts ha
+INNER JOIN accounts a ON a.id = ha.account_id
+WHERE ha.host_id = $1 AND ha.next_fund <= NOW()
+ORDER BY next_fund ASC
 LIMIT $2`, hostID, limit)
 	if err != nil {
 		return nil, err
