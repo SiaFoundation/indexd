@@ -10,6 +10,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/hosts"
+	"go.uber.org/zap"
 )
 
 type mockSectorVerifier struct {
@@ -151,5 +152,113 @@ func TestVerifySectors(t *testing.T) {
 	}, []CheckSectorsResult{SectorSuccess})
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled error, got %v", err)
+	}
+}
+
+func TestPerformIntegrityChecksForHost(t *testing.T) {
+	store := newMockStore()
+	am := newMockAccountManager(store)
+	account := types.GeneratePrivateKey()
+	sm, err := newSlabManager(am, store, account)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	host := hosts.Host{
+		PublicKey: types.PublicKey{1},
+		Settings: proto.HostSettings{
+			Prices: proto.HostPrices{
+				EgressPrice: types.Siacoins(1).Div64(proto.SectorSize), // 1SC per sector
+			},
+		},
+	}
+
+	// helper to call verify sectors
+	verifySectors := func(hostSectors map[types.Hash256]error, toVerify []types.Hash256, expectedResults []CheckSectorsResult) error {
+		verifier := newMockSectorVerifier(host.Settings.Prices)
+		verifier.sectors = hostSectors
+		results, err := sm.verifySectors(context.Background(), verifier, host, toVerify)
+		if !reflect.DeepEqual(results, expectedResults) {
+			t.Fatalf("expected %v, got %v", expectedResults, results)
+		}
+		return err
+	}
+	_ = verifySectors
+
+	// helper to assert balance of service account
+	assertBalance := func(expected types.Currency) {
+		t.Helper()
+		balance, err := am.ServiceAccountBalance(context.Background(), host.PublicKey, proto.Account(account.PublicKey()))
+		if err != nil {
+			t.Fatal(err)
+		} else if !balance.Equals(expected) {
+			t.Fatalf("expected balance %v, got %v", expected, balance)
+		}
+	}
+	_ = assertBalance
+
+	// helper to set balance of service account
+	updateBalance := func(amount types.Currency) {
+		t.Helper()
+		err := am.UpdateServiceAccountBalance(context.Background(), host.PublicKey, proto.Account(account.PublicKey()), amount)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// add plenty of money to the service account
+	updateBalance(types.Siacoins(100))
+
+	// prepare roots for each outcome, a successful check, a lost sector and a
+	// failed check
+	rootGood := types.Hash256{1}
+	rootLost := types.Hash256{2}
+	rootBad := types.Hash256{3}
+	store.sectorsForCheck = []types.Hash256{rootGood, rootLost, rootBad}
+
+	verifier := newMockSectorVerifier(host.Settings.Prices)
+	verifier.sectors = map[types.Hash256]error{
+		rootGood: nil,
+		rootLost: proto.ErrSectorNotFound,
+		rootBad:  proto.ErrNotEnoughFunds,
+	}
+
+	// perform the checks once
+	sm.performIntegrityChecksForHost(context.Background(), verifier, host, zap.NewNop())
+
+	// the lost sector should be marked as lost
+	if len(store.lostSectors[host.PublicKey]) != 1 {
+		t.Fatalf("expected 1 lost sector, got %d", len(store.lostSectors))
+	} else if _, exists := store.lostSectors[host.PublicKey][rootLost]; !exists {
+		t.Fatalf("expected lost sector %v, got %v", rootLost, store.lostSectors)
+	}
+
+	// the failed sector should be marked as failed
+	if len(store.failedChecks) != 1 {
+		t.Fatalf("expected 1 failed checks, got %d", len(store.failedChecks))
+	} else if n, exists := store.failedChecks[host.PublicKey][rootBad]; !exists || n != 1 {
+		t.Fatalf("expected failed check %v, got %v", rootBad, store.failedChecks[host.PublicKey])
+	}
+
+	// perform the checks a few more time to reach the maximum number of failed
+	// checks before a bad sector gets removed
+	for i := 1; i < sm.maxFailedIntegrityChecks; i++ {
+		sm.performIntegrityChecksForHost(context.Background(), verifier, host, zap.NewNop())
+	}
+
+	// the failed sector should be marked as failed 5 times
+	if len(store.failedChecks) != 1 {
+		t.Fatalf("expected 1 failed checks, got %d", len(store.failedChecks))
+	} else if n, exists := store.failedChecks[host.PublicKey][rootBad]; !exists || n != 5 {
+		t.Fatalf("expected failed check %v, got %v", rootBad, store.failedChecks[host.PublicKey])
+	}
+
+	// should have 2 lost sectors now
+	if len(store.lostSectors[host.PublicKey]) != 2 {
+		t.Fatalf("expected 2 lost sectors, got %d", len(store.lostSectors))
+	} else if _, exists := store.lostSectors[host.PublicKey][rootLost]; !exists {
+		t.Fatalf("expected lost sector %v, got %v", rootLost, store.lostSectors)
+	} else if _, exists := store.lostSectors[host.PublicKey][rootBad]; !exists {
+		t.Fatalf("expected lost sector %v, got %v", rootBad, store.lostSectors)
 	}
 }
