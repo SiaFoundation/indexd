@@ -6,9 +6,9 @@ import (
 	"go.sia.tech/indexd/hosts"
 )
 
-// contractsForRepair filters the sectors of a slab and returns the sectors that
+// contractsForRepair filters the sectors of a slab and returns the indices of the sectors that
 // require migration together with the contracts to use for them.
-func contractsForRepair(slab Slab, availableHosts []hosts.Host, availableContracts []contracts.Contract, period uint64) ([]Sector, []contracts.Contract) {
+func contractsForRepair(slab Slab, availableHosts []hosts.Host, availableContracts []contracts.Contract, period uint64) ([]int, []contracts.Contract) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range availableHosts {
@@ -38,12 +38,12 @@ func contractsForRepair(slab Slab, availableHosts []hosts.Host, availableContrac
 	// one of the following is true:
 	// - the sector was marked lost (contract ID and host key are nil)
 	// - the sector is stored on a bad contract
-	var toMigrate []Sector
-	for _, sector := range slab.Sectors {
+	var toMigrate []int
+	for i, sector := range slab.Sectors {
 		isLost := sector.ContractID == nil && sector.HostKey == nil
 		goodContract := sector.ContractID != nil && goodContractMap[*sector.ContractID] != contracts.Contract{}
 		if isLost || !goodContract {
-			toMigrate = append(toMigrate, sector)
+			toMigrate = append(toMigrate, i)
 			continue
 		}
 

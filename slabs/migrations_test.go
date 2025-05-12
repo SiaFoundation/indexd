@@ -108,8 +108,8 @@ func TestContractsForRepair(t *testing.T) {
 			t.Fatalf("expected %d contracts to use, got %d: %v", len(expectedContracts), len(toUse), toUse)
 		}
 		for i := range toRepair {
-			if toRepair[i].Root != (types.Hash256{byte(expectedRoots[i])}) {
-				t.Fatalf("expected root %d to repair, got %s", expectedRoots[i], toRepair[i].Root)
+			if toRepair[i] != expectedRoots[i] {
+				t.Fatalf("expected root %d to repair, got %d", expectedRoots[i], toRepair[i])
 			}
 		}
 		expectedContractsMap := make(map[types.FileContractID]struct{})
@@ -125,13 +125,13 @@ func TestContractsForRepair(t *testing.T) {
 
 	// with no contracts or hosts, all sectors require migration but no
 	// contracts are available
-	assertResult(nil, nil, []int{1, 2, 3, 4}, []int{})
+	assertResult(nil, nil, []int{0, 1, 2, 3}, []int{})
 
 	// calling contractsForRepair with just the hosts and contracts the slab is stored on should
 	// return the missing sectors and no contracts
 	allHosts := []hosts.Host{goodHost, redundantCIDRHost}
 	allContracts := []contracts.Contract{goodContract, badContract, redundantCIDRContract}
-	assertResult(allHosts, allContracts, []int{2, 3}, []int{})
+	assertResult(allHosts, allContracts, []int{1, 2}, []int{})
 
 	// prepare a bunch of hosts and contracts which can't be used for repairs
 	badHost2 := newHost(3, false, false, true)
@@ -150,7 +150,7 @@ func TestContractsForRepair(t *testing.T) {
 	// add the bad hosts+contracts and try again - expect same result
 	allHosts = append(allHosts, badHost2, hostWithoutNetworks, blockedHost, redundantCIDRHost2)
 	allContracts = append(allContracts, cBadHost2, cHostWithoutNetworks, cBlockedHost, cRedundantCIDRHost2)
-	assertResult(allHosts, allContracts, []int{2, 3}, []int{})
+	assertResult(allHosts, allContracts, []int{1, 2}, []int{})
 
 	// prepare 2 good hosts
 	goodHost2 := newHost(7, true, false, true)
@@ -162,5 +162,5 @@ func TestContractsForRepair(t *testing.T) {
 	// should use them
 	allHosts = append(allHosts, goodHost2, goodHost3)
 	allContracts = append(allContracts, cGoodHost2, cGoodHost3)
-	assertResult(allHosts, allContracts, []int{2, 3}, []int{8, 9})
+	assertResult(allHosts, allContracts, []int{1, 2}, []int{8, 9})
 }
