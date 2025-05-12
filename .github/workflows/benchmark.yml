@@ -43,7 +43,19 @@ jobs:
 
       - name: Run benchmarks
         run: |
-          go test -run='^$' -bench=. -benchtime=1s -timeout=2h ./... 2>&1 | tee new_bench.txt
+          set -euo pipefail
+      
+          # Run benchmarks, capture exit code and save output
+          if ! go test -run='^$' -benchmem -benchtime=50x -bench=. -timeout=1h ./... 2>&1 | tee new_bench.txt; then
+            echo "go test exited with an error"
+            exit 1
+          fi
+      
+          # Check for known failure patterns
+          if grep -qE 'panic:|FAIL|fatal error' new_bench.txt; then
+            echo "Benchmark failed with panic or test failure"
+            exit 1
+          fi
 
       - name: Save latest benchmark as artifact
         uses: actions/upload-artifact@v4
