@@ -244,7 +244,7 @@ INNER JOIN hosts h ON c.host_id = h.id
 WHERE h.public_key = $1 AND c.good = TRUE AND c.state <= $2 AND c.remaining_allowance > 0 AND c.last_prune < $3
 ORDER BY c.size DESC`, sqlPublicKey(hk), sqlContractState(contracts.ContractStateActive), maxLastPrune)
 		if err != nil {
-			return fmt.Errorf("failed to fetch contracts for pinning: %w", err)
+			return fmt.Errorf("failed to fetch contracts for pruning: %w", err)
 		}
 		for rows.Next() {
 			var fcid types.FileContractID
