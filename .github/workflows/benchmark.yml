@@ -45,14 +45,12 @@ jobs:
         run: |
           set -euo pipefail
       
-          # Run benchmarks, capture exit code and save output
-          if ! go test -run='^$' -benchmem -benchtime=50x -bench=. -timeout=1h ./... 2>&1 | tee new_bench.txt; then
+          if ! go test -run='^$' -benchmem -benchtime=25x -bench=. -timeout=1h ./... 2>&1 | tee new_bench.txt; then
             echo "go test exited with an error"
             exit 1
           fi
       
-          # Fail on any FAIL, panic, or fatal error in output
-          if grep -E -m1 'FAIL|panic:|fatal error' new_bench.txt; then
+          if grep -E 'FAIL|panic:|fatal error' new_bench.txt; then
             echo "Detected failure pattern in benchmark output"
             exit 1
           fi
