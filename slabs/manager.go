@@ -33,6 +33,7 @@ type (
 		serviceAccountKey types.PrivateKey
 
 		am    AccountManager
+		hm    HostManager
 		store Store
 		tg    *threadgroup.ThreadGroup
 		log   *zap.Logger
@@ -45,6 +46,12 @@ type (
 		ResetAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) error
 		ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error)
 		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
+	}
+
+	// HostManager defines the minimal interface of HostManager functionality
+	// the SlabManager requires.
+	HostManager interface {
+		ScanHost(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
 	}
 
 	// Store defines an interface to store and update slab related information
@@ -72,8 +79,8 @@ func WithLogger(l *zap.Logger) Option {
 }
 
 // NewManager creates a new slab manager.
-func NewManager(am AccountManager, store Store, serviceAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
-	m, err := newSlabManager(am, store, serviceAccount, opts...)
+func NewManager(am AccountManager, hm HostManager, store Store, serviceAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+	m, err := newSlabManager(am, hm, store, serviceAccount, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +116,7 @@ func NewManager(am AccountManager, store Store, serviceAccount types.PrivateKey,
 	return m, nil
 }
 
-func newSlabManager(am AccountManager, store Store, serviceAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+func newSlabManager(am AccountManager, hm HostManager, store Store, serviceAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
 	m := &SlabManager{
 		integrityCheckInterval:       7 * 24 * time.Hour,
 		failedIntegrityCheckInterval: 6 * time.Hour,
@@ -119,6 +126,7 @@ func newSlabManager(am AccountManager, store Store, serviceAccount types.Private
 		serviceAccountKey: serviceAccount,
 
 		am:    am,
+		hm:    hm,
 		store: store,
 		tg:    threadgroup.New(),
 		log:   zap.NewNop(),
@@ -167,11 +175,19 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 
 		sem <- struct{}{}
 		wg.Add(1)
-		go func(host hosts.Host) {
+		go func(hostKey types.PublicKey) {
 			defer func() {
 				<-sem
 				wg.Done()
 			}()
+
+			// fetch good price table
+			host, err = m.hm.ScanHost(ctx, hostKey)
+			if err != nil {
+				logger.With(zap.Stringer("hostKey", hostKey)).Error("failed to scan host", zap.Error(err))
+				return
+			}
+
 			// create verifier
 			verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey)
 			if err != nil {
@@ -184,7 +200,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 			defer verifier.Close()
 
 			m.performIntegrityChecksForHost(ctx, verifier, host, logger)
-		}(host)
+		}(host.PublicKey)
 	}
 	wg.Wait()
 

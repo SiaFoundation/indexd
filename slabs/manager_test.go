@@ -123,3 +123,21 @@ func (m *mockAccountManager) DebitServiceAccount(ctx context.Context, hostKey ty
 	}
 	return nil
 }
+
+type mockhostManager struct {
+	hosts map[types.PublicKey]hosts.Host
+}
+
+func newMockHostManager() *mockhostManager {
+	return &mockhostManager{
+		hosts: make(map[types.PublicKey]hosts.Host),
+	}
+}
+
+func (mock *mockhostManager) ScanHost(ctx context.Context, hk types.PublicKey) (hosts.Host, error) {
+	host, ok := mock.hosts[hk]
+	if !ok {
+		return hosts.Host{}, hosts.ErrNotFound
+	}
+	return host, nil
+}

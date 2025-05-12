@@ -39,8 +39,9 @@ func (ht *mockSectorVerifier) VerifySector(ctx context.Context, prices proto.Hos
 func TestVerifySectors(t *testing.T) {
 	store := newMockStore()
 	am := newMockAccountManager(store)
+	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
-	sm, err := newSlabManager(am, store, account)
+	sm, err := newSlabManager(am, hm, store, account)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,6 +54,9 @@ func TestVerifySectors(t *testing.T) {
 			},
 		},
 	}
+
+	// make host scannable
+	hm.hosts[host.PublicKey] = host
 
 	// helper to call verify sectors
 	verifySectors := func(hostSectors map[types.Hash256]error, toVerify []types.Hash256, expectedResults []CheckSectorsResult) error {
@@ -158,8 +162,9 @@ func TestVerifySectors(t *testing.T) {
 func TestPerformIntegrityChecksForHost(t *testing.T) {
 	store := newMockStore()
 	am := newMockAccountManager(store)
+	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
-	sm, err := newSlabManager(am, store, account)
+	sm, err := newSlabManager(am, hm, store, account)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +177,9 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 			},
 		},
 	}
+
+	// make host scannable
+	hm.hosts[host.PublicKey] = host
 
 	// helper to call verify sectors
 	verifySectors := func(hostSectors map[types.Hash256]error, toVerify []types.Hash256, expectedResults []CheckSectorsResult) error {
