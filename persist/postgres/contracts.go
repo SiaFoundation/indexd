@@ -201,9 +201,9 @@ LIMIT $3
 	return fcids, nil
 }
 
-// ContractsForPinning returns all contracts for the given host key that are
-// good for pinning sectors with. The contracts are sorted by size, capacity in
-// descending fashion.
+// ContractsForPinning returns usable contracts for the given host key that have
+// a size less than the given max contract size. The contracts are sorted by
+// size, capacity in descending fashion.
 func (s *Store) ContractsForPinning(ctx context.Context, hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error) {
 	var fcids []types.FileContractID
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
@@ -213,6 +213,36 @@ FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 WHERE h.public_key = $1 AND c.good = TRUE AND c.state <= $2 AND c.remaining_allowance > 0 AND c.size < $3
 ORDER BY c.capacity DESC, c.size DESC`, sqlPublicKey(hk), sqlContractState(contracts.ContractStateActive), maxContractSize)
+		if err != nil {
+			return fmt.Errorf("failed to fetch contracts for pinning: %w", err)
+		}
+		for rows.Next() {
+			var fcid types.FileContractID
+			if err := rows.Scan((*sqlHash256)(&fcid)); err != nil {
+				return fmt.Errorf("failed to scan contract ID: %w", err)
+			}
+			fcids = append(fcids, fcid)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return fcids, nil
+}
+
+// ContractsForPruning returns usable contracts for the given host key that have
+// not been pruned since the given last prune time. The contracts are sorted by
+// size in descending fashion.
+func (s *Store) ContractsForPruning(ctx context.Context, hk types.PublicKey, maxLastPrune time.Time) ([]types.FileContractID, error) {
+	var fcids []types.FileContractID
+	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+SELECT c.contract_id
+FROM contracts c
+INNER JOIN hosts h ON c.host_id = h.id
+WHERE h.public_key = $1 AND c.good = TRUE AND c.state <= $2 AND c.remaining_allowance > 0 AND c.last_prune < $3
+ORDER BY c.size DESC`, sqlPublicKey(hk), sqlContractState(contracts.ContractStateActive), maxLastPrune)
 		if err != nil {
 			return fmt.Errorf("failed to fetch contracts for pinning: %w", err)
 		}
