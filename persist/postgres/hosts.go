@@ -596,3 +596,9 @@ func scanHost(s scanner) (dbHost, error) {
 
 	return host, nil
 }
+
+// HostsForIntegrityChecks returns a list of hosts that have sectors
+// requiring integrity checks.
+func (s *Store) HostsForIntegrityChecks(ctx context.Context) ([]types.PublicKey, error) {
+	panic("implement")
+}

@@ -260,7 +260,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 
 	// perform the checks a few more time to reach the maximum number of failed
 	// checks before a bad sector gets removed
-	for i := 1; i < sm.maxFailedIntegrityChecks; i++ {
+	for i := uint(1); i < sm.maxFailedIntegrityChecks; i++ {
 		sm.performIntegrityChecksForHost(context.Background(), verifier, zap.NewNop())
 	}
 

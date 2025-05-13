@@ -43,7 +43,7 @@ again.
   b. If the host reports the sector as lost, move on to 3.
   b. If the proof failed for any other reason after a successful dial and sending of the initial request,
   set the next check time 6 hours from now and increment the count of failed checks.
-3. If the sector has failed its check 3 times in a row or has reported it as
+3. If the sector has failed its check 5 times in a row or has reported it as
 lost, set `host_id` and `contract_id` on the `sectors` table to `NULL` and
 increment the `lost_sectors` count on the `hosts` table. This will lead to the
 sector being picked up by the data migration code (see [Data

@@ -146,20 +146,12 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, verifie
 
 			// fetch sector roots for sectors that have now failed the check 5+
 			// times and mark them lost as well
-			for {
-				newlyLost, err := m.store.FailingSectors(ctx, verifier.HostKey(), m.maxFailedIntegrityChecks, batchSize)
-				if err != nil {
-					hostLogger.Error("failed to fetch failing sectors", zap.Error(err))
-					return fmt.Errorf("failed to fetch failing sectors: %w", err)
-				}
-				if err := m.store.MarkSectorsLost(ctx, verifier.HostKey(), newlyLost); err != nil {
-					hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
-					return fmt.Errorf("failed to mark sectors as lost: %w", err)
-				}
-				if len(newlyLost) < batchSize {
-					return nil
-				}
+			err := m.store.MarkFailingSectorsLost(ctx, verifier.HostKey(), m.maxFailedIntegrityChecks)
+			if err != nil {
+				hostLogger.Error("failed to mark failing sectors as lost", zap.Error(err))
+				return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 			}
+			return nil
 		}()
 		if err != nil {
 			hostLogger.Error("failed to persist integrity check results", zap.Error(err))
@@ -170,8 +162,8 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, verifie
 
 // verifySectors verifies a list of sectors on a host. If verifySectors returns
 // either errInsufficientServiceAccountBalance or context.Canceled, the caller
-// should stop handle any remaining results and then interrupt the integrity
-// checks for the host.
+// should handle any remaining results and then interrupt the integrity checks
+// for the host.
 func (m *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, roots []types.Hash256) ([]CheckSectorsResult, error) {
 	// check the account balance
 	cost := hc.Prices().RPCVerifySectorCost().RenterCost()

@@ -46,6 +46,19 @@ func (s *mockStore) Hosts(ctx context.Context, offset, limit int, queryOpts ...h
 	panic("not implemented")
 }
 
+func (s *mockStore) HostsForIntegrityChecks(ctx context.Context) ([]types.PublicKey, error) {
+	panic("not implemented")
+}
+
+func (s *mockStore) MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxFailedIntegrityChecks uint) error {
+	for root, failures := range s.failedChecks[hostKey] {
+		if failures >= int(maxFailedIntegrityChecks) {
+			s.lostSectors[hostKey][root] = struct{}{}
+		}
+	}
+	return nil
+}
+
 func (s *mockStore) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error {
 	if _, ok := s.lostSectors[hostKey]; !ok {
 		s.lostSectors[hostKey] = make(map[types.Hash256]struct{})

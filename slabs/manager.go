@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -27,7 +26,7 @@ type (
 	SlabManager struct {
 		integrityCheckInterval       time.Duration
 		failedIntegrityCheckInterval time.Duration
-		maxFailedIntegrityChecks     int
+		maxFailedIntegrityChecks     uint
 
 		serviceAccount    proto.Account
 		serviceAccountKey types.PrivateKey
@@ -60,6 +59,8 @@ type (
 		AddAccount(ctx context.Context, ak types.PublicKey) error
 		FailingSectors(ctx context.Context, hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
+		HostsForIntegrityChecks(ctx context.Context) ([]types.PublicKey, error)
+		MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxFailedIntegrityChecks uint) error
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error)
 		RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error
@@ -158,8 +159,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 	logger := m.log.Named("integrity")
 	logger.Debug("starting integrity checks", zap.Time("start", start))
 
-	usedHosts, err := m.store.Hosts(ctx, 0, math.MaxInt64,
-		hosts.WithUsable(true), hosts.WithBlocked(false), hosts.WithActiveContracts(true))
+	usedHosts, err := m.store.HostsForIntegrityChecks(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch hosts to block: %w", err)
 	}
@@ -182,7 +182,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 			}()
 
 			// fetch good price table
-			host, err = m.hm.ScanHost(ctx, hostKey)
+			host, err := m.hm.ScanHost(ctx, hostKey)
 			if err != nil {
 				logger.With(zap.Stringer("hostKey", hostKey)).Error("failed to scan host", zap.Error(err))
 				return
@@ -200,7 +200,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 			defer verifier.Close()
 
 			m.performIntegrityChecksForHost(ctx, verifier, logger)
-		}(host.PublicKey)
+		}(host)
 	}
 	wg.Wait()
 
