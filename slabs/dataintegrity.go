@@ -12,7 +12,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
-	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
@@ -45,36 +44,54 @@ type (
 	// SectorVerifier defines the interface verifying a sector's integrity on a
 	// host.
 	SectorVerifier interface {
-		VerifySector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, root types.Hash256) (rhp.RPCVerifySectorResult, error)
+		HostKey() types.PublicKey
+		Prices() proto.HostPrices
+		VerifySector(ctx context.Context, root types.Hash256) (rhp.RPCVerifySectorResult, error)
 	}
 
 	sectorVerifier struct {
-		tc rhp.TransportClient
+		hostKey           types.PublicKey
+		prices            proto.HostPrices
+		serviceAccount    proto.Account
+		serviceAccountKey types.PrivateKey
+		tc                rhp.TransportClient
 	}
 )
 
-func newSectorVerifier(ctx context.Context, hostAddr string, hostKey types.PublicKey) (*sectorVerifier, error) {
+func newSectorVerifier(ctx context.Context, hostAddr string, hostKey types.PublicKey, prices proto.HostPrices) (*sectorVerifier, error) {
 	tc, err := siamux.Dial(ctx, hostAddr, hostKey)
 	if err != nil {
 		return nil, err
 	}
-	return &sectorVerifier{tc: tc}, nil
+	return &sectorVerifier{
+		prices: prices,
+		tc:     tc,
+	}, nil
 }
 
 func (v *sectorVerifier) Close() error {
 	return v.tc.Close()
 }
 
-func (v *sectorVerifier) VerifySector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, root types.Hash256) (rhp.RPCVerifySectorResult, error) {
-	return rhp.RPCVerifySector(ctx, v.tc, prices, token, root)
+func (v *sectorVerifier) HostKey() types.PublicKey {
+	return v.hostKey
 }
 
-func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, verifier SectorVerifier, host hosts.Host, logger *zap.Logger) {
-	hostLogger := logger.With(zap.Stringer("hostKey", host.PublicKey))
+func (v *sectorVerifier) Prices() proto.HostPrices {
+	return v.prices
+}
+
+func (v *sectorVerifier) VerifySector(ctx context.Context, root types.Hash256) (rhp.RPCVerifySectorResult, error) {
+	return rhp.RPCVerifySector(ctx, v.tc, v.prices, v.serviceAccount.Token(v.serviceAccountKey, v.hostKey), root)
+}
+
+func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, verifier SectorVerifier, logger *zap.Logger) {
+	hostKey := verifier.HostKey()
+	hostLogger := logger.With(zap.Stringer("hostKey", hostKey))
 
 	const batchSize = 100 // batch size for sector retrieval
 	for interrupt := false; !interrupt; {
-		toCheck, err := m.store.SectorsForIntegrityCheck(ctx, host.PublicKey, batchSize)
+		toCheck, err := m.store.SectorsForIntegrityCheck(ctx, hostKey, batchSize)
 		if err != nil {
 			hostLogger.Error("failed to fetch sectors for integrity check", zap.Error(err))
 			return
@@ -84,7 +101,7 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, verifie
 		interrupt = len(toCheck) < batchSize
 
 		// perform integrity checks
-		results, err := m.verifySectors(ctx, verifier, host, toCheck)
+		results, err := m.verifySectors(ctx, verifier, toCheck)
 		if errors.Is(err, context.Canceled) || errors.Is(err, errInsufficientServiceAccountBalance) {
 			interrupt = true
 		}
@@ -114,15 +131,15 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, verifie
 			defer cancel()
 
 			// update lost, failed and successful sectors
-			if err := m.store.MarkSectorsLost(ctx, host.PublicKey, lost); err != nil {
+			if err := m.store.MarkSectorsLost(ctx, verifier.HostKey(), lost); err != nil {
 				hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
 				return fmt.Errorf("failed to mark sectors as lost: %w", err)
 			}
-			if err := m.store.RecordIntegrityCheck(ctx, false, time.Now().Add(m.failedIntegrityCheckInterval), host.PublicKey, failed); err != nil {
+			if err := m.store.RecordIntegrityCheck(ctx, false, time.Now().Add(m.failedIntegrityCheckInterval), verifier.HostKey(), failed); err != nil {
 				hostLogger.Error("failed to record integrity check for failed sectors", zap.Error(err))
 				return fmt.Errorf("failed to record integrity check for failed sectors: %w", err)
 			}
-			if err := m.store.RecordIntegrityCheck(ctx, true, time.Now().Add(m.integrityCheckInterval), host.PublicKey, success); err != nil {
+			if err := m.store.RecordIntegrityCheck(ctx, true, time.Now().Add(m.integrityCheckInterval), verifier.HostKey(), success); err != nil {
 				hostLogger.Error("failed to record integrity check for successful sectors", zap.Error(err))
 				return fmt.Errorf("failed to record integrity check for successful sectors: %w", err)
 			}
@@ -130,12 +147,12 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, verifie
 			// fetch sector roots for sectors that have now failed the check 5+
 			// times and mark them lost as well
 			for {
-				newlyLost, err := m.store.FailingSectors(ctx, host.PublicKey, m.maxFailedIntegrityChecks, batchSize)
+				newlyLost, err := m.store.FailingSectors(ctx, verifier.HostKey(), m.maxFailedIntegrityChecks, batchSize)
 				if err != nil {
 					hostLogger.Error("failed to fetch failing sectors", zap.Error(err))
 					return fmt.Errorf("failed to fetch failing sectors: %w", err)
 				}
-				if err := m.store.MarkSectorsLost(ctx, host.PublicKey, newlyLost); err != nil {
+				if err := m.store.MarkSectorsLost(ctx, verifier.HostKey(), newlyLost); err != nil {
 					hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
 					return fmt.Errorf("failed to mark sectors as lost: %w", err)
 				}
@@ -155,10 +172,10 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, verifie
 // either errInsufficientServiceAccountBalance or context.Canceled, the caller
 // should stop handle any remaining results and then interrupt the integrity
 // checks for the host.
-func (m *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, host hosts.Host, roots []types.Hash256) ([]CheckSectorsResult, error) {
+func (m *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, roots []types.Hash256) ([]CheckSectorsResult, error) {
 	// check the account balance
-	cost := host.Settings.Prices.RPCVerifySectorCost().RenterCost()
-	balance, err := m.am.ServiceAccountBalance(ctx, host.PublicKey, m.serviceAccount)
+	cost := hc.Prices().RPCVerifySectorCost().RenterCost()
+	balance, err := m.am.ServiceAccountBalance(ctx, hc.HostKey(), m.serviceAccount)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service account balance: %w", err)
 	} else if balance.Cmp(cost) < 0 {
@@ -181,14 +198,14 @@ func (m *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, host
 		}
 
 		// verify the sector
-		_, err := hc.VerifySector(ctx, host.Settings.Prices, m.serviceAccount.Token(m.serviceAccountKey, host.PublicKey), root)
+		_, err := hc.VerifySector(ctx, root)
 		if errors.Is(err, context.Canceled) {
 			return results, err // interrupted
 		}
 
 		// adjust balance
 		balance = balance.Sub(cost)
-		if err := m.am.DebitServiceAccount(ctx, host.PublicKey, m.serviceAccount, cost); err != nil {
+		if err := m.am.DebitServiceAccount(ctx, hc.HostKey(), m.serviceAccount, cost); err != nil {
 			return nil, fmt.Errorf("failed to debit service account: %w", err)
 		}
 
@@ -213,7 +230,7 @@ func (m *SlabManager) verifySectors(ctx context.Context, hc SectorVerifier, host
 		var resetErr error
 		resetOnce.Do(func() {
 			if err != nil && strings.Contains(err.Error(), proto.ErrNotEnoughFunds.Error()) {
-				resetErr = m.am.ResetAccountBalance(ctx, host.PublicKey, m.serviceAccount)
+				resetErr = m.am.ResetAccountBalance(ctx, hc.HostKey(), m.serviceAccount)
 			}
 		})
 		if resetErr != nil {

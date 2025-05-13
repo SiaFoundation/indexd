@@ -189,7 +189,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 			}
 
 			// create verifier
-			verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey)
+			verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey, host.Settings.Prices)
 			if err != nil {
 				// NOTE: If we can't dial the host we don't mark sectors as lost.
 				// Instead we leave it up to the scan code to determine whether the host
@@ -199,7 +199,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 			}
 			defer verifier.Close()
 
-			m.performIntegrityChecksForHost(ctx, verifier, host, logger)
+			m.performIntegrityChecksForHost(ctx, verifier, logger)
 		}(host.PublicKey)
 	}
 	wg.Wait()

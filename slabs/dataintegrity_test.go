@@ -14,21 +14,31 @@ import (
 )
 
 type mockSectorVerifier struct {
+	hostKey types.PublicKey
 	prices  proto.HostPrices
 	sectors map[types.Hash256]error
 }
 
-func newMockSectorVerifier(prices proto.HostPrices) *mockSectorVerifier {
+func newMockSectorVerifier(hostKey types.PublicKey, prices proto.HostPrices) *mockSectorVerifier {
 	return &mockSectorVerifier{
-		prices: prices,
+		hostKey: hostKey,
+		prices:  prices,
 	}
 }
 
-func (ht *mockSectorVerifier) VerifySector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, root types.Hash256) (rhp.RPCVerifySectorResult, error) {
+func (ht *mockSectorVerifier) HostKey() types.PublicKey {
+	return ht.hostKey
+}
+
+func (ht *mockSectorVerifier) Prices() proto.HostPrices {
+	return ht.prices
+}
+
+func (ht *mockSectorVerifier) VerifySector(ctx context.Context, root types.Hash256) (rhp.RPCVerifySectorResult, error) {
 	if err, ok := ht.sectors[root]; ok {
 		if err == nil {
 			return rhp.RPCVerifySectorResult{
-				Usage: prices.RPCVerifySectorCost(),
+				Usage: ht.prices.RPCVerifySectorCost(),
 			}, nil
 		}
 		return rhp.RPCVerifySectorResult{}, err
@@ -60,9 +70,9 @@ func TestVerifySectors(t *testing.T) {
 
 	// helper to call verify sectors
 	verifySectors := func(hostSectors map[types.Hash256]error, toVerify []types.Hash256, expectedResults []CheckSectorsResult) error {
-		verifier := newMockSectorVerifier(host.Settings.Prices)
+		verifier := newMockSectorVerifier(host.PublicKey, host.Settings.Prices)
 		verifier.sectors = hostSectors
-		results, err := sm.verifySectors(context.Background(), verifier, host, toVerify)
+		results, err := sm.verifySectors(context.Background(), verifier, toVerify)
 		if !reflect.DeepEqual(results, expectedResults) {
 			t.Fatalf("expected %v, got %v", expectedResults, results)
 		}
@@ -183,9 +193,9 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 
 	// helper to call verify sectors
 	verifySectors := func(hostSectors map[types.Hash256]error, toVerify []types.Hash256, expectedResults []CheckSectorsResult) error {
-		verifier := newMockSectorVerifier(host.Settings.Prices)
+		verifier := newMockSectorVerifier(host.PublicKey, host.Settings.Prices)
 		verifier.sectors = hostSectors
-		results, err := sm.verifySectors(context.Background(), verifier, host, toVerify)
+		results, err := sm.verifySectors(context.Background(), verifier, toVerify)
 		if !reflect.DeepEqual(results, expectedResults) {
 			t.Fatalf("expected %v, got %v", expectedResults, results)
 		}
@@ -224,7 +234,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	rootBad := types.Hash256{3}
 	store.sectorsForCheck = []types.Hash256{rootGood, rootLost, rootBad}
 
-	verifier := newMockSectorVerifier(host.Settings.Prices)
+	verifier := newMockSectorVerifier(host.PublicKey, host.Settings.Prices)
 	verifier.sectors = map[types.Hash256]error{
 		rootGood: nil,
 		rootLost: proto.ErrSectorNotFound,
@@ -232,7 +242,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	}
 
 	// perform the checks once
-	sm.performIntegrityChecksForHost(context.Background(), verifier, host, zap.NewNop())
+	sm.performIntegrityChecksForHost(context.Background(), verifier, zap.NewNop())
 
 	// the lost sector should be marked as lost
 	if len(store.lostSectors[host.PublicKey]) != 1 {
@@ -251,7 +261,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	// perform the checks a few more time to reach the maximum number of failed
 	// checks before a bad sector gets removed
 	for i := 1; i < sm.maxFailedIntegrityChecks; i++ {
-		sm.performIntegrityChecksForHost(context.Background(), verifier, host, zap.NewNop())
+		sm.performIntegrityChecksForHost(context.Background(), verifier, zap.NewNop())
 	}
 
 	// the failed sector should be marked as failed 5 times
