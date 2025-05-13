@@ -13,16 +13,12 @@ import (
 )
 
 type refreshContractCall struct {
-	hk       types.PublicKey
-	addr     string
 	settings proto.HostSettings
 	params   proto.RPCRefreshContractParams
 }
 
-func (c *contractorMock) RefreshContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error) {
+func (c *contractorMock) RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error) {
 	c.refreshCalls = append(c.refreshCalls, refreshContractCall{
-		hk:       hk,
-		addr:     addr,
 		settings: settings,
 		params:   params,
 	})
@@ -146,18 +142,15 @@ func TestPerformContractRefreshes(t *testing.T) {
 		bad.PublicKey:  bad,
 	}
 
-	contractor := newContractorMock()
+	dialer := newDialerMock()
+	contractor := dialer.contractor
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, cmMock, contractor, scanner, store, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, cmMock, dialer, scanner, store, syncerMock, wallet)
 
 	assertRefresh := func(h hosts.Host, allowance, collateral types.Currency, refreshedFrom types.FileContractID, call refreshContractCall) {
 		t.Helper()
-		if call.hk != h.PublicKey {
-			t.Fatalf("expected host key %v, got %v", h.PublicKey, call.hk)
-		} else if call.addr != h.SiamuxAddr() {
-			t.Fatalf("expected address %v, got %v", h.SiamuxAddr(), call.addr)
-		} else if call.settings != goodSettings {
+		if call.settings != goodSettings {
 			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
 		} else if call.params.ContractID != refreshedFrom {
 			t.Fatalf("expected refreshedFrom %v, got %v", refreshedFrom, call.params.ContractID)

@@ -8,20 +8,11 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.uber.org/zap"
 )
 
-func (cf *contractor) RefreshContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error) {
-	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
-	defer cancel()
-	t, err := siamux.Dial(dialCtx, addr, hk)
-	if err != nil {
-		return rhp.RPCRefreshContractResult{}, fmt.Errorf("failed to dial host: %w", err)
-	}
-	defer t.Close()
-
-	rev, err := rhp.RPCLatestRevision(ctx, t, params.ContractID)
+func (c *contractor) RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error) {
+	rev, err := rhp.RPCLatestRevision(ctx, c.client, params.ContractID)
 	if err != nil {
 		return rhp.RPCRefreshContractResult{}, fmt.Errorf("failed to fetch latest revision: %w", err)
 	} else if rev.Renewed {
@@ -30,7 +21,7 @@ func (cf *contractor) RefreshContract(ctx context.Context, hk types.PublicKey, a
 		return rhp.RPCRefreshContractResult{}, fmt.Errorf("contract not revisable")
 	}
 
-	res, err := rhp.RPCRefreshContract(ctx, t, cf.cm, cf.signer, cf.cm.TipState(), settings.Prices, rev.Contract, proto.RPCRefreshContractParams{
+	res, err := rhp.RPCRefreshContract(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, rev.Contract, proto.RPCRefreshContractParams{
 		Allowance:  rev.Contract.RenterOutput.Value,
 		Collateral: rev.Contract.MissedHostValue,
 	})
@@ -127,7 +118,13 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		return nil
 	}
 
-	res, err := cm.contractor.RefreshContract(ctx, contract.HostKey, host.SiamuxAddr(), host.Settings, proto.RPCRefreshContractParams{
+	contractor, err := cm.dialer.NewContractor(ctx, host.PublicKey, host.SiamuxAddr())
+	if err != nil {
+		contractLog.Debug("failed to dial contractor", zap.Error(err))
+		return nil
+	}
+	defer contractor.Close()
+	res, err := contractor.RefreshContract(ctx, host.Settings, proto.RPCRefreshContractParams{
 		Allowance:  additionalAllowance,
 		Collateral: additionalCollateral,
 		ContractID: contract.ID,

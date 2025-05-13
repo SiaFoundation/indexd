@@ -8,20 +8,11 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.uber.org/zap"
 )
 
-func (cf *contractor) RenewContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error) {
-	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
-	defer cancel()
-	t, err := siamux.Dial(dialCtx, addr, hk)
-	if err != nil {
-		return rhp.RPCRenewContractResult{}, fmt.Errorf("failed to dial host: %w", err)
-	}
-	defer t.Close()
-
-	rev, err := rhp.RPCLatestRevision(ctx, t, contractID)
+func (c *contractor) RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error) {
+	rev, err := rhp.RPCLatestRevision(ctx, c.client, contractID)
 	if err != nil {
 		return rhp.RPCRenewContractResult{}, fmt.Errorf("failed to fetch latest revision: %w", err)
 	} else if rev.Renewed {
@@ -35,7 +26,7 @@ func (cf *contractor) RenewContract(ctx context.Context, hk types.PublicKey, add
 	// 1. Contracts drain over time if they contain more funds than needed
 	// 2. Renewals are very "cheap" since no party needs to lock away
 	//    additional funds. Only the fees need to be paid.
-	res, err := rhp.RPCRenewContract(ctx, t, cf.cm, cf.signer, cf.cm.TipState(), settings.Prices, rev.Contract, proto.RPCRenewContractParams{
+	res, err := rhp.RPCRenewContract(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, rev.Contract, proto.RPCRenewContractParams{
 		ContractID:  contractID,
 		Allowance:   rev.Contract.RenterOutput.Value,
 		Collateral:  rev.Contract.MissedHostValue,
@@ -108,7 +99,13 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		return nil
 	}
 
-	res, err := cm.contractor.RenewContract(ctx, contract.HostKey, host.SiamuxAddr(), host.Settings, contract.ID, proofHeight)
+	contractor, err := cm.dialer.NewContractor(ctx, host.PublicKey, host.SiamuxAddr())
+	if err != nil {
+		contractLog.Debug("failed to create contractor", zap.Error(err))
+		return nil
+	}
+	defer contractor.Close()
+	res, err := contractor.RenewContract(ctx, host.Settings, contract.ID, proofHeight)
 	if err != nil {
 		contractLog.Debug("failed to renew", zap.Error(err))
 		return nil

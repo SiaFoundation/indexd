@@ -13,17 +13,13 @@ import (
 )
 
 type renewContractCall struct {
-	hk          types.PublicKey
-	addr        string
 	settings    proto.HostSettings
 	contractID  types.FileContractID
 	proofHeight uint64
 }
 
-func (c *contractorMock) RenewContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error) {
+func (c *contractorMock) RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error) {
 	c.renewCalls = append(c.renewCalls, renewContractCall{
-		hk:          hk,
-		addr:        addr,
 		settings:    settings,
 		contractID:  contractID,
 		proofHeight: proofHeight,
@@ -105,18 +101,15 @@ func TestPerformContractRenewals(t *testing.T) {
 		bad.PublicKey:  bad,
 	}
 
-	contractor := newContractorMock()
+	dialer := newDialerMock()
+	contractor := dialer.contractor
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, cmMock, contractor, scanner, store, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, cmMock, dialer, scanner, store, syncerMock, wallet)
 
 	assertRenewal := func(h hosts.Host, renewedFrom types.FileContractID, proofHeight uint64, call renewContractCall) {
 		t.Helper()
-		if call.hk != h.PublicKey {
-			t.Fatalf("expected host key %v, got %v", h.PublicKey, call.hk)
-		} else if call.addr != h.SiamuxAddr() {
-			t.Fatalf("expected address %v, got %v", h.SiamuxAddr(), call.addr)
-		} else if call.settings != goodSettings {
+		if call.settings != goodSettings {
 			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
 		} else if call.contractID != renewedFrom {
 			t.Fatalf("expected renewedFrom %v, got %v", renewedFrom, call.contractID)
@@ -180,9 +173,10 @@ func TestPerformContractRenewals(t *testing.T) {
 func TestSyncRevisionState(t *testing.T) {
 	amMock := &accountsManagerMock{}
 	store := &storeMock{}
-	contractor := newContractorMock()
+	dialer := newDialerMock()
+	contractor := dialer.contractor
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
-	contracts := newContractManager(renterKey, amMock, nil, contractor, nil, store, nil, nil)
+	contracts := newContractManager(renterKey, amMock, nil, dialer, nil, store, nil, nil)
 
 	// add a host and contract
 	contractID := types.FileContractID{1}

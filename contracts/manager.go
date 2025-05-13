@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -48,10 +49,11 @@ type (
 	// Contractor defines the dependencies required to form, renew and refresh
 	// contracts.
 	Contractor interface {
-		FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
-		LatestRevision(ctx context.Context, hk types.PublicKey, addr string, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
-		RefreshContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error)
-		RenewContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
+		io.Closer
+		FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
+		LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
+		RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error)
+		RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
 	}
 
 	// HostManager defines the minimal interface of HostManager functionality
@@ -132,9 +134,9 @@ type (
 		w     Wallet
 		store Store
 
-		contractor Contractor
-		scanner    HostManager
-		renterKey  types.PublicKey
+		dialer    Dialer
+		scanner   HostManager
+		renterKey types.PublicKey
 
 		triggerFundingChan chan struct{}
 
@@ -160,8 +162,8 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	cm := newContractManager(renterKey, accountManager, chainManager, contractor, scanner, store, syncer, wallet, opts...)
+func NewManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, dialer Dialer, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	cm := newContractManager(renterKey, accountManager, chainManager, dialer, scanner, store, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {
@@ -174,15 +176,15 @@ func NewManager(renterKey types.PublicKey, accountManager AccountManager, chainM
 	return cm, nil
 }
 
-func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, dialer Dialer, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
 		am: accountManager,
 		cm: chainManager,
 		s:  syncer,
 		w:  wallet,
 
-		contractor: contractor,
-		renterKey:  renterKey,
+		dialer:    dialer,
+		renterKey: renterKey,
 
 		scanner: scanner,
 		store:   store,
@@ -464,7 +466,13 @@ func (cm *ContractManager) syncContract(ctx context.Context, contract Contract, 
 	revisionCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	resp, err := cm.contractor.LatestRevision(revisionCtx, contract.HostKey, host.SiamuxAddr(), contract.ID)
+	contractor, err := cm.dialer.NewContractor(ctx, host.PublicKey, host.SiamuxAddr())
+	if err != nil {
+		contractLog.Warn("failed to create contractor", zap.Error(err))
+		return err
+	}
+	defer contractor.Close()
+	resp, err := contractor.LatestRevision(revisionCtx, contract.ID)
 	if err != nil {
 		contractLog.Warn("failed to fetch latest revision", zap.Error(err))
 		return nil
