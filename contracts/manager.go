@@ -134,7 +134,7 @@ type (
 		w     Wallet
 		store Store
 
-		dialer    Dialer
+		dialer    dialer
 		scanner   HostManager
 		renterKey types.PublicKey
 
@@ -162,8 +162,9 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, dialer Dialer, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	cm := newContractManager(renterKey, accountManager, chainManager, dialer, scanner, store, syncer, wallet, opts...)
+func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	dialer := newSiamuxDialer(chainManager, wallet, renterKey)
+	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, dialer, scanner, store, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {
@@ -176,7 +177,7 @@ func NewManager(renterKey types.PublicKey, accountManager AccountManager, chainM
 	return cm, nil
 }
 
-func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, dialer Dialer, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, dialer dialer, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
 		am: accountManager,
 		cm: chainManager,

@@ -7,7 +7,6 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/hosts"
@@ -51,27 +50,27 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 	s.w.SignV2Inputs(txn, toSign)
 }
 
-// Dialer is an interface for dialing a host.
-type Dialer interface {
+// dialer is an interface for dialing a host.
+type dialer interface {
 	NewContractor(ctx context.Context, hostKey types.PublicKey, addr string) (Contractor, error)
 }
 
 type contractor struct {
-	cm      *chain.Manager
+	cm      ChainManager
 	client  rhp.TransportClient
 	hostKey types.PublicKey
 	signer  *formContractSigner
 }
 
 type siamuxDialer struct {
-	cm     *chain.Manager
+	cm     ChainManager
 	ownKey types.PrivateKey
 	w      rhp.Wallet
 }
 
-// NewSiamuxDialer creates a new Dialer that uses the SiaMux protocol to dial a
+// newSiamuxDialer creates a new Dialer that uses the SiaMux protocol to dial a
 // host.
-func NewSiamuxDialer(cm *chain.Manager, w rhp.Wallet, ownKey types.PrivateKey) Dialer {
+func newSiamuxDialer(cm ChainManager, w rhp.Wallet, ownKey types.PrivateKey) dialer {
 	return &siamuxDialer{
 		cm:     cm,
 		ownKey: ownKey,
