@@ -77,8 +77,7 @@ func NewSiamuxDialer(cm *chain.Manager, w rhp.Wallet, ownKey types.PrivateKey) D
 }
 
 // NewContractor creates a production Contractor that forms, refreshes and renews contracts by
-// dialing up hosts using the SiaMux protocol and fetching fresh settings right
-// before the RPC call.
+// dialing up hosts using the SiaMux protocol.
 func (d *siamuxDialer) NewContractor(ctx context.Context, hostKey types.PublicKey, addr string) (Contractor, error) {
 	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()

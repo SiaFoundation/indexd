@@ -102,7 +102,6 @@ func TestPerformContractRenewals(t *testing.T) {
 	}
 
 	dialer := newDialerMock()
-	contractor := dialer.contractor
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
 	contracts := newContractManager(renterKey, amMock, cmMock, dialer, scanner, store, syncerMock, wallet)
@@ -121,8 +120,10 @@ func TestPerformContractRenewals(t *testing.T) {
 	// perform renewals when no contract is ready for it
 	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
-	} else if len(contractor.renewCalls) != 0 {
-		t.Fatalf("expected no renewals, got %v", contractor.renewCalls)
+	} else if dialer.Contractor(good.PublicKey) != nil {
+		t.Fatal("expected good host to not be dialed")
+	} else if dialer.Contractor(bad.PublicKey) != nil {
+		t.Fatal("expected bad host to not be dialed")
 	}
 
 	cmMock.state.Index.Height++
@@ -130,10 +131,12 @@ func TestPerformContractRenewals(t *testing.T) {
 
 	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
-	} else if len(contractor.renewCalls) != 1 {
-		t.Fatalf("expected one renewal, got %v", len(contractor.renewCalls))
+	} else if len(dialer.Contractor(good.PublicKey).renewCalls) != 1 {
+		t.Fatalf("expected one renewal, got %v", len(dialer.Contractor(good.PublicKey).renewCalls))
+	} else if dialer.Contractor(bad.PublicKey) != nil {
+		t.Fatal("expected bad host to not be dialed")
 	}
-	assertRenewal(good, types.FileContractID{1}, blockHeight+period+renewWindow, contractor.renewCalls[0])
+	assertRenewal(good, types.FileContractID{1}, blockHeight+period+renewWindow, dialer.Contractor(good.PublicKey).renewCalls[0])
 
 	// assert renewal made it into the store
 	if len(store.contracts) != 4 {
@@ -165,8 +168,10 @@ func TestPerformContractRenewals(t *testing.T) {
 	// assert consecutive calls don't keep renewing the same contract
 	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
-	} else if len(contractor.renewCalls) > 1 {
-		t.Fatalf("expected no new renewals, got %v", len(contractor.renewCalls))
+	} else if len(dialer.Contractor(good.PublicKey).renewCalls) != 1 {
+		t.Fatalf("expected one renewal, got %v", len(dialer.Contractor(good.PublicKey).renewCalls))
+	} else if dialer.Contractor(bad.PublicKey) != nil {
+		t.Fatal("expected bad host to not be dialed")
 	}
 }
 
@@ -174,12 +179,12 @@ func TestSyncRevisionState(t *testing.T) {
 	amMock := &accountsManagerMock{}
 	store := &storeMock{}
 	dialer := newDialerMock()
-	contractor := dialer.contractor
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	contracts := newContractManager(renterKey, amMock, nil, dialer, nil, store, nil, nil)
 
 	// add a host and contract
 	contractID := types.FileContractID{1}
+	contractor := dialer.Contractor(types.PublicKey(contractID))
 	store.hosts = map[types.PublicKey]hosts.Host{
 		types.PublicKey(contractID): {PublicKey: types.PublicKey(contractID)},
 	}

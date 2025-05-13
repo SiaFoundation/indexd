@@ -17,7 +17,6 @@ import (
 func TestBroadcastContractRevisions(t *testing.T) {
 	cmMock := newChainManagerMock()
 	dialer := newDialerMock()
-	contractor := dialer.contractor
 	syncerMock := &syncerMock{}
 	walletMock := &walletMock{}
 	store := &storeMock{}
@@ -27,6 +26,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 
 	// add host
 	hk := types.PublicKey{1}
+	contractor := dialer.Contractor(hk)
 	store.hosts = map[types.PublicKey]hosts.Host{
 		hk: {
 			PublicKey: hk,
