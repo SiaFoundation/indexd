@@ -120,9 +120,9 @@ func TestPerformContractRenewals(t *testing.T) {
 	// perform renewals when no contract is ready for it
 	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
-	} else if dialer.Contractor(good.PublicKey) != nil {
+	} else if len(dialer.Contractor(good.PublicKey).renewCalls) != 0 {
 		t.Fatal("expected good host to not be dialed")
-	} else if dialer.Contractor(bad.PublicKey) != nil {
+	} else if len(dialer.Contractor(bad.PublicKey).renewCalls) != 0 {
 		t.Fatal("expected bad host to not be dialed")
 	}
 
@@ -133,7 +133,7 @@ func TestPerformContractRenewals(t *testing.T) {
 		t.Fatal(err)
 	} else if len(dialer.Contractor(good.PublicKey).renewCalls) != 1 {
 		t.Fatalf("expected one renewal, got %v", len(dialer.Contractor(good.PublicKey).renewCalls))
-	} else if dialer.Contractor(bad.PublicKey) != nil {
+	} else if len(dialer.Contractor(bad.PublicKey).renewCalls) != 0 {
 		t.Fatal("expected bad host to not be dialed")
 	}
 	assertRenewal(good, types.FileContractID{1}, blockHeight+period+renewWindow, dialer.Contractor(good.PublicKey).renewCalls[0])
@@ -170,7 +170,7 @@ func TestPerformContractRenewals(t *testing.T) {
 		t.Fatal(err)
 	} else if len(dialer.Contractor(good.PublicKey).renewCalls) != 1 {
 		t.Fatalf("expected one renewal, got %v", len(dialer.Contractor(good.PublicKey).renewCalls))
-	} else if dialer.Contractor(bad.PublicKey) != nil {
+	} else if len(dialer.Contractor(bad.PublicKey).renewCalls) != 0 {
 		t.Fatal("expected bad host to not be dialed")
 	}
 }

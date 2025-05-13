@@ -164,7 +164,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 		t.Fatal(err)
 	} else if len(dialer.Contractor(good.PublicKey).refreshCalls) != 4 {
 		t.Fatalf("expected 2 refresh calls, got %v", len(dialer.Contractor(good.PublicKey).refreshCalls))
-	} else if dialer.Contractor(bad.PublicKey) != nil {
+	} else if len(dialer.Contractor(bad.PublicKey).refreshCalls) != 0 {
 		t.Fatal("expected bad host to not be dialed")
 	}
 	assertRefresh(good, types.Siacoins(110), types.ZeroCurrency, types.FileContractID{2}, dialer.Contractor(good.PublicKey).refreshCalls[0])

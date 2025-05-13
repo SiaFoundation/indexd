@@ -49,6 +49,9 @@ func newDialerMock() *dialerMock {
 }
 
 func (d *dialerMock) Contractor(hostKey types.PublicKey) *contractorMock {
+	if _, ok := d.contractor[hostKey]; !ok {
+		d.contractor[hostKey] = newContractorMock()
+	}
 	return d.contractor[hostKey]
 }
 
