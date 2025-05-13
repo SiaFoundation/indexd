@@ -26,7 +26,6 @@ func TestBroadcastContractRevisions(t *testing.T) {
 
 	// add host
 	hk := types.PublicKey{1}
-	contractor := dialer.Contractor(hk)
 	store.hosts = map[types.PublicKey]hosts.Host{
 		hk: {
 			PublicKey: hk,
@@ -77,6 +76,8 @@ func TestBroadcastContractRevisions(t *testing.T) {
 
 	// mock a latest revision
 	rev := types.V2FileContract{RevisionNumber: 1}
+	contractor := newContractorMock()
+	dialer.contractor[hk] = contractor
 	contractor.latestRevisions[types.FileContractID{4}] = proto.RPCLatestRevisionResponse{Contract: rev}
 
 	// assert revision was broadcasted and contract was marked as such
