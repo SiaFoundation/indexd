@@ -257,12 +257,6 @@ CREATE INDEX sectors_host_id_next_integrity_check_idx ON sectors(host_id, next_i
 -- speed up querying sectors of a host by root
 CREATE INDEX sectors_host_id_sector_root_idx ON sectors(host_id, sector_root);
 
--- speed up lookup of sectors by root
-CREATE INDEX sectors_sector_root_idx ON sectors(sector_root);
-
--- speed up removing sectors by host
-CREATE INDEX sectors_host_id_sector_root_contract_sectors_map_id_idx ON sectors(host_id, sector_root) WHERE contract_sectors_map_id IS NULL;
-
 CREATE TABLE slab_sectors (
     slab_id BIGINT REFERENCES slabs(id) ON DELETE CASCADE,
     sector_id BIGINT REFERENCES sectors(id) ON DELETE CASCADE,

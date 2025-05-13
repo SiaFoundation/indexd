@@ -48,9 +48,9 @@ type contractorMock struct {
 	renewCalls      []renewContractCall
 	latestRevisions map[types.FileContractID]proto.RPCLatestRevisionResponse
 
-	mu             sync.Mutex
-	pinSectorCalls []pinSectorsCall
-	missingSectors map[types.Hash256]struct{}
+	mu                sync.Mutex
+	appendSectorCalls []appendSectorCall
+	missingSectors    map[types.Hash256]struct{}
 }
 
 func newContractorMock() *contractorMock {
