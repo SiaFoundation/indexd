@@ -950,17 +950,6 @@ func TestUnpinnedSectors(t *testing.T) {
 // BenchmarkSlabs benchmarks Slabs and PinSlabs in various batch sizes. The
 // results are expressed in time per operation as well as equivalent
 // upload/download throughput.
-//
-// Hardware |     Benchmark   |  ms/op  |  Throughput   |
-// M1 Max   |     PinSlab     |  3.8ms  | 10760.68 MB/s |
-// M2 Pro   |     PinSlab     |  1.4ms  | 26590.43 MB/s |
-//
-// M1 Max   |   Slabs-40MiB   |   1.8ms | 24220.77 MB/s |
-// M1 Max   |   Slabs-400MiB  |   3.1ms | 13591.64 MB/s |
-// M1 Max   |   Slabs-4GiB    |  12.5ms |  3344.74 MB/s |
-// M2 Pro   |   Slabs-40MiB   |   0.5ms | 64021.45 MB/s |
-// M2 Pro   |   Slabs-400MiB  |   0.8ms | 40447.43 MB/s |
-// M2 Pro   |   Slabs-4GiB    |   3.3ms |  9930.88 MB/s |
 func BenchmarkSlabs(b *testing.B) {
 	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
 	account := proto.Account{1}
@@ -1059,14 +1048,6 @@ func BenchmarkSlabs(b *testing.B) {
 }
 
 // BenchmarkUnpinnedSectors benchmarks UnpinnedSectors in various batch sizes.
-//
-// CPU    | BatchSize |	 Count  |    Time/op    |    Throughput
-// M1 Max |     100   |    100  |       2.2 ms  |   188111.18 MB/s
-// M1 Max |    1000   |    100  |      10.3 ms  |   407258.92 MB/s
-// M1 Max |   10000   |    100  |      48.4 ms  |   865969.10 MB/s
-// M2 Pro |     100   |   1357  |  0.847729 ms  |   494769.40 MB/s
-// M2 Pro |    1000   |    434  |  3.023359 ms  |  1387299.30 MB/s
-// M2 Pro |   10000   |     84  | 21.598813 ms  |  1941914.13 MB/s
 func BenchmarkUnpinnedSectors(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
@@ -1160,12 +1141,6 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 }
 
 // BenchmarkSectorsForIntegrityCheck benchmarks SectorsForIntegrityCheck
-//
-//	CPU  | BatchSize |	  Count  |     Time/op     |   Throughput
-//
-// M2 Pro |    10     |   2857   |    0.380024 ms  |  110369.50 MB/s
-// M2 Pro |   100     |   2780   |    0.428167 ms  |  979595.01 MB/s
-// M2 Pro |  1000     |   1497   |    0.790556 ms  | 5305513.99 MB/s
 func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto.Account{1}
@@ -1235,11 +1210,6 @@ func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
 }
 
 // BenchmarkPinSectors benchmarks PinSectors in various batch sizes.
-//
-// CPU    | BatchSize |	 Count  |   Time/op     |   Throughput
-// M2 Pro |     10    |   1335  |    0.860 ms   |     48721.98 MB/s
-// M2 Pro |    100    |   400   |    2.637 ms   |     159044.64 MB/s
-// M2 Pro |   1000    |   56    |   19.966 ms   |     210065.00 MB/s
 func BenchmarkPinSectors(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
@@ -1338,9 +1308,6 @@ func BenchmarkPinSectors(b *testing.B) {
 }
 
 // BenchmarkUnhealthySlab benchmarks UnhealthySlab
-//
-//	CPU    |  Count  |   Time/op
-//	M1 Max |   132   |   32.45 ms
 func BenchmarkUnhealthySlab(b *testing.B) {
 	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
 	account := proto.Account{1}
@@ -1450,9 +1417,6 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 // UnpinSlab. All slabs are referenced by the same account, every slab is only
 // referenced once, that means that unpinning the slab will delete the
 // reference, as well as the slab itself.
-//
-//	CPU    |   Count  |    Time/op
-//	M1 Max |    342   |    3.2 ms
 func BenchmarkUnpinSlab(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
@@ -1523,12 +1487,6 @@ func BenchmarkUnpinSlab(b *testing.B) {
 }
 
 // BenchmarkRecordIntegrityChecks benchmarks RecordIntegrityCheck
-//
-//	CPU  | BatchSize |	  Count  |     Time/op     |   Throughput
-//
-// M2 Pro |    10     |    957   |     3.80024 ms  |   19291.60 MB/s
-// M2 Pro |   100     |    280   |    4.057123 ms  |  103381.24 MB/s
-// M2 Pro |  1000     |     37   |   28.196233 ms  |  148754.05 MB/s
 func BenchmarkRecordIntegrityChecks(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto.Account{1}
@@ -1599,12 +1557,6 @@ func BenchmarkRecordIntegrityChecks(b *testing.B) {
 }
 
 // BenchmarkFailingSectors benchmarks FailingSectors.
-//
-//	CPU  | BatchSize |	  Count  |     Time/op     |   Throughput
-//
-// M2 Pro |   100     |    496   |    2.260241 ms  |  185568.92 MB/s
-// M2 Pro |  1000     |    100   |   13.477551 ms  |  311206.68 MB/s
-// M2 Pro | 10000     |     44   |   73.282087 ms  |  572350.51 MB/s
 func BenchmarkFailingSectors(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto.Account{1}
@@ -1814,11 +1766,6 @@ func TestMarkSectorsLost(t *testing.T) {
 }
 
 // BenchmarkMarkSectorsLost benchmarks MarkSectorsLost in various batch sizes.
-//
-// CPU    | BatchSize |	 Count  |     Time/op    |    Throughput
-// M2 Pro |     100   |    638  |   1.903132 ms  |   220389.59 MB/s
-// M2 Pro |    1000   |     94  |  12.430024 ms  |   337433.29 MB/s
-// M2 Pro |   10000   |     10  | 112.704779 ms  |   372149.61 MB/s
 func BenchmarkMarkSectorsLost(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
@@ -1941,9 +1888,6 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 }
 
 // BenchmarkMigrateSector benchmarks MigrateSector.
-//
-// CPU    |	 Count  |     Time/op    |    Throughput
-// M2 Pro |   2508  |   0.437476 ms  |   9587.50 MB/s
 func BenchmarkMigrateSector(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 

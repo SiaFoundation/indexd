@@ -1160,14 +1160,6 @@ func TestSyncContract(t *testing.T) {
 
 // BenchmarkContracts is a benchmark to ensure the performance of
 // Contract and Contracts.
-//
-// M1 Max | Contract       |                | 1.3 ms/op
-// M1 Max | Contracts 100  | None           | 1.9 ms/op
-// M1 Max | Contracts 100  | Revisable      | 2.4 ms/op
-// M1 Max | Contracts 100  | Revisable+Good | 2.2 ms/op
-// M1 Max | Contracts 1000 | None           | 5.1 ms/op
-// M1 Max | Contracts 1000 | Revisable      | 4.8 ms/op
-// M1 Max | Contracts 1000 | Revisable+Good | 5.3 ms/op
 func BenchmarkContracts(b *testing.B) {
 	const (
 		numContractsPerHost = 100
@@ -1262,8 +1254,6 @@ func BenchmarkContracts(b *testing.B) {
 // ContractsForBroadcasting, we prepare the database with a certain number of
 // contracts per host, with a random state, last_broadcast_attempt and good
 // status.
-//
-// M1 Max | 100k contracts | 1.4ms/op
 func BenchmarkContractsForBroadcasting(b *testing.B) {
 	const (
 		numContractsPerHost = 100
@@ -1323,8 +1313,6 @@ func BenchmarkContractsForBroadcasting(b *testing.B) {
 // BenchmarkContractsForFunding is a benchmark to ensure the performance of
 // ContractsForFunding, we prepare the database with a certain number of
 // contracts per host, with a random state, remaining allowance and good status.
-//
-// M1 Max | 100k contracts | 1.56ms/op
 func BenchmarkContractsForFunding(b *testing.B) {
 	const (
 		numContractsPerHost = 100
@@ -1381,8 +1369,6 @@ func BenchmarkContractsForFunding(b *testing.B) {
 // BenchmarkContractsForPinning is a benchmark to ensure the performance of
 // ContractsForPinning, we prepare the database with contracts that are randomly
 // suitable for pinning depending on various factors.
-//
-// M1 Max | 100k contracts | 1.41ms/op
 func BenchmarkContractsForPinning(b *testing.B) {
 	const (
 		maxContractSize     = 10 * 1 << 40 // 10TB
