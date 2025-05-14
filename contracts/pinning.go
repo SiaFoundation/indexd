@@ -106,7 +106,7 @@ func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Lo
 
 	const (
 		batchSize        = 50
-		sectorsBatchSize = (1 << 40) / proto.SectorSize
+		sectorsBatchSize = (1 << 40) / proto.SectorSize // 1TB of sectors
 	)
 
 	var wg sync.WaitGroup
@@ -200,9 +200,14 @@ func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, pinne
 		}
 
 		if len(missing) > 0 {
+			lookup := make(map[types.Hash256]struct{}, len(missing))
+			for _, sector := range missing {
+				lookup[sector] = struct{}{}
+			}
+
 			filtered := roots[:0]
 			for _, root := range roots {
-				if !slices.Contains(missing, root) {
+				if _, missing := lookup[root]; !missing {
 					filtered = append(filtered, root)
 				}
 			}
@@ -226,5 +231,5 @@ func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, pinne
 		}
 	}
 
-	return nil
+	return ctx.Err()
 }

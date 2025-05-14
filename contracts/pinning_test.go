@@ -167,7 +167,7 @@ func (s *storeMock) MarkSectorsLost(ctx context.Context, hk types.PublicKey, roo
 		lookup[root] = struct{}{}
 	}
 
-	// remove sectors
+	// mark sectors as lost
 	updated, ok := s.sectors[hk]
 	if !ok {
 		panic("no host sectors found")
