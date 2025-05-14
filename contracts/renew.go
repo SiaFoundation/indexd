@@ -99,7 +99,7 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		return nil
 	}
 
-	contractor, err := cm.dialer.NewContractor(ctx, host.PublicKey, host.SiamuxAddr())
+	contractor, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		contractLog.Debug("failed to create contractor", zap.Error(err))
 		return nil

@@ -163,7 +163,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 	if err := contracts.performContractRefreshes(context.Background(), zap.NewNop()); err != nil {
 		t.Fatal(err)
 	} else if len(dialer.Contractor(good.PublicKey).refreshCalls) != 4 {
-		t.Fatalf("expected 2 refresh calls, got %v", len(dialer.Contractor(good.PublicKey).refreshCalls))
+		t.Fatalf("expected 4 refresh calls, got %v", len(dialer.Contractor(good.PublicKey).refreshCalls))
 	} else if len(dialer.Contractor(bad.PublicKey).refreshCalls) != 0 {
 		t.Fatal("expected bad host to not be dialed")
 	}

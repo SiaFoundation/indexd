@@ -55,7 +55,7 @@ func (d *dialerMock) Contractor(hostKey types.PublicKey) *contractorMock {
 	return d.contractor[hostKey]
 }
 
-func (d *dialerMock) NewContractor(ctx context.Context, hostKey types.PublicKey, addr string) (Contractor, error) {
+func (d *dialerMock) Dial(ctx context.Context, hostKey types.PublicKey, addr string) (Contractor, error) {
 	if _, ok := d.contractor[hostKey]; !ok {
 		d.contractor[hostKey] = newContractorMock()
 	}

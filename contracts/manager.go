@@ -467,7 +467,7 @@ func (cm *ContractManager) syncContract(ctx context.Context, contract Contract, 
 	revisionCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	contractor, err := cm.dialer.NewContractor(ctx, host.PublicKey, host.SiamuxAddr())
+	contractor, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		contractLog.Warn("failed to create contractor", zap.Error(err))
 		return err

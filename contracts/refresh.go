@@ -118,7 +118,7 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		return nil
 	}
 
-	contractor, err := cm.dialer.NewContractor(ctx, host.PublicKey, host.SiamuxAddr())
+	contractor, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		contractLog.Debug("failed to dial contractor", zap.Error(err))
 		return nil

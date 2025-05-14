@@ -56,7 +56,7 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 	}
 
 	// fetch the latest revision
-	contractor, err := cm.dialer.NewContractor(ctx, host.PublicKey, host.SiamuxAddr())
+	contractor, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		return fmt.Errorf("failed to create contractor: %w", err)
 	}
