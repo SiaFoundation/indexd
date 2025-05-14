@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -508,6 +510,111 @@ func TestContractsForPruning(t *testing.T) {
 		t.Fatalf("expected 1 contract, got %d", len(contractIDs))
 	} else if contractIDs[0] != (types.FileContractID{7}) {
 		t.Fatalf("expected contract %v, got %v", types.FileContractID{7}, contractIDs[0])
+	}
+}
+
+func TestPrunableContractRoots(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// add two hosts
+	hk1 := types.PublicKey{1}
+	hk2 := types.PublicKey{2}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return errors.Join(
+			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
+			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
+		)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add a contract for each host
+	fcid1 := types.FileContractID{1}
+	fcid2 := types.FileContractID{2}
+	if err := errors.Join(
+		store.AddFormedContract(context.Background(), fcid1, hk1, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)),
+		store.AddFormedContract(context.Background(), fcid2, hk2, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare roots
+	roots := []types.Hash256{
+		frand.Entropy256(),
+		frand.Entropy256(),
+		frand.Entropy256(),
+		frand.Entropy256(),
+	}
+
+	// pin two slabs to add sectors
+	_, err := store.PinSlab(context.Background(), account, time.Now(), slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     11,
+		Sectors: []slabs.SectorPinParams{
+			{Root: roots[0], HostKey: hk1},
+			{Root: roots[2], HostKey: hk2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slabID, err := store.PinSlab(context.Background(), account, time.Now(), slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     11,
+		Sectors: []slabs.SectorPinParams{
+			{Root: roots[1], HostKey: hk1},
+			{Root: roots[3], HostKey: hk2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// pin sectors for h1
+	if sectors, err := store.UnpinnedSectors(context.Background(), hk1, 10); err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(context.Background(), fcid1, sectors); err != nil {
+		t.Fatal(err)
+	}
+
+	// pin sectors for h2
+	if sectors, err := store.UnpinnedSectors(context.Background(), hk2, 10); err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(context.Background(), fcid2, sectors); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert no prunable roots for either contract
+	if indices, err := store.PrunableContractRoots(context.Background(), hk1, fcid1, roots[:2]); err != nil {
+		t.Fatal(err)
+	} else if len(indices) != 0 {
+		t.Fatalf("unexpected prunable indices, %+v", indices)
+	} else if indices, err := store.PrunableContractRoots(context.Background(), hk2, fcid2, roots[2:]); err != nil {
+		t.Fatal(err)
+	} else if len(indices) != 0 {
+		t.Fatalf("unexpected prunable indices, %+v", indices)
+	}
+
+	// unpin the second slab to remove sectors for both hosts
+	if err := store.UnpinSlab(context.Background(), account, slabID); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert prunable roots for both contracts
+	if indices, err := store.PrunableContractRoots(context.Background(), hk1, fcid1, roots[:2]); err != nil {
+		t.Fatal(err)
+	} else if len(indices) != 1 || indices[0] != 1 {
+		t.Fatalf("unexpected prunable indices, %+v", indices)
+	} else if indices, err := store.PrunableContractRoots(context.Background(), hk2, fcid2, roots[2:]); err != nil {
+		t.Fatal(err)
+	} else if len(indices) != 1 || indices[0] != 1 {
+		t.Fatalf("unexpected prunable indices, %+v", indices)
 	}
 }
 

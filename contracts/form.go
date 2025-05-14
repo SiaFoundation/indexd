@@ -54,6 +54,7 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 type contractor struct {
 	cm     *chain.Manager
 	signer *formContractSigner
+	sk     types.PrivateKey
 }
 
 // NewContractor creates a production Contractor that forms, refreshes and renews contracts by
@@ -66,6 +67,7 @@ func NewContractor(cm *chain.Manager, w rhp.Wallet, renterKey types.PrivateKey) 
 			renterKey: renterKey,
 			w:         w,
 		},
+		sk: renterKey,
 	}
 }
 
