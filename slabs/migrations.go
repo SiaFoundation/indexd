@@ -12,7 +12,7 @@ func contractsForRepair(slab Slab, availableHosts []hosts.Host, availableContrac
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range availableHosts {
-		if host.Usability.Usable() && !host.Blocked && len(host.Networks) > 0 {
+		if host.IsGood() {
 			hostsMap[host.PublicKey] = host
 		}
 	}
@@ -21,12 +21,9 @@ func contractsForRepair(slab Slab, availableHosts []hosts.Host, availableContrac
 	goodContractMap := make(map[types.FileContractID]contracts.Contract)
 	for _, contract := range availableContracts {
 		host, ok := hostsMap[contract.HostKey]
-		if !ok {
-			continue
-		} else if !contract.GoodForUpload(host.Settings.Prices, host.Settings.MaxCollateral, period) {
-			continue
+		if ok && contract.GoodForUpload(host.Settings.Prices, host.Settings.MaxCollateral, period) {
+			goodContractMap[contract.ID] = contract
 		}
-		goodContractMap[contract.ID] = contract
 	}
 
 	// remember the CIDRs of the hosts that good sectors are stored on. We don't
