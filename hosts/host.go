@@ -109,6 +109,11 @@ type (
 	}
 )
 
+// IsGood returns true if the host is considered good for storing data.
+func (h *Host) IsGood() bool {
+	return h.Usability.Usable() && !h.Blocked && len(h.Networks) > 0
+}
+
 // GoodUsability is the usability struct indicating that all checks passed.
 var GoodUsability = Usability{
 	Uptime:              true,

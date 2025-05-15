@@ -609,11 +609,11 @@ func TestPrunableContractRoots(t *testing.T) {
 	// assert prunable roots for both contracts
 	if indices, err := store.PrunableContractRoots(context.Background(), hk1, fcid1, roots[:2]); err != nil {
 		t.Fatal(err)
-	} else if len(indices) != 1 || indices[0] != 1 {
+	} else if len(indices) != 1 || indices[0] != (types.Hash256{}) {
 		t.Fatalf("unexpected prunable indices, %+v", indices)
 	} else if indices, err := store.PrunableContractRoots(context.Background(), hk2, fcid2, roots[2:]); err != nil {
 		t.Fatal(err)
-	} else if len(indices) != 1 || indices[0] != 1 {
+	} else if len(indices) != 1 || indices[0] != (types.Hash256{}) {
 		t.Fatalf("unexpected prunable indices, %+v", indices)
 	}
 }

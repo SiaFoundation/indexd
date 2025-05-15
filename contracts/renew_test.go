@@ -13,17 +13,13 @@ import (
 )
 
 type renewContractCall struct {
-	hk          types.PublicKey
-	addr        string
 	settings    proto.HostSettings
 	contractID  types.FileContractID
 	proofHeight uint64
 }
 
-func (c *contractorMock) RenewContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error) {
+func (c *hostClientMock) RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error) {
 	c.renewCalls = append(c.renewCalls, renewContractCall{
-		hk:          hk,
-		addr:        addr,
 		settings:    settings,
 		contractID:  contractID,
 		proofHeight: proofHeight,
@@ -105,18 +101,14 @@ func TestPerformContractRenewals(t *testing.T) {
 		bad.PublicKey:  bad,
 	}
 
-	contractor := newContractorMock()
+	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, cmMock, contractor, scanner, store, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, cmMock, dialer, scanner, store, syncerMock, wallet)
 
 	assertRenewal := func(h hosts.Host, renewedFrom types.FileContractID, proofHeight uint64, call renewContractCall) {
 		t.Helper()
-		if call.hk != h.PublicKey {
-			t.Fatalf("expected host key %v, got %v", h.PublicKey, call.hk)
-		} else if call.addr != h.SiamuxAddr() {
-			t.Fatalf("expected address %v, got %v", h.SiamuxAddr(), call.addr)
-		} else if call.settings != goodSettings {
+		if call.settings != goodSettings {
 			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
 		} else if call.contractID != renewedFrom {
 			t.Fatalf("expected renewedFrom %v, got %v", renewedFrom, call.contractID)
@@ -128,8 +120,10 @@ func TestPerformContractRenewals(t *testing.T) {
 	// perform renewals when no contract is ready for it
 	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
-	} else if len(contractor.renewCalls) != 0 {
-		t.Fatalf("expected no renewals, got %v", contractor.renewCalls)
+	} else if len(dialer.HostClient(good.PublicKey).renewCalls) != 0 {
+		t.Fatal("expected good host to not be dialed")
+	} else if len(dialer.HostClient(bad.PublicKey).renewCalls) != 0 {
+		t.Fatal("expected bad host to not be dialed")
 	}
 
 	cmMock.state.Index.Height++
@@ -137,10 +131,12 @@ func TestPerformContractRenewals(t *testing.T) {
 
 	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
-	} else if len(contractor.renewCalls) != 1 {
-		t.Fatalf("expected one renewal, got %v", len(contractor.renewCalls))
+	} else if len(dialer.HostClient(good.PublicKey).renewCalls) != 1 {
+		t.Fatalf("expected one renewal, got %v", len(dialer.HostClient(good.PublicKey).renewCalls))
+	} else if len(dialer.HostClient(bad.PublicKey).renewCalls) != 0 {
+		t.Fatal("expected bad host to not be dialed")
 	}
-	assertRenewal(good, types.FileContractID{1}, blockHeight+period+renewWindow, contractor.renewCalls[0])
+	assertRenewal(good, types.FileContractID{1}, blockHeight+period+renewWindow, dialer.HostClient(good.PublicKey).renewCalls[0])
 
 	// assert renewal made it into the store
 	if len(store.contracts) != 4 {
@@ -172,20 +168,23 @@ func TestPerformContractRenewals(t *testing.T) {
 	// assert consecutive calls don't keep renewing the same contract
 	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
-	} else if len(contractor.renewCalls) > 1 {
-		t.Fatalf("expected no new renewals, got %v", len(contractor.renewCalls))
+	} else if len(dialer.HostClient(good.PublicKey).renewCalls) != 1 {
+		t.Fatalf("expected one renewal, got %v", len(dialer.HostClient(good.PublicKey).renewCalls))
+	} else if len(dialer.HostClient(bad.PublicKey).renewCalls) != 0 {
+		t.Fatal("expected bad host to not be dialed")
 	}
 }
 
 func TestSyncRevisionState(t *testing.T) {
 	amMock := &accountsManagerMock{}
 	store := &storeMock{}
-	contractor := newContractorMock()
+	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
-	contracts := newContractManager(renterKey, amMock, nil, contractor, nil, store, nil, nil)
+	contracts := newContractManager(renterKey, amMock, nil, dialer, nil, store, nil, nil)
 
 	// add a host and contract
 	contractID := types.FileContractID{1}
+	hc := dialer.HostClient(types.PublicKey(contractID))
 	store.hosts = map[types.PublicKey]hosts.Host{
 		types.PublicKey(contractID): {PublicKey: types.PublicKey(contractID)},
 	}
@@ -198,8 +197,8 @@ func TestSyncRevisionState(t *testing.T) {
 	assertContract := func(revisionParams, expectedParams ContractSyncParams) {
 		t.Helper()
 
-		// update latest revision in mocked contractor
-		contractor.latestRevisions[contractID] = proto.RPCLatestRevisionResponse{
+		// update latest revision in mocked client
+		hc.latestRevisions[contractID] = proto.RPCLatestRevisionResponse{
 			Contract: types.V2FileContract{
 				Capacity: revisionParams.Capacity,
 				RenterOutput: types.SiacoinOutput{

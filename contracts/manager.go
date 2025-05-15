@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -45,16 +46,18 @@ type (
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
-	// Contractor defines the dependencies required to form, renew and refresh
+	// HostClient defines the dependencies required to form, renew and refresh
 	// contracts.
-	Contractor interface {
-		ContractSectors(ctx context.Context, tc rhp.TransportClient, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error)
-		PruneSectors(ctx context.Context, tc rhp.TransportClient, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error)
-
-		FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
-		LatestRevision(ctx context.Context, hk types.PublicKey, addr string, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
-		RefreshContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error)
-		RenewContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
+	HostClient interface {
+		io.Closer
+		AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error)
+		ContractSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error)
+		FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
+		HostKey() types.PublicKey
+		LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
+		PruneSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error)
+		RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error)
+		RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
 	}
 
 	// HostManager defines the minimal interface of HostManager functionality
@@ -74,17 +77,21 @@ type (
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		ContractsForBroadcasting(ctx context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error)
 		ContractsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error)
+		ContractsForPinning(ctx context.Context, hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error)
 		ContractsForPruning(ctx context.Context, hk types.PublicKey, maxLastPrune time.Time) ([]types.FileContractID, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
+		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error
 		MarkPruned(ctx context.Context, contractID types.FileContractID) error
 		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
-		PrunableContractRoots(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, roots []types.Hash256) ([]uint64, error)
-		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
+		PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		SyncContract(ctx context.Context, contractID types.FileContractID, params ContractSyncParams) error
+		PrunableContractRoots(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
+		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
+		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 	}
 
 	// Syncer is the minimal interface of Syncer functionality the
@@ -138,9 +145,9 @@ type (
 		w     Wallet
 		store Store
 
-		contractor Contractor
-		scanner    HostManager
-		renterKey  types.PublicKey
+		dialer    dialer
+		scanner   HostManager
+		renterKey types.PublicKey
 
 		triggerFundingChan chan struct{}
 
@@ -166,8 +173,9 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	cm := newContractManager(renterKey, accountManager, chainManager, contractor, scanner, store, syncer, wallet, opts...)
+func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	dialer := newSiamuxDialer(chainManager, wallet, renterKey)
+	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, dialer, scanner, store, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {
@@ -180,15 +188,15 @@ func NewManager(renterKey types.PublicKey, accountManager AccountManager, chainM
 	return cm, nil
 }
 
-func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, contractor Contractor, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, dialer dialer, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
 		am: accountManager,
 		cm: chainManager,
 		s:  syncer,
 		w:  wallet,
 
-		contractor: contractor,
-		renterKey:  renterKey,
+		dialer:    dialer,
+		renterKey: renterKey,
 
 		scanner: scanner,
 		store:   store,
@@ -265,8 +273,8 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 			log.Error("contract pruning failed", zap.Error(err))
 		}
 
-		if err := cm.performSlabPinning(); err != nil {
-			log.Error("slab pinning failed", zap.Error(err))
+		if err := cm.performSectorPinning(ctx, log); err != nil {
+			log.Error("sector pinning failed", zap.Error(err))
 		}
 	}
 }
@@ -470,7 +478,13 @@ func (cm *ContractManager) syncContract(ctx context.Context, contract Contract, 
 	revisionCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	resp, err := cm.contractor.LatestRevision(revisionCtx, contract.HostKey, host.SiamuxAddr(), contract.ID)
+	hc, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
+	if err != nil {
+		contractLog.Warn("failed to dial host", zap.Error(err))
+		return err
+	}
+	defer hc.Close()
+	resp, err := hc.LatestRevision(revisionCtx, contract.ID)
 	if err != nil {
 		contractLog.Warn("failed to fetch latest revision", zap.Error(err))
 		return nil
@@ -493,10 +507,5 @@ func (cm *ContractManager) syncContract(ctx context.Context, contract Contract, 
 		return fmt.Errorf("failed to sync contract state: %w", err)
 	}
 
-	return nil
-}
-
-// TODO: implement
-func (cm *ContractManager) performSlabPinning() error {
 	return nil
 }

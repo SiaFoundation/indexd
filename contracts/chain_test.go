@@ -29,12 +29,27 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 }
 
 type storeMock struct {
-	contracts   []Contract
 	toBroadcast []types.V2FileContractElement
 	pruneCalls  int
 	rejectCalls int
 	settings    MaintenanceSettings
 	hosts       map[types.PublicKey]hosts.Host
+
+	mu        sync.Mutex
+	contracts []Contract
+	sectors   map[types.PublicKey][]sector
+}
+
+type sector struct {
+	root       types.Hash256
+	contractID *types.FileContractID
+}
+
+func newStoreMock() *storeMock {
+	return &storeMock{
+		hosts:   make(map[types.PublicKey]hosts.Host),
+		sectors: make(map[types.PublicKey][]sector),
+	}
 }
 
 func (s *storeMock) AddFormedContract(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee, totalCollateral types.Currency) error {

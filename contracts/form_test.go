@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 	"slices"
-	"strings"
+	"sync"
 	"testing"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -35,37 +35,62 @@ var (
 )
 
 type formContractCall struct {
-	hk       types.PublicKey
-	addr     string
 	settings proto.HostSettings
 	params   proto.RPCFormContractParams
 }
 
-type contractorMock struct {
+type dialerMock struct {
+	clients map[types.PublicKey]*hostClientMock
+}
+
+func newDialerMock() *dialerMock {
+	return &dialerMock{
+		clients: make(map[types.PublicKey]*hostClientMock),
+	}
+}
+
+func (d *dialerMock) HostClient(hostKey types.PublicKey) *hostClientMock {
+	if _, ok := d.clients[hostKey]; !ok {
+		d.clients[hostKey] = newHostClientMock()
+	}
+	return d.clients[hostKey]
+}
+
+func (d *dialerMock) Dial(ctx context.Context, hostKey types.PublicKey, addr string) (HostClient, error) {
+	if _, ok := d.clients[hostKey]; !ok {
+		d.clients[hostKey] = newHostClientMock()
+	}
+	return d.clients[hostKey], nil
+}
+
+type hostClientMock struct {
 	formCalls       []formContractCall
 	refreshCalls    []refreshContractCall
 	renewCalls      []renewContractCall
 	latestRevisions map[types.FileContractID]proto.RPCLatestRevisionResponse
+
+	mu                sync.Mutex
+	appendSectorCalls []appendSectorCall
+	missingSectors    map[types.Hash256]struct{}
 }
 
-func newContractorMock() *contractorMock {
-	return &contractorMock{
+func newHostClientMock() *hostClientMock {
+	return &hostClientMock{
 		latestRevisions: map[types.FileContractID]proto.RPCLatestRevisionResponse{},
+		missingSectors:  map[types.Hash256]struct{}{},
 	}
 }
 
-func (c *contractorMock) Calls() []formContractCall {
-	calls := slices.Clone(c.formCalls)
-	slices.SortFunc(calls, func(a, b formContractCall) int {
-		return strings.Compare(a.hk.String(), b.hk.String())
-	})
-	return calls
+func (c *hostClientMock) Close() error {
+	return nil
 }
 
-func (c *contractorMock) FormContract(ctx context.Context, hk types.PublicKey, addr string, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
+func (c *hostClientMock) Calls() []formContractCall {
+	return slices.Clone(c.formCalls)
+}
+
+func (c *hostClientMock) FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
 	c.formCalls = append(c.formCalls, formContractCall{
-		hk:       hk,
-		addr:     addr,
 		settings: settings,
 		params:   params,
 	})
@@ -88,7 +113,7 @@ func (c *contractorMock) FormContract(ctx context.Context, hk types.PublicKey, a
 	}, nil
 }
 
-func (c *contractorMock) LatestRevision(ctx context.Context, hk types.PublicKey, addr string, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+func (c *hostClientMock) LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 	resp, ok := c.latestRevisions[contractID]
 	if !ok {
 		return proto.RPCLatestRevisionResponse{}, fmt.Errorf("contract %v not found", contractID)
@@ -211,21 +236,18 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 		good3.PublicKey: good3,
 	}
 
-	contractor := newContractorMock()
+	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, cmMock, contractor, scanner, store, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, cmMock, dialer, scanner, store, syncerMock, wallet)
 
 	// disable randomizing hosts to make test deterministic
 	contracts.shuffle = func(int, func(i, j int)) {}
 
-	assertFormation := func(h hosts.Host, call formContractCall) {
+	assertFormation := func(h hosts.Host) {
 		t.Helper()
-		if call.hk != h.PublicKey {
-			t.Fatalf("expected host key %v, got %v", h.PublicKey, call.hk)
-		} else if call.addr != h.SiamuxAddr() {
-			t.Fatalf("expected address %v, got %v", h.SiamuxAddr(), call.addr)
-		} else if call.settings != goodSettings {
+		call := dialer.HostClient(h.PublicKey).Calls()[0]
+		if call.settings != goodSettings {
 			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
 		}
 		// assert params
@@ -250,13 +272,16 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 
 	// assert that we attempted to form contracts with the right hosts,
 	// settings and params
-	calls := contractor.Calls()
-	if len(calls) != wanted {
-		t.Fatalf("expected %v calls, got %v", wanted, len(calls))
+	var nCalls int
+	for _, calls := range dialer.clients {
+		nCalls += len(calls.formCalls)
 	}
-	assertFormation(good1, calls[0])
-	assertFormation(good2, calls[1])
-	assertFormation(good3, calls[2])
+	if nCalls != wanted {
+		t.Fatalf("expected %v calls, got %v", wanted, nCalls)
+	}
+	assertFormation(good1)
+	assertFormation(good2)
+	assertFormation(good3)
 
 	// assert formations made it into the store
 	if len(store.contracts) != wanted {
@@ -376,21 +401,18 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 		good5.PublicKey: good5,
 	}
 
-	cf := &contractorMock{}
+	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, cmMock, cf, scanner, store, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, cmMock, dialer, scanner, store, syncerMock, wallet)
 
 	// disable randomizing hosts to make test deterministic
 	contracts.shuffle = func(int, func(i, j int)) {}
 
-	assertFormation := func(h hosts.Host, call formContractCall) {
+	assertFormation := func(h hosts.Host) {
 		t.Helper()
-		if call.hk != h.PublicKey {
-			t.Fatalf("expected host key %v, got %v", h.PublicKey, call.hk)
-		} else if call.addr != h.SiamuxAddr() {
-			t.Fatalf("expected address %v, got %v", h.SiamuxAddr(), call.addr)
-		} else if call.settings != goodSettings {
+		call := dialer.HostClient(h.PublicKey).Calls()[0]
+		if call.settings != goodSettings {
 			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
 		}
 		// assert params
@@ -415,13 +437,16 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 
 	// assert that we attempted to form contracts with the right hosts,
 	// settings and params
-	calls := cf.Calls()
-	if len(calls) != wanted-1 {
-		t.Fatalf("expected %v calls, got %v", wanted-1, len(calls))
+	var nCalls int
+	for _, calls := range dialer.clients {
+		nCalls += len(calls.formCalls)
 	}
-	assertFormation(good3, calls[0])
-	assertFormation(good4, calls[1])
-	assertFormation(good5, calls[2])
+	if nCalls != wanted-1 {
+		t.Fatalf("expected %v calls, got %v", wanted-1, nCalls)
+	}
+	assertFormation(good3)
+	assertFormation(good4)
+	assertFormation(good5)
 
 	// the store should now contain the right number of total contracts which is
 	// the 3 we started with plus the 3 we formed

@@ -16,12 +16,12 @@ import (
 
 func TestBroadcastContractRevisions(t *testing.T) {
 	cmMock := newChainManagerMock()
-	contractor := newContractorMock()
+	dialer := newDialerMock()
 	syncerMock := &syncerMock{}
 	walletMock := &walletMock{}
 	store := &storeMock{}
 
-	contracts := newContractManager(types.PublicKey{}, nil, cmMock, contractor, nil, store, syncerMock, walletMock)
+	contracts := newContractManager(types.PublicKey{}, nil, cmMock, dialer, nil, store, syncerMock, walletMock)
 	contracts.revisionBroadcastInterval = time.Minute
 
 	// add host
@@ -76,7 +76,9 @@ func TestBroadcastContractRevisions(t *testing.T) {
 
 	// mock a latest revision
 	rev := types.V2FileContract{RevisionNumber: 1}
-	contractor.latestRevisions[types.FileContractID{4}] = proto.RPCLatestRevisionResponse{Contract: rev}
+	hc := newHostClientMock()
+	dialer.clients[hk] = hc
+	hc.latestRevisions[types.FileContractID{4}] = proto.RPCLatestRevisionResponse{Contract: rev}
 
 	// assert revision was broadcasted and contract was marked as such
 	if err := contracts.performBroadcastContractRevisions(context.Background(), zap.NewNop()); err != nil {

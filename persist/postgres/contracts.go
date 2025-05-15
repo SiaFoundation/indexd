@@ -379,7 +379,7 @@ func (s *Store) MarkPruned(ctx context.Context, contractID types.FileContractID)
 
 // PrunableContractRoots returns the indices of the roots that are not present in the
 // database, and thus can be pruned.
-func (s *Store) PrunableContractRoots(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, roots []types.Hash256) ([]uint64, error) {
+func (s *Store) PrunableContractRoots(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error) {
 	var args []sqlHash256
 	for _, root := range roots {
 		args = append(args, sqlHash256(root))
@@ -420,7 +420,7 @@ func (s *Store) PrunableContractRoots(ctx context.Context, hostKey types.PublicK
 		return nil, err
 	}
 
-	return indices, nil
+	return nil, nil
 }
 
 // MarkUnrenewableContractsBad marks all contracts as bad that have a proof

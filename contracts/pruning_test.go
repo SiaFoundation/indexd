@@ -17,14 +17,18 @@ func (s *storeMock) MarkPruned(ctx context.Context, contractID types.FileContrac
 	return nil
 }
 
-func (s *storeMock) PrunableContractRoots(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, roots []types.Hash256) ([]uint64, error) {
+func (s *storeMock) PrunableContractRoots(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error) {
 	return nil, nil
 }
 
-func (c *contractorMock) ContractSectors(ctx context.Context, tc rhp.TransportClient, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error) {
+func (c *hostClientMock) ContractSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error) {
 	return rhp.RPCSectorRootsResult{}, nil
 }
 
-func (c *contractorMock) PruneSectors(ctx context.Context, tc rhp.TransportClient, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error) {
+func (c *hostClientMock) PruneSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error) {
 	return rhp.RPCFreeSectorsResult{}, nil
+}
+
+func (c *hostClientMock) HostKey() types.PublicKey {
+	return types.PublicKey{}
 }

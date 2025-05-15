@@ -5,9 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.uber.org/zap"
 )
+
+func (c *hostClient) LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+	return rhp.RPCLatestRevision(ctx, c.client, contractID)
+}
 
 func (cm *ContractManager) performBroadcastContractRevisions(ctx context.Context, log *zap.Logger) error {
 	broadcastLog := log.Named("broadcast")
@@ -56,7 +62,13 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 	}
 
 	// fetch the latest revision
-	resp, err := cm.contractor.LatestRevision(ctx, host.PublicKey, host.SiamuxAddr(), contractID)
+	hc, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
+	if err != nil {
+		return fmt.Errorf("failed to dial host: %w", err)
+	}
+	defer hc.Close()
+
+	resp, err := hc.LatestRevision(ctx, contractID)
 	if err != nil {
 		log.Warn("failed to fetch latest revision", zap.Error(err))
 		return nil
