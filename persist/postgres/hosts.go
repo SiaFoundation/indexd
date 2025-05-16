@@ -600,5 +600,33 @@ func scanHost(s scanner) (dbHost, error) {
 // HostsForIntegrityChecks returns a list of hosts that have sectors
 // requiring integrity checks.
 func (s *Store) HostsForIntegrityChecks(ctx context.Context) ([]types.PublicKey, error) {
-	panic("implement")
+	var hosts []types.PublicKey
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+			SELECT public_key
+			FROM hosts
+			WHERE EXISTS (
+				SELECT 1
+				FROM sectors
+				WHERE sectors.host_id = hosts.id
+					AND sectors.next_integrity_check <= NOW()
+			)
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to query hosts for scanning: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var hk sqlPublicKey
+			if err := rows.Scan(&hk); err != nil {
+				return err
+			}
+			hosts = append(hosts, types.PublicKey(hk))
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
+	}
+	return hosts, nil
 }

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
@@ -17,6 +18,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -1015,5 +1017,82 @@ func newTestHostSettings(pk types.PublicKey) proto4.HostSettings {
 			ValidUntil:    time.Now().Add(24 * time.Hour).Round(time.Microsecond),
 			TipHeight:     1,
 		},
+	}
+}
+
+func TestHostsForIntegrityChecks(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// add two hosts
+	hk1 := types.PublicKey{1}
+	hk2 := types.PublicKey{2}
+	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return errors.Join(
+			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
+			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
+		)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add account
+	acc := proto.Account{1}
+	if err := db.AddAccount(context.Background(), types.PublicKey(acc)); err != nil {
+		t.Fatal(err)
+	}
+
+	// helper to pin sector with a given checkTime
+	pinSector := func(hk types.PublicKey, root types.Hash256, nextCheck time.Time) {
+		t.Helper()
+		_, err := db.PinSlab(context.Background(), acc, nextCheck, slabs.SlabPinParams{
+			EncryptionKey: [32]byte{},
+			MinShards:     1,
+			Sectors: []slabs.SectorPinParams{
+				{
+					Root:    root,
+					HostKey: hk,
+				},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// pin 2 sectors for each host, one with a check time in the past and one in
+	// the future
+	root1 := types.Hash256{1}
+	root2 := types.Hash256{2}
+	root3 := types.Hash256{3}
+	root4 := types.Hash256{4}
+	pinSector(hk1, root1, time.Now().Add(-time.Hour))
+	pinSector(hk2, root2, time.Now().Add(-time.Hour))
+	pinSector(hk1, root3, time.Now().Add(time.Hour))
+	pinSector(hk2, root4, time.Now().Add(time.Hour))
+
+	hosts, err := db.HostsForIntegrityChecks(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(hosts))
+	} else if hosts[0] != hk1 || hosts[1] != hk2 {
+		t.Fatalf("expected hosts %v, got %v", []types.PublicKey{hk1, hk2}, hosts)
+	}
+
+	// unpinning the sector on host 2 which is up for a check should cause host
+	// 2 to not be returned anymore
+	if err := db.MarkSectorsLost(context.Background(), hk2, []types.Hash256{root2}); err != nil {
+		t.Fatal(err)
+	}
+
+	hosts, err = db.HostsForIntegrityChecks(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	} else if hosts[0] != hk1 {
+		t.Fatalf("expected host %v, got %v", hk1, hosts[0])
 	}
 }
