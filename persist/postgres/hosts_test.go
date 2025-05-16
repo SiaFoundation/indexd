@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	proto "go.sia.tech/core/rhp/v4"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
@@ -1038,7 +1037,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	}
 
 	// add account
-	acc := proto.Account{1}
+	acc := proto4.Account{1}
 	if err := db.AddAccount(context.Background(), types.PublicKey(acc)); err != nil {
 		t.Fatal(err)
 	}
@@ -1110,7 +1109,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 // BenchmarkHostsForIntegrityCheck benchmarks HostsForIntegrityCheck.
 func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
-	account := proto.Account{1}
+	account := proto4.Account{1}
 
 	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
 		b.Fatal("failed to add account:", err)
@@ -1119,7 +1118,7 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 	const (
 		nHosts          = 10000
 		dbBaseSize      = 1 << 40 // 1TiB of sectors
-		nSectorsPerHost = dbBaseSize / proto.SectorSize / nHosts
+		nSectorsPerHost = dbBaseSize / proto4.SectorSize / nHosts
 	)
 
 	// add hosts
