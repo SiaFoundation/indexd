@@ -246,6 +246,9 @@ CREATE INDEX sectors_contract_sectors_map_id_uploaded_at_idx ON sectors(contract
 -- speed up lookup of unpinned sectors
 CREATE INDEX sectors_host_id_uploaded_at_idx ON sectors(host_id, uploaded_at ASC) WHERE contract_sectors_map_id IS NULL;
 
+-- speed up prunable roots check
+CREATE INDEX sectors_contract_sectors_map_id_sector_root_idx ON sectors(contract_sectors_map_id, sector_root);
+
 -- foreign key constraint keys
 CREATE INDEX sectors_host_id_idx ON sectors(host_id);
 -- CREATE INDEX sectors_contract_sectors_map_id_idx ON sectors(contract_sectors_map_id); -- covered by sectors_contract_sectors_map_id_uploaded_at_idx
@@ -269,3 +272,4 @@ CREATE INDEX slab_sectors_sector_id_idx ON slab_sectors(sector_id);
 
 -- speed up fetching sectors for slab ordered by their position within the slab
 CREATE UNIQUE INDEX slab_sectors_slab_id_slab_index_idx ON slab_sectors(slab_id, slab_index ASC);
+

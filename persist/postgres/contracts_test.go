@@ -8,9 +8,12 @@ import (
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -511,6 +514,110 @@ func TestContractsForPruning(t *testing.T) {
 	}
 }
 
+func TestPrunableContractRoots(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// add two hosts
+	hk1 := types.PublicKey{1}
+	hk2 := types.PublicKey{2}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return errors.Join(
+			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
+			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
+		)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add a contract for each host
+	fcid1 := types.FileContractID{1}
+	fcid2 := types.FileContractID{2}
+	if err := errors.Join(
+		store.AddFormedContract(context.Background(), fcid1, hk1, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)),
+		store.AddFormedContract(context.Background(), fcid2, hk2, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare roots
+	roots := []types.Hash256{
+		frand.Entropy256(),
+		frand.Entropy256(),
+		frand.Entropy256(),
+		frand.Entropy256(),
+	}
+
+	// pin two slabs to add sectors
+	_, err := store.PinSlab(context.Background(), account, time.Now(), slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     11,
+		Sectors: []slabs.SectorPinParams{
+			{Root: roots[0], HostKey: hk1},
+			{Root: roots[2], HostKey: hk2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slabID, err := store.PinSlab(context.Background(), account, time.Now(), slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     11,
+		Sectors: []slabs.SectorPinParams{
+			{Root: roots[1], HostKey: hk1},
+			{Root: roots[3], HostKey: hk2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// pin sectors for h1
+	if sectors, err := store.UnpinnedSectors(context.Background(), hk1, 10); err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(context.Background(), fcid1, sectors); err != nil {
+		t.Fatal(err)
+	}
+
+	// pin sectors for h2
+	if sectors, err := store.UnpinnedSectors(context.Background(), hk2, 10); err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(context.Background(), fcid2, sectors); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert no prunable roots for either contract
+	if indices, err := store.PrunableContractRoots(context.Background(), fcid1, roots[:2]); err != nil {
+		t.Fatal(err)
+	} else if len(indices) != 0 {
+		t.Fatalf("unexpected prunable indices, %+v", indices)
+	} else if indices, err := store.PrunableContractRoots(context.Background(), fcid2, roots[2:]); err != nil {
+		t.Fatal(err)
+	} else if len(indices) != 0 {
+		t.Fatalf("unexpected prunable indices, %+v", indices)
+	}
+
+	// unpin the second slab to remove sectors for both hosts
+	if err := store.UnpinSlab(context.Background(), account, slabID); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert prunable roots for both contracts
+	if prunable, err := store.PrunableContractRoots(context.Background(), fcid1, roots[:2]); err != nil {
+		t.Fatal(err)
+	} else if len(prunable) != 1 || prunable[0] != roots[1] {
+		t.Fatalf("unexpected prunable roots, %+v", prunable)
+	} else if prunable, err := store.PrunableContractRoots(context.Background(), fcid2, roots[2:]); err != nil {
+		t.Fatal(err)
+	} else if len(prunable) != 1 || prunable[0] != roots[3] {
+		t.Fatalf("unexpected prunable roots, %+v", prunable)
+	}
+}
 func TestPruneExpiredContractElements(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
@@ -1373,4 +1480,100 @@ func BenchmarkContracts(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkPrunableContractRoots(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	// benchmark parameters
+	const (
+		oneTB    = 1 << 40 // 1TiB of sectors
+		nHosts   = 100
+		nSectors = oneTB / proto.SectorSize
+	)
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	// add hosts and contracts
+	var hks []types.PublicKey
+	for range nHosts {
+		hk := types.PublicKey(frand.Entropy256())
+		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+		}); err != nil {
+			b.Fatal(err)
+		}
+		if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+			b.Fatal(err)
+		}
+		hks = append(hks, hk)
+	}
+
+	// insert sectors in batches
+	hostIdx := 0
+	rootsByContract := make(map[types.FileContractID][]types.Hash256)
+	for remainingSectors := nSectors; remainingSectors > 0; {
+		batchSize := min(remainingSectors, 10000)
+		remainingSectors -= batchSize
+		var sectors []slabs.SectorPinParams
+		for range batchSize {
+			hk := hks[hostIdx]
+			root := frand.Entropy256()
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    root,
+				HostKey: hks[hostIdx],
+			})
+			rootsByContract[types.FileContractID(hk)] = append(rootsByContract[types.FileContractID(hk)], root)
+			hostIdx = (hostIdx + 1) % len(hks)
+		}
+
+		// pin slab
+		if _, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       sectors,
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// pin all sectors to contracts
+	for contractID, roots := range rootsByContract {
+		err := store.PinSectors(context.Background(), contractID, roots)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// extend roots to 1TB worth of sectors and random shuffle
+	for contractID, roots := range rootsByContract {
+		for range nSectors - len(roots) {
+			rootsByContract[contractID] = append(rootsByContract[contractID], frand.Entropy256())
+		}
+		frand.Shuffle(len(rootsByContract[contractID]), func(i, j int) {
+			rootsByContract[contractID][i], rootsByContract[contractID][j] = rootsByContract[contractID][j], rootsByContract[contractID][i]
+		})
+	}
+
+	// run benchmarks with various batch sizes
+	for _, batchSize := range []int64{1000, 5000, 10000, nSectors} {
+		b.Run(fmt.Sprintf("prunable_roots_batch_%d", batchSize), func(b *testing.B) {
+			b.ResetTimer()
+			b.SetBytes(batchSize * proto.SectorSize)
+			for b.Loop() {
+				fcid := types.FileContractID(hks[frand.Intn(len(hks))])
+				prunable, err := store.PrunableContractRoots(context.Background(), fcid, rootsByContract[fcid][:batchSize])
+				if err != nil {
+					b.Fatal(err)
+				} else if len(prunable) == 0 || len(prunable) == int(batchSize) {
+					b.Fatal("unexpected number of prunable roots", len(prunable)) // assert it's not empty or all
+				}
+			}
+		})
+	}
 }

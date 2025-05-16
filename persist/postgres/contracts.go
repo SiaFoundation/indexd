@@ -410,6 +410,51 @@ WHERE contract_id = $6
 	})
 }
 
+// PrunableContractRoots diffs the given roots with the roots in the database
+// and returns the roots that can be pruned.
+func (s *Store) PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error) {
+	var sqlRoots []sqlHash256
+	for _, root := range roots {
+		sqlRoots = append(sqlRoots, sqlHash256(root))
+	}
+
+	prunable := make([]types.Hash256, 0, len(roots))
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+			SELECT s.sector_root
+			FROM sectors s
+			INNER JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
+			WHERE csm.contract_id = $1 AND s.sector_root = ANY($2)`, sqlHash256(contractID), sqlRoots)
+		if err != nil {
+			return fmt.Errorf("failed to fetch prunable contract roots: %w", err)
+		}
+		defer rows.Close()
+
+		lookup := make(map[sqlHash256]struct{})
+		for rows.Next() {
+			var root sqlHash256
+			if err := rows.Scan(&root); err != nil {
+				return fmt.Errorf("failed to scan root: %w", err)
+			}
+			lookup[root] = struct{}{}
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to iterate over rows: %w", err)
+		}
+
+		for _, root := range roots {
+			if _, ok := lookup[sqlHash256(root)]; !ok {
+				prunable = append(prunable, root)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return prunable, nil
+}
+
 func (tx *updateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
 	for _, fce := range fces {
 		_, err := tx.tx.Exec(tx.ctx, `
