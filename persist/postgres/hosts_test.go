@@ -1096,3 +1096,74 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 		t.Fatalf("expected host %v, got %v", hk1, hosts[0])
 	}
 }
+
+// BenchmarkHostsForIntegrityCheck benchmarks HostsForIntegrityCheck.
+func BenchmarkHostsForIntegrityCheck(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+	account := proto.Account{1}
+
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	const (
+		nHosts          = 10000
+		dbBaseSize      = 1 << 40 // 1TiB of sectors
+		nSectorsPerHost = dbBaseSize / proto.SectorSize / nHosts
+	)
+
+	// add hosts
+	for range nHosts {
+		hk := types.PublicKey(frand.Entropy256())
+		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+		}); err != nil {
+			b.Fatal(err)
+		}
+
+		// add sectors
+		for remainingSectors := nSectorsPerHost; remainingSectors > 0; {
+			batchSize := min(remainingSectors, 10000)
+			remainingSectors -= batchSize
+			var sectors []slabs.SectorPinParams
+			for range batchSize {
+				root := frand.Entropy256()
+				sectors = append(sectors, slabs.SectorPinParams{
+					Root:    root,
+					HostKey: hk,
+				})
+			}
+			if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
+				MinShards:     1,
+				EncryptionKey: frand.Entropy256(),
+				Sectors:       sectors,
+			}); err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+
+	// 10% of the sectors have a next check time in the past
+	_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET next_integrity_check = NOW() - INTERVAL '1 hour' WHERE id % 10 = 0`)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// run benchmark for various batch sizes
+	for _, batchSize := range []int{100, 1000, 10000} {
+		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
+			b.SetBytes(int64(batchSize) * proto.SectorSize)
+			b.ResetTimer()
+
+			for b.Loop() {
+				batch, err := store.HostsForIntegrityChecks(context.Background())
+				if err != nil {
+					b.Fatal(err)
+				} else if len(batch) == 0 {
+					b.Fatal("expected hosts, got none")
+				}
+			}
+		})
+	}
+}

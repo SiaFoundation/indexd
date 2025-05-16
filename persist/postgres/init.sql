@@ -155,9 +155,9 @@ CREATE TABLE contracts (
   -- revision broadcast related columns
   last_broadcast_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 
-  -- contract pruning 
+  -- contract pruning
   last_prune TIMESTAMP WITH TIME ZONE,
-  
+
   -- metrics for visualization (not ACID)
   capacity BIGINT NOT NULL DEFAULT 0 CHECK(capacity >= size),
   size BIGINT NOT NULL DEFAULT 0 CHECK(size >= 0),
@@ -272,4 +272,3 @@ CREATE INDEX slab_sectors_sector_id_idx ON slab_sectors(sector_id);
 
 -- speed up fetching sectors for slab ordered by their position within the slab
 CREATE UNIQUE INDEX slab_sectors_slab_id_slab_index_idx ON slab_sectors(slab_id, slab_index ASC);
-
