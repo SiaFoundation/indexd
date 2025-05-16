@@ -1333,20 +1333,6 @@ func TestSyncContract(t *testing.T) {
 // BenchmarkContracts is a benchmark to ensure the performance of
 // all methods on the store that return either a contract or a list of
 // contract IDs.
-//
-// M1 Max | Contract                      |                | 1.42 ms/op
-// M1 Max | Contracts 100                 | None           | 2.24 ms/op
-// M1 Max | Contracts 100                 | Revisable      | 1.85 ms/op
-// M1 Max | Contracts 100                 | Revisable+Good | 1.75 ms/op
-// M1 Max | Contracts 1000                | None           | 5.37 ms/op
-// M1 Max | Contracts 1000                | Revisable      | 5.66 ms/op
-// M1 Max | Contracts 1000                | Revisable+Good | 5.47 ms/op
-// M1 Max | ContractsForBroadcasting 100  | -              | 1.76 ms/op
-// M1 Max | ContractsForBroadcasting 1000 | -              | 2.15 ms/op
-// M1 Max | ContractsForFunding 100       | -              | 1.27 ms/op
-// M1 Max | ContractsForFunding 1000      | -              | 1.46 ms/op
-// M1 Max | ContractsForPinning           | -              | 1.25 ms/op
-// M1 Max | ContractsForPruning           | -              | 1.14 ms/op
 func BenchmarkContracts(b *testing.B) {
 	const (
 		maxContractSize     = 10 * 1 << 40 // 10TB

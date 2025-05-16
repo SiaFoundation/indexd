@@ -379,10 +379,6 @@ func TestUpdateHostAccounts(t *testing.T) {
 // hosts and accounts once. Every iteration fetches two batches of accounts for
 // funding, the first one only includes accounts for which there's no account
 // host entry yet, the second one selects from the account_hosts table.
-//
-// M1 Max | 10k accounts  | 1k hosts | 4ms/op
-// M1 Max | 100k accounts | 1k hosts | 12ms/op
-// M1 Max | 1M accounts   | 1k hosts | 16ms/op
 func BenchmarkHostAccountsForFunding(b *testing.B) {
 	// define parameters
 	const (
@@ -471,8 +467,8 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 			if b.N > numHosts {
 				b.Fatalf("too many iterations, %d > %d", b.N, numHosts)
 			}
-			for i := 0; i < b.N; i++ {
-				hk := hosts[i%numHosts]
+			for b.Loop() {
+				hk := hosts[frand.Intn(numHosts)]
 				hostID := hostIDs[hk]
 
 				if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
@@ -501,8 +497,6 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 // BenchmarkUpdateHostAccounts is a benchmark to ensure the performance of
 // UpdateAccounts, every iteration performs the worst case update where every
 // account gets inserted.
-//
-// M1 Max | 1k accounts | 14 ms/op
 func BenchmarkUpdateHostAccounts(b *testing.B) {
 	// define parameters
 	const (

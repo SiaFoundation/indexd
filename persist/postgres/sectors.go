@@ -309,12 +309,11 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []sl
 
 		sectorsBatch := &pgx.Batch{}
 		for _, slabID := range dbIDs {
-			sectorsBatch.Queue(`SELECT s.sector_root, h.public_key, c.contract_id
+			sectorsBatch.Queue(`SELECT s.sector_root, h.public_key, csm.contract_id
 FROM sectors s
 INNER JOIN slab_sectors ss ON s.id = ss.sector_id
 LEFT JOIN hosts h ON h.id = s.host_id
 LEFT JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
-LEFT JOIN contracts c ON c.contract_id = csm.contract_id
 WHERE ss.slab_id = $1
 ORDER BY ss.slab_index ASC`, slabID).Query(func(rows pgx.Rows) error {
 				defer rows.Close()
