@@ -618,7 +618,6 @@ func TestPrunableContractRoots(t *testing.T) {
 		t.Fatalf("unexpected prunable roots, %+v", prunable)
 	}
 }
-
 func TestPruneExpiredContractElements(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
