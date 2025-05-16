@@ -77,25 +77,36 @@ func TestMigrateSector(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// mark all sectors as having failed once
+	if _, err := store.pool.Exec(context.Background(), `
+		UPDATE sectors
+		SET consecutive_failed_checks = 1
+	`); err != nil {
+		t.Fatal(err)
+	}
+
 	// helper to assert sector state
-	assertSector := func(root types.Hash256, expectedHostKey types.PublicKey, expectedContractID types.FileContractID) {
+	assertSector := func(root types.Hash256, expectedHostKey types.PublicKey, expectedContractID types.FileContractID, expectedFailures int) {
 		t.Helper()
 
 		var hostKey types.PublicKey
 		var contractID types.FileContractID
+		var failures int
 		err := store.pool.QueryRow(context.Background(), `
-			SELECT hosts.public_key, contract_sectors_map.contract_id
+			SELECT hosts.public_key, contract_sectors_map.contract_id, consecutive_failed_checks
 			FROM sectors
 			INNER JOIN hosts ON sectors.host_id = hosts.id
 			LEFT JOIN contract_sectors_map ON sectors.contract_sectors_map_id = contract_sectors_map.id
 			WHERE sector_root = $1
-		`, sqlHash256(root)).Scan(asNullable((*sqlPublicKey)(&hostKey)), asNullable((*sqlHash256)(&contractID)))
+		`, sqlHash256(root)).Scan(asNullable((*sqlPublicKey)(&hostKey)), asNullable((*sqlHash256)(&contractID)), &failures)
 		if err != nil {
 			t.Fatal(err)
 		} else if hostKey != expectedHostKey {
 			t.Fatalf("expected host key %v, got %v", expectedHostKey, hostKey)
 		} else if contractID != expectedContractID {
 			t.Fatalf("expected contract ID %v, got %v", expectedContractID, contractID)
+		} else if failures != expectedFailures {
+			t.Fatalf("expected %d consecutive failures, got %d", expectedFailures, failures)
 		}
 	}
 
@@ -109,23 +120,23 @@ func TestMigrateSector(t *testing.T) {
 	}
 
 	// assert initial state
-	assertSector(root1, hk1, fcid1)
-	assertSector(root2, hk1, fcid1)
+	assertSector(root1, hk1, fcid1, 1)
+	assertSector(root2, hk1, fcid1, 1)
 
 	// migrate sector 1 to host 2
 	migrate(root1, hk2, true)
-	assertSector(root1, hk2, types.FileContractID{})
-	assertSector(root2, hk1, fcid1)
+	assertSector(root1, hk2, types.FileContractID{}, 0)
+	assertSector(root2, hk1, fcid1, 1)
 
 	// migrate sector 2 to unknown host, this should be a no-op
 	migrate(root2, types.PublicKey{10}, false)
-	assertSector(root1, hk2, types.FileContractID{})
-	assertSector(root2, hk1, fcid1)
+	assertSector(root1, hk2, types.FileContractID{}, 0)
+	assertSector(root2, hk1, fcid1, 1)
 
 	// migrate sector 2 to host 2
 	migrate(root2, hk2, true)
-	assertSector(root1, hk2, types.FileContractID{})
-	assertSector(root2, hk2, types.FileContractID{})
+	assertSector(root1, hk2, types.FileContractID{}, 0)
+	assertSector(root2, hk2, types.FileContractID{}, 0)
 }
 
 func TestRecordIntegrityCheck(t *testing.T) {
@@ -183,15 +194,43 @@ func TestRecordIntegrityCheck(t *testing.T) {
 		}
 	}
 
-	assertFailingSectors := func(expectedRoots []types.Hash256, minChecks, limit int) {
+	assertFailingSectors := func(expectedRoots []types.Hash256, minChecks int) {
 		t.Helper()
-		roots, err := store.FailingSectors(context.Background(), hk, minChecks, limit)
+		rows, err := store.pool.Query(context.Background(), `
+			SELECT sector_root
+			FROM sectors
+   			WHERE
+                host_id = (SELECT id FROM hosts WHERE public_key = $1)
+                AND consecutive_failed_checks >= $2
+		`, sqlPublicKey(hk), minChecks)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var roots []types.Hash256
+		for rows.Next() {
+			var root types.Hash256
+			if err := rows.Scan((*sqlHash256)(&root)); err != nil {
+				t.Fatal(err)
+			}
+			roots = append(roots, root)
+		}
 		if err != nil {
 			t.Fatal(err)
 		} else if len(roots) != len(expectedRoots) {
 			t.Fatalf("expected %d failing sectors, got %d", len(expectedRoots), len(roots))
 		} else if len(roots) > 0 && !reflect.DeepEqual(roots, expectedRoots) {
 			t.Fatalf("expected failing sectors %v, got %v", expectedRoots, roots)
+		}
+	}
+
+	assertLostSectors := func(expected int) {
+		t.Helper()
+		var lostSectors int
+		if err := store.pool.QueryRow(context.Background(), "SELECT lost_sectors FROM hosts WHERE public_key = $1", sqlPublicKey(hk)).
+			Scan(&lostSectors); err != nil {
+			t.Fatal(err)
+		} else if lostSectors != expected {
+			t.Fatalf("expected %d lost sectors, got %d", expected, lostSectors)
 		}
 	}
 
@@ -206,22 +245,21 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	// check initial state - 0 failures
 	assertSectors(root1, pinTime, 0)
 	assertSectors(root2, pinTime, 0)
-	assertFailingSectors([]types.Hash256{}, 1, 10)
+	assertFailingSectors([]types.Hash256{}, 1)
 
 	// record success for both
 	now := time.Now().Round(time.Microsecond)
 	record(true, now, []types.Hash256{root1, root2})
 	assertSectors(root1, now, 0)
 	assertSectors(root2, now, 0)
-	assertFailingSectors([]types.Hash256{}, 1, 10)
+	assertFailingSectors([]types.Hash256{}, 1)
 
 	// record failure for both
 	now = now.Add(time.Minute)
 	record(false, now, []types.Hash256{root1, root2})
 	assertSectors(root1, now, 1)
 	assertSectors(root2, now, 1)
-	assertFailingSectors([]types.Hash256{root1, root2}, 1, 10)
-	assertFailingSectors([]types.Hash256{root1}, 1, 1)
+	assertFailingSectors([]types.Hash256{root1, root2}, 1)
 
 	// one more failure for root1 and success for root2
 	now = now.Add(time.Minute)
@@ -229,7 +267,26 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	record(true, now, []types.Hash256{root2})
 	assertSectors(root1, now, 2)
 	assertSectors(root2, now, 0)
-	assertFailingSectors([]types.Hash256{root1}, 1, 10)
+	assertFailingSectors([]types.Hash256{root1}, 1)
+
+	// host should not have any lost sectors
+	assertLostSectors(0)
+
+	// mark sectors lost with a threshold of 2 which is too high to mark
+	// root1 as lost
+	if err := store.MarkFailingSectorsLost(context.Background(), hk, 3); err != nil {
+		t.Fatal(err)
+	}
+	assertFailingSectors([]types.Hash256{root1}, 2)
+
+	// one more time with threshold of 1
+	if err := store.MarkFailingSectorsLost(context.Background(), hk, 2); err != nil {
+		t.Fatal(err)
+	}
+	assertFailingSectors([]types.Hash256{}, 2)
+
+	// host should have lost sector
+	assertLostSectors(1)
 }
 
 func TestSectorsForIntegrityCheck(t *testing.T) {
@@ -1556,8 +1613,8 @@ func BenchmarkRecordIntegrityChecks(b *testing.B) {
 	}
 }
 
-// BenchmarkFailingSectors benchmarks FailingSectors.
-func BenchmarkFailingSectors(b *testing.B) {
+// BenchmarkMarkFailingSectorsLost benchmarks MarkFailingSectorsLost
+func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto.Account{1}
 
@@ -1603,50 +1660,28 @@ func BenchmarkFailingSectors(b *testing.B) {
 		}
 	}
 
-	// 50% of the sectors are bad
+	// 10% of the sectors are bad
 	reset := func() {
 		b.Helper()
-		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET consecutive_failed_checks = 1 WHERE id % 2 = 0`)
+		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET consecutive_failed_checks = 1 WHERE consecutive_failed_checks = 0 AND id % 10 = 0`)
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
 	reset()
-	remainingSectors := nSectors / 2
 
-	// run benchmark for various batch sizes
-	for _, batchSize := range []int{100, 1000, 10000} {
-		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
-			b.SetBytes(int64(batchSize) * proto.SectorSize)
-			b.ResetTimer()
+	for b.Loop() {
+		b.SetBytes(proto.SectorSize * nSectors / 10)
 
-			for b.Loop() {
-				// reset if necessary
-				if remainingSectors < batchSize {
-					b.StopTimer()
-					reset()
-					b.StartTimer()
-					remainingSectors = nSectors / 2
-				}
+		err := store.MarkFailingSectorsLost(context.Background(), hk, 1)
+		if err != nil {
+			b.Fatal(err)
+		}
 
-				// fetch batch
-				batch, err := store.FailingSectors(context.Background(), hk, 1, batchSize)
-				if err != nil {
-					b.Fatal(err)
-				} else if len(batch) != batchSize {
-					b.Fatalf("no full batch was returned: %d", len(batch))
-				}
-				b.StopTimer()
-
-				// mark the batch as good
-				err = store.RecordIntegrityCheck(context.Background(), true, time.Now(), hk, batch)
-				if err != nil {
-					b.Fatal(err)
-				}
-				remainingSectors -= batchSize
-				b.StartTimer()
-			}
-		})
+		// reset db
+		b.StopTimer()
+		reset()
+		b.StartTimer()
 	}
 }
 
