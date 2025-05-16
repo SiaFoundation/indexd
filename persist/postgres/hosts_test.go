@@ -1163,9 +1163,6 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 	// run benchmark for various batch sizes
 	for _, batchSize := range []int{100, 1000, 10000} {
 		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
-			b.ReportMetric(float64(batchSize), "hosts")
-			b.ResetTimer()
-
 			for b.Loop() {
 				batch, err := store.HostsForIntegrityChecks(context.Background(), batchSize)
 				if err != nil {

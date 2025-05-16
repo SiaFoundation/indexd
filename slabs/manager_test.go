@@ -46,7 +46,7 @@ func (s *mockStore) Hosts(ctx context.Context, offset, limit int, queryOpts ...h
 	panic("not implemented")
 }
 
-func (s *mockStore) HostsForIntegrityChecks(ctx context.Context) ([]types.PublicKey, error) {
+func (s *mockStore) HostsForIntegrityChecks(ctx context.Context, limit int) ([]types.PublicKey, error) {
 	panic("not implemented")
 }
 

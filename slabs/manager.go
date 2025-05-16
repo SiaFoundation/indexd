@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -59,7 +60,7 @@ type (
 		AddAccount(ctx context.Context, ak types.PublicKey) error
 		FailingSectors(ctx context.Context, hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
-		HostsForIntegrityChecks(ctx context.Context) ([]types.PublicKey, error)
+		HostsForIntegrityChecks(ctx context.Context, limit int) ([]types.PublicKey, error)
 		MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxFailedIntegrityChecks uint) error
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error)
@@ -159,7 +160,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 	logger := m.log.Named("integrity")
 	logger.Debug("starting integrity checks", zap.Time("start", start))
 
-	usedHosts, err := m.store.HostsForIntegrityChecks(ctx)
+	usedHosts, err := m.store.HostsForIntegrityChecks(ctx, math.MaxInt)
 	if err != nil {
 		return fmt.Errorf("failed to fetch hosts to block: %w", err)
 	}
