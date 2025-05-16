@@ -1126,7 +1126,7 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 				// check if benchmark is exhausted
 				b.StopTimer()
 				if len(unpinned) < batchSize {
-					b.Fatalf("exhausted unpinned sectors: %d", len(unpinned))
+					unpinSectors()
 				}
 
 				// pin sectors to ensure we fetch different ones next time
