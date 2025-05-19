@@ -4,10 +4,10 @@ go 1.24.1
 
 require (
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
-	github.com/jackc/pgx/v5 v5.7.4
+	github.com/jackc/pgx/v5 v5.7.5
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.12.0
-	go.sia.tech/coreutils v0.13.3
+	go.sia.tech/core v0.12.3
+	go.sia.tech/coreutils v0.13.6
 	go.sia.tech/jape v0.14.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0
@@ -34,11 +34,11 @@ require (
 	go.sia.tech/mux v1.4.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/crypto v0.37.0 // indirect
+	golang.org/x/crypto v0.38.0 // indirect
 	golang.org/x/mod v0.24.0 // indirect
-	golang.org/x/net v0.39.0 // indirect
-	golang.org/x/sync v0.13.0 // indirect
+	golang.org/x/net v0.40.0 // indirect
+	golang.org/x/sync v0.14.0 // indirect
 	golang.org/x/sys v0.33.0 // indirect
-	golang.org/x/text v0.24.0 // indirect
-	golang.org/x/tools v0.32.0 // indirect
+	golang.org/x/text v0.25.0 // indirect
+	golang.org/x/tools v0.33.0 // indirect
 )
