@@ -614,7 +614,7 @@ func (s *Store) HostsForIntegrityChecks(ctx context.Context) ([]types.PublicKey,
 			LIMIT $1
 		`)
 		if err != nil {
-			return fmt.Errorf("failed to query hosts for scanning: %w", err)
+			return fmt.Errorf("failed to query hosts for integrity checks: %w", err)
 		}
 		defer rows.Close()
 
