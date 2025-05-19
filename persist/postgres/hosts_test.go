@@ -1071,7 +1071,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	pinSector(hk1, root3, time.Now().Add(time.Hour))
 	pinSector(hk2, root4, time.Now().Add(time.Hour))
 
-	hosts, err := db.HostsForIntegrityChecks(context.Background())
+	hosts, err := db.HostsForIntegrityChecks(context.Background(), 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 2 {
@@ -1080,19 +1080,40 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 		t.Fatalf("expected hosts %v, got %v", []types.PublicKey{hk1, hk2}, hosts)
 	}
 
-	// unpinning the sector on host 2 which is up for a check should cause host
-	// 2 to not be returned anymore
-	if err := db.MarkSectorsLost(context.Background(), hk2, []types.Hash256{root2}); err != nil {
-		t.Fatal(err)
-	}
-
-	hosts, err = db.HostsForIntegrityChecks(context.Background())
+	// apply limit
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
 		t.Fatalf("expected 1 host, got %d", len(hosts))
 	} else if hosts[0] != hk1 {
 		t.Fatalf("expected host %v, got %v", hk1, hosts[0])
+	}
+
+	// unpinning the sector on host 2 which is up for a check should cause host
+	// 2 to not be returned anymore
+	if err := db.MarkSectorsLost(context.Background(), hk2, []types.Hash256{root2}); err != nil {
+		t.Fatal(err)
+	}
+
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	} else if hosts[0] != hk1 {
+		t.Fatalf("expected host %v, got %v", hk1, hosts[0])
+	}
+
+	// block host 1 so that it's also not returned anymore
+	if err := db.BlockHosts(context.Background(), []types.PublicKey{hk1}, ""); err != nil {
+		t.Fatal(err)
+	}
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 0 {
+		t.Fatalf("expected 0 hosts, got %d", len(hosts))
 	}
 }
 
@@ -1150,12 +1171,16 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 	}
 
 	// run benchmark for various batch sizes
-	for b.Loop() {
-		batch, err := store.HostsForIntegrityChecks(context.Background())
-		if err != nil {
-			b.Fatal(err)
-		} else if len(batch) == 0 {
-			b.Fatal("expected hosts, got none")
-		}
+	for _, batchSize := range []int{100, 1000, 10000} {
+		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
+			for b.Loop() {
+				batch, err := store.HostsForIntegrityChecks(context.Background(), batchSize)
+				if err != nil {
+					b.Fatal(err)
+				} else if len(batch) == 0 {
+					b.Fatal("expected hosts, got none")
+				}
+			}
+		})
 	}
 }
