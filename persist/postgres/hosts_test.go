@@ -1072,6 +1072,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	pinSector(hk2, root4, time.Now().Add(time.Hour))
 
 	futureTime := time.Now().Add(time.Hour)
+	firstCallTime := time.Now().Round(time.Microsecond)
 
 	hosts, err := db.HostsForIntegrityChecks(context.Background(), futureTime, 10)
 	if err != nil {
@@ -1093,7 +1094,8 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	}
 
 	// using a maxLastCheck time in the past should cause no hosts to be returned
-	hosts, err = db.HostsForIntegrityChecks(context.Background(), time.Now().Add(-time.Hour), 10)
+	time.Sleep(time.Microsecond)
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), firstCallTime, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 0 {
