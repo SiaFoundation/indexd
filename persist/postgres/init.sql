@@ -8,6 +8,7 @@ CREATE TABLE hosts (
     public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32),
     consecutive_failed_scans INTEGER NOT NULL DEFAULT 0,
     recent_uptime DOUBLE PRECISION NOT NULL DEFAULT 0.894 CHECK (recent_uptime > 0 AND recent_uptime < 1),
+    last_integrity_check TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     last_failed_scan TIMESTAMP WITH TIME ZONE,
     last_successful_scan TIMESTAMP WITH TIME ZONE,
     last_announcement TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -31,7 +32,9 @@ CREATE TABLE hosts (
     settings_tip_height BIGINT NOT NULL DEFAULT 0,
     settings_valid_until TIMESTAMP WITH TIME ZONE
 );
-CREATE INDEX idx_hosts_next_scan_idx ON hosts(next_scan);
+CREATE INDEX hosts_next_scan_idx ON hosts(next_scan);
+
+CREATE INDEX hosts_last_integrity_check_idx ON hosts(last_integrity_check ASC);
 
 CREATE TABLE account_hosts (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

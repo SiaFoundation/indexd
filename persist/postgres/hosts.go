@@ -599,22 +599,29 @@ func scanHost(s scanner) (dbHost, error) {
 
 // HostsForIntegrityChecks returns a list of hosts that have sectors
 // requiring integrity checks.
-func (s *Store) HostsForIntegrityChecks(ctx context.Context, limit int) ([]types.PublicKey, error) {
+func (s *Store) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.Time, limit int) ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT hosts.public_key
-			FROM hosts
-			LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
-			WHERE EXISTS (
-				SELECT 1
-				FROM sectors
-				WHERE sectors.host_id = hosts.id
-					AND sectors.next_integrity_check <= NOW()
-			)
-			AND hb.public_key IS NULL
-			LIMIT $1
-		`, limit)
+			UPDATE hosts
+			SET last_integrity_check = NOW()
+			FROM (
+				SELECT h.id
+				FROM hosts h
+				LEFT JOIN hosts_blocklist hb ON h.public_key = hb.public_key
+				WHERE EXISTS (
+					SELECT 1
+					FROM sectors
+					WHERE sectors.host_id = h.id
+						AND sectors.next_integrity_check <= NOW()
+				)
+				AND hb.public_key IS NULL
+				AND h.last_integrity_check <= $1
+				LIMIT $2
+			) as to_check
+			WHERE hosts.id = to_check.id
+			RETURNING hosts.public_key
+		`, maxLastCheck, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts for integrity checks: %w", err)
 		}

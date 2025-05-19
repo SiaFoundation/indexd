@@ -1071,7 +1071,9 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	pinSector(hk1, root3, time.Now().Add(time.Hour))
 	pinSector(hk2, root4, time.Now().Add(time.Hour))
 
-	hosts, err := db.HostsForIntegrityChecks(context.Background(), 10)
+	futureTime := time.Now().Add(time.Hour)
+
+	hosts, err := db.HostsForIntegrityChecks(context.Background(), futureTime, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 2 {
@@ -1081,7 +1083,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	}
 
 	// apply limit
-	hosts, err = db.HostsForIntegrityChecks(context.Background(), 1)
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), futureTime, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
@@ -1090,13 +1092,21 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 		t.Fatalf("expected host %v, got %v", hk1, hosts[0])
 	}
 
+	// using a maxLastCheck time in the past should cause no hosts to be returned
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), time.Now().Add(-time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 0 {
+		t.Fatalf("expected 0 hosts, got %d", len(hosts))
+	}
+
 	// unpinning the sector on host 2 which is up for a check should cause host
 	// 2 to not be returned anymore
 	if err := db.MarkSectorsLost(context.Background(), hk2, []types.Hash256{root2}); err != nil {
 		t.Fatal(err)
 	}
 
-	hosts, err = db.HostsForIntegrityChecks(context.Background(), 10)
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), futureTime, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
@@ -1109,7 +1119,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	if err := db.BlockHosts(context.Background(), []types.PublicKey{hk1}, ""); err != nil {
 		t.Fatal(err)
 	}
-	hosts, err = db.HostsForIntegrityChecks(context.Background(), 10)
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), futureTime, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 0 {
@@ -1171,10 +1181,11 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 	}
 
 	// run benchmark for various batch sizes
+	futureTime := time.Now().Add(time.Hour)
 	for _, batchSize := range []int{100, 1000, 10000} {
 		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
 			for b.Loop() {
-				batch, err := store.HostsForIntegrityChecks(context.Background(), batchSize)
+				batch, err := store.HostsForIntegrityChecks(context.Background(), futureTime, batchSize)
 				if err != nil {
 					b.Fatal(err)
 				} else if len(batch) == 0 {
