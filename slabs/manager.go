@@ -189,6 +189,12 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 				return
 			}
 
+			// ignore hosts that are not usable
+			if !host.IsGood() {
+				logger.With(zap.Stringer("hostKey", hostKey)).Debug("skipping host since it's not usable")
+				return
+			}
+
 			// create verifier
 			verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey, host.Settings.Prices)
 			if err != nil {
