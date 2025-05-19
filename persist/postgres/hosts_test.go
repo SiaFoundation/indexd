@@ -1182,7 +1182,7 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 
 	// run benchmark for various batch sizes
 	futureTime := time.Now().Add(time.Hour)
-	for _, batchSize := range []int{100, 1000, 10000} {
+	for _, batchSize := range []int{50, 100, 200} {
 		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
 			for b.Loop() {
 				batch, err := store.HostsForIntegrityChecks(context.Background(), futureTime, batchSize)

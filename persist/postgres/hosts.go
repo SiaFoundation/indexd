@@ -603,9 +603,7 @@ func (s *Store) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.T
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			UPDATE hosts
-			SET last_integrity_check = NOW()
-			FROM (
+			WITH to_check AS (
 				SELECT h.id
 				FROM hosts h
 				LEFT JOIN hosts_blocklist hb ON h.public_key = hb.public_key
@@ -618,7 +616,10 @@ func (s *Store) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.T
 				AND hb.public_key IS NULL
 				AND h.last_integrity_check <= $1
 				LIMIT $2
-			) as to_check
+			)
+			UPDATE hosts
+			SET last_integrity_check = NOW()
+			FROM to_check
 			WHERE hosts.id = to_check.id
 			RETURNING hosts.public_key
 		`, maxLastCheck, limit)
