@@ -59,7 +59,6 @@ type hostClient struct {
 	cm      ChainManager
 	client  rhp.TransportClient
 	hostKey types.PublicKey
-	ownKey  types.PrivateKey
 	signer  *formContractSigner
 }
 
@@ -92,7 +91,6 @@ func (d *siamuxDialer) Dial(ctx context.Context, hostKey types.PublicKey, addr s
 		client:  client,
 		cm:      d.cm,
 		hostKey: hostKey,
-		ownKey:  d.ownKey,
 		signer: &formContractSigner{
 			renterKey: d.ownKey,
 			w:         d.w,

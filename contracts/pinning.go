@@ -96,7 +96,7 @@ func (c *hostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPri
 
 	// append sectors
 	revision := rhp.ContractRevision{ID: contractID, Revision: rev.Contract}
-	return rhp.RPCAppendSectors(ctx, c.client, c.cm.TipState(), hostPrices, c.ownKey, revision, sectors)
+	return rhp.RPCAppendSectors(ctx, c.client, c.signer, c.cm.TipState(), hostPrices, revision, sectors)
 }
 
 func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Logger) error {
