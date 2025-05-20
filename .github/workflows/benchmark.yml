@@ -1,0 +1,61 @@
+name: Benchmark Check
+
+on:
+  push:
+    branches: [ master ]
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres
+        env:
+          POSTGRES_USER: indexd_benchmark
+          POSTGRES_PASSWORD: indexd_benchmark
+          POSTGRES_DB: indexd_benchmark
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      POSTGRES_USER: indexd_benchmark
+      POSTGRES_PASSWORD: indexd_benchmark
+      POSTGRES_DB: indexd_benchmark
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: 5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Run benchmarks
+        run: |
+          set -euo pipefail
+      
+          if ! go test -run='^$' -benchmem -benchtime=200x -bench=. -timeout=2h ./... 2>&1 | tee indexd_benchmarks.txt; then
+            echo "go test exited with an error"
+            exit 1
+          fi
+      
+          if grep -E 'FAIL|panic:|fatal error' indexd_benchmarks.txt; then
+            echo "Detected failure pattern in benchmark output"
+            exit 1
+          fi
+
+      - name: Save latest benchmark as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: latest-benchmark
+          path: indexd_benchmarks.txt
+          retention-days: 31

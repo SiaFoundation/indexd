@@ -4,7 +4,7 @@ go 1.24.1
 
 require (
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
-	github.com/jackc/pgx/v5 v5.7.4
+	github.com/jackc/pgx/v5 v5.7.5
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.12.3
 	go.sia.tech/coreutils v0.13.7-0.20250519071355-e7592babc512

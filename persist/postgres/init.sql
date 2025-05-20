@@ -180,10 +180,10 @@ CREATE TABLE contracts (
   sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0
 );
 CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- for rejecting expired contracts
-CREATE INDEX contracts_last_broadcast_attempt_idx ON contracts (last_broadcast_attempt ASC) WHERE renewed_to IS NULL AND state <= 1;
 CREATE INDEX contracts_state_good_idx ON contracts(state) WHERE state <= 1 AND good; -- for filtering contracts
-CREATE INDEX contracts_host_id_remaining_allowance_idx ON contracts (host_id, remaining_allowance DESC) WHERE good = true AND remaining_allowance > 0 AND state <= 1; -- for fetching contracts for funding
-CREATE INDEX contracts_capacity_size_idx ON contracts (capacity DESC, size DESC) WHERE good = true AND remaining_allowance > 0 AND state <= 1; -- for fetching contracts for pinning
+CREATE INDEX contracts_last_broadcast_attempt_contract_id_idx ON contracts (last_broadcast_attempt ASC, contract_id) WHERE renewed_to IS NULL; -- for fetching contracts for broadcasting
+CREATE INDEX contracts_host_id_remaining_allowance_contract_id_idx ON contracts (host_id, remaining_allowance DESC, contract_id) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for funding
+CREATE INDEX contracts_capacity_size_contract_id_idx ON contracts (capacity DESC, size DESC, contract_id) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for pinning
 
 -- foreign key constraint index
 CREATE INDEX contracts_host_id_idx ON contracts(host_id);
@@ -246,6 +246,9 @@ CREATE INDEX sectors_contract_sectors_map_id_uploaded_at_idx ON sectors(contract
 -- speed up lookup of unpinned sectors
 CREATE INDEX sectors_host_id_uploaded_at_idx ON sectors(host_id, uploaded_at ASC) WHERE contract_sectors_map_id IS NULL;
 
+-- speed up prunable roots check
+CREATE INDEX sectors_contract_sectors_map_id_sector_root_idx ON sectors(contract_sectors_map_id, sector_root);
+
 -- foreign key constraint keys
 CREATE INDEX sectors_host_id_idx ON sectors(host_id);
 -- CREATE INDEX sectors_contract_sectors_map_id_idx ON sectors(contract_sectors_map_id); -- covered by sectors_contract_sectors_map_id_uploaded_at_idx
@@ -269,3 +272,4 @@ CREATE INDEX slab_sectors_sector_id_idx ON slab_sectors(sector_id);
 
 -- speed up fetching sectors for slab ordered by their position within the slab
 CREATE UNIQUE INDEX slab_sectors_slab_id_slab_index_idx ON slab_sectors(slab_id, slab_index ASC);
+

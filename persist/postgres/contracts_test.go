@@ -8,9 +8,12 @@ import (
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -446,6 +449,175 @@ func TestContractsForPinning(t *testing.T) {
 	}
 }
 
+func TestContractsForPruning(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	addContract := func(hk types.PublicKey, fcid types.FileContractID, allowance types.Currency, size uint64, state contracts.ContractState, good bool, lastPrune time.Time) {
+		t.Helper()
+		if err := store.AddFormedContract(context.Background(), fcid, hk, 100, 200, types.ZeroCurrency, allowance, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+			t.Fatal(err)
+		}
+		query := `UPDATE contracts SET state = $1, good = $2, size = $3, capacity = $4, last_prune = $5 WHERE contract_id = $6`
+		_, err := store.pool.Exec(context.Background(), query, sqlContractState(state), good, size, size, lastPrune, sqlHash256(fcid))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// add two hosts
+	hk1 := types.PublicKey{1}
+	hk2 := types.PublicKey{2}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return errors.Join(
+			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
+			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
+		)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now()
+	oneDayAgo := now.Add(-24 * time.Hour)
+	twoDaysAgo := now.Add(-48 * time.Hour)
+
+	// add contracts for h1
+	addContract(hk1, types.FileContractID{1}, types.ZeroCurrency, 100, contracts.ContractStateActive, true, twoDaysAgo)       // no allowance
+	addContract(hk1, types.FileContractID{2}, types.NewCurrency64(1), 100, contracts.ContractStateResolved, true, twoDaysAgo) // resolved
+	addContract(hk1, types.FileContractID{3}, types.NewCurrency64(1), 100, contracts.ContractStateActive, false, twoDaysAgo)  // bad
+	addContract(hk1, types.FileContractID{4}, types.NewCurrency64(1), 100, contracts.ContractStateActive, true, now)          // pruned recently
+	addContract(hk1, types.FileContractID{5}, types.NewCurrency64(1), 100, contracts.ContractStateActive, true, twoDaysAgo)   // ok - small size
+	addContract(hk1, types.FileContractID{6}, types.NewCurrency64(1), 200, contracts.ContractStateActive, true, twoDaysAgo)   // ok - big size
+
+	// add contracts for h2
+	addContract(hk2, types.FileContractID{7}, types.NewCurrency64(1), 100, contracts.ContractStateActive, true, twoDaysAgo) // ok
+
+	// assert contracts for pruning for h1
+	contractIDs, err := store.ContractsForPruning(context.Background(), hk1, oneDayAgo)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contractIDs) != 2 {
+		t.Fatalf("expected 2 contracts, got %d", len(contractIDs))
+	} else if contractIDs[0] != (types.FileContractID{6}) {
+		t.Fatalf("expected contract %v, got %v", types.FileContractID{6}, contractIDs[0])
+	} else if contractIDs[1] != (types.FileContractID{5}) {
+		t.Fatalf("expected contract %v, got %v", types.FileContractID{5}, contractIDs[1])
+	}
+
+	// assert contracts for pruning for h2
+	contractIDs, err = store.ContractsForPruning(context.Background(), hk2, oneDayAgo)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(contractIDs) != 1 {
+		t.Fatalf("expected 1 contract, got %d", len(contractIDs))
+	} else if contractIDs[0] != (types.FileContractID{7}) {
+		t.Fatalf("expected contract %v, got %v", types.FileContractID{7}, contractIDs[0])
+	}
+}
+
+func TestPrunableContractRoots(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// add two hosts
+	hk1 := types.PublicKey{1}
+	hk2 := types.PublicKey{2}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return errors.Join(
+			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
+			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
+		)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add a contract for each host
+	fcid1 := types.FileContractID{1}
+	fcid2 := types.FileContractID{2}
+	if err := errors.Join(
+		store.AddFormedContract(context.Background(), fcid1, hk1, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)),
+		store.AddFormedContract(context.Background(), fcid2, hk2, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	// prepare roots
+	roots := []types.Hash256{
+		frand.Entropy256(),
+		frand.Entropy256(),
+		frand.Entropy256(),
+		frand.Entropy256(),
+	}
+
+	// pin two slabs to add sectors
+	_, err := store.PinSlab(context.Background(), account, time.Now(), slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     11,
+		Sectors: []slabs.SectorPinParams{
+			{Root: roots[0], HostKey: hk1},
+			{Root: roots[2], HostKey: hk2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slabID, err := store.PinSlab(context.Background(), account, time.Now(), slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     11,
+		Sectors: []slabs.SectorPinParams{
+			{Root: roots[1], HostKey: hk1},
+			{Root: roots[3], HostKey: hk2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// pin sectors for h1
+	if sectors, err := store.UnpinnedSectors(context.Background(), hk1, 10); err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(context.Background(), fcid1, sectors); err != nil {
+		t.Fatal(err)
+	}
+
+	// pin sectors for h2
+	if sectors, err := store.UnpinnedSectors(context.Background(), hk2, 10); err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(context.Background(), fcid2, sectors); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert no prunable roots for either contract
+	if indices, err := store.PrunableContractRoots(context.Background(), fcid1, roots[:2]); err != nil {
+		t.Fatal(err)
+	} else if len(indices) != 0 {
+		t.Fatalf("unexpected prunable indices, %+v", indices)
+	} else if indices, err := store.PrunableContractRoots(context.Background(), fcid2, roots[2:]); err != nil {
+		t.Fatal(err)
+	} else if len(indices) != 0 {
+		t.Fatalf("unexpected prunable indices, %+v", indices)
+	}
+
+	// unpin the second slab to remove sectors for both hosts
+	if err := store.UnpinSlab(context.Background(), account, slabID); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert prunable roots for both contracts
+	if prunable, err := store.PrunableContractRoots(context.Background(), fcid1, roots[:2]); err != nil {
+		t.Fatal(err)
+	} else if len(prunable) != 1 || prunable[0] != roots[1] {
+		t.Fatalf("unexpected prunable roots, %+v", prunable)
+	} else if prunable, err := store.PrunableContractRoots(context.Background(), fcid2, roots[2:]); err != nil {
+		t.Fatal(err)
+	} else if len(prunable) != 1 || prunable[0] != roots[3] {
+		t.Fatalf("unexpected prunable roots, %+v", prunable)
+	}
+}
 func TestPruneExpiredContractElements(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
@@ -1159,20 +1331,18 @@ func TestSyncContract(t *testing.T) {
 }
 
 // BenchmarkContracts is a benchmark to ensure the performance of
-// Contract and Contracts.
-//
-// M1 Max | Contract       |                | 1.3 ms/op
-// M1 Max | Contracts 100  | None           | 1.9 ms/op
-// M1 Max | Contracts 100  | Revisable      | 2.4 ms/op
-// M1 Max | Contracts 100  | Revisable+Good | 2.2 ms/op
-// M1 Max | Contracts 1000 | None           | 5.1 ms/op
-// M1 Max | Contracts 1000 | Revisable      | 4.8 ms/op
-// M1 Max | Contracts 1000 | Revisable+Good | 5.3 ms/op
+// all methods on the store that return either a contract or a list of
+// contract IDs.
 func BenchmarkContracts(b *testing.B) {
 	const (
+		maxContractSize     = 10 * 1 << 40 // 10TB
 		numContractsPerHost = 100
-		numHosts            = 500
+		numHosts            = 1000
 	)
+
+	randomTime := func() time.Time {
+		return time.Now().Add(-time.Duration(frand.Uint64n(60*60)) * time.Second)
+	}
 
 	// prepare database
 	store := initPostgres(b, zap.NewNop())
@@ -1190,16 +1360,21 @@ func BenchmarkContracts(b *testing.B) {
 			hostContractIDs := make([]types.FileContractID, numContractsPerHost)
 			for i := range numContractsPerHost {
 				frand.Read(hostContractIDs[i][:])
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9);`,
+				size := frand.Uint64n(1e9)
+				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, last_prune) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);`,
 					hostID,
 					sqlHash256(hostContractIDs[i][:]),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlContractState(uint8(frand.Uint64n(5))), // 40% active
-					frand.Uint64n(2) == 0,                     // 50% good
+					sqlCurrency(types.NewCurrency64(frand.Uint64n(5))), // random remaining allowance
+					sqlContractState(uint8(frand.Uint64n(5))),          // random contract state (40% active)
+					frand.Uint64n(2) == 0,                              // random good state (50% good)
+					size,                                               // random size
+					size+frand.Uint64n(1e3),                            // random capacity
+					randomTime(),                                       // random last_broadcast_attempt
+					randomTime(),                                       // random last_prune
 				); err != nil {
 					return err
 				}
@@ -1255,187 +1430,136 @@ func BenchmarkContracts(b *testing.B) {
 				}
 			}
 		})
-	}
-}
 
-// BenchmarkContractsForBroadcasting is a benchmark to ensure the performance of
-// ContractsForBroadcasting, we prepare the database with a certain number of
-// contracts per host, with a random state, last_broadcast_attempt and good
-// status.
-//
-// M1 Max | 100k contracts | 1.4ms/op
-func BenchmarkContractsForBroadcasting(b *testing.B) {
-	const (
-		numContractsPerHost = 100
-		numHosts            = 1000
-	)
-
-	// prepare database
-	store := initPostgres(b, zap.NewNop())
-	hosts := make([]types.PublicKey, 0, numHosts)
-	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		for range numHosts {
-			var hostID int64
-			hk := types.GeneratePrivateKey().PublicKey()
-			err := tx.QueryRow(context.Background(), `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
-			if err != nil {
-				return err
-			}
-
-			for range numContractsPerHost {
-				var id types.FileContractID
-				frand.Read(id[:])
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, last_broadcast_attempt) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9, $10)`,
-					hostID,
-					sqlHash256(id),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlContractState(uint8(frand.Uint64n(5))), // random state
-					frand.Uint64n(10) != 0,                    // random good
-					time.Now().Add(-time.Duration(frand.Uint64n(60*60))*time.Second), // random last_broadcast_attempt
-				); err != nil {
-					return err
+		b.Run(fmt.Sprintf("contracts_for_broadcasting_%d", limit), func(b *testing.B) {
+			for b.Loop() {
+				_, err := store.ContractsForBroadcasting(context.Background(), randomTime(), limit)
+				if err != nil {
+					b.Fatal(err)
 				}
 			}
-
-			hosts = append(hosts, hk)
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
+		})
+		b.Run(fmt.Sprintf("contracts_for_funding_%d", limit), func(b *testing.B) {
+			for b.Loop() {
+				_, err := store.ContractsForFunding(context.Background(), hosts[frand.Intn(len(hosts))], limit)
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 
-	now := time.Now()
-	for b.Loop() {
-		contracts, err := store.ContractsForBroadcasting(context.Background(), now, 50)
+	b.Run("contracts_for_pinning", func(b *testing.B) {
+		for b.Loop() {
+			_, err := store.ContractsForPinning(context.Background(), hosts[frand.Intn(len(hosts))], maxContractSize)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("contracts_for_pruning", func(b *testing.B) {
+		for b.Loop() {
+			_, err := store.ContractsForPruning(context.Background(), hosts[frand.Intn(len(hosts))], randomTime())
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
+
+func BenchmarkPrunableContractRoots(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	// benchmark parameters
+	const (
+		oneTB    = 1 << 40 // 1TiB of sectors
+		nHosts   = 100
+		nSectors = oneTB / proto.SectorSize
+	)
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	// add hosts and contracts
+	var hks []types.PublicKey
+	for range nHosts {
+		hk := types.PublicKey(frand.Entropy256())
+		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+		}); err != nil {
+			b.Fatal(err)
+		}
+		if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+			b.Fatal(err)
+		}
+		hks = append(hks, hk)
+	}
+
+	// insert sectors in batches
+	hostIdx := 0
+	rootsByContract := make(map[types.FileContractID][]types.Hash256)
+	for remainingSectors := nSectors; remainingSectors > 0; {
+		batchSize := min(remainingSectors, 10000)
+		remainingSectors -= batchSize
+		var sectors []slabs.SectorPinParams
+		for range batchSize {
+			hk := hks[hostIdx]
+			root := frand.Entropy256()
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    root,
+				HostKey: hks[hostIdx],
+			})
+			rootsByContract[types.FileContractID(hk)] = append(rootsByContract[types.FileContractID(hk)], root)
+			hostIdx = (hostIdx + 1) % len(hks)
+		}
+
+		// pin slab
+		if _, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       sectors,
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// pin all sectors to contracts
+	for contractID, roots := range rootsByContract {
+		err := store.PinSectors(context.Background(), contractID, roots)
 		if err != nil {
 			b.Fatal(err)
-		} else if len(contracts) < 50 {
-			b.StopTimer()
-			break
 		}
 	}
-}
 
-// BenchmarkContractsForFunding is a benchmark to ensure the performance of
-// ContractsForFunding, we prepare the database with a certain number of
-// contracts per host, with a random state, remaining allowance and good status.
-//
-// M1 Max | 100k contracts | 1.56ms/op
-func BenchmarkContractsForFunding(b *testing.B) {
-	const (
-		numContractsPerHost = 100
-		numHosts            = 1000
-	)
+	// extend roots to 1TB worth of sectors and random shuffle
+	for contractID, roots := range rootsByContract {
+		for range nSectors - len(roots) {
+			rootsByContract[contractID] = append(rootsByContract[contractID], frand.Entropy256())
+		}
+		frand.Shuffle(len(rootsByContract[contractID]), func(i, j int) {
+			rootsByContract[contractID][i], rootsByContract[contractID][j] = rootsByContract[contractID][j], rootsByContract[contractID][i]
+		})
+	}
 
-	// prepare database
-	store := initPostgres(b, zap.NewNop())
-	hosts := make([]types.PublicKey, 0, numHosts)
-	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		for range numHosts {
-			var hostID int64
-			hk := types.GeneratePrivateKey().PublicKey()
-			err := tx.QueryRow(context.Background(), `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
-			if err != nil {
-				return err
-			}
-
-			for range numContractsPerHost {
-				var id types.FileContractID
-				frand.Read(id[:])
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9)`,
-					hostID,
-					sqlHash256(id),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.NewCurrency64(frand.Uint64n(5))), // random remaining allowance
-					sqlContractState(uint8(frand.Uint64n(5))),          // random state
-					frand.Uint64n(2) == 0,                              // random good
-				); err != nil {
-					return err
+	// run benchmarks with various batch sizes
+	for _, batchSize := range []int64{1000, 5000, 10000, nSectors} {
+		b.Run(fmt.Sprintf("prunable_roots_batch_%d", batchSize), func(b *testing.B) {
+			b.ResetTimer()
+			b.SetBytes(batchSize * proto.SectorSize)
+			for b.Loop() {
+				fcid := types.FileContractID(hks[frand.Intn(len(hks))])
+				prunable, err := store.PrunableContractRoots(context.Background(), fcid, rootsByContract[fcid][:batchSize])
+				if err != nil {
+					b.Fatal(err)
+				} else if len(prunable) == 0 || len(prunable) == int(batchSize) {
+					b.Fatal("unexpected number of prunable roots", len(prunable)) // assert it's not empty or all
 				}
 			}
-
-			hosts = append(hosts, hk)
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-
-	for b.Loop() {
-		rIdx := frand.Intn(len(hosts))
-		if ids, err := store.ContractsForFunding(context.Background(), hosts[rIdx], 50); err != nil {
-			b.Fatal(err)
-		} else if len(ids) == 0 {
-			b.Fatal("no contracts found for funding")
-		}
-	}
-}
-
-// BenchmarkContractsForPinning is a benchmark to ensure the performance of
-// ContractsForPinning, we prepare the database with contracts that are randomly
-// suitable for pinning depending on various factors.
-//
-// M1 Max | 100k contracts | 1.41ms/op
-func BenchmarkContractsForPinning(b *testing.B) {
-	const (
-		maxContractSize     = 10 * 1 << 40 // 10TB
-		numContractsPerHost = 100
-		numHosts            = 1000
-	)
-
-	// prepare database
-	store := initPostgres(b, zap.NewNop())
-	hosts := make([]types.PublicKey, 0, numHosts)
-	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		for range numHosts {
-			var hostID int64
-			hk := types.GeneratePrivateKey().PublicKey()
-			err := tx.QueryRow(context.Background(), `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
-			if err != nil {
-				return err
-			}
-
-			for range numContractsPerHost {
-				var id types.FileContractID
-				frand.Read(id[:])
-				size := frand.Uint64n(1e9)
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-					hostID,
-					sqlHash256(id),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.NewCurrency64(frand.Uint64n(5))), // random allowance
-					sqlContractState(uint8(frand.Uint64n(3))),          // random state
-					frand.Uint64n(2) == 0,                              // random good
-					size,                                               // random size
-					size+frand.Uint64n(1e3),                            // random capacity
-				); err != nil {
-					return err
-				}
-			}
-
-			hosts = append(hosts, hk)
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-
-	for b.Loop() {
-		rIdx := frand.Intn(len(hosts))
-		if ids, err := store.ContractsForPinning(context.Background(), hosts[rIdx], maxContractSize); err != nil {
-			b.Fatal(err)
-		} else if len(ids) == 0 {
-			b.Fatal("no contracts found for pinning")
-		}
+		})
 	}
 }
