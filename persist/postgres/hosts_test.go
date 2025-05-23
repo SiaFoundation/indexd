@@ -1327,7 +1327,7 @@ func BenchmarkHostsForPinning(b *testing.B) {
 		batch, err := store.HostsForPinning(context.Background())
 		if err != nil {
 			b.Fatal(err)
-		} else if len(batch) != len(batch) {
+		} else if len(batch) != nHosts {
 			b.Fatal("unexpected number of hosts", len(batch))
 		}
 	}

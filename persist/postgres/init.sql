@@ -261,7 +261,7 @@ CREATE INDEX sectors_next_integrity_check_idx ON sectors(next_integrity_check AS
 CREATE INDEX sectors_host_id_next_integrity_check_idx ON sectors(host_id, next_integrity_check ASC);
 
 -- speed up hosts for pinning query
-CREATE INDEX sectors_host_id_null_contract_map_idx ON sectors(host_id, contract_sectors_map_id) WHERE contract_sectors_map_id IS NULL;
+CREATE INDEX sectors_host_id_null_contract_map_idx ON sectors(host_id) WHERE contract_sectors_map_id IS NULL;
 
 -- speed up querying sectors of a host by root
 CREATE INDEX sectors_host_id_sector_root_idx ON sectors(host_id, sector_root);
