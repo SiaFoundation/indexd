@@ -641,3 +641,37 @@ func (s *Store) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.T
 	}
 	return hosts, nil
 }
+
+// HostsForPinning returns a list of hosts that have unpinned sectors as well as
+// active contracts to pin them to. Hosts that are blocked are excluded.
+func (s *Store) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
+	var hosts []types.PublicKey
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+			SELECT h.public_key 
+			FROM hosts h
+			INNER JOIN contracts c ON h.id = c.host_id
+			LEFT JOIN hosts_blocklist hb ON h.public_key = hb.public_key
+			WHERE c.state <= $1 AND hb.public_key IS NULL AND EXISTS (
+				SELECT 1 
+				FROM sectors 
+				WHERE sectors.host_id = h.id AND contract_sectors_map_id IS NULL
+			)`, contracts.ContractStateActive)
+		if err != nil {
+			return fmt.Errorf("failed to query hosts for pinning: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var hk sqlPublicKey
+			if err := rows.Scan(&hk); err != nil {
+				return err
+			}
+			hosts = append(hosts, types.PublicKey(hk))
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
+	}
+	return hosts, nil
+}
