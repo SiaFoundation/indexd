@@ -193,17 +193,55 @@ DO UPDATE SET
 // account can't underflow, instead it will be set to 0 if the amount withdrawn
 // exceeds the stored balance.
 func (s *Store) DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
-	return errors.New("not implemented")
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		resp, err := tx.Exec(ctx, `
+			UPDATE service_accounts
+			SET balance = GREATEST(balance - $1, 0)
+			WHERE account_id = (SELECT id FROM accounts WHERE public_key = $2)
+			AND host_id = (SELECT id FROM hosts WHERE public_key = $3)
+		`, sqlCurrency(amount), sqlPublicKey(account), sqlPublicKey(hostKey))
+		if err != nil {
+			return err
+		} else if resp.RowsAffected() == 0 {
+			return accounts.ErrNotFound
+		}
+		return nil
+	})
 }
 
 // UpdateServiceAccountBalance updates the balance of a service account.
 func (s *Store) UpdateServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
-	return errors.New("not implemented")
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO service_accounts (account_id, host_id, balance)
+			VALUES (
+				(SELECT id FROM accounts WHERE public_key = $1),
+				(SELECT id FROM hosts WHERE public_key = $2),
+				$3
+			)
+			ON CONFLICT (account_id, host_id) DO UPDATE SET balance = EXCLUDED.balance
+		`, sqlPublicKey(account), sqlPublicKey(hostKey), sqlCurrency(balance))
+		return err
+	})
 }
 
 // ServiceAccountBalance returns the balance of a service account.
 func (s *Store) ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
-	return types.Currency{}, errors.New("not implemented")
+	var balance types.Currency
+	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		err := tx.QueryRow(ctx, `
+			SELECT balance
+			FROM service_accounts
+			INNER JOIN accounts ON accounts.id = service_accounts.account_id
+			INNER JOIN hosts ON hosts.id = service_accounts.host_id
+			WHERE accounts.public_key = $1 AND hosts.public_key = $2
+		`, sqlPublicKey(account), sqlPublicKey(hostKey)).Scan((*sqlCurrency)(&balance))
+		if errors.Is(err, sql.ErrNoRows) {
+			return accounts.ErrNotFound
+		}
+		return err
+	})
+	return balance, err
 }
 
 func (s *Store) newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, limit int) ([]accounts.HostAccount, error) {
