@@ -648,15 +648,21 @@ func (s *Store) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) 
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT h.public_key 
+			SELECT h.public_key
 			FROM hosts h
-			INNER JOIN contracts c ON h.id = c.host_id
-			LEFT JOIN hosts_blocklist hb ON h.public_key = hb.public_key
-			WHERE c.state <= $1 AND hb.public_key IS NULL AND EXISTS (
-				SELECT 1 
-				FROM sectors 
-				WHERE sectors.host_id = h.id AND contract_sectors_map_id IS NULL
-			)`, contracts.ContractStateActive)
+			WHERE
+				EXISTS (
+					SELECT 1
+					FROM sectors
+					WHERE sectors.host_id = h.id AND contract_sectors_map_id IS NULL
+				) AND
+				EXISTS (
+					SELECT 1
+					FROM contracts
+					WHERE contracts.host_id = h.id AND contracts.state <= $1 AND contracts.good = TRUE
+				) AND
+				NOT EXISTS (SELECT 1 FROM hosts_blocklist hb WHERE hb.public_key = h.public_key)
+				 `, contracts.ContractStateActive)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts for pinning: %w", err)
 		}
