@@ -1066,15 +1066,17 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	root2 := types.Hash256{2}
 	root3 := types.Hash256{3}
 	root4 := types.Hash256{4}
-	pinSector(hk1, root1, time.Now().Add(-time.Hour))
-	pinSector(hk2, root2, time.Now().Add(-time.Hour))
-	pinSector(hk1, root3, time.Now().Add(time.Hour))
-	pinSector(hk2, root4, time.Now().Add(time.Hour))
 
-	futureTime := time.Now().Add(time.Hour)
-	firstCallTime := time.Now().Round(time.Microsecond)
+	now := time.Now().Round(time.Microsecond).Add(-time.Microsecond)
+	oneHAgo := now.Add(-time.Hour)
+	oneHFromNow := now.Add(time.Hour)
 
-	hosts, err := db.HostsForIntegrityChecks(context.Background(), futureTime, 10)
+	pinSector(hk1, root1, oneHAgo)
+	pinSector(hk2, root2, oneHAgo)
+	pinSector(hk1, root3, oneHFromNow)
+	pinSector(hk2, root4, oneHFromNow)
+
+	hosts, err := db.HostsForIntegrityChecks(context.Background(), oneHFromNow, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 2 {
@@ -1084,7 +1086,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	}
 
 	// apply limit
-	hosts, err = db.HostsForIntegrityChecks(context.Background(), futureTime, 1)
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), oneHFromNow, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
@@ -1094,8 +1096,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	}
 
 	// using a maxLastCheck time in the past should cause no hosts to be returned
-	time.Sleep(time.Microsecond)
-	hosts, err = db.HostsForIntegrityChecks(context.Background(), firstCallTime, 10)
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), now, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 0 {
@@ -1108,7 +1109,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hosts, err = db.HostsForIntegrityChecks(context.Background(), futureTime, 10)
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), oneHFromNow, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
@@ -1121,7 +1122,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	if err := db.BlockHosts(context.Background(), []types.PublicKey{hk1}, ""); err != nil {
 		t.Fatal(err)
 	}
-	hosts, err = db.HostsForIntegrityChecks(context.Background(), futureTime, 10)
+	hosts, err = db.HostsForIntegrityChecks(context.Background(), oneHFromNow, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 0 {
