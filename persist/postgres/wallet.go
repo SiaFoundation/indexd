@@ -216,6 +216,22 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 	return nil
 }
 
+// LockUTXOs locks the specified siacoin outputs until the specified time.
+func (s *Store) LockUTXOs(scois []types.SiacoinOutputID, until time.Time) error {
+	return nil // TODO: implement
+}
+
+// LockedUTXOs returns the list of locked siacoin outputs at the specified time.
+func (s *Store) LockedUTXOs(t time.Time) ([]types.SiacoinOutputID, error) {
+	return nil, nil // TODO: implement
+}
+
+// ReleaseUTXOs releases the specified siacoin outputs, making them available
+// for spending.
+func (s *Store) ReleaseUTXOs(scois []types.SiacoinOutputID) error {
+	return nil // TODO: implement
+}
+
 func validateOffsetLimit(offset, limit int) error {
 	if offset < 0 {
 		return errors.New("offset can not be negative")

@@ -429,8 +429,10 @@ func (w *walletMock) Address() types.Address {
 func (w *walletMock) FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error) {
 	return types.ChainIndex{}, nil, nil
 }
-func (w *walletMock) ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) {}
-func (w *walletMock) SignV2Inputs(txn *types.V2Transaction, toSign []int)                  {}
+func (w *walletMock) ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) error {
+	return nil
+}
+func (w *walletMock) SignV2Inputs(txn *types.V2Transaction, toSign []int) {}
 
 func TestApplyRevertDiff(t *testing.T) {
 	contracts := newContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil)
