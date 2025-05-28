@@ -59,7 +59,7 @@ type (
 		AddAccount(ctx context.Context, ak types.PublicKey) error
 		FailingSectors(ctx context.Context, hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
-		HostsForIntegrityChecks(ctx context.Context) ([]types.PublicKey, error)
+		HostsForIntegrityChecks(ctx context.Context, limit int) ([]types.PublicKey, error)
 		MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxFailedIntegrityChecks uint) error
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error)
@@ -159,50 +159,60 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 	logger := m.log.Named("integrity")
 	logger.Debug("starting integrity checks", zap.Time("start", start))
 
-	usedHosts, err := m.store.HostsForIntegrityChecks(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch hosts to block: %w", err)
-	}
-
-	sem := make(chan struct{}, 50)
-	var wg sync.WaitGroup
-	for _, host := range usedHosts {
-		select {
-		case <-m.tg.Done():
-			return nil
-		default:
+	for {
+		usedHosts, err := m.store.HostsForIntegrityChecks(ctx, 100)
+		if err != nil {
+			return fmt.Errorf("failed to fetch hosts to block: %w", err)
+		} else if len(usedHosts) == 0 {
+			break
 		}
 
-		sem <- struct{}{}
-		wg.Add(1)
-		go func(hostKey types.PublicKey) {
-			defer func() {
-				<-sem
-				wg.Done()
-			}()
-
-			// fetch good price table
-			host, err := m.hm.ScanHost(ctx, hostKey)
-			if err != nil {
-				logger.With(zap.Stringer("hostKey", hostKey)).Error("failed to scan host", zap.Error(err))
-				return
+		sem := make(chan struct{}, 50)
+		var wg sync.WaitGroup
+		for _, host := range usedHosts {
+			select {
+			case <-m.tg.Done():
+				return nil
+			default:
 			}
 
-			// create verifier
-			verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey, host.Settings.Prices)
-			if err != nil {
-				// NOTE: If we can't dial the host we don't mark sectors as lost.
-				// Instead we leave it up to the scan code to determine whether the host
-				// is offline.
-				logger.With(zap.Stringer("hostKey", host.PublicKey)).Warn("failed to create sector verifier", zap.Error(err))
-				return
-			}
-			defer verifier.Close()
+			sem <- struct{}{}
+			wg.Add(1)
+			go func(hostKey types.PublicKey) {
+				defer func() {
+					<-sem
+					wg.Done()
+				}()
 
-			m.performIntegrityChecksForHost(ctx, verifier, logger)
-		}(host)
+				// fetch good price table
+				host, err := m.hm.ScanHost(ctx, hostKey)
+				if err != nil {
+					logger.With(zap.Stringer("hostKey", hostKey)).Error("failed to scan host", zap.Error(err))
+					return
+				}
+
+				// ignore hosts that are not usable
+				if !host.IsGood() {
+					logger.With(zap.Stringer("hostKey", hostKey)).Debug("skipping host since it's not usable")
+					return
+				}
+
+				// create verifier
+				verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey, host.Settings.Prices)
+				if err != nil {
+					// NOTE: If we can't dial the host we don't mark sectors as lost.
+					// Instead we leave it up to the scan code to determine whether the host
+					// is offline.
+					logger.With(zap.Stringer("hostKey", host.PublicKey)).Warn("failed to create sector verifier", zap.Error(err))
+					return
+				}
+				defer verifier.Close()
+
+				m.performIntegrityChecksForHost(ctx, verifier, logger)
+			}(host)
+		}
+		wg.Wait()
 	}
-	wg.Wait()
 
 	logger.Debug("finished integrity checks", zap.Duration("elapsed", time.Since(start)))
 	return nil
