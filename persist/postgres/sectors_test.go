@@ -46,7 +46,7 @@ func TestMigrateSector(t *testing.T) {
 
 	// add contract for first host
 	fcid1 := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), fcid1, hk1, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk1, fcid1, newTestContract(hk1), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -642,9 +642,9 @@ func TestPinSectors(t *testing.T) {
 
 	// create 2 contracts
 	contractID1, contractID2 := types.FileContractID{1}, types.FileContractID{2}
-	if err := store.AddFormedContract(context.Background(), contractID1, hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, contractID1, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
-	} else if err := store.AddFormedContract(context.Background(), contractID2, hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+	} else if err := store.AddFormedContract(context.Background(), hk, contractID2, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -757,7 +757,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// add contract
-	err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(3))
+	err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -874,7 +874,7 @@ func TestUnpinnedSectors(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1063,7 +1063,7 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	}); err != nil {
 		b.Fatal(err)
 	}
-	if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		b.Fatal(err)
 	}
 
@@ -1225,7 +1225,7 @@ func BenchmarkPinSectors(b *testing.B) {
 	}); err != nil {
 		b.Fatal(err)
 	}
-	if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		b.Fatal(err)
 	}
 
@@ -1330,11 +1330,11 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 	}
 
 	// add 1 good and 1 bad contract
-	err := store.AddFormedContract(context.Background(), types.FileContractID(hks[0]), hks[0], 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(3))
+	err := store.AddFormedContract(context.Background(), hks[0], types.FileContractID(hks[0]), newTestContract(hks[0]), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
 	if err != nil {
 		b.Fatal(err)
 	}
-	err = store.AddFormedContract(context.Background(), types.FileContractID(hks[1]), hks[1], 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(3))
+	err = store.AddFormedContract(context.Background(), hks[1], types.FileContractID(hks[1]), newTestContract(hks[1]), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -1436,7 +1436,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 	}
 
 	// add contract
-	if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		b.Fatal(err)
 	}
 
@@ -1669,7 +1669,7 @@ func TestMarkSectorsLost(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(3))
+		err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1781,7 +1781,7 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 	}); err != nil {
 		b.Fatal(err)
 	}
-	if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		b.Fatal(err)
 	}
 
@@ -1907,7 +1907,7 @@ func BenchmarkMigrateSector(b *testing.B) {
 		}); err != nil {
 			b.Fatal(err)
 		}
-		if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+		if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 			b.Fatal(err)
 		}
 		hks = append(hks, hk)

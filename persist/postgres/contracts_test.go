@@ -36,9 +36,9 @@ func TestContracts(t *testing.T) {
 	fcid2 := types.FileContractID{2}
 	fcid3 := types.FileContractID{3}
 	if err := errors.Join(
-		store.AddFormedContract(context.Background(), fcid1, hk, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-		store.AddFormedContract(context.Background(), fcid2, hk, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-		store.AddFormedContract(context.Background(), fcid3, hk, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+		store.AddFormedContract(context.Background(), hk, fcid1, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+		store.AddFormedContract(context.Background(), hk, fcid2, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+		store.AddFormedContract(context.Background(), hk, fcid3, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func TestContractElement(t *testing.T) {
 	}
 
 	// add a contract and an element
-	if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	} else if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractElements(types.V2FileContractElement{
@@ -159,18 +159,9 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	}
 
 	// add a contract
-	fce := types.V2FileContractElement{
-		ID: types.FileContractID{1, 2, 3},
-		StateElement: types.StateElement{
-			LeafIndex:   1,
-			MerkleProof: []types.Hash256{{1}},
-		},
-		V2FileContract: types.V2FileContract{
-			ExpirationHeight: 100,
-			HostPublicKey:    hk,
-		},
-	}
-	if err := store.AddFormedContract(context.Background(), fce.ID, hk, 50, fce.V2FileContract.ExpirationHeight, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
+	fcid := types.FileContractID{1}
+	contract := newTestContract(hk)
+	if err := store.AddFormedContract(context.Background(), hk, fcid, contract, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -187,7 +178,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 
 	// set height to 10 blocks after expiration
 	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: fce.V2FileContract.ExpirationHeight + 10})
+		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: contract.ExpirationHeight + 10})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -195,6 +186,12 @@ func TestContractElementsForBroadcast(t *testing.T) {
 
 	// no contracts to broadcast since we haven't added the element yet
 	assertContractsToBroadcast(1, 0)
+
+	fce := types.V2FileContractElement{
+		ID:             fcid,
+		StateElement:   types.StateElement{LeafIndex: 1, MerkleProof: []types.Hash256{{1}}},
+		V2FileContract: contract,
+	}
 
 	// add contract element, 1 contract to broadcast
 	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
@@ -231,11 +228,11 @@ func TestContractsForBroadcasting(t *testing.T) {
 
 	// add two contracts
 	fcid1 := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), fcid1, hk, 100, 200, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, fcid1, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 	fcid2 := types.FileContractID{2}
-	if err := store.AddFormedContract(context.Background(), fcid2, hk, 100, 200, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, fcid2, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -280,10 +277,7 @@ func TestContractsForBroadcasting(t *testing.T) {
 	}
 
 	// renew the contract
-	if err := store.AddRenewedContract(context.Background(), contracts.AddRenewedContractParams{
-		RenewedFrom: res[0],
-		RenewedTo:   types.FileContractID{9, 9, 9},
-	}); err != nil {
+	if err := store.AddRenewedContract(context.Background(), res[0], types.FileContractID{9, 9, 9}, types.V2FileContract{}, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -304,7 +298,7 @@ func TestContractsForFunding(t *testing.T) {
 		t.Helper()
 		fcidCnt++
 		fcid := types.FileContractID{byte(fcidCnt)}
-		if err := store.AddFormedContract(context.Background(), fcid, hk, 100, 200, types.ZeroCurrency, remaininAllowance, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+		if err := store.AddFormedContract(context.Background(), hk, fcid, newTestContract(hk), types.ZeroCurrency, remaininAllowance, types.ZeroCurrency); err != nil {
 			t.Fatal(err)
 		}
 		return fcid
@@ -389,7 +383,7 @@ func TestContractsForPinning(t *testing.T) {
 
 	addContract := func(hk types.PublicKey, fcid types.FileContractID, allowance types.Currency, size, capacity uint64, state contracts.ContractState, good bool) {
 		t.Helper()
-		if err := store.AddFormedContract(context.Background(), fcid, hk, 100, 200, types.ZeroCurrency, allowance, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+		if err := store.AddFormedContract(context.Background(), hk, fcid, newTestContract(hk), types.ZeroCurrency, allowance, types.ZeroCurrency); err != nil {
 			t.Fatal(err)
 		}
 		query := `UPDATE contracts SET size = $1, capacity = $2, state = $3, good = $4 WHERE contract_id = $5`
@@ -454,7 +448,7 @@ func TestContractsForPruning(t *testing.T) {
 
 	addContract := func(hk types.PublicKey, fcid types.FileContractID, allowance types.Currency, size uint64, state contracts.ContractState, good bool, lastPrune time.Time) {
 		t.Helper()
-		if err := store.AddFormedContract(context.Background(), fcid, hk, 100, 200, types.ZeroCurrency, allowance, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+		if err := store.AddFormedContract(context.Background(), hk, fcid, newTestContract(hk), types.ZeroCurrency, allowance, types.ZeroCurrency); err != nil {
 			t.Fatal(err)
 		}
 		query := `UPDATE contracts SET state = $1, good = $2, size = $3, capacity = $4, last_prune = $5 WHERE contract_id = $6`
@@ -539,8 +533,8 @@ func TestPrunableContractRoots(t *testing.T) {
 	fcid1 := types.FileContractID{1}
 	fcid2 := types.FileContractID{2}
 	if err := errors.Join(
-		store.AddFormedContract(context.Background(), fcid1, hk1, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)),
-		store.AddFormedContract(context.Background(), fcid2, hk2, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)),
+		store.AddFormedContract(context.Background(), hk1, fcid1, newTestContract(hk1), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+		store.AddFormedContract(context.Background(), hk2, fcid2, newTestContract(hk2), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +628,10 @@ func TestPruneExpiredContractElements(t *testing.T) {
 		t.Helper()
 		var contractID types.FileContractID
 		frand.Read(contractID[:])
-		if err := store.AddFormedContract(context.Background(), contractID, hk, 50, expirationHeight, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
+
+		contract := newTestContract(hk)
+		contract.ExpirationHeight = expirationHeight
+		if err := store.AddFormedContract(context.Background(), hk, contractID, contract, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 			t.Fatal(err)
 		}
 		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
@@ -763,7 +760,11 @@ func TestFormRenewContract(t *testing.T) {
 
 		Good: true,
 	}
-	err = store.AddFormedContract(context.Background(), expectedFormed.ID, expectedFormed.HostKey, expectedFormed.ProofHeight, expectedFormed.ExpirationHeight, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee, expectedFormed.TotalCollateral)
+	contract := newTestContract(hk)
+	contract.ProofHeight = expectedFormed.ProofHeight
+	contract.ExpirationHeight = expectedFormed.ExpirationHeight
+	contract.TotalCollateral = expectedFormed.TotalCollateral
+	err = store.AddFormedContract(context.Background(), hk, expectedFormed.ID, contract, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee)
 	if err != nil {
 		t.Fatal("failed to add formed contract", err)
 	}
@@ -828,17 +829,14 @@ func TestFormRenewContract(t *testing.T) {
 		UsedCollateral:     types.Siacoins(4),
 		TotalCollateral:    types.Siacoins(5),
 	}
-	err = store.AddRenewedContract(context.Background(), contracts.AddRenewedContractParams{
-		RenewedFrom:      expectedRefreshed.RenewedFrom,
-		RenewedTo:        expectedRefreshed.ID,
-		ProofHeight:      expectedRefreshed.ProofHeight,
-		ExpirationHeight: expectedRefreshed.ExpirationHeight,
-		ContractPrice:    expectedRefreshed.ContractPrice,
-		Allowance:        expectedRefreshed.InitialAllowance,
-		MinerFee:         expectedRefreshed.MinerFee,
-		UsedCollateral:   expectedRefreshed.UsedCollateral,
-		TotalCollateral:  expectedRefreshed.TotalCollateral,
-	})
+
+	renewed := newTestContract(hk)
+	renewed.ProofHeight = expectedRefreshed.ProofHeight
+	renewed.ExpirationHeight = expectedRefreshed.ExpirationHeight
+	renewed.TotalCollateral = expectedRefreshed.TotalCollateral
+	renewed.RenterOutput.Value = expectedRefreshed.InitialAllowance
+
+	err = store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, renewed, expectedRefreshed.ContractPrice, expectedRefreshed.MinerFee, expectedRefreshed.UsedCollateral)
 	if err != nil {
 		t.Fatal("failed to add refreshed contract", err)
 	}
@@ -879,17 +877,14 @@ func TestFormRenewContract(t *testing.T) {
 		UsedCollateral:     types.Siacoins(4),
 		TotalCollateral:    types.Siacoins(5),
 	}
-	err = store.AddRenewedContract(context.Background(), contracts.AddRenewedContractParams{
-		RenewedFrom:      expectedRenewed.RenewedFrom,
-		RenewedTo:        expectedRenewed.ID,
-		ProofHeight:      expectedRenewed.ProofHeight,
-		ExpirationHeight: expectedRenewed.ExpirationHeight,
-		ContractPrice:    expectedRenewed.ContractPrice,
-		Allowance:        expectedRenewed.InitialAllowance,
-		MinerFee:         expectedRenewed.MinerFee,
-		UsedCollateral:   expectedRenewed.UsedCollateral,
-		TotalCollateral:  expectedRenewed.TotalCollateral,
-	})
+
+	renewed = newTestContract(hk)
+	renewed.ProofHeight = expectedRenewed.ProofHeight
+	renewed.ExpirationHeight = expectedRenewed.ExpirationHeight
+	renewed.TotalCollateral = expectedRenewed.TotalCollateral
+	renewed.RenterOutput.Value = expectedRenewed.InitialAllowance
+
+	err = store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, renewed, expectedRenewed.ContractPrice, expectedRenewed.MinerFee, expectedRenewed.UsedCollateral)
 	if err != nil {
 		t.Fatal("failed to add refreshed contract", err)
 	}
@@ -952,7 +947,7 @@ func TestRejectContracts(t *testing.T) {
 	now := time.Now()
 	for i := range 3 {
 		contractID := types.FileContractID{byte(i + 1)}
-		err = store.AddFormedContract(context.Background(), contractID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4))
+		err = store.AddFormedContract(context.Background(), hk, contractID, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
 		if err != nil {
 			t.Fatal("failed to add formed contract", err)
 		}
@@ -1048,7 +1043,7 @@ func TestUpdateContractElement(t *testing.T) {
 	assertKnownContract(false)
 
 	// add a contract
-	if err := store.AddFormedContract(context.Background(), fce.ID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, fce.ID, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 	assertKnownContract(true)
@@ -1124,7 +1119,7 @@ func TestUpdateContractState(t *testing.T) {
 	}
 
 	// add a contract
-	if err := store.AddFormedContract(context.Background(), contractID, hk, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, contractID, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1147,7 +1142,7 @@ func TestMarkPruned(t *testing.T) {
 
 	// add a contract
 	fcid := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), fcid, hk, 0, 0, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, fcid, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1216,9 +1211,18 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddFormedContract(context.Background(), fcid, hk, proofHeight, 9999, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
-		t.Fatal(err)
-	} else if err := store.AddFormedContract(context.Background(), goodFCID, hk, 8888, 9999, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4)); err != nil {
+
+	contract1 := newTestContract(hk)
+	contract1.ProofHeight = proofHeight
+	contract1.ExpirationHeight = 9999
+	contract2 := newTestContract(hk)
+	contract2.ProofHeight = 8888
+	contract2.ExpirationHeight = 9999
+
+	if err := errors.Join(
+		store.AddFormedContract(context.Background(), hk, fcid, contract1, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+		store.AddFormedContract(context.Background(), hk, goodFCID, contract2, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+	); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1244,7 +1248,7 @@ func TestMarkBroadcastAttempt(t *testing.T) {
 
 	// add a contract
 	fcid := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), fcid, hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, fcid, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1285,7 +1289,7 @@ func TestSyncContract(t *testing.T) {
 
 	// add a contract
 	contractID := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), contractID, hk, 50, 100, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(10000)); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk, contractID, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1361,7 +1365,7 @@ func BenchmarkContracts(b *testing.B) {
 			for i := range numContractsPerHost {
 				frand.Read(hostContractIDs[i][:])
 				size := frand.Uint64n(1e9)
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, last_prune) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);`,
+				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, last_prune, raw_revision) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, E'\\x');`,
 					hostID,
 					sqlHash256(hostContractIDs[i][:]),
 					sqlCurrency(types.ZeroCurrency),
@@ -1494,7 +1498,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 		}); err != nil {
 			b.Fatal(err)
 		}
-		if err := store.AddFormedContract(context.Background(), types.FileContractID(hk), hk, 100, 200, types.Siacoins(1), types.Siacoins(1), types.Siacoins(1), types.Siacoins(1)); err != nil {
+		if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 			b.Fatal(err)
 		}
 		hks = append(hks, hk)
@@ -1561,5 +1565,18 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+func newTestContract(hk types.PublicKey) types.V2FileContract {
+	return types.V2FileContract{
+		HostPublicKey:    hk,
+		Capacity:         200,
+		Filesize:         100,
+		FileMerkleRoot:   types.Hash256{1},
+		ProofHeight:      400,
+		ExpirationHeight: 800,
+		RevisionNumber:   1,
+		TotalCollateral:  types.Siacoins(100),
 	}
 }

@@ -180,7 +180,10 @@ CREATE TABLE contracts (
   append_sector_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
   free_sector_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
   fund_account_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
-  sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0
+  sector_roots_spending DECIMAL(50, 0) NOT NULL DEFAULT 0,
+
+  -- raw contract revision data
+  raw_revision BYTEA NOT NULL
 );
 CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- for rejecting expired contracts
 CREATE INDEX contracts_state_good_idx ON contracts(state) WHERE state <= 1 AND good; -- for filtering contracts

@@ -37,18 +37,18 @@ type storeMock struct {
 	hosts       map[types.PublicKey]hosts.Host
 }
 
-func (s *storeMock) AddFormedContract(ctx context.Context, contractID types.FileContractID, hostKey types.PublicKey, proofHeight, expirationHeight uint64, contractPrice, allowance, minerFee, totalCollateral types.Currency) error {
+func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error {
 	s.contracts = append(s.contracts, Contract{
 		ID:      contractID,
 		HostKey: hostKey,
 
 		Formation:        time.Now(),
-		ProofHeight:      proofHeight,
-		ExpirationHeight: expirationHeight,
+		ProofHeight:      revision.ProofHeight,
+		ExpirationHeight: revision.ExpirationHeight,
 		State:            ContractStatePending,
 
 		RemainingAllowance: allowance,
-		TotalCollateral:    totalCollateral,
+		TotalCollateral:    revision.TotalCollateral,
 
 		ContractPrice:    contractPrice,
 		InitialAllowance: allowance,
@@ -59,11 +59,11 @@ func (s *storeMock) AddFormedContract(ctx context.Context, contractID types.File
 	return nil
 }
 
-func (s *storeMock) AddRenewedContract(ctx context.Context, params AddRenewedContractParams) error {
+func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error {
 	var source *Contract
 	for i := range s.contracts {
-		if s.contracts[i].ID == params.RenewedFrom {
-			s.contracts[i].RenewedTo = params.RenewedTo
+		if s.contracts[i].ID == renewedFrom {
+			s.contracts[i].RenewedTo = renewedTo
 			source = &s.contracts[i]
 			break
 		}
@@ -72,7 +72,7 @@ func (s *storeMock) AddRenewedContract(ctx context.Context, params AddRenewedCon
 		return ErrNotFound
 	}
 	s.contracts = append(s.contracts, Contract{
-		ID:      params.RenewedTo,
+		ID:      renewedTo,
 		HostKey: source.HostKey,
 
 		Capacity:    source.Size,
@@ -80,17 +80,17 @@ func (s *storeMock) AddRenewedContract(ctx context.Context, params AddRenewedCon
 		RenewedFrom: source.ID,
 
 		Formation:        time.Now(),
-		ProofHeight:      params.ProofHeight,
-		ExpirationHeight: params.ExpirationHeight,
+		ProofHeight:      revision.ProofHeight,
+		ExpirationHeight: revision.ExpirationHeight,
 		State:            ContractStatePending,
 
-		RemainingAllowance: params.Allowance,
-		UsedCollateral:     params.UsedCollateral,
-		TotalCollateral:    params.TotalCollateral,
+		RemainingAllowance: revision.RenterOutput.Value,
+		UsedCollateral:     usedCollateral,
+		TotalCollateral:    revision.TotalCollateral,
 
-		ContractPrice:    params.ContractPrice,
-		InitialAllowance: params.Allowance,
-		MinerFee:         params.MinerFee,
+		ContractPrice:    contractPrice,
+		InitialAllowance: revision.RenterOutput.Value,
+		MinerFee:         minerFee,
 
 		Good: true,
 	})

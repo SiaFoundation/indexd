@@ -68,7 +68,10 @@ func TestPerformContractRenewals(t *testing.T) {
 	blockHeight := cmMock.state.Index.Height
 	formContract := func(contractID types.FileContractID, hostKey types.PublicKey, good bool) {
 		t.Helper()
-		err := store.AddFormedContract(context.Background(), contractID, hostKey, blockHeight+renewWindow+1, 9999, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4))
+		contract := newTestContract(hostKey)
+		contract.ProofHeight = blockHeight + renewWindow + 1
+		contract.ExpirationHeight = 9999
+		err := store.AddFormedContract(context.Background(), hostKey, contractID, contract, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -184,11 +187,10 @@ func TestSyncRevisionState(t *testing.T) {
 
 	// add a host and contract
 	contractID := types.FileContractID{1}
-	hc := dialer.HostClient(types.PublicKey(contractID))
-	store.hosts = map[types.PublicKey]hosts.Host{
-		types.PublicKey(contractID): {PublicKey: types.PublicKey(contractID)},
-	}
-	err := store.AddFormedContract(context.Background(), contractID, types.PublicKey(contractID), 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4))
+	hostKey := types.PublicKey(contractID)
+	hc := dialer.HostClient(hostKey)
+	store.hosts = map[types.PublicKey]hosts.Host{hostKey: {PublicKey: hostKey}}
+	err := store.AddFormedContract(context.Background(), hostKey, contractID, newTestContract(hostKey), types.Siacoins(1), types.Siacoins(2), types.Siacoins(3))
 	if err != nil {
 		t.Fatal(err)
 	}

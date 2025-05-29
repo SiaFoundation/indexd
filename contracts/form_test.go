@@ -339,7 +339,8 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 
 	formContract := func(hostKey types.PublicKey, good bool) {
 		t.Helper()
-		err := store.AddFormedContract(context.Background(), types.FileContractID(hostKey), hostKey, 100, 200, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), types.Siacoins(4))
+
+		err := store.AddFormedContract(context.Background(), hostKey, types.FileContractID(hostKey), newTestContract(hostKey), types.Siacoins(1), types.Siacoins(2), types.Siacoins(3))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -483,5 +484,18 @@ func TestInitialContractFunding(t *testing.T) {
 		t.Fatalf("expected allowance %v, got %v", minAllowance, allowance)
 	} else if !collateral.Equals(maxCollateral) {
 		t.Fatalf("expected collateral %v, got %v", maxCollateral, collateral)
+	}
+}
+
+func newTestContract(hk types.PublicKey) types.V2FileContract {
+	return types.V2FileContract{
+		HostPublicKey:    hk,
+		Capacity:         200,
+		Filesize:         100,
+		FileMerkleRoot:   types.Hash256{1},
+		ProofHeight:      400,
+		ExpirationHeight: 800,
+		RevisionNumber:   1,
+		TotalCollateral:  types.Siacoins(100),
 	}
 }

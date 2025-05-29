@@ -259,7 +259,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		contract := res.Contract
 		minerFee := res.FormationSet.Transactions[len(res.FormationSet.Transactions)-1].MinerFee
 
-		err = cm.store.AddFormedContract(ctx, contract.ID, host.PublicKey, contract.Revision.ProofHeight, contract.Revision.ExpirationHeight, host.Settings.Prices.ContractPrice, allowance, minerFee, contract.Revision.TotalCollateral)
+		err = cm.store.AddFormedContract(ctx, host.PublicKey, contract.ID, contract.Revision, host.Settings.Prices.ContractPrice, allowance, minerFee)
 		if err != nil {
 			formationLog.Error("failed to add formed contract", zap.Error(err))
 			continue

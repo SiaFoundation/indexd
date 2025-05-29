@@ -113,17 +113,7 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 	renewed := res.Contract
 	minerFee := res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1].MinerFee
 
-	if err := cm.store.AddRenewedContract(ctx, AddRenewedContractParams{
-		RenewedFrom:      contract.ID,
-		RenewedTo:        renewed.ID,
-		ProofHeight:      renewed.Revision.ProofHeight,
-		ExpirationHeight: renewed.Revision.ExpirationHeight,
-		ContractPrice:    host.Settings.Prices.ContractPrice,
-		Allowance:        renewed.Revision.RenterOutput.Value,
-		MinerFee:         minerFee,
-		UsedCollateral:   types.ZeroCurrency,
-		TotalCollateral:  renewed.Revision.TotalCollateral,
-	}); err != nil {
+	if err := cm.store.AddRenewedContract(ctx, contract.ID, renewed.ID, renewed.Revision, host.Settings.Prices.ContractPrice, minerFee, types.ZeroCurrency); err != nil {
 		return fmt.Errorf("failed to store renewed contract: %w", err)
 	}
 
