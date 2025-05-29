@@ -65,8 +65,8 @@ type (
 	// Store is the minimal interface of Store functionality the ContractManager
 	// requires.
 	Store interface {
-		AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error
-		AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error
+		AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, contract types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error
+		AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, contract types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error
 		ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error)
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)

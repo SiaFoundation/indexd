@@ -41,20 +41,20 @@ func (s *Store) AddFormedContract(ctx context.Context, hostKey types.PublicKey, 
 // AddRenewedContract adds a renewed contract to the database. It will update
 // the renewed contract and point it to the renewal, as well as update the
 // contract id in the contract sectors map.
-func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error {
+func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, contract types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 INSERT INTO contracts(host_id, contract_id, proof_height, expiration_height, renewed_from, capacity, size, contract_price, initial_allowance, remaining_allowance, miner_fee, used_collateral, total_collateral, raw_revision)
 (SELECT host_id, $1, $2, $3, contract_id, CASE WHEN $2 = proof_height THEN capacity ELSE size END, size, $4, $5, $5, $6, $7, $8, $9 FROM contracts WHERE contract_id = $10)`,
 			sqlHash256(renewedTo),
-			revision.ProofHeight,
-			revision.ExpirationHeight,
+			contract.ProofHeight,
+			contract.ExpirationHeight,
 			sqlCurrency(contractPrice),
-			sqlCurrency(revision.RenterOutput.Value),
+			sqlCurrency(contract.RenterOutput.Value),
 			sqlCurrency(minerFee),
 			sqlCurrency(usedCollateral),
-			sqlCurrency(revision.TotalCollateral),
-			sqlFileContract(revision),
+			sqlCurrency(contract.TotalCollateral),
+			sqlFileContract(contract),
 			sqlHash256(renewedFrom),
 		)
 		if err != nil {

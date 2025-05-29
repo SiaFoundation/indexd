@@ -50,22 +50,6 @@ func WithRevisable(revisable bool) ContractQueryOpt {
 }
 
 type (
-	// AddRenewedContractParams contains the parameters for adding a renewed
-	// contract to the store
-	AddRenewedContractParams struct {
-		RenewedFrom      types.FileContractID
-		RenewedTo        types.FileContractID
-		ProofHeight      uint64
-		ExpirationHeight uint64
-		ContractPrice    types.Currency
-		Allowance        types.Currency
-		MinerFee         types.Currency
-		UsedCollateral   types.Currency
-		TotalCollateral  types.Currency
-	}
-)
-
-type (
 	// ContractState describes the current state of the contract on the network
 	// - pending: the contract has not yet been seen on-chain
 	// - active: the contract was mined on-chain

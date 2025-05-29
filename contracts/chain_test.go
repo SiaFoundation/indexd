@@ -37,18 +37,18 @@ type storeMock struct {
 	hosts       map[types.PublicKey]hosts.Host
 }
 
-func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error {
+func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, contract types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error {
 	s.contracts = append(s.contracts, Contract{
 		ID:      contractID,
 		HostKey: hostKey,
 
 		Formation:        time.Now(),
-		ProofHeight:      revision.ProofHeight,
-		ExpirationHeight: revision.ExpirationHeight,
+		ProofHeight:      contract.ProofHeight,
+		ExpirationHeight: contract.ExpirationHeight,
 		State:            ContractStatePending,
 
 		RemainingAllowance: allowance,
-		TotalCollateral:    revision.TotalCollateral,
+		TotalCollateral:    contract.TotalCollateral,
 
 		ContractPrice:    contractPrice,
 		InitialAllowance: allowance,
@@ -59,7 +59,7 @@ func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicK
 	return nil
 }
 
-func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error {
+func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, contract types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error {
 	var source *Contract
 	for i := range s.contracts {
 		if s.contracts[i].ID == renewedFrom {
@@ -80,16 +80,16 @@ func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewed
 		RenewedFrom: source.ID,
 
 		Formation:        time.Now(),
-		ProofHeight:      revision.ProofHeight,
-		ExpirationHeight: revision.ExpirationHeight,
+		ProofHeight:      contract.ProofHeight,
+		ExpirationHeight: contract.ExpirationHeight,
 		State:            ContractStatePending,
 
-		RemainingAllowance: revision.RenterOutput.Value,
+		RemainingAllowance: contract.RenterOutput.Value,
 		UsedCollateral:     usedCollateral,
-		TotalCollateral:    revision.TotalCollateral,
+		TotalCollateral:    contract.TotalCollateral,
 
 		ContractPrice:    contractPrice,
-		InitialAllowance: revision.RenterOutput.Value,
+		InitialAllowance: contract.RenterOutput.Value,
 		MinerFee:         minerFee,
 
 		Good: true,
