@@ -78,6 +78,7 @@ type (
 		Usability              Usability           `json:"usability"`
 		Blocked                bool                `json:"blocked"`
 		BlockedReason          string              `json:"blockedReason"`
+		LostSectors            uint64              `json:"lostSectors"`
 	}
 
 	// Usability represents a series of host checks that can be used to

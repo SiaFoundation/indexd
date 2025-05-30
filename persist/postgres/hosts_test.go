@@ -122,6 +122,40 @@ func TestHost(t *testing.T) {
 		t.Fatal("unexpected", len(h.Addresses))
 	} else if len(h.Networks) != 1 {
 		t.Fatal("unexpected networks", h.Networks)
+	} else if h.LostSectors != 0 {
+		t.Fatal("expected lost sectors to be 0, got", h.LostSectors)
+	}
+
+	// pin a sector and mark it as lost
+	r1 := types.Hash256{1}
+	if err := db.AddAccount(context.Background(), hk); err != nil {
+		t.Fatal(err)
+	} else if _, err := db.PinSlab(context.Background(), proto4.Account(hk), time.Now(), slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     1,
+		Sectors:       []slabs.SectorPinParams{{Root: r1, HostKey: hk}},
+	}); err != nil {
+		t.Fatal(err)
+	} else if err := db.MarkSectorsLost(context.Background(), hk, []types.Hash256{r1}); err != nil {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert lost sectors is properly set on the host
+	if h, err := db.Host(context.Background(), hk); err != nil {
+		t.Fatal(err)
+	} else if h.LostSectors != 1 {
+		t.Fatal("expected one lost sector, got", h.LostSectors)
+	}
+
+	// assert lost sectors is also set when querying hosts
+	if hosts, err := db.Hosts(context.Background(), 0, 1); err != nil {
+		t.Fatal("unexpected", err)
+	} else if len(hosts) != 1 {
+		t.Fatal("expected one host, got", len(hosts))
+	} else if hosts[0].PublicKey != hk {
+		t.Fatal("expected host public key to match", hosts[0].PublicKey)
+	} else if hosts[0].LostSectors != 1 {
+		t.Fatal("expected one lost sector, got", hosts[0].LostSectors)
 	}
 }
 
