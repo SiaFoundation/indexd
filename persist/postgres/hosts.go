@@ -234,13 +234,6 @@ WHERE
 	return hosts, nil
 }
 
-// HostsForPinning returns a list of host keys that can be used for sector
-// pinning. A host is eligble for pinning if it is not blocked, has unpinned
-// sectors and has an active contract.
-func (s *Store) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
-	panic("not implemented")
-}
-
 // BlockedHosts returns a list of blocked hostkeys.
 func (s *Store) BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error) {
 	// sanity check input
@@ -650,8 +643,9 @@ func (s *Store) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.T
 	return hosts, nil
 }
 
-// HostsForPinning returns a list of hosts that have unpinned sectors as well as
-// active contracts to pin them to. Hosts that are blocked are excluded.
+// HostsForPinning returns a list of host keys that can be used for sector
+// pinning. A host is eligble for pinning if it is not blocked, has unpinned
+// sectors and has an active contract.
 func (s *Store) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
