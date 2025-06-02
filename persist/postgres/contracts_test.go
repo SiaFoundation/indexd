@@ -33,16 +33,9 @@ func TestContracts(t *testing.T) {
 	}
 
 	// add three contracts
-	fcid1 := types.FileContractID{1}
-	fcid2 := types.FileContractID{2}
-	fcid3 := types.FileContractID{3}
-	if err := errors.Join(
-		store.AddFormedContract(context.Background(), hk, fcid1, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-		store.AddFormedContract(context.Background(), hk, fcid2, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-		store.AddFormedContract(context.Background(), hk, fcid3, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-	); err != nil {
-		t.Fatal(err)
-	}
+	fcid1 := store.addTestContract(t, hk, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk, types.FileContractID{2})
+	fcid3 := store.addTestContract(t, hk, types.FileContractID{3})
 
 	// mark the second one resolved so it's considered inactive
 	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
@@ -122,11 +115,10 @@ func TestContractElement(t *testing.T) {
 	}
 
 	// add a contract and an element
-	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	} else if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	fcid := store.addTestContract(t, hk)
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractElements(types.V2FileContractElement{
-			ID: types.FileContractID(hk),
+			ID: fcid,
 			StateElement: types.StateElement{
 				LeafIndex:   1,
 				MerkleProof: []types.Hash256{{1}},
@@ -141,7 +133,7 @@ func TestContractElement(t *testing.T) {
 	}
 
 	// assert contract element is found
-	_, err = store.ContractElement(context.Background(), types.FileContractID(hk))
+	_, err = store.ContractElement(context.Background(), fcid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -228,14 +220,8 @@ func TestContractsForBroadcasting(t *testing.T) {
 	}
 
 	// add two contracts
-	fcid1 := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk, fcid1, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
-	fcid2 := types.FileContractID{2}
-	if err := store.AddFormedContract(context.Background(), hk, fcid2, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	fcid1 := store.addTestContract(t, hk, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk, types.FileContractID{2})
 
 	// tweak timestamp to assert order next
 	now := time.Now()
@@ -531,14 +517,8 @@ func TestPrunableContractRoots(t *testing.T) {
 	}
 
 	// add a contract for each host
-	fcid1 := types.FileContractID{1}
-	fcid2 := types.FileContractID{2}
-	if err := errors.Join(
-		store.AddFormedContract(context.Background(), hk1, fcid1, newTestRevision(hk1), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-		store.AddFormedContract(context.Background(), hk2, fcid2, newTestRevision(hk2), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-	); err != nil {
-		t.Fatal(err)
-	}
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk2, types.FileContractID{2})
 
 	// prepare roots
 	roots := []types.Hash256{
@@ -953,11 +933,7 @@ func TestRejectContracts(t *testing.T) {
 	// form 3 contracts
 	now := time.Now()
 	for i := range 3 {
-		contractID := types.FileContractID{byte(i + 1)}
-		err = store.AddFormedContract(context.Background(), hk, contractID, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
-		if err != nil {
-			t.Fatal("failed to add formed contract", err)
-		}
+		contractID := store.addTestContract(t, hk, types.FileContractID{byte(i + 1)})
 		switch i {
 		case 0:
 			updateStateAndFormation(contractID, contracts.ContractStatePending, now) // recently formed
@@ -1050,9 +1026,7 @@ func TestUpdateContractElement(t *testing.T) {
 	assertKnownContract(false)
 
 	// add a contract
-	if err := store.AddFormedContract(context.Background(), hk, fce.ID, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	store.addTestContract(t, hk, fce.ID)
 	assertKnownContract(true)
 
 	updateElement := func() {
@@ -1125,12 +1099,8 @@ func TestUpdateContractState(t *testing.T) {
 		}
 	}
 
-	// add a contract
-	if err := store.AddFormedContract(context.Background(), hk, contractID, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
-
 	// run tests
+	store.addTestContract(t, hk, contractID)
 	assertState(contracts.ContractStatePending) // fresh contract state
 	updateState(contracts.ContractStateActive)  // set to active
 	assertState(contracts.ContractStateActive)  // assert active
@@ -1254,13 +1224,8 @@ func TestMarkBroadcastAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add a contract
-	fcid := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
-
 	// assert broadcast attempt is defaulted
+	fcid := store.addTestContract(t, hk)
 	contract, err := store.Contract(context.Background(), fcid)
 	if err != nil {
 		t.Fatal(err)
@@ -1295,13 +1260,8 @@ func TestSyncContract(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add a contract
-	contractID := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk, contractID, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
-
 	// helper to sync and assert contract
+	contractID := store.addTestContract(t, hk, types.FileContractID{1})
 	assertContract := func(params contracts.ContractSyncParams) {
 		t.Helper()
 		if err := store.SyncContract(context.Background(), contractID, params); err != nil {
@@ -1576,6 +1536,24 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 			}
 		})
 	}
+}
+
+func (s *Store) addTestContract(t *testing.T, hk types.PublicKey, fcids ...types.FileContractID) types.FileContractID {
+	var fcid types.FileContractID
+	switch len(fcids) {
+	case 0:
+		fcid = types.FileContractID(hk)
+	case 1:
+		fcid = fcids[0]
+	default:
+		panic("developer error")
+	}
+
+	err := s.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fcid
 }
 
 func newTestRevision(hk types.PublicKey) types.V2FileContract {
