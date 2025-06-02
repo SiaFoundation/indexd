@@ -98,13 +98,8 @@ func TestHost(t *testing.T) {
 		t.Fatal("expected [hosts.ErrNotFound], got", err)
 	}
 
-	// add a host
-	ha1 := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha1}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// add the host
+	db.addTestHost(t, hk)
 
 	// update the host
 	networks := []net.IPNet{{IP: net.IPv4(1, 2, 3, 4), Mask: net.CIDRMask(32, 32)}}
@@ -179,11 +174,7 @@ func TestHostChecks(t *testing.T) {
 	}
 
 	// add a host
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, nil, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	db.addTestHost(t, hk)
 
 	// assert unscanned host is unusable
 	if h, err := db.Host(context.Background(), hk); err != nil {
@@ -364,13 +355,7 @@ func TestHosts(t *testing.T) {
 	addHost := func(i byte, usable, blocked bool, contract bool) types.PublicKey {
 		t.Helper()
 		hk := types.PublicKey{i}
-
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			t.Fatal(err)
-		}
+		db.addTestHost(t, hk)
 
 		// "scan" host - first scan fails
 		settings := newSettings(hk)
@@ -514,16 +499,8 @@ func TestHostsForScanning(t *testing.T) {
 	db := initPostgres(t, log.Named("postgres"))
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := db.addTestHost(t)
+	hk2 := db.addTestHost(t)
 
 	// assert both hosts are returned
 	hosts, err := db.HostsForScanning(context.Background())
@@ -601,11 +578,7 @@ func TestHostsRecentUptime(t *testing.T) {
 	}
 
 	// add a host
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, nil, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk = db.addTestHost(t)
 
 	// assert default uptime
 	if uptime() != .894 {
@@ -659,21 +632,9 @@ func TestPruneHosts(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
 
-	// create helper to add a host
-	addHost := func() types.PublicKey {
-		t.Helper()
-		hk := types.GeneratePrivateKey().PublicKey()
-		if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-		}); err != nil {
-			t.Fatal(err)
-		}
-		return hk
-	}
-
 	// add two hosts
-	addHost()
-	addHost()
+	db.addTestHost(t)
+	db.addTestHost(t)
 
 	// assert both get pruned when no params are given
 	n, err := db.PruneHosts(context.Background(), time.Time{}, 0)
@@ -684,8 +645,8 @@ func TestPruneHosts(t *testing.T) {
 	}
 
 	// re-add the hosts
-	h1 := addHost()
-	h2 := addHost()
+	h1 := db.addTestHost(t)
+	h2 := db.addTestHost(t)
 
 	// assert none get pruned when we require at least one failed scan
 	n, err = db.PruneHosts(context.Background(), time.Now().Add(time.Second), 1)
@@ -726,8 +687,8 @@ func TestPruneHosts(t *testing.T) {
 	}
 
 	// re-add both hosts, simulate both a successful and failed scan
-	h1 = addHost()
-	h2 = addHost()
+	h1 = db.addTestHost(t)
+	h2 = db.addTestHost(t)
 	err = errors.Join(
 		db.UpdateHost(context.Background(), h1, testNetworks, proto4.HostSettings{}, true, time.Now()),
 		db.UpdateHost(context.Background(), h1, testNetworks, proto4.HostSettings{}, false, time.Now()),
@@ -786,11 +747,7 @@ func TestUpdateHost(t *testing.T) {
 	}
 
 	// add a host
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	db.addTestHost(t, hk)
 
 	// assert host settings are not inserted if the scan failed
 	hs := newTestHostSettings(hk)
@@ -1022,16 +979,8 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	db := initPostgres(t, log.Named("postgres"))
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := db.addTestHost(t)
+	hk2 := db.addTestHost(t)
 
 	// add account
 	acc := proto4.Account{1}
@@ -1144,13 +1093,7 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 
 	// add hosts
 	for range nHosts {
-		hk := types.PublicKey(frand.Entropy256())
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			b.Fatal(err)
-		}
+		hk := store.addTestHost(b)
 
 		// add sectors
 		for remainingSectors := nSectorsPerHost; remainingSectors > 0; {
@@ -1194,4 +1137,26 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 			}
 		})
 	}
+}
+
+func (s *Store) addTestHost(t testingCommon, hks ...types.PublicKey) types.PublicKey {
+	t.Helper()
+
+	var hk types.PublicKey
+	switch len(hks) {
+	case 0:
+		hk = types.GeneratePrivateKey().PublicKey() // generate a random host key
+	case 1:
+		hk = hks[0]
+	default:
+		panic("developer error")
+	}
+
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := s.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return hk
 }

@@ -12,12 +12,9 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/slabs"
-	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
@@ -32,17 +29,9 @@ func TestMigrateSector(t *testing.T) {
 		t.Fatal("failed to add account:", err)
 	}
 
-	// add 2 hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	for _, hk := range []types.PublicKey{hk1, hk2} {
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			t.Fatal(err)
-		}
-	}
+	// add two hosts
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	// add contract for first host
 	fcid := store.addTestContract(t, hk1)
@@ -135,13 +124,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	}
 
 	// add host
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// pin a slab to add 2 sectors
 	pinTime := time.Now().Round(time.Microsecond)
@@ -239,13 +222,7 @@ func TestSectorsForIntegrityCheck(t *testing.T) {
 	}
 
 	// add host
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// pin a slab to add a few sectors to the database
 	root1 := frand.Entropy256()
@@ -338,21 +315,9 @@ func TestPinSlabs(t *testing.T) {
 		t.Fatal("failed to add account:", err)
 	}
 
-	// add hosts
-	addHost := func(i byte) types.PublicKey {
-		t.Helper()
-		hk := types.PublicKey{i}
-
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			t.Fatal(err)
-		}
-		return hk
-	}
-	hk1 := addHost(1)
-	hk2 := addHost(2)
+	// add two hosts
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	// helper to create slabs
 	newSlab := func(i byte) (slabs.SlabID, slabs.SlabPinParams) {
@@ -509,13 +474,7 @@ func TestUnpinSlab(t *testing.T) {
 	}
 
 	// add host
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// precreate 3 slabs, 2 sectors each
 	var params []slabs.SlabPinParams
@@ -624,17 +583,11 @@ func TestUnpinSlab(t *testing.T) {
 func TestPinSectors(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	// create account and host
+	// create host and account
+	hk := store.addTestHost(t)
 	account := proto.Account{1}
 	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
 		t.Fatal("failed to add account:", err)
-	}
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
 	}
 
 	// create 2 contracts
@@ -740,16 +693,8 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal("failed to add account:", err)
 	}
 
-	// add host
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// add contract
+	// add host with a contract
+	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 
 	// pin a slab to add a few sectors to the database
@@ -852,18 +797,12 @@ func TestUnhealthySlabs(t *testing.T) {
 func TestUnpinnedSectors(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	// create account, host and contract
+	// create host with account and contract
 	account := proto.Account{1}
 	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
 		t.Fatal("failed to add account:", err)
 	}
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 
 	// create 4 sectors
@@ -949,14 +888,7 @@ func BenchmarkSlabs(b *testing.B) {
 	// 30 hosts to simulate default redundancy
 	var hks []types.PublicKey
 	for i := byte(0); i < 30; i++ {
-		hk := types.PublicKey{i}
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			b.Fatal(err)
-		}
-		hks = append(hks, hk)
+		hks = append(hks, store.addTestHost(b, types.PublicKey{i}))
 	}
 
 	// helper to create slabs
@@ -1044,13 +976,7 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
 		b.Fatal("failed to add account:", err)
 	}
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		b.Fatal(err)
-	}
+	hk := store.addTestHost(b)
 	store.addTestContract(b, hk)
 
 	// prepare base db
@@ -1136,13 +1062,7 @@ func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
 	}
 
 	// add a host
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		b.Fatal(err)
-	}
+	hk := store.addTestHost(b)
 
 	// prepare base db
 	const (
@@ -1204,13 +1124,7 @@ func BenchmarkPinSectors(b *testing.B) {
 	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
 		b.Fatal("failed to add account:", err)
 	}
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		b.Fatal(err)
-	}
+	hk := store.addTestHost(b)
 	store.addTestContract(b, hk)
 
 	// prepare base db
@@ -1303,14 +1217,7 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 	// 30 hosts to simulate default redundancy
 	var hks []types.PublicKey
 	for i := byte(0); i < 30; i++ {
-		hk := types.PublicKey{i}
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			b.Fatal(err)
-		}
-		hks = append(hks, hk)
+		hks = append(hks, store.addTestHost(b, types.PublicKey{i}))
 	}
 
 	// add 2 contracts
@@ -1406,16 +1313,8 @@ func BenchmarkUnpinSlab(b *testing.B) {
 		b.Fatal("failed to add account:", err)
 	}
 
-	// add host
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		b.Fatal(err)
-	}
-
-	// add contract
+	// add host with one contract
+	hk := store.addTestHost(b)
 	store.addTestContract(b, hk)
 
 	// prepare base db
@@ -1474,13 +1373,7 @@ func BenchmarkRecordIntegrityChecks(b *testing.B) {
 	}
 
 	// add a host
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		b.Fatal(err)
-	}
+	hk := store.addTestHost(b)
 
 	// prepare base db
 	const (
@@ -1544,13 +1437,7 @@ func BenchmarkFailingSectors(b *testing.B) {
 	}
 
 	// add a host
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		b.Fatal(err)
-	}
+	hk := store.addTestHost(b)
 
 	// prepare base db
 	const (
@@ -1637,18 +1524,13 @@ func TestMarkSectorsLost(t *testing.T) {
 		t.Fatal("failed to add account:", err)
 	}
 
-	// add hosts and contracts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	for _, hk := range []types.PublicKey{hk1, hk2} {
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			t.Fatal(err)
-		}
-		store.addTestContract(t, hk)
-	}
+	// add two hosts
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
+
+	// add a contract for each host
+	store.addTestContract(t, hk1)
+	store.addTestContract(t, hk2)
 
 	// pin a slab that adds 2 sectors to each host
 	root1 := frand.Entropy256()
@@ -1749,13 +1631,7 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
 		b.Fatal("failed to add account:", err)
 	}
-	hk := types.PublicKey{1}
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-	}); err != nil {
-		b.Fatal(err)
-	}
+	hk := store.addTestHost(b)
 	store.addTestContract(b, hk)
 
 	// prepare base db
@@ -1873,13 +1749,7 @@ func BenchmarkMigrateSector(b *testing.B) {
 	// add 100 hosts and contracts
 	var hks []types.PublicKey
 	for range 100 {
-		hk := types.PublicKey(frand.Entropy256())
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			b.Fatal(err)
-		}
+		hk := store.addTestHost(b)
 		store.addTestContract(b, hk)
 		hks = append(hks, hk)
 	}

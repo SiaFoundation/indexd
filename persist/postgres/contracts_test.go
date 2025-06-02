@@ -11,8 +11,6 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
@@ -24,15 +22,8 @@ import (
 func TestContracts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	// add a host
-	hk := types.PublicKey{1}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// add three contracts
+	// add a host with three contracts
+	hk := store.addTestHost(t)
 	fcid1 := store.addTestContract(t, hk, types.FileContractID{1})
 	fcid2 := store.addTestContract(t, hk, types.FileContractID{2})
 	fcid3 := store.addTestContract(t, hk, types.FileContractID{3})
@@ -100,16 +91,10 @@ func TestContractElement(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// assert contract element is not found
-	_, err = store.ContractElement(context.Background(), types.FileContractID(hk))
+	_, err := store.ContractElement(context.Background(), types.FileContractID(hk))
 	if !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatal(err)
 	}
@@ -143,13 +128,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// add a contract
 	fcid := types.FileContractID{1}
@@ -170,7 +149,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	}
 
 	// set height to 10 blocks after expiration
-	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: revision.ExpirationHeight + 10})
 	})
 	if err != nil {
@@ -211,15 +190,8 @@ func TestContractElementsForBroadcast(t *testing.T) {
 func TestContractsForBroadcasting(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	// add a host
-	hk := types.PublicKey{1}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// add two contracts
+	// add a host with two contracts
+	hk := store.addTestHost(t)
 	fcid1 := store.addTestContract(t, hk, types.FileContractID{1})
 	fcid2 := store.addTestContract(t, hk, types.FileContractID{2})
 
@@ -280,34 +252,29 @@ func TestContractsForBroadcasting(t *testing.T) {
 func TestContractsForFunding(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	var fcidCnt uint8
-	addContract := func(hk types.PublicKey, remaininAllowance types.Currency) types.FileContractID {
+	updateAllowance := func(contractID types.FileContractID, allowance types.Currency) {
 		t.Helper()
-		fcidCnt++
-		fcid := types.FileContractID{byte(fcidCnt)}
-		if err := store.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, remaininAllowance, types.ZeroCurrency); err != nil {
+		_, err := store.pool.Exec(context.Background(), `UPDATE contracts SET initial_allowance = $1, remaining_allowance = $1 WHERE contract_id = $2`, sqlCurrency(allowance), sqlHash256(contractID))
+		if err != nil {
 			t.Fatal(err)
 		}
-		return fcid
 	}
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	// add four contracts for h1
-	fcid1 := addContract(hk1, types.Siacoins(1))
-	fcid2 := addContract(hk1, types.Siacoins(3))
-	fcid3 := addContract(hk1, types.Siacoins(2))
-	_ = addContract(hk1, types.ZeroCurrency)
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk1, types.FileContractID{2})
+	fcid3 := store.addTestContract(t, hk1, types.FileContractID{3})
+	fcid4 := store.addTestContract(t, hk1, types.FileContractID{4})
+
+	// update their allowance
+	updateAllowance(fcid1, types.Siacoins(1))
+	updateAllowance(fcid2, types.Siacoins(3))
+	updateAllowance(fcid3, types.Siacoins(2))
+	updateAllowance(fcid4, types.ZeroCurrency)
 
 	// assert only 3 contracts are returned for h1, in order, the fourth has no
 	// remaining allowance and h2 doesn't have contracts yet
@@ -346,8 +313,9 @@ func TestContractsForFunding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add a contract for h2
-	fcid5 := addContract(hk2, types.Siacoins(1))
+	// add a contract for h2 with allowance
+	fcid5 := store.addTestContract(t, hk2, types.FileContractID{5})
+	updateAllowance(fcid5, types.Siacoins(1))
 
 	// assert we have only one contract for h1 now, and one on h2
 	if fcids, err := store.ContractsForFunding(context.Background(), hk1, 10); err != nil {
@@ -379,16 +347,8 @@ func TestContractsForPinning(t *testing.T) {
 	}
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	// add contracts for h1
 	const maxContractSize = 499
@@ -442,16 +402,8 @@ func TestContractsForPruning(t *testing.T) {
 	}
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	now := time.Now()
 	oneDayAgo := now.Add(-24 * time.Hour)
@@ -501,16 +453,8 @@ func TestPrunableContractRoots(t *testing.T) {
 	}
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	// add a contract for each host
 	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
@@ -593,13 +537,7 @@ func TestPruneExpiredContractElements(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	addContract := func(expirationHeight uint64) types.FileContractID {
 		t.Helper()
@@ -611,12 +549,11 @@ func TestPruneExpiredContractElements(t *testing.T) {
 		if err := store.AddFormedContract(context.Background(), hk, contractID, revision, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 			t.Fatal(err)
 		}
-		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 			return tx.UpdateContractElements(types.V2FileContractElement{
 				ID: contractID,
 			})
-		})
-		if err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 		return contractID
@@ -646,10 +583,9 @@ func TestPruneExpiredContractElements(t *testing.T) {
 
 	// set height to block 12
 	bh := uint64(12)
-	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: bh})
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -677,7 +613,7 @@ func TestPruneExpiredContractElements(t *testing.T) {
 	assertContracts([]types.FileContractID{})
 
 	// assert only the elements got pruned but the contracts remain
-	err = store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		var count int
 		err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM contracts").Scan(&count)
 		if err != nil {
@@ -686,8 +622,7 @@ func TestPruneExpiredContractElements(t *testing.T) {
 			t.Fatalf("expected 3 contracts, got %d", count)
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -697,12 +632,7 @@ func TestFormRenewContract(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// define helper to assert contract in db
 	assertContract := func(id types.FileContractID, expected contracts.Contract) {
@@ -889,13 +819,7 @@ func TestRejectContracts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// helper to assert contract state
 	assertContractState := func(id types.FileContractID, state contracts.ContractState) {
@@ -949,8 +873,7 @@ func TestRejectContracts(t *testing.T) {
 	assertContractState(activeID, contracts.ContractStateActive)
 
 	// reject pending contracts older than 30 minutes
-	err = store.RejectPendingContracts(context.Background(), now.Add(-30*time.Minute))
-	if err != nil {
+	if err := store.RejectPendingContracts(context.Background(), now.Add(-30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -964,13 +887,7 @@ func TestUpdateContractElement(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	fce := types.V2FileContractElement{
 		ID: types.FileContractID{1, 2, 3},
@@ -1009,11 +926,10 @@ func TestUpdateContractElement(t *testing.T) {
 	assertKnownContract := func(known bool) {
 		t.Helper()
 		var storedKnown bool
-		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
 			storedKnown, err = tx.IsKnownContract(fce.ID)
 			return err
-		})
-		if err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		} else if storedKnown != known {
 			t.Fatalf("expected known=%v, got %v", known, storedKnown)
@@ -1064,13 +980,7 @@ func TestUpdateContractState(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// create a contract
 	contractID := types.FileContractID{1, 2, 3}
@@ -1105,15 +1015,8 @@ func TestUpdateContractState(t *testing.T) {
 func TestMarkPruned(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	// add a host
-	hk := types.PublicKey{1}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// add a contract
+	// add a host with one contract
+	hk := store.addTestHost(t)
 	fcid := store.addTestContract(t, hk)
 
 	// assert contract is not marked as pruned
@@ -1147,9 +1050,11 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 
 	const proofHeight = 100
 
+	// add a hosts
+	hk := store.addTestHost(t)
+
 	// prepare 2 contracts, one for testing and another one that remains good
 	// for the duration of the test to serve as a canary
-	hk := types.PublicKey{1, 1, 1}
 	fcid := types.FileContractID{1}
 	goodFCID := types.FileContractID{2}
 
@@ -1172,14 +1077,6 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 		} else if !contract.Good {
 			t.Fatal("canary should be good")
 		}
-	}
-
-	// add a host and the contracts
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	revision1 := newTestRevision(hk)
@@ -1210,12 +1107,7 @@ func TestMarkBroadcastAttempt(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// assert broadcast attempt is defaulted
 	fcid := store.addTestContract(t, hk)
@@ -1245,13 +1137,7 @@ func TestSyncContract(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// helper to sync and assert contract
 	contractID := store.addTestContract(t, hk, types.FileContractID{1})
@@ -1454,13 +1340,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	// add hosts and contracts
 	var hks []types.PublicKey
 	for range nHosts {
-		hk := types.PublicKey(frand.Entropy256())
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			b.Fatal(err)
-		}
+		hk := store.addTestHost(b)
 		store.addTestContract(b, hk)
 		hks = append(hks, hk)
 	}
