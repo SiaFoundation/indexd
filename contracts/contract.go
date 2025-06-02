@@ -86,11 +86,11 @@ type (
 		Formation   time.Time            `json:"formation"`
 		RenewedFrom types.FileContractID `json:"renewedFrom"`
 
-		// state fields
+		// event tracking fields
 		LastPrune            time.Time `json:"lastPrune"`
 		LastBroadcastAttempt time.Time `json:"lastBroadcastAttempt"`
 
-		// revision fields
+		// revision fields, updated on refresh/renewal
 		RevisionNumber     uint64         `json:"revisionNumber"`     // current revision number
 		ProofHeight        uint64         `json:"proofHeight"`        // start of the contract's proof window
 		ExpirationHeight   uint64         `json:"expirationHeight"`   // end of the contract's proof window
@@ -106,6 +106,8 @@ type (
 		ContractPrice  types.Currency       `json:"contractPrice"` // price of the contract creation as charged by the host
 		MinerFee       types.Currency       `json:"minerFee"`      // miner fee spent on formation txn
 
+		// state fields, reset on refresh/renewal
+		//
 		// Good determines whether a contract is good or bad. A contract that
 		// is not good, will have its data migrated to a new contract.
 		//

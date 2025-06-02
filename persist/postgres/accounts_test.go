@@ -317,7 +317,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accounts) != 1 {
-		t.Fatal("expected one accounts", len(accounts))
+		t.Fatal("expected one accounts")
 	}
 
 	// assert the updates inserted all accounts
