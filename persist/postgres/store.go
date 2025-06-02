@@ -28,6 +28,11 @@ type (
 		pool *pgxpool.Pool
 		log  *zap.Logger
 	}
+
+	testingCommon interface {
+		Helper()
+		Fatal(args ...any)
+	}
 )
 
 // String returns a connection string for the given ConnectionInfo.

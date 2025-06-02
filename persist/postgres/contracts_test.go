@@ -1529,7 +1529,9 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	}
 }
 
-func (s *Store) addTestContract(t interface{ Fatal(args ...any) }, hk types.PublicKey, fcids ...types.FileContractID) types.FileContractID {
+func (s *Store) addTestContract(t testingCommon, hk types.PublicKey, fcids ...types.FileContractID) types.FileContractID {
+	t.Helper()
+
 	var fcid types.FileContractID
 	switch len(fcids) {
 	case 0:
