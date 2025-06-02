@@ -1139,7 +1139,7 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 	}
 }
 
-func (s *Store) addTestHost(t testingCommon, hks ...types.PublicKey) types.PublicKey {
+func (s *Store) addTestHost(t testing.TB, hks ...types.PublicKey) types.PublicKey {
 	t.Helper()
 
 	var hk types.PublicKey
