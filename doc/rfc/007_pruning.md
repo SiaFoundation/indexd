@@ -26,7 +26,7 @@ that upload, both the `Size` and `Capacity` fields are set to 100 sectors again.
 ### Pruning Process
 
 Similar to pinning, the pruning process is part of the contract maintenance (see
-[Contract Maintenance](004_contract_maintenance.md)). That's because we require
+[Contract Maintenance](003_contract_maintenance.md)). That's because we require
 exclusive control over a contract to do so.
 
 To avoid overwhelming the host, pruning sectors is limited to 1TiB worth of data

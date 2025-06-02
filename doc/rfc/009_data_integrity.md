@@ -1,4 +1,4 @@
-# Price Pinning
+# Data Integrity
 
 ## Abstract
 
@@ -47,7 +47,7 @@ again.
 lost, set `host_id` and `contract_id` on the `sectors` table to `NULL` and
 increment the `lost_sectors` count on the `hosts` table. This will lead to the
 sector being picked up by the data migration code (see [Data
-Migration](007_data_migration.md)).
+Migration](006_data_migration.md)).
 
 ### Host penalty
 

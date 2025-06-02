@@ -12,14 +12,14 @@ serves the following purposes:
 
 ### Authentication
 
-See [API Authentication](011_api_authentication.md)
+See [API Authentication](010_api_authentication.md)
 
 ### Account Funding
 
 Unlike `renterd`, the `indexer` doesn't locally track the expected balance of
 accounts to know when to fund them. Instead, it uses a ratelimit-based approach.
 Accounts are funded with at most 1SC per hour by the contract maintenance (see
-[contract maintenance](004_contract_maintenance.md). To do so, the following
+[Contract Maintenance](003_contract_maintenance.md)). To do so, the following
 state will be stored for every account and host:
 
 | **Field** | **Description** |

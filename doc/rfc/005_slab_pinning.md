@@ -75,8 +75,8 @@ another account's slabs or even fetch that slab's metadata.
 ## Sector Pinning
 
 Pinning sectors happens as part of periodic maintenance that the indexer
-performs on contracts (see [### Funding, Pinning and
-Pruning](003_contract_maintenance.md). The process looks like this:
+performs on contracts (see [Contract Maintenance](003_contract_maintenance.md)).
+The process looks like this:
 
 For each host we have a contract with we do the following:
 1. Fetch a batch of unpinned sectors (at most 1<<40) sorted by expiration time
