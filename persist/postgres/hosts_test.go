@@ -396,10 +396,7 @@ func TestHosts(t *testing.T) {
 
 		// form contract
 		if contract {
-			err := db.AddFormedContract(context.Background(), hk, types.FileContractID{i}, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
-			if err != nil {
-				t.Fatal(err)
-			}
+			db.addTestContract(t, hk)
 		}
 		return hk
 	}
@@ -750,10 +747,7 @@ func TestPruneHosts(t *testing.T) {
 	}
 
 	// add contract to h2
-	err = db.AddFormedContract(context.Background(), h2, types.FileContractID{1}, newTestRevision(h2), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db.addTestContract(t, h2)
 
 	// assert only h1 got pruned if we set the cutoff in the future
 	n, err = db.PruneHosts(context.Background(), time.Now().Add(time.Second), 1)

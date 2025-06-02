@@ -45,10 +45,7 @@ func TestMigrateSector(t *testing.T) {
 	}
 
 	// add contract for first host
-	fcid1 := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk1, fcid1, newTestRevision(hk1), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	fcid := store.addTestContract(t, hk1)
 
 	// pin a slab to add 2 sectors which are both stored on the first host
 	pinTime := time.Now().Round(time.Microsecond)
@@ -73,7 +70,7 @@ func TestMigrateSector(t *testing.T) {
 	}
 
 	// pin sectors to contract
-	if err := store.PinSectors(context.Background(), fcid1, []types.Hash256{root1, root2}); err != nil {
+	if err := store.PinSectors(context.Background(), fcid, []types.Hash256{root1, root2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -109,18 +106,18 @@ func TestMigrateSector(t *testing.T) {
 	}
 
 	// assert initial state
-	assertSector(root1, hk1, fcid1)
-	assertSector(root2, hk1, fcid1)
+	assertSector(root1, hk1, fcid)
+	assertSector(root2, hk1, fcid)
 
 	// migrate sector 1 to host 2
 	migrate(root1, hk2, true)
 	assertSector(root1, hk2, types.FileContractID{})
-	assertSector(root2, hk1, fcid1)
+	assertSector(root2, hk1, fcid)
 
 	// migrate sector 2 to unknown host, this should be a no-op
 	migrate(root2, types.PublicKey{10}, false)
 	assertSector(root1, hk2, types.FileContractID{})
-	assertSector(root2, hk1, fcid1)
+	assertSector(root2, hk1, fcid)
 
 	// migrate sector 2 to host 2
 	migrate(root2, hk2, true)
@@ -641,12 +638,8 @@ func TestPinSectors(t *testing.T) {
 	}
 
 	// create 2 contracts
-	contractID1, contractID2 := types.FileContractID{1}, types.FileContractID{2}
-	if err := store.AddFormedContract(context.Background(), hk, contractID1, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	} else if err := store.AddFormedContract(context.Background(), hk, contractID2, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	contractID1 := store.addTestContract(t, hk, types.FileContractID{1})
+	contractID2 := store.addTestContract(t, hk, types.FileContractID{2})
 
 	// create 4 sectors
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
@@ -757,10 +750,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// add contract
-	err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
-	if err != nil {
-		t.Fatal(err)
-	}
+	store.addTestContract(t, hk)
 
 	// pin a slab to add a few sectors to the database
 	root1 := frand.Entropy256()
@@ -874,9 +864,7 @@ func TestUnpinnedSectors(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	store.addTestContract(t, hk)
 
 	// create 4 sectors
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
@@ -1063,9 +1051,7 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	}); err != nil {
 		b.Fatal(err)
 	}
-	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		b.Fatal(err)
-	}
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -1225,9 +1211,7 @@ func BenchmarkPinSectors(b *testing.B) {
 	}); err != nil {
 		b.Fatal(err)
 	}
-	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		b.Fatal(err)
-	}
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -1329,15 +1313,11 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 		hks = append(hks, hk)
 	}
 
-	// add 1 good and 1 bad contract
-	err := store.AddFormedContract(context.Background(), hks[0], types.FileContractID(hks[0]), newTestRevision(hks[0]), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
-	if err != nil {
-		b.Fatal(err)
-	}
-	err = store.AddFormedContract(context.Background(), hks[1], types.FileContractID(hks[1]), newTestRevision(hks[1]), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
-	if err != nil {
-		b.Fatal(err)
-	}
+	// add 2 contracts
+	store.addTestContract(b, hks[0])
+	store.addTestContract(b, hks[1])
+
+	// mark the second contract as bad
 	res, err := store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE id = 2") // id 2 is bad
 	if err != nil {
 		b.Fatal(err)
@@ -1436,9 +1416,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 	}
 
 	// add contract
-	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		b.Fatal(err)
-	}
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -1669,10 +1647,7 @@ func TestMarkSectorsLost(t *testing.T) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
-		if err != nil {
-			t.Fatal(err)
-		}
+		store.addTestContract(t, hk)
 	}
 
 	// pin a slab that adds 2 sectors to each host
@@ -1781,9 +1756,7 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 	}); err != nil {
 		b.Fatal(err)
 	}
-	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		b.Fatal(err)
-	}
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -1907,9 +1880,7 @@ func BenchmarkMigrateSector(b *testing.B) {
 		}); err != nil {
 			b.Fatal(err)
 		}
-		if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-			b.Fatal(err)
-		}
+		store.addTestContract(b, hk)
 		hks = append(hks, hk)
 	}
 

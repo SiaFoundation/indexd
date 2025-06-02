@@ -370,11 +370,9 @@ func TestContractsForPinning(t *testing.T) {
 
 	addContract := func(hk types.PublicKey, fcid types.FileContractID, allowance types.Currency, size, capacity uint64, state contracts.ContractState, good bool) {
 		t.Helper()
-		if err := store.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, allowance, types.ZeroCurrency); err != nil {
-			t.Fatal(err)
-		}
-		query := `UPDATE contracts SET size = $1, capacity = $2, state = $3, good = $4 WHERE contract_id = $5`
-		_, err := store.pool.Exec(context.Background(), query, size, capacity, sqlContractState(state), good, sqlHash256(fcid))
+		store.addTestContract(t, hk, fcid)
+		query := `UPDATE contracts SET size = $1, capacity = $2, state = $3, good = $4, initial_allowance = $5, remaining_allowance = $5 WHERE contract_id = $6`
+		_, err := store.pool.Exec(context.Background(), query, size, capacity, sqlContractState(state), good, sqlCurrency(allowance), sqlHash256(fcid))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -435,11 +433,9 @@ func TestContractsForPruning(t *testing.T) {
 
 	addContract := func(hk types.PublicKey, fcid types.FileContractID, allowance types.Currency, size uint64, state contracts.ContractState, good bool, lastPrune time.Time) {
 		t.Helper()
-		if err := store.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, allowance, types.ZeroCurrency); err != nil {
-			t.Fatal(err)
-		}
-		query := `UPDATE contracts SET state = $1, good = $2, size = $3, capacity = $4, last_prune = $5 WHERE contract_id = $6`
-		_, err := store.pool.Exec(context.Background(), query, sqlContractState(state), good, size, size, lastPrune, sqlHash256(fcid))
+		store.addTestContract(t, hk, fcid)
+		query := `UPDATE contracts SET state = $1, good = $2, size = $3, capacity = $4, last_prune = $5, initial_allowance = $6, remaining_allowance = $6 WHERE contract_id = $7`
+		_, err := store.pool.Exec(context.Background(), query, sqlContractState(state), good, size, size, lastPrune, sqlCurrency(allowance), sqlHash256(fcid))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1118,10 +1114,7 @@ func TestMarkPruned(t *testing.T) {
 	}
 
 	// add a contract
-	fcid := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	fcid := store.addTestContract(t, hk)
 
 	// assert contract is not marked as pruned
 	if contract, err := store.Contract(context.Background(), fcid); err != nil {
@@ -1468,9 +1461,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 		}); err != nil {
 			b.Fatal(err)
 		}
-		if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-			b.Fatal(err)
-		}
+		store.addTestContract(b, hk)
 		hks = append(hks, hk)
 	}
 
@@ -1538,7 +1529,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	}
 }
 
-func (s *Store) addTestContract(t *testing.T, hk types.PublicKey, fcids ...types.FileContractID) types.FileContractID {
+func (s *Store) addTestContract(t interface{ Fatal(args ...any) }, hk types.PublicKey, fcids ...types.FileContractID) types.FileContractID {
 	var fcid types.FileContractID
 	switch len(fcids) {
 	case 0:
