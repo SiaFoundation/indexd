@@ -704,7 +704,7 @@ func (s *Store) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) 
 					WHERE hb.public_key = h.public_key
 				)`, contracts.ContractStateActive)
 		if err != nil {
-			return fmt.Errorf("failed to query hosts for pinning: %w", err)
+			return fmt.Errorf("failed to query hosts for pruning: %w", err)
 		}
 		defer rows.Close()
 
