@@ -5,9 +5,15 @@ import (
 	"fmt"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.uber.org/zap"
 )
+
+func (c *hostClient) LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+	return rhp.RPCLatestRevision(ctx, c.client, contractID)
+}
 
 func (cm *ContractManager) performBroadcastContractRevisions(ctx context.Context, log *zap.Logger) error {
 	broadcastLog := log.Named("broadcast")
@@ -49,6 +55,12 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 		return fmt.Errorf("failed to fetch contract element: %w", err)
 	}
 
+	// fetch latest revision
+	rev, _, err := cm.store.ContractRevision(ctx, contractID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch contract revision: %w", err)
+	}
+
 	// create the transaction
 	const stdTxnSize = 1000
 	fee := cm.cm.RecommendedFee().Mul64(stdTxnSize)
@@ -57,7 +69,7 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 		FileContractRevisions: []types.V2FileContractRevision{
 			{
 				Parent:   fce,
-				Revision: fce.V2FileContract,
+				Revision: rev,
 			},
 		},
 	}

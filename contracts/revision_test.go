@@ -7,6 +7,13 @@ import (
 )
 
 func (s *storeMock) ContractRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, bool, error) {
+	var renewed bool
+	for i, c := range s.contracts {
+		if c.ID == contractID {
+			renewed = c.RenewedTo != (types.FileContractID{})
+			return s.revisions[i], renewed, nil
+		}
+	}
 	return types.V2FileContract{}, false, nil
 }
 

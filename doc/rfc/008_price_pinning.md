@@ -2,8 +2,8 @@
 
 ## Abstract
 
-Price pinning allows the indexer to pin their price limits (see [gouging
-checks](003_gouging_checks.md)) to values in fiat currency. Sia's token,
+Price pinning allows the indexer to pin their price limits (see [Gouging
+Checks](002_gouging_checks.md)) to values in fiat currency. Sia's token,
 Siacoin, is volatile and for most people it is more convenient to deal with
 currencies such as USD or EUR which are a lot more stable.
 

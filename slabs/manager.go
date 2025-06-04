@@ -57,7 +57,6 @@ type (
 	// in the database.
 	Store interface {
 		AddAccount(ctx context.Context, ak types.PublicKey) error
-		FailingSectors(ctx context.Context, hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		HostsForIntegrityChecks(ctx context.Context, limit int) ([]types.PublicKey, error)
 		MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxFailedIntegrityChecks uint) error

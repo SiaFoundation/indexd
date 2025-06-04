@@ -71,7 +71,7 @@ WITH globals AS (
 	FROM global_settings
 ), hosts AS (
 	SELECT
-		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, COALESCE(hb.reason, ''),
+		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, COALESCE(hb.reason, ''), lost_sectors,
 		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime,
 		settings_protocol_version, settings_release, settings_wallet_address,
 		settings_accepting_contracts, settings_max_collateral, settings_max_contract_duration,
@@ -146,7 +146,7 @@ WITH globals AS (
     FROM global_settings
 ), hosts AS (
 	SELECT
-		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, COALESCE(hb.reason, ''),
+		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, COALESCE(hb.reason, ''), lost_sectors,
 		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime,
 		settings_protocol_version, settings_release, settings_wallet_address,
 		settings_accepting_contracts, settings_max_collateral, settings_max_contract_duration,
@@ -545,6 +545,7 @@ func scanHost(s scanner) (dbHost, error) {
 		&host.LastAnnouncement,
 		&host.Blocked,
 		&host.BlockedReason,
+		&host.LostSectors,
 		&lastFailedScan,
 		&lastSuccessfulScan,
 		&host.NextScan,
@@ -625,6 +626,47 @@ func (s *Store) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.T
 		`, maxLastCheck, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts for integrity checks: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var hk sqlPublicKey
+			if err := rows.Scan(&hk); err != nil {
+				return err
+			}
+			hosts = append(hosts, types.PublicKey(hk))
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
+	}
+	return hosts, nil
+}
+
+// HostsForPinning returns a list of host keys that can be used for sector
+// pinning. A host is eligble for pinning if it is not blocked, has unpinned
+// sectors and has an active contract.
+func (s *Store) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
+	var hosts []types.PublicKey
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+			SELECT h.public_key
+			FROM hosts h
+			WHERE
+				EXISTS (
+					SELECT 1
+					FROM sectors
+					WHERE sectors.host_id = h.id AND contract_sectors_map_id IS NULL
+				) AND
+				EXISTS (
+					SELECT 1
+					FROM contracts
+					WHERE contracts.host_id = h.id AND contracts.state <= $1 AND contracts.good = TRUE
+				) AND
+				NOT EXISTS (SELECT 1 FROM hosts_blocklist hb WHERE hb.public_key = h.public_key)
+				 `, contracts.ContractStateActive)
+		if err != nil {
+			return fmt.Errorf("failed to query hosts for pinning: %w", err)
 		}
 		defer rows.Close()
 

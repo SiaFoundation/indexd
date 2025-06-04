@@ -30,11 +30,25 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 
 type storeMock struct {
 	contracts   []Contract
+	revisions   []types.V2FileContract
 	toBroadcast []types.V2FileContractElement
 	pruneCalls  int
 	rejectCalls int
 	settings    MaintenanceSettings
 	hosts       map[types.PublicKey]hosts.Host
+	sectors     map[types.PublicKey][]sector
+}
+
+type sector struct {
+	root       types.Hash256
+	contractID *types.FileContractID
+}
+
+func newStoreMock() *storeMock {
+	return &storeMock{
+		hosts:   make(map[types.PublicKey]hosts.Host),
+		sectors: make(map[types.PublicKey][]sector),
+	}
 }
 
 func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, contract types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error {
@@ -56,6 +70,7 @@ func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicK
 
 		Good: true,
 	})
+	s.revisions = append(s.revisions, contract)
 	return nil
 }
 
@@ -94,6 +109,7 @@ func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewed
 
 		Good: true,
 	})
+	s.revisions = append(s.revisions, contract)
 	return nil
 }
 

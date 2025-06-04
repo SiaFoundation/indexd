@@ -36,7 +36,7 @@ func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, ro
 		} else if resp.RowsAffected() == 0 {
 			return nil
 		}
-		resp, err = tx.Exec(ctx, `
+		_, err = tx.Exec(ctx, `
 			UPDATE hosts
 			SET lost_sectors = lost_sectors + $1
 			WHERE public_key = $2
@@ -110,33 +110,30 @@ func (s *Store) SectorsForIntegrityCheck(ctx context.Context, hostKey types.Publ
 	return sectors, err
 }
 
-// FailingSectors returns up to `limit` sectors that have failed integrity
-// checks at least 'minChecks' times.
-func (s *Store) FailingSectors(ctx context.Context, hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error) {
-	var sectors []types.Hash256
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		rows, err := tx.Query(ctx, `
-			SELECT sector_root
-			FROM sectors
+// MarkFailingSectorsLost marks sectors as lost if they have failed the
+// integrity checks >= maxChecks times.
+func (s *Store) MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxChecks int) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		resp, err := tx.Exec(ctx, `
+			UPDATE sectors
+			SET contract_sectors_map_id = NULL, host_id = NULL
 			WHERE
 				host_id = (SELECT id FROM hosts WHERE public_key = $1)
 				AND consecutive_failed_checks >= $2
-			LIMIT $3
-		`, sqlPublicKey(hostKey), minChecks, limit)
+		`, sqlPublicKey(hostKey), maxChecks)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		}
-		defer rows.Close()
-		for rows.Next() {
-			var root types.Hash256
-			if err := rows.Scan((*sqlHash256)(&root)); err != nil {
-				return err
-			}
-			sectors = append(sectors, root)
+		_, err = tx.Exec(ctx, `
+			UPDATE hosts
+			SET lost_sectors = lost_sectors + $1
+			WHERE public_key = $2
+		`, resp.RowsAffected(), sqlPublicKey(hostKey))
+		if err != nil {
+			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		}
-		return rows.Err()
+		return nil
 	})
-	return sectors, err
 }
 
 // PinSlab adds a slab to the database for pinning. The slab is associated with
@@ -192,9 +189,9 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 		sectorIDs := make([]int64, len(slab.Sectors))
 		for i, sector := range slab.Sectors {
 			batch.Queue(`
-				INSERT INTO sectors (sector_root, host_id, next_integrity_check) 
-				VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3) 
-				ON CONFLICT (sector_root) DO UPDATE SET sector_root=EXCLUDED.sector_root 
+				INSERT INTO sectors (sector_root, host_id, next_integrity_check)
+				VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3)
+				ON CONFLICT (sector_root) DO UPDATE SET sector_root=EXCLUDED.sector_root
 				RETURNING id
 			`, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), nextIntegrityCheck).QueryRow(func(row pgx.Row) error {
 				return row.Scan(&sectorIDs[i])
@@ -258,8 +255,8 @@ func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID s
 				SELECT ss.sector_id
 				FROM slab_sectors ss
 				WHERE ss.slab_id = $1 AND NOT EXISTS (
-					SELECT 1 
-					FROM slab_sectors ss2 
+					SELECT 1
+					FROM slab_sectors ss2
 					WHERE ss2.sector_id = ss.sector_id AND ss2.slab_id <> $1
 				)
 			)
@@ -351,6 +348,10 @@ ORDER BY ss.slab_index ASC`, slabID).Query(func(rows pgx.Rows) error {
 // contract with. That way, we can avoid a race where the host changes in the
 // meantime and the contract then no longer matches the host.
 func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error {
+	if len(roots) == 0 {
+		return nil
+	}
+
 	sqlRoots := make([]sqlHash256, len(roots))
 	for i, root := range roots {
 		sqlRoots[i] = sqlHash256(root)
@@ -472,7 +473,7 @@ func (s *Store) MigrateSector(ctx context.Context, root types.Hash256, hostKey t
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		resp, err := tx.Exec(ctx, `
 			UPDATE sectors
-			SET host_id = hosts.id, contract_sectors_map_id = NULL
+			SET host_id = hosts.id, contract_sectors_map_id = NULL, consecutive_failed_checks = 0
 			FROM hosts
 			WHERE sector_root = $1 AND hosts.public_key = $2
 		`, sqlHash256(root), sqlPublicKey(hostKey))

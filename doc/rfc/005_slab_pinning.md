@@ -72,11 +72,11 @@ However, the slabs are not yet pinned to contracts. That happens asynchronously.
 Slabs are scoped to the account key that pinned them. So one account can't unpin
 another account's slabs or even fetch that slab's metadata.
 
-## Pinning
+## Sector Pinning
 
-Pinning slabs happens as part of periodic maintenance that the indexer performs
-on contracts (see [Pinning and Pruning](006_slab_pinning.md). The process looks
-like this:
+Pinning sectors happens as part of periodic maintenance that the indexer
+performs on contracts (see [Contract Maintenance](003_contract_maintenance.md)).
+The process looks like this:
 
 For each host we have a contract with we do the following:
 1. Fetch a batch of unpinned sectors (at most 1<<40) sorted by expiration time

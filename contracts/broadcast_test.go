@@ -43,6 +43,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		State:     ContractStateExpired,
 		Good:      true,
 	})
+	store.revisions = append(store.revisions, newTestContract(hk))
 
 	// c2 is not broadcasted because it's renewed
 	store.contracts = append(store.contracts, Contract{
@@ -53,6 +54,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		Good:      true,
 		RenewedTo: types.FileContractID{3},
 	})
+	store.revisions = append(store.revisions, newTestContract(hk))
 
 	// c3 is not broadcasted because it was broadcasted recently
 	store.contracts = append(store.contracts, Contract{
@@ -63,6 +65,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		Good:                 true,
 		LastBroadcastAttempt: time.Now(),
 	})
+	store.revisions = append(store.revisions, newTestContract(hk))
 
 	// c4 is broadcasted
 	store.contracts = append(store.contracts, Contract{
@@ -72,12 +75,8 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		State:     ContractStateActive,
 		Good:      true,
 	})
-
-	// mock a latest revision
-	rev := types.V2FileContract{RevisionNumber: 1}
-	hc := newHostClientMock()
-	dialer.clients[hk] = hc
-	hc.latestRevisions[types.FileContractID{4}] = rev
+	rev := newTestContract(hk)
+	store.revisions = append(store.revisions, rev)
 
 	// assert revision was broadcasted and contract was marked as such
 	if err := contracts.performBroadcastContractRevisions(context.Background(), zap.NewNop()); err != nil {
@@ -85,7 +84,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 	} else if len(syncerMock.broadcasted) != 1 {
 		t.Fatal("expected 1 broadcasted contract, got", len(syncerMock.broadcasted))
 	} else if syncerMock.broadcasted[0].FileContractRevisions[0].Revision != rev {
-		t.Fatal("unexpected revision", syncerMock.broadcasted[0].FileContractRevisions[0].Revision)
+		t.Fatal("unexpected revision", syncerMock.broadcasted[0].FileContractRevisions[0].Revision, rev)
 	} else if contract, err := store.Contract(context.Background(), types.FileContractID{4}); err != nil {
 		t.Fatal(err)
 	} else if contract.LastBroadcastAttempt.IsZero() {

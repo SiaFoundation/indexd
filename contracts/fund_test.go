@@ -78,7 +78,7 @@ func (s *storeMock) ContractsForFunding(_ context.Context, hk types.PublicKey, l
 
 func TestPerformAccountFunding(t *testing.T) {
 	amMock := &accountsManagerMock{}
-	store := &storeMock{hosts: make(map[types.PublicKey]hosts.Host)}
+	store := newStoreMock()
 	cm := newContractManager(types.PublicKey{}, amMock, nil, nil, nil, store, nil, nil)
 
 	// fund accounts

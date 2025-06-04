@@ -64,15 +64,19 @@ func (d *dialerMock) Dial(ctx context.Context, hostKey types.PublicKey, addr str
 }
 
 type hostClientMock struct {
-	formCalls       []formContractCall
-	refreshCalls    []refreshContractCall
-	renewCalls      []renewContractCall
+	appendSectorCalls []appendSectorCall
+	formCalls         []formContractCall
+	refreshCalls      []refreshContractCall
+	renewCalls        []renewContractCall
+
 	latestRevisions map[types.FileContractID]types.V2FileContract
+	missingSectors  map[types.Hash256]struct{}
 }
 
 func newHostClientMock() *hostClientMock {
 	return &hostClientMock{
 		latestRevisions: make(map[types.FileContractID]types.V2FileContract),
+		missingSectors:  map[types.Hash256]struct{}{},
 	}
 }
 

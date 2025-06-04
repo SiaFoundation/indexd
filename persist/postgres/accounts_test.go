@@ -4,12 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
@@ -536,4 +539,142 @@ func BenchmarkUpdateHostAccounts(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func TestServiceAccounts(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// setup
+	account := types.GeneratePrivateKey().PublicKey()
+	err := store.AddAccount(context.Background(), account)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hk := types.GeneratePrivateKey().PublicKey()
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add account
+	err = store.AddAccount(context.Background(), hk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// account not found
+	_, err = store.ServiceAccountBalance(context.Background(), hk, proto.Account(account))
+	if !errors.Is(err, accounts.ErrNotFound) {
+		t.Fatal(err)
+	}
+	err = store.DebitServiceAccount(context.Background(), hk, proto.Account(account), types.Siacoins(1))
+	if !errors.Is(err, accounts.ErrNotFound) {
+		t.Fatal(err)
+	}
+
+	// helper to assert balance
+	assertBalance := func(expected types.Currency) {
+		t.Helper()
+		balance, err := store.ServiceAccountBalance(context.Background(), hk, proto.Account(account))
+		if err != nil {
+			t.Fatal(err)
+		} else if !balance.Equals(expected) {
+			t.Fatal("unexpected balance", balance)
+		}
+	}
+
+	// set account balance
+	expectedBalance := types.Siacoins(1)
+	err = store.UpdateServiceAccountBalance(context.Background(), hk, proto.Account(account), expectedBalance)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch balance
+	assertBalance(expectedBalance)
+
+	// withdraw from it
+	withdrawal := types.Siacoins(1).Div64(10)         // 0.1SC
+	expectedBalance = expectedBalance.Sub(withdrawal) // 0.9SC
+	if err := store.DebitServiceAccount(context.Background(), hk, proto.Account(account), withdrawal); err != nil {
+		t.Fatal(err)
+	}
+	assertBalance(expectedBalance)
+
+	// withdraw more than the balance
+	if err := store.DebitServiceAccount(context.Background(), hk, proto.Account(account), types.Siacoins(100)); err != nil {
+		t.Fatal(err)
+	}
+	assertBalance(types.ZeroCurrency)
+}
+
+// BenchmarkServiceAccounts benchmarks the service account related methods
+func BenchmarkServiceAccounts(b *testing.B) {
+	// define parameters
+	const (
+		numAccounts = 10000
+		numHosts    = 1000
+	)
+
+	// prepare database
+	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
+	for range numAccounts {
+		_, err := store.pool.Exec(context.Background(), `INSERT INTO accounts (public_key) VALUES ($1);`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	account := proto.Account(types.GeneratePrivateKey().PublicKey())
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal(err)
+	}
+
+	var hosts []types.PublicKey
+	for range numHosts {
+		hk := types.GeneratePrivateKey().PublicKey()
+		hosts = append(hosts, hk)
+		_, err := store.pool.Exec(context.Background(), `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW());`, sqlPublicKey(hk))
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		// assume that the account is funded with every host
+		err = store.UpdateServiceAccountBalance(context.Background(), hk, account, types.Siacoins(1))
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.Run("UpdateServiceAccountBalance", func(b *testing.B) {
+		for b.Loop() {
+			hk := hosts[frand.Intn(numHosts)]
+			err := store.UpdateServiceAccountBalance(context.Background(), hk, account, types.NewCurrency64(frand.Uint64n(math.MaxUint64)))
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("DebitServiceAccount", func(b *testing.B) {
+		for b.Loop() {
+			hk := hosts[frand.Intn(numHosts)]
+			err := store.DebitServiceAccount(context.Background(), hk, account, types.NewCurrency64(1))
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("ServiceAccountBalance", func(b *testing.B) {
+		for b.Loop() {
+			hk := hosts[frand.Intn(numHosts)]
+			_, err := store.ServiceAccountBalance(context.Background(), hk, account)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }

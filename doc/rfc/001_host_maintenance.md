@@ -63,7 +63,7 @@ we consider the host as "bad".
   - More than 1 week of uptime and a 90%+ uptime overall
   - MaxDuration is greater than configured contract period
   - MaxCollateral per contract of at least 1TB worth of data
-  - Perform [Gouging Checks](003_gouging_checks.md)
+  - Perform [Gouging Checks](002_gouging_checks.md)
   - Protocol version of at least 1.0.0
   - Prices should be valid for at least 1 hour
   - Accepts contracts

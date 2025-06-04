@@ -50,6 +50,7 @@ type (
 	// contracts.
 	HostClient interface {
 		io.Closer
+		AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error)
 		FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
 		RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error)
 		RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
@@ -72,16 +73,21 @@ type (
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		ContractsForBroadcasting(ctx context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error)
 		ContractsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error)
+		ContractsForPinning(ctx context.Context, hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error)
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
+		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
+		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
 		MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error
 		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
+		PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		RevisionStore
 		SyncContract(ctx context.Context, contractID types.FileContractID, params ContractSyncParams) error
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
+		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 	}
 
 	// RevisionStore will soon be removed
@@ -271,8 +277,8 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 			log.Error("account funding failed", zap.Error(err))
 		}
 
-		if err := cm.performSlabPinning(); err != nil {
-			log.Error("slab pinning failed", zap.Error(err))
+		if err := cm.performSectorPinning(ctx, log); err != nil {
+			log.Error("sector pinning failed", zap.Error(err))
 		}
 
 		if err := cm.performContractPruning(); err != nil {
@@ -434,10 +440,5 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 
 // TODO: implement
 func (cm *ContractManager) performContractPruning() error {
-	return nil
-}
-
-// TODO: implement
-func (cm *ContractManager) performSlabPinning() error {
 	return nil
 }

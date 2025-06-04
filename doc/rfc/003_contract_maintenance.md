@@ -20,7 +20,7 @@ being formed.
 The goal of the contract formation process is to keep around a default of at
 least 50 contracts that meet the following requirements:
 
-- The corresponding host is considered "good" (see [Host Scanning](002_host_scanning.md))
+- The corresponding host is considered "good" (see [Host Maintenance](001_host_maintenance.md))
 - The corresponding host doesn't share the same IP subnet as another host we have a contract with (if they do, they count as one)
 - The contract has less than 10TB of data in it and hasn't reached its MaxCollateral (if it has more and the host is good, we form another contract with the same host)
 - The corresponding host has at least 10GB of free space
@@ -34,8 +34,8 @@ To achieve that, we perform the following steps:
 5. Form a contract with the host
 6. Repeat from step 2 until the desired number of contracts is reached
 
-Initially, we fund contracts with 10GB (upload+download+storage) of allowance
-and 10GB of collateral. e.g. if 10SC equals 100GB of data, we add 100GB worth of
+Initially, we fund contracts with 10SC (upload+download+storage) of allowance
+and 10SC of collateral. e.g. if 10SC equals 100GB of data, we add 100GB worth of
 collateral.
 
 ### Contract Renewals
@@ -44,7 +44,7 @@ Contract renewals are similar to contract formations but the requirements are
 slightly different. We don't care about the number of contracts and instead
 renew a contract if:
 
-- The host is considered "good" (see [Host Scanning](002_host_scanning.md))
+- The host is considered "good" (see [Host Maintenance](001_host_maintenance.md))
 - The contract has data in it
 - The window height of the contract is less blocks away than the renew window
 
@@ -74,7 +74,7 @@ forming contracts.
 
 Bad contracts are contracts that don't contribute to the health of a slab. A contract is considered bad if:
 
-- The host is considered "bad" (see [Host Scanning](002_host_scanning.md))
+- The host is considered "bad" (see [Host Maintenance](001_host_maintenance.md))
 - The contract fails to renew and has reached the second half of the renew window
 
 ### Funding, Pinning and Pruning
@@ -92,7 +92,7 @@ loop to do so:
 funding on all accounts that require it
 3. Wait for goroutines to finish
 4. Do the same thing again but for a batch (1TiB) of pinning limited to 60s per
-host (see [Slab Pinning](006_slab_pinning.md)) 3. Wait for goroutines to finish
+host (see [Slab Pinning](005_slab_pinning.md)) 3. Wait for goroutines to finish
 5. Do the same again but this time for pruning using the same 60s timeout
 6. Wait for goroutines to finish
 7. Repeat from step 1 until there is no more work to perform
