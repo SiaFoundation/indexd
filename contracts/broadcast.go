@@ -5,15 +5,9 @@ import (
 	"fmt"
 	"time"
 
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/rhp/v4"
 	"go.uber.org/zap"
 )
-
-func (c *hostClient) LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
-	return rhp.RPCLatestRevision(ctx, c.client, contractID)
-}
 
 func (cm *ContractManager) performBroadcastContractRevisions(ctx context.Context, log *zap.Logger) error {
 	broadcastLog := log.Named("broadcast")

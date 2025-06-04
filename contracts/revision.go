@@ -12,9 +12,13 @@ import (
 	"go.uber.org/zap"
 )
 
+// revisionSubmissionBuffer is a buffer that the host applies on the contract's
+// proof height before it considers the contract revisable, so if the current
+// block height plus the buffer exceed the proof height, the contract is not
+// revisable.
 const revisionSubmissionBuffer = 144
 
-func (c *hostClient) SyncRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) (types.V2FileContract, bool, error) {
+func (c *hostClient) syncRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) (types.V2FileContract, bool, error) {
 	// apply a sane timeout for syncing the revision
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
@@ -54,7 +58,7 @@ func (c *hostClient) withRevision(ctx context.Context, contractID types.FileCont
 	// try and revise the contract
 	update, err := fn(rev)
 	if errors.Is(err, proto.ErrInvalidSignature) {
-		rev, renewed, err = c.SyncRevision(ctx, contractID, rev)
+		rev, renewed, err = c.syncRevision(ctx, contractID, rev)
 		if err != nil {
 			return fmt.Errorf("failed to sync revision: %w", err)
 		} else if renewed {
