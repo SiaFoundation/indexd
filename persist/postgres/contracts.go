@@ -29,7 +29,7 @@ func (s *Store) UpdateContractRevision(ctx context.Context, contractID types.Fil
 }
 
 // AddFormedContract adds a freshly formed contract to the database.
-func (s *Store) AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, contract types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error {
+func (s *Store) AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var hostID int64
 		if err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = $1`, sqlPublicKey(hostKey)).Scan(&hostID); errors.Is(err, sql.ErrNoRows) {
@@ -37,8 +37,8 @@ func (s *Store) AddFormedContract(ctx context.Context, hostKey types.PublicKey, 
 		} else if err != nil {
 			return fmt.Errorf("failed to fetch host: %w", err)
 		}
-		resp, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, remaining_allowance, miner_fee, total_collateral, raw_revision) VALUES ($1, $2, $3, $4, $5, $6, $6, $7, $8, $9)`,
-			hostID, sqlHash256(contractID), contract.ProofHeight, contract.ExpirationHeight, sqlCurrency(contractPrice), sqlCurrency(allowance), sqlCurrency(minerFee), sqlCurrency(contract.TotalCollateral), sqlFileContract(contract))
+		resp, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, capacity, size, revision_number, contract_price, initial_allowance, remaining_allowance, miner_fee, total_collateral, raw_revision) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $9, $10, $11, $12)`,
+			hostID, sqlHash256(contractID), revision.ProofHeight, revision.ExpirationHeight, revision.Capacity, revision.Filesize, revision.RevisionNumber, sqlCurrency(contractPrice), sqlCurrency(allowance), sqlCurrency(minerFee), sqlCurrency(revision.TotalCollateral), sqlFileContract(revision))
 		if err != nil {
 			return fmt.Errorf("failed to add formed contract to database: %w", err)
 		} else if resp.RowsAffected() != 1 {
@@ -57,20 +57,23 @@ func (s *Store) AddFormedContract(ctx context.Context, hostKey types.PublicKey, 
 // AddRenewedContract adds a renewed contract to the database. It will update
 // the renewed contract and point it to the renewal, as well as update the
 // contract id in the contract sectors map.
-func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, contract types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error {
+func (s *Store) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
-INSERT INTO contracts(host_id, contract_id, proof_height, expiration_height, renewed_from, capacity, size, contract_price, initial_allowance, remaining_allowance, miner_fee, used_collateral, total_collateral, raw_revision)
-(SELECT host_id, $1, $2, $3, contract_id, CASE WHEN $2 = proof_height THEN capacity ELSE size END, size, $4, $5, $5, $6, $7, $8, $9 FROM contracts WHERE contract_id = $10)`,
+INSERT INTO contracts(host_id, contract_id, renewed_from, raw_revision, revision_number, proof_height, expiration_height, capacity, size, initial_allowance, remaining_allowance, total_collateral, used_collateral, contract_price, miner_fee)
+(SELECT host_id, $1, contract_id, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12 FROM contracts WHERE contract_id = $13)`,
 			sqlHash256(renewedTo),
-			contract.ProofHeight,
-			contract.ExpirationHeight,
-			sqlCurrency(contractPrice),
-			sqlCurrency(contract.RenterOutput.Value),
-			sqlCurrency(minerFee),
+			sqlFileContract(revision),
+			revision.RevisionNumber,
+			revision.ProofHeight,
+			revision.ExpirationHeight,
+			revision.Capacity,
+			revision.Filesize,
+			sqlCurrency(revision.RenterOutput.Value), // initial & remaining allowance
+			sqlCurrency(revision.TotalCollateral),
 			sqlCurrency(usedCollateral),
-			sqlCurrency(contract.TotalCollateral),
-			sqlFileContract(contract),
+			sqlCurrency(contractPrice),
+			sqlCurrency(minerFee),
 			sqlHash256(renewedFrom),
 		)
 		if err != nil {

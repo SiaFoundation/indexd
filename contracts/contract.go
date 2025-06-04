@@ -80,39 +80,43 @@ type (
 
 	// Contract is a contract formed with a host
 	Contract struct {
-		ID      types.FileContractID `json:"id"`
-		HostKey types.PublicKey      `json:"hostKey"`
+		// static fields
+		ID          types.FileContractID `json:"id"`
+		HostKey     types.PublicKey      `json:"hostKey"`
+		Formation   time.Time            `json:"formation"`
+		RenewedFrom types.FileContractID `json:"renewedFrom"`
 
-		Formation        time.Time            `json:"formation"`
-		ProofHeight      uint64               `json:"proofHeight"`      // start of the contract's proof window
-		ExpirationHeight uint64               `json:"expirationHeight"` // end of the contract's proof window
-		RenewedFrom      types.FileContractID `json:"renewedFrom"`
-		RenewedTo        types.FileContractID `json:"renewedTo"`
-		State            ContractState        `json:"state"`
+		// event tracking fields
+		LastPrune            time.Time `json:"lastPrune"`
+		LastBroadcastAttempt time.Time `json:"lastBroadcastAttempt"`
 
-		Capacity           uint64           `json:"capacity"`           // already paid for capacity (always >=Size)
-		RemainingAllowance types.Currency   `json:"remainingAllowance"` // remaining renter allowance
-		RevisionNumber     uint64           `json:"revisionNumber"`     // current revision number
-		Size               uint64           `json:"size"`               // current size of the contract
-		Spending           ContractSpending `json:"spending"`
-		TotalCollateral    types.Currency   `json:"totalCollateral"` // total amount of collateral locked in contract
-		UsedCollateral     types.Currency   `json:"usedCollateral"`  // used collateral
+		// revision fields, updated on refresh/renewal
+		RevisionNumber     uint64         `json:"revisionNumber"`     // current revision number
+		ProofHeight        uint64         `json:"proofHeight"`        // start of the contract's proof window
+		ExpirationHeight   uint64         `json:"expirationHeight"`   // end of the contract's proof window
+		Capacity           uint64         `json:"capacity"`           // already paid for capacity (always >=Size)
+		Size               uint64         `json:"size"`               // current size of the contract
+		InitialAllowance   types.Currency `json:"initialAllowance"`   // initial renter allowance locked in contract
+		RemainingAllowance types.Currency `json:"remainingAllowance"` // remaining renter allowance
+		TotalCollateral    types.Currency `json:"totalCollateral"`    // total amount of collateral locked in contract
 
-		ContractPrice    types.Currency `json:"contractPrice"`    // price of the contract creation as charged by the host
-		InitialAllowance types.Currency `json:"initialAllowance"` // initial renter allowance locked in contract
-		MinerFee         types.Currency `json:"minerFee"`         // miner fee spent on formation txn
+		// updated on refresh/renewal
+		RenewedTo      types.FileContractID `json:"renewedTo"`
+		UsedCollateral types.Currency       `json:"usedCollateral"`
+		ContractPrice  types.Currency       `json:"contractPrice"` // price of the contract creation as charged by the host
+		MinerFee       types.Currency       `json:"minerFee"`      // miner fee spent on formation txn
 
-		LastPrune time.Time `json:"lastPrune"` // last time the contract was pruned
-
+		// state fields, reset on refresh/renewal
+		//
 		// Good determines whether a contract is good or bad. A contract that
 		// is not good, will have its data migrated to a new contract.
 		//
 		// A contract can be bad for multiple reasons such as the host being
 		// considered bad or failing to renew when being too close to its
 		// ProofHeight. This field is set by the contract maintenance code.
-		Good bool `json:"good"`
-
-		LastBroadcastAttempt time.Time `json:"lastBroadcastAttempt"`
+		Good     bool             `json:"good"`
+		State    ContractState    `json:"state"`
+		Spending ContractSpending `json:"spending"`
 	}
 
 	// ContractSettings contains various settings used by the manager for

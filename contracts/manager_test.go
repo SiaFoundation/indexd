@@ -25,7 +25,7 @@ func TestBlockBadHosts(t *testing.T) {
 
 	// form a contract with each host except the unused one
 	for _, host := range []hosts.Host{goodHost, badHost} {
-		err := store.AddFormedContract(context.Background(), host.PublicKey, types.FileContractID(host.PublicKey), newTestContract(host.PublicKey), types.Siacoins(1), types.Siacoins(2), types.Siacoins(3))
+		err := store.AddFormedContract(context.Background(), host.PublicKey, types.FileContractID(host.PublicKey), newTestRevision(host.PublicKey), types.Siacoins(1), types.Siacoins(2), types.Siacoins(3))
 		if err != nil {
 			t.Fatal(err)
 		}

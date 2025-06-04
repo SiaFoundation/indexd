@@ -217,13 +217,9 @@ func TestHostAccountsForFunding(t *testing.T) {
 		return
 	}
 
-	// add a host
-	hk1 := types.PublicKey{1}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk1, nil, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// add two host
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	// assert there are no accounts to fund
 	accounts, err := store.HostAccountsForFunding(context.Background(), hk1, 10)
@@ -279,14 +275,6 @@ func TestHostAccountsForFunding(t *testing.T) {
 		t.Fatal("expected no accounts")
 	}
 
-	// add another host
-	hk2 := types.PublicKey{2}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk2, nil, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	// add another account
 	ak2 := types.PublicKey{2, 2}
 	if err := store.AddAccount(context.Background(), ak2); err != nil {
@@ -332,15 +320,8 @@ func TestHostAccountsForFunding(t *testing.T) {
 func TestUpdateHostAccounts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	// add a host
-	hk := types.GeneratePrivateKey().PublicKey()
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, nil, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// add an account
+	// add a host and an account
+	hk := store.addTestHost(t)
 	ak := types.GeneratePrivateKey().PublicKey()
 	if err := store.AddAccount(context.Background(), ak); err != nil {
 		t.Fatal(err)

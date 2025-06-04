@@ -183,11 +183,11 @@ func TestPerformSectorPinningOnHost(t *testing.T) {
 
 	// add two contracts for h1
 	fcid1 := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk1, fcid1, newTestContract(hk1), types.ZeroCurrency, types.NewCurrency64(1), types.ZeroCurrency); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk1, fcid1, newTestRevision(hk1), types.ZeroCurrency, types.NewCurrency64(1), types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 	fcid2 := types.FileContractID{2}
-	if err := store.AddFormedContract(context.Background(), hk1, fcid2, newTestContract(hk1), types.ZeroCurrency, types.NewCurrency64(1), types.ZeroCurrency); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk1, fcid2, newTestRevision(hk1), types.ZeroCurrency, types.NewCurrency64(1), types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -203,7 +203,7 @@ func TestPerformSectorPinningOnHost(t *testing.T) {
 
 	// add one contract for h2
 	fcid3 := types.FileContractID{3}
-	if err := store.AddFormedContract(context.Background(), hk2, fcid3, newTestContract(hk1), types.ZeroCurrency, types.NewCurrency64(1), types.ZeroCurrency); err != nil {
+	if err := store.AddFormedContract(context.Background(), hk2, fcid3, newTestRevision(hk2), types.ZeroCurrency, types.NewCurrency64(1), types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 

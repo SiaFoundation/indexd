@@ -4,14 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
@@ -23,25 +22,11 @@ import (
 func TestContracts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	// add a host
-	hk := types.PublicKey{1}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// add three contracts
-	fcid1 := types.FileContractID{1}
-	fcid2 := types.FileContractID{2}
-	fcid3 := types.FileContractID{3}
-	if err := errors.Join(
-		store.AddFormedContract(context.Background(), hk, fcid1, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-		store.AddFormedContract(context.Background(), hk, fcid2, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-		store.AddFormedContract(context.Background(), hk, fcid3, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-	); err != nil {
-		t.Fatal(err)
-	}
+	// add a host with three contracts
+	hk := store.addTestHost(t)
+	fcid1 := store.addTestContract(t, hk, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk, types.FileContractID{2})
+	fcid3 := store.addTestContract(t, hk, types.FileContractID{3})
 
 	// mark the second one resolved so it's considered inactive
 	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
@@ -106,26 +91,19 @@ func TestContractElement(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// assert contract element is not found
-	_, err = store.ContractElement(context.Background(), types.FileContractID(hk))
+	_, err := store.ContractElement(context.Background(), types.FileContractID(hk))
 	if !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatal(err)
 	}
 
 	// add a contract and an element
-	if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	} else if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	fcid := store.addTestContract(t, hk)
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractElements(types.V2FileContractElement{
-			ID: types.FileContractID(hk),
+			ID: fcid,
 			StateElement: types.StateElement{
 				LeafIndex:   1,
 				MerkleProof: []types.Hash256{{1}},
@@ -140,7 +118,7 @@ func TestContractElement(t *testing.T) {
 	}
 
 	// assert contract element is found
-	_, err = store.ContractElement(context.Background(), types.FileContractID(hk))
+	_, err = store.ContractElement(context.Background(), fcid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,18 +128,12 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// add a contract
 	fcid := types.FileContractID{1}
-	contract := newTestContract(hk)
-	if err := store.AddFormedContract(context.Background(), hk, fcid, contract, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+	revision := newTestRevision(hk)
+	if err := store.AddFormedContract(context.Background(), hk, fcid, revision, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -177,8 +149,8 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	}
 
 	// set height to 10 blocks after expiration
-	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: contract.ExpirationHeight + 10})
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: revision.ExpirationHeight + 10})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +162,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	fce := types.V2FileContractElement{
 		ID:             fcid,
 		StateElement:   types.StateElement{LeafIndex: 1, MerkleProof: []types.Hash256{{1}}},
-		V2FileContract: contract,
+		V2FileContract: revision,
 	}
 
 	// add contract element, 1 contract to broadcast
@@ -218,23 +190,10 @@ func TestContractElementsForBroadcast(t *testing.T) {
 func TestContractsForBroadcasting(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	// add a host
-	hk := types.PublicKey{1}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// add two contracts
-	fcid1 := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk, fcid1, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
-	fcid2 := types.FileContractID{2}
-	if err := store.AddFormedContract(context.Background(), hk, fcid2, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	// add a host with two contracts
+	hk := store.addTestHost(t)
+	fcid1 := store.addTestContract(t, hk, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk, types.FileContractID{2})
 
 	// tweak timestamp to assert order next
 	now := time.Now()
@@ -293,34 +252,29 @@ func TestContractsForBroadcasting(t *testing.T) {
 func TestContractsForFunding(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	var fcidCnt uint8
-	addContract := func(hk types.PublicKey, remaininAllowance types.Currency) types.FileContractID {
+	updateAllowance := func(contractID types.FileContractID, allowance types.Currency) {
 		t.Helper()
-		fcidCnt++
-		fcid := types.FileContractID{byte(fcidCnt)}
-		if err := store.AddFormedContract(context.Background(), hk, fcid, newTestContract(hk), types.ZeroCurrency, remaininAllowance, types.ZeroCurrency); err != nil {
+		_, err := store.pool.Exec(context.Background(), `UPDATE contracts SET initial_allowance = $1, remaining_allowance = $1 WHERE contract_id = $2`, sqlCurrency(allowance), sqlHash256(contractID))
+		if err != nil {
 			t.Fatal(err)
 		}
-		return fcid
 	}
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	// add four contracts for h1
-	fcid1 := addContract(hk1, types.Siacoins(1))
-	fcid2 := addContract(hk1, types.Siacoins(3))
-	fcid3 := addContract(hk1, types.Siacoins(2))
-	_ = addContract(hk1, types.ZeroCurrency)
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk1, types.FileContractID{2})
+	fcid3 := store.addTestContract(t, hk1, types.FileContractID{3})
+	fcid4 := store.addTestContract(t, hk1, types.FileContractID{4})
+
+	// update their allowance
+	updateAllowance(fcid1, types.Siacoins(1))
+	updateAllowance(fcid2, types.Siacoins(3))
+	updateAllowance(fcid3, types.Siacoins(2))
+	updateAllowance(fcid4, types.ZeroCurrency)
 
 	// assert only 3 contracts are returned for h1, in order, the fourth has no
 	// remaining allowance and h2 doesn't have contracts yet
@@ -359,8 +313,9 @@ func TestContractsForFunding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add a contract for h2
-	fcid5 := addContract(hk2, types.Siacoins(1))
+	// add a contract for h2 with allowance
+	fcid5 := store.addTestContract(t, hk2, types.FileContractID{5})
+	updateAllowance(fcid5, types.Siacoins(1))
 
 	// assert we have only one contract for h1 now, and one on h2
 	if fcids, err := store.ContractsForFunding(context.Background(), hk1, 10); err != nil {
@@ -383,27 +338,17 @@ func TestContractsForPinning(t *testing.T) {
 
 	addContract := func(hk types.PublicKey, fcid types.FileContractID, allowance types.Currency, size, capacity uint64, state contracts.ContractState, good bool) {
 		t.Helper()
-		if err := store.AddFormedContract(context.Background(), hk, fcid, newTestContract(hk), types.ZeroCurrency, allowance, types.ZeroCurrency); err != nil {
-			t.Fatal(err)
-		}
-		query := `UPDATE contracts SET size = $1, capacity = $2, state = $3, good = $4 WHERE contract_id = $5`
-		_, err := store.pool.Exec(context.Background(), query, size, capacity, sqlContractState(state), good, sqlHash256(fcid))
+		store.addTestContract(t, hk, fcid)
+		query := `UPDATE contracts SET size = $1, capacity = $2, state = $3, good = $4, initial_allowance = $5, remaining_allowance = $5 WHERE contract_id = $6`
+		_, err := store.pool.Exec(context.Background(), query, size, capacity, sqlContractState(state), good, sqlCurrency(allowance), sqlHash256(fcid))
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	// add contracts for h1
 	const maxContractSize = 499
@@ -448,27 +393,17 @@ func TestContractsForPruning(t *testing.T) {
 
 	addContract := func(hk types.PublicKey, fcid types.FileContractID, allowance types.Currency, size uint64, state contracts.ContractState, good bool, lastPrune time.Time) {
 		t.Helper()
-		if err := store.AddFormedContract(context.Background(), hk, fcid, newTestContract(hk), types.ZeroCurrency, allowance, types.ZeroCurrency); err != nil {
-			t.Fatal(err)
-		}
-		query := `UPDATE contracts SET state = $1, good = $2, size = $3, capacity = $4, last_prune = $5 WHERE contract_id = $6`
-		_, err := store.pool.Exec(context.Background(), query, sqlContractState(state), good, size, size, lastPrune, sqlHash256(fcid))
+		store.addTestContract(t, hk, fcid)
+		query := `UPDATE contracts SET state = $1, good = $2, size = $3, capacity = $4, last_prune = $5, initial_allowance = $6, remaining_allowance = $6 WHERE contract_id = $7`
+		_, err := store.pool.Exec(context.Background(), query, sqlContractState(state), good, size, size, lastPrune, sqlCurrency(allowance), sqlHash256(fcid))
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	now := time.Now()
 	oneDayAgo := now.Add(-24 * time.Hour)
@@ -518,26 +453,12 @@ func TestPrunableContractRoots(t *testing.T) {
 	}
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 
 	// add a contract for each host
-	fcid1 := types.FileContractID{1}
-	fcid2 := types.FileContractID{2}
-	if err := errors.Join(
-		store.AddFormedContract(context.Background(), hk1, fcid1, newTestContract(hk1), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-		store.AddFormedContract(context.Background(), hk2, fcid2, newTestContract(hk2), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-	); err != nil {
-		t.Fatal(err)
-	}
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk2, types.FileContractID{2})
 
 	// prepare roots
 	roots := []types.Hash256{
@@ -616,30 +537,23 @@ func TestPruneExpiredContractElements(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	addContract := func(expirationHeight uint64) types.FileContractID {
 		t.Helper()
 		var contractID types.FileContractID
 		frand.Read(contractID[:])
 
-		contract := newTestContract(hk)
-		contract.ExpirationHeight = expirationHeight
-		if err := store.AddFormedContract(context.Background(), hk, contractID, contract, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+		revision := newTestRevision(hk)
+		revision.ExpirationHeight = expirationHeight
+		if err := store.AddFormedContract(context.Background(), hk, contractID, revision, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 			t.Fatal(err)
 		}
-		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 			return tx.UpdateContractElements(types.V2FileContractElement{
 				ID: contractID,
 			})
-		})
-		if err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 		return contractID
@@ -669,10 +583,9 @@ func TestPruneExpiredContractElements(t *testing.T) {
 
 	// set height to block 12
 	bh := uint64(12)
-	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: bh})
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -700,7 +613,7 @@ func TestPruneExpiredContractElements(t *testing.T) {
 	assertContracts([]types.FileContractID{})
 
 	// assert only the elements got pruned but the contracts remain
-	err = store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		var count int
 		err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM contracts").Scan(&count)
 		if err != nil {
@@ -709,8 +622,7 @@ func TestPruneExpiredContractElements(t *testing.T) {
 			t.Fatalf("expected 3 contracts, got %d", count)
 		}
 		return nil
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -720,23 +632,19 @@ func TestFormRenewContract(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
-	// helper to assert contract in db
+	// define helper to assert contract in db
 	assertContract := func(id types.FileContractID, expected contracts.Contract) {
 		t.Helper()
+
 		contract, err := store.Contract(context.Background(), id)
 		if err != nil {
 			t.Fatal("failed to fetch contract", err)
 		} else if contract.Formation.Before(start) || contract.Formation.After(time.Now().Round(time.Microsecond)) {
 			t.Fatalf("expected formation time to be after start time but not in the future")
 		}
+
 		contract.Formation = time.Time{}
 		contract.LastBroadcastAttempt = time.Time{}
 		if !reflect.DeepEqual(contract, expected) {
@@ -744,63 +652,62 @@ func TestFormRenewContract(t *testing.T) {
 		}
 	}
 
-	// form contract
-	expectedFormed := contracts.Contract{
-		ID:               types.FileContractID{1, 2, 3},
-		HostKey:          hk,
-		ProofHeight:      100,
-		ExpirationHeight: 200,
-		State:            contracts.ContractStatePending,
-
-		ContractPrice:      types.Siacoins(1),
-		InitialAllowance:   types.Siacoins(2),
-		RemainingAllowance: types.Siacoins(2),
-		MinerFee:           types.Siacoins(3),
-		TotalCollateral:    types.Siacoins(4),
-
-		Good: true,
-	}
-	contract := newTestContract(hk)
-	contract.ProofHeight = expectedFormed.ProofHeight
-	contract.ExpirationHeight = expectedFormed.ExpirationHeight
-	contract.TotalCollateral = expectedFormed.TotalCollateral
-	err = store.AddFormedContract(context.Background(), hk, expectedFormed.ID, contract, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee)
-	if err != nil {
-		t.Fatal("failed to add formed contract", err)
-	}
-	assertContract(expectedFormed.ID, expectedFormed)
-
-	// assert `contract_sectors_map` entry was created when forming a contract
-	var mapID int64
-	err = store.pool.QueryRow(context.Background(), `SELECT id FROM contract_sectors_map WHERE contract_id = $1`, sqlHash256(expectedFormed.ID)).Scan(&mapID)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// simulate using the contract and marking it not good
-	modifyContract := func(contractID types.FileContractID) {
-		err = store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-			resp, err := tx.Exec(context.Background(), `
-					UPDATE contracts
-					SET state = 1, capacity = 2000, size = 1000, good = FALSE, append_sector_spending = 1, free_sector_spending = 2, fund_account_spending = 3, sector_roots_spending = 4
-					WHERE contract_id = $1
-					`, sqlHash256(contractID))
+	// define helper to simulate contract usage
+	simulateUsage := func(contractID types.FileContractID) {
+		t.Helper()
+		if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+			resp, err := tx.Exec(context.Background(), `UPDATE contracts SET state = 1, good = FALSE, append_sector_spending = 1, free_sector_spending = 2, fund_account_spending = 3, sector_roots_spending = 4 WHERE contract_id = $1`, sqlHash256(contractID))
 			if err != nil {
 				return err
 			} else if resp.RowsAffected() != 1 {
 				t.Fatalf("expected 1 row to be affected, got %d", resp.RowsAffected())
 			}
 			return nil
-		})
-		if err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	modifyContract(expectedFormed.ID)
 
+	// form contract
+	formation := newTestRevision(hk)
+	formation.RenterOutput.Value = types.NewCurrency64(math.MaxUint64) // initial allowance
+
+	expectedFormed := contracts.Contract{
+		ID:      types.FileContractID{1},
+		HostKey: hk,
+		State:   contracts.ContractStatePending,
+
+		// revision fields
+		RevisionNumber:     formation.RevisionNumber,
+		ProofHeight:        formation.ProofHeight,
+		ExpirationHeight:   formation.ExpirationHeight,
+		Capacity:           formation.Capacity,
+		Size:               formation.Filesize,
+		InitialAllowance:   formation.RenterOutput.Value,
+		RemainingAllowance: formation.RenterOutput.Value,
+		TotalCollateral:    formation.TotalCollateral,
+
+		ContractPrice: types.Siacoins(1),
+		MinerFee:      types.Siacoins(2),
+
+		Good: true,
+	}
+	if err := store.AddFormedContract(context.Background(), hk, expectedFormed.ID, formation, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee); err != nil {
+		t.Fatal("failed to add formed contract", err)
+	}
+
+	// assert the contract matches the expectations
+	assertContract(expectedFormed.ID, expectedFormed)
+
+	// assert the contract sector mapping exists
+	var mapID int64
+	if err := store.pool.QueryRow(context.Background(), `SELECT id FROM contract_sectors_map WHERE contract_id = $1`, sqlHash256(expectedFormed.ID)).Scan(&mapID); err != nil {
+		t.Fatal(err)
+	}
+
+	// simulate usage, assert the contract is active, bad and has spending
+	simulateUsage(expectedFormed.ID)
 	expectedFormed.State = contracts.ContractStateActive
-	expectedFormed.Capacity = 2000
-	expectedFormed.Size = 1000
 	expectedFormed.Good = false
 	expectedFormed.Spending = contracts.ContractSpending{
 		AppendSector: types.NewCurrency64(1),
@@ -810,34 +717,37 @@ func TestFormRenewContract(t *testing.T) {
 	}
 	assertContract(expectedFormed.ID, expectedFormed)
 
-	// refresh the contract
+	// prepare a refresh of the contract, we want to assert spending gets reset,
+	// refreshed contracts are good and the renewed from is set
+	refresh := formation
+	refresh.RenterOutput.Value = types.NewCurrency64(math.MaxUint64) // new initial allowance
+
 	expectedRefreshed := contracts.Contract{
-		ID:                 types.FileContractID{4, 5, 6},
-		Capacity:           expectedFormed.Capacity,         // same capacity after refresh
-		Size:               expectedFormed.Size,             // same size after refresh
-		HostKey:            expectedFormed.HostKey,          // same host
-		ProofHeight:        expectedFormed.ProofHeight,      // same proof height for refresh
-		ExpirationHeight:   expectedFormed.ExpirationHeight, // same expiration height for refresh
-		State:              contracts.ContractStatePending,  // refresh resets state
-		ContractPrice:      types.Siacoins(2),               // new contract price
-		InitialAllowance:   types.Siacoins(3),               // new initial allowance
-		RemainingAllowance: types.Siacoins(3),               // matches initial allowance
-		MinerFee:           types.Siacoins(4),               // new miner fee
-		Good:               true,                            // refreshed contract is good
-		RenewedFrom:        expectedFormed.ID,               // refreshed from formed contract
-		Spending:           contracts.ContractSpending{},    // spending is reset
-		UsedCollateral:     types.Siacoins(4),
-		TotalCollateral:    types.Siacoins(5),
+		ID:          types.FileContractID{2},
+		HostKey:     expectedFormed.HostKey, // same host
+		RenewedFrom: expectedFormed.ID,      // refreshed from formed contract
+
+		// revision fields
+		RevisionNumber:     refresh.RevisionNumber,
+		ProofHeight:        refresh.ProofHeight,
+		ExpirationHeight:   refresh.ExpirationHeight,
+		Capacity:           refresh.Capacity,
+		Size:               refresh.Filesize,
+		InitialAllowance:   refresh.RenterOutput.Value,
+		RemainingAllowance: refresh.RenterOutput.Value,
+		TotalCollateral:    refresh.TotalCollateral,
+
+		UsedCollateral: refresh.TotalCollateral.Div64(2), // updated used collateral
+		ContractPrice:  types.Siacoins(2),                // new contract price
+		MinerFee:       types.Siacoins(4),                // new miner fee
+
+		State: contracts.ContractStatePending, // refresh resets state
+		Good:  true,                           // refreshed contract is good
+
+		Spending: contracts.ContractSpending{}, // spending is reset
 	}
 
-	renewed := newTestContract(hk)
-	renewed.ProofHeight = expectedRefreshed.ProofHeight
-	renewed.ExpirationHeight = expectedRefreshed.ExpirationHeight
-	renewed.TotalCollateral = expectedRefreshed.TotalCollateral
-	renewed.RenterOutput.Value = expectedRefreshed.InitialAllowance
-
-	err = store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, renewed, expectedRefreshed.ContractPrice, expectedRefreshed.MinerFee, expectedRefreshed.UsedCollateral)
-	if err != nil {
+	if err := store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, refresh, expectedRefreshed.ContractPrice, expectedRefreshed.MinerFee, expectedRefreshed.UsedCollateral); err != nil {
 		t.Fatal("failed to add refreshed contract", err)
 	}
 	expectedFormed.RenewedTo = expectedRefreshed.ID
@@ -845,10 +755,8 @@ func TestFormRenewContract(t *testing.T) {
 	assertContract(expectedRefreshed.ID, expectedRefreshed)
 
 	// modify the refreshed contract
-	modifyContract(expectedRefreshed.ID)
+	simulateUsage(expectedRefreshed.ID)
 	expectedRefreshed.State = contracts.ContractStateActive
-	expectedRefreshed.Capacity = 2000
-	expectedRefreshed.Size = 1000
 	expectedRefreshed.Good = false
 	expectedRefreshed.Spending = contracts.ContractSpending{
 		AppendSector: types.NewCurrency64(1),
@@ -859,34 +767,39 @@ func TestFormRenewContract(t *testing.T) {
 	assertContract(expectedRefreshed.ID, expectedRefreshed)
 
 	// renew the refreshed contract
+	renewal := refresh
+	renewal.RenterOutput.Value = types.Siacoins(6) // new initial allowance
+	renewal.Capacity = renewal.Filesize            // capacity shrinks to size upon renewal
+	renewal.ProofHeight *= 2                       // higher proof height for renew
+	renewal.ExpirationHeight *= 2                  // higher expiration height for renew
+
 	expectedRenewed := contracts.Contract{
-		ID:                 types.FileContractID{7, 8, 9},
-		Capacity:           expectedRefreshed.Size,                 // capacity shrinks to size upon renewal
-		Size:               expectedRefreshed.Size,                 // same size after renewal
-		HostKey:            expectedRefreshed.HostKey,              // same host
-		ProofHeight:        expectedRefreshed.ProofHeight * 2,      // higher proof height for renew
-		ExpirationHeight:   expectedRefreshed.ExpirationHeight * 2, // higher expiration height for renew
-		State:              contracts.ContractStatePending,         // renewal resets state
-		ContractPrice:      types.Siacoins(5),                      // new contract price
-		InitialAllowance:   types.Siacoins(6),                      // new initial allowance
-		RemainingAllowance: types.Siacoins(6),                      // matches initial allowance
-		MinerFee:           types.Siacoins(7),                      // new miner fee
-		Good:               true,                                   // renewed contract is good
-		RenewedFrom:        expectedRefreshed.ID,                   // renewed from refreshed contract
-		Spending:           contracts.ContractSpending{},           // spending is reset
-		UsedCollateral:     types.Siacoins(4),
-		TotalCollateral:    types.Siacoins(5),
+		ID:          types.FileContractID{7, 8, 9},
+		HostKey:     expectedRefreshed.HostKey, // same host
+		RenewedFrom: expectedRefreshed.ID,      // renewed from refreshed contract
+
+		// revision fields
+		RevisionNumber:     renewal.RevisionNumber,
+		ProofHeight:        renewal.ProofHeight,
+		ExpirationHeight:   renewal.ExpirationHeight,
+		Capacity:           renewal.Capacity,
+		Size:               renewal.Filesize,
+		InitialAllowance:   renewal.RenterOutput.Value,
+		RemainingAllowance: renewal.RenterOutput.Value,
+		TotalCollateral:    renewal.TotalCollateral,
+
+		UsedCollateral: renewal.TotalCollateral.Div64(4), // updated used collateral
+		ContractPrice:  types.Siacoins(5),                // new contract price
+		MinerFee:       types.Siacoins(7),                // new miner fee
+
+		State: contracts.ContractStatePending, // renewal resets state
+		Good:  true,                           // renewed contract is good
+
+		Spending: contracts.ContractSpending{}, // spending is reset
 	}
 
-	renewed = newTestContract(hk)
-	renewed.ProofHeight = expectedRenewed.ProofHeight
-	renewed.ExpirationHeight = expectedRenewed.ExpirationHeight
-	renewed.TotalCollateral = expectedRenewed.TotalCollateral
-	renewed.RenterOutput.Value = expectedRenewed.InitialAllowance
-
-	err = store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, renewed, expectedRenewed.ContractPrice, expectedRenewed.MinerFee, expectedRenewed.UsedCollateral)
-	if err != nil {
-		t.Fatal("failed to add refreshed contract", err)
+	if err := store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, renewal, expectedRenewed.ContractPrice, expectedRenewed.MinerFee, expectedRenewed.UsedCollateral); err != nil {
+		t.Fatal("failed to add renewed contract", err)
 	}
 	expectedRefreshed.RenewedTo = expectedRenewed.ID
 	assertContract(expectedFormed.ID, expectedFormed)
@@ -906,13 +819,7 @@ func TestRejectContracts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// helper to assert contract state
 	assertContractState := func(id types.FileContractID, state contracts.ContractState) {
@@ -946,11 +853,7 @@ func TestRejectContracts(t *testing.T) {
 	// form 3 contracts
 	now := time.Now()
 	for i := range 3 {
-		contractID := types.FileContractID{byte(i + 1)}
-		err = store.AddFormedContract(context.Background(), hk, contractID, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
-		if err != nil {
-			t.Fatal("failed to add formed contract", err)
-		}
+		contractID := store.addTestContract(t, hk, types.FileContractID{byte(i + 1)})
 		switch i {
 		case 0:
 			updateStateAndFormation(contractID, contracts.ContractStatePending, now) // recently formed
@@ -970,8 +873,7 @@ func TestRejectContracts(t *testing.T) {
 	assertContractState(activeID, contracts.ContractStateActive)
 
 	// reject pending contracts older than 30 minutes
-	err = store.RejectPendingContracts(context.Background(), now.Add(-30*time.Minute))
-	if err != nil {
+	if err := store.RejectPendingContracts(context.Background(), now.Add(-30*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -985,13 +887,7 @@ func TestUpdateContractElement(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	fce := types.V2FileContractElement{
 		ID: types.FileContractID{1, 2, 3},
@@ -1030,11 +926,10 @@ func TestUpdateContractElement(t *testing.T) {
 	assertKnownContract := func(known bool) {
 		t.Helper()
 		var storedKnown bool
-		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
 			storedKnown, err = tx.IsKnownContract(fce.ID)
 			return err
-		})
-		if err != nil {
+		}); err != nil {
 			t.Fatal(err)
 		} else if storedKnown != known {
 			t.Fatalf("expected known=%v, got %v", known, storedKnown)
@@ -1043,9 +938,7 @@ func TestUpdateContractElement(t *testing.T) {
 	assertKnownContract(false)
 
 	// add a contract
-	if err := store.AddFormedContract(context.Background(), hk, fce.ID, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	store.addTestContract(t, hk, fce.ID)
 	assertKnownContract(true)
 
 	updateElement := func() {
@@ -1087,13 +980,7 @@ func TestUpdateContractState(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// create a contract
 	contractID := types.FileContractID{1, 2, 3}
@@ -1118,12 +1005,8 @@ func TestUpdateContractState(t *testing.T) {
 		}
 	}
 
-	// add a contract
-	if err := store.AddFormedContract(context.Background(), hk, contractID, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
-
 	// run tests
+	store.addTestContract(t, hk, contractID)
 	assertState(contracts.ContractStatePending) // fresh contract state
 	updateState(contracts.ContractStateActive)  // set to active
 	assertState(contracts.ContractStateActive)  // assert active
@@ -1132,19 +1015,9 @@ func TestUpdateContractState(t *testing.T) {
 func TestMarkPruned(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	// add a host
-	hk := types.PublicKey{1}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// add a contract
-	fcid := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk, fcid, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	// add a host with one contract
+	hk := store.addTestHost(t)
+	fcid := store.addTestContract(t, hk)
 
 	// assert contract is not marked as pruned
 	if contract, err := store.Contract(context.Background(), fcid); err != nil {
@@ -1177,9 +1050,11 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 
 	const proofHeight = 100
 
+	// add a hosts
+	hk := store.addTestHost(t)
+
 	// prepare 2 contracts, one for testing and another one that remains good
 	// for the duration of the test to serve as a canary
-	hk := types.PublicKey{1, 1, 1}
 	fcid := types.FileContractID{1}
 	goodFCID := types.FileContractID{2}
 
@@ -1204,24 +1079,17 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 		}
 	}
 
-	// add a host and the contracts
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	revision1 := newTestRevision(hk)
+	revision1.ProofHeight = proofHeight
+	revision1.ExpirationHeight = 9999
 
-	contract1 := newTestContract(hk)
-	contract1.ProofHeight = proofHeight
-	contract1.ExpirationHeight = 9999
-	contract2 := newTestContract(hk)
-	contract2.ProofHeight = 8888
-	contract2.ExpirationHeight = 9999
+	revision2 := newTestRevision(hk)
+	revision2.ProofHeight = 8888
+	revision2.ExpirationHeight = 9999
 
 	if err := errors.Join(
-		store.AddFormedContract(context.Background(), hk, fcid, contract1, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
-		store.AddFormedContract(context.Background(), hk, goodFCID, contract2, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+		store.AddFormedContract(context.Background(), hk, fcid, revision1, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
+		store.AddFormedContract(context.Background(), hk, goodFCID, revision2, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency),
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -1239,20 +1107,10 @@ func TestMarkBroadcastAttempt(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	// add a contract
-	fcid := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk, fcid, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// assert broadcast attempt is defaulted
+	fcid := store.addTestContract(t, hk)
 	contract, err := store.Contract(context.Background(), fcid)
 	if err != nil {
 		t.Fatal(err)
@@ -1279,21 +1137,10 @@ func TestSyncContract(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host
-	hk := types.PublicKey{1, 1, 1}
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// add a contract
-	contractID := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk, contractID, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	hk := store.addTestHost(t)
 
 	// helper to sync and assert contract
+	contractID := store.addTestContract(t, hk, types.FileContractID{1})
 	assertContract := func(params contracts.ContractSyncParams) {
 		t.Helper()
 		if err := store.SyncContract(context.Background(), contractID, params); err != nil {
@@ -1363,11 +1210,13 @@ func BenchmarkContracts(b *testing.B) {
 
 			hostContractIDs := make([]types.FileContractID, numContractsPerHost)
 			for i := range numContractsPerHost {
+				revision := newTestRevision(hk)
 				frand.Read(hostContractIDs[i][:])
 				size := frand.Uint64n(1e9)
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, last_prune, raw_revision) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, E'\\x');`,
+				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, last_prune) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
 					hostID,
 					sqlHash256(hostContractIDs[i][:]),
+					sqlFileContract(revision),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
@@ -1491,16 +1340,8 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	// add hosts and contracts
 	var hks []types.PublicKey
 	for range nHosts {
-		hk := types.PublicKey(frand.Entropy256())
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			b.Fatal(err)
-		}
-		if err := store.AddFormedContract(context.Background(), hk, types.FileContractID(hk), newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-			b.Fatal(err)
-		}
+		hk := store.addTestHost(b)
+		store.addTestContract(b, hk)
 		hks = append(hks, hk)
 	}
 
@@ -1568,13 +1409,33 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	}
 }
 
-func newTestContract(hk types.PublicKey) types.V2FileContract {
+func (s *Store) addTestContract(t testing.TB, hk types.PublicKey, fcids ...types.FileContractID) types.FileContractID {
+	t.Helper()
+
+	var fcid types.FileContractID
+	switch len(fcids) {
+	case 0:
+		fcid = types.FileContractID(hk)
+	case 1:
+		fcid = fcids[0]
+	default:
+		panic("developer error")
+	}
+
+	err := s.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fcid
+}
+
+func newTestRevision(hk types.PublicKey) types.V2FileContract {
 	return types.V2FileContract{
 		HostPublicKey:    hk,
 		Capacity:         200,
 		Filesize:         100,
 		FileMerkleRoot:   types.Hash256{1},
-		ProofHeight:      400,
+		ProofHeight:      600,
 		ExpirationHeight: 800,
 		RevisionNumber:   1,
 		TotalCollateral:  types.Siacoins(100),

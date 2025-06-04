@@ -98,13 +98,8 @@ func TestHost(t *testing.T) {
 		t.Fatal("expected [hosts.ErrNotFound], got", err)
 	}
 
-	// add a host
-	ha1 := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha1}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// add the host
+	db.addTestHost(t, hk)
 
 	// update the host
 	networks := []net.IPNet{{IP: net.IPv4(1, 2, 3, 4), Mask: net.CIDRMask(32, 32)}}
@@ -213,11 +208,7 @@ func TestHostChecks(t *testing.T) {
 	}
 
 	// add a host
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, nil, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	db.addTestHost(t, hk)
 
 	// assert unscanned host is unusable
 	if h, err := db.Host(context.Background(), hk); err != nil {
@@ -398,13 +389,7 @@ func TestHosts(t *testing.T) {
 	addHost := func(i byte, usable, blocked bool, contract bool) types.PublicKey {
 		t.Helper()
 		hk := types.PublicKey{i}
-
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			t.Fatal(err)
-		}
+		db.addTestHost(t, hk)
 
 		// "scan" host - first scan fails
 		settings := newSettings(hk)
@@ -430,10 +415,7 @@ func TestHosts(t *testing.T) {
 
 		// form contract
 		if contract {
-			err := db.AddFormedContract(context.Background(), hk, types.FileContractID{i}, newTestContract(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
-			if err != nil {
-				t.Fatal(err)
-			}
+			db.addTestContract(t, hk)
 		}
 		return hk
 	}
@@ -551,16 +533,8 @@ func TestHostsForScanning(t *testing.T) {
 	db := initPostgres(t, log.Named("postgres"))
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := db.addTestHost(t)
+	hk2 := db.addTestHost(t)
 
 	// assert both hosts are returned
 	hosts, err := db.HostsForScanning(context.Background())
@@ -638,11 +612,7 @@ func TestHostsRecentUptime(t *testing.T) {
 	}
 
 	// add a host
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, nil, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk = db.addTestHost(t)
 
 	// assert default uptime
 	if uptime() != .894 {
@@ -696,21 +666,9 @@ func TestPruneHosts(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
 
-	// create helper to add a host
-	addHost := func() types.PublicKey {
-		t.Helper()
-		hk := types.GeneratePrivateKey().PublicKey()
-		if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-		}); err != nil {
-			t.Fatal(err)
-		}
-		return hk
-	}
-
 	// add two hosts
-	addHost()
-	addHost()
+	db.addTestHost(t)
+	db.addTestHost(t)
 
 	// assert both get pruned when no params are given
 	n, err := db.PruneHosts(context.Background(), time.Time{}, 0)
@@ -721,8 +679,8 @@ func TestPruneHosts(t *testing.T) {
 	}
 
 	// re-add the hosts
-	h1 := addHost()
-	h2 := addHost()
+	h1 := db.addTestHost(t)
+	h2 := db.addTestHost(t)
 
 	// assert none get pruned when we require at least one failed scan
 	n, err = db.PruneHosts(context.Background(), time.Now().Add(time.Second), 1)
@@ -763,8 +721,8 @@ func TestPruneHosts(t *testing.T) {
 	}
 
 	// re-add both hosts, simulate both a successful and failed scan
-	h1 = addHost()
-	h2 = addHost()
+	h1 = db.addTestHost(t)
+	h2 = db.addTestHost(t)
 	err = errors.Join(
 		db.UpdateHost(context.Background(), h1, testNetworks, proto4.HostSettings{}, true, time.Now()),
 		db.UpdateHost(context.Background(), h1, testNetworks, proto4.HostSettings{}, false, time.Now()),
@@ -784,10 +742,7 @@ func TestPruneHosts(t *testing.T) {
 	}
 
 	// add contract to h2
-	err = db.AddFormedContract(context.Background(), h2, types.FileContractID{1}, newTestContract(h2), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency)
-	if err != nil {
-		t.Fatal(err)
-	}
+	db.addTestContract(t, h2)
 
 	// assert only h1 got pruned if we set the cutoff in the future
 	n, err = db.PruneHosts(context.Background(), time.Now().Add(time.Second), 1)
@@ -826,11 +781,7 @@ func TestUpdateHost(t *testing.T) {
 	}
 
 	// add a host
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
+	db.addTestHost(t, hk)
 
 	// assert host settings are not inserted if the scan failed
 	hs := newTestHostSettings(hk)
@@ -1062,16 +1013,8 @@ func TestHostsForPinning(t *testing.T) {
 	db := initPostgres(t, log.Named("postgres"))
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := db.addTestHost(t)
+	hk2 := db.addTestHost(t)
 
 	// add account
 	acc := proto4.Account{1}
@@ -1107,12 +1050,8 @@ func TestHostsForPinning(t *testing.T) {
 	}
 
 	// add contract for both hosts
-	fcid1 := types.FileContractID{1}
-	if err := db.AddFormedContract(context.Background(), hk1, fcid1, newTestContract(hk1), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	} else if err := db.AddFormedContract(context.Background(), hk2, types.FileContractID{2}, newTestContract(hk2), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	fcid1 := db.addTestContract(t, hk1)
+	_ = db.addTestContract(t, hk2)
 
 	// assert both hosts are returned now
 	hks, err = db.HostsForPinning(context.Background())
@@ -1123,7 +1062,7 @@ func TestHostsForPinning(t *testing.T) {
 	}
 
 	// pin sectors for h1
-	if err := db.PinSectors(context.Background(), types.FileContractID{1}, []types.Hash256{r1}); err != nil {
+	if err := db.PinSectors(context.Background(), fcid1, []types.Hash256{r1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1157,16 +1096,8 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	db := initPostgres(t, log.Named("postgres"))
 
 	// add two hosts
-	hk1 := types.PublicKey{1}
-	hk2 := types.PublicKey{2}
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return errors.Join(
-			tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{}, time.Now()),
-			tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{}, time.Now()),
-		)
-	}); err != nil {
-		t.Fatal(err)
-	}
+	hk1 := db.addTestHost(t)
+	hk2 := db.addTestHost(t)
 
 	// add account
 	acc := proto4.Account{1}
@@ -1388,13 +1319,7 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 
 	// add hosts
 	for range nHosts {
-		hk := types.PublicKey(frand.Entropy256())
-		ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
-		}); err != nil {
-			b.Fatal(err)
-		}
+		hk := store.addTestHost(b)
 
 		// add sectors
 		for remainingSectors := nSectorsPerHost; remainingSectors > 0; {
@@ -1438,4 +1363,26 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 			}
 		})
 	}
+}
+
+func (s *Store) addTestHost(t testing.TB, hks ...types.PublicKey) types.PublicKey {
+	t.Helper()
+
+	var hk types.PublicKey
+	switch len(hks) {
+	case 0:
+		hk = types.GeneratePrivateKey().PublicKey() // generate a random host key
+	case 1:
+		hk = hks[0]
+	default:
+		panic("developer error")
+	}
+
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := s.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return hk
 }

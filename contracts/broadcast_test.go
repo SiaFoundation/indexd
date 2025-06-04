@@ -43,7 +43,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		State:     ContractStateExpired,
 		Good:      true,
 	})
-	store.revisions = append(store.revisions, newTestContract(hk))
+	store.revisions = append(store.revisions, newTestRevision(hk))
 
 	// c2 is not broadcasted because it's renewed
 	store.contracts = append(store.contracts, Contract{
@@ -54,7 +54,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		Good:      true,
 		RenewedTo: types.FileContractID{3},
 	})
-	store.revisions = append(store.revisions, newTestContract(hk))
+	store.revisions = append(store.revisions, newTestRevision(hk))
 
 	// c3 is not broadcasted because it was broadcasted recently
 	store.contracts = append(store.contracts, Contract{
@@ -65,7 +65,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		Good:                 true,
 		LastBroadcastAttempt: time.Now(),
 	})
-	store.revisions = append(store.revisions, newTestContract(hk))
+	store.revisions = append(store.revisions, newTestRevision(hk))
 
 	// c4 is broadcasted
 	store.contracts = append(store.contracts, Contract{
@@ -75,7 +75,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		State:     ContractStateActive,
 		Good:      true,
 	})
-	rev := newTestContract(hk)
+	rev := newTestRevision(hk)
 	store.revisions = append(store.revisions, rev)
 
 	// assert revision was broadcasted and contract was marked as such
