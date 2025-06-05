@@ -68,7 +68,7 @@ type (
 	// RevisionStore will soon be removed
 	RevisionStore interface {
 		ContractRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, bool, error)
-		UpdateContractRevision(ctx context.Context, contractID types.FileContractID, contract types.V2FileContract) error
+		UpdateContractRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) error
 	}
 )
 

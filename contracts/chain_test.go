@@ -51,18 +51,18 @@ func newStoreMock() *storeMock {
 	}
 }
 
-func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, contract types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error {
+func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error {
 	s.contracts = append(s.contracts, Contract{
 		ID:      contractID,
 		HostKey: hostKey,
 
 		Formation:        time.Now(),
-		ProofHeight:      contract.ProofHeight,
-		ExpirationHeight: contract.ExpirationHeight,
+		ProofHeight:      revision.ProofHeight,
+		ExpirationHeight: revision.ExpirationHeight,
 		State:            ContractStatePending,
 
 		RemainingAllowance: allowance,
-		TotalCollateral:    contract.TotalCollateral,
+		TotalCollateral:    revision.TotalCollateral,
 
 		ContractPrice:    contractPrice,
 		InitialAllowance: allowance,
@@ -70,11 +70,11 @@ func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicK
 
 		Good: true,
 	})
-	s.revisions = append(s.revisions, contract)
+	s.revisions = append(s.revisions, revision)
 	return nil
 }
 
-func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, contract types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error {
+func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error {
 	var source *Contract
 	for i := range s.contracts {
 		if s.contracts[i].ID == renewedFrom {
@@ -95,21 +95,21 @@ func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewed
 		RenewedFrom: source.ID,
 
 		Formation:        time.Now(),
-		ProofHeight:      contract.ProofHeight,
-		ExpirationHeight: contract.ExpirationHeight,
+		ProofHeight:      revision.ProofHeight,
+		ExpirationHeight: revision.ExpirationHeight,
 		State:            ContractStatePending,
 
-		RemainingAllowance: contract.RenterOutput.Value,
+		RemainingAllowance: revision.RenterOutput.Value,
 		UsedCollateral:     usedCollateral,
-		TotalCollateral:    contract.TotalCollateral,
+		TotalCollateral:    revision.TotalCollateral,
 
 		ContractPrice:    contractPrice,
-		InitialAllowance: contract.RenterOutput.Value,
+		InitialAllowance: revision.RenterOutput.Value,
 		MinerFee:         minerFee,
 
 		Good: true,
 	})
-	s.revisions = append(s.revisions, contract)
+	s.revisions = append(s.revisions, revision)
 	return nil
 }
 

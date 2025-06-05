@@ -116,7 +116,7 @@ func (c *hostClientMock) ReplenishAccounts(ctx context.Context, contractID types
 	return rhp.RPCReplenishAccountsResult{}, 0, nil
 }
 
-func (c *hostClientMock) SyncRevision(ctx context.Context, contractID types.FileContractID, contract types.V2FileContract) (types.V2FileContract, bool, error) {
+func (c *hostClientMock) SyncRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) (types.V2FileContract, bool, error) {
 	rev, ok := c.latestRevisions[contractID]
 	if !ok {
 		return types.V2FileContract{}, false, errors.New("not found")
