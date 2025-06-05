@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 )
@@ -218,18 +219,60 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 
 // LockUTXOs locks the specified siacoin outputs until the specified time.
 func (s *Store) LockUTXOs(scois []types.SiacoinOutputID, until time.Time) error {
-	return nil // TODO: implement
+	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		batch := &pgx.Batch{}
+		for _, scoi := range scois {
+			batch.Queue(`INSERT INTO wallet_locked_utxos (output_id, unlock_at) VALUES ($1, $2) ON CONFLICT (output_id) DO UPDATE SET unlock_at=EXCLUDED.unlock_at`, sqlHash256(scoi), until)
+		}
+		batch.Queue(`DELETE FROM wallet_locked_utxos WHERE unlock_at < NOW()`)
+
+		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
+			return fmt.Errorf("failed to lock utxos: %w", err)
+		}
+		return nil
+	})
 }
 
 // LockedUTXOs returns the list of locked siacoin outputs at the specified time.
-func (s *Store) LockedUTXOs(t time.Time) ([]types.SiacoinOutputID, error) {
-	return nil, nil // TODO: implement
+func (s *Store) LockedUTXOs(threshold time.Time) (locked []types.SiacoinOutputID, err error) {
+	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `SELECT output_id FROM wallet_locked_utxos WHERE unlock_at > $1`, threshold)
+		if err != nil {
+			return fmt.Errorf("failed to query locked UTXOs: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var id sqlHash256
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("failed to scan locked UTXO: %w", err)
+			}
+			locked = append(locked, types.SiacoinOutputID(id))
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to iterate locked UTXOs: %w", err)
+		}
+		return nil
+	})
+	return
 }
 
 // ReleaseUTXOs releases the specified siacoin outputs, making them available
 // for spending.
 func (s *Store) ReleaseUTXOs(scois []types.SiacoinOutputID) error {
-	return nil // TODO: implement
+	if len(scois) == 0 {
+		return nil // nothing to release
+	}
+
+	var args []any
+	for _, scoi := range scois {
+		args = append(args, sqlHash256(scoi))
+	}
+
+	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `DELETE FROM wallet_locked_utxos WHERE output_id = ANY($1) OR unlock_at < NOW()`, args)
+		return err
+	})
 }
 
 func validateOffsetLimit(offset, limit int) error {
