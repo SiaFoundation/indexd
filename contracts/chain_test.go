@@ -135,6 +135,17 @@ func (s *storeMock) BlockHosts(_ context.Context, hostKeys []types.PublicKey, re
 	return nil
 }
 
+func (s *storeMock) ContractRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, bool, error) {
+	var renewed bool
+	for i, c := range s.contracts {
+		if c.ID == contractID {
+			renewed = c.RenewedTo != (types.FileContractID{})
+			return s.revisions[i], renewed, nil
+		}
+	}
+	return types.V2FileContract{}, false, errors.New("contract not found")
+}
+
 func (s *storeMock) ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error) {
 	for _, c := range s.contracts {
 		if c.ID == contractID {
@@ -285,6 +296,16 @@ func (s *storeMock) UpdateHostSettings(hostKey types.PublicKey, settings proto.H
 	h.Settings = settings
 	s.hosts[hostKey] = h
 	return nil
+}
+
+func (s *storeMock) UpdateContractRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) error {
+	for i, c := range s.contracts {
+		if c.ID == contractID {
+			s.revisions[i] = revision
+			return nil
+		}
+	}
+	return errors.New("contract not found")
 }
 
 // mockUpdateTx is a mocked implementation of UpdateTx which allows for unit
