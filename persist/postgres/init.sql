@@ -114,8 +114,8 @@ CREATE TABLE wallet_siacoin_elements (
 
 CREATE TABLE wallet_locked_utxos (
     id SERIAL PRIMARY KEY,
-	output_id BYTEA UNIQUE NOT NULL CHECK (LENGTH(output_id) = 32),
-	unlock_at TIMESTAMP WITH TIME ZONE NOT NULL
+    output_id BYTEA UNIQUE NOT NULL CHECK (LENGTH(output_id) = 32),
+    unlock_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 CREATE INDEX wallet_locked_utxos_unlock_at_idx ON wallet_locked_utxos(unlock_at);
 
