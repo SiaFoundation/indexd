@@ -49,7 +49,10 @@ func TestNewCluster(t *testing.T) {
 	// assert all peers are synced
 	tip := indexer.cm.Tip()
 	for _, h := range cluster.Hosts {
-		if h.c.Tip() != tip {
+		hTip, err := h.c.Tip()
+		if err != nil {
+			t.Fatal(err)
+		} else if hTip != tip {
 			t.Fatal("host is not synced")
 		}
 	}

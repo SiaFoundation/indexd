@@ -40,10 +40,14 @@ func TestSingleAddressWalletStoreTip(t *testing.T) {
 func TestSingleAddressWalletStoreUnspentSiacoinElements(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	if utxos, err := store.UnspentSiacoinElements(); err != nil {
+	if tip, utxos, err := store.UnspentSiacoinElements(); err != nil {
 		t.Fatal(err)
 	} else if len(utxos) != 0 {
 		t.Fatal("unexpected number of utxos", len(utxos))
+	} else if expectedTip, err := store.Tip(); err != nil {
+		t.Fatal(err)
+	} else if tip != expectedTip {
+		t.Fatal("unexpected tip", tip, expectedTip)
 	}
 
 	update := newTestSiacoinElement()
@@ -58,12 +62,16 @@ func TestSingleAddressWalletStoreUnspentSiacoinElements(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if utxos, err := store.UnspentSiacoinElements(); err != nil {
+	if tip, utxos, err := store.UnspentSiacoinElements(); err != nil {
 		t.Fatal(err)
 	} else if len(utxos) != 1 {
 		t.Fatal("unexpected number of utxos", len(utxos))
 	} else if !reflect.DeepEqual(utxos[0], update) {
 		t.Fatal("unexpected utxo", utxos[0])
+	} else if expectedTip, err := store.Tip(); err != nil {
+		t.Fatal(err)
+	} else if tip != expectedTip {
+		t.Fatal("unexpected tip", tip, expectedTip)
 	}
 }
 

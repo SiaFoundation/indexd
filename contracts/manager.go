@@ -101,6 +101,7 @@ type (
 	Wallet interface {
 		Address() types.Address
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
+		RecommendedFee() types.Currency
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) error
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 	}

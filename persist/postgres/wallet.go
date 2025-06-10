@@ -25,8 +25,14 @@ func (s *Store) Tip() (ci types.ChainIndex, err error) {
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs
 // including immature outputs.
-func (s *Store) UnspentSiacoinElements() (sces []types.SiacoinElement, err error) {
+func (s *Store) UnspentSiacoinElements() (tip types.ChainIndex, sces []types.SiacoinElement, err error) {
 	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		var tip types.ChainIndex
+		err := tx.QueryRow(ctx, `SELECT scanned_height, scanned_block_id FROM global_settings`).Scan(&tip.Height, (*sqlHash256)(&tip.ID))
+		if err != nil {
+			return fmt.Errorf("failed to query last scanned index: %w", err)
+		}
+
 		rows, err := tx.Query(ctx, `SELECT output_id, value, address, merkle_proof, leaf_index, maturity_height FROM wallet_siacoin_elements`)
 		if err != nil {
 			return fmt.Errorf("failed to query unspent siacoin elements: %w", err)

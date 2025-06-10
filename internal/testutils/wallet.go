@@ -13,7 +13,7 @@ import (
 // all the other components created via the ConsensusNode.
 func NewWallet(t testing.TB, c *ConsensusNode) *wallet.SingleAddressWallet {
 	ws := testutil.NewEphemeralWalletStore()
-	w, err := wallet.NewSingleAddressWallet(types.GeneratePrivateKey(), c.cm, ws)
+	w, err := wallet.NewSingleAddressWallet(types.GeneratePrivateKey(), c.cm, ws, testutil.MockSyncer{})
 	if err != nil {
 		t.Fatal(err)
 	}

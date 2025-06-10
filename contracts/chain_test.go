@@ -442,6 +442,9 @@ func (w *walletMock) Address() types.Address {
 func (w *walletMock) FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error) {
 	return types.ChainIndex{}, nil, nil
 }
+func (w *walletMock) RecommendedFee() types.Currency {
+	return types.ZeroCurrency
+}
 func (w *walletMock) ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) error {
 	return nil
 }
