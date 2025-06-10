@@ -367,13 +367,8 @@ func (a *api) handlePOSTWalletSend(jc jape.Context) {
 		a.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 		return
 	}
-	if _, err := a.chain.AddV2PoolTransactions(basis, txnset); !a.checkServerError(jc, "failed to add v2 transaction set", err) {
-		a.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
-		return
-	}
-
 	// broadcast the transaction
-	if jc.Check("failed to broadcast transaction", a.syncer.BroadcastV2TransactionSet(basis, txnset)) != nil {
+	if jc.Check("failed to broadcast transaction", a.wallet.BroadcastV2TransactionSet(basis, txnset)) != nil {
 		a.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 		return
 	}
