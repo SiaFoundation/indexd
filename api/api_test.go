@@ -353,7 +353,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// create a wallet
-	w := testutils.NewWallet(t, c)
+	w := testutils.NewWallet(t, c, types.GeneratePrivateKey())
 
 	// assert host wallet is empty
 	bal, err := w.Balance()

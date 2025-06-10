@@ -13,10 +13,10 @@ type mockSyncer struct{}
 
 // NewWallet creates a new SingleAddressWallet for testing which is connected to
 // all the other components created via the ConsensusNode.
-func NewWallet(t testing.TB, c *ConsensusNode) *wallet.SingleAddressWallet {
+func NewWallet(t testing.TB, c *ConsensusNode, walletKey types.PrivateKey) *wallet.SingleAddressWallet {
 	ws := testutil.NewEphemeralWalletStore()
 	s := NewSyncer(t, c.genesis.ID(), c.cm)
-	w, err := wallet.NewSingleAddressWallet(types.GeneratePrivateKey(), c.cm, ws, s)
+	w, err := wallet.NewSingleAddressWallet(walletKey, c.cm, ws, s)
 	if err != nil {
 		t.Fatal(err)
 	}
