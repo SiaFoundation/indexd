@@ -64,6 +64,7 @@ type (
 	Wallet interface {
 		Address() types.Address
 		Balance() (balance wallet.Balance, err error)
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 		UnconfirmedEvents() ([]wallet.Event, error)
 		Events(offset, limit int) ([]wallet.Event, error)
 
