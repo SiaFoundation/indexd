@@ -62,7 +62,7 @@ func (s *Store) Close() error {
 // the running migration will be interupted and an error returned.
 func Connect(ctx context.Context, ci ConnectionInfo, log *zap.Logger) (*Store, error) {
 	if err := ensureDatabase(ctx, ci); err != nil {
-		return nil, fmt.Errorf("failed to ensure database exists: %w", err)
+		return nil, fmt.Errorf("failed to ensure database %q exists: %w", ci.Database, err)
 	}
 
 	pool, err := pgxpool.New(ctx, ci.String())
