@@ -575,7 +575,7 @@ func TestHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// veriy hosts are unusable
+	// verify hosts are unusable
 	allHosts, err = db.Hosts(context.Background(), 0, 10)
 	if err != nil {
 		t.Fatal(err)
