@@ -89,13 +89,13 @@ WITH globals AS (
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
 	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
-	has_settings AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
+	has_settings AND settings_valid_until >= (NOW() + INTERVAL '15 minutes'),
 	has_settings AND settings_accepting_contracts,
 	has_settings AND settings_contract_price <= globals.one_sc,
-	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
-	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
-	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
-	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
+	has_settings AND (globals.hosts_min_collateral = 0 OR (settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price)),
+	has_settings AND (globals.hosts_max_storage_price = 0 OR settings_storage_price <= globals.hosts_max_storage_price),
+	has_settings AND (globals.hosts_max_ingress_price = 0 OR settings_ingress_price <= globals.hosts_max_ingress_price),
+	has_settings AND (globals.hosts_max_egress_price = 0 OR settings_egress_price <= globals.hosts_max_egress_price),
 	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
 FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -163,13 +163,13 @@ WITH globals AS (
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
 	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
-	has_settings AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
+	has_settings AND settings_valid_until >= (NOW() + INTERVAL '15 minutes'),
 	has_settings AND settings_accepting_contracts,
 	has_settings AND settings_contract_price <= globals.one_sc,
-	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
-	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
-	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
-	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
+	has_settings AND (globals.hosts_min_collateral = 0 OR (settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price)),
+	has_settings AND (globals.hosts_max_storage_price = 0 OR settings_storage_price <= globals.hosts_max_storage_price),
+	has_settings AND (globals.hosts_max_ingress_price = 0 OR settings_ingress_price <= globals.hosts_max_ingress_price),
+	has_settings AND (globals.hosts_max_egress_price = 0 OR settings_egress_price <= globals.hosts_max_egress_price),
 	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
 FROM hosts CROSS JOIN globals
 WHERE
@@ -180,14 +180,13 @@ WHERE
 		settings_max_contract_duration >= globals.contracts_period AND
 		settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
 		settings_version >= globals.host_min_version AND
-		settings_valid_until >= (NOW() + INTERVAL '1 hour') AND
+		settings_valid_until >= (NOW() + INTERVAL '15 minutes') AND
 		settings_accepting_contracts AND
 		settings_contract_price <= globals.one_sc AND
-		settings_collateral >= globals.hosts_min_collateral AND
-		settings_collateral >= 2 * settings_storage_price AND
-		settings_storage_price <= globals.hosts_max_storage_price AND
-		settings_ingress_price <= globals.hosts_max_ingress_price AND
-		settings_egress_price <= globals.hosts_max_egress_price AND
+		(globals.hosts_min_collateral = 0 OR (settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price)) AND
+		(globals.hosts_max_storage_price = 0 OR settings_storage_price <= globals.hosts_max_storage_price) AND
+		(globals.hosts_max_ingress_price = 0 OR settings_ingress_price <= globals.hosts_max_ingress_price) AND
+		(globals.hosts_max_egress_price = 0 OR settings_egress_price <= globals.hosts_max_egress_price) AND
 		settings_free_sector_price <= globals.one_sc / globals.one_tb
 		)
 	))

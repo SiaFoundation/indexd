@@ -15,7 +15,7 @@ func TestContractSettings(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	expectedSettings := contracts.MaintenanceSettings{
-		Enabled:         false,
+		Enabled:         true,
 		Period:          6048,
 		RenewWindow:     2016,
 		WantedContracts: 50,
@@ -30,7 +30,7 @@ func TestContractSettings(t *testing.T) {
 	}
 
 	// update and check again
-	expectedSettings.Enabled = true
+	expectedSettings.Enabled = false
 	expectedSettings.Period *= 2
 	expectedSettings.RenewWindow *= 2
 	expectedSettings.WantedContracts *= 2

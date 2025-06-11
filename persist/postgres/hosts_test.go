@@ -108,7 +108,7 @@ func TestHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert host is found and address, networks and settings are populated
+	// assert host is found and address, networks and settings are populated and usability is good
 	if h, err := db.Host(context.Background(), hk); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(h.Settings, hs) {
@@ -119,6 +119,26 @@ func TestHost(t *testing.T) {
 		t.Fatal("unexpected networks", h.Networks)
 	} else if h.LostSectors != 0 {
 		t.Fatal("expected lost sectors to be 0, got", h.LostSectors)
+	} else if !h.Usability.Collateral || !h.Usability.StoragePrice || !h.Usability.EgressPrice || !h.Usability.IngressPrice {
+		t.Fatal("expected host settings to be usable")
+	}
+
+	// update usability settings
+	oneH := types.NewCurrency64(1)
+	if err := db.UpdateUsabilitySettings(context.Background(), hosts.UsabilitySettings{
+		MaxEgressPrice:  hs.Prices.EgressPrice.Sub(oneH),
+		MaxIngressPrice: hs.Prices.IngressPrice.Sub(oneH),
+		MaxStoragePrice: hs.Prices.StoragePrice.Sub(oneH),
+		MinCollateral:   hs.Prices.Collateral.Add(oneH),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the host's usability is updated
+	if h, err := db.Host(context.Background(), hk); err != nil {
+		t.Fatal(err)
+	} else if h.Usability.Collateral || h.Usability.StoragePrice || h.Usability.EgressPrice || h.Usability.IngressPrice {
+		t.Fatal("expected host settings to be unusable")
 	}
 
 	// pin a sector and mark it as lost
@@ -234,7 +254,7 @@ func TestHostChecks(t *testing.T) {
 			EgressPrice:     settingMaxEgressPrice.Add(oneH),
 			Collateral:      settingMinCollataral.Sub(oneH),
 			FreeSectorPrice: oneSC.Div64(oneTB).Add(oneH),
-			ValidUntil:      time.Now().Add(59 * time.Minute).Round(time.Microsecond),
+			ValidUntil:      time.Now().Add(14 * time.Minute).Add(59 * time.Second).Round(time.Microsecond),
 			TipHeight:       frand.Uint64n(1e3),
 		},
 	}, true, time.Now())
@@ -284,7 +304,7 @@ func TestHostChecks(t *testing.T) {
 	assertCheckOK("ProtocolVersion")
 
 	// adjust price validity so we pass the check
-	hs.Prices.ValidUntil = time.Now().Add(time.Second * 3601)
+	hs.Prices.ValidUntil = time.Now().Add(time.Second * (60*15 + 1))
 	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
 	assertCheckOK("PriceValidity")
 
@@ -337,16 +357,8 @@ func TestHosts(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
 
-	// update global settings to make hosts pass all checks
-	if err := db.UpdateUsabilitySettings(context.Background(), hosts.UsabilitySettings{
-		MaxEgressPrice:     types.MaxCurrency,
-		MaxIngressPrice:    types.MaxCurrency,
-		MaxStoragePrice:    types.MaxCurrency,
-		MinCollateral:      types.ZeroCurrency,
-		MinProtocolVersion: [3]uint8{1, 0, 0},
-	}); err != nil {
-		t.Fatal(err)
-	}
+	// update maintenance settings, we can leave usability settings at their
+	// default 0 values because they'll be ignored
 	if err := db.UpdateMaintenanceSettings(context.Background(), contracts.MaintenanceSettings{
 		Period:          2,
 		RenewWindow:     1,
@@ -525,6 +537,59 @@ func TestHosts(t *testing.T) {
 	assertHosts([]types.PublicKey{hk1}, 0, 1, hosts.WithBlocked(false))
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithBlocked(false))
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithActiveContracts(true))
+
+	// update usability settings in a way all hosts pass
+	defaults := newTestHostSettings(types.PublicKey{})
+	if err := db.UpdateUsabilitySettings(context.Background(), hosts.UsabilitySettings{
+		MaxEgressPrice:  defaults.Prices.EgressPrice,
+		MaxIngressPrice: defaults.Prices.IngressPrice,
+		MaxStoragePrice: defaults.Prices.StoragePrice,
+		MinCollateral:   defaults.Prices.Collateral,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// veriy hosts are still unusable
+	allHosts, err := db.Hosts(context.Background(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(allHosts) != 4 {
+		t.Fatalf("expected 4 hosts, got %v", len(allHosts))
+	}
+	for _, h := range allHosts {
+		if !h.Usability.EgressPrice ||
+			!h.Usability.IngressPrice ||
+			!h.Usability.StoragePrice ||
+			!h.Usability.Collateral {
+			t.Fatalf("expected host %v to be usable, got %+v", h.PublicKey, h.Usability)
+		}
+	}
+
+	// update usability settings to make hosts unusable
+	if err := db.UpdateUsabilitySettings(context.Background(), hosts.UsabilitySettings{
+		MaxEgressPrice:  defaults.Prices.EgressPrice.Sub(types.NewCurrency64(1)),
+		MaxIngressPrice: defaults.Prices.IngressPrice.Sub(types.NewCurrency64(1)),
+		MaxStoragePrice: defaults.Prices.StoragePrice.Sub(types.NewCurrency64(1)),
+		MinCollateral:   defaults.Prices.Collateral.Add(types.NewCurrency64(1)),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// veriy hosts are unusable
+	allHosts, err = db.Hosts(context.Background(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(allHosts) != 4 {
+		t.Fatalf("expected 4 hosts, got %v", len(allHosts))
+	}
+	for _, h := range allHosts {
+		if h.Usability.EgressPrice ||
+			h.Usability.IngressPrice ||
+			h.Usability.StoragePrice ||
+			h.Usability.Collateral {
+			t.Fatalf("expected host %v to be usable, got %+v", h.PublicKey, h.Usability)
+		}
+	}
 }
 
 func TestHostsForScanning(t *testing.T) {
@@ -991,7 +1056,7 @@ func newTestHostSettings(pk types.PublicKey) proto4.HostSettings {
 		ProtocolVersion:     [3]uint8{1, 0, 0},
 		AcceptingContracts:  true,
 		WalletAddress:       types.StandardAddress(pk),
-		MaxCollateral:       types.Siacoins(10000),
+		MaxCollateral:       types.NewCurrency64(1e6).Mul64(1e12).Mul64(144 * 7 * 6), // collateral * 1TB * period
 		MaxContractDuration: 1000,
 		RemainingStorage:    100 * proto4.SectorSize,
 		TotalStorage:        100 * proto4.SectorSize,
@@ -1000,7 +1065,7 @@ func newTestHostSettings(pk types.PublicKey) proto4.HostSettings {
 			StoragePrice:  types.NewCurrency64(100),   // 100 H / byte / block
 			IngressPrice:  types.NewCurrency64(100),   // 100 H / byte
 			EgressPrice:   types.NewCurrency64(100),   // 100 H / byte
-			Collateral:    types.NewCurrency64(200),
+			Collateral:    types.NewCurrency64(1e6),
 			ValidUntil:    time.Now().Add(24 * time.Hour).Round(time.Microsecond),
 			TipHeight:     1,
 			Signature:     types.Signature{1, 2, 3},
