@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"sort"
 	"testing"
@@ -28,6 +29,10 @@ type pinCall struct {
 }
 
 func (c *hostClientMock) AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error) {
+	if c.failsRPCs {
+		return rhp.RPCAppendSectorsResult{}, fmt.Errorf("mocked error")
+	}
+
 	c.appendSectorCalls = append(c.appendSectorCalls, appendSectorCall{
 		hostPrices: hostPrices,
 		contractID: contractID,

@@ -87,7 +87,7 @@ type (
 		RenewedFrom types.FileContractID `json:"renewedFrom"`
 
 		// event tracking fields
-		LastPrune            time.Time `json:"lastPrune"`
+		NextPrune            time.Time `json:"nextPrune"`
 		LastBroadcastAttempt time.Time `json:"lastBroadcastAttempt"`
 
 		// revision fields, updated on refresh/renewal

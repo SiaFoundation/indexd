@@ -391,11 +391,11 @@ func TestContractsForPinning(t *testing.T) {
 func TestContractsForPruning(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	addContract := func(hk types.PublicKey, fcid types.FileContractID, allowance types.Currency, size uint64, state contracts.ContractState, good bool, lastPrune time.Time) {
+	addContract := func(hk types.PublicKey, fcid types.FileContractID, allowance types.Currency, size uint64, state contracts.ContractState, good bool, nextPrune time.Time) {
 		t.Helper()
 		store.addTestContract(t, hk, fcid)
-		query := `UPDATE contracts SET state = $1, good = $2, size = $3, capacity = $4, last_prune = $5, initial_allowance = $6, remaining_allowance = $6 WHERE contract_id = $7`
-		_, err := store.pool.Exec(context.Background(), query, sqlContractState(state), good, size, size, lastPrune, sqlCurrency(allowance), sqlHash256(fcid))
+		query := `UPDATE contracts SET state = $1, good = $2, size = $3, capacity = $4, next_prune = $5, initial_allowance = $6, remaining_allowance = $6 WHERE contract_id = $7`
+		_, err := store.pool.Exec(context.Background(), query, sqlContractState(state), good, size, size, nextPrune, sqlCurrency(allowance), sqlHash256(fcid))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -405,23 +405,22 @@ func TestContractsForPruning(t *testing.T) {
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
 
-	now := time.Now()
-	oneDayAgo := now.Add(-24 * time.Hour)
-	twoDaysAgo := now.Add(-48 * time.Hour)
+	now := time.Now().Round(time.Microsecond).Add(-time.Microsecond)
+	tomorrow := now.Add(24 * time.Hour)
 
 	// add contracts for h1
-	addContract(hk1, types.FileContractID{1}, types.ZeroCurrency, 100, contracts.ContractStateActive, true, twoDaysAgo)       // no allowance
-	addContract(hk1, types.FileContractID{2}, types.NewCurrency64(1), 100, contracts.ContractStateResolved, true, twoDaysAgo) // resolved
-	addContract(hk1, types.FileContractID{3}, types.NewCurrency64(1), 100, contracts.ContractStateActive, false, twoDaysAgo)  // bad
-	addContract(hk1, types.FileContractID{4}, types.NewCurrency64(1), 100, contracts.ContractStateActive, true, now)          // pruned recently
-	addContract(hk1, types.FileContractID{5}, types.NewCurrency64(1), 100, contracts.ContractStateActive, true, twoDaysAgo)   // ok - small size
-	addContract(hk1, types.FileContractID{6}, types.NewCurrency64(1), 200, contracts.ContractStateActive, true, twoDaysAgo)   // ok - big size
+	addContract(hk1, types.FileContractID{1}, types.ZeroCurrency, 100, contracts.ContractStateActive, true, now)          // no allowance
+	addContract(hk1, types.FileContractID{2}, types.NewCurrency64(1), 100, contracts.ContractStateResolved, true, now)    // resolved
+	addContract(hk1, types.FileContractID{3}, types.NewCurrency64(1), 100, contracts.ContractStateActive, false, now)     // bad
+	addContract(hk1, types.FileContractID{4}, types.NewCurrency64(1), 100, contracts.ContractStateActive, true, tomorrow) // pruned recently
+	addContract(hk1, types.FileContractID{5}, types.NewCurrency64(1), 100, contracts.ContractStateActive, true, now)      // ok - small size
+	addContract(hk1, types.FileContractID{6}, types.NewCurrency64(1), 200, contracts.ContractStateActive, true, now)      // ok - big size
 
 	// add contracts for h2
-	addContract(hk2, types.FileContractID{7}, types.NewCurrency64(1), 100, contracts.ContractStateActive, true, twoDaysAgo) // ok
+	addContract(hk2, types.FileContractID{7}, types.NewCurrency64(1), 100, contracts.ContractStateActive, true, now) // ok
 
 	// assert contracts for pruning for h1
-	contractIDs, err := store.ContractsForPruning(context.Background(), hk1, oneDayAgo)
+	contractIDs, err := store.ContractsForPruning(context.Background(), hk1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contractIDs) != 2 {
@@ -433,7 +432,7 @@ func TestContractsForPruning(t *testing.T) {
 	}
 
 	// assert contracts for pruning for h2
-	contractIDs, err = store.ContractsForPruning(context.Background(), hk2, oneDayAgo)
+	contractIDs, err = store.ContractsForPruning(context.Background(), hk2)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contractIDs) != 1 {
@@ -647,6 +646,7 @@ func TestFormRenewContract(t *testing.T) {
 
 		contract.Formation = time.Time{}
 		contract.LastBroadcastAttempt = time.Time{}
+		contract.NextPrune = time.Time{}
 		if !reflect.DeepEqual(contract, expected) {
 			t.Fatalf("mismatch: \n%+v\n%+v", contract, expected)
 		}
@@ -1012,27 +1012,29 @@ func TestUpdateContractState(t *testing.T) {
 	assertState(contracts.ContractStateActive)  // assert active
 }
 
-func TestMarkPruned(t *testing.T) {
+func TestUpdateNextPruned(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host with one contract
 	hk := store.addTestHost(t)
 	fcid := store.addTestContract(t, hk)
 
-	// assert contract is not marked as pruned
+	// assert contract is marked to be pruned within 24h
+	tomorrow := time.Now().Add(24 * time.Hour)
 	if contract, err := store.Contract(context.Background(), fcid); err != nil {
 		t.Fatal(err)
-	} else if !contract.LastPrune.IsZero() {
-		t.Fatal("contract should not be pruned")
+	} else if !(tomorrow.Add(-time.Second).Before(contract.NextPrune) && tomorrow.Add(time.Second).After(contract.NextPrune)) {
+		t.Fatal("contract should be scheduled for pruning 24h from now")
 	}
 
 	// mark as pruned and assert contract was updated correctly
-	if err := store.MarkPruned(context.Background(), fcid); err != nil {
+	oneHourFromNow := time.Now().Add(time.Hour).Round(time.Microsecond)
+	if err := store.UpdateNextPrune(context.Background(), fcid, oneHourFromNow); err != nil {
 		t.Fatal(err)
 	} else if contract, err := store.Contract(context.Background(), fcid); err != nil {
 		t.Fatal(err)
-	} else if contract.LastPrune.IsZero() {
-		t.Fatal("contract should be marked as pruned")
+	} else if !contract.NextPrune.Equal(oneHourFromNow) {
+		t.Fatal("contract next_prune should be updated")
 	}
 
 	// assert field is decorated in store.Contracts as well
@@ -1040,8 +1042,8 @@ func TestMarkPruned(t *testing.T) {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("expected 1 contract, got %d", len(contracts))
-	} else if contracts[0].LastPrune.IsZero() {
-		t.Fatal("contract should be marked as pruned")
+	} else if contracts[0].NextPrune.IsZero() {
+		t.Fatal("contract should be decorated with the next prune time")
 	}
 }
 
@@ -1192,7 +1194,8 @@ func BenchmarkContracts(b *testing.B) {
 	)
 
 	randomTime := func() time.Time {
-		return time.Now().Add(-time.Duration(frand.Uint64n(60*60)) * time.Second)
+		maxOneHour := time.Duration(frand.Uint64n(60*60)) * time.Second
+		return time.Now().Add(-30 * time.Minute).Add(maxOneHour)
 	}
 
 	// prepare database
@@ -1213,7 +1216,7 @@ func BenchmarkContracts(b *testing.B) {
 				revision := newTestRevision(hk)
 				frand.Read(hostContractIDs[i][:])
 				size := frand.Uint64n(1e9)
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, last_prune) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
+				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, next_prune) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
 					hostID,
 					sqlHash256(hostContractIDs[i][:]),
 					sqlFileContract(revision),
@@ -1227,7 +1230,7 @@ func BenchmarkContracts(b *testing.B) {
 					size,                                               // random size
 					size+frand.Uint64n(1e3),                            // random capacity
 					randomTime(),                                       // random last_broadcast_attempt
-					randomTime(),                                       // random last_prune
+					randomTime(),                                       // random next_prune
 				); err != nil {
 					return err
 				}
@@ -1313,7 +1316,7 @@ func BenchmarkContracts(b *testing.B) {
 
 	b.Run("contracts_for_pruning", func(b *testing.B) {
 		for b.Loop() {
-			_, err := store.ContractsForPruning(context.Background(), hosts[frand.Intn(len(hosts))], randomTime())
+			_, err := store.ContractsForPruning(context.Background(), hosts[frand.Intn(len(hosts))])
 			if err != nil {
 				b.Fatal(err)
 			}

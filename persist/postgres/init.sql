@@ -160,7 +160,7 @@ CREATE TABLE contracts (
   last_broadcast_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 
   -- contract pruning
-  last_prune TIMESTAMP WITH TIME ZONE,
+  next_prune TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW() + INTERVAL '1 day',
 
   -- metrics for visualization (not ACID)
   capacity BIGINT NOT NULL DEFAULT 0 CHECK(capacity >= size),

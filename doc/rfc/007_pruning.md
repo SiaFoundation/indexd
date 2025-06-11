@@ -31,7 +31,7 @@ exclusive control over a contract to do so.
 
 To avoid overwhelming the host, pruning sectors is limited to 1TiB worth of data
 per batch. To avoid overwhelming the indexer, we limit pruning a contract to
-once per day using a `last_prune` field on the contract within the database.
+once per day using a `next_prune` field on the contract within the database.
 
 To determine whether we need to prune or not, we can keep a `prunable_data` flag
 on the contract which we increment whenever we delete from the `host_sectors`

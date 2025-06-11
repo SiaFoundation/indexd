@@ -143,6 +143,8 @@ func (s *storeMock) ContractElement(ctx context.Context, contractID types.FileCo
 				},
 				V2FileContract: types.V2FileContract{
 					HostPublicKey: c.HostKey,
+					Capacity:      c.Capacity,
+					Filesize:      c.Size,
 				},
 			}, nil
 		}
@@ -294,6 +296,7 @@ func (s *storeMock) UpdateHostSettings(hostKey types.PublicKey, settings proto.H
 		return hosts.ErrNotFound
 	}
 	h.Settings = settings
+	h.Usability.AcceptingContracts = settings.AcceptingContracts
 	s.hosts[hostKey] = h
 	return nil
 }

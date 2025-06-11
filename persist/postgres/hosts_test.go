@@ -1091,6 +1091,151 @@ func TestHostsForPinning(t *testing.T) {
 	}
 }
 
+func TestHostsForPruning(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// add two hosts
+	hk1 := db.addTestHost(t)
+	hk2 := db.addTestHost(t)
+
+	// add account
+	acc := proto4.Account{1}
+	if err := db.AddAccount(context.Background(), types.PublicKey(acc)); err != nil {
+		t.Fatal(err)
+	}
+
+	// add contract for both hosts
+	fcid1 := db.addTestContract(t, hk1)
+	fcid2 := db.addTestContract(t, hk2)
+
+	// assert there's no hosts for pruning yet
+	if hks, err := db.HostsForPruning(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(hks) != 0 {
+		t.Fatalf("expected 0 hosts, got %d", len(hks))
+	}
+
+	// update next prune so h2 should be returned for pruning
+	if _, err := db.pool.Exec(context.Background(), `UPDATE contracts SET next_prune = NOW() - INTERVAL '1 second' WHERE contract_id = $1`, sqlHash256(fcid2)); err != nil {
+		t.Fatal(err)
+	} else if hks, err := db.HostsForPruning(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(hks) != 1 || hks[0] != hk2 {
+		t.Fatalf("expected h2 for pruning, got %v", hks)
+	}
+
+	// block host 2 and assert it is not returned anymore
+	if err := db.BlockHosts(context.Background(), []types.PublicKey{hk2}, "test"); err != nil {
+		t.Fatal(err)
+	} else if hks, err := db.HostsForPruning(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(hks) != 0 {
+		t.Fatalf("expected 0 hosts, got %d", len(hks))
+	}
+
+	// update next prune so h1 should be returned for pruning
+	if _, err := db.pool.Exec(context.Background(), `UPDATE contracts SET next_prune = NOW() - INTERVAL '1 second' WHERE contract_id = $1`, sqlHash256(fcid1)); err != nil {
+		t.Fatal(err)
+	} else if hks, err := db.HostsForPruning(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(hks) != 1 || hks[0] != hk1 {
+		t.Fatalf("expected h1 for pruning, got %v", hks)
+	}
+
+	// update good status so h1 is not returned anymore
+	if _, err := db.pool.Exec(context.Background(), `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(fcid1)); err != nil {
+		t.Fatal(err)
+	} else if hks, err := db.HostsForPruning(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(hks) != 0 {
+		t.Fatalf("expected 0 hosts, got %d", len(hks))
+	}
+}
+
+// BenchmarkHostsForPruning benchmarks HostsForPruning.
+func BenchmarkHostsForPruning(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	// add account
+	account := proto4.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	const (
+		dbBaseSize = 1 << 40 // 1TiB of sectors
+
+		nHosts            = 1000
+		nContractsPerHost = 100
+		nBlocklistHosts   = 1000
+	)
+
+	randomTime := func() time.Time {
+		maxOneHour := time.Duration(frand.Uint64n(60*60)) * time.Second
+		return time.Now().Add(-30 * time.Minute).Add(maxOneHour)
+	}
+
+	// prepare database
+	hostToContractID := make(map[types.PublicKey]types.FileContractID, nHosts)
+	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		for range nHosts {
+			// add host
+			hk := types.PublicKey(frand.Entropy256())
+			var hostID int64
+			err := tx.QueryRow(ctx, `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
+			if err != nil {
+				return err
+			}
+
+			// add contracts
+			var fcid types.FileContractID
+			for range nContractsPerHost {
+				frand.Read(fcid[:])
+				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, next_prune) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11);`,
+					hostID,
+					sqlHash256(fcid[:]),
+					sqlFileContract(newTestRevision(hk)),
+					sqlCurrency(types.ZeroCurrency),
+					sqlCurrency(types.ZeroCurrency),
+					sqlCurrency(types.ZeroCurrency),
+					sqlCurrency(types.ZeroCurrency),
+					sqlCurrency(types.ZeroCurrency),
+					sqlContractState(uint8(frand.Uint64n(5))), // random contract state (40% active)
+					frand.Uint64n(2) == 0,                     // random good state (50% good)
+					randomTime(),                              // random next prune time
+
+				); err != nil {
+					return err
+				}
+			}
+			hostToContractID[hk] = fcid
+		}
+
+		// we LEFT JOIN the blocklist so we populate it with random entries
+		for range nBlocklistHosts {
+			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key, reason) VALUES ($1, 'none') ON CONFLICT (public_key) DO NOTHING", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	for b.Loop() {
+		batch, err := store.HostsForPruning(context.Background())
+		if err != nil {
+			b.Fatal(err)
+		} else if len(batch) != nHosts {
+			b.Fatal("unexpected number of hosts", len(batch))
+		}
+	}
+}
+
 func TestHostsForIntegrityChecks(t *testing.T) {
 	// create database
 	log := zaptest.NewLogger(t)
@@ -1230,9 +1375,10 @@ func BenchmarkHostsForPinning(b *testing.B) {
 			for range nContractsPerHost {
 				frand.Read(fcid[:])
 				size := frand.Uint64n(1e9)
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9, $10, $11);`,
+				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12);`,
 					hostID,
 					sqlHash256(fcid[:]),
+					sqlFileContract(newTestRevision(hk)),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
