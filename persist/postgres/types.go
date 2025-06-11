@@ -242,6 +242,25 @@ func (h sqlHash256) Value() (driver.Value, error) {
 	return h[:], nil
 }
 
+type sqlSignature types.Signature
+
+func (s *sqlSignature) Scan(src any) error {
+	switch src := src.(type) {
+	case []byte:
+		if len(src) != len(sqlSignature{}) {
+			return fmt.Errorf("failed to scan source into Signature due to invalid number of bytes %v != %v: %v", len(src), len(sqlSignature{}), src)
+		}
+		copy(s[:], src)
+		return nil
+	default:
+		return fmt.Errorf("cannot scan %T to Signature", src)
+	}
+}
+
+func (s sqlSignature) Value() (driver.Value, error) {
+	return s[:], nil
+}
+
 type sqlMerkleProof []types.Hash256
 
 func (mp *sqlMerkleProof) Scan(src any) error {

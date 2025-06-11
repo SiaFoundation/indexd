@@ -38,7 +38,7 @@ func TestUpdateChainState(t *testing.T) {
 		return tx.WalletApplyIndex(types.ChainIndex{Height: 1}, sces, nil, events, time.Now())
 	}); err != nil {
 		t.Fatal(err)
-	} else if utxos, err := store.UnspentSiacoinElements(); err != nil {
+	} else if tip, utxos, err := store.UnspentSiacoinElements(); err != nil {
 		t.Fatal(err)
 	} else if len(utxos) != 1 {
 		t.Fatal("unexpected number of utxos", len(utxos))
@@ -46,6 +46,10 @@ func TestUpdateChainState(t *testing.T) {
 		t.Fatal(err)
 	} else if len(events) != 1 {
 		t.Fatal("unexpected number of events", len(events))
+	} else if expectedTip, err := store.Tip(); err != nil {
+		t.Fatal(err)
+	} else if tip != expectedTip {
+		t.Fatal("unexpected tip", tip, expectedTip)
 	}
 
 	// spend it
@@ -53,10 +57,14 @@ func TestUpdateChainState(t *testing.T) {
 		return tx.WalletApplyIndex(types.ChainIndex{Height: 2}, nil, sces, nil, time.Now())
 	}); err != nil {
 		t.Fatal(err)
-	} else if utxos, err := store.UnspentSiacoinElements(); err != nil {
+	} else if tip, utxos, err := store.UnspentSiacoinElements(); err != nil {
 		t.Fatal(err)
 	} else if len(utxos) != 0 {
 		t.Fatal("unexpected number of utxos", len(utxos))
+	} else if expectedTip, err := store.Tip(); err != nil {
+		t.Fatal(err)
+	} else if tip != expectedTip {
+		t.Fatal("unexpected tip", tip, expectedTip)
 	}
 
 	// revert spend
@@ -64,7 +72,7 @@ func TestUpdateChainState(t *testing.T) {
 		return tx.WalletRevertIndex(types.ChainIndex{Height: 2}, nil, sces, time.Now())
 	}); err != nil {
 		t.Fatal(err)
-	} else if utxos, err := store.UnspentSiacoinElements(); err != nil {
+	} else if tip, utxos, err := store.UnspentSiacoinElements(); err != nil {
 		t.Fatal(err)
 	} else if len(utxos) != 1 {
 		t.Fatal("unexpected number of utxos", len(utxos))
@@ -72,6 +80,10 @@ func TestUpdateChainState(t *testing.T) {
 		t.Fatal(err)
 	} else if len(events) != 1 {
 		t.Fatal("unexpected number of events", len(events))
+	} else if expectedTip, err := store.Tip(); err != nil {
+		t.Fatal(err)
+	} else if tip != expectedTip {
+		t.Fatal("unexpected tip", tip, expectedTip)
 	}
 
 	// update state elements
@@ -85,12 +97,16 @@ func TestUpdateChainState(t *testing.T) {
 		})
 	}); err != nil {
 		t.Fatal("unexpected error", err)
-	} else if utxos, err := store.UnspentSiacoinElements(); err != nil {
+	} else if tip, utxos, err := store.UnspentSiacoinElements(); err != nil {
 		t.Fatal(err)
 	} else if len(utxos) != 1 {
 		t.Fatal("unexpected number of utxos", len(utxos))
 	} else if !reflect.DeepEqual(utxos[0].StateElement, update) {
 		t.Fatal("unexpected state element", utxos[0].StateElement)
+	} else if expectedTip, err := store.Tip(); err != nil {
+		t.Fatal(err)
+	} else if tip != expectedTip {
+		t.Fatal("unexpected tip", tip, expectedTip)
 	}
 
 	// revert create
@@ -98,7 +114,7 @@ func TestUpdateChainState(t *testing.T) {
 		return tx.WalletRevertIndex(types.ChainIndex{Height: 1}, sces, nil, time.Now())
 	}); err != nil {
 		t.Fatal(err)
-	} else if utxos, err := store.UnspentSiacoinElements(); err != nil {
+	} else if tip, utxos, err := store.UnspentSiacoinElements(); err != nil {
 		t.Fatal(err)
 	} else if len(utxos) != 0 {
 		t.Fatal("unexpected number of utxos", len(utxos))
@@ -106,5 +122,9 @@ func TestUpdateChainState(t *testing.T) {
 		t.Fatal(err)
 	} else if len(events) != 0 {
 		t.Fatal("unexpected number of events", len(events))
+	} else if expectedTip, err := store.Tip(); err != nil {
+		t.Fatal(err)
+	} else if tip != expectedTip {
+		t.Fatal("unexpected tip", tip, expectedTip)
 	}
 }

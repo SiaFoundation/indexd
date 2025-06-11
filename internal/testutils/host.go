@@ -97,7 +97,7 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 	s := NewSyncer(t, c.genesis.ID(), c.cm)
 
 	ws := testutil.NewEphemeralWalletStore()
-	w, err := wallet.NewSingleAddressWallet(types.GeneratePrivateKey(), c.cm, ws)
+	w, err := wallet.NewSingleAddressWallet(types.GeneratePrivateKey(), c.cm, ws, s)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +126,11 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 
 	syncFn := func() {
 		t.Helper()
-		reverted, applied, err := c.cm.UpdatesSince(w.Tip(), 1000)
+		tip, err := w.Tip()
+		if err != nil {
+			t.Fatal(err)
+		}
+		reverted, applied, err := c.cm.UpdatesSince(tip, 1000)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -77,7 +77,7 @@ WITH globals AS (
 		settings_accepting_contracts, settings_max_collateral, settings_max_contract_duration,
 		settings_remaining_storage, settings_total_storage, settings_contract_price,
 		settings_collateral, settings_storage_price, settings_ingress_price,
-		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until,
+		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until, settings_signature,
 		last_successful_scan IS NOT NULL as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
 	FROM hosts
@@ -152,7 +152,7 @@ WITH globals AS (
 		settings_accepting_contracts, settings_max_collateral, settings_max_contract_duration,
 		settings_remaining_storage, settings_total_storage, settings_contract_price,
 		settings_collateral, settings_storage_price, settings_ingress_price,
-		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until,
+		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until, settings_signature,
 		last_successful_scan IS NOT NULL as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
 	FROM hosts
@@ -434,7 +434,8 @@ SET
 	settings_egress_price = $16,
 	settings_free_sector_price = $17,
 	settings_tip_height = $18,
-	settings_valid_until = $19
+	settings_valid_until = $19,
+	settings_signature = $20
 FROM computed
 WHERE hosts.id = computed.id RETURNING hosts.id`,
 			sqlPublicKey(hk),
@@ -456,6 +457,7 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 			sqlCurrency(hs.Prices.FreeSectorPrice),
 			hs.Prices.TipHeight,
 			hs.Prices.ValidUntil,
+			sqlSignature(hs.Prices.Signature),
 		).Scan(&hostID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("host %q: %w", hk, hosts.ErrNotFound)
@@ -567,6 +569,7 @@ func scanHost(s scanner) (dbHost, error) {
 		(*sqlCurrency)(&host.Settings.Prices.FreeSectorPrice),
 		&host.Settings.Prices.TipHeight,
 		&validUntil,
+		(*sqlSignature)(&host.Settings.Prices.Signature),
 		&ignore,
 		&ignore,
 		&host.Usability.Uptime,

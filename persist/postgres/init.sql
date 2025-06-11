@@ -30,7 +30,8 @@ CREATE TABLE hosts (
     settings_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0,
     settings_free_sector_price NUMERIC(50,0) NOT NULL DEFAULT 0,
     settings_tip_height BIGINT NOT NULL DEFAULT 0,
-    settings_valid_until TIMESTAMP WITH TIME ZONE
+    settings_valid_until TIMESTAMP WITH TIME ZONE,
+    settings_signature BYTEA NOT NULL DEFAULT '\x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(settings_signature) = 64)
 );
 CREATE INDEX hosts_next_scan_idx ON hosts(next_scan);
 

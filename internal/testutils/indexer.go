@@ -45,10 +45,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	s := NewSyncer(t, c.genesis.ID(), c.cm)
 
 	walletKey := types.GeneratePrivateKey()
-	wm, err := wallet.NewSingleAddressWallet(walletKey, c.cm, store, wallet.WithLogger(log.Named("wallet")), wallet.WithReservationDuration(3*time.Hour))
-	if err != nil {
-		t.Fatalf("failed to create wallet: %v", err)
-	}
+	wm := NewWallet(t, c, walletKey)
 
 	hm, err := hosts.NewManager(s, store, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(500*time.Millisecond), hosts.WithScanInterval(time.Second))
 	if err != nil {
