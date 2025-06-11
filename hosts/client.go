@@ -284,13 +284,18 @@ func (c *hostClient) syncRevision(ctx context.Context, contractID types.FileCont
 	// update latest revision
 	err = c.store.UpdateContractRevision(ctx, contractID, resp.Contract)
 	if err != nil {
-		c.log.Debug("failed to update contract revision", zap.Error(err))
+		c.log.Error("failed to update contract revision", zap.Stringer("contractID", contractID), zap.Error(err))
 		return types.V2FileContract{}, false, fmt.Errorf("failed to update contract revision: %w", err)
 	}
 
 	return resp.Contract, resp.Renewed, nil
 }
 
+// withRevision retrieves the current revision of the specified contract ID from
+// the database and executes the provided revise function with it. If the host
+// reports an invalid signature, suggesting the local revision is out of sync,
+// it will synchronize with the host and retry the function using the updated
+// revision. Therefore, the revise function must be idempotent.
 func (c *hostClient) withRevision(ctx context.Context, contractID types.FileContractID, reviseFn func(revision types.V2FileContract) (types.V2FileContract, error)) error {
 	cs := c.cm.TipState()
 	bh := cs.Index.Height
@@ -313,6 +318,7 @@ func (c *hostClient) withRevision(ctx context.Context, contractID types.FileCont
 
 	// try and sync the revision if we got an error that indicates the revision is invalid
 	if err != nil && strings.Contains(err.Error(), proto.ErrInvalidSignature.Error()) {
+		c.log.Debug("syncing contract revision due to invalid signature", zap.Uint64("revisionNumber", rev.RevisionNumber), zap.Stringer("contractID", contractID), zap.Error(err))
 		rev, renewed, err = c.syncRevision(ctx, contractID, rev)
 		if err != nil {
 			return fmt.Errorf("failed to sync revision: %w", err)
@@ -321,6 +327,7 @@ func (c *hostClient) withRevision(ctx context.Context, contractID types.FileCont
 		} else if rev.ProofHeight > maxProofHeight {
 			return fmt.Errorf("%d > %d (%d+%d), %w", rev.ProofHeight, maxProofHeight, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
 		}
+		c.log.Debug("synced contract revision", zap.Uint64("revisionNumber", rev.RevisionNumber), zap.Stringer("contractID", contractID))
 
 		// try and revise the contract again
 		update, err = reviseFn(rev)
@@ -332,7 +339,7 @@ func (c *hostClient) withRevision(ctx context.Context, contractID types.FileCont
 	// update revision in the database
 	err = c.store.UpdateContractRevision(ctx, contractID, update)
 	if err != nil {
-		c.log.Debug("failed to update contract revision", zap.Error(err))
+		c.log.Error("failed to update contract revision", zap.Error(err))
 	}
 
 	return nil
