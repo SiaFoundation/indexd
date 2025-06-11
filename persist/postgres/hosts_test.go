@@ -1193,9 +1193,10 @@ func BenchmarkHostsForPruning(b *testing.B) {
 			var fcid types.FileContractID
 			for range nContractsPerHost {
 				frand.Read(fcid[:])
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, next_prune) VALUES ($1, $2, 0, 0, $3, $4, $5, $6, $7, $8, $9, $10);`,
+				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, next_prune) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11);`,
 					hostID,
 					sqlHash256(fcid[:]),
+					sqlFileContract(newTestRevision(hk)),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
