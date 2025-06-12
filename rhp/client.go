@@ -64,6 +64,8 @@ type (
 	}
 )
 
+type rpcLatestRevisionFn func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error)
+
 // HostClient is a client that can be used to interact with a host using the RHP
 // methods. It provides methods to form contracts, append sectors, free sectors,
 // get sector roots, refresh and renew contracts, and replenish accounts. It
@@ -73,8 +75,9 @@ type (
 type HostClient struct {
 	hostKey types.PublicKey
 
-	client rhp.TransportClient
-	signer rhp.FormContractSigner
+	client           rhp.TransportClient
+	signer           rhp.FormContractSigner
+	latestRevisionFn rpcLatestRevisionFn
 
 	cm    ChainManager
 	store RevisionStore
@@ -88,8 +91,9 @@ func NewHostClient(hk types.PublicKey, cm ChainManager, client rhp.TransportClie
 	return &HostClient{
 		hostKey: hk,
 
-		client: client,
-		signer: signer,
+		client:           client,
+		signer:           signer,
+		latestRevisionFn: rhp.RPCLatestRevision, // allows mocking in tests
 
 		cm:    cm,
 		store: store,
@@ -245,7 +249,7 @@ func (c *HostClient) syncRevision(ctx context.Context, contractID types.FileCont
 	defer cancel()
 
 	// fetch latest revision
-	resp, err := rhp.RPCLatestRevision(ctx, c.client, contractID)
+	resp, err := c.latestRevisionFn(ctx, c.client, contractID)
 	if err != nil {
 		c.log.Debug("failed to fetch latest revision", zap.Error(err))
 		return types.V2FileContract{}, false, fmt.Errorf("%w; failed to fetch latest revision", err)
@@ -257,7 +261,6 @@ func (c *HostClient) syncRevision(ctx context.Context, contractID types.FileCont
 	err = c.store.UpdateContractRevision(ctx, contractID, resp.Contract)
 	if err != nil {
 		c.log.Error("failed to update contract revision", zap.Stringer("contractID", contractID), zap.Error(err))
-		return types.V2FileContract{}, false, fmt.Errorf("failed to update contract revision: %w", err)
 	}
 
 	return resp.Contract, resp.Renewed, nil
@@ -306,6 +309,8 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 	}
 	if err != nil {
 		return err
+	} else if update.RevisionNumber <= rev.RevisionNumber {
+		return fmt.Errorf("new revision number %d is not greater than current revision number %d", update.RevisionNumber, rev.RevisionNumber)
 	}
 
 	// update revision in the database

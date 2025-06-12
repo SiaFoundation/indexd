@@ -1,0 +1,185 @@
+package rhp
+
+import (
+	"context"
+	"errors"
+	"math"
+	"strings"
+	"testing"
+
+	"go.sia.tech/core/consensus"
+	proto "go.sia.tech/core/rhp/v4"
+	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
+	"go.uber.org/zap"
+	"lukechampine.com/frand"
+)
+
+type mockChainManager struct{}
+
+func (c *mockChainManager) TipState() consensus.State {
+	return consensus.State{}
+}
+
+func (c *mockChainManager) V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error) {
+	return types.ChainIndex{}, nil, nil
+}
+
+type mockStore struct {
+	revisions map[types.FileContractID]types.V2FileContract
+	renewed   map[types.FileContractID]bool
+}
+
+func (s *mockStore) ContractRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, bool, error) {
+	if contractID == (types.FileContractID{4, 0, 4}) {
+		return types.V2FileContract{}, false, errors.New("revision not found")
+	}
+	rev, ok := s.revisions[contractID]
+	if !ok {
+		rev = types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: types.Siacoins(1)}}
+	}
+	return rev, s.renewed[contractID], nil
+}
+
+func (s *mockStore) UpdateContractRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) error {
+	if contractID == (types.FileContractID{5, 0, 0}) {
+		return errors.New("persist error")
+	}
+	s.revisions[contractID] = revision
+	return nil
+}
+
+func TestWithRevision(t *testing.T) {
+	db := &mockStore{
+		revisions: make(map[types.FileContractID]types.V2FileContract),
+		renewed:   make(map[types.FileContractID]bool),
+	}
+	cm := &mockChainManager{}
+	c := NewHostClient(types.PublicKey{}, cm, nil, nil, db, zap.NewNop())
+
+	db.renewed[types.FileContractID{1}] = true                                                              // renewed
+	db.revisions[types.FileContractID{2}] = types.V2FileContract{ProofHeight: revisionSubmissionBuffer + 1} // not revisable
+	db.revisions[types.FileContractID{3}] = types.V2FileContract{RenterOutput: types.SiacoinOutput{}}       // out of funds
+
+	noopFn := func(revision types.V2FileContract) (types.V2FileContract, error) { return types.V2FileContract{}, nil }
+	invalidSigFn := func(revision types.V2FileContract) (types.V2FileContract, error) {
+		return types.V2FileContract{}, proto.ErrInvalidSignature
+	}
+
+	// assert ErrContractRenewed is returned for a renewed contract
+	err := c.withRevision(context.Background(), types.FileContractID{1}, noopFn)
+	if !errors.Is(err, ErrContractRenewed) {
+		t.Fatalf("expected ErrContractRenewed, got: %v", err)
+	}
+
+	// assert ErrContractNotRevisable is returned for a contract that can't be revised
+	err = c.withRevision(context.Background(), types.FileContractID{2}, noopFn)
+	if !errors.Is(err, ErrContractNotRevisable) {
+		t.Fatalf("expected ErrContractNotRevisable, got: %v", err)
+	}
+
+	// assert ErrContractOutOfFunds is returned for a contract with insufficient funds
+	err = c.withRevision(context.Background(), types.FileContractID{3}, noopFn)
+	if !errors.Is(err, ErrContractOutOfFunds) {
+		t.Fatalf("expected ErrContractOutOfFunds, got: %v", err)
+	}
+
+	// assert withRevision errors out if the revision can't be found
+	err = c.withRevision(context.Background(), types.FileContractID{4, 0, 4}, noopFn)
+	if err == nil || !strings.Contains(err.Error(), "revision not found") {
+		t.Fatalf("expected error for non-existent contract, got: %v", err)
+	}
+
+	// assert withRevision errors out if the revise function returns an unexpected error
+	errUnexpected := errors.New("unexpected error")
+	if err := c.withRevision(context.Background(), types.FileContractID{4}, func(revision types.V2FileContract) (types.V2FileContract, error) {
+		return types.V2FileContract{}, errUnexpected
+	}); err != errUnexpected {
+		t.Fatalf("expected unexpected error, got: %v", err)
+	}
+
+	// assert withRevision persists the revision if no error occurs and we don't need to sync the revision
+	update := frand.Uint64n(math.MaxUint64)
+	err = c.withRevision(context.Background(), types.FileContractID{4}, func(revision types.V2FileContract) (types.V2FileContract, error) {
+		return types.V2FileContract{RevisionNumber: update}, nil
+	})
+	if err != nil || db.revisions[types.FileContractID{4}].RevisionNumber != update {
+		t.Fatalf("expected no error and revision to be updated, got: %v, revision: %v", err, db.revisions[types.FileContractID{4}])
+	}
+
+	// assert withRevision does not return an error if the update fails to persist
+	err = c.withRevision(context.Background(), types.FileContractID{5, 0, 0}, func(revision types.V2FileContract) (types.V2FileContract, error) {
+		return types.V2FileContract{RevisionNumber: update}, nil
+	})
+	if err != nil || db.revisions[types.FileContractID{5, 0, 0}].RevisionNumber != 0 {
+		t.Fatalf("expected no error and revision to not be persisted, got: %v, revision: %v", err, db.revisions[types.FileContractID{5, 0, 0}])
+	}
+
+	// assert withRevision returns an error if the latest revision cannot be
+	// found when trying to sync the revision with the host
+	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+		return proto.RPCLatestRevisionResponse{}, errors.New("latest revision not found")
+	}
+	err = c.withRevision(context.Background(), types.FileContractID{6}, invalidSigFn)
+	if err == nil || !strings.Contains(err.Error(), "latest revision not found") {
+		t.Fatal("unexpected error", err)
+	}
+
+	// assert withRevision returns an error if the local revision is newer than the host revision
+	db.revisions[types.FileContractID{7}] = types.V2FileContract{RevisionNumber: 2, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(1)}}
+	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+		return proto.RPCLatestRevisionResponse{
+			Contract:  types.V2FileContract{RevisionNumber: 1},
+			Revisable: true,
+			Renewed:   false,
+		}, nil
+	}
+	err = c.withRevision(context.Background(), types.FileContractID{7}, invalidSigFn)
+	if err == nil || !strings.Contains(err.Error(), "local revision is newer than host revision") {
+		t.Fatal("unexpected error", err)
+	}
+	// assert withRevision updates the revision in the database after syncing it with the host
+	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+		return proto.RPCLatestRevisionResponse{
+			Contract:  types.V2FileContract{RevisionNumber: update},
+			Revisable: true,
+			Renewed:   false,
+		}, nil
+	}
+	err = c.withRevision(context.Background(), types.FileContractID{8}, func(revision types.V2FileContract) (types.V2FileContract, error) {
+		if revision.RevisionNumber != update {
+			return types.V2FileContract{}, proto.ErrInvalidSignature
+		}
+		revision.RevisionNumber++
+		return revision, nil
+	})
+	if err != nil || db.revisions[types.FileContractID{8}].RevisionNumber != update+1 {
+		t.Fatalf("expected no error and revision to be updated, got: %v, revision: %v", err, db.revisions[types.FileContractID{8}])
+	}
+
+	// assert withRevision returns an error if it turns out the contract was renewed
+	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+		return proto.RPCLatestRevisionResponse{
+			Contract:  types.V2FileContract{RevisionNumber: 1},
+			Revisable: false,
+			Renewed:   true,
+		}, nil
+	}
+	err = c.withRevision(context.Background(), types.FileContractID{9}, invalidSigFn)
+	if !errors.Is(err, ErrContractRenewed) {
+		t.Fatalf("expected ErrContractRenewed, got: %v", err)
+	}
+
+	// assert withRevision returns an error if it turns out the contract is not revisable
+	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+		return proto.RPCLatestRevisionResponse{
+			Contract:  types.V2FileContract{ProofHeight: revisionSubmissionBuffer + 1},
+			Revisable: false,
+			Renewed:   false,
+		}, nil
+	}
+	err = c.withRevision(context.Background(), types.FileContractID{10}, invalidSigFn)
+	if !errors.Is(err, ErrContractNotRevisable) {
+		t.Fatalf("expected ErrContractNotRevisable, got: %v", err)
+	}
+}
