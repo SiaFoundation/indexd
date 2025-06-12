@@ -88,7 +88,6 @@ type (
 		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
 		PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
-		SyncContract(ctx context.Context, contractID types.FileContractID, params ContractSyncParams) error
 		PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
 		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
@@ -399,11 +398,6 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 
 	blockHeight := cm.cm.TipState().Index.Height
 
-	// sync our local contract state with the latest revision known to hosts
-	if err := cm.performContractRevisionSyncs(ctx); err != nil {
-		return fmt.Errorf("failed to sync contract state: %w", err)
-	}
-
 	// block bad hosts we have contracts with
 	if err := cm.blockBadHosts(ctx); err != nil {
 		return fmt.Errorf("failed to block bad hosts: %w", err)
@@ -432,81 +426,6 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 	// rebroadcast revisions for all good contracts
 	if err := cm.performBroadcastContractRevisions(ctx, log); err != nil {
 		return fmt.Errorf("failed to broadcast contract revisions: %w", err)
-	}
-
-	return nil
-}
-
-func (cm *ContractManager) performContractRevisionSyncs(ctx context.Context) error {
-	log := cm.log.Named("sync")
-
-	batchSize := 50
-	for offset := 0; ; offset += batchSize {
-		contracts, err := cm.store.Contracts(ctx, offset, batchSize, WithRevisable(true))
-		if err != nil {
-			return fmt.Errorf("failed to fetch active contracts: %w", err)
-		}
-
-		var wg sync.WaitGroup
-		for _, contract := range contracts {
-			wg.Add(1)
-			go func(contract Contract) {
-				defer wg.Done()
-				if err := cm.syncContract(ctx, contract, log); err != nil {
-					log.Error("failed to sync contract", zap.Stringer("contractID", contract.ID), zap.Error(err))
-				}
-			}(contract)
-		}
-		wg.Wait()
-
-		if len(contracts) < batchSize {
-			break
-		}
-	}
-
-	return nil
-}
-
-func (cm *ContractManager) syncContract(ctx context.Context, contract Contract, log *zap.Logger) error {
-	contractLog := log.With(zap.Stringer("contractID", contract.ID), zap.Stringer("hostKey", contract.HostKey))
-
-	// fetch corresponding host
-	host, err := cm.store.Host(ctx, contract.HostKey)
-	if err != nil {
-		return fmt.Errorf("failed to fetch host for contract: %w", err)
-	}
-
-	// short timeout for fetching revision
-	revisionCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-
-	hc, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
-	if err != nil {
-		contractLog.Warn("failed to dial host", zap.Error(err))
-		return err
-	}
-	defer hc.Close()
-	resp, err := hc.LatestRevision(revisionCtx, contract.ID)
-	if err != nil {
-		contractLog.Warn("failed to fetch latest revision", zap.Error(err))
-		return nil
-	}
-
-	// check if the contract is up to date already
-	if contract.RevisionNumber >= resp.Contract.RevisionNumber {
-		contractLog.Debug("contract information is up to date")
-		return nil
-	}
-
-	// update state in store
-	if err := cm.store.SyncContract(ctx, contract.ID, ContractSyncParams{
-		Capacity:           resp.Contract.Capacity,
-		RemainingAllowance: resp.Contract.RenterOutput.Value,
-		RevisionNumber:     resp.Contract.RevisionNumber,
-		Size:               resp.Contract.Filesize,
-		UsedCollateral:     resp.Contract.MissedHostValue,
-	}); err != nil {
-		return fmt.Errorf("failed to sync contract state: %w", err)
 	}
 
 	return nil

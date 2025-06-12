@@ -1135,54 +1135,6 @@ func TestMarkBroadcastAttempt(t *testing.T) {
 	}
 }
 
-func TestSyncContract(t *testing.T) {
-	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
-
-	// add a host
-	hk := store.addTestHost(t)
-
-	// helper to sync and assert contract
-	contractID := store.addTestContract(t, hk, types.FileContractID{1})
-	assertContract := func(params contracts.ContractSyncParams) {
-		t.Helper()
-		if err := store.SyncContract(context.Background(), contractID, params); err != nil {
-			t.Fatal(err)
-		}
-		contract, err := store.Contract(context.Background(), contractID)
-		if err != nil {
-			t.Fatal(err)
-		} else if contract.Capacity != params.Capacity {
-			t.Fatalf("expected capacity %d, got %d", params.Capacity, contract.Capacity)
-		} else if contract.RemainingAllowance != params.RemainingAllowance {
-			t.Fatalf("expected remaining allowance %d, got %d", params.RemainingAllowance, contract.RemainingAllowance)
-		} else if contract.RevisionNumber != params.RevisionNumber {
-			t.Fatalf("expected revision number %d, got %d", params.RevisionNumber, contract.RevisionNumber)
-		} else if contract.Size != params.Size {
-			t.Fatalf("expected size %d, got %d", params.Size, contract.Size)
-		} else if contract.UsedCollateral != params.UsedCollateral {
-			t.Fatalf("expected used collateral %d, got %d", params.UsedCollateral, contract.UsedCollateral)
-		}
-	}
-
-	// assert setting it to some values works
-	assertContract(contracts.ContractSyncParams{
-		Capacity:           1000,
-		RemainingAllowance: types.Siacoins(1),
-		RevisionNumber:     100,
-		Size:               900,
-		UsedCollateral:     types.Siacoins(10),
-	})
-
-	// try again with different values
-	assertContract(contracts.ContractSyncParams{
-		Capacity:           2000,
-		RemainingAllowance: types.Siacoins(2),
-		RevisionNumber:     200,
-		Size:               1900,
-		UsedCollateral:     types.Siacoins(20),
-	})
-}
-
 // BenchmarkContracts is a benchmark to ensure the performance of
 // all methods on the store that return either a contract or a list of
 // contract IDs.

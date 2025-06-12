@@ -399,20 +399,6 @@ func (s *Store) RejectPendingContracts(ctx context.Context, maxFormation time.Ti
 	})
 }
 
-// SyncContract updates the contract with the given ID to the provided
-// parameters which are expected to contain information about the latest
-// revision of a contract.
-func (s *Store) SyncContract(ctx context.Context, contractID types.FileContractID, params contracts.ContractSyncParams) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
-UPDATE contracts
-SET capacity = $1, remaining_allowance = $2, revision_number = $3, size = $4, used_collateral = $5
-WHERE contract_id = $6
-`, params.Capacity, sqlCurrency(params.RemainingAllowance), params.RevisionNumber, params.Size, sqlCurrency(params.UsedCollateral), sqlHash256(contractID))
-		return err
-	})
-}
-
 // PrunableContractRoots diffs the given roots with the roots in the database
 // and returns the roots that can be pruned.
 func (s *Store) PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error) {
