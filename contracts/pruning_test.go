@@ -130,6 +130,7 @@ func (c *hostClientMock) FreeSectors(ctx context.Context, hostPrices proto.HostP
 
 func TestPerformContractPruningOnHost(t *testing.T) {
 	store := newStoreMock()
+	hmMock := newHostManagerMock(store)
 
 	// h1 is good
 	hk1 := types.PublicKey{1}
@@ -227,18 +228,17 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	store.sectors[hk2] = []sector{{root: r9, contractID: &fcid3}}                                                                                                                                 // none dropped
 	store.sectors[hk5] = []sector{{root: r10, contractID: &fcid4}}                                                                                                                                // none dropped
 
-	// prepare dialer
+	// prepare clients
 	h1Mock := newHostClientMock()
 	h2Mock := newHostClientMock()
 	h4Mock := newHostClientMock()
 	h5Mock := newHostClientMock()
 	h5Mock.failsRPCs = true
 
-	dialer := newDialerMock()
-	dialer.clients[hk1] = h1Mock
-	dialer.clients[hk2] = h2Mock
-	dialer.clients[hk4] = h4Mock
-	dialer.clients[hk5] = h5Mock
+	hmMock.clients[hk1] = h1Mock
+	hmMock.clients[hk2] = h2Mock
+	hmMock.clients[hk4] = h4Mock
+	hmMock.clients[hk5] = h5Mock
 
 	// prepare roots
 	h1Mock.sectorRoots[fcid1] = []types.Hash256{r1, r2, r3}
@@ -260,16 +260,15 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 		}
 	}
 
-	// prepare scanner
-	scanner := store.Scanner()
-	scanner.settings[hk1] = h1.Settings
-	scanner.settings[hk2] = h2.Settings
-	scanner.settings[hk3] = h3.Settings
-	scanner.settings[hk4] = h3.Settings // h4 is bad, same as h3
-	scanner.settings[hk5] = h5.Settings
+	// prepare settings
+	hmMock.settings[hk1] = h1.Settings
+	hmMock.settings[hk2] = h2.Settings
+	hmMock.settings[hk3] = h3.Settings
+	hmMock.settings[hk4] = h3.Settings // h4 is bad, same as h3
+	hmMock.settings[hk5] = h5.Settings
 
 	// prepare contract manager
-	cm, err := NewManager(types.PublicKey{}, nil, &chainManagerMock{}, dialer, scanner, store, nil, nil)
+	cm, err := NewManager(types.PublicKey{}, nil, &chainManagerMock{}, hmMock, store, nil, nil)
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}

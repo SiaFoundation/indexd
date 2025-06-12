@@ -11,6 +11,7 @@ import (
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
@@ -21,6 +22,8 @@ import (
 
 const (
 	announcementMaxAddressesPerProtocol = 2
+
+	dialTimeout = 10 * time.Second
 
 	ipv4FilterRange = 24
 	ipv6FilterRange = 32
@@ -47,6 +50,7 @@ type (
 		scanFrequency      time.Duration
 		scanInterval       time.Duration
 
+		dialer        Dialer
 		onlineChecker OnlineChecker
 		resolver      Resolver
 		scanner       Scanner
@@ -106,13 +110,47 @@ func (h *Host) SiamuxAddr() string {
 	return ""
 }
 
+type siamuxDialer struct {
+	cm     ChainManager
+	store  RevisionStore
+	signer rhp.FormContractSigner
+	log    *zap.Logger
+}
+
+// NewSiamuxDialer creates a new Dialer that uses the SiaMux protocol to dial a
+// host.
+func NewSiamuxDialer(cm ChainManager, store RevisionStore, signer rhp.FormContractSigner, log *zap.Logger) Dialer {
+	return &siamuxDialer{
+		cm:     cm,
+		store:  store,
+		signer: signer,
+		log:    log,
+	}
+}
+
+// Dial dials the host and returns a Client that can be used to interact with
+// the host. It uses the SiaMux protocol to establish a connection and returns a
+// host client that exposes the RPC methods defined in the RHP.
+func (d *siamuxDialer) Dial(ctx context.Context, hk types.PublicKey, addr string) (*HostClient, error) {
+	ctx, cancel := context.WithTimeout(ctx, dialTimeout)
+	defer cancel()
+
+	client, err := siamux.Dial(ctx, addr, hk)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial host: %w", err)
+	}
+
+	return NewClient(hk, d.cm, client, d.signer, d.store, d.log.With(zap.Stringer("hostKey", hk))), nil
+}
+
 // NewManager creates a new host manager.
-func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error) {
+func NewManager(dialer Dialer, syncer Syncer, store Store, opts ...Option) (*HostManager, error) {
 	m := &HostManager{
 		announcementMaxAge: time.Hour * 24 * 365,
 		scanFrequency:      time.Hour,
 		scanInterval:       time.Hour * 24,
 
+		dialer:        dialer,
 		onlineChecker: &onlineChecker{addresses: fallbackSites, syncer: syncer},
 		resolver:      &net.Resolver{},
 		scanner:       &scanner{},
@@ -176,6 +214,12 @@ func (m *HostManager) UsabilitySettings(ctx context.Context) (UsabilitySettings,
 func (m *HostManager) UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error {
 	// perhaps this should reset next_scan to NOW() on all hosts that succeeded their last scan?
 	return m.store.UpdateUsabilitySettings(ctx, us)
+}
+
+// DialHost dials the host with the given public key and address. It returns a
+// host client that is capable of interacting with the host.
+func (m *HostManager) DialHost(ctx context.Context, hk types.PublicKey, addr string) (any, error) {
+	return m.dialer.Dial(ctx, hk, addr)
 }
 
 // ScanHost scans the host with given host key and returns it with updated

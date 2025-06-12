@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
@@ -19,20 +20,29 @@ type (
 		TipState() consensus.State
 	}
 
+	// HostManager defines an interface to dial a host and get a client.
+	HostManager interface {
+		DialHost(ctx context.Context, hostKey types.PublicKey, addr string) (any, error)
+	}
+
+	// HostClient defines an interface for replenishing accounts on a host.
+	HostClient interface {
+		io.Closer
+		ReplenishAccounts(ctx context.Context, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (rhp.RPCReplenishAccountsResult, int, error)
+	}
+
 	// Funder dials a host and replenish a set of ephemeral accounts.
 	Funder struct {
-		cm     ChainManager
-		dialer hosts.Dialer
-		signer rhp.ContractSigner
+		cm ChainManager
+		hm HostManager
 	}
 )
 
 // NewFunder creates a new Funder.
-func NewFunder(cm ChainManager, dialer hosts.Dialer, signer rhp.ContractSigner) *Funder {
+func NewFunder(cm ChainManager, hm HostManager) *Funder {
 	return &Funder{
-		cm:     cm,
-		dialer: dialer,
-		signer: signer,
+		cm: cm,
+		hm: hm,
 	}
 }
 
@@ -54,10 +64,15 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 	}
 
 	// dial the host
-	client, err := f.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
+	raw, err := f.hm.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		return 0, 0, fmt.Errorf("failed to dial host %s: %w", host.PublicKey, err)
 	}
+	client, ok := raw.(HostClient)
+	if !ok {
+		return 0, 0, fmt.Errorf("host client does not implement HostClient interface: %T", raw)
+	}
+	defer client.Close()
 
 	// prepare account keys
 	accountKeys := make([]proto.Account, len(accounts))

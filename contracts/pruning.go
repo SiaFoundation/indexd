@@ -78,7 +78,7 @@ func (cm *ContractManager) performContractPruningOnHost(ctx context.Context, hos
 
 	// refresh prices if necessary
 	if time.Until(host.Settings.Prices.ValidUntil) < 30*time.Minute {
-		host, err := cm.scanner.ScanHost(ctx, host.PublicKey)
+		host, err := cm.hm.ScanHost(ctx, host.PublicKey)
 		if err != nil {
 			return fmt.Errorf("failed to scan host: %w", err)
 		} else if !host.IsGood() {
@@ -87,7 +87,7 @@ func (cm *ContractManager) performContractPruningOnHost(ctx context.Context, hos
 	}
 
 	// dial the host
-	client, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
+	client, err := cm.dialHost(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		return fmt.Errorf("failed to dial host: %w", err)
 	}
@@ -130,7 +130,7 @@ func (cm *ContractManager) performContractPruningOnHost(ctx context.Context, hos
 	return nil
 }
 
-func (cm *ContractManager) pruneContract(ctx context.Context, client hosts.Client, hostPrices proto.HostPrices, contractID types.FileContractID) (int, error) {
+func (cm *ContractManager) pruneContract(ctx context.Context, client HostClient, hostPrices proto.HostPrices, contractID types.FileContractID) (int, error) {
 	const (
 		oneTB          = 1 << 40
 		sectorsPerTB   = oneTB / proto.SectorSize

@@ -15,12 +15,11 @@ import (
 
 func TestBroadcastContractRevisions(t *testing.T) {
 	cmMock := newChainManagerMock()
-	dialer := newDialerMock()
 	syncerMock := &syncerMock{}
 	walletMock := &walletMock{}
 	store := &storeMock{}
 
-	contracts, err := NewManager(types.PublicKey{}, nil, cmMock, dialer, nil, store, syncerMock, walletMock)
+	contracts, err := NewManager(types.PublicKey{}, nil, cmMock, nil, store, syncerMock, walletMock)
 	if err != nil {
 		t.Fatal(err)
 	}

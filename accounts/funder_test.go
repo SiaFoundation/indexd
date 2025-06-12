@@ -13,9 +13,9 @@ import (
 	"go.uber.org/zap"
 )
 
-type dialerMock struct{}
+type hmMock struct{}
 
-func (d *dialerMock) Dial(ctx context.Context, hostKey types.PublicKey, addr string) (hosts.Client, error) {
+func (m *hmMock) DialHost(ctx context.Context, hostKey types.PublicKey, addr string) (any, error) {
 	return &hostClientMock{}, nil
 }
 
@@ -27,24 +27,6 @@ type hostClientMock struct{}
 
 func (*hostClientMock) Close() error { return nil }
 
-func (*hostClientMock) AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error) {
-	return rhp.RPCAppendSectorsResult{}, nil
-}
-func (*hostClientMock) FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error) {
-	return rhp.RPCFormContractResult{}, nil
-}
-func (*hostClientMock) FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error) {
-	return rhp.RPCFreeSectorsResult{}, nil
-}
-func (*hostClientMock) SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error) {
-	return rhp.RPCSectorRootsResult{}, nil
-}
-func (*hostClientMock) RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error) {
-	return rhp.RPCRefreshContractResult{}, nil
-}
-func (*hostClientMock) RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error) {
-	return rhp.RPCRenewContractResult{}, nil
-}
 func (*hostClientMock) ReplenishAccounts(ctx context.Context, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (rhp.RPCReplenishAccountsResult, int, error) {
 	// use contract ID to cover all possible branches
 	switch contractID {
@@ -68,7 +50,7 @@ func (*hostClientMock) ReplenishAccounts(ctx context.Context, contractID types.F
 // TestFunder is a unit test that checks the various edge cases in FundAccounts
 func TestFunder(t *testing.T) {
 	// prepare funder
-	f := NewFunder(&cmMock{}, &dialerMock{}, nil)
+	f := NewFunder(&cmMock{}, &hmMock{})
 
 	// prepare accounts
 	accounts := []HostAccount{

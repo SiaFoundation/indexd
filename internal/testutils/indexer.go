@@ -42,20 +42,21 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	// prepare store
 	store := NewDB(t, log)
 
-	s := NewSyncer(t, c.genesis.ID(), c.cm)
-
 	walletKey := types.GeneratePrivateKey()
 	wm := NewWallet(t, c, walletKey)
 
-	hm, err := hosts.NewManager(s, store, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(500*time.Millisecond), hosts.WithScanInterval(time.Second))
+	syncer := NewSyncer(t, c.genesis.ID(), c.cm)
+	signer := contracts.NewFormContractSigner(wm, walletKey)
+	dialer := hosts.NewSiamuxDialer(c.cm, store, signer, log)
+
+	hm, err := hosts.NewManager(dialer, syncer, store, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(500*time.Millisecond), hosts.WithScanInterval(time.Second))
 	if err != nil {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
 
-	dialer := hosts.NewSiamuxDialer(c.cm, store, contracts.NewFormContractSigner(wm, walletKey), log)
-	am := accounts.NewManager(store, accounts.NewFunder(c.cm, dialer, wm), accounts.WithLogger(log.Named("accounts")))
+	am := accounts.NewManager(store, accounts.NewFunder(c.cm, hm), accounts.WithLogger(log.Named("accounts")))
 
-	contracts, err := contracts.NewManager(walletKey.PublicKey(), am, c.cm, dialer, nil, store, s, wm, contracts.WithLogger(log.Named("contracts")))
+	contracts, err := contracts.NewManager(walletKey.PublicKey(), am, c.cm, hm, store, syncer, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
@@ -81,7 +82,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 
 	password := hex.EncodeToString(frand.Bytes(16))
 	web := http.Server{
-		Handler: jape.BasicAuth(password)(api.NewServer(c.cm, contracts, s, wm, store, apiOpts...)),
+		Handler: jape.BasicAuth(password)(api.NewServer(c.cm, contracts, syncer, wm, store, apiOpts...)),
 	}
 
 	httpListener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -99,7 +100,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		if err := shutdownWithTimeout(web.Shutdown); err != nil {
 			t.Errorf("failed to shutdown webserver: %v", err)
 		}
-		if err := closeWithTimeout(s.Close); err != nil {
+		if err := closeWithTimeout(syncer.Close); err != nil {
 			t.Errorf("failed to close syncer: %v", err)
 		}
 		if err := closeWithTimeout(wm.Close); err != nil {
@@ -126,7 +127,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 
 		db:     store,
 		cm:     c.cm,
-		syncer: s,
+		syncer: syncer,
 		wallet: wm,
 	}
 }

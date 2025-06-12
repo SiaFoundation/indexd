@@ -3,12 +3,14 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/hosts"
@@ -46,7 +48,20 @@ type (
 	// HostManager defines the minimal interface of HostManager functionality
 	// the ContractManager requires.
 	HostManager interface {
+		DialHost(ctx context.Context, hostKey types.PublicKey, addr string) (any, error)
 		ScanHost(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
+	}
+
+	// HostClient defines the dependencies required to form, renew and refresh
+	// contracts.
+	HostClient interface {
+		io.Closer
+		AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error)
+		FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
+		FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error)
+		RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error)
+		RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
+		SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error)
 	}
 
 	// Store is the minimal interface of Store functionality the ContractManager
@@ -126,14 +141,14 @@ type (
 
 	// ContractManager manages the contracts throughout their lifecycle.
 	ContractManager struct {
-		am    AccountManager
-		cm    ChainManager
+		am AccountManager
+		cm ChainManager
+		hm HostManager
+
 		s     Syncer
 		w     Wallet
 		store Store
 
-		dialer    hosts.Dialer
-		scanner   HostManager
 		renterKey types.PublicKey
 
 		triggerFundingChan chan struct{}
@@ -160,18 +175,17 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, dialer hosts.Dialer, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+func NewManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, hostManager HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
 	cm := &ContractManager{
 		am: accountManager,
 		cm: chainManager,
+		hm: hostManager,
 		s:  syncer,
 		w:  wallet,
 
-		dialer:    dialer,
 		renterKey: renterKey,
 
-		scanner: scanner,
-		store:   store,
+		store: store,
 
 		triggerFundingChan: make(chan struct{}, 1),
 
@@ -306,6 +320,18 @@ func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
 		log.Warn("blocking unusable host", zap.Any("usability", host.Usability))
 	}
 	return nil
+}
+
+func (cm *ContractManager) dialHost(ctx context.Context, hk types.PublicKey, addr string) (HostClient, error) {
+	raw, err := cm.hm.DialHost(ctx, hk, addr)
+	if err != nil {
+		return nil, err
+	}
+	hc, ok := raw.(HostClient)
+	if !ok {
+		panic(fmt.Sprintf("host client %T does not implement HostClient interface", raw)) // developer error
+	}
+	return hc, nil
 }
 
 func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.Logger) error {

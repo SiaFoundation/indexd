@@ -53,9 +53,11 @@ func (c *hostClientMock) RefreshContract(ctx context.Context, settings proto.Hos
 }
 
 func TestPerformContractRefreshes(t *testing.T) {
+	store := &storeMock{}
 	amMock := &accountsManagerMock{}
 	cmMock := newChainManagerMock()
-	syncerMock := &syncerMock{}
+	hmMock := newHostManagerMock(store)
+	wMock := &walletMock{}
 
 	// helper to create a good host
 	goodHost := func(i int) hosts.Host {
@@ -65,9 +67,6 @@ func TestPerformContractRefreshes(t *testing.T) {
 			Usability: hosts.GoodUsability,
 		}
 	}
-
-	store := &storeMock{}
-	scanner := store.Scanner()
 
 	var (
 		initialAllowance = types.Siacoins(100)
@@ -117,7 +116,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 
 	// first one is good with 3 contracts
 	good := goodHost(1)
-	scanner.settings[good.PublicKey] = goodSettings
+	hmMock.settings[good.PublicKey] = goodSettings
 	formContract(types.FileContractID{1}, good.PublicKey, true, false, false) // is good
 	formContract(types.FileContractID{2}, good.PublicKey, true, true, false)  // out-of-funds
 	formContract(types.FileContractID{3}, good.PublicKey, true, false, true)  // out-of-collateral
@@ -137,7 +136,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 	// second one is bad since it's not accepting contracts with a good contract
 	bad := goodHost(2)
 	bad.Usability.AcceptingContracts = false
-	scanner.settings[bad.PublicKey] = goodSettings
+	hmMock.settings[bad.PublicKey] = goodSettings
 	formContract(types.FileContractID{8}, bad.PublicKey, true, true, true)
 
 	// populate store
@@ -146,10 +145,8 @@ func TestPerformContractRefreshes(t *testing.T) {
 		bad.PublicKey:  bad,
 	}
 
-	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
-	wallet := &walletMock{}
-	contracts, err := NewManager(renterKey, amMock, cmMock, dialer, scanner, store, syncerMock, wallet)
+	contracts, err := NewManager(renterKey, amMock, cmMock, hmMock, store, &syncerMock{}, wMock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,15 +166,15 @@ func TestPerformContractRefreshes(t *testing.T) {
 
 	if err := contracts.performContractRefreshes(context.Background(), zap.NewNop()); err != nil {
 		t.Fatal(err)
-	} else if len(dialer.HostClient(good.PublicKey).refreshCalls) != 4 {
-		t.Fatalf("expected 4 refresh calls, got %v", len(dialer.HostClient(good.PublicKey).refreshCalls))
-	} else if len(dialer.HostClient(bad.PublicKey).refreshCalls) != 0 {
+	} else if len(hmMock.HostClient(good.PublicKey).refreshCalls) != 4 {
+		t.Fatalf("expected 4 refresh calls, got %v", len(hmMock.HostClient(good.PublicKey).refreshCalls))
+	} else if len(hmMock.HostClient(bad.PublicKey).refreshCalls) != 0 {
 		t.Fatal("expected bad host to not be dialed")
 	}
-	assertRefresh(good, types.Siacoins(110), types.ZeroCurrency, types.FileContractID{2}, dialer.HostClient(good.PublicKey).refreshCalls[0])
-	assertRefresh(good, types.Siacoins(110), types.Siacoins(110), types.FileContractID{3}, dialer.HostClient(good.PublicKey).refreshCalls[1])
-	assertRefresh(good, types.Siacoins(110), types.ZeroCurrency, types.FileContractID{4}, dialer.HostClient(good.PublicKey).refreshCalls[2])
-	assertRefresh(good, types.Siacoins(1), types.Siacoins(1), types.FileContractID{6}, dialer.HostClient(good.PublicKey).refreshCalls[3])
+	assertRefresh(good, types.Siacoins(110), types.ZeroCurrency, types.FileContractID{2}, hmMock.HostClient(good.PublicKey).refreshCalls[0])
+	assertRefresh(good, types.Siacoins(110), types.Siacoins(110), types.FileContractID{3}, hmMock.HostClient(good.PublicKey).refreshCalls[1])
+	assertRefresh(good, types.Siacoins(110), types.ZeroCurrency, types.FileContractID{4}, hmMock.HostClient(good.PublicKey).refreshCalls[2])
+	assertRefresh(good, types.Siacoins(1), types.Siacoins(1), types.FileContractID{6}, hmMock.HostClient(good.PublicKey).refreshCalls[3])
 
 	// assert refreshes made it into the store leading to 8 existing + 4 refreshed
 	// contracts in the store

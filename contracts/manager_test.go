@@ -11,7 +11,7 @@ import (
 
 func TestBlockBadHosts(t *testing.T) {
 	store := &storeMock{}
-	contracts, err := NewManager(types.PublicKey{}, nil, &chainManagerMock{}, nil, nil, store, nil, nil)
+	contracts, err := NewManager(types.PublicKey{}, nil, &chainManagerMock{}, nil, store, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

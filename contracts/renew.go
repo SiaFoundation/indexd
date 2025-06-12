@@ -60,7 +60,7 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 
 	// scan host for valid price settings and make sure it's still usable
 	scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	host, err = cm.scanner.ScanHost(scanCtx, host.PublicKey)
+	host, err = cm.hm.ScanHost(scanCtx, host.PublicKey)
 	cancel()
 	if err != nil {
 		return fmt.Errorf("failed to scan host: %w", err)
@@ -69,13 +69,14 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		return nil
 	}
 
-	hc, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
+	client, err := cm.dialHost(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		contractLog.Debug("failed to dial host", zap.Error(err))
 		return nil
 	}
-	defer hc.Close()
-	res, err := hc.RenewContract(ctx, host.Settings, contract.ID, proofHeight)
+	defer client.Close()
+
+	res, err := client.RenewContract(ctx, host.Settings, contract.ID, proofHeight)
 	if err != nil {
 		contractLog.Debug("failed to renew", zap.Error(err))
 		return nil

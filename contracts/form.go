@@ -164,7 +164,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 
 		// scan host for valid price settings
 		scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		host, err := cm.scanner.ScanHost(scanCtx, candidates[i].PublicKey)
+		host, err := cm.hm.ScanHost(scanCtx, candidates[i].PublicKey)
 		cancel()
 		if err != nil {
 			hostLog.Warn("failed to scan host", zap.Error(err))
@@ -178,7 +178,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 
 		allowance, collateral := initialContractFunding(host.Settings.Prices, host.Settings.MaxCollateral, period)
 		formationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		hc, err := cm.dialer.Dial(formationCtx, host.PublicKey, host.SiamuxAddr())
+		hc, err := cm.dialHost(formationCtx, host.PublicKey, host.SiamuxAddr())
 		if err != nil {
 			cancel()
 			return fmt.Errorf("failed to dial host: %w", err)

@@ -63,7 +63,7 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 
 	// scan host for valid price settings and make sure it's still usable
 	scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	host, err = cm.scanner.ScanHost(scanCtx, host.PublicKey)
+	host, err = cm.hm.ScanHost(scanCtx, host.PublicKey)
 	cancel()
 	if err != nil {
 		return fmt.Errorf("failed to scan host: %w", err)
@@ -96,13 +96,14 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		return nil
 	}
 
-	hc, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
+	client, err := cm.dialHost(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		contractLog.Debug("failed to dial host", zap.Error(err))
 		return nil
 	}
-	defer hc.Close()
-	res, err := hc.RefreshContract(ctx, host.Settings, proto.RPCRefreshContractParams{
+	defer client.Close()
+
+	res, err := client.RefreshContract(ctx, host.Settings, proto.RPCRefreshContractParams{
 		Allowance:  additionalAllowance,
 		Collateral: additionalCollateral,
 		ContractID: contract.ID,

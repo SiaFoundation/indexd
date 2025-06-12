@@ -78,8 +78,9 @@ func (s *storeMock) ContractsForFunding(_ context.Context, hk types.PublicKey, l
 
 func TestPerformAccountFunding(t *testing.T) {
 	amMock := &accountsManagerMock{}
+	cmMock := &chainManagerMock{}
 	store := newStoreMock()
-	cm, err := NewManager(types.PublicKey{}, amMock, &chainManagerMock{}, nil, nil, store, nil, nil)
+	cm, err := NewManager(types.PublicKey{}, amMock, cmMock, nil, store, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
