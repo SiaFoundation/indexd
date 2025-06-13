@@ -71,9 +71,9 @@ func TestFunder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 0 {
-		t.Fatal("expected 0 accounts funded, got", funded)
+		t.Fatal("expected no funded accounts, got", funded)
 	} else if drained != 1 {
-		t.Fatal("expected 1 contracts drained, got", drained)
+		t.Fatal("expected 1 drained contract, got", drained)
 	}
 
 	// assert contract is marked as drained if it is not revisable
@@ -81,9 +81,9 @@ func TestFunder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 0 {
-		t.Fatal("expected 0 accounts funded, got", funded)
+		t.Fatal("expected no funded accounts, got", funded)
 	} else if drained != 1 {
-		t.Fatal("expected 1 contracts drained, got", drained)
+		t.Fatal("expected 1 drained contract, got", drained)
 	}
 
 	// assert contract is not marked as drained if replenish RPC fails
@@ -91,9 +91,9 @@ func TestFunder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 0 {
-		t.Fatal("expected 0 accounts funded, got", funded)
+		t.Fatal("expected no funded accounts, got", funded)
 	} else if drained != 0 {
-		t.Fatal("expected 0 contracts drained, got", drained)
+		t.Fatal("expected no drained contracts, got", drained)
 	}
 
 	// assert contract is marked as drained if replenish RPC succeeds but leaves the contract with insufficient funds afterwards
@@ -101,9 +101,9 @@ func TestFunder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 1 {
-		t.Fatal("expected 1 account funded, got", funded)
+		t.Fatal("expected 1 funded account, got", funded)
 	} else if drained != 1 {
-		t.Fatal("expected 1 contracts drained, got", drained)
+		t.Fatal("expected drained 1 contract, got", drained)
 	}
 
 	// assert contracts are iterated and funded is updated until we run out of contracts
@@ -111,9 +111,9 @@ func TestFunder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 2 {
-		t.Fatal("expected 2 account funded, got", funded)
+		t.Fatal("expected 2 funded accounts, got", funded)
 	} else if drained != 0 {
-		t.Fatal("expected 0 contracts drained, got", drained)
+		t.Fatal("expected no drained contracts, got", drained)
 	}
 
 	// assert contracts are iterated and funded is updated until we run out of accounts
@@ -121,8 +121,8 @@ func TestFunder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 3 {
-		t.Fatal("expected 3 account funded, got", funded)
+		t.Fatal("expected 3 funded accounts, got", funded)
 	} else if drained != 1 {
-		t.Fatal("expected 1 contracts drained, got", drained) // both 1 and 4 would be drained, were it not we ran out of accounts to replenish
+		t.Fatal("expected 1 drained contract, got", drained) // both 1 and 4 would be drained, were it not we ran out of accounts to replenish
 	}
 }
