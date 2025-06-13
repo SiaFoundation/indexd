@@ -15,11 +15,11 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
-	"go.sia.tech/indexd/rhp"
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
@@ -54,10 +54,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	}
 
 	signer := contracts.NewFormContractSigner(wm, walletKey)
-	dialer := rhp.NewSiamuxDialer(c.cm, signer, log)
-	am := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithLogger(log.Named("accounts")))
+	am := accounts.NewManager(store, accounts.NewFunder(client.NewSiamuxDialer[accounts.HostClient](c.cm, signer, log)), accounts.WithLogger(log.Named("accounts")))
 
-	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, dialer, nil, s, wm, contracts.WithLogger(log.Named("contracts")))
+	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, client.NewSiamuxDialer[contracts.HostClient](c.cm, signer, log), nil, s, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}

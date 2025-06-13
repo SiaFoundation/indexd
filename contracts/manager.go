@@ -10,11 +10,11 @@ import (
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
+	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/rhp"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -46,22 +46,17 @@ type (
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
-	// Dialer defines an interface to dial a host and get a client.
-	Dialer interface {
-		DialHost(ctx context.Context, hostKey types.PublicKey, addr string) (HostClient, error)
-	}
-
 	// HostClient defines the dependencies required to form, renew and refresh
 	// contracts.
 	HostClient interface {
 		io.Closer
-		AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp4.RPCAppendSectorsResult, error)
-		FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp4.RPCFormContractResult, error)
-		FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp4.RPCFreeSectorsResult, error)
+		AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error)
+		FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
+		FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error)
 		LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
-		RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp4.RPCRefreshContractResult, error)
-		RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp4.RPCRenewContractResult, error)
-		SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp4.RPCSectorRootsResult, error)
+		RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error)
+		RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
+		SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error)
 	}
 
 	// Scanner defines the minimal interface of Scanner functionality
@@ -152,7 +147,7 @@ type (
 		w     Wallet
 		store Store
 
-		dialer    Dialer
+		dialer    client.Dialer[HostClient]
 		scanner   Scanner
 		renterKey types.PublicKey
 
@@ -170,19 +165,6 @@ type (
 	}
 )
 
-type dialer struct {
-	d *rhp.SiamuxDialer
-}
-
-// DialHost dials the host and returns a HostClient.
-func (d *dialer) DialHost(ctx context.Context, hostKey types.PublicKey, addr string) (HostClient, error) {
-	client, err := d.d.DialHost(ctx, hostKey, addr)
-	if err != nil {
-		return nil, err
-	}
-	return client, nil
-}
-
 // WithLogger creates the contract manager with a custom logger
 func WithLogger(l *zap.Logger) ContractManagerOpt {
 	return func(cm *ContractManager) {
@@ -193,8 +175,8 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, store Store, d *rhp.SiamuxDialer, scanner Scanner, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, store, &dialer{d: d}, scanner, syncer, wallet, opts...)
+func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer client.Dialer[HostClient], scanner Scanner, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, store, dialer, scanner, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {
@@ -207,7 +189,7 @@ func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chain
 	return cm, nil
 }
 
-func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer Dialer, scanner Scanner, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer client.Dialer[HostClient], scanner Scanner, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
 		am: accountManager,
 		cm: chainManager,
