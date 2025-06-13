@@ -107,7 +107,7 @@ func TestPerformContractRenewals(t *testing.T) {
 	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, cmMock, dialer, scanner, store, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, cmMock, store, dialer, scanner, syncerMock, wallet)
 
 	assertRenewal := func(h hosts.Host, renewedFrom types.FileContractID, proofHeight uint64, call renewContractCall) {
 		t.Helper()
@@ -183,7 +183,7 @@ func TestSyncRevisionState(t *testing.T) {
 	store := &storeMock{}
 	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
-	contracts := newContractManager(renterKey, amMock, nil, dialer, nil, store, nil, nil)
+	contracts := newContractManager(renterKey, amMock, nil, store, dialer, nil, nil, nil)
 
 	// add a host and contract
 	contractID := types.FileContractID{1}

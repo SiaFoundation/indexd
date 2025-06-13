@@ -10,10 +10,11 @@ import (
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/rhp/v4"
+	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/rhp"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -23,7 +24,6 @@ const (
 
 	hostsFetchLimit = 100
 
-	dialTimeout         = 10 * time.Second
 	minRemainingStorage = (10 * 1 << 30) / uint64(proto.SectorSize) // 10GB
 	maxContractSize     = 10 * 1 << 40                              // 10TB
 
@@ -46,22 +46,27 @@ type (
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
+	// Dialer defines an interface to dial a host and get a client.
+	Dialer interface {
+		DialHost(ctx context.Context, hostKey types.PublicKey, addr string) (HostClient, error)
+	}
+
 	// HostClient defines the dependencies required to form, renew and refresh
 	// contracts.
 	HostClient interface {
 		io.Closer
-		AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error)
-		FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
-		FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error)
+		AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp4.RPCAppendSectorsResult, error)
+		FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp4.RPCFormContractResult, error)
+		FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp4.RPCFreeSectorsResult, error)
 		LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
-		RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error)
-		RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
-		SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error)
+		RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp4.RPCRefreshContractResult, error)
+		RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp4.RPCRenewContractResult, error)
+		SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp4.RPCSectorRootsResult, error)
 	}
 
-	// HostManager defines the minimal interface of HostManager functionality
+	// Scanner defines the minimal interface of Scanner functionality
 	// the ContractManager requires.
-	HostManager interface {
+	Scanner interface {
 		ScanHost(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
 	}
 
@@ -147,8 +152,8 @@ type (
 		w     Wallet
 		store Store
 
-		dialer    dialer
-		scanner   HostManager
+		dialer    Dialer
+		scanner   Scanner
 		renterKey types.PublicKey
 
 		triggerFundingChan chan struct{}
@@ -165,6 +170,19 @@ type (
 	}
 )
 
+type wrapper struct {
+	d rhp.Dialer
+}
+
+// DialHost dials the host and returns a HostClient.
+func (w *wrapper) DialHost(ctx context.Context, hostKey types.PublicKey, addr string) (HostClient, error) {
+	client, err := w.d.DialHost(ctx, hostKey, addr)
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
 // WithLogger creates the contract manager with a custom logger
 func WithLogger(l *zap.Logger) ContractManagerOpt {
 	return func(cm *ContractManager) {
@@ -175,9 +193,8 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	dialer := newSiamuxDialer(chainManager, wallet, renterKey)
-	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, dialer, scanner, store, syncer, wallet, opts...)
+func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer rhp.Dialer, scanner Scanner, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, store, &wrapper{d: dialer}, scanner, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {
@@ -190,7 +207,7 @@ func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chain
 	return cm, nil
 }
 
-func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, dialer dialer, scanner HostManager, store Store, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer Dialer, scanner Scanner, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
 		am: accountManager,
 		cm: chainManager,
@@ -480,13 +497,14 @@ func (cm *ContractManager) syncContract(ctx context.Context, contract Contract, 
 	revisionCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
 
-	hc, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
+	client, err := cm.dialer.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		contractLog.Warn("failed to dial host", zap.Error(err))
 		return err
 	}
-	defer hc.Close()
-	resp, err := hc.LatestRevision(revisionCtx, contract.ID)
+	defer client.Close()
+
+	resp, err := client.LatestRevision(revisionCtx, contract.ID)
 	if err != nil {
 		contractLog.Warn("failed to fetch latest revision", zap.Error(err))
 		return nil

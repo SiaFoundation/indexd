@@ -3,44 +3,37 @@ package accounts
 import (
 	"context"
 	"errors"
-	"net"
 	"testing"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/rhp"
 	"go.uber.org/zap"
 )
 
-type clientMock struct{}
+type dialerMock struct{}
 
-func (c *clientMock) DialStream() (net.Conn, error) { return nil, nil }
-
-func (c *clientMock) FrameSize() int           { return 0 }
-func (c *clientMock) PeerKey() types.PublicKey { return types.PublicKey{} }
-
-func (c *clientMock) Close() error { return nil }
+func (*dialerMock) DialHost(ctx context.Context, hk types.PublicKey, addr string) (HostClient, error) {
+	return &hostClientMock{}, nil
+}
 
 type hostClientMock struct{}
 
 func (*hostClientMock) Close() error { return nil }
 
-func (*hostClientMock) Dial(ctx context.Context, addr string, hk types.PublicKey) (rhp4.TransportClient, error) {
-	return &clientMock{}, nil
-}
-
-func (*hostClientMock) RPCLatestRevision(ctx context.Context, tc rhp4.TransportClient, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+func (*hostClientMock) LatestRevision(context.Context, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 	return proto.RPCLatestRevisionResponse{}, nil
 }
 
-func (*hostClientMock) RPCReplenishAccounts(ctx context.Context, tc rhp4.TransportClient, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (rhp4.RPCReplenishAccountsResult, int, error) {
+func (*hostClientMock) ReplenishAccounts(ctx context.Context, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (rhp4.RPCReplenishAccountsResult, int, error) {
 	// use contract ID to cover all possible branches
 	switch contractID {
 	case types.FileContractID{1}:
-		return rhp4.RPCReplenishAccountsResult{}, 0, errContractInsufficientFunds
+		return rhp4.RPCReplenishAccountsResult{}, 0, rhp.ErrContractInsufficientFunds
 	case types.FileContractID{2}:
-		return rhp4.RPCReplenishAccountsResult{}, 0, errContractNotRevisable
+		return rhp4.RPCReplenishAccountsResult{}, 0, rhp.ErrContractNotRevisable
 	case types.FileContractID{3}:
 		return rhp4.RPCReplenishAccountsResult{}, 0, errors.New("failed to replenish accounts")
 	case types.FileContractID{4}:
@@ -57,7 +50,7 @@ func (*hostClientMock) RPCReplenishAccounts(ctx context.Context, tc rhp4.Transpo
 // TestFunder is a unit test that checks the various edge cases in FundAccounts
 func TestFunder(t *testing.T) {
 	// prepare funder
-	f := &Funder{client: &hostClientMock{}}
+	f := &Funder{dialer: &dialerMock{}}
 
 	// prepare accounts
 	accounts := []HostAccount{

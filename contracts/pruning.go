@@ -9,7 +9,6 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -18,43 +17,6 @@ const (
 	pruneIntervalSuccess = 24 * time.Hour
 	pruneIntervalFailure = 3 * time.Hour
 )
-
-// HostKey returns the public key of the host.
-func (c *hostClient) HostKey() types.PublicKey {
-	return c.hostKey
-}
-
-func (c *hostClient) SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error) {
-	// fetch revision and check if it meets the requirements
-	rev, err := rhp.RPCLatestRevision(ctx, c.client, contractID)
-	if err != nil {
-		return rhp.RPCSectorRootsResult{}, fmt.Errorf("failed to fetch latest revision: %w", err)
-	} else if !rev.Revisable {
-		return rhp.RPCSectorRootsResult{}, errors.New("contract is not revisable")
-	} else if rev.Contract.RenterOutput.Value.IsZero() {
-		return rhp.RPCSectorRootsResult{}, errors.New("contract is out of funds")
-	}
-
-	// fetch contract sectors
-	revision := rhp.ContractRevision{ID: contractID, Revision: rev.Contract}
-	return rhp.RPCSectorRoots(ctx, c.client, c.cm.TipState(), hostPrices, c.signer, revision, offset, length)
-}
-
-func (c *hostClient) FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error) {
-	// fetch revision and check if it meets the requirements
-	rev, err := rhp.RPCLatestRevision(ctx, c.client, contractID)
-	if err != nil {
-		return rhp.RPCFreeSectorsResult{}, fmt.Errorf("failed to fetch latest revision: %w", err)
-	} else if !rev.Revisable {
-		return rhp.RPCFreeSectorsResult{}, errors.New("contract is not revisable")
-	} else if rev.Contract.RenterOutput.Value.IsZero() {
-		return rhp.RPCFreeSectorsResult{}, errors.New("contract is out of funds")
-	}
-
-	// free sectors
-	revision := rhp.ContractRevision{ID: contractID, Revision: rev.Contract}
-	return rhp.RPCFreeSectors(ctx, c.client, c.signer, c.cm.TipState(), hostPrices, revision, indices)
-}
 
 func (cm *ContractManager) performContractPruning(ctx context.Context, log *zap.Logger) error {
 	start := time.Now()
@@ -125,7 +87,7 @@ func (cm *ContractManager) performContractPruningOnHost(ctx context.Context, hos
 	}
 
 	// dial the host
-	client, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
+	client, err := cm.dialer.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		return fmt.Errorf("failed to dial host: %w", err)
 	}

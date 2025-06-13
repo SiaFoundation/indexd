@@ -28,6 +28,7 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/pins"
+	"go.sia.tech/indexd/rhp"
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
@@ -107,11 +108,12 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer hm.Close()
 
-	funder := accounts.NewFunder(cm, wm)
-	am := accounts.NewManager(store, funder, accounts.WithLogger(log.Named("accounts")))
+	signer := contracts.NewFormContractSigner(wm, walletKey)
+	dialer := rhp.NewSiamuxDialer(cm, signer, log)
+	am := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithLogger(log.Named("accounts")))
 	defer am.Close()
 
-	contracts, err := contracts.NewManager(walletKey, am, cm, hm, store, s, wm, contracts.WithLogger(log.Named("contracts")))
+	contracts, err := contracts.NewManager(walletKey, am, cm, store, dialer, hm, s, wm, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		return fmt.Errorf("failed to create contracts manager: %w", err)
 	}
