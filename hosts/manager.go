@@ -199,7 +199,7 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 		return fmt.Errorf("%w: blocked=%t, usable=%t, networks=%d", ErrBadHost, host.Blocked, host.Usability.Usable(), len(host.Networks))
 	}
 
-	// optimistally call the function with the host
+	// optimistically call the function
 	if err := fn(host); err == nil {
 		return nil
 	} else if err != nil && !strings.Contains(err.Error(), proto4.ErrPricesExpired.Error()) {
