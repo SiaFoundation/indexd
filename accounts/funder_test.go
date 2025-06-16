@@ -22,7 +22,17 @@ func (c *clientMock) PeerKey() types.PublicKey { return types.PublicKey{} }
 
 func (c *clientMock) Close() error { return nil }
 
-type hostClientMock struct{}
+type (
+	hostClientMock struct {
+		results map[types.FileContractID]rpcResult
+	}
+
+	rpcResult struct {
+		res    rhp4.RPCReplenishAccountsResult
+		funded int
+		err    error
+	}
+)
 
 func (*hostClientMock) Close() error { return nil }
 
@@ -34,30 +44,19 @@ func (*hostClientMock) RPCLatestRevision(ctx context.Context, tc rhp4.TransportC
 	return proto.RPCLatestRevisionResponse{}, nil
 }
 
-func (*hostClientMock) RPCReplenishAccounts(ctx context.Context, tc rhp4.TransportClient, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (rhp4.RPCReplenishAccountsResult, int, error) {
-	// use contract ID to cover all possible branches
-	switch contractID {
-	case types.FileContractID{1}:
-		return rhp4.RPCReplenishAccountsResult{}, 0, errContractInsufficientFunds
-	case types.FileContractID{2}:
-		return rhp4.RPCReplenishAccountsResult{}, 0, errContractNotRevisable
-	case types.FileContractID{3}:
-		return rhp4.RPCReplenishAccountsResult{}, 0, errors.New("failed to replenish accounts")
-	case types.FileContractID{4}:
-		return rhp4.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target.Sub(types.NewCurrency64(1))}}}, 1, nil
-	case types.FileContractID{5}, types.FileContractID{6}:
-		return rhp4.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target}}}, 1, nil
-	case types.FileContractID{7}:
-		return rhp4.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target}}}, len(accounts) - 1, nil
-	default:
+func (h *hostClientMock) RPCReplenishAccounts(ctx context.Context, tc rhp4.TransportClient, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (rhp4.RPCReplenishAccountsResult, int, error) {
+	res, ok := h.results[contractID]
+	if !ok {
 		panic("unexpected contract ID in mock")
 	}
+	return res.res, res.funded, res.err
 }
 
 // TestFunder is a unit test that checks the various edge cases in FundAccounts
 func TestFunder(t *testing.T) {
 	// prepare funder
-	f := &Funder{client: &hostClientMock{}}
+	client := &hostClientMock{results: make(map[types.FileContractID]rpcResult)}
+	f := &Funder{client: client}
 
 	// prepare accounts
 	accounts := []HostAccount{
@@ -66,8 +65,27 @@ func TestFunder(t *testing.T) {
 		{AccountKey: proto.Account{3}},
 	}
 
+	// prepare results to cover all possible branches in FundAccounts
+	target := types.Siacoins(1)
+	client.results[types.FileContractID{1}] = rpcResult{err: errContractInsufficientFunds}
+	client.results[types.FileContractID{2}] = rpcResult{err: errContractNotRevisable}
+	client.results[types.FileContractID{3}] = rpcResult{err: errors.New("failed to replenish accounts")}
+	client.results[types.FileContractID{4}] = rpcResult{
+		res:    rhp4.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target.Sub(types.NewCurrency64(1))}}},
+		funded: 1,
+	}
+	client.results[types.FileContractID{5}] = rpcResult{
+		res:    rhp4.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target}}},
+		funded: 1,
+	}
+	client.results[types.FileContractID{6}] = client.results[types.FileContractID{5}]
+	client.results[types.FileContractID{7}] = rpcResult{
+		res:    rhp4.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target}}},
+		funded: len(accounts) - 1,
+	}
+
 	// assert contract is marked as drained if it is out of funds
-	funded, drained, err := f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{1}}, accounts, types.Siacoins(1), zap.NewNop())
+	funded, drained, err := f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{1}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 0 {
@@ -77,7 +95,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// assert contract is marked as drained if it is not revisable
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{2}}, accounts, types.Siacoins(1), zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{2}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 0 {
@@ -87,7 +105,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// assert contract is not marked as drained if replenish RPC fails
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{3}}, accounts, types.Siacoins(1), zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{3}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 0 {
@@ -97,7 +115,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// assert contract is marked as drained if replenish RPC succeeds but leaves the contract with insufficient funds afterwards
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{4}}, accounts, types.Siacoins(1), zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{4}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 1 {
@@ -107,7 +125,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// assert contracts are iterated and funded is updated until we run out of contracts
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{5}, {6}}, accounts, types.Siacoins(1), zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{5}, {6}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 2 {
@@ -117,7 +135,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// assert contracts are iterated and funded is updated until we run out of accounts
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{7}, {1}, {5}, {4}}, accounts, types.Siacoins(1), zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{7}, {1}, {5}, {4}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 3 {
