@@ -1,9 +1,11 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
@@ -225,6 +227,16 @@ func (c *HostClient) ReplenishAccounts(ctx context.Context, contractID types.Fil
 	}
 
 	return res, funded, nil
+}
+
+// WriteSector writes a sector to the host.
+func (c *HostClient) WriteSector(ctx context.Context, settings proto.HostSettings, token proto.AccountToken, data *[proto.SectorSize]byte) (rhp.RPCWriteSectorResult, error) {
+	return rhp.RPCWriteSector(ctx, c.client, settings.Prices, token, bytes.NewReader(data[:]), uint64(len(data)))
+}
+
+// ReadSector reads a sector from the host.
+func (c *HostClient) ReadSector(ctx context.Context, settings proto.HostSettings, token proto.AccountToken, w io.Writer, root types.Hash256, offset, length uint64) (rhp.RPCReadSectorResult, error) {
+	return rhp.RPCReadSector(ctx, c.client, settings.Prices, token, w, root, offset, length)
 }
 
 // LatestRevision retrieves the latest revision of a contract from the host.
