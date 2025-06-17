@@ -43,6 +43,27 @@ func (a *api) checkServerError(jc jape.Context, context string, err error) bool 
 	return err == nil
 }
 
+func (a *api) handleGETTrigger(jc jape.Context) {
+	var action string
+	if jc.DecodeParam("action", &action) != nil {
+		return
+	}
+
+	switch action {
+	case "funding":
+		a.contracts.TriggerAccountFunding()
+	case "maintenance":
+		a.contracts.TriggerMaintenance()
+	case "scanning":
+		a.hosts.TriggerHostScanning()
+	default:
+		jc.Error(fmt.Errorf("unknown action: %q, available actions are 'funding', 'maintenance' or 'scanning'", action), http.StatusBadRequest)
+		return
+	}
+
+	jc.Encode(nil)
+}
+
 func (a *api) handleGETAccounts(jc jape.Context) {
 	offset, limit, ok := parseOffsetLimit(jc)
 	if !ok {

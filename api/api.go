@@ -28,6 +28,12 @@ type (
 	// to ensure the account is funded as soon as possible.
 	ContractManager interface {
 		TriggerAccountFunding()
+		TriggerMaintenance()
+	}
+
+	// HostManager defines an interface that allows trigger a host scan.
+	HostManager interface {
+		TriggerHostScanning()
 	}
 
 	// Explorer retrieves data about the Sia network from an external source.
@@ -77,8 +83,10 @@ type (
 type (
 	// An api provides an HTTP API for the indexer
 	api struct {
+		debug     bool
 		chain     ChainManager
 		contracts ContractManager
+		hosts     HostManager
 		explorer  Explorer
 		store     Store
 		syncer    Syncer
@@ -88,10 +96,11 @@ type (
 )
 
 // NewServer initializes the API
-func NewServer(chain ChainManager, contracts ContractManager, syncer Syncer, wallet Wallet, store Store, opts ...ServerOption) http.Handler {
+func NewServer(chain ChainManager, contracts ContractManager, hosts HostManager, syncer Syncer, wallet Wallet, store Store, opts ...ServerOption) http.Handler {
 	a := &api{
 		chain:     chain,
 		contracts: contracts,
+		hosts:     hosts,
 		store:     store,
 		syncer:    syncer,
 		wallet:    wallet,
@@ -101,7 +110,7 @@ func NewServer(chain ChainManager, contracts ContractManager, syncer Syncer, wal
 		opt(a)
 	}
 
-	return jape.Mux(map[string]jape.Handler{
+	routes := map[string]jape.Handler{
 		"GET /state": a.handleGETState,
 
 		// accounts endpoints
@@ -135,5 +144,12 @@ func NewServer(chain ChainManager, contracts ContractManager, syncer Syncer, wal
 		"GET /wallet/events":  a.handleGETWalletEvents,
 		"GET /wallet/pending": a.handleGETWalletPending,
 		"POST /wallet/send":   a.handlePOSTWalletSend,
-	})
+	}
+
+	// debug endpoints
+	if a.debug {
+		routes["GET /debug/trigger/:action"] = a.handleGETTrigger
+	}
+
+	return jape.Mux(routes)
 }

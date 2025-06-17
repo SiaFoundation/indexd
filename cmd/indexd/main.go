@@ -33,6 +33,7 @@ const (
 
 var cfg = config.Config{
 	Directory: os.Getenv(dataDirEnvVar), // default to env variable
+	Debug:     false,
 	AdminAPI: config.AdminAPI{
 		Address:  "127.0.0.1:9980",
 		Password: os.Getenv(indexdAdminPasswordEnvVar),
@@ -206,6 +207,7 @@ func main() {
 	rootCmd.StringVar(&cfg.Directory, "dir", cfg.Directory, "directory to store indexd metadata in")
 	rootCmd.StringVar(&cfg.AdminAPI.Address, "api.admin", cfg.AdminAPI.Address, "address to serve admin API on")
 	rootCmd.StringVar(&cfg.ApplicationAPI.Address, "api.app", cfg.ApplicationAPI.Address, "address to serve application API on")
+	rootCmd.BoolVar(&cfg.Debug, "debug", false, "enable debug mode")
 	rootCmd.StringVar(&logLevelOverride, "log", "", "overrides the log level for all enabled loggers (debug, info, warn, error)")
 
 	versionCmd := flagg.New("version", ``)
@@ -221,6 +223,10 @@ func main() {
 		},
 	})
 
+	if cfg.Debug {
+		cfg.Log.StdOut.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
+		cfg.Log.File.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
+	}
 	if logLevelOverride != "" {
 		level, err := zap.ParseAtomicLevel(logLevelOverride)
 		checkFatalError("failed to parse log level", err)

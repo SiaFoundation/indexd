@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"sync"
 	"time"
@@ -52,6 +53,8 @@ type (
 		scanner       Scanner
 		store         Store
 
+		triggerHostScanningChan chan struct{}
+
 		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
 	}
@@ -77,6 +80,7 @@ type (
 	// persist the scan results in the database.
 	Store interface {
 		Host(ctx context.Context, hk types.PublicKey) (Host, error)
+		Hosts(ctx context.Context, offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error)
 		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
 		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
 		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
@@ -117,8 +121,11 @@ func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error
 		resolver:      &net.Resolver{},
 		scanner:       &scanner{},
 		store:         store,
-		tg:            threadgroup.New(),
-		log:           zap.NewNop(),
+
+		triggerHostScanningChan: make(chan struct{}, 1),
+
+		tg:  threadgroup.New(),
+		log: zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -150,8 +157,14 @@ func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error
 			select {
 			case <-pruneTicker.C:
 				m.pruneHosts(ctx)
+			case <-m.triggerHostScanningChan:
+				// reset ticker
+				scanTicker.Stop()
+				scanTicker = time.NewTicker(m.scanFrequency)
+				m.log.Debug("triggered host scanning")
+				m.scanHosts(ctx, m.hostsForScanning(ctx, true))
 			case <-scanTicker.C:
-				m.scanHosts(ctx)
+				m.scanHosts(ctx, m.hostsForScanning(ctx, false))
 			case <-ctx.Done():
 				return
 			}
@@ -165,6 +178,14 @@ func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error
 func (m *HostManager) Close() error {
 	m.tg.Stop()
 	return nil
+}
+
+// TriggerHostScanning triggers a scan of all hosts.
+func (m *HostManager) TriggerHostScanning() {
+	select {
+	case m.triggerHostScanningChan <- struct{}{}:
+	default:
+	}
 }
 
 // UsabilitySettings returns the current usability settings.
@@ -259,6 +280,35 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 	return nil
 }
 
+// hostsForScanning returns the public keys of the hosts that need to be
+// scanned, if force is true, this method will return the public keys of all
+// hosts in the database.
+func (m *HostManager) hostsForScanning(ctx context.Context, force bool) []types.PublicKey {
+	if !force {
+		hosts, err := m.store.HostsForScanning(ctx)
+		if err != nil {
+			m.log.Error("failed to get hosts for scanning", zap.Error(err))
+			return nil
+		}
+		return hosts
+	}
+
+	// forcing a rescan of all hosts is only exposed with the debug flag
+	// enabled, therefor it's fine to pay the price here and fetch all hosts
+	// from the database only to get their public keys
+	hosts, err := m.store.Hosts(ctx, 0, math.MaxInt)
+	if err != nil {
+		m.log.Error("failed to get hosts for scanning", zap.Error(err))
+		return nil
+	}
+
+	var hks []types.PublicKey
+	for _, h := range hosts {
+		hks = append(hks, h.PublicKey)
+	}
+	return hks
+}
+
 func (m *HostManager) pruneHosts(ctx context.Context) {
 	cutoff := time.Now().Add(-pruneMinDowntime)
 	n, err := m.store.PruneHosts(ctx, time.Now().Add(-pruneMinDowntime), pruneMinConsecutiveScanFailures)
@@ -278,18 +328,14 @@ func (m *HostManager) pruneHosts(ctx context.Context) {
 	}
 }
 
-func (m *HostManager) scanHosts(ctx context.Context) {
-	start := time.Now()
-
-	hosts, err := m.store.HostsForScanning(ctx)
-	if err != nil {
-		m.log.Error("failed to get hosts for scanning", zap.Error(err))
-		return
-	} else if len(hosts) == 0 {
-		m.log.Debug("scan skipped")
+func (m *HostManager) scanHosts(ctx context.Context, hosts []types.PublicKey) {
+	if len(hosts) == 0 {
+		m.log.Debug("scan skipped, no hosts for scanning")
 		return
 	}
-	m.log.Debug("scan started")
+
+	start := time.Now()
+	m.log.Debug("scan started", zap.Int("hosts", len(hosts)))
 
 	sema := make(chan struct{}, scanThreads)
 	defer close(sema)

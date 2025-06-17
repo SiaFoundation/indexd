@@ -10,6 +10,14 @@ import (
 // ServerOption is a functional option to configure an API server.
 type ServerOption func(*api)
 
+// WithDebug sets the debug mode for the API server. In debug mode, the server
+// exposes additional debug endpoints that allow triggering certain actions.
+func WithDebug(debug bool) ServerOption {
+	return func(a *api) {
+		a.debug = debug
+	}
+}
+
 // WithExplorer sets the explorer for the API server.
 func WithExplorer(e Explorer) ServerOption {
 	return func(a *api) {

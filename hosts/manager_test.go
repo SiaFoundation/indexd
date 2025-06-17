@@ -41,6 +41,10 @@ func (s *mockStore) Host(ctx context.Context, hk types.PublicKey) (Host, error) 
 	return h, nil
 }
 
+func (s *mockStore) Hosts(ctx context.Context, offset, limit int, opts ...HostQueryOpt) ([]Host, error) {
+	return nil, nil
+}
+
 func (s *mockStore) HostsForScanning(ctx context.Context) ([]types.PublicKey, error) { return nil, nil }
 
 func (s *mockStore) PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error) {
