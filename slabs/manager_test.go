@@ -3,6 +3,7 @@ package slabs
 import (
 	"context"
 	"slices"
+	"sync"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -96,6 +97,7 @@ func (s *mockStore) Slabs(ctx context.Context, accountID proto.Account, slabIDs 
 }
 
 type mockAccountManager struct {
+	mu              sync.Mutex
 	serviceAccounts map[proto.Account]struct{}
 	store           *mockStore
 }
@@ -108,6 +110,8 @@ func newMockAccountManager(store *mockStore) *mockAccountManager {
 }
 
 func (m *mockAccountManager) RegisterServiceAccount(account proto.Account) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.serviceAccounts[account] = struct{}{}
 }
 
@@ -116,6 +120,8 @@ func (m *mockAccountManager) ResetAccountBalance(ctx context.Context, hostKey ty
 }
 
 func (m *mockAccountManager) ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if hostAccounts, ok := m.store.serviceAccounts[account]; ok {
 		if balance, ok := hostAccounts[hostKey]; ok {
 			return balance, nil
@@ -126,6 +132,8 @@ func (m *mockAccountManager) ServiceAccountBalance(ctx context.Context, hostKey 
 }
 
 func (m *mockAccountManager) UpdateServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	hostAccounts, ok := m.store.serviceAccounts[account]
 	if !ok {
 		hostAccounts = make(map[types.PublicKey]types.Currency)
@@ -136,6 +144,8 @@ func (m *mockAccountManager) UpdateServiceAccountBalance(ctx context.Context, ho
 }
 
 func (m *mockAccountManager) DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if hostAccounts, ok := m.store.serviceAccounts[account]; ok {
 		if balance, ok := hostAccounts[hostKey]; ok {
 			if balance.Cmp(amount) < 0 {

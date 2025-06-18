@@ -54,7 +54,7 @@ type (
 		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
 	}
 
-	// A HostDialer is an interface for writing and reading sectors to/from hosts.
+	// A Dialer is an interface for writing and reading sectors to/from hosts.
 	Dialer interface {
 		DialHost(ctx context.Context, hostKey types.PublicKey, addr string) (HostClient, error)
 	}
