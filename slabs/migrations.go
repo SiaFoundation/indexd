@@ -95,7 +95,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slab Slab, hosts []hosts.
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	shards, err := downloadSlab(ctx, m.serviceAccountKey, m.am, m.client, slab, hosts, logger)
+	shards, err := m.downloadSlab(ctx, slab, hosts, logger)
 	if err != nil {
 		return fmt.Errorf("failed to download slab %s: %w", slab.ID, err)
 	}
@@ -191,7 +191,7 @@ LOOP:
 	return toMigrate, remainingHosts
 }
 
-func downloadSlab(ctx context.Context, accountKey types.PrivateKey, am AccountManager, client HostClient, slab Slab, availableHosts []hosts.Host, logger *zap.Logger) ([][]byte, error) {
+func (m *SlabManager) downloadSlab(ctx context.Context, slab Slab, availableHosts []hosts.Host, logger *zap.Logger) ([][]byte, error) {
 	ctx, cancelDownload := context.WithCancel(ctx)
 	defer cancelDownload()
 
@@ -251,15 +251,14 @@ top:
 			buf := new(bytes.Buffer)
 
 			// fetch the prices
-			settings, err := client.Settings(ctx, hostKey, "address")
+			settings, err := m.client.Settings(ctx, hostKey, "address")
 			if err != nil {
 				sectorLogger.Debug("failed to fetch host settings")
 				return
 			}
-			account := rhp.Account(accountKey.PublicKey())
-			token := account.Token(accountKey, hostKey)
+			token := m.serviceAccount.Token(m.serviceAccountKey, hostKey)
 
-			result, err := client.ReadSector(ctx, settings.Prices, token, buf, sector.Root, 0, rhp.SectorSize)
+			result, err := m.client.ReadSector(ctx, settings.Prices, token, buf, sector.Root, 0, rhp.SectorSize)
 			if err != nil && strings.Contains(err.Error(), rhp.ErrSectorNotFound.Error()) {
 				// TODO: mark sector lost
 			} else if err != nil {
@@ -267,7 +266,7 @@ top:
 				return
 			}
 
-			if err := am.DebitServiceAccount(ctx, hostKey, account, result.Usage.RenterCost()); err != nil {
+			if err := m.am.DebitServiceAccount(ctx, hostKey, m.serviceAccount, result.Usage.RenterCost()); err != nil {
 				sectorLogger.Error("failed to debit service account for sector read", zap.Error(err))
 				return
 			}
@@ -290,6 +289,6 @@ top:
 	return shards, nil
 }
 
-func uploadShards(ctx context.Context, client HostClient, shards [][]byte, hosts []hosts.Host) ([]Shard, error) {
+func (m *SlabManager) uploadShards(ctx context.Context, client HostClient, shards [][]byte, hosts []hosts.Host) ([]Shard, error) {
 	return nil, errors.New("not implemented")
 }
