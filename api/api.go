@@ -31,7 +31,7 @@ type (
 		TriggerMaintenance()
 	}
 
-	// HostManager defines an interface that allows trigger a host scan.
+	// HostManager defines an interface that allows triggering a host scan.
 	HostManager interface {
 		TriggerHostScanning()
 	}
@@ -148,7 +148,7 @@ func NewServer(chain ChainManager, contracts ContractManager, hosts HostManager,
 
 	// debug endpoints
 	if a.debug {
-		routes["GET /debug/trigger/:action"] = a.handleGETTrigger
+		routes["POST /debug/trigger/:action"] = a.handleGETTrigger
 	}
 
 	return jape.Mux(routes)

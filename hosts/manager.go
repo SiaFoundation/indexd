@@ -294,7 +294,7 @@ func (m *HostManager) hostsForScanning(ctx context.Context, force bool) []types.
 	}
 
 	// forcing a rescan of all hosts is only exposed with the debug flag
-	// enabled, therefor it's fine to pay the price here and fetch all hosts
+	// enabled, therefore it's fine to pay the price here and fetch all hosts
 	// from the database only to get their public keys
 	hosts, err := m.store.Hosts(ctx, 0, math.MaxInt)
 	if err != nil {
