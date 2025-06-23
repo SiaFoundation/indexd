@@ -12,9 +12,9 @@ type ServerOption func(*api)
 
 // WithDebug sets the debug mode for the API server. In debug mode, the server
 // exposes additional debug endpoints that allow triggering certain actions.
-func WithDebug(debug bool) ServerOption {
+func WithDebug() ServerOption {
 	return func(a *api) {
-		a.debug = debug
+		a.debug = true
 	}
 }
 
