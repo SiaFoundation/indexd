@@ -7,8 +7,8 @@ require (
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/klauspost/reedsolomon v1.12.4
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.13.2
-	go.sia.tech/coreutils v0.16.1
+	go.sia.tech/core v0.14.0
+	go.sia.tech/coreutils v0.16.3
 	go.sia.tech/jape v0.14.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0
@@ -33,7 +33,7 @@ require (
 	github.com/quic-go/quic-go v0.52.0 // indirect
 	github.com/quic-go/webtransport-go v0.8.1-0.20241018022711-4ac2c9250e66 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
-	go.etcd.io/bbolt v1.4.0 // indirect
+	go.etcd.io/bbolt v1.4.1 // indirect
 	go.sia.tech/mux v1.4.0 // indirect
 	go.uber.org/mock v0.5.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
