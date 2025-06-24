@@ -44,12 +44,12 @@ func (a *api) checkServerError(jc jape.Context, context string, err error) bool 
 }
 
 func (a *api) handlePOSTTrigger(jc jape.Context) {
-	var req DebugTriggerRequest
-	if jc.Decode(&req) != nil {
+	var action string
+	if jc.DecodeParam("action", &action) != nil {
 		return
 	}
 
-	switch req.Action {
+	switch action {
 	case "funding":
 		a.contracts.TriggerAccountFunding()
 	case "maintenance":
@@ -57,7 +57,7 @@ func (a *api) handlePOSTTrigger(jc jape.Context) {
 	case "scanning":
 		a.hosts.TriggerHostScanning()
 	default:
-		jc.Error(fmt.Errorf("unknown action: %q, available actions are 'funding', 'maintenance' or 'scanning'", req.Action), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("unknown action: %q, available actions are 'funding', 'maintenance' or 'scanning'", action), http.StatusBadRequest)
 		return
 	}
 

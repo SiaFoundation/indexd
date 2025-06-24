@@ -148,7 +148,7 @@ func NewServer(chain ChainManager, contracts ContractManager, hosts HostManager,
 
 	// debug endpoints
 	if a.debug {
-		routes["POST /debug/trigger"] = a.handlePOSTTrigger
+		routes["POST /debug/trigger/:action"] = a.handlePOSTTrigger
 	}
 
 	return jape.Mux(routes)

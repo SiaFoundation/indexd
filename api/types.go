@@ -12,12 +12,6 @@ type (
 		NewAccountKey types.PublicKey `json:"newAccountKey"`
 	}
 
-	// DebugTriggerRequest is the request body for the [POST] /debug/trigger
-	// endpoint.
-	DebugTriggerRequest struct {
-		Action string `json:"action"`
-	}
-
 	// HostsBlocklistRequest is the request body for the [POST] /hosts/blocklist.
 	HostsBlocklistRequest struct {
 		HostKeys []types.PublicKey `json:"hostKeys"`
