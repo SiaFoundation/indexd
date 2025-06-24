@@ -54,6 +54,23 @@ func (c *Client) AccountsUpdate(ctx context.Context, oldAccountKey, newAccountKe
 	return
 }
 
+// Contract returns the contract with the given ID.
+func (c *Client) Contract(ctx context.Context, contractID types.FileContractID) (contract contracts.Contract, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/contract/%s", contractID), &contract)
+	return
+}
+
+// Contracts returns all contracts known to the indexer, optionally filtered by
+// the given query options.
+func (c *Client) Contracts(ctx context.Context, opts ...ContractQueryParameterOption) (contracts []contracts.Contract, err error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	err = c.c.GET(ctx, "/contracts?"+values.Encode(), &contracts)
+	return
+}
+
 // State returns the current state of the indexer.
 func (c *Client) State(ctx context.Context) (state State, err error) {
 	err = c.c.GET(ctx, "/state", &state)

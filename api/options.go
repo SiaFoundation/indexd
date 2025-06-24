@@ -42,6 +42,24 @@ func WithLimit(limit int) URLQueryParameterOption {
 	}
 }
 
+// ContractQueryParameterOption is an option to configure the query string for
+// the Contracts endpoint.
+type ContractQueryParameterOption URLQueryParameterOption
+
+// WithRevisable sets the 'revisable' parameter.
+func WithRevisable(revisable bool) ContractQueryParameterOption {
+	return func(q url.Values) {
+		q.Set("revisable", fmt.Sprint(revisable))
+	}
+}
+
+// WithGood sets the 'good' parameter.
+func WithGood(good bool) ContractQueryParameterOption {
+	return func(q url.Values) {
+		q.Set("good", fmt.Sprint(good))
+	}
+}
+
 // HostQueryParameterOption is an option to configure the query string for the
 // Hosts endpoint.
 type HostQueryParameterOption URLQueryParameterOption

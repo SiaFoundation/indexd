@@ -125,6 +125,52 @@ func (a *api) handleDELETEAccount(jc jape.Context) {
 	}
 }
 
+func (a *api) handleGETContract(jc jape.Context) {
+	var contractID types.FileContractID
+	if jc.DecodeParam("contractid", &contractID) != nil {
+		return
+	}
+
+	contract, err := a.store.Contract(jc.Request.Context(), contractID)
+	if errors.Is(err, contracts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get contract", err) != nil {
+		return
+	}
+
+	jc.Encode(contract)
+}
+
+func (a *api) handleGETContracts(jc jape.Context) {
+	offset, limit, ok := parseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+
+	var opts []contracts.ContractQueryOpt
+	if jc.Request.FormValue("revisable") != "" {
+		var revisable bool
+		if jc.DecodeForm("revisable", &revisable) != nil {
+			return
+		}
+		opts = append(opts, contracts.WithRevisable(revisable))
+	}
+	if jc.Request.FormValue("good") != "" {
+		var good bool
+		if jc.DecodeForm("good", &good) != nil {
+			return
+		}
+		opts = append(opts, contracts.WithGood(good))
+	}
+
+	contracts, err := a.store.Contracts(jc.Request.Context(), offset, limit, opts...)
+	if jc.Check("failed to get contracts", err) != nil {
+		return
+	}
+	jc.Encode(contracts)
+}
+
 func (a *api) handleGETState(jc jape.Context) {
 	ci, err := a.store.LastScannedIndex(jc.Request.Context())
 	if jc.Check("failed to get last scanned index", err) != nil {
