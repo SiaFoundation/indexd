@@ -118,7 +118,7 @@ WHERE
 	-- active filter
 	(
 		$2::boolean IS NULL OR 
-		($2::boolean = TRUE AND c.state <= 1) OR 
+		($2::boolean = TRUE AND c.state <= 1 AND c.renewed_to IS NULL) OR 
 		($2::boolean = FALSE AND c.state > 1)
 	)
 LIMIT $3 OFFSET $4`, opts.Good, opts.Revisable, limit, offset)

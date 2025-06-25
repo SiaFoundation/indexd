@@ -109,7 +109,7 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 		AcceptingContracts:  true,
 		WalletAddress:       w.Address(),
 		MaxCollateral:       types.Siacoins(10000),
-		MaxContractDuration: 1000,
+		MaxContractDuration: 144 * 31 * 3, // 3 months
 		RemainingStorage:    100 * proto4.SectorSize,
 		TotalStorage:        100 * proto4.SectorSize,
 		Prices: proto4.HostPrices{
@@ -143,7 +143,7 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 	}
 	c.addSyncFn(syncFn)
 
-	rs := rhp4.NewServer(pk, c.cm, s, contractor, w, sr, ss, rhp4.WithPriceTableValidity(2*time.Minute))
+	rs := rhp4.NewServer(pk, c.cm, s, contractor, w, sr, ss, rhp4.WithPriceTableValidity(24*time.Hour))
 	rhp4Listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatal(err)

@@ -46,14 +46,18 @@ func WithLimit(limit int) URLQueryParameterOption {
 // the Contracts endpoint.
 type ContractQueryParameterOption URLQueryParameterOption
 
-// WithRevisable sets the 'revisable' parameter.
+// WithRevisable sets the 'revisable' parameter. When revisable is set to
+// 'true', only contracts that can still be used will be returned.
 func WithRevisable(revisable bool) ContractQueryParameterOption {
 	return func(q url.Values) {
 		q.Set("revisable", fmt.Sprint(revisable))
 	}
 }
 
-// WithGood sets the 'good' parameter.
+// WithGood sets the 'good' parameter. When good is set to 'true', all contracts
+// that are considered bad will be filtered out. Examples of such contracts are
+// contracts with blocked hosts or those that failed to renew when nearing their
+// ProofHeight.
 func WithGood(good bool) ContractQueryParameterOption {
 	return func(q url.Values) {
 		q.Set("good", fmt.Sprint(good))

@@ -85,7 +85,7 @@ WITH globals AS (
 	WHERE hosts.public_key = $1
 ) SELECT
 	hosts.*,
-	recent_uptime > 0.9,
+	recent_uptime >= 0.894,
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
 	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
@@ -159,7 +159,7 @@ WITH globals AS (
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 ) SELECT
  	hosts.*,
-	recent_uptime > 0.9,
+	recent_uptime >= 0.894,
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
 	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
@@ -175,7 +175,7 @@ FROM hosts CROSS JOIN globals
 WHERE
 	-- good host filter
 	(($3::boolean IS NULL) OR ($3::boolean = (
-		recent_uptime > 0.9 AND
+		recent_uptime >= 0.894 AND
 		has_settings AND
 		settings_max_contract_duration >= globals.contracts_period AND
 		settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND

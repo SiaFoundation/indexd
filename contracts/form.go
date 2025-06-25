@@ -121,6 +121,7 @@ func (c *hostClient) FormContract(ctx context.Context, settings proto.HostSettin
 // contracts with good hosts in unique CIDRs.
 func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted uint64, log *zap.Logger) error {
 	formationLog := log.Named("formation")
+	formationLog.Debug("started", zap.Uint64("period", period), zap.Uint64("wanted", wanted))
 
 	var activeContracts []Contract
 	const batchSize = 50
@@ -210,6 +211,8 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			break
 		}
 	}
+
+	formationLog.Debug("found candidates", zap.Uint64("n", uint64(len(candidates))))
 
 	// randomize their order to avoid preferring any host
 	cm.shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })

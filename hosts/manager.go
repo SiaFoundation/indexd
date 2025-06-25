@@ -296,10 +296,12 @@ func (m *HostManager) scanHosts(ctx context.Context) {
 
 	var once sync.Once
 	var wg sync.WaitGroup
+
+outer:
 	for _, hk := range hosts {
 		select {
 		case <-ctx.Done():
-			break
+			break outer
 		case sema <- struct{}{}:
 		}
 

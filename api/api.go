@@ -113,10 +113,10 @@ func NewServer(chain ChainManager, contracts ContractManager, syncer Syncer, wal
 		"DELETE /account/:accountkey": a.handleDELETEAccount,
 
 		// contract endpoints
-		"GET    /contract/:contractid": a.handleGETContract,
+		"GET /contract/:contractid": a.handleGETContract,
 
 		// contracts endpoints
-		"GET    /contracts": a.handleGETContracts,
+		"GET /contracts": a.handleGETContracts,
 
 		// explorer endpoints
 		"GET /explorer/exchange-rate/siacoin/:currency": a.handleGETExplorerSiacoinExchangeRate,

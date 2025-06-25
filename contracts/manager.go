@@ -172,6 +172,14 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 	}
 }
 
+// WithMaintenanceFrequency sets the frequency at which the contract manager
+// performs maintenance tasks. The default is 10 minutes.
+func WithMaintenanceFrequency(frequency time.Duration) ContractManagerOpt {
+	return func(cm *ContractManager) {
+		cm.maintenanceFrequency = frequency
+	}
+}
+
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
@@ -389,11 +397,14 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 }
 
 func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *zap.Logger) error {
+	log.Debug("performing contract maintenance")
+
 	// fetch settings and determine if maintenance is supposed to run
 	settings, err := cm.store.MaintenanceSettings(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch settings for contract maintenance: %w", err)
 	} else if !settings.Enabled {
+		log.Debug("contract maintenance is disabled, skipping")
 		return nil
 	}
 

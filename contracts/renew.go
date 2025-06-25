@@ -54,6 +54,7 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 		}
 
 		for _, contract := range contracts {
+			renewalLog.Named("debugpj").Sugar().Infow("found contract", "contractID", contract.ID)
 			if contract.ProofHeight > minProofHeight {
 				continue // too early to renew
 			} else if !contract.Good {
@@ -65,6 +66,8 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 					zap.Stringer("contractID", contract.ID),
 					zap.Error(err),
 				)
+			} else {
+				renewalLog.Debug("renewed", zap.Stringer("contractID", contract.ID))
 			}
 		}
 
