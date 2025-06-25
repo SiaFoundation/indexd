@@ -141,6 +141,18 @@ func TestContractsAPI(t *testing.T) {
 		contract = contracts[0]
 	}
 
+	// assert we can fetch the contract by ID
+	if c, err := indexer.Contract(context.Background(), contract.ID); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(c, contract) {
+		t.Fatal("unexpected contract", c)
+	}
+
+	// assert fetching a non-existing contract returns an error
+	if _, err := indexer.Contract(context.Background(), types.FileContractID{}); err == nil || !strings.Contains(err.Error(), contracts.ErrNotFound.Error()) {
+		t.Fatal("expected ErrNotFound", err)
+	}
+
 	// assert WithGood filters out bad contracts
 	if contracts, err := indexer.Contracts(context.Background(), api.WithGood(true)); err != nil {
 		t.Fatal(err)
