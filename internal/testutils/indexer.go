@@ -25,6 +25,10 @@ import (
 	"lukechampine.com/frand"
 )
 
+const (
+	DefaultHostname = "indexer.sia.tech"
+)
+
 // Indexer is a test utility combining an indexer, an http client for the
 // indexer and useful helpers for testing.
 type Indexer struct {
@@ -34,6 +38,12 @@ type Indexer struct {
 	cm     *chain.Manager
 	syncer *Syncer
 	wallet *wallet.SingleAddressWallet
+
+	applicationAPIAddress string
+}
+
+func (i *Indexer) ApplicationAPIAddress() string {
+	return i.applicationAPIAddress
 }
 
 // NewIndexer creates a new indexer for testing that is automatically closed up
@@ -74,30 +84,52 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	}
 	c.addSyncFn(syncFn)
 
-	apiOpts := []api.ServerOption{
-		api.WithLogger(log.Named("api")),
+	apiOpts := []api.Option{
+		api.WithLogger(log.Named("api.admin")),
 		api.WithExplorer(explorer.New("https://api.siascan.com")),
 	}
 
 	password := hex.EncodeToString(frand.Bytes(16))
-	web := http.Server{
-		Handler: jape.BasicAuth(password)(api.NewServer(c.cm, contracts, s, wm, store, apiOpts...)),
+	adminAPI := http.Server{
+		Handler: jape.BasicAuth(password)(api.NewAdminAPI(c.cm, contracts, s, wm, store, apiOpts...)),
 	}
 
-	httpListener, err := net.Listen("tcp4", "127.0.0.1:0")
+	adminListener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("failed to listen on http address: %v", err)
 	}
 
 	go func() {
-		if err := web.Serve(httpListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("http server failed", zap.Error(err))
+		if err := adminAPI.Serve(adminListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("failed to serve admin API", zap.Error(err))
+		}
+	}()
+
+	apiOpts = []api.Option{
+		api.WithLogger(log.Named("api.application")),
+	}
+
+	applicationAPI := http.Server{
+		Handler: api.NewApplicationAPI(DefaultHostname, store, apiOpts...),
+	}
+
+	applicationListener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen on application address: %v", err)
+	}
+
+	go func() {
+		if err := applicationAPI.Serve(applicationListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("failed to serve application API", zap.Error(err))
 		}
 	}()
 
 	t.Cleanup(func() {
-		if err := shutdownWithTimeout(web.Shutdown); err != nil {
-			t.Errorf("failed to shutdown webserver: %v", err)
+		if err := shutdownWithTimeout(applicationAPI.Shutdown); err != nil {
+			t.Errorf("failed to shutdown application API: %v", err)
+		}
+		if err := shutdownWithTimeout(adminAPI.Shutdown); err != nil {
+			t.Errorf("failed to shutdown admin API: %v", err)
 		}
 		if err := closeWithTimeout(s.Close); err != nil {
 			t.Errorf("failed to close syncer: %v", err)
@@ -122,7 +154,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		}
 	})
 	return &Indexer{
-		Client: api.NewClient(fmt.Sprintf("http://%s", httpListener.Addr().String()), password),
+		Client: api.NewClient(fmt.Sprintf("http://%s", adminListener.Addr().String()), password),
+
+		applicationAPIAddress: fmt.Sprintf("http://%s", applicationListener.Addr().String()),
 
 		db:     store,
 		cm:     c.cm,

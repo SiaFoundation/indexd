@@ -7,21 +7,37 @@ import (
 	"go.uber.org/zap"
 )
 
-// ServerOption is a functional option to configure an API server.
-type ServerOption func(*api)
-
-// WithExplorer sets the explorer for the API server.
-func WithExplorer(e Explorer) ServerOption {
-	return func(a *api) {
-		a.explorer = e
+type (
+	// API is the interface that all API types must implement.
+	// It is used to apply options to the API.
+	API interface {
+		applyOption(Option)
 	}
+
+	// Option is an interface for options that can be applied to the API.
+	Option interface {
+		applyToAdmin(*adminAPI)
+		applyToApplication(*applicationAPI)
+	}
+
+	loggerOption   struct{ log *zap.Logger }
+	explorerOption struct{ e Explorer }
+)
+
+func (o loggerOption) applyToAdmin(api *adminAPI)             { api.log = o.log }
+func (o loggerOption) applyToApplication(api *applicationAPI) { api.log = o.log }
+
+func (e explorerOption) applyToAdmin(api *adminAPI)             { api.explorer = e.e }
+func (e explorerOption) applyToApplication(api *applicationAPI) {}
+
+// WithExplorer sets the explorer for the API.
+func WithExplorer(e Explorer) Option {
+	return explorerOption{e: e}
 }
 
-// WithLogger sets the logger for the API server.
-func WithLogger(log *zap.Logger) ServerOption {
-	return func(a *api) {
-		a.log = log
-	}
+// WithLogger sets the logger for the server.
+func WithLogger(log *zap.Logger) Option {
+	return loggerOption{log: log}
 }
 
 // URLQueryParameterOption is an option to configure the query string
