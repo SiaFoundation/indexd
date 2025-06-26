@@ -7,6 +7,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
@@ -50,16 +51,14 @@ func TestHostSettings(t *testing.T) {
 	us, err := db.UsabilitySettings(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if !us.MaxEgressPrice.IsZero() {
-		t.Fatal("unexpected", us.MaxEgressPrice)
-	} else if !us.MaxIngressPrice.IsZero() {
-		t.Fatal("unexpected", us.MaxIngressPrice)
-	} else if !us.MaxStoragePrice.IsZero() {
-		t.Fatal("unexpected", us.MaxStoragePrice)
-	} else if !us.MinCollateral.IsZero() {
-		t.Fatal("unexpected", us.MinCollateral)
-	} else if us.MinProtocolVersion != ([3]uint8{1, 0, 0}) {
-		t.Fatal("unexpected", us.MinProtocolVersion)
+	} else if !reflect.DeepEqual(us, hosts.UsabilitySettings{
+		MinProtocolVersion: [3]uint8{1, 0, 0},
+		MinCollateral:      types.Siacoins(100).Div64(1e12).Div64(30 * 144),
+		MaxEgressPrice:     types.Siacoins(3000).Div64(1e12),
+		MaxIngressPrice:    types.Siacoins(3000).Div64(1e12),
+		MaxStoragePrice:    types.Siacoins(3000).Div64(1e12).Div64(30 * 144),
+	}) {
+		t.Fatalf("unexpected settings: \n%+v", us)
 	}
 
 	us.MaxEgressPrice = types.NewCurrency64(frand.Uint64n(1e6))
