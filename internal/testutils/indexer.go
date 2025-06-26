@@ -34,7 +34,7 @@ var (
 	}
 
 	testUsabilitySettings = hosts.UsabilitySettings{
-		MinCollateral:   types.Siacoins(10).Div64(oneTB).Div64(blocksPerMonth),   // 10 SC per TB per month
+		MinCollateral:   types.Siacoins(100).Div64(oneTB).Div64(blocksPerMonth),  // 100 SC per TB per month
 		MaxEgressPrice:  types.Siacoins(3000).Div64(oneTB),                       // 3000 SC per 1 TB
 		MaxIngressPrice: types.Siacoins(3000).Div64(oneTB),                       // 3000 SC per 1 TB
 		MaxStoragePrice: types.Siacoins(3000).Div64(oneTB).Div64(blocksPerMonth), // 3000 SC per TB per month
