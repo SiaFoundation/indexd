@@ -126,8 +126,17 @@ func TestContractsAPI(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// assert it got scanned
-	if _, err := indexer.Host(context.Background(), h.PublicKey()); err != nil {
+	if h, err := indexer.Host(context.Background(), h.PublicKey()); err != nil {
 		t.Fatal(err)
+	} else if !h.Usability.Usable() {
+		v := reflect.ValueOf(h.Usability)
+		var failedFields []string
+		for i := 0; i < v.NumField(); i++ {
+			if v.Field(i).Kind() == reflect.Bool && !v.Field(i).Bool() {
+				failedFields = append(failedFields, v.Type().Field(i).Name)
+			}
+		}
+		t.Fatalf("expected host to be usable, but got false for: %v", failedFields)
 	}
 
 	// assert a contract was formed

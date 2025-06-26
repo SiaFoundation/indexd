@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"math"
 	"net"
 	"net/http"
 	"testing"
@@ -35,10 +34,10 @@ var (
 	}
 
 	testUsabilitySettings = hosts.UsabilitySettings{
-		MinCollateral:   types.NewCurrency64(1),
-		MaxEgressPrice:  types.NewCurrency64(math.MaxUint64),
-		MaxIngressPrice: types.NewCurrency64(math.MaxUint64),
-		MaxStoragePrice: types.NewCurrency64(math.MaxUint64),
+		MinCollateral:   types.Siacoins(10).Div64(oneTB).Div64(blocksPerMonth),   // 10 SC per TB per month
+		MaxEgressPrice:  types.Siacoins(3000).Div64(oneTB),                       // 3000 SC per 1 TB
+		MaxIngressPrice: types.Siacoins(3000).Div64(oneTB),                       // 3000 SC per 1 TB
+		MaxStoragePrice: types.Siacoins(3000).Div64(oneTB).Div64(blocksPerMonth), // 3000 SC per TB per month
 	}
 )
 
