@@ -26,6 +26,7 @@ import (
 )
 
 const (
+	// DefaultHostname is the default hostname used for the application API.
 	DefaultHostname = "indexer.sia.tech"
 )
 
@@ -33,17 +34,17 @@ const (
 // indexer and useful helpers for testing.
 type Indexer struct {
 	*api.Client
+	appAPIAddress string
 
 	db     *postgres.Store
 	cm     *chain.Manager
 	syncer *Syncer
 	wallet *wallet.SingleAddressWallet
-
-	applicationAPIAddress string
 }
 
+// ApplicationAPIAddress returns the address of the application API.
 func (i *Indexer) ApplicationAPIAddress() string {
-	return i.applicationAPIAddress
+	return i.appAPIAddress
 }
 
 // NewIndexer creates a new indexer for testing that is automatically closed up
@@ -156,7 +157,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	return &Indexer{
 		Client: api.NewClient(fmt.Sprintf("http://%s", adminListener.Addr().String()), password),
 
-		applicationAPIAddress: fmt.Sprintf("http://%s", applicationListener.Addr().String()),
+		appAPIAddress: fmt.Sprintf("http://%s", applicationListener.Addr().String()),
 
 		db:     store,
 		cm:     c.cm,
