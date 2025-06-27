@@ -1105,6 +1105,58 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 	assertContractGood(false)
 }
 
+func TestUpdateContractRevision(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	hk := store.addTestHost(t)
+	contractID := store.addTestContract(t, hk)
+
+	revision, renewed, err := store.ContractRevision(context.Background(), contractID)
+	if err != nil {
+		t.Fatal(err)
+	} else if renewed {
+		t.Fatal("expected contract to not be renewed")
+	}
+	expectedRevision := newTestRevision(hk)
+	if revision != expectedRevision {
+		t.Fatalf("expected revision to be %v, got %v", expectedRevision, revision)
+	}
+
+	update := revision
+	update.Capacity *= 2
+	update.Filesize *= 2
+	update.RevisionNumber++
+	update.RenterOutput.Value = types.NewCurrency64(1000)
+	update.MissedHostValue = types.NewCurrency64(100)
+
+	if err := store.UpdateContractRevision(context.Background(), contractID, update); err != nil {
+		t.Fatal(err)
+	} else if revision, renewed, err := store.ContractRevision(context.Background(), contractID); err != nil {
+		t.Fatal(err)
+	} else if renewed {
+		t.Fatal("expected contract to not be renewed")
+	} else if revision != update {
+		t.Fatalf("expected revision to be %v, got %v", update, revision)
+	}
+
+	if err := store.AddRenewedContract(context.Background(), contractID, types.FileContractID{2}, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+		t.Fatal(err)
+	} else if revision, renewed, err := store.ContractRevision(context.Background(), contractID); err != nil {
+		t.Fatal(err)
+	} else if !renewed {
+		t.Fatal("expected contract to be renewed")
+	} else if revision != update {
+		t.Fatalf("expected revision to be %v, got %v", update, revision)
+	}
+
+	// assert [contracts.ErrNotFound] is returned for non-existing contract
+	if _, _, err := store.ContractRevision(context.Background(), types.FileContractID{}); !errors.Is(err, contracts.ErrNotFound) {
+		t.Fatalf("expected ErrContractNotFound, got %v", err)
+	} else if err := store.UpdateContractRevision(context.Background(), types.FileContractID{}, newTestRevision(types.PublicKey{})); !errors.Is(err, contracts.ErrNotFound) {
+		t.Fatalf("expected ErrContractNotFound, got %v", err)
+	}
+}
+
 func TestMarkBroadcastAttempt(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
@@ -1133,54 +1185,6 @@ func TestMarkBroadcastAttempt(t *testing.T) {
 	} else if updated.LastBroadcastAttempt.IsZero() || !updated.LastBroadcastAttempt.After(contract.LastBroadcastAttempt) {
 		t.Fatal("unexpected", contract.LastBroadcastAttempt, updated.LastBroadcastAttempt)
 	}
-}
-
-func TestSyncContract(t *testing.T) {
-	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
-
-	// add a host
-	hk := store.addTestHost(t)
-
-	// helper to sync and assert contract
-	contractID := store.addTestContract(t, hk, types.FileContractID{1})
-	assertContract := func(params contracts.ContractSyncParams) {
-		t.Helper()
-		if err := store.SyncContract(context.Background(), contractID, params); err != nil {
-			t.Fatal(err)
-		}
-		contract, err := store.Contract(context.Background(), contractID)
-		if err != nil {
-			t.Fatal(err)
-		} else if contract.Capacity != params.Capacity {
-			t.Fatalf("expected capacity %d, got %d", params.Capacity, contract.Capacity)
-		} else if contract.RemainingAllowance != params.RemainingAllowance {
-			t.Fatalf("expected remaining allowance %d, got %d", params.RemainingAllowance, contract.RemainingAllowance)
-		} else if contract.RevisionNumber != params.RevisionNumber {
-			t.Fatalf("expected revision number %d, got %d", params.RevisionNumber, contract.RevisionNumber)
-		} else if contract.Size != params.Size {
-			t.Fatalf("expected size %d, got %d", params.Size, contract.Size)
-		} else if contract.UsedCollateral != params.UsedCollateral {
-			t.Fatalf("expected used collateral %d, got %d", params.UsedCollateral, contract.UsedCollateral)
-		}
-	}
-
-	// assert setting it to some values works
-	assertContract(contracts.ContractSyncParams{
-		Capacity:           1000,
-		RemainingAllowance: types.Siacoins(1),
-		RevisionNumber:     100,
-		Size:               900,
-		UsedCollateral:     types.Siacoins(10),
-	})
-
-	// try again with different values
-	assertContract(contracts.ContractSyncParams{
-		Capacity:           2000,
-		RemainingAllowance: types.Siacoins(2),
-		RevisionNumber:     200,
-		Size:               1900,
-		UsedCollateral:     types.Siacoins(20),
-	})
 }
 
 // BenchmarkContracts is a benchmark to ensure the performance of
@@ -1318,6 +1322,20 @@ func BenchmarkContracts(b *testing.B) {
 		for b.Loop() {
 			_, err := store.ContractsForPruning(context.Background(), hosts[frand.Intn(len(hosts))])
 			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("contracts_revisions", func(b *testing.B) {
+		for b.Loop() {
+			contractID := contractIDs[frand.Intn(len(contractIDs))]
+			revision, _, err := store.ContractRevision(context.Background(), contractID)
+			if err != nil {
+				b.Fatal(err)
+			}
+			revision.RevisionNumber++
+			if err := store.UpdateContractRevision(context.Background(), contractID, revision); err != nil {
 				b.Fatal(err)
 			}
 		}

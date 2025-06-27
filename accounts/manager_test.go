@@ -129,7 +129,7 @@ type mockFunder struct {
 	fail  bool
 }
 
-func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, accounts []HostAccount, contractIDs []types.FileContractID, target types.Currency, log *zap.Logger) (funded int, drained int, _ error) {
+func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accounts []HostAccount, target types.Currency, log *zap.Logger) (funded int, drained int, _ error) {
 	f.calls = append(f.calls, fundAccountCall{
 		host:        host,
 		accounts:    accounts,

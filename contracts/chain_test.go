@@ -268,20 +268,6 @@ func (s *storeMock) RejectPendingContracts(_ context.Context, t time.Time) error
 	return nil
 }
 
-func (s *storeMock) SyncContract(ctx context.Context, contractID types.FileContractID, params ContractSyncParams) error {
-	for i := range s.contracts {
-		if s.contracts[i].ID == contractID {
-			s.contracts[i].Capacity = params.Capacity
-			s.contracts[i].RemainingAllowance = params.RemainingAllowance
-			s.contracts[i].RevisionNumber = params.RevisionNumber
-			s.contracts[i].Size = params.Size
-			s.contracts[i].UsedCollateral = params.UsedCollateral
-			return nil
-		}
-	}
-	return ErrNotFound
-}
-
 func (s *storeMock) PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error {
 	if maxBlocksSinceExpiry == 0 {
 		panic("invalid maxBlocksSinceExpiry")
@@ -598,7 +584,7 @@ func TestProcessActions(t *testing.T) {
 	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
 	store := &storeMock{}
-	contracts := newContractManager(types.PublicKey{}, amMock, cmMock, nil, nil, store, syncerMock, &walletMock{})
+	contracts := newContractManager(types.PublicKey{}, amMock, cmMock, store, nil, nil, syncerMock, &walletMock{})
 
 	contract := types.V2FileContractElement{
 		ID: types.FileContractID{1},

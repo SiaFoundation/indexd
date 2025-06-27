@@ -261,7 +261,7 @@ func TestPerformSectorPinningOnHost(t *testing.T) {
 	scanner.settings[hk2] = h2.Settings
 
 	// prepare contract manager
-	cm := newContractManager(types.PublicKey{}, nil, nil, dialer, scanner, store, nil, nil)
+	cm := newContractManager(types.PublicKey{}, nil, nil, store, dialer, scanner, nil, nil)
 
 	// pin sectors on h1
 	h1Prices := h1.Settings.Prices
