@@ -3,24 +3,26 @@ package accounts
 import (
 	"context"
 	"errors"
-	"net"
 	"testing"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
-type clientMock struct{}
+type dialerMock struct {
+	clients map[types.PublicKey]HostClient
+}
 
-func (c *clientMock) DialStream() (net.Conn, error) { return nil, nil }
-
-func (c *clientMock) FrameSize() int           { return 0 }
-func (c *clientMock) PeerKey() types.PublicKey { return types.PublicKey{} }
-
-func (c *clientMock) Close() error { return nil }
+func (d *dialerMock) DialHost(ctx context.Context, hk types.PublicKey, addr string) (HostClient, error) {
+	if client, ok := d.clients[hk]; ok {
+		return client, nil
+	}
+	return &hostClientMock{}, nil
+}
 
 type (
 	hostClientMock struct {
@@ -28,7 +30,7 @@ type (
 	}
 
 	rpcResult struct {
-		res    rhp4.RPCReplenishAccountsResult
+		res    rhp.RPCReplenishAccountsResult
 		funded int
 		err    error
 	}
@@ -36,15 +38,11 @@ type (
 
 func (*hostClientMock) Close() error { return nil }
 
-func (*hostClientMock) Dial(ctx context.Context, addr string, hk types.PublicKey) (rhp4.TransportClient, error) {
-	return &clientMock{}, nil
-}
-
-func (*hostClientMock) RPCLatestRevision(ctx context.Context, tc rhp4.TransportClient, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+func (*hostClientMock) LatestRevision(context.Context, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 	return proto.RPCLatestRevisionResponse{}, nil
 }
 
-func (h *hostClientMock) RPCReplenishAccounts(ctx context.Context, tc rhp4.TransportClient, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (rhp4.RPCReplenishAccountsResult, int, error) {
+func (h *hostClientMock) ReplenishAccounts(ctx context.Context, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (rhp.RPCReplenishAccountsResult, int, error) {
 	res, ok := h.results[contractID]
 	if !ok {
 		panic("unexpected contract ID in mock")
@@ -55,8 +53,8 @@ func (h *hostClientMock) RPCReplenishAccounts(ctx context.Context, tc rhp4.Trans
 // TestFunder is a unit test that checks the various edge cases in FundAccounts
 func TestFunder(t *testing.T) {
 	// prepare funder
-	client := &hostClientMock{results: make(map[types.FileContractID]rpcResult)}
-	f := &Funder{client: client}
+	dialer := &dialerMock{clients: make(map[types.PublicKey]HostClient)}
+	f := &Funder{dialer: dialer}
 
 	// prepare accounts
 	accounts := []HostAccount{
@@ -65,27 +63,31 @@ func TestFunder(t *testing.T) {
 		{AccountKey: proto.Account{3}},
 	}
 
-	// prepare results to cover all possible branches in FundAccounts
+	host := hosts.Host{PublicKey: types.PublicKey{1}}
 	target := types.Siacoins(1)
-	client.results[types.FileContractID{1}] = rpcResult{err: errContractInsufficientFunds}
-	client.results[types.FileContractID{2}] = rpcResult{err: errContractNotRevisable}
-	client.results[types.FileContractID{3}] = rpcResult{err: errors.New("failed to replenish accounts")}
-	client.results[types.FileContractID{4}] = rpcResult{
-		res:    rhp4.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target.Sub(types.NewCurrency64(1))}}},
+
+	// prepare results to cover all possible branches in FundAccounts
+	hc := &hostClientMock{results: make(map[types.FileContractID]rpcResult)}
+	hc.results[types.FileContractID{1}] = rpcResult{err: client.ErrContractInsufficientFunds}
+	hc.results[types.FileContractID{2}] = rpcResult{err: client.ErrContractNotRevisable}
+	hc.results[types.FileContractID{3}] = rpcResult{err: errors.New("failed to replenish accounts")}
+	hc.results[types.FileContractID{4}] = rpcResult{
+		res:    rhp.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target.Sub(types.NewCurrency64(1))}}},
 		funded: 1,
 	}
-	client.results[types.FileContractID{5}] = rpcResult{
-		res:    rhp4.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target}}},
+	hc.results[types.FileContractID{5}] = rpcResult{
+		res:    rhp.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target}}},
 		funded: 1,
 	}
-	client.results[types.FileContractID{6}] = client.results[types.FileContractID{5}]
-	client.results[types.FileContractID{7}] = rpcResult{
-		res:    rhp4.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target}}},
+	hc.results[types.FileContractID{6}] = hc.results[types.FileContractID{5}]
+	hc.results[types.FileContractID{7}] = rpcResult{
+		res:    rhp.RPCReplenishAccountsResult{Revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target}}},
 		funded: len(accounts) - 1,
 	}
+	dialer.clients[host.PublicKey] = hc
 
 	// assert contract is marked as drained if it is out of funds
-	funded, drained, err := f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{1}}, accounts, target, zap.NewNop())
+	funded, drained, err := f.FundAccounts(context.Background(), host, []types.FileContractID{{1}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 0 {
@@ -95,7 +97,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// assert contract is marked as drained if it is not revisable
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{2}}, accounts, target, zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), host, []types.FileContractID{{2}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 0 {
@@ -105,7 +107,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// assert contract is not marked as drained if replenish RPC fails
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{3}}, accounts, target, zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), host, []types.FileContractID{{3}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 0 {
@@ -115,7 +117,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// assert contract is marked as drained if replenish RPC succeeds but leaves the contract with insufficient funds afterwards
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{4}}, accounts, target, zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), host, []types.FileContractID{{4}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 1 {
@@ -125,7 +127,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// assert contracts are iterated and funded is updated until we run out of contracts
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{5}, {6}}, accounts, target, zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), host, []types.FileContractID{{5}, {6}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 2 {
@@ -135,7 +137,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// assert contracts are iterated and funded is updated until we run out of accounts
-	funded, drained, err = f.FundAccounts(context.Background(), hosts.Host{}, []types.FileContractID{{7}, {1}, {5}, {4}}, accounts, target, zap.NewNop())
+	funded, drained, err = f.FundAccounts(context.Background(), host, []types.FileContractID{{7}, {1}, {5}, {4}}, accounts, target, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if funded != 3 {
