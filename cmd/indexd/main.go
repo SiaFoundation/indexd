@@ -207,7 +207,7 @@ func main() {
 	rootCmd.StringVar(&cfg.Directory, "dir", cfg.Directory, "directory to store indexd metadata in")
 	rootCmd.StringVar(&cfg.AdminAPI.Address, "api.admin", cfg.AdminAPI.Address, "address to serve admin API on")
 	rootCmd.StringVar(&cfg.ApplicationAPI.Address, "api.app", cfg.ApplicationAPI.Address, "address to serve application API on")
-	rootCmd.BoolVar(&cfg.Debug, "debug", false, "enable debug mode")
+	rootCmd.BoolVar(&cfg.Debug, "debug", cfg.Debug, "enable debug mode")
 	rootCmd.StringVar(&logLevelOverride, "log", "", "overrides the log level for all enabled loggers (debug, info, warn, error)")
 
 	versionCmd := flagg.New("version", ``)
