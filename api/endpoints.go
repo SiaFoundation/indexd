@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/http/pprof"
 	"runtime"
 	"time"
 	"unicode/utf8"
@@ -41,6 +42,26 @@ func (a *api) checkServerError(jc jape.Context, context string, err error) bool 
 		a.log.Warn(context, zap.Error(err))
 	}
 	return err == nil
+}
+
+func (a *api) handleGETPProf(jc jape.Context) {
+	var handler string
+	if err := jc.DecodeParam("handler", &handler); err != nil {
+		return
+	}
+
+	switch handler {
+	case "cmdline":
+		pprof.Cmdline(jc.ResponseWriter, jc.Request)
+	case "profile":
+		pprof.Profile(jc.ResponseWriter, jc.Request)
+	case "symbol":
+		pprof.Symbol(jc.ResponseWriter, jc.Request)
+	case "trace":
+		pprof.Trace(jc.ResponseWriter, jc.Request)
+	default:
+		pprof.Index(jc.ResponseWriter, jc.Request)
+	}
 }
 
 func (a *api) handlePOSTTrigger(jc jape.Context) {

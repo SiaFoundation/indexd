@@ -2,7 +2,7 @@ package main
 
 import (
 	"net/http"
-	_ "net/http/pprof"
+
 	"strings"
 )
 
@@ -16,13 +16,6 @@ func (wr webRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	case strings.HasPrefix(req.URL.Path, "/api"):
 		req.URL.Path = strings.TrimPrefix(req.URL.Path, "/api") // strip the prefix
 		wr.api.ServeHTTP(w, req)
-	case strings.HasPrefix(req.URL.Path, "/debug/pprof"):
-		_, password, ok := req.BasicAuth()
-		if !ok || password != cfg.AdminAPI.Password {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-		http.DefaultServeMux.ServeHTTP(w, req)
 	default:
 		w.WriteHeader(http.StatusNotFound)
 	}

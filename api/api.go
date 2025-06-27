@@ -148,6 +148,7 @@ func NewServer(chain ChainManager, contracts ContractManager, hosts HostManager,
 
 	// debug endpoints
 	if a.debug {
+		routes["GET /debug/pprof/:handler"] = a.handleGETPProf
 		routes["POST /debug/trigger/:action"] = a.handlePOSTTrigger
 	}
 
