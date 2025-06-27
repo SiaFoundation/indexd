@@ -265,7 +265,7 @@ func BenchmarkUpload(b *testing.B) {
 		})
 	}
 
-	inflight := []int{runtime.NumCPU(), 5, 10, 20, 30}
+	inflight := []int{5, 15, 30}
 	// testing more variants is not particularly useful
 	slow := []int{0, 1, 3, 5}
 	timeout := []int{0, 1, 3, 5}
@@ -313,8 +313,8 @@ func BenchmarkDownload(b *testing.B) {
 
 	benchMatrix(b, 0, runtime.NumCPU())
 
-	inflight := []int{1, 3, 5, 10, 20, 30}
-	slow := []int{0, 1, 3, 5, 10, 20}
+	inflight := []int{5, 15, 30}
+	slow := []int{0, 1, 3, 5}
 
 	for _, s := range slow {
 		for _, i := range inflight {
