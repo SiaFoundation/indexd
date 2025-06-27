@@ -269,7 +269,7 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	scanner.settings[hk5] = h5.Settings
 
 	// prepare contract manager
-	cm := newContractManager(types.PublicKey{}, nil, nil, dialer, scanner, store, nil, nil)
+	cm := newContractManager(types.PublicKey{}, nil, nil, store, dialer, scanner, nil, nil)
 
 	// prune contracts on h1
 	err := cm.performContractPruningOnHost(context.Background(), h1, zap.NewNop())

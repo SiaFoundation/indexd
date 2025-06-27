@@ -9,33 +9,9 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
-
-func (c *hostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error) {
-	// sanity check
-	if len(sectors) > proto.MaxSectorBatchSize {
-		return rhp.RPCAppendSectorsResult{}, fmt.Errorf("too many sectors, %d > %d", len(sectors), proto.MaxSectorBatchSize) // developer error
-	}
-
-	// fetch revision and check if it meets the requirements
-	rev, err := rhp.RPCLatestRevision(ctx, c.client, contractID)
-	if err != nil {
-		return rhp.RPCAppendSectorsResult{}, fmt.Errorf("failed to fetch latest revision: %w", err)
-	} else if !rev.Revisable {
-		return rhp.RPCAppendSectorsResult{}, errors.New("contract is not revisable")
-	} else if rev.Contract.RenterOutput.Value.IsZero() {
-		return rhp.RPCAppendSectorsResult{}, errors.New("contract is out of funds")
-	} else if rev.Contract.Filesize > maxContractSize {
-		return rhp.RPCAppendSectorsResult{}, fmt.Errorf("contract is too large, %d > %d", rev.Contract.Filesize, maxContractSize)
-	}
-
-	// append sectors
-	revision := rhp.ContractRevision{ID: contractID, Revision: rev.Contract}
-	return rhp.RPCAppendSectors(ctx, c.client, c.signer, c.cm.TipState(), hostPrices, revision, sectors)
-}
 
 func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Logger) error {
 	start := time.Now()
@@ -105,7 +81,7 @@ func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, host 
 	}
 
 	// dial the host
-	client, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
+	client, err := cm.dialer.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		return fmt.Errorf("failed to dial host: %w", err)
 	}

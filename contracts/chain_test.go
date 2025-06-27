@@ -584,7 +584,7 @@ func TestProcessActions(t *testing.T) {
 	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
 	store := &storeMock{}
-	contracts := newContractManager(types.PublicKey{}, amMock, cmMock, nil, nil, store, syncerMock, &walletMock{})
+	contracts := newContractManager(types.PublicKey{}, amMock, cmMock, store, nil, nil, syncerMock, &walletMock{})
 
 	contract := types.V2FileContractElement{
 		ID: types.FileContractID{1},

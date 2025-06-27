@@ -34,7 +34,7 @@ type (
 
 	// AccountFunder defines an interface to fund accounts.
 	AccountFunder interface {
-		FundAccounts(ctx context.Context, host hosts.Host, accounts []HostAccount, contractIDs []types.FileContractID, target types.Currency, log *zap.Logger) (int, int, error)
+		FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accounts []HostAccount, target types.Currency, log *zap.Logger) (int, int, error)
 	}
 
 	// AccountManager manages accounts.
@@ -107,7 +107,7 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 		}
 
 		// fund accounts
-		funded, drained, err := m.funder.FundAccounts(ctx, host, accounts, contractIDs, m.fundTarget, log)
+		funded, drained, err := m.funder.FundAccounts(ctx, host, contractIDs, accounts, m.fundTarget, log)
 		if err != nil {
 			return fmt.Errorf("failed to fund accounts: %w", err)
 		}

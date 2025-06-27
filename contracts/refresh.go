@@ -7,30 +7,8 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/rhp/v4"
 	"go.uber.org/zap"
 )
-
-func (c *hostClient) RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error) {
-	rev, err := rhp.RPCLatestRevision(ctx, c.client, params.ContractID)
-	if err != nil {
-		return rhp.RPCRefreshContractResult{}, fmt.Errorf("failed to fetch latest revision: %w", err)
-	} else if rev.Renewed {
-		return rhp.RPCRefreshContractResult{}, fmt.Errorf("contract already renewed")
-	} else if !rev.Revisable {
-		return rhp.RPCRefreshContractResult{}, fmt.Errorf("contract not revisable")
-	}
-
-	res, err := rhp.RPCRefreshContract(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, rev.Contract, proto.RPCRefreshContractParams{
-		Allowance:  rev.Contract.RenterOutput.Value,
-		Collateral: rev.Contract.MissedHostValue,
-	})
-	if err != nil {
-		return rhp.RPCRefreshContractResult{}, fmt.Errorf("failed to form contract: %w", err)
-	}
-
-	return res, nil
-}
 
 func (cm *ContractManager) performContractRefreshes(ctx context.Context, log *zap.Logger) error {
 	refreshLog := log.Named("refresh")
@@ -118,13 +96,14 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		return nil
 	}
 
-	hc, err := cm.dialer.Dial(ctx, host.PublicKey, host.SiamuxAddr())
+	client, err := cm.dialer.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		contractLog.Debug("failed to dial host", zap.Error(err))
 		return nil
 	}
-	defer hc.Close()
-	res, err := hc.RefreshContract(ctx, host.Settings, proto.RPCRefreshContractParams{
+	defer client.Close()
+
+	res, err := client.RefreshContract(ctx, host.Settings, proto.RPCRefreshContractParams{
 		Allowance:  additionalAllowance,
 		Collateral: additionalCollateral,
 		ContractID: contract.ID,
