@@ -164,16 +164,14 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 		}
 
 		rus, aus, err := s.cm.UpdatesSince(index, s.updateBatchSize)
-		if errors.Is(err, chain.ErrMissingBlock) {
-			s.log.Warn("missing block at index, resetting chain state", zap.Uint64("height", index.Height), zap.Stringer("id", index.ID))
+		if err != nil {
+			s.log.Warn("failed to fetch updates, resetting chain state", zap.Uint64("height", index.Height), zap.Stringer("id", index.ID), zap.Error(err))
 			if err := s.store.ResetChainState(ctx); err != nil {
 				return fmt.Errorf("failed to reset consensus state: %w", err)
 			} else if index, err = s.store.LastScannedIndex(ctx); err != nil {
 				return fmt.Errorf("failed to get last scanned index after reset: %w", err)
 			}
 			continue
-		} else if err != nil {
-			return fmt.Errorf("failed to fetch updates since %v: %w", index, err)
 		} else if len(rus) == 0 && len(aus) == 0 {
 			break
 		}
