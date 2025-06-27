@@ -259,16 +259,16 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 		}
 	}
 
-	// prepare scanner
-	scanner := store.Scanner()
-	scanner.settings[hk1] = h1.Settings
-	scanner.settings[hk2] = h2.Settings
-	scanner.settings[hk3] = h3.Settings
-	scanner.settings[hk4] = h3.Settings // h4 is bad, same as h3
-	scanner.settings[hk5] = h5.Settings
+	// prepare hm
+	hm := newHostManagerMock(store)
+	hm.settings[hk1] = h1.Settings
+	hm.settings[hk2] = h2.Settings
+	hm.settings[hk3] = h3.Settings
+	hm.settings[hk4] = h3.Settings // h4 is bad, same as h3
+	hm.settings[hk5] = h5.Settings
 
 	// prepare contract manager
-	cm := newContractManager(types.PublicKey{}, nil, nil, store, dialer, scanner, nil, nil)
+	cm := newContractManager(types.PublicKey{}, nil, nil, store, dialer, hm, nil, nil)
 
 	// prune contracts on h1
 	err := cm.performContractPruningOnHost(context.Background(), h1, zap.NewNop())
