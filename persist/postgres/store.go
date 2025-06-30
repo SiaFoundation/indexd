@@ -59,10 +59,11 @@ func (s *Store) Close() error {
 	return nil
 }
 
-// Connect connects to a running PostgresSQL server. The passed in context
-// determines the lifecycle of necessary migrations. If the context is cancelled,
-// the running migration will be interupted and an error returned.
-func Connect(ctx context.Context, ci ConnectionInfo, log *zap.Logger) (*pgxpool.Pool, error) {
+// NewStore creates a new Store instance, initializing the database if
+// necessary.  The passed in context determines the lifecycle of necessary
+// migrations. If the context is cancelled, the running migration will be
+// interupted and an error returned.
+func NewStore(ctx context.Context, ci ConnectionInfo, defaultMaintenanceSettings contracts.MaintenanceSettings, defaultUsabilitySettings hosts.UsabilitySettings, log *zap.Logger) (*Store, error) {
 	if err := ensureDatabase(ctx, ci); err != nil {
 		return nil, fmt.Errorf("failed to ensure database %q exists: %w", ci.Database, err)
 	}
@@ -75,11 +76,7 @@ func Connect(ctx context.Context, ci ConnectionInfo, log *zap.Logger) (*pgxpool.
 		return nil, fmt.Errorf("failed to connect to database: %w", err)
 	}
 	log.Info("connected", zap.String("database", ci.Database), zap.String("host", ci.Host), zap.Int("port", ci.Port))
-	return pool, nil
-}
 
-// NewStore creates a new Store instance, initializing the database if necessary.
-func NewStore(ctx context.Context, pool *pgxpool.Pool, defaultMaintenanceSettings contracts.MaintenanceSettings, defaultUsabilitySettings hosts.UsabilitySettings, log *zap.Logger) (*Store, error) {
 	s := &Store{
 		pool: pool,
 		log:  log,

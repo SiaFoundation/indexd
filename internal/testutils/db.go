@@ -41,14 +41,8 @@ func NewDB(t testing.TB, log *zap.Logger) *postgres.Store {
 	pool.Close()
 	ci.Database = dbName
 
-	// connect
-	log = log.Named("postgres")
-	pool, err = postgres.Connect(context.Background(), ci, log)
-	if err != nil {
-		t.Fatalf("failed to connect to postgres database: %v", err)
-	}
-
-	store, err := postgres.NewStore(context.Background(), pool, contracts.DefaultMaintenanceSettings, hosts.DefaultUsabilitySettings, log)
+	// create store
+	store, err := postgres.NewStore(context.Background(), ci, contracts.DefaultMaintenanceSettings, hosts.DefaultUsabilitySettings, log)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
