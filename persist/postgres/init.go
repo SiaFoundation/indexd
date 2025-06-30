@@ -18,9 +18,15 @@ import (
 //go:embed init.sql
 var initDatabase string
 
-func initSettings(ctx context.Context, tx *txn) error {
-	_, err := tx.Exec(ctx, `INSERT INTO global_settings(id, db_version) VALUES (0, 1);`)
-	return err
+func initSettings(ctx context.Context, tx *txn, ms contracts.MaintenanceSettings, us hosts.UsabilitySettings) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO global_settings(id, db_version) VALUES (0, 1);`); err != nil {
+		return fmt.Errorf("failed to insert initial global settings: %w", err)
+	} else if err := setMaintenanceSettings(ctx, tx, ms); err != nil {
+		return fmt.Errorf("failed to set initial maintenance settings %v: %w", ms, err)
+	} else if err := setUsabilitySettings(ctx, tx, us); err != nil {
+		return fmt.Errorf("failed to set initial usability settings %v: %w", us, err)
+	}
+	return nil
 }
 
 // getDBVersion returns the current version of the database.
@@ -37,18 +43,14 @@ func setDBVersion(ctx context.Context, tx *txn, version int64) error {
 	return tx.QueryRow(ctx, query, version).Scan(&dbID)
 }
 
-func (s *Store) initNewDatabase(ctx context.Context, target int64, defaultMaintenanceSettings contracts.MaintenanceSettings, defaultUsabilitySettings hosts.UsabilitySettings) error {
+func (s *Store) initNewDatabase(ctx context.Context, target int64, ms contracts.MaintenanceSettings, us hosts.UsabilitySettings) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		if _, err := tx.Exec(ctx, initDatabase); err != nil {
 			return err
-		} else if err := initSettings(ctx, tx); err != nil {
+		} else if err := initSettings(ctx, tx, ms, us); err != nil {
 			return fmt.Errorf("failed to init settings: %w", err)
 		} else if err := setDBVersion(ctx, tx, target); err != nil {
 			return fmt.Errorf("failed to set initial database version: %w", err)
-		} else if err := setMaintenanceSettings(ctx, tx, defaultMaintenanceSettings); err != nil {
-			return fmt.Errorf("failed to set initial maintenance settings: %w", err)
-		} else if err := setUsabilitySettings(ctx, tx, defaultUsabilitySettings); err != nil {
-			return fmt.Errorf("failed to set initial usability settings: %w", err)
 		}
 		return nil
 	})

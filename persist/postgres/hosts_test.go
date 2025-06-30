@@ -611,9 +611,8 @@ func TestHostsRecentUptime(t *testing.T) {
 	hk = db.addTestHost(t)
 
 	// manually override the default uptime to .894, this very specific value
-	// gives us the uptime properties that are laid out in the spec, for the
-	// time being though the recent uptime defaults to 0.9 to ensure host pass
-	// uptime checks by default
+	// gives us the uptime properties that are laid out in the spec. The recent
+	// uptime defaults to 0.9 to ensure hosts pass uptime checks by default.
 	_, err := db.pool.Exec(context.Background(), `UPDATE hosts SET recent_uptime = .894`)
 	if err != nil {
 		t.Fatal(err)
