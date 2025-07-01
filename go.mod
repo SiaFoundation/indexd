@@ -7,7 +7,7 @@ require (
 	github.com/jackc/pgx/v5 v5.7.5
 	github.com/klauspost/reedsolomon v1.12.4
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.14.0
+	go.sia.tech/core v0.14.1
 	go.sia.tech/coreutils v0.16.3
 	go.sia.tech/jape v0.14.0
 	go.uber.org/goleak v1.3.0
