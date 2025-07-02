@@ -7,6 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -57,10 +59,11 @@ func (s *Store) Close() error {
 	return nil
 }
 
-// Connect connects to a running PostgresSQL server. The passed in context
-// determines the lifecycle of necessary migrations. If the context is cancelled,
-// the running migration will be interupted and an error returned.
-func Connect(ctx context.Context, ci ConnectionInfo, log *zap.Logger) (*Store, error) {
+// NewStore creates a new Store instance, initializing the database if
+// necessary.  The passed in context determines the lifecycle of necessary
+// migrations. If the context is cancelled, the running migration will be
+// interupted and an error returned.
+func NewStore(ctx context.Context, ci ConnectionInfo, defaultMaintenanceSettings contracts.MaintenanceSettings, defaultUsabilitySettings hosts.UsabilitySettings, log *zap.Logger) (*Store, error) {
 	if err := ensureDatabase(ctx, ci); err != nil {
 		return nil, fmt.Errorf("failed to ensure database %q exists: %w", ci.Database, err)
 	}
@@ -74,14 +77,28 @@ func Connect(ctx context.Context, ci ConnectionInfo, log *zap.Logger) (*Store, e
 	}
 	log.Info("connected", zap.String("database", ci.Database), zap.String("host", ci.Host), zap.Int("port", ci.Port))
 
-	store := &Store{
+	s := &Store{
 		pool: pool,
 		log:  log,
 	}
-	if err := store.init(ctx); err != nil {
-		return nil, fmt.Errorf("failed to initialize store: %w", err)
+
+	target := int64(len(migrations) + 1) // init.sql is the initial schema
+	version := getDBVersion(ctx, pool)
+	switch {
+	case version == 0:
+		if err := s.initNewDatabase(ctx, target, defaultMaintenanceSettings, defaultUsabilitySettings); err != nil {
+			return nil, fmt.Errorf("failed to initialize database: %w", err)
+		}
+	case version < target:
+		s.log.Info("database version is out of date;", zap.Int64("version", version), zap.Int64("target", target))
+		if err := s.upgradeDatabase(ctx, version, target); err != nil {
+			return nil, fmt.Errorf("failed to upgrade database: %w", err)
+		}
+	case version > target:
+		return nil, fmt.Errorf("database version %v is newer than expected %v. database downgrades are not supported", version, target)
 	}
-	return store, nil
+
+	return s, nil
 }
 
 func ensureDatabase(ctx context.Context, ci ConnectionInfo) error {

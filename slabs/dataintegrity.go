@@ -43,6 +43,7 @@ var errInsufficientServiceAccountBalance = errors.New("insufficient service acco
 type (
 	// SectorVerifier defines the interface verifying a sector's integrity on a
 	// host.
+	// TODO: Refactor this to also use the Dialer and HostClient interfaces
 	SectorVerifier interface {
 		HostKey() types.PublicKey
 		Prices() proto.HostPrices

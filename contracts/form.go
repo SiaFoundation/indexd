@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -153,60 +154,53 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	cm.shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
 	for i := range candidates {
-		hostLog := formationLog.With(zap.Stringer("hostKey", candidates[i].PublicKey))
+		hostKey := candidates[i].PublicKey
+		hostLog := formationLog.With(zap.Stringer("hostKey", hostKey))
 
-		// filter out bad hosts - we still need to do this even if the
-		// candidates are usable since there might be additional reasons why a
-		// host isn't good for forming contracts
-		if !isGood(candidates[i], hostLog) {
-			continue
-		}
+		err := cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+			// make sure host is still good
+			if !isGood(host, hostLog) {
+				return fmt.Errorf("host is not good: %s", host.PublicKey)
+			}
 
-		// scan host for valid price settings
-		scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		host, err := cm.scanner.ScanHost(scanCtx, candidates[i].PublicKey)
-		cancel()
-		if err != nil {
-			hostLog.Warn("failed to scan host", zap.Error(err))
-			continue
-		}
+			allowance, collateral := initialContractFunding(host.Settings.Prices, host.Settings.MaxCollateral, period)
+			formationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			defer cancel()
+			hc, err := cm.dialer.DialHost(formationCtx, host.PublicKey, host.SiamuxAddr())
+			if err != nil {
+				return fmt.Errorf("failed to dial host: %w", err)
+			}
 
-		// make sure the host is still good
-		if !isGood(host, hostLog) {
-			continue // ignore bad host
-		}
+			res, err := hc.FormContract(formationCtx, host.Settings, proto.RPCFormContractParams{
+				RenterPublicKey: cm.renterKey,
+				RenterAddress:   cm.w.Address(),
+				Allowance:       allowance,
+				Collateral:      collateral,
+				ProofHeight:     cm.cm.TipState().Index.Height + period,
+			})
+			_ = hc.Close()
+			if err != nil {
+				return fmt.Errorf("failed to form contract: %w", err)
+			}
 
-		allowance, collateral := initialContractFunding(host.Settings.Prices, host.Settings.MaxCollateral, period)
-		formationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		hc, err := cm.dialer.DialHost(formationCtx, host.PublicKey, host.SiamuxAddr())
-		if err != nil {
-			cancel()
-			return fmt.Errorf("failed to dial host: %w", err)
-		}
-		res, err := hc.FormContract(formationCtx, host.Settings, proto.RPCFormContractParams{
-			RenterPublicKey: cm.renterKey,
-			RenterAddress:   cm.w.Address(),
-			Allowance:       allowance,
-			Collateral:      collateral,
-			ProofHeight:     cm.cm.TipState().Index.Height + period,
+			contract := res.Contract
+			minerFee := res.FormationSet.Transactions[len(res.FormationSet.Transactions)-1].MinerFee
+			err = cm.store.AddFormedContract(ctx, hostKey, contract.ID, contract.Revision, host.Settings.Prices.ContractPrice, allowance, minerFee)
+			if err != nil {
+				formationLog.Error("failed to add formed contract", zap.Error(err))
+				return fmt.Errorf("failed to add formed contract: %w", err)
+			}
+
+			// contract formed successfully
+			addHost(host)
+			return nil
 		})
-		cancel()
-		_ = hc.Close()
-		if err != nil {
+		if errors.Is(err, hosts.ErrBadHost) {
+			continue // ignore bad host
+		} else if err != nil {
 			hostLog.Error("failed to form contract", zap.Error(err))
 			continue
 		}
-		contract := res.Contract
-		minerFee := res.FormationSet.Transactions[len(res.FormationSet.Transactions)-1].MinerFee
-
-		err = cm.store.AddFormedContract(ctx, host.PublicKey, contract.ID, contract.Revision, host.Settings.Prices.ContractPrice, allowance, minerFee)
-		if err != nil {
-			formationLog.Error("failed to add formed contract", zap.Error(err))
-			continue
-		}
-
-		// contract formed successfully
-		addHost(host)
 	}
 
 	return nil

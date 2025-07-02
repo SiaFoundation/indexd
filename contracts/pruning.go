@@ -25,10 +25,10 @@ func (cm *ContractManager) performContractPruning(ctx context.Context, log *zap.
 	// fetch hosts for pruning, a host is eligble for pruning if it is not
 	// blocked and has active contracts that haven't been pruned in the last 24
 	// hours
-	hosts, err := cm.store.HostsForPruning(ctx)
+	hfp, err := cm.store.HostsForPruning(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch hosts for pruning: %w", err)
-	} else if len(hosts) == 0 {
+	} else if len(hfp) == 0 {
 		log.Warn("no hosts for pruning")
 		return nil
 	}
@@ -37,7 +37,7 @@ func (cm *ContractManager) performContractPruning(ctx context.Context, log *zap.
 	sema := make(chan struct{}, 50)
 	defer close(sema)
 
-	for _, hostKey := range hosts {
+	for _, hostKey := range hfp {
 		select {
 		case <-ctx.Done():
 			break
@@ -51,13 +51,9 @@ func (cm *ContractManager) performContractPruning(ctx context.Context, log *zap.
 				wg.Done()
 			}()
 
-			host, err := cm.store.Host(ctx, hostKey)
-			if err != nil {
-				hostLog.Debug("failed to fetch host", zap.Error(err))
-				return
-			}
-
-			err = cm.performContractPruningOnHost(ctx, host, hostLog)
+			err = cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+				return cm.performContractPruningOnHost(ctx, host, hostLog)
+			})
 			if err != nil {
 				hostLog.Debug("failed to prune contracts", zap.Error(err))
 			}
@@ -71,21 +67,6 @@ func (cm *ContractManager) performContractPruning(ctx context.Context, log *zap.
 }
 
 func (cm *ContractManager) performContractPruningOnHost(ctx context.Context, host hosts.Host, hostLog *zap.Logger) error {
-	// check host is good
-	if !host.IsGood() {
-		return fmt.Errorf("host is bad: blocked=%t, usable=%t, networks=%d", host.Blocked, host.Usability.Usable(), len(host.Networks))
-	}
-
-	// refresh prices if necessary
-	if time.Until(host.Settings.Prices.ValidUntil) < 30*time.Minute {
-		host, err := cm.scanner.ScanHost(ctx, host.PublicKey)
-		if err != nil {
-			return fmt.Errorf("failed to scan host: %w", err)
-		} else if !host.IsGood() {
-			return fmt.Errorf("host is bad: blocked=%t, usable=%t, networks=%d", host.Blocked, host.Usability.Usable(), len(host.Networks))
-		}
-	}
-
 	// dial the host
 	client, err := cm.dialer.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {

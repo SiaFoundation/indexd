@@ -10,6 +10,11 @@ import (
 	"go.sia.tech/coreutils/chain"
 )
 
+const (
+	blocksPerMonth = 144 * 30
+	oneTB          = 1e12
+)
+
 var (
 	// ErrNotFound is returned by database operations that fail due to a host
 	// not being found.
@@ -19,13 +24,25 @@ var (
 	// should.
 	ErrNoNetworks = errors.New("host has no networks")
 )
+var (
+	// DefaultHostsQueryOpts re the default options applied when querying hosts. By
+	// default no hosts are filtered out.
+	DefaultHostsQueryOpts = hostsQueryOpts{
+		Blocked: nil,
+		Good:    nil,
+	}
 
-// DefaultHostsQueryOpts re the default options applied when querying hosts. By
-// default no hosts are filtered out.
-var DefaultHostsQueryOpts = hostsQueryOpts{
-	Blocked: nil,
-	Good:    nil,
-}
+	// DefaultUsabilitySettings are the default settings used to determine
+	// whether a host is usable or not. These settings are configured in the
+	// database as defaults when the global settings are initialized.
+	DefaultUsabilitySettings = UsabilitySettings{
+		MaxEgressPrice:     types.Siacoins(3000).Div64(oneTB),                       // 3000 SC / TB
+		MaxIngressPrice:    types.Siacoins(3000).Div64(oneTB),                       // 3000 SC / TB
+		MaxStoragePrice:    types.Siacoins(3000).Div64(oneTB).Div64(blocksPerMonth), // 3000 SC / TB / month
+		MinCollateral:      types.Siacoins(100).Div64(oneTB).Div64(blocksPerMonth),  // 100 SC / TB / month
+		MinProtocolVersion: [3]uint8{1, 0, 0},
+	}
+)
 
 type (
 	// HostQueryOpt is a functional option for querying hosts.

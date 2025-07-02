@@ -35,11 +35,7 @@ func (s *Store) UpdatePinnedSettings(ctx context.Context, ps pins.PinnedSettings
 
 // UpdateMaintenanceSettings updates the maintenance settings.
 func (s *Store) UpdateMaintenanceSettings(ctx context.Context, settings contracts.MaintenanceSettings) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `UPDATE global_settings SET contracts_maintenance_enabled = $1, contracts_wanted = $2, contracts_renew_window = $3, contracts_period = $4`,
-			settings.Enabled, settings.WantedContracts, settings.RenewWindow, settings.Period)
-		return err
-	})
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error { return setMaintenanceSettings(ctx, tx, settings) })
 }
 
 // UsabilitySettings returns the usability settings used in the host's usability checks.
@@ -59,11 +55,7 @@ func (s *Store) UsabilitySettings(ctx context.Context) (us hosts.UsabilitySettin
 
 // UpdateUsabilitySettings updates the usability settings.
 func (s *Store) UpdateUsabilitySettings(ctx context.Context, us hosts.UsabilitySettings) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		query := `UPDATE global_settings SET hosts_max_egress_price = $1, hosts_max_ingress_price = $2, hosts_max_storage_price = $3, hosts_min_collateral = $4, hosts_min_protocol_version = $5`
-		_, err := tx.Exec(ctx, query, sqlCurrency(us.MaxEgressPrice), sqlCurrency(us.MaxIngressPrice), sqlCurrency(us.MaxStoragePrice), sqlCurrency(us.MinCollateral), sqlProtocolVersion(us.MinProtocolVersion))
-		return err
-	})
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error { return setUsabilitySettings(ctx, tx, us) })
 }
 
 // LastScannedIndex returns the last scanned index.
@@ -77,5 +69,17 @@ func (s *Store) LastScannedIndex(ctx context.Context) (ci types.ChainIndex, err 
 // UpdateLastScannedIndex updates the last scanned index.
 func (u *updateTx) UpdateLastScannedIndex(ctx context.Context, ci types.ChainIndex) error {
 	_, err := u.tx.Exec(ctx, `UPDATE global_settings SET scanned_height = $1, scanned_block_id = $2`, ci.Height, sqlHash256(ci.ID))
+	return err
+}
+
+func setMaintenanceSettings(ctx context.Context, tx *txn, settings contracts.MaintenanceSettings) error {
+	_, err := tx.Exec(ctx, `UPDATE global_settings SET contracts_maintenance_enabled = $1, contracts_wanted = $2, contracts_renew_window = $3, contracts_period = $4`,
+		settings.Enabled, settings.WantedContracts, settings.RenewWindow, settings.Period)
+	return err
+}
+
+func setUsabilitySettings(ctx context.Context, tx *txn, settings hosts.UsabilitySettings) error {
+	query := `UPDATE global_settings SET hosts_max_egress_price = $1, hosts_max_ingress_price = $2, hosts_max_storage_price = $3, hosts_min_collateral = $4, hosts_min_protocol_version = $5`
+	_, err := tx.Exec(ctx, query, sqlCurrency(settings.MaxEgressPrice), sqlCurrency(settings.MaxIngressPrice), sqlCurrency(settings.MaxStoragePrice), sqlCurrency(settings.MinCollateral), sqlProtocolVersion(settings.MinProtocolVersion))
 	return err
 }

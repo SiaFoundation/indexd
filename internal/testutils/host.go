@@ -17,6 +17,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	blocksPerMonth = 144 * 30
+	oneTB          = 1e12
+)
+
 type (
 	// A Host is an ephemeral host that can be used for testing.
 	Host struct {
@@ -108,16 +113,16 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 		Release:             "test",
 		AcceptingContracts:  true,
 		WalletAddress:       w.Address(),
-		MaxCollateral:       types.Siacoins(10000),
-		MaxContractDuration: 1000,
+		MaxCollateral:       types.Siacoins(1000), // 1 KS
+		MaxContractDuration: blocksPerMonth * 3,   // 3 months
 		RemainingStorage:    100 * proto4.SectorSize,
 		TotalStorage:        100 * proto4.SectorSize,
 		Prices: proto4.HostPrices{
-			ContractPrice: types.Siacoins(1).Div64(5), // 0.2 SC
-			StoragePrice:  types.NewCurrency64(100),   // 100 H / byte / block
-			IngressPrice:  types.NewCurrency64(100),   // 100 H / byte
-			EgressPrice:   types.NewCurrency64(100),   // 100 H / byte
-			Collateral:    types.NewCurrency64(200),
+			ContractPrice: types.Siacoins(1).Div64(5),                                      // 0.2 SC
+			StoragePrice:  types.Siacoins(150).Div64(oneTB).Div64(blocksPerMonth),          // 150 SC / TB / month
+			EgressPrice:   types.Siacoins(500).Div64(oneTB),                                // 500 SC / TB
+			IngressPrice:  types.Siacoins(10).Div64(oneTB),                                 // 10 SC / TB
+			Collateral:    types.Siacoins(150).Div64(oneTB).Div64(blocksPerMonth).Mul64(2), // 2x storage
 		},
 	})
 	ss := testutil.NewEphemeralSectorStore()
@@ -143,7 +148,7 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 	}
 	c.addSyncFn(syncFn)
 
-	rs := rhp4.NewServer(pk, c.cm, s, contractor, w, sr, ss, rhp4.WithPriceTableValidity(2*time.Minute))
+	rs := rhp4.NewServer(pk, c.cm, s, contractor, w, sr, ss, rhp4.WithPriceTableValidity(30*time.Minute))
 	rhp4Listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -10,13 +11,79 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/subscriber"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
+	"lukechampine.com/frand"
 )
 
 type testProofUpdater struct{ fn func(*types.StateElement) }
 
 func (u testProofUpdater) UpdateElementProof(se *types.StateElement) {
 	u.fn(se)
+}
+
+func TestResetChainState(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	// define helper to assert number of rows in a table
+	assertTableCount := func(table string, want int) {
+		t.Helper()
+		var got int
+		if err := store.pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&got); err != nil {
+			t.Fatal(err)
+		} else if got != want {
+			t.Fatalf("expected %d rows in %s, got %d", want, table, got)
+		}
+	}
+
+	// prepare random index
+	var bID types.BlockID
+	frand.Read(bID[:])
+	index := types.ChainIndex{Height: frand.Uint64n(math.MaxInt64), ID: bID}
+
+	// prepare test elements and events
+	utxos := []types.SiacoinOutputID{frand.Entropy256()}
+	created := []types.SiacoinElement{newTestSiacoinElement()}
+	events := []wallet.Event{newTestEvent()}
+	events[0].Index = index
+
+	// prepare store with random chain state
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return errors.Join(
+			tx.WalletApplyIndex(index, created, nil, events, time.Now()),
+			tx.UpdateLastScannedIndex(context.Background(), index),
+		)
+	}); err != nil {
+		t.Fatal(err)
+	} else if err := store.LockUTXOs(utxos, time.Now().Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert chain state before reset
+	if ci, err := store.LastScannedIndex(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if ci != index {
+		t.Fatal("unexpected last scanned index", ci, index)
+	}
+
+	assertTableCount("wallet_siacoin_elements", 1)
+	assertTableCount("wallet_locked_utxos", 1)
+	assertTableCount("wallet_events", 1)
+
+	if err := store.ResetChainState(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert chain state after reset
+	if ci, err := store.LastScannedIndex(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if ci != (types.ChainIndex{}) {
+		t.Fatal("unexpected last scanned index", ci, index)
+	}
+
+	assertTableCount("wallet_siacoin_elements", 0)
+	assertTableCount("wallet_locked_utxos", 0)
+	assertTableCount("wallet_events", 0)
 }
 
 func TestUpdateChainState(t *testing.T) {

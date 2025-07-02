@@ -35,9 +35,9 @@ import (
 )
 
 func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateKey, network *consensus.Network, genesis types.Block, log *zap.Logger) error {
-	store, err := postgres.Connect(ctx, cfg.Database, log.Named("postgres"))
+	store, err := postgres.NewStore(ctx, cfg.Database, contracts.DefaultMaintenanceSettings, hosts.DefaultUsabilitySettings, log.Named("postgres"))
 	if err != nil {
-		return fmt.Errorf("failed to connect to postgres database: %w", err)
+		return fmt.Errorf("failed to create postgres store: %w", err)
 	}
 	defer store.Close()
 
@@ -109,7 +109,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	defer hm.Close()
 
 	signer := contracts.NewFormContractSigner(wm, walletKey)
-	dialer := client.NewSiamuxDialer(cm, signer, log)
+	dialer := client.NewSiamuxDialer(cm, signer, store, log)
 	am := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithLogger(log.Named("accounts")))
 	defer am.Close()
 

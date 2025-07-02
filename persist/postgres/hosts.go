@@ -66,6 +66,7 @@ WITH globals AS (
 		hosts_max_ingress_price,
 		hosts_max_egress_price,
 		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
+		250000::NUMERIC AS sectors_per_tb,
 		1E12::NUMERIC AS one_tb,
 		1E24::NUMERIC AS one_sc
 	FROM global_settings
@@ -85,18 +86,18 @@ WITH globals AS (
 	WHERE hosts.public_key = $1
 ) SELECT
 	hosts.*,
-	recent_uptime > 0.9,
+	recent_uptime >= 0.9,
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
 	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
-	has_settings AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
+	has_settings AND settings_valid_until >= (NOW() + INTERVAL '15 minutes'),
 	has_settings AND settings_accepting_contracts,
 	has_settings AND settings_contract_price <= globals.one_sc,
 	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
 	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
 	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
 	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
-	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
+	has_settings AND settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb
 FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("host %q: %w", hk, hosts.ErrNotFound)
@@ -141,6 +142,7 @@ WITH globals AS (
         hosts_max_ingress_price,
 		hosts_max_egress_price,
 		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
+		250000::NUMERIC AS sectors_per_tb,
 		1E12::NUMERIC AS one_tb,
 		1E24::NUMERIC AS one_sc
     FROM global_settings
@@ -159,28 +161,28 @@ WITH globals AS (
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 ) SELECT
  	hosts.*,
-	recent_uptime > 0.9,
+	recent_uptime >= 0.9,
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
 	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
-	has_settings AND settings_valid_until >= (NOW() + INTERVAL '1 hour'),
+	has_settings AND settings_valid_until >= (NOW() + INTERVAL '15 minutes'),
 	has_settings AND settings_accepting_contracts,
 	has_settings AND settings_contract_price <= globals.one_sc,
 	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
 	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
 	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
 	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
-	has_settings AND settings_free_sector_price <= globals.one_sc / globals.one_tb
+	has_settings AND settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb
 FROM hosts CROSS JOIN globals
 WHERE
 	-- good host filter
 	(($3::boolean IS NULL) OR ($3::boolean = (
-		recent_uptime > 0.9 AND
+		recent_uptime >= 0.9 AND
 		has_settings AND
 		settings_max_contract_duration >= globals.contracts_period AND
 		settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
 		settings_version >= globals.host_min_version AND
-		settings_valid_until >= (NOW() + INTERVAL '1 hour') AND
+		settings_valid_until >= (NOW() + INTERVAL '15 minutes') AND
 		settings_accepting_contracts AND
 		settings_contract_price <= globals.one_sc AND
 		settings_collateral >= globals.hosts_min_collateral AND
@@ -188,7 +190,7 @@ WHERE
 		settings_storage_price <= globals.hosts_max_storage_price AND
 		settings_ingress_price <= globals.hosts_max_ingress_price AND
 		settings_egress_price <= globals.hosts_max_egress_price AND
-		settings_free_sector_price <= globals.one_sc / globals.one_tb
+		settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb
 		)
 	))
 	-- blocked host filter

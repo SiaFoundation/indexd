@@ -49,23 +49,10 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 		return fmt.Errorf("failed to fetch contract element: %w", err)
 	}
 
-	// fetch the host
-	host, err := cm.store.Host(ctx, fce.V2FileContract.HostPublicKey)
+	// fetch latest revision
+	rev, _, err := cm.store.ContractRevision(ctx, contractID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch host: %w", err)
-	}
-
-	// fetch the latest revision
-	client, err := cm.dialer.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
-	if err != nil {
-		return fmt.Errorf("failed to dial host: %w", err)
-	}
-	defer client.Close()
-
-	resp, err := client.LatestRevision(ctx, contractID)
-	if err != nil {
-		log.Warn("failed to fetch latest revision", zap.Error(err))
-		return nil
+		return fmt.Errorf("failed to fetch contract revision: %w", err)
 	}
 
 	// create the transaction
@@ -76,7 +63,7 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 		FileContractRevisions: []types.V2FileContractRevision{
 			{
 				Parent:   fce,
-				Revision: resp.Contract,
+				Revision: rev,
 			},
 		},
 	}

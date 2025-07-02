@@ -30,6 +30,18 @@ const (
 	fundTimeout = 2 * time.Minute
 )
 
+var (
+	// DefaultMaintenanceSettings are the default settings for contract
+	// maintenance. These settings are configured in the database as defaults
+	// when the global settings are initialized.
+	DefaultMaintenanceSettings = MaintenanceSettings{
+		Enabled:         false,
+		Period:          144 * 7 * 6, // 6 weeks
+		RenewWindow:     144 * 7 * 2, // 2 weeks
+		WantedContracts: 50,
+	}
+)
+
 type (
 	// AccountManager defines an interface that allows funding accounts on the
 	// host using a given set of contracts.
@@ -53,7 +65,6 @@ type (
 		AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error)
 		FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
 		FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error)
-		LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
 		RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error)
 		RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
 		SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error)
@@ -65,10 +76,10 @@ type (
 		DialHost(ctx context.Context, hostKey types.PublicKey, addr string) (HostClient, error)
 	}
 
-	// Scanner defines the minimal interface of Scanner functionality
+	// HostManager defines the minimal interface of HostManager functionality
 	// the ContractManager requires.
-	Scanner interface {
-		ScanHost(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
+	HostManager interface {
+		WithScannedHost(ctx context.Context, hk types.PublicKey, fn func(h hosts.Host) error) error
 	}
 
 	// Store is the minimal interface of Store functionality the ContractManager
@@ -78,6 +89,7 @@ type (
 		AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
 		ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error)
+		ContractRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, bool, error)
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		ContractsForBroadcasting(ctx context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error)
@@ -93,10 +105,11 @@ type (
 		MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error
 		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
 		PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error
-		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
+		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
+		UpdateContractRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) error
 		UpdateNextPrune(ctx context.Context, contractID types.FileContractID, nextPrune time.Time) error
 	}
 
@@ -146,14 +159,16 @@ type (
 
 	// ContractManager manages the contracts throughout their lifecycle.
 	ContractManager struct {
-		am    AccountManager
-		cm    ChainManager
+		am AccountManager
+		cm ChainManager
+
 		s     Syncer
 		w     Wallet
 		store Store
 
-		dialer    Dialer
-		scanner   Scanner
+		dialer Dialer
+		hm     HostManager
+
 		renterKey types.PublicKey
 
 		triggerFundingChan     chan struct{}
@@ -194,8 +209,8 @@ func (w *wrapper) DialHost(ctx context.Context, hostKey types.PublicKey, addr st
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer *client.SiamuxDialer, scanner Scanner, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, store, &wrapper{d: dialer}, scanner, syncer, wallet, opts...)
+func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer *client.SiamuxDialer, hm HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, store, &wrapper{d: dialer}, hm, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {
@@ -208,18 +223,19 @@ func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chain
 	return cm, nil
 }
 
-func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer Dialer, scanner Scanner, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer Dialer, hm HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
 		am: accountManager,
 		cm: chainManager,
-		s:  syncer,
-		w:  wallet,
 
-		dialer:    dialer,
+		s:     syncer,
+		w:     wallet,
+		store: store,
+
+		hm:     hm,
+		dialer: dialer,
+
 		renterKey: renterKey,
-
-		scanner: scanner,
-		store:   store,
 
 		triggerFundingChan:     make(chan struct{}, 1),
 		triggerMaintenanceChan: make(chan struct{}, 1),

@@ -3,10 +3,10 @@ package contracts
 import (
 	"context"
 	"fmt"
-	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
@@ -52,72 +52,52 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		zap.Bool("outOfCollateral", contract.OutOfCollateral()),
 	)
 
-	// fetch corresponding host and check if it's theoretically usable
-	host, err := cm.store.Host(ctx, contract.HostKey)
-	if err != nil {
-		return fmt.Errorf("failed to fetch host: %w", err)
-	} else if !host.Usability.Usable() {
-		contractLog.Debug("host is not usable")
-		return nil
-	}
-
-	// scan host for valid price settings and make sure it's still usable
-	scanCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	host, err = cm.scanner.ScanHost(scanCtx, host.PublicKey)
-	cancel()
-	if err != nil {
-		return fmt.Errorf("failed to scan host: %w", err)
-	} else if !host.Usability.Usable() {
-		contractLog.Debug("host is not usable after scan")
-		return nil
-	}
-
-	var additionalAllowance, additionalCollateral types.Currency
-	if contract.OutOfFunds() {
-		additionalAllowance = contract.InitialAllowance.Mul64(11).Div64(10) // add 10%
-		additionalCollateral = types.ZeroCurrency                           // don't need additional collateral
-	} else if contract.OutOfCollateral() {
-		additionalCollateral = contract.TotalCollateral.Mul64(11).Div64(10) // add 10%
-		if contract.TotalCollateral.Add(additionalCollateral).Cmp(host.Settings.MaxCollateral) > 0 {
-			var underflow bool
-			additionalCollateral, underflow = host.Settings.MaxCollateral.SubWithUnderflow(contract.TotalCollateral)
-			if underflow {
-				additionalCollateral = types.ZeroCurrency
+	return cm.hm.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
+		var additionalAllowance, additionalCollateral types.Currency
+		if contract.OutOfFunds() {
+			additionalAllowance = contract.InitialAllowance.Mul64(11).Div64(10) // add 10%
+			additionalCollateral = types.ZeroCurrency                           // don't need additional collateral
+		} else if contract.OutOfCollateral() {
+			additionalCollateral = contract.TotalCollateral.Mul64(11).Div64(10) // add 10%
+			if contract.TotalCollateral.Add(additionalCollateral).Cmp(host.Settings.MaxCollateral) > 0 {
+				var underflow bool
+				additionalCollateral, underflow = host.Settings.MaxCollateral.SubWithUnderflow(contract.TotalCollateral)
+				if underflow {
+					additionalCollateral = types.ZeroCurrency
+				}
+				contractLog.Debug("capping additional collateral since total would exceed max collateral of host",
+					zap.Stringer("additionalCollateral", additionalCollateral))
 			}
-			contractLog.Debug("capping additional collateral since total would exceed max collateral of host",
-				zap.Stringer("additionalCollateral", additionalCollateral))
+			additionalAllowance = proto.MinRenterAllowance(host.Settings.Prices, additionalCollateral) // min possible
 		}
-		additionalAllowance = proto.MinRenterAllowance(host.Settings.Prices, additionalCollateral) // min possible
-	}
 
-	// only refresh if either allowance or collateral increases
-	if additionalAllowance.IsZero() && additionalCollateral.IsZero() {
-		contractLog.Debug("not refreshing contract since resulting contract would have the same allowance and collateral")
+		// only refresh if either allowance or collateral increases
+		if additionalAllowance.IsZero() && additionalCollateral.IsZero() {
+			contractLog.Debug("not refreshing contract since resulting contract would have the same allowance and collateral")
+			return nil
+		}
+
+		hc, err := cm.dialer.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
+		if err != nil {
+			contractLog.Debug("failed to dial host", zap.Error(err))
+			return nil
+		}
+		defer hc.Close()
+		res, err := hc.RefreshContract(ctx, host.Settings, proto.RPCRefreshContractParams{
+			Allowance:  additionalAllowance,
+			Collateral: additionalCollateral,
+			ContractID: contract.ID,
+		})
+		if err != nil {
+			contractLog.Debug("failed to renew", zap.Error(err))
+			return nil
+		}
+		renewed := res.Contract
+		minerFee := res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1].MinerFee
+
+		if err := cm.store.AddRenewedContract(ctx, contract.ID, renewed.ID, renewed.Revision, host.Settings.Prices.ContractPrice, minerFee, renewed.Revision.MissedHostValue); err != nil {
+			return fmt.Errorf("failed to store renewed contract: %w", err)
+		}
 		return nil
-	}
-
-	client, err := cm.dialer.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
-	if err != nil {
-		contractLog.Debug("failed to dial host", zap.Error(err))
-		return nil
-	}
-	defer client.Close()
-
-	res, err := client.RefreshContract(ctx, host.Settings, proto.RPCRefreshContractParams{
-		Allowance:  additionalAllowance,
-		Collateral: additionalCollateral,
-		ContractID: contract.ID,
 	})
-	if err != nil {
-		contractLog.Debug("failed to renew", zap.Error(err))
-		return nil
-	}
-	renewed := res.Contract
-	minerFee := res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1].MinerFee
-
-	if err := cm.store.AddRenewedContract(ctx, contract.ID, renewed.ID, renewed.Revision, host.Settings.Prices.ContractPrice, minerFee, renewed.Revision.MissedHostValue); err != nil {
-		return fmt.Errorf("failed to store renewed contract: %w", err)
-	}
-
-	return nil
 }

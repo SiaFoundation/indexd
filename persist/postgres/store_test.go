@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/goleak"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -50,7 +52,7 @@ func initPostgres(t testing.TB, log *zap.Logger) *Store {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	db, err := Connect(ctx, connectionInfoFromEnv(), log)
+	db, err := NewStore(ctx, connectionInfoFromEnv(), contracts.DefaultMaintenanceSettings, hosts.DefaultUsabilitySettings, log.Named("postgres"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -146,12 +146,16 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatal("expected h1 to be scanned successfully")
 	} else if !h1.LastFailedScan.IsZero() {
 		t.Fatal("expected h1 to not have failed scans")
+	} else if !h1.Usability.Usable() {
+		t.Fatal("expected h1 to be usable", h1.Usability)
 	} else if h2, err := indexer.Host(context.Background(), h2.PublicKey()); err != nil {
 		t.Fatal(err)
 	} else if h2.LastSuccessfulScan.IsZero() {
 		t.Fatal("expected h2 to be scanned successfully")
 	} else if !h2.LastFailedScan.IsZero() {
 		t.Fatal("expected h2 to not have failed scans")
+	} else if !h2.Usability.Usable() {
+		t.Fatal("expected h2 to be usable", h2.Usability)
 	}
 
 	// assert blocklist is empty and unblocking unknown host is noop
@@ -207,17 +211,17 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatalf("invalid hosts were returned (%d): %+v", len(blocked), blocked)
 	}
 
-	// filter by usable hosts - none of them should be usable
+	// filter by usable hosts - all of them should be usable
 	usable, err := indexer.Hosts(context.Background(), api.WithUsable(true))
 	if err != nil {
 		t.Fatal(err)
-	} else if len(usable) != 0 {
+	} else if len(usable) != 2 {
 		t.Fatalf("invalid number of hosts: %d", len(usable))
 	}
 	unusable, err := indexer.Hosts(context.Background(), api.WithUsable(false))
 	if err != nil {
 		t.Fatal(err)
-	} else if len(unusable) != 2 {
+	} else if len(unusable) != 0 {
 		t.Fatalf("invalid number of hosts: %d", len(unusable))
 	}
 

@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"net"
 	"testing"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -59,11 +60,12 @@ func TestPerformContractRenewals(t *testing.T) {
 			PublicKey: types.PublicKey{byte(i)},
 			Settings:  badSettings, // will be updated by scan to good settings
 			Usability: hosts.GoodUsability,
+			Networks:  []net.IPNet{{}},
 		}
 	}
 
 	store := &storeMock{}
-	scanner := store.Scanner()
+	hm := newHostManagerMock(store)
 
 	blockHeight := cmMock.state.Index.Height
 	formContract := func(contractID types.FileContractID, hostKey types.PublicKey, good bool) {
@@ -88,14 +90,13 @@ func TestPerformContractRenewals(t *testing.T) {
 
 	// first one is good with a good contract and a bad one
 	good := goodHost(1)
-	scanner.settings[good.PublicKey] = goodSettings
+	hm.settings[good.PublicKey] = goodSettings
 	formContract(types.FileContractID{1}, good.PublicKey, true)  // will renew
 	formContract(types.FileContractID{2}, good.PublicKey, false) // won't renew
 
 	// second one is bad since it's not accepting contracts with a good contract
 	bad := goodHost(2)
-	bad.Usability.AcceptingContracts = false
-	scanner.settings[bad.PublicKey] = goodSettings
+	hm.settings[bad.PublicKey] = badSettings
 	formContract(types.FileContractID{3}, bad.PublicKey, true) // won't renew
 
 	// populate store
@@ -107,7 +108,7 @@ func TestPerformContractRenewals(t *testing.T) {
 	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, cmMock, store, dialer, scanner, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, cmMock, store, dialer, hm, syncerMock, wallet)
 
 	assertRenewal := func(h hosts.Host, renewedFrom types.FileContractID, proofHeight uint64, call renewContractCall) {
 		t.Helper()

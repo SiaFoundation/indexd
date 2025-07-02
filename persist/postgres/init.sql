@@ -7,7 +7,7 @@ CREATE TABLE hosts (
     id SERIAL PRIMARY KEY,
     public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32),
     consecutive_failed_scans INTEGER NOT NULL DEFAULT 0,
-    recent_uptime DOUBLE PRECISION NOT NULL DEFAULT 0.894 CHECK (recent_uptime > 0 AND recent_uptime < 1),
+    recent_uptime DOUBLE PRECISION NOT NULL DEFAULT 0.9 CHECK (recent_uptime > 0 AND recent_uptime < 1),
     last_integrity_check TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     last_failed_scan TIMESTAMP WITH TIME ZONE,
     last_successful_scan TIMESTAMP WITH TIME ZONE,
@@ -135,11 +135,11 @@ CREATE TABLE global_settings (
     contracts_period INTEGER NOT NULL DEFAULT 144 * 7 * 6 CHECK(contracts_period > contracts_renew_window), -- 6 weeks
 
     -- host manager settings
-    hosts_min_protocol_version BYTEA NOT NULL DEFAULT '\x010000', -- used for host checks
-    hosts_min_collateral NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
-    hosts_max_storage_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte / block
-    hosts_max_ingress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
-    hosts_max_egress_price NUMERIC(50,0) NOT NULL DEFAULT 0, -- hastings / byte
+    hosts_min_protocol_version BYTEA, -- used for host checks
+    hosts_min_collateral NUMERIC(50,0), -- hastings / byte / block
+    hosts_max_storage_price NUMERIC(50,0), -- hastings / byte / block
+    hosts_max_ingress_price NUMERIC(50,0), -- hastings / byte
+    hosts_max_egress_price NUMERIC(50,0), -- hastings / byte
 
     -- pin manager settings
     pins_currency VARCHAR(3) NOT NULL DEFAULT '',

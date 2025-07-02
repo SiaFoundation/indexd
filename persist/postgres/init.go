@@ -8,6 +8,8 @@ import (
 	_ "embed"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
@@ -16,9 +18,15 @@ import (
 //go:embed init.sql
 var initDatabase string
 
-func initSettings(ctx context.Context, tx *txn) error {
-	_, err := tx.Exec(ctx, `INSERT INTO global_settings(id, db_version) VALUES (0, 1);`)
-	return err
+func initSettings(ctx context.Context, tx *txn, ms contracts.MaintenanceSettings, us hosts.UsabilitySettings) error {
+	if _, err := tx.Exec(ctx, `INSERT INTO global_settings(id, db_version) VALUES (0, 1);`); err != nil {
+		return fmt.Errorf("failed to insert initial global settings: %w", err)
+	} else if err := setMaintenanceSettings(ctx, tx, ms); err != nil {
+		return fmt.Errorf("failed to set initial maintenance settings %v: %w", ms, err)
+	} else if err := setUsabilitySettings(ctx, tx, us); err != nil {
+		return fmt.Errorf("failed to set initial usability settings %v: %w", us, err)
+	}
+	return nil
 }
 
 // getDBVersion returns the current version of the database.
@@ -35,11 +43,11 @@ func setDBVersion(ctx context.Context, tx *txn, version int64) error {
 	return tx.QueryRow(ctx, query, version).Scan(&dbID)
 }
 
-func (s *Store) initNewDatabase(ctx context.Context, target int64) error {
+func (s *Store) initNewDatabase(ctx context.Context, target int64, ms contracts.MaintenanceSettings, us hosts.UsabilitySettings) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		if _, err := tx.Exec(ctx, initDatabase); err != nil {
 			return err
-		} else if err := initSettings(ctx, tx); err != nil {
+		} else if err := initSettings(ctx, tx, ms, us); err != nil {
 			return fmt.Errorf("failed to init settings: %w", err)
 		} else if err := setDBVersion(ctx, tx, target); err != nil {
 			return fmt.Errorf("failed to set initial database version: %w", err)
@@ -66,25 +74,5 @@ func (s *Store) upgradeDatabase(ctx context.Context, current, target int64) erro
 		}
 		log.Info("migration complete", zap.Duration("elapsed", time.Since(start)))
 	}
-	return nil
-}
-
-func (s *Store) init(ctx context.Context) error {
-	target := int64(len(migrations) + 1) // init.sql is the initial schema
-	version := getDBVersion(ctx, s.pool)
-	switch {
-	case version == 0:
-		if err := s.initNewDatabase(ctx, target); err != nil {
-			return fmt.Errorf("failed to initialize database: %w", err)
-		}
-	case version < target:
-		s.log.Info("database version is out of date;", zap.Int64("version", version), zap.Int64("target", target))
-		if err := s.upgradeDatabase(ctx, version, target); err != nil {
-			return fmt.Errorf("failed to upgrade database: %w", err)
-		}
-	case version > target:
-		return fmt.Errorf("database version %v is newer than expected %v. database downgrades are not supported", version, target)
-	}
-	// nothing to do
 	return nil
 }
