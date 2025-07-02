@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"net"
 	"testing"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -56,6 +57,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 	amMock := &accountsManagerMock{}
 	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
+	badSettings := proto.HostSettings{}
 
 	// helper to create a good host
 	goodHost := func(i int) hosts.Host {
@@ -63,11 +65,12 @@ func TestPerformContractRefreshes(t *testing.T) {
 			PublicKey: types.PublicKey{byte(i)},
 			Settings:  goodSettings,
 			Usability: hosts.GoodUsability,
+			Networks:  []net.IPNet{{}},
 		}
 	}
 
 	store := &storeMock{}
-	scanner := store.Scanner()
+	hm := newHostManagerMock(store)
 
 	var (
 		initialAllowance = types.Siacoins(100)
@@ -117,7 +120,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 
 	// first one is good with 3 contracts
 	good := goodHost(1)
-	scanner.settings[good.PublicKey] = goodSettings
+	hm.settings[good.PublicKey] = goodSettings
 	formContract(types.FileContractID{1}, good.PublicKey, true, false, false) // is good
 	formContract(types.FileContractID{2}, good.PublicKey, true, true, false)  // out-of-funds
 	formContract(types.FileContractID{3}, good.PublicKey, true, false, true)  // out-of-collateral
@@ -136,8 +139,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 
 	// second one is bad since it's not accepting contracts with a good contract
 	bad := goodHost(2)
-	bad.Usability.AcceptingContracts = false
-	scanner.settings[bad.PublicKey] = goodSettings
+	hm.settings[bad.PublicKey] = badSettings
 	formContract(types.FileContractID{8}, bad.PublicKey, true, true, true)
 
 	// populate store
@@ -149,7 +151,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, cmMock, store, dialer, scanner, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, cmMock, store, dialer, hm, syncerMock, wallet)
 
 	assertRefresh := func(h hosts.Host, allowance, collateral types.Currency, refreshedFrom types.FileContractID, call refreshContractCall) {
 		t.Helper()

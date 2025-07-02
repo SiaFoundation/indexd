@@ -72,6 +72,7 @@ type (
 	Config struct {
 		Directory      string `yaml:"directory"`
 		RecoveryPhrase string `yaml:"recoveryPhrase"`
+		Debug          bool   `yaml:"debug"`
 
 		AdminAPI       AdminAPI                `yaml:"adminAPI"`
 		ApplicationAPI ApplicationAPI          `yaml:"applicationAPI"`

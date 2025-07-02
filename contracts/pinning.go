@@ -19,10 +19,10 @@ func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Lo
 
 	// fetch hosts for pinning, a host is eligble for pinning if it is not
 	// blocked, has unpinned sectors and has an active contract
-	hosts, err := cm.store.HostsForPinning(ctx)
+	hfp, err := cm.store.HostsForPinning(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch hosts for pinning: %w", err)
-	} else if len(hosts) == 0 {
+	} else if len(hfp) == 0 {
 		log.Warn("no hosts for pinning")
 		return nil
 	}
@@ -31,7 +31,7 @@ func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Lo
 	sema := make(chan struct{}, 50)
 	defer close(sema)
 
-	for _, hostKey := range hosts {
+	for _, hostKey := range hfp {
 		select {
 		case <-ctx.Done():
 			break
@@ -45,15 +45,12 @@ func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Lo
 				wg.Done()
 			}()
 
-			host, err := cm.store.Host(ctx, hostKey)
-			if err != nil {
-				hostLog.Debug("failed to fetch host", zap.Error(err))
-				return
-			}
-
-			err = cm.performSectorPinningOnHost(ctx, host, hostLog)
+			err = cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+				return cm.performSectorPinningOnHost(ctx, host, hostLog)
+			})
 			if err != nil {
 				hostLog.Debug("failed to pin sectors", zap.Error(err))
+				return
 			}
 		}(ctx, hostKey, log.With(zap.Stringer("hostKey", hostKey)))
 	}
@@ -68,16 +65,6 @@ func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, host 
 	// check host is good
 	if !host.IsGood() {
 		return fmt.Errorf("host is bad: blocked=%t, usable=%t, networks=%d", host.Blocked, host.Usability.Usable(), len(host.Networks))
-	}
-
-	// refresh prices if necessary
-	if time.Until(host.Settings.Prices.ValidUntil) < 30*time.Minute {
-		host, err := cm.scanner.ScanHost(ctx, host.PublicKey)
-		if err != nil {
-			return fmt.Errorf("failed to scan host: %w", err)
-		} else if !host.IsGood() {
-			return fmt.Errorf("host is bad: blocked=%t, usable=%t, networks=%d", host.Blocked, host.Usability.Usable(), len(host.Networks))
-		}
 	}
 
 	// dial the host

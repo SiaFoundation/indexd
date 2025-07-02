@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +40,10 @@ const (
 
 var (
 	errNodeOffline = errors.New("node is offline")
+
+	// ErrBadHost is returned when a host can't be interacted with due to being
+	// considered bad.
+	ErrBadHost = errors.New("host is bad")
 )
 
 type (
@@ -51,6 +57,8 @@ type (
 		resolver      Resolver
 		scanner       Scanner
 		store         Store
+
+		triggerHostScanningChan chan struct{}
 
 		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
@@ -77,6 +85,7 @@ type (
 	// persist the scan results in the database.
 	Store interface {
 		Host(ctx context.Context, hk types.PublicKey) (Host, error)
+		Hosts(ctx context.Context, offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error)
 		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
 		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
 		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
@@ -117,8 +126,11 @@ func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error
 		resolver:      &net.Resolver{},
 		scanner:       &scanner{},
 		store:         store,
-		tg:            threadgroup.New(),
-		log:           zap.NewNop(),
+
+		triggerHostScanningChan: make(chan struct{}, 1),
+
+		tg:  threadgroup.New(),
+		log: zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -150,8 +162,14 @@ func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error
 			select {
 			case <-pruneTicker.C:
 				m.pruneHosts(ctx)
+			case <-m.triggerHostScanningChan:
+				// reset ticker
+				scanTicker.Stop()
+				scanTicker = time.NewTicker(m.scanFrequency)
+				m.log.Debug("triggered host scanning")
+				m.scanHosts(ctx, m.hostsForScanning(ctx, true))
 			case <-scanTicker.C:
-				m.scanHosts(ctx)
+				m.scanHosts(ctx, m.hostsForScanning(ctx, false))
 			case <-ctx.Done():
 				return
 			}
@@ -167,6 +185,14 @@ func (m *HostManager) Close() error {
 	return nil
 }
 
+// TriggerHostScanning triggers a scan of all hosts.
+func (m *HostManager) TriggerHostScanning() {
+	select {
+	case m.triggerHostScanningChan <- struct{}{}:
+	default:
+	}
+}
+
 // UsabilitySettings returns the current usability settings.
 func (m *HostManager) UsabilitySettings(ctx context.Context) (UsabilitySettings, error) {
 	return m.store.UsabilitySettings(ctx)
@@ -178,53 +204,40 @@ func (m *HostManager) UpdateUsabilitySettings(ctx context.Context, us UsabilityS
 	return m.store.UpdateUsabilitySettings(ctx, us)
 }
 
-// ScanHost scans the host with given host key and returns it with updated
-// settings and checks.
-func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, error) {
+// WithScannedHost calls the given function with the Host with the given host
+// key. If the call fails due to the host's price table being outdated, it will
+// scan the host and try again. If the host is bad, it returns ErrBadHost.
+// NOTE: It's important that the function passed to WithScannedHost can be
+// called twice.
+func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, fn func(h Host) error) error {
 	logger := m.log.With(zap.Stringer("hk", hk))
 
+	// fetch host
 	host, err := m.store.Host(ctx, hk)
 	if err != nil {
-		return Host{}, fmt.Errorf("failed to get host, %w", err)
+		return fmt.Errorf("failed to get host, %w", err)
+	} else if !host.IsGood() {
+		return fmt.Errorf("%w: blocked=%t, usable=%t, networks=%d", ErrBadHost, host.Blocked, host.Usability.Usable(), len(host.Networks))
 	}
 
-	scanCtx, cancel := context.WithTimeout(ctx, scanTimeout)
-	defer cancel()
+	// optimistically call the function
+	if err := fn(host); err == nil {
+		return nil
+	} else if err != nil && !strings.Contains(err.Error(), proto4.ErrPricesExpired.Error()) {
+		return err
+	}
+	logger.Debug("host has outdated prices, rescan")
 
-	addrs, networks, err := resolveHost(scanCtx, m.resolver, host.Addresses, logger)
+	// scan the host if the prices were outdated
+	host, err = m.scanHost(ctx, hk)
 	if err != nil {
-		return Host{}, fmt.Errorf("failed to resolve host, %w", err)
+		return fmt.Errorf("failed to scan host, %w", err)
+	} else if !host.IsGood() {
+		return fmt.Errorf("%w: blocked=%t, usable=%t, networks=%d", ErrBadHost, host.Blocked, host.Usability.Usable(), len(host.Networks))
 	}
 
-	settings, err := fetchSettings(scanCtx, m.scanner, hk, addrs, logger)
-	if err != nil {
-		return Host{}, fmt.Errorf("failed to fetch settings, %w", err)
-	}
-
-	consecutiveFailures := host.ConsecutiveFailedScans
-	success := settings != (proto4.HostSettings{})
-	if !success && !m.onlineChecker.IsOnline() {
-		return Host{}, errNodeOffline
-	} else if !success {
-		consecutiveFailures++
-	}
-
-	nextScan := calculateNextScanTime(
-		time.Now(),
-		success,
-		consecutiveFailures,
-		m.scanInterval,
-		scanIntervalOffsetHours,
-		scanExponentialBackoffHours,
-		scanExponentialBackoffMaxHours,
-	)
-
-	err = m.store.UpdateHost(ctx, hk, networks, settings, success, nextScan)
-	if err != nil {
-		return Host{}, fmt.Errorf("failed to update host, %w", err)
-	}
-
-	return m.store.Host(ctx, hk)
+	// try again
+	return fn(host)
 }
 
 // UpdateChainState updates the host announcements in the database.
@@ -259,6 +272,35 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 	return nil
 }
 
+// hostsForScanning returns the public keys of the hosts that need to be
+// scanned, if force is true, this method will return the public keys of all
+// hosts in the database.
+func (m *HostManager) hostsForScanning(ctx context.Context, force bool) []types.PublicKey {
+	if !force {
+		hosts, err := m.store.HostsForScanning(ctx)
+		if err != nil {
+			m.log.Error("failed to get hosts for scanning", zap.Error(err))
+			return nil
+		}
+		return hosts
+	}
+
+	// forcing a rescan of all hosts is only exposed with the debug flag
+	// enabled, therefore it's fine to pay the price here and fetch all hosts
+	// from the database only to get their public keys
+	hosts, err := m.store.Hosts(ctx, 0, math.MaxInt)
+	if err != nil {
+		m.log.Error("failed to get hosts for scanning", zap.Error(err))
+		return nil
+	}
+
+	var hks []types.PublicKey
+	for _, h := range hosts {
+		hks = append(hks, h.PublicKey)
+	}
+	return hks
+}
+
 func (m *HostManager) pruneHosts(ctx context.Context) {
 	cutoff := time.Now().Add(-pruneMinDowntime)
 	n, err := m.store.PruneHosts(ctx, time.Now().Add(-pruneMinDowntime), pruneMinConsecutiveScanFailures)
@@ -278,18 +320,63 @@ func (m *HostManager) pruneHosts(ctx context.Context) {
 	}
 }
 
-func (m *HostManager) scanHosts(ctx context.Context) {
-	start := time.Now()
+// scanHost scans the host with given host key and returns it with updated
+// settings and checks.
+func (m *HostManager) scanHost(ctx context.Context, hk types.PublicKey) (Host, error) {
+	logger := m.log.With(zap.Stringer("hk", hk))
 
-	hosts, err := m.store.HostsForScanning(ctx)
+	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
+	defer cancel()
+
+	host, err := m.store.Host(ctx, hk)
 	if err != nil {
-		m.log.Error("failed to get hosts for scanning", zap.Error(err))
-		return
-	} else if len(hosts) == 0 {
-		m.log.Debug("scan skipped")
+		return Host{}, fmt.Errorf("failed to get host, %w", err)
+	}
+
+	addrs, networks, err := resolveHost(ctx, m.resolver, host.Addresses, logger)
+	if err != nil {
+		return Host{}, fmt.Errorf("failed to resolve host, %w", err)
+	}
+
+	settings, err := fetchSettings(ctx, m.scanner, hk, addrs, logger)
+	if err != nil {
+		return Host{}, fmt.Errorf("failed to fetch settings, %w", err)
+	}
+
+	consecutiveFailures := host.ConsecutiveFailedScans
+	success := settings != (proto4.HostSettings{})
+	if !success && !m.onlineChecker.IsOnline() {
+		return Host{}, errNodeOffline
+	} else if !success {
+		consecutiveFailures++
+	}
+
+	nextScan := calculateNextScanTime(
+		time.Now(),
+		success,
+		consecutiveFailures,
+		m.scanInterval,
+		scanIntervalOffsetHours,
+		scanExponentialBackoffHours,
+		scanExponentialBackoffMaxHours,
+	)
+
+	err = m.store.UpdateHost(ctx, hk, networks, settings, success, nextScan)
+	if err != nil {
+		return Host{}, fmt.Errorf("failed to update host, %w", err)
+	}
+
+	return m.store.Host(ctx, hk)
+}
+
+func (m *HostManager) scanHosts(ctx context.Context, hosts []types.PublicKey) {
+	if len(hosts) == 0 {
+		m.log.Debug("scan skipped, no hosts for scanning")
 		return
 	}
-	m.log.Debug("scan started")
+
+	start := time.Now()
+	m.log.Debug("scan started", zap.Int("hosts", len(hosts)))
 
 	sema := make(chan struct{}, scanThreads)
 	defer close(sema)
@@ -311,7 +398,7 @@ loop:
 				wg.Done()
 			}()
 
-			if _, err := m.ScanHost(ctx, hk); errors.Is(err, context.Canceled) {
+			if _, err := m.scanHost(ctx, hk); errors.Is(err, context.Canceled) {
 				return
 			} else if errors.Is(err, errNodeOffline) {
 				once.Do(func() { m.log.Warn("indexer is offline, skipping scans") })

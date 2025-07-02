@@ -8,7 +8,6 @@ import (
 	"net"
 	"slices"
 	"sort"
-	"strings"
 	"testing"
 	"time"
 
@@ -260,16 +259,16 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 		}
 	}
 
-	// prepare scanner
-	scanner := store.Scanner()
-	scanner.settings[hk1] = h1.Settings
-	scanner.settings[hk2] = h2.Settings
-	scanner.settings[hk3] = h3.Settings
-	scanner.settings[hk4] = h3.Settings // h4 is bad, same as h3
-	scanner.settings[hk5] = h5.Settings
+	// prepare hm
+	hm := newHostManagerMock(store)
+	hm.settings[hk1] = h1.Settings
+	hm.settings[hk2] = h2.Settings
+	hm.settings[hk3] = h3.Settings
+	hm.settings[hk4] = h3.Settings // h4 is bad, same as h3
+	hm.settings[hk5] = h5.Settings
 
 	// prepare contract manager
-	cm := newContractManager(types.PublicKey{}, nil, nil, store, dialer, scanner, nil, nil)
+	cm := newContractManager(types.PublicKey{}, nil, nil, store, dialer, hm, nil, nil)
 
 	// prune contracts on h1
 	err := cm.performContractPruningOnHost(context.Background(), h1, zap.NewNop())
@@ -332,20 +331,26 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 		t.Fatalf("expected no contracts for pruning, got %v", contracts)
 	}
 
+	performPruning := func(hostKey types.PublicKey) error {
+		return cm.hm.WithScannedHost(context.Background(), hostKey, func(h hosts.Host) error {
+			return cm.performContractPruningOnHost(context.Background(), h, zap.NewNop())
+		})
+	}
+
 	// prune contracts on h3
-	err = cm.performContractPruningOnHost(context.Background(), h3, zap.NewNop())
-	if err == nil || !strings.Contains(err.Error(), "host is bad") {
+	err = performPruning(hk3)
+	if !errors.Is(err, hosts.ErrBadHost) {
 		t.Fatal("unexpected", err)
 	}
 
 	// prune contracts on h4
-	err = cm.performContractPruningOnHost(context.Background(), h4, zap.NewNop())
-	if err == nil || !strings.Contains(err.Error(), "host is bad") {
+	err = performPruning(hk4)
+	if !errors.Is(err, hosts.ErrBadHost) {
 		t.Fatal("unexpected", err)
 	}
 
 	// prune contracts on h5
-	err = cm.performContractPruningOnHost(context.Background(), h5, zap.NewNop())
+	err = performPruning(hk5)
 	if err != nil {
 		t.Fatalf("failed to perform contract pruning: %v", err)
 	}

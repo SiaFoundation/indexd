@@ -255,13 +255,13 @@ func TestPerformSectorPinningOnHost(t *testing.T) {
 	// indicate that root 4 is missing
 	dialer.clients[hk1].missingSectors[r4] = struct{}{}
 
-	// prepare scanner
-	scanner := store.Scanner()
-	scanner.settings[hk1] = h1.Settings
-	scanner.settings[hk2] = h2.Settings
+	// prepare hm
+	hm := newHostManagerMock(store)
+	hm.settings[hk1] = h1.Settings
+	hm.settings[hk2] = h2.Settings
 
 	// prepare contract manager
-	cm := newContractManager(types.PublicKey{}, nil, nil, store, dialer, scanner, nil, nil)
+	cm := newContractManager(types.PublicKey{}, nil, nil, store, dialer, hm, nil, nil)
 
 	// pin sectors on h1
 	h1Prices := h1.Settings.Prices

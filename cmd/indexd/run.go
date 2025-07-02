@@ -135,6 +135,10 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		api.WithLogger(log.Named("api")),
 	}
 
+	if cfg.Debug {
+		apiOpts = append(apiOpts, api.WithDebug())
+	}
+
 	var e *explorer.Explorer
 	if cfg.Explorer.Enabled {
 		e = explorer.New(cfg.Explorer.URL)
@@ -149,7 +153,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 
 	web := http.Server{
 		Handler: webRouter{
-			api: jape.BasicAuth(cfg.AdminAPI.Password)(api.NewServer(cm, contracts, s, wm, store, apiOpts...)),
+			api: jape.BasicAuth(cfg.AdminAPI.Password)(api.NewServer(cm, contracts, hm, s, wm, store, apiOpts...)),
 		},
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,

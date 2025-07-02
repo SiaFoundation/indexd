@@ -51,7 +51,7 @@ func TestVerifySectors(t *testing.T) {
 	am := newMockAccountManager(store)
 	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
-	sm, err := newSlabManager(am, hm, store, account)
+	sm, err := newSlabManager(am, hm, store, nil, account, account)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	am := newMockAccountManager(store)
 	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
-	sm, err := newSlabManager(am, hm, store, account)
+	sm, err := newSlabManager(am, hm, store, nil, account, account)
 	if err != nil {
 		t.Fatal(err)
 	}
