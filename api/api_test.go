@@ -210,7 +210,7 @@ func TestContractsAPI(t *testing.T) {
 		t.Fatal("unexpected")
 	}
 	c.MineBlocks(t, types.Address{}, renewHeight-ci.Height)
-	time.Sleep(3 * time.Second)
+	time.Sleep(time.Second)
 
 	// assert contract was renewed - we don't pass the option here to asserts
 	// the contracts API returns only revisable contracts by default
