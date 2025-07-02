@@ -21,7 +21,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-var errNotEnoughShards = errors.New("not enough shards")
+var (
+	errNotEnoughShards = errors.New("not enough shards")
+	errNotEnoughHosts  = errors.New("not enough hosts")
+)
 
 type (
 	// Shard represents a sector present on a host.
@@ -127,7 +130,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slab Slab, hosts []hosts.
 	}
 
 	// upload the missing shards
-	migratedShards, err := m.uploadShards(ctx, shards, hosts)
+	migratedShards, err := m.uploadShards(ctx, shards, hosts, logger)
 
 	// update the database with the new locations for the migrated shards
 	for _, shard := range migratedShards {
@@ -362,9 +365,49 @@ top:
 // NOTE: uploadShards expects that all the hosts are good hosts returned by
 // 'hostsForRepair'. So we don't duplicate any check here apart from the CIDR
 // check.
-func (m *SlabManager) uploadShards(ctx context.Context, shards [][]byte, hosts []hosts.Host) ([]Shard, error) {
+func (m *SlabManager) uploadShards(ctx context.Context, shards [][]byte, availableHosts []hosts.Host, logger *zap.Logger) ([]Shard, error) {
+	frand.Shuffle(len(availableHosts), func(i int, j int) { availableHosts[i], availableHosts[j] = availableHosts[j], availableHosts[i] }) // pick randomly
+
 	usedCIDRs := make(map[string]struct{})
-	_ = usedCIDRs // todo
+	addHost := func(host hosts.Host) {
+		for _, cidr := range host.Networks {
+			usedCIDRs[cidr.String()] = struct{}{}
+		}
+	}
+	shouldUse := func(host hosts.Host) bool {
+		for _, cidr := range host.Networks {
+			_, ok := usedCIDRs[cidr.String()]
+			if ok {
+				return false // host is already used
+			}
+		}
+		return true
+	}
+
+	for i, shard := range shards {
+		if shard == nil {
+			continue // skip nil shards
+		} else if len(availableHosts) == 0 {
+			return nil, fmt.Errorf("%w: not enough hosts to upload shards", errNotEnoughHosts)
+		}
+
+		var host hosts.Host
+		host, availableHosts = availableHosts[0], availableHosts[1:] // take the first host and remove it from the list
+		if !shouldUse(host) {
+			continue // skip host with conflicting CIDR
+		}
+
+		// upload
+		err := func() error {
+			return errors.New("not implemented")
+		}()
+		if err != nil {
+			logger.Debug("failed to upload shard to host", zap.Stringer("hostKey", host.PublicKey), zap.Int("shard", i), zap.Error(err))
+			continue
+		}
+
+		addHost(host)
+	}
 
 	return nil, errors.New("not implemented")
 }
