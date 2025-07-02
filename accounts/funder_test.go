@@ -38,10 +38,6 @@ type (
 
 func (*hostClientMock) Close() error { return nil }
 
-func (*hostClientMock) LatestRevision(context.Context, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
-	return proto.RPCLatestRevisionResponse{}, nil
-}
-
 func (h *hostClientMock) ReplenishAccounts(ctx context.Context, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (rhp.RPCReplenishAccountsResult, int, error) {
 	res, ok := h.results[contractID]
 	if !ok {

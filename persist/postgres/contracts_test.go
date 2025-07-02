@@ -1116,10 +1116,8 @@ func TestUpdateContractRevision(t *testing.T) {
 		t.Fatal(err)
 	} else if renewed {
 		t.Fatal("expected contract to not be renewed")
-	}
-	expectedRevision := newTestRevision(hk)
-	if revision != expectedRevision {
-		t.Fatalf("expected revision to be %v, got %v", expectedRevision, revision)
+	} else if revision != newTestRevision(hk) {
+		t.Fatalf("expected revision to be %v, got %v", newTestRevision(hk), revision)
 	}
 
 	update := revision

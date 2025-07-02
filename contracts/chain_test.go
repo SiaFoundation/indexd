@@ -30,6 +30,7 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 
 type storeMock struct {
 	contracts   []Contract
+	revisions   []types.V2FileContract
 	toBroadcast []types.V2FileContractElement
 	pruneCalls  int
 	rejectCalls int
@@ -69,6 +70,7 @@ func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicK
 
 		Good: true,
 	})
+	s.revisions = append(s.revisions, revision)
 	return nil
 }
 
@@ -107,6 +109,7 @@ func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewed
 
 		Good: true,
 	})
+	s.revisions = append(s.revisions, revision)
 	return nil
 }
 
@@ -130,6 +133,17 @@ func (s *storeMock) BlockHosts(_ context.Context, hostKeys []types.PublicKey, re
 	}
 
 	return nil
+}
+
+func (s *storeMock) ContractRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, bool, error) {
+	var renewed bool
+	for i, c := range s.contracts {
+		if c.ID == contractID {
+			renewed = c.RenewedTo != (types.FileContractID{})
+			return s.revisions[i], renewed, nil
+		}
+	}
+	return types.V2FileContract{}, false, errors.New("contract not found")
 }
 
 func (s *storeMock) ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error) {
@@ -287,6 +301,16 @@ func (s *storeMock) UpdateHostSettings(hostKey types.PublicKey, settings proto.H
 	return nil
 }
 
+func (s *storeMock) UpdateContractRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) error {
+	for i, c := range s.contracts {
+		if c.ID == contractID {
+			s.revisions[i] = revision
+			return nil
+		}
+	}
+	return errors.New("contract not found")
+}
+
 // mockUpdateTx is a mocked implementation of UpdateTx which allows for unit
 // testing the contract manager's chain updates without a full database.
 type mockUpdateTx struct {
@@ -382,6 +406,8 @@ func (cm *chainManagerMock) AddV2PoolTransactions(basis types.ChainIndex, txns [
 }
 
 func (cm *chainManagerMock) TipState() consensus.State {
+	cm.mu.Lock()
+	defer cm.mu.Unlock()
 	return cm.state
 }
 

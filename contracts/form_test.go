@@ -72,16 +72,14 @@ type hostClientMock struct {
 	renewCalls        []renewContractCall
 	sectorRootsCalls  []sectorRootsCall
 
-	sectorRoots     map[types.FileContractID][]types.Hash256
-	latestRevisions map[types.FileContractID]proto.RPCLatestRevisionResponse
-	missingSectors  map[types.Hash256]struct{}
+	sectorRoots    map[types.FileContractID][]types.Hash256
+	missingSectors map[types.Hash256]struct{}
 }
 
 func newHostClientMock() *hostClientMock {
 	return &hostClientMock{
-		sectorRoots:     make(map[types.FileContractID][]types.Hash256),
-		latestRevisions: make(map[types.FileContractID]proto.RPCLatestRevisionResponse),
-		missingSectors:  make(map[types.Hash256]struct{}),
+		sectorRoots:    make(map[types.FileContractID][]types.Hash256),
+		missingSectors: make(map[types.Hash256]struct{}),
 	}
 }
 
@@ -119,18 +117,6 @@ func (c *hostClientMock) FormContract(ctx context.Context, settings proto.HostSe
 			},
 		},
 	}, nil
-}
-
-func (c *hostClientMock) LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
-	if c.failsRPCs {
-		return proto.RPCLatestRevisionResponse{}, fmt.Errorf("mocked error")
-	}
-
-	resp, ok := c.latestRevisions[contractID]
-	if !ok {
-		return proto.RPCLatestRevisionResponse{}, fmt.Errorf("contract %v not found", contractID)
-	}
-	return resp, nil
 }
 
 type hostManagerMock struct {
