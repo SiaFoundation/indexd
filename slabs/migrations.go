@@ -92,6 +92,9 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slab Slab, hosts []hosts.
 	if len(indices) == 0 {
 		logger.Debug("tried to migrate slab but no indices require migration")
 		return nil
+	} else if len(hosts) == 0 {
+		logger.Warn("tried to migrate slab but no hosts are available for migration")
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
