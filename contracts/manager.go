@@ -65,7 +65,6 @@ type (
 		AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error)
 		FormContract(ctx context.Context, settings proto.HostSettings, params proto.RPCFormContractParams) (rhp.RPCFormContractResult, error)
 		FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error)
-		LatestRevision(ctx context.Context, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
 		RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error)
 		RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error)
 		SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error)
@@ -90,6 +89,7 @@ type (
 		AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
 		ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error)
+		ContractRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, bool, error)
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		ContractsForBroadcasting(ctx context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error)
@@ -105,10 +105,11 @@ type (
 		MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error
 		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
 		PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error
-		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
+		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
+		UpdateContractRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) error
 		UpdateNextPrune(ctx context.Context, contractID types.FileContractID, nextPrune time.Time) error
 	}
 
@@ -158,14 +159,16 @@ type (
 
 	// ContractManager manages the contracts throughout their lifecycle.
 	ContractManager struct {
-		am    AccountManager
-		cm    ChainManager
+		am AccountManager
+		cm ChainManager
+
 		s     Syncer
 		w     Wallet
 		store Store
 
-		dialer    Dialer
-		hm        HostManager
+		dialer Dialer
+		hm     HostManager
+
 		renterKey types.PublicKey
 
 		triggerFundingChan     chan struct{}
@@ -224,14 +227,15 @@ func newContractManager(renterKey types.PublicKey, accountManager AccountManager
 	cm := &ContractManager{
 		am: accountManager,
 		cm: chainManager,
-		s:  syncer,
-		w:  wallet,
 
-		dialer:    dialer,
-		renterKey: renterKey,
-
-		hm:    hm,
+		s:     syncer,
+		w:     wallet,
 		store: store,
+
+		hm:     hm,
+		dialer: dialer,
+
+		renterKey: renterKey,
 
 		triggerFundingChan:     make(chan struct{}, 1),
 		triggerMaintenanceChan: make(chan struct{}, 1),

@@ -19,7 +19,6 @@ type (
 	// host.
 	HostClient interface {
 		io.Closer
-		LatestRevision(context.Context, types.FileContractID) (proto.RPCLatestRevisionResponse, error)
 		ReplenishAccounts(context.Context, types.FileContractID, []proto.Account, types.Currency) (rhp.RPCReplenishAccountsResult, int, error)
 	}
 

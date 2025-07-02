@@ -17,14 +17,16 @@ const dialTimeout = 10 * time.Second
 type SiamuxDialer struct {
 	cm     ChainManager
 	signer rhp.FormContractSigner
+	store  RevisionStore
 	log    *zap.Logger
 }
 
 // NewSiamuxDialer creates a new SiamuxDialer.
-func NewSiamuxDialer(cm ChainManager, signer rhp.FormContractSigner, log *zap.Logger) *SiamuxDialer {
+func NewSiamuxDialer(cm ChainManager, signer rhp.FormContractSigner, store RevisionStore, log *zap.Logger) *SiamuxDialer {
 	return &SiamuxDialer{
 		cm:     cm,
 		signer: signer,
+		store:  store,
 		log:    log,
 	}
 }
@@ -41,5 +43,5 @@ func (d *SiamuxDialer) DialHost(ctx context.Context, hk types.PublicKey, addr st
 		return nil, fmt.Errorf("failed to dial host: %w", err)
 	}
 
-	return newHostClient(hk, d.cm, tc, d.signer, d.log.With(zap.Stringer("hostKey", hk))), nil
+	return newHostClient(hk, d.cm, tc, d.signer, d.store, d.log.With(zap.Stringer("hostKey", hk))), nil
 }
