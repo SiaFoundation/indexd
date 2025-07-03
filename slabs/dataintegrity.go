@@ -99,7 +99,7 @@ func newLostSectorsAlert(hk types.PublicKey, lostSectors int) alerts.Alert {
 		Data: map[string]interface{}{
 			"lostSectors": lostSectors,
 			"hostKey":     hk.String(),
-			"hint":        "The host has reported that it can't serve at least one sector. Consider blocking this host through the blocklist feature. If you think this was a mistake and you want to ignore this warning for now you can reset the lost sector count",
+			"hint":        "The host has reported that it can't serve at least one sector. Consider blocking this host through the blocklist feature.",
 		},
 		Timestamp: time.Now(),
 	}
