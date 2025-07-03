@@ -1,11 +1,55 @@
 package slabs
 
 import (
+	"strings"
 	"testing"
 
 	"go.sia.tech/core/types"
 	"lukechampine.com/frand"
 )
+
+func TestSlabPinParamsValidate(t *testing.T) {
+	params := SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []SectorPinParams{
+			{
+				Root:    frand.Entropy256(),
+				HostKey: frand.Entropy256(),
+			},
+			{
+				Root:    frand.Entropy256(),
+				HostKey: frand.Entropy256(),
+			},
+			{
+				Root:    frand.Entropy256(),
+				HostKey: frand.Entropy256(),
+			},
+		},
+	}
+	if err := params.Validate(3); err != nil {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert empty encryption key is illegal
+	params.EncryptionKey = [32]byte{}
+	if err := params.Validate(3); err == nil || !strings.Contains(err.Error(), "encryption key is empty") {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert duplicate host keys are illegal
+	params.EncryptionKey = frand.Entropy256()
+	params.Sectors[2] = params.Sectors[1]
+	if err := params.Validate(3); err == nil || !strings.Contains(err.Error(), "duplicate host key") {
+		t.Fatal("unexpected", err)
+	}
+
+	// assert insufficient redundancy is illegal
+	params.Sectors = params.Sectors[:1]
+	if err := params.Validate(3); err == nil || !strings.Contains(err.Error(), "minimum redundancy of 3x is not met") {
+		t.Fatal("unexpected", err)
+	}
+}
 
 // TestSlabPinParamsDigest is a unit test for the SlabPinParams.Digest method.
 func TestSlabPinParamsDigest(t *testing.T) {

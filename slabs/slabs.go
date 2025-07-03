@@ -11,6 +11,9 @@ import (
 )
 
 var (
+	// ErrInsufficientRedundancy is returned when the minimum redundancy of slabs is not met.
+	ErrInsufficientRedundancy = errors.New("insufficient redundancy")
+
 	// ErrSlabNotFound is returned when a slab is not found in the database.
 	ErrSlabNotFound = errors.New("slab not found")
 )
@@ -86,6 +89,31 @@ func (s SlabPinParams) Digest() (SlabID, error) {
 		}
 	}
 	return SlabID(hasher.Sum()), nil
+}
+
+// Validate checks if the SlabPinParams are valid. It ensures that the
+// encryption key is set, the minimum number of shards is met, and that there
+// are no duplicate host keys or empty roots in the sectors.
+func (s SlabPinParams) Validate(minRedundancy uint) error {
+	if s.EncryptionKey == ([32]byte{}) {
+		return errors.New("encryption key is empty")
+	} else if len(s.Sectors) < int(s.MinShards*minRedundancy) {
+		return fmt.Errorf("%w: minimum redundancy of %dx is not met", ErrInsufficientRedundancy, minRedundancy)
+	}
+
+	hks := make(map[types.PublicKey]struct{}, len(s.Sectors))
+	for i, sector := range s.Sectors {
+		if sector.Root == (types.Hash256{}) {
+			return errors.New("sector root is empty")
+		} else if sector.HostKey == (types.PublicKey{}) {
+			return fmt.Errorf("sector %d host key is empty", i)
+		} else if _, exists := hks[sector.HostKey]; exists {
+			return fmt.Errorf("duplicate host key %s in slab pin params", sector.HostKey)
+		}
+		hks[sector.HostKey] = struct{}{}
+	}
+
+	return nil
 }
 
 // PinSlab pins the given slab and associates it with the given account.
