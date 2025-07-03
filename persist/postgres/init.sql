@@ -76,12 +76,13 @@ CREATE TABLE host_resolved_cidrs (
 CREATE INDEX host_resolved_cidrs_host_id_idx ON host_resolved_cidrs (host_id);
 
 CREATE TABLE syncer_peers (
-    ip_address INET PRIMARY KEY,
+    ip_address INET NOT NULL,
     port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
     first_seen TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     last_connect TIMESTAMP WITH TIME ZONE,
     synced_blocks INTEGER NOT NULL DEFAULT 0 CHECK (synced_blocks >= 0),
-    sync_duration INTEGER NOT NULL DEFAULT 0 CHECK (sync_duration >= 0)
+    sync_duration INTEGER NOT NULL DEFAULT 0 CHECK (sync_duration >= 0),
+    PRIMARY KEY (ip_address, port)
 );
 
 CREATE TABLE syncer_bans (

@@ -23,7 +23,7 @@ func TestPeerStore(t *testing.T) {
 		t.Fatal(err)
 	} else if err := db.AddPeer(addr); err != nil {
 		t.Fatal(err) // assert no-op
-	} else if err := db.AddPeer("[2a0a:4cc0:0:11bf:d876:fcff:febb:1234]:9981"); err != nil {
+	} else if err := db.AddPeer("1.2.3.4:9881"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -93,5 +93,15 @@ func TestPeerStore(t *testing.T) {
 		t.Fatal("unexpected error", err)
 	} else if !banned {
 		t.Fatal("expected peer to be banned")
+	}
+
+	if err := db.AddPeer("[2a0a:4cc0:0:11bf:d876:fcff:febb:1234]:9981"); err != nil {
+		t.Fatal(err)
+	} else if peers, err := db.Peers(); err != nil {
+		t.Fatal("unexpected error", err)
+	} else if len(peers) != 3 {
+		t.Fatal("unexpected number of peers", len(peers))
+	} else if _, err := db.PeerInfo(addr); err != nil {
+		t.Fatal("unexpected error", err)
 	}
 }

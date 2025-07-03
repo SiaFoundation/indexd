@@ -20,7 +20,7 @@ func (s *Store) AddPeer(addr string) error {
 		return fmt.Errorf("invalid peer address: %w", err)
 	}
 	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		const query = `INSERT INTO syncer_peers (ip_address, port) VALUES ($1, $2) ON CONFLICT (ip_address) DO NOTHING`
+		const query = `INSERT INTO syncer_peers (ip_address, port) VALUES ($1, $2) ON CONFLICT (ip_address, port) DO NOTHING`
 		_, err := tx.Exec(ctx, query, host, port)
 		return err
 	})
