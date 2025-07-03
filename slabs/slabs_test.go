@@ -27,26 +27,26 @@ func TestSlabPinParamsValidate(t *testing.T) {
 			},
 		},
 	}
-	if err := params.Validate(3); err != nil {
+	if err := params.Validate(); err != nil {
 		t.Fatal("unexpected", err)
 	}
 
 	// assert empty encryption key is illegal
 	params.EncryptionKey = [32]byte{}
-	if err := params.Validate(3); err == nil || !strings.Contains(err.Error(), "encryption key is empty") {
+	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "encryption key is empty") {
 		t.Fatal("unexpected", err)
 	}
 
 	// assert duplicate host keys are illegal
 	params.EncryptionKey = frand.Entropy256()
 	params.Sectors[2] = params.Sectors[1]
-	if err := params.Validate(3); err == nil || !strings.Contains(err.Error(), "duplicate host key") {
+	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate host key") {
 		t.Fatal("unexpected", err)
 	}
 
 	// assert insufficient redundancy is illegal
 	params.Sectors = params.Sectors[:1]
-	if err := params.Validate(3); err == nil || !strings.Contains(err.Error(), "minimum redundancy of 3x is not met") {
+	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "minimum redundancy of 3x is not met") {
 		t.Fatal("unexpected", err)
 	}
 }

@@ -13,8 +13,6 @@ import (
 	"go.uber.org/zap"
 )
 
-var minRedundancy = uint(3)
-
 type (
 	// Option is a function that applies an option to the application API.
 	Option func(*app)
@@ -74,7 +72,7 @@ func (a *app) handlePOSTSlabsPin(jc jape.Context, pk types.PublicKey) {
 	if err := jc.Decode(&params); err != nil {
 		jc.Error(err, http.StatusBadRequest)
 		return
-	} else if err := params.Validate(minRedundancy); err != nil {
+	} else if err := params.Validate(); err != nil {
 		jc.Error(fmt.Errorf("invalid slab pin params: %w", err), http.StatusBadRequest)
 		return
 	}

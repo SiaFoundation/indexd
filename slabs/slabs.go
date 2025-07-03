@@ -10,6 +10,11 @@ import (
 	"go.sia.tech/core/types"
 )
 
+const (
+	// DefaultRedundancy is the default minimum redundancy for slabs.
+	DefaultRedundancy = 3
+)
+
 var (
 	// ErrInsufficientRedundancy is returned when the minimum redundancy of slabs is not met.
 	ErrInsufficientRedundancy = errors.New("insufficient redundancy")
@@ -94,11 +99,11 @@ func (s SlabPinParams) Digest() (SlabID, error) {
 // Validate checks if the SlabPinParams are valid. It ensures that the
 // encryption key is set, the minimum number of shards is met, and that there
 // are no duplicate host keys or empty roots in the sectors.
-func (s SlabPinParams) Validate(minRedundancy uint) error {
+func (s SlabPinParams) Validate() error {
 	if s.EncryptionKey == ([32]byte{}) {
 		return errors.New("encryption key is empty")
-	} else if len(s.Sectors) < int(s.MinShards*minRedundancy) {
-		return fmt.Errorf("%w: minimum redundancy of %dx is not met", ErrInsufficientRedundancy, minRedundancy)
+	} else if len(s.Sectors) < int(s.MinShards*DefaultRedundancy) {
+		return fmt.Errorf("%w: minimum redundancy of %dx is not met", ErrInsufficientRedundancy, DefaultRedundancy)
 	}
 
 	hks := make(map[types.PublicKey]struct{}, len(s.Sectors))
