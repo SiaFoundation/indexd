@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	proto "go.sia.tech/core/rhp/v4"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
@@ -579,7 +578,7 @@ func TestHostsForAlert(t *testing.T) {
 	db := initPostgres(t, log.Named("postgres"))
 
 	// add account
-	account := proto.Account{1}
+	account := proto4.Account{1}
 	if err := db.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
 		t.Fatal("failed to add account:", err)
 	}
