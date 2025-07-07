@@ -572,7 +572,7 @@ func TestHostsForScanning(t *testing.T) {
 	}
 }
 
-func TestHostsForAlert(t *testing.T) {
+func TestHostsWithLostSectors(t *testing.T) {
 	// create database
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
@@ -622,15 +622,9 @@ func TestHostsForAlert(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	markSectorLost := func(hk types.PublicKey, roots []types.Hash256) {
-		t.Helper()
-		if err := db.MarkSectorsLost(context.Background(), hk, roots); err != nil {
-			t.Fatal(err)
-		}
-	}
 	assertHosts := func(hks []types.PublicKey) {
 		t.Helper()
-		hosts, err := db.HostsForSectorAlert(context.Background())
+		hosts, err := db.HostsWithLostSectors(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		} else if len(hks) != len(hosts) {
@@ -646,18 +640,24 @@ func TestHostsForAlert(t *testing.T) {
 	// assert no hosts are returned because no sectors are lost yet
 	assertHosts(nil)
 
-	markSectorLost(hk1, []types.Hash256{root1})
+	if err := db.MarkSectorsLost(context.Background(), hk1, []types.Hash256{root1}); err != nil {
+		t.Fatal(err)
+	}
 
 	// hk1 should be returned after one of its sectors is marked as lost
 	assertHosts([]types.PublicKey{hk1})
 
-	markSectorLost(hk1, []types.Hash256{root2})
+	if err := db.MarkSectorsLost(context.Background(), hk1, []types.Hash256{root2}); err != nil {
+		t.Fatal(err)
+	}
 
 	// still only hk1 should be returned after another one of its sectors is
 	// marked as lost
 	assertHosts([]types.PublicKey{hk1})
 
-	markSectorLost(hk2, []types.Hash256{root3, root4})
+	if err := db.MarkSectorsLost(context.Background(), hk2, []types.Hash256{root3}); err != nil {
+		t.Fatal(err)
+	}
 
 	// hk1 and hk2 should be returned after both have lost sectors
 	assertHosts([]types.PublicKey{hk1, hk2})
