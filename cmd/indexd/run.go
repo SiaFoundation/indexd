@@ -179,7 +179,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 
 	appAPI := http.Server{
-		Handler:      app.NewAPI(cfg.ApplicationAPI.Hostname, store, appAPIOpts...),
+		Handler:      app.NewAPI(cfg.ApplicationAPI.Hostname, store, store, appAPIOpts...),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}

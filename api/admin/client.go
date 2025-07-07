@@ -14,12 +14,14 @@ import (
 	"go.sia.tech/jape"
 )
 
-// A Client provides methods for interacting with an indexer.
+// A Client provides methods for interacting with the admin API of the
+// indexer.
 type Client struct {
 	c jape.Client
 }
 
-// NewClient returns a new indexer client.
+// NewClient returns a new client that can be used to interact with the admin
+// API of the indexer.
 func NewClient(addr, password string) *Client {
 	return &Client{jape.Client{
 		BaseURL:  addr,

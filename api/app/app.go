@@ -1,9 +1,13 @@
 package app
 
 import (
+	"context"
 	"net/http"
+	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 )
@@ -12,8 +16,15 @@ type (
 	// Option is a function that applies an option to the application API.
 	Option func(*app)
 
+	// Store defines the store interface for the application API.
+	Store interface {
+		PinSlab(context.Context, proto.Account, time.Time, slabs.SlabPinParams) (slabs.SlabID, error)
+		UnpinSlab(ctx context.Context, accountID proto.Account, slabID slabs.SlabID) error
+	}
+
 	app struct {
-		log *zap.Logger
+		store Store
+		log   *zap.Logger
 	}
 )
 
@@ -28,31 +39,24 @@ func WithLogger(log *zap.Logger) Option {
 // users, or rather their applications, to pin slabs to the indexer.
 // Authentication happens through presigned URLs that are signed with a private
 // key that corresponds to a previously registered public key.
-func NewAPI(hostname string, store AccountStore, opts ...Option) http.Handler {
+func NewAPI(hostname string, store Store, as AccountStore, opts ...Option) http.Handler {
 	a := &app{
-		log: zap.NewNop(),
+		store: store,
+		log:   zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(a)
 	}
 
-	handlers := map[string]authedHandler{
-		"GET /foo": func(jc jape.Context, pk types.PublicKey) {
-			if ok, err := store.HasAccount(jc.Request.Context(), pk); err != nil {
-				jc.ResponseWriter.WriteHeader(http.StatusInternalServerError)
-				return
-			} else if !ok {
-				jc.Error(ErrUnknownAccount, http.StatusUnauthorized)
-				return
-			}
-			jc.ResponseWriter.WriteHeader(http.StatusOK)
-		},
+	routes := map[string]authedHandler{
+		"POST /slabs/pin":       a.handlePOSTSlabsPin,
+		"DELETE /slabs/:slabid": a.handleDELETESlab,
 	}
 
 	signed := make(map[string]jape.Handler)
-	for path, handler := range handlers {
+	for path, handler := range routes {
 		signed[path] = func(jc jape.Context) {
-			pk, ok := checkSignedURLAuth(jc, hostname, store)
+			pk, ok := checkSignedURLAuth(jc, hostname, as)
 			if !ok {
 				return
 			}
@@ -60,4 +64,33 @@ func NewAPI(hostname string, store AccountStore, opts ...Option) http.Handler {
 		}
 	}
 	return jape.Mux(signed)
+}
+
+func (a *app) handlePOSTSlabsPin(jc jape.Context, pk types.PublicKey) {
+	var params slabs.SlabPinParams
+	if err := jc.Decode(&params); err != nil {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	}
+
+	slabID, err := a.store.PinSlab(jc.Request.Context(), proto.Account(pk), time.Now(), params)
+	if jc.Check("failed to pin slab", err) != nil {
+		return
+	}
+
+	jc.Encode(slabID)
+}
+
+func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
+	var slabID slabs.SlabID
+	if err := jc.DecodeParam("slabid", &slabID); err != nil {
+		return
+	}
+
+	err := a.store.UnpinSlab(jc.Request.Context(), proto.Account(pk), slabID)
+	if jc.Check("failed to unpin slab", err) != nil {
+		return
+	}
+
+	jc.Encode(nil)
 }

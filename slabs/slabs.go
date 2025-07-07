@@ -61,6 +61,16 @@ func (s SlabID) String() string {
 	return types.Hash256(s).String()
 }
 
+// MarshalText implements encoding.TextMarshaler.
+func (s SlabID) MarshalText() ([]byte, error) {
+	return []byte(s.String()), nil
+}
+
+// UnmarshalText implements encoding.TextUnmarshaler.
+func (s *SlabID) UnmarshalText(b []byte) error {
+	return (*types.Hash256)(s).UnmarshalText(b)
+}
+
 // Digest creates a unique digest for the slab to be pinned by SlabPinParams. It
 // is important, that the same params always result in the same hash since we
 // deduplicate slabs using it. So if one user makes the mistake of pinning a

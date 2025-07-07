@@ -2,20 +2,47 @@ package app_test
 
 import (
 	"context"
-	"fmt"
-	"net/http"
-	"net/url"
+	"errors"
 	"testing"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/internal/testutils"
+	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 func TestApplicationAPI(t *testing.T) {
-	cs := testutils.NewConsensusNode(t, zap.NewNop())
-	indexer := testutils.NewIndexer(t, cs, zap.NewNop())
+	// create cluster with two hosts
+	logger := testutils.NewLogger(false)
+	c := testutils.NewConsensusNode(t, logger)
+	h1 := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
+	h2 := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
+
+	// create indexer
+	indexer := testutils.NewIndexer(t, c, logger)
+
+	// fund hosts and indexer wallet
+	c.MineBlocks(t, h1.WalletAddress(), 1)
+	c.MineBlocks(t, h2.WalletAddress(), 1)
+	c.MineBlocks(t, indexer.WalletAddr(), 1)
+	c.MineBlocks(t, types.Address{}, c.Network().MaturityDelay)
+
+	// announce hosts
+	if err := errors.Join(h1.Announce(), h2.Announce()); err != nil {
+		t.Fatal(err)
+	}
+	c.MineBlocks(t, types.Address{}, 1)
+	time.Sleep(time.Second)
+
+	// assert hosts are registered
+	hosts, err := indexer.Hosts(context.Background())
+	if err != nil {
+		t.Fatal("failed to get hosts:", err)
+	} else if len(hosts) != 2 {
+		t.Fatal("expected 2 hosts, got", len(hosts))
+	}
 
 	// prepare account
 	sk := types.GeneratePrivateKey()
@@ -23,35 +50,27 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// prepare request
-	req, err := http.NewRequest("GET", indexer.ApplicationAPIAddress()+"/foo", http.NoBody)
+	// pin the slab
+	slabID, err := indexer.App(sk).PinSlab(context.Background(), slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.SectorPinParams{
+			{
+				Root:    frand.Entropy256(),
+				HostKey: h1.PublicKey(),
+			},
+			{
+				Root:    frand.Entropy256(),
+				HostKey: h2.PublicKey(),
+			},
+		},
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatal("failed to pin slab:", err)
 	}
 
-	// prepare request hash
-	validUntil := time.Now().Add(time.Hour)
-	h := types.NewHasher()
-	h.E.Write([]byte(testutils.DefaultHostname))
-	h.E.WriteUint64(uint64(validUntil.Unix()))
-	requestHash := h.Sum()
-
-	// prepare query parameters
-	val := url.Values{}
-	val.Set("SiaIdx-ValidUntil", fmt.Sprint(validUntil.Unix()))
-	val.Set("SiaIdx-Credential", sk.PublicKey().String())
-	val.Set("SiaIdx-Signature", sk.SignHash(requestHash).String())
-	req.URL.RawQuery = val.Encode()
-
-	// execute the request
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-
-	// assert we successfully authenticated
-	if resp.StatusCode != http.StatusOK {
-		t.Fatal("unexpected status code:", resp.StatusCode)
+	// unpin the slab
+	if err := indexer.App(sk).UnpinSlab(context.Background(), slabID); err != nil {
+		t.Fatal("failed to unpin slab:", err)
 	}
 }
