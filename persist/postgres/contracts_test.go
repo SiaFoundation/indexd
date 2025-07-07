@@ -11,6 +11,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
@@ -1111,23 +1112,25 @@ func TestUpdateContractRevision(t *testing.T) {
 	hk := store.addTestHost(t)
 	contractID := store.addTestContract(t, hk)
 
-	revision, renewed, err := store.ContractRevision(context.Background(), contractID)
+	contract, renewed, err := store.ContractRevision(context.Background(), contractID)
 	if err != nil {
 		t.Fatal(err)
 	} else if renewed {
 		t.Fatal("expected contract to not be renewed")
-	} else if revision != newTestRevision(hk) {
-		t.Fatalf("expected revision to be %v, got %v", newTestRevision(hk), revision)
+	} else if contract.Revision != newTestRevision(hk) {
+		t.Fatalf("expected revision to be %v, got %v", newTestRevision(hk), contract.Revision)
+	} else if contract.ID != contractID {
+		t.Fatalf("expected contract ID to be %v, got %v", contractID, contract.ID)
 	}
 
-	update := revision
-	update.Capacity *= 2
-	update.Filesize *= 2
-	update.RevisionNumber++
-	update.RenterOutput.Value = types.NewCurrency64(1000)
-	update.MissedHostValue = types.NewCurrency64(100)
+	update := contract
+	update.Revision.Capacity *= 2
+	update.Revision.Filesize *= 2
+	update.Revision.RevisionNumber++
+	update.Revision.RenterOutput.Value = types.NewCurrency64(1000)
+	update.Revision.MissedHostValue = types.NewCurrency64(100)
 
-	if err := store.UpdateContractRevision(context.Background(), contractID, update); err != nil {
+	if err := store.UpdateContractRevision(context.Background(), update); err != nil {
 		t.Fatal(err)
 	} else if revision, renewed, err := store.ContractRevision(context.Background(), contractID); err != nil {
 		t.Fatal(err)
@@ -1150,7 +1153,7 @@ func TestUpdateContractRevision(t *testing.T) {
 	// assert [contracts.ErrNotFound] is returned for non-existing contract
 	if _, _, err := store.ContractRevision(context.Background(), types.FileContractID{}); !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatalf("expected ErrContractNotFound, got %v", err)
-	} else if err := store.UpdateContractRevision(context.Background(), types.FileContractID{}, newTestRevision(types.PublicKey{})); !errors.Is(err, contracts.ErrNotFound) {
+	} else if err := store.UpdateContractRevision(context.Background(), rhp.ContractRevision{Revision: newTestRevision(types.PublicKey{})}); !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatalf("expected ErrContractNotFound, got %v", err)
 	}
 }
@@ -1328,12 +1331,12 @@ func BenchmarkContracts(b *testing.B) {
 	b.Run("contracts_revisions", func(b *testing.B) {
 		for b.Loop() {
 			contractID := contractIDs[frand.Intn(len(contractIDs))]
-			revision, _, err := store.ContractRevision(context.Background(), contractID)
+			contract, _, err := store.ContractRevision(context.Background(), contractID)
 			if err != nil {
 				b.Fatal(err)
 			}
-			revision.RevisionNumber++
-			if err := store.UpdateContractRevision(context.Background(), contractID, revision); err != nil {
+			contract.Revision.RevisionNumber++
+			if err := store.UpdateContractRevision(context.Background(), contract); err != nil {
 				b.Fatal(err)
 			}
 		}
