@@ -3,6 +3,7 @@ package admin_test
 import (
 	"context"
 	"errors"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -13,9 +14,11 @@ import (
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/admin"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/pins"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -99,6 +102,125 @@ func TestAccountsAPI(t *testing.T) {
 		t.Fatal("unexpected accounts", len(accounts))
 	} else if accounts[0] != pk2 {
 		t.Fatal("unexpected key", accounts[0])
+	}
+}
+
+func TestContractsAPI(t *testing.T) {
+	// create cluster with one host
+	logger := newTestLogger(false)
+	c := testutils.NewConsensusNode(t, logger)
+	h := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
+
+	// create indexer
+	indexer := testutils.NewIndexer(t, c, logger)
+
+	// fund host and indexer wallet
+	c.MineBlocks(t, h.WalletAddress(), 1)
+	c.MineBlocks(t, indexer.WalletAddr(), 1)
+	c.MineBlocks(t, types.Address{}, c.Network().MaturityDelay)
+
+	// announce host
+	if err := h.Announce(); err != nil {
+		t.Fatal(err)
+	}
+	c.MineBlocks(t, types.Address{}, 1)
+	time.Sleep(time.Second)
+
+	// assert it got scanned
+	if h, err := indexer.Host(context.Background(), h.PublicKey()); err != nil {
+		t.Fatal(err)
+	} else if !h.Usability.Usable() {
+		v := reflect.ValueOf(h.Usability)
+		var failedFields []string
+		for i := 0; i < v.NumField(); i++ {
+			if v.Field(i).Kind() == reflect.Bool && !v.Field(i).Bool() {
+				failedFields = append(failedFields, v.Type().Field(i).Name)
+			}
+		}
+		t.Fatalf("expected host to be usable, but got false for: %v", failedFields)
+	}
+
+	// assert a contract was formed
+	time.Sleep(time.Second)
+	var contract contracts.Contract
+	if contracts, err := indexer.Contracts(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	} else {
+		contract = contracts[0]
+	}
+
+	// assert we can fetch the contract by ID
+	if c, err := indexer.Contract(context.Background(), contract.ID); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(c, contract) {
+		t.Fatal("unexpected contract", c)
+	}
+
+	// assert fetching a non-existing contract returns an error
+	if _, err := indexer.Contract(context.Background(), types.FileContractID{}); err == nil || !strings.Contains(err.Error(), contracts.ErrNotFound.Error()) {
+		t.Fatal("expected ErrNotFound", err)
+	}
+
+	// assert WithGood filters out bad contracts
+	if contracts, err := indexer.Contracts(context.Background(), admin.WithGood(true)); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	} else if contracts, err := indexer.Contracts(context.Background(), admin.WithGood(false)); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatal("expected no contract", len(contracts))
+	}
+
+	// assert WithRevisable filters out non-revisable contracts
+	if contracts, err := indexer.Contracts(context.Background(), admin.WithRevisable(true)); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	} else if contracts, err := indexer.Contracts(context.Background(), admin.WithRevisable(false)); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatal("expected no contract", len(contracts))
+	}
+
+	// block host and assert it's not returned
+	if err := indexer.HostsBlocklistAdd(context.Background(), []types.PublicKey{h.PublicKey()}, t.Name()); err != nil {
+		t.Fatal(err)
+	} else if contracts, err := indexer.Contracts(context.Background(), admin.WithGood(true)); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatal("expected no contract", len(contracts))
+	} else if err := indexer.HostsBlocklistRemove(context.Background(), h.PublicKey()); err != nil {
+		t.Fatal(err)
+	}
+
+	// figure out the renew height
+	cs, err := indexer.SettingsContracts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	renewHeight := contract.ProofHeight - cs.RenewWindow + 1
+
+	// mine until contracts get renewed
+	ci, err := indexer.Tip()
+	if err != nil {
+		t.Fatal(err)
+	} else if ci.Height > renewHeight {
+		t.Fatal("unexpected")
+	}
+	c.MineBlocks(t, types.Address{}, renewHeight-ci.Height)
+	time.Sleep(time.Second)
+
+	// assert contract was renewed - we don't pass the option here to asserts
+	// the contracts API returns only revisable contracts by default
+	if contracts, err := indexer.Contracts(context.Background()); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	} else if contracts[0].RenewedFrom != contract.ID {
+		t.Fatal("expected contract to be renewed", contracts[0].RenewedFrom, contract.ID)
 	}
 }
 
@@ -404,4 +526,22 @@ func TestWalletAPI(t *testing.T) {
 	} else if len(pending) != 0 {
 		t.Fatal("expected no pending transaction")
 	}
+}
+
+// newTestLogger creates a console logger used for testing.
+func newTestLogger(enable bool) *zap.Logger {
+	if !enable {
+		return zap.NewNop()
+	}
+	config := zap.NewProductionEncoderConfig()
+	config.EncodeTime = zapcore.RFC3339TimeEncoder
+	config.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	config.StacktraceKey = ""
+	consoleEncoder := zapcore.NewConsoleEncoder(config)
+
+	return zap.New(
+		zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), zap.DebugLevel),
+		zap.AddCaller(),
+		zap.AddStacktrace(zap.DebugLevel),
+	)
 }

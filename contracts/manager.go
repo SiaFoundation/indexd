@@ -89,7 +89,7 @@ type (
 		AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
 		ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error)
-		ContractRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, bool, error)
+		ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error)
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		ContractsForBroadcasting(ctx context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error)
@@ -109,7 +109,7 @@ type (
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
-		UpdateContractRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) error
+		UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision) error
 		UpdateNextPrune(ctx context.Context, contractID types.FileContractID, nextPrune time.Time) error
 	}
 
@@ -190,6 +190,14 @@ type (
 func WithLogger(l *zap.Logger) ContractManagerOpt {
 	return func(cm *ContractManager) {
 		cm.log = l
+	}
+}
+
+// WithMaintenanceFrequency sets the frequency at which the contract manager
+// performs maintenance tasks. The default is 10 minutes.
+func WithMaintenanceFrequency(frequency time.Duration) ContractManagerOpt {
+	return func(cm *ContractManager) {
+		cm.maintenanceFrequency = frequency
 	}
 }
 
@@ -438,11 +446,14 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 }
 
 func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *zap.Logger) error {
+	log.Debug("performing contract maintenance")
+
 	// fetch settings and determine if maintenance is supposed to run
 	settings, err := cm.store.MaintenanceSettings(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch settings for contract maintenance: %w", err)
 	} else if !settings.Enabled {
+		log.Debug("contract maintenance is disabled, skipping")
 		return nil
 	}
 

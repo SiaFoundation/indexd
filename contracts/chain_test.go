@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/hosts"
@@ -30,7 +31,7 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 
 type storeMock struct {
 	contracts   []Contract
-	revisions   []types.V2FileContract
+	revisions   []rhp.ContractRevision
 	toBroadcast []types.V2FileContractElement
 	pruneCalls  int
 	rejectCalls int
@@ -70,7 +71,7 @@ func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicK
 
 		Good: true,
 	})
-	s.revisions = append(s.revisions, revision)
+	s.revisions = append(s.revisions, rhp.ContractRevision{ID: contractID, Revision: revision})
 	return nil
 }
 
@@ -109,7 +110,7 @@ func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewed
 
 		Good: true,
 	})
-	s.revisions = append(s.revisions, revision)
+	s.revisions = append(s.revisions, rhp.ContractRevision{ID: renewedTo, Revision: revision})
 	return nil
 }
 
@@ -135,7 +136,7 @@ func (s *storeMock) BlockHosts(_ context.Context, hostKeys []types.PublicKey, re
 	return nil
 }
 
-func (s *storeMock) ContractRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, bool, error) {
+func (s *storeMock) ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
 	var renewed bool
 	for i, c := range s.contracts {
 		if c.ID == contractID {
@@ -143,7 +144,7 @@ func (s *storeMock) ContractRevision(ctx context.Context, contractID types.FileC
 			return s.revisions[i], renewed, nil
 		}
 	}
-	return types.V2FileContract{}, false, errors.New("contract not found")
+	return rhp.ContractRevision{}, false, errors.New("contract not found")
 }
 
 func (s *storeMock) ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error) {
@@ -301,10 +302,10 @@ func (s *storeMock) UpdateHostSettings(hostKey types.PublicKey, settings proto.H
 	return nil
 }
 
-func (s *storeMock) UpdateContractRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) error {
+func (s *storeMock) UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision) error {
 	for i, c := range s.contracts {
-		if c.ID == contractID {
-			s.revisions[i] = revision
+		if c.ID == contract.ID {
+			s.revisions[i] = contract
 			return nil
 		}
 	}

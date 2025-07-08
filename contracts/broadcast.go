@@ -50,7 +50,7 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 	}
 
 	// fetch latest revision
-	rev, _, err := cm.store.ContractRevision(ctx, contractID)
+	contract, _, err := cm.store.ContractRevision(ctx, contractID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contract revision: %w", err)
 	}
@@ -63,7 +63,7 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 		FileContractRevisions: []types.V2FileContractRevision{
 			{
 				Parent:   fce,
-				Revision: rev,
+				Revision: contract.Revision,
 			},
 		},
 	}

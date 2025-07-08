@@ -8,6 +8,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
@@ -43,7 +44,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		State:     ContractStateExpired,
 		Good:      true,
 	})
-	store.revisions = append(store.revisions, newTestRevision(hk))
+	store.revisions = append(store.revisions, rhp.ContractRevision{ID: types.FileContractID{1}, Revision: newTestRevision(hk)})
 
 	// c2 is not broadcasted because it's renewed
 	store.contracts = append(store.contracts, Contract{
@@ -54,7 +55,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		Good:      true,
 		RenewedTo: types.FileContractID{3},
 	})
-	store.revisions = append(store.revisions, newTestRevision(hk))
+	store.revisions = append(store.revisions, rhp.ContractRevision{ID: types.FileContractID{2}, Revision: newTestRevision(hk)})
 
 	// c3 is not broadcasted because it was broadcasted recently
 	store.contracts = append(store.contracts, Contract{
@@ -65,7 +66,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		Good:                 true,
 		LastBroadcastAttempt: time.Now(),
 	})
-	store.revisions = append(store.revisions, newTestRevision(hk))
+	store.revisions = append(store.revisions, rhp.ContractRevision{ID: types.FileContractID{3}, Revision: newTestRevision(hk)})
 
 	// c4 is broadcasted
 	store.contracts = append(store.contracts, Contract{
@@ -76,7 +77,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		Good:      true,
 	})
 	rev := newTestRevision(hk)
-	store.revisions = append(store.revisions, rev)
+	store.revisions = append(store.revisions, rhp.ContractRevision{ID: types.FileContractID{4}, Revision: rev})
 
 	// assert revision was broadcasted and contract was marked as such
 	if err := contracts.performBroadcastContractRevisions(context.Background(), zap.NewNop()); err != nil {

@@ -75,6 +75,8 @@ type (
 		UpdateAccount(ctx context.Context, oldAK, newAK types.PublicKey) error
 		BlockHosts(ctx context.Context, hks []types.PublicKey, reason string) error
 		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
+		Contract(ctx context.Context, contractID types.FileContractID) (contracts.Contract, error)
+		Contracts(ctx context.Context, offset, limit int, queryOpts ...contracts.ContractQueryOpt) ([]contracts.Contract, error)
 		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		LastScannedIndex(context.Context) (types.ChainIndex, error)
@@ -147,6 +149,12 @@ func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, sy
 		"POST   /account/:accountkey": a.handlePOSTAccount,
 		"PUT    /account/:accountkey": a.handlePUTAccount,
 		"DELETE /account/:accountkey": a.handleDELETEAccount,
+
+		// contract endpoints
+		"GET /contract/:contractid": a.handleGETContract,
+
+		// contracts endpoints
+		"GET /contracts": a.handleGETContracts,
 
 		// explorer endpoints
 		"GET /explorer/exchange-rate/siacoin/:currency": a.handleGETExplorerSiacoinExchangeRate,
@@ -352,6 +360,55 @@ func (a *admin) handleGETExplorerSiacoinExchangeRate(jc jape.Context) {
 	}
 
 	jc.Encode(rate)
+}
+
+func (a *admin) handleGETContract(jc jape.Context) {
+	var contractID types.FileContractID
+	if jc.DecodeParam("contractid", &contractID) != nil {
+		return
+	}
+
+	contract, err := a.store.Contract(jc.Request.Context(), contractID)
+	if errors.Is(err, contracts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get contract", err) != nil {
+		return
+	}
+
+	jc.Encode(contract)
+}
+
+func (a *admin) handleGETContracts(jc jape.Context) {
+	offset, limit, ok := parseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+
+	var opts []contracts.ContractQueryOpt
+	if jc.Request.FormValue("revisable") != "" {
+		var revisable bool
+		if jc.DecodeForm("revisable", &revisable) != nil {
+			return
+		}
+		opts = append(opts, contracts.WithRevisable(revisable))
+	} else {
+		opts = append(opts, contracts.WithRevisable(true)) // default to revisable contracts
+	}
+
+	if jc.Request.FormValue("good") != "" {
+		var good bool
+		if jc.DecodeForm("good", &good) != nil {
+			return
+		}
+		opts = append(opts, contracts.WithGood(good))
+	}
+
+	contracts, err := a.store.Contracts(jc.Request.Context(), offset, limit, opts...)
+	if jc.Check("failed to get contracts", err) != nil {
+		return
+	}
+	jc.Encode(contracts)
 }
 
 func (a *admin) handleGETHost(jc jape.Context) {

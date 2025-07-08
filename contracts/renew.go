@@ -67,6 +67,7 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		if err := cm.store.AddRenewedContract(ctx, contract.ID, renewed.ID, renewed.Revision, host.Settings.Prices.ContractPrice, minerFee, types.ZeroCurrency); err != nil {
 			return fmt.Errorf("failed to store renewed contract: %w", err)
 		}
+		contractLog.Debug("successfully renewed contract")
 		return nil
 	})
 }

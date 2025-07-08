@@ -54,8 +54,8 @@ type (
 	// RevisionStore defines an interface that allows fetching and updating a
 	// contract's revision.
 	RevisionStore interface {
-		ContractRevision(ctx context.Context, contractID types.FileContractID) (types.V2FileContract, bool, error)
-		UpdateContractRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) error
+		ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error)
+		UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision) error
 	}
 )
 
@@ -105,15 +105,16 @@ func (c *HostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPri
 
 	// append sectors
 	var res rhp.RPCAppendSectorsResult
-	if err := c.withRevision(ctx, contractID, func(revision types.V2FileContract) (types.V2FileContract, error) {
-		if revision.Filesize > maxContractSize {
-			return types.V2FileContract{}, fmt.Errorf("contract is too large, %d > %d", revision.Filesize, maxContractSize)
+	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
+		if contract.Revision.Filesize > maxContractSize {
+			return rhp.ContractRevision{}, fmt.Errorf("contract is too large, %d > %d", contract.Revision.Filesize, maxContractSize)
 		}
-		res, err := rhp.RPCAppendSectors(ctx, c.client, c.signer, c.cm.TipState(), hostPrices, rhp.ContractRevision{ID: contractID, Revision: revision}, sectors)
+		res, err = rhp.RPCAppendSectors(ctx, c.client, c.signer, c.cm.TipState(), hostPrices, contract, sectors)
 		if err != nil {
-			return types.V2FileContract{}, fmt.Errorf("failed to append sectors: %w", err)
+			return rhp.ContractRevision{}, fmt.Errorf("failed to append sectors: %w", err)
 		}
-		return res.Revision, nil
+		contract.Revision = res.Revision
+		return contract, nil
 	}); err != nil {
 		return rhp.RPCAppendSectorsResult{}, fmt.Errorf("failed to append sectors: %w", err)
 	}
@@ -139,12 +140,13 @@ func (c *HostClient) FormContract(ctx context.Context, settings proto.HostSettin
 // SectorRoots returns the sector roots for a contract.
 func (c *HostClient) SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error) {
 	var res rhp.RPCSectorRootsResult
-	if err := c.withRevision(ctx, contractID, func(revision types.V2FileContract) (types.V2FileContract, error) {
-		res, err := rhp.RPCSectorRoots(ctx, c.client, c.cm.TipState(), hostPrices, c.signer, rhp.ContractRevision{ID: contractID, Revision: revision}, offset, length)
+	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
+		res, err = rhp.RPCSectorRoots(ctx, c.client, c.cm.TipState(), hostPrices, c.signer, contract, offset, length)
 		if err != nil {
-			return types.V2FileContract{}, fmt.Errorf("failed to fetch sector roots: %w", err)
+			return rhp.ContractRevision{}, fmt.Errorf("failed to fetch sector roots: %w", err)
 		}
-		return res.Revision, nil
+		contract.Revision = res.Revision
+		return contract, nil
 	}); err != nil {
 		return rhp.RPCSectorRootsResult{}, fmt.Errorf("failed to fetch sector roots: %w", err)
 	}
@@ -154,12 +156,13 @@ func (c *HostClient) SectorRoots(ctx context.Context, hostPrices proto.HostPrice
 // FreeSectors frees the specified sectors in the contract.
 func (c *HostClient) FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error) {
 	var res rhp.RPCFreeSectorsResult
-	if err := c.withRevision(ctx, contractID, func(revision types.V2FileContract) (types.V2FileContract, error) {
-		res, err := rhp.RPCFreeSectors(ctx, c.client, c.signer, c.cm.TipState(), hostPrices, rhp.ContractRevision{ID: contractID, Revision: revision}, indices)
+	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
+		res, err = rhp.RPCFreeSectors(ctx, c.client, c.signer, c.cm.TipState(), hostPrices, contract, indices)
 		if err != nil {
-			return types.V2FileContract{}, fmt.Errorf("failed to free sectors: %w", err)
+			return rhp.ContractRevision{}, fmt.Errorf("failed to free sectors: %w", err)
 		}
-		return res.Revision, nil
+		contract.Revision = res.Revision
+		return contract, nil
 	}); err != nil {
 		return rhp.RPCFreeSectorsResult{}, fmt.Errorf("failed to fetch free sectors: %w", err)
 	}
@@ -169,15 +172,15 @@ func (c *HostClient) FreeSectors(ctx context.Context, hostPrices proto.HostPrice
 // RefreshContract refreshes the contract with the host.
 func (c *HostClient) RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error) {
 	var res rhp.RPCRefreshContractResult
-	if err := c.withRevision(ctx, params.ContractID, func(revision types.V2FileContract) (_ types.V2FileContract, err error) {
-		res, err = rhp.RPCRefreshContract(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, revision, proto.RPCRefreshContractParams{
-			Allowance:  revision.RenterOutput.Value,
-			Collateral: revision.MissedHostValue,
+	if err := c.withRevision(ctx, params.ContractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
+		res, err = rhp.RPCRefreshContract(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, proto.RPCRefreshContractParams{
+			Allowance:  contract.Revision.RenterOutput.Value,
+			Collateral: contract.Revision.MissedHostValue,
 		})
 		if err != nil {
-			return types.V2FileContract{}, err
+			return rhp.ContractRevision{}, err
 		}
-		return res.Contract.Revision, nil
+		return res.Contract, nil
 	}); err != nil {
 		return rhp.RPCRefreshContractResult{}, fmt.Errorf("failed to refresh contract: %w", err)
 	}
@@ -187,22 +190,25 @@ func (c *HostClient) RefreshContract(ctx context.Context, settings proto.HostSet
 // RenewContract renews the contract with the host.
 func (c *HostClient) RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error) {
 	var res rhp.RPCRenewContractResult
-	if err := c.withRevision(ctx, contractID, func(revision types.V2FileContract) (types.V2FileContract, error) {
+	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
 		// NOTE: when renewing a contract we keep the same allowance and collateral.
 		// This has the following advantages:
 		// 1. Contracts drain over time if they contain more funds than needed
 		// 2. Renewals are very "cheap" since no party needs to lock away
 		//    additional funds. Only the fees need to be paid.
-		res, err := rhp.RPCRenewContract(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, revision, proto.RPCRenewContractParams{
+		res, err = rhp.RPCRenewContract(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, proto.RPCRenewContractParams{
 			ContractID:  contractID,
-			Allowance:   revision.RenterOutput.Value,
-			Collateral:  revision.MissedHostValue,
+			Allowance:   contract.Revision.RenterOutput.Value,
+			Collateral:  contract.Revision.MissedHostValue,
 			ProofHeight: proofHeight,
 		})
 		if err != nil {
-			return types.V2FileContract{}, err
+			return rhp.ContractRevision{}, err
 		}
-		return res.Contract.Revision, nil
+		// renewals return the old (or 'renewed') revision, the revision of the
+		// renewal will be persisted in the database when the renewed contract
+		// is added
+		return contract, nil
 	}); err != nil {
 		return rhp.RPCRenewContractResult{}, fmt.Errorf("failed to renew contract: %w", err)
 	}
@@ -211,13 +217,13 @@ func (c *HostClient) RenewContract(ctx context.Context, settings proto.HostSetti
 
 // ReplenishAccounts replenishes the accounts in the contract to the target value.
 func (c *HostClient) ReplenishAccounts(ctx context.Context, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (res rhp.RPCReplenishAccountsResult, funded int, _ error) {
-	if err := c.withRevision(ctx, contractID, func(revision types.V2FileContract) (types.V2FileContract, error) {
-		if revision.RenterOutput.Value.Cmp(target) < 0 {
-			return types.V2FileContract{}, ErrContractInsufficientFunds
+	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (rhp.ContractRevision, error) {
+		if contract.Revision.RenterOutput.Value.Cmp(target) < 0 {
+			return rhp.ContractRevision{}, ErrContractInsufficientFunds
 		}
 
 		// prepare batch
-		batchSize := int(min(revision.RenterOutput.Value.Div(target).Big().Uint64(), proto.MaxAccountBatchSize))
+		batchSize := int(min(contract.Revision.RenterOutput.Value.Div(target).Big().Uint64(), proto.MaxAccountBatchSize))
 		funded = min(batchSize, len(accounts))
 		batch := accounts[:funded]
 
@@ -225,13 +231,14 @@ func (c *HostClient) ReplenishAccounts(ctx context.Context, contractID types.Fil
 		params := rhp.RPCReplenishAccountsParams{
 			Accounts: batch,
 			Target:   target,
-			Contract: rhp.ContractRevision{ID: contractID, Revision: revision},
+			Contract: contract,
 		}
 		res, err := rhp.RPCReplenishAccounts(ctx, c.client, params, c.cm.TipState(), c.signer)
 		if err != nil {
-			return types.V2FileContract{}, err
+			return rhp.ContractRevision{}, err
 		}
-		return res.Revision, nil
+		contract.Revision = res.Revision
+		return contract, nil
 	}); err != nil {
 		return rhp.RPCReplenishAccountsResult{}, 0, fmt.Errorf("failed to replenish accounts: %w", err)
 	}
@@ -253,7 +260,7 @@ func (c *HostClient) syncRevision(ctx context.Context, contractID types.FileCont
 	}
 
 	// update latest revision
-	err = c.store.UpdateContractRevision(ctx, contractID, resp.Contract)
+	err = c.store.UpdateContractRevision(ctx, rhp.ContractRevision{ID: contractID, Revision: resp.Contract})
 	if err != nil {
 		c.log.Error("failed to update contract revision", zap.Stringer("contractID", contractID), zap.Error(err))
 	}
@@ -266,50 +273,51 @@ func (c *HostClient) syncRevision(ctx context.Context, contractID types.FileCont
 // reports an invalid signature, suggesting the local revision is out of sync,
 // it will synchronize with the host and retry the function using the updated
 // revision. Therefore, the revise function must be idempotent.
-func (c *HostClient) withRevision(ctx context.Context, contractID types.FileContractID, reviseFn func(revision types.V2FileContract) (types.V2FileContract, error)) error {
+func (c *HostClient) withRevision(ctx context.Context, contractID types.FileContractID, reviseFn func(contract rhp.ContractRevision) (rhp.ContractRevision, error)) error {
 	cs := c.cm.TipState()
 	bh := cs.Index.Height
 	maxProofHeight := bh + revisionSubmissionBuffer
 
 	// fetch revision from database
-	rev, renewed, err := c.store.ContractRevision(ctx, contractID)
+	contract, renewed, err := c.store.ContractRevision(ctx, contractID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contract revision: %w", err)
 	} else if renewed {
 		return ErrContractRenewed
-	} else if rev.ProofHeight > maxProofHeight {
-		return fmt.Errorf("%d > %d (%d+%d), %w", rev.ProofHeight, maxProofHeight, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
+	} else if contract.Revision.ProofHeight > maxProofHeight {
+		return fmt.Errorf("%d > %d (%d+%d), %w", contract.Revision.ProofHeight, maxProofHeight, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
 	}
 
 	// revise the contract
-	update, err := reviseFn(rev)
+	revised, err := reviseFn(contract)
 
 	// try and sync the revision if we got an error that indicates the revision is invalid
 	if err != nil && strings.Contains(err.Error(), proto.ErrInvalidSignature.Error()) {
-		c.log.Debug("syncing contract revision due to invalid signature", zap.Uint64("revisionNumber", rev.RevisionNumber), zap.Stringer("contractID", contractID), zap.Error(err))
-		rev, renewed, err = c.syncRevision(ctx, contractID, rev)
+		c.log.Debug("syncing contract revision due to invalid signature", zap.Uint64("revisionNumber", contract.Revision.RevisionNumber), zap.Stringer("contractID", contractID), zap.Error(err))
+		contract.Revision, renewed, err = c.syncRevision(ctx, contractID, contract.Revision)
 		if err != nil {
 			return fmt.Errorf("failed to sync revision: %w", err)
 		} else if renewed {
 			return ErrContractRenewed
-		} else if rev.ProofHeight > maxProofHeight {
-			return fmt.Errorf("%d > %d (%d+%d), %w", rev.ProofHeight, maxProofHeight, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
+		} else if contract.Revision.ProofHeight > maxProofHeight {
+			return fmt.Errorf("%d > %d (%d+%d), %w", contract.Revision.ProofHeight, maxProofHeight, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
 		}
-		c.log.Debug("synced contract revision", zap.Uint64("revisionNumber", rev.RevisionNumber), zap.Stringer("contractID", contractID))
+		c.log.Debug("synced contract revision", zap.Uint64("revisionNumber", contract.Revision.RevisionNumber), zap.Stringer("contractID", contractID))
 
 		// try and revise the contract again
-		update, err = reviseFn(rev)
+		revised, err = reviseFn(contract)
 	}
 	if err != nil {
 		return err
-	} else if update.RevisionNumber <= rev.RevisionNumber {
-		return fmt.Errorf("new revision number %d is not greater than current revision number %d", update.RevisionNumber, rev.RevisionNumber)
+	} else if revised.ID != contractID {
+		panic("contract ID mismatch") // developer error
 	}
 
 	// update revision in the database
-	err = c.store.UpdateContractRevision(ctx, contractID, update)
-	if err != nil {
-		c.log.Error("failed to update contract revision", zap.Error(err))
+	if revised.Revision.RevisionNumber > contract.Revision.RevisionNumber {
+		if err := c.store.UpdateContractRevision(ctx, revised); err != nil {
+			c.log.Error("failed to update contract revision", zap.Error(err))
+		}
 	}
 
 	return nil

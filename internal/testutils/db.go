@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.uber.org/zap"
@@ -42,7 +41,7 @@ func NewDB(t testing.TB, log *zap.Logger) *postgres.Store {
 	ci.Database = dbName
 
 	// create store
-	store, err := postgres.NewStore(context.Background(), ci, contracts.DefaultMaintenanceSettings, hosts.DefaultUsabilitySettings, log)
+	store, err := postgres.NewStore(context.Background(), ci, testMaintenanceSettings, hosts.DefaultUsabilitySettings, log)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}

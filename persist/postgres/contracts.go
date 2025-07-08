@@ -8,32 +8,36 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 )
 
 // ContractRevision returns the revision for the contract with given ID as well
 // as a boolean that indicates whether the contract was renewed.
-func (s *Store) ContractRevision(ctx context.Context, contractID types.FileContractID) (revision types.V2FileContract, renewed bool, _ error) {
+func (s *Store) ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
+	var renewed bool
+	var revision sqlFileContract
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, `SELECT raw_revision, renewed_to IS NOT NULL FROM contracts WHERE contract_id = $1`, sqlHash256(contractID)).Scan((*sqlFileContract)(&revision), &renewed)
+		return tx.QueryRow(ctx, `SELECT raw_revision, renewed_to IS NOT NULL FROM contracts WHERE contract_id = $1`, sqlHash256(contractID)).Scan(&revision, &renewed)
 	}); errors.Is(err, sql.ErrNoRows) {
-		return types.V2FileContract{}, false, fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
+		return rhp.ContractRevision{}, false, fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
 	} else if err != nil {
-		return types.V2FileContract{}, false, fmt.Errorf("failed to fetch contract revision: %w", err)
+		return rhp.ContractRevision{}, false, fmt.Errorf("failed to fetch contract revision: %w", err)
 	}
-	return revision, renewed, nil
+	return rhp.ContractRevision{ID: contractID, Revision: types.V2FileContract(revision)}, renewed, nil
 }
 
 // UpdateContractRevision updates the contract revision in the database.
-func (s *Store) UpdateContractRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) error {
+func (s *Store) UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision) error {
+	revision := contract.Revision
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		query := `UPDATE contracts SET raw_revision = $1, revision_number = $2, capacity = $3, size = $4, remaining_allowance = $5, used_collateral = $6 WHERE contract_id = $7`
-		res, err := tx.Exec(ctx, query, sqlFileContract(revision), revision.RevisionNumber, revision.Capacity, revision.Filesize, sqlCurrency(revision.RenterOutput.Value), sqlCurrency(revision.MissedHostValue), sqlHash256(contractID))
+		res, err := tx.Exec(ctx, query, sqlFileContract(revision), revision.RevisionNumber, revision.Capacity, revision.Filesize, sqlCurrency(revision.RenterOutput.Value), sqlCurrency(revision.MissedHostValue), sqlHash256(contract.ID))
 		if err != nil {
 			return fmt.Errorf("failed to update contract revision: %w", err)
 		} else if res.RowsAffected() != 1 {
-			return fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
+			return fmt.Errorf("contract %q: %w", contract.ID, contracts.ErrNotFound)
 		}
 		return nil
 	})
@@ -145,7 +149,7 @@ WHERE
 	-- active filter
 	(
 		$2::boolean IS NULL OR 
-		($2::boolean = TRUE AND c.state <= 1) OR 
+		($2::boolean = TRUE AND c.state <= 1 AND c.renewed_to IS NULL) OR 
 		($2::boolean = FALSE AND c.state > 1)
 	)
 LIMIT $3 OFFSET $4`, opts.Good, opts.Revisable, limit, offset)

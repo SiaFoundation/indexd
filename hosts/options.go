@@ -24,14 +24,16 @@ func WithAnnouncementMaxAge(maxAge time.Duration) Option {
 	}
 }
 
-// WithScanFrequency sets the scanning frequency.
+// WithScanFrequency sets the frequency with which we check for hosts that need
+// scanning.
 func WithScanFrequency(d time.Duration) Option {
 	return func(m *HostManager) {
 		m.scanFrequency = d
 	}
 }
 
-// WithScanInterval sets the interval between scans.
+// WithScanInterval sets the minimum amount of time we wait before scanning the
+// host again after a successful scan.
 func WithScanInterval(d time.Duration) Option {
 	return func(m *HostManager) {
 		m.scanInterval = d
