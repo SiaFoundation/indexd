@@ -11,16 +11,29 @@ import (
 	"sync/atomic"
 
 	"go.sia.tech/core/rhp/v4"
+
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
-var errNotEnoughShards = errors.New("not enough shards")
+var (
+	errNotEnoughShards = errors.New("not enough shards")
+	errNotEnoughHosts  = errors.New("not enough hosts")
+)
 
-// contractsForRepair filters the sectors of a slab and returns the indices of the sectors that
-// require migration together with the contracts to use for them.
+type (
+	// Shard represents a sector present on a host.
+	Shard struct {
+		Root    types.Hash256
+		HostKey types.PublicKey
+	}
+)
+
+// contractsForRepair filters the sectors of a slab and returns the indices of
+// the sectors that require migration together with the contracts to use for
+// them.
 func contractsForRepair(slab Slab, availableHosts []hosts.Host, availableContracts []contracts.Contract, period uint64) ([]int, []contracts.Contract) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)

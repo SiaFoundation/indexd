@@ -64,6 +64,7 @@ type (
 	HostClient interface {
 		ReadSector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, w io.Writer, root types.Hash256, offset, length uint64) (rhp.RPCReadSectorResult, error)
 		Settings(context.Context, types.PublicKey) (proto.HostSettings, error)
+		WriteSector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, data io.Reader, length uint64) (rhp.RPCWriteSectorResult, error)
 	}
 
 	// HostManager defines the minimal interface of HostManager functionality

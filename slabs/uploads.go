@@ -1,0 +1,120 @@
+package slabs
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"slices"
+
+	proto "go.sia.tech/core/rhp/v4"
+	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/hosts"
+	"go.uber.org/zap"
+	"lukechampine.com/frand"
+)
+
+type uploadCandidates struct {
+	hosts []hosts.Host
+	cidrs map[string]struct{}
+}
+
+func newUploadCandidates(hosts []hosts.Host) uploadCandidates {
+	cloned := slices.Clone(hosts)
+	frand.Shuffle(len(cloned), func(i int, j int) { cloned[i], cloned[j] = cloned[j], cloned[i] })
+	return uploadCandidates{
+		hosts: cloned,
+		cidrs: make(map[string]struct{}),
+	}
+}
+
+func (uh *uploadCandidates) next() (hosts.Host, bool) {
+	if len(uh.hosts) == 0 {
+		return hosts.Host{}, false
+	}
+	host := uh.hosts[0]
+	uh.hosts = uh.hosts[1:]
+	return host, true
+}
+
+func (uh *uploadCandidates) used(h hosts.Host) {
+	for _, cidr := range h.Networks {
+		_, ok := uh.cidrs[cidr.String()]
+		if ok {
+			panic("CIDR already used: " + cidr.String()) // developer error
+		}
+		uh.cidrs[cidr.String()] = struct{}{}
+	}
+}
+
+// uploadShards uploads the shards to the given hosts. If not all shards were
+// migrated, an error is returned but any finished shards will still be returned
+// and should be tracked in the database. The given shards must not be nil and
+// the candidates can not have overlapping CIDRs.
+func (m *SlabManager) uploadShards(ctx context.Context, shards [][]byte, candidates uploadCandidates, logger *zap.Logger) ([]Shard, error) {
+	uploaded := make([]Shard, 0, len(shards))
+
+	var uploadErr error
+	for _, shard := range shards {
+		if shard == nil {
+			panic("shard is nil") // developer error
+		}
+
+	nextCandidate:
+		host, ok := candidates.next()
+		if !ok {
+			uploadErr = fmt.Errorf("uploaded %d out of %d shards: %w", len(uploaded), len(shards), errNotEnoughHosts)
+			break
+		}
+
+		if ctx.Err() != nil {
+			uploadErr = fmt.Errorf("uploaded %d out of %d shards: %w", len(uploaded), len(shards), ctx.Err())
+			break
+		}
+
+		usage, root, err := m.uploadShard(ctx, host, bytes.NewReader(shard))
+		if err != nil {
+			logger.Debug("failed to upload shard to host", zap.Stringer("hostKey", host.PublicKey), zap.Error(err))
+			goto nextCandidate
+		}
+
+		err = m.am.DebitServiceAccount(ctx, host.PublicKey, m.migrationAccount, usage.RenterCost())
+		if err != nil {
+			logger.Debug("failed to debit service account for sector write", zap.Error(err))
+		}
+
+		candidates.used(host)
+		uploaded = append(uploaded, Shard{
+			Root:    root,
+			HostKey: host.PublicKey,
+		})
+	}
+
+	return uploaded, uploadErr
+}
+
+func (m *SlabManager) uploadShard(ctx context.Context, h hosts.Host, shard io.Reader) (proto.Usage, types.Hash256, error) {
+	ctx, cancel := context.WithTimeout(ctx, m.shardTimeout)
+	defer cancel()
+
+	client, err := m.dialer.DialHost(ctx, h.PublicKey, h.SiamuxAddr())
+	if err != nil {
+		return proto.Usage{}, types.Hash256{}, fmt.Errorf("failed to dial host: %w", err)
+	}
+
+	settings, err := client.Settings(ctx, h.PublicKey)
+	if err != nil {
+		return proto.Usage{}, types.Hash256{}, fmt.Errorf("failed to fetch host settings: %w", err)
+	}
+
+	result, err := client.WriteSector(ctx, settings.Prices, m.migrationToken(h), shard, proto.SectorSize)
+	if err != nil {
+		return proto.Usage{}, types.Hash256{}, fmt.Errorf("failed to write sector: %w", err)
+	}
+
+	return result.Usage, result.Root, nil
+}
+
+func (m *SlabManager) migrationToken(h hosts.Host) proto.AccountToken {
+	return m.migrationAccount.Token(m.migrationAccountKey, h.PublicKey)
+}
