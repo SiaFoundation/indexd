@@ -28,6 +28,7 @@ type mockStore struct {
 func newMockStore() *mockStore {
 	return &mockStore{
 		accounts:        make(map[proto.Account]struct{}),
+		hosts:           make(map[types.PublicKey]hosts.Host),
 		failedChecks:    make(map[types.PublicKey]map[types.Hash256]int),
 		lostSectors:     make(map[types.PublicKey]map[types.Hash256]struct{}),
 		serviceAccounts: make(map[proto.Account]map[types.PublicKey]types.Currency),

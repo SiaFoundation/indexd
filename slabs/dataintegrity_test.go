@@ -302,6 +302,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 
 	// mock a lost sector
 	hk := types.PublicKey{1}
+	store.hosts[hk] = hosts.Host{PublicKey: hk}
 	store.lostSectors[hk] = make(map[types.Hash256]struct{})
 	store.lostSectors[hk][types.Hash256{1}] = struct{}{}
 
@@ -322,5 +323,18 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	got.Timestamp = expected.Timestamp // ignore timestamp
 	if !reflect.DeepEqual(expected, got) {
 		t.Fatal("unexpected alert", expected, got)
+	}
+
+	// remove lostSectors
+	delete(store.lostSectors, hk)
+
+	// perform integrity checks
+	sm.performIntegrityChecks(context.Background())
+
+	// alert should be dismissed
+	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
+		t.Fatal(err)
+	} else if len(alerts) != 0 {
+		t.Fatalf("expected 0 alerts, got %d", len(alerts))
 	}
 }
