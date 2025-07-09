@@ -1,15 +1,9 @@
 package slabs
 
 import (
-	"errors"
-
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
-)
-
-var (
-	errNotEnoughShards = errors.New("not enough shards")
 )
 
 // contractsForRepair filters the sectors of a slab and returns the indices of

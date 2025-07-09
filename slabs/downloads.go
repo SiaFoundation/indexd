@@ -3,6 +3,7 @@ package slabs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,6 +15,8 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
+
+var errNotEnoughShards = errors.New("not enough shards")
 
 type downloadCandidates struct {
 	hosts   []hosts.Host
