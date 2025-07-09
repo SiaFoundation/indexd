@@ -93,6 +93,7 @@ type (
 	// AlertsManager defines an interface to register alerts.
 	AlertsManager interface {
 		RegisterAlert(alert alerts.Alert) error
+		DismissAlerts(ids ...types.Hash256)
 	}
 )
 
@@ -257,15 +258,41 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 		wg.Wait()
 	}
 
+	offset := 0
+	const limit = 100
+	activeHosts := make(map[types.PublicKey]struct{})
+	for {
+		hosts, err := m.store.Hosts(ctx, offset, limit, hosts.WithActiveContracts(true))
+		if err != nil {
+			return fmt.Errorf("failed to get active hosts: %w", err)
+		}
+		for _, host := range hosts {
+			activeHosts[host.PublicKey] = struct{}{}
+		}
+
+		offset += len(hosts)
+		if len(hosts) < limit {
+			break
+		}
+	}
+
 	alertHosts, err := m.store.HostsWithLostSectors(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get hosts with lost sectors: %w", err)
 	}
 	for _, host := range alertHosts {
+		delete(activeHosts, host.PublicKey)
 		if err := m.alerter.RegisterAlert(newLostSectorsAlert(host.PublicKey, host.LostSectors)); err != nil {
 			return fmt.Errorf("failed to register lost sector alert: %w", err)
 		}
 	}
+
+	// activeHosts now represents the active hosts that don't have lost sector
+	var dismiss []types.Hash256
+	for hk := range activeHosts {
+		dismiss = append(dismiss, alerts.IDForHost(alertLostSectorsID, hk))
+	}
+	m.alerter.DismissAlerts(dismiss...)
 
 	logger.Debug("finished integrity checks", zap.Duration("elapsed", time.Since(start)))
 	return nil
