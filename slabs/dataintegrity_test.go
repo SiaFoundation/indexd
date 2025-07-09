@@ -3,7 +3,6 @@ package slabs
 import (
 	"context"
 	"errors"
-	"log"
 	"math"
 	"reflect"
 	"testing"
@@ -288,73 +287,40 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 
 func TestIntegrityChecksAlert(t *testing.T) {
 	store := newMockStore()
-	am := newMockAccountManager(store)
-	hm := newMockHostManager()
-	account := types.GeneratePrivateKey()
 	alerter := alerts.NewManager()
-	sm, err := newSlabManager(am, hm, store, nil, alerter, account, account)
+	sm, err := newSlabManager(newMockAccountManager(store), nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	host := hosts.Host{
-		PublicKey: types.PublicKey{1},
-		Settings: proto.HostSettings{
-			Prices: proto.HostPrices{
-				EgressPrice: types.Siacoins(1).Div64(proto.SectorSize), // 1SC per sector
-			},
-		},
-	}
-
-	// make host scannable
-	hm.hosts[host.PublicKey] = host
-
-	// prepare roots for each outcome, a successful check, a lost sector and a
-	// failed check
-	rootGood := types.Hash256{1}
-	rootLost := types.Hash256{2}
-	rootBad := types.Hash256{3}
-	store.sectorsForCheck = []types.Hash256{rootGood, rootLost, rootBad}
-
-	alerts, err := alerter.Alerts(0, math.MaxInt64)
-	if err != nil {
+	// assert there are no alerts
+	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
 		t.Fatal(err)
-	}
-	if len(alerts) != 0 {
+	} else if len(alerts) != 0 {
 		t.Fatalf("expected 0 alerts, got %d", len(alerts))
 	}
 
-	// make host available to mock HostsForIntegrityChecks
-	store.hosts[host.PublicKey] = struct{}{}
-	// mark host as having a lost sector so alert is generated
-	store.lostSectors[host.PublicKey] = make(map[types.Hash256]struct{})
-	store.lostSectors[host.PublicKey][rootLost] = struct{}{}
-	host.LostSectors = 1
-	// perform integrity check to generate alert
+	// mock a lost sector
+	hk := types.PublicKey{1}
+	store.lostSectors[hk] = make(map[types.Hash256]struct{})
+	store.lostSectors[hk][types.Hash256{1}] = struct{}{}
+
+	// perform integrity checks
 	sm.performIntegrityChecks(context.Background())
 
-	alerts, err = alerter.Alerts(0, math.MaxInt64)
-	if err != nil {
+	// assert alert was generated
+	var got alerts.Alert
+	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
 		t.Fatal(err)
-	}
-	if len(alerts) != 1 {
+	} else if len(alerts) != 1 {
 		t.Fatalf("expected 1 alert, got %d", len(alerts))
+	} else {
+		got = alerts[0]
 	}
 
-	got := alerts[0]
-	expected := newLostSectorsAlert(host.PublicKey, host.LostSectors)
-	if expected.ID != got.ID {
-		log.Fatalf("expected id %v, got %v", expected.ID, got.ID)
-	} else if expected.Severity != got.Severity {
-		log.Fatalf("expected severity %v, got %v", expected.Severity, got.Severity)
-	} else if expected.Message != got.Message {
-		log.Fatalf("expected message %v, got %v", expected.Message, got.Message)
-	} else if len(expected.Data) != len(got.Data) {
-		log.Fatalf("expected len(data) %d, got %d", len(expected.Data), len(got.Data))
-	}
-	for key, value := range expected.Data {
-		if v := got.Data[key]; v != value {
-			t.Fatalf("expected %v, got %v", value, v)
-		}
+	expected := newLostSectorsAlert(hk, 1)
+	got.Timestamp = expected.Timestamp // ignore timestamp
+	if !reflect.DeepEqual(expected, got) {
+		t.Fatal("unexpected alert", expected, got)
 	}
 }
