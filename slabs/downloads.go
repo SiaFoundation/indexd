@@ -9,7 +9,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"go.sia.tech/core/rhp/v4"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/hosts"
@@ -155,7 +154,7 @@ func (m *SlabManager) downloadShard(ctx context.Context, h hosts.Host, sector Se
 	}
 
 	buf := new(bytes.Buffer)
-	result, err := client.ReadSector(ctx, settings.Prices, m.migrationToken(h), buf, sector.Root, 0, rhp.SectorSize)
+	result, err := client.ReadSector(ctx, settings.Prices, m.migrationToken(h), buf, sector.Root, 0, proto.SectorSize)
 	if err != nil {
 		return proto.Usage{}, nil, fmt.Errorf("failed to read sector: %w", err)
 	}
@@ -173,5 +172,5 @@ func (m *SlabManager) markSectorLost(ctx context.Context, host hosts.Host, root 
 }
 
 func isErrLostSector(err error) bool {
-	return err != nil && strings.Contains(err.Error(), rhp.ErrSectorNotFound.Error())
+	return err != nil && strings.Contains(err.Error(), proto.ErrSectorNotFound.Error())
 }
