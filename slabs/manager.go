@@ -81,7 +81,7 @@ type (
 		AddAccount(ctx context.Context, ak types.PublicKey) error
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		HostsForIntegrityChecks(ctx context.Context, limit int) ([]types.PublicKey, error)
-		HostsWithLostSectors(ctx context.Context) ([]types.PublicKey, error)
+		HostsWithLostSectors(ctx context.Context) ([]hosts.Host, error)
 		MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxFailedIntegrityChecks uint) error
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error)
@@ -191,14 +191,15 @@ func (m *SlabManager) Close() error {
 	return nil
 }
 
-func newLostSectorsAlert(hk types.PublicKey) alerts.Alert {
+func newLostSectorsAlert(hk types.PublicKey, lostSectors uint64) alerts.Alert {
 	return alerts.Alert{
 		ID:       alerts.IDForHost(alertLostSectorsID, hk),
 		Severity: alerts.SeverityWarning,
 		Message:  "Host has lost sectors",
 		Data: map[string]interface{}{
-			"hostKey": hk.String(),
-			"hint":    "The host has reported that it can't serve at least one sector. Consider blocking this host through the blocklist feature.",
+			"hostKey":     hk.String(),
+			"lostSectors": lostSectors,
+			"hint":        "The host has reported that it can't serve at least one sector. Consider blocking this host through the blocklist feature.",
 		},
 		Timestamp: time.Now(),
 	}
@@ -261,7 +262,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 		return fmt.Errorf("failed to get hosts with lost sectors: %w", err)
 	}
 	for _, host := range alertHosts {
-		if err := m.alerter.RegisterAlert(newLostSectorsAlert(host)); err != nil {
+		if err := m.alerter.RegisterAlert(newLostSectorsAlert(host.PublicKey, host.LostSectors)); err != nil {
 			return fmt.Errorf("failed to register lost sector alert: %w", err)
 		}
 	}

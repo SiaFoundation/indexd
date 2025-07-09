@@ -631,8 +631,10 @@ func TestHostsWithLostSectors(t *testing.T) {
 			t.Fatalf("expected %d hosts, got %d", len(hks), len(hosts))
 		}
 		for i, host := range hosts {
-			if host != hks[i] {
-				t.Fatalf("expected hk %v, got %v", hks[i], host)
+			if host.PublicKey != hks[i] {
+				t.Fatalf("expected PublicKey %v, got %v", hks[i], host.PublicKey)
+			} else if host.LostSectors <= 0 {
+				t.Fatalf("expected LostSectors > 0, got %d", host.LostSectors)
 			}
 		}
 	}

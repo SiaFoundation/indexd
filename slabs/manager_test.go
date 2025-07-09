@@ -64,10 +64,13 @@ func (s *mockStore) HostsForIntegrityChecks(ctx context.Context, limit int) (res
 	return
 }
 
-func (s *mockStore) HostsWithLostSectors(ctx context.Context) (result []types.PublicKey, err error) {
+func (s *mockStore) HostsWithLostSectors(ctx context.Context) (result []hosts.Host, err error) {
 	for hk, lostSectors := range s.lostSectors {
 		if len(lostSectors) > 0 {
-			result = append(result, hk)
+			result = append(result, hosts.Host{
+				PublicKey:   hk,
+				LostSectors: uint64(len(lostSectors)),
+			})
 		}
 	}
 	return

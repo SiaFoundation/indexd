@@ -329,6 +329,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	// mark host as having a lost sector so alert is generated
 	store.lostSectors[host.PublicKey] = make(map[types.Hash256]struct{})
 	store.lostSectors[host.PublicKey][rootLost] = struct{}{}
+	host.LostSectors = 1
 	// perform integrity check to generate alert
 	sm.performIntegrityChecks(context.Background())
 
@@ -341,7 +342,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	}
 
 	got := alerts[0]
-	expected := newLostSectorsAlert(host.PublicKey)
+	expected := newLostSectorsAlert(host.PublicKey, host.LostSectors)
 	if expected.ID != got.ID {
 		log.Fatalf("expected id %v, got %v", expected.ID, got.ID)
 	} else if expected.Severity != got.Severity {

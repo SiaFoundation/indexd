@@ -9,6 +9,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -35,7 +36,8 @@ func TestUploadShards(t *testing.T) {
 	shards := [][]byte{sector1[:], sector2[:], sector3[:]}
 
 	// create manager
-	sm, err := newSlabManager(am, hm, store, dialer, account, types.GeneratePrivateKey())
+	alerter := alerts.NewManager()
+	sm, err := newSlabManager(am, hm, store, dialer, alerter, account, types.GeneratePrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}
