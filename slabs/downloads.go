@@ -71,11 +71,11 @@ func (dc *downloadCandidates) next() (hosts.Host, bool) {
 
 // downloadShards downloads at least the minimum number of shards required to
 // recover the slab.
-func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, goodHosts []hosts.Host, logger *zap.Logger) ([][]byte, error) {
+func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, allHosts []hosts.Host, logger *zap.Logger) ([][]byte, error) {
 	shards := make([][]byte, len(slab.Sectors))
 	var downloaded atomic.Uint32
 
-	candidates := newDownloadCandidates(goodHosts, slab)
+	candidates := newDownloadCandidates(allHosts, slab)
 	if uint(len(candidates.indices)) < slab.MinShards {
 		return nil, fmt.Errorf("%w: only %d sectors available, minimum required: %d", errNotEnoughShards, len(candidates.indices), slab.MinShards)
 	}
