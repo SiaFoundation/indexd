@@ -331,7 +331,6 @@ func TestRSReconstructSome(t *testing.T) {
 		{false, true, false, true},
 		// {false, false, false, true},
 	} {
-
 		downloaded := make([][]byte, len(shards))
 		downloaded[0] = slices.Clone(shards[0])
 		downloaded[2] = slices.Clone(shards[2])
