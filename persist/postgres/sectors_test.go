@@ -412,8 +412,8 @@ func TestSlabIDs(t *testing.T) {
 		t.Fatal(err)
 	} else if len(slabIDs) != 2 {
 		t.Fatalf("expected 2 slab IDs for account 1, got %d", len(slabIDs))
-	} else if !(slabIDs[0] == slabID1 && slabIDs[1] == slabID2) {
-		t.Fatalf("unexpected slab IDs %v, expected [%v,%v]", slabIDs, slabID1, slabID2)
+	} else if !(slabIDs[0] == slabID2 && slabIDs[1] == slabID1) {
+		t.Fatalf("unexpected slab IDs %v, expected [%v,%v]", slabIDs, slabID2, slabID1)
 	}
 
 	// assert offset and limit are applied
@@ -421,14 +421,14 @@ func TestSlabIDs(t *testing.T) {
 		t.Fatal(err)
 	} else if len(slabIDs) != 1 {
 		t.Fatal("unexpected", len(slabIDs))
-	} else if slabIDs[0] != slabID1 {
-		t.Fatalf("expected slab ID %v, got %v", slabID1, slabIDs[0])
+	} else if slabIDs[0] != slabID2 {
+		t.Fatalf("expected slab ID %v, got %v", slabID2, slabIDs[0])
 	} else if slabIDs, err = store.SlabIDs(context.Background(), a1, 1, 1); err != nil {
 		t.Fatal(err)
 	} else if len(slabIDs) != 1 {
 		t.Fatal("unexpected", len(slabIDs))
-	} else if slabIDs[0] != slabID2 {
-		t.Fatalf("expected slab ID %v, got %v", slabID2, slabIDs[0])
+	} else if slabIDs[0] != slabID1 {
+		t.Fatalf("expected slab ID %v, got %v", slabID1, slabIDs[0])
 	} else if slabIDs, err = store.SlabIDs(context.Background(), a1, 2, 1); err != nil {
 		t.Fatal(err)
 	} else if len(slabIDs) != 0 {
@@ -586,6 +586,29 @@ func TestPinSlabs(t *testing.T) {
 	assertCount("account_slabs", 5) // 2 slabs for each account + the new one
 	assertCount("slabs", 3)         // 3 slabs
 	assertCount("sectors", 4)       // 2 sectors per slab + 0 new ones
+
+	// fetch first slab, get pinned at time
+	ids := []slabs.SlabID{slab1ID}
+	slabs, err := store.Slabs(context.Background(), account, ids)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(slabs))
+	}
+	slab1Full := slabs[0]
+	pinnedAt := slab1Full.PinnedAt
+
+	// pin slab 1 again and fetch it again
+	_, err = store.PinSlab(context.Background(), account2, nextCheck, toPin[0])
+	if err != nil {
+		t.Fatal(err)
+	} else if slabs, err := store.Slabs(context.Background(), account, ids); err != nil {
+		t.Fatal(err)
+	} else if len(slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(slabs))
+	} else if slabs[0].PinnedAt == pinnedAt {
+		t.Fatal("expected slab to be pinned at a different time")
+	}
 }
 
 func TestUnpinSlab(t *testing.T) {
