@@ -53,25 +53,30 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// helper to generate slab pin parameters
+	params := func() slabs.SlabPinParams {
+		return slabs.SlabPinParams{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors: []slabs.SectorPinParams{
+				{
+					Root:    frand.Entropy256(),
+					HostKey: h1.PublicKey(),
+				},
+				{
+					Root:    frand.Entropy256(),
+					HostKey: h2.PublicKey(),
+				},
+				{
+					Root:    frand.Entropy256(),
+					HostKey: h3.PublicKey(),
+				},
+			},
+		}
+	}
+
 	// pin the slab
-	slabID, err := indexer.App(sk).PinSlab(context.Background(), slabs.SlabPinParams{
-		EncryptionKey: frand.Entropy256(),
-		MinShards:     1,
-		Sectors: []slabs.SectorPinParams{
-			{
-				Root:    frand.Entropy256(),
-				HostKey: h1.PublicKey(),
-			},
-			{
-				Root:    frand.Entropy256(),
-				HostKey: h2.PublicKey(),
-			},
-			{
-				Root:    frand.Entropy256(),
-				HostKey: h3.PublicKey(),
-			},
-		},
-	})
+	slabID, err := indexer.App(sk).PinSlab(context.Background(), params())
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
@@ -82,22 +87,31 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert minimum redundancy is enforced
-	// pin the slab
-	_, err = indexer.App(sk).PinSlab(context.Background(), slabs.SlabPinParams{
-		EncryptionKey: frand.Entropy256(),
-		MinShards:     1,
-		Sectors: []slabs.SectorPinParams{
-			{
-				Root:    frand.Entropy256(),
-				HostKey: h1.PublicKey(),
-			},
-			{
-				Root:    frand.Entropy256(),
-				HostKey: h2.PublicKey(),
-			},
-		},
-	})
+	p := params()
+	p.Sectors = p.Sectors[:2]
+	_, err = indexer.App(sk).PinSlab(context.Background(), p)
 	if err == nil || !strings.Contains(err.Error(), slabs.ErrInsufficientRedundancy.Error()) {
 		t.Fatal("expected [slabs.ErrInsufficientRedundancy], got:", err)
+	}
+
+	// pin 2 slabs
+	slab1Params := params()
+	slab2Params := params()
+	slabID1, err := indexer.App(sk).PinSlab(context.Background(), slab1Params)
+	if err != nil {
+		t.Fatal("failed to pin slab:", err)
+	}
+	slabID2, err := indexer.App(sk).PinSlab(context.Background(), slab2Params)
+	if err != nil {
+		t.Fatal("failed to pin slab:", err)
+	}
+	slabs, err := indexer.App(sk).Slabs(context.Background(), []slabs.SlabID{slabID1, slabID2})
+	if err != nil {
+		t.Fatal("failed to fetch slabs:", err)
+	} else if len(slabs) != 2 {
+		t.Fatal("expected 2 slabs, got", len(slabs))
+	} else if slabs[0].EncryptionKey != slab1Params.EncryptionKey ||
+		slabs[1].EncryptionKey != slab2Params.EncryptionKey {
+		t.Fatal("expected slabs to have correct encryption keys")
 	}
 }

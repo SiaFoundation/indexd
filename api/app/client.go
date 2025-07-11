@@ -47,6 +47,20 @@ func (c *Client) PinSlab(ctx context.Context, params slabs.SlabPinParams) (slabI
 	return
 }
 
+// Slabs fetches slabs from the indexer by their IDs.
+func (c *Client) Slabs(ctx context.Context, slabIDs []slabs.SlabID) ([]slabs.Slab, error) {
+	if len(slabIDs) == 0 {
+		return nil, fmt.Errorf("no slab IDs provided")
+	}
+
+	var slabs []slabs.Slab
+	err := c.c.POST(ctx, c.sign("/slabs"), slabIDs, &slabs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch slabs: %w", err)
+	}
+	return slabs, nil
+}
+
 // UnpinSlab unpins a slab from the indexer.
 func (c *Client) UnpinSlab(ctx context.Context, slabID slabs.SlabID) error {
 	return c.c.DELETE(ctx, c.sign(fmt.Sprintf("/slabs/%s", slabID)))

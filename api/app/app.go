@@ -20,6 +20,7 @@ type (
 	// Store defines the store interface for the application API.
 	Store interface {
 		PinSlab(context.Context, proto.Account, time.Time, slabs.SlabPinParams) (slabs.SlabID, error)
+		Slabs(ctx context.Context, accountID proto.Account, slabIDs []slabs.SlabID) ([]slabs.Slab, error)
 		UnpinSlab(ctx context.Context, accountID proto.Account, slabID slabs.SlabID) error
 	}
 
@@ -50,6 +51,7 @@ func NewAPI(hostname string, store Store, as AccountStore, opts ...Option) http.
 	}
 
 	routes := map[string]authedHandler{
+		"POST /slabs":           a.handlePOSTSlabs,
 		"POST /slabs/pin":       a.handlePOSTSlabsPin,
 		"DELETE /slabs/:slabid": a.handleDELETESlab,
 	}
@@ -65,6 +67,24 @@ func NewAPI(hostname string, store Store, as AccountStore, opts ...Option) http.
 		}
 	}
 	return jape.Mux(signed)
+}
+
+func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
+	var ids []slabs.SlabID
+	if err := jc.Decode(&ids); err != nil {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if len(ids) == 0 {
+		jc.Error(fmt.Errorf("no slab IDs provided"), http.StatusBadRequest)
+		return
+	}
+
+	slabs, err := a.store.Slabs(jc.Request.Context(), proto.Account(pk), ids)
+	if jc.Check("failed to fetch slabs", err) != nil {
+		return
+	}
+
+	jc.Encode(slabs)
 }
 
 func (a *app) handlePOSTSlabsPin(jc jape.Context, pk types.PublicKey) {
