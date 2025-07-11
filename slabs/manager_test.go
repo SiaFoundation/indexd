@@ -1,12 +1,10 @@
 package slabs
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"io"
 	"slices"
-	"sort"
 	"sync"
 	"time"
 
@@ -51,42 +49,7 @@ func (s *mockStore) FailingSectors(ctx context.Context, hostKey types.PublicKey,
 }
 
 func (s *mockStore) Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
-	var allHosts []hosts.Host
-	for _, host := range s.hosts {
-		allHosts = append(allHosts, host)
-	}
-	sort.Slice(allHosts, func(i, j int) bool {
-		return bytes.Compare(allHosts[i].PublicKey[:], allHosts[j].PublicKey[:]) < 0
-	})
-
-	opts := hosts.DefaultHostsQueryOpts
-	for _, opt := range queryOpts {
-		opt(&opts)
-	}
-
-	var result []hosts.Host
-	for _, host := range allHosts {
-		if opts.Good != nil {
-			if *opts.Good != host.IsGood() {
-				continue
-			}
-		}
-		if opts.Blocked != nil {
-			if *opts.Blocked != host.Blocked {
-				continue
-			}
-		}
-		// filtering by ActiveContracts: unimplemented
-
-		result = append(result, host)
-	}
-
-	if offset >= len(result) {
-		return nil, nil
-	}
-	result = result[:min(limit, len(result))]
-
-	return result, nil
+	panic("not implemented")
 }
 
 func (s *mockStore) HostsForIntegrityChecks(ctx context.Context, limit int) (result []types.PublicKey, err error) {

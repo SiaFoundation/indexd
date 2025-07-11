@@ -261,24 +261,6 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 		wg.Wait()
 	}
 
-	offset := 0
-	const limit = 100
-	activeHosts := make(map[types.PublicKey]struct{})
-	for {
-		hosts, err := m.store.Hosts(ctx, offset, limit, hosts.WithActiveContracts(true))
-		if err != nil {
-			return fmt.Errorf("failed to get active hosts: %w", err)
-		}
-		for _, host := range hosts {
-			activeHosts[host.PublicKey] = struct{}{}
-		}
-
-		offset += len(hosts)
-		if len(hosts) < limit {
-			break
-		}
-	}
-
 	hks, err := m.store.HostsWithLostSectors(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to get hosts with lost sectors: %w", err)
