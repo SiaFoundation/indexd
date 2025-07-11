@@ -1,0 +1,553 @@
+openapi: "3.0.0"
+info:
+  title: Indexd API
+  description: Indexd is a pinning service for the Sia network. It allows app developers to pin data they uploaded to the Sia network, once pinned the indexer will ensure that data remains healthy on the network.
+  version: 2.0.0
+
+tags:
+  - name: application
+    description: Application API
+  - name: admin
+    description: Admin API
+
+paths:
+    #############################
+    #
+    # Admin API
+    #
+    #############################
+
+    /state:
+      get:
+        tags:
+          - admin
+        summary: "Get the state of the indexer"
+        description: Returns general information about the indexer.
+        operationId: getState
+        responses:
+          '200':
+            description: The state of the indexer
+            content:
+              application/json:
+                schema:
+                  type: object
+                  allOf:
+                  - $ref: "#/components/schemas/BuildState"
+                  properties:
+                    scanHeight:
+                      type: integer
+                      format: uint64
+                      description: The height up until which the wallet is synced
+                    startTime:
+                      type: string
+                      format: date-time
+                      description: The time the indexer was started
+
+    /accounts:
+      get:
+        tags:
+          - admin
+        summary: Get all accounts
+        description: Returns a list of all accounts managed by the indexer.
+        parameters:
+          - name: limit
+            in: query
+            description: The maximum number of accounts to return
+            schema:
+              type: integer
+              minimum: 1
+              maximum: 500
+              default: 100
+          - name: offset
+            in: query
+            description: The number of accounts to skip
+            schema:
+              type: integer
+              minimum: 0
+              default: 0
+        operationId: getAccounts
+        responses:
+          '200':
+            description: A list of accounts
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PublicKey"
+
+    /account/{accountkey}:
+      post:
+        tags:
+          - admin
+        summary: Add an account
+        description: Add an account to the indexer. This makes sure the indexer funds an ephemeral account with every host on behalf of this account.
+        operationId: addAccount
+        parameters:
+          - name: accountkey
+            in: path
+            required: true
+            schema:
+              $ref: "#/components/schemas/PublicKey"
+        responses:
+          '204':
+            description: Account added successfully
+          '409':
+            description: Account already exists
+      put:
+        tags:
+          - admin
+        summary: Update an account
+        description: Rotate an existing account key to a new key. This is useful if you lose access to your account's secret key, by rotating to a new key you retain access to all associated data.
+        operationId: updateAccount
+        parameters:
+          - name: accountkey
+            in: path
+            required: true
+            schema:
+              type: string
+        requestBody:
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  newAccountKey:
+                    $ref: "#/components/schemas/PublicKey"
+        responses:
+          '204':
+            description: Account key rotated successfully
+          '400':
+            description: Invalid new account key
+          '404':
+            description: Account not found
+          '409':
+            description: New account key already exists
+      delete:
+        tags:
+          - admin
+        summary: Delete an account
+        description: Delete an account from the indexer.
+        operationId: deleteAccount
+        parameters:
+          - name: accountkey
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '204':
+            description: Account deleted successfully 
+          '404':
+            description: Account not found
+
+    /contract/{contractid}:
+      get:
+        tags:
+          - admin
+        summary: Get a specific contract by ID
+        operationId: getContract
+        parameters:
+          - name: contractid
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '200':
+            description: Contract details
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    contractID:
+                      type: string
+                    hostKey:
+                      type: string
+                    status:
+                      type: string
+
+    /contracts:
+      get:
+        tags:
+          - admin
+        summary: Get all contracts
+        operationId: getContracts
+        responses:
+          '200':
+            description: A list of contracts
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      contractID:
+                        type: string
+                      hostKey:
+                        type: string
+                      status:
+                        type: string
+
+    /explorer/exchange-rate/siacoin/{currency}:
+      get:
+        tags:
+          - admin
+        summary: Get the exchange rate for Siacoin in a specific currency
+        operationId: getExchangeRate
+        parameters:
+          - name: currency
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '200':
+            description: Exchange rate details
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    currency:
+                      type: string
+                    rate:
+                      type: number
+
+    /host/{hostkey}:
+      get:
+        tags:
+          - admin
+        summary: Get details of a specific host by host key
+        operationId: getHost
+        parameters:
+          - name: hostkey
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '200':
+            description: Host details
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    hostKey:
+                      type: string
+                    status:
+                      type: string
+
+    /hosts:
+      get:
+        tags:
+          - admin
+        summary: Get all hosts
+        operationId: getHosts
+        responses:
+          '200':
+            description: A list of hosts
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      hostKey:
+                        type: string
+                      status:
+                        type: string
+    /hosts/blocklist:
+      get:
+        tags:
+          - admin
+        summary: Get the blocklist of hosts
+        operationId: getHostsBlocklist
+        responses:
+          '200':
+            description: A list of blocked hosts
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    type: string
+      put: 
+        tags:
+          - admin
+        summary: Update the blocklist of hosts
+        operationId: updateHostsBlocklist
+        responses:
+          '200':
+            description: Blocklist updated successfully
+    /hosts/blocklist/{hostkey}:
+      delete:
+        tags:
+          - admin
+        summary: Remove a host from the blocklist
+        operationId: removeHostFromBlocklist
+        parameters:
+          - name: hostkey
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '204':
+            description: Host removed from blocklist successfully
+
+    /settings/contracts:
+      get:
+        tags:
+          - admin
+        summary: Get contract settings
+        operationId: getSettingsContracts
+        responses:
+          '200':
+            description: Contract settings details
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    minDuration:
+                      type: integer
+                    maxDuration:
+                      type: integer
+      put:
+        tags:
+          - admin
+        summary: Update contract settings
+        operationId: updateSettingsContracts
+        responses:
+          '200':
+            description: Contract settings updated successfully
+    /settings/hosts:
+      get:
+        tags:
+          - admin
+        summary: Get host settings
+        operationId: getSettingsHosts
+        responses:
+          '200':
+            description: Host settings details
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    minCollateral:
+                      type: string
+                    maxCollateral:
+                      type: string
+      put:
+        tags:
+          - admin
+        summary: Update host settings
+        operationId: updateSettingsHosts
+        responses:
+          '200':
+            description: Host settings updated successfully
+    /settings/pricepinning:
+      get:
+        tags:
+          - admin
+        summary: Get price pinning settings
+        operationId: getSettingsPricePinning
+        responses:
+          '200':
+            description: Price pinning settings details
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    enabled:
+                      type: boolean
+                    minPrice:
+                      type: string
+      put:
+        tags:
+          - admin
+        summary: Update price pinning settings
+        operationId: updateSettingsPricePinning
+        responses:
+          '200':
+            description: Price pinning settings updated successfully
+
+    /wallet:
+      get:
+        tags:
+          - admin
+        summary: Get wallet information
+        operationId: getWallet
+        responses:
+          '200':
+            description: Wallet details
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    balance:
+                      type: string
+                    address:
+                      type: string
+    /wallet/events:
+      get:
+        tags:
+          - admin
+        summary: Get wallet events
+        operationId: getWalletEvents
+        responses:
+          '200':
+            description: Wallet events details
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      eventType:
+                        type: string
+                      timestamp:
+                        type: string
+    /wallet/pending:
+      get:
+        tags:         
+          - admin
+        summary: Get pending wallet transactions
+        operationId: getWalletPending
+        responses:
+          '200':
+            description: Pending wallet transactions details
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      transactionID:
+                        type: string
+                      amount:   
+                        type: string
+    /wallet/send:
+      post:
+        tags:
+          - admin
+        summary: Send Siacoin to a specific address
+        operationId: sendSiacoin
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  address:
+                    type: string
+                  amount:
+                    type: string
+        responses:
+          '200':
+            description: Transaction sent successfully
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    transactionID:
+                      type: string
+
+
+    #############################
+    #
+    # Application API
+    #
+    #############################
+
+    /slabs/pin:
+      post:
+        tags:
+          - application
+        summary: Pin a slab to the indexer
+        operationId: pinSlab
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slabID:
+                    type: string
+                  hostKey:
+                    type: string
+        responses:
+          '201':
+            description: Slab pinned successfully
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    slabID:
+                      type: string
+
+    /slabs/{slabid}:
+      delete:
+        tags:
+          - application
+        summary: Unpin a slab from the indexer
+        operationId: unpinSlab
+        parameters:
+          - name: slabid
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '204':
+            description: Slab unpinned successfully
+
+components:
+  schemas:
+    #############################
+    #
+    # Core types
+    #
+    #############################
+    
+    PublicKey:
+      type: string
+      pattern: "^ed25519:[0-9a-fA-F]{64}$"
+      description: A ed25519 public key
+
+    #############################
+    #
+    # Helper types
+    #
+    #############################
+    
+    BuildState:
+      type: object
+      properties:
+        buildTime:
+          type: string
+          format: date-time
+          description: The build time of the build
+        commit:
+          type: string
+          description: The commit hash of the build
+        version:
+          type: string
+          description: The version of the build
+        os:
+          type: string
+          description: The operating system of the build
