@@ -646,6 +646,23 @@ components:
         - $ref: "#/components/schemas/Hash256"
         - description: The hash of a set of UnlockConditions
 
+    BlockID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: A unique identifier for a block
+
+    ChainIndex:
+      type: object
+      properties:
+        height:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The height of the block in the blockchain
+        id:
+          allOf:
+            - $ref: "#/components/schemas/BlockID"
+            - description: The ID of the block
+
     Currency:
       type: string
       pattern: "^\\d+$"
@@ -822,6 +839,11 @@ components:
       format: byte
       pattern: "[0-9a-fA-F]{64}"
       description: A ed25519 signature
+
+    TransactionID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: Unique identifier for a transaction.
 
     #############################
     #
@@ -1140,4 +1162,4 @@ components:
         minProtocolVersion:
           allOf:
             - $ref: "#/components/schemas/SemVer"
-            - description: "The minimum protocol version the host must have
+            - description: "The minimum protocol version the host must have to be considered usable. The version is represented as an array of three unsigned 8-bit integers: [major, minor, patch]"
