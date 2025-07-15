@@ -176,9 +176,6 @@ func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2File
 
 	// update contract elements
 	fce := diff.V2FileContractElement
-	if rev, ok := diff.V2RevisionElement(); ok {
-		fce = rev
-	}
 	if err := tx.UpdateContractElements(fce); err != nil {
 		return fmt.Errorf("failed to update contract element: %w", err)
 	}

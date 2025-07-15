@@ -529,11 +529,13 @@ func TestApplyRevertDiff(t *testing.T) {
 	assertContract(ContractStateActive)
 
 	// revise contract
-	fce.V2FileContract.RevisionNumber++
+	revision := fce.V2FileContract
+	revision.RevisionNumber++
 	applyDiff(consensus.V2FileContractElementDiff{
 		V2FileContractElement: fce,
-		Revision:              &fce.V2FileContract,
+		Revision:              &revision,
 	})
+	fce.V2FileContract.RevisionNumber++
 	assertContract(ContractStateActive)
 
 	// resolve contract
@@ -554,9 +556,9 @@ func TestApplyRevertDiff(t *testing.T) {
 
 	// revert revision
 	fce.V2FileContract.RevisionNumber--
-	applyDiff(consensus.V2FileContractElementDiff{
+	revertDiff(consensus.V2FileContractElementDiff{
 		V2FileContractElement: fce,
-		Revision:              &fce.V2FileContract,
+		Revision:              &revision,
 	})
 	assertContract(ContractStateActive)
 
