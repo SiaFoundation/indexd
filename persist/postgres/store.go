@@ -32,11 +32,6 @@ type (
 	}
 )
 
-// Database returns the underlying database connection pool.
-func (s *Store) Database() *pgxpool.Pool {
-	return s.pool
-}
-
 // String returns a connection string for the given ConnectionInfo.
 func (ci ConnectionInfo) String() string {
 	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s", ci.Host, ci.Port, ci.User, ci.Password, ci.Database, ci.SSLMode)

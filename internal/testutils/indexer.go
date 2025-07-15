@@ -49,9 +49,9 @@ type Indexer struct {
 	*admin.Client
 	App func(types.PrivateKey) *app.Client
 
+	db     *postgres.Store
 	cm     *chain.Manager
 	dialer *client.SiamuxDialer
-	store  *postgres.Store
 	syncer *Syncer
 	wallet *wallet.SingleAddressWallet
 }
@@ -180,9 +180,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 			return client
 		},
 
+		db:     store,
 		cm:     c.cm,
 		dialer: dialer,
-		store:  store,
 		syncer: syncer,
 		wallet: wm,
 	}
@@ -190,12 +190,12 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 
 // Store returns the underlying store.
 func (idx *Indexer) Store() *postgres.Store {
-	return idx.store
+	return idx.db
 }
 
 // HostClient returns a host client for the given host public key.
 func (idx *Indexer) HostClient(hk types.PublicKey) *client.HostClient {
-	h, err := idx.store.Host(context.Background(), hk)
+	h, err := idx.db.Host(context.Background(), hk)
 	if err != nil {
 		panic(fmt.Sprintf("failed to get host %s: %v", hk, err)) // developer error
 	}
