@@ -523,6 +523,109 @@ func TestHosts(t *testing.T) {
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithActiveContracts(true))
 }
 
+func TestUsableHosts(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// update global settings to make hosts pass all checks
+	if err := db.UpdateUsabilitySettings(context.Background(), hosts.UsabilitySettings{
+		MaxEgressPrice:     types.MaxCurrency,
+		MaxIngressPrice:    types.MaxCurrency,
+		MaxStoragePrice:    types.MaxCurrency,
+		MinCollateral:      types.ZeroCurrency,
+		MinProtocolVersion: [3]uint8{1, 0, 0},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateMaintenanceSettings(context.Background(), contracts.MaintenanceSettings{
+		Period:          2,
+		RenewWindow:     1,
+		WantedContracts: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// ip mask for testing
+	_, network, err := net.ParseCIDR("127.0.0.1/24")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// helper to add hosts
+	addHost := func(i byte, usable, blocked bool, contract bool) types.PublicKey {
+		t.Helper()
+
+		hk := types.PublicKey{i}
+		db.addTestHost(t, hk)
+
+		// handle usable
+		settings := newTestHostSettings(hk)
+		if !usable {
+			settings.AcceptingContracts = false
+		}
+		if err := db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, true, time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+
+		// handle blocked
+		if blocked {
+			err := db.BlockHosts(context.Background(), []types.PublicKey{hk}, "test")
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		// handle contract
+		if contract {
+			db.addTestContract(t, hk)
+		}
+		return hk
+	}
+
+	// add hosts in all possible configurations
+	_ = addHost(1, false, false, false)
+	_ = addHost(2, false, false, true)
+	_ = addHost(3, false, true, false)
+	_ = addHost(4, false, true, true)
+	_ = addHost(5, true, false, false)
+	uh1 := addHost(6, true, false, true)
+	_ = addHost(7, true, true, false)
+	_ = addHost(8, true, true, true)
+	uh2 := addHost(9, true, false, true) // second usable host
+
+	// assert only h6 and h9 are returned
+	hosts, err := db.UsableHosts(context.Background(), 0, 10)
+	if err != nil {
+		t.Fatal("unexpected", err)
+	} else if len(hosts) != 2 {
+		t.Fatal("unexpected", len(hosts))
+	} else if hosts[0].PublicKey != uh1 || hosts[1].PublicKey != uh2 {
+		t.Fatal("unexpected hosts", hosts[0], hosts[1])
+	} else if hosts[0].Addresses == nil || hosts[1].Addresses == nil {
+		t.Fatal("expected hosts to have addresses")
+	}
+
+	// assert offset and limit are applied
+	if hosts, err := db.UsableHosts(context.Background(), 0, 1); err != nil {
+		t.Fatal("unexpected", err)
+	} else if len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts))
+	} else if hosts[0].PublicKey != uh1 {
+		t.Fatal("unexpected host", hosts[0].PublicKey)
+	} else if hosts, err := db.UsableHosts(context.Background(), 1, 1); err != nil {
+		t.Fatal("unexpected", err)
+	} else if len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts))
+	} else if hosts[0].PublicKey != uh2 {
+		t.Fatal("unexpected host", hosts[0].PublicKey)
+	} else if hosts, err := db.UsableHosts(context.Background(), 2, 1); err != nil {
+		t.Fatal("unexpected", err)
+	} else if len(hosts) != 0 {
+		t.Fatal("expected no hosts, got", len(hosts))
+	}
+}
+
 func TestHostsForScanning(t *testing.T) {
 	// create database
 	log := zaptest.NewLogger(t)

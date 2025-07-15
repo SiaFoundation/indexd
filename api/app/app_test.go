@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
@@ -99,5 +100,39 @@ func TestApplicationAPI(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), slabs.ErrInsufficientRedundancy.Error()) {
 		t.Fatal("expected [slabs.ErrInsufficientRedundancy], got:", err)
+	}
+
+	// assert hosts returns all usable hosts
+	time.Sleep(time.Second) // allow some time to form contracts
+	usableHosts, err := indexer.App(sk).Hosts(context.Background())
+	if err != nil {
+		t.Fatal("failed to get hosts:", err)
+	} else if len(usableHosts) != 3 {
+		t.Fatal("expected 3 usable hosts, got", len(usableHosts))
+	}
+
+	// block h1
+	err = indexer.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey()}, "test blocklist reason")
+	if err != nil {
+		t.Fatal("failed to add host to blocklist:", err)
+	}
+
+	// assert host is no longer returned
+	usableHosts, err = indexer.App(sk).Hosts(context.Background())
+	if err != nil {
+		t.Fatal("failed to get hosts:", err)
+	} else if len(usableHosts) != 2 {
+		t.Fatal("expected 2 usable hosts, got", len(usableHosts))
+	}
+
+	// assert limit and offset are applied
+	if usableHosts, err := indexer.App(sk).Hosts(context.Background(), api.WithLimit(1)); err != nil {
+		t.Fatal("failed to get hosts with limit:", err)
+	} else if len(usableHosts) != 1 {
+		t.Fatal("expected 1 usable host, got", len(usableHosts))
+	} else if usableHosts, err := indexer.App(sk).Hosts(context.Background(), api.WithOffset(2), api.WithLimit(1)); err != nil {
+		t.Fatal("failed to get hosts with limit:", err)
+	} else if len(usableHosts) != 0 {
+		t.Fatal("expected 0 usable hosts, got", len(usableHosts))
 	}
 }

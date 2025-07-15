@@ -137,9 +137,9 @@ func (s *Store) Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts
 WITH globals AS (
     SELECT
 		contracts_period,
-        hosts_min_collateral,
-        hosts_max_storage_price,
-        hosts_max_ingress_price,
+		hosts_min_collateral,
+		hosts_max_storage_price,
+		hosts_max_ingress_price,
 		hosts_max_egress_price,
 		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
 		250000::NUMERIC AS sectors_per_tb,
@@ -485,6 +485,117 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 
 		return nil
 	})
+}
+
+// UsableHosts returns a list of hosts that are not blocked, usable and have an
+// active contract. It returns only the host's public key and addresses.
+func (s *Store) UsableHosts(ctx context.Context, offset, limit int) ([]hosts.HostInfo, error) {
+	if err := validateOffsetLimit(offset, limit); err != nil {
+		return nil, err
+	} else if limit == 0 {
+		return nil, nil
+	}
+
+	var usable []hosts.HostInfo
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
+		rows, err := tx.Query(ctx, `
+WITH globals AS (
+    SELECT
+		contracts_period,
+		hosts_min_collateral,
+		hosts_max_storage_price,
+		hosts_max_ingress_price,
+		hosts_max_egress_price,
+		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
+		250000::NUMERIC AS sectors_per_tb,
+		1E12::NUMERIC AS one_tb,
+		1E24::NUMERIC AS one_sc
+    FROM global_settings
+), hosts AS (
+	SELECT
+		id,
+		hosts.public_key,
+		recent_uptime,
+		settings_protocol_version,
+		settings_release,
+		settings_wallet_address,
+		settings_accepting_contracts, 
+		settings_max_collateral, 
+		settings_max_contract_duration,
+		settings_remaining_storage, 
+		settings_total_storage, 
+		settings_contract_price,
+		settings_collateral, 
+		settings_storage_price, 
+		settings_ingress_price,
+		settings_egress_price, 
+		settings_free_sector_price,
+		settings_tip_height,
+		settings_valid_until,
+		settings_signature,
+		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
+	FROM hosts
+	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
+	WHERE hb.public_key IS NULL AND last_successful_scan IS NOT NULL -- not blocked and has settings
+) 
+SELECT 
+	hosts.id,
+	hosts.public_key
+FROM hosts 
+CROSS JOIN globals
+WHERE
+	-- usable
+	recent_uptime >= 0.9 AND
+	settings_max_contract_duration >= globals.contracts_period AND
+	settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
+	settings_version >= globals.host_min_version AND
+	settings_valid_until >= (NOW() + INTERVAL '15 minutes') AND
+	settings_accepting_contracts AND
+	settings_contract_price <= globals.one_sc AND
+	settings_collateral >= globals.hosts_min_collateral AND
+	settings_collateral >= 2 * settings_storage_price AND
+	settings_storage_price <= globals.hosts_max_storage_price AND
+	settings_ingress_price <= globals.hosts_max_ingress_price AND
+	settings_egress_price <= globals.hosts_max_egress_price AND
+	settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb AND 
+	-- active contracts
+	EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state <= 1)
+LIMIT $1 OFFSET $2;`, limit, offset)
+		if err != nil {
+			return fmt.Errorf("failed to query hosts: %w", err)
+		}
+		defer rows.Close()
+
+		var dbHosts []*dbHost
+		for rows.Next() {
+			var host dbHost
+			if err := rows.Scan(&host.id, (*sqlPublicKey)(&host.PublicKey)); err != nil {
+				return fmt.Errorf("failed to scan host: %w", err)
+			}
+			dbHosts = append(dbHosts, &host)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		} else if len(dbHosts) == 0 {
+			return nil
+		}
+
+		if err := decorateHostAddresses(ctx, tx, dbHosts...); err != nil {
+			return fmt.Errorf("failed to decorate host addresses: %w", err)
+		}
+
+		for _, h := range dbHosts {
+			usable = append(usable, hosts.HostInfo{
+				PublicKey: h.PublicKey,
+				Addresses: h.Addresses,
+			})
+		}
+		return nil
+	}); err != nil {
+		return nil, err
+	}
+
+	return usable, nil
 }
 
 func decorateHostAddresses(ctx context.Context, tx *txn, hosts ...*dbHost) error {

@@ -9,6 +9,8 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
@@ -21,9 +23,9 @@ type (
 	// Store defines the store interface for the application API.
 	Store interface {
 		PinSlab(context.Context, proto.Account, time.Time, slabs.SlabPinParams) (slabs.SlabID, error)
-		UnpinSlab(context.Context, proto.Account, slabs.SlabID) error
-
 		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
+		UnpinSlab(context.Context, proto.Account, slabs.SlabID) error
+		UsableHosts(ctx context.Context, offset, limit int) ([]hosts.HostInfo, error)
 	}
 
 	app struct {
@@ -37,6 +39,19 @@ func WithLogger(log *zap.Logger) Option {
 	return func(api *app) {
 		api.log = log
 	}
+}
+
+func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
+	offset, limit, ok := api.ParseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+
+	hosts, err := a.store.UsableHosts(jc.Request.Context(), offset, limit)
+	if jc.Check("failed to get hosts", err) != nil {
+		return
+	}
+	jc.Encode(hosts)
 }
 
 func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
@@ -103,6 +118,8 @@ func NewAPI(hostname string, store Store, as AccountStore, opts ...Option) http.
 	}
 
 	routes := map[string]authedHandler{
+		"GET /hosts": a.handleGETHosts,
+
 		"POST /slabs":           a.handlePOSTSlabs,
 		"GET /slabs/:slabid":    a.handleGETSlab,
 		"DELETE /slabs/:slabid": a.handleDELETESlab,
