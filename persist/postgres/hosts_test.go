@@ -604,8 +604,6 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal("unexpected hosts", hosts[0], hosts[1])
 	} else if hosts[0].Addresses == nil || hosts[1].Addresses == nil {
 		t.Fatal("expected hosts to have addresses")
-	} else if hosts[0].Networks == nil || hosts[1].Networks == nil {
-		t.Fatal("expected hosts to have networks")
 	}
 
 	// assert offset and limit are applied

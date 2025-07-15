@@ -488,8 +488,7 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 }
 
 // UsableHosts returns a list of hosts that are not blocked, usable and have an
-// active contract. It returns only the host's public key, networks and
-// addresses.
+// active contract. It returns only the host's public key and addresses.
 func (s *Store) UsableHosts(ctx context.Context, offset, limit int) ([]hosts.HostInfo, error) {
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
@@ -583,15 +582,12 @@ LIMIT $1 OFFSET $2;`, limit, offset)
 
 		if err := decorateHostAddresses(ctx, tx, dbHosts...); err != nil {
 			return fmt.Errorf("failed to decorate host addresses: %w", err)
-		} else if err := decorateHostNetworks(ctx, tx, dbHosts...); err != nil {
-			return fmt.Errorf("failed to decorate host networks: %w", err)
 		}
 
 		for _, h := range dbHosts {
 			usable = append(usable, hosts.HostInfo{
 				PublicKey: h.PublicKey,
 				Addresses: h.Addresses,
-				Networks:  h.Networks,
 			})
 		}
 		return nil
