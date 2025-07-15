@@ -195,7 +195,7 @@ func TestAccountManager(t *testing.T) {
 	if len(s.eas[host.PublicKey]) != 2 {
 		t.Fatal("expected two accounts to be updated")
 	}
-	expected := time.Now().Add(time.Hour)
+	expected := time.Now().Add(accountFundInterval)
 	for _, ea := range s.eas[host.PublicKey] {
 		if !ea.NextFund.After(expected.Add(-time.Second)) || !ea.NextFund.Before(expected.Add(time.Second)) {
 			t.Fatal("expected next fund to be updated to the next fund interval", ea.NextFund)
