@@ -1,0 +1,88 @@
+openapi: "3.0.0"
+info:
+  title: Indexd Application API
+  description: >
+    The Application API allows developers to pin and unpin slabs—collections of erasure-coded data shards—on the Sia network using Indexd. 
+    Once pinned, Indexd ensures the data remains healthy and available by monitoring and maintaining the underlying storage.
+  version: 2.0.0
+
+tags:
+  - name: slabs
+    description: Slab management
+
+paths:
+  /slabs/pin:
+    post:
+      tags:
+        - slabs
+      summary: Pin a slab to the indexer
+      operationId: pinSlab
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                encryptionKey:
+                  allOf:
+                    - $ref: "#/components/schemas/EncryptionKey"
+                    - description: The encryption key used to encrypt the shards
+                minShards:
+                  type: integer
+                  minimum: 1
+                  format: uint
+                  description: The number of data shards a piece gets erasure-coded into
+                sectors:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      root: 
+                        allOf:
+                          - $ref: "#/components/schemas/Hash256"
+                          - description: The root of the sector
+                      hostKey:
+                        allOf:
+                          - $ref: "#/components/schemas/PublicKey"
+                          - description: The public key of the host that stores the sector
+      responses:
+        '201':
+          description: Slab pinned successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slabID:
+                    allOf:
+                      - $ref: "#/components/schemas/SlabID"
+                      - description: The ID of the pinned slab
+
+  /slabs/{slabid}:
+    delete:
+      tags:
+        - slabs
+      summary: Unpin a slab from the indexer
+      operationId: unpinSlab
+      parameters:
+        - name: slabid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Slab unpinned successfully
+
+
+components:
+  schemas:
+    EncryptionKey:
+      $ref: './components.yml#/components/schemas/EncryptionKey'
+    Hash256:
+      $ref: './components.yml#/components/schemas/Hash256'
+    PublicKey:
+      $ref: './components.yml#/components/schemas/PublicKey'
+    SlabID:
+      $ref: './components.yml#/components/schemas/SlabID'

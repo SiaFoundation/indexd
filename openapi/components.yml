@@ -1,0 +1,530 @@
+components:
+  schemas:
+    #############################
+    #
+    # Core types
+    #
+    #############################
+    
+    Address:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: The hash of a set of UnlockConditions
+
+    BlockID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: A unique identifier for a block
+
+    ChainIndex:
+      type: object
+      properties:
+        height:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The height of the block in the blockchain
+        id:
+          allOf:
+            - $ref: "#/components/schemas/BlockID"
+            - description: The ID of the block
+
+    Currency:
+      type: string
+      pattern: "^\\d+$"
+      maxLength: 39 # fits 2^128 - 1
+      description: An unsigned amount of Hastings, the smallest unit of currency in Sia. 1 Siacoin (SC) equals 10^24 Hastings (H).
+
+    EncryptionKey:
+      type: string
+      pattern: ^(key|skey):[0-9a-fA-F]{64}$
+      description: A key used to encrypt and decrypt data. The key is either a regular key (key) or a salted key (skey). The latter requires a seed to be used for encryption and decryption.
+
+    Event:
+      type: object
+      description: A transaction or other event that affects the wallet including miner payouts, siafund claims, and file contract payouts.
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The event's ID
+        index:
+          allOf:
+            - $ref: "#/components/schemas/ChainIndex"
+            - description: Information about the block that triggered the creation of this event
+        confirmations:
+          type: integer
+          format: uint64
+          description: The number of blocks on top of the block that triggered the creation of this event
+        type:
+          type: string
+          enum:
+            - miner
+            - foundation
+            - siafundClaim
+            - v1Transaction
+            - v1ContractResolution
+            - v2Transaction
+            - v2ContractResolution
+          description: The type of the event
+        data:
+          type: object
+        maturityHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The block height at which the payout matures.
+        timestamp:
+          type: string
+          format: date-time
+          description: The time the event was created
+        relevant:
+          type: array
+          items:
+            $ref: "#/components/schemas/Address"
+
+    FileContractID:
+      type: string
+      pattern: "^fcid:[0-9a-fA-F]{64}$"
+      description: A unique identifier for a file contract
+
+    Hash256:
+      type: string
+      pattern: ^[0-9a-fA-F]{64}$
+      description: A 256-bit blake2b hash
+
+    HostPrices:
+      type: object
+      properties:
+        contractPrice:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Cost to the renter for forming, renewing, or refreshing a contract. Paid up front and covers the cost of the revision and storage proof transaction the host broadcasts at the end of the contract.
+        collateral:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The amount of Hastings the host will risk per byte of storage per block.
+        storagePrice:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Cost per byte of storage per block.
+        ingressPrice:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Cost per byte of data uploaded from the host
+        egressPrice:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Cost per byte of data downloaded from the host
+        tipHeight:
+          type: integer
+          format: uint64
+          description: The height at which the prices were last updated
+        validUntil:
+          type: string
+          format: date-time
+          description: The time at which these prices will no longer be honored by the host.
+        signature:
+          $ref: "#/components/schemas/Signature"
+
+    HostSettings:
+      type: object
+      properties:
+        protocolVersion:
+          $ref: "#/components/schemas/SemVer"
+        release:
+          type: string
+          description: Release tag of the host software
+          example: "hostd 1.0.0"
+        walletAddress:
+          $ref: "#/components/schemas/Address"
+        acceptingContracts:
+          type: boolean
+          description: Whether the host is accepting new contracts
+        maxCollateral:
+          $ref: "#/components/schemas/Currency"
+        maxContractDuration:
+          type: integer
+          format: uint64
+          description: Maximum allowed contract duration
+        remainingStorage:
+          type: integer
+          format: uint64
+          description: Amount of storage the host has remaining
+        totalStorage:
+          type: integer
+          format: uint64
+          description: Total amount of storage space
+        prices:
+          $ref: "#/components/schemas/HostPrices"
+
+    IPNet:
+      type: object
+      properties:
+        ip: 
+          type: string
+          description: The IP address in CIDR notation
+          example: 100.82.250.91
+        mask: 
+          type: string
+          description: The subnet mask in CIDR notation
+          example: 24
+
+    NetAddress:
+      type: object
+      properties:
+        address:
+          type: string
+          description: The network address of the host, typically in the format "host:port".
+          example: "example.com:9980"
+        protocol:
+          type: string
+          enum:
+            - siamux
+            - quic
+          description: The protocol used by the host
+
+    PublicKey:
+      type: string
+      pattern: "^ed25519:[0-9a-fA-F]{64}$"
+      description: A ed25519 public key
+
+    SemVer:
+      type: array
+      description: "Represents a semantic version as an array of three unsigned 8-bit integers: [major, minor, patch]"
+      minItems: 3
+      maxItems: 3
+      items:
+        type: integer
+        format: uint8
+        minimum: 0
+        maximum: 255
+      example: [1, 2, 3]
+
+    Signature:
+      type: string
+      format: byte
+      pattern: "[0-9a-fA-F]{64}"
+      description: A ed25519 signature
+
+    TransactionID:
+      allOf:
+        - $ref: "#/components/schemas/Hash256"
+        - description: Unique identifier for a transaction.
+
+    #############################
+    #
+    # Helper types
+    #
+    #############################
+
+    BlockHeight:
+      type: integer
+      format: uint64
+      description: The height of a block
+      example: 92813
+
+    BuildState:
+      type: object
+      properties:
+        buildTime:
+          type: string
+          format: date-time
+          description: The build time of the build
+        commit:
+          type: string
+          description: The commit hash of the build
+        version:
+          type: string
+          description: The version of the build
+        os:
+          type: string
+          description: The operating system of the build
+
+    Contract:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The unique identifier for the file contract.
+        hostKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The public key of the host.
+        formation:
+          type: string
+          description: The time when the contract was formed.
+          format: date-time
+        renewedFrom:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the contract this one was renewed from, if applicable.
+
+        nextPrune:
+          type: string
+          description: The time when the contract will be pruned next.
+          format: date-time
+        lastBroadcastAttempt:
+          type: string
+          description: The time of the last revision broadcast attempt for the contract.
+          format: date-time
+          
+        revisionNumber:
+          allOf:
+            - $ref: "#/components/schemas/RevisionNumber"
+            - description: The current revision number of the contract
+        proofHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The start of the contract's proof window
+        expirationHeight:
+          allOf:
+            - $ref: "#/components/schemas/BlockHeight"
+            - description: The end of the contract's proof window
+        capacity:
+          type: integer
+          format: uint64
+          description: The amount of data that is paid for already. This is always larger or equal than the size of the contract.
+        size:
+          type: integer
+          format: uint64
+          description: The size of the contract in bytes
+        initialAllowance:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The initial funds locked in the contract.
+        remainingAllowance:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The remaining funds in the contract.
+        totalCollateral:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The total amount of collateral locked in the contract.
+
+        renewedTo:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The ID of the contract this one was renewed to, if applicable.
+        usedCollateral:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The amount of collateral that is already used.
+        contractPrice:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The price of forming the contract.
+        minerFee:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The miner fee spent on the formation transaction.
+
+        good:
+          type: boolean
+          description: Whether the contract is considered healthy and usable. If the contract is bad its data will be migrated to another contract.
+        state:
+          type: string
+          description: The state of the contract
+          enum:
+            - pending
+            - active
+            - complete
+            - failed
+        spending:
+          allOf:
+            - $ref: "#/components/schemas/ContractSpending"
+            - description: Costs and spending details of the contract.
+
+    ContractSpending:
+      type: object
+      properties:
+        appendSector:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on appending sectors to a contract
+        freeSector:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on freeing sectors in a contract
+        fundAccount:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on funding ephemeral accounts
+        sectorRoots:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total amount spent on retrieving sector roots
+
+    Host:
+      type: object
+      properties:
+        publicKey:
+          $ref: "#/components/schemas/PublicKey"
+        lastAnnouncement:
+          type: string
+          format: date-time
+          description: The time the host last announced itself
+        lastFailedScan:
+          type: string
+          format: date-time
+          description: The time the host last failed a scan
+        lastSuccessfulScan:
+          type: string
+          format: date-time
+          description: The time the host last successfully scanned
+        nextScan:
+          type: string
+          format: date-time
+          description: The time the host is scheduled to be scanned next
+        consecutiveFailedScans:
+          type: integer
+          format: uint64
+          description: The number of consecutive failed scans
+        recentUptime:
+          type: string
+          format: float64
+          description: The recent uptime of the host as a number between 0 and 1, where 1 means 100% uptime
+        addresses:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetAddress"
+        networks:
+          type: array
+          items:
+            $ref: "#/components/schemas/IPNet"
+        settings:
+          $ref: "#/components/schemas/HostSettings"
+        usability:
+          $ref: "#/components/schemas/HostUsability"
+        blocked:
+          type: boolean
+          description: Whether the host is blocked
+        blockedReason:
+          type: string
+          description: The reason why the host is blocked
+          example: "Host has been offline for too long"
+        lostSectors:
+          type: integer
+          format: uint64
+          description: The number of sectors the host lost
+    
+    HostUsability:
+      type: object
+      properties:
+        uptime:
+          type: boolean
+          description: Whether the host matches a minimum uptime requirement
+        maxContractDuration:
+          type: boolean
+          description: Whether the host supports the maximum contract duration
+        maxCollateral:
+          type: boolean
+          description: Whether the host supports the maximum collateral
+        protocolVersion:
+          type: boolean
+          description: Whether the host supports the required minimum protocol version
+        priceValidity:
+          type: boolean
+          description: Whether the host's prices validity exceeds the minimum required validity
+        acceptingContracts:
+          type: boolean
+          description: Whether the host is currently accepting new contracts
+        contractPrice:
+          type: boolean
+          description: Whether the host's contract price is below the maximum contract price
+        collateral:
+          type: boolean
+          description: Whether the host's collateral is above the minimum collateral
+        storagePrice:
+          type: boolean
+          description: Whether the host's storage price is below the maximum storage price
+        ingressPrice:
+          type: boolean
+          description: Whether the host's ingress price is below the maximum ingress price
+        egressPrice:
+          type: boolean
+          description: Whether the host's egress price is below the maximum egress price  
+        freeSectorPrice:
+          type: boolean
+          description: Whether the host's free sector price is below the maximum free sector price
+
+    MaintenanceSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          description: Whether contract maintenance is enabled
+          default: false
+        wantedContracts:
+          type: integer
+          format: uint64
+          description: The minimum number of contracts to form
+          default: 0
+        period:
+          type: integer
+          format: uint64
+          description: The length of a contract's period in blocks (1 block being 10 minutes on average)
+          default: 0
+        renewWindow:
+          type: integer
+          format: uint64
+          description: The number of blocks before the end of a contract that a contract should be renewed
+          default: 0
+
+    PinnedSettings:
+      type: object
+      properties:
+        currency:
+          type: string
+          description: The currency used for price pinning. If this is empty price pinning is disabled.
+          example: "usd"
+        maxEgressPrice:
+          type: number
+          format: float
+          description: The maximum egress price a host can charge, in the specified currency. This pin is disabled if the value is 0.
+        maxIngressPrice:
+          type: number
+          format: float
+          description: The maximum ingress price a host can charge, in the specified currency. This pin is disabled if the value is 0.
+        maxStoragePrice:
+          type: number
+          format: float
+          description: The maximum storage price a host can charge, in the specified currency. This pin is disabled if the value is 0.
+        minCollateral:
+          type: number
+          format: float
+          description: The minimum collateral a host must put up, in the specified currency. This pin is disabled if the value is 0.
+
+    RevisionNumber:
+      type: integer
+      format: uint64
+      description: The revision number of the contract
+      example: 246
+
+    SlabID:
+      type: string
+      pattern: ^[0-9a-fA-F]{64}$
+      description: A unique identifier for a slab, which is a collection of data shards stored on hosts.
+
+    UsabilitySettings:
+      type: object
+      properties:
+        maxEgressPrice:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum egress price a host can charge
+        maxIngressPrice:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum ingress price a host can charge
+        maxStoragePrice:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The maximum storage price a host can charge
+        minCollateral:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The minimum collateral a host must put up
+        minProtocolVersion:
+          allOf:
+            - $ref: "#/components/schemas/SemVer"
+            - description: "The minimum protocol version the host must have to be considered usable. The version is represented as an array of three unsigned 8-bit integers: [major, minor, patch]"

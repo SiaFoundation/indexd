@@ -1,0 +1,642 @@
+openapi: "3.0.0"
+info:
+  title: Indexd Admin API
+  description: >
+    The Admin API lets you monitor and manage the Indexd service. It provides access to system status, accounts, contracts, host settings, pricing, and wallet functions. 
+    This API is meant for internal use by operators who need to keep the service running smoothly.
+  version: 2.0.0
+
+tags:
+  - name: accounts
+    description: Manage ephemeral accounts used to fund storage operations on behalf of clients.
+
+  - name: contracts
+    description: View and manage storage contracts and their metadata.
+
+  - name: hosts
+    description: Query host details, filter usable or blocked hosts, and manage the host blocklist.
+
+  - name: misc
+    description: Access general indexer state and exchange rate information.
+
+  - name: settings
+    description: Configure contract maintenance, host selection criteria, and price pinning behavior.
+
+  - name: wallet
+    description: Inspect wallet balance, track events, and send Siacoin transactions.
+
+paths:
+    /state:
+      get:
+        tags:
+          - misc
+        summary: "Get the state of the indexer"
+        description: Returns general information about the indexer.
+        operationId: getState
+        responses:
+          '200':
+            description: The state of the indexer
+            content:
+              application/json:
+                schema:
+                  type: object
+                  allOf:
+                  - $ref: "#/components/schemas/BuildState"
+                  properties:
+                    scanHeight:
+                      type: integer
+                      format: uint64
+                      description: The height up until which the wallet is synced
+                    startTime:
+                      type: string
+                      format: date-time
+                      description: The time the indexer was started
+
+    /accounts:
+      get:
+        tags:
+          - accounts
+        summary: Get all accounts
+        description: Returns a list of all accounts managed by the indexer.
+        parameters:
+          - name: limit
+            in: query
+            description: The maximum number of accounts to return
+            schema:
+              type: integer
+              minimum: 1
+              maximum: 500
+              default: 100
+          - name: offset
+            in: query
+            description: The number of accounts to skip
+            schema:
+              type: integer
+              minimum: 0
+              default: 0
+        operationId: getAccounts
+        responses:
+          '200':
+            description: A list of accounts
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PublicKey"
+
+    /account/{accountkey}:
+      post:
+        tags:
+          - accounts
+        summary: Add an account
+        description: Add an account to the indexer. This makes sure the indexer funds an ephemeral account with every host on behalf of this account.
+        operationId: addAccount
+        parameters:
+          - name: accountkey
+            in: path
+            required: true
+            schema:
+              $ref: "#/components/schemas/PublicKey"
+        responses:
+          '204':
+            description: Account added successfully
+          '409':
+            description: Account already exists
+      put:
+        tags:
+          - accounts
+        summary: Update an account
+        description: Rotate an existing account key to a new key. This is useful if you lose access to your account's secret key, by rotating to a new key you retain access to all associated data.
+        operationId: updateAccount
+        parameters:
+          - name: accountkey
+            in: path
+            required: true
+            schema:
+              type: string
+        requestBody:
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  newAccountKey:
+                    $ref: "#/components/schemas/PublicKey"
+        responses:
+          '204':
+            description: Account key rotated successfully
+          '400':
+            description: Invalid new account key
+          '404':
+            description: Account not found
+          '409':
+            description: New account key already exists
+      delete:
+        tags:
+          - accounts
+        summary: Delete an account
+        description: Delete an account from the indexer.
+        operationId: deleteAccount
+        parameters:
+          - name: accountkey
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '204':
+            description: Account deleted successfully 
+          '404':
+            description: Account not found
+
+    /contract/{contractid}:
+      get:
+        tags:
+          - contracts
+        summary: Get a specific contract by ID
+        operationId: getContract
+        parameters:
+          - name: contractid
+            in: path
+            required: true
+            schema:
+              $ref: "#/components/schemas/FileContractID"
+        responses:
+          '200':
+            description: Contract metadata
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/Contract"
+
+    /contracts:
+      get:
+        tags:
+          - contracts
+        summary: Get all contracts
+        operationId: getContracts
+        parameters:
+          - name: limit
+            in: query
+            description: The maximum number of contracts to return
+            schema:
+              type: integer
+              minimum: 1
+              maximum: 500
+              default: 100
+          - name: offset
+            in: query
+            description: The number of contracts to skip
+            schema:
+              type: integer
+              minimum: 0
+              default: 0
+          - name: revisable
+            in: query
+            description: Filter contracts that are revisable (true) or not (false)
+            required: false
+            schema:
+              type: boolean
+              default: true
+          - name: good
+            in: query
+            description: Filter contracts that are good (true) or not (false)
+            required: false
+            schema:
+              type: boolean
+        responses:
+          '200':
+            description: A list of contracts
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Contract"
+
+    /explorer/exchange-rate/siacoin/{currency}:
+      get:
+        tags:
+          - misc
+        summary: Get the exchange rate for Siacoin in a specific currency
+        operationId: getExchangeRate
+        parameters:
+          - name: currency
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '200':
+            description: Exchange rate details
+            content:
+              application/json:
+                schema:
+                  type: string
+                  format: float
+                  description: The exchange rate of Siacoin in the specified currency
+          '400':
+            description: Invalid currency provided
+          '503':
+            description: Service unavailable, unable to fetch exchange rate, explorer is disabled.
+
+    /host/{hostkey}:
+      get:
+        tags:
+          - hosts
+        summary: Returns detailed information about a specific host
+        operationId: getHost
+        parameters:
+          - name: hostkey
+            in: path
+            description: Public key of the host
+            schema:
+              $ref: "#/components/schemas/PublicKey"
+            required: true
+        responses:
+          '200':
+            description: Host details
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/Host"
+          '404':
+            description: Host not found
+
+    /hosts:
+      get:
+        tags:
+          - hosts
+        summary: Get all hosts
+        operationId: getHosts
+        parameters:
+          - name: usable
+            in: query
+            description: Filter hosts that are usable (true) or not (false)
+            required: false
+            schema:
+              type: boolean
+          - name: blocked
+            in: query
+            description: Filter hosts that are blocked (true) or not (false)
+            required: false
+            schema:
+              type: boolean
+          - name: activecontracts
+            in: query
+            description: Filter hosts that have active contracts (true) or not (false)
+            required: false
+            schema:
+              type: boolean
+        responses:
+          '200':
+            description: A list of hosts
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Host"
+    /hosts/blocklist:
+      get:
+        tags:
+          - hosts
+        summary: Get the blocklist of hosts
+        operationId: getHostsBlocklist
+        parameters:
+          - name: limit
+            in: query
+            description: The maximum number of blocked hosts to return
+            schema:
+              type: integer
+              minimum: 1
+              maximum: 500
+              default: 100
+          - name: offset
+            in: query
+            description: The number of blocked hosts to skip
+            schema:
+              type: integer
+              minimum: 0
+              default: 0
+        responses:
+          '200':
+            description: A list of blocked hostkeys
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/PublicKey"
+      put: 
+        tags:
+          - hosts
+        summary: Update the blocklist of hosts
+        operationId: updateHostsBlocklist
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hostkeys:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PublicKey"
+                  reason:
+                    type: string
+                    description: Reason for blocking the hosts
+        responses:
+          '200':
+            description: Blocklist updated successfully
+    /hosts/blocklist/{hostkey}:
+      delete:
+        tags:
+          - hosts
+        summary: Remove a host from the blocklist
+        operationId: removeHostFromBlocklist
+        parameters:
+          - name: hostkey
+            in: path
+            required: true
+            schema:
+              type: string
+        responses:
+          '200':
+            description: Host removed from blocklist successfully
+
+    /settings/contracts:
+      get:
+        tags:
+          - settings
+        summary: Get contract settings
+        description: Returns the current settings for contract maintenance.
+        operationId: getSettingsContracts
+        responses:
+          '200':
+            description: Contract settings details
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/MaintenanceSettings"
+      put:
+        tags:
+          - settings
+        summary: Update contract settings
+        operationId: updateSettingsContracts
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MaintenanceSettings"
+        responses:
+          '200':
+            description: Contract settings updated successfully
+    /settings/hosts:
+      get:
+        tags:
+          - settings
+        summary: Get host settings
+        description: Returns the current settings for host usability. These settings are used to determine which hosts are considered usable for forming new contracts.
+        operationId: getSettingsHosts
+        responses:
+          '200':
+            description: Host settings details
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/UsabilitySettings"
+      put:
+        tags:
+          - settings
+        summary: Update host settings
+        operationId: updateSettingsHosts
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UsabilitySettings"
+        responses:
+          '200':
+            description: Host settings updated successfully
+    /settings/pricepinning:
+      get:
+        tags:
+          - settings
+        summary: Get price pinning settings
+        operationId: getSettingsPricePinning
+        responses:
+          '200':
+            description: Price pinning settings details
+            content:
+              application/json:
+                schema:
+                  $ref: "#/components/schemas/PinnedSettings"
+      put:
+        tags:
+          - settings
+        summary: Update price pinning settings
+        operationId: updateSettingsPricePinning
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema: 
+                $ref: "#/components/schemas/PinnedSettings"
+        responses:
+          '200':
+            description: Price pinning settings updated successfully
+
+    /wallet:
+      get:
+        tags:
+          - wallet
+        summary: Get wallet information
+        operationId: getWallet
+        responses:
+          '200':
+            description: Wallet details
+            content:
+              application/json:
+                schema:
+                  type: object
+                  properties:
+                    spendable:
+                      allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of spendable siacoins in the wallet
+                    confirmed:
+                      allOf:
+                        - $ref: "#/components/schemas/Currency"
+                        - description: The amount of siacoins that have been confirmed in a block
+                    unconfirmed:
+                      allOf:
+                        - $ref: "#/components/schemas/Currency"
+                        - description: The amount of siacoins that have not been confirmed in a block
+                    immature:
+                      allOf:
+                        - $ref: "#/components/schemas/Currency"
+                        - description: The amount of siacoins that have yet to mature
+                    address:
+                      allOf:
+                        - $ref: "#/components/schemas/Address"
+                        - description: The wallet's address
+    /wallet/events:
+      get:
+        tags:
+          - wallet
+        summary: Get wallet events
+        description: Returns all events related to the wallet.
+        operationId: getWalletEvents
+        parameters:
+          - name: limit
+            in: query
+            description: The maximum number of events to return
+            schema:
+              type: integer
+              minimum: 1
+              maximum: 500
+              default: 100
+          - name: offset
+            in: query
+            description: The number of events to skip
+            schema:
+              type: integer
+              minimum: 0
+              default: 0
+        responses:
+          '200':
+            description: Wallet events details
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Event"
+
+    /wallet/pending:
+      get:
+        tags:         
+          - wallet
+        summary: Get pending wallet transactions
+        description: Returns all unconfirmed events in the wallet.
+        operationId: getWalletPending
+        responses:
+          '200':
+            description: Pending wallet transactions details
+            content:
+              application/json:
+                schema:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/Event"
+    /wallet/send:
+      post:
+        tags:
+          - wallet
+        summary: Send Siacoin to a specific address
+        operationId: sendSiacoin
+        requestBody:
+          required: true
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  address:
+                    allOf:
+                      - $ref: "#/components/schemas/Address"
+                      - description: The address to send the siacoins to
+                  amount:
+                    allOf:
+                      - $ref: "#/components/schemas/Currency"
+                      - description: The amount of siacoins to send
+                  subtractMinerFee:
+                    type: boolean
+                    description: Whether to subtract the miner fee from the amount
+                  useUnconfirmed:
+                    type: boolean
+                    description: Whether to use unconfirmed outputs
+        responses:
+          '200':
+            description: Transaction sent successfully
+            content:
+              application/json:
+                schema:
+                  allOf:
+                    - $ref: "#/components/schemas/TransactionID"
+                    - description: The ID of the transaction
+
+components:
+  schemas:
+    #############################
+    #
+    # Core types
+    #
+    #############################
+
+    Address:
+      $ref: './components.yml#/components/schemas/Address'
+    BlockID:
+      $ref: './components.yml#/components/schemas/BlockID'
+    ChainIndex:
+      $ref: './components.yml#/components/schemas/ChainIndex'
+    Currency:
+      $ref: './components.yml#/components/schemas/Currency'
+    EncryptionKey:
+      $ref: './components.yml#/components/schemas/EncryptionKey'
+    Event:
+      $ref: './components.yml#/components/schemas/Event'
+    FileContractID:
+      $ref: './components.yml#/components/schemas/FileContractID'
+    Hash256:
+      $ref: './components.yml#/components/schemas/Hash256'
+    HostPrices:
+      $ref: './components.yml#/components/schemas/HostPrices'
+    HostSettings:
+      $ref: './components.yml#/components/schemas/HostSettings'
+    IPNet:
+      $ref: './components.yml#/components/schemas/IPNet'
+    NetAddress:
+      $ref: './components.yml#/components/schemas/NetAddress'
+    PublicKey:
+      $ref: './components.yml#/components/schemas/PublicKey'
+    SemVer:
+      $ref: './components.yml#/components/schemas/SemVer'
+    Signature:
+      $ref: './components.yml#/components/schemas/Signature'
+    TransactionID:
+      $ref: './components.yml#/components/schemas/TransactionID'
+
+    #############################
+    #
+    # Helper types
+    #
+    #############################
+
+    BlockHeight:
+      $ref: './components.yml#/components/schemas/BlockHeight'
+    BuildState:
+      $ref: './components.yml#/components/schemas/BuildState'
+    Contract:
+      $ref: './components.yml#/components/schemas/Contract'
+    ContractSpending:
+      $ref: './components.yml#/components/schemas/ContractSpending'
+    Host:
+      $ref: './components.yml#/components/schemas/Host'
+    HostUsability:
+      $ref: './components.yml#/components/schemas/HostUsability'
+    MaintenanceSettings:
+      $ref: './components.yml#/components/schemas/MaintenanceSettings'
+    PinnedSettings:
+      $ref: './components.yml#/components/schemas/PinnedSettings'
+    RevisionNumber:
+      $ref: './components.yml#/components/schemas/RevisionNumber'
+    SlabID:
+      $ref: './components.yml#/components/schemas/SlabID'
+    UsabilitySettings:
+      $ref: './components.yml#/components/schemas/UsabilitySettings'
