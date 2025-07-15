@@ -99,7 +99,8 @@ type (
 	}
 
 	// HostInfo is a subset of the Host struct that contains only the public
-	// key, networks and addresses. It is used for listing hosts in the API.
+	// key, networks and addresses. It is used for listing usable hosts in the
+	// application API.
 	HostInfo struct {
 		PublicKey types.PublicKey    `json:"publicKey"`
 		Addresses []chain.NetAddress `json:"addresses"`

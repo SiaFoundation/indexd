@@ -137,9 +137,9 @@ func (s *Store) Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts
 WITH globals AS (
     SELECT
 		contracts_period,
-        hosts_min_collateral,
-        hosts_max_storage_price,
-        hosts_max_ingress_price,
+		hosts_min_collateral,
+		hosts_max_storage_price,
+		hosts_max_ingress_price,
 		hosts_max_egress_price,
 		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
 		250000::NUMERIC AS sectors_per_tb,
@@ -488,7 +488,8 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 }
 
 // UsableHosts returns a list of hosts that are not blocked, usable and have an
-// active contract. It only returns the host's public key and addresses.
+// active contract. It returns only the host's public key, networks and
+// addresses.
 func (s *Store) UsableHosts(ctx context.Context, offset, limit int) ([]hosts.HostInfo, error) {
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
@@ -502,9 +503,9 @@ func (s *Store) UsableHosts(ctx context.Context, offset, limit int) ([]hosts.Hos
 WITH globals AS (
     SELECT
 		contracts_period,
-        hosts_min_collateral,
-        hosts_max_storage_price,
-        hosts_max_ingress_price,
+		hosts_min_collateral,
+		hosts_max_storage_price,
+		hosts_max_ingress_price,
 		hosts_max_egress_price,
 		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
 		250000::NUMERIC AS sectors_per_tb,
@@ -544,7 +545,7 @@ SELECT
 FROM hosts 
 CROSS JOIN globals
 WHERE
-    -- usable
+	-- usable
 	recent_uptime >= 0.9 AND
 	settings_max_contract_duration >= globals.contracts_period AND
 	settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
