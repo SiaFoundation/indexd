@@ -47,10 +47,11 @@ type (
 	// Slab is a group of sectors that is encrypted, erasure-coded and uploaded
 	// to hosts.
 	Slab struct {
-		ID            SlabID   `json:"id"`
-		EncryptionKey [32]byte `json:"encryptionKey"`
-		MinShards     uint     `json:"minShards"`
-		Sectors       []Sector `json:"sectors"`
+		ID            SlabID    `json:"id"`
+		EncryptionKey [32]byte  `json:"encryptionKey"`
+		MinShards     uint      `json:"minShards"`
+		Sectors       []Sector  `json:"sectors"`
+		PinnedAt      time.Time `json:"pinnedAt"`
 	}
 
 	// SectorPinParams describes an uploaded sector to be pinned.

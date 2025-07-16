@@ -84,6 +84,23 @@ func (c *Client) Slab(ctx context.Context, slabID slabs.SlabID) (s slabs.PinnedS
 	return
 }
 
+// SlabIDs fetches the digests of slabs associated with the account. It supports
+// pagination through the provided options.
+func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOption) ([]slabs.SlabID, error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+
+	var slabIDs []slabs.SlabID
+	err := c.c.GET(ctx, c.sign("/slabs?"+values.Encode()), &slabIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch slab digests: %w", err)
+	}
+
+	return slabIDs, nil
+}
+
 // NewClient creates a new AppClient that can be used to interact with the
 // application API of the indexer. The address should be the full URL to the
 // application API, including the scheme (e.g., "http://indexer.sia.tech").

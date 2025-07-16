@@ -24,6 +24,7 @@ type (
 	Store interface {
 		PinSlab(context.Context, proto.Account, time.Time, slabs.SlabPinParams) (slabs.SlabID, error)
 		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
+		SlabIDs(ctx context.Context, accountID proto.Account, offset, limit int) ([]slabs.SlabID, error)
 		UnpinSlab(context.Context, proto.Account, slabs.SlabID) error
 		UsableHosts(ctx context.Context, offset, limit int) ([]hosts.HostInfo, error)
 	}
@@ -90,6 +91,20 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(slab)
 }
 
+func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
+	offset, limit, ok := api.ParseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+
+	slabIDs, err := a.store.SlabIDs(jc.Request.Context(), proto.Account(pk), offset, limit)
+	if jc.Check("failed to fetch slab digests", err) != nil {
+		return
+	}
+
+	jc.Encode(slabIDs)
+}
+
 func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
 	var slabID slabs.SlabID
 	if err := jc.DecodeParam("slabid", &slabID); err != nil {
@@ -97,7 +112,10 @@ func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
 	}
 
 	err := a.store.UnpinSlab(jc.Request.Context(), proto.Account(pk), slabID)
-	if jc.Check("failed to unpin slab", err) != nil {
+	if errors.Is(err, slabs.ErrSlabNotFound) {
+		jc.Error(fmt.Errorf("slab %s not found", slabID), http.StatusNotFound)
+		return
+	} else if jc.Check("failed to unpin slab", err) != nil {
 		return
 	}
 
@@ -120,6 +138,7 @@ func NewAPI(hostname string, store Store, as AccountStore, opts ...Option) http.
 	routes := map[string]authedHandler{
 		"GET /hosts": a.handleGETHosts,
 
+		"GET /slabs":            a.handleGETSlabs,
 		"POST /slabs":           a.handlePOSTSlabs,
 		"GET /slabs/:slabid":    a.handleGETSlab,
 		"DELETE /slabs/:slabid": a.handleDELETESlab,

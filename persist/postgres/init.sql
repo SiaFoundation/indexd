@@ -221,6 +221,7 @@ CREATE TABLE contract_elements (
 CREATE TABLE slabs (
     id BIGSERIAL PRIMARY KEY, -- internal db id
 
+    pinned_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by pinned time
     digest BYTEA UNIQUE NOT NULL CHECK(LENGTH(digest) = 32), -- unique identifier for the slab derived from sector roots
 
     encryption_key BYTEA NOT NULL,
@@ -228,6 +229,7 @@ CREATE TABLE slabs (
     min_shards SMALLINT NOT NULL CHECK(min_shards > 0)
 );
 CREATE INDEX slabs_digest_idx ON slabs(digest);
+CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
 
 -- speeds up lookup of unhealthy slabs
 CREATE INDEX slabs_id_last_repair_attempt_idx ON slabs(last_repair_attempt ASC);
