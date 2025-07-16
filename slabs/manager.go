@@ -259,22 +259,10 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 					wg.Done()
 				}()
 
-				err = m.hm.WithScannedHost(ctx, host, func(host hosts.Host) error {
-					// TODO: handle
-					// // create verifier
-					// verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey, host.Settings.Prices)
-					// if err != nil {
-					// 	// NOTE: If we can't dial the host we don't mark sectors as lost.
-					// 	// Instead we leave it up to the scan code to determine whether the host
-					// 	// is offline.
-					// 	return err
-					// }
-					// defer verifier.Close()
-
+				if err := m.hm.WithScannedHost(ctx, host, func(host hosts.Host) error {
 					m.performIntegrityChecksForHost(ctx, host, logger)
 					return nil
-				})
-				if err != nil {
+				}); err != nil {
 					logger.With(zap.Stringer("hostKey", hostKey)).Error("failed to perform integrity checks for host", zap.Error(err))
 				}
 			}(host)

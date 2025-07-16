@@ -27,7 +27,7 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, host ho
 
 		// perform integrity checks
 		results, err := m.verifier.VerifySectors(ctx, host, toCheck)
-		if errors.Is(err, context.Canceled) || errors.Is(err, errInsufficientServiceAccountBalance) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, errInsufficientServiceAccountBalance) || errors.Is(err, errHostUnreachable) {
 			interrupt = true
 		}
 		if err != nil {
