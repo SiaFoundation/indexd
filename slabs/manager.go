@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
+	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -33,18 +34,19 @@ type (
 
 		migrationAccount    proto.Account
 		migrationAccountKey types.PrivateKey
-		serviceAccount      proto.Account
-		serviceAccountKey   types.PrivateKey
 
 		shardTimeout time.Duration
 
-		am      AccountManager
-		dialer  Dialer
-		hm      HostManager
-		store   Store
 		alerter AlertsManager
-		tg      *threadgroup.ThreadGroup
-		log     *zap.Logger
+		am      AccountManager
+		hm      HostManager
+
+		dialer   Dialer
+		store    Store
+		verifier *SectorVerifier
+
+		tg  *threadgroup.ThreadGroup
+		log *zap.Logger
 	}
 
 	// AccountManager defines the SlabManager's dependencies on the account
@@ -62,11 +64,13 @@ type (
 	}
 
 	// HostClient defines the dependencies required to upload and download
-	// sectors to and from hosts.
+	// sectors to and from hosts, as well as verify sectors.
 	HostClient interface {
+		io.Closer
 		ReadSector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, w io.Writer, root types.Hash256, offset, length uint64) (rhp.RPCReadSectorResult, error)
-		Settings(context.Context, types.PublicKey) (proto.HostSettings, error)
+		Settings(context.Context) (proto.HostSettings, error)
 		WriteSector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, data io.Reader, length uint64) (rhp.RPCWriteSectorResult, error)
+		VerifySector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, root types.Hash256) (rhp.RPCVerifySectorResult, error)
 	}
 
 	// HostManager defines the minimal interface of HostManager functionality
@@ -111,42 +115,37 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
+type wrapper struct {
+	d *client.SiamuxDialer
+}
+
+// DialHost dials the host and returns a HostClient.
+func (w *wrapper) DialHost(ctx context.Context, hostKey types.PublicKey, addr string) (HostClient, error) {
+	client, err := w.d.DialHost(ctx, hostKey, addr)
+	if err != nil {
+		return nil, err
+	}
+	return client, nil
+}
+
 // NewManager creates a new slab manager.
-func NewManager(am AccountManager, hm HostManager, store Store, dialer Dialer, alerter AlertsManager, migrationAccount, serviceAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
-	m, err := newSlabManager(am, hm, store, dialer, alerter, migrationAccount, serviceAccount, opts...)
+func NewManager(am AccountManager, hm HostManager, store Store, dialer *client.SiamuxDialer, alerter AlertsManager, migrationAccount, serviceAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+	sm, err := newSlabManager(am, hm, store, &wrapper{d: dialer}, alerter, migrationAccount, serviceAccount, opts...)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx, cancel, err := m.tg.AddContext(context.Background())
+	ctx, cancel, err := sm.tg.AddContext(context.Background())
 	if err != nil {
 		return nil, err
 	}
 
 	go func() {
 		defer cancel()
-
-		healthTicker := time.NewTicker(healthCheckInterval)
-		defer healthTicker.Stop()
-
-		for {
-			select {
-			case <-healthTicker.C:
-			case <-ctx.Done():
-				return
-			}
-
-			if err := m.performIntegrityChecks(ctx); err != nil {
-				m.log.Error("failed to perform integrity checks", zap.Error(err))
-			}
-
-			if err := m.performSlabMigrations(); err != nil {
-				m.log.Error("failed to perform slab migrations", zap.Error(err))
-			}
-		}
+		sm.maintenanceLoop(ctx)
 	}()
 
-	return m, nil
+	return sm, nil
 }
 
 func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Dialer, alerter AlertsManager, migrationAccount, serviceAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
@@ -158,18 +157,16 @@ func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Diale
 		migrationAccount:    proto.Account(migrationAccount.PublicKey()),
 		migrationAccountKey: migrationAccount,
 
-		serviceAccount:    proto.Account(serviceAccount.PublicKey()),
-		serviceAccountKey: serviceAccount,
-
 		shardTimeout: 30 * time.Second,
 
-		am:      am,
-		dialer:  dialer,
-		hm:      hm,
-		store:   store,
-		alerter: alerter,
-		tg:      threadgroup.New(),
-		log:     zap.NewNop(),
+		am:       am,
+		dialer:   dialer,
+		hm:       hm,
+		store:    store,
+		verifier: NewSectorVerifier(am, dialer, serviceAccount),
+		alerter:  alerter,
+		tg:       threadgroup.New(),
+		log:      zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(m)
@@ -180,13 +177,13 @@ func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Diale
 	defer cancel()
 	if err := store.AddAccount(ctx, types.PublicKey(m.migrationAccount)); err != nil && !errors.Is(err, accounts.ErrExists) {
 		return nil, fmt.Errorf("failed to add migration account: %w", err)
-	} else if err := store.AddAccount(ctx, types.PublicKey(m.serviceAccount)); err != nil && !errors.Is(err, accounts.ErrExists) {
+	} else if err := store.AddAccount(ctx, types.PublicKey(proto.Account(serviceAccount.PublicKey()))); err != nil && !errors.Is(err, accounts.ErrExists) {
 		return nil, fmt.Errorf("failed to add service account: %w", err)
 	}
 
 	// let AccountManager know about the service accounts
 	am.RegisterServiceAccount(m.migrationAccount)
-	am.RegisterServiceAccount(m.serviceAccount)
+	am.RegisterServiceAccount(proto.Account(serviceAccount.PublicKey()))
 	return m, nil
 }
 
@@ -194,6 +191,29 @@ func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Diale
 func (m *SlabManager) Close() error {
 	m.tg.Stop()
 	return nil
+}
+
+// maintenanceLoop performs any background tasks that the slab manager needs to
+// perform on slabs
+func (m *SlabManager) maintenanceLoop(ctx context.Context) {
+	healthTicker := time.NewTicker(healthCheckInterval)
+	defer healthTicker.Stop()
+
+	for {
+		select {
+		case <-healthTicker.C:
+		case <-ctx.Done():
+			return
+		}
+
+		if err := m.performIntegrityChecks(ctx); err != nil {
+			m.log.Error("failed to perform integrity checks", zap.Error(err))
+		}
+
+		if err := m.performSlabMigrations(); err != nil {
+			m.log.Error("failed to perform slab migrations", zap.Error(err))
+		}
+	}
 }
 
 func newLostSectorsAlert(hks []types.PublicKey) alerts.Alert {
@@ -240,17 +260,18 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 				}()
 
 				err = m.hm.WithScannedHost(ctx, host, func(host hosts.Host) error {
-					// create verifier
-					verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey, host.Settings.Prices)
-					if err != nil {
-						// NOTE: If we can't dial the host we don't mark sectors as lost.
-						// Instead we leave it up to the scan code to determine whether the host
-						// is offline.
-						return err
-					}
-					defer verifier.Close()
+					// TODO: handle
+					// // create verifier
+					// verifier, err := newSectorVerifier(ctx, host.SiamuxAddr(), host.PublicKey, host.Settings.Prices)
+					// if err != nil {
+					// 	// NOTE: If we can't dial the host we don't mark sectors as lost.
+					// 	// Instead we leave it up to the scan code to determine whether the host
+					// 	// is offline.
+					// 	return err
+					// }
+					// defer verifier.Close()
 
-					m.performIntegrityChecksForHost(ctx, verifier, logger)
+					m.performIntegrityChecksForHost(ctx, host, logger)
 					return nil
 				})
 				if err != nil {

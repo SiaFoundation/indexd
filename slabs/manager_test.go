@@ -200,8 +200,9 @@ func newMockDialer(hosts []hosts.Host) *mockDialer {
 	clients := make(map[types.PublicKey]*mockHostClient, len(hosts))
 	for _, host := range hosts {
 		clients[host.PublicKey] = &mockHostClient{
-			sectors:  make(map[types.Hash256][proto.SectorSize]byte),
-			settings: host.Settings,
+			sectors:   make(map[types.Hash256][proto.SectorSize]byte),
+			integrity: make(map[types.Hash256]error),
+			settings:  host.Settings,
 		}
 	}
 	return &mockDialer{clients: clients}
@@ -215,9 +216,10 @@ func (d *mockDialer) DialHost(ctx context.Context, hostKey types.PublicKey, addr
 }
 
 type mockHostClient struct {
-	delay    time.Duration
-	sectors  map[types.Hash256][proto.SectorSize]byte
-	settings proto.HostSettings
+	delay     time.Duration
+	sectors   map[types.Hash256][proto.SectorSize]byte
+	integrity map[types.Hash256]error
+	settings  proto.HostSettings
 }
 
 func (c *mockHostClient) ReadSector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, w io.Writer, root types.Hash256, offset, length uint64) (rhp.RPCReadSectorResult, error) {
@@ -260,6 +262,6 @@ func (c *mockHostClient) WriteSector(ctx context.Context, prices proto.HostPrice
 	}, nil
 }
 
-func (c *mockHostClient) Settings(context.Context, types.PublicKey) (proto.HostSettings, error) {
+func (c *mockHostClient) Settings(context.Context) (proto.HostSettings, error) {
 	return c.settings, nil
 }

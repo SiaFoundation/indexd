@@ -114,7 +114,7 @@ func (m *SlabManager) uploadShard(ctx context.Context, h hosts.Host, shard io.Re
 		return proto.Usage{}, types.Hash256{}, fmt.Errorf("failed to dial host: %w", err)
 	}
 
-	settings, err := client.Settings(ctx, h.PublicKey)
+	settings, err := client.Settings(ctx)
 	if err != nil {
 		return proto.Usage{}, types.Hash256{}, fmt.Errorf("failed to fetch host settings: %w", err)
 	}
