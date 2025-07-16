@@ -84,9 +84,9 @@ func (c *Client) Slab(ctx context.Context, slabID slabs.SlabID) (s slabs.PinnedS
 	return
 }
 
-// SlabDigests fetches the digests of slabs associated with the account.
-// It supports pagination through the provided options.
-func (c *Client) SlabDigests(ctx context.Context, opts ...api.URLQueryParameterOption) ([]slabs.SlabID, error) {
+// SlabIDs fetches the digests of slabs associated with the account. It supports
+// pagination through the provided options.
+func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOption) ([]slabs.SlabID, error) {
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)

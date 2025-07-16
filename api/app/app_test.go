@@ -143,7 +143,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert slab IDs are returned
-	slabsIDs, err := indexer.App(sk).SlabDigests(context.Background())
+	slabsIDs, err := indexer.App(sk).SlabIDs(context.Background())
 	if err != nil {
 		t.Fatal("failed to fetch slabs:", err)
 	} else if len(slabsIDs) != 2 {
@@ -153,7 +153,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert offset and limit are passed
-	slabsIDs, err = indexer.App(sk).SlabDigests(context.Background(), api.WithOffset(1), api.WithLimit(1))
+	slabsIDs, err = indexer.App(sk).SlabIDs(context.Background(), api.WithOffset(1), api.WithLimit(1))
 	if err != nil {
 		t.Fatal("failed to fetch slabs with offset and limit:", err)
 	} else if len(slabsIDs) != 1 {
