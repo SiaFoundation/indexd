@@ -74,6 +74,19 @@ func (c *Client) Contracts(ctx context.Context, opts ...ContractQueryParameterOp
 	return
 }
 
+// SyncerConnect adds the address as a peer of the syncer.
+func (c *Client) SyncerConnect(addr string) (err error) {
+	err = c.c.POST(context.Background(), "/syncer/connect", addr, nil)
+	return
+}
+
+// TxpoolRecommendedFee returns the recommended fee (per weight unit) to ensure
+// a high probability of inclusion in the next block.
+func (c *Client) TxpoolRecommendedFee() (resp types.Currency, err error) {
+	err = c.c.GET(context.Background(), "/txpool/recommendedfee", &resp)
+	return
+}
+
 // State returns the current state of the indexer.
 func (c *Client) State(ctx context.Context) (state State, err error) {
 	err = c.c.GET(ctx, "/state", &state)
@@ -89,6 +102,12 @@ func (c *Client) ExplorerSiacoinExchangeRate(ctx context.Context, currency strin
 // Host returns information about a particular host known to the indexer.
 func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hosts.Host, err error) {
 	err = c.c.GET(ctx, fmt.Sprintf("/host/%s", hostKey), &h)
+	return
+}
+
+// ScanHost triggers a manual host scan.
+func (c *Client) ScanHost(ctx context.Context, hostKey types.PublicKey) (resp hosts.Host, err error) {
+	err = c.c.POST(ctx, fmt.Sprintf("/host/%s/scan", hostKey), nil, &resp)
 	return
 }
 
