@@ -240,6 +240,55 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 	return fn(host)
 }
 
+// ScanHost scans the host with given host key and returns it with updated
+// settings and checks.
+func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, error) {
+	logger := m.log.With(zap.Stringer("hk", hk))
+
+	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
+	defer cancel()
+
+	host, err := m.store.Host(ctx, hk)
+	if err != nil {
+		return Host{}, fmt.Errorf("failed to get host, %w", err)
+	}
+
+	addrs, networks, err := resolveHost(ctx, m.resolver, host.Addresses, logger)
+	if err != nil {
+		return Host{}, fmt.Errorf("failed to resolve host, %w", err)
+	}
+
+	settings, err := fetchSettings(ctx, m.scanner, hk, addrs, logger)
+	if err != nil {
+		return Host{}, fmt.Errorf("failed to fetch settings, %w", err)
+	}
+
+	consecutiveFailures := host.ConsecutiveFailedScans
+	success := settings != (proto4.HostSettings{})
+	if !success && !m.onlineChecker.IsOnline() {
+		return Host{}, errNodeOffline
+	} else if !success {
+		consecutiveFailures++
+	}
+
+	nextScan := calculateNextScanTime(
+		time.Now(),
+		success,
+		consecutiveFailures,
+		m.scanInterval,
+		scanIntervalOffsetHours,
+		scanExponentialBackoffHours,
+		scanExponentialBackoffMaxHours,
+	)
+
+	err = m.store.UpdateHost(ctx, hk, networks, settings, success, nextScan)
+	if err != nil {
+		return Host{}, fmt.Errorf("failed to update host, %w", err)
+	}
+
+	return m.store.Host(ctx, hk)
+}
+
 // UpdateChainState updates the host announcements in the database.
 func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate) error {
 	for _, update := range applied {
@@ -318,55 +367,6 @@ func (m *HostManager) pruneHosts(ctx context.Context) {
 			zap.Int64("removed", n),
 		)
 	}
-}
-
-// ScanHost scans the host with given host key and returns it with updated
-// settings and checks.
-func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, error) {
-	logger := m.log.With(zap.Stringer("hk", hk))
-
-	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
-	defer cancel()
-
-	host, err := m.store.Host(ctx, hk)
-	if err != nil {
-		return Host{}, fmt.Errorf("failed to get host, %w", err)
-	}
-
-	addrs, networks, err := resolveHost(ctx, m.resolver, host.Addresses, logger)
-	if err != nil {
-		return Host{}, fmt.Errorf("failed to resolve host, %w", err)
-	}
-
-	settings, err := fetchSettings(ctx, m.scanner, hk, addrs, logger)
-	if err != nil {
-		return Host{}, fmt.Errorf("failed to fetch settings, %w", err)
-	}
-
-	consecutiveFailures := host.ConsecutiveFailedScans
-	success := settings != (proto4.HostSettings{})
-	if !success && !m.onlineChecker.IsOnline() {
-		return Host{}, errNodeOffline
-	} else if !success {
-		consecutiveFailures++
-	}
-
-	nextScan := calculateNextScanTime(
-		time.Now(),
-		success,
-		consecutiveFailures,
-		m.scanInterval,
-		scanIntervalOffsetHours,
-		scanExponentialBackoffHours,
-		scanExponentialBackoffMaxHours,
-	)
-
-	err = m.store.UpdateHost(ctx, hk, networks, settings, success, nextScan)
-	if err != nil {
-		return Host{}, fmt.Errorf("failed to update host, %w", err)
-	}
-
-	return m.store.Host(ctx, hk)
 }
 
 func (m *HostManager) scanHosts(ctx context.Context, hosts []types.PublicKey) {

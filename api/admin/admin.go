@@ -138,12 +138,6 @@ func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, sy
 	routes := map[string]jape.Handler{
 		"GET /state": a.handleGETState,
 
-		// syncer endpoints
-		"POST /syncer/connect": a.handlePOSTSyncerConnect,
-
-		// txpool endpoints
-		"GET /txpool/recommendedfee": a.handleGETTxpoolRecommendedFee,
-
 		// accounts endpoints
 		"GET    /accounts":            a.handleGETAccounts,
 		"POST   /account/:accountkey": a.handlePOSTAccount,
@@ -176,6 +170,12 @@ func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, sy
 		"PUT /settings/hosts":        a.handlePUTSettingsHosts,
 		"GET /settings/pricepinning": a.handleGETSettingsPricePinning,
 		"PUT /settings/pricepinning": a.handlePUTSettingsPricePinning,
+
+		// syncer endpoints
+		"POST /syncer/connect": a.handlePOSTSyncerConnect,
+
+		// txpool endpoints
+		"GET /txpool/recommendedfee": a.handleGETTxpoolRecommendedFee,
 
 		// wallet endpoints
 		"GET /wallet":         a.handleGETWallet,
