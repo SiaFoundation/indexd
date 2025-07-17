@@ -44,7 +44,7 @@ type (
 	// ephemeral accounts. If a new account is added we trigger account funding
 	// to ensure the account is funded as soon as possible.
 	ContractManager interface {
-		TriggerAccountFunding()
+		TriggerAccountFunding(force bool) error
 		TriggerMaintenance()
 	}
 
@@ -219,7 +219,10 @@ func (a *admin) handlePOSTTrigger(jc jape.Context) {
 
 	switch action {
 	case "funding":
-		a.contracts.TriggerAccountFunding()
+		err := a.contracts.TriggerAccountFunding(true)
+		if jc.Check("failed to trigger account funding", err) != nil {
+			return
+		}
 	case "maintenance":
 		a.contracts.TriggerMaintenance()
 	case "scanning":
@@ -259,7 +262,10 @@ func (a *admin) handlePOSTAccount(jc jape.Context) {
 		return
 	}
 
-	a.contracts.TriggerAccountFunding()
+	err = a.contracts.TriggerAccountFunding(false)
+	if err != nil {
+		a.log.Warn("failed to trigger account funding after account ", zap.Error(err))
+	}
 
 	jc.Encode(nil)
 }
@@ -296,7 +302,10 @@ func (a *admin) handlePUTAccount(jc jape.Context) {
 		return
 	}
 
-	a.contracts.TriggerAccountFunding()
+	err = a.contracts.TriggerAccountFunding(false)
+	if err != nil {
+		a.log.Warn("failed to trigger account funding after account key rotation", zap.Error(err))
+	}
 
 	jc.Encode(nil)
 }

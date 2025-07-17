@@ -22,7 +22,7 @@ type accountsManagerMock struct {
 	calls []fundAccountsCall
 }
 
-func (am *accountsManagerMock) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) error {
+func (am *accountsManagerMock) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, _ bool, log *zap.Logger) error {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	am.calls = append(am.calls, fundAccountsCall{
@@ -82,7 +82,7 @@ func TestPerformAccountFunding(t *testing.T) {
 	cm := newContractManager(types.PublicKey{}, amMock, nil, store, nil, nil, nil, nil)
 
 	// fund accounts
-	err := cm.performAccountFunding(context.Background(), zap.NewNop())
+	err := cm.performAccountFunding(context.Background(), false, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestPerformAccountFunding(t *testing.T) {
 	})
 
 	// fund accounts
-	err = cm.performAccountFunding(context.Background(), zap.NewNop())
+	err = cm.performAccountFunding(context.Background(), false, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

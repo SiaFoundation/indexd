@@ -98,6 +98,13 @@ func (s *mockStore) HostAccountsForFunding(ctx context.Context, hk types.PublicK
 	return
 }
 
+func (s *mockStore) ScheduleAccountsForFunding(ctx context.Context, hostKey types.PublicKey) error {
+	for _, acc := range s.eas[hostKey] {
+		acc.NextFund = time.Now()
+	}
+	return nil
+}
+
 func (s *mockStore) UpdateHostAccounts(ctx context.Context, accounts []HostAccount) error {
 	for _, acc := range accounts {
 		_, ok := s.eas[acc.HostKey]
@@ -159,7 +166,7 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	contractIDs := []types.FileContractID{{1}}
-	err := am.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+	err := am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
 	if !errors.Is(err, hosts.ErrNotFound) {
 		t.Fatal("expected host not found error")
 	}
@@ -170,7 +177,7 @@ func TestAccountManager(t *testing.T) {
 	s.accounts[types.GeneratePrivateKey().PublicKey()] = struct{}{}
 
 	// fund accounts
-	err = am.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+	err = am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +206,7 @@ func TestAccountManager(t *testing.T) {
 	f.fail = true
 	for range 3 {
 		s.resetNextFund()
-		err = am.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+		err = am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -225,7 +232,7 @@ func TestAccountManager(t *testing.T) {
 
 	// fund accounts
 	contractIDs = append(contractIDs, types.FileContractID{2})
-	err = am.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+	err = am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,7 +255,7 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	// assert all accounts next fund was updated and consecutive failed funds was reset
-	expected = time.Now().Add(accountFundInterval)
+	expected = time.Now().Add(time.Hour)
 	for _, ea := range s.eas[host.PublicKey] {
 		if !approxEqual(ea.NextFund, expected, time.Second) {
 			t.Fatal("expected next fund to be updated to the next fund interval", ea.NextFund)
@@ -256,11 +263,19 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	// assert there's no accounts to fund
-	err = am.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+	err = am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(f.calls) != 2 {
 		t.Fatal("expected two calls to fund accounts")
+	}
+
+	// assert we can force a refill on all accounts
+	err = am.FundAccounts(context.Background(), host, contractIDs, true, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(f.calls) != 4 {
+		t.Fatal("expected four calls to fund accounts")
 	}
 }
 

@@ -25,6 +25,7 @@ type (
 	Store interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		HostAccountsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]HostAccount, error)
+		ScheduleAccountsForFunding(ctx context.Context, hostKey types.PublicKey) error
 		UpdateHostAccounts(ctx context.Context, accounts []HostAccount) error
 
 		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
@@ -81,7 +82,7 @@ func (m *AccountManager) Close() error {
 
 // FundAccounts attempts to fund all accounts for the given host key. It does so
 // using the provided contract IDs, which are used in the order they're given.
-func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) error {
+func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, force bool, log *zap.Logger) error {
 	// sanity check input
 	if len(contractIDs) == 0 {
 		log.Debug("no contracts provided")
@@ -92,6 +93,15 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 	} else if !host.Usability.Usable() {
 		log.Debug("host is not usable")
 		return nil
+	}
+
+	// if we want to force a refill on all accounts, we need to manually set the
+	// next fund time, we do this to avoid having to fetch (and update) all
+	// accounts at once
+	if force {
+		if err := m.store.ScheduleAccountsForFunding(ctx, host.PublicKey); err != nil {
+			return fmt.Errorf("failed to schedule accounts for funding: %w", err)
+		}
 	}
 
 	var exhausted bool

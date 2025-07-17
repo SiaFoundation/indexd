@@ -315,6 +315,20 @@ func TestHostAccountsForFunding(t *testing.T) {
 	if n := numEAs(); n != 4 {
 		t.Fatal("expected 4 account-host entries, got", n)
 	}
+
+	// schedule h1 accounts for funding
+	err = store.ScheduleAccountsForFunding(context.Background(), hk1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert both accounts are returned
+	accounts, err = store.HostAccountsForFunding(context.Background(), hk1, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accounts) != 2 {
+		t.Fatal("expected two accounts")
+	}
 }
 
 func TestUpdateHostAccounts(t *testing.T) {

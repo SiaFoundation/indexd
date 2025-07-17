@@ -97,6 +97,11 @@ func newHostClient(hk types.PublicKey, cm ChainManager, client rhp.TransportClie
 	}
 }
 
+// AccountBalance returns the balance of the given account.
+func (c *HostClient) AccountBalance(ctx context.Context, account proto.Account) (types.Currency, error) {
+	return rhp.RPCAccountBalance(ctx, c.client, account)
+}
+
 // AppendSectors appends the given sectors to the contract.
 func (c *HostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error) {
 	// sanity check

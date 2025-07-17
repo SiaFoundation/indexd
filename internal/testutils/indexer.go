@@ -52,6 +52,7 @@ type Indexer struct {
 	db     *postgres.Store
 	cm     *chain.Manager
 	syncer *Syncer
+	dialer *client.SiamuxDialer
 	wallet *wallet.SingleAddressWallet
 }
 
@@ -96,6 +97,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	c.addSyncFn(syncFn)
 
 	adminAPIOpts := []admin.Option{
+		admin.WithDebug(),
 		admin.WithLogger(log.Named("api.admin")),
 		admin.WithExplorer(explorer.New("https://api.siascan.com")),
 	}
@@ -181,9 +183,23 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 
 		db:     store,
 		cm:     c.cm,
+		dialer: dialer,
 		syncer: syncer,
 		wallet: wm,
 	}
+}
+
+// HostClient returns a host client for the given host public key.
+func (idx *Indexer) HostClient(hk types.PublicKey) *client.HostClient {
+	h, err := idx.db.Host(context.Background(), hk)
+	if err != nil {
+		panic(fmt.Sprintf("failed to get host %s: %v", hk, err)) // developer error
+	}
+	hc, err := idx.dialer.DialHost(context.Background(), hk, h.SiamuxAddr())
+	if err != nil {
+		panic(fmt.Sprintf("failed to dial host %s: %v", hk, err)) // developer error
+	}
+	return hc
 }
 
 // Tip returns the current tip of the chain.

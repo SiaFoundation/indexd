@@ -163,6 +163,13 @@ func (c *Client) SettingsPricePinningUpdate(ctx context.Context, s pins.PinnedSe
 	return
 }
 
+// TriggerAction triggers an action on the indexer. The action must be one of
+// the following values: 'funding', 'maintenance' or 'scanning'.
+func (c *Client) TriggerAction(ctx context.Context, action string) (err error) {
+	err = c.c.POST(ctx, fmt.Sprintf("/debug/trigger/%s", action), nil, nil)
+	return
+}
+
 // Wallet returns the state of the wallet.
 func (c *Client) Wallet(ctx context.Context) (resp WalletResponse, err error) {
 	err = c.c.GET(ctx, "/wallet", &resp)

@@ -146,6 +146,19 @@ func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, 
 	return accs, nil
 }
 
+// ScheduleAccountsForFunding marks all accounts for the given host key as due
+// for funding.
+func (s *Store) ScheduleAccountsForFunding(ctx context.Context, hostKey types.PublicKey) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE account_hosts
+			SET next_fund = NOW()
+			WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)
+		`, sqlPublicKey(hostKey))
+		return err
+	})
+}
+
 // UpdateHostAccounts updates the given host accounts in the database.
 func (s *Store) UpdateHostAccounts(ctx context.Context, accounts []accounts.HostAccount) error {
 	if len(accounts) == 0 {
@@ -249,7 +262,8 @@ func (s *Store) newHostAccountsForFunding(ctx context.Context, tx *txn, hk types
 
 	rows, err := tx.Query(ctx, `
 SELECT a.public_key
-FROM accounts a LEFT JOIN account_hosts ah ON a.id = ah.account_id AND ah.host_id = $1
+FROM accounts a 
+LEFT JOIN account_hosts ah ON a.id = ah.account_id AND ah.host_id = $1
 WHERE ah.account_id IS NULL
 LIMIT $2;`, hostID, limit)
 	if err != nil {
