@@ -34,6 +34,8 @@ type (
 
 		ScanHeight uint64    `json:"scanHeight"`
 		StartTime  time.Time `json:"startTime"`
+		SyncHeight uint64    `json:"syncHeight"`
+		Synced     bool      `json:"synced"`
 	}
 
 	// WalletResponse is the response body for the [GET] /wallet endpoint.

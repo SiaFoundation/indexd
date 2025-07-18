@@ -21,6 +21,10 @@ func TestNewCluster(t *testing.T) {
 		t.Fatal(err)
 	} else if state.ScanHeight < tipState.Index.Height {
 		t.Fatal("updates not synced")
+	} else if state.SyncHeight != tipState.Index.Height {
+		t.Fatal("sync height does not match tip height")
+	} else if !state.Synced {
+		t.Fatal("not synced")
 	}
 
 	// assert indexer was funded

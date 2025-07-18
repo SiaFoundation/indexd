@@ -344,6 +344,7 @@ func (a *admin) handleGETState(jc jape.Context) {
 		return
 	}
 
+	ts := a.chain.TipState()
 	jc.Encode(State{
 		StartTime: startTime,
 		BuildState: BuildState{
@@ -353,6 +354,8 @@ func (a *admin) handleGETState(jc jape.Context) {
 			BuildTime: build.Time(),
 		},
 		ScanHeight: ci.Height,
+		SyncHeight: ts.Index.Height,
+		Synced:     time.Since(ts.PrevTimestamps[0]) <= 3*time.Hour,
 	})
 }
 
