@@ -932,7 +932,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	} else if len(unhealthyIDs) != 1 {
 		t.Fatalf("expected 1 slab, got %d", len(unhealthyIDs))
-	} else if slabID != unhealthyIDs[0] {
+	} else if slabID != unhealthyIDs[0].ID {
 		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthyIDs[0])
 	}
 
@@ -967,7 +967,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	} else if len(unhealthyIDs) != 1 {
 		t.Fatalf("expected 1 slab, got %d", len(unhealthyIDs))
-	} else if slabID != unhealthyIDs[0] {
+	} else if slabID != unhealthyIDs[0].ID {
 		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthyIDs[0])
 	}
 }
@@ -1518,10 +1518,10 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 			b.Fatal(err)
 		} else if len(slabIDs) != 1 {
 			b.Fatalf("expected 1 slab IDs, got %d", len(slabIDs))
-		} else if _, exists := seenSlabs[slabIDs[0]]; exists {
+		} else if _, exists := seenSlabs[slabIDs[0].ID]; exists {
 			b.Fatal("known slab was returned")
 		}
-		seenSlabs[slabIDs[0]] = struct{}{}
+		seenSlabs[slabIDs[0].ID] = struct{}{}
 	}
 }
 
