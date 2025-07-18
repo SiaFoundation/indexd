@@ -475,6 +475,18 @@ func (s *Store) PrunableContractRoots(ctx context.Context, contractID types.File
 	return prunable, nil
 }
 
+// ScheduleContractsForPruning schedules contracts for pruning by updating their
+// next prune time to the current time.
+func (s *Store) ScheduleContractsForPruning(ctx context.Context) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `UPDATE contracts SET next_prune = NOW() WHERE good = TRUE AND state <= $1`, sqlContractState(contracts.ContractStateActive))
+		if err != nil {
+			return fmt.Errorf("failed to schedule contracts for pruning: %w", err)
+		}
+		return nil
+	})
+}
+
 func (tx *updateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
 	for _, fce := range fces {
 		_, err := tx.tx.Exec(tx.ctx, `

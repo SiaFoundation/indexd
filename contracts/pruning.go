@@ -18,9 +18,17 @@ const (
 	pruneIntervalFailure = 3 * time.Hour
 )
 
-func (cm *ContractManager) performContractPruning(ctx context.Context, log *zap.Logger) error {
+func (cm *ContractManager) performContractPruning(ctx context.Context, force bool, log *zap.Logger) error {
 	start := time.Now()
 	log = log.Named("contractpruning")
+
+	// if force is true, schedule all (active and good) contracts for pruning
+	if force {
+		err := cm.store.ScheduleContractsForPruning(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to schedule contracts for pruning: %w", err)
+		}
+	}
 
 	// fetch hosts for pruning, a host is eligble for pruning if it is not
 	// blocked and has active contracts that haven't been pruned in the last 24
@@ -52,10 +60,9 @@ loop:
 				wg.Done()
 			}()
 
-			err = cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+			if err := cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
 				return cm.performContractPruningOnHost(ctx, host, hostLog)
-			})
-			if err != nil {
+			}); err != nil {
 				hostLog.Debug("failed to prune contracts", zap.Error(err))
 			}
 		}(ctx, hostKey, log.With(zap.Stringer("hostKey", hostKey)))
@@ -120,11 +127,14 @@ func (cm *ContractManager) pruneContract(ctx context.Context, client HostClient,
 		rootsBatchSize = 10000
 	)
 
-	contract, err := cm.store.ContractElement(ctx, contractID)
+	contract, renewed, err := cm.store.ContractRevision(ctx, contractID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to fetch contract: %w", err)
+		return 0, fmt.Errorf("failed to fetch contract revision: %w", err)
+	} else if renewed {
+		cm.log.Debug("skipping pruning of renewed contract", zap.Stringer("contractID", contractID))
+		return 0, nil
 	}
-	contractSectors := contract.V2FileContract.Filesize / proto.SectorSize
+	contractSectors := contract.Revision.Filesize / proto.SectorSize
 
 	var pruned int
 	for offset := uint64(0); offset < contractSectors; offset += sectorsPerTB {

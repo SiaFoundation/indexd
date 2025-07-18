@@ -68,8 +68,8 @@ func (s *Syncer) Close() error {
 }
 
 // Connect forms an outbound connection to a peer.
-func (s *Syncer) Connect(addr string) (*syncer.Peer, error) {
-	return s.s.Connect(context.Background(), addr)
+func (s *Syncer) Connect(ctx context.Context, addr string) (*syncer.Peer, error) {
+	return s.s.Connect(ctx, addr)
 }
 
 // Peers returns the set of currently-connected peers.

@@ -108,6 +108,7 @@ type (
 		PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
+		ScheduleContractsForPruning(ctx context.Context) error
 		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 		UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision) error
 		UpdateNextPrune(ctx context.Context, contractID types.FileContractID, nextPrune time.Time) error
@@ -173,6 +174,7 @@ type (
 
 		triggerFundingChan     chan bool
 		triggerMaintenanceChan chan struct{}
+		triggerPruningChan     chan struct{}
 
 		log     *zap.Logger
 		shuffle func(int, func(i, j int))
@@ -182,6 +184,8 @@ type (
 		expiredContractBroadcastBuffer uint64
 		expiredContractPruneBuffer     uint64
 		maintenanceFrequency           time.Duration
+		pruneIntervalSuccess           time.Duration
+		pruneIntervalFailure           time.Duration
 		revisionBroadcastInterval      time.Duration
 	}
 )
@@ -247,6 +251,7 @@ func newContractManager(renterKey types.PublicKey, accountManager AccountManager
 
 		triggerFundingChan:     make(chan bool, 1),
 		triggerMaintenanceChan: make(chan struct{}, 1),
+		triggerPruningChan:     make(chan struct{}, 1),
 
 		log:     zap.NewNop(),
 		shuffle: frand.Shuffle,
@@ -256,6 +261,8 @@ func newContractManager(renterKey types.PublicKey, accountManager AccountManager
 		expiredContractBroadcastBuffer: 144,           // 144 block after expiration
 		expiredContractPruneBuffer:     144,           // 144 blocks after broadcast
 		maintenanceFrequency:           10 * time.Minute,
+		pruneIntervalSuccess:           24 * time.Hour,     // 1 day
+		pruneIntervalFailure:           3 * time.Hour,      // 3 hours
 		revisionBroadcastInterval:      7 * 24 * time.Hour, // 1 week,
 	}
 	for _, opt := range opts {
@@ -279,6 +286,24 @@ func (cm *ContractManager) TriggerAccountFunding(force bool) error {
 		select {
 		case <-ctx.Done():
 		case cm.triggerFundingChan <- force:
+		}
+	}()
+	return nil
+}
+
+// TriggerContractPruning triggers contract pruning for all active contracts
+// that are marked good.
+func (cm *ContractManager) TriggerContractPruning() error {
+	ctx, cancel, err := cm.tg.AddContext(context.Background())
+	if err != nil {
+		return err
+	}
+	go func() {
+		defer cancel()
+
+		select {
+		case <-ctx.Done():
+		case cm.triggerPruningChan <- struct{}{}:
 		}
 	}()
 	return nil
@@ -321,6 +346,11 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 				log.Error("account funding failed", zap.Error(err))
 			}
 			continue
+		case <-cm.triggerPruningChan:
+			log.Debug("triggering contract pruning")
+			if err := cm.performContractPruning(ctx, true, log); err != nil {
+				log.Error("contract pruning failed", zap.Error(err))
+			}
 		case <-cm.triggerMaintenanceChan:
 			// reset ticker
 			ticker.Stop()
@@ -338,7 +368,7 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 			log.Error("account funding failed", zap.Error(err))
 		}
 
-		if err := cm.performContractPruning(ctx, log); err != nil {
+		if err := cm.performContractPruning(ctx, false, log); err != nil {
 			log.Error("contract pruning failed", zap.Error(err))
 		}
 

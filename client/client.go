@@ -124,7 +124,6 @@ func (c *HostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPri
 	}); err != nil {
 		return rhp.RPCAppendSectorsResult{}, fmt.Errorf("failed to append sectors: %w", err)
 	}
-
 	return res, nil
 }
 

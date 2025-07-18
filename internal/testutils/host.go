@@ -88,7 +88,7 @@ func (h *Host) Announce() error {
 
 // Connect connects the host's syncer with the given peer.
 func (h *Host) Connect(ctx context.Context, addr string) error {
-	_, err := h.s.Connect(addr)
+	_, err := h.s.Connect(ctx, addr)
 	return err
 }
 

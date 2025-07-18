@@ -13,6 +13,7 @@ import (
 
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
@@ -45,12 +46,14 @@ type (
 	// to ensure the account is funded as soon as possible.
 	ContractManager interface {
 		TriggerAccountFunding(force bool) error
+		TriggerContractPruning() error
 		TriggerMaintenance()
 	}
 
 	// HostManager defines an interface that allows triggering a host scan.
 	HostManager interface {
 		TriggerHostScanning()
+		ScanHost(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
 	}
 
 	// Explorer retrieves data about the Sia network from an external source.
@@ -82,6 +85,7 @@ type (
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
 	Syncer interface {
+		Connect(ctx context.Context, addr string) (*syncer.Peer, error)
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 	}
 
@@ -151,7 +155,8 @@ func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, sy
 		"GET /explorer/exchange-rate/siacoin/:currency": a.handleGETExplorerSiacoinExchangeRate,
 
 		// host endpoints
-		"GET    /host/:hostkey": a.handleGETHost,
+		"GET    /host/:hostkey":      a.handleGETHost,
+		"POST   /host/:hostkey/scan": a.handlePOSTHostScan,
 
 		// hosts endpoints
 		"GET    /hosts":                    a.handleGETHosts,
@@ -166,6 +171,12 @@ func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, sy
 		"PUT /settings/hosts":        a.handlePUTSettingsHosts,
 		"GET /settings/pricepinning": a.handleGETSettingsPricePinning,
 		"PUT /settings/pricepinning": a.handlePUTSettingsPricePinning,
+
+		// syncer endpoints
+		"POST /syncer/connect": a.handlePOSTSyncerConnect,
+
+		// txpool endpoints
+		"GET /txpool/recommendedfee": a.handleGETTxpoolRecommendedFee,
 
 		// wallet endpoints
 		"GET /wallet":         a.handleGETWallet,
@@ -225,10 +236,12 @@ func (a *admin) handlePOSTTrigger(jc jape.Context) {
 		}
 	case "maintenance":
 		a.contracts.TriggerMaintenance()
+	case "pruning":
+		a.contracts.TriggerContractPruning()
 	case "scanning":
 		a.hosts.TriggerHostScanning()
 	default:
-		jc.Error(fmt.Errorf("unknown action: %q, available actions are 'funding', 'maintenance' or 'scanning'", action), http.StatusBadRequest)
+		jc.Error(fmt.Errorf("unknown action: %q, available actions are 'funding', 'maintenance', 'pruning' or 'scanning'", action), http.StatusBadRequest)
 		return
 	}
 
@@ -331,6 +344,7 @@ func (a *admin) handleGETState(jc jape.Context) {
 		return
 	}
 
+	ts := a.chain.TipState()
 	jc.Encode(State{
 		StartTime: startTime,
 		BuildState: BuildState{
@@ -340,7 +354,25 @@ func (a *admin) handleGETState(jc jape.Context) {
 			BuildTime: build.Time(),
 		},
 		ScanHeight: ci.Height,
+		SyncHeight: ts.Index.Height,
+		Synced:     time.Since(ts.PrevTimestamps[0]) <= 3*time.Hour,
 	})
+}
+
+func (a *admin) handlePOSTSyncerConnect(jc jape.Context) {
+	var addr string
+	if jc.Decode(&addr) != nil {
+		return
+	}
+	_, err := a.syncer.Connect(jc.Request.Context(), addr)
+	if jc.Check("couldn't connect to peer", err) != nil {
+		return
+	}
+	jc.Encode(nil)
+}
+
+func (a *admin) handleGETTxpoolRecommendedFee(jc jape.Context) {
+	jc.Encode(a.chain.RecommendedFee())
 }
 
 func (a *admin) handleGETExplorerSiacoinExchangeRate(jc jape.Context) {
@@ -421,6 +453,21 @@ func (a *admin) handleGETHost(jc jape.Context) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to get host", err) != nil {
+		return
+	}
+	jc.Encode(host)
+}
+
+func (a *admin) handlePOSTHostScan(jc jape.Context) {
+	var hk types.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
+		return
+	}
+	host, err := a.hosts.ScanHost(jc.Request.Context(), hk)
+	if errors.Is(err, hosts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to scan host", err) != nil {
 		return
 	}
 	jc.Encode(host)
