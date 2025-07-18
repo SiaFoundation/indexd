@@ -468,9 +468,10 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 //
 // NOTE: For the sake of scalability, we don't prioritize any slabs and instead
 // simply fetch the first ones that we can get.
-func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]slabs.SlabID, error) {
-	var slabIDs []slabs.SlabID
+func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]slabs.Slab, error) {
+	var results []slabs.Slab
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		dbIDMap := make(map[int64]int)
 		rows, err := tx.Query(ctx, `
 			UPDATE slabs
 			SET last_repair_attempt = NOW()
@@ -491,7 +492,7 @@ func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, 
 					AND (slabs.last_repair_attempt <= $1)
 				LIMIT $2
 			)
-			RETURNING digest
+			RETURNING id, digest, encryption_key, min_shards, pinned_at
 		`, maxRepairAttempt, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query unhealthy slabs: %w", err)
@@ -499,15 +500,56 @@ func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, 
 		defer rows.Close()
 
 		for rows.Next() {
-			var slabID slabs.SlabID
-			if err := rows.Scan((*sqlHash256)(&slabID)); err != nil {
+			var dbID int64
+			var slab slabs.Slab
+			if err := rows.Scan(&dbID, (*sqlHash256)(&slab.ID), (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.PinnedAt); err != nil {
 				return fmt.Errorf("failed to scan slab ID: %w", err)
 			}
-			slabIDs = append(slabIDs, slabID)
+
+			dbIDMap[dbID] = len(results)
+			results = append(results, slab)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		sectorsBatch := &pgx.Batch{}
+		for slabID := range dbIDMap {
+			sectorsBatch.Queue(`SELECT s.sector_root, h.public_key, csm.contract_id
+FROM sectors s
+INNER JOIN slab_sectors ss ON s.id = ss.sector_id
+LEFT JOIN hosts h ON h.id = s.host_id
+LEFT JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
+WHERE ss.slab_id = $1
+ORDER BY ss.slab_index ASC`, slabID).Query(func(rows pgx.Rows) error {
+				defer rows.Close()
+				for rows.Next() {
+					var sector slabs.Sector
+					var hostKey sql.Null[sqlPublicKey]
+					var contractID sql.Null[sqlHash256]
+
+					if err := rows.Scan((*sqlHash256)(&sector.Root), &hostKey, &contractID); err != nil {
+						return fmt.Errorf("failed to scan sector: %w", err)
+					}
+
+					if hostKey.Valid {
+						sector.HostKey = (*types.PublicKey)(&hostKey.V)
+					}
+					if contractID.Valid {
+						sector.ContractID = (*types.FileContractID)(&contractID.V)
+					}
+					results[dbIDMap[slabID]].Sectors = append(results[dbIDMap[slabID]].Sectors, sector)
+				}
+				return rows.Err()
+			})
+		}
+		if err := tx.Tx.SendBatch(ctx, sectorsBatch).Close(); err != nil {
+			return fmt.Errorf("failed to get slab sectors: %w", err)
+		}
+
+		return nil
 	})
-	return slabIDs, err
+	return results, err
 }
 
 // MigrateSector updates a sector that was just migrated in the database to be
