@@ -215,24 +215,33 @@ func (s *mockStore) Slabs(ctx context.Context, accountID proto.Account, slabIDs 
 	return slabs, nil
 }
 
-func (s *mockStore) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (Slab, error) {
+func (s *mockStore) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) (result []Slab, _ error) {
 	for acc := range s.accounts {
 		for _, slab := range s.pinnedSlabs[acc] {
 			for _, sector := range slab.Sectors {
+				if len(result) >= limit {
+					break
+				}
+
 				if sector.ContractID == nil || sector.HostKey == nil {
-					return slab, nil
+					result = append(result, slab)
+					break
 				}
 				if sector.HostKey != nil {
 					hk := *sector.HostKey
 					contract, ok := s.contracts[hk]
 					if ok && !contract.Good {
-						return slab, nil
+						result = append(result, slab)
+						break
 					}
 				}
 			}
 		}
 	}
-	return Slab{}, ErrSlabNotFound
+	if len(result) == 0 {
+		return nil, ErrSlabNotFound
+	}
+	return result, nil
 }
 
 type mockAccountManager struct {

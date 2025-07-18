@@ -458,7 +458,7 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 	return roots, err
 }
 
-// UnhealthySlab returns a slab that has at least one sector that needs to be
+// UnhealthySlabs returns slabs which have at least one sector that needs to be
 // migrated to a new host and hasn't had a repair attempted since
 // 'maxRepairAttempt'. The condition for such a slab is that it either has:
 // a). a sector that is not stored on a host (host_id == null)
@@ -468,14 +468,14 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 // subsequent or parallel calls from returning the same slab.
 //
 // NOTE: For the sake of scalability, we don't prioritize any slabs and instead
-// simply fetch the first one that we can get.
-func (s *Store) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (slabs.SlabID, error) {
-	var slabID slabs.SlabID
+// simply fetch the first ones that we can get.
+func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]slabs.SlabID, error) {
+	var slabIDs []slabs.SlabID
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		err := tx.QueryRow(ctx, `
+		rows, err := tx.Query(ctx, `
 			UPDATE slabs
 			SET last_repair_attempt = NOW()
-			WHERE id = (
+			WHERE id IN (
 				SELECT slabs.id
 				FROM slabs
 				INNER JOIN slab_sectors ON slabs.id = slab_sectors.slab_id
@@ -490,16 +490,32 @@ func (s *Store) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (
 						(sectors.host_id IS NULL)
 					)
 					AND (slabs.last_repair_attempt <= $1)
-				LIMIT 1
+				LIMIT $2
 			)
 			RETURNING digest
-		`, maxRepairAttempt).Scan((*sqlHash256)(&slabID))
-		if errors.Is(err, sql.ErrNoRows) {
+		`, maxRepairAttempt, limit)
+		if err != nil {
+			return fmt.Errorf("failed to query unhealthy slabs: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var slabID slabs.SlabID
+			if err := rows.Scan((*sqlHash256)(&slabID)); err != nil {
+				return fmt.Errorf("failed to scan slab ID: %w", err)
+			}
+			slabIDs = append(slabIDs, slabID)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		if len(slabIDs) == 0 {
 			return slabs.ErrSlabNotFound
 		}
-		return err
+		return nil
 	})
-	return slabID, err
+	return slabIDs, err
 }
 
 // MigrateSector updates a sector that was just migrated in the database to be

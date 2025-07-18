@@ -97,7 +97,7 @@ type (
 		RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error
 		SectorsForIntegrityCheck(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 		Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error)
-		UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (Slab, error)
+		UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]Slab, error)
 	}
 
 	// AlertsManager defines an interface to register alerts.
@@ -299,19 +299,16 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	logger.Debug("starting slab migrations", zap.Time("start", start))
 
 	const slabsPerBatch = 10
-	nextBatch := func(ctx context.Context) (batch []Slab, _ error) {
-		for len(batch) < slabsPerBatch {
-			slab, err := m.store.UnhealthySlab(ctx, start)
-			if errors.Is(err, ErrSlabNotFound) {
-				return batch, nil
-			} else if errors.Is(err, context.Canceled) {
-				return nil, nil
-			} else if err != nil {
-				return nil, err
-			}
-			batch = append(batch, slab)
+	nextBatch := func(ctx context.Context) ([]Slab, error) {
+		batch, err := m.store.UnhealthySlabs(ctx, start, slabsPerBatch)
+		if errors.Is(err, ErrSlabNotFound) {
+			return batch, nil
+		} else if errors.Is(err, context.Canceled) {
+			return nil, nil
+		} else if err != nil {
+			return nil, err
 		}
-		return
+		return batch, nil
 	}
 
 	for {

@@ -892,7 +892,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// after pinning, no slab should be unhealthy since their sectors aren't
 	// pinned to contracts yet.
-	_, err = store.UnhealthySlab(context.Background(), time.Now().Add(time.Hour))
+	_, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
 	if !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatal(err)
 	}
@@ -903,7 +903,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = store.UnhealthySlab(context.Background(), time.Now().Add(time.Hour))
+	_, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
 	if !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatal(err)
 	}
@@ -915,21 +915,23 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// fetch unhealthy slabs which haven't had a repair attempted in at least 1 hour - should not have any
-	_, err = store.UnhealthySlab(context.Background(), time.Now().Add(-time.Hour))
+	_, err = store.UnhealthySlabs(context.Background(), time.Now().Add(-time.Hour), 1)
 	if !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatal(err)
 	}
 
 	// try again with the current time - this should return the slab since it has 1 bad sector
-	unhealthyID, err := store.UnhealthySlab(context.Background(), time.Now())
+	unhealthyIDs, err := store.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
 		t.Fatal(err)
-	} else if slabID != unhealthyID {
-		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthyID)
+	} else if len(unhealthyIDs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(unhealthyIDs))
+	} else if slabID != unhealthyIDs[0] {
+		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthyIDs[0])
 	}
 
 	// run again for 100ms - shouldn't return the same slab twice since the last_repair_attempt was updated
-	_, err = store.UnhealthySlab(context.Background(), time.Now().Add(-100*time.Millisecond))
+	_, err = store.UnhealthySlabs(context.Background(), time.Now().Add(-100*time.Millisecond), 1)
 	if !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatal(err)
 	}
@@ -939,7 +941,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.UnhealthySlab(context.Background(), time.Now().Add(-time.Hour))
+	_, err = store.UnhealthySlabs(context.Background(), time.Now().Add(-time.Hour), 1)
 	if !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatal(err)
 	}
@@ -949,11 +951,13 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unhealthyID, err = store.UnhealthySlab(context.Background(), time.Now())
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
 		t.Fatal(err)
-	} else if slabID != unhealthyID {
-		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthyID)
+	} else if len(unhealthyIDs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(unhealthyIDs))
+	} else if slabID != unhealthyIDs[0] {
+		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthyIDs[0])
 	}
 }
 
@@ -1413,8 +1417,8 @@ func BenchmarkPinSectors(b *testing.B) {
 	}
 }
 
-// BenchmarkUnhealthySlab benchmarks UnhealthySlab
-func BenchmarkUnhealthySlab(b *testing.B) {
+// BenchmarkUnhealthySlabs benchmarks UnhealthySlab
+func BenchmarkUnhealthySlabs(b *testing.B) {
 	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
 	account := proto.Account{1}
 
@@ -1498,13 +1502,15 @@ func BenchmarkUnhealthySlab(b *testing.B) {
 
 	seenSlabs := make(map[slabs.SlabID]struct{})
 	for b.Loop() {
-		slabID, err := store.UnhealthySlab(context.Background(), time.Now().Add(-time.Hour))
+		slabIDs, err := store.UnhealthySlabs(context.Background(), time.Now().Add(-time.Hour), 1)
 		if err != nil {
 			b.Fatal(err)
-		} else if _, exists := seenSlabs[slabID]; exists {
+		} else if len(slabIDs) != 1 {
+			b.Fatalf("expected 1 slab IDs, got %d", len(slabIDs))
+		} else if _, exists := seenSlabs[slabIDs[0]]; exists {
 			b.Fatal("known slab was returned")
 		}
-		seenSlabs[slabID] = struct{}{}
+		seenSlabs[slabIDs[0]] = struct{}{}
 	}
 }
 

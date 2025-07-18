@@ -111,15 +111,17 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's unhealthy
-	unhealthSlab, err := db.UnhealthySlab(context.Background(), time.Now())
+	unhealthSlabs, err := db.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
 		t.Fatal(err)
-	} else if unhealthSlab.ID != slabID {
-		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlab.ID)
+	} else if len(unhealthSlabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(unhealthSlabs))
+	} else if unhealthSlabs[0].ID != slabID {
+		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabs[0])
 	}
 
 	// migrate the slab
-	err = mgr.migrateSlabs(context.Background(), []Slab{unhealthSlab}, zap.NewNop())
+	err = mgr.migrateSlabs(context.Background(), unhealthSlabs, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,11 +141,13 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's still unhealthy
-	unhealthSlab, err = db.UnhealthySlab(context.Background(), time.Now())
+	unhealthSlabs, err = db.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
 		t.Fatal(err)
-	} else if unhealthSlab.ID != slabID {
-		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlab.ID)
+	} else if len(unhealthSlabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(unhealthSlabs))
+	} else if unhealthSlabs[0].ID != slabID {
+		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabs[0].ID)
 	}
 
 	// add another good host
@@ -157,7 +161,7 @@ func TestMigrateSlab(t *testing.T) {
 	db.contracts[h5.PublicKey] = c5
 
 	// migrate the slab again
-	err = mgr.migrateSlabs(context.Background(), []Slab{unhealthSlab}, zap.NewNop())
+	err = mgr.migrateSlabs(context.Background(), unhealthSlabs, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +174,7 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's now healthy
-	_, err = db.UnhealthySlab(context.Background(), time.Now())
+	_, err = db.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if !errors.Is(err, ErrSlabNotFound) {
 		t.Fatal("expected no unhealthy slabs")
 	}
