@@ -299,24 +299,13 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	logger.Debug("starting slab migrations", zap.Time("start", start))
 
 	const slabsPerBatch = 10
-	nextBatch := func(ctx context.Context) ([]Slab, error) {
+	var exhausted bool
+	for !exhausted {
 		batch, err := m.store.UnhealthySlabs(ctx, start, slabsPerBatch)
-		if errors.Is(err, ErrSlabNotFound) {
-			return batch, nil
-		} else if errors.Is(err, context.Canceled) {
-			return nil, nil
-		} else if err != nil {
-			return nil, err
-		}
-		return batch, nil
-	}
-
-	for {
-		batch, err := nextBatch(ctx)
 		if err != nil {
-			return fmt.Errorf("failed to fetch unhealthy slabs: %w", err)
-		} else if len(batch) == 0 {
-			break
+			return err
+		} else if len(batch) < slabsPerBatch {
+			exhausted = true
 		}
 
 		err = m.migrateSlabs(ctx, batch, logger)

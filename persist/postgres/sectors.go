@@ -463,9 +463,8 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 // 'maxRepairAttempt'. The condition for such a slab is that it either has:
 // a). a sector that is not stored on a host (host_id == null)
 // b). a sector that is stored in a bad contract (contract_id != null && contract.good = false)
-// When no slab is found, ErrSlabNotFound is returned. If a slab is found, it
-// will have its last_repair_attempt updated to the time of the call. To prevent
-// subsequent or parallel calls from returning the same slab.
+// If a slab is found, it will have its last_repair_attempt updated to the time
+// of the call. To prevent subsequent or parallel calls from returning the same slab.
 //
 // NOTE: For the sake of scalability, we don't prioritize any slabs and instead
 // simply fetch the first ones that we can get.
@@ -506,14 +505,7 @@ func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, 
 			}
 			slabIDs = append(slabIDs, slabID)
 		}
-		if err := rows.Err(); err != nil {
-			return err
-		}
-
-		if len(slabIDs) == 0 {
-			return slabs.ErrSlabNotFound
-		}
-		return nil
+		return rows.Err()
 	})
 	return slabIDs, err
 }

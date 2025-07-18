@@ -3,7 +3,6 @@ package slabs
 import (
 	"bytes"
 	"context"
-	"errors"
 	"math"
 	"net"
 	"testing"
@@ -174,8 +173,10 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's now healthy
-	_, err = db.UnhealthySlabs(context.Background(), time.Now(), 1)
-	if !errors.Is(err, ErrSlabNotFound) {
+	unhealthSlabs, err = db.UnhealthySlabs(context.Background(), time.Now(), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthSlabs) != 0 {
 		t.Fatal("expected no unhealthy slabs")
 	}
 }

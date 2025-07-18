@@ -238,9 +238,6 @@ func (s *mockStore) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Ti
 			}
 		}
 	}
-	if len(result) == 0 {
-		return nil, ErrSlabNotFound
-	}
 	return result, nil
 }
 
