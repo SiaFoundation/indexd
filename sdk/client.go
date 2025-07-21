@@ -1,6 +1,7 @@
 package sdk
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
@@ -360,6 +361,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata []Slab, opts .
 		workCh <- work{err: io.EOF}
 	}(ctx, metadata)
 
+	bw := bufio.NewWriterSize(w, 1<<16)
 	for i := 0; ; i++ {
 		select {
 		case <-ctx.Done():
@@ -368,12 +370,15 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata []Slab, opts .
 			err := work.err
 			if errors.Is(err, io.EOF) {
 				// EOF signals completion
+				if err := bw.Flush(); err != nil {
+					return fmt.Errorf("failed to flush write: %w", err)
+				}
 				return nil
 			} else if err != nil {
 				return err
 			}
 			slab := metadata[i]
-			if err := stripedJoin(w, work.shards, int(slab.Length)); err != nil {
+			if err := stripedJoin(bw, work.shards, int(slab.Length)); err != nil {
 				return fmt.Errorf("failed to write slab %d: %w", i, err)
 			}
 		}
