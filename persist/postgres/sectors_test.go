@@ -972,6 +972,128 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 }
 
+func TestUnhealthySlabsLimit(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// add host with a contract
+	hk1 := store.addTestHost(t)
+	store.addTestContract(t, hk1)
+	hk2 := store.addTestHost(t)
+	store.addTestContract(t, hk2)
+
+	// pin a slab to add a few sectors to the database
+	slabID1, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     10,
+		Sectors: []slabs.SectorPinParams{
+			{
+				Root:    frand.Entropy256(),
+				HostKey: hk1,
+			},
+			{
+				Root:    frand.Entropy256(),
+				HostKey: hk1,
+			},
+			{
+				Root:    frand.Entropy256(),
+				HostKey: hk1,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slabID2, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     10,
+		Sectors: []slabs.SectorPinParams{
+			{
+				Root:    frand.Entropy256(),
+				HostKey: hk2,
+			},
+			{
+				Root:    frand.Entropy256(),
+				HostKey: hk2,
+			},
+			{
+				Root:    frand.Entropy256(),
+				HostKey: hk2,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure some time passes since the default time that is set when the
+	// slab is pinned
+	time.Sleep(100 * time.Millisecond)
+
+	// after pinning, no slab should be unhealthy since their sectors aren't
+	// pinned to contracts yet.
+	unhealthyIDs, err := store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthyIDs) != 0 {
+		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
+	}
+
+	// pin one sector to both contracts - we should still not have any unhealthy sectors
+	// first contract sector IDs: 1, 2, 3
+	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET contract_sectors_map_id = 1 WHERE id = 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// second contract sector IDs: 4, 5, 6
+	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET contract_sectors_map_id = 2 WHERE id = 4")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthyIDs) != 0 {
+		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
+	}
+
+	// update the contracts to be bad
+	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// try with the current time and limit of 1
+	// this should return the first slab since it has 1 bad sector
+	now := time.Now()
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), now, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthyIDs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(unhealthyIDs))
+	} else if slabID1 != unhealthyIDs[0].ID {
+		t.Fatalf("expected slab ID %v, got %v", slabID1, unhealthyIDs[0])
+	}
+
+	// try with the current time and limit of 1
+	// this should return the second slab since it has 1 bad sector and the
+	// first slab was already returned
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), now, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthyIDs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(unhealthyIDs))
+	} else if slabID2 != unhealthyIDs[0].ID {
+		t.Fatalf("expected slab ID %v, got %v", slabID2, unhealthyIDs[0].ID)
+	}
+}
+
 func TestUnpinnedSectors(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
