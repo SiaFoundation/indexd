@@ -346,6 +346,7 @@ func (a *admin) handleGETState(jc jape.Context) {
 
 	ts := a.chain.TipState()
 	jc.Encode(State{
+		Network:   ts.Network.Name,
 		StartTime: startTime,
 		BuildState: BuildState{
 			Version:   build.Version(),

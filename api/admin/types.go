@@ -32,6 +32,7 @@ type (
 	State struct {
 		BuildState
 
+		Network    string    `json:"network"`
 		ScanHeight uint64    `json:"scanHeight"`
 		StartTime  time.Time `json:"startTime"`
 		SyncHeight uint64    `json:"syncHeight"`
