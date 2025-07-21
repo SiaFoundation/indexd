@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"runtime"
 	"testing"
 	"time"
@@ -41,6 +42,50 @@ func TestRoundtrip(t *testing.T) {
 	if !bytes.Equal(buf.Bytes(), data) {
 		t.Fatal("data mismatch")
 	}
+}
+
+type countWriter struct {
+	count int
+
+	w io.Writer
+}
+
+func (c *countWriter) Write(p []byte) (int, error) {
+	c.count++
+	return c.w.Write(p)
+}
+
+func TestRoundtripCount(t *testing.T) {
+	dialer := newMockDialer(50)
+
+	appKey := types.GeneratePrivateKey()
+
+	s, err := initSDK(newMockAppClient(), dialer, appKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 1 MB
+	data := frand.Bytes(1 << 20)
+	slabs, err := s.Upload(context.Background(), bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("failed to upload: %v", err)
+	} else if len(slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(slabs))
+	} else if slabs[0].Length != uint32(len(data)) {
+		t.Fatalf("expected slab length %d, got %d", len(data), slabs[0].Length)
+	}
+
+	buf := bytes.NewBuffer(nil)
+	cw := &countWriter{w: buf}
+	if err := s.Download(context.Background(), cw, slabs); err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(buf.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+	t.Logf("Downloaded: %d bytes, Write calls: %d", buf.Len(), cw.count)
 }
 
 func TestUpload(t *testing.T) {
