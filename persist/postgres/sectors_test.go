@@ -1552,92 +1552,96 @@ func BenchmarkPinSectors(b *testing.B) {
 
 // BenchmarkUnhealthySlabs benchmarks UnhealthySlabs
 func BenchmarkUnhealthySlabs(b *testing.B) {
-	var store *Store
-	reset := func(b *testing.B) {
-		store = initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
+	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
 
-		account := proto.Account{1}
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
 
-		if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
-			b.Fatal("failed to add account:", err)
+	// 30 hosts to simulate default redundancy
+	var hks []types.PublicKey
+	for i := byte(0); i < 30; i++ {
+		hks = append(hks, store.addTestHost(b, types.PublicKey{i}))
+	}
+
+	// add 2 contracts
+	store.addTestContract(b, hks[0])
+	store.addTestContract(b, hks[1])
+
+	// mark the second contract as bad
+	res, err := store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE id = 2") // id 2 is bad
+	if err != nil {
+		b.Fatal(err)
+	} else if res.RowsAffected() != 1 {
+		b.Fatal("expected to update 1 row")
+	}
+
+	// helper to create slabs
+	newSlab := func() slabs.SlabPinParams {
+		var sectors []slabs.SectorPinParams
+		for i := range hks {
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    frand.Entropy256(),
+				HostKey: hks[i],
+			})
 		}
-
-		// 30 hosts to simulate default redundancy
-		var hks []types.PublicKey
-		for i := byte(0); i < 30; i++ {
-			hks = append(hks, store.addTestHost(b, types.PublicKey{i}))
+		slab := slabs.SlabPinParams{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     10,
+			Sectors:       sectors,
 		}
+		return slab
+	}
 
-		// add 2 contracts
-		store.addTestContract(b, hks[0])
-		store.addTestContract(b, hks[1])
+	const dbBaseSize = 1 << 40    // 1TiB
+	const slabSize = 40 * 1 << 20 // 40MiB
 
-		// mark the second contract as bad
-		res, err := store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE id = 2") // id 2 is bad
+	// prepare base db
+	for range dbBaseSize / slabSize {
+		_, err = store.PinSlab(context.Background(), account, time.Time{}, newSlab())
 		if err != nil {
 			b.Fatal(err)
-		} else if res.RowsAffected() != 1 {
-			b.Fatal("expected to update 1 row")
 		}
+	}
 
-		// helper to create slabs
-		newSlab := func() slabs.SlabPinParams {
-			var sectors []slabs.SectorPinParams
-			for i := range hks {
-				sectors = append(sectors, slabs.SectorPinParams{
-					Root:    frand.Entropy256(),
-					HostKey: hks[i],
-				})
-			}
-			slab := slabs.SlabPinParams{
-				EncryptionKey: frand.Entropy256(),
-				MinShards:     10,
-				Sectors:       sectors,
-			}
-			return slab
-		}
+	// make sure the slabs have a last_repair_attempt time between 1 and 7 days
+	// in the past
+	_, err = store.pool.Exec(context.Background(), "UPDATE slabs SET last_repair_attempt = NOW() - interval '1 day' - interval '1 week' * random()")
+	if err != nil {
+		b.Fatal(err)
+	}
 
-		const dbBaseSize = 1 << 40    // 1TiB
-		const slabSize = 40 * 1 << 20 // 40MiB
+	// default to the good contract for all sectors
+	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id = 1`)
+	if err != nil {
+		b.Fatal(err)
+	}
 
-		// prepare base db
-		for range dbBaseSize / slabSize {
-			_, err = store.PinSlab(context.Background(), account, time.Time{}, newSlab())
-			if err != nil {
-				b.Fatal(err)
-			}
-		}
+	// 25% of the sectors are stored on a bad contract
+	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id = 2 WHERE id % 4 = 0`)
+	if err != nil {
+		b.Fatal(err)
+	}
 
+	// 25% of the sectors don't have a host at all
+	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id % 4 = 1`)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	reset := func(b *testing.B) {
 		// make sure the slabs have a last_repair_attempt time between 1 and 7 days
 		// in the past
 		_, err = store.pool.Exec(context.Background(), "UPDATE slabs SET last_repair_attempt = NOW() - interval '1 day' - interval '1 week' * random()")
 		if err != nil {
 			b.Fatal(err)
 		}
-
-		// default to the good contract for all sectors
-		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id = 1`)
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		// 25% of the sectors are stored on a bad contract
-		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id = 2 WHERE id % 4 = 0`)
-		if err != nil {
-			b.Fatal(err)
-		}
-
-		// 25% of the sectors don't have a host at all
-		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id % 4 = 1`)
-		if err != nil {
-			b.Fatal(err)
-		}
 	}
 
-	for _, batchSize := range []int{10, 100, 1000} {
+	for _, batchSize := range []int{10, 25, 50} {
 		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
 			reset(b)
-			b.ReportMetric(float64(b.N), "slabs")
 			b.ResetTimer()
 
 			seenSlabs := make(map[slabs.SlabID]struct{})
