@@ -538,7 +538,9 @@ WITH globals AS (
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 	WHERE hb.public_key IS NULL AND last_successful_scan IS NOT NULL -- not blocked and has settings
 ) 
-SELECT hosts.*
+SELECT
+	hosts.id,	
+	hosts.public_key
 FROM hosts 
 CROSS JOIN globals
 WHERE
@@ -566,36 +568,9 @@ LIMIT $1 OFFSET $2;`, limit, offset)
 
 		var dbHosts []*dbHost
 		for rows.Next() {
-			var validUntil sql.NullTime
-			var ignore any
 			var host dbHost
-			if err := rows.Scan(
-				&host.id,
-				(*sqlPublicKey)(&host.PublicKey),
-				&ignore, // recent_uptime
-				(*sqlProtocolVersion)(&host.Settings.ProtocolVersion),
-				&host.Settings.Release,
-				(*sqlHash256)(&host.Settings.WalletAddress),
-				&host.Settings.AcceptingContracts,
-				(*sqlCurrency)(&host.Settings.MaxCollateral),
-				&host.Settings.MaxContractDuration,
-				&host.Settings.RemainingStorage,
-				&host.Settings.TotalStorage,
-				(*sqlCurrency)(&host.Settings.Prices.ContractPrice),
-				(*sqlCurrency)(&host.Settings.Prices.Collateral),
-				(*sqlCurrency)(&host.Settings.Prices.StoragePrice),
-				(*sqlCurrency)(&host.Settings.Prices.IngressPrice),
-				(*sqlCurrency)(&host.Settings.Prices.EgressPrice),
-				(*sqlCurrency)(&host.Settings.Prices.FreeSectorPrice),
-				&host.Settings.Prices.TipHeight,
-				&validUntil,
-				(*sqlSignature)(&host.Settings.Prices.Signature),
-				&ignore, // settings_version
-			); err != nil {
+			if err := rows.Scan(&host.id, (*sqlPublicKey)(&host.PublicKey)); err != nil {
 				return fmt.Errorf("failed to scan host: %w", err)
-			}
-			if validUntil.Valid {
-				host.Settings.Prices.ValidUntil = validUntil.Time
 			}
 			dbHosts = append(dbHosts, &host)
 		}
@@ -613,7 +588,6 @@ LIMIT $1 OFFSET $2;`, limit, offset)
 			usable = append(usable, hosts.HostInfo{
 				PublicKey: h.PublicKey,
 				Addresses: h.Addresses,
-				Settings:  h.Settings,
 			})
 		}
 		return nil

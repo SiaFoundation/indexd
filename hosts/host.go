@@ -102,9 +102,8 @@ type (
 	// key and addresses. It is used for listing usable hosts in the
 	// application API.
 	HostInfo struct {
-		PublicKey types.PublicKey     `json:"publicKey"`
-		Addresses []chain.NetAddress  `json:"addresses"`
-		Settings  proto4.HostSettings `json:"settings"`
+		PublicKey types.PublicKey    `json:"publicKey"`
+		Addresses []chain.NetAddress `json:"addresses"`
 	}
 
 	// Usability represents a series of host checks that can be used to

@@ -606,17 +606,6 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal("expected hosts to have addresses")
 	}
 
-	// assert host settings are populated
-	expectedH1Settings := newTestHostSettings(uh1)
-	expectedH2Settings := newTestHostSettings(uh2)
-	hosts[0].Settings.Prices.ValidUntil = expectedH1Settings.Prices.ValidUntil // ignore valid until for comparison
-	hosts[1].Settings.Prices.ValidUntil = expectedH2Settings.Prices.ValidUntil // ignore valid until for comparison
-	if !reflect.DeepEqual(hosts[0].Settings, expectedH1Settings) {
-		t.Fatal("expected host settings to match", hosts[0].Settings)
-	} else if !reflect.DeepEqual(hosts[1].Settings, expectedH2Settings) {
-		t.Fatal("expected host settings to match", hosts[1].Settings)
-	}
-
 	// assert offset and limit are applied
 	if hosts, err := db.UsableHosts(context.Background(), 0, 1); err != nil {
 		t.Fatal("unexpected", err)

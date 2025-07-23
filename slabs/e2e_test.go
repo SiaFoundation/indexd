@@ -47,7 +47,12 @@ func TestMigrationsE2E(t *testing.T) {
 	// upload sectors to hosts
 	shards, roots := newTestShards(t, 2, 4)
 	for i := range shards {
-		if _, err := indexer.HostClient(t, hosts[i].PublicKey).WriteSector(context.Background(), hosts[i].Settings.Prices, acc.Token(a1, hosts[i].PublicKey), bytes.NewReader(shards[i]), proto.SectorSize); err != nil {
+		client := indexer.HostClient(t, hosts[i].PublicKey)
+		hs, err := client.Settings(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.WriteSector(context.Background(), hs.Prices, acc.Token(a1, hosts[i].PublicKey), bytes.NewReader(shards[i]), proto.SectorSize); err != nil {
 			t.Fatal(err)
 		}
 	}

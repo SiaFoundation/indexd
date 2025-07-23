@@ -79,6 +79,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	usedCidrs := make(map[string]types.PublicKey)
 	addHost := func(host hosts.Host) {
 		for _, network := range host.Networks {
+			// in testing the host's IP is often unspecified, to ensure we don't
+			// form multiple contracts with the same host we use the host's
+			// public key as the CIDR
 			cidr := network.IP.String()
 			if network.IP.IsUnspecified() {
 				cidr = host.PublicKey.String()
@@ -87,7 +90,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		}
 		wanted--
 	}
-	isUsed := func(host hosts.Host) (types.PublicKey, bool) {
+	hasCidrConflict := func(host hosts.Host) (types.PublicKey, bool) {
 		for _, network := range host.Networks {
 			cidr := network.IP.String()
 			if network.IP.IsUnspecified() {
@@ -107,7 +110,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			// host should be good
 			hostLog.Debug("host is not usable due to bad usability")
 			return false
-		} else if usedBy, used := isUsed(host); used {
+		} else if usedBy, used := hasCidrConflict(host); used {
 			// host should be on a unique cidr
 			hostLog.Debug("host is not usable cidr is already in use", zap.Stringer("usedBy", usedBy))
 			return false
