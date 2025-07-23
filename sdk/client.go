@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -181,8 +182,13 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.PinnedSlab, maxInflig
 
 	var successful atomic.Uint32
 	var wg sync.WaitGroup
+
 	sectors := make([][]byte, len(slab.Sectors))
-	sema := make(chan struct{}, maxInflight)
+
+	// add ~10% extra to the semaphore buffer
+	extra := int(math.Ceil(float64(maxInflight) * 0.1))
+	sema := make(chan struct{}, maxInflight+extra)
+
 top:
 	for i, sector := range slab.Sectors {
 		select {
@@ -192,11 +198,13 @@ top:
 			// limit number of concurrent requests
 		}
 		wg.Add(1)
+
 		go func(ctx context.Context, sector slabs.PinnedSector, i int) {
-			defer func() { <-sema }() // release semaphore
 			defer wg.Done()
+
 			data, err := downloadShard(ctx, sector.Root, sector.HostKey, s.dialer, timeout)
 			if err != nil {
+				<-sema
 				return
 			}
 			sectors[i] = data[:]
@@ -208,6 +216,9 @@ top:
 	}
 
 	wg.Wait()
+
+	close(sema)
+
 	if n := successful.Load(); n < uint32(slab.MinShards) {
 		return nil, fmt.Errorf("retrieved %d sectors, minimum required: %d: %w", n, slab.MinShards, ErrNotEnoughShards)
 	}
