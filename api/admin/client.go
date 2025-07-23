@@ -211,6 +211,12 @@ func (c *Client) WalletEvents(ctx context.Context, opts ...api.URLQueryParameter
 	return
 }
 
+// WalletEvent returns the event with the given ID.
+func (c *Client) WalletEvent(ctx context.Context, id types.Hash256) (resp wallet.Event, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/wallet/events/%s", id), &resp)
+	return
+}
+
 // WalletSendSiacoins sends siacoins to the specified address. If subtractFee is
 // true, the miner fee is subtracted from the amount. If useUnconfirmedTxns the
 // transaction might be funded with outputs that have not yet been confirmed.

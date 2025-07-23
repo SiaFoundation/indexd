@@ -8,7 +8,7 @@ require (
 	github.com/klauspost/reedsolomon v1.12.5
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.14.3
-	go.sia.tech/coreutils v0.16.6-0.20250722191200-ef391309979e
+	go.sia.tech/coreutils v0.16.6-0.20250723153653-0ce26cea9f6e
 	go.sia.tech/jape v0.14.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0

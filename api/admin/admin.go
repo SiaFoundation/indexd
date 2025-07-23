@@ -96,6 +96,7 @@ type (
 		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 		UnconfirmedEvents() ([]wallet.Event, error)
 		Events(offset, limit int) ([]wallet.Event, error)
+		Event(id types.Hash256) (wallet.Event, error)
 
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
@@ -179,10 +180,11 @@ func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, sy
 		"GET /txpool/recommendedfee": a.handleGETTxpoolRecommendedFee,
 
 		// wallet endpoints
-		"GET /wallet":         a.handleGETWallet,
-		"GET /wallet/events":  a.handleGETWalletEvents,
-		"GET /wallet/pending": a.handleGETWalletPending,
-		"POST /wallet/send":   a.handlePOSTWalletSend,
+		"GET /wallet":            a.handleGETWallet,
+		"GET /wallet/events":     a.handleGETWalletEvents,
+		"GET /wallet/events/:id": a.handleGETWalletEventsID,
+		"GET /wallet/pending":    a.handleGETWalletPending,
+		"POST /wallet/send":      a.handlePOSTWalletSend,
 	}
 
 	// debug endpoints
@@ -614,6 +616,20 @@ func (a *admin) handleGETWalletEvents(jc jape.Context) {
 	}
 
 	jc.Encode(events)
+}
+
+func (a *admin) handleGETWalletEventsID(jc jape.Context) {
+	var id types.Hash256
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	event, err := a.wallet.Event(id)
+	if !a.checkServerError(jc, "failed to get events", err) {
+		return
+	}
+
+	jc.Encode(event)
 }
 
 func (a *admin) handleGETWalletPending(jc jape.Context) {

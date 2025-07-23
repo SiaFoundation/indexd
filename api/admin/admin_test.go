@@ -505,6 +505,13 @@ func TestWalletAPI(t *testing.T) {
 		t.Fatalf("expected miner payout, %+v", events[0])
 	}
 
+	event, err := indexer.WalletEvent(context.Background(), events[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(events[0], event) {
+		t.Fatalf("expected %v, got %v", events[0], event)
+	}
+
 	// assert wallet is empty
 	res, err := indexer.Wallet(context.Background())
 	if err != nil {

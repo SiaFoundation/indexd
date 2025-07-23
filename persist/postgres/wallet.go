@@ -105,6 +105,17 @@ func (s *Store) UnspentSiacoinElements() (tip types.ChainIndex, sces []types.Sia
 	return
 }
 
+// WalletEvent returns an event with the given ID.
+func (s *Store) WalletEvent(id types.Hash256) (wallet.Event, error) {
+	var event wallet.Event
+	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		return tx.QueryRow(ctx, `SELECT chain_index, maturity_height, event_id, event_type, event_data FROM wallet_events WHERE id = $1`, sqlHash256(id)).Scan((*sqlChainIndex)(&event.Index), &event.MaturityHeight, (*sqlHash256)(&event.ID), &event.Type, sqlDecodeEvent(&event.Data))
+	}); err != nil {
+		return wallet.Event{}, err
+	}
+	return event, nil
+}
+
 // WalletEvents returns a paginated list of transactions ordered by maturity
 // height, descending. If no more transactions are available, (nil, nil) should
 // be returned.
