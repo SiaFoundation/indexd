@@ -75,6 +75,29 @@ func TestSlab(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, expected) {
 		t.Fatalf("expected slab %v, got %v", expected, got)
+	} else if expected.PinnedAt.IsZero() {
+		t.Fatal("expected slab to be pinned at a non-zero time")
+	}
+
+	// pin the first sector to a contract
+	hk := hosts[0]
+	fcid := types.FileContractID(hk)
+	if err := store.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(context.Background(), fcid, []types.Hash256{params.Sectors[0].Root}); err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch slab again
+	got, err = store.Slab(context.Background(), slabID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert it matches the expected slab with the pinned sector
+	expected.Sectors[0].ContractID = &fcid
+	if !reflect.DeepEqual(got, expected) {
+		t.Fatalf("expected slab %v, got %v", expected, got)
 	}
 }
 
