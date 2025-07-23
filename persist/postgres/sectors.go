@@ -471,42 +471,37 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]slabs.Slab, error) {
 	var results []slabs.Slab
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		rows, err := tx.Query(ctx, `
-			UPDATE slabs
-			SET last_repair_attempt = NOW()
-			WHERE id IN (
-				SELECT slabs.id
-				FROM slabs
-				INNER JOIN slab_sectors ON slabs.id = slab_sectors.slab_id
-				INNER JOIN sectors ON slab_sectors.sector_id = sectors.id
-				LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
-				LEFT JOIN contracts ON csm.contract_id = contracts.contract_id
-				WHERE
-					(
-						-- stored on bad contract
-						(sectors.contract_sectors_map_id IS NOT NULL AND contracts.good = FALSE) OR
-						-- not stored on any host
-						(sectors.host_id IS NULL)
-					)
-					AND (slabs.last_repair_attempt <= $1)
-				LIMIT $2
-			)
-			RETURNING digest
-		`, maxRepairAttempt, limit)
-		if err != nil {
-			return fmt.Errorf("failed to query unhealthy slabs: %w", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
+		for range limit {
 			var slab slabs.Slab
-			if err := rows.Scan((*sqlHash256)(&slab.ID)); err != nil {
-				return fmt.Errorf("failed to scan slab ID: %w", err)
+			err := tx.QueryRow(ctx, `UPDATE slabs
+				SET last_repair_attempt = NOW()
+				WHERE id = (
+					SELECT slabs.id
+					FROM slabs
+					INNER JOIN slab_sectors ON slabs.id = slab_sectors.slab_id
+					INNER JOIN sectors ON slab_sectors.sector_id = sectors.id
+					LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
+					LEFT JOIN contracts ON csm.contract_id = contracts.contract_id
+					WHERE
+						(
+							-- stored on bad contract
+							(sectors.contract_sectors_map_id IS NOT NULL AND contracts.good = FALSE) OR
+							-- not stored on any host
+							(sectors.host_id IS NULL)
+						)
+						AND (slabs.last_repair_attempt <= $1)
+					LIMIT 1
+				)
+				RETURNING digest
+		`, maxRepairAttempt).Scan((*sqlHash256)(&slab.ID))
+			if errors.Is(err, sql.ErrNoRows) {
+				break
+			} else if err != nil {
+				return fmt.Errorf("failed to query unhealthy slabs: %w", err)
 			}
-
 			results = append(results, slab)
 		}
-		return rows.Err()
+		return nil
 	})
 	return results, err
 }
