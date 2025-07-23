@@ -37,6 +37,7 @@ const (
 )
 
 var (
+	// MaintenanceSettings are the default maintenance settings used in testing.
 	MaintenanceSettings = contracts.MaintenanceSettings{
 		Enabled:         true,
 		Period:          144,
