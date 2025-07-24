@@ -80,7 +80,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	dialer := client.NewSiamuxDialer(c.cm, signer, store, log)
 	am := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithLogger(log.Named("accounts")))
 
-	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, dialer, hm, s, wm, contracts.WithLogger(log.Named("contracts")), contracts.WithMaintenanceFrequency(200*time.Millisecond))
+	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, dialer, hm, s, wm, contracts.WithLogger(log.Named("contracts")), contracts.WithMaintenanceFrequency(200*time.Millisecond), contracts.WithDisabledCIDRChecks())
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}

@@ -31,9 +31,10 @@ func (s *Store) ContractRevision(ctx context.Context, contractID types.FileContr
 // UpdateContractRevision updates the contract revision in the database.
 func (s *Store) UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision) error {
 	revision := contract.Revision
+	usedCollateral := contract.Revision.TotalCollateral.Sub(contract.Revision.MissedHostValue)
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		query := `UPDATE contracts SET raw_revision = $1, revision_number = $2, capacity = $3, size = $4, remaining_allowance = $5, used_collateral = $6 WHERE contract_id = $7`
-		res, err := tx.Exec(ctx, query, sqlFileContract(revision), revision.RevisionNumber, revision.Capacity, revision.Filesize, sqlCurrency(revision.RenterOutput.Value), sqlCurrency(revision.MissedHostValue), sqlHash256(contract.ID))
+		res, err := tx.Exec(ctx, query, sqlFileContract(revision), revision.RevisionNumber, revision.Capacity, revision.Filesize, sqlCurrency(revision.RenterOutput.Value), sqlCurrency(usedCollateral), sqlHash256(contract.ID))
 		if err != nil {
 			return fmt.Errorf("failed to update contract revision: %w", err)
 		} else if res.RowsAffected() != 1 {

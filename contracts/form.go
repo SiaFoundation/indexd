@@ -78,12 +78,22 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	// helpers for CIDR check
 	usedCidrs := make(map[string]types.PublicKey)
 	addHost := func(host hosts.Host) {
-		for _, cidr := range host.Networks {
-			usedCidrs[cidr.IP.String()] = host.PublicKey
+		if cm.disableCIDRChecks {
+			usedCidrs[host.PublicKey.String()] = host.PublicKey
+		} else {
+			for _, network := range host.Networks {
+				usedCidrs[network.IP.String()] = host.PublicKey
+			}
 		}
+
 		wanted--
 	}
 	hasCidrConflict := func(host hosts.Host) (types.PublicKey, bool) {
+		if cm.disableCIDRChecks {
+			hk, known := usedCidrs[host.PublicKey.String()]
+			return hk, known
+		}
+
 		for _, cidr := range host.Networks {
 			if hk, known := usedCidrs[cidr.IP.String()]; known {
 				return hk, true
