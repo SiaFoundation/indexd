@@ -112,7 +112,7 @@ func (s *Store) SectorsForIntegrityCheck(ctx context.Context, hostKey types.Publ
 
 // MarkFailingSectorsLost marks sectors as lost if they have failed the
 // integrity checks >= maxChecks times.
-func (s *Store) MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxChecks int) error {
+func (s *Store) MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxChecks uint) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		resp, err := tx.Exec(ctx, `
 			UPDATE sectors

@@ -11,12 +11,15 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/blake2b"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
+	"go.sia.tech/indexd/slabs"
 
 	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/contracts"
@@ -80,6 +83,11 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, dialer, hm, s, wm, contracts.WithLogger(log.Named("contracts")), contracts.WithMaintenanceFrequency(200*time.Millisecond))
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
+	}
+
+	slabs, err := slabs.NewManager(am, hm, store, dialer, alerts.NewManager(), deriveKey(walletKey, "migration"), deriveKey(walletKey, "integrity"))
+	if err != nil {
+		t.Fatalf("failed to create slabs manager: %v", err)
 	}
 
 	subscriber, err := subscriber.New(c.cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
@@ -166,6 +174,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 		if err := closeWithTimeout(am.Close); err != nil {
 			t.Errorf("failed to close account manager: %v", err)
 		}
+		if err := closeWithTimeout(slabs.Close); err != nil {
+			t.Errorf("failed to close slabs manager: %v", err)
+		}
 		if err := closeWithTimeout(subscriber.Close); err != nil {
 			t.Errorf("failed to close subscriber: %v", err)
 		}
@@ -237,6 +248,15 @@ func closeWithTimeout(closeFn func() error) error {
 	})
 
 	return closeFn()
+}
+
+func deriveKey(key types.PrivateKey, purpose string) types.PrivateKey {
+	seed := blake2b.Sum256(append(key[:], []byte(purpose)...))
+	pk := types.NewPrivateKeyFromSeed(seed[:])
+	for i := range seed {
+		seed[i] = 0
+	}
+	return pk
 }
 
 // shutdownWithTimeout is a wrapper around closeWithTimeout to handle shutdown

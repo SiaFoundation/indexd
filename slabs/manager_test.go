@@ -94,7 +94,7 @@ func (s *mockStore) Hosts(ctx context.Context, offset, limit int, queryOpts ...h
 	return hosts, nil
 }
 
-func (s *mockStore) HostsForIntegrityChecks(ctx context.Context, limit int) (result []types.PublicKey, err error) {
+func (s *mockStore) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.Time, limit int) (result []types.PublicKey, err error) {
 	return nil, nil
 }
 
@@ -207,6 +207,15 @@ func (s *mockStore) SectorsForIntegrityCheck(ctx context.Context, hostKey types.
 	return slices.Clone(s.sectorsForCheck), nil
 }
 
+func (s *mockStore) Slab(ctx context.Context, slabID SlabID) (Slab, error) {
+	for _, slabs := range s.pinnedSlabs {
+		if slab, ok := slabs[slabID]; ok {
+			return slab, nil
+		}
+	}
+	return Slab{}, ErrSlabNotFound
+}
+
 func (s *mockStore) Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error) {
 	var slabs []Slab
 	for _, slab := range s.pinnedSlabs[accountID] {
@@ -215,24 +224,24 @@ func (s *mockStore) Slabs(ctx context.Context, accountID proto.Account, slabIDs 
 	return slabs, nil
 }
 
-func (s *mockStore) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (Slab, error) {
+func (s *mockStore) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (SlabID, error) {
 	for acc := range s.accounts {
 		for _, slab := range s.pinnedSlabs[acc] {
 			for _, sector := range slab.Sectors {
 				if sector.ContractID == nil || sector.HostKey == nil {
-					return slab, nil
+					return slab.ID, nil
 				}
 				if sector.HostKey != nil {
 					hk := *sector.HostKey
 					contract, ok := s.contracts[hk]
 					if ok && !contract.Good {
-						return slab, nil
+						return slab.ID, nil
 					}
 				}
 			}
 		}
 	}
-	return Slab{}, ErrSlabNotFound
+	return SlabID{}, ErrSlabNotFound
 }
 
 type mockAccountManager struct {
