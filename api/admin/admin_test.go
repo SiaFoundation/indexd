@@ -28,6 +28,16 @@ func TestAccountsAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
 
+	existing, err := indexer.Accounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, acc := range existing {
+		if err := indexer.AccountsDelete(context.Background(), acc); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	var accs []types.PublicKey
 	for range 10 {
 		accs = append(accs, types.GeneratePrivateKey().PublicKey())
@@ -37,7 +47,7 @@ func TestAccountsAPI(t *testing.T) {
 		}
 	}
 
-	err := indexer.AccountsAdd(context.Background(), accs[len(accs)-1])
+	err = indexer.AccountsAdd(context.Background(), accs[len(accs)-1])
 	if err == nil || !strings.Contains(err.Error(), accounts.ErrExists.Error()) {
 		t.Fatal("expected ErrExists", err)
 	}
