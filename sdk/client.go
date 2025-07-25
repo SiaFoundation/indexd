@@ -14,7 +14,9 @@ import (
 	"github.com/klauspost/reedsolomon"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/app"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
@@ -38,6 +40,7 @@ type (
 		PinSlab(context.Context, slabs.SlabPinParams) (slabs.SlabID, error)
 		UnpinSlab(context.Context, slabs.SlabID) error
 
+		Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.Host, error)
 		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
 	}
 
@@ -45,7 +48,7 @@ type (
 	HostDialer interface {
 		// Hosts returns the public keys of all hosts that are available for
 		// upload or download.
-		Hosts() []types.PublicKey
+		Hosts(context.Context) ([]types.PublicKey, error)
 
 		// WriteSector writes a sector to the host identified by the public key.
 		WriteSector(context.Context, types.PublicKey, *[proto4.SectorSize]byte) (types.Hash256, error)
@@ -109,7 +112,10 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 	}
 
 	var hostsMu sync.Mutex
-	hosts := shuffle(s.dialer.Hosts())
+	hosts, err := s.dialer.Hosts(ctx)
+	if err != nil {
+		return slabs.SlabPinParams{}, fmt.Errorf("failed to get usable hosts: %w", err)
+	}
 	if len(hosts) < len(shards) {
 		return slabs.SlabPinParams{}, fmt.Errorf("not enough hosts available: %d, required: %d", len(hosts), len(shards))
 	}

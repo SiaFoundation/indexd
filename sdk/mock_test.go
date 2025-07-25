@@ -10,6 +10,8 @@ import (
 
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 )
 
@@ -24,8 +26,8 @@ type mockHostDialer struct {
 }
 
 // Hosts implements the [HostDialer] interface.
-func (m *mockHostDialer) Hosts() []types.PublicKey {
-	return slices.Collect(maps.Keys(m.hosts))
+func (m *mockHostDialer) Hosts(context.Context) ([]types.PublicKey, error) {
+	return slices.Collect(maps.Keys(m.hosts)), nil
 }
 
 func (m *mockHostDialer) delay(ctx context.Context, hostKey types.PublicKey) error {
@@ -166,6 +168,10 @@ func (mc *mockAppClient) Slab(_ context.Context, id slabs.SlabID) (slabs.PinnedS
 		return slabs.PinnedSlab{}, errors.New("slab not found")
 	}
 	return slab, nil
+}
+
+func (mc *mockAppClient) Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.Host, error) {
+	return nil, nil
 }
 
 func newMockAppClient() *mockAppClient {
