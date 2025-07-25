@@ -39,15 +39,6 @@ func NewSyncer(t testing.TB, genesis types.BlockID, cm *chain.Manager) *Syncer {
 	return &Syncer{s: s}
 }
 
-// BroadcastTransactionSet broadcasts a transaction set to all peers.
-func (s *Syncer) BroadcastTransactionSet(txns []types.Transaction) error {
-	err := s.s.BroadcastTransactionSet(txns)
-	if err != nil && err != syncer.ErrNoPeers {
-		return err
-	}
-	return nil
-}
-
 // BroadcastV2TransactionSet broadcasts a v2 transaction set to all peers.
 func (s *Syncer) BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error {
 	err := s.s.BroadcastV2TransactionSet(index, txns)

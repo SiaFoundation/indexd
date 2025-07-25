@@ -15,7 +15,10 @@ import (
 	"lukechampine.com/frand"
 )
 
-var errNotEnoughHosts = errors.New("not enough hosts")
+var (
+	errNotEnoughHosts = errors.New("not enough hosts")
+	errRootMismatch   = errors.New("sector root of shard doesn't match expected root")
+)
 
 type (
 	// Shard represents a sector present on a host.
@@ -68,12 +71,16 @@ func (uc *uploadCandidates) used(h hosts.Host) {
 // migrated, an error is returned but any finished shards will still be returned
 // and should be tracked in the database. The given shards must not be nil and
 // the given hosts must all be good.
-func (m *SlabManager) uploadShards(ctx context.Context, shards [][]byte, goodHosts []hosts.Host, logger *zap.Logger) ([]Shard, error) {
+func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, goodHosts []hosts.Host, logger *zap.Logger) ([]Shard, error) {
 	candidates := newUploadCandidates(goodHosts)
 	uploaded := make([]Shard, 0, len(shards))
 
+	if len(slab.Sectors) != len(shards) {
+		panic(fmt.Sprintf("slab %s has %d sectors but %d shards", slab.ID, len(slab.Sectors), len(shards))) // developer error
+	}
+
 	var uploadErr error
-	for _, shard := range shards {
+	for i, shard := range shards {
 		if shard == nil {
 			continue
 		}
@@ -94,6 +101,11 @@ func (m *SlabManager) uploadShards(ctx context.Context, shards [][]byte, goodHos
 		if err != nil {
 			logger.Debug("failed to upload shard", zap.Stringer("hostKey", host.PublicKey), zap.Error(err))
 			goto nextCandidate
+		}
+
+		if root != slab.Sectors[i].Root {
+			uploadErr = fmt.Errorf("uploaded %d out of %d shards: %w", len(uploaded), len(shards), errRootMismatch)
+			break
 		}
 
 		err = m.am.DebitServiceAccount(ctx, host.PublicKey, m.migrationAccount, usage.RenterCost())

@@ -94,6 +94,14 @@ CREATE TABLE syncer_bans (
 CREATE INDEX syncer_bans_expiration_idx ON syncer_bans (expiration);
 CREATE INDEX syncer_bans_net_cidr_idx ON syncer_bans USING gist (net_cidr inet_ops); -- fast subnet matches
 
+CREATE TABLE wallet_broadcasted_sets (
+    id SERIAL PRIMARY KEY,
+    chain_index BYTEA NOT NULL CHECK (LENGTH(chain_index) = 8+32),
+    set_id BYTEA UNIQUE NOT NULL CHECK (LENGTH(set_id) = 32),
+    transactions BYTEA NOT NULL,
+    broadcasted_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE wallet_events (
     id SERIAL PRIMARY KEY,
     chain_index BYTEA NOT NULL CHECK (LENGTH(chain_index) = 8+32),
@@ -114,13 +122,6 @@ CREATE TABLE wallet_siacoin_elements (
     leaf_index INTEGER NOT NULL,
     maturity_height INTEGER NOT NULL
 );
-
-CREATE TABLE wallet_locked_utxos (
-    id SERIAL PRIMARY KEY,
-    output_id BYTEA UNIQUE NOT NULL CHECK (LENGTH(output_id) = 32),
-    unlock_at TIMESTAMP WITH TIME ZONE NOT NULL
-);
-CREATE INDEX wallet_locked_utxos_unlock_at_idx ON wallet_locked_utxos(unlock_at);
 
 CREATE TABLE global_settings (
     id INTEGER PRIMARY KEY NOT NULL DEFAULT 0 CHECK (id = 0), -- enforce a single row

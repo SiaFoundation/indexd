@@ -127,7 +127,7 @@ type (
 		Address() types.Address
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 		RecommendedFee() types.Currency
-		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction) error
+		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 	}
 )

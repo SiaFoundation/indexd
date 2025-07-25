@@ -19,8 +19,8 @@ func (s *Store) ResetChainState(ctx context.Context) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		if _, err := tx.Exec(ctx, `TRUNCATE wallet_siacoin_elements`); err != nil {
 			return fmt.Errorf("failed to clear wallet_siacoin_elements: %w", err)
-		} else if _, err := tx.Exec(ctx, `TRUNCATE wallet_locked_utxos`); err != nil {
-			return fmt.Errorf("failed to clear wallet_locked_utxos: %w", err)
+		} else if _, err := tx.Exec(ctx, `TRUNCATE wallet_broadcasted_sets`); err != nil {
+			return fmt.Errorf("failed to clear wallet_broadcasted_sets: %w", err)
 		} else if _, err := tx.Exec(ctx, `TRUNCATE wallet_events`); err != nil {
 			return fmt.Errorf("failed to clear wallet_events: %w", err)
 		} else if res, err := tx.Exec(ctx, `UPDATE global_settings SET scanned_height = 0, scanned_block_id = '\x0000000000000000000000000000000000000000000000000000000000000000'`); err != nil {

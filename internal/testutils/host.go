@@ -148,7 +148,7 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 	}
 	c.addSyncFn(syncFn)
 
-	rs := rhp4.NewServer(pk, c.cm, s, contractor, w, sr, ss, rhp4.WithPriceTableValidity(30*time.Minute))
+	rs := rhp4.NewServer(pk, c.cm, contractor, w, sr, ss, rhp4.WithPriceTableValidity(30*time.Minute))
 	rhp4Listener, err := net.Listen("tcp", ":0")
 	if err != nil {
 		t.Fatal(err)

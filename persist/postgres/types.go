@@ -223,6 +223,29 @@ func (c *sqlFileContract) Scan(src any) error {
 	}
 }
 
+type sqlTransactions []types.V2Transaction
+
+func (ts sqlTransactions) Value() (driver.Value, error) {
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	types.EncodeSlice(e, ts)
+	if err := e.Flush(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func (ts *sqlTransactions) Scan(src any) error {
+	switch src := src.(type) {
+	case []byte:
+		dec := types.NewBufDecoder(src)
+		types.DecodeSlice(dec, (*[]types.V2Transaction)(ts))
+		return dec.Err()
+	default:
+		return fmt.Errorf("cannot scan %T to V2Transactions", src)
+	}
+}
+
 type sqlHash256 types.Hash256
 
 func (h *sqlHash256) Scan(src any) error {

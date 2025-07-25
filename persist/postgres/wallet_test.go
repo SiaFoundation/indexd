@@ -2,137 +2,18 @@ package postgres
 
 import (
 	"context"
+	"errors"
+	"math"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
-
-func TestWalletLockUnlock(t *testing.T) {
-	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
-
-	expectedLocked := make(map[types.SiacoinOutputID]bool)
-	lockedIDs := make([]types.SiacoinOutputID, 10)
-	for i := range lockedIDs {
-		lockedIDs[i] = frand.Entropy256()
-		expectedLocked[lockedIDs[i]] = true
-	}
-	if err := store.LockUTXOs(lockedIDs, time.Now().Add(time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	ids, err := store.LockedUTXOs(time.Now())
-	if err != nil {
-		t.Fatal(err)
-	} else if len(ids) != len(lockedIDs) {
-		t.Fatalf("expected %d locked outputs, got %d", len(lockedIDs), len(ids))
-	}
-	for _, id := range ids {
-		if _, ok := expectedLocked[id]; !ok {
-			t.Fatalf("unexpected locked output %s", id)
-		}
-	}
-
-	if err := store.ReleaseUTXOs(lockedIDs); err != nil {
-		t.Fatal(err)
-	}
-
-	ids, err = store.LockedUTXOs(time.Now())
-	if err != nil {
-		t.Fatal(err)
-	} else if len(ids) != 0 {
-		t.Fatalf("expected 0 locked outputs, got %d", len(ids))
-	}
-
-	// lock the ids, but set the unlock time to the past
-	if err := store.LockUTXOs(lockedIDs, time.Now().Add(-time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	ids, err = store.LockedUTXOs(time.Now())
-	if err != nil {
-		t.Fatal(err)
-	} else if len(ids) != 0 {
-		t.Fatalf("expected 0 locked outputs, got %d", len(ids))
-	}
-
-	// assert the outputs were cleaned up
-	var count int
-	err = store.pool.QueryRow(context.Background(), `SELECT COUNT(*) FROM wallet_locked_utxos`).Scan(&count)
-	if err != nil {
-		t.Fatal(err)
-	} else if count != 0 {
-		t.Fatalf("expected 0 locked outputs, got %d", count)
-	}
-}
-
-func BenchmarkWalletLockUnlock(b *testing.B) {
-	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
-
-	const batchSize = 1000
-
-	randomUTXOs := func() []types.SiacoinOutputID {
-		utxos := make([]types.SiacoinOutputID, batchSize)
-		for i := range utxos {
-			utxos[i] = frand.Entropy256()
-		}
-		return utxos
-	}
-
-	insertUTXOs := func() (utxos []types.SiacoinOutputID) {
-		b.Helper()
-		batch := &pgx.Batch{}
-		for _, utxo := range randomUTXOs() {
-			unlock := time.Now().Add(time.Duration(frand.Uint64n(3600)) * time.Second)
-			batch.Queue(`INSERT INTO wallet_locked_utxos (output_id, unlock_at) VALUES ($1, $2)`, sqlHash256(utxo), unlock)
-			utxos = append(utxos, utxo)
-		}
-		if err := store.pool.SendBatch(context.Background(), batch).Close(); err != nil {
-			b.Fatal(err)
-		}
-		return
-	}
-
-	b.Run("LockedUTXOs", func(b *testing.B) {
-		for b.Loop() {
-			if locked, err := store.LockedUTXOs(time.Now().Add(time.Duration(frand.Uint64n(3600)) * time.Second)); err != nil {
-				b.Fatal(err)
-			} else if len(locked) < batchSize {
-				b.StopTimer()
-				insertUTXOs()
-				b.StartTimer()
-			}
-		}
-	})
-
-	b.Run("LockUTXOs", func(b *testing.B) {
-		for b.Loop() {
-			b.StopTimer()
-			utxos := randomUTXOs()
-			unlock := time.Now().Add(time.Duration(frand.Uint64n(3600)) * time.Second)
-			b.StartTimer()
-
-			if err := store.LockUTXOs(utxos, unlock); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-
-	b.Run("ReleaseUTXOs", func(b *testing.B) {
-		for b.Loop() {
-			b.StopTimer()
-			outputIDs := insertUTXOs()
-			b.StartTimer()
-
-			if err := store.ReleaseUTXOs(outputIDs); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-}
 
 func TestSingleAddressWalletStoreTip(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
@@ -148,9 +29,11 @@ func TestSingleAddressWalletStoreTip(t *testing.T) {
 		t.Fatal("unexpected tip", ci)
 	}
 
-	update := types.ChainIndex{Height: 1, ID: types.BlockID{1}}
+	update := newTestChainIndex()
 	if _, err := store.pool.Exec(context.Background(), `UPDATE global_settings SET scanned_height = $1, scanned_block_id = $2`, update.Height, sqlHash256(update.ID)); err != nil {
 		t.Fatal(err)
+	} else if update == (types.ChainIndex{}) {
+		t.Fatal("unexpected tip", ci)
 	}
 
 	ci, err = store.Tip()
@@ -164,14 +47,18 @@ func TestSingleAddressWalletStoreTip(t *testing.T) {
 func TestSingleAddressWalletStoreUnspentSiacoinElements(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
+	ci := newTestChainIndex()
+	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error { return tx.UpdateLastScannedIndex(context.Background(), ci) })
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if tip, utxos, err := store.UnspentSiacoinElements(); err != nil {
 		t.Fatal(err)
 	} else if len(utxos) != 0 {
 		t.Fatal("unexpected number of utxos", len(utxos))
-	} else if expectedTip, err := store.Tip(); err != nil {
-		t.Fatal(err)
-	} else if tip != expectedTip {
-		t.Fatal("unexpected tip", tip, expectedTip)
+	} else if tip != ci {
+		t.Fatal("unexpected tip", tip, ci)
 	}
 
 	update := newTestSiacoinElement()
@@ -246,17 +133,71 @@ func TestSingleAddressWalletStoreWalletEventsAndWalletEventCount(t *testing.T) {
 	}
 }
 
+func TestSingleAddressWalletStoreBroadcastedSets(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// assert there are no sets
+	if sets, err := store.BroadcastedSets(); err != nil {
+		t.Fatal(err)
+	} else if len(sets) != 0 {
+		t.Fatal("unexpected number of broadcasted sets", len(sets))
+	}
+
+	// add a set
+	set := wallet.BroadcastedSet{
+		Basis:         types.ChainIndex{Height: 1, ID: types.BlockID{1}},
+		Transactions:  []types.V2Transaction{{MinerFee: types.Siacoins(1)}},
+		BroadcastedAt: time.Now().Round(time.Second),
+	}
+	if err := store.AddBroadcastedSet(set); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert adding the same set is a no-op
+	if err := store.AddBroadcastedSet(set); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the set was added
+	if sets, err := store.BroadcastedSets(); err != nil {
+		t.Fatal(err)
+	} else if len(sets) != 1 {
+		t.Fatal("unexpected number of broadcasted sets", len(sets))
+	} else if !reflect.DeepEqual(sets[0], set) {
+		t.Fatal("unexpected broadcasted set", sets[0], set)
+	}
+
+	// assert the set can be removed
+	if err := store.RemoveBroadcastedSet(set); err != nil {
+		t.Fatal(err)
+	} else if sets, err := store.BroadcastedSets(); err != nil {
+		t.Fatal(err)
+	} else if len(sets) != 0 {
+		t.Fatal("unexpected number of broadcasted sets", len(sets))
+	}
+
+	// assert ErrBroadcastedSetNotFound is returned when trying to remove a
+	// non-existing set
+	err := store.RemoveBroadcastedSet(set)
+	if !errors.Is(err, ErrBroadcastedSetNotFound) {
+		t.Fatal("unexpected", err)
+	}
+}
+
 func newTestEvent() wallet.Event {
 	return wallet.Event{
-		ID: types.Hash256{1},
-		Index: types.ChainIndex{
-			Height: 2,
-			ID:     types.BlockID{3},
-		},
+		ID:             types.Hash256{1},
+		Index:          newTestChainIndex(),
 		Type:           wallet.EventTypeSiafundClaim,
 		Data:           wallet.EventPayout{SiacoinElement: newTestSiacoinElement()},
 		MaturityHeight: 4,
 	}
+}
+
+func newTestChainIndex() (ci types.ChainIndex) {
+	ci.Height = frand.Uint64n(math.MaxInt64)
+	frand.Read(ci.ID[:])
+	return ci
 }
 
 func newTestSiacoinElement() types.SiacoinElement {

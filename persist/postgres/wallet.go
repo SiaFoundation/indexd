@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 )
@@ -15,9 +14,63 @@ var (
 	// ErrSiacoinElementNotFound is returned when a siacoin element is not
 	// found in the database.
 	ErrSiacoinElementNotFound = errors.New("not found")
+
+	// ErrBroadcastedSetNotFound is returned when a broadcasted set is not found
+	// in the database.
+	ErrBroadcastedSetNotFound = errors.New("broadcasted set not found")
 )
 
 var _ wallet.SingleAddressStore = (*Store)(nil)
+
+// AddBroadcastedSet adds a set of broadcasted transactions. The wallet will
+// periodically rebroadcast the transactions in this set until all transactions
+// are gone from the transaction pool or one week has passed.
+func (s *Store) AddBroadcastedSet(set wallet.BroadcastedSet) error {
+	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+			INSERT INTO wallet_broadcasted_sets (chain_index, set_id, transactions, broadcasted_at)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (set_id) DO NOTHING`,
+			sqlChainIndex(set.Basis), sqlHash256(set.ID()), sqlTransactions(set.Transactions), set.BroadcastedAt)
+		return err
+	})
+}
+
+// BroadcastedSets returns recently broadcasted sets.
+func (s *Store) BroadcastedSets() (sets []wallet.BroadcastedSet, err error) {
+	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `SELECT chain_index, transactions, broadcasted_at FROM wallet_broadcasted_sets ORDER BY broadcasted_at DESC`)
+		if err != nil {
+			return fmt.Errorf("failed to query broadcasted sets: %w", err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var set wallet.BroadcastedSet
+			if err := rows.Scan((*sqlChainIndex)(&set.Basis), (*sqlTransactions)(&set.Transactions), &set.BroadcastedAt); err != nil {
+				return fmt.Errorf("failed to scan broadcasted set: %w", err)
+			}
+			sets = append(sets, set)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to iterate broadcasted sets: %w", err)
+		}
+		return nil
+	})
+	return
+}
+
+// RemoveBroadcastedSet removes a set so it's no longer rebroadcasted.
+func (s *Store) RemoveBroadcastedSet(set wallet.BroadcastedSet) error {
+	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		res, err := tx.Exec(ctx, `DELETE FROM wallet_broadcasted_sets WHERE set_id = $1`, sqlHash256(set.ID()))
+		if err != nil {
+			return fmt.Errorf("failed to remove broadcasted set: %w", err)
+		} else if res.RowsAffected() == 0 {
+			return ErrBroadcastedSetNotFound
+		}
+		return nil
+	})
+}
 
 // Tip returns the last scanned index.
 func (s *Store) Tip() (ci types.ChainIndex, err error) {
@@ -28,7 +81,6 @@ func (s *Store) Tip() (ci types.ChainIndex, err error) {
 // including immature outputs.
 func (s *Store) UnspentSiacoinElements() (tip types.ChainIndex, sces []types.SiacoinElement, err error) {
 	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		var tip types.ChainIndex
 		err := tx.QueryRow(ctx, `SELECT scanned_height, scanned_block_id FROM global_settings`).Scan(&tip.Height, (*sqlHash256)(&tip.ID))
 		if err != nil {
 			return fmt.Errorf("failed to query last scanned index: %w", err)
@@ -221,64 +273,6 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 		return fmt.Errorf("failed to delete events: %w", err)
 	}
 	return nil
-}
-
-// LockUTXOs locks the specified siacoin outputs until the specified time.
-func (s *Store) LockUTXOs(scois []types.SiacoinOutputID, until time.Time) error {
-	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		batch := &pgx.Batch{}
-		for _, scoi := range scois {
-			batch.Queue(`INSERT INTO wallet_locked_utxos (output_id, unlock_at) VALUES ($1, $2) ON CONFLICT (output_id) DO UPDATE SET unlock_at=EXCLUDED.unlock_at`, sqlHash256(scoi), until)
-		}
-		batch.Queue(`DELETE FROM wallet_locked_utxos WHERE unlock_at < NOW()`)
-
-		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
-			return fmt.Errorf("failed to lock utxos: %w", err)
-		}
-		return nil
-	})
-}
-
-// LockedUTXOs returns the list of locked siacoin outputs at the specified time.
-func (s *Store) LockedUTXOs(threshold time.Time) (locked []types.SiacoinOutputID, err error) {
-	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		rows, err := tx.Query(ctx, `SELECT output_id FROM wallet_locked_utxos WHERE unlock_at > $1`, threshold)
-		if err != nil {
-			return fmt.Errorf("failed to query locked UTXOs: %w", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var id sqlHash256
-			if err := rows.Scan(&id); err != nil {
-				return fmt.Errorf("failed to scan locked UTXO: %w", err)
-			}
-			locked = append(locked, types.SiacoinOutputID(id))
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("failed to iterate locked UTXOs: %w", err)
-		}
-		return nil
-	})
-	return
-}
-
-// ReleaseUTXOs releases the specified siacoin outputs, making them available
-// for spending.
-func (s *Store) ReleaseUTXOs(scois []types.SiacoinOutputID) error {
-	if len(scois) == 0 {
-		return nil // nothing to release
-	}
-
-	var args []any
-	for _, scoi := range scois {
-		args = append(args, sqlHash256(scoi))
-	}
-
-	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `DELETE FROM wallet_locked_utxos WHERE output_id = ANY($1) OR unlock_at < NOW()`, args)
-		return err
-	})
 }
 
 func validateOffsetLimit(offset, limit int) error {
