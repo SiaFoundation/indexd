@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -18,6 +19,8 @@ import (
 var _ HostDialer = (*Dialer)(nil)
 
 type Dialer struct {
+	mu sync.Mutex
+
 	c      AppClient
 	appKey types.PrivateKey
 
@@ -38,6 +41,9 @@ func newDialer(c AppClient, appKey types.PrivateKey) *Dialer {
 // Hosts returns the public keys of all hosts that are available for
 // upload or download.
 func (d *Dialer) Hosts(ctx context.Context) ([]types.PublicKey, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	clear(d.hosts)
 	offset, limit := 0, 100
 	var pks []types.PublicKey
@@ -92,6 +98,9 @@ func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey, reuse bo
 }
 
 func (d *Dialer) settings(ctx context.Context, hostKey types.PublicKey) (rhp.TransportClient, proto.HostPrices, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
 	// reuse connection if we can
 	tc, err := d.dialHost(ctx, hostKey, true)
 	if err != nil {
