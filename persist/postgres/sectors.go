@@ -468,11 +468,11 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 //
 // NOTE: For the sake of scalability, we don't prioritize any slabs and instead
 // simply fetch the first ones that we can get.
-func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]slabs.Slab, error) {
-	var results []slabs.Slab
+func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]slabs.SlabID, error) {
+	var results []slabs.SlabID
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		for range limit {
-			var slab slabs.Slab
+			var slabID slabs.SlabID
 			err := tx.QueryRow(ctx, `UPDATE slabs
 				SET last_repair_attempt = NOW()
 				WHERE id = (
@@ -493,13 +493,13 @@ func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, 
 					LIMIT 1
 				)
 				RETURNING digest
-		`, maxRepairAttempt).Scan((*sqlHash256)(&slab.ID))
+		`, maxRepairAttempt).Scan((*sqlHash256)(&slabID))
 			if errors.Is(err, sql.ErrNoRows) {
 				break
 			} else if err != nil {
 				return fmt.Errorf("failed to query unhealthy slabs: %w", err)
 			}
-			results = append(results, slab)
+			results = append(results, slabID)
 		}
 		return nil
 	})
