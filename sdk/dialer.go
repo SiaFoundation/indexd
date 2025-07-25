@@ -19,6 +19,7 @@ import (
 
 var _ HostDialer = (*Dialer)(nil)
 
+// Dialer implements the HostDialer interface.
 type Dialer struct {
 	mu sync.Mutex
 
@@ -30,7 +31,8 @@ type Dialer struct {
 	cachedSettings map[types.PublicKey]proto.HostSettings
 }
 
-func newDialer(c AppClient, appKey types.PrivateKey) *Dialer {
+// NewDialer returns a new Dialer.
+func NewDialer(c AppClient, appKey types.PrivateKey) *Dialer {
 	return &Dialer{
 		c:      c,
 		appKey: appKey,

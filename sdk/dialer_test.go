@@ -26,7 +26,7 @@ func TestHostDialer(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dialer := newDialer(app, a1)
+	dialer := NewDialer(app, a1)
 	time.Sleep(3 * time.Second)
 
 	hks, err := dialer.Hosts(context.Background())
