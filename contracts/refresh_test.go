@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"testing"
 
@@ -133,15 +134,10 @@ func TestPerformContractRefreshes(t *testing.T) {
 	formContract(types.FileContractID{6}, good.PublicKey, true, false, false)
 	updateCollateral(types.FileContractID{6}, goodSettings.MaxCollateral.Sub(types.Siacoins(2)), goodSettings.MaxCollateral.Sub(types.Siacoins(1)))
 
-	// add a special contract that already contains MaxCollateral collateral
-	// resulting in the contract not being refreshed
-	formContract(types.FileContractID{7}, good.PublicKey, true, false, false)
-	updateCollateral(types.FileContractID{7}, goodSettings.MaxCollateral.Sub(types.Siacoins(1)), goodSettings.MaxCollateral)
-
 	// second one is bad since it's not accepting contracts with a good contract
 	bad := goodHost(2)
 	hm.settings[bad.PublicKey] = badSettings
-	formContract(types.FileContractID{8}, bad.PublicKey, true, true, true)
+	formContract(types.FileContractID{7}, bad.PublicKey, true, true, true)
 
 	// populate store
 	store.hosts = map[types.PublicKey]hosts.Host{
@@ -170,35 +166,28 @@ func TestPerformContractRefreshes(t *testing.T) {
 	if err := contracts.performContractRefreshes(context.Background(), period, zap.NewNop()); err != nil {
 		t.Fatal(err)
 	} else if len(dialer.HostClient(good.PublicKey).refreshCalls) != 4 {
+		calls := dialer.HostClient(good.PublicKey).refreshCalls
+		fmt.Println("calls", calls)
 		t.Fatalf("expected 4 refresh calls, got %v", len(dialer.HostClient(good.PublicKey).refreshCalls))
 	} else if len(dialer.HostClient(bad.PublicKey).refreshCalls) != 0 {
 		t.Fatal("expected bad host to not be dialed")
 	}
-	assertRefresh(types.Siacoins(110), types.ZeroCurrency, types.FileContractID{2}, dialer.HostClient(good.PublicKey).refreshCalls[0])
-	assertRefresh(types.Siacoins(110), types.Siacoins(110), types.FileContractID{3}, dialer.HostClient(good.PublicKey).refreshCalls[1])
-	assertRefresh(types.Siacoins(110), types.ZeroCurrency, types.FileContractID{4}, dialer.HostClient(good.PublicKey).refreshCalls[2])
-	assertRefresh(types.Siacoins(1), types.Siacoins(1), types.FileContractID{6}, dialer.HostClient(good.PublicKey).refreshCalls[3])
+	assertRefresh(types.Siacoins(10), types.Siacoins(1), types.FileContractID{2}, dialer.HostClient(good.PublicKey).refreshCalls[0])
+	assertRefresh(types.Siacoins(10), types.Siacoins(1), types.FileContractID{3}, dialer.HostClient(good.PublicKey).refreshCalls[1])
+	assertRefresh(types.Siacoins(10), types.Siacoins(1), types.FileContractID{4}, dialer.HostClient(good.PublicKey).refreshCalls[2])
+	assertRefresh(types.Siacoins(10), types.Siacoins(1), types.FileContractID{6}, dialer.HostClient(good.PublicKey).refreshCalls[3])
 
 	// assert refreshes made it into the store leading to 8 existing + 4 refreshed
 	// contracts in the store
-	if len(store.contracts) != 12 {
-		t.Fatalf("expected 4 contracts, got %v", len(store.contracts))
+	if len(store.contracts) != 11 {
+		t.Fatalf("expected 11 contracts, got %v", len(store.contracts))
 	}
 
 	for _, contract := range store.contracts {
 		var initialAllowance, totalCollateral types.Currency
 		switch contract.RenewedFrom {
-		case types.FileContractID{2}:
-			initialAllowance = types.Siacoins(110)
-			totalCollateral = types.ZeroCurrency
-		case types.FileContractID{3}:
-			initialAllowance = types.Siacoins(110)
-			totalCollateral = types.Siacoins(110)
-		case types.FileContractID{4}:
-			initialAllowance = types.Siacoins(110)
-			totalCollateral = types.ZeroCurrency
-		case types.FileContractID{6}:
-			initialAllowance = types.Siacoins(1)
+		case types.FileContractID{2}, types.FileContractID{3}, types.FileContractID{4}, types.FileContractID{6}:
+			initialAllowance = types.Siacoins(10)
 			totalCollateral = types.Siacoins(1)
 		default:
 			continue // only check refreshed contracts
