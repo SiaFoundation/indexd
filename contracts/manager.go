@@ -107,6 +107,7 @@ type (
 		PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error
 		PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
+		PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpiry uint64) error
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
 		ScheduleContractsForPruning(ctx context.Context) error
 		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
@@ -180,13 +181,14 @@ type (
 		shuffle func(int, func(i, j int))
 		tg      *threadgroup.ThreadGroup
 
-		contractRejectBuffer           time.Duration
-		expiredContractBroadcastBuffer uint64
-		expiredContractPruneBuffer     uint64
-		maintenanceFrequency           time.Duration
-		pruneIntervalSuccess           time.Duration
-		pruneIntervalFailure           time.Duration
-		revisionBroadcastInterval      time.Duration
+		contractRejectBuffer              time.Duration
+		expiredContractBroadcastBuffer    uint64
+		expiredContractPruneBuffer        uint64
+		expiredContractSectorsPruneBuffer uint64
+		maintenanceFrequency              time.Duration
+		pruneIntervalSuccess              time.Duration
+		pruneIntervalFailure              time.Duration
+		revisionBroadcastInterval         time.Duration
 	}
 )
 
@@ -257,13 +259,14 @@ func newContractManager(renterKey types.PublicKey, accountManager AccountManager
 		shuffle: frand.Shuffle,
 		tg:      threadgroup.New(),
 
-		contractRejectBuffer:           6 * time.Hour, // 6 hours after formation
-		expiredContractBroadcastBuffer: 144,           // 144 block after expiration
-		expiredContractPruneBuffer:     144,           // 144 blocks after broadcast
-		maintenanceFrequency:           10 * time.Minute,
-		pruneIntervalSuccess:           24 * time.Hour,     // 1 day
-		pruneIntervalFailure:           3 * time.Hour,      // 3 hours
-		revisionBroadcastInterval:      7 * 24 * time.Hour, // 1 week,
+		contractRejectBuffer:              6 * time.Hour, // 6 hours after formation
+		expiredContractBroadcastBuffer:    144,           // 144 block after expiration
+		expiredContractPruneBuffer:        144,           // 144 blocks after broadcast
+		expiredContractSectorsPruneBuffer: 36,            // 36 blocks (~6 hours) after expiration
+		maintenanceFrequency:              10 * time.Minute,
+		pruneIntervalSuccess:              24 * time.Hour,     // 1 day
+		pruneIntervalFailure:              3 * time.Hour,      // 3 hours
+		revisionBroadcastInterval:         7 * 24 * time.Hour, // 1 week,
 	}
 	for _, opt := range opts {
 		opt(cm)

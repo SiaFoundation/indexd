@@ -30,14 +30,15 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 }
 
 type storeMock struct {
-	contracts   []Contract
-	revisions   []rhp.ContractRevision
-	toBroadcast []types.V2FileContractElement
-	pruneCalls  int
-	rejectCalls int
-	settings    MaintenanceSettings
-	hosts       map[types.PublicKey]hosts.Host
-	sectors     map[types.PublicKey][]sector
+	contracts                 []Contract
+	revisions                 []rhp.ContractRevision
+	toBroadcast               []types.V2FileContractElement
+	pruneCalls                int
+	pruneContractSectorsCalls int
+	rejectCalls               int
+	settings                  MaintenanceSettings
+	hosts                     map[types.PublicKey]hosts.Host
+	sectors                   map[types.PublicKey][]sector
 }
 
 type sector struct {
@@ -288,6 +289,14 @@ func (s *storeMock) PruneExpiredContractElements(ctx context.Context, maxBlocksS
 		panic("invalid maxBlocksSinceExpiry")
 	}
 	s.pruneCalls++
+	return nil
+}
+
+func (s *storeMock) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpiry uint64) error {
+	if maxBlocksSinceExpiry == 0 {
+		panic("invalid maxBlocksSinceExpiry")
+	}
+	s.pruneContractSectorsCalls++
 	return nil
 }
 
@@ -624,7 +633,7 @@ func TestProcessActions(t *testing.T) {
 	// broadcasted transactions in the mocked syncer, the number of resolutions
 	// in the latest broadcasted transactions and the contract elements in the
 	// store.
-	assert := func(poolTxns, broadcastedTxns, resolutions, pruneCalls, rejectCalls int) {
+	assert := func(poolTxns, broadcastedTxns, resolutions, pruneCalls, pruneContractSectorsCalls, rejectCalls int) {
 		t.Helper()
 		if len(cmMock.V2PoolTransactions()) != poolTxns {
 			t.Fatalf("expected %v contract in tpool, got %v", poolTxns, len(cmMock.tpool))
@@ -634,6 +643,8 @@ func TestProcessActions(t *testing.T) {
 			t.Fatalf("expected %v contract resolution in broadcast, got %v", resolutions, len(sets[0].FileContracts))
 		} else if store.pruneCalls != pruneCalls {
 			t.Fatalf("expected %v calls to PruneExpiredContractElements, got %v", pruneCalls, store.pruneCalls)
+		} else if store.pruneContractSectorsCalls != pruneContractSectorsCalls {
+			t.Fatalf("expected %v calls to PruneExpiredContractElements, got %v", pruneContractSectorsCalls, store.pruneContractSectorsCalls)
 		} else if store.rejectCalls != rejectCalls {
 			t.Fatalf("expected %v calls to RejectPendingContracts, got %v", rejectCalls, store.rejectCalls)
 		}
@@ -643,12 +654,12 @@ func TestProcessActions(t *testing.T) {
 	if err := contracts.ProcessActions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assert(0, 0, 0, 1, 1)
+	assert(0, 0, 0, 1, 1, 1)
 
 	// broadcast with 1 contract to broadcast
 	store.toBroadcast = []types.V2FileContractElement{contract}
 	if err := contracts.ProcessActions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assert(1, 1, 1, 2, 2)
+	assert(1, 1, 1, 2, 2, 2)
 }

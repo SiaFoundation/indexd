@@ -143,13 +143,13 @@ func (s *Store) Contracts(ctx context.Context, offset, limit int, queryOpts ...c
 SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
-WHERE 
+WHERE
 	-- good filter
 	(($1::boolean IS NULL) OR ($1::boolean = c.good)) AND
 	-- active filter
 	(
-		$2::boolean IS NULL OR 
-		($2::boolean = TRUE AND c.state <= 1 AND c.renewed_to IS NULL) OR 
+		$2::boolean IS NULL OR
+		($2::boolean = TRUE AND c.state <= 1 AND c.renewed_to IS NULL) OR
 		($2::boolean = FALSE AND c.state > 1)
 	)
 LIMIT $3 OFFSET $4`, opts.Good, opts.Revisable, limit, offset)
@@ -369,6 +369,22 @@ WHERE fces.contract_id = contracts.contract_id AND current_height.scanned_height
 	})
 }
 
+// PruneContractSectorsMap prunes the contract_sectors_map table of contracts
+// that have been expired for at least 'maxBlocksSinceExpiry' blocks.
+func (s *Store) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpiry uint64) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+WITH current_height AS (
+    SELECT scanned_height FROM global_settings
+)
+DELETE FROM contract_sectors_map csm
+USING contracts, current_height
+WHERE csm.contract_id = contracts.contract_id AND current_height.scanned_height >= contracts.expiration_height + $1;
+`, maxBlocksSinceExpiry)
+		return err
+	})
+}
+
 func (tx *updateTx) ContractElements() ([]types.V2FileContractElement, error) {
 	rows, err := tx.tx.Query(tx.ctx, `SELECT contract_id, contract, leaf_index, merkle_proof FROM contract_elements fces`)
 	if err != nil {
@@ -490,7 +506,7 @@ func (s *Store) ScheduleContractsForPruning(ctx context.Context) error {
 func (tx *updateTx) UpdateContractElements(fces ...types.V2FileContractElement) error {
 	for _, fce := range fces {
 		_, err := tx.tx.Exec(tx.ctx, `
-INSERT INTO contract_elements (contract_id, contract, leaf_index, merkle_proof) VALUES ($1, $2, $3, $4) 
+INSERT INTO contract_elements (contract_id, contract, leaf_index, merkle_proof) VALUES ($1, $2, $3, $4)
 ON CONFLICT (contract_id) DO UPDATE SET contract = EXCLUDED.contract, leaf_index = EXCLUDED.leaf_index, merkle_proof = EXCLUDED.merkle_proof
 `, sqlHash256(fce.ID), (*sqlFileContract)(&fce.V2FileContract), fce.StateElement.LeafIndex, sqlMerkleProof(fce.StateElement.MerkleProof))
 		if err != nil {

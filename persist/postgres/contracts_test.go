@@ -639,6 +639,106 @@ func TestPruneExpiredContractElements(t *testing.T) {
 	}
 }
 
+func TestPruneContractSectorsMap(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add a host
+	hk := store.addTestHost(t)
+
+	addContract := func(expirationHeight uint64) types.FileContractID {
+		t.Helper()
+		var contractID types.FileContractID
+		frand.Read(contractID[:])
+
+		revision := newTestRevision(hk)
+		revision.ExpirationHeight = expirationHeight
+		if err := store.AddFormedContract(context.Background(), hk, contractID, revision, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+			t.Fatal(err)
+		}
+		return contractID
+	}
+
+	assertContracts := func(contractIDs []types.FileContractID) {
+		t.Helper()
+		rows, err := store.pool.Query(context.Background(), "SELECT contract_id FROM contract_sectors_map")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var readIDs []types.FileContractID
+		for rows.Next() {
+			var id types.FileContractID
+			if err := rows.Scan((*sqlHash256)(&id)); err != nil {
+				t.Fatal(err)
+			}
+			readIDs = append(readIDs, id)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		} else if len(readIDs) != len(contractIDs) {
+			t.Fatalf("expected %d contracts, got %d", len(contractIDs), len(readIDs))
+		}
+
+	outer:
+		for _, readID := range readIDs {
+			for _, id := range contractIDs {
+				if readID == id {
+					continue outer
+				}
+			}
+			t.Fatalf("contract %v is missing", readID)
+		}
+	}
+
+	// set height to block 12
+	bh := uint64(12)
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: bh})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add 3 contracts at different expiration heights
+	c1 := addContract(10)
+	c2 := addContract(11)
+	c3 := addContract(12)
+
+	// all of them should be in the map
+	assertContracts([]types.FileContractID{c1, c2, c3})
+
+	// prune with a buffer of 3, should not prune anything
+	if err := store.PruneContractSectorsMap(context.Background(), 3); err != nil {
+		t.Fatal(err)
+	}
+	assertContracts([]types.FileContractID{c1, c2, c3})
+
+	// prune with a buffer of 1, should prune c1 and c2
+	if err := store.PruneContractSectorsMap(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	assertContracts([]types.FileContractID{c3})
+
+	// prune with a buffer of 0 to prune c3 too
+	if err := store.PruneContractSectorsMap(context.Background(), 0); err != nil {
+		t.Fatal(err)
+	}
+	assertContracts([]types.FileContractID{})
+
+	// assert only the map got pruned but the contracts remain
+	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		var count int
+		err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM contracts").Scan(&count)
+		if err != nil {
+			return err
+		} else if count != 3 {
+			t.Fatalf("expected 3 contracts, got %d", count)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFormRenewContract(t *testing.T) {
 	start := time.Now().Round(time.Microsecond)
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
