@@ -9,11 +9,11 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/api"
-	"go.sia.tech/indexd/hosts"
 )
 
 var _ HostDialer = (*Dialer)(nil)
@@ -24,7 +24,7 @@ type Dialer struct {
 	c      AppClient
 	appKey types.PrivateKey
 
-	hosts map[types.PublicKey]hosts.Host
+	addrs map[types.PublicKey][]chain.NetAddress
 	conns map[types.PublicKey]rhp.TransportClient
 }
 
@@ -33,7 +33,7 @@ func newDialer(c AppClient, appKey types.PrivateKey) *Dialer {
 		c:      c,
 		appKey: appKey,
 
-		hosts: make(map[types.PublicKey]hosts.Host),
+		addrs: make(map[types.PublicKey][]chain.NetAddress),
 		conns: make(map[types.PublicKey]rhp.TransportClient),
 	}
 }
@@ -44,7 +44,7 @@ func (d *Dialer) Hosts(ctx context.Context) ([]types.PublicKey, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	clear(d.hosts)
+	clear(d.addrs)
 	offset, limit := 0, 100
 	var pks []types.PublicKey
 	for {
@@ -55,7 +55,7 @@ func (d *Dialer) Hosts(ctx context.Context) ([]types.PublicKey, error) {
 
 		for _, host := range hosts {
 			pks = append(pks, host.PublicKey)
-			d.hosts[host.PublicKey] = host
+			d.addrs[host.PublicKey] = host.Addresses
 		}
 
 		offset += len(hosts)
@@ -72,12 +72,12 @@ func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey, reuse bo
 		return tc, nil
 	}
 
-	h, ok := d.hosts[hostKey]
+	h, ok := d.addrs[hostKey]
 	if !ok {
 		return nil, fmt.Errorf("we haven't seen host")
 	}
 
-	for _, addr := range h.Addresses {
+	for _, addr := range h {
 		if addr.Protocol == siamux.Protocol {
 			tc, err := siamux.Dial(ctx, addr.Address, hostKey)
 			if err != nil {
