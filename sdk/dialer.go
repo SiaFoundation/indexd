@@ -217,16 +217,16 @@ func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.Tra
 	}()
 
 	for _, addr := range h {
-		if addr.Protocol == quic.Protocol {
-			tc, err = quic.Dial(ctx, addr.Address, hostKey)
+		if addr.Protocol == siamux.Protocol {
+			tc, err = siamux.Dial(ctx, addr.Address, hostKey)
 			if err == nil {
 				return tc, nil
 			}
 		}
 	}
 	for _, addr := range h {
-		if addr.Protocol == siamux.Protocol {
-			tc, err = siamux.Dial(ctx, addr.Address, hostKey)
+		if addr.Protocol == quic.Protocol {
+			tc, err = quic.Dial(ctx, addr.Address, hostKey)
 			if err == nil {
 				return tc, nil
 			}
