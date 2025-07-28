@@ -104,15 +104,14 @@ func (s *Store) UnspentSiacoinElements() (tip types.ChainIndex, sces []types.Sia
 	return
 }
 
-func scanEvent(row scanner) (event wallet.Event, err error) {
-	err = row.Scan((*sqlWalletEvent)(&event))
-	return
-}
-
 // WalletEvent returns an event with the given ID.
 func (s *Store) WalletEvent(id types.Hash256) (event wallet.Event, err error) {
 	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		event, err = scanEvent(tx.QueryRow(ctx, `SELECT event_data FROM wallet_events WHERE event_id = $1`, sqlHash256(id)))
+		tip, err := getTip(ctx, tx)
+		if err != nil {
+			return fmt.Errorf("failed to get tip: %w", err)
+		}
+		event, err = scanEvent(tx.QueryRow(ctx, `SELECT event_data FROM wallet_events WHERE event_id = $1`, sqlHash256(id)), tip)
 		return err
 	}); err != nil {
 		return wallet.Event{}, err
@@ -133,10 +132,9 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 
 	var events []wallet.Event
 	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		var tip types.ChainIndex
-		err := tx.QueryRow(ctx, `SELECT scanned_height, scanned_block_id FROM global_settings`).Scan(&tip.Height, (*sqlHash256)(&tip.ID))
+		tip, err := getTip(ctx, tx)
 		if err != nil {
-			return fmt.Errorf("failed to query last scanned index: %w", err)
+			return fmt.Errorf("failed to get tip: %w", err)
 		}
 
 		rows, err := tx.Query(ctx, `SELECT event_data FROM wallet_events ORDER BY maturity_height DESC, id DESC LIMIT $1 OFFSET $2`, limit, offset)
@@ -146,12 +144,9 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 		defer rows.Close()
 
 		for rows.Next() {
-			event, err := scanEvent(rows)
+			event, err := scanEvent(rows, tip)
 			if err != nil {
 				return fmt.Errorf("failed to scan wallet event: %w", err)
-			}
-			if tip.Height >= event.Index.Height {
-				event.Confirmations = 1 + tip.Height - event.Index.Height
 			}
 			events = append(events, event)
 		}
@@ -280,6 +275,21 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 		return fmt.Errorf("failed to delete events: %w", err)
 	}
 	return nil
+}
+
+func scanEvent(row scanner, tip types.ChainIndex) (event wallet.Event, err error) {
+	err = row.Scan((*sqlWalletEvent)(&event))
+	if err != nil {
+		return wallet.Event{}, err
+	} else if tip.Height >= event.Index.Height {
+		event.Confirmations = 1 + tip.Height - event.Index.Height
+	}
+	return
+}
+
+func getTip(ctx context.Context, tx *txn) (tip types.ChainIndex, err error) {
+	err = tx.QueryRow(ctx, `SELECT scanned_height, scanned_block_id FROM global_settings`).Scan(&tip.Height, (*sqlHash256)(&tip.ID))
+	return
 }
 
 func insertWalletEvent(ctx context.Context, tx *txn, event wallet.Event) error {
