@@ -102,17 +102,20 @@ func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey, reuse bo
 	}
 
 	for _, addr := range h {
+		if addr.Protocol == quic.Protocol {
+			tc, err := quic.Dial(ctx, addr.Address, hostKey)
+			if err != nil {
+				return nil, fmt.Errorf("failed to dial host over quic: %w", err)
+			}
+			d.conns[hostKey] = tc
+			return tc, nil
+		}
+	}
+	for _, addr := range h {
 		if addr.Protocol == siamux.Protocol {
 			tc, err := siamux.Dial(ctx, addr.Address, hostKey)
 			if err != nil {
 				return nil, fmt.Errorf("failed to dial host over siamux: %w", err)
-			}
-			d.conns[hostKey] = tc
-			return tc, nil
-		} else if addr.Protocol == quic.Protocol {
-			tc, err := quic.Dial(ctx, addr.Address, hostKey)
-			if err != nil {
-				return nil, fmt.Errorf("failed to dial host over quic: %w", err)
 			}
 			d.conns[hostKey] = tc
 			return tc, nil
