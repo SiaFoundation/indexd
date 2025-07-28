@@ -161,8 +161,13 @@ func (d *Dialer) Hosts() []types.PublicKey {
 }
 
 func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.TransportClient, error) {
-	// Get or create connection entry
 	d.mu.Lock()
+	h, ok := d.addrs[hostKey]
+	if !ok {
+		d.mu.Unlock()
+		return nil, fmt.Errorf("missing host with key: %v", hostKey)
+	}
+	// Get or create connection entry
 	entry, exists := d.conns[hostKey]
 	if !exists {
 		entry = &connEntry{}
@@ -170,29 +175,33 @@ func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.Tra
 	}
 	d.mu.Unlock()
 
-	entry.mu.Lock()
+	for {
+		entry.mu.Lock()
+		if entry.dial == nil {
+			// No dial in progress
+			if entry.tc != nil {
+				tc := entry.tc
+				entry.mu.Unlock()
+				return tc, nil
+			}
 
-	// Wait for any ongoing dial to complete
-	for entry.dial != nil {
+			// Start new dial
+			entry.dial = make(chan struct{})
+			entry.mu.Unlock()
+			break
+		}
+
+		// Wait for any ongoing dial to complete
+		ch := entry.dial
 		entry.mu.Unlock()
+
 		select {
-		case <-entry.dial:
+		case <-ch:
+			// dial finished
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		entry.mu.Lock()
 	}
-
-	// Return existing connection if available
-	if entry.tc != nil {
-		tc := entry.tc
-		entry.mu.Unlock()
-		return tc, nil
-	}
-
-	// Start new dial operation
-	entry.dial = make(chan struct{})
-	entry.mu.Unlock()
 
 	// Actually dial outside the lock
 	var tc rhp.TransportClient
@@ -206,12 +215,6 @@ func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.Tra
 		entry.dial = nil
 		entry.mu.Unlock()
 	}()
-
-	// Find valid address and dial
-	h, ok := d.addrs[hostKey]
-	if !ok {
-		return nil, fmt.Errorf("missing host with key: %v", hostKey)
-	}
 
 	for _, addr := range h {
 		if addr.Protocol == quic.Protocol {
@@ -230,7 +233,8 @@ func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.Tra
 		}
 	}
 
-	return nil, errors.New("host has no supported protocols")
+	err = errors.New("host has no supported protocols")
+	return nil, err
 }
 
 func (d *Dialer) retry(ctx context.Context, hostKey types.PublicKey, fn func(rhp.TransportClient) error) error {
