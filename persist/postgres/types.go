@@ -20,7 +20,7 @@ var (
 	_ scannerValuer = (*sqlContractState)(nil)
 	_ scannerValuer = (*sqlCurrency)(nil)
 	_ scannerValuer = (*sqlDurationMS)(nil)
-	_ scannerValuer = (*sqlEventData)(nil)
+	_ scannerValuer = (*sqlWalletEvent)(nil)
 	_ scannerValuer = (*sqlHash256)(nil)
 	_ scannerValuer = (*sqlMerkleProof)(nil)
 	_ scannerValuer = (*sqlNetworkProtocol)(nil)
@@ -122,82 +122,26 @@ func (d *sqlDurationMS) Scan(src any) error {
 	}
 }
 
-type sqlEventData struct {
-	eventType string
-	data      *wallet.EventData
-}
+type sqlWalletEvent wallet.Event
 
-func sqlEncodeEvent(t string, d wallet.EventData) sqlEventData {
-	return sqlEventData{t, &d}
-}
-
-func sqlDecodeEvent(d *wallet.EventData) *sqlEventData {
-	return &sqlEventData{data: d}
-}
-
-func (event sqlEventData) Value() (driver.Value, error) {
+func (se *sqlWalletEvent) Value() (driver.Value, error) {
 	var buf bytes.Buffer
 	e := types.NewEncoder(&buf)
-	e.WriteString(event.eventType)
-	switch data := (*event.data).(type) {
-	case wallet.EventPayout:
-		data.EncodeTo(e)
-	case wallet.EventV1Transaction:
-		data.EncodeTo(e)
-	case wallet.EventV1ContractResolution:
-		data.EncodeTo(e)
-	case wallet.EventV2ContractResolution:
-		data.EncodeTo(e)
-	case wallet.EventV2Transaction:
-		data.EncodeTo(e)
-	default:
-		panic(fmt.Sprintf("unknown event type %v", event.eventType)) // developer error
-	}
+	(*wallet.Event)(se).EncodeTo(e)
 	if err := e.Flush(); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil
 }
 
-func (ed *sqlEventData) Scan(src any) error {
-	// sanity check to avoid nil pointer dereferences
-	if ed.data == nil {
-		panic("EventData.Scan: nil pointer") // developer error
+func (se *sqlWalletEvent) Scan(src any) error {
+	buf, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("cannot scan %T to WalletEvent", src)
 	}
-	switch src := src.(type) {
-	case []byte:
-		dec := types.NewBufDecoder(src)
-		ed.eventType = dec.ReadString()
-		switch ed.eventType {
-		case wallet.EventTypeMinerPayout,
-			wallet.EventTypeSiafundClaim,
-			wallet.EventTypeFoundationSubsidy:
-			var e wallet.EventPayout
-			e.DecodeFrom(dec)
-			*ed.data = e
-		case wallet.EventTypeV1ContractResolution:
-			var e wallet.EventV1ContractResolution
-			e.DecodeFrom(dec)
-			*ed.data = e
-		case wallet.EventTypeV2ContractResolution:
-			var e wallet.EventV2ContractResolution
-			e.DecodeFrom(dec)
-			*ed.data = e
-		case wallet.EventTypeV1Transaction:
-			var e wallet.EventV1Transaction
-			e.DecodeFrom(dec)
-			*ed.data = e
-		case wallet.EventTypeV2Transaction:
-			var e wallet.EventV2Transaction
-			e.DecodeFrom(dec)
-			*ed.data = e
-		default:
-			panic(fmt.Sprintf("unknown event type %v", ed.eventType)) // developer error
-		}
-		return dec.Err()
-	default:
-		return fmt.Errorf("cannot scan %T to EventData", src)
-	}
+	dec := types.NewBufDecoder(buf)
+	(*wallet.Event)(se).DecodeFrom(dec)
+	return dec.Err()
 }
 
 type sqlFileContract types.V2FileContract

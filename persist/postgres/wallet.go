@@ -105,14 +105,14 @@ func (s *Store) UnspentSiacoinElements() (tip types.ChainIndex, sces []types.Sia
 }
 
 func scanEvent(row scanner) (event wallet.Event, err error) {
-	err = row.Scan((*sqlChainIndex)(&event.Index), &event.MaturityHeight, (*sqlHash256)(&event.ID), &event.Type, sqlDecodeEvent(&event.Data))
+	err = row.Scan((*sqlWalletEvent)(&event))
 	return
 }
 
 // WalletEvent returns an event with the given ID.
 func (s *Store) WalletEvent(id types.Hash256) (event wallet.Event, err error) {
 	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-		event, err = scanEvent(tx.QueryRow(ctx, `SELECT chain_index, maturity_height, event_id, event_type, event_data FROM wallet_events WHERE event_id = $1`, sqlHash256(id)))
+		event, err = scanEvent(tx.QueryRow(ctx, `SELECT event_data FROM wallet_events WHERE event_id = $1`, sqlHash256(id)))
 		return err
 	}); err != nil {
 		return wallet.Event{}, err
@@ -139,7 +139,7 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 			return fmt.Errorf("failed to query last scanned index: %w", err)
 		}
 
-		rows, err := tx.Query(ctx, `SELECT chain_index, maturity_height, event_id, event_type, event_data FROM wallet_events ORDER BY maturity_height DESC, id DESC LIMIT $1 OFFSET $2`, limit, offset)
+		rows, err := tx.Query(ctx, `SELECT event_data FROM wallet_events ORDER BY maturity_height DESC, id DESC LIMIT $1 OFFSET $2`, limit, offset)
 		if err != nil {
 			return fmt.Errorf("failed to query wallet events: %w", err)
 		}
@@ -239,16 +239,8 @@ func (u *updateTx) WalletApplyIndex(index types.ChainIndex, created, spent []typ
 
 	if len(events) > 0 {
 		for _, e := range events {
-			if res, err := u.tx.Exec(u.ctx, `INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`,
-				sqlChainIndex(e.Index),
-				e.MaturityHeight,
-				sqlHash256(e.ID),
-				e.Type,
-				sqlEncodeEvent(e.Type, e.Data),
-			); err != nil {
-				return fmt.Errorf("failed to insert event: %w", err)
-			} else if res.RowsAffected() != 1 {
-				return errors.New("failed to insert event")
+			if err := insertWalletEvent(u.ctx, u.tx, e); err != nil {
+				return fmt.Errorf("failed to insert wallet event %q: %w", e.ID, err)
 			}
 		}
 	}
@@ -288,6 +280,14 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 		return fmt.Errorf("failed to delete events: %w", err)
 	}
 	return nil
+}
+
+func insertWalletEvent(ctx context.Context, tx *txn, event wallet.Event) error {
+	_, err := tx.Exec(ctx, `
+		INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data)
+		VALUES ($1, $2, $3, $4, $5)`,
+		sqlChainIndex(event.Index), event.MaturityHeight, sqlHash256(event.ID), event.Type, (*sqlWalletEvent)(&event))
+	return err
 }
 
 func validateOffsetLimit(offset, limit int) error {
