@@ -122,16 +122,16 @@ func TestHostDialerParallel(t *testing.T) {
 
 			root, err := dialer.WriteSector(context.Background(), hk, &data)
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
 			}
 
 			sector, err := dialer.ReadSector(context.Background(), hk, root)
 			if err != nil {
-				t.Fatal(err)
+				t.Error(err)
 			}
 
 			if !bytes.Equal(data[:], sector[:]) {
-				t.Fatal("retrieved sector does not match")
+				t.Error("retrieved sector does not match")
 			}
 		}()
 	}
