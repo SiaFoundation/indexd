@@ -3,7 +3,6 @@ package slabs
 import (
 	"bytes"
 	"context"
-	"errors"
 	"math"
 	"net"
 	"testing"
@@ -111,15 +110,17 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's unhealthy
-	unhealthSlabID, err := db.UnhealthySlab(context.Background(), time.Now())
+	unhealthSlabIDs, err := db.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
 		t.Fatal(err)
-	} else if unhealthSlabID != slabID {
-		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabID)
+	} else if len(unhealthSlabIDs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(unhealthSlabIDs))
+	} else if unhealthSlabIDs[0] != slabID {
+		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabIDs[0])
 	}
 
 	// migrate the slab
-	err = mgr.migrateSlabs(context.Background(), []SlabID{unhealthSlabID}, zap.NewNop())
+	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,11 +140,13 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's still unhealthy
-	unhealthSlabID, err = db.UnhealthySlab(context.Background(), time.Now())
+	unhealthSlabIDs, err = db.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
 		t.Fatal(err)
-	} else if unhealthSlabID != slabID {
-		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabID)
+	} else if len(unhealthSlabIDs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(unhealthSlabIDs))
+	} else if unhealthSlabIDs[0] != slabID {
+		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabIDs[0])
 	}
 
 	// add another good host
@@ -157,7 +160,7 @@ func TestMigrateSlab(t *testing.T) {
 	db.contracts[h5.PublicKey] = c5
 
 	// migrate the slab again
-	err = mgr.migrateSlabs(context.Background(), []SlabID{unhealthSlabID}, zap.NewNop())
+	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,8 +173,10 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's now healthy
-	_, err = db.UnhealthySlab(context.Background(), time.Now())
-	if !errors.Is(err, ErrSlabNotFound) {
+	unhealthSlabIDs, err = db.UnhealthySlabs(context.Background(), time.Now(), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthSlabIDs) != 0 {
 		t.Fatal("expected no unhealthy slabs")
 	}
 }

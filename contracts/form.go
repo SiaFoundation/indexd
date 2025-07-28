@@ -167,6 +167,11 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	cm.shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
 	for i := range candidates {
+		if wanted == 0 {
+			// we have enough contracts, stop forming
+			break
+		}
+
 		hostKey := candidates[i].PublicKey
 		hostLog := formationLog.With(zap.Stringer("hostKey", hostKey))
 

@@ -98,7 +98,7 @@ type (
 		SectorsForIntegrityCheck(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 		Slab(ctx context.Context, slabID SlabID) (Slab, error)
 		Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error)
-		UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (SlabID, error)
+		UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]SlabID, error)
 	}
 
 	// AlertsManager defines an interface to register alerts.
@@ -310,27 +310,13 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	logger.Debug("starting slab migrations", zap.Time("start", start))
 
 	const slabsPerBatch = 10
-	nextBatch := func(ctx context.Context) (batch []SlabID, _ error) {
-		for len(batch) < slabsPerBatch {
-			slab, err := m.store.UnhealthySlab(ctx, start)
-			if errors.Is(err, ErrSlabNotFound) {
-				return batch, nil
-			} else if errors.Is(err, context.Canceled) {
-				return nil, nil
-			} else if err != nil {
-				return nil, err
-			}
-			batch = append(batch, slab)
-		}
-		return
-	}
-
-	for {
-		batch, err := nextBatch(ctx)
+	var exhausted bool
+	for !exhausted {
+		batch, err := m.store.UnhealthySlabs(ctx, start, slabsPerBatch)
 		if err != nil {
-			return fmt.Errorf("failed to fetch unhealthy slabs: %w", err)
-		} else if len(batch) == 0 {
-			break
+			return err
+		} else if len(batch) < slabsPerBatch {
+			exhausted = true
 		}
 
 		err = m.migrateSlabs(ctx, batch, logger)

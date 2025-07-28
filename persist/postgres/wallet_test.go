@@ -133,6 +133,27 @@ func TestSingleAddressWalletStoreWalletEventsAndWalletEventCount(t *testing.T) {
 	}
 }
 
+func TestSingleAddressWalletStoreWalletEvent(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	update := newTestEvent()
+	if _, err := store.pool.Exec(context.Background(), `INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data) VALUES ($1, $2, $3, $4, $5)`,
+		sqlChainIndex(update.Index),
+		update.MaturityHeight,
+		sqlHash256(update.ID),
+		update.Type,
+		sqlEncodeEvent(update.Type, update.Data),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if event, err := store.WalletEvent(update.ID); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(event, update) {
+		t.Fatal("unexpected event", update, event)
+	}
+}
+
 func TestSingleAddressWalletStoreBroadcastedSets(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

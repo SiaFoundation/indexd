@@ -458,48 +458,52 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 	return roots, err
 }
 
-// UnhealthySlab returns a slab that has at least one sector that needs to be
+// UnhealthySlabs returns slabs which have at least one sector that needs to be
 // migrated to a new host and hasn't had a repair attempted since
 // 'maxRepairAttempt'. The condition for such a slab is that it either has:
 // a). a sector that is not stored on a host (host_id == null)
 // b). a sector that is stored in a bad contract (contract_id != null && contract.good = false)
-// When no slab is found, ErrSlabNotFound is returned. If a slab is found, it
-// will have its last_repair_attempt updated to the time of the call. To prevent
-// subsequent or parallel calls from returning the same slab.
+// If a slab is found, it will have its last_repair_attempt updated to the time
+// of the call. To prevent subsequent or parallel calls from returning the same slab.
 //
 // NOTE: For the sake of scalability, we don't prioritize any slabs and instead
-// simply fetch the first one that we can get.
-func (s *Store) UnhealthySlab(ctx context.Context, maxRepairAttempt time.Time) (slabs.SlabID, error) {
-	var slabID slabs.SlabID
+// simply fetch the first ones that we can get.
+func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]slabs.SlabID, error) {
+	var results []slabs.SlabID
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		err := tx.QueryRow(ctx, `
-			UPDATE slabs
-			SET last_repair_attempt = NOW()
-			WHERE id = (
-				SELECT slabs.id
-				FROM slabs
-				INNER JOIN slab_sectors ON slabs.id = slab_sectors.slab_id
-				INNER JOIN sectors ON slab_sectors.sector_id = sectors.id
-				LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
-				LEFT JOIN contracts ON csm.contract_id = contracts.contract_id
-				WHERE
-					(
-						-- stored on bad contract
-						(sectors.contract_sectors_map_id IS NOT NULL AND contracts.good = FALSE) OR
-						-- not stored on any host
-						(sectors.host_id IS NULL)
-					)
-					AND (slabs.last_repair_attempt <= $1)
-				LIMIT 1
-			)
-			RETURNING digest
+		for range limit {
+			var slabID slabs.SlabID
+			err := tx.QueryRow(ctx, `UPDATE slabs
+				SET last_repair_attempt = NOW()
+				WHERE id = (
+					SELECT slabs.id
+					FROM slabs
+					INNER JOIN slab_sectors ON slabs.id = slab_sectors.slab_id
+					INNER JOIN sectors ON slab_sectors.sector_id = sectors.id
+					LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
+					LEFT JOIN contracts ON csm.contract_id = contracts.contract_id
+					WHERE
+						(
+							-- stored on bad contract
+							(sectors.contract_sectors_map_id IS NOT NULL AND contracts.good = FALSE) OR
+							-- not stored on any host
+							(sectors.host_id IS NULL)
+						)
+						AND (slabs.last_repair_attempt <= $1)
+					LIMIT 1
+				)
+				RETURNING digest
 		`, maxRepairAttempt).Scan((*sqlHash256)(&slabID))
-		if errors.Is(err, sql.ErrNoRows) {
-			return slabs.ErrSlabNotFound
+			if errors.Is(err, sql.ErrNoRows) {
+				break
+			} else if err != nil {
+				return fmt.Errorf("failed to query unhealthy slabs: %w", err)
+			}
+			results = append(results, slabID)
 		}
-		return err
+		return nil
 	})
-	return slabID, err
+	return results, err
 }
 
 // MigrateSector updates a sector that was just migrated in the database to be

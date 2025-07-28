@@ -104,6 +104,22 @@ func (s *Store) UnspentSiacoinElements() (tip types.ChainIndex, sces []types.Sia
 	return
 }
 
+func scanEvent(row scanner) (event wallet.Event, err error) {
+	err = row.Scan((*sqlChainIndex)(&event.Index), &event.MaturityHeight, (*sqlHash256)(&event.ID), &event.Type, sqlDecodeEvent(&event.Data))
+	return
+}
+
+// WalletEvent returns an event with the given ID.
+func (s *Store) WalletEvent(id types.Hash256) (event wallet.Event, err error) {
+	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		event, err = scanEvent(tx.QueryRow(ctx, `SELECT chain_index, maturity_height, event_id, event_type, event_data FROM wallet_events WHERE event_id = $1`, sqlHash256(id)))
+		return err
+	}); err != nil {
+		return wallet.Event{}, err
+	}
+	return
+}
+
 // WalletEvents returns a paginated list of transactions ordered by maturity
 // height, descending. If no more transactions are available, (nil, nil) should
 // be returned.
@@ -130,8 +146,7 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 		defer rows.Close()
 
 		for rows.Next() {
-			var event wallet.Event
-			err := rows.Scan((*sqlChainIndex)(&event.Index), &event.MaturityHeight, (*sqlHash256)(&event.ID), &event.Type, sqlDecodeEvent(&event.Data))
+			event, err := scanEvent(rows)
 			if err != nil {
 				return fmt.Errorf("failed to scan wallet event: %w", err)
 			}

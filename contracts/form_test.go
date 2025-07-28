@@ -232,6 +232,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 		bad2.PublicKey:  bad2,
 		bad3.PublicKey:  bad3,
 		good3.PublicKey: good3,
+		good4.PublicKey: good4,
 	}
 
 	dialer := newDialerMock()
