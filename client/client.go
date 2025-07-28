@@ -194,7 +194,7 @@ func (c *HostClient) RefreshContract(ctx context.Context, settings proto.HostSet
 func (c *HostClient) RenewContract(ctx context.Context, settings proto.HostSettings, contractID types.FileContractID, proofHeight uint64) (rhp.RPCRenewContractResult, error) {
 	var res rhp.RPCRenewContractResult
 	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
-		collateral := contract.Revision.TotalCollateral.Sub(contract.Revision.MissedHostValue)
+		collateral := contract.Revision.TotalCollateral
 		allowance := contract.Revision.RenterOutput.Value
 		minAllowance := proto.MinRenterAllowance(settings.Prices, collateral)
 		if allowance.Cmp(minAllowance) < 0 {
