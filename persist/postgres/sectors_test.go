@@ -848,69 +848,66 @@ func TestPinSectors(t *testing.T) {
 }
 
 func TestUnhealthySlabs(t *testing.T) {
-	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	store := initPostgres(t, zap.NewNop())
 
-	// add account
+	// convenience variables
+	now := time.Now()
+	oneHourAgo := now.Add(-time.Hour)
+
+	// define a helper to assert the number of unhealthy slabs
+	assertUnhealthySlabs := func(expected, limit int, maxLastRepairTime time.Time) []slabs.SlabID {
+		t.Helper()
+		unhealthyIDs, err := store.UnhealthySlabs(context.Background(), maxLastRepairTime, limit)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(unhealthyIDs) != expected {
+			t.Fatalf("expected %d unhealthy slabs, got %d", expected, len(unhealthyIDs))
+		}
+
+		// always assert slabIDs are unique
+		seen := make(map[slabs.SlabID]struct{})
+		for _, id := range unhealthyIDs {
+			if _, exists := seen[id]; exists {
+				t.Fatalf("duplicate slab ID %v in unhealthy slabs", id)
+			}
+			seen[id] = struct{}{}
+		}
+
+		return unhealthyIDs
+	}
+
+	// define a helper to reset the repair attempt time
+	resetLastRepairAttempt := func(val time.Time) {
+		t.Helper()
+		_, err := store.pool.Exec(context.Background(), "UPDATE slabs SET last_repair_attempt = $1", val)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// add an account
 	account := proto.Account{1}
 	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
 		t.Fatal("failed to add account:", err)
 	}
 
-	// add host with a contract
+	// add a host and a contract
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 
-	// pin a slab to add a few sectors to the database
-	root1 := frand.Entropy256()
-	root2 := frand.Entropy256()
-	root3 := frand.Entropy256()
-	slabID, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
-		EncryptionKey: [32]byte{},
-		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
-			{
-				Root:    root1,
-				HostKey: hk,
-			},
-			{
-				Root:    root2,
-				HostKey: hk,
-			},
-			{
-				Root:    root3,
-				HostKey: hk,
-			},
-		},
-	})
+	// add two slabs & immediately reset the LRA-time
+	slabID1 := store.addTestSlab(t, account, 1, 2, []types.PublicKey{hk})
+	slabID2 := store.addTestSlab(t, account, 1, 2, []types.PublicKey{hk})
+	resetLastRepairAttempt(oneHourAgo)
+
+	// pin all sectors to the contract
+	_, err := store.pool.Exec(context.Background(), "UPDATE sectors SET contract_sectors_map_id = 1")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// make sure some time passes since the default time that is set when the
-	// slab is pinned
-	time.Sleep(100 * time.Millisecond)
-
-	// after pinning, no slab should be unhealthy since their sectors aren't
-	// pinned to contracts yet.
-	unhealthyIDs, err := store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 0 {
-		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
-	}
-
-	// pin one sector to the contract - we should still not have any unhealthy sectors
-	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET contract_sectors_map_id = 1 WHERE id = 1")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 0 {
-		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
-	}
+	// assert we have no unhealthy slabs
+	assertUnhealthySlabs(0, 10, now)
 
 	// update the contract to be bad
 	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE")
@@ -918,179 +915,58 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// fetch unhealthy slabs which haven't had a repair attempted in at least 1 hour - should not have any
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now().Add(-time.Hour), 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 0 {
-		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
+	// assert both slabs are unhealthy
+	assertUnhealthySlabs(2, 10, now)
+
+	// consecutive calls to unhealthy slabs return no new slabs since the
+	// LRA-time has been updated
+	assertUnhealthySlabs(0, 10, now)
+
+	// reset the LRA-time and assert we have no unhealthy slabs since that time
+	resetLastRepairAttempt(oneHourAgo)
+	assertUnhealthySlabs(0, 10, oneHourAgo)
+
+	// do that again but with the current time, assert we have two unhealthy slabs
+	assertUnhealthySlabs(2, 10, now)
+
+	// reset the LRA-time and assert the limit is applied
+	resetLastRepairAttempt(oneHourAgo)
+	assertUnhealthySlabs(1, 1, now)
+
+	// we can call it again since we have one left, should be SlabID2
+	unhealthyIDs := assertUnhealthySlabs(1, 1, now)
+	if unhealthyIDs[0] != slabID2 {
+		t.Fatalf("expected slab ID %v, got %v", slabID2, unhealthyIDs[0])
 	}
 
-	// try again with the current time - this should return the slab since it has 1 bad sector
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(unhealthyIDs))
-	} else if slabID != unhealthyIDs[0] {
-		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthyIDs[0])
-	}
-
-	// run again for 100ms - shouldn't return the same slab twice since the last_repair_attempt was updated
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now().Add(-100*time.Millisecond), 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 0 {
-		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
-	}
-
-	// fix the contract again
+	// reset the LRA-time and make the contract good again
+	resetLastRepairAttempt(oneHourAgo)
 	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET good = TRUE")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now().Add(-time.Hour), 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 0 {
-		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
-	}
+	// assert no slabs are unhealthy
+	assertUnhealthySlabs(0, 10, now)
 
 	// remove a sector from its host - the unhealthy slab should be back
-	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET host_id = NULL WHERE id = 2")
-	if err != nil {
-		t.Fatal(err)
-	}
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(unhealthyIDs))
-	} else if slabID != unhealthyIDs[0] {
-		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthyIDs[0])
-	}
-}
-
-func TestUnhealthySlabsLimit(t *testing.T) {
-	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
-
-	// add account
-	account := proto.Account{1}
-	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
-		t.Fatal("failed to add account:", err)
-	}
-
-	// add host with a contract
-	hk1 := store.addTestHost(t)
-	store.addTestContract(t, hk1)
-	hk2 := store.addTestHost(t)
-	store.addTestContract(t, hk2)
-
-	// pin a slab to add a few sectors to the database
-	slabID1, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
-		EncryptionKey: [32]byte{},
-		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
-			{
-				Root:    frand.Entropy256(),
-				HostKey: hk1,
-			},
-			{
-				Root:    frand.Entropy256(),
-				HostKey: hk1,
-			},
-			{
-				Root:    frand.Entropy256(),
-				HostKey: hk1,
-			},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	slabID2, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
-		EncryptionKey: [32]byte{},
-		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
-			{
-				Root:    frand.Entropy256(),
-				HostKey: hk2,
-			},
-			{
-				Root:    frand.Entropy256(),
-				HostKey: hk2,
-			},
-			{
-				Root:    frand.Entropy256(),
-				HostKey: hk2,
-			},
-		},
-	})
+	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id = 1")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// make sure some time passes since the default time that is set when the
-	// slab is pinned
-	time.Sleep(100 * time.Millisecond)
-
-	// after pinning, no slab should be unhealthy since their sectors aren't
-	// pinned to contracts yet.
-	unhealthyIDs, err := store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
+	// assert slab1 is unhealthy
+	unhealthyIDs = assertUnhealthySlabs(1, 10, now)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(unhealthyIDs) != 0 {
-		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
-	}
-
-	// pin one sector to both contracts - we should still not have any unhealthy sectors
-	// first contract sector IDs: 1, 2, 3
-	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET contract_sectors_map_id = 1 WHERE id = 1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	// second contract sector IDs: 4, 5, 6
-	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET contract_sectors_map_id = 2 WHERE id = 4")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 0 {
-		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
-	}
-
-	// update the contracts to be bad
-	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// try with the current time and limit of 1
-	// this should return the first slab since it has 1 bad sector
-	now := time.Now()
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), now, 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(unhealthyIDs))
-	} else if slabID1 != unhealthyIDs[0] {
+	} else if unhealthyIDs[0] != slabID1 {
 		t.Fatalf("expected slab ID %v, got %v", slabID1, unhealthyIDs[0])
 	}
 
-	// try with the current time and limit of 1
-	// this should return the second slab since it has 1 bad sector and the
-	// first slab was already returned
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), now, 1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(unhealthyIDs))
-	} else if slabID2 != unhealthyIDs[0] {
-		t.Fatalf("expected slab ID %v, got %v", slabID2, unhealthyIDs[0])
+	// assert maxLastRepairAttempt must be
+	_, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Second), 10)
+	if err == nil {
+		t.Fatal("expected error for future maxLastRepairAttempt, got nil")
 	}
 }
 
@@ -2149,4 +2025,24 @@ func BenchmarkMigrateSector(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+func (s *Store) addTestSlab(t testing.TB, account proto.Account, dataShards, parityShards int, hks []types.PublicKey) slabs.SlabID {
+	params := slabs.SlabPinParams{
+		EncryptionKey: [32]byte(types.GeneratePrivateKey()),
+		MinShards:     1,
+		Sectors:       make([]slabs.SectorPinParams, dataShards+parityShards),
+	}
+
+	for i := range dataShards + parityShards {
+		params.Sectors[i] = slabs.SectorPinParams{
+			Root:    frand.Entropy256(),
+			HostKey: hks[i%len(hks)],
+		}
+	}
+	slabId, err := s.PinSlab(context.Background(), account, time.Time{}, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return slabId
 }
