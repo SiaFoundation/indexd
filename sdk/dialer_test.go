@@ -25,14 +25,17 @@ func TestHostDialer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	dialer := NewDialer(app, a1)
 	time.Sleep(3 * time.Second)
 
-	hks, err := dialer.Hosts(context.Background())
+	dialer := NewDialer(app, a1, logger.Named("Dialer"))
+	cancel, err := dialer.Start(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if len(hks) != 1 {
+	}
+	defer cancel()
+
+	hks := dialer.Hosts()
+	if len(hks) != 1 {
 		t.Fatalf("expected 1 host, got %d", len(hks))
 	}
 

@@ -5,8 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
+
+	"maps"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -15,6 +18,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/api"
+	"go.uber.org/zap"
 )
 
 var _ HostDialer = (*Dialer)(nil)
@@ -27,7 +31,8 @@ type connEntry struct {
 
 // Dialer implements the HostDialer interface.
 type Dialer struct {
-	mu sync.Mutex
+	mu  sync.Mutex
+	log *zap.Logger
 
 	c      AppClient
 	appKey types.PrivateKey
@@ -38,8 +43,10 @@ type Dialer struct {
 }
 
 // NewDialer returns a new Dialer.
-func NewDialer(c AppClient, appKey types.PrivateKey) *Dialer {
+func NewDialer(c AppClient, appKey types.PrivateKey, log *zap.Logger) *Dialer {
 	return &Dialer{
+		log: log,
+
 		c:      c,
 		appKey: appKey,
 
@@ -47,6 +54,35 @@ func NewDialer(c AppClient, appKey types.PrivateKey) *Dialer {
 		conns:          make(map[types.PublicKey]*connEntry),
 		cachedSettings: make(map[types.PublicKey]proto.HostSettings),
 	}
+}
+
+// Start starts the goroutine that periodically refreshes the map of host
+// addresses
+func (d *Dialer) Start(ctx context.Context) (func(), error) {
+	if err := d.updateHosts(ctx); err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithCancel(ctx)
+	ticker := time.NewTicker(10 * time.Minute)
+
+	go func() {
+		for {
+			select {
+			case <-ticker.C:
+				if err := d.updateHosts(ctx); err != nil {
+					d.log.Warn("Failed to refresh hosts list", zap.Error(err))
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return func() {
+		ticker.Stop()
+		cancel()
+	}, nil
 }
 
 // Close closes all the open connections on the dialer.
@@ -73,6 +109,31 @@ func (d *Dialer) Close() error {
 	return nil
 }
 
+func (d *Dialer) updateHosts(ctx context.Context) error {
+	offset, limit := 0, 100
+	addrs := make(map[types.PublicKey][]chain.NetAddress)
+	for {
+		hosts, err := d.c.Hosts(ctx, api.WithOffset(offset), api.WithLimit(limit))
+		if err != nil {
+			return err
+		}
+
+		for _, host := range hosts {
+			addrs[host.PublicKey] = host.Addresses
+		}
+
+		offset += len(hosts)
+		if len(hosts) < limit {
+			break
+		}
+	}
+
+	d.mu.Lock()
+	d.addrs = addrs
+	d.mu.Unlock()
+	return nil
+}
+
 // clearHostConnection clears the connection for a host
 func (d *Dialer) clearHostConnection(hostKey types.PublicKey) {
 	d.mu.Lock()
@@ -93,30 +154,10 @@ func (d *Dialer) clearHostConnection(hostKey types.PublicKey) {
 
 // Hosts returns the public keys of all hosts that are available for
 // upload or download.
-func (d *Dialer) Hosts(ctx context.Context) ([]types.PublicKey, error) {
+func (d *Dialer) Hosts() []types.PublicKey {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-
-	clear(d.addrs)
-	offset, limit := 0, 100
-	var pks []types.PublicKey
-	for {
-		hosts, err := d.c.Hosts(ctx, api.WithOffset(offset), api.WithLimit(limit))
-		if err != nil {
-			return nil, err
-		}
-
-		for _, host := range hosts {
-			pks = append(pks, host.PublicKey)
-			d.addrs[host.PublicKey] = host.Addresses
-		}
-
-		offset += len(hosts)
-		if len(hosts) < limit {
-			break
-		}
-	}
-	return pks, nil
+	return slices.Collect(maps.Keys(d.addrs))
 }
 
 func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.TransportClient, error) {

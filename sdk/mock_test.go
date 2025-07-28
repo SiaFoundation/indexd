@@ -26,8 +26,8 @@ type mockHostDialer struct {
 }
 
 // Hosts implements the [HostDialer] interface.
-func (m *mockHostDialer) Hosts(context.Context) ([]types.PublicKey, error) {
-	return slices.Collect(maps.Keys(m.hosts)), nil
+func (m *mockHostDialer) Hosts() []types.PublicKey {
+	return slices.Collect(maps.Keys(m.hosts))
 }
 
 func (m *mockHostDialer) delay(ctx context.Context, hostKey types.PublicKey) error {

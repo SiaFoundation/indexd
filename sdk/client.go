@@ -48,7 +48,7 @@ type (
 	HostDialer interface {
 		// Hosts returns the public keys of all hosts that are available for
 		// upload or download.
-		Hosts(context.Context) ([]types.PublicKey, error)
+		Hosts() []types.PublicKey
 
 		// WriteSector writes a sector to the host identified by the public key.
 		WriteSector(context.Context, types.PublicKey, *[proto4.SectorSize]byte) (types.Hash256, error)
@@ -112,10 +112,7 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 	}
 
 	var hostsMu sync.Mutex
-	hosts, err := s.dialer.Hosts(ctx)
-	if err != nil {
-		return slabs.SlabPinParams{}, fmt.Errorf("failed to get usable hosts: %w", err)
-	}
+	hosts := s.dialer.Hosts()
 	if len(hosts) < len(shards) {
 		return slabs.SlabPinParams{}, fmt.Errorf("not enough hosts available: %d, required: %d", len(hosts), len(shards))
 	}
