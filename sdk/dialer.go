@@ -19,6 +19,12 @@ import (
 
 var _ HostDialer = (*Dialer)(nil)
 
+type connEntry struct {
+	mu   sync.Mutex
+	dial chan struct{} // signals dial completion
+	tc   rhp.TransportClient
+}
+
 // Dialer implements the HostDialer interface.
 type Dialer struct {
 	mu sync.Mutex
@@ -27,7 +33,7 @@ type Dialer struct {
 	appKey types.PrivateKey
 
 	addrs          map[types.PublicKey][]chain.NetAddress
-	conns          map[types.PublicKey]rhp.TransportClient
+	conns          map[types.PublicKey]*connEntry
 	cachedSettings map[types.PublicKey]proto.HostSettings
 }
 
@@ -38,7 +44,7 @@ func NewDialer(c AppClient, appKey types.PrivateKey) *Dialer {
 		appKey: appKey,
 
 		addrs:          make(map[types.PublicKey][]chain.NetAddress),
-		conns:          make(map[types.PublicKey]rhp.TransportClient),
+		conns:          make(map[types.PublicKey]*connEntry),
 		cachedSettings: make(map[types.PublicKey]proto.HostSettings),
 	}
 }
@@ -49,10 +55,15 @@ func (d *Dialer) Close() error {
 	defer d.mu.Unlock()
 
 	var errs []error
-	for i := range d.conns {
-		if err := d.conns[i].Close(); err != nil {
-			errs = append(errs, err)
+	for _, entry := range d.conns {
+		entry.mu.Lock()
+		if entry.tc != nil {
+			if err := entry.tc.Close(); err != nil {
+				errs = append(errs, err)
+			}
+			entry.tc = nil
 		}
+		entry.mu.Unlock()
 	}
 	clear(d.conns)
 
@@ -60,6 +71,24 @@ func (d *Dialer) Close() error {
 		return errors.Join(errs...)
 	}
 	return nil
+}
+
+// clearHostConnection clears the connection for a host
+func (d *Dialer) clearHostConnection(hostKey types.PublicKey) {
+	d.mu.Lock()
+	entry, exists := d.conns[hostKey]
+	d.mu.Unlock()
+	if !exists {
+		return
+	}
+
+	entry.mu.Lock()
+	defer entry.mu.Unlock()
+
+	if entry.tc != nil {
+		entry.tc.Close()
+		entry.tc = nil
+	}
 }
 
 // Hosts returns the public keys of all hosts that are available for
@@ -90,67 +119,99 @@ func (d *Dialer) Hosts(ctx context.Context) ([]types.PublicKey, error) {
 	return pks, nil
 }
 
-func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey, reuse bool) (rhp.TransportClient, error) {
-	if tc, ok := d.conns[hostKey]; ok && reuse {
-		// we have an existing connection
+func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.TransportClient, error) {
+	// Get or create connection entry
+	d.mu.Lock()
+	entry, exists := d.conns[hostKey]
+	if !exists {
+		entry = &connEntry{}
+		d.conns[hostKey] = entry
+	}
+	d.mu.Unlock()
+
+	entry.mu.Lock()
+
+	// Wait for any ongoing dial to complete
+	for entry.dial != nil {
+		entry.mu.Unlock()
+		select {
+		case <-entry.dial:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		entry.mu.Lock()
+	}
+
+	// Return existing connection if available
+	if entry.tc != nil {
+		tc := entry.tc
+		entry.mu.Unlock()
 		return tc, nil
 	}
 
+	// Start new dial operation
+	entry.dial = make(chan struct{})
+	entry.mu.Unlock()
+
+	// Actually dial outside the lock
+	var tc rhp.TransportClient
+	var err error
+	defer func() {
+		entry.mu.Lock()
+		if err == nil {
+			entry.tc = tc
+		}
+		close(entry.dial)
+		entry.dial = nil
+		entry.mu.Unlock()
+	}()
+
+	// Find valid address and dial
 	h, ok := d.addrs[hostKey]
 	if !ok {
-		return nil, fmt.Errorf("we haven't seen host")
+		return nil, fmt.Errorf("missing host with key: %v", hostKey)
 	}
 
 	for _, addr := range h {
 		if addr.Protocol == quic.Protocol {
-			tc, err := quic.Dial(ctx, addr.Address, hostKey)
-			if err != nil {
-				return nil, fmt.Errorf("failed to dial host over quic: %w", err)
+			tc, err = quic.Dial(ctx, addr.Address, hostKey)
+			if err == nil {
+				return tc, nil
 			}
-			d.conns[hostKey] = tc
-			return tc, nil
 		}
 	}
 	for _, addr := range h {
 		if addr.Protocol == siamux.Protocol {
-			tc, err := siamux.Dial(ctx, addr.Address, hostKey)
-			if err != nil {
-				return nil, fmt.Errorf("failed to dial host over siamux: %w", err)
+			tc, err = siamux.Dial(ctx, addr.Address, hostKey)
+			if err == nil {
+				return tc, nil
 			}
-			d.conns[hostKey] = tc
-			return tc, nil
 		}
 	}
+
 	return nil, errors.New("host has no supported protocols")
 }
 
 func (d *Dialer) retry(ctx context.Context, hostKey types.PublicKey, fn func(rhp.TransportClient) error) error {
-	// reuse connection if we can
-	d.mu.Lock()
-	tc, err := d.dialHost(ctx, hostKey, true)
+	// First attempt
+	tc, err := d.dialHost(ctx, hostKey)
 	if err != nil {
-		d.mu.Unlock()
 		return fmt.Errorf("failed to dial host: %w", err)
 	}
-	d.mu.Unlock()
-
-	if err := fn(tc); err != nil && proto.ErrorCode(err) != proto.ErrorCodeTransport {
-		// we received a non transport related error
-		return err
-	} else if err == nil {
-		// success
+	if err := fn(tc); err == nil {
 		return nil
+	} else if proto.ErrorCode(err) != proto.ErrorCodeTransport {
+		return err
 	}
 
-	// we got a transport error, try reconnecting and trying again
-	d.mu.Lock()
-	tc, err = d.dialHost(ctx, hostKey, false)
+	// Clear connection if we got transport error
+	d.clearHostConnection(hostKey)
+
+	// Second attempt
+	tc, err = d.dialHost(ctx, hostKey)
 	if err != nil {
-		d.mu.Unlock()
 		return fmt.Errorf("failed to redial host: %w", err)
 	}
-	d.mu.Unlock()
-
 	return fn(tc)
 }
 
