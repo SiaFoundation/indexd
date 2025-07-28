@@ -766,6 +766,67 @@ func TestHostsWithLostSectors(t *testing.T) {
 	assertHosts([]types.PublicKey{hk1, hk2})
 }
 
+func TestHostsWithUnpinnedSectors(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// add account
+	account := proto4.Account{1}
+	if err := db.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// add hosts
+
+	// host1 has no contracts and no sectors -> not returned
+	db.addTestHost(t)
+
+	// host2 has a contract but no sectors -> not returned
+	hk2 := db.addTestHost(t)
+	db.addTestContract(t, hk2)
+
+	// host3 has no contracts but a sector -> returned
+	hk3 := db.addTestHost(t)
+
+	// host4 has a contract and a pinned sector -> not returned
+	hk4 := db.addTestHost(t)
+	db.addTestContract(t, hk4)
+
+	_, err := db.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     10,
+		Sectors: []slabs.SectorPinParams{
+			{
+				Root:    types.Hash256(hk3),
+				HostKey: hk3,
+			},
+			{
+				Root:    types.Hash256(hk4),
+				HostKey: hk4,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// pin sector for host4
+	err = db.PinSectors(context.Background(), types.FileContractID(hk4), []types.Hash256{types.Hash256(hk4)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hosts, err := db.HostsWithUnpinnedSectors(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 1 {
+		t.Fatalf("expected 1 host with unpinned sectors, got %d", len(hosts))
+	} else if hosts[0] != hk3 {
+		t.Fatalf("expected host %v with unpinned sectors, got %v", hk3, hosts[0])
+	}
+}
+
 func TestHostsRecentUptime(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
