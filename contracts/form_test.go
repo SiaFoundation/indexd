@@ -62,6 +62,14 @@ func (d *dialerMock) DialHost(ctx context.Context, hostKey types.PublicKey, addr
 	return d.clients[hostKey], nil
 }
 
+func (d *dialerMock) TotalFormations() int {
+	var nCalls int
+	for _, calls := range d.clients {
+		nCalls += len(calls.formCalls)
+	}
+	return nCalls
+}
+
 type hostClientMock struct {
 	failsRPCs bool
 
@@ -323,7 +331,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 
 	const (
 		period = 100
-		wanted = 4
+		wanted = 5
 	)
 
 	// helper to create a good host
@@ -396,6 +404,20 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 	hm.settings[good5.PublicKey] = goodSettings
 	formContract(good5.PublicKey, false)
 
+	// seventh one is good but full host takes priority -> no formation
+	good6 := goodHost(7)
+	hm.settings[good6.PublicKey] = goodSettings
+
+	// eighth one is good but has a full contract
+	good7 := goodHost(8)
+	hm.settings[good7.PublicKey] = goodSettings
+	formContract(good7.PublicKey, true)
+	for i := range store.contracts {
+		if store.contracts[i].ID == types.FileContractID(good7.PublicKey) {
+			store.contracts[i].Size = maxContractSize
+		}
+	}
+
 	// populate store
 	store.hosts = map[types.PublicKey]hosts.Host{
 		good1.PublicKey: good1,
@@ -404,6 +426,8 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 		good3.PublicKey: good3,
 		good4.PublicKey: good4,
 		good5.PublicKey: good5,
+		good6.PublicKey: good6,
+		good7.PublicKey: good7,
 	}
 
 	dialer := newDialerMock()
@@ -416,7 +440,11 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 
 	assertFormation := func(h hosts.Host) {
 		t.Helper()
-		call := dialer.HostClient(h.PublicKey).Calls()[0]
+		calls := dialer.HostClient(h.PublicKey).Calls()
+		if len(calls) == 0 {
+			t.Fatalf("no calls for host %v", h.PublicKey)
+		}
+		call := calls[0]
 		if call.settings != goodSettings {
 			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
 		}
@@ -442,21 +470,46 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 
 	// assert that we attempted to form contracts with the right hosts,
 	// settings and params
-	var nCalls int
-	for _, calls := range dialer.clients {
-		nCalls += len(calls.formCalls)
-	}
+	nCalls := dialer.TotalFormations()
 	if nCalls != wanted-1 {
 		t.Fatalf("expected %v calls, got %v", wanted-1, nCalls)
 	}
 	assertFormation(good3)
 	assertFormation(good4)
 	assertFormation(good5)
+	assertFormation(good7)
 
 	// the store should now contain the right number of total contracts which is
-	// the 3 we started with plus the 3 we formed
-	if len(store.contracts) != 6 {
-		t.Fatalf("expected 6 contracts, got %v", len(store.contracts))
+	// the 4 we started with plus the 4 we formed
+	if len(store.contracts) != 8 {
+		t.Fatalf("expected 8 contracts, got %v", len(store.contracts))
+	}
+
+	// perform formations again, this time it's a no-op
+	if err := contracts.performContractFormation(context.Background(), period, wanted, zap.NewNop()); err != nil {
+		t.Fatal(err)
+	}
+	nCalls = dialer.TotalFormations()
+	if nCalls != wanted-1 {
+		t.Fatalf("expected %v calls, got %v", wanted-1, nCalls)
+	}
+
+	// form a contract with the previously ignored host to make it full and
+	// perform migrations with a 0 minimum. This should still form a contract
+	// with the host.
+	formContract(good6.PublicKey, true)
+	for i := range store.contracts {
+		if store.contracts[i].ID == types.FileContractID(good6.PublicKey) {
+			store.contracts[i].Size = maxContractSize
+		}
+	}
+	if err := contracts.performContractFormation(context.Background(), period, 0, zap.NewNop()); err != nil {
+		t.Fatal(err)
+	}
+	assertFormation(good6)
+	nCalls = dialer.TotalFormations()
+	if nCalls != wanted {
+		t.Fatalf("expected %v calls, got %v", wanted, nCalls)
 	}
 }
 

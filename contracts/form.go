@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -85,9 +86,9 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 
 // performContractFormation makes sure that we have at least 'wanted' good
 // contracts with good hosts in unique CIDRs.
-func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted uint64, log *zap.Logger) error {
+func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted int64, log *zap.Logger) error {
 	formationLog := log.Named("formation")
-	formationLog.Debug("started", zap.Uint64("period", period), zap.Uint64("wanted", wanted))
+	formationLog.Debug("started", zap.Uint64("period", period), zap.Int64("wanted", wanted))
 
 	var activeContracts []Contract
 	const batchSize = 50
@@ -99,6 +100,18 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		activeContracts = append(activeContracts, batch...)
 		if len(batch) < batchSize {
 			break
+		}
+	}
+
+	// determine which hosts are 'full', meaning they have exclusively full
+	// contracts. A full host bypasses the CIDR check and will always have a
+	// contract formed with it assuming it's not bad for other reasons.
+	isFull := make(map[types.PublicKey]bool)
+	for _, contract := range activeContracts {
+		if contract.Size < maxContractSize {
+			isFull[contract.HostKey] = false
+		} else if _, hasContract := isFull[contract.HostKey]; !hasContract {
+			isFull[contract.HostKey] = true
 		}
 	}
 
@@ -130,12 +143,13 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	// helper to check if a host is good to form a contract with
 	isGood := func(host hosts.Host, log *zap.Logger) bool {
 		hostLog := log.With(zap.Stringer("hostKey", host.PublicKey))
+		full, _ := isFull[host.PublicKey]
 		if good := host.Usability.Usable(); !good {
 			// host should be good
 			hostLog.Debug("host is not usable due to bad usability")
 			return false
-		} else if usedBy, used := hasCidrConflict(host); used {
-			// host should be on a unique cidr
+		} else if usedBy, used := hasCidrConflict(host); used && !full {
+			// host should be on a unique cidr unless 'full'
 			hostLog.Debug("host is not usable cidr is already in use", zap.Stringer("usedBy", usedBy))
 			return false
 		} else if host.Settings.RemainingStorage < minRemainingStorage {
@@ -191,14 +205,20 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	// randomize their order to avoid preferring any host
 	cm.shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
+	// move full hosts to the front of the list
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return isFull[candidates[i].PublicKey] && !isFull[candidates[j].PublicKey]
+	})
+
+	// we form contracts with all full hosts and until we reach the wanted
+	// number of contracts
 	for i := range candidates {
-		if wanted == 0 {
-			// we have enough contracts, stop forming
+		if !isFull[candidates[i].PublicKey] && wanted <= 0 {
 			break
 		}
 
 		hostKey := candidates[i].PublicKey
-		hostLog := formationLog.With(zap.Stringer("hostKey", hostKey))
+		hostLog := formationLog.With(zap.Stringer("hostKey", hostKey), zap.Bool("full", isFull[hostKey]))
 
 		err := cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
 			// make sure host is still good

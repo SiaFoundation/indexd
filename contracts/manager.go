@@ -528,7 +528,7 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 	}
 
 	// form new contracts until there are enough good contracts to use
-	if err := cm.performContractFormation(ctx, settings.Period, settings.WantedContracts, log); err != nil {
+	if err := cm.performContractFormation(ctx, settings.Period, int64(settings.WantedContracts), log); err != nil {
 		return fmt.Errorf("failed to form contracts: %w", err)
 	}
 
