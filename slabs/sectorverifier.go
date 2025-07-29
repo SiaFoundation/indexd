@@ -164,6 +164,5 @@ func (v *SectorVerifier) account() proto.Account {
 }
 
 func (v *SectorVerifier) token(hostKey types.PublicKey) proto.AccountToken {
-	acc := proto.Account(v.serviceAccount.PublicKey())
-	return acc.Token(v.serviceAccount, hostKey)
+	return proto.NewAccountToken(v.serviceAccount, hostKey)
 }

@@ -40,7 +40,7 @@ func TestAccountFundingE2E(t *testing.T) {
 	hk := hosts[0].PublicKey
 	hp := hosts[0].Settings.Prices
 	hc := indexer.HostClient(t, hk)
-	token := acc.Token(a1, hk)
+	token := proto.NewAccountToken(a1, hk)
 	target := types.Siacoins(1)
 
 	// assert we have one active contract

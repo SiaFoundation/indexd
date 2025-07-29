@@ -146,5 +146,5 @@ func (m *SlabManager) uploadShard(ctx context.Context, h hosts.Host, shard io.Re
 }
 
 func (m *SlabManager) migrationToken(h hosts.Host) proto.AccountToken {
-	return m.migrationAccount.Token(m.migrationAccountKey, h.PublicKey)
+	return proto.NewAccountToken(m.migrationAccountKey, h.PublicKey)
 }
