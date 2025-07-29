@@ -285,7 +285,7 @@ func TestHostChecks(t *testing.T) {
 	assertCheckOK("ProtocolVersion")
 
 	// adjust price validity so we pass the check
-	hs.Prices.ValidUntil = time.Now().Add(time.Second * 3601)
+	hs.Prices.ValidUntil = time.Now().Add(time.Second * 1801)
 	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
 	assertCheckOK("PriceValidity")
 
@@ -331,6 +331,17 @@ func TestHostChecks(t *testing.T) {
 	} else if !h.Usability.Usable() {
 		t.Fatal("expected host to be usable")
 	}
+
+	// assert valid until takes into account the last successful scan time
+	// instead of the current time when calculating whether the price validity
+	// check passes
+	if _, err := db.pool.Exec(context.Background(), `
+		UPDATE hosts SET 
+			last_successful_scan = last_successful_scan - INTERVAL '1 day', 
+			settings_valid_until = settings_valid_until - INTERVAL '1 day'`); err != nil {
+		t.Fatal(err)
+	}
+	assertCheckOK("PriceValidity")
 }
 
 func TestHosts(t *testing.T) {

@@ -90,7 +90,7 @@ WITH globals AS (
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
 	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
-	has_settings AND settings_valid_until >= (NOW() + INTERVAL '15 minutes'),
+	has_settings AND settings_valid_until >= last_successful_scan + INTERVAL '15 minutes',
 	has_settings AND settings_accepting_contracts,
 	has_settings AND settings_contract_price <= globals.one_sc,
 	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
@@ -165,7 +165,7 @@ WITH globals AS (
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
 	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
 	has_settings AND settings_version >= globals.host_min_version,
-	has_settings AND settings_valid_until >= (NOW() + INTERVAL '15 minutes'),
+	has_settings AND settings_valid_until >= last_successful_scan + INTERVAL '15 minutes',
 	has_settings AND settings_accepting_contracts,
 	has_settings AND settings_contract_price <= globals.one_sc,
 	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
@@ -182,7 +182,7 @@ WHERE
 		settings_max_contract_duration >= globals.contracts_period AND
 		settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
 		settings_version >= globals.host_min_version AND
-		settings_valid_until >= (NOW() + INTERVAL '15 minutes') AND
+		settings_valid_until >= last_successful_scan + INTERVAL '15 minutes' AND
 		settings_accepting_contracts AND
 		settings_contract_price <= globals.one_sc AND
 		settings_collateral >= globals.hosts_min_collateral AND
@@ -516,6 +516,7 @@ WITH globals AS (
 		id,
 		hosts.public_key,
 		recent_uptime,
+		last_successful_scan,
 		settings_protocol_version,
 		settings_release,
 		settings_wallet_address,
@@ -549,7 +550,7 @@ WHERE
 	settings_max_contract_duration >= globals.contracts_period AND
 	settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
 	settings_version >= globals.host_min_version AND
-	settings_valid_until >= (NOW() + INTERVAL '15 minutes') AND
+	settings_valid_until >= last_successful_scan + INTERVAL '15 minutes' AND
 	settings_accepting_contracts AND
 	settings_contract_price <= globals.one_sc AND
 	settings_collateral >= globals.hosts_min_collateral AND
