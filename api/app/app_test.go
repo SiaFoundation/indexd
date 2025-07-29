@@ -2,7 +2,6 @@ package app_test
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -12,33 +11,14 @@ import (
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
-	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
 func TestApplicationAPI(t *testing.T) {
 	// create cluster with three hosts
 	logger := testutils.NewLogger(false)
-	c := testutils.NewConsensusNode(t, logger)
-	h1 := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
-	h2 := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
-	h3 := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
-
-	// create indexer
-	indexer := testutils.NewIndexer(t, c, logger)
-
-	// fund hosts and indexer wallet
-	c.MineBlocks(t, h1.WalletAddress(), 1)
-	c.MineBlocks(t, h2.WalletAddress(), 1)
-	c.MineBlocks(t, h3.WalletAddress(), 1)
-	c.MineBlocks(t, indexer.WalletAddr(), 1)
-	c.MineBlocks(t, types.Address{}, c.Network().MaturityDelay)
-
-	// announce hosts
-	if err := errors.Join(h1.Announce(), h2.Announce(), h3.Announce()); err != nil {
-		t.Fatal(err)
-	}
-	c.MineBlocks(t, types.Address{}, 1)
+	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
+	indexer := cluster.Indexer
 	time.Sleep(time.Second)
 
 	// assert hosts are registered
@@ -48,6 +28,10 @@ func TestApplicationAPI(t *testing.T) {
 	} else if len(hosts) != 3 {
 		t.Fatal("expected 3 hosts, got", len(hosts))
 	}
+
+	h1 := hosts[0]
+	h2 := hosts[1]
+	h3 := hosts[2]
 
 	// prepare account
 	sk := types.GeneratePrivateKey()
@@ -63,15 +47,15 @@ func TestApplicationAPI(t *testing.T) {
 			Sectors: []slabs.SectorPinParams{
 				{
 					Root:    frand.Entropy256(),
-					HostKey: h1.PublicKey(),
+					HostKey: h1.PublicKey,
 				},
 				{
 					Root:    frand.Entropy256(),
-					HostKey: h2.PublicKey(),
+					HostKey: h2.PublicKey,
 				},
 				{
 					Root:    frand.Entropy256(),
-					HostKey: h3.PublicKey(),
+					HostKey: h3.PublicKey,
 				},
 			},
 		}
@@ -106,7 +90,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// block h1
-	err = indexer.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey()}, "test blocklist reason")
+	err = indexer.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey}, "test blocklist reason")
 	if err != nil {
 		t.Fatal("failed to add host to blocklist:", err)
 	}

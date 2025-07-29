@@ -2,7 +2,6 @@ package admin_test
 
 import (
 	"context"
-	"errors"
 	"os"
 	"reflect"
 	"strings"
@@ -111,22 +110,10 @@ func TestAccountsAPI(t *testing.T) {
 func TestContractsAPI(t *testing.T) {
 	// create cluster with one host
 	logger := newTestLogger(false)
-	c := testutils.NewConsensusNode(t, logger)
-	h := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
-
-	// create indexer
-	indexer := testutils.NewIndexer(t, c, logger)
-
-	// fund host and indexer wallet
-	c.MineBlocks(t, h.WalletAddress(), 1)
-	c.MineBlocks(t, indexer.WalletAddr(), 1)
-	c.MineBlocks(t, types.Address{}, c.Network().MaturityDelay)
-
-	// announce host
-	if err := h.Announce(); err != nil {
-		t.Fatal(err)
-	}
-	c.MineBlocks(t, types.Address{}, 1)
+	cluster := testutils.NewCluster(t, testutils.WithHosts(1), testutils.WithLogger(logger))
+	indexer := cluster.Indexer
+	c := cluster.ConsensusNode
+	h := cluster.Hosts[0]
 	time.Sleep(time.Second)
 
 	// assert it got scanned
@@ -221,12 +208,11 @@ func TestContractsAPI(t *testing.T) {
 	if contracts, err := indexer.Contracts(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
-		t.Fatal("expected 1 contract", len(contracts))
+		t.Fatal("expected 1 contract, got", len(contracts))
 	} else if contracts[0].RenewedFrom != contract.ID {
 		t.Fatal("expected contract to be renewed", contracts[0].RenewedFrom, contract.ID)
 	}
 }
-
 func TestExplorerAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
@@ -271,26 +257,17 @@ func TestTxpoolAPI(t *testing.T) {
 }
 
 func TestHostsAPI(t *testing.T) {
+	ms := testutils.MaintenanceSettings
+	ms.Enabled = false
+
 	// create cluster
-	c := testutils.NewConsensusNode(t, zap.NewNop())
-	h1 := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
-	h2 := c.NewHost(t, types.GeneratePrivateKey(), zap.NewNop())
-	indexer := testutils.NewIndexer(t, c, zap.NewNop())
-
-	// fund hosts
-	c.MineBlocks(t, h1.WalletAddress(), 1)
-	c.MineBlocks(t, h2.WalletAddress(), 1)
-	c.MineBlocks(t, types.Address{}, c.Network().MaturityDelay)
-
-	// announce hosts
-	err := errors.Join(h1.Announce(), h2.Announce())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// mine a block and allow hosts to be scanned
-	c.MineBlocks(t, types.Address{}, 1)
+	cluster := testutils.NewCluster(t, testutils.WithHosts(2), testutils.WithIndexer(testutils.WithMaintenanceSettings(ms)))
+	indexer := cluster.Indexer
 	time.Sleep(time.Second)
+
+	// convenience variables
+	h1 := cluster.Hosts[0]
+	h2 := cluster.Hosts[1]
 
 	// assert both hosts got scanned
 	if hosts, err := indexer.Hosts(context.Background()); err != nil {

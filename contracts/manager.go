@@ -181,6 +181,7 @@ type (
 		tg      *threadgroup.ThreadGroup
 
 		contractRejectBuffer           time.Duration
+		disableCIDRChecks              bool
 		expiredContractBroadcastBuffer uint64
 		expiredContractPruneBuffer     uint64
 		maintenanceFrequency           time.Duration
@@ -194,6 +195,13 @@ type (
 func WithLogger(l *zap.Logger) ContractManagerOpt {
 	return func(cm *ContractManager) {
 		cm.log = l
+	}
+}
+
+// WithDisabledCIDRChecks disables the CIDR checks for the contract manager.
+func WithDisabledCIDRChecks() ContractManagerOpt {
+	return func(cm *ContractManager) {
+		cm.disableCIDRChecks = true
 	}
 }
 

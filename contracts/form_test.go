@@ -245,7 +245,12 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 
 	assertFormation := func(h hosts.Host) {
 		t.Helper()
-		call := dialer.HostClient(h.PublicKey).Calls()[0]
+
+		calls := dialer.HostClient(h.PublicKey).Calls()
+		if len(calls) != 1 {
+			t.Fatalf("expected 1 call for host %v, got %v", h.PublicKey, len(calls))
+		}
+		call := calls[0]
 		if call.settings != goodSettings {
 			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
 		}

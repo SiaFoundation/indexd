@@ -14,10 +14,11 @@ import (
 
 type (
 	clusterCfg struct {
-		network *consensus.Network
-		genesis types.Block
-		logger  *zap.Logger
-		hosts   int
+		network     *consensus.Network
+		genesis     types.Block
+		indexerOpts []IndexerOpt
+		logger      *zap.Logger
+		hosts       int
 	}
 
 	// ClusterOpt is a functional option for configuring a cluster for testing
@@ -61,6 +62,14 @@ func WithHosts(n int) ClusterOpt {
 	}
 }
 
+// WithIndexer allows for passing options to the indexer when creating the
+// cluster. This is useful for configuring slab options, logger, etc.
+func WithIndexer(opts ...IndexerOpt) ClusterOpt {
+	return func(cfg *clusterCfg) {
+		cfg.indexerOpts = opts
+	}
+}
+
 // NewCluster creates a cluster for testing. A cluster contains an indexer and
 // multiple hosts.
 func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
@@ -74,7 +83,7 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 
 	// create indexer and mine until after V2 allowheight
 	c := NewConsensusNode(t, cfg.logger)
-	indexer := NewIndexer(t, c, cfg.logger.Named("indexer"))
+	indexer := NewIndexer(t, c, cfg.logger.Named("indexer"), cfg.indexerOpts...)
 	c.MineBlocks(t, indexer.WalletAddr(), 1)
 
 	// create cluster

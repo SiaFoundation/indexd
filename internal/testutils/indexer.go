@@ -35,7 +35,8 @@ const (
 )
 
 var (
-	testMaintenanceSettings = contracts.MaintenanceSettings{
+	// MaintenanceSettings is the default maintenance settings used for testing.
+	MaintenanceSettings = contracts.MaintenanceSettings{
 		Enabled:         true,
 		Period:          144,
 		RenewWindow:     72,
@@ -43,24 +44,51 @@ var (
 	}
 )
 
-// Indexer is a test utility combining an indexer, an http client for the
-// indexer and useful helpers for testing.
-type Indexer struct {
-	*admin.Client
-	App func(types.PrivateKey) *app.Client
+type (
+	// Indexer is a test utility combining an indexer, an http client for the
+	// indexer and useful helpers for testing.
+	Indexer struct {
+		*admin.Client
+		App func(types.PrivateKey) *app.Client
 
-	cm     *chain.Manager
-	dialer *client.SiamuxDialer
-	syncer *Syncer
-	store  *postgres.Store
-	wallet *wallet.SingleAddressWallet
+		cm     *chain.Manager
+		dialer *client.SiamuxDialer
+		syncer *Syncer
+		store  *postgres.Store
+		wallet *wallet.SingleAddressWallet
+	}
+
+	// IndexerOpt is a functional option for configuring an indexer for testing
+	IndexerOpt func(*indexerCfg)
+
+	indexerCfg struct {
+		maintenanceSettings contracts.MaintenanceSettings
+	}
+)
+
+func defaultIndexerCfg() *indexerCfg {
+	return &indexerCfg{
+		maintenanceSettings: MaintenanceSettings,
+	}
+}
+
+// WithMaintenanceSettings allows for passing maintenance settings to the indexer
+func WithMaintenanceSettings(ms contracts.MaintenanceSettings) IndexerOpt {
+	return func(cfg *indexerCfg) {
+		cfg.maintenanceSettings = ms
+	}
 }
 
 // NewIndexer creates a new indexer for testing that is automatically closed up
 // after the test is finished.
-func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
+func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...IndexerOpt) *Indexer {
+	cfg := defaultIndexerCfg()
+	for _, opt := range opts {
+		opt(cfg)
+	}
+
 	// prepare store
-	store := NewDB(t, log)
+	store := NewDB(t, cfg.maintenanceSettings, log)
 
 	s := NewSyncer(t, c.genesis.ID(), c.cm)
 
@@ -77,7 +105,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger) *Indexer {
 	dialer := client.NewSiamuxDialer(c.cm, signer, store, log)
 	am := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithLogger(log.Named("accounts")))
 
-	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, dialer, hm, s, wm, contracts.WithLogger(log.Named("contracts")), contracts.WithMaintenanceFrequency(200*time.Millisecond))
+	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, dialer, hm, s, wm, contracts.WithLogger(log.Named("contracts")), contracts.WithMaintenanceFrequency(200*time.Millisecond), contracts.WithDisabledCIDRChecks())
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}

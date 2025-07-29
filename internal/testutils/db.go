@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.uber.org/zap"
 )
 
 // NewDB creates a new postgres database for testing.
-func NewDB(t testing.TB, log *zap.Logger) *postgres.Store {
+func NewDB(t testing.TB, maintenanceSettings contracts.MaintenanceSettings, log *zap.Logger) *postgres.Store {
 	// parse connection info from env vars
 	ci := postgres.ConnectionInfo{
 		Host:     "127.0.0.1",
@@ -41,7 +42,7 @@ func NewDB(t testing.TB, log *zap.Logger) *postgres.Store {
 	ci.Database = dbName
 
 	// create store
-	store, err := postgres.NewStore(context.Background(), ci, testMaintenanceSettings, hosts.DefaultUsabilitySettings, log)
+	store, err := postgres.NewStore(context.Background(), ci, maintenanceSettings, hosts.DefaultUsabilitySettings, log)
 	if err != nil {
 		t.Fatalf("failed to create store: %v", err)
 	}
