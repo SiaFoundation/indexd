@@ -302,8 +302,11 @@ func (s *Store) HostsWithUnpinnedSectors(ctx context.Context) ([]types.PublicKey
 		rows, err := tx.Query(ctx, `
 			SELECT public_key
 			FROM hosts
-			INNER JOIN sectors ON sectors.host_id = hosts.id
-			WHERE NOT EXISTS (
+			WHERE EXISTS (
+				SELECT 1
+				FROM sectors
+				WHERE sectors.host_id = hosts.id
+			) AND NOT EXISTS (
 				SELECT 1
 				FROM contracts
 				WHERE contracts.host_id = hosts.id AND contracts.state >= $1 AND contracts.state <= $2

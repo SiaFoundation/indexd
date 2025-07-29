@@ -795,14 +795,22 @@ func TestHostsWithUnpinnedSectors(t *testing.T) {
 
 	_, err := db.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.SectorPinParams{
 			{
 				Root:    types.Hash256(hk3),
 				HostKey: hk3,
 			},
 			{
+				Root:    frand.Entropy256(),
+				HostKey: hk3,
+			},
+			{
 				Root:    types.Hash256(hk4),
+				HostKey: hk4,
+			},
+			{
+				Root:    frand.Entropy256(),
 				HostKey: hk4,
 			},
 		},
@@ -811,7 +819,7 @@ func TestHostsWithUnpinnedSectors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// pin sector for host4
+	// pin sector for host4 but not host3
 	err = db.PinSectors(context.Background(), types.FileContractID(hk4), []types.Hash256{types.Hash256(hk4)})
 	if err != nil {
 		t.Fatal(err)
@@ -1824,6 +1832,61 @@ func BenchmarkHostsWithLostSectors(b *testing.B) {
 			b.Fatal(err)
 		} else if len(batch) == 0 {
 			b.Fatal("expected hosts, got none")
+		}
+	}
+}
+
+func BenchmarkHostsWithUnpinnedSectors(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+	account := proto4.Account{1}
+
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	const (
+		nHosts          = 1000
+		dbBaseSize      = 1 << 40 // 1TiB of sectors
+		nSectorsPerHost = dbBaseSize / proto4.SectorSize / nHosts
+	)
+
+	// add hosts
+	for i := range nHosts {
+		hk := store.addTestHost(b)
+
+		// add sectors
+		for remainingSectors := nSectorsPerHost; remainingSectors > 0; {
+			batchSize := min(remainingSectors, 10000)
+			remainingSectors -= batchSize
+			var sectors []slabs.SectorPinParams
+			for range batchSize {
+				root := frand.Entropy256()
+				sectors = append(sectors, slabs.SectorPinParams{
+					Root:    root,
+					HostKey: hk,
+				})
+			}
+			if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
+				MinShards:     1,
+				EncryptionKey: frand.Entropy256(),
+				Sectors:       sectors,
+			}); err != nil {
+				b.Fatal(err)
+			}
+		}
+
+		// 10% of hosts have unpinned sectors which results in 100 out of 1000.
+		if i%10 != 0 {
+			store.addTestContract(b, hk)
+		}
+	}
+
+	for b.Loop() {
+		batch, err := store.HostsWithUnpinnedSectors(context.Background())
+		if err != nil {
+			b.Fatal(err)
+		} else if len(batch) != 100 {
+			b.Fatal("expected 100 hosts, got", len(batch))
 		}
 	}
 }
