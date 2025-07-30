@@ -70,6 +70,7 @@ type (
 
 	// Config contains the configuration for the indexer
 	Config struct {
+		AutoOpenWebUI  bool   `yaml:"autoOpenWebUI"`
 		Directory      string `yaml:"directory"`
 		RecoveryPhrase string `yaml:"recoveryPhrase"`
 		Debug          bool   `yaml:"debug"`

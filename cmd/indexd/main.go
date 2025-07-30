@@ -32,8 +32,9 @@ const (
 )
 
 var cfg = config.Config{
-	Directory: os.Getenv(dataDirEnvVar), // default to env variable
-	Debug:     false,
+	AutoOpenWebUI: true,
+	Directory:     os.Getenv(dataDirEnvVar), // default to env variable
+	Debug:         false,
 	AdminAPI: config.AdminAPI{
 		Address:  "127.0.0.1:9980",
 		Password: os.Getenv(indexdAdminPasswordEnvVar),

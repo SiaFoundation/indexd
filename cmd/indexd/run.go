@@ -7,8 +7,10 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"syscall"
 	"time"
@@ -35,6 +37,7 @@ import (
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
+	"go.sia.tech/web/indexd"
 	"go.uber.org/zap"
 )
 
@@ -164,6 +167,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	adminAPI := http.Server{
 		Handler: webRouter{
 			api: jape.BasicAuth(cfg.AdminAPI.Password)(admin.NewAPI(cm, contracts, hm, s, wm, store, adminAPIOpts...)),
+			ui:  indexd.Handler(),
 		},
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -200,6 +204,17 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 			log.Error("failed to serve application API", zap.Error(err))
 		}
 	}()
+
+	// open the web UI if enabled
+	if cfg.AutoOpenWebUI {
+		time.Sleep(time.Millisecond) // give the web server a chance to start
+		_, port, err := net.SplitHostPort(adminAPIListener.Addr().String())
+		if err != nil {
+			log.Debug("failed to parse API address", zap.Error(err))
+		} else if err := openBrowser(fmt.Sprintf("http://127.0.0.1:%s", port)); err != nil {
+			log.Debug("failed to open browser", zap.Error(err))
+		}
+	}
 
 	log.Info("node started", zap.Stringer("admin", adminAPIListener.Addr()), zap.Stringer("application", appAPIListener.Addr()), zap.String("p2p", string(s.Addr())))
 	<-ctx.Done()
@@ -258,4 +273,17 @@ func startLocalhostListener(listenAddr string, log *zap.Logger) (l net.Listener,
 		log.Debug("failed to listen on fallback address", zap.String("address", addr), zap.Error(err))
 	}
 	return
+}
+
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "linux":
+		return exec.Command("xdg-open", url).Start()
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		return exec.Command("open", url).Start()
+	default:
+		return fmt.Errorf("unsupported platform %q", runtime.GOOS)
+	}
 }
