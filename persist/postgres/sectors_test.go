@@ -1075,7 +1075,7 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
 	}
 
-	if err := store.PruneUnpinnableSectors(context.Background()); err != nil {
+	if err := store.PruneUnpinnableSectors(context.Background(), time.Now().Add(-3*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1892,13 +1892,14 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 	}
 
 	// 10% of the sectors are candidates to be marked
+	now := time.Now()
 	reset := func() {
 		b.Helper()
-		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = 1, contract_sectors_map_id = NULL, uploaded_at = NOW()`)
+		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = 1, contract_sectors_map_id = NULL, uploaded_at = $1`, now)
 		if err != nil {
 			b.Fatal(err)
 		}
-		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET uploaded_at = NOW() - INTERVAL '4 days' WHERE id % 10 = 0`)
+		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET uploaded_at = $1 - INTERVAL '4 days' WHERE id % 10 = 0`, now)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1906,7 +1907,7 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 	reset()
 
 	for b.Loop() {
-		err := store.PruneUnpinnableSectors(context.Background())
+		err := store.PruneUnpinnableSectors(context.Background(), now.Add(-3*24*time.Hour))
 		if err != nil {
 			b.Fatal(err)
 		}
