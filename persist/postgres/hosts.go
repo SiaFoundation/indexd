@@ -305,11 +305,11 @@ func (s *Store) HostsWithUnpinnedSectors(ctx context.Context) ([]types.PublicKey
 			WHERE EXISTS (
 				SELECT 1
 				FROM sectors
-				WHERE sectors.host_id = hosts.id
+				WHERE sectors.host_id = hosts.id AND sectors.contract_sectors_map_id IS NULL
 			) AND NOT EXISTS (
 				SELECT 1
 				FROM contracts
-				WHERE contracts.host_id = hosts.id AND contracts.state >= $1 AND contracts.state <= $2
+				WHERE contracts.host_id = hosts.id AND (contracts.state <> $1 OR contracts.state <> $2)
 			)
 		`, contracts.ContractStatePending, contracts.ContractStateActive)
 		if err != nil {
