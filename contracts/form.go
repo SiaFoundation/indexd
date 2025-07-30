@@ -103,16 +103,30 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		}
 	}
 
+	// forceFormation is a map of hosts that we will always form a contract with
+	// regardless of how many we already have or what CIDR they are on.
+	forceFormation := make(map[types.PublicKey]bool)
+
 	// determine which hosts are 'full', meaning they have exclusively full
-	// contracts. A full host bypasses the CIDR check and will always have a
-	// contract formed with it assuming it's not bad for other reasons.
-	isFull := make(map[types.PublicKey]bool)
+	// contracts. A full host will always have a contract formed with it
+	// assuming it's not bad for other reasons.
 	for _, contract := range activeContracts {
 		if contract.Size < maxContractSize {
-			isFull[contract.HostKey] = false
-		} else if _, hasContract := isFull[contract.HostKey]; !hasContract {
-			isFull[contract.HostKey] = true
+			forceFormation[contract.HostKey] = false
+		} else if _, hasContract := forceFormation[contract.HostKey]; !hasContract {
+			forceFormation[contract.HostKey] = true
 		}
+	}
+
+	// determine which hosts have unpinned sectors and no active contracts. We
+	// always form contracts with these hosts to be able to pin the sectors
+	// eventually.
+	hwus, err := cm.store.HostsWithUnpinnableSectors(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch hosts with unpinnable sectors: %w", err)
+	}
+	for _, hostKey := range hwus {
+		forceFormation[hostKey] = true
 	}
 
 	// helpers for CIDR check
@@ -148,7 +162,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	// helper to check if a host is good to form a contract with
 	isGood := func(host hosts.Host, log *zap.Logger) bool {
 		hostLog := log.With(zap.Stringer("hostKey", host.PublicKey))
-		full, _ := isFull[host.PublicKey]
+		full, _ := forceFormation[host.PublicKey]
 		if good := host.Usability.Usable(); !good {
 			// host should be good
 			hostLog.Debug("host is not usable due to bad usability")
@@ -212,18 +226,18 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 
 	// move full hosts to the front of the list
 	sort.SliceStable(candidates, func(i, j int) bool {
-		return isFull[candidates[i].PublicKey] && !isFull[candidates[j].PublicKey]
+		return forceFormation[candidates[i].PublicKey] && !forceFormation[candidates[j].PublicKey]
 	})
 
 	// we form contracts with all full hosts and until we reach the wanted
 	// number of contracts
 	for i := range candidates {
-		if !isFull[candidates[i].PublicKey] && wanted <= 0 {
+		if !forceFormation[candidates[i].PublicKey] && wanted <= 0 {
 			break
 		}
 
 		hostKey := candidates[i].PublicKey
-		hostLog := formationLog.With(zap.Stringer("hostKey", hostKey), zap.Bool("full", isFull[hostKey]))
+		hostLog := formationLog.With(zap.Stringer("hostKey", hostKey), zap.Bool("full", forceFormation[hostKey]))
 
 		err := cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
 			// make sure host is still good

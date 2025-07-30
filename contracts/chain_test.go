@@ -254,6 +254,19 @@ func (s *storeMock) Hosts(ctx context.Context, offset, limit int, queryOpts ...h
 	return filter, nil
 }
 
+func (s *storeMock) HostsWithUnpinnableSectors(ctx context.Context) (hks []types.PublicKey, _ error) {
+	for _, host := range s.hosts {
+		hasContract := slices.ContainsFunc(s.contracts, func(c Contract) bool {
+			return c.HostKey == host.PublicKey
+		})
+		_, hasSector := s.sectors[host.PublicKey]
+		if !hasContract && hasSector {
+			hks = append(hks, host.PublicKey)
+		}
+	}
+	return hks, nil
+}
+
 func (s *storeMock) LastScannedIndex(ctx context.Context) (ci types.ChainIndex, err error) {
 	return types.ChainIndex{}, nil
 }

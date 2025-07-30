@@ -101,6 +101,7 @@ type (
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
 		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
+		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
 		LastScannedIndex(ctx context.Context) (ci types.ChainIndex, err error)
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
