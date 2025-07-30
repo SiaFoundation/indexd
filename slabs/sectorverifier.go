@@ -90,6 +90,7 @@ func (v *SectorVerifier) ResetBalance(ctx context.Context, host hosts.Host) erro
 // should handle any remaining results and then interrupt the integrity checks
 // for the host.
 func (v *SectorVerifier) VerifySectors(ctx context.Context, host hosts.Host, roots []types.Hash256) ([]CheckSectorsResult, error) {
+	fmt.Println("verifying sectors on host", host.PublicKey)
 	hc, err := v.dialer.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to dial host %s: %w", errHostUnreachable, host.PublicKey, err)

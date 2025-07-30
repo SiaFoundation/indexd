@@ -20,6 +20,9 @@ import (
 // - The host reports that the sector is lost (e.g. when pinning it, during the integrity check or when fetching it for migration)
 // - The host has failed the integrity check for that sector enough times
 func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error {
+	if len(roots) == 0 {
+		return nil
+	}
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		sqlRoots := make([]sqlHash256, len(roots))
 		for i, root := range roots {

@@ -92,6 +92,15 @@ func (h *Host) Connect(ctx context.Context, addr string) error {
 	return err
 }
 
+// DropSector simulates the host losing a sector by removing it from the sector
+// store.
+func (h *Host) DropSector(root types.Hash256) {
+	err := h.ss.DeleteSector(root)
+	if err != nil {
+		panic(fmt.Sprintf("failed to delete sector %s: %v", root, err)) // developer error
+	}
+}
+
 // PublicKey returns the host's public key.
 func (h *Host) PublicKey() types.PublicKey {
 	return h.pk.PublicKey()

@@ -20,15 +20,13 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	healthCheckInterval = 30 * time.Minute
-)
-
 type (
 	// SlabManager is responsible for managing slabs, including pinning them,
 	// checking their integrity on the network and migrating their sectors if
 	// necessary.
 	SlabManager struct {
+		healthCheckInterval time.Duration
+
 		integrityCheckInterval       time.Duration
 		failedIntegrityCheckInterval time.Duration
 		maxFailedIntegrityChecks     uint
@@ -115,6 +113,21 @@ var (
 // An Option is a functional option for the SlabManager.
 type Option func(*SlabManager)
 
+// WithHealthCheckInterval sets the interval for health checks.
+func WithHealthCheckInterval(interval time.Duration) Option {
+	return func(m *SlabManager) {
+		m.healthCheckInterval = interval
+	}
+}
+
+// WithIntegrityCheckIntervals sets the intervals for successful and failed integrity checks.
+func WithIntegrityCheckIntervals(success, failure time.Duration) Option {
+	return func(m *SlabManager) {
+		m.integrityCheckInterval = success
+		m.failedIntegrityCheckInterval = failure
+	}
+}
+
 // WithLogger sets the logger for the SlabManager.
 func WithLogger(l *zap.Logger) Option {
 	return func(m *SlabManager) {
@@ -157,6 +170,8 @@ func NewManager(am AccountManager, hm HostManager, store Store, dialer *client.S
 
 func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
 	m := &SlabManager{
+		healthCheckInterval: 30 * time.Minute,
+
 		integrityCheckInterval:       7 * 24 * time.Hour,
 		failedIntegrityCheckInterval: 6 * time.Hour,
 		maxFailedIntegrityChecks:     5,
@@ -214,7 +229,7 @@ func (m *SlabManager) initServiceAccounts(sks ...types.PrivateKey) error {
 // maintenanceLoop performs any background tasks that the slab manager needs to
 // perform on slabs
 func (m *SlabManager) maintenanceLoop(ctx context.Context) {
-	healthTicker := time.NewTicker(healthCheckInterval)
+	healthTicker := time.NewTicker(m.healthCheckInterval)
 	defer healthTicker.Stop()
 
 	for {

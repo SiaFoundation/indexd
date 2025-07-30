@@ -48,6 +48,7 @@ var (
 )
 
 type (
+
 	// Indexer is a test utility combining an indexer, an http client for the
 	// indexer and useful helpers for testing.
 	Indexer struct {
@@ -56,8 +57,8 @@ type (
 
 		cm     *chain.Manager
 		dialer *client.SiamuxDialer
-		syncer *Syncer
 		store  *postgres.Store
+		syncer *Syncer
 		wallet *wallet.SingleAddressWallet
 	}
 
@@ -66,6 +67,7 @@ type (
 
 	indexerCfg struct {
 		maintenanceSettings contracts.MaintenanceSettings
+		slabOpts            []slabs.Option
 	}
 )
 
@@ -79,6 +81,13 @@ func defaultIndexerCfg() *indexerCfg {
 func WithMaintenanceSettings(ms contracts.MaintenanceSettings) IndexerOpt {
 	return func(cfg *indexerCfg) {
 		cfg.maintenanceSettings = ms
+	}
+}
+
+// WithSlabOptions allows for passing slab options to the indexer
+func WithSlabOptions(opts ...slabs.Option) IndexerOpt {
+	return func(cfg *indexerCfg) {
+		cfg.slabOpts = opts
 	}
 }
 
@@ -113,9 +122,13 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
 
-	slabs, err := slabs.NewManager(am, hm, store, dialer, alerts.NewManager(), keys.DeriveKey(walletKey, "migration"), keys.DeriveKey(walletKey, "integrity"))
+	slabOpts := []slabs.Option{slabs.WithLogger(log.Named("slabs"))}
+	slabOpts = append(slabOpts, cfg.slabOpts...)
+
+	alerter := alerts.NewManager()
+	slabs, err := slabs.NewManager(am, hm, store, dialer, alerter, keys.DeriveKey(walletKey, "migration"), keys.DeriveKey(walletKey, "integrity"), slabOpts...)
 	if err != nil {
-		t.Fatalf("failed to create slabs manager: %v", err)
+		t.Fatalf("failed to create slab manager: %v", err)
 	}
 
 	subscriber, err := subscriber.New(c.cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
@@ -226,11 +239,6 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		syncer: syncer,
 		wallet: wm,
 	}
-}
-
-// Database returns the underlying store.
-func (idx *Indexer) Database() *postgres.Store {
-	return idx.store
 }
 
 // HostClient returns a host client for the given host public key.
