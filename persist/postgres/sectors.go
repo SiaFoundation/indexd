@@ -428,6 +428,22 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 	})
 }
 
+// PruneUnpinnableSectors sets the the host ID for sectors that haven't been
+// pinned within 3 days to NULL.
+func (s *Store) PruneUnpinnableSectors(ctx context.Context) error {
+	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+            UPDATE sectors
+            SET host_id = NULL
+            WHERE host_id IS NOT NULL
+	            AND contract_sectors_map_id IS NULL
+	            AND uploaded_at <= NOW() - INTERVAL '3 days'
+		`)
+		return err
+	})
+	return err
+}
+
 // UnpinnedSectors returns up to 'limit' sectors which have been uploaded to a host but
 // not pinned to a contract yet.
 func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
