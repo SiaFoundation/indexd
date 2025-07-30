@@ -294,9 +294,9 @@ func (s *Store) BlockHosts(ctx context.Context, hks []types.PublicKey, reason st
 	})
 }
 
-// HostsWithUnpinnedSectors returns a list of host public keys for hosts that
+// HostsWithUnpinnableSectors returns a list of host public keys for hosts that
 // don't have any contracts but unpinned sectors.
-func (s *Store) HostsWithUnpinnedSectors(ctx context.Context) ([]types.PublicKey, error) {
+func (s *Store) HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `

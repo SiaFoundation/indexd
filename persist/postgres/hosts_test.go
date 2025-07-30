@@ -766,7 +766,7 @@ func TestHostsWithLostSectors(t *testing.T) {
 	assertHosts([]types.PublicKey{hk1, hk2})
 }
 
-func TestHostsWithUnpinnedSectors(t *testing.T) {
+func TestHostsWithUnpinnableSectors(t *testing.T) {
 	// create database
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
@@ -825,7 +825,7 @@ func TestHostsWithUnpinnedSectors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hosts, err := db.HostsWithUnpinnedSectors(context.Background())
+	hosts, err := db.HostsWithUnpinnableSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
@@ -1836,7 +1836,7 @@ func BenchmarkHostsWithLostSectors(b *testing.B) {
 	}
 }
 
-func BenchmarkHostsWithUnpinnedSectors(b *testing.B) {
+func BenchmarkHostsWithUnpinnableSectors(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto4.Account{1}
 
@@ -1882,7 +1882,7 @@ func BenchmarkHostsWithUnpinnedSectors(b *testing.B) {
 	}
 
 	for b.Loop() {
-		batch, err := store.HostsWithUnpinnedSectors(context.Background())
+		batch, err := store.HostsWithUnpinnableSectors(context.Background())
 		if err != nil {
 			b.Fatal(err)
 		} else if len(batch) != 100 {
