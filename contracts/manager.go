@@ -107,6 +107,7 @@ type (
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error
 		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
+		PruneUnpinnableSectors(ctx context.Context) error
 		PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error
 		PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
@@ -398,6 +399,10 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 
 		if err := cm.performSectorPinning(ctx, log); err != nil {
 			log.Error("sector pinning failed", zap.Error(err))
+		}
+
+		if err := cm.store.PruneUnpinnableSectors(ctx); err != nil {
+			log.Error("failed to prune unpinnable sectors", zap.Error(err))
 		}
 	}
 }

@@ -1007,6 +1007,88 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 }
 
+func TestPruneUnpinnableSectors(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// add host with a contract
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// pin a slab to add a few sectors to the database
+	root1 := frand.Entropy256()
+	root2 := frand.Entropy256()
+	root3 := frand.Entropy256()
+	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     10,
+		Sectors: []slabs.SectorPinParams{
+			{
+				Root:    root1,
+				HostKey: hk,
+			},
+			{
+				Root:    root2,
+				HostKey: hk,
+			},
+			{
+				Root:    root3,
+				HostKey: hk,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure some time passes since the default time that is set when the
+	// slab is pinned
+	time.Sleep(100 * time.Millisecond)
+
+	// after pinning, no slab should be unhealthy since their sectors aren't
+	// pinned to contracts yet.
+	unhealthyIDs, err := store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthyIDs) != 0 {
+		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
+	}
+
+	// set the uploaded timestamp to past the threshold pruning threshold date
+	// of 3 days
+	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET uploaded_at = NOW() - Interval '4 days' WHERE id = 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// we should still have no unhealthy slabs because the host_id has not been
+	// set to null yet
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthyIDs) != 0 {
+		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
+	}
+
+	if err := store.PruneUnpinnableSectors(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+
+	// sector should have had host_id nulled out due to PruneUnpinnableSectors
+	// and should now be unhealthy
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthyIDs) != 1 {
+		t.Fatalf("expected 1 unhealthy slabs, got %d", len(unhealthyIDs))
+	}
+}
+
 func TestUnpinnedSectors(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
@@ -1757,6 +1839,74 @@ func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 		b.SetBytes(proto.SectorSize * nSectors / 10)
 
 		err := store.MarkFailingSectorsLost(context.Background(), hk, 1)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		// reset db
+		b.StopTimer()
+		reset()
+		b.StartTimer()
+	}
+}
+
+// BenchmarkPruneUnpinnableSectors benchmarks PruneUnpinnableSectors
+func BenchmarkPruneUnpinnableSectors(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+	account := proto.Account{1}
+
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	// add a host
+	hk := store.addTestHost(b)
+
+	// prepare base db
+	const (
+		dbBaseSize = 1 << 40 // 1TiB of sectors
+		nSectors   = dbBaseSize / proto.SectorSize
+	)
+
+	// insert sectors in batches
+	sectorRoots := make([]types.Hash256, 0, nSectors)
+	for remainingSectors := nSectors; remainingSectors > 0; {
+		batchSize := min(remainingSectors, 10000)
+		remainingSectors -= batchSize
+		var sectors []slabs.SectorPinParams
+		for range batchSize {
+			root := frand.Entropy256()
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    root,
+				HostKey: hk,
+			})
+			sectorRoots = append(sectorRoots, root)
+		}
+		if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       sectors,
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// 10% of the sectors are candidates to be marked
+	reset := func() {
+		b.Helper()
+		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = 1, contract_sectors_map_id = NULL, uploaded_at = NOW()`)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET uploaded_at = NOW() - INTERVAL '4 days' WHERE id % 10 = 0`)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+	reset()
+
+	for b.Loop() {
+		err := store.PruneUnpinnableSectors(context.Background())
 		if err != nil {
 			b.Fatal(err)
 		}
