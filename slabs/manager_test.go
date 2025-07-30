@@ -208,8 +208,8 @@ func (s *mockStore) SectorsForIntegrityCheck(ctx context.Context, hostKey types.
 }
 
 func (s *mockStore) Slab(ctx context.Context, slabID SlabID) (Slab, error) {
-	for _, slabs := range s.pinnedSlabs {
-		if slab, ok := slabs[slabID]; ok {
+	for acc := range s.accounts {
+		if slab, ok := s.pinnedSlabs[acc][slabID]; ok {
 			return slab, nil
 		}
 	}

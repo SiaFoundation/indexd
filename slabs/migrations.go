@@ -56,14 +56,7 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, l *zap
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-
-			slab, err := m.store.Slab(ctx, slabID)
-			if err != nil {
-				logger.Error("failed to fetch slab", zap.String("slabID", slabID.String()), zap.Error(err))
-				return
-			}
-
-			if err := m.migrateSlab(ctx, slab, allHosts, goodContracts, ms.Period, logger); err != nil {
+			if err := m.migrateSlab(ctx, slabID, allHosts, goodContracts, ms.Period, logger); err != nil {
 				logger.Error("failed to migrate slab", zap.Error(err))
 				return
 			}
@@ -73,8 +66,13 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, l *zap
 	return nil
 }
 
-func (m *SlabManager) migrateSlab(ctx context.Context, slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, l *zap.Logger) error {
-	logger := l.Named(slab.ID.String())
+func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, l *zap.Logger) error {
+	logger := l.Named(slabID.String())
+
+	slab, err := m.store.Slab(ctx, slabID)
+	if err != nil {
+		return fmt.Errorf("failed to fetch slab %s: %w", slabID, err)
+	}
 
 	indices, usableHosts := sectorsToMigrate(slab, allHosts, goodContracts, period)
 	if len(indices) == 0 {

@@ -458,8 +458,8 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 	return roots, err
 }
 
-// UnhealthySlabs returns slabs which have at least one sector that needs to be
-// migrated to a new host and hasn't had a repair attempted since
+// UnhealthySlabs returns the ID of slabs which have at least one sector that
+// needs to be migrated to a new host and hasn't had a repair attempted since
 // 'maxRepairAttempt'. The condition for such a slab is that it either has:
 // a). a sector that is not stored on a host (host_id == null)
 // b). a sector that is stored in a bad contract (contract_id != null && contract.good = false)
@@ -467,14 +467,19 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 // of the call. To prevent subsequent or parallel calls from returning the same slab.
 //
 // NOTE: For the sake of scalability, we don't prioritize any slabs and instead
-// simply fetch the first ones that we can get.
+// simply fetch the first batch we find.
 func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]slabs.SlabID, error) {
+	now := time.Now()
+	if maxRepairAttempt.After(now) {
+		return nil, fmt.Errorf("maxRepairAttempt must be in the past: %v", maxRepairAttempt)
+	}
+
 	var results []slabs.SlabID
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		for range limit {
 			var slabID slabs.SlabID
 			err := tx.QueryRow(ctx, `UPDATE slabs
-				SET last_repair_attempt = NOW()
+				SET last_repair_attempt = $1
 				WHERE id = (
 					SELECT slabs.id
 					FROM slabs
@@ -489,11 +494,11 @@ func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, 
 							-- not stored on any host
 							(sectors.host_id IS NULL)
 						)
-						AND (slabs.last_repair_attempt <= $1)
+						AND (slabs.last_repair_attempt < $2)
 					LIMIT 1
 				)
 				RETURNING digest
-		`, maxRepairAttempt).Scan((*sqlHash256)(&slabID))
+		`, now, maxRepairAttempt).Scan((*sqlHash256)(&slabID))
 			if errors.Is(err, sql.ErrNoRows) {
 				break
 			} else if err != nil {
