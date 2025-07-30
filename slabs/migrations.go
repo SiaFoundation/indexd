@@ -53,19 +53,21 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, l *zap
 
 	var wg sync.WaitGroup
 	for _, slabID := range slabIDs {
-		slab, err := m.store.Slab(ctx, slabID)
-		if err != nil {
-			logger.Error("failed to fetch slab", zap.Stringer("slabID", slabID), zap.Error(err))
-			continue
-		}
-
 		wg.Add(1)
-		go func(slab Slab) {
+		go func() {
 			defer wg.Done()
+
+			slab, err := m.store.Slab(ctx, slabID)
+			if err != nil {
+				logger.Error("failed to fetch slab", zap.String("slabID", slabID.String()), zap.Error(err))
+				return
+			}
+
 			if err := m.migrateSlab(ctx, slab, allHosts, goodContracts, ms.Period, logger); err != nil {
 				logger.Error("failed to migrate slab", zap.Error(err))
+				return
 			}
-		}(slab)
+		}()
 	}
 	wg.Wait()
 	return nil
