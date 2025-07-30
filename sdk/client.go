@@ -40,7 +40,7 @@ type (
 		PinSlab(context.Context, slabs.SlabPinParams) (slabs.SlabID, error)
 		UnpinSlab(context.Context, slabs.SlabID) error
 
-		Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.Host, error)
+		Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error)
 		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
 	}
 
