@@ -17,6 +17,6 @@ func (wr webRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		req.URL.Path = strings.TrimPrefix(req.URL.Path, "/api") // strip the prefix
 		wr.api.ServeHTTP(w, req)
 	default:
-		w.WriteHeader(http.StatusNotFound)
+		wr.ui.ServeHTTP(w, req)
 	}
 }
