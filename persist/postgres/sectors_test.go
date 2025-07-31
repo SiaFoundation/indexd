@@ -1101,7 +1101,7 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 
 	// after pinning, no slab should be unhealthy since their sectors aren't
 	// pinned to contracts yet.
-	unhealthyIDs, err := store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
+	unhealthyIDs, err := store.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthyIDs) != 0 {
@@ -1117,7 +1117,7 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 
 	// we should still have no unhealthy slabs because the host_id has not been
 	// set to null yet
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthyIDs) != 0 {
@@ -1130,7 +1130,7 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 
 	// sector should have had host_id nulled out due to PruneUnpinnableSectors
 	// and should now be unhealthy
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Hour), 1)
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthyIDs) != 1 {
@@ -1942,13 +1942,14 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 
 	// 10% of the sectors are candidates to be marked
 	now := time.Now()
+	const day = 24 * time.Hour
 	reset := func() {
 		b.Helper()
 		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = 1, contract_sectors_map_id = NULL, uploaded_at = $1`, now)
 		if err != nil {
 			b.Fatal(err)
 		}
-		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET uploaded_at = $1 - INTERVAL '4 days' WHERE id % 10 = 0`, now)
+		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET uploaded_at = $1 WHERE id % 10 = 0`, now.Add(-4*day))
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1956,7 +1957,7 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 	reset()
 
 	for b.Loop() {
-		err := store.PruneUnpinnableSectors(context.Background(), now.Add(-3*24*time.Hour))
+		err := store.PruneUnpinnableSectors(context.Background(), now.Add(-3*day))
 		if err != nil {
 			b.Fatal(err)
 		}
