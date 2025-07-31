@@ -194,7 +194,7 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 			batch.Queue(`
 				INSERT INTO sectors (sector_root, host_id, next_integrity_check)
 				VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3)
-				ON CONFLICT (sector_root) DO UPDATE SET sector_root=EXCLUDED.sector_root
+				ON CONFLICT (sector_root) DO UPDATE SET sector_root=EXCLUDED.sector_root, uploaded_at=NOW()
 				RETURNING id
 			`, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), nextIntegrityCheck).QueryRow(func(row pgx.Row) error {
 				return row.Scan(&sectorIDs[i])
@@ -539,7 +539,7 @@ func (s *Store) MigrateSector(ctx context.Context, root types.Hash256, hostKey t
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		resp, err := tx.Exec(ctx, `
 			UPDATE sectors
-			SET host_id = hosts.id, contract_sectors_map_id = NULL, consecutive_failed_checks = 0
+			SET host_id = hosts.id, contract_sectors_map_id = NULL, consecutive_failed_checks = 0, uploaded_at=NOW()
 			FROM hosts
 			WHERE sector_root = $1 AND hosts.public_key = $2
 		`, sqlHash256(root), sqlPublicKey(hostKey))

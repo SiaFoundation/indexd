@@ -71,6 +71,20 @@ func TestMigrateSector(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	sectorUploadedAt := func(root types.Hash256) (uploadedAt time.Time) {
+		t.Helper()
+
+		err := store.pool.QueryRow(context.Background(), `
+            SELECT uploaded_at
+            FROM sectors
+            WHERE sector_root = $1
+        `, sqlHash256(root)).Scan(&uploadedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
 	// helper to assert sector state
 	assertSector := func(root types.Hash256, expectedHostKey types.PublicKey, expectedContractID types.FileContractID, expectedFailures int) {
 		t.Helper()
@@ -98,10 +112,19 @@ func TestMigrateSector(t *testing.T) {
 
 	migrate := func(root types.Hash256, hostKey types.PublicKey, expectedMigrated bool) {
 		t.Helper()
+
+		beforeUploadedAt := sectorUploadedAt(root)
 		if migrated, err := store.MigrateSector(context.Background(), root, hostKey); err != nil {
 			t.Fatal(err)
 		} else if migrated != expectedMigrated {
 			t.Fatalf("expected migrated %v, got %v", expectedMigrated, migrated)
+		}
+		afterUploadedAt := sectorUploadedAt(root)
+
+		if expectedMigrated && afterUploadedAt.Compare(beforeUploadedAt) != 1 {
+			t.Fatal("expected after uploaded at timestamp to be greater than before timestamp")
+		} else if !expectedMigrated && !afterUploadedAt.Equal(beforeUploadedAt) {
+			t.Fatal("expected after uploaded at timestamp equal before timestamp because no migration happened")
 		}
 	}
 
@@ -496,6 +519,20 @@ func TestPinSlabs(t *testing.T) {
 		}
 	}
 
+	sectorUploadedAt := func(root types.Hash256) (uploadedAt time.Time) {
+		t.Helper()
+
+		err := store.pool.QueryRow(context.Background(), `
+            SELECT uploaded_at
+            FROM sectors
+            WHERE sector_root = $1
+        `, sqlHash256(root)).Scan(&uploadedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
 	assertSlab := func(slabID slabs.SlabID, params slabs.SlabPinParams, slab slabs.Slab) {
 		t.Helper()
 		if slab.ID != slabID {
@@ -538,11 +575,23 @@ func TestPinSlabs(t *testing.T) {
 	// pin same slabs for account 2 again which should add links to the join
 	// table
 	for i := range toPin {
+		var beforeUploadedAt []time.Time
+		for _, sector := range toPin[i].Sectors {
+			beforeUploadedAt = append(beforeUploadedAt, sectorUploadedAt(sector.Root))
+		}
+
 		slabID, err := store.PinSlab(context.Background(), account2, nextCheck, toPin[i])
 		if err != nil {
 			t.Fatal(err)
 		} else if slabID != expectedIDs[i] {
 			t.Fatalf("expected slab IDs %v, got %v", expectedIDs[i], slabID)
+		}
+
+		for i, sector := range toPin[i].Sectors {
+			afterUploadedAt := sectorUploadedAt(sector.Root)
+			if afterUploadedAt.Compare(beforeUploadedAt[i]) != 1 {
+				t.Fatal("expected after uploaded at timestamp to be greater than before timestamp")
+			}
 		}
 	}
 
