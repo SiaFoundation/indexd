@@ -406,6 +406,16 @@ components:
           type: integer
           format: uint64
           description: The number of sectors the host lost
+
+    HostInfo:
+      type: object
+      properties:
+        publicKey:
+          $ref: "#/components/schemas/PublicKey"
+        addresses:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetAddress"
     
     HostUsability:
       type: object

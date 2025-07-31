@@ -8,10 +8,80 @@ info:
 
 tags:
   - name: slabs
-    description: Slab management
+    description: List, pin, unpin and retrieve pinned slab details
+  - name: hosts
+    description: Fetch usable hosts
 
 paths:
-  /slabs/pin:
+  /hosts:
+    get:
+      tags:
+        - hosts
+      summary: List usable hosts
+      parameters:
+          - name: limit
+            in: query
+            description: The maximum number of hosts to return
+            schema:
+              type: integer
+              minimum: 1
+              maximum: 500
+              default: 100
+          - name: offset
+            in: query
+            description: The number of hosts to skip
+            schema:
+              type: integer
+              minimum: 0
+              default: 0
+      operationId: listHosts
+      responses:
+        '200':
+          description: A list of usable hosts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  hosts:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/HostInfo"
+
+  /slabs:
+    get:
+      tags:
+        - slabs
+      summary: List all pinned slabs
+      parameters:
+          - name: limit
+            in: query
+            description: The maximum number of slab IDs to return
+            schema:
+              type: integer
+              minimum: 1
+              maximum: 500
+              default: 100
+          - name: offset
+            in: query
+            description: The number of slab IDs to skip
+            schema:
+              type: integer
+              minimum: 0
+              default: 0
+      operationId: listSlabs
+      responses:
+        '200':
+          description: A list of pinned slabs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slabs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SlabID"
     post:
       tags:
         - slabs
@@ -60,6 +130,51 @@ paths:
                       - description: The ID of the pinned slab
 
   /slabs/{slabid}:
+    get:
+      tags:
+        - slabs
+      summary: Get details of a pinned slab
+      operationId: getSlab
+      parameters:
+        - name: slabid
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Details of the pinned slab
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    allOf:
+                      - $ref: "#/components/schemas/SlabID"
+                      - description: The ID of the slab
+                  encryptionKey:
+                    allOf:
+                      - $ref: "#/components/schemas/EncryptionKey"
+                      - description: The encryption key used for the slab
+                  minShards:
+                    type: integer
+                    description: The minimum number of shards required for the slab
+                  sectors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        root:
+                          allOf:
+                            - $ref: "#/components/schemas/Hash256"
+                            - description: The root hash of the sector
+                        hostKey:
+                          allOf:
+                            - $ref: "#/components/schemas/PublicKey"
+                            - description: The public key of the host storing the sector
+        '404':
+          description: Slab not found
     delete:
       tags:
         - slabs
@@ -82,6 +197,8 @@ components:
       $ref: './components.yml#/components/schemas/EncryptionKey'
     Hash256:
       $ref: './components.yml#/components/schemas/Hash256'
+    HostInfo:
+      $ref: './components.yml#/components/schemas/HostInfo'
     PublicKey:
       $ref: './components.yml#/components/schemas/PublicKey'
     SlabID:
