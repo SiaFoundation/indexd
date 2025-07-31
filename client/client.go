@@ -44,12 +44,6 @@ var (
 	ErrContractRenewed = errors.New("contract got renewed")
 )
 
-var (
-	// minVersionPartialRefresh defines the minimum protocol version that
-	// supports partial refreshes
-	minVersionPartialRefresh = [3]uint8{5, 0, 0}
-)
-
 type (
 	// ChainManager defines an interface to access the chain state as well as
 	// interact with the transaction pool.
