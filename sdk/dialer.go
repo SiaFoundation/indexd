@@ -32,6 +32,39 @@ type connEntry struct {
 	tc   rhp.TransportClient
 }
 
+func (c *connEntry) close(log *zap.Logger) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.tc != nil {
+		if err := c.tc.Close(); err != nil {
+			log.Debug("Failed to close connection", zap.Stringer("pk", c.hostKey), zap.Error(err))
+		}
+	}
+	c.tc = nil
+}
+
+func (c *connEntry) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.tc != nil {
+		c.tc.Close()
+		c.tc = nil
+	}
+}
+
+func (c *connEntry) setTransport(tc rhp.TransportClient, assign bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if assign {
+		c.tc = tc
+	}
+	close(c.dial)
+	c.dial = nil
+}
+
 // Dialer implements the HostDialer interface.
 type Dialer struct {
 	log *zap.Logger
@@ -75,14 +108,7 @@ func (d *Dialer) Close() {
 	d.mu.Unlock()
 
 	for _, entry := range conns {
-		entry.mu.Lock()
-		if entry.tc != nil {
-			if err := entry.tc.Close(); err != nil {
-				d.log.Debug("Failed to close connection", zap.Stringer("pk", entry.hostKey), zap.Error(err))
-			}
-		}
-		entry.tc = nil
-		entry.mu.Unlock()
+		entry.close(d.log)
 	}
 	clear(d.conns)
 }
@@ -164,13 +190,7 @@ func (d *Dialer) clearHostConnection(hostKey types.PublicKey) {
 		return
 	}
 
-	entry.mu.Lock()
-	defer entry.mu.Unlock()
-
-	if entry.tc != nil {
-		entry.tc.Close()
-		entry.tc = nil
-	}
+	entry.clear()
 }
 
 // Hosts returns the public keys of all hosts that are available for
@@ -228,13 +248,7 @@ func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.Tra
 	var tc rhp.TransportClient
 	var err error
 	defer func() {
-		entry.mu.Lock()
-		if err == nil {
-			entry.tc = tc
-		}
-		close(entry.dial)
-		entry.dial = nil
-		entry.mu.Unlock()
+		entry.setTransport(tc, err == nil)
 	}()
 
 	for _, addr := range h {
