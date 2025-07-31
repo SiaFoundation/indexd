@@ -435,7 +435,7 @@ func (cm *ContractManager) waitUntilSynced(ctx context.Context, log *zap.Logger)
 		if synced {
 			return true
 		} else if err != nil {
-			log.Debug(err.Error())
+			log.Debug("failed to check synced", zap.Error(err))
 		}
 	}
 }
