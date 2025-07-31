@@ -963,7 +963,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatalf("expected slab ID %v, got %v", slabID1, unhealthyIDs[0])
 	}
 
-	// assert maxLastRepairAttempt must be
+	// assert maxLastRepairAttempt must be in the past
 	_, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Second), 10)
 	if err == nil {
 		t.Fatal("expected error for future maxLastRepairAttempt, got nil")

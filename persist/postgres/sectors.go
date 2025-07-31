@@ -471,7 +471,7 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]slabs.SlabID, error) {
 	now := time.Now()
 	if maxRepairAttempt.After(now) {
-		return nil, fmt.Errorf("maxRepairAttempt must be in the past: %v", maxRepairAttempt) // developer error
+		return nil, fmt.Errorf("maxRepairAttempt (%v) must be in the past (current time: %v)", maxRepairAttempt, now) // developer error
 	}
 
 	var results []slabs.SlabID
