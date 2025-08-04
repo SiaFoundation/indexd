@@ -10,6 +10,8 @@ import (
 
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 )
 
@@ -166,6 +168,10 @@ func (mc *mockAppClient) Slab(_ context.Context, id slabs.SlabID) (slabs.PinnedS
 		return slabs.PinnedSlab{}, errors.New("slab not found")
 	}
 	return slab, nil
+}
+
+func (mc *mockAppClient) Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error) {
+	return nil, nil
 }
 
 func newMockAppClient() *mockAppClient {

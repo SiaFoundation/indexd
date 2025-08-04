@@ -13,7 +13,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestAccountFundingE2E(t *testing.T) {
+func TestAccountFunding(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(1))

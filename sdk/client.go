@@ -14,7 +14,9 @@ import (
 	"github.com/klauspost/reedsolomon"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/app"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
@@ -38,6 +40,7 @@ type (
 		PinSlab(context.Context, slabs.SlabPinParams) (slabs.SlabID, error)
 		UnpinSlab(context.Context, slabs.SlabID) error
 
+		Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error)
 		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
 	}
 

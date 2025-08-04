@@ -66,8 +66,8 @@ type (
 	IndexerOpt func(*indexerCfg)
 
 	indexerCfg struct {
-		slabOpts            []slabs.Option
 		maintenanceSettings contracts.MaintenanceSettings
+		slabOpts            []slabs.Option
 	}
 )
 
@@ -125,7 +125,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 
 	slabs, err := slabs.NewManager(am, hm, store, dialer, alerts.NewManager(), keys.DeriveKey(walletKey, "migration"), keys.DeriveKey(walletKey, "integrity"), cfg.slabOpts...)
 	if err != nil {
-		t.Fatalf("failed to create slabs manager: %v", err)
+		t.Fatalf("failed to create slab manager: %v", err)
 	}
 
 	subscriber, err := subscriber.New(c.cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
@@ -236,11 +236,6 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		syncer: syncer,
 		wallet: wm,
 	}
-}
-
-// Database returns the underlying store.
-func (idx *Indexer) Database() *postgres.Store {
-	return idx.store
 }
 
 // HostClient returns a host client for the given host public key.

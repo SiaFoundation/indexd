@@ -89,7 +89,7 @@ func TestContracts(t *testing.T) {
 
 	// assert WithRevisable(true) takes into account renewed_to
 	fcid4 := types.FileContractID{4}
-	if err := store.AddRenewedContract(context.Background(), fcid1, fcid4, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+	if err := store.AddRenewedContract(context.Background(), fcid1, fcid4, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	} else if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true), contracts.WithGood(true)); err != nil {
 		t.Fatal(err)
@@ -249,7 +249,7 @@ func TestContractsForBroadcasting(t *testing.T) {
 	}
 
 	// renew the contract
-	if err := store.AddRenewedContract(context.Background(), res[0], types.FileContractID{9, 9, 9}, types.V2FileContract{}, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+	if err := store.AddRenewedContract(context.Background(), res[0], types.FileContractID{9, 9, 9}, types.V2FileContract{}, types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 
@@ -849,10 +849,10 @@ func TestFormRenewContract(t *testing.T) {
 		InitialAllowance:   refresh.RenterOutput.Value,
 		RemainingAllowance: refresh.RenterOutput.Value,
 		TotalCollateral:    refresh.TotalCollateral,
+		UsedCollateral:     refresh.RiskedCollateral(),
 
-		UsedCollateral: refresh.TotalCollateral.Div64(2), // updated used collateral
-		ContractPrice:  types.Siacoins(2),                // new contract price
-		MinerFee:       types.Siacoins(4),                // new miner fee
+		ContractPrice: types.Siacoins(2), // new contract price
+		MinerFee:      types.Siacoins(4), // new miner fee
 
 		State: contracts.ContractStatePending, // refresh resets state
 		Good:  true,                           // refreshed contract is good
@@ -860,7 +860,7 @@ func TestFormRenewContract(t *testing.T) {
 		Spending: contracts.ContractSpending{}, // spending is reset
 	}
 
-	if err := store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, refresh, expectedRefreshed.ContractPrice, expectedRefreshed.MinerFee, expectedRefreshed.UsedCollateral); err != nil {
+	if err := store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, refresh, expectedRefreshed.ContractPrice, expectedRefreshed.MinerFee); err != nil {
 		t.Fatal("failed to add refreshed contract", err)
 	}
 	expectedFormed.RenewedTo = expectedRefreshed.ID
@@ -900,10 +900,10 @@ func TestFormRenewContract(t *testing.T) {
 		InitialAllowance:   renewal.RenterOutput.Value,
 		RemainingAllowance: renewal.RenterOutput.Value,
 		TotalCollateral:    renewal.TotalCollateral,
+		UsedCollateral:     renewal.RiskedCollateral(),
 
-		UsedCollateral: renewal.TotalCollateral.Div64(4), // updated used collateral
-		ContractPrice:  types.Siacoins(5),                // new contract price
-		MinerFee:       types.Siacoins(7),                // new miner fee
+		ContractPrice: types.Siacoins(5), // new contract price
+		MinerFee:      types.Siacoins(7), // new miner fee
 
 		State: contracts.ContractStatePending, // renewal resets state
 		Good:  true,                           // renewed contract is good
@@ -911,7 +911,7 @@ func TestFormRenewContract(t *testing.T) {
 		Spending: contracts.ContractSpending{}, // spending is reset
 	}
 
-	if err := store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, renewal, expectedRenewed.ContractPrice, expectedRenewed.MinerFee, expectedRenewed.UsedCollateral); err != nil {
+	if err := store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, renewal, expectedRenewed.ContractPrice, expectedRenewed.MinerFee); err != nil {
 		t.Fatal("failed to add renewed contract", err)
 	}
 	expectedRefreshed.RenewedTo = expectedRenewed.ID
@@ -1252,7 +1252,7 @@ func TestUpdateContractRevision(t *testing.T) {
 		t.Fatalf("expected revision to be %v, got %v", update, revision)
 	}
 
-	if err := store.AddRenewedContract(context.Background(), contractID, types.FileContractID{2}, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency); err != nil {
+	if err := store.AddRenewedContract(context.Background(), contractID, types.FileContractID{2}, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	} else if revision, renewed, err := store.ContractRevision(context.Background(), contractID); err != nil {
 		t.Fatal(err)

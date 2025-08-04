@@ -76,7 +76,7 @@ func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicK
 	return nil
 }
 
-func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error {
+func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee types.Currency) error {
 	var source *Contract
 	for i := range s.contracts {
 		if s.contracts[i].ID == renewedFrom {
@@ -102,7 +102,7 @@ func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewed
 		State:            ContractStatePending,
 
 		RemainingAllowance: revision.RenterOutput.Value,
-		UsedCollateral:     usedCollateral,
+		UsedCollateral:     revision.RiskedCollateral(),
 		TotalCollateral:    revision.TotalCollateral,
 
 		ContractPrice:    contractPrice,

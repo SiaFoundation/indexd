@@ -15,7 +15,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestContractPruningE2E(t *testing.T) {
+func TestContractPruning(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(3))
@@ -41,7 +41,7 @@ func TestContractPruningE2E(t *testing.T) {
 	// convenience variables
 	acc := proto.Account(a1.PublicKey())
 	client := indexer.App(a1)
-	store := indexer.Database()
+	store := indexer.Store()
 
 	// prepare pin params
 	params := slabs.SlabPinParams{
@@ -69,7 +69,7 @@ func TestContractPruningE2E(t *testing.T) {
 
 	// assert the slab is pinned
 	time.Sleep(time.Second)
-	res, err := indexer.Database().Slabs(context.Background(), acc, slabIDs)
+	res, err := store.Slabs(context.Background(), acc, slabIDs)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 1 {
@@ -119,7 +119,7 @@ func TestContractPruningE2E(t *testing.T) {
 	}
 }
 
-func TestSectorPinningE2E(t *testing.T) {
+func TestSectorPinning(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(3))

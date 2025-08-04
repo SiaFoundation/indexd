@@ -86,7 +86,7 @@ type (
 	// requires.
 	Store interface {
 		AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error
-		AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee, usedCollateral types.Currency) error
+		AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee types.Currency) error
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
 		ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error)
 		ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error)

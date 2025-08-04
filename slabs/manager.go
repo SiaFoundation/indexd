@@ -129,6 +129,14 @@ func WithHealthCheckInterval(interval time.Duration) Option {
 	}
 }
 
+// WithIntegrityCheckIntervals sets the intervals for successful and failed integrity checks.
+func WithIntegrityCheckIntervals(success, failure time.Duration) Option {
+	return func(m *SlabManager) {
+		m.integrityCheckInterval = success
+		m.failedIntegrityCheckInterval = failure
+	}
+}
+
 // WithLogger sets the logger for the SlabManager.
 func WithLogger(l *zap.Logger) Option {
 	return func(m *SlabManager) {
