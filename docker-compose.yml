@@ -1,0 +1,42 @@
+# This file contains an example docker-compose configuration for running indexd.
+#
+# To use this, first create a `.env` file in the same directory with the
+# POSTGRES_PASSWORD variable set to your desired password.
+# Then run 'docker compose run --rm indexd seed' to generate a new seed if you
+# don't have one already.
+# Next, run 'docker compose run --rm -it indexd config' to configure indexd. You
+# can leave the default values for most options until you get to the "advanced
+# settings". In the advanced settings, you need to set the database user,
+# database name and password to match 'indexd', 'indexd' and the password you
+# chose respectively. You also need to set the database address to
+# 'postgres:5432'.
+# Finally, run 'docker compose up -d' to start the services.
+
+services:
+  postgres:
+    image: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: indexd
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: indexd
+    volumes:
+      - postgres:/var/lib/postgresql/data
+
+  # create seed using 'docker compose run --rm indexd seed'
+  # create config using 'docker compose run --rm -it indexd config'
+  indexd:
+    depends_on:
+      - postgres
+    image: ghcr.io/siafoundation/indexd:master
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:9980:9980/tcp # expose UI on localhost
+      - 9981:9981/tcp # public syncer
+      - 9982:9982/tcp # public apps API
+    volumes:
+      - indexd:/data
+
+volumes:
+  indexd:
+  postgres:

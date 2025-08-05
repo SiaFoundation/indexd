@@ -240,13 +240,13 @@ func setDatabaseAddress() {
 
 		host, port, err := net.SplitHostPort(input)
 		if err != nil {
-			stdoutError(fmt.Sprintf("Invalid database port %q: %s", input, err.Error()))
+			stdoutError(fmt.Sprintf("Invalid database address %q: %s", input, err.Error()))
 			continue
 		}
 
 		n, err := strconv.Atoi(port)
 		if err != nil {
-			stdoutError(fmt.Sprintf("Invalid database port %q: %s", input, err.Error()))
+			stdoutError(fmt.Sprintf("Invalid database port %q: %s", port, err.Error()))
 			continue
 		} else if n < 0 || n > 65535 {
 			stdoutError(fmt.Sprintf("Invalid database port %q: must be between 0 and 65535", input))

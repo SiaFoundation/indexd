@@ -30,9 +30,11 @@ ENV INDEXD_CONFIG_FILE=/data/indexd.yml
 
 VOLUME [ "/data" ]
 
-# API port
+# Admin API port
 EXPOSE 9980/tcp
 # Syncer port
 EXPOSE 9981/tcp
+# App API port
+EXPOSE 9982/tcp
 
 ENTRYPOINT [ "indexd", "-api.admin", ":9980" ]
