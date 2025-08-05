@@ -9,7 +9,7 @@
 # settings". In the advanced settings, you need to set the database user,
 # database name and password to match 'indexd', 'indexd' and the password you
 # chose respectively. You also need to set the database address to
-# 'postgres:5432'.
+# 'postgres:5432' and the SSL mode to 'disable'.
 # Finally, run 'docker compose up -d' to start the services.
 
 services:
@@ -23,8 +23,6 @@ services:
     volumes:
       - postgres:/var/lib/postgresql/data
 
-  # create seed using 'docker compose run --rm indexd seed'
-  # create config using 'docker compose run --rm -it indexd config'
   indexd:
     depends_on:
       - postgres
