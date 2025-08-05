@@ -437,7 +437,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 		for _, hk := range hosts {
 			var accs []accounts.HostAccount
 			if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) (err error) {
-				accs, err = store.newHostAccountsForFunding(context.Background(), tx, hk, hostIDs[hk], batchSize)
+				accs, err = newHostAccountsForFunding(context.Background(), tx, hk, hostIDs[hk], batchSize)
 				return
 			}); err != nil {
 				b.Fatal(err)
@@ -458,14 +458,14 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 
 				if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 					// fetch accounts without account_host entry
-					if accounts, err := store.newHostAccountsForFunding(context.Background(), tx, hk, hostID, batchSize); err != nil {
+					if accounts, err := newHostAccountsForFunding(context.Background(), tx, hk, hostID, batchSize); err != nil {
 						return err
 					} else if len(accounts) != batchSize {
 						return fmt.Errorf("expected %d new accounts, got %d", batchSize, len(accounts))
 					}
 
 					// fetch accounts with account_host entry
-					if accounts, err := store.existingHostAccountsForFunding(context.Background(), tx, hk, hostID, batchSize); err != nil {
+					if accounts, err := existingHostAccountsForFunding(context.Background(), tx, hk, hostID, batchSize); err != nil {
 						return err
 					} else if len(accounts) != batchSize {
 						return fmt.Errorf("expected %d new accounts, got %d", batchSize, len(accounts))

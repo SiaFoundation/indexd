@@ -122,7 +122,7 @@ func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, 
 			return err
 		}
 
-		newAccs, err := s.newHostAccountsForFunding(ctx, tx, hk, hostID, limit)
+		newAccs, err := newHostAccountsForFunding(ctx, tx, hk, hostID, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query new accounts for funding: %w", err)
 		} else if len(newAccs) >= limit {
@@ -131,7 +131,7 @@ func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, 
 		}
 
 		limit -= len(newAccs)
-		existingAccs, err := s.existingHostAccountsForFunding(ctx, tx, hk, hostID, limit)
+		existingAccs, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query existing accounts for funding: %w", err)
 		}
@@ -254,7 +254,7 @@ func (s *Store) ServiceAccountBalance(ctx context.Context, hostKey types.PublicK
 	return balance, err
 }
 
-func (s *Store) newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, limit int) ([]accounts.HostAccount, error) {
+func newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, limit int) ([]accounts.HostAccount, error) {
 	accs := make([]accounts.HostAccount, 0, limit)
 
 	rows, err := tx.Query(ctx, `
@@ -282,7 +282,7 @@ LIMIT $2;`, hostID, limit)
 	return accs, nil
 }
 
-func (s *Store) existingHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, limit int) ([]accounts.HostAccount, error) {
+func existingHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, limit int) ([]accounts.HostAccount, error) {
 	accs := make([]accounts.HostAccount, 0, limit)
 
 	rows, err := tx.Query(ctx, `
