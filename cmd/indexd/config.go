@@ -176,6 +176,7 @@ func setAPIPassword() {
 }
 
 func setAdvancedConfig() {
+	fmt.Println("")
 	if !promptYesNo("Would you like to configure advanced settings?") {
 		return
 	}
@@ -199,9 +200,91 @@ func setAdvancedConfig() {
 
 	// syncer address
 	fmt.Println("")
-	fmt.Println("The syncer address is used to exchange blocks with other nodes in the Sia network")
+	fmt.Println("The syncer address is used to exchange blocks with other nodes in the Sia network.")
 	fmt.Println("It should be exposed publicly to improve the indexer's connectivity.")
 	setListenAddress("Gateway Address", &cfg.Syncer.Address)
+
+	// database user
+	fmt.Println("")
+	fmt.Println("The database user for the postgres connection.")
+	setDatabaseUser()
+
+	// database name
+	fmt.Println("")
+	fmt.Println("The database name for the postgres connection.")
+	setDatabaseName()
+
+	// database password
+	fmt.Println("")
+	fmt.Println("The database password for the postgres connection.")
+	setDatabasePassword()
+
+	// database address
+	fmt.Println("")
+	fmt.Println("The database address is used to connect to the indexer's database.")
+	setDatabaseAddress()
+}
+
+func setDatabaseAddress() {
+	current := fmt.Sprintf("%s:%d", cfg.Database.Host, cfg.Database.Port)
+	if !promptYesNo("Would you like to change the database address? (Current: " + current + ")") {
+		return
+	}
+
+	// will continue to prompt until a valid value is entered
+	for {
+		input := readInput(fmt.Sprintf("Enter new database address (currently %q)", current))
+		if input == "" {
+			return
+		}
+
+		host, port, err := net.SplitHostPort(input)
+		if err != nil {
+			stdoutError(fmt.Sprintf("Invalid database port %q: %s", input, err.Error()))
+			continue
+		}
+
+		n, err := strconv.Atoi(port)
+		if err != nil {
+			stdoutError(fmt.Sprintf("Invalid database port %q: %s", input, err.Error()))
+			continue
+		} else if n < 0 || n > 65535 {
+			stdoutError(fmt.Sprintf("Invalid database port %q: must be between 0 and 65535", input))
+			continue
+		}
+		cfg.Database.Host = host
+		cfg.Database.Port = n
+		return
+	}
+}
+
+func setDatabaseUser() {
+	if !promptYesNo("Would you like to change the database user? (Current: " + cfg.Database.User + ")") {
+		return
+	}
+	cfg.Database.User = readInput("Enter new user")
+}
+
+func setDatabaseName() {
+	if !promptYesNo("Would you like to change the database name? (Current: " + cfg.Database.Database + ")") {
+		return
+	}
+	cfg.Database.Database = readInput("Enter new database name")
+}
+
+func setDatabasePassword() {
+	if !promptYesNo("Would you like to change the database password?") {
+		return
+	}
+
+	fmt.Println("The database password is used to connect to the indexer's database.")
+	fmt.Println("It should be a strong password that is not used for any other purpose.")
+	cfg.Database.Password = readPasswordInput("Enter new database password")
+	if len(cfg.Database.Password) < 4 {
+		fmt.Println(wrapANSI("\033[31m", "Password must be at least 4 characters!", "\033[0m"))
+		setDatabasePassword()
+		return
+	}
 }
 
 func setDataDirectory() {
