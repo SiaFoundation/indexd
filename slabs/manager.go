@@ -25,6 +25,8 @@ type (
 	// checking their integrity on the network and migrating their sectors if
 	// necessary.
 	SlabManager struct {
+		disableCIDRChecks bool
+
 		healthCheckInterval time.Duration
 
 		integrityCheckInterval       time.Duration
@@ -112,6 +114,13 @@ var (
 
 // An Option is a functional option for the SlabManager.
 type Option func(*SlabManager)
+
+// WithDisabledCIDRChecks disables the CIDR checks for the slab manager.
+func WithDisabledCIDRChecks() Option {
+	return func(m *SlabManager) {
+		m.disableCIDRChecks = true
+	}
+}
 
 // WithHealthCheckInterval sets the interval for health checks.
 func WithHealthCheckInterval(interval time.Duration) Option {

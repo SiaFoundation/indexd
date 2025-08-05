@@ -138,7 +138,6 @@ func (c *HostClient) FormContract(ctx context.Context, settings proto.HostSettin
 	if err != nil {
 		return rhp.RPCFormContractResult{}, fmt.Errorf("failed to form contract: %w", err)
 	}
-
 	return res, nil
 }
 

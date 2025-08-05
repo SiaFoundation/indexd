@@ -38,12 +38,12 @@ const (
 )
 
 var (
-	// MaintenanceSettings is the default maintenance settings used for testing.
+	// MaintenanceSettings are the default maintenance settings used in testing.
 	MaintenanceSettings = contracts.MaintenanceSettings{
 		Enabled:         true,
 		Period:          144,
 		RenewWindow:     72,
-		WantedContracts: 6,
+		WantedContracts: 12,
 	}
 )
 
@@ -74,6 +74,7 @@ type (
 func defaultIndexerCfg() *indexerCfg {
 	return &indexerCfg{
 		maintenanceSettings: MaintenanceSettings,
+		slabOpts:            []slabs.Option{slabs.WithDisabledCIDRChecks()},
 	}
 }
 
@@ -87,7 +88,7 @@ func WithMaintenanceSettings(ms contracts.MaintenanceSettings) IndexerOpt {
 // WithSlabOptions allows for passing slab options to the indexer
 func WithSlabOptions(opts ...slabs.Option) IndexerOpt {
 	return func(cfg *indexerCfg) {
-		cfg.slabOpts = opts
+		cfg.slabOpts = append(cfg.slabOpts, opts...)
 	}
 }
 
@@ -128,11 +129,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
 
-	slabOpts := []slabs.Option{slabs.WithLogger(log.Named("slabs"))}
-	slabOpts = append(slabOpts, cfg.slabOpts...)
-
-	alerter := alerts.NewManager()
-	slabs, err := slabs.NewManager(am, hm, store, dialer, alerter, keys.DeriveKey(walletKey, "migration"), keys.DeriveKey(walletKey, "integrity"), slabOpts...)
+	slabs, err := slabs.NewManager(am, hm, store, dialer, alerts.NewManager(), keys.DeriveKey(walletKey, "migration"), keys.DeriveKey(walletKey, "integrity"), cfg.slabOpts...)
 	if err != nil {
 		t.Fatalf("failed to create slab manager: %v", err)
 	}
@@ -222,7 +219,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 			t.Errorf("failed to close account manager: %v", err)
 		}
 		if err := closeWithTimeout(slabs.Close); err != nil {
-			t.Errorf("failed to close slabs manager: %v", err)
+			t.Errorf("failed to close slab manager: %v", err)
 		}
 		if err := closeWithTimeout(subscriber.Close); err != nil {
 			t.Errorf("failed to close subscriber: %v", err)

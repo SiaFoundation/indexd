@@ -71,15 +71,11 @@ func TestMigrateSlab(t *testing.T) {
 	db.contracts[h4.PublicKey] = c4
 
 	// prepare shards
-	shards, err := newTestShards(2, 2)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	r1 := proto.SectorRoot((*[proto.SectorSize]byte)(shards[0]))
-	r2 := proto.SectorRoot((*[proto.SectorSize]byte)(shards[1]))
-	r3 := proto.SectorRoot((*[proto.SectorSize]byte)(shards[2]))
-	r4 := proto.SectorRoot((*[proto.SectorSize]byte)(shards[3]))
+	shards, roots := newTestShards(t, 2, 2)
+	r1 := roots[0]
+	r2 := roots[1]
+	r3 := roots[2]
+	r4 := roots[3]
 
 	dialer.clients[h1.PublicKey].sectors[r1] = ([proto.SectorSize]byte)(shards[0])
 	dialer.clients[h2.PublicKey].sectors[r2] = ([proto.SectorSize]byte)(shards[1])
@@ -258,7 +254,7 @@ func TestSectorsToMigrate(t *testing.T) {
 	// helper to assert result of contractsForRepair
 	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots, expectedHosts []int) {
 		t.Helper()
-		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 100)
+		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 100, false)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {
@@ -332,10 +328,10 @@ func newTestContract(hk types.PublicKey) contracts.Contract {
 	}
 }
 
-func newTestShards(dataShards, parityShards int) ([][]byte, error) {
+func newTestShards(t *testing.T, dataShards, parityShards int) ([][]byte, []types.Hash256) {
 	enc, err := reedsolomon.New(dataShards, parityShards)
 	if err != nil {
-		return nil, err
+		t.Fatal(err)
 	}
 
 	shards := make([][]byte, dataShards+parityShards)
@@ -349,10 +345,15 @@ func newTestShards(dataShards, parityShards int) ([][]byte, error) {
 	stripedSplit(buf, shards[:dataShards])
 	err = enc.Encode(shards)
 	if err != nil {
-		return nil, err
+		t.Fatalf("failed to encode shards: %v", err)
 	}
 
-	return shards, nil
+	var roots []types.Hash256
+	for _, shard := range shards {
+		roots = append(roots, proto.SectorRoot((*[proto.SectorSize]byte)(shard)))
+	}
+
+	return shards, roots
 }
 
 func stripedSplit(data []byte, dataShards [][]byte) {

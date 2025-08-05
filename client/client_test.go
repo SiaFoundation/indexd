@@ -91,8 +91,6 @@ func TestWithRevision(t *testing.T) {
 
 	// assert withRevision only updates the store if the revised revision number is greater than the local revision number
 	err = c.withRevision(context.Background(), fcid3, func(rhp.ContractRevision) (rhp.ContractRevision, error) {
-		revision := db.revisions[fcid3]
-		revision.ProofHeight = frand.Uint64n(math.MaxUint64)
 		return rhp.ContractRevision{ID: fcid3, Revision: db.revisions[fcid3]}, nil
 	})
 	if err != nil || db.revisions[fcid3].ProofHeight != 1 {

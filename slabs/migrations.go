@@ -7,7 +7,6 @@ import (
 	"sync"
 
 	"github.com/klauspost/reedsolomon"
-
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
@@ -74,7 +73,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 		return fmt.Errorf("failed to fetch slab %s: %w", slabID, err)
 	}
 
-	indices, usableHosts := sectorsToMigrate(slab, allHosts, goodContracts, period)
+	indices, usableHosts := sectorsToMigrate(slab, allHosts, goodContracts, period, m.disableCIDRChecks)
 	if len(indices) == 0 {
 		logger.Debug("tried to migrate slab but no indices require migration")
 		return nil
@@ -106,10 +105,10 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 		return fmt.Errorf("failed to reconstruct shards for slab %s: %w", slab.ID, err)
 	}
 
-	// nil shards that are not missing
+	// upload the missing shards
 	for i, missing := range required {
 		if !missing {
-			shards[i] = nil
+			shards[i] = nil // nil shards that are not missing
 		}
 	}
 
@@ -118,8 +117,10 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 
 	// update the database with the new locations for the migrated shards
 	for _, shard := range migratedShards {
-		if _, err := m.store.MigrateSector(ctx, shard.Root, shard.HostKey); err != nil {
+		if migrated, err := m.store.MigrateSector(ctx, shard.Root, shard.HostKey); err != nil {
 			return fmt.Errorf("failed to migrate sector %s: %w", shard.Root, err)
+		} else if !migrated {
+			logger.Warn("sector was not migrated", zap.String("root", shard.Root.String()), zap.String("host", shard.HostKey.String()))
 		}
 	}
 
@@ -137,7 +138,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 
 // sectorsToMigrate filters the sectors of a slab and returns the indices of the
 // sectors that require migration together with the contracts to use for them.
-func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64) ([]int, []hosts.Host) {
+func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, disableCIDRChecks bool) ([]int, []hosts.Host) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range allHosts {
@@ -176,9 +177,15 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 		// remove contract from the map since we don't want to use it again
 		delete(goodContractMap, *sector.ContractID)
 
-		// add the CIDRs of the host to the map
-		for _, network := range hostsMap[*sector.HostKey].Networks {
-			usedCIDRs[network.String()] = struct{}{}
+		// NOTE: in testing CIDR checks are disabled because the hosts' network
+		// is an unspecified IPv6 address, in those cases we use the host's
+		// public key to ensure we don't migrate the bad sector to a used host
+		if disableCIDRChecks {
+			usedCIDRs[sector.HostKey.String()] = struct{}{}
+		} else {
+			for _, network := range hostsMap[*sector.HostKey].Networks {
+				usedCIDRs[network.String()] = struct{}{}
+			}
 		}
 	}
 
@@ -189,9 +196,17 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 LOOP:
 	for _, contract := range goodContractMap {
 		h := hostsMap[contract.HostKey]
-		for _, network := range h.Networks {
-			if _, ok := usedCIDRs[network.String()]; ok {
+		if disableCIDRChecks {
+			if _, ok := usedCIDRs[contract.HostKey.String()]; ok {
+				// if CIDR checks are disabled, we only check the host key
+				// against the used CIDRs
 				continue LOOP
+			}
+		} else {
+			for _, network := range h.Networks {
+				if _, ok := usedCIDRs[network.String()]; ok {
+					continue LOOP
+				}
 			}
 		}
 		if _, ok := usedHost[contract.HostKey]; ok {
