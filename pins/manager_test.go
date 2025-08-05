@@ -10,6 +10,7 @@ import (
 
 	"github.com/shopspring/decimal"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/hosts"
 	"lukechampine.com/frand"
 )
@@ -20,7 +21,7 @@ var (
 		MaxIngressPrice:    types.Siacoins(5).Div64(oneTB),
 		MaxStoragePrice:    types.Siacoins(5).Div64(oneTB).Div64(oneMonth),
 		MinCollateral:      types.Siacoins(1).Div64(oneTB).Div64(oneMonth),
-		MinProtocolVersion: [3]uint8{1, 0, 0},
+		MinProtocolVersion: rhp.ProtocolVersion400,
 	}
 )
 

@@ -182,7 +182,7 @@ func (c *HostClient) ReadSector(ctx context.Context, hostPrices proto.HostPrices
 func (c *HostClient) RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error) {
 	var res rhp.RPCRefreshContractResult
 	if err := c.withRevision(ctx, params.ContractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
-		if settings.ProtocolVersion[0] >= 5 {
+		if settings.ProtocolVersion.Cmp(rhp.ProtocolVersion500) >= 0 {
 			res, err = rhp.RPCRefreshContractPartialRollover(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, params)
 		} else {
 			res, err = rhp.RPCRefreshContractFullRollover(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, params)

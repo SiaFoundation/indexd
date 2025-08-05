@@ -8,6 +8,7 @@ import (
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4"
 )
 
 const (
@@ -40,7 +41,7 @@ var (
 		MaxIngressPrice:    types.Siacoins(3000).Div64(oneTB),                       // 3000 SC / TB
 		MaxStoragePrice:    types.Siacoins(3000).Div64(oneTB).Div64(blocksPerMonth), // 3000 SC / TB / month
 		MinCollateral:      types.Siacoins(100).Div64(oneTB).Div64(blocksPerMonth),  // 100 SC / TB / month
-		MinProtocolVersion: [3]uint8{1, 0, 0},
+		MinProtocolVersion: rhp.ProtocolVersion400,
 	}
 )
 
@@ -127,11 +128,11 @@ type (
 	// UsabilitySettings contains the settings that are used to check if a host
 	// is usable.
 	UsabilitySettings struct {
-		MaxEgressPrice     types.Currency `json:"maxEgressPrice"`
-		MaxIngressPrice    types.Currency `json:"maxIngressPrice"`
-		MaxStoragePrice    types.Currency `json:"maxStoragePrice"`
-		MinCollateral      types.Currency `json:"minCollateral"`
-		MinProtocolVersion [3]uint8       `json:"minProtocolVersion"`
+		MaxEgressPrice     types.Currency         `json:"maxEgressPrice"`
+		MaxIngressPrice    types.Currency         `json:"maxIngressPrice"`
+		MaxStoragePrice    types.Currency         `json:"maxStoragePrice"`
+		MinCollateral      types.Currency         `json:"minCollateral"`
+		MinProtocolVersion proto4.ProtocolVersion `json:"minProtocolVersion"`
 	}
 )
 

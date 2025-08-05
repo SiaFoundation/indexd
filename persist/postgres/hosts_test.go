@@ -13,6 +13,7 @@ import (
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/contracts"
@@ -196,7 +197,7 @@ func TestHostChecks(t *testing.T) {
 		MaxIngressPrice:    settingMaxIngressPrice,
 		MaxStoragePrice:    settingMaxStoragePrice,
 		MinCollateral:      settingMinCollataral,
-		MinProtocolVersion: [3]uint8{1, 0, 0},
+		MinProtocolVersion: rhp.ProtocolVersion400,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -221,7 +222,7 @@ func TestHostChecks(t *testing.T) {
 	// update host with settings that fail all checks
 	err := db.UpdateHost(context.Background(), hk, testNetworks, proto4.HostSettings{
 		Release:             "test",
-		ProtocolVersion:     [3]uint8{0, 0, 0},
+		ProtocolVersion:     proto4.ProtocolVersion{0, 0, 0},
 		AcceptingContracts:  false,
 		WalletAddress:       types.StandardAddress(hk),
 		MaxCollateral:       oneH.Mul64(oneTB).Mul64(settingPeriod).Sub(oneH),
@@ -280,7 +281,7 @@ func TestHostChecks(t *testing.T) {
 	assertCheckOK("MaxCollateral")
 
 	// adjust protocol to pass the check
-	hs.ProtocolVersion = [3]uint8{1, 0, 0}
+	hs.ProtocolVersion = proto4.ProtocolVersion{1, 0, 0}
 	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
 	assertCheckOK("ProtocolVersion")
 
@@ -336,8 +337,8 @@ func TestHostChecks(t *testing.T) {
 	// instead of the current time when calculating whether the price validity
 	// check passes
 	if _, err := db.pool.Exec(context.Background(), `
-		UPDATE hosts SET 
-			last_successful_scan = last_successful_scan - INTERVAL '1 day', 
+		UPDATE hosts SET
+			last_successful_scan = last_successful_scan - INTERVAL '1 day',
 			settings_valid_until = settings_valid_until - INTERVAL '1 day'`); err != nil {
 		t.Fatal(err)
 	}
@@ -355,7 +356,7 @@ func TestHosts(t *testing.T) {
 		MaxIngressPrice:    types.MaxCurrency,
 		MaxStoragePrice:    types.MaxCurrency,
 		MinCollateral:      types.ZeroCurrency,
-		MinProtocolVersion: [3]uint8{1, 0, 0},
+		MinProtocolVersion: rhp.ProtocolVersion400,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -545,7 +546,7 @@ func TestUsableHosts(t *testing.T) {
 		MaxIngressPrice:    types.MaxCurrency,
 		MaxStoragePrice:    types.MaxCurrency,
 		MinCollateral:      types.ZeroCurrency,
-		MinProtocolVersion: [3]uint8{1, 0, 0},
+		MinProtocolVersion: rhp.ProtocolVersion400,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1230,7 +1231,7 @@ func BenchmarkHosts(b *testing.B) {
 	b.Run("UpdateHost", func(b *testing.B) {
 		ts := time.Now()
 		hs := proto4.HostSettings{
-			ProtocolVersion:     [3]uint8{1, 2, 3},
+			ProtocolVersion:     proto4.ProtocolVersion{1, 2, 3},
 			Release:             b.Name(),
 			WalletAddress:       types.Address{1},
 			AcceptingContracts:  true,
@@ -1266,7 +1267,7 @@ func BenchmarkHosts(b *testing.B) {
 func newTestHostSettings(pk types.PublicKey) proto4.HostSettings {
 	return proto4.HostSettings{
 		Release:             "test",
-		ProtocolVersion:     [3]uint8{1, 0, 0},
+		ProtocolVersion:     proto4.ProtocolVersion{1, 0, 0},
 		AcceptingContracts:  true,
 		WalletAddress:       types.StandardAddress(pk),
 		MaxCollateral:       types.Siacoins(10000),
