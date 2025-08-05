@@ -223,6 +223,11 @@ func setAdvancedConfig() {
 	fmt.Println("")
 	fmt.Println("The database address is used to connect to the indexer's database.")
 	setDatabaseAddress()
+
+	// database SSL mode
+	fmt.Println("")
+	fmt.Println("The database SSL mode is used to configure the database connection's encryption.")
+	setDatabaseSSLMode()
 }
 
 func setDatabaseAddress() {
@@ -258,13 +263,6 @@ func setDatabaseAddress() {
 	}
 }
 
-func setDatabaseUser() {
-	if !promptYesNo("Would you like to change the database user? (Current: " + cfg.Database.User + ")") {
-		return
-	}
-	cfg.Database.User = readInput("Enter new user")
-}
-
 func setDatabaseName() {
 	if !promptYesNo("Would you like to change the database name? (Current: " + cfg.Database.Database + ")") {
 		return
@@ -285,6 +283,20 @@ func setDatabasePassword() {
 		setDatabasePassword()
 		return
 	}
+}
+
+func setDatabaseSSLMode() {
+	if !promptYesNo("Would you like to change the database SSL mode? (Current: " + cfg.Database.SSLMode + ")") {
+		return
+	}
+	cfg.Database.SSLMode = promptQuestion("Enter new database SSL mode", []string{"disable", "allow", "prefer", "require", "verify-ca", "verify-full"})
+}
+
+func setDatabaseUser() {
+	if !promptYesNo("Would you like to change the database user? (Current: " + cfg.Database.User + ")") {
+		return
+	}
+	cfg.Database.User = readInput("Enter new user")
 }
 
 func setDataDirectory() {
