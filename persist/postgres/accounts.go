@@ -166,23 +166,21 @@ func (s *Store) UpdateHostAccounts(ctx context.Context, accounts []accounts.Host
 	} else if len(accounts) > proto.MaxAccountBatchSize {
 		return errors.New("too many accounts to update") // sanity check batch size against max batch size used in replenish RPC
 	}
-
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-			vals := make([]string, 0, len(accounts))
-			args := make([]any, 0, len(accounts)*4)
-			for i, account := range accounts {
-				ii := i * 4
-				vals = append(vals, fmt.Sprintf(`($%d::bytea, $%d::bytea, $%d::int, $%d::timestamptz)`, ii+1, ii+2, ii+3, ii+4))
-				args = append(args,
-					sqlPublicKey(account.AccountKey),
-					sqlPublicKey(account.HostKey),
-					account.ConsecutiveFailedFunds,
-					account.NextFund,
-				)
-			}
+		vals := make([]string, 0, len(accounts))
+		args := make([]any, 0, len(accounts)*4)
+		for i, account := range accounts {
+			ii := i * 4
+			vals = append(vals, fmt.Sprintf(`($%d::bytea, $%d::bytea, $%d::int, $%d::timestamptz)`, ii+1, ii+2, ii+3, ii+4))
+			args = append(args,
+				sqlPublicKey(account.AccountKey),
+				sqlPublicKey(account.HostKey),
+				account.ConsecutiveFailedFunds,
+				account.NextFund,
+			)
+		}
 
-			query := fmt.Sprintf(`
+		query := fmt.Sprintf(`
 INSERT INTO account_hosts (account_id, host_id, consecutive_failed_funds, next_fund)
 SELECT
 	a.id AS account_id,
@@ -196,9 +194,8 @@ ON CONFLICT (account_id, host_id)
 DO UPDATE SET
 	consecutive_failed_funds = EXCLUDED.consecutive_failed_funds,
 	next_fund = EXCLUDED.next_fund;`, strings.Join(vals, ", "))
-			_, err := tx.Exec(ctx, query, args...)
-			return err
-		})
+		_, err := tx.Exec(ctx, query, args...)
+		return err
 	})
 }
 

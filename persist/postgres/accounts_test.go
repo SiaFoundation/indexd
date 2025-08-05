@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
@@ -390,6 +390,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 	// prune is a helper function to delete all rows from a table
 	prune := func(table string) {
 		b.Helper()
+
 		if _, err := store.pool.Exec(context.Background(), fmt.Sprintf(`DELETE FROM %s;`, table)); err != nil {
 			b.Fatal(err)
 		}
@@ -398,11 +399,11 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 	// insert hosts
 	hosts := make([]types.PublicKey, 0, numHosts)
 	hostIDs := make(map[types.PublicKey]int64, numHosts)
-	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
 		for range numHosts {
 			var hostID int64
 			hk := types.GeneratePrivateKey().PublicKey()
-			err := tx.QueryRow(context.Background(), `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
+			err := tx.QueryRow(ctx, `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
 			if err != nil {
 				return err
 			}
@@ -420,27 +421,13 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 
 		// prepare accounts
 		prune("accounts")
-		aks := make([]any, numAccounts)
-		for i := range aks {
-			aks[i] = sqlPublicKey(types.GeneratePrivateKey().PublicKey())
-		}
 		if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-			for len(aks) > 0 {
-				batchSize := min(len(aks), 5000)
-				batch := aks[:batchSize]
-				aks = aks[batchSize:]
-
-				var values []string
-				for i := range batch {
-					values = append(values, fmt.Sprintf("($%d)", i+1))
-				}
-
-				_, err := tx.Exec(ctx, fmt.Sprintf("INSERT INTO accounts (public_key) VALUES %s", strings.Join(values, ",")), batch...)
-				if err != nil {
-					return fmt.Errorf("failed to insert accounts: %w", err)
-				}
+			batch := &pgx.Batch{}
+			for range numAccounts {
+				pk := types.GeneratePrivateKey().PublicKey()
+				batch.Queue(`INSERT INTO accounts (public_key) VALUES ($1);`, sqlPublicKey(pk))
 			}
-			return nil
+			return tx.SendBatch(ctx, batch).Close()
 		}); err != nil {
 			b.Fatal(err)
 		}
@@ -521,7 +508,7 @@ func BenchmarkUpdateHostAccounts(b *testing.B) {
 	}
 
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		b.StopTimer()
 		accounts, err := store.HostAccountsForFunding(context.Background(), hosts[i%numHosts], batchSize)
 		if err != nil {
