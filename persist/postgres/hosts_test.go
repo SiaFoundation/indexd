@@ -281,7 +281,7 @@ func TestHostChecks(t *testing.T) {
 	assertCheckOK("MaxCollateral")
 
 	// adjust protocol to pass the check
-	hs.ProtocolVersion = proto4.ProtocolVersion{1, 0, 0}
+	hs.ProtocolVersion = rhp.ProtocolVersion400
 	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
 	assertCheckOK("ProtocolVersion")
 
@@ -1267,7 +1267,7 @@ func BenchmarkHosts(b *testing.B) {
 func newTestHostSettings(pk types.PublicKey) proto4.HostSettings {
 	return proto4.HostSettings{
 		Release:             "test",
-		ProtocolVersion:     proto4.ProtocolVersion{1, 0, 0},
+		ProtocolVersion:     rhp.ProtocolVersion400,
 		AcceptingContracts:  true,
 		WalletAddress:       types.StandardAddress(pk),
 		MaxCollateral:       types.Siacoins(10000),
