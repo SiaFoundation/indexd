@@ -65,7 +65,7 @@ func NewFormContractSigner(w Wallet, renterKey types.PrivateKey) rhp.FormContrac
 }
 
 func (s *formContractSigner) FundV2Transaction(txn *types.V2Transaction, amount types.Currency) (types.ChainIndex, []int, error) {
-	return s.w.FundV2Transaction(txn, amount, true)
+	return s.w.FundV2Transaction(txn, amount, false)
 }
 
 func (s *formContractSigner) RecommendedFee() types.Currency {
