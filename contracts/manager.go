@@ -515,8 +515,6 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 					log.Debug("failed to fund accounts", zap.Error(err))
 					return
 				}
-
-				log.Debug("funding successful")
 			}(ctx, host, log.With(zap.Stringer("hostKey", host.PublicKey)))
 		}
 		wg.Wait()
