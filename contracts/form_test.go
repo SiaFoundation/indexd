@@ -331,7 +331,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 
 	const (
 		period = 100
-		wanted = 5
+		wanted = 6
 	)
 
 	// helper to create a good host
@@ -352,7 +352,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 		}
 	}
 
-	store := &storeMock{}
+	store := newStoreMock()
 	hm := newHostManagerMock(store)
 
 	formContract := func(hostKey types.PublicKey, good bool) {
@@ -408,7 +408,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 	good6 := goodHost(7)
 	hm.settings[good6.PublicKey] = goodSettings
 
-	// eighth one is good but has a full contract
+	// eighth one is good and has a full contract
 	good7 := goodHost(8)
 	hm.settings[good7.PublicKey] = goodSettings
 	formContract(good7.PublicKey, true)
@@ -416,6 +416,16 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 		if store.contracts[i].ID == types.FileContractID(good7.PublicKey) {
 			store.contracts[i].Size = maxContractSize
 		}
+	}
+
+	// ninth one is good and has an unpinned sector
+	good8 := goodHost(9)
+	hm.settings[good8.PublicKey] = goodSettings
+	store.sectors[good8.PublicKey] = []sector{
+		{
+			root:       frand.Entropy256(),
+			contractID: nil, // unpinned
+		},
 	}
 
 	// populate store
@@ -428,6 +438,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 		good5.PublicKey: good5,
 		good6.PublicKey: good6,
 		good7.PublicKey: good7,
+		good8.PublicKey: good8,
 	}
 
 	dialer := newDialerMock()
@@ -479,11 +490,12 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 	assertFormation(good4)
 	assertFormation(good5)
 	assertFormation(good7)
+	assertFormation(good8)
 
 	// the store should now contain the right number of total contracts which is
-	// the 4 we started with plus the 4 we formed
-	if len(store.contracts) != 8 {
-		t.Fatalf("expected 8 contracts, got %v", len(store.contracts))
+	// the 4 we started with plus the 5 we formed
+	if len(store.contracts) != 9 {
+		t.Fatalf("expected 9 contracts, got %v", len(store.contracts))
 	}
 
 	// perform formations again, this time it's a no-op
