@@ -14,7 +14,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestMigrationsE2E(t *testing.T) {
+func TestMigrations(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(7), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
@@ -35,7 +35,7 @@ func TestMigrationsE2E(t *testing.T) {
 	app := indexer.App(a1)
 
 	// fetch hosts
-	time.Sleep(time.Second)
+	time.Sleep(2 * time.Second)
 	hosts, err := app.Hosts(context.Background())
 	if err != nil {
 		t.Fatal(err)
