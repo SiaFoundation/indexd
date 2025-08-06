@@ -1332,7 +1332,9 @@ func BenchmarkContracts(b *testing.B) {
 			for i := range numContractsPerHost {
 				revision := newTestRevision(hk)
 				frand.Read(hostContractIDs[i][:])
-				size := frand.Uint64n(1e9)
+				revision.Filesize = frand.Uint64n(1e9)                                                            // random size
+				revision.Capacity = revision.Filesize + frand.Uint64n(1e3)                                        // random capacity
+				revision.RenterOutput.Value = types.Siacoins(100).Add(types.Siacoins(uint32(frand.Uint64n(100)))) // random allowance
 				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, next_prune) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
 					hostID,
 					sqlHash256(hostContractIDs[i][:]),
@@ -1340,14 +1342,14 @@ func BenchmarkContracts(b *testing.B) {
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
 					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.NewCurrency64(frand.Uint64n(5))), // random remaining allowance
-					sqlContractState(uint8(frand.Uint64n(5))),          // random contract state (40% active)
-					frand.Uint64n(2) == 0,                              // random good state (50% good)
-					size,                                               // random size
-					size+frand.Uint64n(1e3),                            // random capacity
-					randomTime(),                                       // random last_broadcast_attempt
-					randomTime(),                                       // random next_prune
+					sqlCurrency(revision.RemainingAllowance().Add(types.Siacoins(1))), // 1SC more than initial allowance
+					sqlCurrency(revision.RemainingAllowance()),
+					sqlContractState(uint8(frand.Uint64n(5))), // random contract state (40% active)
+					frand.Uint64n(2) == 0,                     // random good state (50% good)
+					revision.Filesize,
+					revision.Capacity,
+					randomTime(), // random last_broadcast_attempt
+					randomTime(), // random next_prune
 				); err != nil {
 					return err
 				}
