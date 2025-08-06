@@ -893,7 +893,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// add a host and a contract
 	hk := store.addTestHost(t)
-	store.addTestContract(t, hk)
+	contractID := store.addTestContract(t, hk)
 
 	// add two slabs & immediately reset the LRA-time
 	slabID1 := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
@@ -907,6 +907,18 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// assert we have no unhealthy slabs
+	assertUnhealthySlabs(0, 10, now)
+
+	// renew the contract
+	renewedTo := types.FileContractID{1}
+	err = store.AddRenewedContract(context.Background(), contractID, renewedTo, types.V2FileContract{
+		ExpirationHeight: 0, // expired, will be pruned the next time PruneContractSectorsMap is called
+	}, types.ZeroCurrency, types.ZeroCurrency)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert we still have no unhealthy slabs
 	assertUnhealthySlabs(0, 10, now)
 
 	// update the contract to be bad
@@ -962,6 +974,31 @@ func TestUnhealthySlabs(t *testing.T) {
 	} else if unhealthyIDs[0] != slabID1 {
 		t.Fatalf("expected slab ID %v, got %v", slabID1, unhealthyIDs[0])
 	}
+
+	// add the sector back - the unhealthy slab should be gone
+	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET host_id = 1, contract_sectors_map_id = NULL WHERE id = 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetLastRepairAttempt(oneHourAgo)
+	assertUnhealthySlabs(0, 10, now)
+
+	// prune expired contract
+	err = store.PruneContractSectorsMap(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := store.pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM contract_sectors_map").Scan(&count); err != nil {
+		t.Fatal(err)
+	} else if count != 0 {
+		t.Fatalf("expected 0 contract sectors map rows, got %d", count)
+	}
+
+	// assert slab1 is not considered unhealthy since it is considered uploaded
+	// to a host but not yet pinned
+	resetLastRepairAttempt(oneHourAgo)
+	assertUnhealthySlabs(0, 10, now)
 
 	// assert maxLastRepairAttempt must be in the past
 	_, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Second), 10)
