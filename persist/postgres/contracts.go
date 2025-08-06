@@ -373,15 +373,50 @@ WHERE fces.contract_id = contracts.contract_id AND current_height.scanned_height
 // that have been expired for at least 'maxBlocksSinceExpiry' blocks.
 func (s *Store) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpiry uint64) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
-WITH current_height AS (
-    SELECT scanned_height FROM global_settings
-)
-DELETE FROM contract_sectors_map csm
-USING contracts, current_height
-WHERE csm.contract_id = contracts.contract_id AND current_height.scanned_height >= contracts.expiration_height + $1;
-`, maxBlocksSinceExpiry)
-		return err
+		// fetch rows to prune
+		var toPrune []int64
+		rows, err := tx.Query(ctx, `
+			WITH current_height AS (
+				SELECT scanned_height FROM global_settings
+			)
+			SELECT csm.id
+			FROM contract_sectors_map csm
+			CROSS JOIN current_height
+			INNER JOIN contracts ON csm.contract_id = contracts.contract_id
+			WHERE current_height.scanned_height >= contracts.expiration_height + $1
+		`, maxBlocksSinceExpiry)
+		defer rows.Close()
+
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("failed to scan contract_sectors_map id: %w", err)
+			}
+			toPrune = append(toPrune, id)
+		}
+		if rows.Err() != nil {
+			return fmt.Errorf("failed to iterate over contract_sectors_map rows: %w", rows.Err())
+		}
+
+		// update sectors table
+		_, err = tx.Exec(ctx, `
+			UPDATE sectors s
+			SET contract_sectors_map_id = NULL
+			WHERE s.contract_sectors_map_id = ANY($1)
+		`, toPrune)
+		if err != nil {
+			return fmt.Errorf("failed to update sectors table: %w", err)
+		}
+
+		// prune the rows
+		_, err = tx.Exec(ctx, `
+			DELETE FROM contract_sectors_map csm
+			WHERE csm.id = ANY($1)
+		`, toPrune)
+		if err != nil {
+			return fmt.Errorf("failed to prune contract_sectors_map: %w", err)
+		}
+		return nil
 	})
 }
 
