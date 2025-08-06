@@ -418,8 +418,20 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 		}
 	}
 
-	// ninth one is good and has an unpinned sector
-	good8 := goodHost(9)
+	// ninth one is bad and has an unpinned sector
+	bad2 := goodHost(9)
+	badSettings := goodSettings
+	badSettings.AcceptingContracts = false
+	hm.settings[bad2.PublicKey] = badSettings
+	store.sectors[bad2.PublicKey] = []sector{
+		{
+			root:       frand.Entropy256(),
+			contractID: nil, // unpinned
+		},
+	}
+
+	// tenth one is good and has an unpinned sector
+	good8 := goodHost(10)
 	hm.settings[good8.PublicKey] = goodSettings
 	store.sectors[good8.PublicKey] = []sector{
 		{
@@ -438,6 +450,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 		good5.PublicKey: good5,
 		good6.PublicKey: good6,
 		good7.PublicKey: good7,
+		bad2.PublicKey:  bad2,
 		good8.PublicKey: good8,
 	}
 

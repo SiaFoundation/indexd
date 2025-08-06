@@ -104,12 +104,11 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	}
 
 	// forceFormation is a map of hosts that we will always form a contract with
-	// regardless of how many we already have or what CIDR they are on.
+	// regardless of how many we already have or what CIDR they are on
 	forceFormation := make(map[types.PublicKey]bool)
 
 	// determine which hosts are 'full', meaning they have exclusively full
-	// contracts. A full host will always have a contract formed with it
-	// assuming it's not bad for other reasons.
+	// contracts
 	for _, contract := range activeContracts {
 		if contract.Size < maxContractSize {
 			forceFormation[contract.HostKey] = false
@@ -120,7 +119,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 
 	// determine which hosts have unpinned sectors and no active contracts. We
 	// always form contracts with these hosts to be able to pin the sectors
-	// eventually.
+	// eventually
 	hwus, err := cm.store.HostsWithUnpinnableSectors(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch hosts with unpinnable sectors: %w", err)
