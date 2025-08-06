@@ -398,7 +398,7 @@ loop:
 				wg.Done()
 			}()
 
-			if _, err := m.ScanHost(ctx, hk); errors.Is(err, context.Canceled) {
+			if _, err := m.ScanHost(ctx, hk); errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 				return
 			} else if errors.Is(err, errNodeOffline) {
 				once.Do(func() { m.log.Warn("indexer is offline, skipping scans") })
