@@ -40,10 +40,6 @@ var (
 
 	threads int
 
-	clientMu    sync.Mutex
-	client      *sdk.SDK
-	clientUntil time.Time
-
 	elapsedMu sync.Mutex
 	elapsed   []time.Duration
 )

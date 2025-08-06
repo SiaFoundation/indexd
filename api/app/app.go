@@ -42,10 +42,10 @@ type (
 		Request     RegisterAppRequest
 		ResponseURL string
 		AppKey      types.PublicKey
-		Approved    bool
 		Expiration  time.Time
 	}
 
+	// A RegisterAppRequest is the request body for registering a new application.
 	RegisterAppRequest struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
@@ -54,11 +54,15 @@ type (
 		CallbackURL string `json:"callbackURL"`
 	}
 
+	// RegisterAppResponse is the response body for registering a new application.
+	// It contains the URL to redirect the user to for authentication.
+	// The user must approve the request before the expiration time.
 	RegisterAppResponse struct {
 		ResponseURL string    `json:"responseURL"`
 		Expiration  time.Time `json:"expiration"`
 	}
 
+	// ApproveAppRequest is the request body for approving or rejecting an application connection request.
 	ApproveAppRequest struct {
 		Approve bool `json:"approve"`
 	}

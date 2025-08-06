@@ -103,11 +103,14 @@ func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOptio
 	return slabIDs, nil
 }
 
+// RequestAppConnection requests an application connection to the indexer.
 func (c *Client) RequestAppConnection(ctx context.Context, request RegisterAppRequest) (resp RegisterAppResponse, err error) {
 	err = c.c.POST(ctx, c.sign("/auth/connect"), request, &resp)
 	return
 }
 
+// CheckAppAuth checks if the application is authenticated with the indexer.
+// It returns true if authenticated, false if not, and an error if the request fails.
 func (c *Client) CheckAppAuth(ctx context.Context) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.sign(fmt.Sprintf("%s/auth/check", c.c.BaseURL)), nil)
 	if err != nil {
