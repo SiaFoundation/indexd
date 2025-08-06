@@ -247,7 +247,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		})
 		defer appAPIListener.Close()
 	} else {
-		log.Warn("TLS is enabled but no certificate or key file is provided,using self-signed certificate. Some apps may not be able to connect")
+		log.Warn("TLS is enabled but no certificate or key file is provided. Using self-signed certificate. Some apps may not be able to connect")
 		cert, err := selfSignedCert(hostname)
 		if err != nil {
 			return fmt.Errorf("failed to generate self-signed certificate: %w", err)
