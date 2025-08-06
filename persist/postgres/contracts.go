@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.uber.org/zap"
 )
 
 // ContractRevision returns the revision for the contract with given ID as well
@@ -396,25 +397,31 @@ func (s *Store) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpir
 		}
 		if rows.Err() != nil {
 			return fmt.Errorf("failed to iterate over contract_sectors_map rows: %w", rows.Err())
+		} else if len(toPrune) == 0 {
+			return nil
 		}
 
-		// update sectors table
-		_, err = tx.Exec(ctx, `
-			UPDATE sectors s
-			SET contract_sectors_map_id = NULL
-			WHERE s.contract_sectors_map_id = ANY($1)
-		`, toPrune)
-		if err != nil {
-			return fmt.Errorf("failed to update sectors table: %w", err)
-		}
+		s.log.Debug("pruning contract sectors map", zap.Uint64("maxBlocksSinceExpiry", maxBlocksSinceExpiry), zap.Int("toPrune", len(toPrune)))
 
-		// prune the rows
-		_, err = tx.Exec(ctx, `
-			DELETE FROM contract_sectors_map csm
-			WHERE csm.id = ANY($1)
-		`, toPrune)
-		if err != nil {
-			return fmt.Errorf("failed to prune contract_sectors_map: %w", err)
+		for _, id := range toPrune {
+			// update sectors table
+			_, err = tx.Exec(ctx, `
+				UPDATE sectors s
+				SET contract_sectors_map_id = NULL
+				WHERE s.contract_sectors_map_id = $1
+			`, id)
+			if err != nil {
+				return fmt.Errorf("failed to update sectors table: %w", err)
+			}
+
+			// prune the rows
+			_, err = tx.Exec(ctx, `
+				DELETE FROM contract_sectors_map csm
+				WHERE csm.id = $1
+			`, id)
+			if err != nil {
+				return fmt.Errorf("failed to prune contract_sectors_map: %w", err)
+			}
 		}
 		return nil
 	})
