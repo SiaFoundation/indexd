@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/contracts"
@@ -386,6 +387,9 @@ func (s *Store) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpir
 			INNER JOIN contracts ON csm.contract_id = contracts.contract_id
 			WHERE current_height.scanned_height >= contracts.expiration_height + $1
 		`, maxBlocksSinceExpiry)
+		if err != nil {
+			return fmt.Errorf("failed to query contract_sectors_map for pruning: %w", err)
+		}
 		defer rows.Close()
 
 		for rows.Next() {
@@ -403,23 +407,29 @@ func (s *Store) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpir
 
 		s.log.Debug("pruning contract sectors map", zap.Uint64("maxBlocksSinceExpiry", maxBlocksSinceExpiry), zap.Int("toPrune", len(toPrune)))
 
+		updateBatch := &pgx.Batch{}
+		pruneBatch := &pgx.Batch{}
 		for _, id := range toPrune {
 			// update sectors table
-			_, err = tx.Exec(ctx, `
+			updateBatch.Queue(`
 				UPDATE sectors s
 				SET contract_sectors_map_id = NULL
 				WHERE s.contract_sectors_map_id = $1
 			`, id)
-			if err != nil {
-				return fmt.Errorf("failed to update sectors table: %w", err)
-			}
 
 			// prune the rows
-			_, err = tx.Exec(ctx, `
+			pruneBatch.Queue(`
 				DELETE FROM contract_sectors_map csm
 				WHERE csm.id = $1
 			`, id)
-			if err != nil {
+		}
+		if updateBatch.Len() > 0 {
+			if err := tx.SendBatch(ctx, updateBatch).Close(); err != nil {
+				return fmt.Errorf("failed to update sectors table: %w", err)
+			}
+		}
+		if pruneBatch.Len() > 0 {
+			if err := tx.SendBatch(ctx, pruneBatch).Close(); err != nil {
 				return fmt.Errorf("failed to prune contract_sectors_map: %w", err)
 			}
 		}
