@@ -128,10 +128,29 @@ type (
 	// UsabilitySettings contains the settings that are used to check if a host
 	// is usable.
 	UsabilitySettings struct {
-		MaxEgressPrice     types.Currency         `json:"maxEgressPrice"`
-		MaxIngressPrice    types.Currency         `json:"maxIngressPrice"`
-		MaxStoragePrice    types.Currency         `json:"maxStoragePrice"`
-		MinCollateral      types.Currency         `json:"minCollateral"`
+		// MaxEgressPrice is the maximum egress price in Hastings per byte that
+		// a host can charge before we consider the host bad.
+		MaxEgressPrice types.Currency `json:"maxEgressPrice"`
+
+		// MaxIngressPrice is the maximum ingress price in Hastings per byte that
+		// a host can charge before we consider the host bad.
+		MaxIngressPrice types.Currency `json:"maxIngressPrice"`
+
+		// MaxStoragePrice is the maximum storage price in Hastings per byte
+		// per block that a host can charge before we consider the host bad.
+		MaxStoragePrice types.Currency `json:"maxStoragePrice"`
+
+		// MinCollateral is the minimum collateral in Hastings per byte per
+		// block a host needs to allocate to be considered good in addition to a
+		// 2x minimum ratio between storage price and collateral.
+		// The minimum collateral protects us against hosts with a very low
+		// storage price not having incentive to keep our data stored while the
+		// ratio makes sure that a host burns more funds for losing data than
+		// the renter paid for storing it.
+		MinCollateral types.Currency `json:"minCollateral"`
+
+		// MinProtocolVersion is the minimum protocol version that a host must
+		// support to be considered good.
 		MinProtocolVersion proto4.ProtocolVersion `json:"minProtocolVersion"`
 	}
 )
