@@ -161,12 +161,12 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	// helper to check if a host is good to form a contract with
 	isGood := func(host hosts.Host, log *zap.Logger) bool {
 		hostLog := log.With(zap.Stringer("hostKey", host.PublicKey))
-		full, _ := forceFormation[host.PublicKey]
+		force := forceFormation[host.PublicKey]
 		if good := host.Usability.Usable(); !good {
 			// host should be good
 			hostLog.Debug("host is not usable due to bad usability")
 			return false
-		} else if usedBy, used := hasCidrConflict(host); used && !full {
+		} else if usedBy, used := hasCidrConflict(host); used && !force {
 			// host should be on a unique cidr unless 'full'
 			hostLog.Debug("host is not usable cidr is already in use", zap.Stringer("usedBy", usedBy))
 			return false
@@ -236,7 +236,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		}
 
 		hostKey := candidates[i].PublicKey
-		hostLog := formationLog.With(zap.Stringer("hostKey", hostKey), zap.Bool("full", forceFormation[hostKey]))
+		hostLog := formationLog.With(zap.Stringer("hostKey", hostKey), zap.Bool("force", forceFormation[hostKey]))
 
 		err := cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
 			// make sure host is still good
