@@ -90,6 +90,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	formationLog := log.Named("formation")
 	formationLog.Debug("started", zap.Uint64("period", period), zap.Int64("wanted", wanted))
 
+	// fetch all revisable contracts
 	var activeContracts []Contract
 	const batchSize = 50
 	for offset := 0; ; offset += batchSize {
@@ -103,17 +104,51 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		}
 	}
 
+	// fetch all hosts that are usable and not blocked
+	var candidates []hosts.Host
+	for offset := 0; ; offset += batchSize {
+		batch, err := cm.store.Hosts(ctx, offset, batchSize, hosts.WithUsable(true), hosts.WithBlocked(false))
+		if err != nil {
+			return fmt.Errorf("failed to fetch hosts to form contracts with: %w", err)
+		}
+		candidates = append(candidates, batch...)
+		if len(batch) < batchSize {
+			break
+		}
+	}
+
+	formationLog.Debug("found candidates", zap.Uint64("n", uint64(len(candidates))))
+
 	// forceFormation is a map of hosts that we will always form a contract with
 	// regardless of how many we already have or what CIDR they are on
 	forceFormation := make(map[types.PublicKey]bool)
 
 	// determine which hosts are 'full', meaning they have exclusively full
-	// contracts
+	// contracts or contracts with the max collateral.
+	settings := make(map[types.PublicKey]proto.HostSettings)
+	for _, host := range candidates {
+		settings[host.PublicKey] = host.Settings
+	}
 	for _, contract := range activeContracts {
-		if contract.Size < maxContractSize {
+		contractLog := formationLog.Named(contract.ID.String()).With(zap.Stringer("hostKey", contract.HostKey))
+
+		s, ok := settings[contract.HostKey]
+		maxCollReached := ok && contract.UsedCollateral.Add(minHostCollateral).Cmp(s.MaxCollateral) >= 0 // less than minHostCollateral from MaxCollateral
+		maxSizeReached := contract.Size >= maxContractSize
+		full := maxCollReached || maxSizeReached
+		if !full {
 			forceFormation[contract.HostKey] = false
 		} else if _, hasContract := forceFormation[contract.HostKey]; !hasContract {
 			forceFormation[contract.HostKey] = true
+		}
+
+		if full {
+			contractLog.Debug("contract is full", zap.Bool("maxCollReached", maxCollReached),
+				zap.Bool("maxSizeReached", maxSizeReached),
+				zap.Uint64("size", contract.Size),
+				zap.Stringer("usedCollateral", contract.UsedCollateral),
+				zap.Stringer("totalCollateral", contract.TotalCollateral),
+				zap.Stringer("maxCollateral", s.MaxCollateral))
 		}
 	}
 
@@ -205,31 +240,16 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		addHost(host)
 	}
 
-	// fetch all hosts that are usable and not blocked
-	var candidates []hosts.Host
-	for offset := 0; ; offset += batchSize {
-		batch, err := cm.store.Hosts(ctx, offset, batchSize, hosts.WithUsable(true), hosts.WithBlocked(false))
-		if err != nil {
-			return fmt.Errorf("failed to fetch hosts to form contracts with: %w", err)
-		}
-		candidates = append(candidates, batch...)
-		if len(batch) < batchSize {
-			break
-		}
-	}
-
-	formationLog.Debug("found candidates", zap.Uint64("n", uint64(len(candidates))))
-
-	// randomize their order to avoid preferring any host
+	// randomize the candidate order to avoid preferring any host
 	cm.shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
-	// move full hosts to the front of the list
+	// move hosts we want to force a formation with to the front of the list
 	sort.SliceStable(candidates, func(i, j int) bool {
 		return forceFormation[candidates[i].PublicKey] && !forceFormation[candidates[j].PublicKey]
 	})
 
-	// we form contracts with all full hosts and until we reach the wanted
-	// number of contracts
+	// we form contracts with all hosts in forceFormation and until we reach the
+	// wanted number of contracts
 	for i := range candidates {
 		if !forceFormation[candidates[i].PublicKey] && wanted <= 0 {
 			break
