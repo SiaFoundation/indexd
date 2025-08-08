@@ -258,6 +258,7 @@ CREATE TABLE sectors (
 
 CREATE MATERIALIZED VIEW sectors_stats AS
 SELECT
+  1 AS id, -- single row view
   now() AS updated_at,
   COUNT(*) AS num_sectors,
   COUNT(*) FILTER (WHERE s.host_id IS NOT NULL AND s.contract_sectors_map_id IS NULL) AS num_unpinned_sectors,
@@ -266,6 +267,9 @@ SELECT
 FROM sectors s
 LEFT JOIN contract_sectors_map csm ON csm.id = s.contract_sectors_map_id
 LEFT JOIN contracts c ON c.contract_id = csm.contract_id AND c.good = FALSE; -- only bad contracts
+
+-- concurrent refresh requires a unique index
+CREATE UNIQUE INDEX sectors_stats_id_idx ON sectors_stats(id);
 
 -- quick lookup of sectors that failed the integrity checks too many times
 CREATE INDEX sectors_consecutive_failed_checks_idx ON sectors(host_id, consecutive_failed_checks) WHERE consecutive_failed_checks > 0;

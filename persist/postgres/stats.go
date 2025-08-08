@@ -22,7 +22,7 @@ func (s *Store) SectorStats(ctx context.Context) (admin.SectorsStatsResponse, er
 // background thread.
 func (s *Store) RefreshSectorStats(ctx context.Context) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, "REFRESH MATERIALIZED VIEW sectors_stats")
+		_, err := tx.Exec(ctx, "REFRESH MATERIALIZED VIEW CONCURRENTLY sectors_stats")
 		return err
 	})
 }
