@@ -7,7 +7,10 @@ CREATE TABLE app_connect_keys (
     app_key TEXT PRIMARY KEY,
     use_description TEXT NOT NULL,
     remaining_uses INTEGER NOT NULL,
-    date_created TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    total_uses INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_used TIMESTAMP WITH TIME ZONE
 );
 
 CREATE TABLE hosts (

@@ -18,7 +18,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func respondToAppConnection(t *testing.T, responseURL string, approve bool) {
+func respondToAppConnection(t *testing.T, responseURL string, connectKey string, approve bool) {
 	t.Helper()
 
 	buf, err := json.Marshal(app.ApproveAppRequest{
@@ -31,7 +31,7 @@ func respondToAppConnection(t *testing.T, responseURL string, approve bool) {
 	if err != nil {
 		t.Fatal("failed to create request:", err)
 	}
-	req.SetBasicAuth("", "foobar")
+	req.SetBasicAuth("", connectKey)
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -69,8 +69,7 @@ func TestApplicationAPI(t *testing.T) {
 	client := indexer.App(sk)
 
 	admin := indexer.Client
-	err = admin.AddAppConnectKey(ctx, app.AddConnectKey{
-		Key:           "foobar",
+	key, err := admin.AddAppConnectKey(ctx, app.AddConnectKeyRequest{
 		RemainingUses: 1,
 	})
 	if err != nil {
@@ -95,13 +94,30 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// approve the app
-	respondToAppConnection(t, connectResp.ResponseURL, true)
+	respondToAppConnection(t, connectResp.ResponseURL, key.Key, true)
 
-	// check the app is not authenticated yet
+	// check the app is now authenticated
 	if ok, err := client.CheckAppAuth(ctx); err != nil {
 		t.Fatal(err)
 	} else if !ok {
 		t.Fatal("expected app to be authenticated")
+	}
+
+	// check that the key has been used
+	keys, err := admin.AppConnectKeys(ctx, 0, 1)
+	switch {
+	case err != nil:
+		t.Fatal(err)
+	case len(keys) != 1:
+		t.Fatal("expected 1 key, got", len(keys))
+	case keys[0].Key != key.Key:
+		t.Fatal("expected key to match", keys[0].Key, key.Key)
+	case keys[0].RemainingUses != 0:
+		t.Fatal("expected remaining uses to be 0, got", keys[0].RemainingUses)
+	case keys[0].TotalUses != 1:
+		t.Fatal("expected total uses to be 1, got", keys[0].TotalUses)
+	case keys[0].LastUsed.IsZero():
+		t.Fatal("expected last used to be set, got", keys[0].LastUsed)
 	}
 
 	// helper to generate slab pin parameters

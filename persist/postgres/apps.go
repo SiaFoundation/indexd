@@ -10,40 +10,77 @@ import (
 	"go.sia.tech/indexd/api/app"
 )
 
+func scanConnectKey(s scanner) (key app.ConnectKey, err error) {
+	var lastUsed sql.NullTime
+	err = s.Scan(
+		&key.Key,
+		&key.Description,
+		&key.RemainingUses,
+		&key.TotalUses,
+		&key.DateCreated,
+		&key.LastUpdated,
+		&lastUsed,
+	)
+	if lastUsed.Valid {
+		key.LastUsed = lastUsed.Time
+	}
+	return
+}
+
 // AddAppConnectKey adds or updates an application connection key in the database.
-func (s *Store) AddAppConnectKey(ctx context.Context, key app.AddConnectKey) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
+func (s *Store) AddAppConnectKey(ctx context.Context, meta app.UpdateAppConnectKey) (key app.ConnectKey, err error) {
+	if meta.RemainingUses <= 0 {
+		return app.ConnectKey{}, app.ErrKeyExhausted
+	}
+	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			INSERT INTO app_connect_keys (app_key, use_description, remaining_uses) VALUES ($1, $2, $3)
-			ON CONFLICT (app_key) DO UPDATE SET (use_description, remaining_uses) = (EXCLUDED.use_description, EXCLUDED.remaining_uses);
-		`, key.Key, key.Description, key.RemainingUses)
+			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used;
+		`, meta.Key, meta.Description, meta.RemainingUses))
 		return err
 	})
+	return
+}
+
+// UpdateAppConnectKey updates an existing application connection key in the database.
+// If the key does not exist, it returns [app.ErrKeyNotFound].
+func (s *Store) UpdateAppConnectKey(ctx context.Context, meta app.UpdateAppConnectKey) (key app.ConnectKey, err error) {
+	if meta.RemainingUses <= 0 {
+		return app.ConnectKey{}, app.ErrKeyExhausted
+	}
+	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		key, err = scanConnectKey(tx.QueryRow(ctx, `
+			UPDATE app_connect_keys SET (use_description, remaining_uses) = ($2, $3) WHERE app_key = $1
+			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used;
+		`, meta.Key, meta.Description, meta.RemainingUses))
+		return err
+	})
+	return
 }
 
 // ValidAppConnectKey checks if an application connection key is valid.
 func (s *Store) ValidAppConnectKey(ctx context.Context, key string) (bool, error) {
-	var count int
+	var uses int
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		return tx.QueryRow(ctx, `
-			SELECT remaining_uses FROM app_connect_keys WHERE app_key = $1 AND remaining_uses > 0
-		`, key).Scan(&count)
+			SELECT remaining_uses FROM app_connect_keys WHERE app_key = $1
+		`, key).Scan(&uses)
 	})
 	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
+		return false, app.ErrKeyNotFound
 	} else if err != nil {
 		return false, err
 	}
-	return count > 0, nil
+	return uses > 0, nil
 }
 
 // AppConnectKeys retrieves a list of application connection keys from the database.
 func (s *Store) AppConnectKeys(ctx context.Context, offset, limit int) (keys []app.ConnectKey, err error) {
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT app_key, use_description, remaining_uses, date_created 
+			SELECT app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used
 			FROM app_connect_keys
-			ORDER BY date_created DESC
+			ORDER BY created_at DESC
 			LIMIT $1 OFFSET $2
 		`, limit, offset)
 		if err != nil {
@@ -52,8 +89,8 @@ func (s *Store) AppConnectKeys(ctx context.Context, offset, limit int) (keys []a
 		defer rows.Close()
 
 		for rows.Next() {
-			var key app.ConnectKey
-			if err := rows.Scan(&key.Key, &key.Description, &key.RemainingUses, &key.DateCreated); err != nil {
+			key, err := scanConnectKey(rows)
+			if err != nil {
 				return err
 			}
 			keys = append(keys, key)
@@ -81,14 +118,18 @@ func (s *Store) UseAppConnectKey(ctx context.Context, connectKey string, appKey 
 			return fmt.Errorf("failed to add app account: %w", err)
 		}
 
-		res, err := tx.Exec(ctx, `
-			UPDATE app_connect_keys SET remaining_uses = remaining_uses - 1
-			WHERE app_key = $1 AND remaining_uses > 0
-		`, connectKey)
-		if err != nil {
+		var uses int
+		err := tx.QueryRow(ctx, `
+			UPDATE app_connect_keys SET (remaining_uses, total_uses, last_used) = (remaining_uses - 1, total_uses + 1, NOW())
+			WHERE app_key = $1 RETURNING remaining_uses
+		`, connectKey).Scan(&uses)
+		if errors.Is(err, sql.ErrNoRows) {
+			return app.ErrKeyNotFound
+		} else if err != nil {
 			return fmt.Errorf("failed to update app connect key %q: %w", connectKey, err)
-		} else if res.RowsAffected() != 1 {
-			return fmt.Errorf("failed to use app connect key %q", connectKey)
+		} else if uses < 0 {
+			// uses is returned after updating, -1 would mean the key is exhausted
+			return app.ErrKeyExhausted
 		}
 		return nil
 	})

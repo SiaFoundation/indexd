@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/hex"
 	"net/http"
 
 	"errors"
@@ -25,6 +26,7 @@ import (
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -83,7 +85,8 @@ type (
 		PinnedSettings(ctx context.Context) (pins.PinnedSettings, error)
 		UpdatePinnedSettings(ctx context.Context, ps pins.PinnedSettings) error
 
-		AddAppConnectKey(context.Context, app.AddConnectKey) error
+		AddAppConnectKey(context.Context, app.UpdateAppConnectKey) (app.ConnectKey, error)
+		UpdateAppConnectKey(context.Context, app.UpdateAppConnectKey) (app.ConnectKey, error)
 		DeleteAppConnectKey(context.Context, string) error
 		AppConnectKeys(ctx context.Context, offset, limit int) ([]app.ConnectKey, error)
 	}
@@ -186,6 +189,7 @@ func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, sy
 
 		// connect endpoints
 		"GET /apps/connect/keys":         a.handleGETAppConnectKeys,
+		"POST /apps/connect/keys":        a.handlePOSTAppConnectKeys,
 		"PUT /apps/connect/keys":         a.handlePUTAppConnectKeys,
 		"DELETE /apps/connect/keys/:key": a.handleDELETEAppConnectKeys,
 
@@ -273,16 +277,37 @@ func (a *admin) handleGETAppConnectKeys(jc jape.Context) {
 	jc.Encode(keys)
 }
 
-func (a *admin) handlePUTAppConnectKeys(jc jape.Context) {
-	var key app.AddConnectKey
+func (a *admin) handlePOSTAppConnectKeys(jc jape.Context) {
+	var key app.AddConnectKeyRequest
 	if jc.Decode(&key) != nil {
 		return
 	}
 
-	err := a.store.AddAppConnectKey(jc.Request.Context(), key)
-	if jc.Check("failed to add app connect key", err) != nil {
+	created, err := a.store.AddAppConnectKey(jc.Request.Context(), app.UpdateAppConnectKey{
+		Key:           hex.EncodeToString(frand.Bytes(16)),
+		Description:   key.Description,
+		RemainingUses: key.RemainingUses,
+	})
+	if jc.Check("failed to update app connect key", err) != nil {
 		return
 	}
+	jc.Encode(created)
+}
+
+func (a *admin) handlePUTAppConnectKeys(jc jape.Context) {
+	var key app.UpdateAppConnectKey
+	if jc.Decode(&key) != nil {
+		return
+	}
+
+	_, err := a.store.UpdateAppConnectKey(jc.Request.Context(), key)
+	if errors.Is(err, app.ErrKeyNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to update app connect key", err) != nil {
+		return
+	}
+	// PUT doesn't expect a body
 	jc.Encode(nil)
 }
 
@@ -293,7 +318,10 @@ func (a *admin) handleDELETEAppConnectKeys(jc jape.Context) {
 	}
 
 	err := a.store.DeleteAppConnectKey(jc.Request.Context(), key)
-	if jc.Check("failed to delete app connect key", err) != nil {
+	if errors.Is(err, app.ErrKeyNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to delete app connect key", err) != nil {
 		return
 	}
 	jc.Encode(nil)

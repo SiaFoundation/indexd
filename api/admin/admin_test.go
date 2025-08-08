@@ -2,7 +2,6 @@ package admin_test
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"reflect"
@@ -41,20 +40,32 @@ func TestAppConnectKeys(t *testing.T) {
 
 	var generated []app.ConnectKey
 	for i := range 100 {
-		key := app.ConnectKey{
-			Key:           hex.EncodeToString(frand.Bytes(32)),
-			Description:   fmt.Sprintf("key %d", i),
-			RemainingUses: frand.Intn(1000) + 1,
-		}
-		err = admin.AddAppConnectKey(context.Background(), app.AddConnectKey{
-			Key:           key.Key,
-			Description:   key.Description,
-			RemainingUses: key.RemainingUses,
+		description := fmt.Sprintf("key %d", i)
+		uses := frand.Intn(1000) + 1
+		created, err := admin.AddAppConnectKey(context.Background(), app.AddConnectKeyRequest{
+			Description:   description,
+			RemainingUses: uses,
 		})
+		switch {
+		case err != nil:
+			t.Fatal(err)
+		case created.Key == "":
+			t.Fatal("expected key to be generated")
+		case created.RemainingUses != uses:
+			t.Fatal("expected remaining uses to match")
+		case created.TotalUses != 0:
+			t.Fatal("expected total uses to be 0")
+		case !created.LastUsed.IsZero():
+			t.Fatal("expected last used to be zero")
+		case created.DateCreated.IsZero():
+			t.Fatal("expected date created to be set")
+		case created.LastUpdated.IsZero():
+			t.Fatal("expected last updated to be set")
+		}
 		if err != nil {
 			t.Fatal(err)
 		}
-		generated = append(generated, key)
+		generated = append(generated, created)
 	}
 	slices.Reverse(generated)
 
@@ -89,11 +100,12 @@ func TestAppConnectKeys(t *testing.T) {
 	key := generated[0]
 	key.Description = "foobar"
 
-	if err := admin.AddAppConnectKey(context.Background(), app.AddConnectKey{
+	err = admin.UpdateAppConnectKey(context.Background(), app.UpdateAppConnectKey{
 		Key:           key.Key,
 		Description:   key.Description,
 		RemainingUses: key.RemainingUses,
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatal(err)
 	}
 
