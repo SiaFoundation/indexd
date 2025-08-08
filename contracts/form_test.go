@@ -331,7 +331,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 
 	const (
 		period = 100
-		wanted = 6
+		wanted = 7
 	)
 
 	// helper to create a good host
@@ -440,6 +440,19 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 		},
 	}
 
+	// eleventh one is good and has a contract that is close to the max
+	// collateral
+	good9 := goodHost(11)
+	maxCollSettings := goodSettings
+	maxCollSettings.MaxCollateral = types.Siacoins(1000)
+	hm.settings[good9.PublicKey] = maxCollSettings
+	formContract(good9.PublicKey, true)
+	for i := range store.contracts {
+		if store.contracts[i].ID == types.FileContractID(good9.PublicKey) {
+			store.contracts[i].UsedCollateral = maxCollSettings.MaxCollateral.Sub(minHostCollateral)
+		}
+	}
+
 	// populate store
 	store.hosts = map[types.PublicKey]hosts.Host{
 		good1.PublicKey: good1,
@@ -452,6 +465,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 		good7.PublicKey: good7,
 		bad2.PublicKey:  bad2,
 		good8.PublicKey: good8,
+		good9.PublicKey: good9,
 	}
 
 	dialer := newDialerMock()
@@ -504,11 +518,12 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 	assertFormation(good5)
 	assertFormation(good7)
 	assertFormation(good8)
+	assertFormation(good9)
 
 	// the store should now contain the right number of total contracts which is
-	// the 4 we started with plus the 5 we formed
-	if len(store.contracts) != 9 {
-		t.Fatalf("expected 9 contracts, got %v", len(store.contracts))
+	// the 5 we started with plus the 6 we formed
+	if len(store.contracts) != 11 {
+		t.Fatalf("expected 11 contracts, got %v", len(store.contracts))
 	}
 
 	// perform formations again, this time it's a no-op
