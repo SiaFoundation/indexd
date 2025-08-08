@@ -13,11 +13,7 @@ import (
 )
 
 // nolint:misspell
-const initialSchema = `/*
-	When changing the schema, the version must be incremented at the bottom of
-	this file and a migration added to migrations.go
-*/
-
+const initialSchema = `
 CREATE TABLE accounts (
     id SERIAL PRIMARY KEY,
     public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32)
