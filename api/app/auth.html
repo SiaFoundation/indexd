@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Connect Application</title>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0D1104" />
+    <meta
+      name="description"
+      content="Approve or reject application connection requests securely."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0d1104;
+        --panel: #1f2425;
+        --panel-hi: #262b2d;
+        --border: #2b2f31;
+        --text: #eff2ed;
+        --muted: #a9b1aa;
+        --accent: #36d955;
+        --accent-600: #1e9d36;
+        --danger: #d93636;
+        --danger-600: #9d1e1e;
+        --ring: #6ee38a;
+        --radius: 12px;
+        --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        height: 100%;
+      }
+      body {
+        margin: 0;
+        background: radial-gradient(
+            1200px 600px at 60% -10%,
+            #15200f 0%,
+            var(--bg) 45%
+          )
+          fixed;
+        color: var(--text);
+        font-family: "IBM Plex Sans", system-ui, -apple-system, Segoe UI, Roboto,
+          Arial, sans-serif;
+        line-height: 1.45;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+      }
+
+      /* overlay + modal */
+      .overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.55);
+        backdrop-filter: blur(2px);
+      }
+      .card {
+        position: relative;
+        z-index: 1;
+        width: min(560px, 92vw);
+        background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+        border: 1px solid var(--border);
+        border-radius: var(--radius);
+        box-shadow: var(--shadow);
+        padding: 24px;
+      }
+
+      /* header */
+      .header {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .logo {
+        width: 44px;
+        height: 44px;
+        border-radius: 10px;
+        flex: 0 0 44px;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        background: #141816;
+        border: 1px solid var(--border);
+      }
+      .title {
+        margin: 0;
+        font-weight: 700;
+        font-size: 1.1rem;
+      }
+      .subtitle {
+        margin: 2px 0 0;
+        color: var(--muted);
+        font-size: 0.92rem;
+      }
+
+      /* body copy */
+      .copy {
+        margin: 14px 0 18px;
+      }
+      .caption {
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 0.82rem;
+        font-style: italic;
+      }
+
+      /* input */
+      label {
+        display: block;
+        font-size: 0.88rem;
+        color: var(--muted);
+        margin: 14px 0 6px;
+      }
+      input {
+        width: 100%;
+        padding: 10px 12px;
+        border-radius: 10px;
+        background: #151819;
+        border: 1px solid #3a3f40;
+        color: var(--text);
+        outline: none;
+        transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      input::placeholder {
+        color: #7d8680;
+      }
+      input:focus {
+        border-color: var(--accent-600);
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
+      }
+
+      /* actions */
+      .actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        margin-top: 18px;
+      }
+      .btn {
+        appearance: none;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        padding: 10px 16px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.04s ease, filter 0.15s ease,
+          border-color 0.15s ease;
+      }
+      .btn:active {
+        transform: translateY(1px);
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #102012;
+        border-color: var(--accent-600);
+      }
+      .btn-primary:hover {
+        filter: brightness(1.05);
+      }
+      .btn-danger {
+        background: var(--danger);
+        color: #230c0c;
+        border-color: var(--danger-600);
+      }
+      .btn-danger:hover {
+        filter: brightness(1.04);
+      }
+      .btn-ghost {
+        background: transparent;
+        color: var(--text);
+        border-color: #3a3f40;
+      }
+      .btn:focus-visible {
+        outline: 0;
+        box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
+      }
+
+      /* result states share the same modal */
+      .result-head {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 6px;
+      }
+      .pill {
+        width: 36px;
+        height: 36px;
+        border-radius: 9px;
+        display: grid;
+        place-items: center;
+        font-weight: 700;
+        border: 1px solid transparent;
+      }
+      .pill.success {
+        background: color-mix(in srgb, var(--accent) 25%, #0b1a0d);
+        border-color: var(--accent-600);
+      }
+      .pill.reject {
+        background: color-mix(in srgb, var(--danger) 25%, #1a0b0b);
+        border-color: var(--danger-600);
+      }
+      .result-title {
+        margin: 0;
+        font-size: 1.05rem;
+        font-weight: 700;
+      }
+      .result-copy {
+        margin: 6px 0 0;
+        color: var(--muted);
+      }
+      .center-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 18px;
+      }
+
+      /* footer */
+      .app-footer {
+        position: fixed;
+        bottom: 10px;
+        inset-inline: 0;
+        display: grid;
+        place-items: center;
+        opacity: 0.6;
+      }
+      .app-footer img {
+        height: 22px;
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        * {
+          transition: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="overlay"></div>
+
+    <div
+      id="modal"
+      class="card"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dlg-title"
+    >
+      <div class="header">
+        <div class="logo">
+          <img
+            src="{{.Request.LogoURL}}"
+            alt="app logo"
+            style="width: 100%; height: 100%; object-fit: cover"
+          />
+        </div>
+        <div>
+          <h1 id="dlg-title" class="title">Connect to app?</h1>
+          <p class="subtitle">{{.Request.Name}}</p>
+        </div>
+      </div>
+
+      <div class="copy">
+        <p class="subtitle">{{.Request.Description}}</p>
+        <p>
+          Connecting to this application will allow it to upload and download
+          data on your behalf.
+        </p>
+        <p class="caption">
+          Apps cannot access data from other connected apps and you can revoke
+          access at any time from the admin interface.
+        </p>
+      </div>
+
+      <label for="appPassword">App password</label>
+      <input
+        type="password"
+        id="appPassword"
+        placeholder="Enter your app password"
+        required
+      />
+
+      <div class="actions">
+        <button id="rejectButton" class="btn btn-danger">Reject</button>
+        <button id="acceptButton" class="btn btn-primary">Accept</button>
+      </div>
+    </div>
+
+    <div class="app-footer">
+      <img src="https://sia.tech/api/media/file/token.svg" alt="Sia" />
+    </div>
+
+    <script>
+      async function respondToRequest(approve) {
+        const response = await fetch("{{.ResponseURL}}", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${btoa(
+              ":" + document.getElementById("appPassword").value
+            )}`,
+          },
+          body: JSON.stringify({ approve }),
+        });
+        if (response.status !== 204) {
+          const error = await response.text();
+          throw new Error(error);
+        }
+      }
+
+      function renderResult(approved) {
+        const modal = document.getElementById("modal");
+        const state = approved ? "success" : "reject";
+        const title = approved ? "Connection approved" : "Connection rejected";
+        const note = approved
+          ? "You can return to the application."
+          : "You can close this window and return to the application.";
+        const btnClass = approved ? "btn-primary" : "btn-danger";
+        const btnText = approved ? "Return to app" : "Close";
+
+        modal.setAttribute("aria-labelledby", "result-title");
+        modal.innerHTML = `
+          <div class="result-head">
+            <div class="pill ${state}" aria-hidden="true">${
+          approved ? "✓" : "!"
+        }</div>
+            <h2 id="result-title" class="result-title">${title}</h2>
+          </div>
+          <p class="result-copy">${note}</p>
+          <div class="center-actions">
+            <button class="btn ${btnClass}" id="resultBtn">${btnText}</button>
+          </div>
+        `;
+
+        document.getElementById("resultBtn").addEventListener("click", () => {
+          window.close();
+        });
+      }
+
+      document
+        .getElementById("acceptButton")
+        .addEventListener("click", async (e) => {
+          e.preventDefault();
+          try {
+            await respondToRequest(true);
+            renderResult(true);
+          } catch (err) {
+            console.error(err);
+          }
+        });
+
+      document
+        .getElementById("rejectButton")
+        .addEventListener("click", async (e) => {
+          e.preventDefault();
+          try {
+            await respondToRequest(false);
+            renderResult(false);
+          } catch (err) {
+            console.error(err);
+          }
+        });
+    </script>
+  </body>
+</html>

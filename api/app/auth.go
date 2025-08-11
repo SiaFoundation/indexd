@@ -39,17 +39,17 @@ const (
 	queryParamValidUntil = "SiaIdx-ValidUntil"
 )
 
-// AccountStore defines the interface for checking if a public key corresponds
+// accountStore defines the interface for checking if a public key corresponds
 // to a known account.
-type AccountStore interface {
+type accountStore interface {
 	HasAccount(ctx context.Context, ak types.PublicKey) (bool, error)
 }
 
-// checkSignedURLAuth validates a signed URL by checking its required query
-// parameters, verifying the signature and expiration, and confirming the
-// account exists. If any check fails, it writes an HTTP error and returns
-// false, otherwise it returns the public key and true.
-func checkSignedURLAuth(jc jape.Context, hostname string, store AccountStore) (types.PublicKey, bool) {
+// getSignedURLAuth extracts the signed public key from the request
+// and verifies the signature and expiration. If successful, it returns the
+// public key and true, otherwise it writes an error to the context and returns
+// an empty public key and false.
+func getSignedURLAuth(jc jape.Context, hostname string) (types.PublicKey, bool) {
 	req := jc.Request
 
 	// validate presence of required parameters
@@ -81,7 +81,21 @@ func checkSignedURLAuth(jc jape.Context, hostname string, store AccountStore) (t
 		jc.Error(ErrSignatureExpired, http.StatusUnauthorized)
 		return types.PublicKey{}, false
 	} else if !pk.VerifyHash(requestHash(hostname, ts), sig) {
-		jc.Error(ErrSignatureInvalid, http.StatusUnauthorized)
+		jc.Error(fmt.Errorf("failed to authenticate for host %q: %w", hostname, ErrSignatureInvalid), http.StatusUnauthorized)
+		return types.PublicKey{}, false
+	}
+	return pk, true
+}
+
+// checkSignedURLAuth validates a signed URL by checking its required query
+// parameters, verifying the signature and expiration, and confirming the
+// account exists. If any check fails, it writes an HTTP error and returns
+// false, otherwise it returns the public key and true.
+func checkSignedURLAuth(jc jape.Context, hostname string, store accountStore) (types.PublicKey, bool) {
+	req := jc.Request
+
+	pk, ok := getSignedURLAuth(jc, hostname)
+	if !ok {
 		return types.PublicKey{}, false
 	}
 

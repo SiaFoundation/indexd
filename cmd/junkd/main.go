@@ -16,10 +16,10 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/indexd/api/admin"
-	"go.sia.tech/indexd/keys"
+	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/sdk"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"lukechampine.com/frand"
 )
 
@@ -32,33 +32,23 @@ const (
 )
 
 var (
-	adminURL      string
-	adminPassword string
+	appSecret  string
+	indexerURL string
 
-	appSecret string
-	appURL    string
-
-	logLevel string
+	logLevel zap.AtomicLevel
 	logPath  string
 
 	threads int
-
-	clientMu    sync.Mutex
-	client      *sdk.SDK
-	clientUntil time.Time
 
 	elapsedMu sync.Mutex
 	elapsed   []time.Duration
 )
 
 func init() {
-	flag.StringVar(&adminURL, "admin.url", "http://localhost:9980/api", "the URL of the admin API")
-	flag.StringVar(&adminPassword, "admin.password", "", "the password for the admin API")
-
+	flag.StringVar(&indexerURL, "indexer.url", "http://localhost:9982", "the URL of the indexer API")
 	flag.StringVar(&appSecret, "app.secret", "", "a secret used to derive the application key")
-	flag.StringVar(&appURL, "app.url", "http://localhost:9880", "the URL of the application API")
 
-	flag.StringVar(&logLevel, "log.level", "info", "the log level to use")
+	flag.TextVar(&logLevel, "log.level", zap.NewAtomicLevelAt(zap.InfoLevel), "the log level to use")
 	flag.StringVar(&logPath, "log.path", "", "the path to write the log to")
 
 	flag.IntVar(&threads, "threads", 1, "the number of upload threads")
@@ -67,10 +57,7 @@ func init() {
 }
 
 func main() {
-	log, err := newLogger()
-	if err != nil {
-		log.Fatal("failed to build logger", zap.Error(err))
-	}
+	log := newLogger()
 
 	sk, err := loadPrivateKey()
 	if err != nil {
@@ -79,6 +66,29 @@ func main() {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+
+	resp, connected, err := sdk.Connect(ctx, indexerURL, sk, app.RegisterAppRequest{
+		Name:        "junkd Uploader",
+		Description: "A tool to upload junk data to the indexer",
+		LogoURL:     "https://example.com/logo.png",
+		ServiceURL:  "https://example.com/service",
+	})
+	if err != nil {
+		log.Fatal("failed to connect app", zap.Error(err))
+	} else if !connected {
+		log.Info("please approve app connection", zap.String("url", resp.ResponseURL))
+		if connected, err := resp.WaitForApproval(ctx); err != nil {
+			log.Fatal("failed to wait for app approval", zap.Error(err))
+		} else if !connected {
+			log.Fatal("user denied app connection")
+		}
+	}
+	log.Info("junkd connected")
+
+	sdkClient, err := sdk.NewSDK(indexerURL, sk, sdk.WithLogger(log.Named("sdk")))
+	if err != nil {
+		log.Fatal("failed to create SDK client", zap.Error(err))
+	}
 
 	var wg sync.WaitGroup
 	for n := 1; n <= threads; n++ {
@@ -89,19 +99,9 @@ func main() {
 
 		loop:
 			for {
-				// prepare client (refresh the app key daily)
-				client, err := loadClient(ctx, sk, log)
-				if err != nil {
-					log.Error("failed to load client, timing out for 5 minutes", zap.Error(err))
-					if ok := <-waitFor(ctx, 5*time.Minute); ok {
-						continue loop
-					}
-					break loop
-				}
-
 				// upload slab
 				start := time.Now()
-				slabs, err := client.Upload(ctx, io.LimitReader(frand.Reader, slabSize), sdk.WithRedundancy(dataShards, parityShards))
+				slabs, err := sdkClient.Upload(ctx, io.LimitReader(frand.Reader, slabSize), sdk.WithRedundancy(dataShards, parityShards))
 				if err != nil {
 					log.Error("failed to upload slab, timing out for 5 minutes", zap.Error(err), zap.Duration("duration", time.Since(start)))
 					if ok := <-waitFor(ctx, 5*time.Minute); ok {
@@ -140,32 +140,6 @@ func waitFor(ctx context.Context, d time.Duration) <-chan bool {
 	return c
 }
 
-func loadClient(ctx context.Context, masterKey types.PrivateKey, log *zap.Logger) (*sdk.SDK, error) {
-	clientMu.Lock()
-	defer clientMu.Unlock()
-
-	// return cached client
-	if time.Now().Before(clientUntil) {
-		return client, nil
-	}
-
-	// register application key
-	appKey := keys.DeriveKey(masterKey, fmt.Sprintf("junkd-%s", time.Now().Format(time.DateOnly)))
-	err := admin.NewClient(adminURL, adminPassword).AccountsAdd(ctx, appKey.PublicKey())
-	if err != nil {
-		return nil, fmt.Errorf("failed to add app key to admin API: %w", err)
-	}
-
-	// create new client
-	clientUntil = time.Now().AddDate(0, 0, 1)
-	client, err = sdk.NewSDK(appURL, appKey, sdk.WithLogger(log))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create SDK: %w", err)
-	}
-
-	return client, nil
-}
-
 func loadPrivateKey() (types.PrivateKey, error) {
 	if appSecret == "" {
 		return types.PrivateKey{}, fmt.Errorf("app secret is required")
@@ -181,26 +155,12 @@ func loadPrivateKey() (types.PrivateKey, error) {
 	return wallet.KeyFromSeed(&seed, 0), nil
 }
 
-func newLogger() (*zap.Logger, error) {
-	cfg := zap.NewProductionConfig()
-	switch logLevel {
-	case "debug":
-		cfg.Level = zap.NewAtomicLevelAt(zap.DebugLevel)
-	case "info":
-		cfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	case "warn":
-		cfg.Level = zap.NewAtomicLevelAt(zap.WarnLevel)
-	default:
-		cfg.Level = zap.NewAtomicLevelAt(zap.InfoLevel)
-	}
-
-	cfg.OutputPaths = []string{"stdout"}
-	if logPath != "" {
-		cfg.OutputPaths = append(cfg.OutputPaths, logPath)
-	}
-	cfg.DisableStacktrace = true
-
-	return cfg.Build()
+func newLogger() *zap.Logger {
+	cfg := zap.NewProductionEncoderConfig()
+	cfg.EncodeTime = zapcore.ISO8601TimeEncoder
+	cfg.EncodeLevel = zapcore.CapitalColorLevelEncoder
+	cfg.EncodeDuration = zapcore.MillisDurationEncoder
+	return zap.New(zapcore.NewCore(zapcore.NewConsoleEncoder(cfg), zapcore.Lock(os.Stdout), logLevel))
 }
 
 func formatBpsString(b int64, t time.Duration) string {

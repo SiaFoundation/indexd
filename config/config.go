@@ -21,8 +21,12 @@ type (
 	// ApplicationAPI contains the configuration for the HTTP server serving the
 	// application API
 	ApplicationAPI struct {
-		Address  string `yaml:"address"`
-		Hostname string `yaml:"hostname"`
+		Address string `yaml:"address"`
+		// AdvertiseURL can be used to override the URL
+		// that is generated for auth requests and
+		// the hostname that is valid for signed
+		// requests.
+		AdvertiseURL string `yaml:"advertiseURL"`
 	}
 
 	// Syncer contains the configuration for the p2p syncer.

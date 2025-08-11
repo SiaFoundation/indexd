@@ -9,8 +9,6 @@ import (
 	"go.sia.tech/coreutils/wallet"
 )
 
-type mockSyncer struct{}
-
 // NewWallet creates a new SingleAddressWallet for testing which is connected to
 // all the other components created via the ConsensusNode.
 func NewWallet(t testing.TB, c *ConsensusNode, walletKey types.PrivateKey) *wallet.SingleAddressWallet {

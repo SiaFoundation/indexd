@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"time"
 
@@ -101,6 +104,68 @@ func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOptio
 	return slabIDs, nil
 }
 
+// RequestAppConnection requests an application connection to the indexer.
+func (c *Client) RequestAppConnection(ctx context.Context, request RegisterAppRequest) (resp RegisterAppResponse, err error) {
+	err = c.c.POST(ctx, c.sign("/auth/connect"), request, &resp)
+	return
+}
+
+// CheckRequestStatus checks if an auth request has been approved.
+// If the auth request is still pending, it returns false.
+func (c *Client) CheckRequestStatus(ctx context.Context, statusURL string) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.sign(statusURL), nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("failed to check app auth: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusNotFound:
+		return false, ErrUserRejected
+	case http.StatusOK:
+		var connectResp AuthConnectStatusResponse
+		err = json.NewDecoder(resp.Body).Decode(&connectResp)
+		return connectResp.Approved, err
+	default:
+		buf, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		if err != nil {
+			return false, fmt.Errorf("failed to read response error: %w", err)
+		}
+		return false, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, buf)
+	}
+}
+
+// CheckAppAuth checks if the application is authenticated with the indexer.
+// It returns true if authenticated, false if not, and an error if the request fails.
+func (c *Client) CheckAppAuth(ctx context.Context) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.sign(fmt.Sprintf("%s/auth/check", c.c.BaseURL)), nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to create request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return false, fmt.Errorf("failed to check app auth: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusUnauthorized:
+		return false, nil // not authenticated
+	case http.StatusNoContent:
+		return true, nil // authenticated
+	default:
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		if err != nil {
+			return false, fmt.Errorf("failed to read response body: %w", err)
+		}
+		return false, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, body)
+	}
+}
+
 // NewClient creates a new AppClient that can be used to interact with the
 // application API of the indexer. The address should be the full URL to the
 // application API, including the scheme (e.g., "http://indexer.sia.tech").
@@ -114,6 +179,6 @@ func NewClient(address string, appKey types.PrivateKey) (*Client, error) {
 		c: jape.Client{BaseURL: address},
 
 		appkey:   appKey,
-		hostname: parsedURL.Hostname(),
+		hostname: parsedURL.Host,
 	}, nil
 }

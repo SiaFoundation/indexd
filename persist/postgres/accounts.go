@@ -50,13 +50,7 @@ func (s *Store) Accounts(ctx context.Context, offset, limit int) ([]types.Public
 // AddAccount adds a new account in the database with given account key.
 func (s *Store) AddAccount(ctx context.Context, ak types.PublicKey) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		res, err := tx.Exec(ctx, `INSERT INTO accounts (public_key) VALUES ($1) ON CONFLICT DO NOTHING`, sqlPublicKey(ak))
-		if err != nil {
-			return fmt.Errorf("failed to add account: %w", err)
-		} else if res.RowsAffected() == 0 {
-			return accounts.ErrExists
-		}
-		return nil
+		return addAccount(ctx, tx, ak)
 	})
 }
 
@@ -252,6 +246,16 @@ func (s *Store) ServiceAccountBalance(ctx context.Context, hostKey types.PublicK
 		return err
 	})
 	return balance, err
+}
+
+func addAccount(ctx context.Context, tx *txn, account types.PublicKey) error {
+	res, err := tx.Exec(ctx, `INSERT INTO accounts (public_key) VALUES ($1) ON CONFLICT DO NOTHING`, sqlPublicKey(account))
+	if err != nil {
+		return fmt.Errorf("failed to add account: %w", err)
+	} else if res.RowsAffected() == 0 {
+		return accounts.ErrExists
+	}
+	return nil
 }
 
 func newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, limit int) ([]accounts.HostAccount, error) {

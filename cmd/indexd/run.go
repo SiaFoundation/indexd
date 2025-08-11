@@ -94,7 +94,6 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		}
 	}
 
-	log.Debug("starting syncer", zap.String("syncer address", syncerAddr))
 	s := syncer.New(syncerListener, cm, store, gateway.Header{
 		GenesisID:  genesis.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
@@ -191,15 +190,30 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		app.WithLogger(log.Named("api.application")),
 	}
 
+	advertiseURL := cfg.ApplicationAPI.AdvertiseURL
+	if advertiseURL == "" {
+		host, port, _ := net.SplitHostPort(appAPIListener.Addr().String())
+		if ip := net.ParseIP(host); ip == nil || ip.IsUnspecified() {
+			advertiseURL = "http://" + net.JoinHostPort("127.0.0.1", port)
+		} else {
+			advertiseURL = "http://" + net.JoinHostPort(host, port)
+		}
+	}
+
+	appHandler, err := app.NewAPI(advertiseURL, store, appAPIOpts...)
+	if err != nil {
+		return fmt.Errorf("failed to create application API: %w", err)
+	}
+
 	appAPI := http.Server{
-		Handler:      app.NewAPI(cfg.ApplicationAPI.Hostname, store, store, appAPIOpts...),
+		Handler:      appHandler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 	}
 	defer appAPI.Close()
 
 	go func() {
-		log.Debug("starting application API", zap.String("applicationAddress", cfg.ApplicationAPI.Address))
+		log.Debug("starting application API", zap.String("appAddress", advertiseURL), zap.String("applicationAddress", cfg.ApplicationAPI.Address))
 		if err := appAPI.Serve(appAPIListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("failed to serve application API", zap.Error(err))
 		}

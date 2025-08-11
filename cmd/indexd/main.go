@@ -271,10 +271,10 @@ func main() {
 		}
 
 		if cfg.AdminAPI.Password == "" {
-			os.Stderr.WriteString(fmt.Sprintf("missing admin password - needs to be set either via config file or '%s' env var\n", indexdAdminPasswordEnvVar))
+			fmt.Fprintf(os.Stderr, "missing admin password - needs to be set either via config file or '%s' env var\n", indexdAdminPasswordEnvVar)
 			os.Exit(1)
 		} else if cfg.RecoveryPhrase == "" {
-			os.Stderr.WriteString("missing recovery phrase - needs to be set via config file\n")
+			fmt.Fprintf(os.Stderr, "missing recovery phrase - needs to be set via config file\n")
 			os.Exit(1)
 		}
 
