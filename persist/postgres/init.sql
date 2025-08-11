@@ -292,6 +292,9 @@ CREATE INDEX sectors_host_id_null_contract_map_idx ON sectors(host_id) WHERE con
 -- speed up querying sectors of a host by root
 CREATE INDEX sectors_host_id_sector_root_idx ON sectors(host_id, sector_root);
 
+-- for pruning unpinned sectors
+CREATE INDEX sectors_uploaded_at_unpinned_idx ON sectors(uploaded_at) WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NULL;
+
 CREATE TABLE slab_sectors (
     slab_id BIGINT REFERENCES slabs(id) ON DELETE CASCADE,
     sector_id BIGINT REFERENCES sectors(id) ON DELETE CASCADE,
