@@ -1955,7 +1955,7 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 	// 1/10 = 10%, 1/100 = 1%, 1/1000 = 0.1%
 	for _, fraction := range []int64{10, 100, 1000} {
 		reset(fraction)
-		b.Run(fmt.Sprintf("%.2f%%", 1.0/float32(fraction)), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%.3f%%", 1.0/float32(fraction)*100), func(b *testing.B) {
 			for b.Loop() {
 				b.SetBytes(proto.SectorSize * nSectors / fraction)
 				err := store.PruneUnpinnableSectors(context.Background(), now.Add(-3*day))
