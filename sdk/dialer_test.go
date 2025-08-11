@@ -135,3 +135,59 @@ func TestHostDialerParallel(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestHostDialerHosts(t *testing.T) {
+	logger := zaptest.NewLogger(t)
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(2))
+	indexer := cluster.Indexer
+
+	// add an account
+	a1 := types.GeneratePrivateKey()
+	app := indexer.App(a1)
+	err := indexer.AccountsAdd(context.Background(), a1.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(2 * time.Second)
+
+	dialer, err := NewDialer(app, a1, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hks := dialer.ActiveHosts()
+	if len(hks) != 0 {
+		t.Fatalf("expected 0 active hosts, got %d", len(hks))
+	}
+
+	hks = dialer.Hosts()
+	if len(hks) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(hks))
+	}
+
+	hk := hks[0]
+	var data [proto.SectorSize]byte
+	frand.Read(data[:])
+	if _, err := dialer.WriteSector(context.Background(), hk, &data); err != nil {
+		t.Fatal(err)
+	}
+
+	hks = dialer.ActiveHosts()
+	if len(hks) != 1 {
+		t.Fatalf("expected 1 active hosts, got %d", len(hks))
+	} else if hks[0] != hk {
+		t.Fatal("wrong host was active")
+	}
+
+	hks = dialer.Hosts()
+	if len(hks) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(hks))
+	}
+
+	dialer.Close()
+
+	hks = dialer.ActiveHosts()
+	if len(hks) != 0 {
+		t.Fatalf("expected 0 active hosts after close, got %d", len(hks))
+	}
+}
