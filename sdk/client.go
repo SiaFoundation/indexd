@@ -51,6 +51,9 @@ type (
 		// upload or download.
 		Hosts() []types.PublicKey
 
+		// ActiveHosts returns hosts that there is an active connection with.
+		ActiveHosts() []types.PublicKey
+
 		// WriteSector writes a sector to the host identified by the public key.
 		WriteSector(context.Context, types.PublicKey, *[proto4.SectorSize]byte) (types.Hash256, error)
 		// ReadSector reads a sector from the host identified by the public key.
@@ -113,7 +116,16 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 	}
 
 	var hostsMu sync.Mutex
-	hosts := shuffle(s.dialer.Hosts())
+	combined := append(s.dialer.ActiveHosts(), s.dialer.Hosts()...)
+	seen := make(map[types.PublicKey]struct{}, len(combined))
+	hosts := combined[:0] // reuse underlying array
+	for _, pk := range combined {
+		if _, exists := seen[pk]; !exists {
+			seen[pk] = struct{}{}
+			hosts = append(hosts, pk)
+		}
+	}
+
 	if len(hosts) < len(shards) {
 		return slabs.SlabPinParams{}, fmt.Errorf("not enough hosts available: %d, required: %d", len(hosts), len(shards))
 	}
