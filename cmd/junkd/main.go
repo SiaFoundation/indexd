@@ -67,7 +67,7 @@ func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
-	ok, err := sdk.Connect(ctx, indexerURL, sk, app.RegisterAppRequest{
+	resp, connected, err := sdk.Connect(ctx, indexerURL, sk, app.RegisterAppRequest{
 		Name:        "junkd Uploader",
 		Description: "A tool to upload junk data to the indexer",
 		LogoURL:     "https://example.com/logo.png",
@@ -75,8 +75,13 @@ func main() {
 	})
 	if err != nil {
 		log.Fatal("failed to connect app", zap.Error(err))
-	} else if !ok {
-		log.Fatal("user denied app connection")
+	} else if !connected {
+		log.Info("please approve app connection", zap.String("url", resp.ResponseURL))
+		if connected, err := resp.WaitForApproval(ctx); err != nil {
+			log.Fatal("failed to wait for app approval", zap.Error(err))
+		} else if !connected {
+			log.Fatal("user denied app connection")
+		}
 	}
 	log.Info("junkd connected")
 
