@@ -194,11 +194,16 @@ func (d *Dialer) clearHostConnection(hostKey types.PublicKey) {
 }
 
 // ActiveHosts implements the [HostDialer] interface.
-func (d *Dialer) ActiveHosts() []types.PublicKey {
+func (d *Dialer) ActiveHosts() (hks []types.PublicKey) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	return slices.Collect(maps.Keys(d.conns))
+	for hk, entry := range d.conns {
+		if entry.tc != nil {
+			hks = append(hks, hk)
+		}
+	}
+	return
 }
 
 // Hosts implements the [HostDialer] interface.
