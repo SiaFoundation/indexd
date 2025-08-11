@@ -1918,7 +1918,6 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 	)
 
 	// insert sectors in batches
-	sectorRoots := make([]types.Hash256, 0, nSectors)
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
@@ -1929,7 +1928,6 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 				Root:    root,
 				HostKey: hk,
 			})
-			sectorRoots = append(sectorRoots, root)
 		}
 		if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
 			MinShards:     1,
@@ -1940,32 +1938,37 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 		}
 	}
 
-	// 10% of the sectors are candidates to be marked
 	now := time.Now()
 	const day = 24 * time.Hour
-	reset := func() {
+	reset := func(fraction int64) {
 		b.Helper()
 		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = 1, contract_sectors_map_id = NULL, uploaded_at = $1`, now)
 		if err != nil {
 			b.Fatal(err)
 		}
-		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET uploaded_at = $1 WHERE id % 10 = 0`, now.Add(-4*day))
+		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET uploaded_at = $1 WHERE id % $2 = 0`, now.Add(-4*day), fraction)
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
-	reset()
 
-	for b.Loop() {
-		err := store.PruneUnpinnableSectors(context.Background(), now.Add(-3*day))
-		if err != nil {
-			b.Fatal(err)
-		}
+	// 1/10 = 10%, 1/100 = 1%, 1/1000 = 0.1%
+	for _, fraction := range []int64{10, 100, 1000} {
+		reset(fraction)
+		b.Run(fmt.Sprintf("%.2f%%", 1.0/float32(fraction)), func(b *testing.B) {
+			for b.Loop() {
+				b.SetBytes(proto.SectorSize * nSectors / fraction)
+				err := store.PruneUnpinnableSectors(context.Background(), now.Add(-3*day))
+				if err != nil {
+					b.Fatal(err)
+				}
 
-		// reset db
-		b.StopTimer()
-		reset()
-		b.StartTimer()
+				// reset db
+				b.StopTimer()
+				reset(fraction)
+				b.StartTimer()
+			}
+		})
 	}
 }
 
