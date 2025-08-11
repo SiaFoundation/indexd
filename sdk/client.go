@@ -116,14 +116,20 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 	}
 
 	var hostsMu sync.Mutex
-	combined := append(shuffle(s.dialer.ActiveHosts()), shuffle(s.dialer.Hosts())...)
-	seen := make(map[types.PublicKey]struct{}, len(combined))
-	hosts := combined[:0] // reuse underlying array
-	for _, pk := range combined {
-		if _, exists := seen[pk]; !exists {
-			seen[pk] = struct{}{}
-			hosts = append(hosts, pk)
+	activeHosts := shuffle(s.dialer.ActiveHosts())
+	allHosts := shuffle(s.dialer.Hosts())
+
+	hosts := make([]types.PublicKey, 0, len(allHosts))
+	seen := make(map[types.PublicKey]struct{}, len(activeHosts))
+	for _, pk := range activeHosts {
+		seen[pk] = struct{}{}
+		hosts = append(hosts, pk)
+	}
+	for _, pk := range allHosts {
+		if _, ok := seen[pk]; ok {
+			continue
 		}
+		hosts = append(hosts, pk)
 	}
 
 	if len(hosts) < len(shards) {
