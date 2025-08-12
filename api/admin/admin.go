@@ -284,7 +284,7 @@ func (a *admin) handlePOSTAppConnectKeys(jc jape.Context) {
 		return
 	}
 	if req.MaxPinnedData == 0 {
-		req.MaxPinnedData = math.MaxUint64 // default to no limit
+		req.MaxPinnedData = math.MaxInt64 // default to no limit
 	}
 
 	created, err := a.store.AddAppConnectKey(jc.Request.Context(), app.UpdateAppConnectKey{

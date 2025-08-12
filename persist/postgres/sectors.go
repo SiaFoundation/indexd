@@ -266,9 +266,13 @@ func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID s
 				SELECT COUNT(*) * $1
 				FROM slabs
 				INNER JOIN slab_sectors ON slabs.id = slab_sectors.slab_id
+				WHERE slabs.id = $2
 			)
-			WHERE public_key = $2
-		`, proto.SectorSize, sqlPublicKey(accountID))
+			WHERE public_key = $3
+		`, proto.SectorSize, sID, sqlPublicKey(accountID))
+		if err != nil {
+			return fmt.Errorf("failed to update account's pinned data: %w", err)
+		}
 
 		// return early if the slab is pinned by another account
 		var pinned bool

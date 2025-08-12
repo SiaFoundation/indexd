@@ -668,11 +668,23 @@ func TestUnpinSlab(t *testing.T) {
 		}
 	}
 
+	assertPinnedData := func(acc proto.Account, pinned uint64) {
+		t.Helper()
+		var pinnedData uint64
+		err := store.pool.QueryRow(context.Background(), "SELECT pinned_data FROM accounts WHERE public_key = $1", sqlPublicKey(acc)).Scan(&pinnedData)
+		if err != nil {
+			t.Fatal(err)
+		} else if pinnedData != pinned {
+			t.Fatalf("expected %d pinned data for account %v, got %d", pinned, acc, pinnedData)
+		}
+	}
+
 	// add host
 	hk := store.addTestHost(t)
 
 	// precreate 3 slabs, 2 sectors each
 	var params []slabs.SlabPinParams
+	slabSize := uint64(2 * proto.SectorSize) // 2 sectors per slab
 	for range 3 {
 		params = append(params, slabs.SlabPinParams{
 			EncryptionKey: [32]byte{},
@@ -715,6 +727,8 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 3)
 	assertCount("sectors", 6)
 	assertCount("account_slabs", 4)
+	assertPinnedData(acc1, 2*slabSize)
+	assertPinnedData(acc2, 2*slabSize)
 
 	// unpinning a slab that's not pinned to an account should return [slabs.ErrNotFound]
 	err := store.UnpinSlab(context.Background(), acc2, slab1)
@@ -734,6 +748,8 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 2)
 	assertCount("sectors", 4)
 	assertCount("account_slabs", 3)
+	assertPinnedData(acc1, slabSize)
+	assertPinnedData(acc2, 2*slabSize)
 
 	// unpin second slab
 	err = store.UnpinSlab(context.Background(), acc1, slab2)
@@ -747,6 +763,8 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 2)
 	assertCount("sectors", 4)
 	assertCount("account_slabs", 2)
+	assertPinnedData(acc1, 0)
+	assertPinnedData(acc2, 2*slabSize)
 
 	// unpin second slab on second account
 	err = store.UnpinSlab(context.Background(), acc2, slab2)
@@ -760,6 +778,8 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 1)
 	assertCount("sectors", 2)
 	assertCount("account_slabs", 1)
+	assertPinnedData(acc1, 0)
+	assertPinnedData(acc2, slabSize)
 
 	// unpin third slab on second account
 	err = store.UnpinSlab(context.Background(), acc2, slab3)
@@ -773,6 +793,8 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 0)
 	assertCount("sectors", 0)
 	assertCount("account_slabs", 0)
+	assertPinnedData(acc1, 0)
+	assertPinnedData(acc2, 0)
 }
 
 func TestPinSectors(t *testing.T) {

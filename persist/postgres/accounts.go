@@ -251,7 +251,7 @@ func (s *Store) ServiceAccountBalance(ctx context.Context, hostKey types.PublicK
 
 func addAccount(ctx context.Context, tx *txn, account types.PublicKey, opts ...accounts.AddAccountOption) error {
 	aao := accounts.AddAccountOptions{
-		MaxPinnedData: math.MaxUint64, // no limit by default
+		MaxPinnedData: math.MaxInt64, // no limit by default
 	}
 	for _, opt := range opts {
 		opt(&aao)
