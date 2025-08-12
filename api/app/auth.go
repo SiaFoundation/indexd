@@ -1,10 +1,12 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,6 +14,11 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/jape"
 )
+
+// maxRequestSize determines the maximum size of an incoming
+// HTTP request body. 1MB is quite generous. A Slab with the
+// maximum 255 sectors is < 50KiB
+const maxRequestSize = 1 << 20 // 1 MB
 
 type authedHandler func(jape.Context, types.PublicKey)
 
@@ -45,12 +52,20 @@ type accountStore interface {
 	HasAccount(ctx context.Context, ak types.PublicKey) (bool, error)
 }
 
-// getSignedURLAuth extracts the signed public key from the request
+// validateURLSignature extracts the signed public key from the request
 // and verifies the signature and expiration. If successful, it returns the
 // public key and true, otherwise it writes an error to the context and returns
 // an empty public key and false.
-func getSignedURLAuth(jc jape.Context, hostname string) (types.PublicKey, bool) {
+func validateURLSignature(jc jape.Context, hostname string) (types.PublicKey, bool) {
 	req := jc.Request
+	defer req.Body.Close()
+
+	buf, err := io.ReadAll(io.LimitReader(req.Body, maxRequestSize))
+	if err != nil {
+		jc.Error(errors.New("failed to read request body"), http.StatusBadRequest)
+		return types.PublicKey{}, false
+	}
+	req.Body = io.NopCloser(bytes.NewReader(buf))
 
 	// validate presence of required parameters
 	if !isSignedRequest(req) {
@@ -80,21 +95,21 @@ func getSignedURLAuth(jc jape.Context, hostname string) (types.PublicKey, bool) 
 	if ts.Before(time.Now().UTC()) {
 		jc.Error(ErrSignatureExpired, http.StatusUnauthorized)
 		return types.PublicKey{}, false
-	} else if !pk.VerifyHash(requestHash(hostname, ts), sig) {
-		jc.Error(fmt.Errorf("failed to authenticate for host %q: %w", hostname, ErrSignatureInvalid), http.StatusUnauthorized)
+	} else if !pk.VerifyHash(requestHash(req.Method, hostname, ts, buf), sig) {
+		jc.Error(fmt.Errorf("failed to authenticate for %q host %q: %w", req.Method, hostname, ErrSignatureInvalid), http.StatusUnauthorized)
 		return types.PublicKey{}, false
 	}
 	return pk, true
 }
 
-// checkSignedURLAuth validates a signed URL by checking its required query
+// validateSignedURLAuth validates a signed URL by checking its required query
 // parameters, verifying the signature and expiration, and confirming the
 // account exists. If any check fails, it writes an HTTP error and returns
 // false, otherwise it returns the public key and true.
-func checkSignedURLAuth(jc jape.Context, hostname string, store accountStore) (types.PublicKey, bool) {
+func validateSignedURLAuth(jc jape.Context, hostname string, store accountStore) (types.PublicKey, bool) {
 	req := jc.Request
 
-	pk, ok := getSignedURLAuth(jc, hostname)
+	pk, ok := validateURLSignature(jc, hostname)
 	if !ok {
 		return types.PublicKey{}, false
 	}
@@ -150,9 +165,13 @@ func isSignedRequest(req *http.Request) bool {
 		req.URL.Query().Has(queryParamValidUntil)
 }
 
-func requestHash(hostname string, validUntil time.Time) types.Hash256 {
+func requestHash(method string, hostname string, validUntil time.Time, body []byte) types.Hash256 {
 	h := types.NewHasher()
+	h.E.Write([]byte(method))
 	h.E.Write([]byte(hostname))
 	h.E.WriteUint64(uint64(validUntil.Unix()))
+	if body != nil {
+		h.E.Write(body)
+	}
 	return h.Sum()
 }

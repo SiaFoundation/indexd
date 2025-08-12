@@ -1,19 +1,21 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
-	"go.sia.tech/jape"
 )
 
 const (
@@ -22,32 +24,38 @@ const (
 
 // Client is an HTTP client for the application API of the indexer.
 type Client struct {
-	c jape.Client
+	baseURL string
 
 	// the following fields are used to sign requests
 	appkey   types.PrivateKey
 	hostname string
 }
 
-func (c *Client) sign(route string) string {
+// sign signs the request with the appropriate headers and returns the signed URL
+// and request body.
+func sign(appKey types.PrivateKey, method, endpointURL string, req any) (string, io.Reader, error) {
+	u, err := url.Parse(endpointURL)
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to parse URL: %w", err)
+	}
+
+	var buf []byte
+	if req != nil {
+		var err error
+		buf, err = json.Marshal(req)
+		if err != nil {
+			return "", nil, fmt.Errorf("failed to marshal request: %w", err)
+		}
+	}
 	// prepare request hash
 	validUntil := time.Now().Add(defaultValidity)
-	h := types.NewHasher()
-	h.E.Write([]byte(c.hostname))
-	h.E.WriteUint64(uint64(validUntil.Unix()))
-	requestHash := h.Sum()
+	sigHash := requestHash(method, u.Host, validUntil, buf)
 
 	// prepare query parameters
 	val := url.Values{}
 	val.Set("SiaIdx-ValidUntil", fmt.Sprint(validUntil.Unix()))
-	val.Set("SiaIdx-Credential", c.appkey.PublicKey().String())
-	val.Set("SiaIdx-Signature", c.appkey.SignHash(requestHash).String())
-
-	// parse the route (which may contain existing query parameters)
-	u, err := url.Parse(route)
-	if err != nil {
-		panic(err) // developer error
-	}
+	val.Set("SiaIdx-Credential", appKey.PublicKey().String())
+	val.Set("SiaIdx-Signature", appKey.SignHash(sigHash).String())
 
 	// merge query params
 	q := u.Query()
@@ -57,7 +65,37 @@ func (c *Client) sign(route string) string {
 		}
 	}
 	u.RawQuery = q.Encode()
-	return u.String()
+	var body io.Reader = http.NoBody
+	if buf != nil {
+		body = bytes.NewReader(buf)
+	}
+	return u.String(), body, nil
+}
+
+func (c *Client) signedRequest(ctx context.Context, method, route string, data any, resp any) error {
+	u, body, err := sign(c.appkey, method, fmt.Sprintf("%s%s", c.baseURL, route), data)
+	if err != nil {
+		return fmt.Errorf("failed to sign request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, body)
+	if err != nil {
+		return fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	r, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer io.Copy(io.Discard, r.Body)
+	defer r.Body.Close()
+	if !(200 <= r.StatusCode && r.StatusCode < 300) {
+		err, _ := io.ReadAll(r.Body)
+		return errors.New(strings.TrimSpace(string(err)))
+	}
+	if resp == nil {
+		return nil
+	}
+	return json.NewDecoder(r.Body).Decode(resp)
 }
 
 // Hosts returns all usable hosts.
@@ -66,54 +104,53 @@ func (c *Client) Hosts(ctx context.Context, opts ...api.URLQueryParameterOption)
 	for _, opt := range opts {
 		opt(values)
 	}
-	err = c.c.GET(ctx, c.sign("/hosts?"+values.Encode()), &hosts)
+	err = c.signedRequest(ctx, http.MethodGet, "/hosts?"+values.Encode(), nil, &hosts)
 	return
 }
 
 // PinSlab pins a slab to the indexer.
 func (c *Client) PinSlab(ctx context.Context, params slabs.SlabPinParams) (slabID slabs.SlabID, err error) {
-	err = c.c.POST(ctx, c.sign("/slabs"), params, &slabID)
+	err = c.signedRequest(ctx, http.MethodPost, "/slabs", params, &slabID)
 	return
 }
 
 // UnpinSlab unpins a slab from the indexer.
 func (c *Client) UnpinSlab(ctx context.Context, slabID slabs.SlabID) error {
-	return c.c.DELETE(ctx, c.sign(fmt.Sprintf("/slabs/%s", slabID)))
+	return c.signedRequest(ctx, http.MethodDelete, fmt.Sprintf("/slabs/%s", slabID), nil, nil)
 }
 
 // Slab retrieves a slab from the indexer by its ID.
 func (c *Client) Slab(ctx context.Context, slabID slabs.SlabID) (s slabs.PinnedSlab, err error) {
-	err = c.c.GET(ctx, c.sign(fmt.Sprintf("/slabs/%s", slabID)), &s)
+	err = c.signedRequest(ctx, http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil, &s)
 	return
 }
 
 // SlabIDs fetches the digests of slabs associated with the account. It supports
 // pagination through the provided options.
-func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOption) ([]slabs.SlabID, error) {
+func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOption) (slabIDs []slabs.SlabID, err error) {
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
 	}
 
-	var slabIDs []slabs.SlabID
-	err := c.c.GET(ctx, c.sign("/slabs?"+values.Encode()), &slabIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch slab digests: %w", err)
-	}
-
-	return slabIDs, nil
+	err = c.signedRequest(ctx, http.MethodGet, "/slabs?"+values.Encode(), nil, &slabIDs)
+	return
 }
 
 // RequestAppConnection requests an application connection to the indexer.
 func (c *Client) RequestAppConnection(ctx context.Context, request RegisterAppRequest) (resp RegisterAppResponse, err error) {
-	err = c.c.POST(ctx, c.sign("/auth/connect"), request, &resp)
+	err = c.signedRequest(ctx, http.MethodPost, "/auth/connect", request, &resp)
 	return
 }
 
 // CheckRequestStatus checks if an auth request has been approved.
 // If the auth request is still pending, it returns false.
 func (c *Client) CheckRequestStatus(ctx context.Context, statusURL string) (bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.sign(statusURL), nil)
+	requestURL, body, err := sign(c.appkey, http.MethodGet, statusURL, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to sign request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, body)
 	if err != nil {
 		return false, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -142,7 +179,11 @@ func (c *Client) CheckRequestStatus(ctx context.Context, statusURL string) (bool
 // CheckAppAuth checks if the application is authenticated with the indexer.
 // It returns true if authenticated, false if not, and an error if the request fails.
 func (c *Client) CheckAppAuth(ctx context.Context) (bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.sign(fmt.Sprintf("%s/auth/check", c.c.BaseURL)), nil)
+	u, body, err := sign(c.appkey, http.MethodGet, fmt.Sprintf("%s/auth/check", c.baseURL), nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to sign request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, body)
 	if err != nil {
 		return false, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -176,7 +217,7 @@ func NewClient(address string, appKey types.PrivateKey) (*Client, error) {
 	}
 
 	return &Client{
-		c: jape.Client{BaseURL: address},
+		baseURL: address,
 
 		appkey:   appKey,
 		hostname: parsedURL.Host,

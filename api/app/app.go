@@ -13,6 +13,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
@@ -38,7 +39,12 @@ type (
 		ValidAppConnectKey(context.Context, string) (bool, error)
 		UseAppConnectKey(context.Context, string, types.PublicKey) error
 
-		HasAccount(ctx context.Context, ak types.PublicKey) (bool, error)
+		HasAccount(context.Context, types.PublicKey) (bool, error)
+	}
+
+	// Accounts defines the account management interface for the application API.
+	Accounts interface {
+		TriggerAccountFunding(force bool) error
 	}
 
 	authReq struct {
@@ -78,8 +84,9 @@ type (
 	}
 
 	app struct {
-		store Store
-		log   *zap.Logger
+		store    Store
+		accounts Accounts
+		log      *zap.Logger
 
 		hostname     string
 		advertiseURL string
@@ -193,7 +200,7 @@ func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
 
 func (a *app) handleAuthRegister(jc jape.Context) {
 	// check whether the request is properly signed
-	pk, ok := getSignedURLAuth(jc, a.hostname)
+	pk, ok := validateURLSignature(jc, a.hostname)
 	if !ok {
 		return
 	}
@@ -251,8 +258,7 @@ func (a *app) handleGETAuthCheck(jc jape.Context, _ types.PublicKey) {
 }
 
 func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
-	// check whether the request is properly signed
-	pk, ok := getSignedURLAuth(jc, a.hostname)
+	pk, ok := validateURLSignature(jc, a.hostname)
 	if !ok {
 		return
 	}
@@ -344,26 +350,44 @@ func (a *app) handlePOSTAuthConnect(jc jape.Context) {
 		return
 	}
 
-	if err := a.store.UseAppConnectKey(ctx, connectKey, req.AppKey); err != nil {
+	err := a.store.UseAppConnectKey(ctx, connectKey, req.AppKey)
+	switch {
+	case errors.Is(err, accounts.ErrExists):
+		jc.Encode(nil)
+	case errors.Is(err, ErrKeyExhausted):
+		jc.Error(ErrKeyExhausted, http.StatusForbidden)
+	case errors.Is(err, ErrKeyNotFound):
+		jc.Error(ErrKeyNotFound, http.StatusUnauthorized)
+	case err != nil:
 		a.log.Debug("failed to use app connect key", zap.Error(err))
 		jc.Error(ErrInternalError, http.StatusInternalServerError)
-		return
+	default:
+		if err := a.accounts.TriggerAccountFunding(false); err != nil {
+			a.log.Warn("failed to trigger account funding after adding account", zap.Error(err))
+			jc.Error(ErrInternalError, http.StatusInternalServerError)
+			return
+		}
+		jc.Encode(nil)
 	}
-	jc.Encode(nil)
+}
+
+func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
+	jc.Encode(struct{}{}) // TODO: include account details, like storage usage
 }
 
 // NewAPI creates a new instance of the application API. This API is used by
 // users, or rather their applications, to pin slabs to the indexer.
 // Authentication happens through presigned URLs that are signed with a private
 // key that corresponds to a previously registered public key.
-func NewAPI(advertiseURL string, store Store, opts ...Option) (http.Handler, error) {
+func NewAPI(advertiseURL string, store Store, accounts Accounts, opts ...Option) (http.Handler, error) {
 	u, err := url.Parse(advertiseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse advertise URL %q: %w", advertiseURL, err)
 	}
 	a := &app{
-		store: store,
-		log:   zap.NewNop(),
+		store:    store,
+		accounts: accounts,
+		log:      zap.NewNop(),
 
 		hostname:     u.Host,
 		advertiseURL: advertiseURL,
@@ -375,7 +399,7 @@ func NewAPI(advertiseURL string, store Store, opts ...Option) (http.Handler, err
 
 	wrapSignedAuth := func(h authedHandler) jape.Handler {
 		return func(jc jape.Context) {
-			pk, ok := checkSignedURLAuth(jc, a.hostname, store)
+			pk, ok := validateSignedURLAuth(jc, a.hostname, store)
 			if !ok {
 				return
 			}
@@ -421,6 +445,8 @@ func NewAPI(advertiseURL string, store Store, opts ...Option) (http.Handler, err
 	}
 
 	return jape.Mux(map[string]jape.Handler{
+		"GET /account": wrapCORS(wrapSignedAuth(a.handleGETAccount)),
+
 		"POST /auth/connect":                  a.handleAuthRegister, // register request
 		"GET /auth/connect/:requestID":        a.handleGETAuthConnectUI,
 		"POST /auth/connect/:requestID":       wrapBasicAuth(a.handlePOSTAuthConnect), // accept/reject
