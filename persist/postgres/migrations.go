@@ -20,4 +20,8 @@ var migrations = []func(context.Context, *txn, *zap.Logger) error{
 );`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX sectors_uploaded_at_unpinned_idx ON sectors(uploaded_at) WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NULL;`)
+		return err
+	},
 }
