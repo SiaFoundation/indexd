@@ -47,7 +47,7 @@ func runConfigCmd(fp string) {
 
 	fmt.Println("")
 	if cfg.RecoveryPhrase != "" {
-		fmt.Println(wrapANSI("\033[33m", "A wallet seed phrase is already set.", "\033[0m"))
+		fmt.Println(ansiStyle("33m", "A wallet seed phrase is already set."))
 		fmt.Println("If you change your wallet seed phrase, your indexer will not be able to access Siacoin associated with this wallet.")
 		fmt.Println("Ensure that you have backed up your wallet seed phrase before continuing.")
 		if promptYesNo("Would you like to change your wallet seed phrase?") {
@@ -59,7 +59,7 @@ func runConfigCmd(fp string) {
 
 	fmt.Println("")
 	if cfg.AdminAPI.Password != "" {
-		fmt.Println(wrapANSI("\033[33m", "An admin password is already set.", "\033[0m"))
+		fmt.Println(ansiStyle("33m", "An admin password is already set."))
 		fmt.Println("If you change your admin password, you will need to update any scripts or applications that use the admin API.")
 		if promptYesNo("Would you like to change your admin password?") {
 			setAPIPassword()
@@ -131,7 +131,7 @@ func promptQuestion(question string, answers []string) string {
 				return answer
 			}
 		}
-		fmt.Println(wrapANSI("\033[31m", fmt.Sprintf("Answer must be %s", humanList(answers, "or")), "\033[0m"))
+		fmt.Println(ansiStyle("31m", fmt.Sprintf("Answer must be %s", humanList(answers, "or"))))
 	}
 }
 
@@ -170,7 +170,7 @@ func setAPIPassword() {
 			break
 		}
 
-		fmt.Println(wrapANSI("\033[31m", "Password must be at least 4 characters!", "\033[0m"))
+		fmt.Println(ansiStyle("31m", "Password must be at least 4 characters!"))
 		fmt.Println("")
 	}
 }
@@ -279,7 +279,7 @@ func setDatabasePassword() {
 	fmt.Println("It should be a strong password that is not used for any other purpose.")
 	cfg.Database.Password = readPasswordInput("Enter new database password")
 	if len(cfg.Database.Password) < 4 {
-		fmt.Println(wrapANSI("\033[31m", "Password must be at least 4 characters!", "\033[0m"))
+		fmt.Println(ansiStyle("31m", "Password must be at least 4 characters!"))
 		setDatabasePassword()
 		return
 	}
@@ -314,8 +314,8 @@ func setDataDirectory() {
 	_, existsErr := os.Stat(filepath.Join(cfg.Directory, "indexd.db"))
 	dataExists := existsErr == nil
 	if dataExists {
-		fmt.Println(wrapANSI("\033[33m", "There is existing data in the data directory.", "\033[0m"))
-		fmt.Println(wrapANSI("\033[33m", "If you change your data directory, you will need to manually move consensus, gateway, tpool, and indexd.db to the new directory.", "\033[0m"))
+		fmt.Println(ansiStyle("33m", "There is existing data in the data directory."))
+		fmt.Println(ansiStyle("33m", "If you change your data directory, you will need to manually move consensus, gateway, tpool, and indexd.db to the new directory."))
 	}
 
 	if !promptYesNo("Would you like to change the data directory? (Current: " + dir + ")") {
@@ -367,24 +367,24 @@ func setSeedPhrase() {
 			}
 			key := wallet.KeyFromSeed(&seed, 0)
 			fmt.Println("")
-			fmt.Println("A new seed phrase has been generated below. " + wrapANSI("\033[1m", "Write it down and keep it safe.", "\033[0m"))
+			fmt.Println("A new seed phrase has been generated below. " + ansiStyle("1m", "Write it down and keep it safe."))
 			fmt.Println("Your seed phrase is the only way to recover your Siacoin. If you lose your seed phrase, you will also lose your Siacoin.")
 			fmt.Println("You will need to re-enter this seed phrase every time you start indexd.")
 			fmt.Println("")
-			fmt.Println(wrapANSI("\033[34;1m", "Seed Phrase:", "\033[0m"), phrase)
-			fmt.Println(wrapANSI("\033[34;1m", "Wallet Address:", "\033[0m"), types.StandardUnlockHash(key.PublicKey()))
+			fmt.Println(ansiStyle("34;1m", "Seed Phrase:"), phrase)
+			fmt.Println(ansiStyle("34;1m", "Wallet Address:"), types.StandardUnlockHash(key.PublicKey()))
 
 			// confirm seed phrase
 			for {
 				fmt.Println("")
-				fmt.Println(wrapANSI("\033[1m", "Please confirm your seed phrase to continue.", "\033[0m"))
+				fmt.Println(ansiStyle("1m", "Please confirm your seed phrase to continue."))
 				confirmPhrase := readPasswordInput("Enter seed phrase")
 				if confirmPhrase == phrase {
 					cfg.RecoveryPhrase = phrase
 					return
 				}
 
-				fmt.Println(wrapANSI("\033[31m", "Seed phrases do not match!", "\033[0m"))
+				fmt.Println(ansiStyle("31m", "Seed phrases do not match!"))
 				fmt.Println("You entered:", confirmPhrase)
 				fmt.Println("Actual phrase:", phrase)
 			}
@@ -392,7 +392,7 @@ func setSeedPhrase() {
 
 		var seed [32]byte
 		if err := wallet.SeedFromPhrase(&seed, phrase); err != nil {
-			fmt.Println(wrapANSI("\033[31m", "Invalid seed phrase:", "\033[0m"), err)
+			fmt.Println(ansiStyle("31m", "Invalid seed phrase:"), err)
 			fmt.Println("You entered:", phrase)
 			continue
 		}
@@ -406,16 +406,16 @@ func setSeedPhrase() {
 // stdoutError prints an error message to stdout
 func stdoutError(msg string) {
 	if cfg.Log.StdOut.EnableANSI {
-		fmt.Println(wrapANSI("\033[31m", msg, "\033[0m"))
+		fmt.Println(ansiStyle("31m", msg))
 	} else {
 		fmt.Println(msg)
 	}
 }
 
-// wrapANSI wraps the output in ANSI escape codes if enabled.
-func wrapANSI(prefix, output, suffix string) string {
+// ansiStyle wraps the output in ANSI escape codes if enabled.
+func ansiStyle(style, output string) string {
 	if cfg.Log.StdOut.EnableANSI {
-		return prefix + output + suffix
+		return fmt.Sprintf("\033[%sm%s\033[0m", style, output)
 	}
 	return output
 }

@@ -23,11 +23,6 @@ type appendSectorCall struct {
 	sectors    []types.Hash256
 }
 
-type pinCall struct {
-	contractID types.FileContractID
-	roots      []types.Hash256
-}
-
 func (c *hostClientMock) AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error) {
 	if c.failsRPCs {
 		return rhp.RPCAppendSectorsResult{}, fmt.Errorf("mocked error")

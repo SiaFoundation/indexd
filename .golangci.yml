@@ -13,6 +13,8 @@ linters:
     - revive
     - tagliatelle
     - whitespace
+    - unparam
+    - unused
   settings:
     gocritic:
       disabled-checks:
