@@ -90,6 +90,6 @@ type AlertQueryParameterOption api.URLQueryParameterOption
 // WithSeverity sets the 'severity' parameter.
 func WithSeverity(severity alerts.Severity) AlertQueryParameterOption {
 	return func(q url.Values) {
-		q.Set("severity", fmt.Sprint(severity))
+		q.Set("severity", severity.String())
 	}
 }

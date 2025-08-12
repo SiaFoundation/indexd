@@ -112,6 +112,7 @@ type (
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
 	}
 
+	// An Alerter manages alerts.
 	Alerter interface {
 		DismissAlerts(ids ...types.Hash256)
 		Alerts(offset, limit int, opts ...alerts.AlertOpt) ([]alerts.Alert, error)
