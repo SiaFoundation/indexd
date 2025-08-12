@@ -1444,8 +1444,6 @@ func BenchmarkHostsForPruning(b *testing.B) {
 	}
 
 	const (
-		dbBaseSize = 1 << 40 // 1TiB of sectors
-
 		nHosts            = 1000
 		nContractsPerHost = 100
 		nBlocklistHosts   = 1000

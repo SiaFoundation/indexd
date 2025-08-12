@@ -334,7 +334,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata []Slab, opts .
 		err    error
 	}
 	workCh := make(chan work, 1)
-	go func(ctx context.Context, slabs []Slab) {
+	go func() {
 		for i, meta := range metadata {
 			pinned, err := s.client.Slab(ctx, meta.ID)
 			if err != nil {
@@ -363,7 +363,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata []Slab, opts .
 			workCh <- work{shards: shards[:pinned.MinShards]}
 		}
 		workCh <- work{err: io.EOF}
-	}(ctx, metadata)
+	}()
 
 	bw := bufio.NewWriterSize(w, 1<<16)
 	for i := 0; ; i++ {
