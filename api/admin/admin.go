@@ -199,6 +199,9 @@ func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, sy
 		"GET /wallet/events/:id": a.handleGETWalletEventsID,
 		"GET /wallet/pending":    a.handleGETWalletPending,
 		"POST /wallet/send":      a.handlePOSTWalletSend,
+
+		// stats endpoints
+		"GET /stats/sectors": nil,
 	}
 
 	// debug endpoints

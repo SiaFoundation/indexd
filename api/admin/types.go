@@ -28,6 +28,11 @@ type (
 		Reason   string            `json:"reason"`
 	}
 
+	// SectorsStatsResponse is the response body for the [GET] /stats/sectors
+	SectorsStatsResponse struct {
+		NumSlabs int64 `json:"numSectors"`
+	}
+
 	// State is the response body for the [GET] /state endpoint.
 	State struct {
 		BuildState

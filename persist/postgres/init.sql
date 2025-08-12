@@ -266,6 +266,11 @@ CREATE TABLE sectors (
     consecutive_failed_checks SMALLINT NOT NULL DEFAULT 0
 );
 
+CREATE TABLE sectors_stats (
+    id INTEGER PRIMARY KEY NOT NULL DEFAULT 0 CHECK (id = 0), -- enforce a single row
+    num_slabs BIGINT NOT NULL DEFAULT 0 CHECK (num_slabs >= 0) -- total number of slabs
+);
+
 -- quick lookup of sectors that failed the integrity checks too many times
 CREATE INDEX sectors_consecutive_failed_checks_idx ON sectors(host_id, consecutive_failed_checks) WHERE consecutive_failed_checks > 0;
 

@@ -187,6 +187,11 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 			return nil
 		}
 
+		// update slab stats
+		if err := s.incrementNumSlabs(ctx, tx, 1); err != nil {
+			return fmt.Errorf("failed to increment number of slabs: %w", err)
+		}
+
 		// insert slab's sectors in a single batch
 		batch := &pgx.Batch{}
 		sectorIDs := make([]int64, len(slab.Sectors))
@@ -267,6 +272,11 @@ func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID s
 		batch.Queue(`DELETE FROM slabs WHERE id = $1`, sID)
 		if err := tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
 			return fmt.Errorf("failed to prune slab: %w", err)
+		}
+
+		// update slab stats
+		if err := s.incrementNumSlabs(ctx, tx, -1); err != nil {
+			return fmt.Errorf("failed to decrement number of slabs: %w", err)
 		}
 
 		return nil

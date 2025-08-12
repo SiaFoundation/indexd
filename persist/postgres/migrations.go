@@ -20,4 +20,12 @@ var migrations = []func(context.Context, *txn, *zap.Logger) error{
 );`)
 		return err
 	},
+	// add the sectors_stats table
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE TABLE sectors_stats (
+    id INTEGER PRIMARY KEY NOT NULL DEFAULT 0 CHECK (id = 0), -- enforce a single row
+    num_slabs BIGINT NOT NULL DEFAULT 0 CHECK (num_slabs >= 0) -- total number of slabs
+);`)
+		return err
+	},
 }
