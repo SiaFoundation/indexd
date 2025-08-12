@@ -18,11 +18,11 @@ import (
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/keys"
+	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/slabs"
 
 	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/contracts"
-	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/subscriber"
@@ -138,6 +138,12 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to create subscriber: %v", err)
 	}
 
+	explorer := NewExplorer()
+	pm, err := pins.NewManager(explorer, hm, store)
+	if err != nil {
+		t.Fatalf("failed to create pin manager: %v", err)
+	}
+
 	// sync subscriber
 	syncFn := func() {
 		t.Helper()
@@ -150,12 +156,12 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	adminAPIOpts := []admin.Option{
 		admin.WithDebug(),
 		admin.WithLogger(log.Named("api.admin")),
-		admin.WithExplorer(explorer.New("https://api.siascan.com")),
+		admin.WithExplorer(explorer),
 	}
 
 	password := hex.EncodeToString(frand.Bytes(16))
 	adminAPI := http.Server{
-		Handler: jape.BasicAuth(password)(admin.NewAPI(c.cm, contracts, hm, nil, syncer, wm, store, adminAPIOpts...)),
+		Handler: jape.BasicAuth(password)(admin.NewAPI(c.cm, contracts, hm, pm, syncer, wm, store, adminAPIOpts...)),
 	}
 
 	adminListener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -221,6 +227,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		}
 		if err := closeWithTimeout(subscriber.Close); err != nil {
 			t.Errorf("failed to close subscriber: %v", err)
+		}
+		if err := pm.Close(); err != nil {
+			t.Errorf("failed to close pin manager: %v", err)
 		}
 		if err := closeWithTimeout(store.Close); err != nil {
 			t.Errorf("failed to close store: %v", err)

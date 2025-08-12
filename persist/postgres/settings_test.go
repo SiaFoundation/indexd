@@ -91,7 +91,7 @@ func TestPricePinningSettings(t *testing.T) {
 		t.Fatal("unexpected", ps.MaxStoragePrice)
 	}
 
-	ps.Currency = "eur"
+	ps.Currency = "usd"
 	ps.MinCollateral = 0.1
 	ps.MaxEgressPrice = 0.2
 	ps.MaxIngressPrice = 0.3

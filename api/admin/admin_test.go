@@ -563,7 +563,7 @@ func TestSettingsAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ps.Currency = "eur"
+	ps.Currency = "usd"
 	ps.MaxEgressPrice = pins.Pin(frand.Float64())
 	ps.MaxIngressPrice = pins.Pin(frand.Float64())
 	ps.MaxStoragePrice = pins.Pin(frand.Float64())
