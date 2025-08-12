@@ -432,11 +432,7 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 // by the threshold time to NULL.
 func (s *Store) PruneUnpinnableSectors(ctx context.Context, threshold time.Time) error {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `SET LOCAL enable_seqscan = off;`)
-		if err != nil {
-			return fmt.Errorf("failed to disable planner use of sequential scans: %w", err)
-		}
-		_, err = tx.Exec(ctx, `
+		_, err := tx.Exec(ctx, `
             UPDATE sectors
             SET host_id = NULL
             WHERE host_id IS NOT NULL
