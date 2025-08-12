@@ -35,7 +35,7 @@ func TestMigrations(t *testing.T) {
 	app := indexer.App(a1)
 
 	// fetch hosts
-	time.Sleep(2 * time.Second)
+	time.Sleep(5 * time.Second)
 	hosts, err := app.Hosts(context.Background())
 	if err != nil {
 		t.Fatal(err)
