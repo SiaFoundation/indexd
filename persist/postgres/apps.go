@@ -21,6 +21,7 @@ func scanConnectKey(s scanner) (key app.ConnectKey, err error) {
 		&key.DateCreated,
 		&key.LastUpdated,
 		&lastUsed,
+		&key.MaxPinnedData,
 	)
 	if lastUsed.Valid {
 		key.LastUsed = lastUsed.Time
@@ -38,7 +39,7 @@ func (s *Store) AddAppConnectKey(ctx context.Context, meta app.UpdateAppConnectK
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			INSERT INTO app_connect_keys (app_key, use_description, remaining_uses, max_pinned_data) VALUES ($1, $2, $3, $4)
-			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used;
+			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data;
 		`, meta.Key, meta.Description, meta.RemainingUses, meta.MaxPinnedData))
 		return err
 	})
@@ -56,8 +57,8 @@ func (s *Store) UpdateAppConnectKey(ctx context.Context, meta app.UpdateAppConne
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			UPDATE app_connect_keys SET (use_description, remaining_uses, max_pinned_data) = ($2, $3, $4) WHERE app_key = $1
-			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used;
-		`, meta.Key, meta.Description, meta.RemainingUses))
+			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data;
+		`, meta.Key, meta.Description, meta.RemainingUses, meta.MaxPinnedData))
 		return err
 	})
 	return
@@ -83,7 +84,7 @@ func (s *Store) ValidAppConnectKey(ctx context.Context, key string) (bool, error
 func (s *Store) AppConnectKeys(ctx context.Context, offset, limit int) (keys []app.ConnectKey, err error) {
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used
+			SELECT app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data
 			FROM app_connect_keys
 			ORDER BY created_at DESC
 			LIMIT $1 OFFSET $2

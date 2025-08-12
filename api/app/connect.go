@@ -24,6 +24,7 @@ type (
 		DateCreated   time.Time `json:"dateCreated"`
 		LastUpdated   time.Time `json:"lastUpdated"`
 		LastUsed      time.Time `json:"lastUsed"`
+		MaxPinnedData int64     `json:"maxPinnedData"`
 	}
 
 	// AddConnectKeyRequest is the request type for adding a new app connect key.
