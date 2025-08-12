@@ -155,7 +155,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 
 	password := hex.EncodeToString(frand.Bytes(16))
 	adminAPI := http.Server{
-		Handler: jape.BasicAuth(password)(admin.NewAPI(c.cm, contracts, hm, syncer, wm, store, adminAPIOpts...)),
+		Handler: jape.BasicAuth(password)(admin.NewAPI(c.cm, contracts, hm, nil, syncer, wm, store, adminAPIOpts...)),
 	}
 
 	adminListener, err := net.Listen("tcp4", "127.0.0.1:0")
