@@ -1270,6 +1270,45 @@ func TestUpdateContractRevision(t *testing.T) {
 	}
 }
 
+func TestUpdateContractRenewedTo(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	hk1 := store.addTestHost(t)
+	contractID := store.addTestContract(t, hk1)
+	hk2 := store.addTestHost(t)
+	renewedToID := store.addTestContract(t, hk2)
+
+	if contract, err := store.Contract(context.Background(), contractID); err != nil {
+		t.Fatal(err)
+	} else if contract.RenewedTo != (types.FileContractID{}) {
+		t.Fatal("expected contract to not be renewed")
+	}
+
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateContractRenewedTo(contractID, &renewedToID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if contract, err := store.Contract(context.Background(), contractID); err != nil {
+		t.Fatal(err)
+	} else if contract.RenewedTo != renewedToID {
+		t.Fatalf("expected RenewedTo ID %v, got %v", renewedToID, contract.RenewedTo)
+	}
+
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateContractRenewedTo(contractID, nil)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if contract, err := store.Contract(context.Background(), contractID); err != nil {
+		t.Fatal(err)
+	} else if contract.RenewedTo != (types.FileContractID{}) {
+		t.Fatal("expected contract to not be renewed")
+	}
+}
+
 func TestMarkBroadcastAttempt(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

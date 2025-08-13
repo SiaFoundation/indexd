@@ -504,7 +504,7 @@ func (tx *updateTx) UpdateContractRenewedTo(contractID types.FileContractID, ren
 	if renewedTo != nil {
 		value = sqlHash256(*renewedTo)
 	}
-	res, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2 AND renewed_to IS NULL`, value, sqlHash256(contractID))
+	res, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2`, value, sqlHash256(contractID))
 	if err != nil {
 		return fmt.Errorf("failed to update contract renewed to: %w", err)
 	} else if res.RowsAffected() != 1 {
