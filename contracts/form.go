@@ -14,8 +14,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const sectorsPerGiB = uint64(1<<30) / proto.SectorSize
-
 const (
 	// minContractGrowthRate is the minimum expected growth rate
 	// for contracts used when calculating funding. Lowering
