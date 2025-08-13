@@ -13,7 +13,6 @@ import (
 	"unicode/utf8"
 
 	"go.sia.tech/core/consensus"
-	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
@@ -37,11 +36,6 @@ const (
 var startTime = time.Now()
 
 type (
-	// AccountManager manages user accounts and service accounts.
-	AccountManager interface {
-		IsServiceAccount(account proto4.Account) bool
-	}
-
 	// A ChainManager retrieves the current blockchain state
 	ChainManager interface {
 		TipState() consensus.State
@@ -122,7 +116,6 @@ type (
 	admin struct {
 		debug     bool
 		chain     ChainManager
-		accounts  AccountManager
 		contracts ContractManager
 		hosts     HostManager
 		explorer  Explorer
@@ -138,10 +131,9 @@ type (
 // API exposes endpoints to manage accounts, hosts, settings and the wallet.
 // This is different from the application API, which users, or rather their
 // applications, can use to pin slabs.
-func NewAPI(accounts AccountManager, chain ChainManager, contracts ContractManager, hosts HostManager, syncer Syncer, wallet Wallet, store Store, opts ...Option) http.Handler {
+func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, syncer Syncer, wallet Wallet, store Store, opts ...Option) http.Handler {
 	a := &admin{
 		chain:     chain,
-		accounts:  accounts,
 		contracts: contracts,
 		hosts:     hosts,
 		store:     store,
@@ -413,9 +405,6 @@ func (a *admin) handlePUTAccount(jc jape.Context) {
 func (a *admin) handleDELETEAccount(jc jape.Context) {
 	var ak types.PublicKey
 	if jc.DecodeParam("accountkey", &ak) != nil {
-		return
-	} else if a.accounts.IsServiceAccount(proto4.Account(ak)) {
-		jc.Error(errors.New("deleting service accounts is not allowed"), http.StatusBadRequest)
 		return
 	}
 
