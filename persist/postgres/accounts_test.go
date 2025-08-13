@@ -176,6 +176,29 @@ func TestDeleteAccount(t *testing.T) {
 	} else if len(accs) != 0 {
 		t.Fatal("unexpected accounts", accs)
 	}
+
+	// check service account deletion fails
+	pk2 := types.GeneratePrivateKey().PublicKey()
+	accs, err = store.Accounts(context.Background(), 0, 1, accounts.WithServiceAccount(true))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accs) != 0 {
+		t.Fatal("unexpected accounts", accs)
+	}
+	err = store.AddServiceAccount(context.Background(), pk2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = store.DeleteAccount(context.Background(), pk2)
+	if !errors.Is(err, accounts.ErrServiceAccount) {
+		t.Fatal(err)
+	}
+	accs, err = store.Accounts(context.Background(), 0, 1, accounts.WithServiceAccount(true))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accs) != 1 {
+		t.Fatal("unexpected accounts", accs)
+	}
 }
 
 func TestUpdateAccount(t *testing.T) {
