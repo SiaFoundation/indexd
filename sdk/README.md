@@ -2,8 +2,8 @@
 
 This SDK provides a convenient way to interact with the Indexd API, allowing
 users to connect an application to the indexer and uploading data to as well as
-users to connect an application to the indexer and upload data to and download data from
-the Sia network.
+users to connect an application to the indexer and upload data to and download
+data from the Sia network.
 
 The README provides a short overview to quickly get started using the SDK. For more information, please refer to the [Godocs](https://pkg.go.dev/go.sia.tech/indexd/sdk).
 
