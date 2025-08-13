@@ -25,6 +25,10 @@ func TestNewCluster(t *testing.T) {
 		t.Fatal("sync height does not match tip height")
 	} else if !state.Synced {
 		t.Fatal("not synced")
+	} else if !state.Explorer.Enabled {
+		t.Fatal("explorer is not enabled")
+	} else if state.Explorer.URL == "" {
+		t.Fatal("explorer URL is empty")
 	}
 
 	// assert indexer was funded

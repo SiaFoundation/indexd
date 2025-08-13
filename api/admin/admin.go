@@ -67,6 +67,7 @@ type (
 
 	// Explorer retrieves data about the Sia network from an external source.
 	Explorer interface {
+		BaseURL() string
 		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
 	}
 
@@ -505,10 +506,17 @@ func (a *admin) handleGETState(jc jape.Context) {
 		return
 	}
 
+	var explorer ExplorerState
+	if a.explorer != nil {
+		explorer.Enabled = true
+		explorer.URL = a.explorer.BaseURL()
+	}
+
 	ts := a.chain.TipState()
 	jc.Encode(State{
 		Network:   ts.Network.Name,
 		StartTime: startTime,
+		Explorer:  explorer,
 		BuildState: BuildState{
 			Version:   build.Version(),
 			Commit:    build.Commit(),
