@@ -498,6 +498,21 @@ func (s *Store) RejectPendingContracts(ctx context.Context, maxFormation time.Ti
 	})
 }
 
+// UpdateContractRenewedTo updates the renewed to ID of a contract to the provided one.
+func (tx *updateTx) UpdateContractRenewedTo(contractID types.FileContractID, renewedTo *types.FileContractID) error {
+	var value any
+	if renewedTo != nil {
+		value = sqlHash256(*renewedTo)
+	}
+	res, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2 AND renewed_to IS NULL`, value, sqlHash256(contractID))
+	if err != nil {
+		return fmt.Errorf("failed to update contract renewed to: %w", err)
+	} else if res.RowsAffected() != 1 {
+		return fmt.Errorf("expected 1 row to be affected, got %d", res.RowsAffected())
+	}
+	return nil
+}
+
 // PrunableContractRoots diffs the given roots with the roots in the database
 // and returns the roots that can be pruned.
 func (s *Store) PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error) {

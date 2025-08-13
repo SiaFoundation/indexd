@@ -347,6 +347,7 @@ func (s *storeMock) UpdateContractRevision(ctx context.Context, contract rhp.Con
 type mockUpdateTx struct {
 	contracts map[types.FileContractID]types.V2FileContractElement
 	state     map[types.FileContractID]ContractState
+	renewedTo map[types.FileContractID]*types.FileContractID
 }
 
 // newMockUpdateTx creates a new mock UpdateTx.
@@ -354,12 +355,14 @@ func newMockUpdateTx() *mockUpdateTx {
 	return &mockUpdateTx{
 		contracts: make(map[types.FileContractID]types.V2FileContractElement),
 		state:     make(map[types.FileContractID]ContractState),
+		renewedTo: make(map[types.FileContractID]*types.FileContractID),
 	}
 }
 
 func (tx *mockUpdateTx) AddContract(fce types.V2FileContractElement) {
 	tx.contracts[fce.ID] = fce
 	tx.state[fce.ID] = ContractStatePending
+	tx.renewedTo[fce.ID] = nil
 }
 
 func (tx *mockUpdateTx) ContractElements() ([]types.V2FileContractElement, error) {
@@ -368,6 +371,14 @@ func (tx *mockUpdateTx) ContractElements() ([]types.V2FileContractElement, error
 		stateElements = append(stateElements, fce)
 	}
 	return stateElements, nil
+}
+
+func (tx *mockUpdateTx) RenewedTo(contractID types.FileContractID) *types.FileContractID {
+	renewedTo, ok := tx.renewedTo[contractID]
+	if !ok {
+		panic("renewed to ID not found")
+	}
+	return renewedTo
 }
 
 func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileContractElement, ContractState) {
@@ -408,6 +419,14 @@ func (tx *mockUpdateTx) UpdateContractState(contractID types.FileContractID, sta
 		return errors.New("contract not found")
 	}
 	tx.state[contractID] = state
+	return nil
+}
+
+func (tx *mockUpdateTx) UpdateContractRenewedTo(contractID types.FileContractID, renewedTo *types.FileContractID) error {
+	if _, ok := tx.contracts[contractID]; !ok {
+		return errors.New("contract not found")
+	}
+	tx.renewedTo[contractID] = renewedTo
 	return nil
 }
 
@@ -687,4 +706,117 @@ func TestProcessActions(t *testing.T) {
 		t.Fatal(err)
 	}
 	assert(1, 1, 1, 2, 2, 2)
+}
+
+func TestApplyRevertRenewedTo(t *testing.T) {
+	contracts := newContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil)
+
+	// create a contract
+	contractID := types.FileContractID{1, 2, 3}
+	fce := types.V2FileContractElement{
+		ID: contractID,
+		StateElement: types.StateElement{
+			LeafIndex:   1,
+			MerkleProof: []types.Hash256{{123}},
+		},
+		V2FileContract: types.V2FileContract{
+			HostPublicKey:   types.PublicKey{1},
+			RenterPublicKey: types.PublicKey{1},
+		},
+	}
+
+	// mock the update tx
+	mock := newMockUpdateTx()
+	mock.AddContract(fce)
+	updateTx := &updateTx{
+		UpdateTx:       mock,
+		knownContracts: make(map[types.FileContractID]bool),
+	}
+
+	// helper to apply/revert diff
+	applyDiff := func(diff consensus.V2FileContractElementDiff) {
+		t.Helper()
+		err := contracts.applyContractDiff(updateTx, diff)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	revertDiff := func(diff consensus.V2FileContractElementDiff) {
+		t.Helper()
+		err := contracts.revertContractDiff(updateTx, diff)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	assertContract := func(fce types.V2FileContractElement, state ContractState, renewedTo *types.FileContractID) {
+		t.Helper()
+		storedFCE, storedState := mock.Contract(fce.ID)
+		storedRenewedTo := mock.RenewedTo(fce.ID)
+		if storedState != state {
+			t.Fatalf("expected state %v, got %v", state, storedState)
+		} else if !reflect.DeepEqual(storedFCE, fce) {
+			t.Fatalf("expected contract %v, got %v", fce, storedFCE)
+		} else if !reflect.DeepEqual(storedRenewedTo, renewedTo) {
+			t.Fatalf("expected renewed to %v, got %v", storedRenewedTo, renewedTo)
+		}
+	}
+
+	// initial state
+	assertContract(fce, ContractStatePending, nil)
+
+	// confirm the contract
+	fce.V2FileContract.RevisionNumber++
+	applyDiff(consensus.V2FileContractElementDiff{
+		Created:               true,
+		V2FileContractElement: fce,
+	})
+	assertContract(fce, ContractStateActive, nil)
+
+	// resolve contract
+	fce.V2FileContract.RevisionNumber++
+
+	newFCE := fce
+	newFCE.ID = fce.ID.V2RenewalID()
+	newFCE.V2FileContract.RevisionNumber++
+	applyDiff(consensus.V2FileContractElementDiff{
+		V2FileContractElement: fce,
+		Resolution:            &types.V2FileContractRenewal{},
+	})
+
+	mock.AddContract(newFCE)
+	assertContract(newFCE, ContractStatePending, nil)
+
+	applyDiff(consensus.V2FileContractElementDiff{
+		Created:               true,
+		V2FileContractElement: newFCE,
+	})
+
+	assertContract(fce, ContractStateResolved, &newFCE.ID)
+	assertContract(newFCE, ContractStateActive, nil)
+
+	// revert resolution
+	fce.V2FileContract.RevisionNumber--
+	revertDiff(consensus.V2FileContractElementDiff{
+		V2FileContractElement: fce,
+		Resolution:            &types.V2FileContractRenewal{},
+	})
+	revertDiff(consensus.V2FileContractElementDiff{
+		Created:               true,
+		V2FileContractElement: newFCE,
+	})
+	assertContract(fce, ContractStateActive, nil)
+	assertContract(newFCE, ContractStatePending, nil)
+
+	applyDiff(consensus.V2FileContractElementDiff{
+		V2FileContractElement: fce,
+		Resolution:            &types.V2FileContractRenewal{},
+	})
+	applyDiff(consensus.V2FileContractElementDiff{
+		Created:               true,
+		V2FileContractElement: newFCE,
+	})
+
+	assertContract(fce, ContractStateResolved, &newFCE.ID)
+	assertContract(newFCE, ContractStateActive, nil)
 }

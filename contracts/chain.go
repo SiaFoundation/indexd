@@ -22,6 +22,7 @@ type (
 		IsKnownContract(contractID types.FileContractID) (bool, error)
 		UpdateContractElements(fces ...types.V2FileContractElement) error
 		UpdateContractState(contractID types.FileContractID, state ContractState) error
+		UpdateContractRenewedTo(contractID types.FileContractID, renewedTo *types.FileContractID) error
 	}
 
 	updateTx struct {
@@ -123,6 +124,12 @@ func (m *ContractManager) applyContractDiff(tx *updateTx, diff consensus.V2FileC
 		switch {
 		case diff.Resolution != nil:
 			state = ContractStateResolved
+			if _, ok := diff.Resolution.(*types.V2FileContractRenewal); ok {
+				renewedTo := diff.V2FileContractElement.ID.V2RenewalID()
+				if err := tx.UpdateContractRenewedTo(diff.V2FileContractElement.ID, &renewedTo); err != nil {
+					return fmt.Errorf("failed to update renewed to for %v: %w", diff.V2FileContractElement.ID, err)
+				}
+			}
 		case diff.Created:
 			state = ContractStateActive
 		default:
@@ -170,6 +177,11 @@ func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2File
 			state = ContractStatePending
 		case diff.Resolution != nil:
 			state = ContractStateActive
+			if _, ok := diff.Resolution.(*types.V2FileContractRenewal); ok {
+				if err := tx.UpdateContractRenewedTo(diff.V2FileContractElement.ID, nil); err != nil {
+					return fmt.Errorf("failed to null renewed to for %v: %w", diff.V2FileContractElement.ID, err)
+				}
+			}
 		default:
 			panic("unknown state") // unreachable
 		}
