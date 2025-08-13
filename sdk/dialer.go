@@ -65,7 +65,7 @@ func (c *connEntry) setTransport(tc rhp.TransportClient, assign bool) {
 	c.dial = nil
 }
 
-// Dialer implements the HostDialer interface.
+// Dialer implements the [HostDialer] interface.
 type Dialer struct {
 	log *zap.Logger
 	tg  *threadgroup.ThreadGroup
@@ -193,11 +193,24 @@ func (d *Dialer) clearHostConnection(hostKey types.PublicKey) {
 	entry.clear()
 }
 
-// Hosts returns the public keys of all hosts that are available for
-// upload or download.
+// ActiveHosts implements the [HostDialer] interface.
+func (d *Dialer) ActiveHosts() (hks []types.PublicKey) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	for hk, entry := range d.conns {
+		if entry.tc != nil {
+			hks = append(hks, hk)
+		}
+	}
+	return
+}
+
+// Hosts implements the [HostDialer] interface.
 func (d *Dialer) Hosts() []types.PublicKey {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
 	return slices.Collect(maps.Keys(d.addrs))
 }
 
@@ -323,7 +336,7 @@ func (d *Dialer) prices(ctx context.Context, hostKey types.PublicKey) (proto.Hos
 	return settings.Prices, nil
 }
 
-// WriteSector writes a sector to the host identified by the public key.
+// WriteSector implements the [HostDialer] interface.
 func (d *Dialer) WriteSector(ctx context.Context, hostKey types.PublicKey, sector *[proto.SectorSize]byte) (types.Hash256, error) {
 	ctx, cancel, err := d.tg.AddContext(ctx)
 	if err != nil {
@@ -349,7 +362,7 @@ func (d *Dialer) WriteSector(ctx context.Context, hostKey types.PublicKey, secto
 	return result.Root, nil
 }
 
-// ReadSector reads a sector from the host identified by the public key.
+// ReadSector implements the [HostDialer] interface.
 func (d *Dialer) ReadSector(ctx context.Context, hostKey types.PublicKey, sectorRoot types.Hash256) (*[proto.SectorSize]byte, error) {
 	ctx, cancel, err := d.tg.AddContext(ctx)
 	if err != nil {

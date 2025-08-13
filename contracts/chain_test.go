@@ -284,6 +284,10 @@ func (s *storeMock) MarkUnrenewableContractsBad(ctx context.Context, minProofHei
 	return nil
 }
 
+func (s *storeMock) PruneUnpinnableSectors(ctx context.Context, threshold time.Time) error {
+	return nil
+}
+
 func (s *storeMock) MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error {
 	for i := range s.contracts {
 		if s.contracts[i].ID == contractID {

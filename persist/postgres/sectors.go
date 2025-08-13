@@ -199,7 +199,7 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 			batch.Queue(`
 				INSERT INTO sectors (sector_root, host_id, next_integrity_check)
 				VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3)
-				ON CONFLICT (sector_root) DO UPDATE SET sector_root=EXCLUDED.sector_root
+				ON CONFLICT (sector_root) DO UPDATE SET sector_root=EXCLUDED.sector_root, uploaded_at=NOW()
 				RETURNING id
 			`, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), nextIntegrityCheck).QueryRow(func(row pgx.Row) error {
 				return row.Scan(&sectorIDs[i])
@@ -438,6 +438,24 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 	})
 }
 
+// PruneUnpinnableSectors sets the host ID for sectors that haven't been pinned
+// by the threshold time to NULL.
+func (s *Store) PruneUnpinnableSectors(ctx context.Context, threshold time.Time) error {
+	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+            UPDATE sectors
+            SET host_id = NULL
+            WHERE host_id IS NOT NULL
+	            AND contract_sectors_map_id IS NULL
+	            AND uploaded_at <= $1`, threshold)
+		if err != nil {
+			return fmt.Errorf("failed to prune unpinnable sectors: %w", err)
+		}
+		return nil
+	})
+	return err
+}
+
 // UnpinnedSectors returns up to 'limit' sectors which have been uploaded to a host but
 // not pinned to a contract yet.
 func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
@@ -534,7 +552,7 @@ func (s *Store) MigrateSector(ctx context.Context, root types.Hash256, hostKey t
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		resp, err := tx.Exec(ctx, `
 			UPDATE sectors
-			SET host_id = hosts.id, contract_sectors_map_id = NULL, consecutive_failed_checks = 0
+			SET host_id = hosts.id, contract_sectors_map_id = NULL, consecutive_failed_checks = 0, uploaded_at=NOW()
 			FROM hosts
 			WHERE sector_root = $1 AND hosts.public_key = $2
 		`, sqlHash256(root), sqlPublicKey(hostKey))

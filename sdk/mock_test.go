@@ -30,6 +30,11 @@ func (m *mockHostDialer) Hosts() []types.PublicKey {
 	return slices.Collect(maps.Keys(m.hosts))
 }
 
+// ActiveHosts implements the [HostDialer] interface.
+func (m *mockHostDialer) ActiveHosts() []types.PublicKey {
+	return slices.Collect(maps.Keys(m.hostSectors))
+}
+
 func (m *mockHostDialer) delay(ctx context.Context, hostKey types.PublicKey) error {
 	m.delayMu.Lock()
 	delay, ok := m.slowHosts[hostKey]

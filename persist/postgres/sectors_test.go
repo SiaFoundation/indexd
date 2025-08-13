@@ -71,6 +71,20 @@ func TestMigrateSector(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	sectorUploadedAt := func(root types.Hash256) (uploadedAt time.Time) {
+		t.Helper()
+
+		err := store.pool.QueryRow(context.Background(), `
+            SELECT uploaded_at
+            FROM sectors
+            WHERE sector_root = $1
+        `, sqlHash256(root)).Scan(&uploadedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
 	// helper to assert sector state
 	assertSector := func(root types.Hash256, expectedHostKey types.PublicKey, expectedContractID types.FileContractID, expectedFailures int) {
 		t.Helper()
@@ -98,10 +112,19 @@ func TestMigrateSector(t *testing.T) {
 
 	migrate := func(root types.Hash256, hostKey types.PublicKey, expectedMigrated bool) {
 		t.Helper()
+
+		beforeUploadedAt := sectorUploadedAt(root)
 		if migrated, err := store.MigrateSector(context.Background(), root, hostKey); err != nil {
 			t.Fatal(err)
 		} else if migrated != expectedMigrated {
 			t.Fatalf("expected migrated %v, got %v", expectedMigrated, migrated)
+		}
+		afterUploadedAt := sectorUploadedAt(root)
+
+		if expectedMigrated && afterUploadedAt.Compare(beforeUploadedAt) != 1 {
+			t.Fatal("expected after uploaded at timestamp to be greater than before timestamp")
+		} else if !expectedMigrated && !afterUploadedAt.Equal(beforeUploadedAt) {
+			t.Fatal("expected after uploaded at timestamp equal before timestamp because no migration happened")
 		}
 	}
 
@@ -496,6 +519,20 @@ func TestPinSlabs(t *testing.T) {
 		}
 	}
 
+	sectorUploadedAt := func(root types.Hash256) (uploadedAt time.Time) {
+		t.Helper()
+
+		err := store.pool.QueryRow(context.Background(), `
+            SELECT uploaded_at
+            FROM sectors
+            WHERE sector_root = $1
+        `, sqlHash256(root)).Scan(&uploadedAt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
 	assertSlab := func(slabID slabs.SlabID, params slabs.SlabPinParams, slab slabs.Slab) {
 		t.Helper()
 		if slab.ID != slabID {
@@ -538,11 +575,23 @@ func TestPinSlabs(t *testing.T) {
 	// pin same slabs for account 2 again which should add links to the join
 	// table
 	for i := range toPin {
+		var beforeUploadedAt []time.Time
+		for _, sector := range toPin[i].Sectors {
+			beforeUploadedAt = append(beforeUploadedAt, sectorUploadedAt(sector.Root))
+		}
+
 		slabID, err := store.PinSlab(context.Background(), account2, nextCheck, toPin[i])
 		if err != nil {
 			t.Fatal(err)
 		} else if slabID != expectedIDs[i] {
 			t.Fatalf("expected slab IDs %v, got %v", expectedIDs[i], slabID)
+		}
+
+		for i, sector := range toPin[i].Sectors {
+			afterUploadedAt := sectorUploadedAt(sector.Root)
+			if afterUploadedAt.Compare(beforeUploadedAt[i]) != 1 {
+				t.Fatal("expected after uploaded at timestamp to be greater than before timestamp")
+			}
 		}
 	}
 
@@ -1004,6 +1053,88 @@ func TestUnhealthySlabs(t *testing.T) {
 	_, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Second), 10)
 	if err == nil {
 		t.Fatal("expected error for future maxLastRepairAttempt, got nil")
+	}
+}
+
+func TestPruneUnpinnableSectors(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+
+	// add host with a contract
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// pin a slab to add a few sectors to the database
+	root1 := frand.Entropy256()
+	root2 := frand.Entropy256()
+	root3 := frand.Entropy256()
+	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     10,
+		Sectors: []slabs.SectorPinParams{
+			{
+				Root:    root1,
+				HostKey: hk,
+			},
+			{
+				Root:    root2,
+				HostKey: hk,
+			},
+			{
+				Root:    root3,
+				HostKey: hk,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure some time passes since the default time that is set when the
+	// slab is pinned
+	time.Sleep(100 * time.Millisecond)
+
+	// after pinning, no slab should be unhealthy since their sectors aren't
+	// pinned to contracts yet.
+	unhealthyIDs, err := store.UnhealthySlabs(context.Background(), time.Now(), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthyIDs) != 0 {
+		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
+	}
+
+	// set the uploaded timestamp to past the threshold pruning threshold date
+	// of 3 days
+	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET uploaded_at = NOW() - Interval '4 days' WHERE id = 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// we should still have no unhealthy slabs because the host_id has not been
+	// set to null yet
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthyIDs) != 0 {
+		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
+	}
+
+	if err := store.PruneUnpinnableSectors(context.Background(), time.Now().Add(-3*24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	// sector should have had host_id nulled out due to PruneUnpinnableSectors
+	// and should now be unhealthy
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(unhealthyIDs) != 1 {
+		t.Fatalf("expected 1 unhealthy slabs, got %d", len(unhealthyIDs))
 	}
 }
 
@@ -1765,6 +1896,79 @@ func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 		b.StopTimer()
 		reset()
 		b.StartTimer()
+	}
+}
+
+// BenchmarkPruneUnpinnableSectors benchmarks PruneUnpinnableSectors
+func BenchmarkPruneUnpinnableSectors(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+	account := proto.Account{1}
+
+	if err := store.AddAccount(context.Background(), types.PublicKey(account)); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	// add a host
+	hk := store.addTestHost(b)
+
+	// prepare base db
+	const (
+		dbBaseSize = 1 << 40 // 1TiB of sectors
+		nSectors   = dbBaseSize / proto.SectorSize
+	)
+
+	// insert sectors in batches
+	for remainingSectors := nSectors; remainingSectors > 0; {
+		batchSize := min(remainingSectors, 10000)
+		remainingSectors -= batchSize
+		var sectors []slabs.SectorPinParams
+		for range batchSize {
+			root := frand.Entropy256()
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    root,
+				HostKey: hk,
+			})
+		}
+		if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       sectors,
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	now := time.Now()
+	const day = 24 * time.Hour
+	reset := func(fraction int64) {
+		b.Helper()
+		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = 1, contract_sectors_map_id = NULL, uploaded_at = $1`, now)
+		if err != nil {
+			b.Fatal(err)
+		}
+		_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET uploaded_at = $1 WHERE id % $2 = 0`, now.Add(-4*day), fraction)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	// 1/10 = 10%, 1/100 = 1%, 1/1000 = 0.1%
+	for _, fraction := range []int64{10, 100, 1000} {
+		reset(fraction)
+		b.Run(fmt.Sprintf("%.3f%%", 1.0/float32(fraction)*100), func(b *testing.B) {
+			for b.Loop() {
+				b.SetBytes(proto.SectorSize * nSectors / fraction)
+				err := store.PruneUnpinnableSectors(context.Background(), now.Add(-3*day))
+				if err != nil {
+					b.Fatal(err)
+				}
+
+				// reset db
+				b.StopTimer()
+				reset(fraction)
+				b.StartTimer()
+			}
+		})
 	}
 }
 
