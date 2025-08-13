@@ -2,7 +2,8 @@
 
 This SDK provides a convenient way to interact with the Indexd API, allowing
 users to connect an application to the indexer and uploading data to as well as
-downloading data from the Sia network.
+users to connect an application to the indexer and upload data to and download data from
+the Sia network.
 
 The README provides a short overview to quickly get started using the SDK. For more information, please refer to the [Godocs](https://pkg.go.dev/go.sia.tech/indexd/sdk).
 
@@ -36,7 +37,7 @@ if err != nil {
 }
 ```
 
-This code will attempat to open a browser window for the user to put in their
+This code will attempt to open a browser window for the user to put in their
 app password and approve the request. If the browser cannot be opened, the user
 will need to manually open the URL.
 
@@ -67,7 +68,7 @@ if err != nil {
 }
 
 // open a file to download to
-dstFile, err := os.Open("path/to/dst.dat")
+dstFile, err := os.Create("path/to/dst.dat")
 if err != nil {
 	log.Fatal("failed to open the file")
 }
@@ -81,5 +82,5 @@ if err != nil {
 ```
 
 The `metadata` returned from the `Upload` function contains information about
-the uploaded file required to download it later. Applications need to to store
+the uploaded file required to download it later. Applications need to store
 this information in a database or some other persistent storage.
