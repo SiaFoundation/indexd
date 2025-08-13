@@ -123,7 +123,7 @@ type (
 		chain     ChainManager
 		contracts ContractManager
 		hosts     HostManager
-		pm        PinManager
+		pins      PinManager
 		explorer  Explorer
 		store     Store
 		syncer    Syncer
@@ -142,7 +142,7 @@ func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, pm
 		chain:     chain,
 		contracts: contracts,
 		hosts:     hosts,
-		pm:        pm,
+		pins:      pm,
 		store:     store,
 		syncer:    syncer,
 		wallet:    wallet,
@@ -673,7 +673,7 @@ func (a *admin) handlePUTSettingsPricePinning(jc jape.Context) {
 		return
 	}
 
-	jc.Check("failed to update price pinning settings", a.pm.UpdatePinnedSettings(jc.Request.Context(), s))
+	jc.Check("failed to update price pinning settings", a.pins.UpdatePinnedSettings(jc.Request.Context(), s))
 }
 
 func (a *admin) handleGETWallet(jc jape.Context) {
