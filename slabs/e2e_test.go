@@ -22,7 +22,6 @@ func TestMigrations(t *testing.T) {
 	// create some more utxos
 	indexer := cluster.Indexer
 	cluster.ConsensusNode.MineBlocks(t, indexer.WalletAddr(), 10)
-	time.Sleep(3 * time.Second)
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
@@ -35,12 +34,9 @@ func TestMigrations(t *testing.T) {
 	app := indexer.App(a1)
 
 	// fetch hosts
-	time.Sleep(5 * time.Second)
-	hosts, err := app.Hosts(context.Background())
+	hosts := testutils.WaitForHosts(t, app, 7)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(hosts) != 7 {
-		t.Fatalf("expected 7 hosts, got %d", len(hosts))
 	}
 
 	// upload sectors to hosts
