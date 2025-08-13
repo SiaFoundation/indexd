@@ -297,3 +297,20 @@ func shutdownWithTimeout(shutdownFn func(context.Context) error) error {
 		return shutdownFn(context.Background())
 	})
 }
+
+func WaitForHosts(t *testing.T, app *app.Client, n int) []hosts.HostInfo {
+	t.Helper()
+	start := time.Now()
+	limit := 10 * time.Second
+	for {
+		hosts, err := app.Hosts(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		} else if len(hosts) == n {
+			return hosts
+		} else if time.Since(start) > limit {
+			t.Fatal(fmt.Sprintf("timed out waiting for %d hosts, got %d", n, len(hosts)))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}

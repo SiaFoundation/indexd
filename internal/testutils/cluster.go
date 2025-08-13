@@ -150,12 +150,12 @@ func (c *Cluster) AnnounceHosts(ctx context.Context, t testing.TB, hosts ...*Hos
 	}
 }
 
-// FundHosts funds the hosts with one block, then waits for the funds to mature.
+// FundHosts funds the hosts with multiple blocks, then waits for the funds to mature.
 func (c *Cluster) FundHosts(ctx context.Context, t testing.TB, hosts ...*Host) {
 	t.Helper()
 
 	for _, h := range hosts {
-		c.ConsensusNode.MineBlocks(t, h.w.Address(), 1)
+		c.ConsensusNode.MineBlocks(t, h.w.Address(), 5)
 	}
 	c.ConsensusNode.MineBlocks(t, types.Address{}, c.ConsensusNode.network.MaturityDelay)
 
