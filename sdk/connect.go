@@ -32,10 +32,11 @@ type ConnectAppRequest struct {
 	client *app.Client
 }
 
-// WaitForApproval waits for the user to approve the app connection request.
-// It will block until the request is either approved or denied.
-// The app should display the response URL to the user before
-// calling this function.
+// WaitForApproval waits for the user to approve the app connection request in a
+// browser window that it attempts to open automatically. It will block until
+// the request is either approved or denied.
+// NOTE: The app should display the response URL to the user before calling this
+// function in case the browser fails to open automatically.
 func (cr *ConnectAppRequest) WaitForApproval(ctx context.Context) (bool, error) {
 	if time.Until(cr.Expiration) <= 0 {
 		return false, fmt.Errorf("request expired")
