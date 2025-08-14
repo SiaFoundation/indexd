@@ -1064,6 +1064,22 @@ func TestUnhealthySlabs(t *testing.T) {
 	// assert no slabs are unhealthy
 	assertUnhealthySlabs(0, 10, now)
 
+	// update the contract to be no longer active or pending
+	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateExpired))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert both slabs are unhealthy
+	assertUnhealthySlabs(2, 10, now)
+
+	// reset the LRA-time and make the contract good again
+	resetLastRepairAttempt(oneHourAgo)
+	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateActive))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// remove a sector from its host - the unhealthy slab should be back
 	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id = 1")
 	if err != nil {
