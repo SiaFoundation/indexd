@@ -498,8 +498,20 @@ func (s *Store) RejectPendingContracts(ctx context.Context, maxFormation time.Ti
 	})
 }
 
-// UpdateContractRenewedTo updates the renewed to ID of a contract to the provided one.
+// UpdateContractRenewedTo updates the renewed to ID of a contract to the
+// provided one. We will not renew to a contract that has been deleted to avoid
+// violating foreign key constraints.
 func (tx *updateTx) UpdateContractRenewedTo(contractID types.FileContractID, renewedTo *types.FileContractID) error {
+	if renewedTo != nil {
+		var exists bool
+		if err := tx.tx.QueryRow(tx.ctx, `SELECT EXISTS(SELECT 1 FROM contracts WHERE contract_id = $1)`, sqlHash256(*renewedTo)).Scan(&exists); err != nil {
+			return fmt.Errorf("failed to check if renewal exists: %w", err)
+		}
+		if !exists {
+			return nil
+		}
+	}
+
 	res, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2`, (*sqlHash256)(renewedTo), sqlHash256(contractID))
 	if err != nil {
 		return fmt.Errorf("failed to update contract renewed to: %w", err)

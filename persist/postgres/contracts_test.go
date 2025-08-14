@@ -1284,6 +1284,14 @@ func TestUpdateContractRenewedTo(t *testing.T) {
 		t.Fatal("expected contract to not be renewed")
 	}
 
+	// renewing to a contract that does not exist should do nothing
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		fcID := types.FileContractID{255}
+		return tx.UpdateContractRenewedTo(contractID, &fcID)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractRenewedTo(contractID, &renewedToID)
 	}); err != nil {
