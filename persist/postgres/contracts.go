@@ -500,11 +500,7 @@ func (s *Store) RejectPendingContracts(ctx context.Context, maxFormation time.Ti
 
 // UpdateContractRenewedTo updates the renewed to ID of a contract to the provided one.
 func (tx *updateTx) UpdateContractRenewedTo(contractID types.FileContractID, renewedTo *types.FileContractID) error {
-	var value any
-	if renewedTo != nil {
-		value = sqlHash256(*renewedTo)
-	}
-	res, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2`, value, sqlHash256(contractID))
+	res, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2`, (*sqlHash256)(renewedTo), sqlHash256(contractID))
 	if err != nil {
 		return fmt.Errorf("failed to update contract renewed to: %w", err)
 	} else if res.RowsAffected() != 1 {
