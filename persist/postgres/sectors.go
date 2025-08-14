@@ -554,7 +554,7 @@ func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, 
 						(
 							-- stored on bad contract
 							(sectors.contract_sectors_map_id IS NOT NULL AND contracts.good = FALSE) OR
-							NOT (contracts.state = $2 OR contracts.state = $3) OR
+							contracts.state NOT IN ($2, $3) OR
 							-- not stored on any host
 							(sectors.host_id IS NULL)
 						)
