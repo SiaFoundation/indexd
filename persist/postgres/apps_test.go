@@ -7,7 +7,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/api/app"
+	"go.sia.tech/indexd/accounts"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -15,11 +15,11 @@ func TestAppConnectKeys(t *testing.T) {
 	ctx := t.Context()
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	if _, err := store.ValidAppConnectKey(ctx, "foobar"); !errors.Is(err, app.ErrKeyNotFound) {
-		t.Fatalf("expected err %q, got %q", app.ErrKeyNotFound, err)
+	if _, err := store.ValidAppConnectKey(ctx, "foobar"); !errors.Is(err, accounts.ErrKeyNotFound) {
+		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
 
-	if key, err := store.AddAppConnectKey(ctx, app.UpdateAppConnectKey{
+	if key, err := store.AddAppConnectKey(ctx, accounts.UpdateAppConnectKey{
 		Key:           "foobar",
 		Description:   "test key",
 		MaxPinnedData: 10,
@@ -68,8 +68,8 @@ func TestAppConnectKeys(t *testing.T) {
 	}
 
 	// try again on an exhausted key
-	if err := store.UseAppConnectKey(ctx, "foobar", types.GeneratePrivateKey().PublicKey()); !errors.Is(err, app.ErrKeyExhausted) {
-		t.Fatalf("expected err %q, got %q", app.ErrKeyExhausted, err)
+	if err := store.UseAppConnectKey(ctx, "foobar", types.GeneratePrivateKey().PublicKey()); !errors.Is(err, accounts.ErrKeyExhausted) {
+		t.Fatalf("expected err %q, got %q", accounts.ErrKeyExhausted, err)
 	}
 
 	if ok, err := store.ValidAppConnectKey(ctx, "foobar"); err != nil {
@@ -78,7 +78,7 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatal("expected app connect key to be invalid")
 	}
 
-	if updated, err := store.UpdateAppConnectKey(ctx, app.UpdateAppConnectKey{
+	if updated, err := store.UpdateAppConnectKey(ctx, accounts.UpdateAppConnectKey{
 		Key:           "foobar",
 		Description:   "updated key",
 		MaxPinnedData: 20,
@@ -101,7 +101,7 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatal("failed to delete app connect key:", err)
 	}
 
-	if _, err := store.ValidAppConnectKey(ctx, "foobar"); !errors.Is(err, app.ErrKeyNotFound) {
-		t.Fatalf("expected err %q, got %q", app.ErrKeyNotFound, err)
+	if _, err := store.ValidAppConnectKey(ctx, "foobar"); !errors.Is(err, accounts.ErrKeyNotFound) {
+		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
 }

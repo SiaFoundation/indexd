@@ -7,9 +7,9 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/api"
-	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/pins"
@@ -32,7 +32,7 @@ func NewClient(addr, password string) *Client {
 }
 
 // AppConnectKeys retrieves a paginated list of application connection keys.
-func (c *Client) AppConnectKeys(ctx context.Context, offset, limit int) (keys []app.ConnectKey, err error) {
+func (c *Client) AppConnectKeys(ctx context.Context, offset, limit int) (keys []accounts.ConnectKey, err error) {
 	values := url.Values{}
 	values.Set("offset", fmt.Sprintf("%d", offset))
 	values.Set("limit", fmt.Sprintf("%d", limit))
@@ -47,49 +47,29 @@ func (c *Client) DeleteAppConnectKey(ctx context.Context, key string) (err error
 }
 
 // AddAppConnectKey adds a new application connection key.
-func (c *Client) AddAppConnectKey(ctx context.Context, req app.AddConnectKeyRequest) (key app.ConnectKey, err error) {
+func (c *Client) AddAppConnectKey(ctx context.Context, req AddConnectKeyRequest) (key accounts.ConnectKey, err error) {
 	err = c.c.POST(ctx, "/apps/connect/keys", req, &key)
 	return
 }
 
 // UpdateAppConnectKey updates an existing application connection key.
-func (c *Client) UpdateAppConnectKey(ctx context.Context, req app.UpdateAppConnectKey) error {
+func (c *Client) UpdateAppConnectKey(ctx context.Context, req accounts.UpdateAppConnectKey) error {
 	return c.c.PUT(ctx, "/apps/connect/keys", req)
 }
 
+// DeleteAccount removes the account with the given public key.
+func (c *Client) DeleteAccount(ctx context.Context, ak types.PublicKey) (err error) {
+	err = c.c.DELETE(ctx, fmt.Sprintf("/account/%s", ak))
+	return
+}
+
 // Accounts returns all accounts registered in the indexer.
-func (c *Client) Accounts(ctx context.Context, opts ...api.URLQueryParameterOption) (accounts []types.PublicKey, err error) {
+func (c *Client) Accounts(ctx context.Context, opts ...api.URLQueryParameterOption) (accounts []accounts.Account, err error) {
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
 	}
 	err = c.c.GET(ctx, "/accounts?"+values.Encode(), &accounts)
-	return
-}
-
-// AccountsAddOption defines a functional option for the AccountsAdd.
-type AccountsAddOption func(req *AddAccountRequest)
-
-// WithStorageLimit sets the storage limit for the account being added.
-func WithStorageLimit(limit int64) AccountsAddOption {
-	return func(req *AddAccountRequest) {
-		req.StorageLimit = limit
-	}
-}
-
-// AccountsAdd adds the account with the given account key.
-func (c *Client) AccountsAdd(ctx context.Context, accountKey types.PublicKey, opts ...AccountsAddOption) (err error) {
-	var req AddAccountRequest
-	for _, opt := range opts {
-		opt(&req)
-	}
-	err = c.c.POST(ctx, fmt.Sprintf("/account/%s", accountKey), req, nil)
-	return
-}
-
-// AccountsDelete deletes the account with the given account key.
-func (c *Client) AccountsDelete(ctx context.Context, accountKey types.PublicKey) (err error) {
-	err = c.c.DELETE(ctx, fmt.Sprintf("/account/%s", accountKey))
 	return
 }
 
@@ -106,12 +86,6 @@ func (c *Client) Alerts(ctx context.Context, opts ...AlertQueryParameterOption) 
 // DismissAlerts dismisses registered alerts.
 func (c *Client) DismissAlerts(ctx context.Context, ids ...types.Hash256) (err error) {
 	err = c.c.POST(ctx, "/alerts/dismiss", ids, nil)
-	return
-}
-
-// AccountsUpdate allows rotating the account key.
-func (c *Client) AccountsUpdate(ctx context.Context, oldAccountKey, newAccountKey types.PublicKey) (err error) {
-	err = c.c.PUT(ctx, fmt.Sprintf("/account/%s", oldAccountKey), AccountRotateKeyRequest{NewAccountKey: newAccountKey})
 	return
 }
 

@@ -105,7 +105,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	// fetch all hosts that are usable and not blocked
 	var candidates []hosts.Host
 	for offset := 0; ; offset += batchSize {
-		batch, err := cm.store.Hosts(ctx, offset, batchSize, hosts.WithUsable(true), hosts.WithBlocked(false))
+		batch, err := cm.hosts.Hosts(ctx, offset, batchSize, hosts.WithUsable(true), hosts.WithBlocked(false))
 		if err != nil {
 			return fmt.Errorf("failed to fetch hosts to form contracts with: %w", err)
 		}
@@ -153,7 +153,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	// determine which hosts have unpinned sectors and no active contracts. We
 	// always form contracts with these hosts to be able to pin the sectors
 	// eventually
-	hwus, err := cm.store.HostsWithUnpinnableSectors(ctx)
+	hwus, err := cm.hosts.HostsWithUnpinnableSectors(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch hosts with unpinnable sectors: %w", err)
 	}
@@ -216,7 +216,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		contractLog := formationLog.Named(contract.ID.String()).With(zap.Stringer("hostKey", contract.HostKey))
 
 		// host checks
-		host, err := cm.store.Host(ctx, contract.HostKey)
+		host, err := cm.hosts.Host(ctx, contract.HostKey)
 		if err != nil {
 			contractLog.Error("failed to fetch host for contract", zap.Error(err))
 			continue
@@ -256,7 +256,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		hostKey := candidates[i].PublicKey
 		hostLog := formationLog.With(zap.Stringer("hostKey", hostKey), zap.Bool("force", forceFormation[hostKey]))
 
-		err := cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+		err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
 			// make sure host is still good
 			if !isGood(host, hostLog) {
 				return fmt.Errorf("host is not good: %s", host.PublicKey)
@@ -272,10 +272,10 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 
 			res, err := hc.FormContract(formationCtx, host.Settings, proto.RPCFormContractParams{
 				RenterPublicKey: cm.renterKey,
-				RenterAddress:   cm.w.Address(),
+				RenterAddress:   cm.wallet.Address(),
 				Allowance:       allowance,
 				Collateral:      collateral,
-				ProofHeight:     cm.cm.TipState().Index.Height + period,
+				ProofHeight:     cm.chain.TipState().Index.Height + period,
 			})
 			_ = hc.Close()
 			if err != nil {

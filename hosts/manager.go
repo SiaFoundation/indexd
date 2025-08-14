@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"strings"
 	"sync"
 	"time"
 
@@ -86,9 +85,19 @@ type (
 	Store interface {
 		Host(ctx context.Context, hk types.PublicKey) (Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error)
+
 		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
+		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
+		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
+		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
+
+		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
+		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
+		UnblockHost(ctx context.Context, hk types.PublicKey) error
+
 		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
 		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
+
 		UsabilitySettings(ctx context.Context) (UsabilitySettings, error)
 		UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error
 	}
@@ -113,6 +122,46 @@ func (h *Host) SiamuxAddr() string {
 		}
 	}
 	return ""
+}
+
+// Host returns the host with the given key.
+func (hm *HostManager) Host(ctx context.Context, hostKey types.PublicKey) (Host, error) {
+	return hm.store.Host(ctx, hostKey)
+}
+
+// Hosts returns a list of hosts filtered by the given query options.
+func (hm *HostManager) Hosts(ctx context.Context, offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error) {
+	return hm.store.Hosts(ctx, offset, limit, queryOpts...)
+}
+
+// HostsForPruning returns a list of hosts with sectors that need pruning
+func (hm *HostManager) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) {
+	return hm.store.HostsForPruning(ctx)
+}
+
+// HostsForPinning returns a list of hosts that have sectors that need pinning
+func (hm *HostManager) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
+	return hm.store.HostsForPinning(ctx)
+}
+
+// BlockHosts blocks the given hosts for the given reason
+func (hm *HostManager) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error {
+	return hm.store.BlockHosts(ctx, hostKeys, reason)
+}
+
+// HostsWithUnpinnableSectors returns any hosts that have sectors that could not be pinned
+func (hm *HostManager) HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error) {
+	return hm.store.HostsWithUnpinnableSectors(ctx)
+}
+
+// BlockedHosts returns a list of blocked hosts
+func (hm *HostManager) BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error) {
+	return hm.store.BlockedHosts(ctx, offset, limit)
+}
+
+// UnblockHost unblocks the given host
+func (hm *HostManager) UnblockHost(ctx context.Context, hk types.PublicKey) error {
+	return hm.store.UnblockHost(ctx, hk)
 }
 
 // NewManager creates a new host manager.
@@ -221,9 +270,7 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 	}
 
 	// optimistically call the function
-	if err := fn(host); err == nil {
-		return nil
-	} else if err != nil && !strings.Contains(err.Error(), proto4.ErrPricesExpired.Error()) {
+	if err := fn(host); err != nil && !errors.Is(err, proto4.ErrPricesExpired) {
 		return err
 	}
 	logger.Debug("host has outdated prices, rescan")

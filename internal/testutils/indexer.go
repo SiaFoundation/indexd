@@ -51,15 +51,18 @@ type (
 	// Indexer is a test utility combining an indexer, an http client for the
 	// indexer and useful helpers for testing.
 	Indexer struct {
-		*admin.Client
-		App func(types.PrivateKey) *app.Client
+		Admin *admin.Client
+		App   func(types.PrivateKey) *app.Client
 
-		cm      *chain.Manager
-		dialer  *client.SiamuxDialer
-		alerter *alerts.Manager
-		store   *postgres.Store
-		syncer  *Syncer
-		wallet  *wallet.SingleAddressWallet
+		cm        *chain.Manager
+		dialer    *client.SiamuxDialer
+		accounts  *accounts.AccountManager
+		contracts *contracts.ContractManager
+		hosts     *hosts.HostManager
+		alerter   *alerts.Manager
+		store     *postgres.Store
+		syncer    *Syncer
+		wallet    *wallet.SingleAddressWallet
 	}
 
 	// IndexerOpt is a functional option for configuring an indexer for testing
@@ -90,6 +93,21 @@ func WithSlabOptions(opts ...slabs.Option) IndexerOpt {
 	return func(cfg *indexerCfg) {
 		cfg.slabOpts = append(cfg.slabOpts, opts...)
 	}
+}
+
+// Accounts returns the account manager for the indexer.
+func (i *Indexer) Accounts() *accounts.AccountManager {
+	return i.accounts
+}
+
+// Contracts returns the contract manager for the indexer.
+func (i *Indexer) Contracts() *contracts.ContractManager {
+	return i.contracts
+}
+
+// Hosts returns the host manager for the indexer.
+func (i *Indexer) Hosts() *hosts.HostManager {
+	return i.hosts
 }
 
 // NewIndexer creates a new indexer for testing that is automatically closed up
@@ -163,7 +181,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 
 	password := hex.EncodeToString(frand.Bytes(16))
 	adminAPI := http.Server{
-		Handler: jape.BasicAuth(password)(admin.NewAPI(c.cm, contracts, hm, pm, syncer, wm, store, alerter, adminAPIOpts...)),
+		Handler: jape.BasicAuth(password)(admin.NewAPI(c.cm, am, contracts, hm, pm, syncer, wm, store, alerter, adminAPIOpts...)),
 	}
 
 	adminListener, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -187,7 +205,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to listen on application address: %v", err)
 	}
 	appAPIAddr := fmt.Sprintf("http://%s", appListener.Addr().String())
-	appHandler, err := app.NewAPI(appAPIAddr, store, contracts, appAPIOpts...)
+	appHandler, err := app.NewAPI(appAPIAddr, store, am, contracts, appAPIOpts...)
 	if err != nil {
 		t.Fatalf("failed to create application API: %v", err)
 	}
@@ -236,21 +254,25 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		if err := closeWithTimeout(store.Close); err != nil {
 			t.Errorf("failed to close store: %v", err)
 		}
+		time.Sleep(time.Second) // pgx does not properly clean up its background goroutines triggering goleak
 	})
 
 	return &Indexer{
-		Client: admin.NewClient(adminAPIAddr, password),
+		Admin: admin.NewClient(adminAPIAddr, password),
 		App: func(appKey types.PrivateKey) *app.Client {
 			client, _ := app.NewClient(appAPIAddr, appKey)
 			return client
 		},
 
-		cm:      c.cm,
-		dialer:  dialer,
-		alerter: alerter,
-		store:   store,
-		syncer:  syncer,
-		wallet:  wm,
+		cm:        c.cm,
+		accounts:  am,
+		hosts:     hm,
+		contracts: contracts,
+		dialer:    dialer,
+		alerter:   alerter,
+		store:     store,
+		syncer:    syncer,
+		wallet:    wm,
 	}
 }
 

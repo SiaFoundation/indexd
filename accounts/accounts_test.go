@@ -8,7 +8,8 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/api/admin"
+	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
 	"lukechampine.com/frand"
 )
@@ -21,14 +22,14 @@ func TestAccountFunding(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	err := indexer.AccountsAdd(context.Background(), a1.PublicKey())
+	err := indexer.Accounts().AddAccount(context.Background(), a1.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert we have one usable host
 	time.Sleep(time.Second)
-	hosts, err := indexer.Hosts(context.Background(), admin.WithUsable(true))
+	hosts, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 1 {
@@ -45,7 +46,7 @@ func TestAccountFunding(t *testing.T) {
 
 	// assert we have one active contract
 	time.Sleep(time.Second)
-	contracts, err := indexer.Contracts(context.Background(), admin.WithRevisable(true), admin.WithGood(true))
+	contracts, err := indexer.Contracts().Contracts(context.Background(), 0, 10, contracts.WithRevisable(true), contracts.WithGood(true))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
@@ -77,7 +78,7 @@ func TestAccountFunding(t *testing.T) {
 	}
 
 	// trigger funding
-	err = indexer.TriggerAction(context.Background(), "funding")
+	err = indexer.Contracts().TriggerAccountFunding(true)
 	if err != nil {
 		t.Fatal(err)
 	}

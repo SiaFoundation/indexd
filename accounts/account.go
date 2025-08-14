@@ -67,6 +67,7 @@ type (
 	Account struct {
 		AccountKey     proto.Account `json:"accountKey"`
 		ServiceAccount bool          `json:"serviceAccount"`
+		MaxPinnedData  int64         `json:"maxPinnedData"`
 	}
 
 	// HostAccount represents an ephemeral account on a host.

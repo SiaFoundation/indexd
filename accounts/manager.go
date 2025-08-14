@@ -31,6 +31,19 @@ type (
 		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
 		UpdateServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account, balance types.Currency) error
 		ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error)
+
+		ValidAppConnectKey(context.Context, string) (bool, error)
+		UseAppConnectKey(context.Context, string, types.PublicKey) error
+		AddAppConnectKey(context.Context, UpdateAppConnectKey) (ConnectKey, error)
+		UpdateAppConnectKey(context.Context, UpdateAppConnectKey) (ConnectKey, error)
+		DeleteAppConnectKey(context.Context, string) error
+		AppConnectKeys(ctx context.Context, offset, limit int) ([]ConnectKey, error)
+
+		Account(context.Context, types.PublicKey) (Account, error)
+		AddAccount(context.Context, types.PublicKey, ...AddAccountOption) error
+		Accounts(ctx context.Context, offset, limit int, opts ...QueryAccountsOpt) ([]Account, error)
+		HasAccount(context.Context, types.PublicKey) (bool, error)
+		DeleteAccount(ctx context.Context, ak types.PublicKey) error
 	}
 
 	// AccountFunder defines an interface to fund accounts.
@@ -58,21 +71,6 @@ func WithLogger(l *zap.Logger) Option {
 	return func(m *AccountManager) {
 		m.log = l
 	}
-}
-
-// NewManager creates a new AccountManager.
-func NewManager(store Store, funder AccountFunder, opts ...Option) *AccountManager {
-	m := &AccountManager{
-		serviceAccounts: make(map[proto.Account]struct{}),
-		store:           store,
-		funder:          funder,
-		fundTarget:      types.Siacoins(1),
-		log:             zap.NewNop(),
-	}
-	for _, opt := range opts {
-		opt(m)
-	}
-	return m
 }
 
 // Close closes the AccountManager.
@@ -145,6 +143,31 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 	return nil
 }
 
+// HasAccount checks if the account exists.
+func (m *AccountManager) HasAccount(ctx context.Context, pk types.PublicKey) (bool, error) {
+	return m.store.HasAccount(ctx, pk)
+}
+
+// Account returns the account for the given public key.
+func (m *AccountManager) Account(ctx context.Context, pk types.PublicKey) (Account, error) {
+	return m.store.Account(ctx, pk)
+}
+
+// Accounts returns a list of accounts.
+func (m *AccountManager) Accounts(ctx context.Context, offset, limit int, opts ...QueryAccountsOpt) ([]Account, error) {
+	return m.store.Accounts(ctx, offset, limit, opts...)
+}
+
+// DeleteAccount deletes the account for the given public key.
+func (m *AccountManager) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
+	return m.store.DeleteAccount(ctx, ak)
+}
+
+// AddAccount adds a new account for the given public key.
+func (m *AccountManager) AddAccount(ctx context.Context, pk types.PublicKey) error {
+	return m.store.AddAccount(ctx, pk)
+}
+
 func updateFundedAccounts(accounts []HostAccount, n int) {
 	if n > len(accounts) {
 		panic("illegal number of funded accounts") // developer error
@@ -157,4 +180,19 @@ func updateFundedAccounts(accounts []HostAccount, n int) {
 		accounts[i].ConsecutiveFailedFunds++
 		accounts[i].NextFund = time.Now().Add(time.Duration(min(math.Pow(2, float64(accounts[i].ConsecutiveFailedFunds)), accountExpBackoffMaxMinutes)) * time.Minute)
 	}
+}
+
+// NewManager creates a new AccountManager.
+func NewManager(store Store, funder AccountFunder, opts ...Option) *AccountManager {
+	m := &AccountManager{
+		serviceAccounts: make(map[proto.Account]struct{}),
+		store:           store,
+		funder:          funder,
+		fundTarget:      types.Siacoins(1),
+		log:             zap.NewNop(),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }

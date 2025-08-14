@@ -49,8 +49,8 @@ func TestAccounts(t *testing.T) {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
 		t.Fatal("unexpected accounts", accs)
-	} else if accs[0] != pk2 {
-		t.Fatalf("expected service account %s, got %s", pk2, accs[0])
+	} else if types.PublicKey(accs[0].AccountKey) != pk2 {
+		t.Fatalf("expected service account %s, got %s", pk2, accs[0].AccountKey)
 	}
 
 	// fetch only user accounts
@@ -59,8 +59,8 @@ func TestAccounts(t *testing.T) {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
 		t.Fatal("unexpected accounts", accs)
-	} else if accs[0] != pk1 {
-		t.Fatalf("expected service account %s, got %s", pk1, accs[0])
+	} else if types.PublicKey(accs[0].AccountKey) != pk1 {
+		t.Fatalf("expected service account %s, got %s", pk1, accs[0].AccountKey)
 	}
 
 	// fetch only service accounts
@@ -69,8 +69,8 @@ func TestAccounts(t *testing.T) {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
 		t.Fatal("unexpected accounts", accs)
-	} else if accs[0] != pk2 {
-		t.Fatalf("expected service account %s, got %s", pk2, accs[0])
+	} else if types.PublicKey(accs[0].AccountKey) != pk2 {
+		t.Fatalf("expected service account %s, got %s", pk2, accs[0].AccountKey)
 	}
 }
 
@@ -107,7 +107,7 @@ func TestAddAccount(t *testing.T) {
 		accs, err := store.Accounts(context.Background(), 0, 1, accounts.WithServiceAccount(serviceAccount))
 		if err != nil {
 			t.Fatal(err)
-		} else if len(accs) != 1 || accs[0] != pk {
+		} else if len(accs) != 1 || types.PublicKey(accs[0].AccountKey) != pk {
 			t.Fatal("unexpected accounts", accs)
 		}
 		acc, err := store.Account(context.Background(), pk)
@@ -161,7 +161,7 @@ func TestDeleteAccount(t *testing.T) {
 	accs, err := store.Accounts(context.Background(), 0, 1)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(accs) != 1 || accs[0] != pk {
+	} else if len(accs) != 1 || types.PublicKey(accs[0].AccountKey) != pk {
 		t.Fatal("unexpected accounts", accs)
 	}
 

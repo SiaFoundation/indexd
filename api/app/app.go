@@ -35,15 +35,18 @@ type (
 		SlabIDs(ctx context.Context, accountID proto.Account, offset, limit int) ([]slabs.SlabID, error)
 		UnpinSlab(context.Context, proto.Account, slabs.SlabID) error
 		UsableHosts(ctx context.Context, offset, limit int) ([]hosts.HostInfo, error)
+	}
 
+	// Accounts defines the account management interface for the application API.
+	Accounts interface {
 		ValidAppConnectKey(context.Context, string) (bool, error)
 		UseAppConnectKey(context.Context, string, types.PublicKey) error
 
 		HasAccount(context.Context, types.PublicKey) (bool, error)
 	}
 
-	// Accounts defines the account management interface for the application API.
-	Accounts interface {
+	// Contracts defines the contract management interface for the application API.
+	Contracts interface {
 		TriggerAccountFunding(force bool) error
 	}
 
@@ -206,7 +209,7 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 	}
 
 	// check if the account is already connected
-	if known, err := a.store.HasAccount(jc.Request.Context(), pk); err != nil {
+	if known, err := a.accounts.HasAccount(jc.Request.Context(), pk); err != nil {
 		jc.Error(ErrInternalError, http.StatusInternalServerError)
 		return
 	} else if known {
@@ -263,7 +266,7 @@ func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
 		return
 	}
 
-	if ok, err := a.store.HasAccount(jc.Request.Context(), pk); err != nil {
+	if ok, err := a.accounts.HasAccount(jc.Request.Context(), pk); err != nil {
 		jc.Error(ErrInternalError, http.StatusInternalServerError)
 		return
 	} else if ok {
@@ -350,23 +353,18 @@ func (a *app) handlePOSTAuthConnect(jc jape.Context) {
 		return
 	}
 
-	err := a.store.UseAppConnectKey(ctx, connectKey, req.AppKey)
+	err := a.accounts.UseAppConnectKey(ctx, connectKey, req.AppKey)
 	switch {
 	case errors.Is(err, accounts.ErrExists):
 		jc.Encode(nil)
-	case errors.Is(err, ErrKeyExhausted):
-		jc.Error(ErrKeyExhausted, http.StatusForbidden)
-	case errors.Is(err, ErrKeyNotFound):
-		jc.Error(ErrKeyNotFound, http.StatusUnauthorized)
+	case errors.Is(err, accounts.ErrKeyExhausted):
+		jc.Error(accounts.ErrKeyExhausted, http.StatusForbidden)
+	case errors.Is(err, accounts.ErrKeyNotFound):
+		jc.Error(accounts.ErrKeyNotFound, http.StatusUnauthorized)
 	case err != nil:
 		a.log.Debug("failed to use app connect key", zap.Error(err))
 		jc.Error(ErrInternalError, http.StatusInternalServerError)
 	default:
-		if err := a.accounts.TriggerAccountFunding(false); err != nil {
-			a.log.Warn("failed to trigger account funding after adding account", zap.Error(err))
-			jc.Error(ErrInternalError, http.StatusInternalServerError)
-			return
-		}
 		jc.Encode(nil)
 	}
 }
@@ -379,14 +377,14 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 // users, or rather their applications, to pin slabs to the indexer.
 // Authentication happens through presigned URLs that are signed with a private
 // key that corresponds to a previously registered public key.
-func NewAPI(advertiseURL string, store Store, accounts Accounts, opts ...Option) (http.Handler, error) {
+func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, opts ...Option) (http.Handler, error) {
 	u, err := url.Parse(advertiseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse advertise URL %q: %w", advertiseURL, err)
 	}
 	a := &app{
 		store:    store,
-		accounts: accounts,
+		accounts: am,
 		log:      zap.NewNop(),
 
 		hostname:     u.Host,
@@ -399,7 +397,7 @@ func NewAPI(advertiseURL string, store Store, accounts Accounts, opts ...Option)
 
 	wrapSignedAuth := func(h authedHandler) jape.Handler {
 		return func(jc jape.Context) {
-			pk, ok := validateSignedURLAuth(jc, a.hostname, store)
+			pk, ok := validateSignedURLAuth(jc, a.hostname, am)
 			if !ok {
 				return
 			}
@@ -415,8 +413,8 @@ func NewAPI(advertiseURL string, store Store, accounts Accounts, opts ...Option)
 				return
 			}
 
-			ok, err := store.ValidAppConnectKey(jc.Request.Context(), password)
-			if errors.Is(err, ErrKeyNotFound) {
+			ok, err := am.ValidAppConnectKey(jc.Request.Context(), password)
+			if errors.Is(err, accounts.ErrKeyNotFound) {
 				jc.Error(errors.New("invalid app connect key"), http.StatusUnauthorized)
 				return
 			} else if err != nil {

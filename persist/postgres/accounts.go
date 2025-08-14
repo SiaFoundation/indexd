@@ -18,7 +18,7 @@ import (
 )
 
 // Accounts returns a list of account keys.
-func (s *Store) Accounts(ctx context.Context, offset, limit int, opts ...accounts.QueryAccountsOpt) ([]types.PublicKey, error) {
+func (s *Store) Accounts(ctx context.Context, offset, limit int, opts ...accounts.QueryAccountsOpt) (accs []accounts.Account, err error) {
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
 	} else if limit == 0 {
@@ -32,10 +32,9 @@ func (s *Store) Accounts(ctx context.Context, offset, limit int, opts ...account
 		opt(&queryOpts)
 	}
 
-	var accs []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		rows, err := tx.Query(ctx, `
-			SELECT public_key
+			SELECT public_key, service_account, max_pinned_data
 			FROM accounts
 			WHERE ($1::boolean IS NULL OR service_account = $1::boolean)
 			LIMIT $2 OFFSET $3
@@ -46,11 +45,11 @@ func (s *Store) Accounts(ctx context.Context, offset, limit int, opts ...account
 		defer rows.Close()
 
 		for rows.Next() {
-			var ak types.PublicKey
-			if err := rows.Scan((*sqlPublicKey)(&ak)); err != nil {
+			var account accounts.Account
+			if err := rows.Scan((*sqlPublicKey)(&account.AccountKey), &account.ServiceAccount, &account.MaxPinnedData); err != nil {
 				return fmt.Errorf("failed to scan account key: %w", err)
 			}
-			accs = append(accs, ak)
+			accs = append(accs, account)
 		}
 		return rows.Err()
 	}); err != nil {

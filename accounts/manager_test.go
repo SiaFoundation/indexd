@@ -3,6 +3,7 @@ package accounts
 import (
 	"context"
 	"errors"
+	"maps"
 	"math"
 	"reflect"
 	"slices"
@@ -39,19 +40,143 @@ var (
 var _ Store = (*mockStore)(nil)
 
 type mockStore struct {
-	accounts        map[types.PublicKey]struct{}
+	accounts        map[types.PublicKey]Account
 	hosts           map[types.PublicKey]hosts.Host
 	eas             map[types.PublicKey]map[types.PublicKey]*HostAccount
 	serviceAccounts map[proto.Account]map[types.PublicKey]types.Currency
+	connectKeys     map[string]ConnectKey
 }
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		accounts:        make(map[types.PublicKey]struct{}),
+		accounts:        make(map[types.PublicKey]Account),
 		hosts:           make(map[types.PublicKey]hosts.Host),
 		eas:             make(map[types.PublicKey]map[types.PublicKey]*HostAccount),
 		serviceAccounts: make(map[proto.Account]map[types.PublicKey]types.Currency),
 	}
+}
+
+func (s *mockStore) AddAppConnectKey(ctx context.Context, key UpdateAppConnectKey) (ConnectKey, error) {
+	s.connectKeys[key.Key] = ConnectKey{
+		Key:           key.Key,
+		Description:   key.Description,
+		RemainingUses: key.RemainingUses,
+		MaxPinnedData: key.MaxPinnedData,
+		DateCreated:   time.Now(),
+		LastUpdated:   time.Now(),
+	}
+	return s.connectKeys[key.Key], nil
+}
+
+func (s *mockStore) UpdateAppConnectKey(ctx context.Context, key UpdateAppConnectKey) (ConnectKey, error) {
+	if _, ok := s.connectKeys[key.Key]; !ok {
+		return ConnectKey{}, ErrKeyNotFound
+	}
+	s.connectKeys[key.Key] = ConnectKey{
+		Key:           key.Key,
+		Description:   key.Description,
+		RemainingUses: key.RemainingUses,
+		MaxPinnedData: key.MaxPinnedData,
+		DateCreated:   time.Now(),
+		LastUpdated:   time.Now(),
+	}
+	return s.connectKeys[key.Key], nil
+}
+
+func (s *mockStore) AppConnectKeys(ctx context.Context, offset, limit int) ([]ConnectKey, error) {
+	keys := slices.Collect(maps.Values(s.connectKeys))
+	if offset > len(keys) {
+		return nil, nil
+	}
+	if offset+limit > len(keys) {
+		limit = len(keys) - offset
+	}
+	return keys[offset : offset+limit], nil
+}
+
+func (s *mockStore) ValidAppConnectKey(ctx context.Context, key string) (bool, error) {
+	ck, ok := s.connectKeys[key]
+	if !ok {
+		return false, ErrNotFound
+	}
+	return ck.RemainingUses > 0, nil
+}
+
+func (s *mockStore) UseAppConnectKey(ctx context.Context, key string, pk types.PublicKey) error {
+	ck, ok := s.connectKeys[key]
+	if !ok {
+		return ErrNotFound
+	}
+	if ck.RemainingUses == 0 {
+		return ErrKeyExhausted
+	}
+	ck.RemainingUses--
+	s.connectKeys[key] = ck
+	s.accounts[pk] = Account{
+		AccountKey:     proto.Account(pk),
+		ServiceAccount: false,
+	}
+	return nil
+}
+
+func (s *mockStore) DeleteAppConnectKey(ctx context.Context, key string) error {
+	delete(s.connectKeys, key)
+	return nil
+}
+
+func (s *mockStore) AddAccount(ctx context.Context, pk types.PublicKey, opts ...AddAccountOption) error {
+	var options AddAccountOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	s.accounts[pk] = Account{
+		AccountKey:     proto.Account(pk),
+		ServiceAccount: false,
+		MaxPinnedData:  options.MaxPinnedData,
+	}
+	return nil
+}
+
+func (s *mockStore) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
+	delete(s.accounts, ak)
+	return nil
+}
+
+func (s *mockStore) HasAccount(ctx context.Context, pk types.PublicKey) (bool, error) {
+	_, ok := s.accounts[pk]
+	return ok, nil
+}
+
+func (s *mockStore) Account(ctx context.Context, ak types.PublicKey) (Account, error) {
+	acc, ok := s.accounts[ak]
+	if !ok {
+		return Account{}, ErrNotFound
+	}
+	return acc, nil
+}
+
+func (s *mockStore) Accounts(ctx context.Context, offset, limit int, opts ...QueryAccountsOpt) ([]Account, error) {
+	var options QueryAccountsOptions
+	for _, opt := range opts {
+		opt(&options)
+	}
+	accounts := slices.Collect(maps.Values(s.accounts))
+	if options.ServiceAccount != nil && *options.ServiceAccount {
+		filtered := accounts[:0]
+		for _, acc := range accounts {
+			if !acc.ServiceAccount {
+				filtered = append(filtered, acc)
+			}
+		}
+		accounts = filtered
+	}
+	if offset > len(accounts) {
+		return nil, nil
+	}
+	if offset+limit > len(accounts) {
+		limit = len(accounts) - offset
+	}
+	return accounts[offset : offset+limit], nil
 }
 
 func (s *mockStore) Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error) {
@@ -173,8 +298,17 @@ func TestAccountManager(t *testing.T) {
 
 	// add a host and two accounts
 	s.hosts[host.PublicKey] = host
-	s.accounts[types.GeneratePrivateKey().PublicKey()] = struct{}{}
-	s.accounts[types.GeneratePrivateKey().PublicKey()] = struct{}{}
+	pk1 := types.GeneratePrivateKey().PublicKey()
+	s.accounts[pk1] = Account{
+		AccountKey:     proto.Account(pk1),
+		ServiceAccount: false,
+	}
+
+	pk2 := types.GeneratePrivateKey().PublicKey()
+	s.accounts[pk2] = Account{
+		AccountKey:     proto.Account(pk2),
+		ServiceAccount: false,
+	}
 
 	// fund accounts
 	err = am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
@@ -227,7 +361,11 @@ func TestAccountManager(t *testing.T) {
 
 	// add another 1000 accounts
 	for range 1000 {
-		s.accounts[types.GeneratePrivateKey().PublicKey()] = struct{}{}
+		pk := types.GeneratePrivateKey().PublicKey()
+		s.accounts[pk] = Account{
+			AccountKey:     proto.Account(pk),
+			ServiceAccount: false,
+		}
 	}
 
 	// fund accounts

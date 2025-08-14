@@ -51,7 +51,7 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		zap.Bool("outOfCollateral", contract.OutOfCollateral()),
 	)
 
-	return cm.hm.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
+	return cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
 		hc, err := cm.dialer.DialHost(ctx, host.PublicKey, host.SiamuxAddr())
 		if err != nil {
 			contractLog.Debug("failed to dial host", zap.Error(err))

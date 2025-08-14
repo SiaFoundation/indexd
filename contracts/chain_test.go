@@ -275,6 +275,11 @@ func (s *storeMock) MaintenanceSettings(ctx context.Context) (MaintenanceSetting
 	return s.settings, nil
 }
 
+func (s *storeMock) UpdateMaintenanceSettings(ctx context.Context, ms MaintenanceSettings) error {
+	s.settings = ms
+	return nil
+}
+
 func (s *storeMock) MarkUnrenewableContractsBad(ctx context.Context, minProofHeight uint64) error {
 	for i := range s.contracts {
 		if s.contracts[i].ProofHeight <= minProofHeight {
@@ -460,33 +465,32 @@ func (cm *chainManagerMock) RecommendedFee() types.Currency {
 	return types.ZeroCurrency
 }
 
-type syncerMock struct {
-	mu          sync.Mutex
-	broadcasted []types.V2Transaction
-}
-
-func (s *syncerMock) BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error {
-	s.mu.Lock()
-	s.broadcasted = append(s.broadcasted, txns...)
-	s.mu.Unlock()
-	return nil
-}
-
-func (s *syncerMock) BroadcastedSets() []types.V2Transaction {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Clone(s.broadcasted)
-}
+type syncerMock struct{}
 
 func (s *syncerMock) Peers() []*syncer.Peer {
 	return []*syncer.Peer{{}}
 }
 
 type walletMock struct {
+	mu          sync.Mutex
+	broadcasted []types.V2Transaction
+}
+
+func (w *walletMock) BroadcastedSets() []types.V2Transaction {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return slices.Clone(w.broadcasted)
 }
 
 func (w *walletMock) Address() types.Address {
 	return types.Address{1, 2, 3}
+}
+
+func (w *walletMock) BroadcastV2TransactionSet(_ types.ChainIndex, txns []types.V2Transaction) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.broadcasted = append(w.broadcasted, txns...)
+	return nil
 }
 
 func (w *walletMock) FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error) {
@@ -644,8 +648,9 @@ func TestProcessActions(t *testing.T) {
 	amMock := &accountsManagerMock{}
 	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
+	walletMock := &walletMock{}
 	store := &storeMock{}
-	contracts := newContractManager(types.PublicKey{}, amMock, cmMock, store, nil, nil, syncerMock, &walletMock{})
+	contracts := newContractManager(types.PublicKey{}, amMock, cmMock, store, nil, nil, syncerMock, walletMock)
 
 	contract := types.V2FileContractElement{
 		ID: types.FileContractID{1},
@@ -658,12 +663,10 @@ func TestProcessActions(t *testing.T) {
 	// broadcasted transactions in the mocked syncer, the number of resolutions
 	// in the latest broadcasted transactions and the contract elements in the
 	// store.
-	assert := func(poolTxns, broadcastedTxns, resolutions, pruneCalls, pruneContractSectorsCalls, rejectCalls int) {
+	assert := func(broadcastedTxns, resolutions, pruneCalls, pruneContractSectorsCalls, rejectCalls int) {
 		t.Helper()
-		if len(cmMock.V2PoolTransactions()) != poolTxns {
-			t.Fatalf("expected %v contract in tpool, got %v", poolTxns, len(cmMock.tpool))
-		} else if sets := syncerMock.BroadcastedSets(); len(sets) != broadcastedTxns {
-			t.Fatalf("expected %v broadcasted contracts, got %v", broadcastedTxns, len(syncerMock.broadcasted))
+		if sets := walletMock.BroadcastedSets(); len(sets) != broadcastedTxns {
+			t.Fatalf("expected %v broadcasted contracts, got %v", broadcastedTxns, len(sets))
 		} else if broadcastedTxns > 0 && len(sets[broadcastedTxns-1].FileContractResolutions) != resolutions {
 			t.Fatalf("expected %v contract resolution in broadcast, got %v", resolutions, len(sets[0].FileContracts))
 		} else if store.pruneCalls != pruneCalls {
@@ -679,12 +682,12 @@ func TestProcessActions(t *testing.T) {
 	if err := contracts.ProcessActions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assert(0, 0, 0, 1, 1, 1)
+	assert(0, 0, 1, 1, 1)
 
 	// broadcast with 1 contract to broadcast
 	store.toBroadcast = []types.V2FileContractElement{contract}
 	if err := contracts.ProcessActions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assert(1, 1, 1, 2, 2, 2)
+	assert(1, 1, 2, 2, 2)
 }

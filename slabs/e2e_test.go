@@ -25,7 +25,7 @@ func TestMigrations(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	err := indexer.AccountsAdd(context.Background(), a1.PublicKey())
+	err := indexer.Accounts().AddAccount(context.Background(), a1.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +81,7 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// add h1 to blocklist
-	err = indexer.HostsBlocklistAdd(context.Background(), []types.PublicKey{hosts[0].PublicKey}, "test blocklist reason")
+	err = indexer.Hosts().BlockHosts(context.Background(), []types.PublicKey{hosts[0].PublicKey}, "test blocklist reason")
 	if err != nil {
 		t.Fatal(err)
 	}

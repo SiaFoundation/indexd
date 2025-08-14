@@ -33,7 +33,7 @@ func (cm *ContractManager) performContractPruning(ctx context.Context, force boo
 	// fetch hosts for pruning, a host is eligble for pruning if it is not
 	// blocked and has active contracts that haven't been pruned in the last 24
 	// hours
-	hfp, err := cm.store.HostsForPruning(ctx)
+	hfp, err := cm.hosts.HostsForPruning(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch hosts for pruning: %w", err)
 	} else if len(hfp) == 0 {
@@ -60,7 +60,7 @@ loop:
 				wg.Done()
 			}()
 
-			if err := cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+			if err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
 				return cm.performContractPruningOnHost(ctx, host, hostLog)
 			}); err != nil {
 				hostLog.Debug("failed to prune contracts", zap.Error(err))

@@ -57,7 +57,7 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 
 	// create the transaction
 	const stdTxnSize = 1000
-	fee := cm.cm.RecommendedFee().Mul64(stdTxnSize)
+	fee := cm.wallet.RecommendedFee().Mul64(stdTxnSize)
 	txn := types.V2Transaction{
 		MinerFee: fee,
 		FileContractRevisions: []types.V2FileContractRevision{
@@ -69,23 +69,19 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 	}
 
 	// fund the transaction (only the fee) and sign it
-	basis, toSign, err := cm.w.FundV2Transaction(&txn, fee, true)
+	basis, toSign, err := cm.wallet.FundV2Transaction(&txn, fee, true)
 	if err != nil {
 		log.Debug("failed to fund transaction", zap.Error(err))
 		return nil
 	}
-	cm.w.SignV2Inputs(&txn, toSign)
+	cm.wallet.SignV2Inputs(&txn, toSign)
 
-	// verify the transaction and add it to the transaction pool
+	// broadcast the transaction
 	txnSet := []types.V2Transaction{txn}
-	_, err = cm.cm.AddV2PoolTransactions(basis, txnSet)
-	if err != nil {
-		cm.w.ReleaseInputs(nil, txnSet)
+	if err = cm.wallet.BroadcastV2TransactionSet(basis, txnSet); err != nil {
+		cm.wallet.ReleaseInputs(nil, txnSet)
 		log.Debug("failed to add transaction set to the pool", zap.Error(err))
 		return nil
 	}
-
-	// broadcast the transaction
-	cm.s.BroadcastV2TransactionSet(basis, txnSet)
 	return nil
 }

@@ -5,13 +5,15 @@ import (
 	"errors"
 	"testing"
 
+	"go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/hosts"
 )
 
 func TestBlockBadHosts(t *testing.T) {
 	store := &storeMock{}
-	contracts := newContractManager(types.PublicKey{}, nil, nil, store, nil, nil, nil, nil)
+	hmMock := &hostManagerMock{store: store, settings: make(map[types.PublicKey]rhp.HostSettings)}
+	contracts := newContractManager(types.PublicKey{}, nil, nil, store, nil, hmMock, nil, nil)
 
 	goodHost := hosts.Host{PublicKey: types.PublicKey{1}, Usability: hosts.GoodUsability, Blocked: false}
 	badHost := hosts.Host{PublicKey: types.PublicKey{2}, Usability: hosts.Usability{}, Blocked: false}

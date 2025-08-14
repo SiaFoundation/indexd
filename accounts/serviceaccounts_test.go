@@ -65,8 +65,14 @@ func TestServiceAccounts(t *testing.T) {
 	// add accounts
 	account1 := proto.Account(types.GeneratePrivateKey().PublicKey())
 	account2 := proto.Account(types.GeneratePrivateKey().PublicKey())
-	s.accounts[types.PublicKey(account1)] = struct{}{}
-	s.accounts[types.PublicKey(account2)] = struct{}{}
+	s.accounts[types.PublicKey(account1)] = Account{
+		AccountKey:     account1,
+		ServiceAccount: true,
+	}
+	s.accounts[types.PublicKey(account2)] = Account{
+		AccountKey:     account2,
+		ServiceAccount: true,
+	}
 
 	f := &mockFunder{}
 	am := NewManager(s, f)
