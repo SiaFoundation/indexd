@@ -1353,10 +1353,7 @@ func TestPruneRenewedTo(t *testing.T) {
 		if err := tx.UpdateContractState(childContractID1, contracts.ContractStateActive); err != nil {
 			return err
 		}
-		if err := tx.UpdateContractRenewedTo(contractID, &childContractID1); err != nil {
-			return err
-		}
-		return nil
+		return tx.UpdateContractRenewedTo(contractID, &childContractID1)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1388,10 +1385,7 @@ func TestPruneRenewedTo(t *testing.T) {
 		if err := tx.UpdateContractState(childContractID2, contracts.ContractStateActive); err != nil {
 			return err
 		}
-		if err := tx.UpdateContractRenewedTo(contractID, &childContractID2); err != nil {
-			return err
-		}
-		return nil
+		return tx.UpdateContractRenewedTo(contractID, &childContractID2)
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1441,7 +1435,7 @@ func TestPruneRenewedTo(t *testing.T) {
 		t.Fatalf("expected error %v, got %v", contracts.ErrNotFound, err)
 	}
 
-	// contract should still be resolved and renewed to seocnd child
+	// contract should still be resolved and renewed to second child
 	if contract, err := store.Contract(context.Background(), contractID); err != nil {
 		t.Fatal(err)
 	} else if contract.RenewedTo != childContractID2 {
