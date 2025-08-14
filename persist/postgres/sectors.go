@@ -554,14 +554,15 @@ func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, 
 						(
 							-- stored on bad contract
 							(sectors.contract_sectors_map_id IS NOT NULL AND contracts.good = FALSE) OR
+							NOT (contracts.state = $2 OR contracts.state = $3) OR
 							-- not stored on any host
 							(sectors.host_id IS NULL)
 						)
-						AND (slabs.last_repair_attempt < $2)
+						AND (slabs.last_repair_attempt < $4)
 					LIMIT 1
 				)
 				RETURNING digest
-		`, now, maxRepairAttempt).Scan((*sqlHash256)(&slabID))
+		`, now, sqlContractState(contracts.ContractStateActive), sqlContractState(contracts.ContractStatePending), maxRepairAttempt).Scan((*sqlHash256)(&slabID))
 			if errors.Is(err, sql.ErrNoRows) {
 				break
 			} else if err != nil {
