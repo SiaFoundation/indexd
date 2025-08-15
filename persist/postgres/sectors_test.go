@@ -1073,7 +1073,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	// assert both slabs are unhealthy
 	assertUnhealthySlabs(2, 10, now)
 
-	// reset the LRA-time and make the contract good again
+	// reset the LRA-time and set the state back to active
 	resetLastRepairAttempt(oneHourAgo)
 	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateActive))
 	if err != nil {
