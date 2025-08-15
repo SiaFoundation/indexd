@@ -28,6 +28,12 @@ const (
 	severityCriticalStr = "critical"
 )
 
+var (
+	// ErrNotFound is returned when Alert cannot find an alert with the given
+	// ID.
+	ErrNotFound = errors.New("alert not found")
+)
+
 // Severity indicates the severity of an alert.
 type Severity uint8
 
@@ -174,6 +180,18 @@ func (m *Manager) Alerts(offset, limit int, opts ...AlertOpt) ([]Alert, error) {
 	}
 
 	return filtered, nil
+}
+
+// Alert retrieves an individual alert.
+func (m *Manager) Alert(id types.Hash256) (Alert, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	alert, ok := m.alerts[id]
+	if !ok {
+		return Alert{}, ErrNotFound
+	}
+	return alert, nil
 }
 
 // DismissAlerts dismisses the alerts with the given IDs.

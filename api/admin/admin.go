@@ -131,6 +131,7 @@ type (
 	// An Alerter manages alerts.
 	Alerter interface {
 		DismissAlerts(ids ...types.Hash256)
+		Alert(id types.Hash256) (alerts.Alert, error)
 		Alerts(offset, limit int, opts ...alerts.AlertOpt) ([]alerts.Alert, error)
 	}
 )
@@ -186,6 +187,7 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 
 		// alerts endpoints
 		"GET    /alerts":         a.handleGETAlerts,
+		"GET    /alerts/:id":     a.handleGETAlertsID,
 		"POST   /alerts/dismiss": a.handlePOSTAlertsDismiss,
 
 		// contract endpoints
@@ -456,6 +458,22 @@ func (a *admin) handleGETAlerts(jc jape.Context) {
 		return
 	}
 	jc.Encode(alerts)
+}
+
+func (a *admin) handleGETAlertsID(jc jape.Context) {
+	var id types.Hash256
+	if jc.DecodeParam("id", &id) != nil {
+		return
+	}
+
+	alert, err := a.alerter.Alert(id)
+	if errors.Is(err, alerts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get alert", err) != nil {
+		return
+	}
+	jc.Encode(alert)
 }
 
 func (a *admin) handlePOSTAlertsDismiss(jc jape.Context) {

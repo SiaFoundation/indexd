@@ -3,6 +3,7 @@ package admin_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -214,6 +215,10 @@ func TestAlertsAPI(t *testing.T) {
 		t.Fatalf("expected 0 alerts, got %d", len(alerts))
 	}
 
+	if _, err := alerter.Alert(types.Hash256{}); !errors.Is(err, alerts.ErrNotFound) {
+		t.Fatalf("expected error %v, got %v", alerts.ErrNotFound, err)
+	}
+
 	// first alert has info severity
 	a1 := alerts.Alert{
 		ID:        types.Hash256{0: 1},
@@ -222,6 +227,12 @@ func TestAlertsAPI(t *testing.T) {
 	}
 	if err := alerter.RegisterAlert(a1); err != nil {
 		t.Fatal(err)
+	}
+
+	if alert, err := alerter.Alert(a1.ID); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(a1, alert) {
+		t.Fatalf("expected alert %v, got %v", a1, alert)
 	}
 
 	// we should have the 1 alert we just registered
@@ -248,6 +259,12 @@ func TestAlertsAPI(t *testing.T) {
 	}
 	if err := alerter.RegisterAlert(a2); err != nil {
 		t.Fatal(err)
+	}
+
+	if alert, err := alerter.Alert(a2.ID); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(a2, alert) {
+		t.Fatalf("expected alert %v, got %v", a2, alert)
 	}
 
 	// we should only get the second alert if we filter with SeverityError

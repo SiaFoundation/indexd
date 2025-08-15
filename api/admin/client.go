@@ -89,6 +89,12 @@ func (c *Client) Alerts(ctx context.Context, opts ...AlertQueryParameterOption) 
 	return
 }
 
+// Alert returns an individual alert.
+func (c *Client) Alert(ctx context.Context, id types.Hash256) (alert alerts.Alert, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/alerts/%s", id), &alert)
+	return
+}
+
 // DismissAlerts dismisses registered alerts.
 func (c *Client) DismissAlerts(ctx context.Context, ids ...types.Hash256) (err error) {
 	err = c.c.POST(ctx, "/alerts/dismiss", ids, nil)
