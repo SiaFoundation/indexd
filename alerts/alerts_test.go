@@ -1,6 +1,7 @@
 package alerts
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -30,10 +31,16 @@ func TestAlertManager(t *testing.T) {
 		SeverityCritical,
 	}
 	for i, severity := range severities {
-		alert := Alert{ID: types.Hash256{byte(i + 1)}, Severity: severity, Message: severity.String(), Timestamp: time.Now()}
+		alert := Alert{ID: types.Hash256{byte(i + 1)}, Severity: severity, Message: severity.String(), Timestamp: time.Now().UTC()}
 		err := mgr.RegisterAlert(alert)
 		if err != nil {
 			t.Fatal("failed to register alert", err)
+		}
+
+		if got, err := mgr.Alert(alert.ID); err != nil {
+			t.Fatal("failed to get alert:", err)
+		} else if !reflect.DeepEqual(alert, got) {
+			t.Fatalf("expected alert %v, got %v", alert, got)
 		}
 	}
 
