@@ -64,7 +64,7 @@ func (s *Store) Account(ctx context.Context, ak types.PublicKey) (accounts.Accou
 	var account accounts.Account
 	account.AccountKey = proto.Account(ak) // no need to fetch key
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, `SELECT service_account FROM accounts WHERE public_key = $1`, sqlPublicKey(ak)).Scan(&account.ServiceAccount)
+		return tx.QueryRow(ctx, `SELECT service_account, max_pinned_data FROM accounts WHERE public_key = $1`, sqlPublicKey(ak)).Scan(&account.ServiceAccount, &account.MaxPinnedData)
 	})
 	return account, err
 }

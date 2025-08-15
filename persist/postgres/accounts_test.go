@@ -108,7 +108,7 @@ func TestAccount(t *testing.T) {
 	} else if !acc.ServiceAccount {
 		t.Fatalf("expected service account to be true, got false")
 	} else if acc.MaxPinnedData != math.MaxInt64 {
-		t.Fatalf("expected max pinned data to be 0, got %d", acc.MaxPinnedData)
+		t.Fatalf("expected max pinned data to be %d, got %d", math.MaxInt64, acc.MaxPinnedData)
 	}
 }
 
