@@ -120,7 +120,7 @@ func (s *Store) DeleteAppConnectKey(ctx context.Context, connectKey string) erro
 func (s *Store) UseAppConnectKey(ctx context.Context, connectKey string, appKey types.PublicKey) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var uses int
-		var storageLimit int64
+		var storageLimit uint64
 		err := tx.QueryRow(ctx, `
 			UPDATE app_connect_keys SET (remaining_uses, total_uses, last_used) = (remaining_uses - 1, total_uses + 1, NOW())
 			WHERE app_key = $1 RETURNING remaining_uses, max_pinned_data

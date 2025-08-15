@@ -29,7 +29,7 @@ var (
 type (
 	// AddAccountOptions holds optional parameters for account creation.
 	AddAccountOptions struct {
-		MaxPinnedData int64
+		MaxPinnedData uint64
 	}
 
 	// AddAccountOption is a functional option for configuring optional
@@ -38,7 +38,7 @@ type (
 )
 
 // WithMaxPinnedData sets the maximum amount of data that can be pinned
-func WithMaxPinnedData(maxPinnedData int64) AddAccountOption {
+func WithMaxPinnedData(maxPinnedData uint64) AddAccountOption {
 	return func(opts *AddAccountOptions) {
 		opts.MaxPinnedData = maxPinnedData
 	}
@@ -67,7 +67,7 @@ type (
 	Account struct {
 		AccountKey     proto.Account `json:"accountKey"`
 		ServiceAccount bool          `json:"serviceAccount"`
-		MaxPinnedData  int64         `json:"maxPinnedData"`
+		MaxPinnedData  uint64        `json:"maxPinnedData"`
 	}
 
 	// HostAccount represents an ephemeral account on a host.
