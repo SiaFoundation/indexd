@@ -24,12 +24,12 @@
         --border: #2b2f31;
         --text: #eff2ed;
         --muted: #a9b1aa;
-        --accent: #36d955;
-        --accent-600: #1e9d36;
-        --danger: #d93636;
-        --danger-600: #9d1e1e;
+        --accent: #15803d;
+        --accent-border: rgb(22 163 74 / 0.7);
+        --danger: #b91c1c;
+        --danger-border: rgb(220 38 38 / 0.7);
         --ring: #6ee38a;
-        --radius: 12px;
+        --radius: 4px;
         --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
       }
 
@@ -68,11 +68,11 @@
         position: relative;
         z-index: 1;
         width: min(560px, 92vw);
-        background: linear-gradient(180deg, var(--panel-hi), var(--panel));
+        background: hsl(197 6.8% 13.6% / 1);
         border: 1px solid var(--border);
         border-radius: var(--radius);
         box-shadow: var(--shadow);
-        padding: 24px;
+        padding: 24px 15px 15px;
       }
 
       /* header */
@@ -85,7 +85,7 @@
       .logo {
         width: 44px;
         height: 44px;
-        border-radius: 10px;
+        border-radius: var(--radius);
         flex: 0 0 44px;
         display: grid;
         place-items: center;
@@ -125,7 +125,7 @@
       input {
         width: 100%;
         padding: 10px 12px;
-        border-radius: 10px;
+        border-radius: var(--radius);
         background: #151819;
         border: 1px solid #3a3f40;
         color: var(--text);
@@ -136,8 +136,21 @@
         color: #7d8680;
       }
       input:focus {
-        border-color: var(--accent-600);
+        border-color: var(--accent-border);
         box-shadow: 0 0 0 3px color-mix(in srgb, var(--ring) 35%, transparent);
+      }
+
+      /* inline error next to label */
+      .label-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+      }
+      .error-text {
+        color: var(--danger);
+        font-size: 0.82rem;
+        white-space: nowrap;
       }
 
       /* actions */
@@ -150,28 +163,25 @@
       .btn {
         appearance: none;
         border: 1px solid transparent;
-        border-radius: 10px;
+        border-radius: var(--radius);
         padding: 10px 16px;
         font-weight: 600;
         cursor: pointer;
         transition: transform 0.04s ease, filter 0.15s ease,
           border-color 0.15s ease;
       }
-      .btn:active {
-        transform: translateY(1px);
-      }
       .btn-primary {
         background: var(--accent);
-        color: #102012;
-        border-color: var(--accent-600);
+        color: white;
+        border-color: var(--accent-border);
       }
       .btn-primary:hover {
         filter: brightness(1.05);
       }
       .btn-danger {
         background: var(--danger);
-        color: #230c0c;
-        border-color: var(--danger-600);
+        color: white;
+        border-color: var(--danger-border);
       }
       .btn-danger:hover {
         filter: brightness(1.04);
@@ -196,7 +206,7 @@
       .pill {
         width: 36px;
         height: 36px;
-        border-radius: 9px;
+        border-radius: var(--radius);
         display: grid;
         place-items: center;
         font-weight: 700;
@@ -204,11 +214,11 @@
       }
       .pill.success {
         background: color-mix(in srgb, var(--accent) 25%, #0b1a0d);
-        border-color: var(--accent-600);
+        border-color: var(--accent-border);
       }
       .pill.reject {
         background: color-mix(in srgb, var(--danger) 25%, #1a0b0b);
-        border-color: var(--danger-600);
+        border-color: var(--danger-border);
       }
       .result-title {
         margin: 0;
@@ -281,7 +291,10 @@
         </p>
       </div>
 
-      <label for="appPassword">App password</label>
+      <div class="label-row">
+        <label for="appPassword">App password</label>
+        <span id="passwordError" class="error-text" aria-live="polite"></span>
+      </div>
       <input
         type="password"
         id="appPassword"
@@ -300,14 +313,21 @@
     </div>
 
     <script>
+      const passwordError = document.getElementById("passwordError");
+      const passwordInput = document.getElementById("appPassword");
+
+      function setPasswordError(msg) {
+        passwordError.textContent = msg || "";
+      }
+
+      passwordInput.addEventListener("input", () => setPasswordError(""));
+
       async function respondToRequest(approve) {
         const response = await fetch("{{.ResponseURL}}", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Basic ${btoa(
-              ":" + document.getElementById("appPassword").value
-            )}`,
+            Authorization: `Basic ${btoa(":" + passwordInput.value)}`,
           },
           body: JSON.stringify({ approve }),
         });
@@ -350,11 +370,13 @@
         .getElementById("acceptButton")
         .addEventListener("click", async (e) => {
           e.preventDefault();
+          setPasswordError("");
           try {
             await respondToRequest(true);
             renderResult(true);
           } catch (err) {
-            console.error(err);
+            setPasswordError("invalid password");
+            passwordInput.focus();
           }
         });
 
@@ -362,11 +384,13 @@
         .getElementById("rejectButton")
         .addEventListener("click", async (e) => {
           e.preventDefault();
+          setPasswordError("");
           try {
             await respondToRequest(false);
             renderResult(false);
           } catch (err) {
-            console.error(err);
+            setPasswordError("invalid password");
+            passwordInput.focus();
           }
         });
     </script>
