@@ -87,9 +87,10 @@ type (
 	}
 
 	app struct {
-		store    Store
-		accounts Accounts
-		log      *zap.Logger
+		store     Store
+		accounts  Accounts
+		contracts Contracts
+		log       *zap.Logger
 
 		hostname     string
 		advertiseURL string
@@ -365,6 +366,10 @@ func (a *app) handlePOSTAuthConnect(jc jape.Context) {
 		a.log.Debug("failed to use app connect key", zap.Error(err))
 		jc.Error(ErrInternalError, http.StatusInternalServerError)
 	default:
+		if err := a.contracts.TriggerAccountFunding(false); err != nil {
+			// error is ignored since the account is already connected
+			a.log.Debug("failed to trigger account funding", zap.Error(err))
+		}
 		jc.Encode(nil)
 	}
 }
@@ -383,9 +388,10 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		return nil, fmt.Errorf("failed to parse advertise URL %q: %w", advertiseURL, err)
 	}
 	a := &app{
-		store:    store,
-		accounts: am,
-		log:      zap.NewNop(),
+		store:     store,
+		accounts:  am,
+		contracts: contracts,
+		log:       zap.NewNop(),
 
 		hostname:     u.Host,
 		advertiseURL: advertiseURL,
