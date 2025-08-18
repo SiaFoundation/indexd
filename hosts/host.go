@@ -3,6 +3,7 @@ package hosts
 import (
 	"errors"
 	"net"
+	"strings"
 	"time"
 
 	proto4 "go.sia.tech/core/rhp/v4"
@@ -180,4 +181,46 @@ var GoodUsability = Usability{
 // Usable returns true if all checks passed.
 func (u Usability) Usable() bool {
 	return u == GoodUsability
+}
+
+// FailedChecks returns a string representing all failed Usability checks.
+func (u Usability) FailedChecks() string {
+	var reasons []string
+	if !u.Uptime {
+		reasons = append(reasons, "Uptime")
+	}
+	if !u.MaxContractDuration {
+		reasons = append(reasons, "MaxContractDuration")
+	}
+	if !u.MaxCollateral {
+		reasons = append(reasons, "MaxCollateral")
+	}
+	if !u.ProtocolVersion {
+		reasons = append(reasons, "ProtocolVersion")
+	}
+	if !u.PriceValidity {
+		reasons = append(reasons, "PriceValidity")
+	}
+	if !u.AcceptingContracts {
+		reasons = append(reasons, "AcceptingContracts")
+	}
+	if !u.ContractPrice {
+		reasons = append(reasons, "ContractPrice")
+	}
+	if !u.Collateral {
+		reasons = append(reasons, "Collateral")
+	}
+	if !u.StoragePrice {
+		reasons = append(reasons, "StoragePrice")
+	}
+	if !u.IngressPrice {
+		reasons = append(reasons, "IngressPrice")
+	}
+	if !u.EgressPrice {
+		reasons = append(reasons, "EgressPrice")
+	}
+	if !u.FreeSectorPrice {
+		reasons = append(reasons, "FreeSectorPrice")
+	}
+	return strings.Join(reasons, ",")
 }
