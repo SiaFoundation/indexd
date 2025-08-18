@@ -16,7 +16,7 @@ func TestNewCluster(t *testing.T) {
 	}
 
 	// assert updates were synced
-	state, err := indexer.State(context.Background())
+	state, err := indexer.Admin.State(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if state.ScanHeight < tipState.Index.Height {
@@ -32,7 +32,7 @@ func TestNewCluster(t *testing.T) {
 	}
 
 	// assert indexer was funded
-	res, err := indexer.Wallet(context.Background())
+	res, err := indexer.Admin.Wallet(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if res.Balance.Confirmed.IsZero() {

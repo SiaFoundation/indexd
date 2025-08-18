@@ -159,6 +159,30 @@ func (s *hostManagerMock) WithScannedHost(ctx context.Context, hk types.PublicKe
 	return fn(h)
 }
 
+func (s *hostManagerMock) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) {
+	return s.store.HostsForPruning(ctx)
+}
+
+func (s *hostManagerMock) Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error) {
+	return s.store.Host(ctx, hk)
+}
+
+func (s *hostManagerMock) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
+	return s.store.HostsForPinning(ctx)
+}
+
+func (s *hostManagerMock) HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error) {
+	return s.store.HostsWithUnpinnableSectors(ctx)
+}
+
+func (s *hostManagerMock) Hosts(ctx context.Context, offset int, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
+	return s.store.Hosts(ctx, offset, limit, queryOpts...)
+}
+
+func (s *hostManagerMock) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error {
+	return s.store.BlockHosts(ctx, hostKeys, reason)
+}
+
 // TestPerformContractFormationWithoutContracts tests the
 // performContractFormation method assuming that we don't have any contracts
 // yet.

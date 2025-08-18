@@ -16,17 +16,25 @@ import (
 	"go.sia.tech/jape"
 )
 
-type mockStore struct{ tokens map[types.PublicKey]struct{} }
+type mockAccounts struct{ tokens map[types.PublicKey]struct{} }
 
-func (s *mockStore) HasAccount(_ context.Context, ak types.PublicKey) (bool, error) {
+func (s *mockAccounts) HasAccount(_ context.Context, ak types.PublicKey) (bool, error) {
 	_, found := s.tokens[ak]
 	return found, nil
+}
+
+func (s *mockAccounts) ValidAppConnectKey(context.Context, string) (bool, error) {
+	return true, nil
+}
+
+func (s *mockAccounts) UseAppConnectKey(context.Context, string, types.PublicKey) error {
+	return nil
 }
 
 func TestAuth(t *testing.T) {
 	const hostname = "indexer.sia.tech"
 	sk := types.GeneratePrivateKey()
-	s := &mockStore{tokens: map[types.PublicKey]struct{}{sk.PublicKey(): {}}}
+	s := &mockAccounts{tokens: map[types.PublicKey]struct{}{sk.PublicKey(): {}}}
 
 	server := httptest.NewServer(jape.Mux(map[string]jape.Handler{
 		"GET /foo": func(jc jape.Context) {

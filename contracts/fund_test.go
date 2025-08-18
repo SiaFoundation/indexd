@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
@@ -79,7 +80,8 @@ func (s *storeMock) ContractsForFunding(_ context.Context, hk types.PublicKey, l
 func TestPerformAccountFunding(t *testing.T) {
 	amMock := &accountsManagerMock{}
 	store := newStoreMock()
-	cm := newContractManager(types.PublicKey{}, amMock, nil, store, nil, nil, nil, nil)
+	hmMock := &hostManagerMock{settings: make(map[types.PublicKey]rhp.HostSettings), store: store}
+	cm := newContractManager(types.PublicKey{}, amMock, nil, store, nil, hmMock, nil, nil)
 
 	// fund accounts
 	err := cm.performAccountFunding(context.Background(), false, zap.NewNop())

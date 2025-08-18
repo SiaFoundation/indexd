@@ -47,6 +47,18 @@ func (s *mockStore) Hosts(ctx context.Context, offset, limit int, opts ...HostQu
 
 func (s *mockStore) HostsForScanning(ctx context.Context) ([]types.PublicKey, error) { return nil, nil }
 
+func (s *mockStore) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error {
+	return nil
+}
+
+func (s *mockStore) BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error) {
+	return nil, nil
+}
+
+func (s *mockStore) UnblockHost(ctx context.Context, hk types.PublicKey) error {
+	return nil
+}
+
 func (s *mockStore) PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error) {
 	return 0, nil
 }
@@ -61,6 +73,18 @@ func (s *mockStore) UsabilitySettings(context.Context) (UsabilitySettings, error
 
 func (s *mockStore) UpdateUsabilitySettings(_ context.Context, us UsabilitySettings) error {
 	return nil
+}
+
+func (s *mockStore) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) {
+	return nil, nil
+}
+
+func (s *mockStore) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
+	return nil, nil
+}
+
+func (s *mockStore) HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error) {
+	return nil, nil
 }
 
 // mockResolver is a mock that implements the Resolver interface.

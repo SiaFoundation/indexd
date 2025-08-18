@@ -19,7 +19,6 @@ import (
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/api"
-	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/build"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/explorer"
@@ -40,8 +39,6 @@ type (
 	// A ChainManager retrieves the current blockchain state
 	ChainManager interface {
 		TipState() consensus.State
-		RecommendedFee() types.Currency
-		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
 
@@ -52,16 +49,33 @@ type (
 		TriggerAccountFunding(force bool) error
 		TriggerContractPruning() error
 		TriggerMaintenance()
+
+		MaintenanceSettings(ctx context.Context) (contracts.MaintenanceSettings, error)
+		UpdateMaintenanceSettings(ctx context.Context, ms contracts.MaintenanceSettings) error
+
+		Contract(ctx context.Context, contractID types.FileContractID) (contracts.Contract, error)
+		Contracts(ctx context.Context, offset, limit int, queryOpts ...contracts.ContractQueryOpt) ([]contracts.Contract, error)
 	}
 
 	// HostManager defines an interface that allows triggering a host scan.
 	HostManager interface {
 		TriggerHostScanning()
 		ScanHost(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
+
+		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
+		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
+
+		BlockHosts(ctx context.Context, hks []types.PublicKey, reason string) error
+		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
+		UnblockHost(ctx context.Context, hk types.PublicKey) error
+
+		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)
+		UpdateUsabilitySettings(ctx context.Context, us hosts.UsabilitySettings) error
 	}
 
 	// PinManager defines an interface for managing pinned settings.
 	PinManager interface {
+		PinnedSettings(ctx context.Context) (pins.PinnedSettings, error)
 		UpdatePinnedSettings(ctx context.Context, ps pins.PinnedSettings) error
 	}
 
@@ -71,35 +85,24 @@ type (
 		SiacoinExchangeRate(ctx context.Context, currency string) (rate float64, err error)
 	}
 
+	// Accounts defines the account management interface for the application API.
+	Accounts interface {
+		Account(ctx context.Context, ak types.PublicKey) (accounts.Account, error)
+		Accounts(ctx context.Context, offset, limit int, opts ...accounts.QueryAccountsOpt) ([]accounts.Account, error)
+		DeleteAccount(ctx context.Context, ak types.PublicKey) error
+
+		AddAppConnectKey(context.Context, accounts.UpdateAppConnectKey) (accounts.ConnectKey, error)
+		UpdateAppConnectKey(context.Context, accounts.UpdateAppConnectKey) (accounts.ConnectKey, error)
+		DeleteAppConnectKey(context.Context, string) error
+		AppConnectKey(ctx context.Context, key string) (accounts.ConnectKey, error)
+		AppConnectKeys(ctx context.Context, offset, limit int) ([]accounts.ConnectKey, error)
+	}
+
 	// A Store is a persistent store for the indexer.
 	Store interface {
-		Account(ctx context.Context, ak types.PublicKey) (accounts.Account, error)
-		Accounts(ctx context.Context, offset, limit int, opts ...accounts.QueryAccountsOpt) ([]types.PublicKey, error)
-		AddAccount(ctx context.Context, ak types.PublicKey, opts ...accounts.AddAccountOption) error
-		DeleteAccount(ctx context.Context, ak types.PublicKey) error
-		UpdateAccount(ctx context.Context, oldAK, newAK types.PublicKey) error
-		BlockHosts(ctx context.Context, hks []types.PublicKey, reason string) error
-		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
-		Contract(ctx context.Context, contractID types.FileContractID) (contracts.Contract, error)
-		Contracts(ctx context.Context, offset, limit int, queryOpts ...contracts.ContractQueryOpt) ([]contracts.Contract, error)
-		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
-		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
-		LastScannedIndex(context.Context) (types.ChainIndex, error)
-		UnblockHost(ctx context.Context, hk types.PublicKey) error
-		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)
-		UpdateUsabilitySettings(ctx context.Context, us hosts.UsabilitySettings) error
-		MaintenanceSettings(ctx context.Context) (contracts.MaintenanceSettings, error)
-		UpdateMaintenanceSettings(ctx context.Context, ms contracts.MaintenanceSettings) error
-		PinnedSettings(ctx context.Context) (pins.PinnedSettings, error)
-		UpdatePinnedSettings(ctx context.Context, ps pins.PinnedSettings) error
-
-		AddAppConnectKey(context.Context, app.UpdateAppConnectKey) (app.ConnectKey, error)
-		UpdateAppConnectKey(context.Context, app.UpdateAppConnectKey) (app.ConnectKey, error)
-		DeleteAppConnectKey(context.Context, string) error
-		AppConnectKey(context.Context, string) (app.ConnectKey, error)
-		AppConnectKeys(ctx context.Context, offset, limit int) ([]app.ConnectKey, error)
-
 		SectorStats(ctx context.Context) (SectorsStatsResponse, error)
+
+		LastScannedIndex(context.Context) (types.ChainIndex, error)
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -112,10 +115,13 @@ type (
 	Wallet interface {
 		Address() types.Address
 		Balance() (balance wallet.Balance, err error)
-		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
+
 		UnconfirmedEvents() ([]wallet.Event, error)
 		Events(offset, limit int) ([]wallet.Event, error)
 		Event(id types.Hash256) (wallet.Event, error)
+
+		RecommendedFee() types.Currency
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 
 		FundV2Transaction(txn *types.V2Transaction, amount types.Currency, useUnconfirmed bool) (types.ChainIndex, []int, error)
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
@@ -131,17 +137,20 @@ type (
 
 type (
 	admin struct {
-		debug     bool
+		debug bool
+
+		accounts  Accounts
+		alerter   Alerter
 		chain     ChainManager
 		contracts ContractManager
+		explorer  Explorer
 		hosts     HostManager
 		pins      PinManager
-		explorer  Explorer
 		store     Store
 		syncer    Syncer
 		wallet    Wallet
-		alerter   Alerter
-		log       *zap.Logger
+
+		log *zap.Logger
 	}
 )
 
@@ -150,9 +159,10 @@ type (
 // API exposes endpoints to manage accounts, hosts, settings and the wallet.
 // This is different from the application API, which users, or rather their
 // applications, can use to pin slabs.
-func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, pm PinManager, syncer Syncer, wallet Wallet, store Store, alerter Alerter, opts ...Option) http.Handler {
+func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, hosts HostManager, pm PinManager, syncer Syncer, wallet Wallet, store Store, alerter Alerter, opts ...Option) http.Handler {
 	a := &admin{
 		chain:     chain,
+		accounts:  accounts,
 		contracts: contracts,
 		hosts:     hosts,
 		pins:      pm,
@@ -172,8 +182,6 @@ func NewAPI(chain ChainManager, contracts ContractManager, hosts HostManager, pm
 		// accounts endpoints
 		"GET    /accounts":            a.handleGETAccounts,
 		"GET    /account/:accountkey": a.handleGETAccount,
-		"POST   /account/:accountkey": a.handlePOSTAccount,
-		"PUT    /account/:accountkey": a.handlePUTAccount,
 		"DELETE /account/:accountkey": a.handleDELETEAccount,
 
 		// alerts endpoints
@@ -300,7 +308,7 @@ func (a *admin) handleGETAppConnectKeys(jc jape.Context) {
 		return
 	}
 
-	keys, err := a.store.AppConnectKeys(jc.Request.Context(), offset, limit)
+	keys, err := a.accounts.AppConnectKeys(jc.Request.Context(), offset, limit)
 	if jc.Check("failed to get app connect keys", err) != nil {
 		return
 	}
@@ -308,7 +316,7 @@ func (a *admin) handleGETAppConnectKeys(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTAppConnectKeys(jc jape.Context) {
-	var req app.AddConnectKeyRequest
+	var req AddConnectKeyRequest
 	if jc.Decode(&req) != nil {
 		return
 	}
@@ -316,8 +324,8 @@ func (a *admin) handlePOSTAppConnectKeys(jc jape.Context) {
 		req.MaxPinnedData = 1e12 // default to 1TB
 	}
 
-	created, err := a.store.AddAppConnectKey(jc.Request.Context(), app.UpdateAppConnectKey{
-		Key:           hex.EncodeToString(frand.Bytes(16)),
+	created, err := a.accounts.AddAppConnectKey(jc.Request.Context(), accounts.UpdateAppConnectKey{
+		Key:           hex.EncodeToString(frand.Bytes(32)),
 		Description:   req.Description,
 		MaxPinnedData: req.MaxPinnedData,
 		RemainingUses: req.RemainingUses,
@@ -329,13 +337,13 @@ func (a *admin) handlePOSTAppConnectKeys(jc jape.Context) {
 }
 
 func (a *admin) handlePUTAppConnectKeys(jc jape.Context) {
-	var key app.UpdateAppConnectKey
+	var key accounts.UpdateAppConnectKey
 	if jc.Decode(&key) != nil {
 		return
 	}
 
-	_, err := a.store.UpdateAppConnectKey(jc.Request.Context(), key)
-	if errors.Is(err, app.ErrKeyNotFound) {
+	_, err := a.accounts.UpdateAppConnectKey(jc.Request.Context(), key)
+	if errors.Is(err, accounts.ErrKeyNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to update app connect key", err) != nil {
@@ -351,8 +359,8 @@ func (a *admin) handleGETAppConnectKeysKey(jc jape.Context) {
 		return
 	}
 
-	connectKey, err := a.store.AppConnectKey(jc.Request.Context(), key)
-	if errors.Is(err, app.ErrKeyNotFound) {
+	connectKey, err := a.accounts.AppConnectKey(jc.Request.Context(), key)
+	if errors.Is(err, accounts.ErrKeyNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to get app connect key", err) != nil {
@@ -367,8 +375,8 @@ func (a *admin) handleDELETEAppConnectKeys(jc jape.Context) {
 		return
 	}
 
-	err := a.store.DeleteAppConnectKey(jc.Request.Context(), key)
-	if errors.Is(err, app.ErrKeyNotFound) {
+	err := a.accounts.DeleteAppConnectKey(jc.Request.Context(), key)
+	if errors.Is(err, accounts.ErrKeyNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to delete app connect key", err) != nil {
@@ -382,7 +390,7 @@ func (a *admin) handleGETAccount(jc jape.Context) {
 	if jc.DecodeParam("accountkey", &ak) != nil {
 		return
 	}
-	acc, err := a.store.Account(jc.Request.Context(), ak)
+	acc, err := a.accounts.Account(jc.Request.Context(), ak)
 	if errors.Is(err, accounts.ErrNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -406,81 +414,11 @@ func (a *admin) handleGETAccounts(jc jape.Context) {
 		opts = append(opts, accounts.WithServiceAccount(serviceAccount))
 	}
 
-	accounts, err := a.store.Accounts(jc.Request.Context(), offset, limit, opts...)
+	accounts, err := a.accounts.Accounts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get accounts", err) != nil {
 		return
 	}
 	jc.Encode(accounts)
-}
-
-func (a *admin) handlePOSTAccount(jc jape.Context) {
-	var ak types.PublicKey
-	if jc.DecodeParam("accountkey", &ak) != nil {
-		return
-	}
-
-	var req AddAccountRequest
-	var opts []accounts.AddAccountOption
-	if jc.Decode(&req) != nil {
-		return
-	} else if req.StorageLimit > 0 {
-		opts = append(opts, accounts.WithMaxPinnedData(req.StorageLimit))
-	}
-
-	err := a.store.AddAccount(jc.Request.Context(), ak, opts...)
-	if errors.Is(err, accounts.ErrExists) {
-		jc.Encode(nil) // treat as no-op, no need to trigger funding
-		return
-	} else if jc.Check("failed to add account", err) != nil {
-		return
-	}
-
-	err = a.contracts.TriggerAccountFunding(false)
-	if err != nil {
-		a.log.Warn("failed to trigger account funding after account ", zap.Error(err))
-	}
-
-	jc.Encode(nil)
-}
-
-func (a *admin) handlePUTAccount(jc jape.Context) {
-	var ak types.PublicKey
-	if jc.DecodeParam("accountkey", &ak) != nil {
-		return
-	}
-
-	var req AccountRotateKeyRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
-	switch req.NewAccountKey {
-	case types.PublicKey{}:
-		jc.Error(errors.New("new account key cannot be empty"), http.StatusBadRequest)
-		return
-	case ak:
-		jc.Error(errors.New("new account key cannot be the same as the old one"), http.StatusBadRequest)
-		return
-	default:
-	}
-
-	err := a.store.UpdateAccount(jc.Request.Context(), ak, req.NewAccountKey)
-	if errors.Is(err, accounts.ErrNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if errors.Is(err, accounts.ErrExists) {
-		jc.Error(err, http.StatusConflict)
-		return
-	} else if jc.Check("failed to rotate account key", err) != nil {
-		return
-	}
-
-	err = a.contracts.TriggerAccountFunding(false)
-	if err != nil {
-		a.log.Warn("failed to trigger account funding after account key rotation", zap.Error(err))
-	}
-
-	jc.Encode(nil)
 }
 
 func (a *admin) handleDELETEAccount(jc jape.Context) {
@@ -489,7 +427,7 @@ func (a *admin) handleDELETEAccount(jc jape.Context) {
 		return
 	}
 
-	err := a.store.DeleteAccount(jc.Request.Context(), ak)
+	err := a.accounts.DeleteAccount(jc.Request.Context(), ak)
 	if errors.Is(err, accounts.ErrNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -572,7 +510,7 @@ func (a *admin) handlePOSTSyncerConnect(jc jape.Context) {
 }
 
 func (a *admin) handleGETTxpoolRecommendedFee(jc jape.Context) {
-	jc.Encode(a.chain.RecommendedFee())
+	jc.Encode(a.wallet.RecommendedFee())
 }
 
 func (a *admin) handleGETExplorerSiacoinExchangeRate(jc jape.Context) {
@@ -600,7 +538,7 @@ func (a *admin) handleGETContract(jc jape.Context) {
 		return
 	}
 
-	contract, err := a.store.Contract(jc.Request.Context(), contractID)
+	contract, err := a.contracts.Contract(jc.Request.Context(), contractID)
 	if errors.Is(err, contracts.ErrNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -636,7 +574,7 @@ func (a *admin) handleGETContracts(jc jape.Context) {
 		opts = append(opts, contracts.WithGood(good))
 	}
 
-	contracts, err := a.store.Contracts(jc.Request.Context(), offset, limit, opts...)
+	contracts, err := a.contracts.Contracts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get contracts", err) != nil {
 		return
 	}
@@ -648,7 +586,7 @@ func (a *admin) handleGETHost(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
-	host, err := a.store.Host(jc.Request.Context(), hk)
+	host, err := a.hosts.Host(jc.Request.Context(), hk)
 	if errors.Is(err, hosts.ErrNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -702,7 +640,7 @@ func (a *admin) handleGETHosts(jc jape.Context) {
 		opts = append(opts, hosts.WithActiveContracts(activeContracts))
 	}
 
-	hosts, err := a.store.Hosts(jc.Request.Context(), offset, limit, opts...)
+	hosts, err := a.hosts.Hosts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}
@@ -714,7 +652,7 @@ func (a *admin) handleGETHostsBlocklist(jc jape.Context) {
 	if !ok {
 		return
 	}
-	hosts, err := a.store.BlockedHosts(jc.Request.Context(), offset, limit)
+	hosts, err := a.hosts.BlockedHosts(jc.Request.Context(), offset, limit)
 	if jc.Check("failed to get blocklist", err) != nil {
 		return
 	}
@@ -726,7 +664,8 @@ func (a *admin) handlePUTHostsBlocklist(jc jape.Context) {
 	if jc.Decode(&hosts) != nil {
 		return
 	}
-	jc.Check("failed to add host keys to blocklist", a.store.BlockHosts(jc.Request.Context(), hosts.HostKeys, hosts.Reason))
+	jc.Check("failed to add host keys to blocklist", a.hosts.BlockHosts(jc.Request.Context(), hosts.HostKeys, hosts.Reason))
+	jc.Encode(nil)
 }
 
 func (a *admin) handleDELETEHostsBlocklist(jc jape.Context) {
@@ -734,11 +673,12 @@ func (a *admin) handleDELETEHostsBlocklist(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
-	jc.Check("failed to unblock host", a.store.UnblockHost(jc.Request.Context(), hk))
+	jc.Check("failed to unblock host", a.hosts.UnblockHost(jc.Request.Context(), hk))
+	jc.Encode(nil)
 }
 
 func (a *admin) handleGETSettingsContracts(jc jape.Context) {
-	ms, err := a.store.MaintenanceSettings(jc.Request.Context())
+	ms, err := a.contracts.MaintenanceSettings(jc.Request.Context())
 	if jc.Check("failed to get contract settings", err) != nil {
 		return
 	}
@@ -750,11 +690,12 @@ func (a *admin) handlePUTSettingsContracts(jc jape.Context) {
 	if jc.Decode(&ms) != nil {
 		return
 	}
-	jc.Check("failed to update contract settings", a.store.UpdateMaintenanceSettings(jc.Request.Context(), ms))
+	jc.Check("failed to update contract settings", a.contracts.UpdateMaintenanceSettings(jc.Request.Context(), ms))
+	jc.Encode(nil)
 }
 
 func (a *admin) handleGETSettingsHosts(jc jape.Context) {
-	s, err := a.store.UsabilitySettings(jc.Request.Context())
+	s, err := a.hosts.UsabilitySettings(jc.Request.Context())
 	if jc.Check("failed to get host settings", err) != nil {
 		return
 	}
@@ -766,11 +707,12 @@ func (a *admin) handlePUTSettingsHosts(jc jape.Context) {
 	if jc.Decode(&s) != nil {
 		return
 	}
-	jc.Check("failed to update host settings", a.store.UpdateUsabilitySettings(jc.Request.Context(), s))
+	jc.Check("failed to update host settings", a.hosts.UpdateUsabilitySettings(jc.Request.Context(), s))
+	jc.Encode(nil)
 }
 
 func (a *admin) handleGETSettingsPricePinning(jc jape.Context) {
-	s, err := a.store.PinnedSettings(jc.Request.Context())
+	s, err := a.pins.PinnedSettings(jc.Request.Context())
 	if jc.Check("failed to get price pinning settings", err) != nil {
 		return
 	}
@@ -787,6 +729,7 @@ func (a *admin) handlePUTSettingsPricePinning(jc jape.Context) {
 	}
 
 	jc.Check("failed to update price pinning settings", a.pins.UpdatePinnedSettings(jc.Request.Context(), s))
+	jc.Encode(nil)
 }
 
 func (a *admin) handleGETWallet(jc jape.Context) {
@@ -848,7 +791,7 @@ func (a *admin) handlePOSTWalletSend(jc jape.Context) {
 	}
 
 	// subtract miner fee if necessary
-	minerFee := a.chain.RecommendedFee().Mul64(stdTxnSize)
+	minerFee := a.wallet.RecommendedFee().Mul64(stdTxnSize)
 	if req.SubtractMinerFee {
 		var underflow bool
 		req.Amount, underflow = req.Amount.SubWithUnderflow(minerFee)

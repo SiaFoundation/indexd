@@ -2,7 +2,6 @@ package app
 
 import (
 	"bytes"
-	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -45,12 +44,6 @@ const (
 	queryParamSignature  = "SiaIdx-Signature"
 	queryParamValidUntil = "SiaIdx-ValidUntil"
 )
-
-// accountStore defines the interface for checking if a public key corresponds
-// to a known account.
-type accountStore interface {
-	HasAccount(ctx context.Context, ak types.PublicKey) (bool, error)
-}
 
 // validateURLSignature extracts the signed public key from the request
 // and verifies the signature and expiration. If successful, it returns the
@@ -106,7 +99,7 @@ func validateURLSignature(jc jape.Context, hostname string) (types.PublicKey, bo
 // parameters, verifying the signature and expiration, and confirming the
 // account exists. If any check fails, it writes an HTTP error and returns
 // false, otherwise it returns the public key and true.
-func validateSignedURLAuth(jc jape.Context, hostname string, store accountStore) (types.PublicKey, bool) {
+func validateSignedURLAuth(jc jape.Context, hostname string, store Accounts) (types.PublicKey, bool) {
 	req := jc.Request
 
 	pk, ok := validateURLSignature(jc, hostname)

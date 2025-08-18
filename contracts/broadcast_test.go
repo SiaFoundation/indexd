@@ -82,10 +82,10 @@ func TestBroadcastContractRevisions(t *testing.T) {
 	// assert revision was broadcasted and contract was marked as such
 	if err := contracts.performBroadcastContractRevisions(context.Background(), zap.NewNop()); err != nil {
 		t.Fatal(err)
-	} else if len(syncerMock.broadcasted) != 1 {
-		t.Fatal("expected 1 broadcasted contract, got", len(syncerMock.broadcasted))
-	} else if syncerMock.broadcasted[0].FileContractRevisions[0].Revision != rev {
-		t.Fatal("unexpected revision", syncerMock.broadcasted[0].FileContractRevisions[0].Revision, rev)
+	} else if len(walletMock.broadcasted) != 1 {
+		t.Fatal("expected 1 broadcasted contract, got", len(walletMock.broadcasted))
+	} else if walletMock.broadcasted[0].FileContractRevisions[0].Revision != rev {
+		t.Fatal("unexpected revision", walletMock.broadcasted[0].FileContractRevisions[0].Revision, rev)
 	} else if contract, err := store.Contract(context.Background(), types.FileContractID{4}); err != nil {
 		t.Fatal(err)
 	} else if contract.LastBroadcastAttempt.IsZero() {

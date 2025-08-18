@@ -32,6 +32,8 @@ func (m *mockHostDialer) Hosts() []types.PublicKey {
 
 // ActiveHosts implements the [HostDialer] interface.
 func (m *mockHostDialer) ActiveHosts() []types.PublicKey {
+	m.sectorsMu.Lock()
+	defer m.sectorsMu.Unlock()
 	return slices.Collect(maps.Keys(m.hostSectors))
 }
 

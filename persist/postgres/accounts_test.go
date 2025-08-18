@@ -23,6 +23,18 @@ import (
 func TestAccounts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
+	assertAccount := func(t *testing.T, acc accounts.Account, expectedKey types.PublicKey, maxData uint64, isService bool) {
+		t.Helper()
+		switch {
+		case types.PublicKey(acc.AccountKey) != expectedKey:
+			t.Fatalf("expected account key %s, got %s", expectedKey, acc.AccountKey)
+		case acc.ServiceAccount != isService:
+			t.Fatalf("expected service account %t, got %t", isService, acc.ServiceAccount)
+		case uint64(acc.MaxPinnedData) != maxData:
+			t.Fatalf("expected max data %d, got %d", maxData, acc.MaxPinnedData)
+		}
+	}
+
 	pk1 := types.GeneratePrivateKey().PublicKey()
 	err := store.AddAccount(context.Background(), pk1)
 	if err != nil {
@@ -35,13 +47,22 @@ func TestAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// fetch all
-	accs, err := store.Accounts(context.Background(), 0, 2)
+	pk3 := types.GeneratePrivateKey().PublicKey()
+	err = store.AddAccount(context.Background(), pk3, accounts.WithMaxPinnedData(100))
 	if err != nil {
 		t.Fatal(err)
-	} else if len(accs) != 2 {
+	}
+
+	// fetch all
+	accs, err := store.Accounts(context.Background(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accs) != 3 {
 		t.Fatal("unexpected accounts", accs)
 	}
+	assertAccount(t, accs[0], pk1, math.MaxInt64, false)
+	assertAccount(t, accs[1], pk2, math.MaxInt64, true)
+	assertAccount(t, accs[2], pk3, 100, false)
 
 	// fetch all with limit and offset
 	accs, err = store.Accounts(context.Background(), 1, 1)
@@ -49,29 +70,27 @@ func TestAccounts(t *testing.T) {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
 		t.Fatal("unexpected accounts", accs)
-	} else if accs[0] != pk2 {
-		t.Fatalf("expected service account %s, got %s", pk2, accs[0])
 	}
+	assertAccount(t, accs[0], pk2, math.MaxInt64, true)
 
 	// fetch only user accounts
-	accs, err = store.Accounts(context.Background(), 0, 2, accounts.WithServiceAccount(false))
+	accs, err = store.Accounts(context.Background(), 0, 10, accounts.WithServiceAccount(false))
 	if err != nil {
 		t.Fatal(err)
-	} else if len(accs) != 1 {
+	} else if len(accs) != 2 {
 		t.Fatal("unexpected accounts", accs)
-	} else if accs[0] != pk1 {
-		t.Fatalf("expected service account %s, got %s", pk1, accs[0])
 	}
+	assertAccount(t, accs[0], pk1, math.MaxInt64, false)
+	assertAccount(t, accs[1], pk3, 100, false)
 
 	// fetch only service accounts
-	accs, err = store.Accounts(context.Background(), 0, 2, accounts.WithServiceAccount(true))
+	accs, err = store.Accounts(context.Background(), 0, 10, accounts.WithServiceAccount(true))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
 		t.Fatal("unexpected accounts", accs)
-	} else if accs[0] != pk2 {
-		t.Fatalf("expected service account %s, got %s", pk2, accs[0])
 	}
+	assertAccount(t, accs[0], pk2, math.MaxInt64, true)
 }
 
 func TestAccount(t *testing.T) {
@@ -88,6 +107,8 @@ func TestAccount(t *testing.T) {
 		t.Fatalf("expected public key %s, got %s", pk, acc.AccountKey)
 	} else if !acc.ServiceAccount {
 		t.Fatalf("expected service account to be true, got false")
+	} else if acc.MaxPinnedData != math.MaxInt64 {
+		t.Fatalf("expected max pinned data to be %d, got %d", math.MaxInt64, acc.MaxPinnedData)
 	}
 }
 
@@ -107,7 +128,7 @@ func TestAddAccount(t *testing.T) {
 		accs, err := store.Accounts(context.Background(), 0, 1, accounts.WithServiceAccount(serviceAccount))
 		if err != nil {
 			t.Fatal(err)
-		} else if len(accs) != 1 || accs[0] != pk {
+		} else if len(accs) != 1 || types.PublicKey(accs[0].AccountKey) != pk {
 			t.Fatal("unexpected accounts", accs)
 		}
 		acc, err := store.Account(context.Background(), pk)
@@ -161,7 +182,7 @@ func TestDeleteAccount(t *testing.T) {
 	accs, err := store.Accounts(context.Background(), 0, 1)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(accs) != 1 || accs[0] != pk {
+	} else if len(accs) != 1 || types.PublicKey(accs[0].AccountKey) != pk {
 		t.Fatal("unexpected accounts", accs)
 	}
 

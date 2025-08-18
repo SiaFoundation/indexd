@@ -93,103 +93,6 @@ func (p Pin) Enabled() bool {
 	return p > 0
 }
 
-// WithLogger creates the pin manager with a custom logger
-func WithLogger(l *zap.Logger) PinManagerOpt {
-	return func(pm *PinManager) {
-		pm.log = l
-	}
-}
-
-// WithPriceUpdateFrequency sets the frequency at which the prices are updated.
-func WithPriceUpdateFrequency(d time.Duration) PinManagerOpt {
-	return func(pm *PinManager) {
-		pm.updatePriceFrequency = d
-	}
-}
-
-// WithRateWindow sets the rate window over which we calculate the average
-// exchange rate to determine whether we should update the prices.
-func WithRateWindow(d time.Duration) PinManagerOpt {
-	return func(pm *PinManager) {
-		pm.rateWindow = d
-	}
-}
-
-// NewManager creates a new pin manager. It is responsible pinning prices to an
-// underlying currency if its configured to do so by the pinned settings.
-func NewManager(explorer Explorer, hosts HostManager, store Store, opts ...PinManagerOpt) (*PinManager, error) {
-	pm := &PinManager{
-		explorer: explorer,
-		hosts:    hosts,
-		store:    store,
-
-		updatePriceFrequency: 5 * time.Minute,
-		rateWindow:           6 * time.Hour,
-
-		tg:  threadgroup.New(),
-		log: zap.NewNop(),
-	}
-	for _, opt := range opts {
-		opt(pm)
-	}
-
-	if pm.rateWindow == 0 {
-		return nil, errors.New("rate window must be set")
-	} else if pm.updatePriceFrequency == 0 {
-		return nil, errors.New("price update frequency must be set")
-	} else if pm.updatePriceFrequency > pm.rateWindow {
-		return nil, errors.New("price update frequency exceeds rate window")
-	}
-
-	ctx, cancel, err := pm.tg.AddContext(context.Background())
-	if err != nil {
-		return nil, err
-	}
-	go func() {
-		defer cancel()
-
-		updatePinsTicker := time.NewTicker(pm.updatePriceFrequency)
-		defer updatePinsTicker.Stop()
-
-		for {
-			select {
-			case <-updatePinsTicker.C:
-				err := pm.updatePrices(ctx, false, pm.log.Named("pinning"))
-				if err != nil && !errors.Is(err, context.Canceled) {
-					pm.log.Error("failed to update prices", zap.Error(err))
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	return pm, nil
-}
-
-// UpdatePinnedSettings updates the pinned settings in the store and forces a
-// price update.
-func (pm *PinManager) UpdatePinnedSettings(ctx context.Context, ps PinnedSettings) error {
-	ctx, cancel, err := pm.tg.AddContext(ctx)
-	if err != nil {
-		return err
-	}
-	defer cancel()
-
-	err = pm.store.UpdatePinnedSettings(ctx, ps)
-	if err != nil {
-		return fmt.Errorf("failed to update pinned settings: %w", err)
-	}
-
-	return pm.updatePrices(ctx, true, pm.log.Named("pinning"))
-}
-
-// Close closes the pin manager.
-func (pm *PinManager) Close() error {
-	pm.tg.Stop()
-	return nil
-}
-
 // updatePrices will update the prices that correspond to the configured pins
 // depending on whether the new exchange rate exceeds a certain threshold. If
 // the force flag is set, the prices will be updated regardless of whether the
@@ -307,6 +210,86 @@ func (pm *PinManager) addRate(currency string, rate float64) bool {
 	// update average
 	pm.average = avg
 	return shouldUpdate
+}
+
+// PinnedSettings returns the pinned settings from the store.
+func (pm *PinManager) PinnedSettings(ctx context.Context) (PinnedSettings, error) {
+	return pm.store.PinnedSettings(ctx)
+}
+
+// UpdatePinnedSettings updates the pinned settings in the store and forces a
+// price update.
+func (pm *PinManager) UpdatePinnedSettings(ctx context.Context, ps PinnedSettings) error {
+	ctx, cancel, err := pm.tg.AddContext(ctx)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+
+	err = pm.store.UpdatePinnedSettings(ctx, ps)
+	if err != nil {
+		return fmt.Errorf("failed to update pinned settings: %w", err)
+	}
+
+	return pm.updatePrices(ctx, true, pm.log.Named("pinning"))
+}
+
+// Close closes the pin manager.
+func (pm *PinManager) Close() error {
+	pm.tg.Stop()
+	return nil
+}
+
+// NewManager creates a new pin manager. It is responsible pinning prices to an
+// underlying currency if its configured to do so by the pinned settings.
+func NewManager(explorer Explorer, hosts HostManager, store Store, opts ...PinManagerOpt) (*PinManager, error) {
+	pm := &PinManager{
+		explorer: explorer,
+		hosts:    hosts,
+		store:    store,
+
+		updatePriceFrequency: 5 * time.Minute,
+		rateWindow:           6 * time.Hour,
+
+		tg:  threadgroup.New(),
+		log: zap.NewNop(),
+	}
+	for _, opt := range opts {
+		opt(pm)
+	}
+
+	if pm.rateWindow == 0 {
+		return nil, errors.New("rate window must be set")
+	} else if pm.updatePriceFrequency == 0 {
+		return nil, errors.New("price update frequency must be set")
+	} else if pm.updatePriceFrequency > pm.rateWindow {
+		return nil, errors.New("price update frequency exceeds rate window")
+	}
+
+	ctx, cancel, err := pm.tg.AddContext(context.Background())
+	if err != nil {
+		return nil, err
+	}
+	go func() {
+		defer cancel()
+
+		updatePinsTicker := time.NewTicker(pm.updatePriceFrequency)
+		defer updatePinsTicker.Stop()
+
+		for {
+			select {
+			case <-updatePinsTicker.C:
+				err := pm.updatePrices(ctx, false, pm.log.Named("pinning"))
+				if err != nil && !errors.Is(err, context.Canceled) {
+					pm.log.Error("failed to update prices", zap.Error(err))
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	return pm, nil
 }
 
 // convertCurrencyToSC converts a value in an external currency and an exchange

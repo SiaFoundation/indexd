@@ -8,16 +8,11 @@ import (
 )
 
 type (
-	// AddAccountRequest is the request body for the [POST]
-	// /account/:accountkey.
-	AddAccountRequest struct {
-		StorageLimit int64 `json:"storageLimit"`
-	}
-
-	// AccountRotateKeyRequest is the request body for the [PUT]
-	// /account/:accountkey request.
-	AccountRotateKeyRequest struct {
-		NewAccountKey types.PublicKey `json:"newAccountKey"`
+	// AddConnectKeyRequest is the request body for adding a new application connection key.
+	AddConnectKeyRequest struct {
+		Description   string `json:"description"`
+		MaxPinnedData int64  `json:"maxPinnedData,omitempty"`
+		RemainingUses int    `json:"remainingUses"`
 	}
 
 	// BuildState contains static information about the build.

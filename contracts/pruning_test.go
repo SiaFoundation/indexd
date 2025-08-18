@@ -343,7 +343,7 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	}
 
 	performPruning := func(hostKey types.PublicKey) error {
-		return cm.hm.WithScannedHost(context.Background(), hostKey, func(h hosts.Host) error {
+		return cm.hosts.WithScannedHost(context.Background(), hostKey, func(h hosts.Host) error {
 			return cm.performContractPruningOnHost(context.Background(), h, zap.NewNop())
 		})
 	}

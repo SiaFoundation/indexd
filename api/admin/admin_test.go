@@ -16,10 +16,10 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/admin"
-	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/pins"
@@ -33,28 +33,28 @@ import (
 func TestAppConnectKeys(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
-	admin := indexer.Client
+	adminClient := indexer.Admin
 
-	keys, err := admin.AppConnectKeys(context.Background(), 0, 10)
+	keys, err := adminClient.AppConnectKeys(context.Background(), 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(keys) != 0 {
 		t.Fatal("unexpected keys", keys)
 	}
 
-	var generated []app.ConnectKey
+	var generated []accounts.ConnectKey
 	for i := range 100 {
 		description := fmt.Sprintf("key %d", i)
 		uses := frand.Intn(1000) + 1
-		created, err := admin.AddAppConnectKey(context.Background(), app.AddConnectKeyRequest{
+		created, err := adminClient.AddAppConnectKey(context.Background(), admin.AddConnectKeyRequest{
 			Description:   description,
 			RemainingUses: uses,
 		})
 		switch {
 		case err != nil:
 			t.Fatal(err)
-		case created.Key == "":
-			t.Fatal("expected key to be generated")
+		case len(created.Key) != 64:
+			t.Fatalf("expected key to be %d, got %d", 64, len(created.Key))
 		case created.RemainingUses != uses:
 			t.Fatal("expected remaining uses to match")
 		case created.TotalUses != 0:
@@ -74,7 +74,7 @@ func TestAppConnectKeys(t *testing.T) {
 	slices.Reverse(generated)
 
 	// verify keys were added
-	keys, err = admin.AppConnectKeys(context.Background(), 0, 10)
+	keys, err = adminClient.AppConnectKeys(context.Background(), 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(keys) != 10 {
@@ -87,7 +87,7 @@ func TestAppConnectKeys(t *testing.T) {
 		}
 	}
 
-	keys, err = admin.AppConnectKeys(context.Background(), 10, 10)
+	keys, err = adminClient.AppConnectKeys(context.Background(), 10, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(keys) != 10 {
@@ -105,7 +105,7 @@ func TestAppConnectKeys(t *testing.T) {
 	key.Description = "foobar"
 	key.MaxPinnedData = 32
 
-	err = admin.UpdateAppConnectKey(context.Background(), app.UpdateAppConnectKey{
+	err = adminClient.UpdateAppConnectKey(context.Background(), accounts.UpdateAppConnectKey{
 		Key:           key.Key,
 		Description:   key.Description,
 		RemainingUses: key.RemainingUses,
@@ -115,26 +115,26 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	keys, err = admin.AppConnectKeys(context.Background(), 0, 10)
+	keys, err = adminClient.AppConnectKeys(context.Background(), 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(keys[0], key) {
 		t.Fatal("unexpected key", keys[0], key)
 	}
 
-	err = admin.DeleteAppConnectKey(context.Background(), key.Key)
+	err = adminClient.DeleteAppConnectKey(context.Background(), key.Key)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	keys, err = admin.AppConnectKeys(context.Background(), 0, 10)
+	keys, err = adminClient.AppConnectKeys(context.Background(), 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(keys[0], generated[1]) {
 		t.Fatal("unexpected key", keys[0], generated[1])
 	}
 
-	key, err = admin.AppConnectKey(context.Background(), keys[0].Key)
+	key, err = adminClient.AppConnectKey(context.Background(), keys[0].Key)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(keys[0], key) {
@@ -145,38 +145,42 @@ func TestAppConnectKeys(t *testing.T) {
 func TestAccountsAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	admin := indexer.Admin
 
 	var accs []types.PublicKey
 	for range 10 {
 		accs = append(accs, types.GeneratePrivateKey().PublicKey())
-		err := indexer.AccountsAdd(context.Background(), accs[len(accs)-1])
+		err := indexer.Accounts().AddAccount(context.Background(), accs[len(accs)-1])
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	err := indexer.AccountsAdd(context.Background(), accs[len(accs)-1])
-	if err != nil {
-		t.Fatalf("expected re-adding an account to be treated as a no-op, instead %v", err)
-	}
-
-	opt := api.WithServiceAccount(false) // ignore service accounts
-
-	accounts, err := indexer.Accounts(context.Background(), opt)
+	accounts, err := admin.Accounts(context.Background(), api.WithServiceAccount(false))
 	if err != nil {
 		t.Fatal(err)
-	} else if !reflect.DeepEqual(accs, accounts) {
-		t.Fatal("unexpected accounts", accounts)
+	}
+	var returned []types.PublicKey
+	for _, acc := range accounts {
+		returned = append(returned, types.PublicKey(acc.AccountKey))
+	}
+	if !reflect.DeepEqual(accs, returned) {
+		t.Fatal("unexpected accounts", returned)
 	}
 
-	accounts, err = indexer.Accounts(context.Background(), api.WithOffset(7), api.WithLimit(2), opt)
+	accounts, err = admin.Accounts(context.Background(), api.WithOffset(7), api.WithLimit(2), api.WithServiceAccount(false))
 	if err != nil {
 		t.Fatal(err)
-	} else if !reflect.DeepEqual(accs[7:9], accounts) {
-		t.Fatal("unexpected accounts", accounts)
+	}
+	returned = returned[:0]
+	for _, acc := range accounts {
+		returned = append(returned, types.PublicKey(acc.AccountKey))
+	}
+	if !reflect.DeepEqual(accs[7:9], returned) {
+		t.Fatal("unexpected accounts", returned)
 	}
 
-	accounts, err = indexer.Accounts(context.Background(), api.WithOffset(10), api.WithLimit(2), opt)
+	accounts, err = admin.Accounts(context.Background(), api.WithOffset(10), api.WithLimit(2), api.WithServiceAccount(false))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accounts) != 0 {
@@ -184,46 +188,16 @@ func TestAccountsAPI(t *testing.T) {
 	}
 
 	for _, acc := range accs {
-		err = indexer.AccountsDelete(context.Background(), acc)
+		err = admin.DeleteAccount(context.Background(), acc)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
-	accounts, err = indexer.Accounts(context.Background(), opt)
+	accounts, err = admin.Accounts(context.Background(), api.WithServiceAccount(false))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accounts) != 0 {
 		t.Fatal("unexpected accounts", len(accounts))
-	}
-
-	pk1 := types.GeneratePrivateKey().PublicKey()
-	err = indexer.AccountsAdd(context.Background(), pk1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	accounts, err = indexer.Accounts(context.Background(), opt)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(accounts) != 1 {
-		t.Fatal("unexpected accounts", len(accounts))
-	} else if accounts[0] != pk1 {
-		t.Fatal("unexpected key", accounts[0])
-	}
-
-	pk2 := types.GeneratePrivateKey().PublicKey()
-	err = indexer.AccountsUpdate(context.Background(), pk1, pk2)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	accounts, err = indexer.Accounts(context.Background(), opt)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(accounts) != 1 {
-		t.Fatal("unexpected accounts", len(accounts))
-	} else if accounts[0] != pk2 {
-		t.Fatal("unexpected key", accounts[0])
 	}
 }
 
@@ -231,9 +205,10 @@ func TestAlertsAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
 	alerter := indexer.Alerter()
+	adminClient := indexer.Admin
 
 	// no alerts registered at this point
-	if alerts, err := indexer.Alerts(context.Background()); err != nil {
+	if alerts, err := adminClient.Alerts(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if len(alerts) != 0 {
 		t.Fatalf("expected 0 alerts, got %d", len(alerts))
@@ -250,7 +225,7 @@ func TestAlertsAPI(t *testing.T) {
 	}
 
 	// we should have the 1 alert we just registered
-	if alerts, err := indexer.Alerts(context.Background()); err != nil {
+	if alerts, err := adminClient.Alerts(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if len(alerts) != 1 {
 		t.Fatalf("expected 1 alerts, got %d", len(alerts))
@@ -259,7 +234,7 @@ func TestAlertsAPI(t *testing.T) {
 	}
 
 	// offset = 1 with only 1 alert registered should mean no results
-	if alerts, err := indexer.Alerts(context.Background(), admin.AlertQueryParameterOption(api.WithOffset(1))); err != nil {
+	if alerts, err := adminClient.Alerts(context.Background(), admin.AlertQueryParameterOption(api.WithOffset(1))); err != nil {
 		t.Fatal(err)
 	} else if len(alerts) != 0 {
 		t.Fatalf("expected 0 alerts, got %d", len(alerts))
@@ -276,7 +251,7 @@ func TestAlertsAPI(t *testing.T) {
 	}
 
 	// we should only get the second alert if we filter with SeverityError
-	if alerts, err := indexer.Alerts(context.Background(), admin.WithSeverity(alerts.SeverityError)); err != nil {
+	if alerts, err := adminClient.Alerts(context.Background(), admin.WithSeverity(alerts.SeverityError)); err != nil {
 		t.Fatal(err)
 	} else if len(alerts) != 1 {
 		t.Fatalf("expected 1 alerts, got %d", len(alerts))
@@ -284,7 +259,7 @@ func TestAlertsAPI(t *testing.T) {
 		t.Fatalf("expected alert %v, got %v", a2, alerts[0])
 	}
 
-	alerts, err := indexer.Alerts(context.Background())
+	alerts, err := adminClient.Alerts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -299,12 +274,12 @@ func TestAlertsAPI(t *testing.T) {
 		t.Fatalf("expected alert %v, got %v", a2, alerts[1])
 	}
 
-	if err := indexer.DismissAlerts(context.Background(), a1.ID); err != nil {
+	if err := adminClient.DismissAlerts(context.Background(), a1.ID); err != nil {
 		t.Fatal(err)
 	}
 
 	// we should only have the second alert left after dismissing the first one
-	if alerts, err := indexer.Alerts(context.Background()); err != nil {
+	if alerts, err := adminClient.Alerts(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if len(alerts) != 1 {
 		t.Fatalf("expected 1 alerts, got %d", len(alerts))
@@ -318,12 +293,13 @@ func TestContractsAPI(t *testing.T) {
 	logger := newTestLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithHosts(1), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
+	adminClient := indexer.Admin
 	c := cluster.ConsensusNode
 	h := cluster.Hosts[0]
 	time.Sleep(time.Second)
 
 	// assert it got scanned
-	if h, err := indexer.Host(context.Background(), h.PublicKey()); err != nil {
+	if h, err := adminClient.Host(context.Background(), h.PublicKey()); err != nil {
 		t.Fatal(err)
 	} else if !h.Usability.Usable() {
 		v := reflect.ValueOf(h.Usability)
@@ -339,7 +315,7 @@ func TestContractsAPI(t *testing.T) {
 	// assert a contract was formed
 	time.Sleep(time.Second)
 	var contract contracts.Contract
-	if contracts, err := indexer.Contracts(context.Background()); err != nil {
+	if contracts, err := adminClient.Contracts(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatal("expected 1 contract", len(contracts))
@@ -348,52 +324,52 @@ func TestContractsAPI(t *testing.T) {
 	}
 
 	// assert we can fetch the contract by ID
-	if c, err := indexer.Contract(context.Background(), contract.ID); err != nil {
+	if c, err := adminClient.Contract(context.Background(), contract.ID); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(c, contract) {
 		t.Fatal("unexpected contract", c)
 	}
 
 	// assert fetching a non-existing contract returns an error
-	if _, err := indexer.Contract(context.Background(), types.FileContractID{}); err == nil || !strings.Contains(err.Error(), contracts.ErrNotFound.Error()) {
+	if _, err := adminClient.Contract(context.Background(), types.FileContractID{}); err == nil || !strings.Contains(err.Error(), contracts.ErrNotFound.Error()) {
 		t.Fatal("expected ErrNotFound", err)
 	}
 
 	// assert WithGood filters out bad contracts
-	if contracts, err := indexer.Contracts(context.Background(), admin.WithGood(true)); err != nil {
+	if contracts, err := adminClient.Contracts(context.Background(), admin.WithGood(true)); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatal("expected 1 contract", len(contracts))
-	} else if contracts, err := indexer.Contracts(context.Background(), admin.WithGood(false)); err != nil {
+	} else if contracts, err := adminClient.Contracts(context.Background(), admin.WithGood(false)); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 0 {
 		t.Fatal("expected no contract", len(contracts))
 	}
 
 	// assert WithRevisable filters out non-revisable contracts
-	if contracts, err := indexer.Contracts(context.Background(), admin.WithRevisable(true)); err != nil {
+	if contracts, err := adminClient.Contracts(context.Background(), admin.WithRevisable(true)); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatal("expected 1 contract", len(contracts))
-	} else if contracts, err := indexer.Contracts(context.Background(), admin.WithRevisable(false)); err != nil {
+	} else if contracts, err := adminClient.Contracts(context.Background(), admin.WithRevisable(false)); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 0 {
 		t.Fatal("expected no contract", len(contracts))
 	}
 
 	// block host and assert it's not returned
-	if err := indexer.HostsBlocklistAdd(context.Background(), []types.PublicKey{h.PublicKey()}, t.Name()); err != nil {
+	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h.PublicKey()}, t.Name()); err != nil {
 		t.Fatal(err)
-	} else if contracts, err := indexer.Contracts(context.Background(), admin.WithGood(true)); err != nil {
+	} else if contracts, err := adminClient.Contracts(context.Background(), admin.WithGood(true)); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 0 {
 		t.Fatal("expected no contract", len(contracts))
-	} else if err := indexer.HostsBlocklistRemove(context.Background(), h.PublicKey()); err != nil {
+	} else if err := adminClient.HostsBlocklistRemove(context.Background(), h.PublicKey()); err != nil {
 		t.Fatal(err)
 	}
 
 	// figure out the renew height
-	cs, err := indexer.SettingsContracts(context.Background())
+	cs, err := adminClient.SettingsContracts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +387,7 @@ func TestContractsAPI(t *testing.T) {
 
 	// assert contract was renewed - we don't pass the option here to asserts
 	// the contracts API returns only revisable contracts by default
-	if contracts, err := indexer.Contracts(context.Background()); err != nil {
+	if contracts, err := adminClient.Contracts(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatal("expected 1 contract, got", len(contracts))
@@ -423,8 +399,9 @@ func TestContractsAPI(t *testing.T) {
 func TestExplorerAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
 
-	rate, err := indexer.ExplorerSiacoinExchangeRate(context.Background(), "usd")
+	rate, err := adminClient.ExplorerSiacoinExchangeRate(context.Background(), "usd")
 	if err != nil {
 		t.Fatal(err)
 	} else if rate == 0 {
@@ -435,6 +412,7 @@ func TestExplorerAPI(t *testing.T) {
 func TestSyncerAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
 
 	log := zaptest.NewLogger(t)
 	network, genesis := testutil.V2Network()
@@ -446,7 +424,7 @@ func TestSyncerAPI(t *testing.T) {
 	s := testutils.NewSyncer(t, genesis.ID(), cm)
 	defer s.Close()
 
-	if err := indexer.SyncerConnect(s.Addr()); err != nil {
+	if err := adminClient.SyncerConnect(s.Addr()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -454,8 +432,9 @@ func TestSyncerAPI(t *testing.T) {
 func TestTxpoolAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
 
-	fee, err := indexer.TxpoolRecommendedFee()
+	fee, err := adminClient.TxpoolRecommendedFee()
 	if err != nil {
 		t.Fatal(err)
 	} else if fee == types.ZeroCurrency {
@@ -470,6 +449,7 @@ func TestHostsAPI(t *testing.T) {
 	// create cluster
 	cluster := testutils.NewCluster(t, testutils.WithHosts(2), testutils.WithIndexer(testutils.WithMaintenanceSettings(ms)))
 	indexer := cluster.Indexer
+	adminClient := indexer.Admin
 	time.Sleep(time.Second)
 
 	// convenience variables
@@ -477,11 +457,11 @@ func TestHostsAPI(t *testing.T) {
 	h2 := cluster.Hosts[1]
 
 	// assert both hosts got scanned
-	if hosts, err := indexer.Hosts(context.Background()); err != nil {
+	if hosts, err := adminClient.Hosts(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 2 {
 		t.Fatal("expected 2 hosts", len(hosts))
-	} else if h1, err := indexer.Host(context.Background(), h1.PublicKey()); err != nil {
+	} else if h1, err := adminClient.Host(context.Background(), h1.PublicKey()); err != nil {
 		t.Fatal(err)
 	} else if h1.LastSuccessfulScan.IsZero() {
 		t.Fatal("expected h1 to be scanned successfully")
@@ -489,7 +469,7 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatal("expected h1 to not have failed scans")
 	} else if !h1.Usability.Usable() {
 		t.Fatal("expected h1 to be usable", h1.Usability)
-	} else if h2, err := indexer.Host(context.Background(), h2.PublicKey()); err != nil {
+	} else if h2, err := adminClient.Host(context.Background(), h2.PublicKey()); err != nil {
 		t.Fatal(err)
 	} else if h2.LastSuccessfulScan.IsZero() {
 		t.Fatal("expected h2 to be scanned successfully")
@@ -500,28 +480,28 @@ func TestHostsAPI(t *testing.T) {
 	}
 
 	// assert blocklist is empty and unblocking unknown host is noop
-	if blocklist, err := indexer.HostsBlocklist(context.Background()); err != nil {
+	if blocklist, err := adminClient.HostsBlocklist(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if len(blocklist) != 0 {
 		t.Fatal("expected 0 blocklisted hosts", len(blocklist))
-	} else if indexer.HostsBlocklistRemove(context.Background(), types.GeneratePrivateKey().PublicKey()) != nil {
+	} else if adminClient.HostsBlocklistRemove(context.Background(), types.GeneratePrivateKey().PublicKey()) != nil {
 		t.Fatal("expected error")
 	}
 
 	// block both hosts
-	if err := indexer.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey(), h2.PublicKey()}, t.Name()); err != nil {
+	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey(), h2.PublicKey()}, t.Name()); err != nil {
 		t.Fatal(err)
-	} else if blocklist, err := indexer.HostsBlocklist(context.Background()); err != nil {
+	} else if blocklist, err := adminClient.HostsBlocklist(context.Background()); err != nil {
 		t.Fatal(err)
 	} else if len(blocklist) != 2 {
 		t.Fatal("expected 2 blocklisted hosts", len(blocklist))
-	} else if h1, err := indexer.Host(context.Background(), h1.PublicKey()); err != nil {
+	} else if h1, err := adminClient.Host(context.Background(), h1.PublicKey()); err != nil {
 		t.Fatal(err)
 	} else if !h1.Blocked {
 		t.Fatal("expected host to be blocked", h1.Blocked)
 	} else if h1.BlockedReason != t.Name() {
 		t.Fatalf("expected host to be blocked with reason %s, got %s", t.Name(), h1.BlockedReason)
-	} else if h2, err := indexer.Host(context.Background(), h2.PublicKey()); err != nil {
+	} else if h2, err := adminClient.Host(context.Background(), h2.PublicKey()); err != nil {
 		t.Fatal(err)
 	} else if !h2.Blocked {
 		t.Fatal("expected host to be blocked", h2.Blocked)
@@ -530,22 +510,22 @@ func TestHostsAPI(t *testing.T) {
 	}
 
 	// unblock h1
-	if err := indexer.HostsBlocklistRemove(context.Background(), h1.PublicKey()); err != nil {
+	if err := adminClient.HostsBlocklistRemove(context.Background(), h1.PublicKey()); err != nil {
 		t.Fatal(err)
-	} else if h1, err := indexer.Host(context.Background(), h1.PublicKey()); err != nil {
+	} else if h1, err := adminClient.Host(context.Background(), h1.PublicKey()); err != nil {
 		t.Fatal(err)
 	} else if h1.Blocked {
 		t.Fatal("expected host to be unblocked", h1.Blocked)
 	}
 
 	// filter by blocked hosts
-	unblocked, err := indexer.Hosts(context.Background(), admin.WithBlocked(false))
+	unblocked, err := adminClient.Hosts(context.Background(), admin.WithBlocked(false))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unblocked) != 1 || unblocked[0].PublicKey != h1.PublicKey() {
 		t.Fatalf("invalid hosts were returned (%d): %+v", len(unblocked), unblocked)
 	}
-	blocked, err := indexer.Hosts(context.Background(), admin.WithBlocked(true))
+	blocked, err := adminClient.Hosts(context.Background(), admin.WithBlocked(true))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(blocked) != 1 || blocked[0].PublicKey != h2.PublicKey() {
@@ -553,13 +533,13 @@ func TestHostsAPI(t *testing.T) {
 	}
 
 	// filter by usable hosts - all of them should be usable
-	usable, err := indexer.Hosts(context.Background(), admin.WithUsable(true))
+	usable, err := adminClient.Hosts(context.Background(), admin.WithUsable(true))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(usable) != 2 {
 		t.Fatalf("invalid number of hosts: %d", len(usable))
 	}
-	unusable, err := indexer.Hosts(context.Background(), admin.WithUsable(false))
+	unusable, err := adminClient.Hosts(context.Background(), admin.WithUsable(false))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unusable) != 0 {
@@ -567,13 +547,13 @@ func TestHostsAPI(t *testing.T) {
 	}
 
 	// filter for hosts with contracts - none should have contracts
-	contracted, err := indexer.Hosts(context.Background(), admin.WithActiveContracts(true))
+	contracted, err := adminClient.Hosts(context.Background(), admin.WithActiveContracts(true))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contracted) != 0 {
 		t.Fatalf("invalid number of hosts: %d", len(contracted))
 	}
-	notContracted, err := indexer.Hosts(context.Background(), admin.WithActiveContracts(false))
+	notContracted, err := adminClient.Hosts(context.Background(), admin.WithActiveContracts(false))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(notContracted) != 2 {
@@ -581,11 +561,11 @@ func TestHostsAPI(t *testing.T) {
 	}
 
 	// manually scan host
-	host1, err := indexer.Host(context.Background(), h1.PublicKey())
+	host1, err := adminClient.Host(context.Background(), h1.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
-	scanHost1, err := indexer.ScanHost(context.Background(), h1.PublicKey())
+	scanHost1, err := adminClient.ScanHost(context.Background(), h1.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -603,9 +583,10 @@ func TestHostsAPI(t *testing.T) {
 func TestSettingsAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
 
 	// assert contract settings can be fetched and updated
-	cs, err := indexer.SettingsContracts(context.Background())
+	cs, err := adminClient.SettingsContracts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -614,12 +595,12 @@ func TestSettingsAPI(t *testing.T) {
 	cs.RenewWindow = cs.Period / 2
 	cs.WantedContracts = frand.Uint64n(1e3)
 
-	err = indexer.SettingsContractsUpdate(context.Background(), cs)
+	err = adminClient.SettingsContractsUpdate(context.Background(), cs)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	csUpdate, err := indexer.SettingsContracts(context.Background())
+	csUpdate, err := adminClient.SettingsContracts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(cs, csUpdate) {
@@ -627,7 +608,7 @@ func TestSettingsAPI(t *testing.T) {
 	}
 
 	// assert host settings can be fetched and updated
-	hs, err := indexer.SettingsHosts(context.Background())
+	hs, err := adminClient.SettingsHosts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -637,12 +618,12 @@ func TestSettingsAPI(t *testing.T) {
 	hs.MinCollateral = types.NewCurrency64(frand.Uint64n(1e3))
 	frand.Read(hs.MinProtocolVersion[:])
 
-	err = indexer.SettingsHostsUpdate(context.Background(), hs)
+	err = adminClient.SettingsHostsUpdate(context.Background(), hs)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	hsUpdate, err := indexer.SettingsHosts(context.Background())
+	hsUpdate, err := adminClient.SettingsHosts(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(hs, hsUpdate) {
@@ -650,7 +631,7 @@ func TestSettingsAPI(t *testing.T) {
 	}
 
 	// assert price pinning settings can be fetched and updated
-	ps, err := indexer.SettingsPricePinning(context.Background())
+	ps, err := adminClient.SettingsPricePinning(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -660,12 +641,12 @@ func TestSettingsAPI(t *testing.T) {
 	ps.MaxStoragePrice = pins.Pin(frand.Float64())
 	ps.MinCollateral = pins.Pin(frand.Float64())
 
-	err = indexer.SettingsPricePinningUpdate(context.Background(), ps)
+	err = adminClient.SettingsPricePinningUpdate(context.Background(), ps)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	psUpdate, err := indexer.SettingsPricePinning(context.Background())
+	psUpdate, err := adminClient.SettingsPricePinning(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(ps, psUpdate) {
@@ -677,10 +658,12 @@ func TestWalletAPI(t *testing.T) {
 	// create indexer
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
+
 	c.MineBlocks(t, indexer.WalletAddr(), 1)
 
 	// assert events are being persisted
-	events, err := indexer.WalletEvents(context.Background())
+	events, err := adminClient.WalletEvents(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(events) != 1 {
@@ -689,7 +672,7 @@ func TestWalletAPI(t *testing.T) {
 		t.Fatalf("expected miner payout, %+v", events[0])
 	}
 
-	event, err := indexer.WalletEvent(context.Background(), events[0].ID)
+	event, err := adminClient.WalletEvent(context.Background(), events[0].ID)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(events[0], event) {
@@ -697,7 +680,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// assert wallet is empty
-	res, err := indexer.Wallet(context.Background())
+	res, err := adminClient.Wallet(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if !res.Confirmed.Add(res.Unconfirmed).IsZero() {
@@ -708,7 +691,7 @@ func TestWalletAPI(t *testing.T) {
 	c.MineBlocks(t, types.Address{}, c.Network().MaturityDelay)
 
 	// assert wallet is funded
-	res, err = indexer.Wallet(context.Background())
+	res, err = adminClient.Wallet(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if res.Confirmed.IsZero() {
@@ -718,7 +701,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// assert sending siacoins to void address fails
-	_, err = indexer.WalletSendSiacoins(context.Background(), types.VoidAddress, types.Siacoins(1), false, false)
+	_, err = adminClient.WalletSendSiacoins(context.Background(), types.VoidAddress, types.Siacoins(1), false, false)
 	if err == nil || !strings.Contains(err.Error(), "cannot send to void address") {
 		t.Fatal("unexpected error", err)
 	}
@@ -735,13 +718,13 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// assert we can send siacoins to that host
-	txnID, err := indexer.WalletSendSiacoins(context.Background(), w.Address(), types.Siacoins(1), false, false)
+	txnID, err := adminClient.WalletSendSiacoins(context.Background(), w.Address(), types.Siacoins(1), false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert the transaction is pending
-	pending, err := indexer.WalletPending(context.Background())
+	pending, err := adminClient.WalletPending(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(pending) != 1 {
@@ -764,7 +747,7 @@ func TestWalletAPI(t *testing.T) {
 	}
 
 	// assert the transaction is no longer pending
-	pending, err = indexer.WalletPending(context.Background())
+	pending, err = adminClient.WalletPending(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(pending) != 0 {
@@ -776,9 +759,10 @@ func TestSectorStatsAPI(t *testing.T) {
 	// create indexer
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
 
 	// assert 0 slabs
-	stats, err := indexer.StatsSectors(context.Background())
+	stats, err := adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if stats.NumSlabs != 0 {
@@ -802,7 +786,7 @@ func TestSectorStatsAPI(t *testing.T) {
 	}
 
 	// assert 1 slab
-	stats, err = indexer.StatsSectors(context.Background())
+	stats, err = adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if stats.NumSlabs != 1 {
@@ -815,7 +799,7 @@ func TestSectorStatsAPI(t *testing.T) {
 	}
 
 	// assert 0 slabs
-	stats, err = indexer.StatsSectors(context.Background())
+	stats, err = adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	} else if stats.NumSlabs != 0 {

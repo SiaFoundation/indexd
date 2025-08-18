@@ -9,7 +9,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/api/admin"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
 	"lukechampine.com/frand"
@@ -24,14 +24,14 @@ func TestContractPruning(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	err := indexer.AccountsAdd(context.Background(), a1.PublicKey())
+	err := indexer.Accounts().AddAccount(context.Background(), a1.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert we have 3 usable hosts
 	time.Sleep(time.Second)
-	hosts, err := indexer.Hosts(context.Background(), admin.WithUsable(true), admin.WithActiveContracts(true))
+	hosts, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true), hosts.WithActiveContracts(true))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 3 {
@@ -100,8 +100,7 @@ func TestContractPruning(t *testing.T) {
 	}
 
 	// trigger contract pruning
-	err = indexer.TriggerAction(context.Background(), "pruning")
-	if err != nil {
+	if err = indexer.Contracts().TriggerContractPruning(); err != nil {
 		t.Fatal(err)
 	}
 
@@ -129,14 +128,14 @@ func TestSectorPinning(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	err := indexer.AccountsAdd(context.Background(), a1.PublicKey())
+	err := indexer.Accounts().AddAccount(context.Background(), a1.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert we have 3 usable hosts
 	time.Sleep(time.Second)
-	hosts, err := indexer.Hosts(context.Background(), admin.WithUsable(true), admin.WithActiveContracts(true))
+	hosts, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true), hosts.WithActiveContracts(true))
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 3 {

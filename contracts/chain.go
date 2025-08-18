@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -197,7 +196,7 @@ func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
 	for _, fce := range expiredFCEs {
 		const contractResolutionTxnWeight = 1000
 		txn := types.V2Transaction{
-			MinerFee: m.cm.RecommendedFee().Mul64(contractResolutionTxnWeight),
+			MinerFee: m.wallet.RecommendedFee().Mul64(contractResolutionTxnWeight),
 			FileContractResolutions: []types.V2FileContractResolution{
 				{
 					Parent:     fce,
@@ -207,35 +206,25 @@ func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
 		}
 
 		// fund and sign txn
-		basis, toSign, err := m.w.FundV2Transaction(&txn, txn.MinerFee, true)
+		basis, toSign, err := m.wallet.FundV2Transaction(&txn, txn.MinerFee, true)
 		if err != nil {
 			m.log.Error("failed to fund contract expiration txn", zap.Error(err))
 			continue
 		}
-		m.w.SignV2Inputs(&txn, toSign)
+		m.wallet.SignV2Inputs(&txn, toSign)
 
 		// fetch potential parents and basis for broadcasting the txn set
-		basis, txnSet, err := m.cm.V2TransactionSet(basis, txn)
+		basis, txnSet, err := m.chain.V2TransactionSet(basis, txn)
 		if err != nil {
 			m.log.Error("failed to retrieve txn set for broadcasting", zap.Error(err))
-			m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
+			m.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 			continue
 		}
 
 		// verify txn and broadcast it
-		_, err = m.cm.AddV2PoolTransactions(basis, txnSet)
-		if err != nil {
-			if strings.Contains(err.Error(), "has already been resolved") ||
-				strings.Contains(err.Error(), "not present in the accumulator") {
-				m.log.Debug("failed to add broadcast contract expiration txn to pool", zap.Error(err))
-			} else {
-				m.log.Error("failed to add contract expiration txn to pool", zap.Error(err))
-			}
-			m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
-			continue
-		} else if err := m.s.BroadcastV2TransactionSet(basis, []types.V2Transaction{txn}); err != nil {
+		if err = m.wallet.BroadcastV2TransactionSet(basis, txnSet); err != nil {
+			m.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 			m.log.Error("failed to broadcast contract expiration txn", zap.Error(err))
-			m.w.ReleaseInputs(nil, []types.V2Transaction{txn})
 			continue
 		}
 	}

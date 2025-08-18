@@ -19,7 +19,7 @@ func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Lo
 
 	// fetch hosts for pinning, a host is eligble for pinning if it is not
 	// blocked, has unpinned sectors and has an active contract
-	hfp, err := cm.store.HostsForPinning(ctx)
+	hfp, err := cm.hosts.HostsForPinning(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch hosts for pinning: %w", err)
 	} else if len(hfp) == 0 {
@@ -46,7 +46,7 @@ loop:
 				wg.Done()
 			}()
 
-			if err := cm.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+			if err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
 				return cm.performSectorPinningOnHost(ctx, host, hostLog)
 			}); err != nil {
 				hostLog.Debug("failed to pin sectors", zap.Error(err))

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sync"
 	"time"
 
 	"go.sia.tech/core/consensus"
@@ -54,9 +53,7 @@ type (
 	// ChainManager is the minimal interface of ChainManager functionality the
 	// ContractManager requires.
 	ChainManager interface {
-		AddV2PoolTransactions(basis types.ChainIndex, txns []types.V2Transaction) (known bool, err error)
 		Block(id types.BlockID) (types.Block, bool)
-		RecommendedFee() types.Currency
 		TipState() consensus.State
 		V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error)
 	}
@@ -82,30 +79,35 @@ type (
 	// HostManager defines the minimal interface of HostManager functionality
 	// the ContractManager requires.
 	HostManager interface {
+		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
+		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
+		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
+		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
+		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
+		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
+
 		WithScannedHost(ctx context.Context, hk types.PublicKey, fn func(h hosts.Host) error) error
 	}
 
 	// Store is the minimal interface of Store functionality the ContractManager
 	// requires.
 	Store interface {
+		Contract(ctx context.Context, id types.FileContractID) (Contract, error)
+		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
+
 		AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error
 		AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee types.Currency) error
-		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
 		ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error)
 		ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error)
 		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
-		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 		ContractsForBroadcasting(ctx context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error)
 		ContractsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error)
 		ContractsForPinning(ctx context.Context, hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error)
 		ContractsForPruning(ctx context.Context, hk types.PublicKey) ([]types.FileContractID, error)
-		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
-		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
-		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
-		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
-		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
-		LastScannedIndex(ctx context.Context) (ci types.ChainIndex, err error)
+
 		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
+		UpdateMaintenanceSettings(ctx context.Context, ms MaintenanceSettings) error
+
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error
 		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
@@ -119,12 +121,13 @@ type (
 		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 		UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision) error
 		UpdateNextPrune(ctx context.Context, contractID types.FileContractID, nextPrune time.Time) error
+
+		LastScannedIndex(ctx context.Context) (ci types.ChainIndex, err error)
 	}
 
 	// Syncer is the minimal interface of Syncer functionality the
 	// ContractManager requires.
 	Syncer interface {
-		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 		Peers() []*syncer.Peer
 	}
 
@@ -136,6 +139,8 @@ type (
 		RecommendedFee() types.Currency
 		ReleaseInputs(txns []types.Transaction, v2txns []types.V2Transaction)
 		SignV2Inputs(txn *types.V2Transaction, toSign []int)
+
+		BroadcastV2TransactionSet(index types.ChainIndex, txns []types.V2Transaction) error
 	}
 )
 
@@ -167,16 +172,14 @@ type (
 
 	// ContractManager manages the contracts throughout their lifecycle.
 	ContractManager struct {
-		am AccountManager
-		cm ChainManager
+		accounts AccountManager
+		chain    ChainManager
+		hosts    HostManager
+		syncer   Syncer
+		wallet   Wallet
+		store    Store
 
-		s     Syncer
-		w     Wallet
-		store Store
-
-		dialer Dialer
-		hm     HostManager
-
+		dialer    Dialer
 		renterKey types.PublicKey
 
 		triggerFundingChan     chan bool
@@ -243,59 +246,74 @@ func (w *wrapper) DialHost(ctx context.Context, hostKey types.PublicKey, addr st
 	return client, nil
 }
 
-// NewManager creates a new contract manager. It is responsible for forming and
-// renewing contracts as well as any interactions with hosts that require
-// contracts.
-func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer *client.SiamuxDialer, hm HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, store, &wrapper{d: dialer}, hm, syncer, wallet, opts...)
+func (cm *ContractManager) waitUntilSynced(ctx context.Context, log *zap.Logger) bool {
+	isSynced := func() (bool, error) {
+		ci, err := cm.store.LastScannedIndex(ctx)
+		if err != nil {
+			return false, fmt.Errorf("failed to get last scanned index: %w", err)
+		}
 
-	ctx, cancel, err := cm.tg.AddContext(context.Background())
-	if err != nil {
-		return nil, err
+		block, ok := cm.chain.Block(ci.ID)
+		if !ok {
+			return false, fmt.Errorf("failed to get block for last scanned index %v", ci.ID)
+		}
+
+		return time.Since(block.Timestamp) < 3*time.Hour, nil
 	}
-	go func() {
-		defer cancel()
-		cm.maintenanceLoop(ctx)
-	}()
-	return cm, nil
+
+	// check if we are synced
+	synced, _ := isSynced()
+	if synced {
+		return true
+	}
+
+	// if not, check again every minute
+	log.Info("waiting for wallet to be scanned before doing contract maintenance")
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(cm.syncPollInterval):
+		}
+
+		synced, err := isSynced()
+		if synced {
+			return true
+		} else if err != nil {
+			log.Debug("failed to check synced", zap.Error(err))
+		}
+	}
 }
 
-func newContractManager(renterKey types.PublicKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer Dialer, hm HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
-	cm := &ContractManager{
-		am: accountManager,
-		cm: chainManager,
+// blockBadHosts blocks any hosts that we have contracts with that are not
+// usable.
+func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	log := cm.log.Named("blockhosts")
 
-		s:     syncer,
-		w:     wallet,
-		store: store,
-
-		hm:     hm,
-		dialer: dialer,
-
-		renterKey: renterKey,
-
-		triggerFundingChan:     make(chan bool, 1),
-		triggerMaintenanceChan: make(chan struct{}, 1),
-		triggerPruningChan:     make(chan struct{}, 1),
-
-		log:     zap.NewNop(),
-		shuffle: frand.Shuffle,
-		tg:      threadgroup.New(),
-
-		contractRejectBuffer:              6 * time.Hour, // 6 hours after formation
-		expiredContractBroadcastBuffer:    144,           // 144 block after expiration
-		expiredContractPruneBuffer:        144,           // 144 blocks after broadcast
-		expiredContractSectorsPruneBuffer: 36,            // 36 blocks (~6 hours) after expiration
-		maintenanceFrequency:              10 * time.Minute,
-		pruneIntervalSuccess:              24 * time.Hour,     // 1 day
-		pruneIntervalFailure:              3 * time.Hour,      // 3 hours
-		revisionBroadcastInterval:         7 * 24 * time.Hour, // 1 week,
-		syncPollInterval:                  time.Minute,
+	var hostsToBlock []hosts.Host
+	for offset := 0; ; offset += hostsFetchLimit {
+		hosts, err := cm.hosts.Hosts(ctx, offset, hostsFetchLimit,
+			hosts.WithUsable(false), hosts.WithBlocked(false), hosts.WithActiveContracts(true))
+		if err != nil {
+			return fmt.Errorf("failed to fetch hosts to block: %w", err)
+		}
+		hostsToBlock = append(hostsToBlock, hosts...)
+		if len(hosts) < hostsFetchLimit {
+			break
+		}
 	}
-	for _, opt := range opts {
-		opt(cm)
+
+	for _, host := range hostsToBlock {
+		hostLog := log.With(zap.Stringer("hostKey", host.PublicKey))
+		if err := cm.hosts.BlockHosts(ctx, []types.PublicKey{host.PublicKey}, blockingReasonUsability); err != nil {
+			hostLog.Error("failed to block host", zap.Error(err))
+			continue
+		}
+		log.Warn("blocking unusable host", zap.Any("usability", host.Usability))
 	}
-	return cm
+	return nil
 }
 
 // TriggerAccountFunding triggers the account funding process. This trigger is
@@ -344,6 +362,26 @@ func (cm *ContractManager) TriggerMaintenance() {
 	}
 }
 
+// Contract retrieves a contract by its ID.
+func (cm *ContractManager) Contract(ctx context.Context, id types.FileContractID) (Contract, error) {
+	return cm.store.Contract(ctx, id)
+}
+
+// Contracts retrieves a list of contracts.
+func (cm *ContractManager) Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error) {
+	return cm.store.Contracts(ctx, offset, limit, queryOpts...)
+}
+
+// MaintenanceSettings returns the current maintenance settings.
+func (cm *ContractManager) MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error) {
+	return cm.store.MaintenanceSettings(ctx)
+}
+
+// UpdateMaintenanceSettings updates the maintenance settings.
+func (cm *ContractManager) UpdateMaintenanceSettings(ctx context.Context, settings MaintenanceSettings) error {
+	return cm.store.UpdateMaintenanceSettings(ctx, settings)
+}
+
 // Close closes the contract manager, terminates any background tasks and waits
 // for them to exit.
 func (cm *ContractManager) Close() error {
@@ -351,234 +389,57 @@ func (cm *ContractManager) Close() error {
 	return nil
 }
 
-// maintenanceLoop performs any background tasks that the contract manager needs
-// to perform on contracts
-func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
-	log := cm.log.Named("maintenance")
+func newContractManager(renterKey types.PublicKey, accounts AccountManager, chain ChainManager, store Store, dialer Dialer, hosts HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+	cm := &ContractManager{
+		accounts: accounts,
+		chain:    chain,
+		hosts:    hosts,
 
-	ticker := time.NewTicker(cm.maintenanceFrequency)
-	defer ticker.Stop()
+		syncer: syncer,
+		wallet: wallet,
+		store:  store,
 
-	for {
-		if !cm.waitUntilSynced(ctx, log) {
-			return
-		}
+		dialer: dialer,
 
-		select {
-		case <-ctx.Done():
-			return
-		case force := <-cm.triggerFundingChan:
-			log.Debug("triggering account funding", zap.Bool("force", force))
-			if err := cm.performAccountFunding(ctx, force, log); err != nil {
-				log.Error("account funding failed", zap.Error(err))
-			}
-			continue
-		case <-cm.triggerPruningChan:
-			log.Debug("triggering contract pruning")
-			if err := cm.performContractPruning(ctx, true, log); err != nil {
-				log.Error("contract pruning failed", zap.Error(err))
-			}
-		case <-cm.triggerMaintenanceChan:
-			// reset ticker
-			ticker.Stop()
-			ticker = time.NewTicker(cm.maintenanceFrequency)
+		renterKey: renterKey,
 
-			log.Debug("triggering maintenance")
-		case <-ticker.C:
-		}
+		triggerFundingChan:     make(chan bool, 1),
+		triggerMaintenanceChan: make(chan struct{}, 1),
+		triggerPruningChan:     make(chan struct{}, 1),
 
-		if err := cm.performContractMaintenance(ctx, log); err != nil {
-			log.Error("contract maintenance failed", zap.Error(err))
-		}
+		log:     zap.NewNop(),
+		shuffle: frand.Shuffle,
+		tg:      threadgroup.New(),
 
-		if err := cm.performAccountFunding(ctx, false, log); err != nil {
-			log.Error("account funding failed", zap.Error(err))
-		}
-
-		if err := cm.performContractPruning(ctx, false, log); err != nil {
-			log.Error("contract pruning failed", zap.Error(err))
-		}
-
-		if err := cm.performSectorPinning(ctx, log); err != nil {
-			log.Error("sector pinning failed", zap.Error(err))
-		}
-
-		if err := cm.store.PruneUnpinnableSectors(ctx, time.Now().Add(-pruneUnpinnableThreshold)); err != nil {
-			log.Error("failed to prune unpinnable sectors", zap.Error(err))
-		}
+		contractRejectBuffer:              6 * time.Hour, // 6 hours after formation
+		expiredContractBroadcastBuffer:    144,           // 144 block after expiration
+		expiredContractPruneBuffer:        144,           // 144 blocks after broadcast
+		expiredContractSectorsPruneBuffer: 36,            // 36 blocks (~6 hours) after expiration
+		maintenanceFrequency:              10 * time.Minute,
+		pruneIntervalSuccess:              24 * time.Hour,     // 1 day
+		pruneIntervalFailure:              3 * time.Hour,      // 3 hours
+		revisionBroadcastInterval:         7 * 24 * time.Hour, // 1 week,
+		syncPollInterval:                  time.Minute,
 	}
+	for _, opt := range opts {
+		opt(cm)
+	}
+	return cm
 }
 
-func (cm *ContractManager) waitUntilSynced(ctx context.Context, log *zap.Logger) bool {
-	isSynced := func() (bool, error) {
-		ci, err := cm.store.LastScannedIndex(ctx)
-		if err != nil {
-			return false, fmt.Errorf("failed to get last scanned index: %w", err)
-		}
+// NewManager creates a new contract manager. It is responsible for forming and
+// renewing contracts as well as any interactions with hosts that require
+// contracts.
+func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer *client.SiamuxDialer, hm HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, store, &wrapper{d: dialer}, hm, syncer, wallet, opts...)
 
-		block, ok := cm.cm.Block(ci.ID)
-		if !ok {
-			return false, fmt.Errorf("failed to get block for last scanned index %v", ci.ID)
-		}
-
-		return time.Since(block.Timestamp) < 3*time.Hour, nil
-	}
-
-	// check if we are synced
-	synced, _ := isSynced()
-	if synced {
-		return true
-	}
-
-	// if not, check again every minute
-	log.Info("waiting for wallet to be scanned before doing contract maintenance")
-	for {
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(cm.syncPollInterval):
-		}
-
-		synced, err := isSynced()
-		if synced {
-			return true
-		} else if err != nil {
-			log.Debug("failed to check synced", zap.Error(err))
-		}
-	}
-}
-
-// blockBadHosts blocks any hosts that we have contracts with that are not
-// usable.
-func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-	log := cm.log.Named("blockhosts")
-
-	var hostsToBlock []hosts.Host
-	for offset := 0; ; offset += hostsFetchLimit {
-		hosts, err := cm.store.Hosts(ctx, offset, hostsFetchLimit,
-			hosts.WithUsable(false), hosts.WithBlocked(false), hosts.WithActiveContracts(true))
-		if err != nil {
-			return fmt.Errorf("failed to fetch hosts to block: %w", err)
-		}
-		hostsToBlock = append(hostsToBlock, hosts...)
-		if len(hosts) < hostsFetchLimit {
-			break
-		}
-	}
-
-	for _, host := range hostsToBlock {
-		hostLog := log.With(zap.Stringer("hostKey", host.PublicKey))
-		if err := cm.store.BlockHosts(ctx, []types.PublicKey{host.PublicKey}, blockingReasonUsability); err != nil {
-			hostLog.Error("failed to block host", zap.Error(err))
-			continue
-		}
-		log.Warn("blocking unusable host", zap.Any("usability", host.Usability))
-	}
-	return nil
-}
-
-func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool, log *zap.Logger) error {
-	start := time.Now()
-	log = log.Named("accounts")
-
-	// fund accounts on usable hosts with active contracts
-	opts := []hosts.HostQueryOpt{
-		hosts.WithUsable(true),
-		hosts.WithBlocked(false),
-		hosts.WithActiveContracts(true),
-	}
-
-	const batchSize = 50
-	for offset := 0; ; offset += batchSize {
-		// fetch hosts
-		hostsToFund, err := cm.store.Hosts(ctx, offset, batchSize, opts...)
-		if err != nil {
-			return fmt.Errorf("failed to fetch hosts for account funding: %w", err)
-		}
-
-		// fund accounts on all hosts
-		var wg sync.WaitGroup
-		for _, host := range hostsToFund {
-			wg.Add(1)
-			go func(ctx context.Context, host hosts.Host, log *zap.Logger) {
-				ctx, cancel := context.WithTimeout(ctx, fundTimeout)
-				defer func() {
-					wg.Done()
-					cancel()
-				}()
-
-				contractIDs, err := cm.store.ContractsForFunding(ctx, host.PublicKey, 10)
-				if err != nil {
-					log.Error("failed to fetch contracts for funding", zap.Error(err))
-					return
-				} else if len(contractIDs) == 0 {
-					log.Debug("no contracts for funding")
-					return
-				}
-
-				err = cm.am.FundAccounts(ctx, host, contractIDs, force, log)
-				if err != nil {
-					log.Debug("failed to fund accounts", zap.Error(err))
-					return
-				}
-			}(ctx, host, log.With(zap.Stringer("hostKey", host.PublicKey)))
-		}
-		wg.Wait()
-
-		if len(hostsToFund) < batchSize {
-			break
-		}
-	}
-
-	log.Debug("funding finished", zap.Duration("duration", time.Since(start)))
-	return ctx.Err()
-}
-
-func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *zap.Logger) error {
-	log.Debug("performing contract maintenance")
-
-	// fetch settings and determine if maintenance is supposed to run
-	settings, err := cm.store.MaintenanceSettings(ctx)
+	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to fetch settings for contract maintenance: %w", err)
-	} else if !settings.Enabled {
-		log.Debug("contract maintenance is disabled, skipping")
-		return nil
+		return nil, err
 	}
-
-	blockHeight := cm.cm.TipState().Index.Height
-
-	// block bad hosts we have contracts with
-	if err := cm.blockBadHosts(ctx); err != nil {
-		return fmt.Errorf("failed to block bad hosts: %w", err)
-	}
-
-	// renew any good contracts within their renew window
-	if err := cm.performContractRenewals(ctx, settings.Period, settings.RenewWindow, log); err != nil {
-		return fmt.Errorf("failed to renew contracts: %w", err)
-	}
-
-	// refresh any good contracts that are either out of collateral or funds
-	if err := cm.performContractRefreshes(ctx, settings.Period, log); err != nil {
-		return fmt.Errorf("failed to perform contract refreshes: %w", err)
-	}
-
-	// mark any contracts too close to their expiration height as bad
-	if err := cm.store.MarkUnrenewableContractsBad(ctx, blockHeight+settings.RenewWindow/2); err != nil {
-		return fmt.Errorf("failed to mark unrenewable contracts bad: %w", err)
-	}
-
-	// form new contracts until there are enough good contracts to use
-	if err := cm.performContractFormation(ctx, settings.Period, int64(settings.WantedContracts), log); err != nil {
-		return fmt.Errorf("failed to form contracts: %w", err)
-	}
-
-	// rebroadcast revisions for all good contracts
-	if err := cm.performBroadcastContractRevisions(ctx, log); err != nil {
-		return fmt.Errorf("failed to broadcast contract revisions: %w", err)
-	}
-
-	return nil
+	go func() {
+		defer cancel()
+		cm.maintenanceLoop(ctx)
+	}()
+	return cm, nil
 }

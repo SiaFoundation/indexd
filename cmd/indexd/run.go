@@ -166,7 +166,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 
 	adminAPI := http.Server{
 		Handler: webRouter{
-			api: jape.BasicAuth(cfg.AdminAPI.Password)(admin.NewAPI(cm, contracts, hm, pm, s, wm, store, alerter, adminAPIOpts...)),
+			api: jape.BasicAuth(cfg.AdminAPI.Password)(admin.NewAPI(cm, am, contracts, hm, pm, s, wm, store, alerter, adminAPIOpts...)),
 			ui:  indexd.Handler(),
 		},
 		ReadTimeout:  30 * time.Second,
@@ -201,7 +201,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		}
 	}
 
-	appHandler, err := app.NewAPI(advertiseURL, store, contracts, appAPIOpts...)
+	appHandler, err := app.NewAPI(advertiseURL, store, am, contracts, appAPIOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create application API: %w", err)
 	}

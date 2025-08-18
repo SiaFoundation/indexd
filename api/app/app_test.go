@@ -13,6 +13,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
@@ -51,10 +52,11 @@ func TestApplicationAPI(t *testing.T) {
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
+	adminClient := indexer.Admin
 	time.Sleep(time.Second)
 
 	// assert hosts are registered
-	hosts, err := indexer.Hosts(ctx)
+	hosts, err := adminClient.Hosts(ctx)
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(hosts) != 3 {
@@ -69,8 +71,7 @@ func TestApplicationAPI(t *testing.T) {
 	sk := types.GeneratePrivateKey()
 	client := indexer.App(sk)
 
-	admin := indexer.Client
-	key, err := admin.AddAppConnectKey(ctx, app.AddConnectKeyRequest{
+	key, err := adminClient.AddAppConnectKey(ctx, admin.AddConnectKeyRequest{
 		RemainingUses: 1,
 	})
 	if err != nil {
@@ -105,7 +106,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// check that the key has been used
-	keys, err := admin.AppConnectKeys(ctx, 0, 1)
+	keys, err := adminClient.AppConnectKeys(ctx, 0, 1)
 	switch {
 	case err != nil:
 		t.Fatal(err)
@@ -172,7 +173,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// block h1
-	err = indexer.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey}, "test blocklist reason")
+	err = adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey}, "test blocklist reason")
 	if err != nil {
 		t.Fatal("failed to add host to blocklist:", err)
 	}
@@ -259,9 +260,9 @@ func TestAppConnect(t *testing.T) {
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
-	admin := indexer.Client
+	adminClient := indexer.Admin
 
-	connectKey, err := admin.AddAppConnectKey(ctx, app.AddConnectKeyRequest{
+	connectKey, err := adminClient.AddAppConnectKey(ctx, admin.AddConnectKeyRequest{
 		Description:   "hello world",
 		RemainingUses: 1,
 	})
