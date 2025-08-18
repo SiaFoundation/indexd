@@ -55,15 +55,15 @@ func TestWithRevision(t *testing.T) {
 		renewed:   make(map[types.FileContractID]bool),
 	}
 	cm := &mockChainManager{}
-	c := newHostClient(types.PublicKey{}, cm, nil, nil, db, zap.NewNop())
+	c := newHostClient(types.PublicKey{}, cm, nil, nil, db, defaultRevisionSubmissionBuffer, zap.NewNop())
 
 	fcid1 := types.FileContractID{1}
 	fcid2 := types.FileContractID{2}
 	fcid3 := types.FileContractID{3}
 	fcid4 := types.FileContractID{4}
 
-	db.renewed[fcid1] = true                                                              // renewed
-	db.revisions[fcid2] = types.V2FileContract{ProofHeight: revisionSubmissionBuffer + 1} // not revisable
+	db.renewed[fcid1] = true                                                                     // renewed
+	db.revisions[fcid2] = types.V2FileContract{ProofHeight: defaultRevisionSubmissionBuffer + 1} // not revisable
 	db.revisions[fcid3] = types.V2FileContract{ProofHeight: 1, RevisionNumber: 1}
 
 	noopFn := func(contract rhp.ContractRevision) (rhp.ContractRevision, error) { return rhp.ContractRevision{}, nil }
@@ -182,7 +182,7 @@ func TestWithRevision(t *testing.T) {
 	// assert withRevision returns an error if it turns out the contract is not revisable
 	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
-			Contract:  types.V2FileContract{ProofHeight: revisionSubmissionBuffer + 1},
+			Contract:  types.V2FileContract{ProofHeight: defaultRevisionSubmissionBuffer + 1},
 			Revisable: false,
 			Renewed:   false,
 		}, nil
@@ -213,13 +213,13 @@ func TestIsBeyondMaxRevisionHeight(t *testing.T) {
 		{
 			name:        "before buffer",
 			blockHeight: 1000,
-			proofHeight: 1000 + revisionSubmissionBuffer + 1,
+			proofHeight: 1000 + defaultRevisionSubmissionBuffer + 1,
 			expected:    false,
 		},
 		{
 			name:        "at beginning of buffer",
 			blockHeight: 1000,
-			proofHeight: 1000 + revisionSubmissionBuffer,
+			proofHeight: 1000 + defaultRevisionSubmissionBuffer,
 			expected:    true,
 		},
 		{
@@ -236,7 +236,7 @@ func TestIsBeyondMaxRevisionHeight(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result := isBeyondMaxRevisionHeight(tc.proofHeight, tc.blockHeight)
+			result := isBeyondMaxRevisionHeight(tc.proofHeight, defaultRevisionSubmissionBuffer, tc.blockHeight)
 			if result != tc.expected {
 				t.Errorf("expected %v, got %v", tc.expected, result)
 			}

@@ -15,20 +15,41 @@ const dialTimeout = 10 * time.Second
 
 // SiamuxDialer can be used to dial a host using the SiaMux protocol.
 type SiamuxDialer struct {
-	cm     ChainManager
-	signer rhp.FormContractSigner
-	store  RevisionStore
-	log    *zap.Logger
+	cm                       ChainManager
+	revisionSubmissionBuffer uint64
+	signer                   rhp.FormContractSigner
+	store                    RevisionStore
+	log                      *zap.Logger
+}
+
+// SiamuxDialerOption is a functional option type for configuring the
+// SiamuxDialer.
+type SiamuxDialerOption func(*SiamuxDialer)
+
+// WithRevisionSubmissionBuffer sets the revision submission buffer for the
+// SiamuxDialer.
+func WithRevisionSubmissionBuffer(buffer uint64) SiamuxDialerOption {
+	if buffer == 0 {
+		panic("revisionSubmissionBuffer mustn't be 0") // developer error
+	}
+	return func(c *SiamuxDialer) {
+		c.revisionSubmissionBuffer = buffer
+	}
 }
 
 // NewSiamuxDialer creates a new SiamuxDialer.
-func NewSiamuxDialer(cm ChainManager, signer rhp.FormContractSigner, store RevisionStore, log *zap.Logger) *SiamuxDialer {
-	return &SiamuxDialer{
-		cm:     cm,
-		signer: signer,
-		store:  store,
-		log:    log,
+func NewSiamuxDialer(cm ChainManager, signer rhp.FormContractSigner, store RevisionStore, log *zap.Logger, opts ...SiamuxDialerOption) *SiamuxDialer {
+	d := &SiamuxDialer{
+		cm:                       cm,
+		revisionSubmissionBuffer: defaultRevisionSubmissionBuffer,
+		signer:                   signer,
+		store:                    store,
+		log:                      log,
 	}
+	for _, opt := range opts {
+		opt(d)
+	}
+	return d
 }
 
 // DialHost dials the host and returns a Client that can be used to interact
@@ -43,5 +64,5 @@ func (d *SiamuxDialer) DialHost(ctx context.Context, hk types.PublicKey, addr st
 		return nil, fmt.Errorf("failed to dial host: %w", err)
 	}
 
-	return newHostClient(hk, d.cm, tc, d.signer, d.store, d.log.With(zap.Stringer("hostKey", hk))), nil
+	return newHostClient(hk, d.cm, tc, d.signer, d.store, d.revisionSubmissionBuffer, d.log.With(zap.Stringer("hostKey", hk))), nil
 }

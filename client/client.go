@@ -18,11 +18,11 @@ import (
 const (
 	maxContractSize = 10 * 1 << 40 // 10TB
 
-	// revisionSubmissionBuffer is a buffer that the host applies on the contract's
-	// proof height before it considers the contract revisable, so if the current
-	// block height plus the buffer exceed the proof height, the contract is not
-	// revisable.
-	revisionSubmissionBuffer = 144
+	// defaultRevisionSubmissionBuffer is a buffer that mainnet hosts apply on
+	// the contract's proof height before they consider a contract revisable, so
+	// if the current block height plus the buffer exceed the proof height, the
+	// contract is not revisable.
+	defaultRevisionSubmissionBuffer = 144
 )
 
 var (
@@ -71,9 +71,10 @@ type rpcLatestRevisionFn func(context.Context, rhp.TransportClient, types.FileCo
 type HostClient struct {
 	hostKey types.PublicKey
 
-	client           rhp.TransportClient
-	signer           rhp.FormContractSigner
-	latestRevisionFn rpcLatestRevisionFn
+	client                   rhp.TransportClient
+	signer                   rhp.FormContractSigner
+	latestRevisionFn         rpcLatestRevisionFn
+	revisionSubmissionBuffer uint64
 
 	cm    ChainManager
 	store RevisionStore
@@ -83,18 +84,20 @@ type HostClient struct {
 // newHostClient creates a new HostClient that can be used to interact with a
 // host using the RHP methods. The client is expected to be closed when no
 // longer needed.
-func newHostClient(hk types.PublicKey, cm ChainManager, client rhp.TransportClient, signer rhp.FormContractSigner, store RevisionStore, log *zap.Logger) *HostClient {
-	return &HostClient{
+func newHostClient(hk types.PublicKey, cm ChainManager, client rhp.TransportClient, signer rhp.FormContractSigner, store RevisionStore, revisionSubmissionBuffer uint64, log *zap.Logger) *HostClient {
+	hc := &HostClient{
 		hostKey: hk,
 
-		client:           client,
-		signer:           signer,
-		store:            store,
-		latestRevisionFn: rhp.RPCLatestRevision, // allows mocking in tests
+		client:                   client,
+		signer:                   signer,
+		store:                    store,
+		latestRevisionFn:         rhp.RPCLatestRevision, // allows mocking in tests
+		revisionSubmissionBuffer: revisionSubmissionBuffer,
 
 		cm:  cm,
 		log: log.Named("client").With(zap.Stringer("hostKey", hk)),
 	}
+	return hc
 }
 
 // AccountBalance returns the balance of the given account.
@@ -313,8 +316,8 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 		return fmt.Errorf("failed to fetch contract revision: %w", err)
 	} else if renewed {
 		return ErrContractRenewed
-	} else if isBeyondMaxRevisionHeight(contract.Revision.ProofHeight, bh) {
-		return fmt.Errorf("%d <= %d (%d+%d), %w", contract.Revision.ProofHeight, bh+revisionSubmissionBuffer, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
+	} else if isBeyondMaxRevisionHeight(contract.Revision.ProofHeight, c.revisionSubmissionBuffer, bh) {
+		return fmt.Errorf("%d <= %d (%d+%d), %w", contract.Revision.ProofHeight, bh+c.revisionSubmissionBuffer, bh, c.revisionSubmissionBuffer, ErrContractNotRevisable)
 	}
 
 	// revise the contract
@@ -328,8 +331,8 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 			return fmt.Errorf("failed to sync revision: %w", err)
 		} else if renewed {
 			return ErrContractRenewed
-		} else if isBeyondMaxRevisionHeight(contract.Revision.ProofHeight, bh) {
-			return fmt.Errorf("%d <= %d (%d+%d), %w", contract.Revision.ProofHeight, bh+revisionSubmissionBuffer, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
+		} else if isBeyondMaxRevisionHeight(contract.Revision.ProofHeight, c.revisionSubmissionBuffer, bh) {
+			return fmt.Errorf("%d <= %d (%d+%d), %w", contract.Revision.ProofHeight, bh+c.revisionSubmissionBuffer, bh, c.revisionSubmissionBuffer, ErrContractNotRevisable)
 		}
 		c.log.Debug("synced contract revision", zap.Uint64("revisionNumber", contract.Revision.RevisionNumber), zap.Stringer("contractID", contractID))
 
@@ -354,7 +357,7 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 
 // isBeyondMaxRevisionHeight checks whether we are too close to a contract's
 // proofHeight for a contract to be considered revisable by the host.
-func isBeyondMaxRevisionHeight(proofHeight, blockHeight uint64) bool {
+func isBeyondMaxRevisionHeight(proofHeight, revisionSubmissionBuffer, blockHeight uint64) bool {
 	var maxRevisionHeight uint64
 	if proofHeight > revisionSubmissionBuffer {
 		maxRevisionHeight = proofHeight - revisionSubmissionBuffer
