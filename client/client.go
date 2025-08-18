@@ -313,7 +313,7 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 		return fmt.Errorf("failed to fetch contract revision: %w", err)
 	} else if renewed {
 		return ErrContractRenewed
-	} else if withinRevisionSubmissionBuffer(contract.Revision.ProofHeight, bh) {
+	} else if isBeyondMaxRevisionHeight(contract.Revision.ProofHeight, bh) {
 		return fmt.Errorf("%d <= %d (%d+%d), %w", contract.Revision.ProofHeight, bh+revisionSubmissionBuffer, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
 	}
 
@@ -328,7 +328,7 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 			return fmt.Errorf("failed to sync revision: %w", err)
 		} else if renewed {
 			return ErrContractRenewed
-		} else if withinRevisionSubmissionBuffer(contract.Revision.ProofHeight, bh) {
+		} else if isBeyondMaxRevisionHeight(contract.Revision.ProofHeight, bh) {
 			return fmt.Errorf("%d <= %d (%d+%d), %w", contract.Revision.ProofHeight, bh+revisionSubmissionBuffer, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
 		}
 		c.log.Debug("synced contract revision", zap.Uint64("revisionNumber", contract.Revision.RevisionNumber), zap.Stringer("contractID", contractID))
@@ -352,6 +352,12 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 	return nil
 }
 
-func withinRevisionSubmissionBuffer(proofHeight, blockHeight uint64) bool {
-	return proofHeight <= blockHeight+revisionSubmissionBuffer
+// isBeyondMaxRevisionHeight checks whether we are too close to a contract's
+// proofHeight for a contract to be considered revisable by the host.
+func isBeyondMaxRevisionHeight(proofHeight, blockHeight uint64) bool {
+	var maxRevisionHeight uint64
+	if proofHeight > revisionSubmissionBuffer {
+		maxRevisionHeight = proofHeight - revisionSubmissionBuffer
+	}
+	return blockHeight >= maxRevisionHeight
 }

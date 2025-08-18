@@ -203,7 +203,7 @@ func TestWithRevision(t *testing.T) {
 	}
 }
 
-func TestWithinRevisionSubmissionBuffer(t *testing.T) {
+func TestIsBeyondMaxRevisionHeight(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
 		blockHeight uint64
@@ -236,7 +236,7 @@ func TestWithinRevisionSubmissionBuffer(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result := withinRevisionSubmissionBuffer(tc.proofHeight, tc.blockHeight)
+			result := isBeyondMaxRevisionHeight(tc.proofHeight, tc.blockHeight)
 			if result != tc.expected {
 				t.Errorf("expected %v, got %v", tc.expected, result)
 			}
