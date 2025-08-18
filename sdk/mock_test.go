@@ -15,6 +15,33 @@ import (
 	"go.sia.tech/indexd/slabs"
 )
 
+type mockHost struct {
+	mu      sync.Mutex
+	sectors map[types.Hash256][proto4.SectorSize]byte
+}
+
+func (mh *mockHost) WriteSector(ctx context.Context, sector *[proto4.SectorSize]byte) (types.Hash256, error) {
+	root := proto4.SectorRoot(sector)
+
+	mh.mu.Lock()
+	defer mh.mu.Unlock()
+	if mh.sectors == nil {
+		mh.sectors = make(map[types.Hash256][proto4.SectorSize]byte)
+	}
+	mh.sectors[root] = *sector
+	return root, nil
+}
+
+func (mh *mockHost) ReadSector(ctx context.Context, root types.Hash256) (*[proto4.SectorSize]byte, error) {
+	mh.mu.Lock()
+	defer mh.mu.Unlock()
+	sector, ok := mh.sectors[root]
+	if !ok {
+		return nil, errors.New("sector not found")
+	}
+	return &sector, nil
+}
+
 type mockHostDialer struct {
 	hosts map[types.PublicKey]struct{}
 
@@ -22,7 +49,7 @@ type mockHostDialer struct {
 	slowHosts map[types.PublicKey]time.Duration
 
 	sectorsMu   sync.Mutex
-	hostSectors map[types.PublicKey]map[types.Hash256][proto4.SectorSize]byte
+	hostSectors map[types.PublicKey]*mockHost
 }
 
 // Hosts implements the [HostDialer] interface.
@@ -62,14 +89,13 @@ func (m *mockHostDialer) WriteSector(ctx context.Context, hostKey types.PublicKe
 	}
 
 	m.sectorsMu.Lock()
-	defer m.sectorsMu.Unlock()
-
-	root := proto4.SectorRoot(sector)
-	if _, ok := m.hostSectors[hostKey]; !ok {
-		m.hostSectors[hostKey] = make(map[types.Hash256][proto4.SectorSize]byte)
+	mh, ok := m.hostSectors[hostKey]
+	if !ok {
+		mh = &mockHost{}
+		m.hostSectors[hostKey] = mh
 	}
-	m.hostSectors[hostKey][root] = *sector
-	return root, nil
+	m.sectorsMu.Unlock()
+	return m.hostSectors[hostKey].WriteSector(ctx, sector)
 }
 
 // ReadSector implements the [HostDialer] interface.
@@ -80,18 +106,12 @@ func (m *mockHostDialer) ReadSector(ctx context.Context, hostKey types.PublicKey
 	}
 
 	m.sectorsMu.Lock()
-	defer m.sectorsMu.Unlock()
-
-	var sector [proto4.SectorSize]byte
-	sectors, ok := m.hostSectors[hostKey]
+	mh, ok := m.hostSectors[hostKey]
 	if !ok {
 		return nil, errors.New("host not found")
 	}
-	sector, ok = sectors[sectorRoot]
-	if !ok {
-		return nil, errors.New("sector not found")
-	}
-	return &sector, nil
+	m.sectorsMu.Unlock()
+	return mh.ReadSector(ctx, sectorRoot)
 }
 
 func (m *mockHostDialer) ResetSlowHosts() {
@@ -118,7 +138,7 @@ func newMockDialer(hosts int) *mockHostDialer {
 	m := &mockHostDialer{
 		hosts:       make(map[types.PublicKey]struct{}),
 		slowHosts:   make(map[types.PublicKey]time.Duration),
-		hostSectors: make(map[types.PublicKey]map[types.Hash256][proto4.SectorSize]byte),
+		hostSectors: make(map[types.PublicKey]*mockHost),
 	}
 	for range hosts {
 		sk := types.GeneratePrivateKey()

@@ -7,19 +7,26 @@ import (
 	"fmt"
 	"io"
 	"runtime"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/klauspost/reedsolomon"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
+	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
 
 func TestRoundtrip(t *testing.T) {
+	log := zap.NewNop()
 	dialer := newMockDialer(50)
 
 	appKey := types.GeneratePrivateKey()
 
-	s, err := initSDK(newMockAppClient(), dialer, appKey)
+	s, err := initSDK(newMockAppClient(), dialer, appKey, log.Named("sdk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,11 +63,12 @@ func (c *countWriter) Write(p []byte) (int, error) {
 }
 
 func TestRoundtripCount(t *testing.T) {
+	log := zap.NewNop()
 	dialer := newMockDialer(50)
 
 	appKey := types.GeneratePrivateKey()
 
-	s, err := initSDK(newMockAppClient(), dialer, appKey)
+	s, err := initSDK(newMockAppClient(), dialer, appKey, log.Named("sdk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,9 +97,10 @@ func TestRoundtripCount(t *testing.T) {
 }
 
 func TestUpload(t *testing.T) {
+	log := zap.NewNop()
 	dialer := newMockDialer(50)
 	appKey := types.GeneratePrivateKey()
-	s, err := initSDK(newMockAppClient(), dialer, appKey)
+	s, err := initSDK(newMockAppClient(), dialer, appKey, log.Named("sdk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,11 +131,12 @@ func TestUpload(t *testing.T) {
 }
 
 func TestDownload(t *testing.T) {
+	log := zap.NewNop()
 	dialer := newMockDialer(30)
 
 	appKey := types.GeneratePrivateKey()
 
-	s, err := initSDK(newMockAppClient(), dialer, appKey)
+	s, err := initSDK(newMockAppClient(), dialer, appKey, log.Named("sdk"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +176,8 @@ func TestDownload(t *testing.T) {
 }
 
 func BenchmarkUpload(b *testing.B) {
-	const benchmarkSize = 256 * 1000 * 1000 // 256 MB
+	const benchmarkSize = 10 * proto.SectorSize
+	log := zaptest.NewLogger(b)
 	appKey := types.GeneratePrivateKey()
 	data := frand.Bytes(benchmarkSize)
 
@@ -178,7 +189,7 @@ func BenchmarkUpload(b *testing.B) {
 			dialer.SetSlowHosts(slow, time.Second)       // slow, but not too slow
 			dialer.SetSlowHosts(timeout, 30*time.Second) // longer than the default timeout
 
-			s, err := initSDK(newMockAppClient(), dialer, appKey)
+			s, err := initSDK(newMockAppClient(), dialer, appKey, log.Named("sdk"))
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -195,10 +206,10 @@ func BenchmarkUpload(b *testing.B) {
 		})
 	}
 
-	inflight := []int{runtime.NumCPU(), 5, 10, 20, 30}
+	inflight := []int{10, 30}
 	// testing more variants is not particularly useful
-	slow := []int{0, 1, 3, 5}
-	timeout := []int{0, 1, 3, 5}
+	slow := []int{0, 1}
+	timeout := []int{0, 1}
 	for _, s := range slow {
 		for _, t := range timeout {
 			for _, i := range inflight {
@@ -208,13 +219,57 @@ func BenchmarkUpload(b *testing.B) {
 	}
 }
 
+func BenchmarkErasureCode(b *testing.B) {
+	const (
+		dataShards   = 10
+		parityShards = 20
+		dataSize     = proto.SectorSize * dataShards
+	)
+
+	encryptionKey := frand.Entropy256()
+	data := frand.Bytes(dataSize)
+	enc, err := reedsolomon.New(dataShards, parityShards)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	b.SetBytes(dataSize)
+	b.ResetTimer()
+	for b.Loop() {
+		shards := make([][]byte, dataShards+parityShards)
+		for i := range shards {
+			shards[i] = make([]byte, proto.SectorSize)
+		}
+
+		stripedSplit(data, shards[:dataShards])
+		if err := enc.Encode(shards); err != nil {
+			b.Fatal(err)
+		}
+
+		var wg sync.WaitGroup
+		for i := range shards {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				nonce := [24]byte{byte(i)}
+				c, _ := chacha20.NewUnauthenticatedCipher(encryptionKey[:], nonce[:])
+				c.XORKeyStream(shards[i], shards[i])
+				time.Sleep(20 * time.Millisecond) // simulate network io for upload
+			}(i)
+		}
+
+		wg.Wait()
+	}
+}
+
 func BenchmarkDownload(b *testing.B) {
 	const benchmarkSize = 256 * 1000 * 1000 // 256 MB
+	log := zap.NewNop()
 	dialer := newMockDialer(30)
 
 	appKey := types.GeneratePrivateKey()
 
-	s, err := initSDK(newMockAppClient(), dialer, appKey)
+	s, err := initSDK(newMockAppClient(), dialer, appKey, log.Named("sdk"))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -246,8 +301,8 @@ func BenchmarkDownload(b *testing.B) {
 
 	benchMatrix(b, 0, runtime.NumCPU())
 
-	inflight := []int{1, 3, 5, 10, 20, 30}
-	slow := []int{0, 1, 3, 5, 10, 20}
+	inflight := []int{10, 30}
+	slow := []int{0, 1}
 
 	for _, s := range slow {
 		for _, i := range inflight {

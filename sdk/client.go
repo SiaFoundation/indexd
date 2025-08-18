@@ -82,10 +82,11 @@ type (
 
 	// An SDK is a client for the indexd service.
 	SDK struct {
-		appKey types.PrivateKey
+		log    *zap.Logger
 		client AppClient
-
 		dialer HostDialer
+
+		appKey types.PrivateKey
 	}
 )
 
@@ -115,36 +116,35 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 		Sectors:       make([]slabs.SectorPinParams, len(shards)),
 	}
 
-	var hostsMu sync.Mutex
-	activeHosts := shuffle(s.dialer.ActiveHosts())
-	allHosts := shuffle(s.dialer.Hosts())
+	hostCh := make(chan types.PublicKey, maxInFlight)
+	go func() {
+		defer close(hostCh)
 
-	hosts := make([]types.PublicKey, 0, len(allHosts))
-	seen := make(map[types.PublicKey]struct{}, len(activeHosts))
-	for _, pk := range activeHosts {
-		seen[pk] = struct{}{}
-		hosts = append(hosts, pk)
-	}
-	for _, pk := range allHosts {
-		if _, ok := seen[pk]; ok {
-			continue
+		seen := make(map[types.PublicKey]struct{})
+		for _, host := range shuffle(s.dialer.ActiveHosts()) {
+			select {
+			case <-ctx.Done():
+				return
+			case hostCh <- host:
+				seen[host] = struct{}{}
+			}
 		}
-		hosts = append(hosts, pk)
-	}
-
-	if len(hosts) < len(shards) {
-		return slabs.SlabPinParams{}, fmt.Errorf("not enough hosts available: %d, required: %d", len(hosts), len(shards))
-	}
+		for _, host := range shuffle(s.dialer.Hosts()) {
+			if _, ok := seen[host]; ok {
+				continue
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case hostCh <- host:
+				seen[host] = struct{}{}
+			}
+		}
+	}()
 
 	errCh := make(chan error, len(shards))
-	nonce := make([]byte, 24)
 	sema := make(chan struct{}, maxInFlight)
 	for i := range shards {
-		// encrypt the shard before upload
-		nonce[0] = byte(i)
-		c, _ := chacha20.NewUnauthenticatedCipher(encryptionKey[:], nonce)
-		c.XORKeyStream(shards[i], shards[i])
-
 		select {
 		case <-ctx.Done():
 			return slabs.SlabPinParams{}, ctx.Err()
@@ -153,6 +153,10 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 		}
 
 		go func(ctx context.Context, shard []byte, index int) {
+			nonce := [24]byte{byte(index)}
+			c, _ := chacha20.NewUnauthenticatedCipher(encryptionKey[:], nonce[:])
+			c.XORKeyStream(shard, shard)
+
 			defer func() { <-sema }() // release semaphore
 			sector := (*[proto4.SectorSize]byte)(shard)
 			for {
@@ -162,16 +166,13 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 				default:
 				}
 
-				hostsMu.Lock()
-				if len(hosts) == 0 {
+				hostKey, ok := <-hostCh
+				if !ok {
 					errCh <- ErrNoMoreHosts
-					hostsMu.Unlock()
 					return
 				}
-				hostKey := hosts[0]
-				hosts = hosts[1:]
-				hostsMu.Unlock()
 
+				start := time.Now()
 				root, err := uploadShard(ctx, sector, hostKey, s.dialer, timeout) // error can be ignored, hosts will be retried until none are left and the upload fails.
 				if err == nil {
 					slab.Sectors[index] = slabs.SectorPinParams{
@@ -179,8 +180,10 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 						Root:    root,
 					}
 					errCh <- nil
+					s.log.Debug("shard uploaded", zap.Stringer("host", hostKey), zap.Stringer("root", root), zap.Duration("elapsed", time.Since(start)))
 					break
 				}
+				s.log.Debug("failed to upload shard", zap.Stringer("host", hostKey), zap.Error(err))
 			}
 		}(ctx, shards[i], i)
 	}
@@ -219,6 +222,7 @@ top:
 			defer wg.Done()
 			data, err := downloadShard(ctx, sector.Root, sector.HostKey, s.dialer, timeout)
 			if err != nil {
+				s.log.Debug("failed to download sector", zap.Stringer("host", sector.HostKey), zap.Error(err))
 				return
 			}
 			sectors[i] = data[:]
@@ -243,7 +247,7 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) ([]
 	uo := uploadOption{
 		dataShards:   10,
 		parityShards: 20,
-		hostTimeout:  4 * time.Second, // ~10 Mbps
+		hostTimeout:  4 * time.Second,
 		maxInflight:  30,
 	}
 	for _, opt := range opts {
@@ -254,20 +258,22 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) ([]
 		return nil, errors.New("redundancy must be at least 2x")
 	}
 
-	type work struct {
-		length        int
-		shards        [][]byte
-		encryptionKey [32]byte
-		err           error
+	type result struct {
+		slab  Slab
+		err   error
+		index int
 	}
-	workCh := make(chan work, 1)
+	resultCh := make(chan result, 1)
 	go func() {
+		defer close(resultCh) // signals done
 		enc, err := reedsolomon.New(int(uo.dataShards), int(uo.parityShards))
 		if err != nil {
-			workCh <- work{err: fmt.Errorf("failed to create erasure coder: %w", err)}
+			resultCh <- result{err: fmt.Errorf("failed to create erasure coder: %w", err)}
 			return
 		}
 		slabBuf := make([]byte, proto4.SectorSize*int(uo.dataShards))
+		sema := make(chan struct{}, 2)
+		var wg sync.WaitGroup
 		for i := 0; ; i++ {
 			select {
 			case <-ctx.Done():
@@ -276,10 +282,9 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) ([]
 			}
 			n, err := readAtMost(r, slabBuf)
 			if n == 0 && errors.Is(err, io.EOF) {
-				workCh <- work{err: io.EOF} // signal done with EOF
 				break
 			} else if err != nil && !errors.Is(err, io.EOF) {
-				workCh <- work{err: fmt.Errorf("failed to read slab %d: %w", i, err)}
+				resultCh <- result{err: fmt.Errorf("failed to read slab %d: %w", i, err)}
 				return
 			}
 			shards := make([][]byte, uo.dataShards+uo.parityShards)
@@ -288,45 +293,63 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) ([]
 			}
 			stripedSplit(slabBuf, shards[:uo.dataShards])
 			if err := enc.Encode(shards); err != nil {
-				workCh <- work{err: fmt.Errorf("failed to encode slab %d shards: %w", i, err)}
+				resultCh <- result{err: fmt.Errorf("failed to encode slab %d shards: %w", i, err)}
 				return
 			}
 			encryptionKey := types.HashBytes(append(s.appKey[:], slabBuf[:n]...))
-			workCh <- work{length: n, encryptionKey: encryptionKey, shards: shards}
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				select {
+				case <-ctx.Done():
+					return
+				case sema <- struct{}{}:
+					// acquire
+				}
+				defer func() { <-sema }() // release
+				params, err := s.uploadSlab(ctx, encryptionKey, shards, uo.dataShards, uo.maxInflight, uo.hostTimeout)
+				if err != nil {
+					resultCh <- result{err: fmt.Errorf("failed to upload slab %d: %w", i, err)}
+					return
+				}
+
+				slabID, err := s.client.PinSlab(ctx, params)
+				if err != nil {
+					resultCh <- result{err: fmt.Errorf("failed to pin slab %d: %w", i, err)}
+					return
+				}
+				resultCh <- result{slab: Slab{
+					ID:     slabID,
+					Offset: 0,
+					Length: uint32(n),
+				}, err: err, index: i}
+			}(i)
 		}
+
+		wg.Wait()
 	}()
 
 	// TODO: cleanup on failure
 	var pinned []Slab
-	for i := 0; ; i++ {
+	for {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case work := <-workCh:
-			err := work.err
-			shards := work.shards
-			shardKey := work.encryptionKey
-
-			if errors.Is(err, io.EOF) {
-				// no more slabs to upload, return the pinned slabs
+		case result, ok := <-resultCh:
+			if !ok {
 				return pinned, nil
-			} else if work.err != nil {
-				return nil, work.err
-			}
-			params, err := s.uploadSlab(ctx, shardKey, shards, uo.dataShards, uo.maxInflight, uo.hostTimeout)
-			if err != nil {
-				return nil, fmt.Errorf("failed to upload slab %d: %w", i, err)
+			} else if result.err != nil {
+				return nil, result.err
 			}
 
-			slabID, err := s.client.PinSlab(ctx, params)
-			if err != nil {
-				return nil, fmt.Errorf("failed to pin slab %d: %w", i, err)
+			if result.index == len(pinned) {
+				pinned = append(pinned, result.slab)
+			} else {
+				for len(pinned) <= result.index {
+					pinned = append(pinned, Slab{})
+				}
+				pinned[result.index] = result.slab
 			}
-			pinned = append(pinned, Slab{
-				ID:     slabID,
-				Offset: 0,
-				Length: uint32(work.length),
-			})
 		}
 	}
 }
@@ -340,7 +363,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata []Slab, opts .
 	}
 
 	do := downloadOption{
-		hostTimeout: 4 * time.Second, // ~10 Mbps
+		hostTimeout: 30 * time.Second,
 		maxInflight: 10,
 	}
 	for _, opt := range opts {
@@ -453,17 +476,9 @@ func uploadShard(ctx context.Context, sector *[proto4.SectorSize]byte, hostKey t
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	rootCh := make(chan types.Hash256, 1)
-	go func() {
-		root := proto4.SectorRoot(sector)
-		rootCh <- root
-	}()
-
 	uploaded, err := dialer.WriteSector(ctx, hostKey, sector)
 	if err != nil {
 		return types.Hash256{}, fmt.Errorf("failed to upload shard to host %s: %w", hostKey.String(), err)
-	} else if root := <-rootCh; uploaded != root {
-		return types.Hash256{}, fmt.Errorf("uploaded shard root %s does not match expected root %s", uploaded.String(), root.String())
 	}
 	return uploaded, nil
 }
@@ -542,7 +557,7 @@ func WithDownloadInflight(maxInflight int) DownloadOption {
 	}
 }
 
-func initSDK(client AppClient, dialer HostDialer, appKey types.PrivateKey) (*SDK, error) {
+func initSDK(client AppClient, dialer HostDialer, appKey types.PrivateKey, log *zap.Logger) (*SDK, error) {
 	if client == nil {
 		return nil, errors.New("app client is required")
 	} else if dialer == nil {
@@ -552,6 +567,7 @@ func initSDK(client AppClient, dialer HostDialer, appKey types.PrivateKey) (*SDK
 		appKey: appKey,
 		client: client,
 		dialer: dialer,
+		log:    log,
 	}, nil
 }
 
@@ -581,15 +597,13 @@ func NewSDK(baseURL string, appKey types.PrivateKey, opts ...Option) (*SDK, erro
 		opt(&options)
 	}
 
-	options.logger = options.logger.Named("sdk") // decorate logger
-
 	c, err := app.NewClient(baseURL, appKey)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create app client: %w", err)
 	}
-	dialer, err := NewDialer(c, appKey, options.logger)
+	dialer, err := NewDialer(c, appKey, options.logger.Named("dialer"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create host dialer: %w", err)
 	}
-	return initSDK(c, dialer, appKey)
+	return initSDK(c, dialer, appKey, options.logger)
 }

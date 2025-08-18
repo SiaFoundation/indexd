@@ -97,20 +97,18 @@ func main() {
 			defer wg.Done()
 			log.Debug("starting upload thread")
 
-		loop:
 			for {
+				if ctx.Err() != nil {
+					return
+				}
 				// upload slab
 				start := time.Now()
 				slabs, err := sdkClient.Upload(ctx, io.LimitReader(frand.Reader, slabSize), sdk.WithRedundancy(dataShards, parityShards))
 				if err != nil {
-					log.Error("failed to upload slab, timing out for 5 minutes", zap.Error(err), zap.Duration("duration", time.Since(start)))
-					if ok := <-waitFor(ctx, 5*time.Minute); ok {
-						continue loop
-					}
-					break loop
+					log.Error("failed to upload slab", zap.Error(err), zap.Duration("duration", time.Since(start)))
+					continue
 				} else if len(slabs) != 1 {
-					log.Error(fmt.Sprintf("expected 1 slab, got %d", len(slabs)))
-					break loop
+					log.Panic("incorrect number of slabs", zap.Int("expected", 1), zap.Int("got", len(slabs)))
 				}
 
 				elapsedMu.Lock()
@@ -125,19 +123,6 @@ func main() {
 	wg.Wait()
 
 	log.Info("all upload threads finished, exiting")
-}
-
-func waitFor(ctx context.Context, d time.Duration) <-chan bool {
-	c := make(chan bool, 1)
-	go func() {
-		select {
-		case <-ctx.Done():
-			c <- false
-		case <-time.After(d):
-			c <- true
-		}
-	}()
-	return c
 }
 
 func loadPrivateKey() (types.PrivateKey, error) {
