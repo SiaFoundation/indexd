@@ -15,10 +15,12 @@ import (
 	"lukechampine.com/frand"
 )
 
-type mockChainManager struct{}
+type mockChainManager struct {
+	state consensus.State
+}
 
 func (c *mockChainManager) TipState() consensus.State {
-	return consensus.State{}
+	return c.state
 }
 
 func (c *mockChainManager) V2TransactionSet(basis types.ChainIndex, txn types.V2Transaction) (types.ChainIndex, []types.V2Transaction, error) {
@@ -36,7 +38,7 @@ func (s *mockStore) ContractRevision(ctx context.Context, contractID types.FileC
 	}
 	rev, ok := s.revisions[contractID]
 	if !ok {
-		rev = types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: types.Siacoins(1)}}
+		rev = types.V2FileContract{ProofHeight: 1000, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(1)}}
 	}
 	return rhp.ContractRevision{ID: contractID, Revision: rev}, s.renewed[contractID], nil
 }
@@ -54,17 +56,22 @@ func TestWithRevision(t *testing.T) {
 		revisions: make(map[types.FileContractID]types.V2FileContract),
 		renewed:   make(map[types.FileContractID]bool),
 	}
-	cm := &mockChainManager{}
-	c := newHostClient(types.PublicKey{}, cm, nil, nil, db, defaultRevisionSubmissionBuffer, zap.NewNop())
+	cm := &mockChainManager{
+		state: consensus.State{
+			Index: types.ChainIndex{Height: 100},
+		},
+	}
+	revisionSubmissionBuffer := uint64(10)
+	c := newHostClient(types.PublicKey{}, cm, nil, nil, db, revisionSubmissionBuffer, zap.NewNop())
 
 	fcid1 := types.FileContractID{1}
 	fcid2 := types.FileContractID{2}
 	fcid3 := types.FileContractID{3}
 	fcid4 := types.FileContractID{4}
 
-	db.renewed[fcid1] = true                                                                     // renewed
-	db.revisions[fcid2] = types.V2FileContract{ProofHeight: defaultRevisionSubmissionBuffer + 1} // not revisable
-	db.revisions[fcid3] = types.V2FileContract{ProofHeight: 1, RevisionNumber: 1}
+	db.renewed[fcid1] = true                                                                // renewed
+	db.revisions[fcid2] = types.V2FileContract{ProofHeight: 100 + revisionSubmissionBuffer} // not revisable
+	db.revisions[fcid3] = types.V2FileContract{ProofHeight: 200, RevisionNumber: 1}
 
 	noopFn := func(contract rhp.ContractRevision) (rhp.ContractRevision, error) { return rhp.ContractRevision{}, nil }
 	invalidSigFn := func(contract rhp.ContractRevision) (rhp.ContractRevision, error) {
@@ -93,7 +100,7 @@ func TestWithRevision(t *testing.T) {
 	err = c.withRevision(context.Background(), fcid3, func(rhp.ContractRevision) (rhp.ContractRevision, error) {
 		return rhp.ContractRevision{ID: fcid3, Revision: db.revisions[fcid3]}, nil
 	})
-	if err != nil || db.revisions[fcid3].ProofHeight != 1 {
+	if err != nil || db.revisions[fcid3].ProofHeight != 200 {
 		t.Fatalf("expected no error and revision to not be updated, got: %v, revision: %v", err, db.revisions[fcid3])
 	}
 
@@ -135,7 +142,7 @@ func TestWithRevision(t *testing.T) {
 	}
 
 	// assert withRevision returns an error if the local revision is newer than the host revision
-	db.revisions[types.FileContractID{7}] = types.V2FileContract{RevisionNumber: 2, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(1)}}
+	db.revisions[types.FileContractID{7}] = types.V2FileContract{ProofHeight: 200, RevisionNumber: 2, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(1)}}
 	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
 			Contract:  types.V2FileContract{RevisionNumber: 1},
@@ -150,7 +157,7 @@ func TestWithRevision(t *testing.T) {
 	// assert withRevision updates the revision in the database after syncing it with the host
 	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
-			Contract:  types.V2FileContract{RevisionNumber: update},
+			Contract:  types.V2FileContract{RevisionNumber: update, ProofHeight: 200},
 			Revisable: true,
 			Renewed:   false,
 		}, nil
@@ -182,7 +189,7 @@ func TestWithRevision(t *testing.T) {
 	// assert withRevision returns an error if it turns out the contract is not revisable
 	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
-			Contract:  types.V2FileContract{ProofHeight: defaultRevisionSubmissionBuffer + 1},
+			Contract:  types.V2FileContract{ProofHeight: revisionSubmissionBuffer + 1},
 			Revisable: false,
 			Renewed:   false,
 		}, nil
