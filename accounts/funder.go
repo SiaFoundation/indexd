@@ -90,11 +90,11 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 		maxEnd := min(len(accountKeys), funded+proto.MaxAccountBatchSize)
 		res, n, err := hc.ReplenishAccounts(ctx, contractID, accountKeys[funded:maxEnd], target)
 		if errors.Is(err, client.ErrContractInsufficientFunds) {
-			contractLog.Debug("contract has insufficient funds")
+			contractLog.Debug("contract has insufficient funds", zap.Error(err))
 			drained++
 			continue
 		} else if errors.Is(err, client.ErrContractNotRevisable) {
-			contractLog.Debug("contract is not revisable") // sanity check
+			contractLog.Debug("contract is not revisable", zap.Error(err)) // sanity check
 			drained++
 			continue
 		} else if err != nil {

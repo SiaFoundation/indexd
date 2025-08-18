@@ -202,3 +202,44 @@ func TestWithRevision(t *testing.T) {
 		t.Fatalf("expected no revision to be persisted, but found one")
 	}
 }
+
+func TestWithinRevisionSubmissionBuffer(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		blockHeight uint64
+		proofHeight uint64
+		expected    bool
+	}{
+		{
+			name:        "before buffer",
+			blockHeight: 1000,
+			proofHeight: 1000 + revisionSubmissionBuffer + 1,
+			expected:    false,
+		},
+		{
+			name:        "at beginning of buffer",
+			blockHeight: 1000,
+			proofHeight: 1000 + revisionSubmissionBuffer,
+			expected:    true,
+		},
+		{
+			name:        "at end of buffer",
+			blockHeight: 1000,
+			proofHeight: 1000,
+			expected:    true,
+		},
+		{
+			name:        "beyond buffer",
+			blockHeight: 1000,
+			proofHeight: 1000 - 1,
+			expected:    true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := withinRevisionSubmissionBuffer(tc.proofHeight, tc.blockHeight)
+			if result != tc.expected {
+				t.Errorf("expected %v, got %v", tc.expected, result)
+			}
+		})
+	}
+}

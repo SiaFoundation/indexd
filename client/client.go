@@ -306,7 +306,6 @@ func (c *HostClient) syncRevision(ctx context.Context, contractID types.FileCont
 func (c *HostClient) withRevision(ctx context.Context, contractID types.FileContractID, reviseFn func(contract rhp.ContractRevision) (rhp.ContractRevision, error)) error {
 	cs := c.cm.TipState()
 	bh := cs.Index.Height
-	maxProofHeight := bh + revisionSubmissionBuffer
 
 	// fetch revision from database
 	contract, renewed, err := c.store.ContractRevision(ctx, contractID)
@@ -314,8 +313,8 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 		return fmt.Errorf("failed to fetch contract revision: %w", err)
 	} else if renewed {
 		return ErrContractRenewed
-	} else if contract.Revision.ProofHeight > maxProofHeight {
-		return fmt.Errorf("%d > %d (%d+%d), %w", contract.Revision.ProofHeight, maxProofHeight, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
+	} else if withinRevisionSubmissionBuffer(contract.Revision.ProofHeight, bh) {
+		return fmt.Errorf("%d <= %d (%d+%d), %w", contract.Revision.ProofHeight, bh+revisionSubmissionBuffer, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
 	}
 
 	// revise the contract
@@ -329,8 +328,8 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 			return fmt.Errorf("failed to sync revision: %w", err)
 		} else if renewed {
 			return ErrContractRenewed
-		} else if contract.Revision.ProofHeight > maxProofHeight {
-			return fmt.Errorf("%d > %d (%d+%d), %w", contract.Revision.ProofHeight, maxProofHeight, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
+		} else if withinRevisionSubmissionBuffer(contract.Revision.ProofHeight, bh) {
+			return fmt.Errorf("%d <= %d (%d+%d), %w", contract.Revision.ProofHeight, bh+revisionSubmissionBuffer, bh, revisionSubmissionBuffer, ErrContractNotRevisable)
 		}
 		c.log.Debug("synced contract revision", zap.Uint64("revisionNumber", contract.Revision.RevisionNumber), zap.Stringer("contractID", contractID))
 
@@ -351,4 +350,8 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 	}
 
 	return nil
+}
+
+func withinRevisionSubmissionBuffer(proofHeight, blockHeight uint64) bool {
+	return proofHeight <= blockHeight+revisionSubmissionBuffer
 }
