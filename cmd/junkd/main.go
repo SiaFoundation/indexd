@@ -101,7 +101,7 @@ func main() {
 			for {
 				// upload slab
 				start := time.Now()
-				slabs, err := sdkClient.Upload(ctx, io.LimitReader(frand.Reader, slabSize), sdk.WithRedundancy(dataShards, parityShards))
+				slabs, err := sdkClient.Upload(ctx, nil, io.LimitReader(frand.Reader, slabSize), sdk.WithRedundancy(dataShards, parityShards))
 				if err != nil {
 					log.Error("failed to upload slab, timing out for 5 minutes", zap.Error(err), zap.Duration("duration", time.Since(start)))
 					if ok := <-waitFor(ctx, 5*time.Minute); ok {
