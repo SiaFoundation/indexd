@@ -37,6 +37,7 @@ type (
 		AddAppConnectKey(context.Context, UpdateAppConnectKey) (ConnectKey, error)
 		UpdateAppConnectKey(context.Context, UpdateAppConnectKey) (ConnectKey, error)
 		DeleteAppConnectKey(context.Context, string) error
+		AppConnectKey(ctx context.Context, key string) (ConnectKey, error)
 		AppConnectKeys(ctx context.Context, offset, limit int) ([]ConnectKey, error)
 
 		Account(context.Context, types.PublicKey) (Account, error)

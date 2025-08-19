@@ -40,6 +40,12 @@ func (c *Client) AppConnectKeys(ctx context.Context, offset, limit int) (keys []
 	return
 }
 
+// AppConnectKey retrieves the given application key.
+func (c *Client) AppConnectKey(ctx context.Context, key string) (connectKey accounts.ConnectKey, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/apps/connect/keys/%s", key), &connectKey)
+	return
+}
+
 // DeleteAppConnectKey removes the application connection key with the given key.
 func (c *Client) DeleteAppConnectKey(ctx context.Context, key string) (err error) {
 	err = c.c.DELETE(ctx, fmt.Sprintf("/apps/connect/keys/%s", key))

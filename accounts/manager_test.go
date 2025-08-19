@@ -83,6 +83,13 @@ func (s *mockStore) UpdateAppConnectKey(ctx context.Context, key UpdateAppConnec
 	return s.connectKeys[key.Key], nil
 }
 
+func (s *mockStore) AppConnectKey(ctx context.Context, key string) (ConnectKey, error) {
+	if connectKey, ok := s.connectKeys[key]; ok {
+		return connectKey, nil
+	}
+	return ConnectKey{}, ErrNotFound
+}
+
 func (s *mockStore) AppConnectKeys(ctx context.Context, offset, limit int) ([]ConnectKey, error) {
 	keys := slices.Collect(maps.Values(s.connectKeys))
 	if offset > len(keys) {

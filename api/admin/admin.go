@@ -94,6 +94,7 @@ type (
 		AddAppConnectKey(context.Context, accounts.UpdateAppConnectKey) (accounts.ConnectKey, error)
 		UpdateAppConnectKey(context.Context, accounts.UpdateAppConnectKey) (accounts.ConnectKey, error)
 		DeleteAppConnectKey(context.Context, string) error
+		AppConnectKey(ctx context.Context, key string) (accounts.ConnectKey, error)
 		AppConnectKeys(ctx context.Context, offset, limit int) ([]accounts.ConnectKey, error)
 	}
 
@@ -221,9 +222,10 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /txpool/recommendedfee": a.handleGETTxpoolRecommendedFee,
 
 		// connect endpoints
-		"GET /apps/connect/keys":         a.handleGETAppConnectKeys,
-		"POST /apps/connect/keys":        a.handlePOSTAppConnectKeys,
-		"PUT /apps/connect/keys":         a.handlePUTAppConnectKeys,
+		"GET    /apps/connect/keys":      a.handleGETAppConnectKeys,
+		"POST   /apps/connect/keys":      a.handlePOSTAppConnectKeys,
+		"PUT    /apps/connect/keys":      a.handlePUTAppConnectKeys,
+		"GET    /apps/connect/keys/:key": a.handleGETAppConnectKeysKey,
 		"DELETE /apps/connect/keys/:key": a.handleDELETEAppConnectKeys,
 
 		// wallet endpoints
@@ -349,6 +351,22 @@ func (a *admin) handlePUTAppConnectKeys(jc jape.Context) {
 	}
 	// PUT doesn't expect a body
 	jc.Encode(nil)
+}
+
+func (a *admin) handleGETAppConnectKeysKey(jc jape.Context) {
+	var key string
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	connectKey, err := a.accounts.AppConnectKey(jc.Request.Context(), key)
+	if errors.Is(err, accounts.ErrKeyNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get app connect key", err) != nil {
+		return
+	}
+	jc.Encode(connectKey)
 }
 
 func (a *admin) handleDELETEAppConnectKeys(jc jape.Context) {

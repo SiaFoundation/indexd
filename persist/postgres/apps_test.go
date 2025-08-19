@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -103,5 +104,27 @@ func TestAppConnectKeys(t *testing.T) {
 
 	if _, err := store.ValidAppConnectKey(ctx, "foobar"); !errors.Is(err, accounts.ErrKeyNotFound) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
+	}
+}
+
+func TestAppConnectKey(t *testing.T) {
+	ctx := t.Context()
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	key, err := store.AddAppConnectKey(ctx, accounts.UpdateAppConnectKey{
+		Key:           "foobar",
+		Description:   "test key",
+		MaxPinnedData: 10,
+		RemainingUses: 1,
+	})
+	if err != nil {
+		t.Fatal("failed to add app connect key:", err)
+	}
+
+	got, err := store.AppConnectKey(ctx, "foobar")
+	if err != nil {
+		t.Fatal("failed to validate app connect key:", err)
+	} else if !reflect.DeepEqual(key, got) {
+		t.Fatalf("expected app connect key %v, got %v", key, got)
 	}
 }

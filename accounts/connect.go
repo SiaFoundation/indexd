@@ -65,6 +65,11 @@ func (m *AccountManager) DeleteAppConnectKey(ctx context.Context, key string) er
 	return m.store.DeleteAppConnectKey(ctx, key)
 }
 
+// AppConnectKey returns the given app connect keys.
+func (m *AccountManager) AppConnectKey(ctx context.Context, key string) (ConnectKey, error) {
+	return m.store.AppConnectKey(ctx, key)
+}
+
 // AppConnectKeys returns a list of app connect keys.
 func (m *AccountManager) AppConnectKeys(ctx context.Context, offset, limit int) ([]ConnectKey, error) {
 	return m.store.AppConnectKeys(ctx, offset, limit)

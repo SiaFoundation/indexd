@@ -133,6 +133,13 @@ func TestAppConnectKeys(t *testing.T) {
 	} else if !reflect.DeepEqual(keys[0], generated[1]) {
 		t.Fatal("unexpected key", keys[0], generated[1])
 	}
+
+	key, err = adminClient.AppConnectKey(context.Background(), keys[0].Key)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(keys[0], key) {
+		t.Fatal("unexpected key", keys[0], key)
+	}
 }
 
 func TestAccountsAPI(t *testing.T) {
