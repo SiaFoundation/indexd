@@ -26,7 +26,7 @@ func TestRoundtrip(t *testing.T) {
 
 	// without client side encryption
 	data := frand.Bytes(4096)
-	obj, err := s.Upload(context.Background(), bytes.NewReader(data))
+	obj, err := s.Upload(context.Background(), bytes.NewReader(data), WithDisableEncryption())
 	if err != nil {
 		t.Fatalf("failed to upload: %v", err)
 	} else if len(obj.Slabs) != 1 {
@@ -40,7 +40,29 @@ func TestRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// with client side encryption
 	obj, err = s.Upload(context.Background(), bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("failed to upload: %v", err)
+	} else if len(obj.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
+	} else if obj.Slabs[0].Length != uint32(len(data)) {
+		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs[0].Length)
+	}
+
+	buf = bytes.NewBuffer(nil)
+	if err := s.Download(context.Background(), buf, obj); err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(buf.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+
+	// with client side encryption, custom key
+	var key [32]byte
+	frand.Read(key[:])
+	obj, err = s.Upload(context.Background(), bytes.NewReader(data), WithXChaCha20Secret(key))
 	if err != nil {
 		t.Fatalf("failed to upload: %v", err)
 	} else if len(obj.Slabs) != 1 {
