@@ -317,10 +317,16 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) ([]
 			if err != nil {
 				return nil, fmt.Errorf("failed to upload slab %d: %w", i, err)
 			}
+			expectedSlabID, err := params.Digest()
+			if err != nil {
+				return nil, fmt.Errorf("failed to compute slab id for slab %d: %w", i, err)
+			}
 
 			slabID, err := s.client.PinSlab(ctx, params)
 			if err != nil {
 				return nil, fmt.Errorf("failed to pin slab %d: %w", i, err)
+			} else if slabID != expectedSlabID {
+				return nil, fmt.Errorf("pinned slab %d id %s does not match expected id %s", i, slabID.String(), expectedSlabID.String())
 			}
 			pinned = append(pinned, Slab{
 				ID:     slabID,
