@@ -39,8 +39,8 @@ func (obj *Object) DecodeFrom(d *types.Decoder) {
 	types.DecodeSlice(d, &obj.Slabs)
 }
 
-// This is a convenience method to encode the object metadata into bytes using
-// the Sia encoding. This is equivalent to:
+// MarshalSia is a convenience method to encode the object metadata into bytes
+// using the Sia encoding. This is equivalent to:
 // var buf bytes.Buffer
 // e := types.NewEncoder(&buf)
 // obj.EncodeTo(e)
@@ -54,8 +54,8 @@ func (obj *Object) MarshalSia() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// This is a convenience method to decode the Sia-encoded bytes into an object
-// metadata type. This is equivalent to:
+// UnmarshalSia is a convenience method to decode the Sia-encoded bytes into an
+// object metadata type. This is equivalent to:
 // d := types.NewBufDecoder(bv)
 // obj.DecodeFrom(d)
 // return d.Err()
