@@ -116,9 +116,8 @@ var (
 )
 
 const (
-	contentType            = "Content-Type"
-	contentTypeJSON        = "application/json"
-	contentTypeOctetStream = "application/octet-stream"
+	acceptHeader = "Content-Type"
+	octetStream  = "application/octet-stream"
 )
 
 // WithLogger sets the logger for application API.
@@ -174,15 +173,13 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	if contentType := jc.Request.Header.Get(contentType); contentType == contentTypeJSON {
-		jc.Encode(slab)
-	} else if contentType == contentTypeOctetStream {
+	if contentType := jc.Request.Header.Get(acceptHeader); contentType == octetStream {
 		e := types.NewEncoder(jc.ResponseWriter)
 		slab.EncodeTo(e)
-		if jc.Check("failed to flush", e.Flush()) != nil {
-			return
-		}
+		jc.Check("failed to flush", e.Flush())
+		return
 	}
+	jc.Encode(slab)
 }
 
 func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
@@ -196,15 +193,13 @@ func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	if contentType := jc.Request.Header.Get(contentType); contentType == contentTypeJSON {
-		jc.Encode(slabIDs)
-	} else if contentType == contentTypeOctetStream {
+	if contentType := jc.Request.Header.Get(acceptHeader); contentType == octetStream {
 		e := types.NewEncoder(jc.ResponseWriter)
 		types.EncodeSlice(e, slabIDs)
-		if jc.Check("failed to flush", e.Flush()) != nil {
-			return
-		}
+		jc.Check("failed to flush", e.Flush())
+		return
 	}
+	jc.Encode(slabIDs)
 }
 
 func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
