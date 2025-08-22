@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/slabs"
 	"lukechampine.com/frand"
 )
 
@@ -24,23 +25,81 @@ func TestRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := frand.Bytes(4096)
-	slabs, err := s.Upload(context.Background(), bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("failed to upload: %v", err)
-	} else if len(slabs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(slabs))
-	} else if slabs[0].Length != uint32(len(data)) {
-		t.Fatalf("expected slab length %d, got %d", len(data), slabs[0].Length)
+	// each upload has varying encryption configurations so we should get
+	// different slab IDs every time
+	seen := make(map[slabs.SlabID]struct{})
+	checkSlabIDs := func(slabs []Slab) {
+		t.Helper()
+
+		for _, slab := range slabs {
+			if _, ok := seen[slab.ID]; ok {
+				t.Fatal("slab ID seen twice")
+			}
+			seen[slab.ID] = struct{}{}
+		}
 	}
 
+	// without client side encryption
+	data := frand.Bytes(4096)
+	obj, err := s.Upload(context.Background(), bytes.NewReader(data), WithDisableEncryption())
+	if err != nil {
+		t.Fatalf("failed to upload: %v", err)
+	} else if len(obj.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
+	} else if obj.Slabs[0].Length != uint32(len(data)) {
+		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs[0].Length)
+	}
+	checkSlabIDs(obj.Slabs)
+
 	buf := bytes.NewBuffer(nil)
-	if err := s.Download(context.Background(), buf, slabs); err != nil {
+	if err := s.Download(context.Background(), buf, obj); err != nil {
+		t.Fatal(err)
+	}
+
+	// with client side encryption
+	obj, err = s.Upload(context.Background(), bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("failed to upload: %v", err)
+	} else if len(obj.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
+	} else if obj.Slabs[0].Length != uint32(len(data)) {
+		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs[0].Length)
+	}
+	checkSlabIDs(obj.Slabs)
+
+	buf = bytes.NewBuffer(nil)
+	if err := s.Download(context.Background(), buf, obj); err != nil {
 		t.Fatal(err)
 	}
 
 	if !bytes.Equal(buf.Bytes(), data) {
 		t.Fatal("data mismatch")
+	}
+
+	// with client side encryption, custom key
+	var key [32]byte
+	frand.Read(key[:])
+	obj, err = s.Upload(context.Background(), bytes.NewReader(data), WithXChaCha20Secret(key))
+	if err != nil {
+		t.Fatalf("failed to upload: %v", err)
+	} else if len(obj.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
+	} else if obj.Slabs[0].Length != uint32(len(data)) {
+		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs[0].Length)
+	}
+	checkSlabIDs(obj.Slabs)
+
+	buf = bytes.NewBuffer(nil)
+	if err := s.Download(context.Background(), buf, obj); err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(buf.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+
+	if _, err = s.Upload(context.Background(), bytes.NewReader(data), WithDisableEncryption(), WithXChaCha20Secret(key)); err == nil {
+		t.Fatal("expected error when disabling encryption but still passing custom key")
 	}
 }
 
@@ -67,18 +126,18 @@ func TestRoundtripCount(t *testing.T) {
 
 	// 1 MB
 	data := frand.Bytes(1 << 20)
-	slabs, err := s.Upload(context.Background(), bytes.NewReader(data))
+	obj, err := s.Upload(context.Background(), bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("failed to upload: %v", err)
-	} else if len(slabs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(slabs))
-	} else if slabs[0].Length != uint32(len(data)) {
-		t.Fatalf("expected slab length %d, got %d", len(data), slabs[0].Length)
+	} else if len(obj.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
+	} else if obj.Slabs[0].Length != uint32(len(data)) {
+		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs[0].Length)
 	}
 
 	buf := bytes.NewBuffer(nil)
 	cw := &countWriter{w: buf}
-	if err := s.Download(context.Background(), cw, slabs); err != nil {
+	if err := s.Download(context.Background(), cw, obj); err != nil {
 		t.Fatal(err)
 	}
 
@@ -112,11 +171,11 @@ func TestUpload(t *testing.T) {
 		// make most of the hosts slow,
 		// but not enough to fail to upload
 		dialer.SetSlowHosts(20, time.Second)
-		slabs, err := s.Upload(context.Background(), bytes.NewReader(data), WithUploadHostTimeout(100*time.Millisecond))
+		obj, err := s.Upload(context.Background(), bytes.NewReader(data), WithUploadHostTimeout(100*time.Millisecond))
 		if err != nil {
 			t.Fatal(err)
-		} else if len(slabs) != 1 {
-			t.Fatalf("expected 1 slab, got %d", len(slabs))
+		} else if len(obj.Slabs) != 1 {
+			t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
 		}
 	})
 }
@@ -132,13 +191,13 @@ func TestDownload(t *testing.T) {
 	}
 
 	data := frand.Bytes(4096)
-	slabs, err := s.Upload(context.Background(), bytes.NewReader(data))
+	obj, err := s.Upload(context.Background(), bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("failed to upload: %v", err)
 	}
 
 	buf := bytes.NewBuffer(nil)
-	if err = s.Download(context.Background(), buf, slabs); err != nil {
+	if err = s.Download(context.Background(), buf, obj); err != nil {
 		t.Fatalf("failed to download: %v", err)
 	}
 
@@ -147,7 +206,7 @@ func TestDownload(t *testing.T) {
 		// make enough hosts timeout to fail to download
 		dialer.SetSlowHosts(21, time.Second)
 		buf := bytes.NewBuffer(nil)
-		err = s.Download(context.Background(), buf, slabs, WithDownloadHostTimeout(200*time.Millisecond))
+		err = s.Download(context.Background(), buf, obj, WithDownloadHostTimeout(200*time.Millisecond))
 		if !errors.Is(err, ErrNotEnoughShards) {
 			t.Fatalf("expected ErrNotEnoughShards, got %v", err)
 		}
@@ -158,7 +217,7 @@ func TestDownload(t *testing.T) {
 		// make most of the hosts timeout
 		dialer.SetSlowHosts(20, time.Second)
 		buf := bytes.NewBuffer(nil)
-		err = s.Download(context.Background(), buf, slabs, WithDownloadHostTimeout(200*time.Millisecond))
+		err = s.Download(context.Background(), buf, obj, WithDownloadHostTimeout(200*time.Millisecond))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -220,7 +279,7 @@ func BenchmarkDownload(b *testing.B) {
 	}
 
 	data := frand.Bytes(benchmarkSize)
-	slabs, err := s.Upload(context.Background(), bytes.NewReader(data))
+	obj, err := s.Upload(context.Background(), bytes.NewReader(data))
 	if err != nil {
 		b.Fatalf("failed to upload: %v", err)
 	}
@@ -236,7 +295,7 @@ func BenchmarkDownload(b *testing.B) {
 			b.ResetTimer()
 			for b.Loop() {
 				buf.Reset()
-				err = s.Download(context.Background(), buf, slabs, WithDownloadInflight(inflight))
+				err = s.Download(context.Background(), buf, obj, WithDownloadInflight(inflight))
 				if err != nil {
 					b.Fatalf("failed to download: %v", err)
 				}

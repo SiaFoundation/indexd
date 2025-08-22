@@ -29,6 +29,9 @@ type (
 		parityShards uint8
 		hostTimeout  time.Duration
 		maxInflight  int
+
+		customKey         *[32]byte
+		disableEncryption bool
 	}
 
 	downloadOption struct {
@@ -76,7 +79,7 @@ type (
 	// An Object represents a collection of slabs that are associated with a
 	// specific key.
 	Object struct {
-		Key   string
+		Key   *[32]byte
 		Slabs []Slab
 	}
 
@@ -239,7 +242,7 @@ top:
 // Upload uploads the data to hosts and pins it to the indexer.
 //
 // Returns the metadata of the slabs that were pinned
-func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) ([]Slab, error) {
+func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Object, error) {
 	uo := uploadOption{
 		dataShards:   10,
 		parityShards: 20,
@@ -251,7 +254,24 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) ([]
 	}
 
 	if (uo.parityShards+uo.dataShards)/uo.dataShards < 2 {
-		return nil, errors.New("redundancy must be at least 2x")
+		return Object{}, errors.New("redundancy must be at least 2x")
+	} else if uo.disableEncryption && uo.customKey != nil {
+		return Object{}, errors.New("custom key provided but encryption disabled ")
+	}
+
+	var obj Object
+	if !uo.disableEncryption {
+		if uo.customKey != nil {
+			obj.Key = uo.customKey
+		} else {
+			obj.Key = new([32]byte)
+			frand.Read(obj.Key[:])
+		}
+
+		var err error
+		if r, err = encrypt(obj.Key, r, 0); err != nil {
+			return Object{}, fmt.Errorf("failed to get stream cipher: %w", err)
+		}
 	}
 
 	type work struct {
@@ -297,11 +317,10 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) ([]
 	}()
 
 	// TODO: cleanup on failure
-	var pinned []Slab
 	for i := 0; ; i++ {
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return Object{}, ctx.Err()
 		case work := <-workCh:
 			err := work.err
 			shards := work.shards
@@ -309,26 +328,26 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) ([]
 
 			if errors.Is(err, io.EOF) {
 				// no more slabs to upload, return the pinned slabs
-				return pinned, nil
+				return obj, nil
 			} else if work.err != nil {
-				return nil, work.err
+				return Object{}, work.err
 			}
 			params, err := s.uploadSlab(ctx, shardKey, shards, uo.dataShards, uo.maxInflight, uo.hostTimeout)
 			if err != nil {
-				return nil, fmt.Errorf("failed to upload slab %d: %w", i, err)
+				return Object{}, fmt.Errorf("failed to upload slab %d: %w", i, err)
 			}
 			expectedSlabID, err := params.Digest()
 			if err != nil {
-				return nil, fmt.Errorf("failed to compute slab id for slab %d: %w", i, err)
+				return Object{}, fmt.Errorf("failed to compute slab id for slab %d: %w", i, err)
 			}
 
 			slabID, err := s.client.PinSlab(ctx, params)
 			if err != nil {
-				return nil, fmt.Errorf("failed to pin slab %d: %w", i, err)
+				return Object{}, fmt.Errorf("failed to pin slab %d: %w", i, err)
 			} else if slabID != expectedSlabID {
-				return nil, fmt.Errorf("pinned slab %d id %s does not match expected id %s", i, slabID.String(), expectedSlabID.String())
+				return Object{}, fmt.Errorf("pinned slab %d id %s does not match expected id %s", i, slabID.String(), expectedSlabID.String())
 			}
-			pinned = append(pinned, Slab{
+			obj.Slabs = append(obj.Slabs, Slab{
 				ID:     slabID,
 				Offset: 0,
 				Length: uint32(work.length),
@@ -340,9 +359,13 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) ([]
 // Download downloads object metadata
 //
 // TODO: support seeks
-func (s *SDK) Download(ctx context.Context, w io.Writer, metadata []Slab, opts ...DownloadOption) error {
-	if len(metadata) == 0 {
+func (s *SDK) Download(ctx context.Context, w io.Writer, metadata Object, opts ...DownloadOption) error {
+	if len(metadata.Slabs) == 0 {
 		return errors.New("no slabs to download")
+	}
+
+	if metadata.Key != nil {
+		w = decrypt(metadata.Key, w, 0)
 	}
 
 	do := downloadOption{
@@ -359,7 +382,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata []Slab, opts .
 	}
 	workCh := make(chan work, 1)
 	go func() {
-		for i, meta := range metadata {
+		for i, meta := range metadata.Slabs {
 			pinned, err := s.client.Slab(ctx, meta.ID)
 			if err != nil {
 				workCh <- work{err: fmt.Errorf("failed to get slab %d metadata: %w", i, err)}
@@ -405,7 +428,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata []Slab, opts .
 			} else if err != nil {
 				return err
 			}
-			slab := metadata[i]
+			slab := metadata.Slabs[i]
 			if err := stripedJoin(bw, work.shards, int(slab.Length)); err != nil {
 				return fmt.Errorf("failed to write slab %d: %w", i, err)
 			}
@@ -527,6 +550,23 @@ func WithUploadHostTimeout(timeout time.Duration) UploadOption {
 func WithUploadInflight(maxInflight int) UploadOption {
 	return func(uo *uploadOption) {
 		uo.maxInflight = maxInflight
+	}
+}
+
+// WithDisableEncryption disables client side encryption for uploads.  By
+// default client side encryption is enabled.
+func WithDisableEncryption() UploadOption {
+	return func(uo *uploadOption) {
+		uo.disableEncryption = true
+	}
+}
+
+// WithXChaCha20Secret sets a custom key for client side encryption.  By
+// default a randomly generated key is used.  In both cases, the key will be
+// returned alongside the slabs in the Object.
+func WithXChaCha20Secret(key [32]byte) UploadOption {
+	return func(uo *uploadOption) {
+		uo.customKey = &key
 	}
 }
 

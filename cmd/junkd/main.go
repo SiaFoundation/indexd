@@ -101,15 +101,15 @@ func main() {
 			for {
 				// upload slab
 				start := time.Now()
-				slabs, err := sdkClient.Upload(ctx, io.LimitReader(frand.Reader, slabSize), sdk.WithRedundancy(dataShards, parityShards))
+				obj, err := sdkClient.Upload(ctx, io.LimitReader(frand.Reader, slabSize), sdk.WithRedundancy(dataShards, parityShards))
 				if err != nil {
 					log.Error("failed to upload slab, timing out for 5 minutes", zap.Error(err), zap.Duration("duration", time.Since(start)))
 					if ok := <-waitFor(ctx, 5*time.Minute); ok {
 						continue loop
 					}
 					break loop
-				} else if len(slabs) != 1 {
-					log.Error(fmt.Sprintf("expected 1 slab, got %d", len(slabs)))
+				} else if len(obj.Slabs) != 1 {
+					log.Error(fmt.Sprintf("expected 1 slab, got %d", len(obj.Slabs)))
 					break loop
 				}
 
@@ -117,7 +117,7 @@ func main() {
 				elapsed = append(elapsed, time.Since(start))
 				elapsedMu.Unlock()
 
-				log.Info("upload completed", zap.Stringer("SlabID", slabs[0].ID), zap.Duration("duration", time.Since(start)), zap.String("speed", formatBpsString(redundantSlabSize, time.Since(start))))
+				log.Info("upload completed", zap.Stringer("SlabID", obj.Slabs[0].ID), zap.Duration("duration", time.Since(start)), zap.String("speed", formatBpsString(redundantSlabSize, time.Since(start))))
 			}
 		}(log.Named(fmt.Sprintf("upload-thread-%d", n)))
 	}
