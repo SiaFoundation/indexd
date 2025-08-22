@@ -99,7 +99,7 @@ func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route 
 	return r.Body, nil
 }
 
-func (c *Client) signedRequest(ctx context.Context, method, route string, data, resp any) error {
+func (c *Client) signedRequestJSON(ctx context.Context, method, route string, data, resp any) error {
 	body, err := c.signedRequestCustom(ctx, "application/json", method, route, data)
 	if err != nil {
 		return err
@@ -132,19 +132,19 @@ func (c *Client) Hosts(ctx context.Context, opts ...api.URLQueryParameterOption)
 	for _, opt := range opts {
 		opt(values)
 	}
-	err = c.signedRequest(ctx, http.MethodGet, "/hosts?"+values.Encode(), nil, &hosts)
+	err = c.signedRequestJSON(ctx, http.MethodGet, "/hosts?"+values.Encode(), nil, &hosts)
 	return
 }
 
 // PinSlab pins a slab to the indexer.
 func (c *Client) PinSlab(ctx context.Context, params slabs.SlabPinParams) (slabID slabs.SlabID, err error) {
-	err = c.signedRequest(ctx, http.MethodPost, "/slabs", params, &slabID)
+	err = c.signedRequestJSON(ctx, http.MethodPost, "/slabs", params, &slabID)
 	return
 }
 
 // UnpinSlab unpins a slab from the indexer.
 func (c *Client) UnpinSlab(ctx context.Context, slabID slabs.SlabID) error {
-	return c.signedRequest(ctx, http.MethodDelete, fmt.Sprintf("/slabs/%s", slabID), nil, nil)
+	return c.signedRequestJSON(ctx, http.MethodDelete, fmt.Sprintf("/slabs/%s", slabID), nil, nil)
 }
 
 // Slab retrieves a slab from the indexer by its ID.
@@ -176,7 +176,7 @@ func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOptio
 
 // RequestAppConnection requests an application connection to the indexer.
 func (c *Client) RequestAppConnection(ctx context.Context, request RegisterAppRequest) (resp RegisterAppResponse, err error) {
-	err = c.signedRequest(ctx, http.MethodPost, "/auth/connect", request, &resp)
+	err = c.signedRequestJSON(ctx, http.MethodPost, "/auth/connect", request, &resp)
 	return
 }
 
