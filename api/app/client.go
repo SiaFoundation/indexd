@@ -73,59 +73,67 @@ func sign(appKey types.PrivateKey, method, endpointURL string, req any) (string,
 	return u.String(), body, nil
 }
 
-func (c *Client) signedRequestCustom(ctx context.Context, setHeaders func(http.Header), decode func(io.Reader) error, method, route string, data any) error {
+func (c *Client) signedRequestCustom(ctx context.Context, setHeaders func(http.Header), method, route string, data any) (io.ReadCloser, error) {
 	u, body, err := sign(c.appkey, method, fmt.Sprintf("%s%s", c.baseURL, route), data)
 	if err != nil {
-		return fmt.Errorf("failed to sign request: %w", err)
+		return nil, fmt.Errorf("failed to sign request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {
-		return fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	setHeaders(req.Header)
+
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer io.Copy(io.Discard, r.Body)
-	defer r.Body.Close()
+
 	if !(200 <= r.StatusCode && r.StatusCode < 300) {
-		err, _ := io.ReadAll(r.Body)
-		return errors.New(strings.TrimSpace(string(err)))
+		defer io.Copy(io.Discard, r.Body)
+		defer r.Body.Close()
+		b, _ := io.ReadAll(r.Body)
+		return nil, errors.New(strings.TrimSpace(string(b)))
 	}
-	return decode(r.Body)
+
+	return r.Body, nil
 }
 
 func (c *Client) signedRequest(ctx context.Context, method, route string, data, resp any) error {
-	return c.signedRequestCustom(ctx,
+	body, err := c.signedRequestCustom(ctx,
 		func(h http.Header) {
 			h.Set("Content-Type", "application/json")
 		},
-		func(r io.Reader) error {
-			if resp == nil {
-				return nil
-			}
-			return json.NewDecoder(r).Decode(resp)
-		},
 		method, route, data,
 	)
+	if err != nil {
+		return err
+	}
+	defer io.Copy(io.Discard, body)
+	defer body.Close()
+
+	if resp == nil {
+		return nil
+	}
+	return json.NewDecoder(body).Decode(resp)
 }
 
 func (c *Client) signedRequestBinary(ctx context.Context, method, route string, data any, resp types.DecoderFrom) error {
-	return c.signedRequestCustom(ctx,
+	body, err := c.signedRequestCustom(ctx,
 		func(h http.Header) {
 			h.Set("Content-Type", "application/octet-stream")
 		},
-		func(r io.Reader) error {
-			if resp == nil {
-				return nil
-			}
-			d := types.NewDecoder(io.LimitedReader{R: r, N: math.MaxInt64})
-			resp.DecodeFrom(d)
-			return d.Err()
-		},
 		method, route, data,
 	)
+	if err != nil {
+		return err
+	}
+	defer io.Copy(io.Discard, body)
+	defer body.Close()
+
+	d := types.NewDecoder(io.LimitedReader{R: body, N: math.MaxInt64})
+	resp.DecodeFrom(d)
+	return d.Err()
 }
 
 // Hosts returns all usable hosts.
