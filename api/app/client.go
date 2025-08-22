@@ -73,7 +73,7 @@ func sign(appKey types.PrivateKey, method, endpointURL string, req any) (string,
 	return u.String(), body, nil
 }
 
-func (c *Client) signedRequestCustom(ctx context.Context, setHeaders func(http.Header), method, route string, data any) (io.ReadCloser, error) {
+func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route string, data any) (io.ReadCloser, error) {
 	u, body, err := sign(c.appkey, method, fmt.Sprintf("%s%s", c.baseURL, route), data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign request: %w", err)
@@ -82,7 +82,7 @@ func (c *Client) signedRequestCustom(ctx context.Context, setHeaders func(http.H
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	setHeaders(req.Header)
+	req.Header.Set("Accept", accept)
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -100,12 +100,7 @@ func (c *Client) signedRequestCustom(ctx context.Context, setHeaders func(http.H
 }
 
 func (c *Client) signedRequest(ctx context.Context, method, route string, data, resp any) error {
-	body, err := c.signedRequestCustom(ctx,
-		func(h http.Header) {
-			h.Set("Content-Type", "application/json")
-		},
-		method, route, data,
-	)
+	body, err := c.signedRequestCustom(ctx, "application/json", method, route, data)
 	if err != nil {
 		return err
 	}
@@ -119,12 +114,7 @@ func (c *Client) signedRequest(ctx context.Context, method, route string, data, 
 }
 
 func (c *Client) signedRequestBinary(ctx context.Context, method, route string, data any, resp types.DecoderFrom) error {
-	body, err := c.signedRequestCustom(ctx,
-		func(h http.Header) {
-			h.Set("Content-Type", "application/octet-stream")
-		},
-		method, route, data,
-	)
+	body, err := c.signedRequestCustom(ctx, "application/octet-stream", method, route, data)
 	if err != nil {
 		return err
 	}

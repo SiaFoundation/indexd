@@ -116,7 +116,7 @@ var (
 )
 
 const (
-	acceptHeader = "Content-Type"
+	acceptHeader = "Accept"
 	octetStream  = "application/octet-stream"
 )
 
@@ -173,7 +173,7 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	if contentType := jc.Request.Header.Get(acceptHeader); contentType == octetStream {
+	if accept := jc.Request.Header.Get(acceptHeader); accept == octetStream {
 		e := types.NewEncoder(jc.ResponseWriter)
 		slab.EncodeTo(e)
 		jc.Check("failed to flush", e.Flush())
