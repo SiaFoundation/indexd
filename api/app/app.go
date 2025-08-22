@@ -115,6 +115,12 @@ var (
 	ErrUserRejected = errors.New("user rejected connection request")
 )
 
+const (
+	contentType            = "Content-Type"
+	contentTypeJSON        = "application/json"
+	contentTypeOctetStream = "application/octet-stream"
+)
+
 // WithLogger sets the logger for application API.
 func WithLogger(log *zap.Logger) Option {
 	return func(api *app) {
@@ -168,9 +174,9 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	if contentType := jc.Request.Header.Get("Content-Type"); contentType == "application/json" {
+	if contentType := jc.Request.Header.Get(contentType); contentType == contentTypeJSON {
 		jc.Encode(slab)
-	} else if contentType == "application/octet-stream" {
+	} else if contentType == contentTypeOctetStream {
 		e := types.NewEncoder(jc.ResponseWriter)
 		slab.EncodeTo(e)
 		if jc.Check("failed to flush", e.Flush()) != nil {
@@ -190,9 +196,9 @@ func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	if contentType := jc.Request.Header.Get("Content-Type"); contentType == "application/json" {
+	if contentType := jc.Request.Header.Get(contentType); contentType == contentTypeJSON {
 		jc.Encode(slabIDs)
-	} else if contentType == "application/octet-stream" {
+	} else if contentType == contentTypeOctetStream {
 		e := types.NewEncoder(jc.ResponseWriter)
 		types.EncodeSlice(e, slabIDs)
 		if jc.Check("failed to flush", e.Flush()) != nil {
