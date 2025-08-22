@@ -111,6 +111,23 @@ func (c *Client) signedRequest(ctx context.Context, method, route string, data, 
 	)
 }
 
+func (c *Client) signedRequestBinary(ctx context.Context, method, route string, data any, resp types.DecoderFrom) error {
+	return c.signedRequestCustom(ctx,
+		func(h http.Header) {
+			h.Set("Content-Type", "application/octet-stream")
+		},
+		func(r io.Reader) error {
+			if resp == nil {
+				return nil
+			}
+			d := types.NewDecoder(io.LimitedReader{R: r, N: math.MaxInt64})
+			resp.DecodeFrom(d)
+			return d.Err()
+		},
+		method, route, data,
+	)
+}
+
 // Hosts returns all usable hosts.
 func (c *Client) Hosts(ctx context.Context, opts ...api.URLQueryParameterOption) (hosts []hosts.HostInfo, err error) {
 	values := url.Values{}
@@ -132,41 +149,30 @@ func (c *Client) UnpinSlab(ctx context.Context, slabID slabs.SlabID) error {
 	return c.signedRequest(ctx, http.MethodDelete, fmt.Sprintf("/slabs/%s", slabID), nil, nil)
 }
 
-func setBinaryHeaders(h http.Header) {
-	h.Set("Content-Type", "application/octet-stream")
-}
-
 // Slab retrieves a slab from the indexer by its ID.
 func (c *Client) Slab(ctx context.Context, slabID slabs.SlabID) (s slabs.PinnedSlab, err error) {
-	err = c.signedRequestCustom(ctx,
-		setBinaryHeaders,
-		func(r io.Reader) error {
-			d := types.NewDecoder(io.LimitedReader{R: r, N: math.MaxInt64})
-			s.DecodeFrom(d)
-			return d.Err()
-		},
-		http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil,
-	)
+	err = c.signedRequestBinary(ctx, http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil, &s)
 	return
+}
+
+// slabIDs is a wrapper type to allow us to call DecodeFrom on a slice of slab
+// IDs.
+type slabIDs []slabs.SlabID
+
+// DecodeFrom implements types.DecoderFrom.
+func (s *slabIDs) DecodeFrom(d *types.Decoder) {
+	types.DecodeSlice[slabs.SlabID](d, (*[]slabs.SlabID)(s))
 }
 
 // SlabIDs fetches the digests of slabs associated with the account. It supports
 // pagination through the provided options.
-func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOption) (slabIDs []slabs.SlabID, err error) {
+func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOption) (resp []slabs.SlabID, err error) {
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
 	}
 
-	err = c.signedRequestCustom(ctx,
-		setBinaryHeaders,
-		func(r io.Reader) error {
-			d := types.NewDecoder(io.LimitedReader{R: r, N: math.MaxInt64})
-			types.DecodeSlice(d, &slabIDs)
-			return d.Err()
-		},
-		http.MethodGet, "/slabs?"+values.Encode(), nil,
-	)
+	err = c.signedRequestBinary(ctx, http.MethodGet, "/slabs?"+values.Encode(), nil, (*slabIDs)(&resp))
 	return
 }
 
