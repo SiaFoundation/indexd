@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -72,7 +73,7 @@ func sign(appKey types.PrivateKey, method, endpointURL string, req any) (string,
 	return u.String(), body, nil
 }
 
-func (c *Client) signedRequest(ctx context.Context, method, route string, data any, resp any) error {
+func (c *Client) signedRequestCustom(ctx context.Context, setHeaders func(http.Header), decode func(io.Reader) error, method, route string, data any) error {
 	u, body, err := sign(c.appkey, method, fmt.Sprintf("%s%s", c.baseURL, route), data)
 	if err != nil {
 		return fmt.Errorf("failed to sign request: %w", err)
@@ -81,7 +82,7 @@ func (c *Client) signedRequest(ctx context.Context, method, route string, data a
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Content-Type", "application/json")
+	setHeaders(req.Header)
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -92,10 +93,22 @@ func (c *Client) signedRequest(ctx context.Context, method, route string, data a
 		err, _ := io.ReadAll(r.Body)
 		return errors.New(strings.TrimSpace(string(err)))
 	}
-	if resp == nil {
-		return nil
-	}
-	return json.NewDecoder(r.Body).Decode(resp)
+	return decode(r.Body)
+}
+
+func (c *Client) signedRequest(ctx context.Context, method, route string, data, resp any) error {
+	return c.signedRequestCustom(ctx,
+		func(h http.Header) {
+			h.Set("Content-Type", "application/json")
+		},
+		func(r io.Reader) error {
+			if resp == nil {
+				return nil
+			}
+			return json.NewDecoder(r).Decode(resp)
+		},
+		method, route, data,
+	)
 }
 
 // Hosts returns all usable hosts.
@@ -119,9 +132,21 @@ func (c *Client) UnpinSlab(ctx context.Context, slabID slabs.SlabID) error {
 	return c.signedRequest(ctx, http.MethodDelete, fmt.Sprintf("/slabs/%s", slabID), nil, nil)
 }
 
+func setBinaryHeaders(h http.Header) {
+	h.Set("Content-Type", "application/octet-stream")
+}
+
 // Slab retrieves a slab from the indexer by its ID.
 func (c *Client) Slab(ctx context.Context, slabID slabs.SlabID) (s slabs.PinnedSlab, err error) {
-	err = c.signedRequest(ctx, http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil, &s)
+	err = c.signedRequestCustom(ctx,
+		setBinaryHeaders,
+		func(r io.Reader) error {
+			d := types.NewDecoder(io.LimitedReader{R: r, N: math.MaxInt64})
+			s.DecodeFrom(d)
+			return d.Err()
+		},
+		http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil,
+	)
 	return
 }
 
@@ -133,7 +158,15 @@ func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOptio
 		opt(values)
 	}
 
-	err = c.signedRequest(ctx, http.MethodGet, "/slabs?"+values.Encode(), nil, &slabIDs)
+	err = c.signedRequestCustom(ctx,
+		setBinaryHeaders,
+		func(r io.Reader) error {
+			d := types.NewDecoder(io.LimitedReader{R: r, N: math.MaxInt64})
+			types.DecodeSlice(d, &slabIDs)
+			return d.Err()
+		},
+		http.MethodGet, "/slabs?"+values.Encode(), nil,
+	)
 	return
 }
 

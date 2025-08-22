@@ -168,7 +168,15 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	jc.Encode(slab)
+	if contentType := jc.Request.Header.Get("Content-Type"); contentType == "application/json" {
+		jc.Encode(slab)
+	} else if contentType == "application/octet-stream" {
+		e := types.NewEncoder(jc.ResponseWriter)
+		slab.EncodeTo(e)
+		if jc.Check("failed to flush", e.Flush()) != nil {
+			return
+		}
+	}
 }
 
 func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
@@ -182,7 +190,15 @@ func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	jc.Encode(slabIDs)
+	if contentType := jc.Request.Header.Get("Content-Type"); contentType == "application/json" {
+		jc.Encode(slabIDs)
+	} else if contentType == "application/octet-stream" {
+		e := types.NewEncoder(jc.ResponseWriter)
+		types.EncodeSlice(e, slabIDs)
+		if jc.Check("failed to flush", e.Flush()) != nil {
+			return
+		}
+	}
 }
 
 func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
