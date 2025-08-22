@@ -1,6 +1,8 @@
 package sdk
 
 import (
+	"bytes"
+
 	"go.sia.tech/core/types"
 )
 
@@ -34,4 +36,30 @@ func (obj *Object) DecodeFrom(d *types.Decoder) {
 		d.Read((*obj.Key)[:])
 	}
 	types.DecodeSlice(d, &obj.Slabs)
+}
+
+// This is a convenience method to encode the object metadata into bytes using
+// the Sia encoding. This is equivalent to:
+// var buf bytes.Buffer
+// e := types.NewEncoder(&buf)
+// obj.EncodeTo(e)
+// e.Flush()
+// buf now contains encoded Object
+func (obj *Object) MarshalSia() ([]byte, error) {
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	obj.EncodeTo(e)
+	e.Flush()
+	return buf.Bytes(), nil
+}
+
+// This is a convenience method to decode the Sia-encoded bytes into an Object
+// metadata type. This is equivalent to:
+// d := types.NewBufDecoder(bv)
+// obj.DecodeFrom(d)
+// return d.Err()
+func (obj *Object) UnmarshalSia(b []byte) error {
+	d := types.NewBufDecoder(bv)
+	obj.DecodeFrom(d)
+	return d.Err()
 }
