@@ -153,15 +153,6 @@ func (c *Client) Slab(ctx context.Context, slabID slabs.SlabID) (s slabs.PinnedS
 	return
 }
 
-// slabIDs is a wrapper type to allow us to call DecodeFrom on a slice of slab
-// IDs.
-type slabIDs []slabs.SlabID
-
-// DecodeFrom implements types.DecoderFrom.
-func (s *slabIDs) DecodeFrom(d *types.Decoder) {
-	types.DecodeSlice[slabs.SlabID](d, (*[]slabs.SlabID)(s))
-}
-
 // SlabIDs fetches the digests of slabs associated with the account. It supports
 // pagination through the provided options.
 func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOption) (resp []slabs.SlabID, err error) {
@@ -170,7 +161,7 @@ func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOptio
 		opt(values)
 	}
 
-	err = c.signedRequestBinary(ctx, http.MethodGet, "/slabs?"+values.Encode(), nil, (*slabIDs)(&resp))
+	err = c.signedRequestJSON(ctx, http.MethodGet, "/slabs?"+values.Encode(), nil, &resp)
 	return
 }
 

@@ -193,12 +193,6 @@ func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	if contentType := jc.Request.Header.Get(acceptHeader); contentType == octetStream {
-		e := types.NewEncoder(jc.ResponseWriter)
-		types.EncodeSlice(e, slabIDs)
-		jc.Check("failed to flush", e.Flush())
-		return
-	}
 	jc.Encode(slabIDs)
 }
 
