@@ -117,7 +117,9 @@ var (
 
 const (
 	acceptHeader = "Accept"
-	octetStream  = "application/octet-stream"
+
+	applicationJSON        = "application/json"
+	applicationOctetStream = "application/octet-stream"
 )
 
 // WithLogger sets the logger for application API.
@@ -173,7 +175,7 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	if accept := jc.Request.Header.Get(acceptHeader); accept == octetStream {
+	if accept := jc.Request.Header.Get(acceptHeader); accept == applicationOctetStream {
 		e := types.NewEncoder(jc.ResponseWriter)
 		slab.EncodeTo(e)
 		jc.Check("failed to flush", e.Flush())
