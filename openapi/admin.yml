@@ -6,6 +6,9 @@ info:
     This API is meant for internal use by operators who need to keep the service running smoothly.
   version: 2.0.0
 
+servers:
+  - url: http://localhost:9980/api
+
 tags:
   - name: accounts
     description: Manage ephemeral accounts used to fund storage operations on behalf of clients.
@@ -56,6 +59,32 @@ paths:
                       type: string
                       format: date-time
                       description: The time the indexer was started
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                state, err := c.State(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const state = await admin.state()
 
     /accounts:
       get:
@@ -89,6 +118,32 @@ paths:
                   type: array
                   items:
                     $ref: "#/components/schemas/PublicKey"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                accounts, err := c.Accounts(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const accounts = await admin.accounts()
 
     /account/{accountkey}:
       post:
@@ -108,6 +163,17 @@ paths:
             description: Account added successfully
           '409':
             description: Account already exists
+        x-codeSamples:
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+                const admin = Admin({
+                  api: "http://localhost:9980/api",
+                  password: "your-admin-password"
+                })
+                await admin.accountAdd("ed25519:your-public-key")
       put:
         tags:
           - accounts
@@ -137,6 +203,19 @@ paths:
             description: Account not found
           '409':
             description: New account key already exists
+        x-codeSamples:
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              await admin.accountRotateKey("ed25519:current-public-key", {
+                newAccountKey: "ed25519:new-public-key"
+              })
       delete:
         tags:
           - accounts
@@ -154,6 +233,17 @@ paths:
             description: Account deleted successfully 
           '404':
             description: Account not found
+        x-codeSamples:
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+                const admin = Admin({
+                  api: "http://localhost:9980/api",
+                  password: "your-admin-password"
+                })
+                await admin.accountDelete("ed25519:your-public-key")
 
     /contract/{contractid}:
       get:
@@ -174,6 +264,34 @@ paths:
               application/json:
                 schema:
                   $ref: "#/components/schemas/Contract"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+                "go.sia.tech/core/types"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                var id types.FileContractID
+                contract, err := c.Contract(context.Background(), id)
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const contract = await admin.contract("filecontractid:your-id")
 
     /contracts:
       get:
@@ -219,6 +337,32 @@ paths:
                   type: array
                   items:
                     $ref: "#/components/schemas/Contract"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                contracts, err := c.Contracts(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const contracts = await admin.contracts()
 
     /debug/pprof/{handler}:
       get:
@@ -269,6 +413,22 @@ paths:
             description: Action triggered successfully
           '400':
             description: Invalid action specified
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                err := c.TriggerAction(context.Background(), "maintenance")
+                // ...
+              }
 
     /explorer/exchange-rate/siacoin/{currency}:
       get:
@@ -295,6 +455,32 @@ paths:
             description: Invalid currency provided
           '503':
             description: Service unavailable, unable to fetch exchange rate, explorer is disabled.
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                rate, err := c.ExplorerSiacoinExchangeRate(context.Background(), "usd")
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const rate = await admin.explorerExchangeRateSiacoin("usd")
 
     /host/{hostkey}:
       get:
@@ -318,6 +504,34 @@ paths:
                   $ref: "#/components/schemas/Host"
           '404':
             description: Host not found
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+                "go.sia.tech/core/types"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                var hostKey types.PublicKey
+                host, err := c.Host(context.Background(), hostKey)
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const host = await admin.host("ed25519:host-public-key")
 
     /hosts:
       get:
@@ -353,6 +567,32 @@ paths:
                   type: array
                   items:
                     $ref: "#/components/schemas/Host"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                hosts, err := c.Hosts(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const hosts = await admin.hosts()
     /hosts/blocklist:
       get:
         tags:
@@ -384,6 +624,32 @@ paths:
                   type: array
                   items:
                     $ref: "#/components/schemas/PublicKey"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                list, err := c.HostsBlocklist(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const blocklist = await admin.hostsBlocklist()
       put: 
         tags:
           - hosts
@@ -406,6 +672,37 @@ paths:
         responses:
           '200':
             description: Blocklist updated successfully
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+                "go.sia.tech/core/types"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                var a, b types.PublicKey
+                err := c.HostsBlocklistAdd(context.Background(), []types.PublicKey{a, b}, "maintenance")
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              await admin.hostsBlocklistUpdate({
+                hostkeys: ["ed25519:host-key-a", "ed25519:host-key-b"],
+                reason: "maintenance"
+              })
     /hosts/blocklist/{hostkey}:
       delete:
         tags:
@@ -421,6 +718,34 @@ paths:
         responses:
           '200':
             description: Host removed from blocklist successfully
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+                "go.sia.tech/core/types"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                var k types.PublicKey
+                err := c.HostsBlocklistRemove(context.Background(), k)
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              await admin.hostsBlocklistDelete("ed25519:host-public-key")
 
     /settings/contracts:
       get:
@@ -436,6 +761,32 @@ paths:
               application/json:
                 schema:
                   $ref: "#/components/schemas/MaintenanceSettings"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                s, err := c.SettingsContracts(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const settings = await admin.settingsContracts()
       put:
         tags:
           - settings
@@ -450,6 +801,34 @@ paths:
         responses:
           '200':
             description: Contract settings updated successfully
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+                "go.sia.tech/indexd/contracts"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                var s contracts.MaintenanceSettings
+                err := c.SettingsContractsUpdate(context.Background(), s)
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              await admin.settingsContractsUpdate({ /* maintenance settings */ })
     /settings/hosts:
       get:
         tags:
@@ -464,6 +843,32 @@ paths:
               application/json:
                 schema:
                   $ref: "#/components/schemas/UsabilitySettings"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                s, err := c.SettingsHosts(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const settings = await admin.settingsHosts()
       put:
         tags:
           - settings
@@ -478,6 +883,34 @@ paths:
         responses:
           '200':
             description: Host settings updated successfully
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+                "go.sia.tech/indexd/hosts"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                var s hosts.UsabilitySettings
+                err := c.SettingsHostsUpdate(context.Background(), s)
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              await admin.settingsHostsUpdate({ /* usability settings */ })
     /settings/pricepinning:
       get:
         tags:
@@ -491,6 +924,32 @@ paths:
               application/json:
                 schema:
                   $ref: "#/components/schemas/PinnedSettings"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                s, err := c.SettingsPricePinning(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const settings = await admin.settingsPricePinning()
       put:
         tags:
           - settings
@@ -505,7 +964,34 @@ paths:
         responses:
           '200':
             description: Price pinning settings updated successfully
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
 
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+                "go.sia.tech/indexd/pins"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                var s pins.PinnedSettings
+                err := c.SettingsPricePinningUpdate(context.Background(), s)
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              await admin.settingsPricePinningUpdate({ /* pinning settings */ })
     /syncer/connect:
       post:
         tags:
@@ -522,6 +1008,31 @@ paths:
         responses:
           "200":
             description: Successfully connected to syncer
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                err := c.SyncerConnect("118.92.232.145:9981")
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              await admin.syncerConnect("118.92.232.145:9981")
 
     /txpool/recommendedfee:
       get:
@@ -536,6 +1047,31 @@ paths:
               application/json:
                 schema:
                   $ref: "#/components/schemas/Currency"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                fee, err := c.TxpoolRecommendedFee()
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const fee = await admin.txpoolRecommendedFee()
 
     /wallet:
       get:
@@ -571,6 +1107,32 @@ paths:
                       allOf:
                         - $ref: "#/components/schemas/Address"
                         - description: The wallet's address
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                w, err := c.Wallet(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const wallet = await admin.wallet()
     /wallet/events:
       get:
         tags:
@@ -603,6 +1165,32 @@ paths:
                   type: array
                   items:
                     $ref: "#/components/schemas/Event"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                events, err := c.WalletEvents(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const events = await admin.walletEvents()
 
     /wallet/pending:
       get:
@@ -620,6 +1208,32 @@ paths:
                   type: array
                   items:
                     $ref: "#/components/schemas/Event"
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                pending, err := c.WalletPending(context.Background())
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const pending = await admin.walletPending()
     /wallet/send:
       post:
         tags:
@@ -656,6 +1270,40 @@ paths:
                   allOf:
                     - $ref: "#/components/schemas/TransactionID"
                     - description: The ID of the transaction
+        x-codeSamples:
+          - lang: Go
+            label: Go
+            source: |
+              package main
+
+              import (
+                "context"
+                admin "go.sia.tech/indexd/admin"
+                "go.sia.tech/core/types"
+              )
+
+              func main() {
+                c := admin.NewClient("http://localhost:9980", "your-admin-password")
+                var addr types.Address
+                var amount types.Currency
+                id, err := c.WalletSendSiacoins(context.Background(), addr, amount, false, false)
+                // ...
+              }
+          - lang: JavaScript
+            label: JavaScript
+            source: |
+              import { Admin } from "@siafoundation/indexd-js"
+
+              const admin = Admin({
+                api: "http://localhost:9980/api",
+                password: "your-admin-password"
+              })
+              const txid = await admin.walletSend({
+                address: "your-wallet-address",
+                amount: "1000000000000000000000",
+                subtractMinerFee: false,
+                useUnconfirmed: false
+              })
 
 components:
   schemas:
