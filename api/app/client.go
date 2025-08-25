@@ -73,34 +73,36 @@ func sign(appKey types.PrivateKey, method, endpointURL string, req any) (string,
 	return u.String(), body, nil
 }
 
-func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route string, data any) (io.ReadCloser, string, error) {
+func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route string, data, resp any) (io.ReadCloser, error) {
 	u, body, err := sign(c.appkey, method, fmt.Sprintf("%s%s", c.baseURL, route), data)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to sign request: %w", err)
+		return nil, fmt.Errorf("failed to sign request: %w", err)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, u, body)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Accept", accept)
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 
 	if !(200 <= r.StatusCode && r.StatusCode < 300) {
 		defer io.Copy(io.Discard, r.Body)
 		defer r.Body.Close()
 		b, _ := io.ReadAll(r.Body)
-		return nil, "", errors.New(strings.TrimSpace(string(b)))
+		return nil, errors.New(strings.TrimSpace(string(b)))
+	} else if contentType := r.Header.Get("Content-Type"); resp != nil && accept != contentType {
+		return nil, fmt.Errorf("expected content type %s, got %s", accept, contentType)
 	}
 
-	return r.Body, r.Header.Get("Content-Type"), nil
+	return r.Body, nil
 }
 
 func (c *Client) signedRequestJSON(ctx context.Context, method, route string, data, resp any) error {
-	body, contentType, err := c.signedRequestCustom(ctx, applicationJSON, method, route, data)
+	body, err := c.signedRequestCustom(ctx, applicationJSON, method, route, data, resp)
 	if err != nil {
 		return err
 	}
@@ -109,24 +111,18 @@ func (c *Client) signedRequestJSON(ctx context.Context, method, route string, da
 
 	if resp == nil {
 		return nil
-	} else if contentType != applicationJSON {
-		return fmt.Errorf("expected content type %s, got %s", applicationJSON, contentType)
 	}
-
 	return json.NewDecoder(body).Decode(resp)
 }
 
 func (c *Client) signedRequestBinary(ctx context.Context, method, route string, data any, resp types.DecoderFrom) error {
-	body, contentType, err := c.signedRequestCustom(ctx, applicationOctetStream, method, route, data)
+	body, err := c.signedRequestCustom(ctx, applicationOctetStream, method, route, data, resp)
 	if err != nil {
 		return err
 	}
 	defer io.Copy(io.Discard, body)
 	defer body.Close()
 
-	if contentType != applicationOctetStream {
-		return fmt.Errorf("expected content type %s, got %s", applicationOctetStream, contentType)
-	}
 	d := types.NewDecoder(io.LimitedReader{R: body, N: math.MaxInt64})
 	resp.DecodeFrom(d)
 	return d.Err()
