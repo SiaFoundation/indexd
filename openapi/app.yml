@@ -6,6 +6,9 @@ info:
     Once pinned, Indexd ensures the data remains healthy and available by monitoring and maintaining the underlying storage.
   version: 2.0.0
 
+servers:
+  - url: http://localhost:9982/api
+
 tags:
   - name: slabs
     description: List, pin, unpin and retrieve pinned slab details
@@ -48,6 +51,25 @@ paths:
                     items:
                       $ref: "#/components/schemas/HostInfo"
 
+      x-codeSamples:
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+              "context"
+              app "go.sia.tech/indexd/app"
+              "go.sia.tech/core/types"
+            )
+
+            func main() {
+              var appKey types.PrivateKey
+              client, err := app.NewClient("http://localhost:9982", appKey)
+              hosts, err := client.Hosts(context.Background())
+              // ...
+            }
+
   /slabs:
     get:
       tags:
@@ -82,6 +104,25 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/SlabID"
+
+      x-codeSamples:
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+              "context"
+              app "go.sia.tech/indexd/app"
+              "go.sia.tech/core/types"
+            )
+
+            func main() {
+              var appKey types.PrivateKey
+              client, err := app.NewClient("http://localhost:9982", appKey)
+              ids, err := client.SlabIDs(context.Background())
+              // ...
+            }
     post:
       tags:
         - slabs
@@ -129,6 +170,27 @@ paths:
                       - $ref: "#/components/schemas/SlabID"
                       - description: The ID of the pinned slab
 
+      x-codeSamples:
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+              "context"
+              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/slabs"
+              "go.sia.tech/core/types"
+            )
+
+            func main() {
+              var appKey types.PrivateKey
+              client, err := app.NewClient("http://localhost:9982", appKey)
+              var params slabs.SlabPinParams
+              id, err := client.PinSlab(context.Background(), params)
+              // ...
+            }
+
   /slabs/{slabid}:
     get:
       tags:
@@ -175,6 +237,27 @@ paths:
                             - description: The public key of the host storing the sector
         '404':
           description: Slab not found
+
+      x-codeSamples:
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+              "context"
+              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/slabs"
+              "go.sia.tech/core/types"
+            )
+
+            func main() {
+              var appKey types.PrivateKey
+              client, err := app.NewClient("http://localhost:9982", appKey)
+              var id slabs.SlabID
+              s, err := client.Slab(context.Background(), id)
+              // ...
+            }
     delete:
       tags:
         - slabs
@@ -189,6 +272,27 @@ paths:
       responses:
         '204':
           description: Slab unpinned successfully
+
+      x-codeSamples:
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+              "context"
+              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/slabs"
+              "go.sia.tech/core/types"
+            )
+
+            func main() {
+              var appKey types.PrivateKey
+              client, err := app.NewClient("http://localhost:9982", appKey)
+              var id slabs.SlabID
+              err = client.UnpinSlab(context.Background(), id)
+              // ...
+            }
 
 
 components:
