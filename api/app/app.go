@@ -14,6 +14,8 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
@@ -133,6 +135,8 @@ func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 	if err := jc.DecodeForm("protocol", &p); err != nil {
 		jc.Error(err, http.StatusBadRequest)
 		return
+	} else if p != "" && p != string(siamux.Protocol) && p != string(quic.Protocol) {
+		jc.Error(fmt.Errorf("invalid protocol %s", p), http.StatusBadRequest)
 	}
 
 	var opts []hosts.UsableHostQueryOpt
