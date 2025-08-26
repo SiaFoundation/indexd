@@ -268,10 +268,7 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 			frand.Read(obj.Key[:])
 		}
 
-		var err error
-		if r, err = encrypt(obj.Key, r, 0); err != nil {
-			return Object{}, fmt.Errorf("failed to get stream cipher: %w", err)
-		}
+		r = encrypt(obj.Key, r, 0)
 	}
 
 	type work struct {
