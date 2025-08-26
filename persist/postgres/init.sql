@@ -27,6 +27,9 @@ CREATE TABLE hosts (
     last_successful_scan TIMESTAMP WITH TIME ZONE,
     last_announcement TIMESTAMP WITH TIME ZONE NOT NULL,
     next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    country_code TEXT NOT NULL DEFAULT '',
+    latitude DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    longitude DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     lost_sectors INTEGER NOT NULL DEFAULT 0,
 
     settings_protocol_version BYTEA NOT NULL DEFAULT '\x000000'::bytea CHECK (LENGTH(settings_protocol_version) = 3),
