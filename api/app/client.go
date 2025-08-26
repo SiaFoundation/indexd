@@ -134,6 +134,7 @@ func (c *Client) Hosts(ctx context.Context, opts ...api.URLQueryParameterOption)
 	for _, opt := range opts {
 		opt(values)
 	}
+
 	err = c.signedRequestJSON(ctx, http.MethodGet, "/hosts?"+values.Encode(), nil, &hosts)
 	return
 }

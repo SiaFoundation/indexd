@@ -12,11 +12,14 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/subscriber"
 	"lukechampine.com/frand"
 )
 
@@ -170,6 +173,27 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 3 {
 		t.Fatal("expected 3 usable hosts, got", len(usableHosts))
+	}
+
+	// add quic to h1
+	if err := indexer.Store().UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		h1.Addresses = append(h1.Addresses, chain.NetAddress{
+			Protocol: quic.Protocol,
+			Address:  "127.0.0.1:1234",
+		})
+		return tx.AddHostAnnouncement(h1.PublicKey, chain.V2HostAnnouncement(h1.Addresses), time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert filtering for quic only returns h1
+	usableHosts, err = client.Hosts(ctx, api.WithProtocol(quic.Protocol))
+	if err != nil {
+		t.Fatal("failed to get hosts:", err)
+	} else if len(usableHosts) != 1 {
+		t.Fatal("expected 1 host, got", len(usableHosts))
+	} else if usableHosts[0].PublicKey != h1.PublicKey {
+		t.Fatal("got wrong quic host")
 	}
 
 	// block h1

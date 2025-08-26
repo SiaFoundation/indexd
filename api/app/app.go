@@ -13,6 +13,9 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
@@ -34,7 +37,7 @@ type (
 		PinnedSlab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
 		SlabIDs(ctx context.Context, accountID proto.Account, offset, limit int) ([]slabs.SlabID, error)
 		UnpinSlab(context.Context, proto.Account, slabs.SlabID) error
-		UsableHosts(ctx context.Context, offset, limit int) ([]hosts.HostInfo, error)
+		UsableHosts(ctx context.Context, offset, limit int, opts ...hosts.UsableHostQueryOpt) ([]hosts.HostInfo, error)
 	}
 
 	// Accounts defines the account management interface for the application API.
@@ -135,7 +138,20 @@ func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 		return
 	}
 
-	hosts, err := a.store.UsableHosts(jc.Request.Context(), offset, limit)
+	var p string
+	if err := jc.DecodeForm("protocol", &p); err != nil {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if p != "" && p != string(siamux.Protocol) && p != string(quic.Protocol) {
+		jc.Error(fmt.Errorf("invalid protocol %s", p), http.StatusBadRequest)
+	}
+
+	var opts []hosts.UsableHostQueryOpt
+	if p != "" {
+		opts = append(opts, hosts.WithProtocol(chain.Protocol(p)))
+	}
+
+	hosts, err := a.store.UsableHosts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}

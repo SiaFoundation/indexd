@@ -3,6 +3,7 @@ package hosts
 import (
 	"time"
 
+	"go.sia.tech/coreutils/chain"
 	"go.uber.org/zap"
 )
 
@@ -37,5 +38,23 @@ func WithScanFrequency(d time.Duration) Option {
 func WithScanInterval(d time.Duration) Option {
 	return func(m *HostManager) {
 		m.scanInterval = d
+	}
+}
+
+type (
+	// UsableHostQueryOpt is a functional option for querying usable hosts.
+	UsableHostQueryOpt func(*UsableHostsQueryOpts)
+
+	// UsableHostsQueryOpts holds optional parameters for querying usable
+	// hosts.
+	UsableHostsQueryOpts struct {
+		Protocol *chain.Protocol
+	}
+)
+
+// WithProtocol causes UsableHosts to only return hosts with the given protocol.
+func WithProtocol(protocol chain.Protocol) UsableHostQueryOpt {
+	return func(opts *UsableHostsQueryOpts) {
+		opts.Protocol = &protocol
 	}
 }

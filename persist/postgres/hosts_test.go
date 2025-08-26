@@ -565,11 +565,21 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// helper to add hosts
-	addHost := func(i byte, usable, blocked bool, contract bool) types.PublicKey {
+	addHost := func(i byte, protocols []chain.Protocol, usable, blocked bool, contract bool) types.PublicKey {
 		t.Helper()
 
 		hk := types.PublicKey{i}
 		db.addTestHost(t, hk)
+
+		var netAddrs []chain.NetAddress
+		for _, protocol := range protocols {
+			netAddrs = append(netAddrs, chain.NetAddress{Protocol: protocol, Address: "[::]:4848"})
+		}
+		if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement(netAddrs), time.Now())
+		}); err != nil {
+			t.Fatal(err)
+		}
 
 		// handle usable
 		settings := newTestHostSettings(hk)
@@ -595,24 +605,25 @@ func TestUsableHosts(t *testing.T) {
 		return hk
 	}
 
+	bothProtocols := []chain.Protocol{siamux.Protocol, quic.Protocol}
+	siamuxProtocol := []chain.Protocol{siamux.Protocol}
 	// add hosts in all possible configurations
-	_ = addHost(1, false, false, false)
-	_ = addHost(2, false, false, true)
-	_ = addHost(3, false, true, false)
-	_ = addHost(4, false, true, true)
-	_ = addHost(5, true, false, false)
-	uh1 := addHost(6, true, false, true)
-	_ = addHost(7, true, true, false)
-	_ = addHost(8, true, true, true)
-	uh2 := addHost(9, true, false, true) // second usable host
+	_ = addHost(1, siamuxProtocol, false, false, false)
+	_ = addHost(2, siamuxProtocol, false, false, true)
+	_ = addHost(3, siamuxProtocol, false, true, false)
+	_ = addHost(4, siamuxProtocol, false, true, true)
+	_ = addHost(5, siamuxProtocol, true, false, false)
+	uh1 := addHost(6, siamuxProtocol, true, false, true)
+	_ = addHost(7, siamuxProtocol, true, true, false)
+	_ = addHost(8, bothProtocols, true, true, true)
+	uh2 := addHost(9, bothProtocols, true, false, true) // second usable host
 
 	// assert only h6 and h9 are returned
-	hosts, err := db.UsableHosts(context.Background(), 0, 10)
-	if err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), 0, 10); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 2 {
 		t.Fatal("unexpected", len(hosts))
-	} else if hosts[0].PublicKey != uh1 || hosts[1].PublicKey != uh2 {
+	} else if hosts[0].PublicKey != uh2 || hosts[1].PublicKey != uh1 {
 		t.Fatal("unexpected hosts", hosts[0], hosts[1])
 	} else if hosts[0].Addresses == nil || hosts[1].Addresses == nil {
 		t.Fatal("expected hosts to have addresses")
@@ -623,18 +634,39 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
-	} else if hosts[0].PublicKey != uh1 {
+	} else if hosts[0].PublicKey != uh2 {
 		t.Fatal("unexpected host", hosts[0].PublicKey)
 	} else if hosts, err := db.UsableHosts(context.Background(), 1, 1); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
-	} else if hosts[0].PublicKey != uh2 {
+	} else if hosts[0].PublicKey != uh1 {
 		t.Fatal("unexpected host", hosts[0].PublicKey)
 	} else if hosts, err := db.UsableHosts(context.Background(), 2, 1); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 0 {
 		t.Fatal("expected no hosts, got", len(hosts))
+	}
+
+	// filter protocols
+	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithProtocol(siamux.Protocol)); err != nil {
+		t.Fatal("unexpected", err)
+	} else if len(hosts) != 2 {
+		t.Fatal("unexpected", len(hosts))
+	} else if hosts[0].PublicKey != uh2 || hosts[1].PublicKey != uh1 {
+		t.Fatal("unexpected hosts", hosts[0], hosts[1])
+	} else if hosts[0].Addresses == nil || hosts[1].Addresses == nil {
+		t.Fatal("expected hosts to have addresses")
+	}
+
+	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithProtocol(quic.Protocol)); err != nil {
+		t.Fatal("unexpected", err)
+	} else if len(hosts) != 1 {
+		t.Fatal("unexpected", len(hosts))
+	} else if hosts[0].PublicKey != uh2 {
+		t.Fatal("unexpected host", hosts[0])
+	} else if hosts[0].Addresses == nil {
+		t.Fatal("expected host to have address")
 	}
 }
 

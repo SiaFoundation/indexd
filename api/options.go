@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/jape"
 )
 
@@ -44,6 +45,13 @@ func WithLimit(limit int) URLQueryParameterOption {
 func WithServiceAccount(serviceAccount bool) URLQueryParameterOption {
 	return func(q url.Values) {
 		q.Set("serviceaccount", fmt.Sprint(serviceAccount))
+	}
+}
+
+// WithProtocol sets the 'protocol' parameter in Hosts
+func WithProtocol(protocol chain.Protocol) URLQueryParameterOption {
+	return func(q url.Values) {
+		q.Set("protocol", fmt.Sprint(protocol))
 	}
 }
 
