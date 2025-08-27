@@ -17,6 +17,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
@@ -104,7 +105,7 @@ func TestHost(t *testing.T) {
 
 	// update the host
 	networks := []net.IPNet{{IP: net.IPv4(1, 2, 3, 4), Mask: net.CIDRMask(32, 32)}}
-	err = db.UpdateHost(context.Background(), hk, networks, hs, true, time.Now())
+	err = db.UpdateHost(context.Background(), hk, networks, hs, geoip.Location{}, true, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,13 +240,13 @@ func TestHostChecks(t *testing.T) {
 			ValidUntil:      time.Now().Add(14 * time.Minute).Round(time.Microsecond),
 			TipHeight:       frand.Uint64n(1e3),
 		},
-	}, true, time.Now())
+	}, geoip.Location{}, true, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// fail scan to ensure we fail on uptime
-	err = db.UpdateHost(context.Background(), hk, nil, proto4.HostSettings{}, false, time.Now())
+	err = db.UpdateHost(context.Background(), hk, nil, proto4.HostSettings{}, geoip.Location{}, false, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,58 +273,58 @@ func TestHostChecks(t *testing.T) {
 
 	// adjust max duration so we pass the check
 	hs.MaxContractDuration = settingPeriod
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("MaxContractDuration")
 
 	// adjust max collateral so we pass the check
 	hs.MaxCollateral = hs.Prices.Collateral.Mul64(oneTB).Mul64(settingPeriod)
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("MaxCollateral")
 
 	// adjust protocol to pass the check
 	hs.ProtocolVersion = rhp.ProtocolVersion400
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("ProtocolVersion")
 
 	// adjust price validity so we pass the check
 	hs.Prices.ValidUntil = time.Now().Add(time.Second * 1801)
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("PriceValidity")
 
 	// adjust accepting contracts so we pass the check
 	hs.AcceptingContracts = true
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("AcceptingContracts")
 
 	// adjust contract price so we pass the check
 	hs.Prices.ContractPrice = oneSC.Sub(oneH)
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("ContractPrice")
 
 	// adjust collateral so we pass the check
 	hs.Prices.Collateral = hs.Prices.StoragePrice.Mul64(2)
 	hs.MaxCollateral = hs.Prices.Collateral.Mul64(oneTB).Mul64(settingPeriod)
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("Collateral")
 
 	// adjust storage price so we pass the check
 	hs.Prices.StoragePrice = settingMaxStoragePrice
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("StoragePrice")
 
 	// adjust egress price so we pass the check
 	hs.Prices.EgressPrice = settingMaxEgressPrice
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("EgressPrice")
 
 	// adjust ingress price so we pass the check
 	hs.Prices.IngressPrice = settingMaxIngressPrice
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("IngressPrice")
 
 	// adjust free sector price so we pass the check
 	hs.Prices.FreeSectorPrice = oneSC.Div64(sectorsPerTB)
-	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, true, time.Now())
+	_ = db.UpdateHost(context.Background(), hk, testNetworks, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("FreeSectorPrice")
 
 	// assert host is usable
@@ -409,11 +410,11 @@ func TestHosts(t *testing.T) {
 		if !usable {
 			settings.AcceptingContracts = false
 		}
-		err = db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, false, time.Now().Add(time.Hour))
+		err = db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, geoip.Location{}, false, time.Now().Add(time.Hour))
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, true, time.Now().Add(time.Hour))
+		err = db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, geoip.Location{}, true, time.Now().Add(time.Hour))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -576,7 +577,7 @@ func TestUsableHosts(t *testing.T) {
 		if !usable {
 			settings.AcceptingContracts = false
 		}
-		if err := db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, true, time.Now().Add(time.Hour)); err != nil {
+		if err := db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, geoip.Location{}, true, time.Now().Add(time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 
@@ -657,7 +658,7 @@ func TestHostsForScanning(t *testing.T) {
 
 	// simulate scanning h1 successfully
 	nextScan := time.Now().Round(time.Microsecond).Add(time.Minute)
-	err = db.UpdateHost(context.Background(), hk1, testNetworks, proto4.HostSettings{}, true, nextScan)
+	err = db.UpdateHost(context.Background(), hk1, testNetworks, proto4.HostSettings{}, geoip.Location{}, true, nextScan)
 	if err != nil {
 		t.Fatal("unexpected", err)
 	}
@@ -673,7 +674,7 @@ func TestHostsForScanning(t *testing.T) {
 	}
 
 	// simulate scanning h2 successfully
-	err = db.UpdateHost(context.Background(), hk2, testNetworks, proto4.HostSettings{}, true, nextScan)
+	err = db.UpdateHost(context.Background(), hk2, testNetworks, proto4.HostSettings{}, geoip.Location{}, true, nextScan)
 	if err != nil {
 		t.Fatal("unexpected", err)
 	}
@@ -859,14 +860,14 @@ func TestHostsRecentUptime(t *testing.T) {
 		if up {
 			for range n {
 				_, err1 := db.pool.Exec(context.Background(), `UPDATE hosts SET last_failed_scan = '0001-01-01 00:00:00+00'::timestamptz, last_successful_scan = NOW() - INTERVAL '24 hours'`)
-				if err := errors.Join(err1, db.UpdateHost(context.Background(), hk, testNetworks, newTestHostSettings(hk), true, time.Time{})); err != nil {
+				if err := errors.Join(err1, db.UpdateHost(context.Background(), hk, testNetworks, newTestHostSettings(hk), geoip.Location{}, true, time.Time{})); err != nil {
 					t.Fatal(err)
 				}
 			}
 		} else {
 			for range n {
 				_, err1 := db.pool.Exec(context.Background(), `UPDATE hosts SET last_successful_scan = '0001-01-01 00:00:00+00'::timestamptz, last_failed_scan = NOW() - INTERVAL '24 hours'`)
-				if err := errors.Join(err1, db.UpdateHost(context.Background(), hk, testNetworks, proto4.HostSettings{}, false, time.Time{})); err != nil {
+				if err := errors.Join(err1, db.UpdateHost(context.Background(), hk, testNetworks, proto4.HostSettings{}, geoip.Location{}, false, time.Time{})); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -970,7 +971,7 @@ func TestPruneHosts(t *testing.T) {
 	}
 
 	// simulate failed scan for h1
-	err = db.UpdateHost(context.Background(), h1, nil, proto4.HostSettings{}, false, time.Now())
+	err = db.UpdateHost(context.Background(), h1, nil, proto4.HostSettings{}, geoip.Location{}, false, time.Now())
 	if err != nil {
 		t.Fatal("unexpected", err)
 	}
@@ -986,7 +987,7 @@ func TestPruneHosts(t *testing.T) {
 	}
 
 	// simulate failed scan for h2
-	err = db.UpdateHost(context.Background(), h2, nil, proto4.HostSettings{}, false, time.Now())
+	err = db.UpdateHost(context.Background(), h2, nil, proto4.HostSettings{}, geoip.Location{}, false, time.Now())
 	if err != nil {
 		t.Fatal("unexpected", err)
 	}
@@ -1003,10 +1004,10 @@ func TestPruneHosts(t *testing.T) {
 	h1 = db.addTestHost(t)
 	h2 = db.addTestHost(t)
 	err = errors.Join(
-		db.UpdateHost(context.Background(), h1, testNetworks, proto4.HostSettings{}, true, time.Now()),
-		db.UpdateHost(context.Background(), h1, testNetworks, proto4.HostSettings{}, false, time.Now()),
-		db.UpdateHost(context.Background(), h2, testNetworks, proto4.HostSettings{}, true, time.Now()),
-		db.UpdateHost(context.Background(), h2, testNetworks, proto4.HostSettings{}, false, time.Now()),
+		db.UpdateHost(context.Background(), h1, testNetworks, proto4.HostSettings{}, geoip.Location{}, true, time.Now()),
+		db.UpdateHost(context.Background(), h1, testNetworks, proto4.HostSettings{}, geoip.Location{}, false, time.Now()),
+		db.UpdateHost(context.Background(), h2, testNetworks, proto4.HostSettings{}, geoip.Location{}, true, time.Now()),
+		db.UpdateHost(context.Background(), h2, testNetworks, proto4.HostSettings{}, geoip.Location{}, false, time.Now()),
 	)
 	if err != nil {
 		t.Fatal("unexpected", err)
@@ -1054,7 +1055,7 @@ func TestUpdateHost(t *testing.T) {
 
 	// assert [hosts.ErrNotFound] is returned
 	hk := types.GeneratePrivateKey().PublicKey()
-	err := db.UpdateHost(context.Background(), hk, nil, proto4.HostSettings{}, false, time.Now())
+	err := db.UpdateHost(context.Background(), hk, nil, proto4.HostSettings{}, geoip.Location{}, false, time.Now())
 	if !errors.Is(err, hosts.ErrNotFound) {
 		t.Fatal("expected [hosts.ErrNotFound], got", err)
 	}
@@ -1064,7 +1065,7 @@ func TestUpdateHost(t *testing.T) {
 
 	// assert host settings are not inserted if the scan failed
 	hs := newTestHostSettings(hk)
-	err = db.UpdateHost(context.Background(), hk, nil, hs, false, time.Now())
+	err = db.UpdateHost(context.Background(), hk, nil, hs, geoip.Location{}, false, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	} else if h, err := db.Host(context.Background(), hk); err != nil {
@@ -1078,7 +1079,7 @@ func TestUpdateHost(t *testing.T) {
 	}
 
 	// assert consecutive failed scans are incremented
-	err = db.UpdateHost(context.Background(), hk, nil, hs, false, time.Now())
+	err = db.UpdateHost(context.Background(), hk, nil, hs, geoip.Location{}, false, time.Now())
 	if err != nil {
 		t.Fatal(err)
 	} else if h, err := db.Host(context.Background(), hk); err != nil {
@@ -1091,8 +1092,13 @@ func TestUpdateHost(t *testing.T) {
 	nextScan := now.Add(time.Hour)
 	networks := []net.IPNet{{IP: net.IPv4(1, 2, 3, 4), Mask: net.CIDRMask(32, 32)}}
 
+	location := geoip.Location{
+		CountryCode: "US",
+		Latitude:    10,
+		Longitude:   -20,
+	}
 	// assert host is properly updated on successful scan
-	err = db.UpdateHost(context.Background(), hk, networks, hs, true, nextScan)
+	err = db.UpdateHost(context.Background(), hk, networks, hs, location, true, nextScan)
 	if err != nil {
 		t.Fatal(err)
 	} else if h, err := db.Host(context.Background(), hk); err != nil {
@@ -1111,11 +1117,17 @@ func TestUpdateHost(t *testing.T) {
 		t.Fatal("unexpected networks", h.Networks)
 	} else if h.Networks[0].String() != networks[0].String() {
 		t.Fatal("unexpected network", h.Networks)
+	} else if h.CountryCode != location.CountryCode {
+		t.Fatal("unexpected country code", h.CountryCode)
+	} else if h.Latitude != location.Latitude {
+		t.Fatal("unexpected Latitude", h.Latitude)
+	} else if h.Longitude != location.Longitude {
+		t.Fatal("unexpected Longitude", h.Longitude)
 	}
 
 	// assert networks are overwritten
 	networks = []net.IPNet{{IP: net.IPv4(4, 3, 2, 1), Mask: net.CIDRMask(32, 32)}}
-	err = db.UpdateHost(context.Background(), hk, networks, hs, true, nextScan)
+	err = db.UpdateHost(context.Background(), hk, networks, hs, location, true, nextScan)
 	if err != nil {
 		t.Fatal(err)
 	} else if h, err := db.Host(context.Background(), hk); err != nil {
@@ -1127,13 +1139,14 @@ func TestUpdateHost(t *testing.T) {
 	}
 
 	// assert successful scan needs networks
-	err = db.UpdateHost(context.Background(), hk, nil, hs, true, nextScan)
+	err = db.UpdateHost(context.Background(), hk, nil, hs, location, true, nextScan)
 	if !errors.Is(err, hosts.ErrNoNetworks) {
 		t.Fatalf("expected hosts.ErrNoNetworks, got %v", err)
 	}
 
 	// assert updating with a failed scan doesn't affect the host's networks
-	err = db.UpdateHost(context.Background(), hk, []net.IPNet{{IP: net.IPv4(9, 9, 9, 9)}}, hs, false, nextScan)
+	// or geolocation
+	err = db.UpdateHost(context.Background(), hk, []net.IPNet{{IP: net.IPv4(9, 9, 9, 9)}}, hs, geoip.Location{}, false, nextScan)
 	if err != nil {
 		t.Fatal(err)
 	} else if h, err := db.Host(context.Background(), hk); err != nil {
@@ -1142,6 +1155,12 @@ func TestUpdateHost(t *testing.T) {
 		t.Fatal("unexpected networks", h.Networks)
 	} else if h.Networks[0].String() != networks[0].String() {
 		t.Fatal("unexpected network", h.Networks)
+	} else if h.CountryCode != location.CountryCode {
+		t.Fatal("unexpected country code", h.CountryCode)
+	} else if h.Latitude != location.Latitude {
+		t.Fatal("unexpected Latitude", h.Latitude)
+	} else if h.Longitude != location.Longitude {
+		t.Fatal("unexpected Longitude", h.Longitude)
 	}
 }
 
@@ -1255,7 +1274,7 @@ func BenchmarkHosts(b *testing.B) {
 		for b.Loop() {
 			hk := hosts[i%numHosts]
 			succeeded := frand.Intn(2) == 0
-			err := store.UpdateHost(context.Background(), hk, networks, hs, succeeded, ts)
+			err := store.UpdateHost(context.Background(), hk, networks, hs, geoip.Location{}, succeeded, ts)
 			if err != nil {
 				b.Fatal(err)
 			}

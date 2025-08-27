@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
+	"go.sia.tech/indexd/geoip"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -56,6 +57,7 @@ type (
 		resolver      Resolver
 		scanner       Scanner
 		store         Store
+		locator       Locator
 
 		triggerHostScanningChan chan struct{}
 
@@ -96,7 +98,7 @@ type (
 		UnblockHost(ctx context.Context, hk types.PublicKey) error
 
 		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
-		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
+		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error
 
 		UsabilitySettings(ctx context.Context) (UsabilitySettings, error)
 		UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error
@@ -111,6 +113,12 @@ type (
 	// chain update in the database.
 	UpdateTx interface {
 		AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnouncement, ts time.Time) error
+	}
+
+	// A Locator maps IP addresses to their location.
+	Locator interface {
+		Close() error
+		Locate(ip net.IP) (geoip.Location, error)
 	}
 )
 
@@ -328,7 +336,16 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 		scanExponentialBackoffMaxHours,
 	)
 
-	err = m.store.UpdateHost(ctx, hk, networks, settings, success, nextScan)
+	var loc geoip.Location
+	for _, cidr := range networks {
+		loc, err = m.locator.Locate(cidr.IP)
+		if err != nil {
+			return Host{}, fmt.Errorf("failed to geolocate host: %w", err)
+		}
+		break
+	}
+
+	err = m.store.UpdateHost(ctx, hk, networks, settings, loc, success, nextScan)
 	if err != nil {
 		return Host{}, fmt.Errorf("failed to update host, %w", err)
 	}

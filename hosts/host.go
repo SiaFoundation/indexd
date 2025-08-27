@@ -93,6 +93,9 @@ type (
 		RecentUptime           float64             `json:"recentUptime"`
 		Addresses              []chain.NetAddress  `json:"addresses"`
 		Networks               []net.IPNet         `json:"networks"`
+		CountryCode            string              `json:"countryCode"`
+		Latitude               float64             `json:"latitude"`
+		Longitude              float64             `json:"longitude"`
 		Settings               proto4.HostSettings `json:"settings"`
 		Usability              Usability           `json:"usability"`
 		Blocked                bool                `json:"blocked"`
