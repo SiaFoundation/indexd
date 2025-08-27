@@ -109,6 +109,10 @@ type (
 	HostInfo struct {
 		PublicKey types.PublicKey    `json:"publicKey"`
 		Addresses []chain.NetAddress `json:"addresses"`
+
+		CountryCode string  `json:"countryCode"`
+		Latitude    float64 `json:"latitude"`
+		Longitude   float64 `json:"longitude"`
 	}
 
 	// Usability represents a series of host checks that can be used to

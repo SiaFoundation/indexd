@@ -642,6 +642,10 @@ LIMIT $1 OFFSET $2;`, limit, offset)
 			usable = append(usable, hosts.HostInfo{
 				PublicKey: h.PublicKey,
 				Addresses: h.Addresses,
+
+				CountryCode: h.CountryCode,
+				Latitude:    h.Latitude,
+				Longitude:   h.Longitude,
 			})
 		}
 		return nil
