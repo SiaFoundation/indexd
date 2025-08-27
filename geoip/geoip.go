@@ -2,7 +2,6 @@ package geoip
 
 import (
 	_ "embed" // needed for geolocation database
-	"errors"
 	"net"
 	"sync"
 
@@ -27,7 +26,7 @@ type Locator interface {
 	// Close closes the Locator.
 	Close() error
 	// Locate maps IP addresses to a Location.
-	Locate(ip *net.IPAddr) (Location, error)
+	Locate(ip net.IP) (Location, error)
 }
 
 type maxMindLocator struct {
@@ -37,14 +36,11 @@ type maxMindLocator struct {
 }
 
 // Locate implements Locator.
-func (m *maxMindLocator) Locate(addr *net.IPAddr) (Location, error) {
-	if addr == nil {
-		return Location{}, errors.New("nil IP")
-	}
+func (m *maxMindLocator) Locate(addr net.IP) (Location, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	record, err := m.db.City(addr.IP)
+	record, err := m.db.City(addr)
 	if err != nil {
 		return Location{}, err
 	}
