@@ -67,13 +67,9 @@ var migrations = []func(context.Context, *txn, *zap.Logger) error{
 		if err != nil {
 			return fmt.Errorf("failed to add country_code column: %w", err)
 		}
-		_, err = tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN latitude DOUBLE PRECISION NOT NULL DEFAULT 0.0;`)
+		_, err = tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN location POINT NOT NULL DEFAULT POINT(0.0, 0.0);`)
 		if err != nil {
-			return fmt.Errorf("failed to add latitude column: %w", err)
-		}
-		_, err = tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN longitude DOUBLE PRECISION NOT NULL DEFAULT 0.0;`)
-		if err != nil {
-			return fmt.Errorf("failed to add longitude column: %w", err)
+			return fmt.Errorf("failed to add location column: %w", err)
 		}
 		return nil
 	},
