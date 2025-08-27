@@ -17,6 +17,7 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
+	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/keys"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/slabs"
@@ -126,8 +127,13 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	walletKey := types.GeneratePrivateKey()
 	wm := NewWallet(t, c, walletKey)
 
+	locator, err := geoip.NewMaxMindLocator("")
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	syncer := NewSyncer(t, c.genesis.ID(), c.cm)
-	hm, err := hosts.NewManager(syncer, store, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(200*time.Millisecond), hosts.WithScanInterval(time.Second))
+	hm, err := hosts.NewManager(syncer, locator, store, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(200*time.Millisecond), hosts.WithScanInterval(time.Second))
 	if err != nil {
 		t.Fatalf("failed to create host manager: %v", err)
 	}

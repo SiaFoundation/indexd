@@ -56,8 +56,8 @@ type (
 		onlineChecker OnlineChecker
 		resolver      Resolver
 		scanner       Scanner
-		store         Store
 		locator       Locator
+		store         Store
 
 		triggerHostScanningChan chan struct{}
 
@@ -173,7 +173,7 @@ func (hm *HostManager) UnblockHost(ctx context.Context, hk types.PublicKey) erro
 }
 
 // NewManager creates a new host manager.
-func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error) {
+func NewManager(syncer Syncer, locator Locator, store Store, opts ...Option) (*HostManager, error) {
 	m := &HostManager{
 		announcementMaxAge: time.Hour * 24 * 365,
 		scanFrequency:      time.Hour,
@@ -182,6 +182,7 @@ func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error
 		onlineChecker: &onlineChecker{addresses: fallbackSites, syncer: syncer},
 		resolver:      &net.Resolver{},
 		scanner:       &scanner{},
+		locator:       locator,
 		store:         store,
 
 		triggerHostScanningChan: make(chan struct{}, 1),

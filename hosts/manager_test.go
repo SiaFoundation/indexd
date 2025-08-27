@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/indexd/geoip"
 	"go.uber.org/zap"
 )
 
@@ -63,7 +64,7 @@ func (s *mockStore) PruneHosts(ctx context.Context, lastSuccessfulScanCutoff tim
 	return 0, nil
 }
 
-func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error {
+func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
 	return nil
 }
 
@@ -126,11 +127,25 @@ func (c *mockClient) Settings(ctx context.Context, hk types.PublicKey, addr stri
 	return proto4.HostSettings{}, errors.New("") // mock host being unavailable on unknown address
 }
 
+type mockLocator struct{}
+
+func (m *mockLocator) Close() error {
+	return nil
+}
+
+func (m *mockLocator) Locate(addr net.IP) (geoip.Location, error) {
+	return geoip.Location{
+		CountryCode: "US",
+		Latitude:    10,
+		Longitude:   -20,
+	}, nil
+}
+
 func TestHostManager(t *testing.T) {
 	db := &mockStore{hosts: make(map[types.PublicKey]Host)}
 
 	// create host manager
-	mgr, err := NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, db, WithAnnouncementMaxAge(time.Minute))
+	mgr, err := NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mockLocator{}, db, WithAnnouncementMaxAge(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
