@@ -61,4 +61,14 @@ var migrations = []func(context.Context, *txn, *zap.Logger) error{
 		}
 		return nil
 	},
+	// adds the 'description', 'logo_url' and 'service_url' columns
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		for _, c := range []string{"description", "logo_url", "service_url"} {
+			_, err := tx.Exec(ctx, fmt.Sprintf(`ALTER TABLE accounts ADD COLUMN %s TEXT NOT NULL DEFAULT '';`, c))
+			if err != nil {
+				return fmt.Errorf("failed to add %q column: %w", c, err)
+			}
+		}
+		return nil
+	},
 }
