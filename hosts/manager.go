@@ -578,11 +578,10 @@ func resolveHost(ctx context.Context, resolver Resolver, locator Locator, addres
 			filtered = append(filtered, na)
 		}
 
-		if len(ips) > 0 {
+		if len(ips) > 0 && loc.CountryCode == "" {
 			loc, err = locator.Locate(ips[0].IP)
 			if err != nil {
 				log.Debug("failed to locate IP address", zap.Error(err))
-				continue
 			}
 		}
 	}

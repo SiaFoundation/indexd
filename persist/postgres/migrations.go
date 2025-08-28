@@ -61,7 +61,7 @@ var migrations = []func(context.Context, *txn, *zap.Logger) error{
 		}
 		return nil
 	},
-	// adds the "country_code", "latitude", "longitude" columns
+	// adds the "country_code" and "location" columns
 	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
 		_, err := tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN country_code TEXT NOT NULL DEFAULT '';`)
 		if err != nil {
