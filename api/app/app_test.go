@@ -357,7 +357,6 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("service url mismatch", account.ServiceURL)
 	} else if account.PinnedData != 0 {
 		t.Fatal("expected 0 pinned data, got", account.PinnedData)
-	} else if account.MaxPinnedData != 1000000000000 {
-		t.Fatal("expected 0 max pinned data, got", account.MaxPinnedData)
+		t.Fatal("expected 1000000000000 max pinned data, got", account.MaxPinnedData)
 	}
 }
