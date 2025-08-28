@@ -63,6 +63,12 @@ func (c *Client) UpdateAppConnectKey(ctx context.Context, req accounts.UpdateApp
 	return c.c.PUT(ctx, "/apps/connect/keys", req)
 }
 
+// Account returns the account with the given public key.
+func (c *Client) Account(ctx context.Context, ak types.PublicKey) (account accounts.Account, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/account/%s", ak), &account)
+	return
+}
+
 // DeleteAccount removes the account with the given public key.
 func (c *Client) DeleteAccount(ctx context.Context, ak types.PublicKey) (err error) {
 	err = c.c.DELETE(ctx, fmt.Sprintf("/account/%s", ak))

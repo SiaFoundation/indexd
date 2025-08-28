@@ -77,8 +77,8 @@ func (m *AccountManager) AppConnectKeys(ctx context.Context, offset, limit int) 
 
 // UseAppConnectKey uses an existing app connect key to add an account. If the key is exhausted, it
 // returns [ErrKeyExhausted]. If the key is not found, it returns [ErrKeyNotFound].
-func (m *AccountManager) UseAppConnectKey(ctx context.Context, key string, pk types.PublicKey) error {
-	if err := m.store.UseAppConnectKey(ctx, key, pk); err != nil {
+func (m *AccountManager) UseAppConnectKey(ctx context.Context, key, description, logoURL, serviceURL string, pk types.PublicKey) error {
+	if err := m.store.UseAppConnectKey(ctx, key, description, logoURL, serviceURL, pk); err != nil {
 		return fmt.Errorf("failed to use app connect key: %w", err)
 	}
 	return nil

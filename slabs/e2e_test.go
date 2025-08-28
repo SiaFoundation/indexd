@@ -25,7 +25,7 @@ func TestMigrations(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	err := indexer.Accounts().AddAccount(context.Background(), a1.PublicKey())
+	err := indexer.Store().AddAccount(context.Background(), a1.PublicKey())
 	if err != nil {
 		t.Fatal(err)
 	}

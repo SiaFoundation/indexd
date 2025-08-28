@@ -115,9 +115,14 @@ func TestAccount(t *testing.T) {
 func TestAddAccount(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	test := func(t *testing.T, addAccount func(types.PublicKey) (bool, error)) {
+	test := func(t *testing.T, addAccount func(types.PublicKey, ...accounts.AddAccountOption) (bool, error)) {
 		pk := types.GeneratePrivateKey().PublicKey()
-		serviceAccount, err := addAccount(pk)
+		serviceAccount, err := addAccount(pk,
+			accounts.WithDescription("description"),
+			accounts.WithLogoURL("logoURL"),
+			accounts.WithServiceURL("serviceURL"),
+			accounts.WithMaxPinnedData(1000),
+		)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -136,12 +141,20 @@ func TestAddAccount(t *testing.T) {
 			t.Fatal(err)
 		} else if acc.ServiceAccount != serviceAccount {
 			t.Fatalf("expected service account %t, got %t", serviceAccount, acc.ServiceAccount)
+		} else if acc.Description != "description" {
+			t.Fatalf("expected description %q, got %q", "description", acc.Description)
+		} else if acc.LogoURL != "logoURL" {
+			t.Fatalf("expected logo URL %q, got %q", "logoURL", acc.LogoURL)
+		} else if acc.ServiceURL != "serviceURL" {
+			t.Fatalf("expected service URL %q, got %q", "serviceURL", acc.ServiceURL)
+		} else if acc.MaxPinnedData != 1000 {
+			t.Fatalf("expected max pinned data %d, got %d", 1000, acc.MaxPinnedData)
 		}
 	}
 
 	t.Run("user account", func(t *testing.T) {
-		test(t, func(pk types.PublicKey) (bool, error) {
-			if err := store.AddAccount(context.Background(), pk); err != nil {
+		test(t, func(pk types.PublicKey, opts ...accounts.AddAccountOption) (bool, error) {
+			if err := store.AddAccount(context.Background(), pk, opts...); err != nil {
 				return false, err
 			}
 			return false, nil // 'false' for user account
@@ -149,8 +162,8 @@ func TestAddAccount(t *testing.T) {
 	})
 
 	t.Run("service account", func(t *testing.T) {
-		test(t, func(pk types.PublicKey) (bool, error) {
-			if err := store.AddServiceAccount(context.Background(), pk); err != nil {
+		test(t, func(pk types.PublicKey, opts ...accounts.AddAccountOption) (bool, error) {
+			if err := store.AddServiceAccount(context.Background(), pk, opts...); err != nil {
 				return true, err
 			}
 			return true, nil // 'true' for service account

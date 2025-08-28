@@ -151,7 +151,7 @@ func TestAccountsAPI(t *testing.T) {
 	var accs []types.PublicKey
 	for range 10 {
 		accs = append(accs, types.GeneratePrivateKey().PublicKey())
-		err := indexer.Accounts().AddAccount(context.Background(), accs[len(accs)-1])
+		err := indexer.Store().AddAccount(context.Background(), accs[len(accs)-1])
 		if err != nil {
 			t.Fatal(err)
 		}

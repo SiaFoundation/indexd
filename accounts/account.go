@@ -29,7 +29,10 @@ var (
 type (
 	// AddAccountOptions holds optional parameters for account creation.
 	AddAccountOptions struct {
+		Description   string
+		LogoURL       string
 		MaxPinnedData uint64
+		ServiceURL    string
 	}
 
 	// AddAccountOption is a functional option for configuring optional
@@ -37,10 +40,31 @@ type (
 	AddAccountOption func(*AddAccountOptions)
 )
 
+// WithDescription sets the description for the account
+func WithDescription(description string) AddAccountOption {
+	return func(opts *AddAccountOptions) {
+		opts.Description = description
+	}
+}
+
+// WithLogoURL sets the logo URL for the account
+func WithLogoURL(logoURL string) AddAccountOption {
+	return func(opts *AddAccountOptions) {
+		opts.LogoURL = logoURL
+	}
+}
+
 // WithMaxPinnedData sets the maximum amount of data that can be pinned
 func WithMaxPinnedData(maxPinnedData uint64) AddAccountOption {
 	return func(opts *AddAccountOptions) {
 		opts.MaxPinnedData = maxPinnedData
+	}
+}
+
+// WithServiceURL sets the service URL for the account
+func WithServiceURL(serviceURL string) AddAccountOption {
+	return func(opts *AddAccountOptions) {
+		opts.ServiceURL = serviceURL
 	}
 }
 
@@ -68,6 +92,10 @@ type (
 		AccountKey     proto.Account `json:"accountKey"`
 		ServiceAccount bool          `json:"serviceAccount"`
 		MaxPinnedData  uint64        `json:"maxPinnedData"`
+		PinnedData     uint64        `json:"pinnedData"`
+		Description    string        `json:"description,omitempty"`
+		LogoURL        string        `json:"logoURL,omitempty"`
+		ServiceURL     string        `json:"serviceURL,omitempty"`
 	}
 
 	// HostAccount represents an ephemeral account on a host.

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
@@ -340,5 +341,23 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("failed to check request status:", err)
 	} else if !ok {
 		t.Fatal("expected request to be approved")
+	}
+
+	// assert the account was created correctly
+	account, err := adminClient.Account(context.Background(), sk.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	} else if account.AccountKey != proto.Account(sk.PublicKey()) {
+		t.Fatal("account key mismatch")
+	} else if account.Description != "A test app" {
+		t.Fatal("description mismatch", account.Description)
+	} else if account.LogoURL != "" {
+		t.Fatal("expected empty logo url", account.LogoURL)
+	} else if account.ServiceURL != "http://test-app.com" {
+		t.Fatal("service url mismatch", account.ServiceURL)
+	} else if account.PinnedData != 0 {
+		t.Fatal("expected 0 pinned data, got", account.PinnedData)
+	} else if account.MaxPinnedData != 1000000000000 {
+		t.Fatal("expected 0 max pinned data, got", account.MaxPinnedData)
 	}
 }

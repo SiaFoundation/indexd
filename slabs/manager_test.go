@@ -46,7 +46,7 @@ func (s *mockStore) AddAccount(ctx context.Context, account types.PublicKey, opt
 	return nil
 }
 
-func (s *mockStore) AddServiceAccount(ctx context.Context, account types.PublicKey) error {
+func (s *mockStore) AddServiceAccount(ctx context.Context, account types.PublicKey, opts ...accounts.AddAccountOption) error {
 	s.accounts[proto.Account(account)] = struct{}{}
 	return nil
 }

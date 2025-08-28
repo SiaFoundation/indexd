@@ -27,7 +27,7 @@ func (s *mockAccounts) ValidAppConnectKey(context.Context, string) (bool, error)
 	return true, nil
 }
 
-func (s *mockAccounts) UseAppConnectKey(context.Context, string, types.PublicKey) error {
+func (s *mockAccounts) UseAppConnectKey(ctx context.Context, connectKey, description, logoURL, serviceURL string, appKey types.PublicKey) error {
 	return nil
 }
 

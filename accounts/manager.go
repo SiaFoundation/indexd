@@ -33,7 +33,7 @@ type (
 		ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error)
 
 		ValidAppConnectKey(context.Context, string) (bool, error)
-		UseAppConnectKey(context.Context, string, types.PublicKey) error
+		UseAppConnectKey(ctx context.Context, connectKey, description, logoURL, serviceURL string, appKey types.PublicKey) error
 		AddAppConnectKey(context.Context, UpdateAppConnectKey) (ConnectKey, error)
 		UpdateAppConnectKey(context.Context, UpdateAppConnectKey) (ConnectKey, error)
 		DeleteAppConnectKey(context.Context, string) error
@@ -162,11 +162,6 @@ func (m *AccountManager) Accounts(ctx context.Context, offset, limit int, opts .
 // DeleteAccount deletes the account for the given public key.
 func (m *AccountManager) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
 	return m.store.DeleteAccount(ctx, ak)
-}
-
-// AddAccount adds a new account for the given public key.
-func (m *AccountManager) AddAccount(ctx context.Context, pk types.PublicKey) error {
-	return m.store.AddAccount(ctx, pk)
 }
 
 func updateFundedAccounts(accounts []HostAccount, n int) {

@@ -6,7 +6,6 @@ import (
 	"reflect"
 	"testing"
 
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.uber.org/zap/zaptest"
@@ -37,24 +36,29 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatal("expected app connect key to be valid")
 	}
 
-	assertAccount := func(acc proto.Account, pinned, maxPinned int64) {
+	assertAccount := func(acc types.PublicKey, pinned, maxPinned uint64, desc, logo, service string) {
 		t.Helper()
-		var pinnedData, maxPinnedData int64
-		err := store.pool.QueryRow(context.Background(), "SELECT pinned_data, max_pinned_data FROM accounts WHERE public_key = $1", sqlPublicKey(acc)).Scan(&pinnedData, &maxPinnedData)
+		account, err := store.Account(context.Background(), types.PublicKey(acc))
 		if err != nil {
 			t.Fatal(err)
-		} else if pinnedData != pinned {
-			t.Fatalf("expected %d pinned data for account %v, got %d", pinned, acc, pinnedData)
-		} else if maxPinnedData != maxPinned {
-			t.Fatalf("expected max pinned data to be 10, got %d", maxPinnedData)
+		} else if account.PinnedData != pinned {
+			t.Fatalf("expected %d pinned data for account %v, got %d", pinned, acc, account.PinnedData)
+		} else if account.MaxPinnedData != maxPinned {
+			t.Fatalf("expected max pinned data to be 10, got %d", account.MaxPinnedData)
+		} else if account.Description != desc {
+			t.Fatalf("expected description to be %q, got %q", desc, account.Description)
+		} else if account.LogoURL != logo {
+			t.Fatalf("expected logo to be %q, got %q", logo, account.LogoURL)
+		} else if account.ServiceURL != service {
+			t.Fatalf("expected service url to be %q, got %q", service, account.ServiceURL)
 		}
 	}
 
 	acc := types.GeneratePrivateKey().PublicKey()
-	if err := store.UseAppConnectKey(ctx, "foobar", acc); err != nil {
+	if err := store.UseAppConnectKey(ctx, "foobar", "desc", "logo", "service", acc); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
-	assertAccount(proto.Account(acc), 0, 10)
+	assertAccount(acc, 0, 10, "desc", "logo", "service")
 
 	// ensure the key's last used field was updated
 	keys, err := store.AppConnectKeys(ctx, 0, 1)
@@ -69,7 +73,7 @@ func TestAppConnectKeys(t *testing.T) {
 	}
 
 	// try again on an exhausted key
-	if err := store.UseAppConnectKey(ctx, "foobar", types.GeneratePrivateKey().PublicKey()); !errors.Is(err, accounts.ErrKeyExhausted) {
+	if err := store.UseAppConnectKey(ctx, "foobar", "description", "logo", "service", types.GeneratePrivateKey().PublicKey()); !errors.Is(err, accounts.ErrKeyExhausted) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyExhausted, err)
 	}
 

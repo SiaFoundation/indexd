@@ -3,7 +3,10 @@ CREATE TABLE accounts (
     public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32),
     pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0), -- total pinned data in bytes
     max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0), -- max pinned data in bytes
-    service_account BOOLEAN NOT NULL DEFAULT FALSE -- true if this is a service account
+    service_account BOOLEAN NOT NULL DEFAULT FALSE, -- true if this is a service account
+    description TEXT NOT NULL DEFAULT '',
+    logo_url TEXT NOT NULL DEFAULT '',
+    service_url TEXT NOT NULL DEFAULT ''
 );
 
 CREATE TABLE app_connect_keys (

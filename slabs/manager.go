@@ -85,7 +85,7 @@ type (
 	// in the database.
 	Store interface {
 		AddAccount(ctx context.Context, ak types.PublicKey, opts ...accounts.AddAccountOption) error
-		AddServiceAccount(ctx context.Context, ak types.PublicKey) error
+		AddServiceAccount(ctx context.Context, ak types.PublicKey, opts ...accounts.AddAccountOption) error
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...contracts.ContractQueryOpt) ([]contracts.Contract, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.Time, limit int) ([]types.PublicKey, error)
@@ -205,7 +205,7 @@ func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Diale
 		opt(m)
 	}
 
-	err := m.initServiceAccounts(migrationAccount, integrityAccount)
+	err := m.initServiceAccounts(migrationAccount.PublicKey(), integrityAccount.PublicKey())
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize service accounts: %w", err)
 	}
@@ -219,19 +219,25 @@ func (m *SlabManager) Close() error {
 	return nil
 }
 
-func (m *SlabManager) initServiceAccounts(sks ...types.PrivateKey) error {
+func (m *SlabManager) initServiceAccounts(migrationAccount, integrityAccount types.PublicKey) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	for _, sk := range sks {
+	for _, acc := range []struct {
+		description string
+		key         types.PublicKey
+	}{
+		{"slab migrations", migrationAccount},
+		{"data integrity checks", integrityAccount},
+	} {
 		// ensure account is added to the store
-		err := m.store.AddServiceAccount(ctx, sk.PublicKey())
+		err := m.store.AddServiceAccount(ctx, acc.key, accounts.WithDescription(acc.description))
 		if err != nil && !errors.Is(err, accounts.ErrExists) {
 			return fmt.Errorf("failed to add service account: %w", err)
 		}
 
 		// ensure account is registered with the AccountManager
-		m.am.RegisterServiceAccount(proto.Account(sk.PublicKey()))
+		m.am.RegisterServiceAccount(proto.Account(acc.key))
 	}
 	return nil
 }

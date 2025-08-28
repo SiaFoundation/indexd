@@ -109,7 +109,7 @@ func (s *mockStore) ValidAppConnectKey(ctx context.Context, key string) (bool, e
 	return ck.RemainingUses > 0, nil
 }
 
-func (s *mockStore) UseAppConnectKey(ctx context.Context, key string, pk types.PublicKey) error {
+func (s *mockStore) UseAppConnectKey(ctx context.Context, key, description, logoURL, serviceURL string, pk types.PublicKey) error {
 	ck, ok := s.connectKeys[key]
 	if !ok {
 		return ErrNotFound
