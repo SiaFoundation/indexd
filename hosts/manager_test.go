@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/indexd/geoip"
 	"go.uber.org/zap"
 )
 
@@ -63,7 +64,7 @@ func (s *mockStore) PruneHosts(ctx context.Context, lastSuccessfulScanCutoff tim
 	return 0, nil
 }
 
-func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error {
+func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
 	return nil
 }
 
@@ -126,11 +127,29 @@ func (c *mockClient) Settings(ctx context.Context, hk types.PublicKey, addr stri
 	return proto4.HostSettings{}, errors.New("") // mock host being unavailable on unknown address
 }
 
+// mockLocation is the location that will always be returned by the
+// mockLocator.
+var mockLocation = geoip.Location{
+	CountryCode: "US",
+	Latitude:    10,
+	Longitude:   -20,
+}
+
+type mockLocator struct{}
+
+func (m *mockLocator) Close() error {
+	return nil
+}
+
+func (m *mockLocator) Locate(addr net.IP) (geoip.Location, error) {
+	return mockLocation, nil
+}
+
 func TestHostManager(t *testing.T) {
 	db := &mockStore{hosts: make(map[types.PublicKey]Host)}
 
 	// create host manager
-	mgr, err := NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, db, WithAnnouncementMaxAge(time.Minute))
+	mgr, err := NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mockLocator{}, db, WithAnnouncementMaxAge(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,15 +351,16 @@ func TestResolveHost(t *testing.T) {
 			"h2.com": {{IP: net.IPv4(8, 8, 8, 8)}},
 		},
 	}
+	locator := &mockLocator{}
 
 	// assert [context.Cancelled] is returned when context is cancelled
-	_, _, err := resolveHost(cancelledCtx, r, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
+	_, _, _, err := resolveHost(cancelledCtx, r, locator, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 
 	// assert incorrect addresses are filtered out
-	addrs, _, err := resolveHost(context.Background(), r, []chain.NetAddress{testMuxAddr("h1.com")}, zap.NewNop())
+	addrs, _, _, err := resolveHost(context.Background(), r, locator, []chain.NetAddress{testMuxAddr("h1.com")}, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(addrs) != 0 {
@@ -348,7 +368,7 @@ func TestResolveHost(t *testing.T) {
 	}
 
 	// assert net addresses with private IPs are filtered out
-	addrs, _, err = resolveHost(context.Background(), r, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
+	addrs, _, _, err = resolveHost(context.Background(), r, locator, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(addrs) != 0 {
@@ -356,13 +376,15 @@ func TestResolveHost(t *testing.T) {
 	}
 
 	// assert net addresses get resolved and networks are returned
-	addrs, networks, err := resolveHost(context.Background(), r, []chain.NetAddress{testMuxAddr("h2.com:1234")}, zap.NewNop())
+	addrs, networks, loc, err := resolveHost(context.Background(), r, locator, []chain.NetAddress{testMuxAddr("h2.com:1234")}, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(addrs) != 1 {
 		t.Fatal("unexpected", len(addrs))
 	} else if len(networks) != 1 {
 		t.Fatal("unexpected", len(networks))
+	} else if loc != mockLocation {
+		t.Fatalf("expected location %v, got %v", mockLocation, loc)
 	}
 }
 

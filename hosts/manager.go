@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
+	"go.sia.tech/indexd/geoip"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -55,6 +56,7 @@ type (
 		onlineChecker OnlineChecker
 		resolver      Resolver
 		scanner       Scanner
+		locator       Locator
 		store         Store
 
 		triggerHostScanningChan chan struct{}
@@ -96,7 +98,7 @@ type (
 		UnblockHost(ctx context.Context, hk types.PublicKey) error
 
 		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
-		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error
+		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error
 
 		UsabilitySettings(ctx context.Context) (UsabilitySettings, error)
 		UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error
@@ -111,6 +113,12 @@ type (
 	// chain update in the database.
 	UpdateTx interface {
 		AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnouncement, ts time.Time) error
+	}
+
+	// A Locator maps IP addresses to their location.
+	Locator interface {
+		Close() error
+		Locate(ip net.IP) (geoip.Location, error)
 	}
 )
 
@@ -165,7 +173,7 @@ func (hm *HostManager) UnblockHost(ctx context.Context, hk types.PublicKey) erro
 }
 
 // NewManager creates a new host manager.
-func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error) {
+func NewManager(syncer Syncer, locator Locator, store Store, opts ...Option) (*HostManager, error) {
 	m := &HostManager{
 		announcementMaxAge: time.Hour * 24 * 365,
 		scanFrequency:      time.Hour,
@@ -174,6 +182,7 @@ func NewManager(syncer Syncer, store Store, opts ...Option) (*HostManager, error
 		onlineChecker: &onlineChecker{addresses: fallbackSites, syncer: syncer},
 		resolver:      &net.Resolver{},
 		scanner:       &scanner{},
+		locator:       locator,
 		store:         store,
 
 		triggerHostScanningChan: make(chan struct{}, 1),
@@ -300,7 +309,7 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 		return Host{}, fmt.Errorf("failed to get host, %w", err)
 	}
 
-	addrs, networks, err := resolveHost(ctx, m.resolver, host.Addresses, logger)
+	addrs, networks, loc, err := resolveHost(ctx, m.resolver, m.locator, host.Addresses, logger)
 	if err != nil {
 		return Host{}, fmt.Errorf("failed to resolve host, %w", err)
 	}
@@ -328,7 +337,7 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 		scanExponentialBackoffMaxHours,
 	)
 
-	err = m.store.UpdateHost(ctx, hk, networks, settings, success, nextScan)
+	err = m.store.UpdateHost(ctx, hk, networks, settings, loc, success, nextScan)
 	if err != nil {
 		return Host{}, fmt.Errorf("failed to update host, %w", err)
 	}
@@ -517,9 +526,10 @@ func calculateNextScanTime(lastScan time.Time, success bool, consecScanFailures 
 // and/or private addresses, and a list of networks in CIDR notation. The only
 // error this function returns is [context.Canceled], other errors that occur
 // during the resolving and parsing are debug logged but otherwise ignored.
-func resolveHost(ctx context.Context, resolver Resolver, addresses []chain.NetAddress, log *zap.Logger) ([]chain.NetAddress, []net.IPNet, error) {
+func resolveHost(ctx context.Context, resolver Resolver, locator Locator, addresses []chain.NetAddress, log *zap.Logger) ([]chain.NetAddress, []net.IPNet, geoip.Location, error) {
 	var filtered []chain.NetAddress
 	var networks []net.IPNet
+	var loc geoip.Location
 	for _, na := range addresses {
 		host, _, err := net.SplitHostPort(na.Address)
 		if err != nil {
@@ -529,7 +539,7 @@ func resolveHost(ctx context.Context, resolver Resolver, addresses []chain.NetAd
 
 		ips, err := resolver.LookupIPAddr(ctx, host)
 		if errors.Is(err, context.Canceled) {
-			return nil, nil, err
+			return nil, nil, geoip.Location{}, err
 		} else if err != nil {
 			log.Debug("failed to resolve host", zap.String("host", host), zap.Error(err))
 			continue
@@ -567,8 +577,15 @@ func resolveHost(ctx context.Context, resolver Resolver, addresses []chain.NetAd
 			networks = append(networks, ipnets...)
 			filtered = append(filtered, na)
 		}
+
+		if len(ips) > 0 && loc.CountryCode == "" {
+			loc, err = locator.Locate(ips[0].IP)
+			if err != nil {
+				log.Debug("failed to locate IP address", zap.Error(err))
+			}
+		}
 	}
-	return filtered, networks, nil
+	return filtered, networks, loc, nil
 }
 
 func isPrivateIP(ip net.IP) bool {

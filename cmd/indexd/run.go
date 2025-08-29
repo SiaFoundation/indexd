@@ -30,6 +30,7 @@ import (
 	"go.sia.tech/indexd/config"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/explorer"
+	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/keys"
 	"go.sia.tech/indexd/persist/postgres"
@@ -108,7 +109,12 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer wm.Close()
 
-	hm, err := hosts.NewManager(s, store, hosts.WithLogger(log.Named("hosts")))
+	locator, err := geoip.NewMaxMindLocator("")
+	if err != nil {
+		return fmt.Errorf("failed to create MaxMind locator: %w", err)
+	}
+
+	hm, err := hosts.NewManager(s, locator, store, hosts.WithLogger(log.Named("hosts")))
 	if err != nil {
 		return fmt.Errorf("failed to create host manager: %w", err)
 	}

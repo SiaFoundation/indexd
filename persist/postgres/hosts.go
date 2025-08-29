@@ -8,10 +8,12 @@ import (
 	"net"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 )
 
@@ -74,6 +76,7 @@ WITH globals AS (
 	SELECT
 		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, COALESCE(hb.reason, ''), lost_sectors,
 		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime,
+		country_code, location,
 		settings_protocol_version, settings_release, settings_wallet_address,
 		settings_accepting_contracts, settings_max_collateral, settings_max_contract_duration,
 		settings_remaining_storage, settings_total_storage, settings_contract_price,
@@ -150,6 +153,7 @@ WITH globals AS (
 	SELECT
 		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, COALESCE(hb.reason, ''), lost_sectors,
 		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime,
+		country_code, location,
 		settings_protocol_version, settings_release, settings_wallet_address,
 		settings_accepting_contracts, settings_max_collateral, settings_max_contract_duration,
 		settings_remaining_storage, settings_total_storage, settings_contract_price,
@@ -394,7 +398,7 @@ func (s *Store) PruneHosts(ctx context.Context, minLastSuccessfulScan time.Time,
 }
 
 // UpdateHost updates a host in the database, the given parameters are the result of scanning the host.
-func (s *Store) UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, scanSucceeded bool, nextScan time.Time) error {
+func (s *Store) UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
 	if len(networks) == 0 && scanSucceeded {
 		return hosts.ErrNoNetworks
 	}
@@ -456,28 +460,40 @@ SET
 	consecutive_failed_scans = 0,
 	last_successful_scan = NOW(),
 	next_scan = $3,
-	settings_protocol_version = $4,
-	settings_release = $5,
-	settings_wallet_address = $6,
-	settings_accepting_contracts = $7,
-	settings_max_collateral = $8,
-	settings_max_contract_duration = $9,
-	settings_remaining_storage = $10,
-	settings_total_storage = $11,
-	settings_contract_price = $12,
-	settings_collateral = $13,
-	settings_storage_price = $14,
-	settings_ingress_price = $15,
-	settings_egress_price = $16,
-	settings_free_sector_price = $17,
-	settings_tip_height = $18,
-	settings_valid_until = $19,
-	settings_signature = $20
+
+	country_code = $4,
+	location = $5,
+
+	settings_protocol_version = $6,
+	settings_release = $7,
+	settings_wallet_address = $8,
+	settings_accepting_contracts = $9,
+	settings_max_collateral = $10,
+	settings_max_contract_duration = $11,
+	settings_remaining_storage = $12,
+	settings_total_storage = $13,
+	settings_contract_price = $14,
+	settings_collateral = $15,
+	settings_storage_price = $16,
+	settings_ingress_price = $17,
+	settings_egress_price = $18,
+	settings_free_sector_price = $19,
+	settings_tip_height = $20,
+	settings_valid_until = $21,
+	settings_signature = $22
 FROM computed
 WHERE hosts.id = computed.id RETURNING hosts.id`,
 			sqlPublicKey(hk),
 			uptimeHalfLife,
 			nextScan,
+			loc.CountryCode,
+			pgtype.Point{
+				P: pgtype.Vec2{
+					X: loc.Latitude,
+					Y: loc.Longitude,
+				},
+				Valid: true,
+			},
 			sqlProtocolVersion(hs.ProtocolVersion),
 			hs.Release,
 			sqlHash256(hs.WalletAddress),
@@ -556,6 +572,8 @@ WITH globals AS (
 		id,
 		hosts.public_key,
 		recent_uptime,
+		country_code,
+		location,
 		last_successful_scan,
 		settings_protocol_version,
 		settings_release,
@@ -631,6 +649,10 @@ LIMIT $1 OFFSET $2;`, limit, offset, (*sqlNetworkProtocol)(queryOpts.Protocol))
 			usable = append(usable, hosts.HostInfo{
 				PublicKey: h.PublicKey,
 				Addresses: h.Addresses,
+
+				CountryCode: h.CountryCode,
+				Latitude:    h.Latitude,
+				Longitude:   h.Longitude,
 			})
 		}
 		return nil
@@ -695,6 +717,7 @@ func decorateHostNetworks(ctx context.Context, tx *txn, hosts ...*dbHost) error 
 
 func scanHost(s scanner) (dbHost, error) {
 	var host dbHost
+	var point pgtype.Point
 	var lastFailedScan, lastSuccessfulScan, validUntil sql.NullTime
 	var ignore any
 	if err := s.Scan(
@@ -709,6 +732,8 @@ func scanHost(s scanner) (dbHost, error) {
 		&host.NextScan,
 		&host.ConsecutiveFailedScans,
 		&host.RecentUptime,
+		&host.CountryCode,
+		&point,
 		(*sqlProtocolVersion)(&host.Settings.ProtocolVersion),
 		&host.Settings.Release,
 		(*sqlHash256)(&host.Settings.WalletAddress),
@@ -744,6 +769,8 @@ func scanHost(s scanner) (dbHost, error) {
 		return dbHost{}, err
 	}
 
+	host.Latitude = point.P.X
+	host.Longitude = point.P.Y
 	if lastFailedScan.Valid {
 		host.LastFailedScan = lastFailedScan.Time
 	}

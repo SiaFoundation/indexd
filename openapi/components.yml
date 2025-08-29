@@ -416,6 +416,17 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NetAddress"
+        countryCode:
+          type: string
+          description: The ISO 3166-1 A-2 country code of the host inferred from its IP address.
+        latitude:
+          type: number
+          format: float
+          description: Approximate latitude of the host inferred from its IP address.
+        longitude:
+          type: number
+          format: float
+          description: Approximate longitude of the host inferred from its IP address.
     
     HostUsability:
       type: object

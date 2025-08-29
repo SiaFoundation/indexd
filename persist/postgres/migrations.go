@@ -61,6 +61,18 @@ var migrations = []func(context.Context, *txn, *zap.Logger) error{
 		}
 		return nil
 	},
+	// adds the "country_code" and "location" columns
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN country_code TEXT NOT NULL DEFAULT '';`)
+		if err != nil {
+			return fmt.Errorf("failed to add country_code column: %w", err)
+		}
+		_, err = tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN location POINT NOT NULL DEFAULT POINT(0.0, 0.0);`)
+		if err != nil {
+			return fmt.Errorf("failed to add location column: %w", err)
+		}
+		return nil
+	},
 	// adds the 'description', 'logo_url' and 'service_url' columns
 	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
 		for _, c := range []string{"description", "logo_url", "service_url"} {
