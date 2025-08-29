@@ -26,7 +26,7 @@ type (
 		// that is generated for auth requests and
 		// the hostname that is valid for signed
 		// requests.
-		AdvertiseURL string `yaml:"advertiseURL"`
+		AdvertiseURL string `yaml:"advertiseUrl"`
 	}
 
 	// Syncer contains the configuration for the p2p syncer.

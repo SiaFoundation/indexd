@@ -64,9 +64,9 @@ type (
 	RegisterAppRequest struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
-		LogoURL     string `json:"logoURL"`
-		ServiceURL  string `json:"serviceURL"`
-		CallbackURL string `json:"callbackURL"`
+		LogoURL     string `json:"logoUrl"`
+		ServiceURL  string `json:"serviceUrl"`
+		CallbackURL string `json:"callbackUrl"`
 	}
 
 	// AuthConnectStatusResponse is the response body for checking the status of an
@@ -79,8 +79,8 @@ type (
 	// It contains the URL to redirect the user to for authentication.
 	// The user must approve the request before the expiration time.
 	RegisterAppResponse struct {
-		ResponseURL string    `json:"responseURL"`
-		StatusURL   string    `json:"statusURL"`
+		ResponseURL string    `json:"responseUrl"`
+		StatusURL   string    `json:"statusUrl"`
 		Expiration  time.Time `json:"expiration"`
 	}
 

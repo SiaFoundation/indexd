@@ -242,15 +242,9 @@ func (c *Client) CheckAppAuth(ctx context.Context) (bool, error) {
 // application API of the indexer. The address should be the full URL to the
 // application API, including the scheme (e.g., "http://indexer.sia.tech").
 func NewClient(address string, appKey types.PrivateKey) (*Client, error) {
-	parsedURL, err := url.Parse(address)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse address %q: %w", address, err)
-	}
-
 	return &Client{
 		baseURL: address,
 
-		appkey:   appKey,
-		hostname: parsedURL.Host,
+		appkey: appKey,
 	}, nil
 }
