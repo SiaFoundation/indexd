@@ -305,7 +305,7 @@ paths:
       tags:
         - auth
       summary: Request application connection to the indexer
-      operationId: connectAuth
+      operationId: requestAppConnection
       requestBody:
         required: true
         content:
@@ -349,12 +349,37 @@ paths:
         "500":
           description: Internal server error
 
+      x-codeSamples:
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+              "context"
+              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/slabs"
+              "go.sia.tech/core/types"
+            )
+
+            func main() {
+              var appKey types.PrivateKey
+              client, err := app.NewClient("http://localhost:9982", appKey)
+              connectResp, err := client.RequestAppConnection(ctx, app.RegisterAppRequest{
+                Name:        "Test App",
+                Description: "A test application",
+                LogoURL:     "foo",
+                ServiceURL:  "bar",
+              })
+              ...
+            }
+
   /auth/check:
     get:
       tags:
         - auth
       summary: Check if application is authenticated
-      operationId: checkAuth
+      operationId: checkAppAuth
       responses:
         "204":
           description: Application is authenticated
@@ -365,12 +390,35 @@ paths:
         "500":
           description: Internal server error
 
+      x-codeSamples:
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+              "context"
+              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/slabs"
+              "go.sia.tech/core/types"
+            )
+
+            func main() {
+              var appKey types.PrivateKey
+              client, err := app.NewClient("http://localhost:9982", appKey)
+              if ok, err := client.CheckAppAuth(ctx); err != nil {
+                t.Fatal(err)
+              } else if !ok {
+                t.Fatal("expected app to be authenticated")
+              }
+              ...
+            }
+
   /auth/connect/{requestID}:
     get:
       tags:
         - auth
-      summary: Show connection request UI
-      description: Returns an HTML page where a human operator can approve or reject the application connection request.
+      summary: Returns connection request UI HTML page.
       operationId: connectAuthUI
       parameters:
         - name: requestID
@@ -389,8 +437,7 @@ paths:
     post:
       tags:
         - auth
-      summary: Approve or reject an application connection request
-      description: Requires HTTP Basic authentication. Deletes the pending request. On approval, consumes the provided connect key.
+      summary: Approve or reject an application connection request.  Requires HTTP Basic authentication.
       operationId: approveAppRequest
       parameters:
         - name: requestID
