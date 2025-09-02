@@ -356,7 +356,6 @@ paths:
             import (
               "context"
               app "go.sia.tech/indexd/app"
-              "go.sia.tech/indexd/slabs"
               "go.sia.tech/core/types"
             )
 
@@ -395,18 +394,13 @@ paths:
             import (
               "context"
               app "go.sia.tech/indexd/app"
-              "go.sia.tech/indexd/slabs"
               "go.sia.tech/core/types"
             )
 
             func main() {
               var appKey types.PrivateKey
               client, err := app.NewClient("http://localhost:9982", appKey)
-              if ok, err := client.CheckAppAuth(ctx); err != nil {
-                t.Fatal(err)
-              } else if !ok {
-                t.Fatal("expected app to be authenticated")
-              }
+              ok, err := client.CheckAppAuth(ctx)
               ...
             }
 
