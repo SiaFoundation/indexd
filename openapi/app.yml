@@ -346,8 +346,6 @@ paths:
           description: Invalid request (missing required fields or signature)
         "409":
           description: Application already connected
-        "500":
-          description: Internal server error
 
       x-codeSamples:
         - lang: Go
@@ -387,8 +385,6 @@ paths:
           description: Application is not authenticated
         "400":
           description: Invalid signature
-        "500":
-          description: Internal server error
 
       x-codeSamples:
         - lang: Go
@@ -464,8 +460,6 @@ paths:
           description: Connect key exhausted
         "404":
           description: Unknown request ID
-        "500":
-          description: Internal server error
 
   /auth/connect/{requestID}/status:
     get:
@@ -492,8 +486,6 @@ paths:
           description: Unknown request ID
         "410":
           description: Request expired
-        "500":
-          description: Internal server error
 
 components:
   schemas:
