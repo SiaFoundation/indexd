@@ -37,6 +37,12 @@ paths:
             type: integer
             minimum: 0
             default: 0
+        - name: protocol
+          in: query
+          description: Filter hosts by protocol
+          schema:
+            type: string
+            enum: [siamux, quic]
       operationId: listHosts
       responses:
         "200":
@@ -294,6 +300,154 @@ paths:
               // ...
             }
 
+  /auth/connect:
+    post:
+      tags:
+        - auth
+      summary: Request application connection to the indexer
+      operationId: connectAuth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+                - description
+                - serviceURL
+              properties:
+                name:
+                  type: string
+                  description: Application name
+                description:
+                  type: string
+                  description: Application description
+                logoURL:
+                  type: string
+                  format: uri
+                  description: URL of the application logo
+                serviceURL:
+                  type: string
+                  format: uri
+                  description: URL of the application service
+                callbackURL:
+                  type: string
+                  format: uri
+                  description: URL of the application callback
+      responses:
+        "200":
+          description: Application connection request accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterAppResponse"
+        "400":
+          description: Invalid request (missing required fields or signature)
+        "409":
+          description: Application already connected
+        "500":
+          description: Internal server error
+
+  /auth/check:
+    get:
+      tags:
+        - auth
+      summary: Check if application is authenticated
+      operationId: checkAuth
+      responses:
+        "204":
+          description: Application is authenticated
+        "401":
+          description: Application is not authenticated
+        "400":
+          description: Invalid signature
+        "500":
+          description: Internal server error
+
+  /auth/connect/{requestID}:
+    get:
+      tags:
+        - auth
+      summary: Show connection request UI
+      description: Returns an HTML page where a human operator can approve or reject the application connection request.
+      operationId: connectAuthUI
+      parameters:
+        - name: requestID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: HTML authorization page
+          content:
+            text/html: {}
+        "404":
+          description: Unknown request ID
+
+    post:
+      tags:
+        - auth
+      summary: Approve or reject an application connection request
+      description: Requires HTTP Basic authentication. Deletes the pending request. On approval, consumes the provided connect key.
+      operationId: approveAppRequest
+      parameters:
+        - name: requestID
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                approve:
+                  type: boolean
+                  description: Whether to approve the application connection request or not.
+      responses:
+        "200":
+          description: Request processed successfully
+        "401":
+          description: Invalid connect key
+        "403":
+          description: Connect key exhausted
+        "404":
+          description: Unknown request ID
+        "500":
+          description: Internal server error
+
+  /auth/connect/{requestID}/status:
+    get:
+      tags:
+        - auth
+      summary: Check the status of a connection request
+      operationId: authConnectStatus
+      parameters:
+        - name: requestID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Connection request status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthConnectStatusResponse"
+        "400":
+          description: Invalid app key
+        "404":
+          description: Unknown request ID
+        "410":
+          description: Request expired
+        "500":
+          description: Internal server error
+
 components:
   schemas:
     EncryptionKey:
@@ -306,3 +460,7 @@ components:
       $ref: "./components.yml#/components/schemas/PublicKey"
     SlabID:
       $ref: "./components.yml#/components/schemas/SlabID"
+    RegisterAppResponse:
+      $ref: "./components.yml#/components/schemas/RegisterAppResponse"
+    AuthConnectStatusResponse:
+      $ref: "./components.yml#/components/schemas/AuthConnectStatusResponse"

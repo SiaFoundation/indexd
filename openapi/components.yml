@@ -560,3 +560,26 @@ components:
           allOf:
             - $ref: "#/components/schemas/SemVer"
             - description: "The minimum protocol version the host must have to be considered usable. The version is represented as an array of three unsigned 8-bit integers: [major, minor, patch]"
+
+    RegisterAppResponse:
+      type: object
+      properties:
+        responseURL:
+          type: string
+          format: uri
+          description: URL where the application can complete connection
+        statusURL:
+          type: string
+          format: uri
+          description: URL to poll for connection request status
+        expiration:
+          type: string
+          format: date-time
+          description: Expiration time of the request
+
+    AuthConnectStatusResponse:
+      type: object
+      properties:
+        approved:
+          type: boolean
+          description: The status of an application connection request.
