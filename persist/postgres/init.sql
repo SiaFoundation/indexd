@@ -273,11 +273,11 @@ CREATE UNIQUE INDEX objects_account_id_object_key_idx ON objects(account_id, obj
 CREATE INDEX objects_updated_at_object_key_idx ON objects(updated_at ASC, object_key ASC);
 
 CREATE TABLE object_slabs (
-    object_id BIGINT REFERENCES objects(id),
-    slab_id BIGINT REFERENCES slabs(id),
+    object_id BIGINT REFERENCES objects(id) ON DELETE CASCADE,
+    slab_digest BIGINT REFERENCES slabs(digest) ON DELETE CASCADE,
     slab_index INTEGER NOT NULL, -- index within corresponding slab to retrieve slabs in right order
-    offset BYTEA NOT NULL CHECK(LENGTH(offset) <= 16), -- encrypted offset within slab
-    length BYTEA NOT NULL CHECK(LENGTH(length) <= 16), -- encrypted length within slab
+    offset INTEGER NOT NULL, -- offset within slab
+    length BYTEA NOT NULL, -- length of object data within slab
     PRIMARY KEY (object_id, slab_id, slab_index)
 );
 
