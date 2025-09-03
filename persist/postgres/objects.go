@@ -10,6 +10,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/slabs"
 )
 
 type (
@@ -22,7 +23,7 @@ type (
 	}
 
 	SlabSlice struct {
-		SlabID types.Hash256
+		SlabID slabs.SlabID
 		Offset uint32
 		Length uint32
 	}
@@ -73,7 +74,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, after ti
 		// populate slabs
 		for i := range objects {
 			rows, err = tx.Query(ctx, `
-				SELECT slab_digest, offset, length
+				SELECT slab_digest, slab_offset, slab_length
 				FROM object_slabs
 				WHERE object_id = $1
 				ORDER BY slab_index ASC
@@ -95,13 +96,13 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, after ti
 		}
 		return nil
 	})
-	return nil, err
+	return objects, err
 }
 
 func (s *Store) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var objectID int64
-		err := tx.QueryRow(ctx, `SELECT objects.id FROM objects WHERE objects.object_key = $1)`, sqlHash256(objectKey)).
+		err := tx.QueryRow(ctx, `SELECT id FROM objects WHERE object_key = $1`, sqlHash256(objectKey)).
 			Scan(&objectID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrObjectNotFound
@@ -143,7 +144,7 @@ func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj Objec
 		// TODO: what about objects linking slabs that aren't pinned? Pin them here?
 
 		for i, slab := range obj.Slabs {
-			_, err := tx.Exec(ctx, `INSERT INTO object_slabs (object_id, slab_digest, slab_index, offset, length) VALUES ($1, $2, $3, $4, $5)`,
+			_, err := tx.Exec(ctx, `INSERT INTO object_slabs (object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, $3, $4, $5)`,
 				objectID, sqlHash256(slab.SlabID), i, slab.Offset, slab.Length)
 			if err != nil {
 				return fmt.Errorf("failed to insert slab %d for object: %w", i, err)
