@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
@@ -566,6 +567,11 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	pk := types.GeneratePrivateKey().PublicKey()
+	if err := db.AddServiceAccount(context.Background(), pk, accounts.AccountMeta{}); err != nil {
+		t.Fatal(err)
+	}
+
 	// helper to add hosts
 	addHost := func(i byte, countryCode string, protocols []chain.Protocol, usable, blocked bool, contract bool) types.PublicKey {
 		t.Helper()
@@ -591,6 +597,9 @@ func TestUsableHosts(t *testing.T) {
 		if err := db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, geoip.Location{
 			CountryCode: countryCode,
 		}, true, time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.UpdateServiceAccountBalance(context.Background(), hk, proto.Account(pk), types.Siacoins(100)); err != nil {
 			t.Fatal(err)
 		}
 
@@ -625,7 +634,7 @@ func TestUsableHosts(t *testing.T) {
 	uh2 := addHost(9, countryAU, bothProtocols, true, false, true) // second usable host
 
 	// assert only h6 and h9 are returned
-	if hosts, err := db.UsableHosts(context.Background(), 0, 10); err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), pk, 0, 10); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 2 {
 		t.Fatal("unexpected", len(hosts))
@@ -636,26 +645,26 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// assert offset and limit are applied
-	if hosts, err := db.UsableHosts(context.Background(), 0, 1); err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), pk, 0, 1); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
 	} else if hosts[0].PublicKey != uh2 {
 		t.Fatal("unexpected host", hosts[0].PublicKey)
-	} else if hosts, err := db.UsableHosts(context.Background(), 1, 1); err != nil {
+	} else if hosts, err := db.UsableHosts(context.Background(), pk, 1, 1); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
 	} else if hosts[0].PublicKey != uh1 {
 		t.Fatal("unexpected host", hosts[0].PublicKey)
-	} else if hosts, err := db.UsableHosts(context.Background(), 2, 1); err != nil {
+	} else if hosts, err := db.UsableHosts(context.Background(), pk, 2, 1); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 0 {
 		t.Fatal("expected no hosts, got", len(hosts))
 	}
 
 	// filter protocols
-	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithProtocol(siamux.Protocol)); err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), pk, 0, 10, hosts.WithProtocol(siamux.Protocol)); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 2 {
 		t.Fatal("unexpected", len(hosts))
@@ -665,7 +674,7 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal("expected hosts to have addresses")
 	}
 
-	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithProtocol(quic.Protocol)); err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), pk, 0, 10, hosts.WithProtocol(quic.Protocol)); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
@@ -676,7 +685,7 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// filter by country
-	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithCountry(countryUS)); err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), pk, 0, 10, hosts.WithCountry(countryUS)); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
@@ -684,7 +693,7 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal("unexpected host", hosts[0])
 	}
 
-	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithCountry(countryAU)); err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), pk, 0, 10, hosts.WithCountry(countryAU)); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
