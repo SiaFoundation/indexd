@@ -177,7 +177,7 @@ func (mc *mockAppClient) Slab(_ context.Context, id slabs.SlabID) (slabs.PinnedS
 	return slab, nil
 }
 
-func (mc *mockAppClient) Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error) {
+func (mc *mockAppClient) Hosts(context.Context, types.PublicKey, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error) {
 	return nil, nil
 }
 

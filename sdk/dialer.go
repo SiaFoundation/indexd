@@ -160,7 +160,7 @@ func (d *Dialer) updateHosts(ctx context.Context) error {
 	offset, limit := 0, 100
 	addrs := make(map[types.PublicKey][]chain.NetAddress)
 	for {
-		hosts, err := d.c.Hosts(ctx, api.WithOffset(offset), api.WithLimit(limit))
+		hosts, err := d.c.Hosts(ctx, d.appKey.PublicKey(), api.WithOffset(offset), api.WithLimit(limit))
 		if err != nil {
 			return fmt.Errorf("failed to get hosts: %w", err)
 		}
