@@ -5,22 +5,22 @@ import (
 	"net"
 )
 
-// IPNet is a net.IPNet wrapped to add marshaling.
-type IPNet net.IPNet
+// ipNet is a net.IPNet wrapped to add marshaling.
+type ipNet net.IPNet
 
 // String implements fmt.Stringer.
-func (n IPNet) String() string {
+func (n ipNet) String() string {
 	subnet := net.IPNet(n)
 	return subnet.String()
 }
 
 // MarshalText implements encoding.TextMarshaler.
-func (n IPNet) MarshalText() ([]byte, error) {
+func (n ipNet) MarshalText() ([]byte, error) {
 	return []byte(n.String()), nil
 }
 
 // UnmarshalText implements encoding.TextUnmarshaler.
-func (n *IPNet) UnmarshalText(text []byte) error {
+func (n *ipNet) UnmarshalText(text []byte) error {
 	ip, subnet, err := net.ParseCIDR(string(text))
 	if err != nil {
 		return err
@@ -29,7 +29,7 @@ func (n *IPNet) UnmarshalText(text []byte) error {
 	if ip4 := subnet.IP.To4(); ip4 != nil {
 		subnet.IP = ip4
 	}
-	*n = IPNet(*subnet)
+	*n = ipNet(*subnet)
 	return nil
 }
 
@@ -37,13 +37,13 @@ func (n *IPNet) UnmarshalText(text []byte) error {
 func (h Host) MarshalJSON() ([]byte, error) {
 	type Alias Host
 	return json.Marshal(&struct {
-		Networks []IPNet `json:"networks"`
+		Networks []ipNet `json:"networks"`
 		*Alias
 	}{
-		Networks: func() []IPNet {
-			out := make([]IPNet, len(h.Networks))
+		Networks: func() []ipNet {
+			out := make([]ipNet, len(h.Networks))
 			for i, n := range h.Networks {
-				out[i] = IPNet(n)
+				out[i] = ipNet(n)
 			}
 			return out
 		}(),
@@ -55,7 +55,7 @@ func (h Host) MarshalJSON() ([]byte, error) {
 func (h *Host) UnmarshalJSON(data []byte) error {
 	type Alias Host
 	aux := &struct {
-		Networks []IPNet `json:"networks"`
+		Networks []ipNet `json:"networks"`
 		*Alias
 	}{
 		Alias: (*Alias)(h),
