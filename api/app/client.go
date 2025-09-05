@@ -134,7 +134,7 @@ func (c *Client) Hosts(ctx context.Context, accountKey types.PublicKey, opts ...
 		opt(values)
 	}
 
-	err = c.signedRequestJSON(ctx, http.MethodGet, fmt.Sprintf("/hosts/%s?%s", accountKey, values.Encode()), nil, &hosts)
+	err = c.signedRequestJSON(ctx, http.MethodGet, "/hosts?"+values.Encode(), nil, &hosts)
 	return
 }
 
