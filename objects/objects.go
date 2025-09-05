@@ -18,7 +18,7 @@ type (
 		UpdatedAt time.Time     `json:"updatedAt"`
 	}
 
-	// ObjectsCursor describes a cursor for paginating through objects. During
+	// Cursor describes a cursor for paginating through objects. During
 	// pagination, 'After' is meant to be set to the 'UpdatedAt' value of the
 	// last object received and 'Key' is meant to be set to the 'Key' value of
 	// the last object received. This allows for consistent pagination even if
@@ -28,7 +28,7 @@ type (
 	// NOTE: Considering that 'UpdatedAt' for an object can increase if updated
 	// while paginating, it's possible to see the same object multiple times
 	// with higher timestamps and different slabs/metadata.
-	ObjectsCursor struct {
+	Cursor struct {
 		After time.Time
 		Key   types.Hash256
 	}

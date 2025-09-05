@@ -15,7 +15,7 @@ import (
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
-func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor objects.ObjectsCursor, limit int64) (objs []objects.Object, _ error) {
+func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor objects.Cursor, limit int64) (objs []objects.Object, _ error) {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var accountID int64
 		err := tx.QueryRow(ctx, "SELECT id FROM accounts WHERE accounts.public_key = $1", sqlPublicKey(account)).Scan(&accountID)

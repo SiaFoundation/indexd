@@ -38,7 +38,7 @@ func TestObjects(t *testing.T) {
 
 	assertObjects := func(acc proto4.Account, n int) []objects.Object {
 		t.Helper()
-		objects, err := store.ListObjects(context.Background(), acc, objects.ObjectsCursor{}, 10)
+		objects, err := store.ListObjects(context.Background(), acc, objects.Cursor{}, 10)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(objects) != n {
@@ -133,7 +133,7 @@ func TestObjects(t *testing.T) {
 	assertObj(obj3, objs[1])
 
 	// make sure the limit works
-	objs, err := store.ListObjects(context.Background(), acc2, objects.ObjectsCursor{}, 1)
+	objs, err := store.ListObjects(context.Background(), acc2, objects.Cursor{}, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 {
@@ -141,7 +141,7 @@ func TestObjects(t *testing.T) {
 	}
 
 	// increasing 'after' to now should not yield any results
-	objs, err = store.ListObjects(context.Background(), acc2, objects.ObjectsCursor{After: time.Now()}, 1)
+	objs, err = store.ListObjects(context.Background(), acc2, objects.Cursor{After: time.Now()}, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
