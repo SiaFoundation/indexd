@@ -73,7 +73,8 @@ func TestApplicationAPI(t *testing.T) {
 	h3 := hosts[2]
 
 	// prepare account
-	client := indexer.App(types.GeneratePrivateKey())
+	sk := types.GeneratePrivateKey()
+	client := indexer.App(sk)
 
 	key, err := adminClient.AddAppConnectKey(ctx, admin.AddConnectKeyRequest{
 		RemainingUses: 1,
@@ -110,7 +111,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// now that the account exists, we can fund the hosts
-	cluster.FundHostAccounts(ctx, t, client.PublicKey(), h1.PublicKey, h2.PublicKey, h3.PublicKey)
+	cluster.FundHostAccounts(ctx, t, sk.PublicKey(), h1.PublicKey, h2.PublicKey, h3.PublicKey)
 
 	// check that the key has been used
 	keys, err := adminClient.AppConnectKeys(ctx, 0, 1)
@@ -172,7 +173,7 @@ func TestApplicationAPI(t *testing.T) {
 
 	// assert hosts returns all usable hosts
 	time.Sleep(time.Second) // allow some time to form contracts
-	usableHosts, err := client.Hosts(context.Background(), client.PublicKey())
+	usableHosts, err := client.Hosts(context.Background())
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 3 {
@@ -211,7 +212,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert filtering for quic only returns h1
-	usableHosts, err = client.Hosts(ctx, client.PublicKey(), api.WithProtocol(quic.Protocol))
+	usableHosts, err = client.Hosts(ctx, api.WithProtocol(quic.Protocol))
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 1 {
@@ -221,7 +222,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// filtering for US should only return h1
-	usableHosts, err = client.Hosts(ctx, client.PublicKey(), api.WithCountry(locationUS.CountryCode))
+	usableHosts, err = client.Hosts(ctx, api.WithCountry(locationUS.CountryCode))
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 1 {
@@ -231,7 +232,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// filtering for AU should only return h2
-	usableHosts, err = client.Hosts(ctx, client.PublicKey(), api.WithCountry(locationAU.CountryCode))
+	usableHosts, err = client.Hosts(ctx, api.WithCountry(locationAU.CountryCode))
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 1 {
@@ -247,7 +248,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert host is no longer returned
-	usableHosts, err = client.Hosts(context.Background(), client.PublicKey())
+	usableHosts, err = client.Hosts(context.Background())
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 2 {
@@ -255,11 +256,11 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert limit and offset are applied
-	if usableHosts, err := client.Hosts(context.Background(), client.PublicKey(), api.WithLimit(1)); err != nil {
+	if usableHosts, err := client.Hosts(context.Background(), api.WithLimit(1)); err != nil {
 		t.Fatal("failed to get hosts with limit:", err)
 	} else if len(usableHosts) != 1 {
 		t.Fatal("expected 1 usable host, got", len(usableHosts))
-	} else if usableHosts, err := client.Hosts(context.Background(), client.PublicKey(), api.WithOffset(2), api.WithLimit(1)); err != nil {
+	} else if usableHosts, err := client.Hosts(context.Background(), api.WithOffset(2), api.WithLimit(1)); err != nil {
 		t.Fatal("failed to get hosts with limit:", err)
 	} else if len(usableHosts) != 0 {
 		t.Fatal("expected 0 usable hosts, got", len(usableHosts))
