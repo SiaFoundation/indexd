@@ -16,6 +16,7 @@ jobs:
     with:
       slug: indexd-admin
       spec_path: openapi/admin.yml
+      docs_slug: sia
     secrets:
       SCALAR_API_KEY: ${{ secrets.SCALAR_API_KEY }}
 
@@ -24,5 +25,6 @@ jobs:
     with:
       slug: indexd-app
       spec_path: openapi/app.yml
+      docs_slug: sia
     secrets:
       SCALAR_API_KEY: ${{ secrets.SCALAR_API_KEY }}
