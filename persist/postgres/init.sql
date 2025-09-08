@@ -261,8 +261,8 @@ CREATE TABLE objects (
     id BIGSERIAL PRIMARY KEY,
     object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32), -- user provided, object identifier
     account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns object
-    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by update time
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL, -- allow sorting by update time
     meta BYTEA -- user provided, encrypted metadata
 );
 

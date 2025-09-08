@@ -20,6 +20,7 @@ import (
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/internal/testutils"
+	"go.sia.tech/indexd/objects"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"lukechampine.com/frand"
@@ -317,6 +318,62 @@ func TestApplicationAPI(t *testing.T) {
 		slab2.Sectors[1].Root != slab2Params.Sectors[1].Root ||
 		slab2.Sectors[2].Root != slab2Params.Sectors[2].Root {
 		t.Fatal("unexpected sector roots in slab")
+	}
+
+	obj := objects.Object{
+		Key: types.Hash256(frand.Entropy256()),
+		Slabs: []objects.SlabSlice{
+			{
+				SlabID: slab1.ID,
+				Offset: 0,
+				Length: 256,
+			},
+			{
+				SlabID: slab2.ID,
+				Offset: 0,
+				Length: 256,
+			},
+		},
+		Meta: nil,
+	}
+
+	objs, err := client.ListObjects(context.Background(), objects.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(objs) != 0 {
+		t.Fatalf("expected 0 objects, got %d", len(objs))
+	}
+
+	if err := client.SaveObject(context.Background(), obj); err != nil {
+		t.Fatal(err)
+	}
+
+	objs, err = client.ListObjects(context.Background(), objects.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(objs) != 1 {
+		t.Fatalf("expected 1 objects, got %d", len(objs))
+	}
+	obj1 := objs[0]
+
+	if objs, err := client.ListObjects(context.Background(), objects.Cursor{
+		After: obj1.UpdatedAt,
+		Key:   obj1.Key,
+	}, 100); err != nil {
+		t.Fatal(err)
+	} else if len(objs) != 0 {
+		t.Fatalf("expected 0 objects, got %d", len(objs))
+	}
+
+	if err := client.DeleteObject(context.Background(), obj1.Key); err != nil {
+		t.Fatal(err)
+	}
+
+	objs, err = client.ListObjects(context.Background(), objects.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(objs) != 0 {
+		t.Fatalf("expected 0 objects, got %d", len(objs))
 	}
 }
 

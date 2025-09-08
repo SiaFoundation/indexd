@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
@@ -28,7 +29,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor o
 			WHERE (updated_at > $1 OR (updated_at = $1 AND object_key > $2)) AND account_id = $3
 			ORDER BY updated_at ASC, object_key ASC
 			LIMIT $4
-		`, cursor.After, cursor.Key, accountID, limit)
+		`, cursor.After, sqlHash256(cursor.Key), accountID, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query objects: %w", err)
 		}
@@ -118,10 +119,10 @@ func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj objec
 
 		var objectID int64
 		err = tx.QueryRow(ctx, `
-			INSERT INTO objects (object_key, account_id, meta) VALUES ($1, $2, $3)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET meta = EXCLUDED.meta, updated_at = NOW()
+			INSERT INTO objects (object_key, account_id, meta, created_at, updated_at) VALUES ($1, $2, $3, $4, $4)
+			ON CONFLICT (account_id, object_key) DO UPDATE SET meta = EXCLUDED.meta
 			RETURNING id`,
-			sqlHash256(obj.Key), accountID, obj.Meta).Scan(&objectID)
+			sqlHash256(obj.Key), accountID, obj.Meta, time.Now().UTC().Round(time.Second)).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
