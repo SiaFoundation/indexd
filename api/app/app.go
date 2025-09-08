@@ -34,7 +34,7 @@ type (
 
 	// Store defines the store interface for the application API.
 	Store interface {
-		GetObject(ctx context.Context, account proto.Account, key types.Hash256) (objects.Object, error)
+		Object(ctx context.Context, account proto.Account, key types.Hash256) (objects.Object, error)
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		SaveObject(ctx context.Context, account proto.Account, obj objects.Object) error
 		ListObjects(ctx context.Context, account proto.Account, cursor objects.Cursor, limit int) (objs []objects.Object, _ error)
@@ -179,7 +179,7 @@ func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	obj, err := a.store.GetObject(jc.Request.Context(), proto.Account(pk), key)
+	obj, err := a.store.Object(jc.Request.Context(), proto.Account(pk), key)
 	if errors.Is(err, objects.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return

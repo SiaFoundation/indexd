@@ -365,7 +365,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatalf("expected 0 objects, got %d", len(objs))
 	}
 
-	obj, err = client.GetObject(context.Background(), obj1.Key)
+	obj, err = client.Object(context.Background(), obj1.Key)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(obj, objs[0]) {
@@ -376,7 +376,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = client.GetObject(context.Background(), obj1.Key)
+	_, err = client.Object(context.Background(), obj1.Key)
 	if err == nil || !strings.Contains(err.Error(), objects.ErrObjectNotFound.Error()) {
 		t.Fatal("expected object to be not found, got", err)
 	}

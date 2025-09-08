@@ -168,8 +168,8 @@ func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOptio
 	return
 }
 
-// GetObject retrieves the object with the given key for the given account.
-func (c *Client) GetObject(ctx context.Context, key types.Hash256) (resp objects.Object, err error) {
+// Object retrieves the object with the given key for the given account.
+func (c *Client) Object(ctx context.Context, key types.Hash256) (resp objects.Object, err error) {
 	err = c.signedRequestJSON(ctx, http.MethodGet, fmt.Sprintf("/objects/%s", key), nil, &resp)
 	return
 }

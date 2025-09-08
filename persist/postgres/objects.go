@@ -13,8 +13,8 @@ import (
 	"go.sia.tech/indexd/objects"
 )
 
-// GetObject retrieves the object with the given key for the given account.
-func (s *Store) GetObject(ctx context.Context, account proto.Account, key types.Hash256) (obj objects.Object, _ error) {
+// Object retrieves the object with the given key for the given account.
+func (s *Store) Object(ctx context.Context, account proto.Account, key types.Hash256) (obj objects.Object, _ error) {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {

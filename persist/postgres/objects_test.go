@@ -150,7 +150,7 @@ func TestObjects(t *testing.T) {
 	}
 
 	// assert we can fetch a single object
-	obj, err = store.GetObject(context.Background(), acc2, obj2.Key)
+	obj, err = store.Object(context.Background(), acc2, obj2.Key)
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.CreatedAt.IsZero() || obj.UpdatedAt.IsZero() {
@@ -159,13 +159,13 @@ func TestObjects(t *testing.T) {
 	assertObj(obj2, obj)
 
 	// assert account is taken into consideration when fetching an object
-	_, err = store.GetObject(context.Background(), acc1, obj2.Key)
+	_, err = store.Object(context.Background(), acc1, obj2.Key)
 	if !errors.Is(err, objects.ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
 
 	// assert fetching a non-existent object returns the correct error
-	_, err = store.GetObject(context.Background(), acc2, frand.Entropy256())
+	_, err = store.Object(context.Background(), acc2, frand.Entropy256())
 	if !errors.Is(err, objects.ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
