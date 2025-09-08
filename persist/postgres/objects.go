@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
@@ -119,10 +118,10 @@ func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj objec
 
 		var objectID int64
 		err = tx.QueryRow(ctx, `
-			INSERT INTO objects (object_key, account_id, meta, created_at, updated_at) VALUES ($1, $2, $3, $4, $4)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET meta = EXCLUDED.meta
+			INSERT INTO objects (object_key, account_id, meta) VALUES ($1, $2, $3)
+			ON CONFLICT (account_id, object_key) DO UPDATE SET meta = EXCLUDED.meta, updated_at = NOW()
 			RETURNING id`,
-			sqlHash256(obj.Key), accountID, obj.Meta, time.Now().UTC().Round(time.Second)).Scan(&objectID)
+			sqlHash256(obj.Key), accountID, obj.Meta).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}

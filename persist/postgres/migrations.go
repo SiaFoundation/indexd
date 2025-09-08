@@ -124,14 +124,4 @@ CREATE INDEX object_slabs_object_id_slab_index_idx ON object_slabs(object_id, sl
 		`)
 		return err
 	},
-	// remove the default NOW from objects created_at/updated_at
-	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
-		if _, err := tx.Exec(ctx, `ALTER TABLE objects ALTER COLUMN created_at DROP DEFAULT;`); err != nil {
-			return fmt.Errorf("failed to alter created_at: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `ALTER TABLE objects ALTER COLUMN updated_at DROP DEFAULT;`); err != nil {
-			return fmt.Errorf("failed to alter updated_at: %w", err)
-		}
-		return nil
-	},
 }

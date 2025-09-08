@@ -173,7 +173,7 @@ func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOptio
 func (c *Client) ListObjects(ctx context.Context, cursor objects.Cursor, limit int) (resp []objects.Object, err error) {
 	values := url.Values{}
 	values.Set("limit", fmt.Sprintf("%d", limit))
-	values.Set("after", cursor.After.Format(time.RFC3339))
+	values.Set("after", cursor.After.Format(time.RFC3339Nano))
 	values.Set("key", cursor.Key.String())
 
 	err = c.signedRequestJSON(ctx, http.MethodGet, "/objects?"+values.Encode(), nil, &resp)
