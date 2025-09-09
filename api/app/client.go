@@ -274,7 +274,8 @@ func (c *Client) CheckAppAuth(ctx context.Context) (bool, error) {
 // client.
 type ClientOption func(client *Client)
 
-// WithValidity sets the logger for application API client.
+// WithValidity sets the validity period for the URLs signed by the application
+// API client.
 func WithValidity(validity time.Duration) ClientOption {
 	return func(client *Client) {
 		client.validity = validity
