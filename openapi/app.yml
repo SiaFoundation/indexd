@@ -146,6 +146,8 @@ paths:
       responses:
         "200":
           description: Object created or updated successfully
+        "400":
+          description: Object has no slabs or metadata exceeds size limit
   /objects/{key}:
     get:
       tags:

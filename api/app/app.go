@@ -225,8 +225,12 @@ func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
+	const metadataLimit = 1024
 	if len(obj.Slabs) == 0 {
 		jc.Error(errors.New("object must have at least one slab"), http.StatusBadRequest)
+		return
+	} else if len(obj.Meta) > metadataLimit {
+		jc.Error(fmt.Errorf("metadata size limit (%d) exceeded, got %d bytes", metadataLimit, len(obj.Meta)), http.StatusBadRequest)
 		return
 	}
 
