@@ -209,11 +209,12 @@ func (s *Store) UpdateHostAccounts(ctx context.Context, accounts []accounts.Host
 		}
 
 		query := fmt.Sprintf(`
-INSERT INTO account_hosts (account_id, host_id, consecutive_failed_funds, next_fund)
+INSERT INTO account_hosts (account_id, host_id, consecutive_failed_funds, funded, next_fund)
 SELECT
 	a.id AS account_id,
 	h.id AS host_id,
 	vals.consecutive_failed_funds,
+	(vals.consecutive_failed_funds = 0),
 	vals.next_fund
 FROM (VALUES %s) AS vals(account_pubkey, host_pubkey, consecutive_failed_funds, next_fund)
 INNER JOIN accounts a ON a.public_key = vals.account_pubkey

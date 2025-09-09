@@ -621,9 +621,6 @@ func TestUsableHosts(t *testing.T) {
 			if err := db.UpdateHostAccounts(context.Background(), []accounts.HostAccount{ha}); err != nil {
 				t.Fatal(err)
 			}
-			if err := db.UpdateHostAccounts(context.Background(), []accounts.HostAccount{ha}); err != nil {
-				t.Fatal(err)
-			}
 		}
 
 		return hk
