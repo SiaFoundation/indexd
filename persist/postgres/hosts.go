@@ -540,7 +540,7 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 
 // UsableHosts returns a list of hosts that are not blocked, usable and have an
 // active contract. It returns only the host's public key and addresses.
-func (s *Store) UsableHosts(ctx context.Context, accountKey types.PublicKey, offset, limit int, opts ...hosts.UsableHostQueryOpt) ([]hosts.HostInfo, error) {
+func (s *Store) UsableHosts(ctx context.Context, ak types.PublicKey, offset, limit int, opts ...hosts.UsableHostQueryOpt) ([]hosts.HostInfo, error) {
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
 	} else if limit == 0 {
@@ -555,7 +555,7 @@ func (s *Store) UsableHosts(ctx context.Context, accountKey types.PublicKey, off
 	var usable []hosts.HostInfo
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		var accountID int64
-		if err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE public_key = $1`, sqlPublicKey(accountKey)).Scan(&accountID); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE public_key = $1`, sqlPublicKey(ak)).Scan(&accountID); err != nil {
 			return fmt.Errorf("failed to query accounts: %w", err)
 		}
 

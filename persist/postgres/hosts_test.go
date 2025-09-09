@@ -1991,6 +1991,98 @@ func BenchmarkHostsWithUnpinnableSectors(b *testing.B) {
 	}
 }
 
+func BenchmarkUsableHosts(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+	pk := types.PublicKey{1}
+	account := proto.Account(pk)
+
+	// update global settings to make hosts pass all checks
+	if err := store.UpdateUsabilitySettings(context.Background(), hosts.UsabilitySettings{
+		MaxEgressPrice:     types.MaxCurrency,
+		MaxIngressPrice:    types.MaxCurrency,
+		MaxStoragePrice:    types.MaxCurrency,
+		MinCollateral:      types.ZeroCurrency,
+		MinProtocolVersion: rhp.ProtocolVersion400,
+	}); err != nil {
+		b.Fatal(err)
+	}
+	if err := store.UpdateMaintenanceSettings(context.Background(), contracts.MaintenanceSettings{
+		Period:          2,
+		RenewWindow:     1,
+		WantedContracts: 1,
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
+		b.Fatal("failed to add account:", err)
+	}
+
+	const (
+		nHosts          = 1000
+		dbBaseSize      = 1 << 40 // 1TiB of sectors
+		nSectorsPerHost = dbBaseSize / proto.SectorSize / nHosts
+	)
+
+	// add hosts
+	for i := range nHosts {
+		hk := store.addTestHost(b)
+
+		// add sectors
+		for remainingSectors := nSectorsPerHost; remainingSectors > 0; {
+			batchSize := min(remainingSectors, 10000)
+			remainingSectors -= batchSize
+			var sectors []slabs.SectorPinParams
+			for range batchSize {
+				root := frand.Entropy256()
+				sectors = append(sectors, slabs.SectorPinParams{
+					Root:    root,
+					HostKey: hk,
+				})
+			}
+			if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
+				MinShards:     1,
+				EncryptionKey: frand.Entropy256(),
+				Sectors:       sectors,
+			}); err != nil {
+				b.Fatal(err)
+			}
+		}
+
+		// 10% of hosts are usable
+		// For host to be usable needs to be have funded account
+		// Funded set to true in DB if ConsecutiveFailedFunds is 0
+		ha := accounts.HostAccount{
+			AccountKey:             account,
+			HostKey:                hk,
+			ConsecutiveFailedFunds: 1,
+		}
+		settings := newTestHostSettings(hk)
+
+		if i%10 == 0 {
+			ha.ConsecutiveFailedFunds = 0
+			settings.AcceptingContracts = true
+		} else {
+			settings.AcceptingContracts = false
+		}
+		if err := store.UpdateHost(context.Background(), hk, testNetworks, settings, geoip.Location{CountryCode: "US"}, true, time.Now().Add(time.Hour)); err != nil {
+			b.Fatal(err)
+		}
+		if err := store.UpdateHostAccounts(context.Background(), []accounts.HostAccount{ha}); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	for b.Loop() {
+		batch, err := store.UsableHosts(context.Background(), pk, 0, 1000)
+		if err != nil {
+			b.Fatal(err)
+		} else if len(batch) != 100 {
+			b.Fatal("expected 100 hosts, got", len(batch))
+		}
+	}
+}
+
 func (s *Store) addTestHost(t testing.TB, hks ...types.PublicKey) types.PublicKey {
 	t.Helper()
 
