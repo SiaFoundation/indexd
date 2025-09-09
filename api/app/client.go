@@ -33,9 +33,9 @@ type Client struct {
 	validity time.Duration
 }
 
-// sign signs the request with the appropriate headers and returns the signed URL
+// Sign signs the request with the appropriate headers and returns the signed URL
 // and request body.
-func sign(appKey types.PrivateKey, validity time.Duration, method, endpointURL string, req any) (string, io.Reader, error) {
+func Sign(appKey types.PrivateKey, validity time.Duration, method, endpointURL string, req any) (string, io.Reader, error) {
 	u, err := url.Parse(endpointURL)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to parse URL: %w", err)
@@ -75,7 +75,7 @@ func sign(appKey types.PrivateKey, validity time.Duration, method, endpointURL s
 }
 
 func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route string, data any) (io.ReadCloser, error) {
-	u, body, err := sign(c.appkey, c.validity, method, fmt.Sprintf("%s%s", c.baseURL, route), data)
+	u, body, err := Sign(c.appkey, c.validity, method, fmt.Sprintf("%s%s", c.baseURL, route), data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign request: %w", err)
 	}
@@ -209,7 +209,7 @@ func (c *Client) RequestAppConnection(ctx context.Context, request RegisterAppRe
 // CheckRequestStatus checks if an auth request has been approved.
 // If the auth request is still pending, it returns false.
 func (c *Client) CheckRequestStatus(ctx context.Context, statusURL string) (bool, error) {
-	requestURL, body, err := sign(c.appkey, c.validity, http.MethodGet, statusURL, nil)
+	requestURL, body, err := Sign(c.appkey, c.validity, http.MethodGet, statusURL, nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to sign request: %w", err)
 	}
@@ -242,7 +242,7 @@ func (c *Client) CheckRequestStatus(ctx context.Context, statusURL string) (bool
 // CheckAppAuth checks if the application is authenticated with the indexer.
 // It returns true if authenticated, false if not, and an error if the request fails.
 func (c *Client) CheckAppAuth(ctx context.Context) (bool, error) {
-	u, body, err := sign(c.appkey, c.validity, http.MethodGet, fmt.Sprintf("%s/auth/check", c.baseURL), nil)
+	u, body, err := Sign(c.appkey, c.validity, http.MethodGet, fmt.Sprintf("%s/auth/check", c.baseURL), nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to sign request: %w", err)
 	}
