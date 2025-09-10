@@ -211,7 +211,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to listen on application address: %v", err)
 	}
 	appAPIAddr := fmt.Sprintf("http://%s", appListener.Addr().String())
-	appHandler, err := app.NewAPI(appAPIAddr, store, am, contracts, appAPIOpts...)
+	appHandler, err := app.NewAPI(appAPIAddr, store, am, contracts, slabs, appAPIOpts...)
 	if err != nil {
 		t.Fatalf("failed to create application API: %v", err)
 	}

@@ -1,11 +1,13 @@
-package objects
+package slabs
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/slabs"
 )
 
 type (
@@ -35,9 +37,9 @@ type (
 
 	// SlabSlice represents a slice of a slab that is part of an object.
 	SlabSlice struct {
-		SlabID slabs.SlabID `json:"slabID"`
-		Offset uint32       `json:"offset"`
-		Length uint32       `json:"length"`
+		SlabID SlabID `json:"slabID"`
+		Offset uint32 `json:"offset"`
+		Length uint32 `json:"length"`
 	}
 )
 
@@ -45,3 +47,26 @@ var (
 	// ErrObjectNotFound is returned when an object is not found in the database.
 	ErrObjectNotFound = errors.New("object not found")
 )
+
+func (m *SlabManager) Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error) {
+	return m.store.Object(ctx, account, key)
+}
+
+func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
+	return m.store.DeleteObject(ctx, account, objectKey)
+}
+
+func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj Object) error {
+	const metadataLimit = 1024
+	if len(obj.Slabs) == 0 {
+		return errors.New("object must have at least one slab")
+	} else if len(obj.Meta) > metadataLimit {
+		return fmt.Errorf("metadata size limit (%d) exceeded, got %d bytes", metadataLimit, len(obj.Meta))
+	}
+
+	return m.store.SaveObject(ctx, account, obj)
+}
+
+func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]Object, error) {
+	return m.store.ListObjects(ctx, account, cursor, limit)
+}

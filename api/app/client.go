@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/objects"
 	"go.sia.tech/indexd/slabs"
 )
 
@@ -169,14 +168,14 @@ func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOptio
 }
 
 // Object retrieves the object with the given key for the given account.
-func (c *Client) Object(ctx context.Context, key types.Hash256) (resp objects.Object, err error) {
+func (c *Client) Object(ctx context.Context, key types.Hash256) (resp slabs.Object, err error) {
 	err = c.signedRequestJSON(ctx, http.MethodGet, fmt.Sprintf("/objects/%s", key), nil, &resp)
 	return
 }
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
-func (c *Client) ListObjects(ctx context.Context, cursor objects.Cursor, limit int) (resp []objects.Object, err error) {
+func (c *Client) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) (resp []slabs.Object, err error) {
 	values := url.Values{}
 	values.Set("limit", fmt.Sprintf("%d", limit))
 	values.Set("after", cursor.After.Format(time.RFC3339Nano))
@@ -188,7 +187,7 @@ func (c *Client) ListObjects(ctx context.Context, cursor objects.Cursor, limit i
 
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (c *Client) SaveObject(ctx context.Context, obj objects.Object) (err error) {
+func (c *Client) SaveObject(ctx context.Context, obj slabs.Object) (err error) {
 	err = c.signedRequestJSON(ctx, http.MethodPost, "/objects", obj, nil)
 	return
 }

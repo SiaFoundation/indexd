@@ -20,7 +20,6 @@ import (
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/internal/testutils"
-	"go.sia.tech/indexd/objects"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"lukechampine.com/frand"
@@ -320,9 +319,9 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("unexpected sector roots in slab")
 	}
 
-	obj := objects.Object{
+	obj := slabs.Object{
 		Key: types.Hash256(frand.Entropy256()),
-		Slabs: []objects.SlabSlice{
+		Slabs: []slabs.SlabSlice{
 			{
 				SlabID: slab1.ID,
 				Offset: 0,
@@ -337,7 +336,7 @@ func TestApplicationAPI(t *testing.T) {
 		Meta: nil,
 	}
 
-	objs, err := client.ListObjects(context.Background(), objects.Cursor{}, 100)
+	objs, err := client.ListObjects(context.Background(), slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
@@ -348,7 +347,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	objs, err = client.ListObjects(context.Background(), objects.Cursor{}, 100)
+	objs, err = client.ListObjects(context.Background(), slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 {
@@ -356,7 +355,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 	obj1 := objs[0]
 
-	if objs, err := client.ListObjects(context.Background(), objects.Cursor{
+	if objs, err := client.ListObjects(context.Background(), slabs.Cursor{
 		After: obj1.UpdatedAt,
 		Key:   obj1.Key,
 	}, 100); err != nil {
@@ -377,15 +376,15 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	_, err = client.Object(context.Background(), obj1.Key)
-	if err == nil || !strings.Contains(err.Error(), objects.ErrObjectNotFound.Error()) {
+	if err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
 		t.Fatal("expected object to be not found, got", err)
 	}
 
-	if err := client.DeleteObject(context.Background(), obj1.Key); err != nil && err.Error() != objects.ErrObjectNotFound.Error() {
-		t.Fatalf("expected %v, got %v", objects.ErrObjectNotFound, err)
+	if err := client.DeleteObject(context.Background(), obj1.Key); err != nil && err.Error() != slabs.ErrObjectNotFound.Error() {
+		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
 	}
 
-	objs, err = client.ListObjects(context.Background(), objects.Cursor{}, 100)
+	objs, err = client.ListObjects(context.Background(), slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
