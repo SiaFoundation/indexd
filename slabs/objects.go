@@ -43,9 +43,17 @@ type (
 	}
 )
 
+// metadataLimit represents the maximum size of an objects metadata we will
+// store.
+const metadataLimit = 1024
+
 var (
 	// ErrObjectNotFound is returned when an object is not found in the database.
 	ErrObjectNotFound = errors.New("object not found")
+	// ErrObjectMinimumSlabs is returned when the object has no slabs.
+	ErrObjectMinimumSlabs = errors.New("object must have at least one slab")
+	// ErrMetadataLimitExceeded is returned when the provided metadata is too large.
+	ErrMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", metadataLimit)
 )
 
 func (m *SlabManager) Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error) {
@@ -57,11 +65,10 @@ func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, o
 }
 
 func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj Object) error {
-	const metadataLimit = 1024
 	if len(obj.Slabs) == 0 {
-		return errors.New("object must have at least one slab")
+		return ErrObjectMinimumSlabs
 	} else if len(obj.Meta) > metadataLimit {
-		return fmt.Errorf("metadata size limit (%d) exceeded, got %d bytes", metadataLimit, len(obj.Meta))
+		return fmt.Errorf("%w: got %d bytes", ErrMetadataLimitExceeded, len(obj.Meta))
 	}
 
 	return m.store.SaveObject(ctx, account, obj)

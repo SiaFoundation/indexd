@@ -231,7 +231,9 @@ func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
 	}
 
 	err := a.slabs.SaveObject(jc.Request.Context(), proto.Account(pk), obj)
-	if err != nil {
+	if errors.Is(err, slabs.ErrObjectNotFound) || errors.Is(err, slabs.ErrObjectMinimumSlabs) {
+		jc.Error(err, http.StatusBadRequest)
+	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
