@@ -56,14 +56,18 @@ var (
 	ErrMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", metadataLimit)
 )
 
+// Object retrieves the object with the given key for the given account.
 func (m *SlabManager) Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error) {
 	return m.store.Object(ctx, account, key)
 }
 
+// DeleteObject deletes the object with the given key for the given account.
 func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
 	return m.store.DeleteObject(ctx, account, objectKey)
 }
 
+// SaveObject saves the given object for the given account. If an object with
+// the given key exists for an account, it is overwritten.
 func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj Object) error {
 	if len(obj.Slabs) == 0 {
 		return ErrObjectMinimumSlabs
@@ -74,6 +78,8 @@ func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj
 	return m.store.SaveObject(ctx, account, obj)
 }
 
+// ListObjects lists objects for the given account that were updated after the
+// the given 'after' time.
 func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]Object, error) {
 	return m.store.ListObjects(ctx, account, cursor, limit)
 }
