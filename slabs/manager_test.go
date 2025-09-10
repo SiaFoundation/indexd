@@ -18,7 +18,6 @@ import (
 
 type mockStore struct {
 	accounts        map[proto.Account]struct{}
-	objects         map[types.Hash256]Object
 	contracts       map[types.PublicKey]contracts.Contract
 	failedChecks    map[types.PublicKey]map[types.Hash256]int
 	hosts           map[types.PublicKey]hosts.Host
