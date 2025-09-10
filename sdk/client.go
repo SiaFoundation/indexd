@@ -24,16 +24,6 @@ import (
 )
 
 type (
-	uploadOption struct {
-		dataShards   uint8
-		parityShards uint8
-		hostTimeout  time.Duration
-		maxInflight  int
-
-		customKey         *[32]byte
-		disableEncryption bool
-	}
-
 	downloadOption struct {
 		hostTimeout time.Duration
 		maxInflight int
@@ -103,89 +93,6 @@ var (
 	ErrNoMoreHosts = errors.New("no more hosts available")
 )
 
-func (s *SDK) uploadSlab(ctx context.Context, shards [][]byte, dataShards uint8, maxInFlight int, timeout time.Duration) (slabs.SlabPinParams, error) {
-	if len(shards) == 0 {
-		return slabs.SlabPinParams{}, errors.New("no shards to upload")
-	} else if len(shards) < int(dataShards) {
-		return slabs.SlabPinParams{}, fmt.Errorf("not enough shards to upload: %d, required: %d", len(shards), dataShards)
-	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	slab := slabs.SlabPinParams{
-		EncryptionKey: frand.Entropy256(),
-		MinShards:     uint(dataShards),
-		Sectors:       make([]slabs.PinnedSector, len(shards)),
-	}
-
-	var hostsMu sync.Mutex
-	hosts := s.dialer.Hosts()
-	if len(hosts) < len(shards) {
-		return slabs.SlabPinParams{}, fmt.Errorf("not enough hosts available: %d, required: %d", len(hosts), len(shards))
-	}
-
-	errCh := make(chan error, len(shards))
-	nonce := make([]byte, 24)
-	sema := make(chan struct{}, maxInFlight)
-	for i := range shards {
-		// encrypt the shard before upload
-		nonce[0] = byte(i)
-		c, _ := chacha20.NewUnauthenticatedCipher(slab.EncryptionKey[:], nonce)
-		c.XORKeyStream(shards[i], shards[i])
-
-		select {
-		case <-ctx.Done():
-			return slabs.SlabPinParams{}, ctx.Err()
-		case sema <- struct{}{}:
-			// limit number of concurrent requests
-		}
-
-		go func(ctx context.Context, shard []byte, index int) {
-			defer func() { <-sema }() // release semaphore
-			sector := (*[proto4.SectorSize]byte)(shard)
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				default:
-				}
-
-				hostsMu.Lock()
-				if len(hosts) == 0 {
-					errCh <- ErrNoMoreHosts
-					hostsMu.Unlock()
-					return
-				}
-				hostKey := hosts[0]
-				hosts = hosts[1:]
-				hostsMu.Unlock()
-
-				root, err := uploadShard(ctx, sector, hostKey, s.dialer, timeout) // error can be ignored, hosts will be retried until none are left and the upload fails.
-				if err == nil {
-					slab.Sectors[index] = slabs.PinnedSector{
-						HostKey: hostKey,
-						Root:    root,
-					}
-					errCh <- nil
-					break
-				}
-			}
-		}(ctx, shards[i], i)
-	}
-	for range len(shards) {
-		select {
-		case <-ctx.Done():
-			return slabs.SlabPinParams{}, ctx.Err()
-		case err := <-errCh:
-			if err != nil {
-				return slabs.SlabPinParams{}, fmt.Errorf("failed to upload shard: %w", err)
-			}
-		}
-	}
-	return slab, nil
-}
-
 func (s *SDK) downloadSlab(ctx context.Context, slab slabs.PinnedSlab, maxInflight int, timeout time.Duration) ([][]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -229,6 +136,9 @@ top:
 //
 // Returns the metadata of the slabs that were pinned
 func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Object, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	uo := uploadOption{
 		dataShards:   10,
 		parityShards: 20,
@@ -245,6 +155,7 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 		return Object{}, errors.New("custom key provided but encryption disabled ")
 	}
 
+	// create reader
 	var obj Object
 	if !uo.disableEncryption {
 		if uo.customKey != nil {
@@ -257,80 +168,69 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 		r = encrypt(obj.Key, r, 0)
 	}
 
-	type work struct {
-		length int
-		shards [][]byte
-		err    error
+	// create erasure coder
+	enc, err := reedsolomon.New(int(uo.dataShards), int(uo.parityShards))
+	if err != nil {
+		return Object{}, fmt.Errorf("failed to create erasure coder: %w", err)
 	}
-	workCh := make(chan work, 1)
-	go func() {
-		enc, err := reedsolomon.New(int(uo.dataShards), int(uo.parityShards))
-		if err != nil {
-			workCh <- work{err: fmt.Errorf("failed to create erasure coder: %w", err)}
-			return
-		}
-		slabBuf := make([]byte, proto4.SectorSize*int(uo.dataShards))
-		for i := 0; ; i++ {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			n, err := readAtMost(r, slabBuf)
-			if n == 0 && errors.Is(err, io.EOF) {
-				workCh <- work{err: io.EOF} // signal done with EOF
-				break
-			} else if err != nil && !errors.Is(err, io.EOF) {
-				workCh <- work{err: fmt.Errorf("failed to read slab %d: %w", i, err)}
-				return
-			}
-			shards := make([][]byte, uo.dataShards+uo.parityShards)
-			for i := range shards {
-				shards[i] = make([]byte, proto4.SectorSize)
-			}
-			stripedSplit(slabBuf, shards[:uo.dataShards])
-			if err := enc.Encode(shards); err != nil {
-				workCh <- work{err: fmt.Errorf("failed to encode slab %d shards: %w", i, err)}
-				return
-			}
-			workCh <- work{length: n, shards: shards}
-		}
-	}()
+
+	// start uploading slabs
+	slabsCh := make(chan slabUpload, concurrentSlabUploads)
+	go s.uploadSlabs(ctx, slabsCh, r, enc, int(uo.dataShards), int(uo.parityShards), uo.maxInflight, uo.hostTimeout)
 
 	// TODO: cleanup on failure
-	for i := 0; ; i++ {
+	for {
 		select {
 		case <-ctx.Done():
 			return Object{}, ctx.Err()
-		case work := <-workCh:
-			err := work.err
-			shards := work.shards
-
+		case slab := <-slabsCh:
+			err := slab.err
 			if errors.Is(err, io.EOF) {
-				// no more slabs to upload, return the pinned slabs
-				return obj, nil
-			} else if work.err != nil {
-				return Object{}, work.err
+				return obj, nil // done
+			} else if slab.err != nil {
+				return Object{}, slab.err
 			}
-			params, err := s.uploadSlab(ctx, shards, uo.dataShards, uo.maxInflight, uo.hostTimeout)
-			if err != nil {
-				return Object{}, fmt.Errorf("failed to upload slab %d: %w", i, err)
+
+			slabIndex := len(obj.Slabs)
+			totalShards := uo.dataShards + uo.parityShards
+			params := slabs.SlabPinParams{
+				EncryptionKey: slab.encryptionKey,
+				MinShards:     uint(uo.dataShards),
+				Sectors:       make([]slabs.PinnedSector, totalShards),
 			}
+
+			// collect all shards
+			for n := totalShards; n > 0; n-- {
+				select {
+				case <-ctx.Done():
+					return Object{}, ctx.Err()
+				case shard := <-slab.uploadsCh:
+					if shard.err != nil {
+						return Object{}, fmt.Errorf("failed to upload slab: shard upload failed: %w", shard.err)
+					}
+					params.Sectors[shard.index] = slabs.PinnedSector{
+						HostKey: shard.host,
+						Root:    shard.root,
+					}
+				}
+			}
+
 			expectedSlabID, err := params.Digest()
 			if err != nil {
-				return Object{}, fmt.Errorf("failed to compute slab id for slab %d: %w", i, err)
+				return Object{}, fmt.Errorf("failed to compute slab id for slab %d: %w", slabIndex, err)
 			}
 
 			slabID, err := s.client.PinSlab(ctx, params)
 			if err != nil {
-				return Object{}, fmt.Errorf("failed to pin slab %d: %w", i, err)
+				return Object{}, fmt.Errorf("failed to pin slab %d: %w", slabIndex, err)
 			} else if slabID != expectedSlabID {
-				return Object{}, fmt.Errorf("pinned slab %d id %s does not match expected id %s", i, slabID.String(), expectedSlabID.String())
+				return Object{}, fmt.Errorf("pinned slab %d id %s does not match expected id %s", slabIndex, slabID, expectedSlabID)
 			}
+
 			obj.Slabs = append(obj.Slabs, Slab{
 				ID:     slabID,
 				Offset: 0,
-				Length: uint32(work.length),
+				Length: slab.length,
 			})
 		}
 	}

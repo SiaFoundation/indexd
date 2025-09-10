@@ -19,7 +19,6 @@ func TestRoundtrip(t *testing.T) {
 	dialer := newMockDialer(50)
 
 	appKey := types.GeneratePrivateKey()
-
 	s, err := initSDK(newMockAppClient(), dialer, appKey)
 	if err != nil {
 		t.Fatal(err)
