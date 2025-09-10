@@ -148,9 +148,6 @@ func (s *Store) DeleteObject(ctx context.Context, account proto.Account, objectK
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
 func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs.Object) error {
-	if len(obj.Slabs) == 0 {
-		return errors.New("object must have at least one slab")
-	}
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {

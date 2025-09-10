@@ -52,8 +52,8 @@ var (
 	ErrObjectNotFound = errors.New("object not found")
 	// ErrObjectMinimumSlabs is returned when the object has no slabs.
 	ErrObjectMinimumSlabs = errors.New("object must have at least one slab")
-	// ErrMetadataLimitExceeded is returned when the provided metadata is too large.
-	ErrMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", metadataLimit)
+	// ErrObjectMetadataLimitExceeded is returned when the provided metadata is too large.
+	ErrObjectMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", metadataLimit)
 )
 
 // Object retrieves the object with the given key for the given account.
@@ -72,7 +72,7 @@ func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj
 	if len(obj.Slabs) == 0 {
 		return ErrObjectMinimumSlabs
 	} else if len(obj.Meta) > metadataLimit {
-		return fmt.Errorf("%w: got %d bytes", ErrMetadataLimitExceeded, len(obj.Meta))
+		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(obj.Meta))
 	}
 
 	return m.store.SaveObject(ctx, account, obj)
