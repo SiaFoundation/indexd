@@ -54,6 +54,12 @@ func (c *connEntry) clear() {
 	}
 }
 
+func (c *connEntry) isConnected() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.tc != nil
+}
+
 func (c *connEntry) setTransport(tc rhp.TransportClient, assign bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -195,19 +201,23 @@ func (d *Dialer) clearHostConnection(hostKey types.PublicKey) {
 
 // Hosts implements the [HostDialer] interface.
 func (d *Dialer) Hosts() (hks []types.PublicKey) {
+	// grab current state
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	addrs := slices.Collect(maps.Keys(d.addrs))
+	conns := slices.Collect(maps.Values(d.conns))
+	d.mu.Unlock()
 
 	// prioritize hosts we already have a connection with
 	seen := make(map[types.PublicKey]struct{})
-	for hk, entry := range d.conns {
-		if entry.tc != nil {
-			hks = append(hks, hk)
-			seen[hk] = struct{}{}
+	for _, entry := range conns {
+		if entry.isConnected() {
+			hks = append(hks, entry.hostKey)
+			seen[entry.hostKey] = struct{}{}
 		}
 	}
 
-	for hk := range d.addrs {
+	// add remaining hosts
+	for _, hk := range addrs {
 		if _, ok := seen[hk]; !ok {
 			hks = append(hks, hk)
 		}
