@@ -18,6 +18,7 @@ import (
 
 type mockStore struct {
 	accounts        map[proto.Account]struct{}
+	objects         map[types.Hash256]Object
 	contracts       map[types.PublicKey]contracts.Contract
 	failedChecks    map[types.PublicKey]map[types.Hash256]int
 	hosts           map[types.PublicKey]hosts.Host
@@ -254,6 +255,22 @@ func (s *mockStore) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Ti
 		}
 	}
 	return result, nil
+}
+
+func (s *mockStore) Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error) {
+	return Object{}, nil
+}
+
+func (s *mockStore) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
+	return nil
+}
+
+func (s *mockStore) SaveObject(ctx context.Context, account proto.Account, obj Object) error {
+	return nil
+}
+
+func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]Object, error) {
+	return nil, nil
 }
 
 type mockAccountManager struct {
