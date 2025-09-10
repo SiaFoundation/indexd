@@ -33,7 +33,7 @@ type (
 	// Option is a function that applies an option to the application API.
 	Option func(*app)
 
-	// Slab defines the slab interface for the application API.
+	// Slabs defines the slab interface for the application API.
 	Slabs interface {
 		Object(ctx context.Context, account proto.Account, key types.Hash256) (slabs.Object, error)
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
