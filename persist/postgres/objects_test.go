@@ -10,7 +10,6 @@ import (
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
-	"go.sia.tech/indexd/objects"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -37,9 +36,9 @@ func TestObjects(t *testing.T) {
 		}
 	}
 
-	assertObjects := func(acc proto4.Account, n int) []objects.Object {
+	assertObjects := func(acc proto4.Account, n int) []slabs.Object {
 		t.Helper()
-		objects, err := store.ListObjects(context.Background(), acc, objects.Cursor{}, 10)
+		objects, err := store.ListObjects(context.Background(), acc, slabs.Cursor{}, 10)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(objects) != n {
@@ -55,9 +54,9 @@ func TestObjects(t *testing.T) {
 	// add objects for both accounts
 	objKey := frand.Entropy256()
 	slabID, _ := slab.Digest()
-	obj := objects.Object{
+	obj := slabs.Object{
 		Key: objKey,
-		Slabs: []objects.SlabSlice{
+		Slabs: []slabs.SlabSlice{
 			{
 				SlabID: slabID,
 				Offset: 10,
@@ -78,7 +77,7 @@ func TestObjects(t *testing.T) {
 		}
 	}
 
-	assertObj := func(obj, other objects.Object) {
+	assertObj := func(obj, other slabs.Object) {
 		t.Helper()
 		if other.CreatedAt.IsZero() || other.UpdatedAt.IsZero() {
 			t.Fatalf("expected non-zero timestamps, got %v and %v", other.CreatedAt, other.UpdatedAt)
@@ -134,7 +133,7 @@ func TestObjects(t *testing.T) {
 	assertObj(obj3, objs[1])
 
 	// make sure the limit works
-	objs, err := store.ListObjects(context.Background(), acc2, objects.Cursor{}, 1)
+	objs, err := store.ListObjects(context.Background(), acc2, slabs.Cursor{}, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 {
@@ -142,7 +141,7 @@ func TestObjects(t *testing.T) {
 	}
 
 	// increasing 'after' to now should not yield any results
-	objs, err = store.ListObjects(context.Background(), acc2, objects.Cursor{After: time.Now()}, 1)
+	objs, err = store.ListObjects(context.Background(), acc2, slabs.Cursor{After: time.Now()}, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
@@ -160,13 +159,13 @@ func TestObjects(t *testing.T) {
 
 	// assert account is taken into consideration when fetching an object
 	_, err = store.Object(context.Background(), acc1, obj2.Key)
-	if !errors.Is(err, objects.ErrObjectNotFound) {
+	if !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
 
 	// assert fetching a non-existent object returns the correct error
 	_, err = store.Object(context.Background(), acc2, frand.Entropy256())
-	if !errors.Is(err, objects.ErrObjectNotFound) {
+	if !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
 }
@@ -196,9 +195,9 @@ func TestListObjectsRegression(t *testing.T) {
 
 	// add multiple objects
 	for i := 3; i >= 1; i-- {
-		if err := store.SaveObject(context.Background(), acc, objects.Object{
+		if err := store.SaveObject(context.Background(), acc, slabs.Object{
 			Key: types.Hash256{byte(i)},
-			Slabs: []objects.SlabSlice{
+			Slabs: []slabs.SlabSlice{
 				{
 					SlabID: slabID,
 					Offset: 0,
@@ -216,7 +215,7 @@ func TestListObjectsRegression(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	objs, err := store.ListObjects(context.Background(), acc, objects.Cursor{After: ts}, 10)
+	objs, err := store.ListObjects(context.Background(), acc, slabs.Cursor{After: ts}, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 3 {

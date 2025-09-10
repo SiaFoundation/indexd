@@ -21,7 +21,6 @@ import (
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/objects"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
@@ -34,13 +33,16 @@ type (
 	// Option is a function that applies an option to the application API.
 	Option func(*app)
 
+	// Slab defines the slab interface for the application API.
+	Slabs interface {
+		Object(ctx context.Context, account proto.Account, key types.Hash256) (slabs.Object, error)
+		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
+		SaveObject(ctx context.Context, account proto.Account, obj slabs.Object) error
+		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (objs []slabs.Object, _ error)
+	}
+
 	// Store defines the store interface for the application API.
 	Store interface {
-		Object(ctx context.Context, account proto.Account, key types.Hash256) (objects.Object, error)
-		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
-		SaveObject(ctx context.Context, account proto.Account, obj objects.Object) error
-		ListObjects(ctx context.Context, account proto.Account, cursor objects.Cursor, limit int) (objs []objects.Object, _ error)
-
 		PinSlab(context.Context, proto.Account, time.Time, slabs.SlabPinParams) (slabs.SlabID, error)
 		PinnedSlab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
 		SlabIDs(ctx context.Context, accountID proto.Account, offset, limit int) ([]slabs.SlabID, error)
@@ -101,6 +103,7 @@ type (
 		store     Store
 		accounts  Accounts
 		contracts Contracts
+		slabs     Slabs
 		log       *zap.Logger
 
 		hostname     string
@@ -181,8 +184,8 @@ func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	obj, err := a.store.Object(jc.Request.Context(), proto.Account(pk), key)
-	if errors.Is(err, objects.ErrObjectNotFound) {
+	obj, err := a.slabs.Object(jc.Request.Context(), proto.Account(pk), key)
+	if errors.Is(err, slabs.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if err != nil {
@@ -209,7 +212,7 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	objs, err := a.store.ListObjects(jc.Request.Context(), proto.Account(pk), objects.Cursor{
+	objs, err := a.slabs.ListObjects(jc.Request.Context(), proto.Account(pk), slabs.Cursor{
 		After: after,
 		Key:   key,
 	}, limit)
@@ -222,21 +225,12 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 }
 
 func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
-	var obj objects.Object
+	var obj slabs.Object
 	if jc.Decode(&obj) != nil {
 		return
 	}
 
-	const metadataLimit = 1024
-	if len(obj.Slabs) == 0 {
-		jc.Error(errors.New("object must have at least one slab"), http.StatusBadRequest)
-		return
-	} else if len(obj.Meta) > metadataLimit {
-		jc.Error(fmt.Errorf("metadata size limit (%d) exceeded, got %d bytes", metadataLimit, len(obj.Meta)), http.StatusBadRequest)
-		return
-	}
-
-	err := a.store.SaveObject(jc.Request.Context(), proto.Account(pk), obj)
+	err := a.slabs.SaveObject(jc.Request.Context(), proto.Account(pk), obj)
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -250,8 +244,8 @@ func (a *app) handleDELETEObjects(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	err := a.store.DeleteObject(jc.Request.Context(), proto.Account(pk), key)
-	if errors.Is(err, objects.ErrObjectNotFound) {
+	err := a.slabs.DeleteObject(jc.Request.Context(), proto.Account(pk), key)
+	if errors.Is(err, slabs.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if err != nil {
@@ -527,7 +521,7 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 // users, or rather their applications, to pin slabs to the indexer.
 // Authentication happens through presigned URLs that are signed with a private
 // key that corresponds to a previously registered public key.
-func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, opts ...Option) (http.Handler, error) {
+func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, slabs Slabs, opts ...Option) (http.Handler, error) {
 	u, err := url.Parse(advertiseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse advertise URL %q: %w", advertiseURL, err)
@@ -536,6 +530,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		store:     store,
 		accounts:  am,
 		contracts: contracts,
+		slabs:     slabs,
 		log:       zap.NewNop(),
 
 		hostname:     u.Host,
