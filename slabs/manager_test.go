@@ -276,6 +276,10 @@ func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, curs
 	return nil, nil
 }
 
+func (s *mockStore) IsSlabPinned(ctx context.Context, account proto.Account, slabID SlabID) (bool, error) {
+	return false, nil
+}
+
 type mockAccountManager struct {
 	mu              sync.Mutex
 	serviceAccounts map[proto.Account]struct{}
