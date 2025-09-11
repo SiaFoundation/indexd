@@ -100,8 +100,7 @@ func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj
 		pinned, err := m.store.IsSlabPinned(ctx, account, slab.SlabID)
 		if err != nil {
 			return fmt.Errorf("failed to check if slab was pinned to our account: %w", err)
-		}
-		if !pinned {
+		} else if !pinned {
 			return ErrObjectUnpinnedSlab
 		}
 	}
