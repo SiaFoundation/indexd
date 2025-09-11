@@ -52,8 +52,9 @@ func respondToAppConnection(t *testing.T, responseURL string, connectKey string,
 	}
 }
 
-func newAccount(t *testing.T, ctx context.Context, cluster *testutils.Cluster) (types.PrivateKey, accounts.ConnectKey) {
+func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, accounts.ConnectKey) {
 	t.Helper()
+	ctx := t.Context()
 	indexer := cluster.Indexer
 
 	sk := types.GeneratePrivateKey()
@@ -422,7 +423,7 @@ func TestApplicationAPI(t *testing.T) {
 		}},
 	}
 	if err := client.SaveObject(context.Background(), badObj); err == nil || err.Error() != slabs.ErrObjectUnpinnedSlab.Error() {
-		t.Fatal(err)
+		t.Fatalf("expected %v, got %v", slabs.ErrObjectUnpinnedSlab, err)
 	}
 }
 
