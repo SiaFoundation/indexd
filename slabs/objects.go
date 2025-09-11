@@ -96,14 +96,6 @@ func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj
 	} else if len(obj.Meta) > metadataLimit {
 		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(obj.Meta))
 	}
-	for _, slab := range obj.Slabs {
-		pinned, err := m.store.IsSlabPinned(ctx, account, slab.SlabID)
-		if err != nil {
-			return fmt.Errorf("failed to check if slab was pinned to our account: %w", err)
-		} else if !pinned {
-			return ErrObjectUnpinnedSlab
-		}
-	}
 
 	return m.store.SaveObject(ctx, account, obj)
 }

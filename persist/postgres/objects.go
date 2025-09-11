@@ -229,7 +229,21 @@ func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
 
-		// TODO: what about objects linking slabs that aren't pinned? Pin them here?
+		args := make([]any, 0, len(obj.Slabs))
+		for _, slab := range obj.Slabs {
+			args = append(args, sqlHash256(slab.SlabID))
+		}
+
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM slabs
+JOIN account_slabs ON account_slabs.slab_id = slabs.id
+WHERE account_slabs.account_id = $1
+AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
+			return fmt.Errorf("failed to check how many slab IDs exist: %w", err)
+		}
+		if count != len(obj.Slabs) {
+			return slabs.ErrObjectUnpinnedSlab
+		}
 
 		// delete existing slabs
 		batch := &pgx.Batch{}
