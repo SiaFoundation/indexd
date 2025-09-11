@@ -119,7 +119,7 @@ func TestApplicationAPI(t *testing.T) {
 	h3 := hosts[2]
 
 	// prepare account
-	sk, key := newAccount(t, ctx, cluster)
+	sk, key := newAccount(t, cluster)
 	client := indexer.App(sk)
 
 	// check that the key has been used
@@ -404,9 +404,9 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// We are not allowed to create objects using slabs that we have not pinned
-	// ourselves.  Test this rule
+	// ourselves.
 	// Pin a slab on a second account
-	sk2, _ := newAccount(t, ctx, cluster)
+	sk2, _ := newAccount(t, cluster)
 	client2 := indexer.App(sk2)
 
 	slabID, err = client2.PinSlab(context.Background(), params())
