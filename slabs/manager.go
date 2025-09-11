@@ -104,7 +104,7 @@ type (
 		// Object methods
 		Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error)
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
-		SaveObject(ctx context.Context, account proto.Account, obj Object) error
+		SaveObject(ctx context.Context, account proto.Account, key types.Hash256, slabs []SlabSlice, meta []byte) error
 		ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) (objs []Object, _ error)
 		SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error)
 	}

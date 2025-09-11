@@ -37,7 +37,7 @@ type (
 	Slabs interface {
 		Object(ctx context.Context, account proto.Account, key types.Hash256) (slabs.Object, error)
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
-		SaveObject(ctx context.Context, account proto.Account, obj slabs.Object) error
+		SaveObject(ctx context.Context, account proto.Account, key types.Hash256, slabs []slabs.SlabSlice, meta []byte) error
 		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (objs []slabs.Object, _ error)
 		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
@@ -69,6 +69,12 @@ type (
 		ResponseURL string
 		AppKey      types.PublicKey
 		Expiration  time.Time
+	}
+
+	// PutObjectRequest is the request body for saving an object.
+	PutObjectRequest struct {
+		Slabs []slabs.SlabSlice `json:"slabs"`
+		Meta  []byte            `json:"meta,omitempty"`
 	}
 
 	// A RegisterAppRequest is the request body for registering a new application.
@@ -243,13 +249,18 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(objs)
 }
 
-func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
-	var obj slabs.Object
-	if jc.Decode(&obj) != nil {
+func (a *app) handlePUTObject(jc jape.Context, pk types.PublicKey) {
+	var req PutObjectRequest
+	if jc.Decode(&req) != nil {
 		return
 	}
 
-	err := a.slabs.SaveObject(jc.Request.Context(), proto.Account(pk), obj)
+	var key types.Hash256
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	err := a.slabs.SaveObject(jc.Request.Context(), proto.Account(pk), key, req.Slabs, req.Meta)
 	if errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) {
 		jc.Error(err, http.StatusBadRequest)
 	} else if err != nil {
@@ -259,7 +270,7 @@ func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(nil)
 }
 
-func (a *app) handleDELETEObjects(jc jape.Context, pk types.PublicKey) {
+func (a *app) handleDELETEObject(jc jape.Context, pk types.PublicKey) {
 	var key types.Hash256
 	if jc.DecodeParam("key", &key) != nil {
 		return
@@ -623,8 +634,8 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		"GET /objects":             wrapCORS(wrapSignedAuth(a.handleGETObjects)),
 		"GET /objects/:key":        wrapCORS(wrapSignedAuth(a.handleGETObject)),
 		"GET /objects/:key/shared": wrapCORS(wrapSignedAuth(a.handleGETObjectShared)),
-		"POST /objects":            wrapCORS(wrapSignedAuth(a.handlePOSTObjects)),
-		"DELETE /objects/:key":     wrapCORS(wrapSignedAuth(a.handleDELETEObjects)),
+		"PUT /objects/:key":        wrapCORS(wrapSignedAuth(a.handlePUTObject)),
+		"DELETE /objects/:key":     wrapCORS(wrapSignedAuth(a.handleDELETEObject)),
 
 		"GET /slabs":            wrapCORS(wrapSignedAuth(a.handleGETSlabs)),
 		"POST /slabs":           wrapCORS(wrapSignedAuth(a.handlePOSTSlabs)),

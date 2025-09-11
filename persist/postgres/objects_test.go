@@ -75,7 +75,7 @@ func TestObjects(t *testing.T) {
 		Meta: []byte("hello world"),
 	}
 	for _, acc := range []proto4.Account{acc1, acc2} {
-		err := store.SaveObject(context.Background(), acc, obj)
+		err := store.SaveObject(context.Background(), acc, objKey, obj.Slabs, obj.Meta)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -113,7 +113,7 @@ func TestObjects(t *testing.T) {
 	// add another object to acc2
 	obj2 := obj
 	obj2.Key = frand.Entropy256()
-	if err := store.SaveObject(context.Background(), acc2, obj2); err != nil {
+	if err := store.SaveObject(context.Background(), acc2, obj2.Key, obj2.Slabs, obj2.Meta); err != nil {
 		t.Fatal(err)
 	}
 
@@ -126,7 +126,7 @@ func TestObjects(t *testing.T) {
 	// save object 1 again to update its timestamp
 	obj3 := obj // same key as obj
 	obj3.Meta = []byte("updated meta")
-	if err := store.SaveObject(context.Background(), acc2, obj3); err != nil {
+	if err := store.SaveObject(context.Background(), acc2, obj3.Key, obj3.Slabs, obj3.Meta); err != nil {
 		t.Fatal(err)
 	}
 
@@ -199,17 +199,13 @@ func TestListObjectsRegression(t *testing.T) {
 
 	// add multiple objects
 	for i := 3; i >= 1; i-- {
-		if err := store.SaveObject(context.Background(), acc, slabs.Object{
-			Key: types.Hash256{byte(i)},
-			Slabs: []slabs.SlabSlice{
-				{
-					SlabID: slabID,
-					Offset: 0,
-					Length: 12,
-				},
+		if err := store.SaveObject(context.Background(), acc, types.Hash256{byte(i)}, []slabs.SlabSlice{
+			{
+				SlabID: slabID,
+				Offset: 0,
+				Length: 12,
 			},
-			Meta: []byte("meta"),
-		}); err != nil {
+		}, []byte("meta")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -308,7 +304,7 @@ func TestSharedObjects(t *testing.T) {
 			Length: slab.Length,
 		}
 	}
-	if err := store.SaveObject(context.Background(), acc1, obj); err != nil {
+	if err := store.SaveObject(context.Background(), acc1, obj.Key, obj.Slabs, obj.Meta); err != nil {
 		t.Fatal(err)
 	}
 

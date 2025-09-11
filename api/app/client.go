@@ -195,8 +195,8 @@ func (c *Client) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int
 
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (c *Client) SaveObject(ctx context.Context, obj slabs.Object) (err error) {
-	err = c.signedRequestJSON(ctx, http.MethodPost, "/objects", obj, nil)
+func (c *Client) SaveObject(ctx context.Context, key types.Hash256, slabs []slabs.SlabSlice, meta []byte) (err error) {
+	err = c.signedRequestJSON(ctx, http.MethodPut, fmt.Sprintf("/objects/%s", key), PutObjectRequest{Slabs: slabs, Meta: meta}, nil)
 	return
 }
 

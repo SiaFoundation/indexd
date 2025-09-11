@@ -343,7 +343,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatalf("expected 0 objects, got %d", len(objs))
 	}
 
-	if err := client.SaveObject(context.Background(), obj); err != nil {
+	if err := client.SaveObject(context.Background(), obj.Key, obj.Slabs, obj.Meta); err != nil {
 		t.Fatal(err)
 	}
 
@@ -616,7 +616,7 @@ func TestSharedObjects(t *testing.T) {
 			},
 		},
 	}
-	if err := client1.SaveObject(ctx, obj); err != nil {
+	if err := client1.SaveObject(ctx, obj.Key, obj.Slabs, obj.Meta); err != nil {
 		t.Fatal(err)
 	}
 

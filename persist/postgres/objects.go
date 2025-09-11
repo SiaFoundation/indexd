@@ -212,7 +212,7 @@ func (s *Store) DeleteObject(ctx context.Context, account proto.Account, objectK
 
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs.Object) error {
+func (s *Store) SaveObject(ctx context.Context, account proto.Account, key types.Hash256, slabs []slabs.SlabSlice, meta []byte) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -224,7 +224,7 @@ func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs
 			INSERT INTO objects (object_key, account_id, meta) VALUES ($1, $2, $3)
 			ON CONFLICT (account_id, object_key) DO UPDATE SET meta = EXCLUDED.meta, updated_at = NOW()
 			RETURNING id`,
-			sqlHash256(obj.Key), accountID, obj.Meta).Scan(&objectID)
+			sqlHash256(key), accountID, meta).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
@@ -236,10 +236,9 @@ func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs
 		batch.Queue(`DELETE FROM object_slabs WHERE object_id = $1`, objectID)
 
 		// insert new slabs
-		for i, slab := range obj.Slabs {
-			batch.Queue(`
-				INSERT INTO object_slabs (object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, $3, $4, $5)
-			`,
+		for i, slab := range slabs {
+			batch.Queue(
+				`INSERT INTO object_slabs (object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, $3, $4, $5)`,
 				objectID, sqlHash256(slab.SlabID), i, slab.Offset, slab.Length)
 		}
 		res := tx.SendBatch(ctx, batch)

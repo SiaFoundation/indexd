@@ -1,6 +1,7 @@
 package slabs
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -62,6 +63,57 @@ type (
 	}
 )
 
+// EncodeTo implements types.EncoderTo.
+func (s SlabSlice) EncodeTo(e *types.Encoder) {
+	e.Write(s.SlabID[:])
+	e.WriteUint64(uint64(s.Offset)<<32 | uint64(s.Length))
+}
+
+// DecodeFrom implements types.DecoderFrom.
+func (s *SlabSlice) DecodeFrom(d *types.Decoder) {
+	d.Read(s.SlabID[:])
+
+	combined := d.ReadUint64()
+	s.Offset = uint32(combined >> 32)
+	s.Length = uint32(combined)
+}
+
+// EncodeTo implements types.EncoderTo.
+func (obj Object) EncodeTo(e *types.Encoder) {
+	e.Write(obj.Key[:])
+	types.EncodeSlice(e, obj.Slabs)
+	e.WriteBytes(obj.Meta)
+	e.WriteTime(obj.CreatedAt)
+	e.WriteTime(obj.UpdatedAt)
+}
+
+// DecodeFrom implements types.DecoderFrom.
+func (obj *Object) DecodeFrom(d *types.Decoder) {
+	d.Read(obj.Key[:])
+	types.DecodeSlice(d, &obj.Slabs)
+	obj.Meta = d.ReadBytes()
+	obj.CreatedAt = d.ReadTime()
+	obj.UpdatedAt = d.ReadTime()
+}
+
+// MarshalSia is a convenience method to encode the object metadata into bytes
+// using the Sia encoding.
+func (obj *Object) MarshalSia() ([]byte, error) {
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	obj.EncodeTo(e)
+	e.Flush()
+	return buf.Bytes(), nil
+}
+
+// UnmarshalSia is a convenience method to decode the Sia-encoded bytes into an
+// object metadata type.
+func (obj *Object) UnmarshalSia(b []byte) error {
+	d := types.NewBufDecoder(b)
+	obj.DecodeFrom(d)
+	return d.Err()
+}
+
 // metadataLimit represents the maximum size of an objects metadata we will
 // store.
 const metadataLimit = 1024
@@ -87,14 +139,14 @@ func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, o
 
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj Object) error {
-	if len(obj.Slabs) == 0 {
+func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, key types.Hash256, slabs []SlabSlice, meta []byte) error {
+	if len(slabs) == 0 {
 		return ErrObjectMinimumSlabs
-	} else if len(obj.Meta) > metadataLimit {
-		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(obj.Meta))
+	} else if len(meta) > metadataLimit {
+		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(meta))
 	}
 
-	return m.store.SaveObject(ctx, account, obj)
+	return m.store.SaveObject(ctx, account, key, slabs, meta)
 }
 
 // ListObjects lists objects for the given account that were updated after the

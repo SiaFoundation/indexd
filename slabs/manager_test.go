@@ -268,7 +268,7 @@ func (s *mockStore) DeleteObject(ctx context.Context, account proto.Account, obj
 	return nil
 }
 
-func (s *mockStore) SaveObject(ctx context.Context, account proto.Account, obj Object) error {
+func (s *mockStore) SaveObject(ctx context.Context, account proto.Account, key types.Hash256, slabs []SlabSlice, meta []byte) error {
 	return nil
 }
 
