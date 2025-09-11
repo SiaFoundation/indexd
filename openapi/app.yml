@@ -183,6 +183,26 @@ paths:
           description: Object deleted successfully
         "404":
           description: Object not found
+  /objects/{key}/shared:
+    get:
+      tags:
+        - objects
+      summary: Get a shared object
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: The shared object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SharedObject"
+        "404":
+          description: Object not found
 
   /slabs:
     get:
@@ -609,3 +629,5 @@ components:
       $ref: "./components.yml#/components/schemas/SlabID"
     SlabSlice:
       $ref: "./components.yml#/components/schemas/SlabSlice"
+    SharedObject:
+      $ref: "./components.yml#/components/schemas/SharedObject"

@@ -207,6 +207,74 @@ components:
           format: date-time
           description: The time the object was last updated
 
+    # A shared object contains all information required to retrieve
+    # and decrypt an object without additional account context.
+    SharedObject:
+      type: object
+      properties:
+        key:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The shared object's key
+        slabs:
+          type: array
+          description: The list of slabs that make up the shared object
+          items:
+            $ref: "#/components/schemas/SharedObjectSlab"
+        meta:
+          type: string
+          format: byte
+          description: Optional metadata stored on the object
+
+    # A slab of a shared object including decryption info and slice bounds.
+    SharedObjectSlab:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/SlabID"
+            - description: The slab's ID
+        encryptionKey:
+          type: array
+          description: 32-byte key used to decrypt the slab
+          minItems: 32
+          maxItems: 32
+          items:
+            type: integer
+            format: uint8
+            minimum: 0
+            maximum: 255
+        minShards:
+          type: integer
+          format: uint64
+          description: Minimum number of shards required to reconstruct the slab
+        sectors:
+          type: array
+          description: The list of pinned sectors composing the slab
+          items:
+            $ref: "#/components/schemas/PinnedSector"
+        offset:
+          type: integer
+          format: uint32
+          description: The offset within the slab where the slice starts
+        length:
+          type: integer
+          format: uint32
+          description: The length of the slice
+
+    # A sector pinned to a host.
+    PinnedSector:
+      type: object
+      properties:
+        root:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The Merkle root of the sector
+        hostKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The public key of the host storing the sector
+
     PublicKey:
       type: string
       pattern: "^ed25519:[0-9a-fA-F]{64}$"

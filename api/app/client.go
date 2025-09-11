@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -34,10 +35,10 @@ type Client struct {
 
 // sign signs the request with the appropriate headers and returns the signed URL
 // and request body.
-func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL string, req any) (string, io.Reader, error) {
+func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL string, req any) (*url.URL, io.Reader, error) {
 	u, err := url.Parse(endpointURL)
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to parse URL: %w", err)
+		return nil, nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
 
 	var buf []byte
@@ -45,7 +46,7 @@ func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL str
 		var err error
 		buf, err = json.Marshal(req)
 		if err != nil {
-			return "", nil, fmt.Errorf("failed to marshal request: %w", err)
+			return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
 		}
 	}
 	// prepare request hash
@@ -69,15 +70,14 @@ func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL str
 	if buf != nil {
 		body = bytes.NewReader(buf)
 	}
-	return u.String(), body, nil
+	return u, body, nil
 }
 
-func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route string, data any) (io.ReadCloser, error) {
-	u, body, err := sign(c.appkey, time.Now().Add(c.validity), method, fmt.Sprintf("%s%s", c.baseURL, route), data)
-	if err != nil {
-		return nil, fmt.Errorf("failed to sign request: %w", err)
+func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, accept string) (io.ReadCloser, error) {
+	if u == nil {
+		return nil, errors.New("nil URL")
 	}
-	req, err := http.NewRequestWithContext(ctx, method, u, body)
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -98,6 +98,14 @@ func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route 
 	}
 
 	return r.Body, nil
+}
+
+func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route string, data any) (io.ReadCloser, error) {
+	u, body, err := sign(c.appkey, time.Now().Add(c.validity), method, fmt.Sprintf("%s%s", c.baseURL, route), data)
+	if err != nil {
+		return nil, fmt.Errorf("failed to sign request: %w", err)
+	}
+	return doRequest(ctx, method, u, body, accept)
 }
 
 func (c *Client) signedRequestJSON(ctx context.Context, method, route string, data, resp any) error {
@@ -198,14 +206,48 @@ func (c *Client) DeleteObject(ctx context.Context, key types.Hash256) (err error
 	return
 }
 
-// ObjectShareURL generates a signed URL for accessing the object with the given
+// CreateSharedObjectURL generates a signed URL for accessing the object with the given
 // key. The URL is valid until the specified validUntil time.
-func (c *Client) ObjectShareURL(ctx context.Context, key types.Hash256, validUntil time.Time) (string, error) {
-	u, _, err := sign(c.appkey, validUntil, http.MethodGet, fmt.Sprintf("%s/objects/%s", c.baseURL, key), nil)
+func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, encryptionKey [32]byte, validUntil time.Time) (string, error) {
+	u, _, err := sign(c.appkey, validUntil, http.MethodGet, fmt.Sprintf("%s/objects/%s/shared", c.baseURL, objectKey), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign request: %w", err)
 	}
-	return u, nil
+	u.Fragment = fmt.Sprintf("encryption_key=%x", encryptionKey)
+	return u.String(), nil
+}
+
+// RetrieveSharedObject retrieves an object using the pre-signed URL.
+func (c *Client) RetrieveSharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, error) {
+	u, err := url.Parse(sharedURL)
+	if err != nil {
+		return slabs.SharedObject{}, fmt.Errorf("failed to parse shared URL: %w", err)
+	}
+	if !strings.HasPrefix(u.Path, "/objects/") && !strings.HasSuffix(u.Path, "/shared") {
+		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: path must start with /objects/")
+	}
+	fields := strings.Split(u.Fragment, "=")
+	if len(fields) != 2 || fields[0] != "encryption_key" {
+		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: missing encryption key")
+	}
+	var encryptionKey [32]byte
+	if n, err := hex.Decode(encryptionKey[:], []byte(fields[1])); err != nil {
+		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: invalid encryption key: %w", err)
+	} else if n != 32 {
+		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: invalid encryption key length: expected 32 bytes, got %d", n)
+	}
+
+	var obj slabs.SharedObject
+	resp, err := doRequest(ctx, http.MethodGet, u, nil, applicationJSON)
+	if err != nil {
+		return slabs.SharedObject{}, fmt.Errorf("failed to fetch shared object: %w", err)
+	}
+	defer io.Copy(io.Discard, resp)
+	defer resp.Close()
+
+	dec := json.NewDecoder(resp)
+	err = dec.Decode(&obj)
+	return obj, err
 }
 
 // RequestAppConnection requests an application connection to the indexer.
@@ -221,7 +263,7 @@ func (c *Client) CheckRequestStatus(ctx context.Context, statusURL string) (bool
 	if err != nil {
 		return false, fmt.Errorf("failed to sign request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), body)
 	if err != nil {
 		return false, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -254,7 +296,7 @@ func (c *Client) CheckAppAuth(ctx context.Context) (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("failed to sign request: %w", err)
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, body)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), body)
 	if err != nil {
 		return false, fmt.Errorf("failed to create request: %w", err)
 	}

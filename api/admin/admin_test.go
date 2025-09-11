@@ -15,6 +15,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
@@ -25,6 +26,7 @@ import (
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
@@ -786,17 +788,36 @@ func TestSectorStatsAPI(t *testing.T) {
 		t.Fatalf("expected no slabs, got %d", stats.NumSlabs)
 	}
 
+	hk1 := types.GeneratePrivateKey().PublicKey()
+	hk2 := types.GeneratePrivateKey().PublicKey()
+	hk3 := types.GeneratePrivateKey().PublicKey()
+
+	store := indexer.Store()
+	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		if err := tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{ha}, time.Now()); err != nil {
+			return err
+		} else if err := tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{ha}, time.Now()); err != nil {
+			return err
+		} else if err := tx.AddHostAnnouncement(hk3, chain.V2HostAnnouncement{ha}, time.Now()); err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
 	// pin a slab
 	account := types.GeneratePrivateKey()
-	store := indexer.Store()
 	store.AddAccount(context.Background(), account.PublicKey(), accounts.AccountMeta{})
 	slabID, err := indexer.App(account).PinSlab(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{1},
 		MinShards:     1,
 		Sectors: []slabs.SectorPinParams{
-			{Root: frand.Entropy256(), HostKey: types.PublicKey{1}},
-			{Root: frand.Entropy256(), HostKey: types.PublicKey{2}},
-			{Root: frand.Entropy256(), HostKey: types.PublicKey{3}}},
+			{Root: frand.Entropy256(), HostKey: hk1},
+			{Root: frand.Entropy256(), HostKey: hk2},
+			{Root: frand.Entropy256(), HostKey: hk3},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)

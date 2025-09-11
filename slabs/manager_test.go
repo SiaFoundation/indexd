@@ -41,6 +41,10 @@ func newMockStore() *mockStore {
 	}
 }
 
+func (s *mockStore) SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error) {
+	panic("not implemented")
+}
+
 func (s *mockStore) AddAccount(ctx context.Context, account types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
 	s.accounts[proto.Account(account)] = struct{}{}
 	return nil

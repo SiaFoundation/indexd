@@ -475,3 +475,187 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("expected 0 pinned data, got", account.PinnedData)
 	}
 }
+
+func TestSharedObjects(t *testing.T) {
+	ctx := t.Context()
+	// create cluster with three hosts
+	logger := testutils.NewLogger(false)
+	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
+	indexer := cluster.Indexer
+	adminClient := indexer.Admin
+	time.Sleep(time.Second)
+
+	// assert hosts are registered
+	hosts, err := adminClient.Hosts(ctx)
+	if err != nil {
+		t.Fatal("failed to get hosts:", err)
+	} else if len(hosts) != 3 {
+		t.Fatal("expected 3 hosts, got", len(hosts))
+	}
+
+	// prepare accounts
+	prepareAcccount := func(t *testing.T) *app.Client {
+		sk := types.GeneratePrivateKey()
+		client := indexer.App(sk)
+
+		key, err := adminClient.AddAppConnectKey(ctx, admin.AddConnectKeyRequest{
+			RemainingUses: 1,
+		})
+		if err != nil {
+			t.Fatal("failed to add app connect key:", err)
+		}
+
+		connectResp, err := client.RequestAppConnection(ctx, app.RegisterAppRequest{
+			Name:        "Test App",
+			Description: "A test application",
+			LogoURL:     "foo",
+			ServiceURL:  "bar",
+		})
+		if err != nil {
+			t.Fatal("failed to request app connection:", err)
+		}
+
+		respondToAppConnection(t, connectResp.ResponseURL, key.Key, true)
+		return client
+	}
+
+	client1 := prepareAcccount(t)
+	client2 := prepareAcccount(t)
+
+	h1 := hosts[0]
+	h2 := hosts[1]
+	h3 := hosts[2]
+
+	// helper to generate slab pin parameters
+	randomSlab := func() slabs.SlabPinParams {
+		return slabs.SlabPinParams{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors: []slabs.SectorPinParams{
+				{
+					Root:    frand.Entropy256(),
+					HostKey: h1.PublicKey,
+				},
+				{
+					Root:    frand.Entropy256(),
+					HostKey: h2.PublicKey,
+				},
+				{
+					Root:    frand.Entropy256(),
+					HostKey: h3.PublicKey,
+				},
+			},
+		}
+	}
+	// generate and pin a slab
+	slab1Params := randomSlab()
+	slab1ID, err := client1.PinSlab(ctx, slab1Params)
+	if err != nil {
+		t.Fatal("failed to pin slab:", err)
+	}
+	slab2Params := randomSlab()
+	slab2ID, err := client1.PinSlab(ctx, slab2Params)
+	if err != nil {
+		t.Fatal("failed to pin slab:", err)
+	}
+
+	expectedSharedObj := slabs.SharedObject{
+		Key: types.Hash256(frand.Entropy256()),
+		Slabs: []slabs.SharedObjectSlab{
+			{
+				ID:            slab1ID,
+				EncryptionKey: slab1Params.EncryptionKey,
+				MinShards:     slab1Params.MinShards,
+				Offset:        0,
+				Length:        256,
+				Sectors: func() []slabs.PinnedSector {
+					so := make([]slabs.PinnedSector, len(slab1Params.Sectors))
+					for i := range slab1Params.Sectors {
+						so[i] = slabs.PinnedSector{
+							Root:    slab1Params.Sectors[i].Root,
+							HostKey: slab1Params.Sectors[i].HostKey,
+						}
+					}
+					return so
+				}(),
+			},
+			{
+				ID:            slab2ID,
+				EncryptionKey: slab2Params.EncryptionKey,
+				MinShards:     slab2Params.MinShards,
+				Offset:        0,
+				Length:        256,
+				Sectors: func() []slabs.PinnedSector {
+					so := make([]slabs.PinnedSector, len(slab2Params.Sectors))
+					for i := range slab2Params.Sectors {
+						so[i] = slabs.PinnedSector{
+							Root:    slab2Params.Sectors[i].Root,
+							HostKey: slab2Params.Sectors[i].HostKey,
+						}
+					}
+					return so
+				}(),
+			},
+		},
+		Meta: nil,
+	}
+
+	// add the object to the db
+	obj := slabs.Object{
+		Key: expectedSharedObj.Key,
+		Slabs: []slabs.SlabSlice{
+			{
+				SlabID: slab1ID,
+				Offset: 0,
+				Length: 256,
+			},
+			{
+				SlabID: slab2ID,
+				Offset: 0,
+				Length: 256,
+			},
+		},
+	}
+	if err := client1.SaveObject(ctx, obj); err != nil {
+		t.Fatal(err)
+	}
+
+	// populate the object's created and updated fields
+	obj, err = client1.Object(ctx, obj.Key)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// create a shared URL for the object
+	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.Key, [32]byte{}, time.Now().Add(time.Second))
+	if err != nil {
+		t.Fatal("failed to create shared object URL:", err)
+	}
+	t.Log(shareURL)
+
+	// try to retrieve the object with client2
+	sharedObj, err := client2.RetrieveSharedObject(ctx, shareURL)
+	if err != nil {
+		t.Fatal("failed to retrieve shared object:", err)
+	}
+	buf1, err := json.MarshalIndent(expectedSharedObj, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	buf2, err := json.MarshalIndent(sharedObj, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(buf1, buf2) {
+		t.Log("expected:", string(buf1))
+		t.Log("got:     ", string(buf2))
+		t.Fatal("shared object does not match expected")
+	}
+
+	time.Sleep(time.Second * 2)
+	// try to retrieve the object again, should be expired
+	_, err = client1.RetrieveSharedObject(ctx, shareURL)
+	if err == nil {
+		t.Fatal("expected error when creating shared URL with past expiry")
+	}
+}

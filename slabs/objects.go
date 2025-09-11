@@ -11,6 +11,25 @@ import (
 )
 
 type (
+	// A SharedObjectSlab represents a slab of a shared object.
+	// It contains all the metadata needed to retrieve a slab.
+	SharedObjectSlab struct {
+		ID            SlabID         `json:"id"`
+		EncryptionKey [32]byte       `json:"encryptionKey"`
+		MinShards     uint           `json:"minShards"`
+		Sectors       []PinnedSector `json:"sectors"`
+		Offset        uint32         `json:"offset"`
+		Length        uint32         `json:"length"`
+	}
+
+	// SharedObject provides all the metadata necessary to retrieve
+	// and decrypt an object.
+	SharedObject struct {
+		Key   types.Hash256      `json:"key"`
+		Slabs []SharedObjectSlab `json:"slabs"`
+		Meta  []byte             `json:"meta,omitempty"`
+	}
+
 	// Object represents a collection of slabs that form an uploaded object.
 	Object struct {
 		Key       types.Hash256 `json:"key"`
@@ -82,4 +101,9 @@ func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj
 // the given 'after' time.
 func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]Object, error) {
 	return m.store.ListObjects(ctx, account, cursor, limit)
+}
+
+// SharedObject retrieves the shared object with the given key for the given account.
+func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error) {
+	return m.store.SharedObject(ctx, key)
 }

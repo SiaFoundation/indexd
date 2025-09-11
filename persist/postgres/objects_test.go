@@ -3,14 +3,18 @@ package postgres
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 	"time"
 
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -222,5 +226,117 @@ func TestListObjectsRegression(t *testing.T) {
 		t.Fatal("expected 3 objects, got", len(objs))
 	} else if objs[0].Key != (types.Hash256{1}) || objs[1].Key != (types.Hash256{2}) || objs[2].Key != (types.Hash256{3}) {
 		t.Fatal("objects not in expected order")
+	}
+}
+
+func TestSharedObjects(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	// create 2 accounts
+	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
+	for _, acc := range []proto4.Account{acc1, acc2} {
+		err := store.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	hostKeys := make([]types.PublicKey, 30)
+	for i := range hostKeys {
+		hostKeys[i] = types.GeneratePrivateKey().PublicKey()
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hostKeys[i], chain.V2HostAnnouncement{{Protocol: quic.Protocol, Address: "[::]:4848"}}, time.Now())
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pinRandomSlab := func(t *testing.T) slabs.SharedObjectSlab {
+		t.Helper()
+
+		s := slabs.SlabPinParams{
+			MinShards:     uint(frand.Intn(255)),
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       make([]slabs.SectorPinParams, 30),
+		}
+		for i := range s.Sectors {
+			s.Sectors[i].HostKey = hostKeys[i%len(hostKeys)]
+			s.Sectors[i].Root = frand.Entropy256()
+		}
+
+		slabID, err := store.PinSlab(t.Context(), acc1, time.Time{}, s)
+		if err != nil {
+			t.Fatal(err)
+		} else if id, err := s.Digest(); err != nil {
+			t.Fatal(err)
+		} else if id != slabID {
+			t.Fatalf("expected slab ID %v, got %v", id, slabID)
+		}
+
+		so := slabs.SharedObjectSlab{
+			ID:            slabID,
+			EncryptionKey: s.EncryptionKey,
+			MinShards:     s.MinShards,
+			Sectors:       make([]slabs.PinnedSector, len(s.Sectors)),
+			Offset:        uint32(frand.Uint64n(math.MaxInt32)),
+			Length:        uint32(frand.Uint64n(math.MaxInt32)),
+		}
+		for i := range s.Sectors {
+			so.Sectors[i] = slabs.PinnedSector{
+				Root:    s.Sectors[i].Root,
+				HostKey: s.Sectors[i].HostKey,
+			}
+		}
+		return so
+	}
+
+	// add an object with multiple slabs
+	expectedSharedObj := slabs.SharedObject{
+		Key:   frand.Entropy256(),
+		Slabs: []slabs.SharedObjectSlab{pinRandomSlab(t), pinRandomSlab(t), pinRandomSlab(t)},
+		Meta:  []byte("hello world"),
+	}
+	obj := slabs.Object{
+		Key:   expectedSharedObj.Key,
+		Slabs: make([]slabs.SlabSlice, len(expectedSharedObj.Slabs)),
+		Meta:  expectedSharedObj.Meta,
+	}
+	for i, slab := range expectedSharedObj.Slabs {
+		obj.Slabs[i] = slabs.SlabSlice{
+			SlabID: slab.ID,
+			Offset: slab.Offset,
+			Length: slab.Length,
+		}
+	}
+	if err := store.SaveObject(context.Background(), acc1, obj); err != nil {
+		t.Fatal(err)
+	}
+
+	sharedObj, err := store.SharedObject(t.Context(), obj.Key)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(expectedSharedObj, sharedObj) {
+		t.Fatalf("shared objects not equal: expected %+v, got %+v", expectedSharedObj, sharedObj)
+	}
+
+	// pin the slabs to the second account
+	for _, slab := range expectedSharedObj.Slabs {
+		_, err := store.PinSlab(t.Context(), acc2, time.Time{}, slabs.SlabPinParams{
+			MinShards: slab.MinShards,
+			Sectors: func() []slabs.SectorPinParams {
+				sps := make([]slabs.SectorPinParams, len(slab.Sectors))
+				for i := range slab.Sectors {
+					sps[i] = slabs.SectorPinParams{
+						Root:    slab.Sectors[i].Root,
+						HostKey: slab.Sectors[i].HostKey,
+					}
+				}
+				return sps
+			}(),
+			EncryptionKey: slab.EncryptionKey,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
 	}
 }

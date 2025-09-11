@@ -215,11 +215,17 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 		for i, sector := range slab.Sectors {
 			batch.Queue(`
 				INSERT INTO sectors (sector_root, host_id, next_integrity_check)
-				VALUES ($1, (SELECT id FROM hosts WHERE public_key = $2), $3)
+				SELECT $1, h.id, $3
+				FROM hosts h
+				WHERE h.public_key = $2
 				ON CONFLICT (sector_root) DO UPDATE SET sector_root=EXCLUDED.sector_root, uploaded_at=NOW()
 				RETURNING id
 			`, sqlHash256(sector.Root), sqlPublicKey(sector.HostKey), nextIntegrityCheck).QueryRow(func(row pgx.Row) error {
-				return row.Scan(&sectorIDs[i])
+				err := row.Scan(&sectorIDs[i])
+				if errors.Is(err, sql.ErrNoRows) {
+					return fmt.Errorf("unknown host %q for sector", sector.HostKey)
+				}
+				return err
 			})
 		}
 
