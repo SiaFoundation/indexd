@@ -345,7 +345,7 @@ func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
 
 func (a *app) handleAuthRegister(jc jape.Context) {
 	// check whether the request is properly signed
-	pk, ok := validateURLSignature(jc, a.hostname)
+	pk, ok := validateURLSignature(jc, a.hostname, jc.Request.URL.Path)
 	if !ok {
 		return
 	}
@@ -403,7 +403,7 @@ func (a *app) handleGETAuthCheck(jc jape.Context, _ types.PublicKey) {
 }
 
 func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
-	pk, ok := validateURLSignature(jc, a.hostname)
+	pk, ok := validateURLSignature(jc, a.hostname, jc.Request.URL.Path)
 	if !ok {
 		return
 	}
@@ -548,7 +548,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 
 	wrapSignedAuth := func(h authedHandler) jape.Handler {
 		return func(jc jape.Context) {
-			pk, ok := validateSignedURLAuth(jc, a.hostname, am)
+			pk, ok := validateSignedURLAuth(jc, a.hostname, jc.Request.URL.Path, am)
 			if !ok {
 				return
 			}

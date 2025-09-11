@@ -34,17 +34,18 @@ func (s *mockAccounts) UseAppConnectKey(ctx context.Context, connectKey string, 
 
 func TestAuth(t *testing.T) {
 	const hostname = "indexer.sia.tech"
+	const path = "/foo"
 	sk := types.GeneratePrivateKey()
 	s := &mockAccounts{tokens: map[types.PublicKey]struct{}{sk.PublicKey(): {}}}
 
 	server := httptest.NewServer(jape.Mux(map[string]jape.Handler{
 		"GET /foo": func(jc jape.Context) {
-			if _, ok := validateSignedURLAuth(jc, hostname, s); ok {
+			if _, ok := validateSignedURLAuth(jc, hostname, path, s); ok {
 				jc.ResponseWriter.WriteHeader(http.StatusOK)
 			}
 		},
 		"POST /foo": func(jc jape.Context) {
-			if _, ok := validateSignedURLAuth(jc, hostname, s); ok {
+			if _, ok := validateSignedURLAuth(jc, hostname, path, s); ok {
 				jc.ResponseWriter.WriteHeader(http.StatusOK)
 			}
 		},
@@ -85,7 +86,7 @@ func TestAuth(t *testing.T) {
 		val := url.Values{}
 		val.Set(queryParamValidUntil, fmt.Sprint(validUntil.Unix()))
 		val.Set(queryParamCredential, sk.PublicKey().String())
-		val.Set(queryParamSignature, sk.SignHash(requestHash(method, hostname, validUntil, body)).String())
+		val.Set(queryParamSignature, sk.SignHash(requestHash(method, hostname, path, validUntil, body)).String())
 		return val
 	}
 
@@ -98,7 +99,9 @@ func TestAuth(t *testing.T) {
 	// assert authorized if the body does match
 	params := goodParams(http.MethodPost, []byte("hello, world!"))
 	status, errorMsg = doRequest(http.MethodPost, params, []byte("hello, world!"))
-	if status != http.StatusOK {
+	if errorMsg != "" {
+		t.Fatal("unexpected", errorMsg)
+	} else if status != http.StatusOK {
 		t.Fatal("unexpected", status)
 	}
 

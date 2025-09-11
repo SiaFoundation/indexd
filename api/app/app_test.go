@@ -405,6 +405,9 @@ func TestAppConnect(t *testing.T) {
 		Description:   "hello world",
 		RemainingUses: 1,
 	})
+	if err != nil {
+		t.Fatal("failed to add app connect key:", err)
+	}
 
 	sk := types.GeneratePrivateKey()
 	appClient := indexer.App(sk)

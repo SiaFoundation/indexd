@@ -33,9 +33,9 @@ type Client struct {
 	validity time.Duration
 }
 
-// Sign signs the request with the appropriate headers and returns the signed URL
+// sign signs the request with the appropriate headers and returns the signed URL
 // and request body.
-func Sign(appKey types.PrivateKey, validity time.Duration, method, endpointURL string, req any) (string, io.Reader, error) {
+func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL string, req any) (string, io.Reader, error) {
 	u, err := url.Parse(endpointURL)
 	if err != nil {
 		return "", nil, fmt.Errorf("failed to parse URL: %w", err)
@@ -50,8 +50,7 @@ func Sign(appKey types.PrivateKey, validity time.Duration, method, endpointURL s
 		}
 	}
 	// prepare request hash
-	validUntil := time.Now().Add(validity)
-	sigHash := requestHash(method, u.Host, validUntil, buf)
+	sigHash := requestHash(method, u.Host, u.Path, validUntil, buf)
 
 	// prepare query parameters
 	val := url.Values{}
@@ -75,7 +74,7 @@ func Sign(appKey types.PrivateKey, validity time.Duration, method, endpointURL s
 }
 
 func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route string, data any) (io.ReadCloser, error) {
-	u, body, err := Sign(c.appkey, c.validity, method, fmt.Sprintf("%s%s", c.baseURL, route), data)
+	u, body, err := sign(c.appkey, time.Now().Add(c.validity), method, fmt.Sprintf("%s%s", c.baseURL, route), data)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign request: %w", err)
 	}
@@ -200,6 +199,16 @@ func (c *Client) DeleteObject(ctx context.Context, key types.Hash256) (err error
 	return
 }
 
+// ObjectShareURL generates a signed URL for accessing the object with the given
+// key. The URL is valid until the specified validUntil time.
+func (c *Client) ObjectShareURL(ctx context.Context, key types.Hash256, validUntil time.Time) (string, error) {
+	u, _, err := sign(c.appkey, validUntil, http.MethodGet, fmt.Sprintf("%s/objects/%s", c.baseURL, key), nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to sign request: %w", err)
+	}
+	return u, nil
+}
+
 // RequestAppConnection requests an application connection to the indexer.
 func (c *Client) RequestAppConnection(ctx context.Context, request RegisterAppRequest) (resp RegisterAppResponse, err error) {
 	err = c.signedRequestJSON(ctx, http.MethodPost, "/auth/connect", request, &resp)
@@ -209,7 +218,7 @@ func (c *Client) RequestAppConnection(ctx context.Context, request RegisterAppRe
 // CheckRequestStatus checks if an auth request has been approved.
 // If the auth request is still pending, it returns false.
 func (c *Client) CheckRequestStatus(ctx context.Context, statusURL string) (bool, error) {
-	requestURL, body, err := Sign(c.appkey, c.validity, http.MethodGet, statusURL, nil)
+	requestURL, body, err := sign(c.appkey, time.Now().Add(c.validity), http.MethodGet, statusURL, nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to sign request: %w", err)
 	}
@@ -242,7 +251,7 @@ func (c *Client) CheckRequestStatus(ctx context.Context, statusURL string) (bool
 // CheckAppAuth checks if the application is authenticated with the indexer.
 // It returns true if authenticated, false if not, and an error if the request fails.
 func (c *Client) CheckAppAuth(ctx context.Context) (bool, error) {
-	u, body, err := Sign(c.appkey, c.validity, http.MethodGet, fmt.Sprintf("%s/auth/check", c.baseURL), nil)
+	u, body, err := sign(c.appkey, time.Now().Add(c.validity), http.MethodGet, fmt.Sprintf("%s/auth/check", c.baseURL), nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to sign request: %w", err)
 	}
