@@ -531,6 +531,7 @@ func TestAppConnect(t *testing.T) {
 
 func TestSharedObjects(t *testing.T) {
 	ctx := t.Context()
+
 	// create cluster with three hosts
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
@@ -616,38 +617,42 @@ func TestSharedObjects(t *testing.T) {
 		Key: types.Hash256(frand.Entropy256()),
 		Slabs: []slabs.SharedObjectSlab{
 			{
-				ID:            slab1ID,
-				EncryptionKey: slab1Params.EncryptionKey,
-				MinShards:     slab1Params.MinShards,
-				Offset:        0,
-				Length:        256,
-				Sectors: func() []slabs.PinnedSector {
-					so := make([]slabs.PinnedSector, len(slab1Params.Sectors))
-					for i := range slab1Params.Sectors {
-						so[i] = slabs.PinnedSector{
-							Root:    slab1Params.Sectors[i].Root,
-							HostKey: slab1Params.Sectors[i].HostKey,
+				PinnedSlab: slabs.PinnedSlab{
+					ID:            slab1ID,
+					EncryptionKey: slab1Params.EncryptionKey,
+					MinShards:     slab1Params.MinShards,
+					Sectors: func() []slabs.PinnedSector {
+						so := make([]slabs.PinnedSector, len(slab1Params.Sectors))
+						for i := range slab1Params.Sectors {
+							so[i] = slabs.PinnedSector{
+								Root:    slab1Params.Sectors[i].Root,
+								HostKey: slab1Params.Sectors[i].HostKey,
+							}
 						}
-					}
-					return so
-				}(),
+						return so
+					}(),
+				},
+				Offset: 0,
+				Length: 256,
 			},
 			{
-				ID:            slab2ID,
-				EncryptionKey: slab2Params.EncryptionKey,
-				MinShards:     slab2Params.MinShards,
-				Offset:        0,
-				Length:        256,
-				Sectors: func() []slabs.PinnedSector {
-					so := make([]slabs.PinnedSector, len(slab2Params.Sectors))
-					for i := range slab2Params.Sectors {
-						so[i] = slabs.PinnedSector{
-							Root:    slab2Params.Sectors[i].Root,
-							HostKey: slab2Params.Sectors[i].HostKey,
+				PinnedSlab: slabs.PinnedSlab{
+					ID:            slab2ID,
+					EncryptionKey: slab2Params.EncryptionKey,
+					MinShards:     slab2Params.MinShards,
+					Sectors: func() []slabs.PinnedSector {
+						so := make([]slabs.PinnedSector, len(slab2Params.Sectors))
+						for i := range slab2Params.Sectors {
+							so[i] = slabs.PinnedSector{
+								Root:    slab2Params.Sectors[i].Root,
+								HostKey: slab2Params.Sectors[i].HostKey,
+							}
 						}
-					}
-					return so
-				}(),
+						return so
+					}(),
+				},
+				Offset: 0,
+				Length: 256,
 			},
 		},
 		Meta: nil,
@@ -679,35 +684,29 @@ func TestSharedObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// generate a random encryption key
+	var encryptionKey [32]byte
+	frand.Read(encryptionKey[:])
+
 	// create a shared URL for the object
-	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.Key, [32]byte{}, time.Now().Add(time.Second))
+	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.Key, encryptionKey, time.Now().Add(time.Second))
 	if err != nil {
 		t.Fatal("failed to create shared object URL:", err)
 	}
-	t.Log(shareURL)
 
 	// try to retrieve the object with client2
-	sharedObj, err := client2.RetrieveSharedObject(ctx, shareURL)
+	sharedObj, key, err := client2.SharedObject(ctx, shareURL)
 	if err != nil {
 		t.Fatal("failed to retrieve shared object:", err)
-	}
-	buf1, err := json.MarshalIndent(expectedSharedObj, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	buf2, err := json.MarshalIndent(sharedObj, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(buf1, buf2) {
-		t.Log("expected:", string(buf1))
-		t.Log("got:     ", string(buf2))
-		t.Fatal("shared object does not match expected")
+	} else if !bytes.Equal(key[:], encryptionKey[:]) {
+		t.Fatal("encryption key mismatch")
+	} else if !reflect.DeepEqual(expectedSharedObj, sharedObj) {
+		t.Fatal("shared object mismatch")
 	}
 
 	time.Sleep(time.Second * 2)
 	// try to retrieve the object again, should be expired
-	_, err = client1.RetrieveSharedObject(ctx, shareURL)
+	_, _, err = client1.SharedObject(ctx, shareURL)
 	if err == nil {
 		t.Fatal("expected error when creating shared URL with past expiry")
 	}
