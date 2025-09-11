@@ -276,7 +276,7 @@ func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, curs
 	return nil, nil
 }
 
-func (s *mockStore) IsSlabPinned(ctx context.Context, account proto.Account, slabID SlabID) (bool, error) {
+func (s *mockStore) IsSlabPinned(ctx context.Context, account proto.Account, slabIDs ...SlabID) (bool, error) {
 	return false, nil
 }
 

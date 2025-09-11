@@ -100,10 +100,29 @@ ORDER BY ss.slab_index ASC`, dbID)
 	return
 }
 
-// IsSlabPinned returns true if a slab is pinned to the given account.
-func (s *Store) IsSlabPinned(ctx context.Context, account proto.Account, slabID slabs.SlabID) (exists bool, err error) {
+// SlabsPinned returns true if all the slabs are pinned to the given account.
+func (s *Store) IsSlabPinned(ctx context.Context, account proto.Account, slabIDs ...slabs.SlabID) (exists bool, err error) {
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_slabs WHERE account_id = (SELECT id FROM accounts WHERE public_key = $1) AND slab_id = (SELECT id FROM slabs WHERE digest = $2))`, sqlPublicKey(types.PublicKey(account)), sqlHash256(slabID)).Scan(&exists)
+		var accountID int64
+		if err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE public_key = $1`, sqlPublicKey(types.PublicKey(account))).Scan(&accountID); err != nil {
+			return fmt.Errorf("failed to get account: %w", err)
+		}
+
+		args := make([]any, 0, len(slabIDs))
+		for _, slabID := range slabIDs {
+			args = append(args, sqlHash256(slabID))
+		}
+
+		var count int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM slabs
+JOIN account_slabs ON account_slabs.slab_id = slabs.id
+WHERE account_slabs.account_id = $1
+AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
+			return fmt.Errorf("failed to check how many slab IDs exist: %w", err)
+		}
+
+		exists = (count == len(slabIDs))
+		return nil
 	})
 	return
 }

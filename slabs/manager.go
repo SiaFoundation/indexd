@@ -100,7 +100,7 @@ type (
 		Slab(ctx context.Context, slabID SlabID) (Slab, error)
 		Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error)
 		UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]SlabID, error)
-		IsSlabPinned(ctx context.Context, account proto.Account, slabID SlabID) (bool, error)
+		IsSlabPinned(ctx context.Context, account proto.Account, slabIDs ...SlabID) (exists bool, err error)
 
 		// Object methods
 		Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error)
