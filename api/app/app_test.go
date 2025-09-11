@@ -404,7 +404,7 @@ func TestApplicationAPI(t *testing.T) {
 
 	// We are not allowed to create objects using slabs that we have not pinned
 	// ourselves.  Test this rule
-	// Try to pin a slab on a second account
+	// Pin a slab on a second account
 	sk2, _ := newAccount(t, ctx, cluster)
 	client2 := indexer.App(sk2)
 
@@ -412,6 +412,7 @@ func TestApplicationAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
+	// Try to save an object referencing that slab on first account
 	badObj := slabs.Object{
 		Key: types.Hash256(frand.Entropy256()),
 		Slabs: []slabs.SlabSlice{{
