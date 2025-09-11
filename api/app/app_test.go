@@ -226,6 +226,12 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected 1 host, got", len(usableHosts))
 	} else if usableHosts[0].PublicKey != h1.PublicKey {
 		t.Fatal("got wrong quic host")
+	} else if usableHosts[0].CountryCode != locationUS.CountryCode {
+		t.Fatalf("expected country code %v, got %v", locationUS.CountryCode, usableHosts[0].CountryCode)
+	} else if usableHosts[0].Latitude != locationUS.Latitude {
+		t.Fatalf("expected latitude %v, got %v", locationUS.Latitude, usableHosts[0].Latitude)
+	} else if usableHosts[0].Longitude != locationUS.Longitude {
+		t.Fatalf("expected longitude %v, got %v", locationUS.Longitude, usableHosts[0].Longitude)
 	}
 
 	// filtering for AU should only return h2
@@ -236,6 +242,12 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected 1 host, got", len(usableHosts))
 	} else if usableHosts[0].PublicKey != h2.PublicKey {
 		t.Fatal("got wrong quic host")
+	} else if usableHosts[0].CountryCode != locationAU.CountryCode {
+		t.Fatalf("expected country code %v, got %v", locationAU.CountryCode, usableHosts[0].CountryCode)
+	} else if usableHosts[0].Latitude != locationAU.Latitude {
+		t.Fatalf("expected latitude %v, got %v", locationAU.Latitude, usableHosts[0].Latitude)
+	} else if usableHosts[0].Longitude != locationAU.Longitude {
+		t.Fatalf("expected longitude %v, got %v", locationAU.Longitude, usableHosts[0].Longitude)
 	}
 
 	// block h1

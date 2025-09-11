@@ -567,7 +567,7 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// helper to add hosts
-	addHost := func(i byte, countryCode string, protocols []chain.Protocol, usable, blocked bool, contract bool) types.PublicKey {
+	addHost := func(i byte, loc geoip.Location, protocols []chain.Protocol, usable, blocked bool, contract bool) types.PublicKey {
 		t.Helper()
 
 		hk := types.PublicKey{i}
@@ -588,9 +588,7 @@ func TestUsableHosts(t *testing.T) {
 		if !usable {
 			settings.AcceptingContracts = false
 		}
-		if err := db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, geoip.Location{
-			CountryCode: countryCode,
-		}, true, time.Now().Add(time.Hour)); err != nil {
+		if err := db.UpdateHost(context.Background(), hk, []net.IPNet{*network}, settings, loc, true, time.Now().Add(time.Hour)); err != nil {
 			t.Fatal(err)
 		}
 
@@ -609,20 +607,28 @@ func TestUsableHosts(t *testing.T) {
 		return hk
 	}
 
-	countryUS := "US"
-	countryAU := "AU"
+	locationUS := geoip.Location{
+		CountryCode: "US",
+		Latitude:    10,
+		Longitude:   -20,
+	}
+	locationAU := geoip.Location{
+		CountryCode: "AU",
+		Latitude:    30,
+		Longitude:   -40,
+	}
 	bothProtocols := []chain.Protocol{siamux.Protocol, quic.Protocol}
 	siamuxProtocol := []chain.Protocol{siamux.Protocol}
 	// add hosts in all possible configurations
-	_ = addHost(1, countryUS, siamuxProtocol, false, false, false)
-	_ = addHost(2, countryUS, siamuxProtocol, false, false, true)
-	_ = addHost(3, countryUS, siamuxProtocol, false, true, false)
-	_ = addHost(4, countryUS, siamuxProtocol, false, true, true)
-	_ = addHost(5, countryAU, siamuxProtocol, true, false, false)
-	uh1 := addHost(6, countryUS, siamuxProtocol, true, false, true)
-	_ = addHost(7, countryUS, siamuxProtocol, true, true, false)
-	_ = addHost(8, countryUS, bothProtocols, true, true, true)
-	uh2 := addHost(9, countryAU, bothProtocols, true, false, true) // second usable host
+	_ = addHost(1, locationUS, siamuxProtocol, false, false, false)
+	_ = addHost(2, locationUS, siamuxProtocol, false, false, true)
+	_ = addHost(3, locationUS, siamuxProtocol, false, true, false)
+	_ = addHost(4, locationUS, siamuxProtocol, false, true, true)
+	_ = addHost(5, locationAU, siamuxProtocol, true, false, false)
+	uh1 := addHost(6, locationUS, siamuxProtocol, true, false, true)
+	_ = addHost(7, locationUS, siamuxProtocol, true, true, false)
+	_ = addHost(8, locationUS, bothProtocols, true, true, true)
+	uh2 := addHost(9, locationAU, bothProtocols, true, false, true) // second usable host
 
 	// assert only h6 and h9 are returned
 	if hosts, err := db.UsableHosts(context.Background(), 0, 10); err != nil {
@@ -676,20 +682,34 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// filter by country
-	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithCountry(countryUS)); err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithCountry(locationUS.CountryCode)); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
 	} else if hosts[0].PublicKey != uh1 {
 		t.Fatal("unexpected host", hosts[0])
+	} else if hosts[0].PublicKey != uh1 {
+		t.Fatal("unexpected host", hosts[0])
+	} else if hosts[0].CountryCode != locationUS.CountryCode {
+		t.Fatalf("expected country code %v, got %v", locationUS.CountryCode, hosts[0].CountryCode)
+	} else if hosts[0].Latitude != locationUS.Latitude {
+		t.Fatalf("expected latitude %v, got %v", locationUS.Latitude, hosts[0].Latitude)
+	} else if hosts[0].Longitude != locationUS.Longitude {
+		t.Fatalf("expected longitude %v, got %v", locationUS.Longitude, hosts[0].Longitude)
 	}
 
-	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithCountry(countryAU)); err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithCountry(locationAU.CountryCode)); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 1 {
 		t.Fatal("unexpected", len(hosts))
 	} else if hosts[0].PublicKey != uh2 {
 		t.Fatal("unexpected host", hosts[0])
+	} else if hosts[0].CountryCode != locationAU.CountryCode {
+		t.Fatalf("expected country code %v, got %v", locationAU.CountryCode, hosts[0].CountryCode)
+	} else if hosts[0].Latitude != locationAU.Latitude {
+		t.Fatalf("expected latitude %v, got %v", locationAU.Latitude, hosts[0].Latitude)
+	} else if hosts[0].Longitude != locationAU.Longitude {
+		t.Fatalf("expected longitude %v, got %v", locationAU.Longitude, hosts[0].Longitude)
 	}
 }
 

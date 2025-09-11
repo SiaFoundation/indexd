@@ -599,7 +599,9 @@ WITH globals AS (
 )
 SELECT
 	hosts.id,
-	hosts.public_key
+	hosts.public_key,
+	hosts.country_code,
+	hosts.location
 FROM hosts
 CROSS JOIN globals
 WHERE
@@ -632,9 +634,13 @@ LIMIT $1 OFFSET $2;`, limit, offset, queryOpts.CountryCode, (*sqlNetworkProtocol
 		var dbHosts []*dbHost
 		for rows.Next() {
 			var host dbHost
-			if err := rows.Scan(&host.id, (*sqlPublicKey)(&host.PublicKey)); err != nil {
+			var point pgtype.Point
+			if err := rows.Scan(&host.id, (*sqlPublicKey)(&host.PublicKey), &host.CountryCode, &point); err != nil {
 				return fmt.Errorf("failed to scan host: %w", err)
 			}
+
+			host.Latitude = point.P.X
+			host.Longitude = point.P.Y
 			dbHosts = append(dbHosts, &host)
 		}
 		if err := rows.Err(); err != nil {
