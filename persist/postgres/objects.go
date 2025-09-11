@@ -229,8 +229,14 @@ func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
 
+		// check that this account has pinned these slabs
+		seen := make(map[slabs.SlabID]struct{}, len(obj.Slabs))
 		args := make([]any, 0, len(obj.Slabs))
 		for _, slab := range obj.Slabs {
+			if _, ok := seen[slab.SlabID]; ok {
+				continue
+			}
+			seen[slab.SlabID] = struct{}{}
 			args = append(args, sqlHash256(slab.SlabID))
 		}
 
@@ -241,7 +247,7 @@ WHERE account_slabs.account_id = $1
 AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 			return fmt.Errorf("failed to check how many slab IDs exist: %w", err)
 		}
-		if count != len(obj.Slabs) {
+		if count != len(seen) {
 			return slabs.ErrObjectUnpinnedSlab
 		}
 
