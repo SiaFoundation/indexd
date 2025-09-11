@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
 )
@@ -95,6 +96,14 @@ ORDER BY ss.slab_index ASC`, dbID)
 			return fmt.Errorf("recovery requires at least %d sectors, slab has %d sectors: %w", slab.MinShards, len(slab.Sectors), slabs.ErrUnrecoverable)
 		}
 		return rows.Err()
+	})
+	return
+}
+
+// IsSlabPinned returns true if a slab pinned is pinned to the given account.
+func (s *Store) IsSlabPinned(ctx context.Context, account proto.Account, slabID slabs.SlabID) (exists bool, err error) {
+	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_slabs WHERE account_id = (SELECT id FROM accounts WHERE public_key = $1) AND slab_id = (SELECT id FROM slabs WHERE digest = $2))`, sqlPublicKey(types.PublicKey(account)), sqlHash256(slabID)).Scan(&exists)
 	})
 	return
 }

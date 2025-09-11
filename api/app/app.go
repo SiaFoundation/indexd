@@ -251,7 +251,7 @@ func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
 	}
 
 	err := a.slabs.SaveObject(jc.Request.Context(), proto.Account(pk), obj)
-	if errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) {
+	if errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) || errors.Is(err, slabs.ErrObjectUnpinnedSlab) {
 		jc.Error(err, http.StatusBadRequest)
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)

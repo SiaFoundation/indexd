@@ -73,6 +73,9 @@ var (
 	ErrObjectMinimumSlabs = errors.New("object must have at least one slab")
 	// ErrObjectMetadataLimitExceeded is returned when the provided metadata is too large.
 	ErrObjectMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", metadataLimit)
+	// ErrObjectUnpinnedSlab is returned when an object containing a slab that
+	// is not pinned to the account is saved.
+	ErrObjectUnpinnedSlab = errors.New("failed to add object containing slab not pinned to the account")
 )
 
 // Object retrieves the object with the given key for the given account.
@@ -92,6 +95,15 @@ func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj
 		return ErrObjectMinimumSlabs
 	} else if len(obj.Meta) > metadataLimit {
 		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(obj.Meta))
+	}
+	for _, slab := range obj.Slabs {
+		pinned, err := m.store.IsSlabPinned(ctx, account, slab.SlabID)
+		if err != nil {
+			return fmt.Errorf("failed to check if slab was pinned to our account: %w", err)
+		}
+		if !pinned {
+			return ErrObjectUnpinnedSlab
+		}
 	}
 
 	return m.store.SaveObject(ctx, account, obj)
