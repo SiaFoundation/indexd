@@ -14,12 +14,9 @@ type (
 	// A SharedObjectSlab represents a slab of a shared object.
 	// It contains all the metadata needed to retrieve a slab.
 	SharedObjectSlab struct {
-		ID            SlabID         `json:"id"`
-		EncryptionKey [32]byte       `json:"encryptionKey"`
-		MinShards     uint           `json:"minShards"`
-		Sectors       []PinnedSector `json:"sectors"`
-		Offset        uint32         `json:"offset"`
-		Length        uint32         `json:"length"`
+		PinnedSlab
+		Offset uint32 `json:"offset"`
+		Length uint32 `json:"length"`
 	}
 
 	// SharedObject provides all the metadata necessary to retrieve

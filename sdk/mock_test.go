@@ -177,8 +177,14 @@ func (mc *mockAppClient) Slab(_ context.Context, id slabs.SlabID) (slabs.PinnedS
 	return slab, nil
 }
 
+// Hosts implements the [AppClient] interface.
 func (mc *mockAppClient) Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error) {
 	return nil, nil
+}
+
+// SharedObject implements the [AppClient] interface.
+func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, *[32]byte, error) {
+	return slabs.SharedObject{}, nil, errors.New("not implemented")
 }
 
 func newMockAppClient() *mockAppClient {
