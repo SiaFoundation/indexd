@@ -39,6 +39,7 @@ type (
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		SaveObject(ctx context.Context, account proto.Account, obj slabs.Object) error
 		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (objs []slabs.Object, _ error)
+		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
 
 	// Store defines the store interface for the application API.
@@ -185,6 +186,24 @@ func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
 	}
 
 	obj, err := a.slabs.Object(jc.Request.Context(), proto.Account(pk), key)
+	if errors.Is(err, slabs.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(obj)
+}
+
+func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
+	var key types.Hash256
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	obj, err := a.slabs.SharedObject(jc.Request.Context(), key)
 	if errors.Is(err, slabs.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -601,10 +620,11 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 
 		"GET /hosts": wrapCORS(wrapSignedAuth(a.handleGETHosts)),
 
-		"GET /objects":         wrapCORS(wrapSignedAuth(a.handleGETObjects)),
-		"GET /objects/:key":    wrapCORS(wrapSignedAuth(a.handleGETObject)),
-		"POST /objects":        wrapCORS(wrapSignedAuth(a.handlePOSTObjects)),
-		"DELETE /objects/:key": wrapCORS(wrapSignedAuth(a.handleDELETEObjects)),
+		"GET /objects":             wrapCORS(wrapSignedAuth(a.handleGETObjects)),
+		"GET /objects/:key":        wrapCORS(wrapSignedAuth(a.handleGETObject)),
+		"GET /objects/:key/shared": wrapCORS(wrapSignedAuth(a.handleGETObjectShared)),
+		"POST /objects":            wrapCORS(wrapSignedAuth(a.handlePOSTObjects)),
+		"DELETE /objects/:key":     wrapCORS(wrapSignedAuth(a.handleDELETEObjects)),
 
 		"GET /slabs":            wrapCORS(wrapSignedAuth(a.handleGETSlabs)),
 		"POST /slabs":           wrapCORS(wrapSignedAuth(a.handlePOSTSlabs)),

@@ -476,7 +476,6 @@ func TestAppConnect(t *testing.T) {
 	}
 }
 
-/*
 func TestSharedObjects(t *testing.T) {
 	ctx := t.Context()
 	// create cluster with three hosts
@@ -550,17 +549,68 @@ func TestSharedObjects(t *testing.T) {
 	}
 	// generate and pin a slab
 	slab1Params := randomSlab()
-	slabID, err := client1.PinSlab(ctx, slab1Params)
+	slab1ID, err := client1.PinSlab(ctx, slab1Params)
+	if err != nil {
+		t.Fatal("failed to pin slab:", err)
+	}
+	slab2Params := randomSlab()
+	slab2ID, err := client1.PinSlab(ctx, slab2Params)
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
 
-	// add the object to the db
-	obj := objects.Object{
+	expectedSharedObj := slabs.SharedObject{
 		Key: types.Hash256(frand.Entropy256()),
-		Slabs: []objects.SlabSlice{
+		Slabs: []slabs.SharedObjectSlab{
 			{
-				SlabID: slabID,
+				ID:            slab1ID,
+				EncryptionKey: slab1Params.EncryptionKey,
+				MinShards:     slab1Params.MinShards,
+				Offset:        0,
+				Length:        256,
+				Sectors: func() []slabs.PinnedSector {
+					so := make([]slabs.PinnedSector, len(slab1Params.Sectors))
+					for i := range slab1Params.Sectors {
+						so[i] = slabs.PinnedSector{
+							Root:    slab1Params.Sectors[i].Root,
+							HostKey: slab1Params.Sectors[i].HostKey,
+						}
+					}
+					return so
+				}(),
+			},
+			{
+				ID:            slab2ID,
+				EncryptionKey: slab2Params.EncryptionKey,
+				MinShards:     slab2Params.MinShards,
+				Offset:        0,
+				Length:        256,
+				Sectors: func() []slabs.PinnedSector {
+					so := make([]slabs.PinnedSector, len(slab2Params.Sectors))
+					for i := range slab2Params.Sectors {
+						so[i] = slabs.PinnedSector{
+							Root:    slab2Params.Sectors[i].Root,
+							HostKey: slab2Params.Sectors[i].HostKey,
+						}
+					}
+					return so
+				}(),
+			},
+		},
+		Meta: nil,
+	}
+
+	// add the object to the db
+	obj := slabs.Object{
+		Key: expectedSharedObj.Key,
+		Slabs: []slabs.SlabSlice{
+			{
+				SlabID: slab1ID,
+				Offset: 0,
+				Length: 256,
+			},
+			{
+				SlabID: slab2ID,
 				Offset: 0,
 				Length: 256,
 			},
@@ -581,19 +631,24 @@ func TestSharedObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal("failed to create shared object URL:", err)
 	}
+	t.Log(shareURL)
 
 	// try to retrieve the object with client2
 	sharedObj, err := client2.RetrieveSharedObject(ctx, shareURL)
 	if err != nil {
 		t.Fatal("failed to retrieve shared object:", err)
-	} else if !reflect.DeepEqual(obj, sharedObj) {
-		t.Fatal("retrieved object does not match original")
 	}
-
-	// pin the shared object with client2
-	for _, slab := range sharedObj.Slabs {
-		client2.Sl
+	buf1, err := json.MarshalIndent(expectedSharedObj, "", "  ")
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	client2.PinSlab(ctx, sharedObj.Slabs[0])
-}*/
+	buf2, err := json.MarshalIndent(sharedObj, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(buf1, buf2) {
+		t.Log("expected:", string(buf1))
+		t.Log("got:     ", string(buf2))
+		t.Fatal("shared object does not match expected")
+	}
+}

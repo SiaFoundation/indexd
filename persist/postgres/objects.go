@@ -14,16 +14,11 @@ import (
 )
 
 // SharedObject retrieves the shared object with the given key for the given account.
-func (s *Store) SharedObject(ctx context.Context, account proto.Account, key types.Hash256) (obj slabs.SharedObject, _ error) {
+func (s *Store) SharedObject(ctx context.Context, key types.Hash256) (obj slabs.SharedObject, _ error) {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		accountID, err := accountID(ctx, tx, account)
-		if err != nil {
-			return err
-		}
-
 		var objID int64
-		err = tx.QueryRow(ctx, `SELECT id, object_key, meta FROM objects WHERE account_id = $1 AND object_key = $2
-		`, accountID, sqlHash256(key)).Scan(&objID, (*sqlHash256)(&obj.Key), &obj.Meta)
+		err := tx.QueryRow(ctx, `SELECT id, object_key, meta FROM objects WHERE object_key = $1
+		`, sqlHash256(key)).Scan(&objID, (*sqlHash256)(&obj.Key), &obj.Meta)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrObjectNotFound
 		} else if err != nil {
@@ -55,7 +50,7 @@ func (s *Store) SharedObject(ctx context.Context, account proto.Account, key typ
 INNER JOIN slab_sectors ss ON (ss.sector_id = s.id)
 INNER JOIN hosts h ON (h.id = s.host_id)
 WHERE ss.slab_id = $1
-ORDER BY slab_index ASC`, slabDBID).Query(func(rows pgx.Rows) error {
+ORDER BY ss.slab_index ASC`, slabDBID).Query(func(rows pgx.Rows) error {
 				defer rows.Close()
 				for rows.Next() {
 					var sector slabs.PinnedSector

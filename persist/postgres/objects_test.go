@@ -312,7 +312,7 @@ func TestSharedObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sharedObj, err := store.SharedObject(t.Context(), acc1, obj.Key)
+	sharedObj, err := store.SharedObject(t.Context(), obj.Key)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(expectedSharedObj, sharedObj) {

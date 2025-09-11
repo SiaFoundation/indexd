@@ -102,3 +102,8 @@ func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj
 func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]Object, error) {
 	return m.store.ListObjects(ctx, account, cursor, limit)
 }
+
+// SharedObject retrieves the shared object with the given key for the given account.
+func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error) {
+	return m.store.SharedObject(ctx, key)
+}

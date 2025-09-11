@@ -209,7 +209,7 @@ func (c *Client) DeleteObject(ctx context.Context, key types.Hash256) (err error
 // CreateSharedObjectURL generates a signed URL for accessing the object with the given
 // key. The URL is valid until the specified validUntil time.
 func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, encryptionKey [32]byte, validUntil time.Time) (string, error) {
-	u, _, err := sign(c.appkey, validUntil, http.MethodGet, fmt.Sprintf("%s/objects/%s", c.baseURL, objectKey), nil)
+	u, _, err := sign(c.appkey, validUntil, http.MethodGet, fmt.Sprintf("%s/objects/%s/shared", c.baseURL, objectKey), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign request: %w", err)
 	}
@@ -218,29 +218,29 @@ func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash
 }
 
 // RetrieveSharedObject retrieves an object using the pre-signed URL.
-func (c *Client) RetrieveSharedObject(ctx context.Context, sharedURL string) (slabs.Object, error) {
+func (c *Client) RetrieveSharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, error) {
 	u, err := url.Parse(sharedURL)
 	if err != nil {
-		return slabs.Object{}, fmt.Errorf("failed to parse shared URL: %w", err)
+		return slabs.SharedObject{}, fmt.Errorf("failed to parse shared URL: %w", err)
 	}
-	if !strings.HasPrefix(u.Path, "/objects/") {
-		return slabs.Object{}, fmt.Errorf("invalid shared URL: path must start with /objects/")
+	if !strings.HasPrefix(u.Path, "/objects/") && !strings.HasSuffix(u.Path, "/shared") {
+		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: path must start with /objects/")
 	}
 	fields := strings.Split(u.Fragment, "=")
 	if len(fields) != 2 || fields[0] != "encryption_key" {
-		return slabs.Object{}, fmt.Errorf("invalid shared URL: missing encryption key")
+		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: missing encryption key")
 	}
 	var encryptionKey [32]byte
 	if n, err := hex.Decode(encryptionKey[:], []byte(fields[1])); err != nil {
-		return slabs.Object{}, fmt.Errorf("invalid shared URL: invalid encryption key: %w", err)
+		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: invalid encryption key: %w", err)
 	} else if n != 32 {
-		return slabs.Object{}, fmt.Errorf("invalid shared URL: invalid encryption key length: expected 32 bytes, got %d", n)
+		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: invalid encryption key length: expected 32 bytes, got %d", n)
 	}
 
-	var obj slabs.Object
+	var obj slabs.SharedObject
 	resp, err := doRequest(ctx, http.MethodGet, u, nil, applicationJSON)
 	if err != nil {
-		return slabs.Object{}, fmt.Errorf("failed to fetch shared object: %w", err)
+		return slabs.SharedObject{}, fmt.Errorf("failed to fetch shared object: %w", err)
 	}
 	defer io.Copy(io.Discard, resp)
 	defer resp.Close()
