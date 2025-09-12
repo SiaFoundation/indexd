@@ -194,32 +194,30 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 	// return all hosts with contracts that are good, currently not in use and
 	// don't have overlapping CIDRs, if CIDR checks are disabled we only check
 	// against the host key to ensure unique hosts are used
-	goodHost := make(map[types.PublicKey]hosts.Host)
-	for _, contract := range goodContractMap {
-		if disableCIDRChecks {
+	var candidates []hosts.Host
+	if disableCIDRChecks {
+		for _, contract := range goodContractMap {
 			if _, used := usedCIDRs[contract.HostKey.String()]; used {
 				continue
 			}
 			usedCIDRs[contract.HostKey.String()] = struct{}{}
-			goodHost[contract.HostKey] = hostsMap[contract.HostKey]
-			continue
+			candidates = append(candidates, hostsMap[contract.HostKey])
 		}
-
-		var used bool
-		for _, network := range hostsMap[contract.HostKey].Networks {
-			if _, ok := usedCIDRs[network.String()]; ok {
-				used = true
-				break
-			}
-		}
-		if used {
-			continue
-		}
-		goodHost[contract.HostKey] = hostsMap[contract.HostKey]
+		return toMigrate, candidates
 	}
 
-	var candidates []hosts.Host
-	for _, host := range goodHost {
+LOOP:
+	for _, contract := range goodContractMap {
+		host := hostsMap[contract.HostKey]
+		for _, network := range host.Networks {
+			if _, ok := usedCIDRs[network.String()]; ok {
+				continue LOOP
+			}
+		}
+
+		for _, network := range host.Networks {
+			usedCIDRs[network.String()] = struct{}{}
+		}
 		candidates = append(candidates, host)
 	}
 
