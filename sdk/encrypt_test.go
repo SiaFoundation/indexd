@@ -18,7 +18,7 @@ func TestEncryptRoundtrip(t *testing.T) {
 
 	for _, offset := range []uint64{0, 16, 31, 63, 64, 96, 128, 2048, 4096, maxBytesPerNonce - 127, maxBytesPerNonce - 128, maxBytesPerNonce - 63, maxBytesPerNonce - 64, maxBytesPerNonce, 2 * maxBytesPerNonce} {
 		t.Run(fmt.Sprint(offset), func(t *testing.T) {
-			r := encrypt(&key, bytes.NewReader(data[:]), offset)
+			r := EncryptStream(&key, bytes.NewReader(data[:]), offset)
 
 			read, err := io.ReadAll(r)
 			if err != nil {
@@ -26,7 +26,7 @@ func TestEncryptRoundtrip(t *testing.T) {
 			}
 
 			var buf bytes.Buffer
-			decrypted := decrypt(&key, &buf, offset)
+			decrypted := DecryptStream(&key, &buf, offset)
 			if _, err := decrypted.Write(read); err != nil {
 				t.Fatal(err)
 			}

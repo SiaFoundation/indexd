@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/cipher"
 	"errors"
 	"fmt"
 	"io"
@@ -20,7 +21,6 @@ import (
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/chacha20"
-	"lukechampine.com/frand"
 )
 
 type (
@@ -29,9 +29,6 @@ type (
 		parityShards uint8
 		hostTimeout  time.Duration
 		maxInflight  int
-
-		customKey         *[32]byte
-		disableEncryption bool
 	}
 
 	downloadOption struct {
@@ -224,7 +221,7 @@ top:
 // Upload uploads the data to hosts and pins it to the indexer.
 //
 // Returns the metadata of the slabs that were pinned
-func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Object, error) {
+func (s *SDK) Upload(ctx context.Context, r cipher.StreamReader, opts ...UploadOption) (uploaded []Slab, _ error) {
 	uo := uploadOption{
 		dataShards:   10,
 		parityShards: 20,
@@ -235,22 +232,8 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 		opt(&uo)
 	}
 
-	if (uo.parityShards+uo.dataShards)/uo.dataShards < 2 {
-		return Object{}, errors.New("redundancy must be at least 2x")
-	} else if uo.disableEncryption && uo.customKey != nil {
-		return Object{}, errors.New("custom key provided but encryption disabled ")
-	}
-
-	var obj Object
-	if !uo.disableEncryption {
-		if uo.customKey != nil {
-			obj.Key = uo.customKey
-		} else {
-			obj.Key = new([32]byte)
-			frand.Read(obj.Key[:])
-		}
-
-		r = encrypt(obj.Key, r, 0)
+	if uo.parityShards+uo.dataShards < uo.dataShards*slabs.DefaultRedundancy {
+		return nil, errors.New("redundancy must be at least 3x")
 	}
 
 	type work struct {
@@ -299,7 +282,7 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 	for i := 0; ; i++ {
 		select {
 		case <-ctx.Done():
-			return Object{}, ctx.Err()
+			return nil, ctx.Err()
 		case work := <-workCh:
 			err := work.err
 			shards := work.shards
@@ -307,26 +290,26 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 
 			if errors.Is(err, io.EOF) {
 				// no more slabs to upload, return the pinned slabs
-				return obj, nil
+				return uploaded, nil
 			} else if work.err != nil {
-				return Object{}, work.err
+				return nil, work.err
 			}
 			params, err := s.uploadSlab(ctx, shardKey, shards, uo.dataShards, uo.maxInflight, uo.hostTimeout)
 			if err != nil {
-				return Object{}, fmt.Errorf("failed to upload slab %d: %w", i, err)
+				return nil, fmt.Errorf("failed to upload slab %d: %w", i, err)
 			}
 			expectedSlabID, err := params.Digest()
 			if err != nil {
-				return Object{}, fmt.Errorf("failed to compute slab id for slab %d: %w", i, err)
+				return nil, fmt.Errorf("failed to compute slab id for slab %d: %w", i, err)
 			}
 
 			slabID, err := s.client.PinSlab(ctx, params)
 			if err != nil {
-				return Object{}, fmt.Errorf("failed to pin slab %d: %w", i, err)
+				return nil, fmt.Errorf("failed to pin slab %d: %w", i, err)
 			} else if slabID != expectedSlabID {
-				return Object{}, fmt.Errorf("pinned slab %d id %s does not match expected id %s", i, slabID.String(), expectedSlabID.String())
+				return nil, fmt.Errorf("pinned slab %d id %s does not match expected id %s", i, slabID.String(), expectedSlabID.String())
 			}
-			obj.Slabs = append(obj.Slabs, Slab{
+			uploaded = append(uploaded, Slab{
 				ID:     slabID,
 				Offset: 0,
 				Length: uint32(work.length),
@@ -338,13 +321,9 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 // Download downloads object metadata
 //
 // TODO: support seeks
-func (s *SDK) Download(ctx context.Context, w io.Writer, metadata Object, opts ...DownloadOption) error {
-	if len(metadata.Slabs) == 0 {
+func (s *SDK) Download(ctx context.Context, w cipher.StreamWriter, slabs []Slab, opts ...DownloadOption) error {
+	if len(slabs) == 0 {
 		return errors.New("no slabs to download")
-	}
-
-	if metadata.Key != nil {
-		w = decrypt(metadata.Key, w, 0)
 	}
 
 	do := downloadOption{
@@ -361,7 +340,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata Object, opts .
 	}
 	workCh := make(chan work, 1)
 	go func() {
-		for i, meta := range metadata.Slabs {
+		for i, meta := range slabs {
 			pinned, err := s.client.Slab(ctx, meta.ID)
 			if err != nil {
 				workCh <- work{err: fmt.Errorf("failed to get slab %d metadata: %w", i, err)}
@@ -407,8 +386,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata Object, opts .
 			} else if err != nil {
 				return err
 			}
-			slab := metadata.Slabs[i]
-			if err := stripedJoin(bw, work.shards, int(slab.Length)); err != nil {
+			if err := stripedJoin(bw, work.shards, int(slabs[i].Length)); err != nil {
 				return fmt.Errorf("failed to write slab %d: %w", i, err)
 			}
 		}
@@ -496,9 +474,9 @@ func readAtMost(r io.Reader, buf []byte) (int, error) {
 	return n, nil
 }
 
-// WithRedundancy sets the number of data and parity shards for the upload.
-// The number of shards must be at least 2x redundancy:
-// `(dataShards + parityShards) / dataShards >= 2`.
+// WithRedundancy sets the number of data and parity shards for the upload. The
+// number of shards must be at least 3x redundancy: `(dataShards + parityShards)
+// / dataShards >= 3`.
 func WithRedundancy(dataShards, parityShards uint8) UploadOption {
 	return func(uo *uploadOption) {
 		uo.dataShards = dataShards
@@ -521,23 +499,6 @@ func WithUploadHostTimeout(timeout time.Duration) UploadOption {
 func WithUploadInflight(maxInflight int) UploadOption {
 	return func(uo *uploadOption) {
 		uo.maxInflight = maxInflight
-	}
-}
-
-// WithDisableEncryption disables client side encryption for uploads.  By
-// default client side encryption is enabled.
-func WithDisableEncryption() UploadOption {
-	return func(uo *uploadOption) {
-		uo.disableEncryption = true
-	}
-}
-
-// WithXChaCha20Secret sets a custom key for client side encryption.  By
-// default a randomly generated key is used.  In both cases, the key will be
-// returned alongside the slabs in the Object.
-func WithXChaCha20Secret(key [32]byte) UploadOption {
-	return func(uo *uploadOption) {
-		uo.customKey = &key
 	}
 }
 

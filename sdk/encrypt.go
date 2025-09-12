@@ -81,9 +81,9 @@ func nonce(offset uint64) (nonce [24]byte, nonce64 uint64) {
 	return
 }
 
-// encrypt returns a cipher.StreamReader that encrypts r with k starting at the
-// given offset.
-func encrypt(key *[32]byte, r io.Reader, offset uint64) cipher.StreamReader {
+// EncryptStream returns a cipher.StreamReader that encrypts r with k starting
+// at the given offset.
+func EncryptStream(key *[32]byte, r io.Reader, offset uint64) cipher.StreamReader {
 	n, n64 := nonce(offset)
 	offset %= maxBytesPerNonce
 	skip := int(offset % 64)
@@ -94,9 +94,9 @@ func encrypt(key *[32]byte, r io.Reader, offset uint64) cipher.StreamReader {
 	return cipher.StreamReader{S: rs, R: r}
 }
 
-// decrypt returns a cipher.StreamWriter that decrypts w with k, starting at the
-// specified offset.
-func decrypt(key *[32]byte, w io.Writer, offset uint64) cipher.StreamWriter {
+// DecryptStream returns a cipher.StreamWriter that decrypts w with k, starting
+// at the specified offset.
+func DecryptStream(key *[32]byte, w io.Writer, offset uint64) cipher.StreamWriter {
 	n, n64 := nonce(offset)
 	offset %= maxBytesPerNonce
 	skip := int(offset % 64)
