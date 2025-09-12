@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"html/template"
 	"net/http"
 	"net/url"
+	"strconv"
 	"sync"
 	"time"
 
@@ -30,6 +32,15 @@ import (
 type (
 	// Option is a function that applies an option to the application API.
 	Option func(*app)
+
+	// Slabs defines the slab interface for the application API.
+	Slabs interface {
+		Object(ctx context.Context, account proto.Account, key types.Hash256) (slabs.Object, error)
+		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
+		SaveObject(ctx context.Context, account proto.Account, obj slabs.Object) error
+		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (objs []slabs.Object, _ error)
+		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
+	}
 
 	// Store defines the store interface for the application API.
 	Store interface {
@@ -93,6 +104,7 @@ type (
 		store     Store
 		accounts  Accounts
 		contracts Contracts
+		slabs     Slabs
 		log       *zap.Logger
 
 		hostname     string
@@ -167,6 +179,103 @@ func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 	jc.Encode(hosts)
 }
 
+func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
+	var key types.Hash256
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	obj, err := a.slabs.Object(jc.Request.Context(), proto.Account(pk), key)
+	if errors.Is(err, slabs.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(obj)
+}
+
+func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
+	var key types.Hash256
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	obj, err := a.slabs.SharedObject(jc.Request.Context(), key)
+	if errors.Is(err, slabs.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(obj)
+}
+
+func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
+	_, limit, ok := api.ParseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+
+	var key types.Hash256
+	if jc.DecodeForm("key", &key) != nil {
+		return
+	}
+
+	var after time.Time
+	if jc.DecodeForm("after", &after) != nil {
+		return
+	}
+
+	objs, err := a.slabs.ListObjects(jc.Request.Context(), proto.Account(pk), slabs.Cursor{
+		After: after,
+		Key:   key,
+	}, limit)
+	if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(objs)
+}
+
+func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
+	var obj slabs.Object
+	if jc.Decode(&obj) != nil {
+		return
+	}
+
+	err := a.slabs.SaveObject(jc.Request.Context(), proto.Account(pk), obj)
+	if errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) {
+		jc.Error(err, http.StatusBadRequest)
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(nil)
+}
+
+func (a *app) handleDELETEObjects(jc jape.Context, pk types.PublicKey) {
+	var key types.Hash256
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	err := a.slabs.DeleteObject(jc.Request.Context(), proto.Account(pk), key)
+	if errors.Is(err, slabs.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(nil)
+}
+
 func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	var params slabs.SlabPinParams
 	if err := jc.Decode(&params); err != nil {
@@ -185,6 +294,17 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(slabID)
 }
 
+func encodeBinary(jc jape.Context, resp types.EncoderTo) {
+	var buf bytes.Buffer
+	e := types.NewEncoder(&buf)
+	resp.EncodeTo(e)
+	e.Flush()
+
+	jc.ResponseWriter.Header().Set("Content-Type", applicationOctetStream)
+	jc.ResponseWriter.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
+	buf.WriteTo(jc.ResponseWriter)
+}
+
 func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 	var slabID slabs.SlabID
 	if err := jc.DecodeParam("slabid", &slabID); err != nil {
@@ -201,9 +321,7 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 	}
 
 	if accept := jc.Request.Header.Get(acceptHeader); accept == applicationOctetStream {
-		e := types.NewEncoder(jc.ResponseWriter)
-		slab.EncodeTo(e)
-		jc.Check("failed to flush", e.Flush())
+		encodeBinary(jc, slab)
 		return
 	}
 	jc.Encode(slab)
@@ -242,7 +360,7 @@ func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
 
 func (a *app) handleAuthRegister(jc jape.Context) {
 	// check whether the request is properly signed
-	pk, ok := validateURLSignature(jc, a.hostname)
+	pk, ok := validateURLSignature(jc, a.hostname, jc.Request.URL.Path)
 	if !ok {
 		return
 	}
@@ -300,7 +418,7 @@ func (a *app) handleGETAuthCheck(jc jape.Context, _ types.PublicKey) {
 }
 
 func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
-	pk, ok := validateURLSignature(jc, a.hostname)
+	pk, ok := validateURLSignature(jc, a.hostname, jc.Request.URL.Path)
 	if !ok {
 		return
 	}
@@ -424,7 +542,7 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 // users, or rather their applications, to pin slabs to the indexer.
 // Authentication happens through presigned URLs that are signed with a private
 // key that corresponds to a previously registered public key.
-func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, opts ...Option) (http.Handler, error) {
+func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, slabs Slabs, opts ...Option) (http.Handler, error) {
 	u, err := url.Parse(advertiseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse advertise URL %q: %w", advertiseURL, err)
@@ -433,6 +551,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		store:     store,
 		accounts:  am,
 		contracts: contracts,
+		slabs:     slabs,
 		log:       zap.NewNop(),
 
 		hostname:     u.Host,
@@ -445,7 +564,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 
 	wrapSignedAuth := func(h authedHandler) jape.Handler {
 		return func(jc jape.Context) {
-			pk, ok := validateSignedURLAuth(jc, a.hostname, am)
+			pk, ok := validateSignedURLAuth(jc, a.hostname, jc.Request.URL.Path, am)
 			if !ok {
 				return
 			}
@@ -499,7 +618,14 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		"GET /auth/connect/:requestID/status": wrapCORS(a.handleGETAuthConnectStatus),
 		"GET /auth/check":                     wrapCORS(wrapSignedAuth(a.handleGETAuthCheck)),
 
-		"GET /hosts":            wrapCORS(wrapSignedAuth(a.handleGETHosts)),
+		"GET /hosts": wrapCORS(wrapSignedAuth(a.handleGETHosts)),
+
+		"GET /objects":             wrapCORS(wrapSignedAuth(a.handleGETObjects)),
+		"GET /objects/:key":        wrapCORS(wrapSignedAuth(a.handleGETObject)),
+		"GET /objects/:key/shared": wrapCORS(wrapSignedAuth(a.handleGETObjectShared)),
+		"POST /objects":            wrapCORS(wrapSignedAuth(a.handlePOSTObjects)),
+		"DELETE /objects/:key":     wrapCORS(wrapSignedAuth(a.handleDELETEObjects)),
+
 		"GET /slabs":            wrapCORS(wrapSignedAuth(a.handleGETSlabs)),
 		"POST /slabs":           wrapCORS(wrapSignedAuth(a.handlePOSTSlabs)),
 		"GET /slabs/:slabid":    wrapCORS(wrapSignedAuth(a.handleGETSlab)),

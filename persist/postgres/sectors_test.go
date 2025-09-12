@@ -2136,7 +2136,6 @@ func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 	)
 
 	// insert sectors in batches
-	sectorRoots := make([]types.Hash256, 0, nSectors)
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
@@ -2147,7 +2146,6 @@ func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 				Root:    root,
 				HostKey: hk,
 			})
-			sectorRoots = append(sectorRoots, root)
 		}
 		if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
 			MinShards:     1,

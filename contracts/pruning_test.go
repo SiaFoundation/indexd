@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"net"
 	"slices"
 	"sort"
 	"testing"
@@ -141,7 +140,7 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	hk1 := types.PublicKey{1}
 	h1 := hosts.Host{
 		PublicKey: hk1,
-		Networks:  []net.IPNet{{IP: net.IP{127, 0, 0, 1}, Mask: net.CIDRMask(24, 32)}},
+		Networks:  []string{"127.0.0.1/24"},
 		Addresses: []chain.NetAddress{{Protocol: siamux.Protocol, Address: "host1.com"}},
 		Settings:  goodSettings,
 		Usability: hosts.GoodUsability,
@@ -154,7 +153,7 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	hk2 := types.PublicKey{2}
 	h2 := hosts.Host{
 		PublicKey: hk2,
-		Networks:  []net.IPNet{{IP: net.IP{127, 0, 0, 2}, Mask: net.CIDRMask(24, 32)}},
+		Networks:  []string{"127.0.0.2/24"},
 		Addresses: []chain.NetAddress{{Protocol: siamux.Protocol, Address: "host2.com"}},
 		Settings:  goodSettings,
 		Usability: hosts.GoodUsability,
@@ -177,7 +176,7 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	hk4 := types.PublicKey{4}
 	h4 := hosts.Host{
 		PublicKey: hk4,
-		Networks:  []net.IPNet{{IP: net.IP{127, 0, 0, 2}, Mask: net.CIDRMask(24, 32)}},
+		Networks:  []string{"127.0.0.2/24"},
 		Addresses: []chain.NetAddress{{Protocol: siamux.Protocol, Address: "host4.com"}},
 		Settings:  goodSettings,
 		Usability: hosts.GoodUsability,
@@ -188,7 +187,7 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	hk5 := types.PublicKey{5}
 	h5 := hosts.Host{
 		PublicKey: hk5,
-		Networks:  []net.IPNet{{IP: net.IP{127, 0, 0, 1}, Mask: net.CIDRMask(24, 32)}},
+		Networks:  []string{"127.0.0.1/24"},
 		Addresses: []chain.NetAddress{{Protocol: siamux.Protocol, Address: "host5.com"}},
 		Settings:  goodSettings,
 		Usability: hosts.GoodUsability,

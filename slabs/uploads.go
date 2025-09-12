@@ -48,7 +48,7 @@ outer:
 		host := uc.hosts[0]
 		uc.hosts = uc.hosts[1:]
 		for _, cidr := range host.Networks {
-			if _, ok := uc.cidrs[cidr.String()]; ok {
+			if _, ok := uc.cidrs[cidr]; ok {
 				continue outer // already used this CIDR
 			}
 		}
@@ -59,11 +59,11 @@ outer:
 
 func (uc *uploadCandidates) used(h hosts.Host) {
 	for _, cidr := range h.Networks {
-		_, ok := uc.cidrs[cidr.String()]
+		_, ok := uc.cidrs[cidr]
 		if ok {
-			panic("CIDR already used: " + cidr.String()) // developer error
+			panic("CIDR already used: " + cidr) // developer error
 		}
-		uc.cidrs[cidr.String()] = struct{}{}
+		uc.cidrs[cidr] = struct{}{}
 	}
 }
 

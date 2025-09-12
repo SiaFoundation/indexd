@@ -64,7 +64,7 @@ func (s *mockStore) PruneHosts(ctx context.Context, lastSuccessfulScanCutoff tim
 	return 0, nil
 }
 
-func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
+func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks []string, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
 	return nil
 }
 

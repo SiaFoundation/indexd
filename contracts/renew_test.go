@@ -2,7 +2,6 @@ package contracts
 
 import (
 	"context"
-	"net"
 	"testing"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -58,7 +57,7 @@ func TestPerformContractRenewals(t *testing.T) {
 			PublicKey: types.PublicKey{byte(i)},
 			Settings:  badSettings, // will be updated by scan to good settings
 			Usability: hosts.GoodUsability,
-			Networks:  []net.IPNet{{}},
+			Networks:  []string{""},
 		}
 	}
 

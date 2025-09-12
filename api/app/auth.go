@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -49,7 +50,7 @@ const (
 // and verifies the signature and expiration. If successful, it returns the
 // public key and true, otherwise it writes an error to the context and returns
 // an empty public key and false.
-func validateURLSignature(jc jape.Context, hostname string) (types.PublicKey, bool) {
+func validateURLSignature(jc jape.Context, hostname, path string) (types.PublicKey, bool) {
 	req := jc.Request
 	defer req.Body.Close()
 
@@ -88,8 +89,8 @@ func validateURLSignature(jc jape.Context, hostname string) (types.PublicKey, bo
 	if ts.Before(time.Now().UTC()) {
 		jc.Error(ErrSignatureExpired, http.StatusUnauthorized)
 		return types.PublicKey{}, false
-	} else if !pk.VerifyHash(requestHash(req.Method, hostname, ts, buf), sig) {
-		jc.Error(fmt.Errorf("failed to authenticate for %q host %q: %w", req.Method, hostname, ErrSignatureInvalid), http.StatusUnauthorized)
+	} else if !pk.VerifyHash(requestHash(req.Method, hostname, path, ts, buf), sig) {
+		jc.Error(fmt.Errorf("failed to authenticate for %q host %q: %w", req.Method, filepath.Join(hostname, path), ErrSignatureInvalid), http.StatusUnauthorized)
 		return types.PublicKey{}, false
 	}
 	return pk, true
@@ -99,10 +100,10 @@ func validateURLSignature(jc jape.Context, hostname string) (types.PublicKey, bo
 // parameters, verifying the signature and expiration, and confirming the
 // account exists. If any check fails, it writes an HTTP error and returns
 // false, otherwise it returns the public key and true.
-func validateSignedURLAuth(jc jape.Context, hostname string, store Accounts) (types.PublicKey, bool) {
+func validateSignedURLAuth(jc jape.Context, hostname, path string, store Accounts) (types.PublicKey, bool) {
 	req := jc.Request
 
-	pk, ok := validateURLSignature(jc, hostname)
+	pk, ok := validateURLSignature(jc, hostname, path)
 	if !ok {
 		return types.PublicKey{}, false
 	}
@@ -158,10 +159,11 @@ func isSignedRequest(req *http.Request) bool {
 		req.URL.Query().Has(queryParamValidUntil)
 }
 
-func requestHash(method string, hostname string, validUntil time.Time, body []byte) types.Hash256 {
+func requestHash(method string, hostname, path string, validUntil time.Time, body []byte) types.Hash256 {
 	h := types.NewHasher()
 	h.E.Write([]byte(method))
 	h.E.Write([]byte(hostname))
+	h.E.Write([]byte(path))
 	h.E.WriteUint64(uint64(validUntil.Unix()))
 	if body != nil {
 		h.E.Write(body)

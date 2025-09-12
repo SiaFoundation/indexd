@@ -2,7 +2,6 @@ package hosts
 
 import (
 	"errors"
-	"net"
 	"strings"
 	"time"
 
@@ -92,7 +91,7 @@ type (
 		ConsecutiveFailedScans int                 `json:"consecutiveFailedScans"`
 		RecentUptime           float64             `json:"recentUptime"`
 		Addresses              []chain.NetAddress  `json:"addresses"`
-		Networks               []net.IPNet         `json:"networks"`
+		Networks               []string            `json:"networks"`
 		CountryCode            string              `json:"countryCode"`
 		Latitude               float64             `json:"latitude"`
 		Longitude              float64             `json:"longitude"`

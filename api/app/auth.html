@@ -122,13 +122,14 @@
         color: var(--muted);
         margin: 14px 0 6px;
       }
-      input {
+      input, select, textarea {
         width: 100%;
         padding: 10px 12px;
         border-radius: var(--radius);
         background: #151819;
         border: 1px solid #3a3f40;
         color: var(--text);
+        font-size: 1rem;
         outline: none;
         transition: border-color 0.15s ease, box-shadow 0.15s ease;
       }
@@ -362,7 +363,9 @@
         `;
 
         document.getElementById("resultBtn").addEventListener("click", () => {
-          window.close();
+          const callbackUrl = "{{.Request.CallbackURL}}";
+          if (callbackUrl) window.location.href = callbackUrl;
+          else window.close();
         });
       }
 

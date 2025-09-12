@@ -54,9 +54,6 @@ type (
 		// upload or download.
 		Hosts() []types.PublicKey
 
-		// ActiveHosts returns hosts that there is an active connection with.
-		ActiveHosts() []types.PublicKey
-
 		// WriteSector writes a sector to the host identified by the public key.
 		WriteSector(context.Context, types.PublicKey, *[proto4.SectorSize]byte) (types.Hash256, error)
 		// ReadSector reads a sector from the host identified by the public key.
@@ -119,22 +116,7 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 	}
 
 	var hostsMu sync.Mutex
-	activeHosts := shuffle(s.dialer.ActiveHosts())
-	allHosts := shuffle(s.dialer.Hosts())
-
-	hosts := make([]types.PublicKey, 0, len(allHosts))
-	seen := make(map[types.PublicKey]struct{}, len(activeHosts))
-	for _, pk := range activeHosts {
-		seen[pk] = struct{}{}
-		hosts = append(hosts, pk)
-	}
-	for _, pk := range allHosts {
-		if _, ok := seen[pk]; ok {
-			continue
-		}
-		hosts = append(hosts, pk)
-	}
-
+	hosts := s.dialer.Hosts()
 	if len(hosts) < len(shards) {
 		return slabs.SlabPinParams{}, fmt.Errorf("not enough hosts available: %d, required: %d", len(hosts), len(shards))
 	}
@@ -492,14 +474,6 @@ func uploadShard(ctx context.Context, sector *[proto4.SectorSize]byte, hostKey t
 		return types.Hash256{}, fmt.Errorf("uploaded shard root %s does not match expected root %s", uploaded.String(), root.String())
 	}
 	return uploaded, nil
-}
-
-// shuffle shuffles the elements of a slice in place and returns it.
-func shuffle[T any, S ~[]T](s S) S {
-	frand.Shuffle(len(s), func(i, j int) {
-		s[i], s[j] = s[j], s[i]
-	})
-	return s
 }
 
 // readAtMost reads from the reader until the buffer is filled,

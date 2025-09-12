@@ -139,10 +139,7 @@ func TestPinnedSlab(t *testing.T) {
 		Sectors:       make([]slabs.PinnedSector, len(pinned.Sectors)),
 	}
 	for i, sector := range pinned.Sectors {
-		expected.Sectors[i] = slabs.PinnedSector{
-			Root:    sector.Root,
-			HostKey: sector.HostKey,
-		}
+		expected.Sectors[i] = slabs.PinnedSector(sector)
 	}
 
 	slabID, err := store.PinSlab(context.Background(), account, time.Time{}, pinned)

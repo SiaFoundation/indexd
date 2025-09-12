@@ -10,10 +10,12 @@ servers:
   - url: http://localhost:9982/api
 
 tags:
-  - name: slabs
-    description: List, pin, unpin and retrieve pinned slab details
   - name: hosts
     description: Fetch usable hosts
+  - name: objects
+    description: List, save, retrieve and delete objects
+  - name: slabs
+    description: List, pin, unpin and retrieve pinned slab details
 
 paths:
   /hosts:
@@ -65,7 +67,7 @@ paths:
 
             import (
               "context"
-              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/app"
               "go.sia.tech/core/types"
             )
 
@@ -75,6 +77,132 @@ paths:
               hosts, err := client.Hosts(context.Background())
               // ...
             }
+
+  /objects:
+    get:
+      tags:
+        - objects
+      summary: List all objects
+      parameters:
+        - name: limit
+          in: query
+          description: The maximum number of objects to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: key
+          in: query
+          description: The object key that is used as an offset when paginating
+          schema:
+            $ref: "#/components/schemas/Hash256"
+        - name: after
+          in: query
+          description: The updated at timestamp that is used as an offset when paginating
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: A list of objects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slabs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Object"
+    post:
+      tags:
+        - objects
+      summary: Create or update an object
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - key
+                - slabs
+                - meta
+              properties:
+                key:
+                  allOf:
+                    - $ref: "#/components/schemas/Hash256"
+                    - description: The object's key
+                slabs:
+                  type: array
+                  items:
+                    $ref: "#/components/schemas/SlabSlice"
+                  description: The list of slabs that make up the object
+                meta:
+                  type: string
+                  format: byte
+                  description: Optional metadata stored as a byte array (base64-encoded in JSON)
+      responses:
+        "200":
+          description: Object created or updated successfully
+        "400":
+          description: Object has no slabs or metadata exceeds size limit
+  /objects/{key}:
+    get:
+      tags:
+        - objects
+      summary: Get details of an object
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: Details of the object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Object"
+        "404":
+          description: Object not found
+    delete:
+      tags:
+        - objects
+      summary: Delete an object
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: Object deleted successfully
+        "404":
+          description: Object not found
+  /objects/{key}/shared:
+    get:
+      tags:
+        - objects
+      summary: Get a shared object
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: The shared object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SharedObject"
+        "404":
+          description: Object not found
 
   /slabs:
     get:
@@ -119,7 +247,7 @@ paths:
 
             import (
               "context"
-              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/app"
               "go.sia.tech/core/types"
             )
 
@@ -184,7 +312,7 @@ paths:
 
             import (
               "context"
-              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/app"
               "go.sia.tech/indexd/slabs"
               "go.sia.tech/core/types"
             )
@@ -252,7 +380,7 @@ paths:
 
             import (
               "context"
-              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/app"
               "go.sia.tech/indexd/slabs"
               "go.sia.tech/core/types"
             )
@@ -287,7 +415,7 @@ paths:
 
             import (
               "context"
-              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/app"
               "go.sia.tech/indexd/slabs"
               "go.sia.tech/core/types"
             )
@@ -355,7 +483,7 @@ paths:
 
             import (
               "context"
-              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/app"
               "go.sia.tech/core/types"
             )
 
@@ -393,7 +521,7 @@ paths:
 
             import (
               "context"
-              app "go.sia.tech/indexd/app"
+              "go.sia.tech/indexd/app"
               "go.sia.tech/core/types"
             )
 
@@ -483,17 +611,23 @@ paths:
 
 components:
   schemas:
+    AuthConnectStatusResponse:
+      $ref: "./components.yml#/components/schemas/AuthConnectStatusResponse"
     EncryptionKey:
       $ref: "./components.yml#/components/schemas/EncryptionKey"
     Hash256:
       $ref: "./components.yml#/components/schemas/Hash256"
     HostInfo:
       $ref: "./components.yml#/components/schemas/HostInfo"
+    Object:
+      $ref: "./components.yml#/components/schemas/Object"
     PublicKey:
       $ref: "./components.yml#/components/schemas/PublicKey"
-    SlabID:
-      $ref: "./components.yml#/components/schemas/SlabID"
     RegisterAppResponse:
       $ref: "./components.yml#/components/schemas/RegisterAppResponse"
-    AuthConnectStatusResponse:
-      $ref: "./components.yml#/components/schemas/AuthConnectStatusResponse"
+    SlabID:
+      $ref: "./components.yml#/components/schemas/SlabID"
+    SlabSlice:
+      $ref: "./components.yml#/components/schemas/SlabSlice"
+    SharedObject:
+      $ref: "./components.yml#/components/schemas/SharedObject"

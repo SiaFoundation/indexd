@@ -3,8 +3,8 @@ package slabs
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math"
-	"net"
 	"testing"
 	"time"
 
@@ -189,7 +189,7 @@ func TestSectorsToMigrate(t *testing.T) {
 			h.Usability = hosts.GoodUsability
 		}
 		if networks {
-			h.Networks = []net.IPNet{{IP: net.IP{1, 1, 1, i}, Mask: net.CIDRMask(24, 32)}}
+			h.Networks = []string{fmt.Sprintf("1.1.1.%d/24", i)}
 		}
 		return h
 	}

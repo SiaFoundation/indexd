@@ -3,7 +3,6 @@ package contracts
 import (
 	"context"
 	"fmt"
-	"net"
 	"testing"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -66,7 +65,7 @@ func TestPerformContractRefreshes(t *testing.T) {
 			PublicKey: types.PublicKey{byte(i)},
 			Settings:  goodSettings,
 			Usability: hosts.GoodUsability,
-			Networks:  []net.IPNet{{}},
+			Networks:  []string{""},
 		}
 	}
 

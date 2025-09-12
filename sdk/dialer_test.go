@@ -139,7 +139,7 @@ func TestHostDialerParallel(t *testing.T) {
 
 func TestHostDialerHosts(t *testing.T) {
 	logger := zaptest.NewLogger(t)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(2))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(3))
 	indexer := cluster.Indexer
 
 	// add an account
@@ -156,14 +156,9 @@ func TestHostDialerHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hks := dialer.ActiveHosts()
-	if len(hks) != 0 {
-		t.Fatalf("expected 0 active hosts, got %d", len(hks))
-	}
-
-	hks = dialer.Hosts()
-	if len(hks) != 2 {
-		t.Fatalf("expected 2 hosts, got %d", len(hks))
+	hks := dialer.Hosts()
+	if len(hks) != 3 {
+		t.Fatalf("expected 3 hosts, got %d", len(hks))
 	}
 
 	hk := hks[0]
@@ -173,22 +168,12 @@ func TestHostDialerHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hks = dialer.ActiveHosts()
-	if len(hks) != 1 {
-		t.Fatalf("expected 1 active hosts, got %d", len(hks))
-	} else if hks[0] != hk {
-		t.Fatal("wrong host was active")
-	}
-
 	hks = dialer.Hosts()
-	if len(hks) != 2 {
-		t.Fatalf("expected 2 hosts, got %d", len(hks))
+	if len(hks) != 3 {
+		t.Fatalf("expected 3 hosts, got %d", len(hks))
+	} else if hks[0] != hk {
+		t.Fatal("active host should be first")
 	}
 
 	dialer.Close()
-
-	hks = dialer.ActiveHosts()
-	if len(hks) != 0 {
-		t.Fatalf("expected 0 active hosts after close, got %d", len(hks))
-	}
 }

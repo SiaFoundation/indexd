@@ -98,7 +98,7 @@ type (
 		UnblockHost(ctx context.Context, hk types.PublicKey) error
 
 		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
-		UpdateHost(ctx context.Context, hk types.PublicKey, networks []net.IPNet, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error
+		UpdateHost(ctx context.Context, hk types.PublicKey, networks []string, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error
 
 		UsabilitySettings(ctx context.Context) (UsabilitySettings, error)
 		UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error
@@ -526,9 +526,9 @@ func calculateNextScanTime(lastScan time.Time, success bool, consecScanFailures 
 // and/or private addresses, and a list of networks in CIDR notation. The only
 // error this function returns is [context.Canceled], other errors that occur
 // during the resolving and parsing are debug logged but otherwise ignored.
-func resolveHost(ctx context.Context, resolver Resolver, locator Locator, addresses []chain.NetAddress, log *zap.Logger) ([]chain.NetAddress, []net.IPNet, geoip.Location, error) {
+func resolveHost(ctx context.Context, resolver Resolver, locator Locator, addresses []chain.NetAddress, log *zap.Logger) ([]chain.NetAddress, []string, geoip.Location, error) {
 	var filtered []chain.NetAddress
-	var networks []net.IPNet
+	var networks []string
 	var loc geoip.Location
 	for _, na := range addresses {
 		host, _, err := net.SplitHostPort(na.Address)
@@ -574,7 +574,9 @@ func resolveHost(ctx context.Context, resolver Resolver, locator Locator, addres
 		}
 
 		if len(ipnets) > 0 {
-			networks = append(networks, ipnets...)
+			for _, ipnet := range ipnets {
+				networks = append(networks, ipnet.String())
+			}
 			filtered = append(filtered, na)
 		}
 

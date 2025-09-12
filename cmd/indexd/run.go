@@ -207,7 +207,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		}
 	}
 
-	appHandler, err := app.NewAPI(advertiseURL, store, am, contracts, appAPIOpts...)
+	appHandler, err := app.NewAPI(advertiseURL, store, am, contracts, slabs, appAPIOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create application API: %w", err)
 	}

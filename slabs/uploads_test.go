@@ -3,7 +3,7 @@ package slabs
 import (
 	"context"
 	"errors"
-	"net"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -167,9 +167,9 @@ func TestUploadCandidates(t *testing.T) {
 	candidates.used(fst)
 	if len(candidates.cidrs) != 1 {
 		t.Fatalf("expected 1 used candidate, got %d", len(candidates.cidrs))
-	} else if _, ok := candidates.cidrs[h1.Networks[0].String()]; !ok {
+	} else if _, ok := candidates.cidrs[h1.Networks[0]]; !ok {
 		t.Fatal("expected CIDR to be marked as used", candidates.cidrs)
-	} else if _, ok := candidates.cidrs[h2.Networks[0].String()]; ok {
+	} else if _, ok := candidates.cidrs[h2.Networks[0]]; ok {
 		t.Fatal("expected CIDR to not be marked as used", candidates.cidrs)
 	}
 
@@ -177,7 +177,7 @@ func TestUploadCandidates(t *testing.T) {
 	candidates.used(snd)
 	if len(candidates.cidrs) != 2 {
 		t.Fatalf("expected 2 used candidates, got %d", len(candidates.cidrs))
-	} else if _, ok := candidates.cidrs[h2.Networks[0].String()]; !ok {
+	} else if _, ok := candidates.cidrs[h2.Networks[0]]; !ok {
 		t.Fatal("expected CIDR to be marked as used", candidates.cidrs)
 	}
 
@@ -192,7 +192,7 @@ func TestUploadCandidates(t *testing.T) {
 
 func newTestHost(hk types.PublicKey) hosts.Host {
 	return hosts.Host{
-		Networks:  []net.IPNet{{IP: net.IP{127, 0, 0, hk[0]}, Mask: net.CIDRMask(24, 32)}},
+		Networks:  []string{fmt.Sprintf("127.0.0.%d/24", hk[0])},
 		PublicKey: hk,
 		Settings:  goodSettings,
 		Usability: hosts.GoodUsability,

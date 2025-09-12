@@ -41,6 +41,10 @@ func newMockStore() *mockStore {
 	}
 }
 
+func (s *mockStore) SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error) {
+	panic("not implemented")
+}
+
 func (s *mockStore) AddAccount(ctx context.Context, account types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
 	s.accounts[proto.Account(account)] = struct{}{}
 	return nil
@@ -254,6 +258,22 @@ func (s *mockStore) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Ti
 		}
 	}
 	return result, nil
+}
+
+func (s *mockStore) Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error) {
+	return Object{}, nil
+}
+
+func (s *mockStore) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
+	return nil
+}
+
+func (s *mockStore) SaveObject(ctx context.Context, account proto.Account, obj Object) error {
+	return nil
+}
+
+func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]Object, error) {
+	return nil, nil
 }
 
 type mockAccountManager struct {

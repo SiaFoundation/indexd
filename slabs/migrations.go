@@ -184,7 +184,7 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 			usedCIDRs[sector.HostKey.String()] = struct{}{}
 		} else {
 			for _, network := range hostsMap[*sector.HostKey].Networks {
-				usedCIDRs[network.String()] = struct{}{}
+				usedCIDRs[network] = struct{}{}
 			}
 		}
 	}
@@ -204,7 +204,7 @@ LOOP:
 			}
 		} else {
 			for _, network := range h.Networks {
-				if _, ok := usedCIDRs[network.String()]; ok {
+				if _, ok := usedCIDRs[network]; ok {
 					continue LOOP
 				}
 			}

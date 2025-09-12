@@ -3,7 +3,6 @@ package contracts
 import (
 	"context"
 	"fmt"
-	"net"
 	"slices"
 	"testing"
 
@@ -205,9 +204,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 	goodHost := func(i int) hosts.Host {
 		return hosts.Host{
 			PublicKey: types.PublicKey{byte(i)},
-			Networks: []net.IPNet{
-				{IP: net.IP{127, 0, 0, byte(i)}, Mask: net.CIDRMask(24, 32)},
-			},
+			Networks:  []string{fmt.Sprintf("127.0.0.%d/24", i)},
 			Addresses: []chain.NetAddress{
 				{
 					Protocol: siamux.Protocol,
@@ -362,9 +359,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 	goodHost := func(i int) hosts.Host {
 		return hosts.Host{
 			PublicKey: types.PublicKey{byte(i)},
-			Networks: []net.IPNet{
-				{IP: net.IP{127, 0, 0, byte(i)}, Mask: net.CIDRMask(24, 32)},
-			},
+			Networks:  []string{fmt.Sprintf("127.0.0.%d/24", i)},
 			Addresses: []chain.NetAddress{
 				{
 					Protocol: siamux.Protocol,

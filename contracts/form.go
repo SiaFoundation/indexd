@@ -172,7 +172,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			usedCidrs[host.PublicKey.String()] = host.PublicKey
 		} else {
 			for _, network := range host.Networks {
-				usedCidrs[network.IP.String()] = host.PublicKey
+				usedCidrs[network] = host.PublicKey
 			}
 		}
 
@@ -184,7 +184,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			return hk, known
 		}
 		for _, cidr := range host.Networks {
-			if hk, known := usedCidrs[cidr.IP.String()]; known {
+			if hk, known := usedCidrs[cidr]; known {
 				return hk, true
 			}
 		}
