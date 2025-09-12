@@ -480,7 +480,7 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 // by the threshold time to NULL.
 func (s *Store) PruneUnpinnableSectors(ctx context.Context, threshold time.Time) error {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
+		res, err := tx.Exec(ctx, `
             UPDATE sectors
             SET host_id = NULL
             WHERE host_id IS NOT NULL
@@ -488,6 +488,10 @@ func (s *Store) PruneUnpinnableSectors(ctx context.Context, threshold time.Time)
 	            AND uploaded_at <= $1`, threshold)
 		if err != nil {
 			return fmt.Errorf("failed to prune unpinnable sectors: %w", err)
+		} else if res.RowsAffected() > 0 {
+			if err := s.incrementNumUnpinnableSlabs(ctx, tx, uint64(res.RowsAffected())); err != nil {
+				return fmt.Errorf("failed to increment unpinnable sectors: %w", err)
+			}
 		}
 		return nil
 	})

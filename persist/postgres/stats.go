@@ -11,6 +11,11 @@ func (s *Store) incrementNumSlabs(ctx context.Context, tx *txn, delta int64) err
 	return err
 }
 
+func (s *Store) incrementNumUnpinnableSlabs(ctx context.Context, tx *txn, incr uint64) error {
+	_, err := tx.Exec(ctx, "UPDATE sectors_stats SET num_unpinnable_sectors = num_unpinnable_sectors + $1", incr)
+	return err
+}
+
 func (s *Store) initSectorStats(ctx context.Context, tx *txn) error {
 	_, err := tx.Exec(ctx, "INSERT INTO sectors_stats (id) VALUES (0) ON CONFLICT(id) DO NOTHING")
 	return err

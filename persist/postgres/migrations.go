@@ -124,4 +124,13 @@ CREATE INDEX object_slabs_object_id_slab_index_idx ON object_slabs(object_id, sl
 		`)
 		return err
 	},
+	// adds the "num_unpinnable_sectors" column to sectors_stats
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE sectors_stats ADD COLUMN num_unpinnable_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinnable_sectors >= 0);`)
+		if err != nil {
+			return fmt.Errorf("failed to add num_unpinnable_sectors column: %w", err)
+		}
+		// no need to initialize it as it's a number-go-up statistic
+		return nil
+	},
 }
