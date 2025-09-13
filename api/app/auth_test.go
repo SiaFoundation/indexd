@@ -24,6 +24,14 @@ func (s *mockAccounts) HasAccount(_ context.Context, ak types.PublicKey) (bool, 
 	return found, nil
 }
 
+func (s *mockAccounts) Account(_ context.Context, ak types.PublicKey) (accounts.Account, error) {
+	_, found := s.tokens[ak]
+	if !found {
+		return accounts.Account{}, accounts.ErrNotFound
+	}
+	return accounts.Account{}, nil
+}
+
 func (s *mockAccounts) ValidAppConnectKey(context.Context, string) (bool, error) {
 	return true, nil
 }

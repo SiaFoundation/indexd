@@ -57,6 +57,7 @@ type (
 		UseAppConnectKey(context.Context, string, types.PublicKey, accounts.AccountMeta) error
 
 		HasAccount(context.Context, types.PublicKey) (bool, error)
+		Account(context.Context, types.PublicKey) (accounts.Account, error)
 	}
 
 	// Contracts defines the contract management interface for the application API.
@@ -535,7 +536,15 @@ func (a *app) handlePOSTAuthConnect(jc jape.Context) {
 }
 
 func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
-	jc.Encode(struct{}{}) // TODO: include account details, like storage usage
+	account, err := a.accounts.Account(jc.Request.Context(), pk)
+	if errors.Is(err, accounts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(account)
 }
 
 // NewAPI creates a new instance of the application API. This API is used by

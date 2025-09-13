@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
@@ -203,6 +204,12 @@ func (c *Client) SaveObject(ctx context.Context, obj slabs.Object) (err error) {
 // DeleteObject deletes the object with the given key for the given account.
 func (c *Client) DeleteObject(ctx context.Context, key types.Hash256) (err error) {
 	err = c.signedRequestJSON(ctx, http.MethodDelete, fmt.Sprintf("/objects/%s", key), nil, nil)
+	return
+}
+
+// Account retrieves the account of the current user.
+func (c *Client) Account(ctx context.Context) (resp accounts.Account, err error) {
+	err = c.signedRequestJSON(ctx, http.MethodGet, "/account", nil, &resp)
 	return
 }
 

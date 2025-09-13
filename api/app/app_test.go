@@ -486,6 +486,13 @@ func TestAppConnect(t *testing.T) {
 	} else if account.PinnedData != 0 {
 		t.Fatal("expected 0 pinned data, got", account.PinnedData)
 	}
+
+	appAccount, err := appClient.Account(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(account, appAccount) {
+		t.Fatalf("account mismatch: expected %+v, got %+v", account, appAccount)
+	}
 }
 
 func TestSharedObjects(t *testing.T) {
