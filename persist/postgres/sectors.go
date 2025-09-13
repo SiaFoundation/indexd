@@ -450,15 +450,11 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		resp, err := tx.Exec(ctx, `
 			UPDATE sectors
-			SET (host_id, contract_sectors_map_id) = (result.host_id, result.contract_sectors_map_id)
-			FROM (
-				SELECT hosts.id AS host_id, contracts.id AS contract_sectors_map_id
-				FROM contract_sectors_map
-				INNER JOIN contracts ON contracts.contract_id = contract_sectors_map.contract_id
-				INNER JOIN hosts ON contracts.host_id = hosts.id
-				WHERE contract_sectors_map.contract_id = $1
-			) AS result
-			WHERE sector_root = ANY($2) AND result.contract_sectors_map_id IS NOT NULL
+			SET (host_id, contract_sectors_map_id) = (c.host_id, csm.id)
+			FROM
+			contract_sectors_map csm
+			INNER JOIN contracts c ON (csm.contract_id = c.contract_id)
+			WHERE csm.contract_id=$1 AND sectors.sector_root = ANY($2);
 		`, sqlHash256(contractID), sqlRoots)
 		if err != nil {
 			return err
