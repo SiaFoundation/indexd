@@ -54,6 +54,8 @@ func TestRoundtrip(t *testing.T) {
 	buf := bytes.NewBuffer(nil)
 	if err := s.Download(context.Background(), buf, obj); err != nil {
 		t.Fatal(err)
+	} else if !bytes.Equal(buf.Bytes(), data) {
+		t.Fatal("data mismatch")
 	}
 
 	// with client side encryption
@@ -70,16 +72,14 @@ func TestRoundtrip(t *testing.T) {
 	buf = bytes.NewBuffer(nil)
 	if err := s.Download(context.Background(), buf, obj); err != nil {
 		t.Fatal(err)
-	}
-
-	if !bytes.Equal(buf.Bytes(), data) {
+	} else if !bytes.Equal(buf.Bytes(), data) {
 		t.Fatal("data mismatch")
 	}
 
-	// with client side encryption, custom key
-	var key [32]byte
-	frand.Read(key[:])
-	obj, err = s.Upload(context.Background(), bytes.NewReader(data), WithXChaCha20Secret(key))
+	// with client side encryption, custom encryptionKey
+	var encryptionKey [32]byte
+	frand.Read(encryptionKey[:])
+	obj, err = s.Upload(context.Background(), bytes.NewReader(data), WithXChaCha20Secret(encryptionKey))
 	if err != nil {
 		t.Fatalf("failed to upload: %v", err)
 	} else if len(obj.Slabs) != 1 {
@@ -92,13 +92,42 @@ func TestRoundtrip(t *testing.T) {
 	buf = bytes.NewBuffer(nil)
 	if err := s.Download(context.Background(), buf, obj); err != nil {
 		t.Fatal(err)
-	}
-
-	if !bytes.Equal(buf.Bytes(), data) {
+	} else if !bytes.Equal(buf.Bytes(), data) {
 		t.Fatal("data mismatch")
 	}
 
-	if _, err = s.Upload(context.Background(), bytes.NewReader(data), WithDisableEncryption(), WithXChaCha20Secret(key)); err == nil {
+	// save the object
+	var objKey types.Hash256
+	frand.Read(objKey[:])
+	if err := s.client.SaveObject(context.Background(), slabs.Object{
+		Key: objKey,
+		Slabs: func() (out []slabs.SlabSlice) {
+			for _, slab := range obj.Slabs {
+				out = append(out, slabs.SlabSlice{
+					SlabID: slab.ID,
+					Offset: slab.Offset,
+					Length: slab.Length,
+				})
+			}
+			return out
+		}(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	buf = bytes.NewBuffer(nil)
+	url, err := s.client.CreateSharedObjectURL(context.Background(), objKey, encryptionKey, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DownloadSharedObject(context.Background(), buf, url); err != nil {
+		t.Fatal("unexpected error", err)
+	} else if !bytes.Equal(buf.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+
+	if _, err = s.Upload(context.Background(), bytes.NewReader(data), WithDisableEncryption(), WithXChaCha20Secret(encryptionKey)); err == nil {
 		t.Fatal("expected error when disabling encryption but still passing custom key")
 	}
 }

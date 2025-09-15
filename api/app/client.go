@@ -33,29 +33,6 @@ type Client struct {
 	validity time.Duration
 }
 
-func parseShareURL(rawURL string) (*url.URL, *[32]byte, error) {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, nil, fmt.Errorf("failed to parse shared URL: %w", err)
-	}
-	if !(strings.HasPrefix(u.Path, "/objects/") && strings.HasSuffix(u.Path, "/shared")) {
-		return nil, nil, fmt.Errorf("path must start with '/objects/' and end with '/shared'")
-	}
-	fields := strings.Split(u.Fragment, "=")
-	if len(fields) != 2 || fields[0] != "encryption_key" {
-		return nil, nil, fmt.Errorf("missing encryption key")
-	}
-
-	var encryptionKey [32]byte
-	if n, err := hex.Decode(encryptionKey[:], []byte(fields[1])); err != nil {
-		return nil, nil, fmt.Errorf("invalid encryption key: %w", err)
-	} else if n != 32 {
-		return nil, nil, fmt.Errorf("invalid encryption key length: expected 32 bytes, got %d", n)
-	}
-
-	return u, &encryptionKey, nil
-}
-
 // sign signs the request with the appropriate headers and returns the signed URL
 // and request body.
 func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL string, req any) (*url.URL, io.Reader, error) {
@@ -242,9 +219,23 @@ func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash
 
 // SharedObject retrieves an object using the pre-signed URL.
 func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, *[32]byte, error) {
-	u, key, err := parseShareURL(sharedURL)
+	u, err := url.Parse(sharedURL)
 	if err != nil {
 		return slabs.SharedObject{}, nil, fmt.Errorf("failed to parse shared URL: %w", err)
+	}
+	if !(strings.HasPrefix(u.Path, "/objects/") && strings.HasSuffix(u.Path, "/shared")) {
+		return slabs.SharedObject{}, nil, fmt.Errorf("path must start with '/objects/' and end with '/shared'")
+	}
+	fields := strings.Split(u.Fragment, "=")
+	if len(fields) != 2 || fields[0] != "encryption_key" {
+		return slabs.SharedObject{}, nil, fmt.Errorf("missing encryption key")
+	}
+
+	var encryptionKey [32]byte
+	if n, err := hex.Decode(encryptionKey[:], []byte(fields[1])); err != nil {
+		return slabs.SharedObject{}, nil, fmt.Errorf("invalid encryption key: %w", err)
+	} else if n != 32 {
+		return slabs.SharedObject{}, nil, fmt.Errorf("invalid encryption key length: expected 32 bytes, got %d", n)
 	}
 
 	var obj slabs.SharedObject
@@ -257,7 +248,7 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 
 	dec := json.NewDecoder(resp)
 	err = dec.Decode(&obj)
-	return obj, key, err
+	return obj, &encryptionKey, err
 }
 
 // RequestAppConnection requests an application connection to the indexer.

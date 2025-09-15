@@ -43,7 +43,9 @@ type (
 	AppClient interface {
 		Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error)
 
+		CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, encryptionKey [32]byte, validUntil time.Time) (string, error)
 		SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, *[32]byte, error)
+		SaveObject(ctx context.Context, obj slabs.Object) (err error)
 
 		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
 		PinSlab(context.Context, slabs.SlabPinParams) (slabs.SlabID, error)
@@ -356,18 +358,22 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 	}
 
 	var curr int
-	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.PinnedSlab, int, error) {
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SharedObjectSlab, error) {
 		if curr >= len(obj.Slabs) {
-			return slabs.PinnedSlab{}, 0, nil
+			return slabs.SharedObjectSlab{}, nil
 		}
 		slab := obj.Slabs[curr]
 		curr++
 
 		pinned, err := s.client.Slab(ctx, slab.ID)
 		if err != nil {
-			return slabs.PinnedSlab{}, 0, fmt.Errorf("failed to get slab %d metadata: %w", curr, err)
+			return slabs.SharedObjectSlab{}, fmt.Errorf("failed to get slab %d metadata: %w", curr, err)
 		}
-		return pinned, int(slab.Length), nil
+		return slabs.SharedObjectSlab{
+			PinnedSlab: pinned,
+			Offset:     slab.Offset,
+			Length:     slab.Length,
+		}, nil
 	})
 }
 
@@ -391,17 +397,17 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, url string,
 	}
 
 	var curr int
-	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.PinnedSlab, int, error) {
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SharedObjectSlab, error) {
 		if curr >= len(obj.Slabs) {
-			return slabs.PinnedSlab{}, 0, nil
+			return slabs.SharedObjectSlab{}, nil
 		}
 		slab := obj.Slabs[curr]
 		curr++
-		return slab.PinnedSlab, int(slab.Length), nil
+		return slab, nil
 	})
 }
 
-type slabIterFn func() (slabs.PinnedSlab, int, error)
+type slabIterFn func() (slabs.SharedObjectSlab, error)
 
 func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, next slabIterFn) error {
 	type work struct {
@@ -420,11 +426,11 @@ func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, h
 
 	go func() {
 		for {
-			slab, length, err := next()
+			slab, err := next()
 			if err != nil {
 				sendErr(fmt.Errorf("failed to get next slab: %w", err))
 				return
-			} else if length == 0 {
+			} else if slab.Length == 0 {
 				break
 			}
 
@@ -433,7 +439,7 @@ func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, h
 				sendErr(fmt.Errorf("failed to create erasure coder: %w", err))
 				return
 			}
-			shards, err := s.downloadSlab(ctx, slab, maxInflight, hostTimeout)
+			shards, err := s.downloadSlab(ctx, slab.PinnedSlab, maxInflight, hostTimeout)
 			if err != nil {
 				sendErr(fmt.Errorf("failed to download slab: %w", err))
 				return
@@ -449,7 +455,7 @@ func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, h
 			}
 			workCh <- work{
 				shards: shards[:slab.MinShards],
-				length: length,
+				length: int(slab.Length),
 			}
 		}
 		workCh <- work{err: io.EOF}
