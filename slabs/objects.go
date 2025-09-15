@@ -73,9 +73,9 @@ var (
 	ErrObjectMinimumSlabs = errors.New("object must have at least one slab")
 	// ErrObjectMetadataLimitExceeded is returned when the provided metadata is too large.
 	ErrObjectMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", metadataLimit)
-	// ErrObjectUnpinnedSlab is returned when an object containing a slab that
-	// is not pinned to the account is saved.
-	ErrObjectUnpinnedSlab = errors.New("failed to add object containing slab not pinned to the account")
+	// ErrObjectUnpinnedSlab is returned when an user attempts to save an
+	// object containing a slab that is not pinned to their account.
+	ErrObjectUnpinnedSlab = errors.New("object contains unpinned slab")
 )
 
 // Object retrieves the object with the given key for the given account.
