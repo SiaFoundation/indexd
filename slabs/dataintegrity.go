@@ -47,6 +47,7 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, host ho
 				hostLogger.Fatal("unknown result", zap.Int("result", int(result)))
 			}
 		}
+		hostLogger.Debug("performed integrity checks", zap.Int("lost", len(lost)), zap.Int("failed", len(failed)), zap.Int("successful", len(success)))
 
 		// starting from here, we use a background context with a
 		// timeout, to make sure even when the integrity checks are
