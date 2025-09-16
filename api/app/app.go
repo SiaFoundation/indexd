@@ -35,6 +35,8 @@ type (
 
 	// Slabs defines the slab interface for the application API.
 	Slabs interface {
+		PruneSlabs(ctx context.Context, account proto.Account) error
+
 		Object(ctx context.Context, account proto.Account, key types.Hash256) (slabs.Object, error)
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		SaveObject(ctx context.Context, account proto.Account, obj slabs.Object) error
@@ -294,6 +296,15 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	}
 
 	jc.Encode(slabID)
+}
+
+func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
+	err := a.slabs.PruneSlabs(jc.Request.Context(), proto.Account(pk))
+	if jc.Check("failed to prune slabs", err) != nil {
+		return
+	}
+
+	jc.Encode(nil)
 }
 
 func encodeBinary(jc jape.Context, resp types.EncoderTo) {
@@ -638,6 +649,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 
 		"GET /slabs":            wrapCORS(wrapSignedAuth(a.handleGETSlabs)),
 		"POST /slabs":           wrapCORS(wrapSignedAuth(a.handlePOSTSlabs)),
+		"POST /slabs/prune":     wrapCORS(wrapSignedAuth(a.handlePOSTSlabsPrune)),
 		"GET /slabs/:slabid":    wrapCORS(wrapSignedAuth(a.handleGETSlab)),
 		"DELETE /slabs/:slabid": wrapCORS(wrapSignedAuth(a.handleDELETESlab)),
 	}), nil

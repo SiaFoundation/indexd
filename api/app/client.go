@@ -164,6 +164,12 @@ func (c *Client) Slab(ctx context.Context, slabID slabs.SlabID) (s slabs.PinnedS
 	return
 }
 
+// PruneSlabs prunes all pinned slabs of a user not currently connected to an
+// object.
+func (c *Client) PruneSlabs(ctx context.Context) error {
+	return c.signedRequestJSON(ctx, http.MethodPost, "/slabs/prune", nil, nil)
+}
+
 // SlabIDs fetches the digests of slabs associated with the account. It supports
 // pagination through the provided options.
 func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOption) (resp []slabs.SlabID, err error) {

@@ -147,3 +147,9 @@ func (m *SlabManager) PinSlab(ctx context.Context, account proto.Account, nextIn
 func (m *SlabManager) Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error) {
 	return m.store.Slabs(ctx, accountID, slabIDs)
 }
+
+// PruneSlabs prunes all pinned slabs of a user not currently connected to an
+// object.
+func (m *SlabManager) PruneSlabs(ctx context.Context, account proto.Account) error {
+	return m.store.PruneSlabs(ctx, account)
+}
