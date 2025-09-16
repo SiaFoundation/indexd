@@ -112,6 +112,18 @@ func TestMigrateSector(t *testing.T) {
 		}
 	}
 
+	assertMigratedSectors := func(expected int64) {
+		t.Helper()
+
+		var got int64
+		err = store.pool.QueryRow(context.Background(), `SELECT num_migrated_sectors FROM sectors_stats`).Scan(&got)
+		if err != nil {
+			t.Fatal(err)
+		} else if got != expected {
+			t.Fatalf("expected %d migrated sectors, got %d", expected, got)
+		}
+	}
+
 	migrate := func(root types.Hash256, hostKey types.PublicKey, expectedMigrated bool) {
 		t.Helper()
 
@@ -133,21 +145,25 @@ func TestMigrateSector(t *testing.T) {
 	// assert initial state
 	assertSector(root1, hk1, fcid1, 1, 0)
 	assertSector(root2, hk1, fcid1, 1, 0)
+	assertMigratedSectors(0)
 
 	// migrate sector 1 to host 2
 	migrate(root1, hk2, true)
 	assertSector(root1, hk2, types.FileContractID{}, 0, 1)
 	assertSector(root2, hk1, fcid1, 1, 0)
+	assertMigratedSectors(1)
 
 	// migrate sector 2 to unknown host, this should be a no-op
 	migrate(root2, types.PublicKey{10}, false)
 	assertSector(root1, hk2, types.FileContractID{}, 0, 1)
 	assertSector(root2, hk1, fcid1, 1, 0)
+	assertMigratedSectors(1)
 
 	// migrate sector 2 to host 2
 	migrate(root2, hk2, true)
 	assertSector(root1, hk2, types.FileContractID{}, 0, 1)
 	assertSector(root2, hk2, types.FileContractID{}, 0, 1)
+	assertMigratedSectors(2)
 }
 
 func TestRecordIntegrityCheck(t *testing.T) {
