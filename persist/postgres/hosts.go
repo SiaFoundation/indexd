@@ -559,7 +559,7 @@ func (s *Store) UsableHosts(ctx context.Context, offset, limit int, opts ...host
 
 	var p *pgtype.Point
 	if queryOpts.SortOptions != nil {
-		if queryOpts.SortOptions.SortBy != "proximity" {
+		if queryOpts.SortOptions.SortBy != "distance" {
 			return nil, fmt.Errorf("unsupported sort by option: %q", queryOpts.SortOptions.SortBy)
 		} else if queryOpts.SortOptions.SortDir != "asc" {
 			return nil, fmt.Errorf("unsupported sort dir option: %q", queryOpts.SortOptions.SortDir)

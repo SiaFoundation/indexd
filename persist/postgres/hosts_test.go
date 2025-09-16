@@ -717,9 +717,9 @@ func TestUsableHosts(t *testing.T) {
 		Longitude:   2.3522,
 	}, siamuxProtocol, true, false, true)
 
-	// assert sorting by proximity works
+	// assert sorting by distance works
 	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithSortOptions(api.SortOptions{
-		SortBy:  "proximity",
+		SortBy:  "distance",
 		SortDir: "asc",
 		SortCtx: &pgtype.Point{
 			P: pgtype.Vec2{
@@ -742,7 +742,7 @@ func TestUsableHosts(t *testing.T) {
 
 	// now try fetching it from Portugal
 	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.WithSortOptions(api.SortOptions{
-		SortBy:  "proximity",
+		SortBy:  "distance",
 		SortDir: "asc",
 		SortCtx: &pgtype.Point{
 			P: pgtype.Vec2{
@@ -1629,7 +1629,7 @@ func BenchmarkUsableHosts(b *testing.B) {
 			for b.Loop() {
 				point := randomLocation()
 				hosts, err := store.UsableHosts(context.Background(), 0, test.limit, hosts.WithSortOptions(api.SortOptions{
-					SortBy:  "proximity",
+					SortBy:  "distance",
 					SortDir: "asc",
 					SortCtx: &point,
 				}))

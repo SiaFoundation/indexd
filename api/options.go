@@ -37,11 +37,11 @@ type (
 // parameters.
 type URLQueryParameterOption func(url.Values)
 
-// SortByProximity decorates the query to sort by proximity to the given
+// SortByDistance decorates the query to sort by distance to the given
 // location.
-func SortByProximity(location *pgtype.Point) URLQueryParameterOption {
+func SortByDistance(location *pgtype.Point) URLQueryParameterOption {
 	return func(q url.Values) {
-		q.Set("sortby", "proximity")
+		q.Set("sortby", "distance")
 		q.Set("sortdir", "asc")
 		q.Set("sortctx", fmt.Sprintf("(%f,%f)", location.P.X, location.P.Y))
 	}
@@ -115,8 +115,8 @@ func ParseSortOptions(jc jape.Context) (opts SortOptions, ok bool) {
 		return SortOptions{}, false
 	} else if opts.SortBy == "" {
 		return SortOptions{}, true
-	} else if opts.SortBy != "proximity" {
-		jc.Error(fmt.Errorf("invalid sort by %q, must be one of [proximity]", opts.SortBy), http.StatusBadRequest)
+	} else if opts.SortBy != "distance" {
+		jc.Error(fmt.Errorf("invalid sort by %q, must be one of [distance]", opts.SortBy), http.StatusBadRequest)
 		return SortOptions{}, false
 	}
 
@@ -130,10 +130,10 @@ func ParseSortOptions(jc jape.Context) (opts SortOptions, ok bool) {
 	var sortCtx string
 	if jc.DecodeForm("sortctx", &sortCtx) != nil {
 		return SortOptions{}, false
-	} else if opts.SortBy == "proximity" {
+	} else if opts.SortBy == "distance" {
 		var lat, lng float64
 		if _, err := fmt.Sscanf(sortCtx, "(%f,%f)", &lat, &lng); err != nil {
-			jc.Error(fmt.Errorf("invalid sort context %q for proximity sorting, must be of the form (lat,lng)", sortCtx), http.StatusBadRequest)
+			jc.Error(fmt.Errorf("invalid sort context %q for distance sorting, must be of the form (lat,lng)", sortCtx), http.StatusBadRequest)
 			return SortOptions{}, false
 		}
 		opts.SortCtx = &pgtype.Point{

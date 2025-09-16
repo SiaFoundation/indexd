@@ -60,7 +60,7 @@ CREATE INDEX hosts_lost_sectors_idx ON hosts(lost_sectors);
 -- speed up querying by country
 CREATE INDEX hosts_country_code_idx ON hosts(country_code);
 
--- speed up ordering by proximity to a location
+-- speed up ordering by distance to a location
 CREATE INDEX hosts_location_gist_idx ON hosts USING GIST (location);
 
 CREATE TABLE account_hosts (
