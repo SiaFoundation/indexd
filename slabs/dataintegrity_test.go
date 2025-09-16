@@ -19,6 +19,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	// prepare host
 	hk := types.PublicKey{1}
 	host := hosts.Host{
+		Networks:  []string{"1.1.1.1"},
 		PublicKey: hk,
 		Settings: proto.HostSettings{
 			Prices: proto.HostPrices{
@@ -32,6 +33,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	store := newMockStore()
 	am := newMockAccountManager(store)
 	hm := newMockHostManager()
+	host.Usability = hosts.GoodUsability
 	hm.hosts[host.PublicKey] = host // make host scannable
 
 	// prepare account
@@ -64,7 +66,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 
 	// perform the checks once
 	resetBalance()
-	sm.performIntegrityChecksForHost(context.Background(), host, zap.NewNop())
+	sm.performIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 
 	// the lost sector should be marked as lost
 	if len(store.lostSectors[host.PublicKey]) != 1 {
@@ -84,7 +86,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	// checks before a bad sector gets removed
 	for i := uint(1); i < sm.maxFailedIntegrityChecks; i++ {
 		resetBalance()
-		sm.performIntegrityChecksForHost(context.Background(), host, zap.NewNop())
+		sm.performIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	}
 
 	// the failed sector should be marked as failed 5 times

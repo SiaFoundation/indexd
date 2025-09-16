@@ -11,12 +11,12 @@ import (
 	"go.uber.org/zap"
 )
 
-func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, host hosts.Host, logger *zap.Logger) {
-	hostLogger := logger.With(zap.Stringer("hostKey", host.PublicKey))
+func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, hostKey types.PublicKey, logger *zap.Logger) {
+	hostLogger := logger.With(zap.Stringer("hostKey", hostKey))
 
-	const batchSize = 100 // batch size for sector retrieval
+	const batchSize = 1000 // batch size for sector retrieval
 	for interrupt := false; !interrupt; {
-		toCheck, err := m.store.SectorsForIntegrityCheck(ctx, host.PublicKey, batchSize)
+		toCheck, err := m.store.SectorsForIntegrityCheck(ctx, hostKey, batchSize)
 		if err != nil {
 			hostLogger.Error("failed to fetch sectors for integrity check", zap.Error(err))
 			return
@@ -26,7 +26,11 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, host ho
 		interrupt = len(toCheck) < batchSize
 
 		// perform integrity checks
-		results, err := m.verifier.VerifySectors(ctx, host, toCheck)
+		var results []CheckSectorsResult
+		err = m.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+			results, err = m.verifier.VerifySectors(ctx, host, toCheck)
+			return err
+		})
 		if errors.Is(err, context.Canceled) || errors.Is(err, errInsufficientServiceAccountBalance) || errors.Is(err, errHostUnreachable) {
 			interrupt = true
 		}
@@ -57,22 +61,22 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, host ho
 			defer cancel()
 
 			// update lost, failed and successful sectors
-			if err := m.store.MarkSectorsLost(ctx, host.PublicKey, lost); err != nil {
+			if err := m.store.MarkSectorsLost(ctx, hostKey, lost); err != nil {
 				hostLogger.Error("failed to mark sectors as lost", zap.Error(err))
 				return fmt.Errorf("failed to mark sectors as lost: %w", err)
 			}
-			if err := m.store.RecordIntegrityCheck(ctx, false, time.Now().Add(m.failedIntegrityCheckInterval), host.PublicKey, failed); err != nil {
+			if err := m.store.RecordIntegrityCheck(ctx, false, time.Now().Add(m.failedIntegrityCheckInterval), hostKey, failed); err != nil {
 				hostLogger.Error("failed to record integrity check for failed sectors", zap.Error(err))
 				return fmt.Errorf("failed to record integrity check for failed sectors: %w", err)
 			}
-			if err := m.store.RecordIntegrityCheck(ctx, true, time.Now().Add(m.integrityCheckInterval), host.PublicKey, success); err != nil {
+			if err := m.store.RecordIntegrityCheck(ctx, true, time.Now().Add(m.integrityCheckInterval), hostKey, success); err != nil {
 				hostLogger.Error("failed to record integrity check for successful sectors", zap.Error(err))
 				return fmt.Errorf("failed to record integrity check for successful sectors: %w", err)
 			}
 
 			// fetch sector roots for sectors that have now failed the check 5+
 			// times and mark them lost as well
-			err := m.store.MarkFailingSectorsLost(ctx, host.PublicKey, m.maxFailedIntegrityChecks)
+			err := m.store.MarkFailingSectorsLost(ctx, hostKey, m.maxFailedIntegrityChecks)
 			if err != nil {
 				hostLogger.Error("failed to mark failing sectors as lost", zap.Error(err))
 				return fmt.Errorf("failed to mark failing sectors as lost: %w", err)

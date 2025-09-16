@@ -318,13 +318,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 					<-sem
 					wg.Done()
 				}()
-
-				if err := m.hm.WithScannedHost(ctx, host, func(host hosts.Host) error {
-					m.performIntegrityChecksForHost(ctx, host, logger)
-					return nil
-				}); err != nil {
-					logger.With(zap.Stringer("hostKey", hostKey)).Error("failed to perform integrity checks for host", zap.Error(err))
-				}
+				m.performIntegrityChecksForHost(ctx, host, logger)
 			}(host)
 		}
 		wg.Wait()
