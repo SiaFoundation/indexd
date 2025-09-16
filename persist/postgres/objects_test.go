@@ -404,7 +404,7 @@ func BenchmarkSaveObject(b *testing.B) {
 
 		obj.Key = frand.Entropy256()
 		obj.Meta = make([]byte, 1024)
-		frand.Read(obj.Meta[:])
+		frand.Read(obj.Meta)
 
 		return
 	}
