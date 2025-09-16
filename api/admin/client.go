@@ -53,7 +53,7 @@ func (c *Client) DeleteAppConnectKey(ctx context.Context, key string) (err error
 }
 
 // AddAppConnectKey adds a new application connection key.
-func (c *Client) AddAppConnectKey(ctx context.Context, req AddConnectKeyRequest) (key accounts.ConnectKey, err error) {
+func (c *Client) AddAppConnectKey(ctx context.Context, req accounts.AddConnectKeyRequest) (key accounts.ConnectKey, err error) {
 	err = c.c.POST(ctx, "/apps/connect/keys", req, &key)
 	return
 }

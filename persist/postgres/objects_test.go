@@ -257,7 +257,7 @@ func TestSharedObjects(t *testing.T) {
 		s := slabs.SlabPinParams{
 			MinShards:     uint(frand.Intn(255)),
 			EncryptionKey: frand.Entropy256(),
-			Sectors:       make([]slabs.SectorPinParams, 30),
+			Sectors:       make([]slabs.PinnedSector, 30),
 		}
 		for i := range s.Sectors {
 			s.Sectors[i].HostKey = hostKeys[i%len(hostKeys)]
@@ -323,10 +323,10 @@ func TestSharedObjects(t *testing.T) {
 	for _, slab := range expectedSharedObj.Slabs {
 		_, err := store.PinSlab(t.Context(), acc2, time.Time{}, slabs.SlabPinParams{
 			MinShards: slab.MinShards,
-			Sectors: func() []slabs.SectorPinParams {
-				sps := make([]slabs.SectorPinParams, len(slab.Sectors))
+			Sectors: func() []slabs.PinnedSector {
+				sps := make([]slabs.PinnedSector, len(slab.Sectors))
 				for i := range slab.Sectors {
-					sps[i] = slabs.SectorPinParams{
+					sps[i] = slabs.PinnedSector{
 						Root:    slab.Sectors[i].Root,
 						HostKey: slab.Sectors[i].HostKey,
 					}
@@ -370,7 +370,7 @@ func BenchmarkSaveObject(b *testing.B) {
 		s := slabs.SlabPinParams{
 			MinShards:     uint(frand.Intn(255)) + 1,
 			EncryptionKey: frand.Entropy256(),
-			Sectors:       make([]slabs.SectorPinParams, 30),
+			Sectors:       make([]slabs.PinnedSector, 30),
 		}
 		for i := range s.Sectors {
 			s.Sectors[i].HostKey = hostKeys[i%len(hostKeys)]

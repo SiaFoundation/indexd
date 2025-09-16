@@ -86,7 +86,7 @@ func TestMigrateSlab(t *testing.T) {
 	slabID, err := db.PinSlab(context.Background(), proto.Account(a1), time.Time{}, SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     2,
-		Sectors: []SectorPinParams{
+		Sectors: []PinnedSector{
 			{Root: r1, HostKey: h1.PublicKey},
 			{Root: r2, HostKey: h2.PublicKey}, // migrate
 			{Root: r3, HostKey: h3.PublicKey},

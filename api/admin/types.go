@@ -8,13 +8,6 @@ import (
 )
 
 type (
-	// AddConnectKeyRequest is the request body for adding a new application connection key.
-	AddConnectKeyRequest struct {
-		Description   string `json:"description"`
-		MaxPinnedData int64  `json:"maxPinnedData,omitempty"`
-		RemainingUses int    `json:"remainingUses"`
-	}
-
 	// BuildState contains static information about the build.
 	BuildState struct {
 		Version   string    `json:"version"`

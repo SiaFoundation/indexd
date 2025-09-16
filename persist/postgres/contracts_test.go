@@ -485,7 +485,7 @@ func TestPrunableContractRoots(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Now(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     11,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{Root: roots[0], HostKey: hk1},
 			{Root: roots[2], HostKey: hk2},
 		},
@@ -496,7 +496,7 @@ func TestPrunableContractRoots(t *testing.T) {
 	slabID, err := store.PinSlab(context.Background(), account, time.Now(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     11,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{Root: roots[1], HostKey: hk1},
 			{Root: roots[3], HostKey: hk2},
 		},
@@ -1535,11 +1535,11 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
 			hk := hks[hostIdx]
 			root := frand.Entropy256()
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    root,
 				HostKey: hks[hostIdx],
 			})

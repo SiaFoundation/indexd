@@ -112,7 +112,7 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 	slab := slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
 		MinShards:     uint(dataShards),
-		Sectors:       make([]slabs.SectorPinParams, len(shards)),
+		Sectors:       make([]slabs.PinnedSector, len(shards)),
 	}
 
 	var hostsMu sync.Mutex
@@ -159,7 +159,7 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 
 				root, err := uploadShard(ctx, sector, hostKey, s.dialer, timeout) // error can be ignored, hosts will be retried until none are left and the upload fails.
 				if err == nil {
-					slab.Sectors[index] = slabs.SectorPinParams{
+					slab.Sectors[index] = slabs.PinnedSector{
 						HostKey: hostKey,
 						Root:    root,
 					}

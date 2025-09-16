@@ -43,7 +43,7 @@ func TestMigrateSector(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
 				HostKey: hk1,
@@ -167,7 +167,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
 				HostKey: hk,
@@ -312,7 +312,7 @@ func TestSectorsForIntegrityCheck(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
 				HostKey: hk,
@@ -398,7 +398,7 @@ func TestSlabIDs(t *testing.T) {
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
 			MinShards:     10,
-			Sectors: []slabs.SectorPinParams{
+			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
 					HostKey: hk1,
@@ -489,7 +489,7 @@ func TestPinSlabs(t *testing.T) {
 		slab := slabs.SlabPinParams{
 			EncryptionKey: [32]byte{i},
 			MinShards:     10,
-			Sectors: []slabs.SectorPinParams{
+			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
 					HostKey: hk1,
@@ -738,7 +738,7 @@ func TestUnpinSlab(t *testing.T) {
 		params = append(params, slabs.SlabPinParams{
 			EncryptionKey: [32]byte{},
 			MinShards:     2,
-			Sectors: []slabs.SectorPinParams{
+			Sectors: []slabs.PinnedSector{
 				{Root: frand.Entropy256(), HostKey: hk},
 				{Root: frand.Entropy256(), HostKey: hk},
 			},
@@ -864,7 +864,7 @@ func TestPinSectors(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				HostKey: hk,
 				Root:    types.Hash256{1},
@@ -1146,7 +1146,7 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
 				HostKey: hk,
@@ -1223,7 +1223,7 @@ func TestUnpinnedSectors(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				HostKey: hk,
 				Root:    types.Hash256{1},
@@ -1307,9 +1307,9 @@ func BenchmarkSlabs(b *testing.B) {
 
 	// helper to create slabs
 	newSlab := func() slabs.SlabPinParams {
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for i := range hks {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hks[i],
 			})
@@ -1448,9 +1448,9 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hk,
 			})
@@ -1533,9 +1533,9 @@ func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hk,
 			})
@@ -1596,9 +1596,9 @@ func BenchmarkPinSectors(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hk,
 			})
@@ -1693,9 +1693,9 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 
 	// helper to create slabs
 	newSlab := func() slabs.SlabPinParams {
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for i := range hks {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hks[i],
 			})
@@ -1801,10 +1801,10 @@ func BenchmarkUnpinSlab(b *testing.B) {
 
 	// insert slabs
 	slabIDs := make([]slabs.SlabID, nSlabs)
-	sectors := make([]slabs.SectorPinParams, 30)
+	sectors := make([]slabs.PinnedSector, 30)
 	for i := range nSlabs {
 		for j := range 30 {
-			sectors[j] = slabs.SectorPinParams{
+			sectors[j] = slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hk,
 			}
@@ -1862,10 +1862,10 @@ func BenchmarkRecordIntegrityChecks(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
 			root := frand.Entropy256()
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    root,
 				HostKey: hk,
 			})
@@ -1925,10 +1925,10 @@ func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
 			root := frand.Entropy256()
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    root,
 				HostKey: hk,
 			})
@@ -1989,10 +1989,10 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
 			root := frand.Entropy256()
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    root,
 				HostKey: hk,
 			})
@@ -2065,7 +2065,7 @@ func TestMarkSectorsLost(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
 				HostKey: hk1,
@@ -2169,9 +2169,9 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hk,
 			})
@@ -2292,11 +2292,11 @@ func BenchmarkMigrateSector(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
 			hk := hks[hostIdx]
 			root := frand.Entropy256()
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    root,
 				HostKey: hks[hostIdx],
 			})
@@ -2340,11 +2340,11 @@ func (s *Store) pinTestSlab(t testing.TB, account proto.Account, minShards uint,
 	params := slabs.SlabPinParams{
 		EncryptionKey: [32]byte(types.GeneratePrivateKey()),
 		MinShards:     minShards,
-		Sectors:       make([]slabs.SectorPinParams, len(hks)),
+		Sectors:       make([]slabs.PinnedSector, len(hks)),
 	}
 
 	for i, hk := range hks {
-		params.Sectors[i] = slabs.SectorPinParams{
+		params.Sectors[i] = slabs.PinnedSector{
 			Root:    frand.Entropy256(),
 			HostKey: hk,
 		}

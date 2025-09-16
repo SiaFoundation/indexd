@@ -17,7 +17,6 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
-	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/internal/testutils"
@@ -60,7 +59,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	sk := types.GeneratePrivateKey()
 	client := indexer.App(sk)
 
-	key, err := indexer.Admin.AddAppConnectKey(ctx, admin.AddConnectKeyRequest{
+	key, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
 		RemainingUses: 1,
 	})
 	if err != nil {
@@ -144,7 +143,7 @@ func TestApplicationAPI(t *testing.T) {
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
 			MinShards:     1,
-			Sectors: []slabs.SectorPinParams{
+			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
 					HostKey: h1.PublicKey,
@@ -447,7 +446,7 @@ func TestAppConnect(t *testing.T) {
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
 
-	connectKey, err := adminClient.AddAppConnectKey(ctx, admin.AddConnectKeyRequest{
+	connectKey, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
 		Description:   "hello world",
 		RemainingUses: 1,
 	})
@@ -552,7 +551,7 @@ func TestSharedObjects(t *testing.T) {
 		sk := types.GeneratePrivateKey()
 		client := indexer.App(sk)
 
-		key, err := adminClient.AddAppConnectKey(ctx, admin.AddConnectKeyRequest{
+		key, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
 			RemainingUses: 1,
 		})
 		if err != nil {
@@ -585,7 +584,7 @@ func TestSharedObjects(t *testing.T) {
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
 			MinShards:     1,
-			Sectors: []slabs.SectorPinParams{
+			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
 					HostKey: h1.PublicKey,

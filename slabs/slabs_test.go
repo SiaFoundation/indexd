@@ -12,7 +12,7 @@ func TestSlabPinParamsValidate(t *testing.T) {
 	params := SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     1,
-		Sectors: []SectorPinParams{
+		Sectors: []PinnedSector{
 			{
 				Root:    frand.Entropy256(),
 				HostKey: frand.Entropy256(),
@@ -56,7 +56,7 @@ func TestSlabPinParamsDigest(t *testing.T) {
 	params := SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
-		Sectors: []SectorPinParams{
+		Sectors: []PinnedSector{
 			{
 				Root:    frand.Entropy256(),
 				HostKey: frand.Entropy256(),

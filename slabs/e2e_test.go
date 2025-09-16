@@ -57,7 +57,7 @@ func TestMigrations(t *testing.T) {
 	slabID, err := app.PinSlab(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     2,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{Root: roots[0], HostKey: hosts[0].PublicKey},
 			{Root: roots[1], HostKey: hosts[1].PublicKey},
 			{Root: roots[2], HostKey: hosts[2].PublicKey},
