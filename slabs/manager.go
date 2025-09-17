@@ -95,11 +95,15 @@ type (
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		MigrateSector(ctx context.Context, root types.Hash256, hostKey types.PublicKey) (bool, error)
 		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error)
+		UnpinSlab(context.Context, proto.Account, SlabID) error
 		RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error
 		SectorsForIntegrityCheck(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
+		PinnedSlab(ctx context.Context, slabID SlabID) (PinnedSlab, error)
 		Slab(ctx context.Context, slabID SlabID) (Slab, error)
 		Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error)
+		SlabIDs(ctx context.Context, accountID proto.Account, offset, limit int) ([]SlabID, error)
 		UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]SlabID, error)
+		UpdateLastUsed(ctx context.Context, account proto.Account) error
 
 		// Object methods
 		Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error)

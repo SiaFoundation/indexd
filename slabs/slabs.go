@@ -146,10 +146,39 @@ func (s SlabPinParams) Validate() error {
 
 // PinSlab pins the given slab and associates it with the given account.
 func (m *SlabManager) PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error) {
+	if err := m.store.UpdateLastUsed(ctx, account); err != nil {
+		return SlabID{}, fmt.Errorf("failed to update account last used time: %w", err)
+	}
 	return m.store.PinSlab(ctx, account, nextIntegrityCheck, slab)
+}
+
+// UnpinSlab removes the association between the account and the given slab. If
+// this slab was only referenced by the given account, it will also be deleted.
+// The sectors are potentially orphaned and will be removed by a background
+// process.
+func (m *SlabManager) UnpinSlab(ctx context.Context, accountID proto.Account, slabID SlabID) error {
+	if err := m.store.UpdateLastUsed(ctx, accountID); err != nil {
+		return fmt.Errorf("failed to update account last used time: %w", err)
+	}
+	return m.store.UnpinSlab(ctx, accountID, slabID)
 }
 
 // Slabs returns the slabs with the given IDs from the database.
 func (m *SlabManager) Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error) {
 	return m.store.Slabs(ctx, accountID, slabIDs)
+}
+
+// PinnedSlab retrieves a pinned slab from the database by its ID.
+func (m *SlabManager) PinnedSlab(ctx context.Context, accountID proto.Account, slabID SlabID) (PinnedSlab, error) {
+	if err := m.store.UpdateLastUsed(ctx, accountID); err != nil {
+		return PinnedSlab{}, fmt.Errorf("failed to update account last used time: %w", err)
+	}
+	return m.store.PinnedSlab(ctx, slabID)
+}
+
+// SlabIDs returns the IDs of slabs associated with the given account. The IDs
+// are returned in descending order of the `pinned_at` timestamp, which is the
+// time when the slab was pinned to the indexer.
+func (m *SlabManager) SlabIDs(ctx context.Context, accountID proto.Account, offset, limit int) ([]SlabID, error) {
+	return m.store.SlabIDs(ctx, accountID, offset, limit)
 }

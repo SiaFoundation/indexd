@@ -97,6 +97,14 @@ func (s *Store) HasAccount(ctx context.Context, ak types.PublicKey) (bool, error
 	return exists, nil
 }
 
+// UpdateLastUsed updates the time the account was last used to now.
+func (s *Store) UpdateLastUsed(ctx context.Context, account proto.Account) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `UPDATE accounts SET last_used = NOW() WHERE public_key = $1`, sqlPublicKey(account))
+		return err
+	})
+}
+
 // ActiveAccounts returns the number of accounts active since the threshold
 // time.
 func (s *Store) ActiveAccounts(ctx context.Context, threshold time.Time) (count uint64, err error) {
