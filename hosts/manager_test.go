@@ -404,7 +404,7 @@ type blockingScanner struct {
 }
 
 func (bs *blockingScanner) Settings(ctx context.Context, _ types.PublicKey, _ string) (proto4.HostSettings, error) {
-	<-time.After(bs.delay)
+	time.Sleep(bs.delay)
 	return bs.settings, nil
 }
 
