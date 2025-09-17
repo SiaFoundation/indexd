@@ -17,11 +17,6 @@ const (
 	accountFundBatch            = proto.MaxAccountBatchSize // equals max batch size used in replenish RPC
 	accountFundInterval         = time.Hour
 	accountExpBackoffMaxMinutes = 128
-
-	// We multiply the target amount of funds per host by the number of active
-	// accounts up to a certain point.  clampAccounts is the highest number of
-	// active accounts we will use for the purposes of giving hosts extra funding.
-	clampAccounts = 1000
 )
 
 var (
@@ -112,8 +107,6 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 		return fmt.Errorf("failed to get number of active accounts: %w", err)
 	} else if count == 0 {
 		count = 1
-	} else if count > clampAccounts {
-		count = clampAccounts
 	}
 	fundTarget := m.fundTarget.Mul64(count)
 

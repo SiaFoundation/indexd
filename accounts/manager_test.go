@@ -371,7 +371,7 @@ func TestAccountManager(t *testing.T) {
 	s.resetNextFund()
 
 	// add another 1000 accounts
-	for range clampAccounts {
+	for range 1000 {
 		pk := types.GeneratePrivateKey().PublicKey()
 		s.accounts[pk] = Account{
 			AccountKey:     proto.Account(pk),
@@ -386,8 +386,13 @@ func TestAccountManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	activeAccounts, err := s.ActiveAccounts(context.Background(), time.Now().Add(-24*7*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// assert batches were applied correctly
-	target := defaultFundTarget.Mul64(clampAccounts)
+	target := defaultFundTarget.Mul64(activeAccounts)
 	if len(f.calls) != 2 {
 		t.Fatal("expected two calls to fund accounts")
 	} else if len(f.calls[0].accounts) != accountFundBatch {
