@@ -109,7 +109,7 @@ func (v *SectorVerifier) VerifySectors(ctx context.Context, host hosts.Host, roo
 	for _, root := range roots {
 		select {
 		case <-ctx.Done():
-			return results, nil
+			return results, ctx.Err()
 		default:
 		}
 

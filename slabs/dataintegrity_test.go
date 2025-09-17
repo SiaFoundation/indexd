@@ -25,6 +25,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 		Settings: proto.HostSettings{
 			Prices: proto.HostPrices{
 				EgressPrice: types.Siacoins(1).Div64(proto.SectorSize), // 1SC per sector
+				ValidUntil:  time.Now().Add(time.Hour),
 			},
 		},
 	}
