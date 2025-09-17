@@ -417,7 +417,7 @@ func TestScanTimeout(t *testing.T) {
 
 	hostKey := types.PublicKey{1}
 	db := &mockStore{hosts: map[types.PublicKey]Host{
-		hostKey: Host{
+		hostKey: {
 			Addresses: []chain.NetAddress{
 				testMuxAddr("1.1.1.1:1111"),
 			},
