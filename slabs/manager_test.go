@@ -55,6 +55,10 @@ func (s *mockStore) AddServiceAccount(ctx context.Context, account types.PublicK
 	return nil
 }
 
+func (s *mockStore) UpdateLastUsed(ctx context.Context, account proto.Account) error {
+	return nil
+}
+
 func (s *mockStore) Contracts(ctx context.Context, offset, limit int, opts ...contracts.ContractQueryOpt) ([]contracts.Contract, error) {
 	opt := contracts.ContractQueryOpts{}
 	for _, o := range opts {
@@ -197,6 +201,22 @@ func (s *mockStore) PinSlab(ctx context.Context, account proto.Account, nextInte
 		Sectors:       sectors,
 	}
 	return slabID, nil
+}
+
+func (s *mockStore) UnpinSlab(ctx context.Context, account proto.Account, slabID SlabID) error {
+	if _, ok := s.pinnedSlabs[account][slabID]; !ok {
+		return ErrSlabNotFound
+	}
+	delete(s.pinnedSlabs[account], slabID)
+	return nil
+}
+
+func (s *mockStore) PinnedSlab(ctx context.Context, slabID SlabID) (PinnedSlab, error) {
+	return PinnedSlab{}, nil
+}
+
+func (s *mockStore) SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]SlabID, error) {
+	return nil, nil
 }
 
 func (s *mockStore) RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
