@@ -103,7 +103,7 @@ var (
 	ErrNoMoreHosts = errors.New("no more hosts available")
 )
 
-func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][]byte, dataShards uint8, maxInFlight int, timeout time.Duration) (slabs.SlabPinParams, error) {
+func (s *SDK) uploadSlab(ctx context.Context, shards [][]byte, dataShards uint8, maxInFlight int, timeout time.Duration) (slabs.SlabPinParams, error) {
 	if len(shards) == 0 {
 		return slabs.SlabPinParams{}, errors.New("no shards to upload")
 	} else if len(shards) < int(dataShards) {
@@ -112,6 +112,9 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	var encryptionKey [32]byte
+	frand.Read(encryptionKey[:])
 
 	slab := slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
@@ -258,10 +261,9 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 	}
 
 	type work struct {
-		length        int
-		shards        [][]byte
-		encryptionKey [32]byte
-		err           error
+		length int
+		shards [][]byte
+		err    error
 	}
 	workCh := make(chan work, 1)
 	go func() {
@@ -294,8 +296,7 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 				workCh <- work{err: fmt.Errorf("failed to encode slab %d shards: %w", i, err)}
 				return
 			}
-			encryptionKey := types.HashBytes(append(s.appKey[:], slabBuf[:n]...))
-			workCh <- work{length: n, encryptionKey: encryptionKey, shards: shards}
+			workCh <- work{length: n, shards: shards}
 		}
 	}()
 
@@ -307,7 +308,6 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 		case work := <-workCh:
 			err := work.err
 			shards := work.shards
-			shardKey := work.encryptionKey
 
 			if errors.Is(err, io.EOF) {
 				// no more slabs to upload, return the pinned slabs
@@ -315,7 +315,7 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 			} else if work.err != nil {
 				return Object{}, work.err
 			}
-			params, err := s.uploadSlab(ctx, shardKey, shards, uo.dataShards, uo.maxInflight, uo.hostTimeout)
+			params, err := s.uploadSlab(ctx, shards, uo.dataShards, uo.maxInflight, uo.hostTimeout)
 			if err != nil {
 				return Object{}, fmt.Errorf("failed to upload slab %d: %w", i, err)
 			}
