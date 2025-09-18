@@ -867,6 +867,7 @@ func writeResponse(jc jape.Context, resp prometheus.Marshaller) {
 	}
 	switch responseFormat {
 	case "prometheus":
+		jc.Request.Header.Set("Content-Type", "text/plain; version=0.0.4")
 		enc := prometheus.NewEncoder(jc.ResponseWriter)
 		if jc.Check("failed to marshal prometheus response", enc.Append(resp)) != nil {
 			return
