@@ -10,10 +10,7 @@ import (
 	"testing"
 	"time"
 
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/accounts"
-	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
 	"lukechampine.com/frand"
 )
@@ -122,8 +119,37 @@ func TestRoundtrip(t *testing.T) {
 	url, err := s.client.CreateSharedObjectURL(context.Background(), objKey, encryptionKey, time.Now().Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
+	} else if err := s.DownloadSharedObject(context.Background(), buf, url); err != nil {
+		t.Fatal("unexpected error", err)
+	} else if !bytes.Equal(buf.Bytes(), data) {
+		t.Fatal("data mismatch")
 	}
 
+	// delete all data shards
+	sharedObj, _, err := s.client.SharedObject(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(sharedObj.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(sharedObj.Slabs))
+	}
+	slab := sharedObj.Slabs[0]
+	for i, sector := range slab.Sectors {
+		delete(dialer.hostSectors[sector.HostKey], sector.Root)
+		if i == int(slab.MinShards) {
+			break
+		}
+	}
+
+	// ensure download still works
+	buf = bytes.NewBuffer(nil)
+	if err := s.Download(context.Background(), buf, obj); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(buf.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+
+	// ensure download shared object still works
+	buf = bytes.NewBuffer(nil)
 	if err := s.DownloadSharedObject(context.Background(), buf, url); err != nil {
 		t.Fatal("unexpected error", err)
 	} else if !bytes.Equal(buf.Bytes(), data) {
@@ -132,46 +158,6 @@ func TestRoundtrip(t *testing.T) {
 
 	if _, err = s.Upload(context.Background(), bytes.NewReader(data), WithDisableEncryption(), WithXChaCha20Secret(encryptionKey)); err == nil {
 		t.Fatal("expected error when disabling encryption but still passing custom key")
-	}
-}
-
-func TestRoundtripCluster(t *testing.T) {
-	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(6), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
-
-	indexer := cluster.Indexer
-	cluster.ConsensusNode.MineBlocks(t, indexer.WalletAddr(), 10)
-
-	a1 := types.GeneratePrivateKey()
-	err := indexer.Store().AddAccount(context.Background(), a1.PublicKey(), accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_ = testutils.WaitForHosts(t, indexer.App(a1), 6)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	client := indexer.App(a1)
-	sdk_, err := NewSDK(client.BaseURL(), a1)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	data := frand.Bytes(proto.SectorSize)
-	r := bytes.NewReader(data)
-	obj, err := sdk_.Upload(t.Context(), r, WithRedundancy(2, 4))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var buf bytes.Buffer
-	err = sdk_.Download(t.Context(), &buf, obj)
-	if err != nil {
-		t.Fatal(err)
-	} else if !bytes.Equal(buf.Bytes(), data) {
-		t.Fatal("data mismatch")
 	}
 }
 
