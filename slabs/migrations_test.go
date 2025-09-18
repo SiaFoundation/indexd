@@ -358,7 +358,7 @@ func NewTestShards(t *testing.T, dataShards, parityShards int) ([32]byte, [][]by
 	for i := range shards {
 		nonce[0] = byte(i)
 		c, _ := chacha20.NewUnauthenticatedCipher(encryptionKey[:], nonce)
-		c.XORKeyStream(shards[i][:], shards[i][:])
+		c.XORKeyStream(shards[i], shards[i])
 	}
 
 	var roots []types.Hash256
