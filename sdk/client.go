@@ -433,11 +433,6 @@ func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, h
 				break
 			}
 
-			enc, err := reedsolomon.New(int(slab.MinShards), len(slab.Sectors)-int(slab.MinShards))
-			if err != nil {
-				sendErr(fmt.Errorf("failed to create erasure coder: %w", err))
-				return
-			}
 			shards, err := s.downloadSlab(ctx, slab.PinnedSlab, maxInflight, hostTimeout)
 			if err != nil {
 				sendErr(fmt.Errorf("failed to download slab: %w", err))
@@ -449,7 +444,11 @@ func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, h
 				c, _ := chacha20.NewUnauthenticatedCipher(slab.EncryptionKey[:], nonce)
 				c.XORKeyStream(shards[i], shards[i]) // decrypt shard in place
 			}
-			if err := enc.ReconstructData(shards); err != nil {
+
+			if enc, err := reedsolomon.New(int(slab.MinShards), len(slab.Sectors)-int(slab.MinShards)); err != nil {
+				sendErr(fmt.Errorf("failed to create erasure coder: %w", err))
+				return
+			} else if err := enc.ReconstructData(shards); err != nil {
 				sendErr(fmt.Errorf("failed to reconstruct slab data: %w", err))
 				return
 			}
