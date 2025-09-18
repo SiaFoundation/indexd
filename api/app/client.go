@@ -147,6 +147,11 @@ func (c *Client) Hosts(ctx context.Context, opts ...api.URLQueryParameterOption)
 	return
 }
 
+// BaseURL returns the base URL of the indexer application API.
+func (c *Client) BaseURL() string {
+	return c.baseURL
+}
+
 // PinSlab pins a slab to the indexer.
 func (c *Client) PinSlab(ctx context.Context, params slabs.SlabPinParams) (slabID slabs.SlabID, err error) {
 	err = c.signedRequestJSON(ctx, http.MethodPost, "/slabs", params, &slabID)

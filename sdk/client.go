@@ -348,7 +348,6 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 	} else if obj.Key != nil {
 		w = decrypt(obj.Key, w, 0)
 	}
-
 	do := downloadOption{
 		hostTimeout: 4 * time.Second, // ~10 Mbps
 		maxInflight: 10,
@@ -443,15 +442,16 @@ func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, h
 			if err != nil {
 				sendErr(fmt.Errorf("failed to download slab: %w", err))
 				return
-			} else if err := enc.ReconstructData(shards); err != nil {
-				sendErr(fmt.Errorf("failed to reconstruct slab data: %w", err))
-				return
 			}
 			nonce := make([]byte, 24)
 			for i := range shards {
 				nonce[0] = byte(i)
 				c, _ := chacha20.NewUnauthenticatedCipher(slab.EncryptionKey[:], nonce)
 				c.XORKeyStream(shards[i], shards[i]) // decrypt shard in place
+			}
+			if err := enc.ReconstructData(shards); err != nil {
+				sendErr(fmt.Errorf("failed to reconstruct slab data: %w", err))
+				return
 			}
 			workCh <- work{
 				shards: shards[:slab.MinShards],

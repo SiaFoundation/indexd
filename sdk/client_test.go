@@ -10,7 +10,10 @@ import (
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
 	"lukechampine.com/frand"
 )
@@ -132,6 +135,46 @@ func TestRoundtrip(t *testing.T) {
 	}
 }
 
+func TestRoundtripCluster(t *testing.T) {
+	logger := testutils.NewLogger(false)
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(6), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
+
+	indexer := cluster.Indexer
+	cluster.ConsensusNode.MineBlocks(t, indexer.WalletAddr(), 10)
+
+	a1 := types.GeneratePrivateKey()
+	err := indexer.Store().AddAccount(context.Background(), a1.PublicKey(), accounts.AccountMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = testutils.WaitForHosts(t, indexer.App(a1), 6)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	client := indexer.App(a1)
+	sdk_, err := NewSDK(client.BaseURL(), a1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := frand.Bytes(proto.SectorSize)
+	r := bytes.NewReader(data)
+	obj, err := sdk_.Upload(t.Context(), r, WithRedundancy(2, 4))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	err = sdk_.Download(t.Context(), &buf, obj)
+	if err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(buf.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+}
+
 type countWriter struct {
 	count int
 
@@ -249,6 +292,8 @@ func TestDownload(t *testing.T) {
 		err = s.Download(context.Background(), buf, obj, WithDownloadHostTimeout(200*time.Millisecond))
 		if err != nil {
 			t.Fatal(err)
+		} else if !bytes.Equal(buf.Bytes(), data) {
+			t.Fatal("data mismatch")
 		}
 	})
 }
