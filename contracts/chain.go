@@ -206,6 +206,9 @@ func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
 		return fmt.Errorf("failed to get expired contracts for broadcast: %w", err)
 	}
 	for _, fce := range expiredFCEs {
+		log := m.log.With(zap.Stringer("contractID", fce.ID)).
+			With(zap.Uint64("expirationHeight", fce.V2FileContract.ExpirationHeight))
+
 		const contractResolutionTxnWeight = 1000
 		txn := types.V2Transaction{
 			MinerFee: m.wallet.RecommendedFee().Mul64(contractResolutionTxnWeight),
@@ -220,7 +223,7 @@ func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
 		// fund and sign txn
 		basis, toSign, err := m.wallet.FundV2Transaction(&txn, txn.MinerFee, true)
 		if err != nil {
-			m.log.Error("failed to fund contract expiration txn", zap.Error(err))
+			log.Error("failed to fund contract expiration txn", zap.Error(err))
 			continue
 		}
 		m.wallet.SignV2Inputs(&txn, toSign)
@@ -228,7 +231,7 @@ func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
 		// fetch potential parents and basis for broadcasting the txn set
 		basis, txnSet, err := m.chain.V2TransactionSet(basis, txn)
 		if err != nil {
-			m.log.Error("failed to retrieve txn set for broadcasting", zap.Error(err))
+			log.Error("failed to retrieve txn set for broadcasting", zap.Error(err))
 			m.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
 			continue
 		}
@@ -236,7 +239,7 @@ func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
 		// verify txn and broadcast it
 		if err = m.wallet.BroadcastV2TransactionSet(basis, txnSet); err != nil {
 			m.wallet.ReleaseInputs(nil, []types.V2Transaction{txn})
-			m.log.Error("failed to broadcast contract expiration txn", zap.Error(err))
+			log.Error("failed to broadcast contract expiration txn", zap.Error(err))
 			continue
 		}
 	}
