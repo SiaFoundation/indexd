@@ -151,9 +151,6 @@ func (m *SlabManager) PinSlab(ctx context.Context, account proto.Account, nextIn
 // The sectors are potentially orphaned and will be removed by a background
 // process.
 func (m *SlabManager) UnpinSlab(ctx context.Context, account proto.Account, slabID SlabID) error {
-	if err := m.store.UpdateLastUsed(ctx, account); err != nil {
-		return fmt.Errorf("failed to update account last used time: %w", err)
-	}
 	return m.store.UnpinSlab(ctx, account, slabID)
 }
 
