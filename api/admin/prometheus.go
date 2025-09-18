@@ -26,11 +26,7 @@ func (s State) PrometheusMetric() (metrics []prometheus.Metric) {
 		"os":         s.OS,
 		"build_time": s.BuildTime.String(),
 
-		"network":          s.Network,
-		"start_time":       s.StartTime.String(),
-		"explorer_enabled": s.Explorer.Enabled,
-		"explorer_url":     s.Explorer.URL,
-		"synced":           s.Synced,
+		"network": s.Network,
 	}
 	return []prometheus.Metric{
 		{
