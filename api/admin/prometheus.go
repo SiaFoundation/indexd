@@ -2,6 +2,8 @@ package admin
 
 import "go.sia.tech/indexd/internal/prometheus"
 
+// PrometheusMetric implements the prometheus.Marshaller interface for the
+// sector stats response.
 func (s SectorsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	return []prometheus.Metric{
 		{
@@ -15,6 +17,8 @@ func (s SectorsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	}
 }
 
+// PrometheusMetric implements the prometheus.Marshaller interface for the state
+// response.
 func (s State) PrometheusMetric() (metrics []prometheus.Metric) {
 	labels := map[string]any{
 		"version":    s.Version,
@@ -49,6 +53,8 @@ func (s State) PrometheusMetric() (metrics []prometheus.Metric) {
 	}
 }
 
+// PrometheusMetric implements the prometheus.Marshaller interface for the
+// wallet response.
 func (w WalletResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	return []prometheus.Metric{
 		{
