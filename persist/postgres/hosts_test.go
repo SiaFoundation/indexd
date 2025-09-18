@@ -717,13 +717,7 @@ func TestUsableHosts(t *testing.T) {
 	}, siamuxProtocol, true, false, true)
 
 	// assert sorting by distance works
-	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.SortByDistance(&pgtype.Point{
-		P: pgtype.Vec2{
-			X: 50.8503, // Latitude of Brussels
-			Y: 4.3517,  // Longitude of Brussels
-		},
-		Valid: true,
-	})); err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.SortByDistance(50.8503, 4.3517)); err != nil { // Brussels
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 3 {
 		t.Fatal("unexpected", len(hosts))
@@ -736,13 +730,7 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// now try fetching it from Portugal
-	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.SortByDistance(&pgtype.Point{
-		P: pgtype.Vec2{
-			X: 38.7223, // Lisbon
-			Y: -9.1393, // Lisbon
-		},
-		Valid: true,
-	})); err != nil {
+	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.SortByDistance(38.7223, -9.1393)); err != nil { // Lisbon
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 3 {
 		t.Fatal("unexpected", len(hosts))
@@ -1619,7 +1607,7 @@ func BenchmarkUsableHosts(b *testing.B) {
 		b.Run("UsableHosts_WithProximity_"+test.name, func(b *testing.B) {
 			for b.Loop() {
 				point := randomLocation()
-				hosts, err := store.UsableHosts(context.Background(), 0, test.limit, hosts.SortByDistance(&point))
+				hosts, err := store.UsableHosts(context.Background(), 0, test.limit, hosts.SortByDistance(point.P.X, point.P.Y))
 				if err != nil {
 					b.Fatal(err)
 				} else if len(hosts) != test.limit {

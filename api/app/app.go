@@ -13,7 +13,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
@@ -166,23 +165,15 @@ func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 		return
 	}
 
-	var location *pgtype.Point
 	var locationStr string
+	var lat, lng float64
 	if err := jc.DecodeForm("location", &locationStr); err != nil {
 		jc.Error(err, http.StatusBadRequest)
 		return
 	} else if locationStr != "" {
-		var lat, lng float64
 		if _, err := fmt.Sscanf(locationStr, "(%f,%f)", &lat, &lng); err != nil {
 			jc.Error(fmt.Errorf("invalid location %q, must be of the form (lat,lng)", locationStr), http.StatusBadRequest)
 			return
-		}
-		location = &pgtype.Point{
-			P: pgtype.Vec2{
-				X: lat,
-				Y: lng,
-			},
-			Valid: true,
 		}
 	}
 
@@ -193,8 +184,8 @@ func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 	if countryCode != "" {
 		opts = append(opts, hosts.WithCountry(countryCode))
 	}
-	if location != nil {
-		opts = append(opts, hosts.SortByDistance(location))
+	if locationStr != "" {
+		opts = append(opts, hosts.SortByDistance(lat, lng))
 	}
 
 	hosts, err := a.store.UsableHosts(jc.Request.Context(), offset, limit, opts...)

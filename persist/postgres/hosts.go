@@ -632,9 +632,9 @@ WHERE
 	($4::smallint IS NULL OR EXISTS (SELECT 1 FROM host_addresses WHERE host_id = hosts.id AND protocol = $4::smallint)) `
 		args := []any{limit, offset, queryOpts.CountryCode, (*sqlNetworkProtocol)(queryOpts.Protocol)}
 
-		if queryOpts.Location != nil {
+		if len(queryOpts.Location) == 2 {
 			baseQuery += `ORDER BY location <-> point($5, $6) `
-			args = append(args, queryOpts.Location.P.X, queryOpts.Location.P.Y)
+			args = append(args, queryOpts.Location[0], queryOpts.Location[1])
 		}
 		baseQuery += `LIMIT $1 OFFSET $2;`
 

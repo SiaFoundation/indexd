@@ -4,7 +4,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"go.sia.tech/coreutils/chain"
 	"go.uber.org/zap"
 )
@@ -54,7 +53,7 @@ type (
 		Protocol    *chain.Protocol
 
 		// sorting
-		Location *pgtype.Point
+		Location [2]float64
 	}
 )
 
@@ -76,8 +75,8 @@ func WithProtocol(protocol chain.Protocol) UsableHostQueryOpt {
 
 // SortByDistance causes UsableHosts to sort the results by distance to the
 // given location (latitude, longitude).
-func SortByDistance(location *pgtype.Point) UsableHostQueryOpt {
+func SortByDistance(lat, lng float64) UsableHostQueryOpt {
 	return func(opts *UsableHostsQueryOpts) {
-		opts.Location = location
+		opts.Location = [2]float64{lat, lng}
 	}
 }
