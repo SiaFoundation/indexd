@@ -34,12 +34,12 @@ func TestSlab(t *testing.T) {
 	params := slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
-		Sectors:       make([]slabs.SectorPinParams, 0, len(hosts)),
+		Sectors:       make([]slabs.PinnedSector, 0, len(hosts)),
 	}
 	var expectedSectors []slabs.Sector
 	for _, host := range hosts {
 		root := frand.Entropy256()
-		params.Sectors = append(params.Sectors, slabs.SectorPinParams{
+		params.Sectors = append(params.Sectors, slabs.PinnedSector{
 			Root:    root,
 			HostKey: host,
 		})
@@ -120,10 +120,10 @@ func TestPinnedSlab(t *testing.T) {
 	pinned := slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
-		Sectors:       make([]slabs.SectorPinParams, 0, len(hosts)),
+		Sectors:       make([]slabs.PinnedSector, 0, len(hosts)),
 	}
 	for _, host := range hosts {
-		pinned.Sectors = append(pinned.Sectors, slabs.SectorPinParams{
+		pinned.Sectors = append(pinned.Sectors, slabs.PinnedSector{
 			Root:    frand.Entropy256(),
 			HostKey: host,
 		})

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -43,6 +44,7 @@ func TestSectorVerifier(t *testing.T) {
 		Settings: proto.HostSettings{
 			Prices: proto.HostPrices{
 				EgressPrice: oneSC.Div64(proto.SectorSize), // 1SC per sector
+				ValidUntil:  time.Now().Add(time.Hour),
 			},
 		},
 	}
@@ -74,7 +76,7 @@ func TestSectorVerifier(t *testing.T) {
 		if err != nil && expectedErr == nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(got, want) {
+		if (len(want) != 0 || len(got) != 0) && !reflect.DeepEqual(got, want) {
 			t.Fatalf("expected results %v, got %v", want, got)
 		}
 		if !errors.Is(err, expectedErr) {
@@ -126,4 +128,10 @@ func TestSectorVerifier(t *testing.T) {
 	dialer.clients[host.PublicKey].integrity[r1] = nil              // good sector
 	dialer.clients[host.PublicKey].integrity[r2] = context.Canceled // verification interrupted
 	assertResults([]types.Hash256{r1, r2}, []CheckSectorsResult{SectorSuccess}, context.Canceled)
+
+	// case 5: interruption via expired prices
+	updateBalance(types.Siacoins(10))
+	dialer.clients[host.PublicKey].integrity[r1] = nil // good sector
+	host.Settings.Prices.ValidUntil = time.Time{}
+	assertResults([]types.Hash256{r1, r2}, []CheckSectorsResult{}, nil)
 }

@@ -256,24 +256,36 @@ func (m *SlabManager) initServiceAccounts(migrationAccount, integrityAccount typ
 // maintenanceLoop performs any background tasks that the slab manager needs to
 // perform on slabs
 func (m *SlabManager) maintenanceLoop(ctx context.Context) {
-	healthTicker := time.NewTicker(m.healthCheckInterval)
-	defer healthTicker.Stop()
+	var wg sync.WaitGroup
+	launch := func(task func()) {
+		healthTicker := time.NewTicker(m.healthCheckInterval)
 
-	for {
-		select {
-		case <-healthTicker.C:
-		case <-ctx.Done():
-			return
-		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer healthTicker.Stop()
+			for {
+				select {
+				case <-healthTicker.C:
+				case <-ctx.Done():
+					return
+				}
+				task()
+			}
+		}()
+	}
 
+	launch(func() {
 		if err := m.performIntegrityChecks(ctx); err != nil {
 			m.log.Error("failed to perform integrity checks", zap.Error(err))
 		}
-
+	})
+	launch(func() {
 		if err := m.performSlabMigrations(ctx); err != nil {
 			m.log.Error("failed to perform slab migrations", zap.Error(err))
 		}
-	}
+	})
+	wg.Wait()
 }
 
 func newLostSectorsAlert(hks []types.PublicKey) alerts.Alert {
@@ -281,7 +293,7 @@ func newLostSectorsAlert(hks []types.PublicKey) alerts.Alert {
 		ID:       alertLostSectorsID,
 		Severity: alerts.SeverityWarning,
 		Message:  "Host(s) have lost sectors",
-		Data: map[string]interface{}{
+		Data: map[string]any{
 			"hostKeys": hks,
 			"hint":     "Host(s) have reported that it can't serve at least one sector. Consider blocking these hosts through the blocklist feature.",
 		},
@@ -318,13 +330,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 					<-sem
 					wg.Done()
 				}()
-
-				if err := m.hm.WithScannedHost(ctx, host, func(host hosts.Host) error {
-					m.performIntegrityChecksForHost(ctx, host, logger)
-					return nil
-				}); err != nil {
-					logger.With(zap.Stringer("hostKey", hostKey)).Error("failed to perform integrity checks for host", zap.Error(err))
-				}
+				m.performIntegrityChecksForHost(ctx, hostKey, logger)
 			}(host)
 		}
 		wg.Wait()

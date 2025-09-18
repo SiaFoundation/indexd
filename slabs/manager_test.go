@@ -340,6 +340,8 @@ func (m *mockAccountManager) DebitServiceAccount(ctx context.Context, hostKey ty
 
 type mockhostManager struct {
 	hosts map[types.PublicKey]hosts.Host
+
+	refreshPrices bool // reset prices.ValidUntil after each call to WithScannedHost
 }
 
 func newMockHostManager() *mockhostManager {
@@ -355,7 +357,12 @@ func (mock *mockhostManager) WithScannedHost(ctx context.Context, hk types.Publi
 	} else if !host.IsGood() {
 		return hosts.ErrBadHost
 	}
-	return fn(host)
+	err := fn(host)
+	if mock.refreshPrices {
+		host.Settings.Prices.ValidUntil = time.Now().Add(time.Hour)
+		mock.hosts[hk] = host
+	}
+	return err
 }
 
 type mockDialer struct {

@@ -15,8 +15,8 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
-	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/internal/testutils"
@@ -51,32 +51,15 @@ func respondToAppConnection(t *testing.T, responseURL string, connectKey string,
 	}
 }
 
-func TestApplicationAPI(t *testing.T) {
+func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, accounts.ConnectKey) {
+	t.Helper()
 	ctx := t.Context()
-	// create cluster with three hosts
-	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
-	adminClient := indexer.Admin
-	time.Sleep(time.Second)
 
-	// assert hosts are registered
-	hosts, err := adminClient.Hosts(ctx)
-	if err != nil {
-		t.Fatal("failed to get hosts:", err)
-	} else if len(hosts) != 3 {
-		t.Fatal("expected 3 hosts, got", len(hosts))
-	}
-
-	h1 := hosts[0]
-	h2 := hosts[1]
-	h3 := hosts[2]
-
-	// prepare account
 	sk := types.GeneratePrivateKey()
 	client := indexer.App(sk)
 
-	key, err := adminClient.AddAppConnectKey(ctx, admin.AddConnectKeyRequest{
+	key, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
 		RemainingUses: 1,
 	})
 	if err != nil {
@@ -110,6 +93,34 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected app to be authenticated")
 	}
 
+	return sk, key
+}
+
+func TestApplicationAPI(t *testing.T) {
+	ctx := t.Context()
+	// create cluster with three hosts
+	logger := testutils.NewLogger(false)
+	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
+	indexer := cluster.Indexer
+	adminClient := indexer.Admin
+	time.Sleep(time.Second)
+
+	// assert hosts are registered
+	hosts, err := adminClient.Hosts(ctx)
+	if err != nil {
+		t.Fatal("failed to get hosts:", err)
+	} else if len(hosts) != 3 {
+		t.Fatal("expected 3 hosts, got", len(hosts))
+	}
+
+	h1 := hosts[0]
+	h2 := hosts[1]
+	h3 := hosts[2]
+
+	// prepare account
+	sk, key := newAccount(t, cluster)
+	client := indexer.App(sk)
+
 	// check that the key has been used
 	keys, err := adminClient.AppConnectKeys(ctx, 0, 1)
 	switch {
@@ -132,7 +143,7 @@ func TestApplicationAPI(t *testing.T) {
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
 			MinShards:     1,
-			Sectors: []slabs.SectorPinParams{
+			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
 					HostKey: h1.PublicKey,
@@ -392,7 +403,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected object to be not found, got", err)
 	}
 
-	if err := client.DeleteObject(context.Background(), obj1.Key); err != nil && err.Error() != slabs.ErrObjectNotFound.Error() {
+	if err := client.DeleteObject(context.Background(), obj1.Key); err == nil || err.Error() != slabs.ErrObjectNotFound.Error() {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
 	}
 
@@ -401,6 +412,29 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
 		t.Fatalf("expected 0 objects, got %d", len(objs))
+	}
+
+	// We are not allowed to create objects using slabs that we have not pinned
+	// ourselves.
+	// Pin a slab on a second account
+	sk2, _ := newAccount(t, cluster)
+	client2 := indexer.App(sk2)
+
+	slabID, err = client2.PinSlab(context.Background(), params())
+	if err != nil {
+		t.Fatal("failed to pin slab:", err)
+	}
+	// Try to save an object referencing that slab on first account
+	badObj := slabs.Object{
+		Key: types.Hash256(frand.Entropy256()),
+		Slabs: []slabs.SlabSlice{{
+			SlabID: slabID,
+			Offset: 0,
+			Length: 256,
+		}},
+	}
+	if err := client.SaveObject(context.Background(), badObj); err == nil || err.Error() != slabs.ErrObjectUnpinnedSlab.Error() {
+		t.Fatalf("expected %v, got %v", slabs.ErrObjectUnpinnedSlab, err)
 	}
 }
 
@@ -412,7 +446,7 @@ func TestAppConnect(t *testing.T) {
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
 
-	connectKey, err := adminClient.AddAppConnectKey(ctx, admin.AddConnectKeyRequest{
+	connectKey, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
 		Description:   "hello world",
 		RemainingUses: 1,
 	})
@@ -486,10 +520,18 @@ func TestAppConnect(t *testing.T) {
 	} else if account.PinnedData != 0 {
 		t.Fatal("expected 0 pinned data, got", account.PinnedData)
 	}
+
+	appAccount, err := appClient.Account(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(account, appAccount) {
+		t.Fatalf("account mismatch: expected %+v, got %+v", account, appAccount)
+	}
 }
 
 func TestSharedObjects(t *testing.T) {
 	ctx := t.Context()
+
 	// create cluster with three hosts
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
@@ -510,7 +552,7 @@ func TestSharedObjects(t *testing.T) {
 		sk := types.GeneratePrivateKey()
 		client := indexer.App(sk)
 
-		key, err := adminClient.AddAppConnectKey(ctx, admin.AddConnectKeyRequest{
+		key, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
 			RemainingUses: 1,
 		})
 		if err != nil {
@@ -543,7 +585,7 @@ func TestSharedObjects(t *testing.T) {
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
 			MinShards:     1,
-			Sectors: []slabs.SectorPinParams{
+			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
 					HostKey: h1.PublicKey,
@@ -575,38 +617,42 @@ func TestSharedObjects(t *testing.T) {
 		Key: types.Hash256(frand.Entropy256()),
 		Slabs: []slabs.SharedObjectSlab{
 			{
-				ID:            slab1ID,
-				EncryptionKey: slab1Params.EncryptionKey,
-				MinShards:     slab1Params.MinShards,
-				Offset:        0,
-				Length:        256,
-				Sectors: func() []slabs.PinnedSector {
-					so := make([]slabs.PinnedSector, len(slab1Params.Sectors))
-					for i := range slab1Params.Sectors {
-						so[i] = slabs.PinnedSector{
-							Root:    slab1Params.Sectors[i].Root,
-							HostKey: slab1Params.Sectors[i].HostKey,
+				PinnedSlab: slabs.PinnedSlab{
+					ID:            slab1ID,
+					EncryptionKey: slab1Params.EncryptionKey,
+					MinShards:     slab1Params.MinShards,
+					Sectors: func() []slabs.PinnedSector {
+						so := make([]slabs.PinnedSector, len(slab1Params.Sectors))
+						for i := range slab1Params.Sectors {
+							so[i] = slabs.PinnedSector{
+								Root:    slab1Params.Sectors[i].Root,
+								HostKey: slab1Params.Sectors[i].HostKey,
+							}
 						}
-					}
-					return so
-				}(),
+						return so
+					}(),
+				},
+				Offset: 0,
+				Length: 256,
 			},
 			{
-				ID:            slab2ID,
-				EncryptionKey: slab2Params.EncryptionKey,
-				MinShards:     slab2Params.MinShards,
-				Offset:        0,
-				Length:        256,
-				Sectors: func() []slabs.PinnedSector {
-					so := make([]slabs.PinnedSector, len(slab2Params.Sectors))
-					for i := range slab2Params.Sectors {
-						so[i] = slabs.PinnedSector{
-							Root:    slab2Params.Sectors[i].Root,
-							HostKey: slab2Params.Sectors[i].HostKey,
+				PinnedSlab: slabs.PinnedSlab{
+					ID:            slab2ID,
+					EncryptionKey: slab2Params.EncryptionKey,
+					MinShards:     slab2Params.MinShards,
+					Sectors: func() []slabs.PinnedSector {
+						so := make([]slabs.PinnedSector, len(slab2Params.Sectors))
+						for i := range slab2Params.Sectors {
+							so[i] = slabs.PinnedSector{
+								Root:    slab2Params.Sectors[i].Root,
+								HostKey: slab2Params.Sectors[i].HostKey,
+							}
 						}
-					}
-					return so
-				}(),
+						return so
+					}(),
+				},
+				Offset: 0,
+				Length: 256,
 			},
 		},
 		Meta: nil,
@@ -638,35 +684,29 @@ func TestSharedObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// generate a random encryption key
+	var encryptionKey [32]byte
+	frand.Read(encryptionKey[:])
+
 	// create a shared URL for the object
-	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.Key, [32]byte{}, time.Now().Add(time.Second))
+	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.Key, encryptionKey, time.Now().Add(time.Second))
 	if err != nil {
 		t.Fatal("failed to create shared object URL:", err)
 	}
-	t.Log(shareURL)
 
 	// try to retrieve the object with client2
-	sharedObj, err := client2.RetrieveSharedObject(ctx, shareURL)
+	sharedObj, key, err := client2.SharedObject(ctx, shareURL)
 	if err != nil {
 		t.Fatal("failed to retrieve shared object:", err)
-	}
-	buf1, err := json.MarshalIndent(expectedSharedObj, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	buf2, err := json.MarshalIndent(sharedObj, "", "  ")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(buf1, buf2) {
-		t.Log("expected:", string(buf1))
-		t.Log("got:     ", string(buf2))
-		t.Fatal("shared object does not match expected")
+	} else if !bytes.Equal(key[:], encryptionKey[:]) {
+		t.Fatal("encryption key mismatch")
+	} else if !reflect.DeepEqual(expectedSharedObj, sharedObj) {
+		t.Fatal("shared object mismatch")
 	}
 
 	time.Sleep(time.Second * 2)
 	// try to retrieve the object again, should be expired
-	_, err = client1.RetrieveSharedObject(ctx, shareURL)
+	_, _, err = client1.SharedObject(ctx, shareURL)
 	if err == nil {
 		t.Fatal("expected error when creating shared URL with past expiry")
 	}

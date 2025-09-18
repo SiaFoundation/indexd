@@ -423,15 +423,25 @@ func (s *Store) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpir
 				WHERE csm.id = $1
 			`, id)
 		}
-		if updateBatch.Len() > 0 {
-			if err := tx.SendBatch(ctx, updateBatch).Close(); err != nil {
+
+		var totalUnpinned int64
+		res := tx.SendBatch(ctx, updateBatch)
+		for range toPrune {
+			ct, err := res.Exec()
+			if err != nil {
+				res.Close()
 				return fmt.Errorf("failed to update sectors table: %w", err)
 			}
+			totalUnpinned += ct.RowsAffected()
 		}
-		if pruneBatch.Len() > 0 {
-			if err := tx.SendBatch(ctx, pruneBatch).Close(); err != nil {
-				return fmt.Errorf("failed to prune contract_sectors_map: %w", err)
-			}
+		if err := res.Close(); err != nil {
+			return err
+		} else if err := s.incrementPinnedSectors(ctx, tx, -totalUnpinned); err != nil {
+			return fmt.Errorf("failed to update number of pinned sectors: %w", err)
+		}
+
+		if err := tx.SendBatch(ctx, pruneBatch).Close(); err != nil {
+			return fmt.Errorf("failed to prune contract_sectors_map: %w", err)
 		}
 		return nil
 	})

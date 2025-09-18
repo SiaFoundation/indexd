@@ -278,9 +278,15 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 		return fmt.Errorf("%w: blocked=%t, usable=%t, networks=%d", ErrBadHost, host.Blocked, host.Usability.Usable(), len(host.Networks))
 	}
 
-	// optimistically call the function
-	if err := fn(host); err != nil && !errors.Is(err, proto4.ErrPricesExpired) {
-		return err
+	// optimistically call the function if the prices are still valid for a
+	// bit
+	const validPriceBuf = 5 * time.Minute
+	if host.Settings.Prices.ValidUntil.After(time.Now().Add(validPriceBuf)) {
+		if err := fn(host); err != nil && !errors.Is(err, proto4.ErrPricesExpired) {
+			return err
+		} else if err == nil {
+			return nil // 'fn' succeeded so we're done
+		}
 	}
 	logger.Debug("host has outdated prices, rescan")
 

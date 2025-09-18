@@ -773,6 +773,10 @@ components:
           type: integer
           format: int64
           description: Total number of sectors that have been migrated
+        numPinnedSectors:
+          type: integer
+          format: int64
+          description: Number of sectors currently pinned to a contract by this instance
 
     ConnectKey:
       type: object

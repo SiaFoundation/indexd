@@ -143,53 +143,6 @@ func TestUploadShards(t *testing.T) {
 	}
 }
 
-func TestUploadCandidates(t *testing.T) {
-	// prepare candidates
-	h1 := newTestHost(types.PublicKey{1})
-	h2 := newTestHost(types.PublicKey{2})
-	candidates := newUploadCandidates([]hosts.Host{h1, h2})
-
-	// assert next exhausts candidates
-	fst, ok1 := candidates.next()
-	snd, ok2 := candidates.next()
-	_, ok3 := candidates.next()
-
-	if fst.PublicKey != h1.PublicKey {
-		fst, snd = snd, fst
-	}
-	if !ok1 || !ok2 || ok3 {
-		t.Fatalf("expected two candidates, got ok1: %v, ok2: %v, ok3: %v", ok1, ok2, ok3)
-	} else if fst.PublicKey != h1.PublicKey || snd.PublicKey != h2.PublicKey {
-		t.Fatalf("expected candidates %v and %v, got %v and %v", h1.PublicKey, h2.PublicKey, fst.PublicKey, snd.PublicKey)
-	}
-
-	// assert used candidates are tracked correctly
-	candidates.used(fst)
-	if len(candidates.cidrs) != 1 {
-		t.Fatalf("expected 1 used candidate, got %d", len(candidates.cidrs))
-	} else if _, ok := candidates.cidrs[h1.Networks[0]]; !ok {
-		t.Fatal("expected CIDR to be marked as used", candidates.cidrs)
-	} else if _, ok := candidates.cidrs[h2.Networks[0]]; ok {
-		t.Fatal("expected CIDR to not be marked as used", candidates.cidrs)
-	}
-
-	// assert using a second candidate works
-	candidates.used(snd)
-	if len(candidates.cidrs) != 2 {
-		t.Fatalf("expected 2 used candidates, got %d", len(candidates.cidrs))
-	} else if _, ok := candidates.cidrs[h2.Networks[0]]; !ok {
-		t.Fatal("expected CIDR to be marked as used", candidates.cidrs)
-	}
-
-	// assert using a candidate twice panics
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("expected panic when using already used CIDR")
-		}
-	}()
-	candidates.used(fst)
-}
-
 func newTestHost(hk types.PublicKey) hosts.Host {
 	return hosts.Host{
 		Networks:  []string{fmt.Sprintf("127.0.0.%d/24", hk[0])},

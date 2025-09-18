@@ -134,6 +134,24 @@ CREATE INDEX object_slabs_object_id_slab_index_idx ON object_slabs(object_id, sl
 		if err != nil {
 			return fmt.Errorf("failed to add num_migrated_sectors column: %w", err)
 		}
-		return err
+		return nil
+	},
+	// adds the "num_pinned_sectors" column to sectors_stats
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE sectors_stats ADD COLUMN num_pinned_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_pinned_sectors >= 0);`)
+		if err != nil {
+			return fmt.Errorf("failed to add num_pinned_sectors column: %w", err)
+		}
+		_, err = tx.Exec(ctx, `
+			UPDATE sectors_stats
+			SET num_pinned_sectors = (
+				SELECT COUNT(id)
+				FROM sectors
+				WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NOT NULL
+			)`)
+		if err != nil {
+			return fmt.Errorf("failed to initialize num_pinned_sectors: %w", err)
+		}
+		return nil
 	},
 }

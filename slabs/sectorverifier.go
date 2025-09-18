@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -108,13 +109,18 @@ func (v *SectorVerifier) VerifySectors(ctx context.Context, host hosts.Host, roo
 	for _, root := range roots {
 		select {
 		case <-ctx.Done():
-			return results, nil
+			return results, ctx.Err()
 		default:
 		}
 
 		// check our budget before verifying the sector
 		if budget.Cmp(cost) < 0 {
 			return results, errInsufficientServiceAccountBalance
+		}
+
+		// check host prices are still valid
+		if !host.Settings.Prices.ValidUntil.After(time.Now().Add(30 * time.Second)) {
+			return results, nil // interrupt integrity checks to rescan host
 		}
 
 		// verify the sector
