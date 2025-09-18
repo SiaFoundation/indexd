@@ -240,7 +240,8 @@ func (c *HostClient) ReplenishAccounts(ctx context.Context, contractID types.Fil
 			Target:   target,
 			Contract: contract,
 		}
-		res, err := rhp.RPCReplenishAccounts(ctx, c.client, params, c.cm.TipState(), c.signer)
+		var err error
+		res, err = rhp.RPCReplenishAccounts(ctx, c.client, params, c.cm.TipState(), c.signer)
 		if err != nil {
 			return rhp.ContractRevision{}, err
 		}

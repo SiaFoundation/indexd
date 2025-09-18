@@ -6,13 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
 )
 
 var (
@@ -28,51 +26,11 @@ type (
 	}
 )
 
-type uploadCandidates struct {
-	hosts []hosts.Host
-	cidrs map[string]struct{}
-}
-
-func newUploadCandidates(hosts []hosts.Host) uploadCandidates {
-	cloned := slices.Clone(hosts)
-	frand.Shuffle(len(cloned), func(i int, j int) { cloned[i], cloned[j] = cloned[j], cloned[i] })
-	return uploadCandidates{
-		hosts: cloned,
-		cidrs: make(map[string]struct{}),
-	}
-}
-
-func (uc *uploadCandidates) next() (hosts.Host, bool) {
-outer:
-	for len(uc.hosts) > 0 {
-		host := uc.hosts[0]
-		uc.hosts = uc.hosts[1:]
-		for _, cidr := range host.Networks {
-			if _, ok := uc.cidrs[cidr]; ok {
-				continue outer // already used this CIDR
-			}
-		}
-		return host, true
-	}
-	return hosts.Host{}, false
-}
-
-func (uc *uploadCandidates) used(h hosts.Host) {
-	for _, cidr := range h.Networks {
-		_, ok := uc.cidrs[cidr]
-		if ok {
-			panic("CIDR already used: " + cidr) // developer error
-		}
-		uc.cidrs[cidr] = struct{}{}
-	}
-}
-
 // uploadShards uploads the shards to the given hosts. If not all shards were
 // migrated, an error is returned but any finished shards will still be returned
 // and should be tracked in the database. The given shards must not be nil and
-// the given hosts must all be good.
-func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, goodHosts []hosts.Host, logger *zap.Logger) ([]Shard, error) {
-	candidates := newUploadCandidates(goodHosts)
+// the given hosts must all be good and not have overlapping CIDRs.
+func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, uploadCandidates []hosts.Host, logger *zap.Logger) ([]Shard, error) {
 	uploaded := make([]Shard, 0, len(shards))
 
 	if len(slab.Sectors) != len(shards) {
@@ -86,11 +44,12 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 		}
 
 	nextCandidate:
-		host, ok := candidates.next()
-		if !ok {
+		if len(uploadCandidates) == 0 {
 			uploadErr = fmt.Errorf("uploaded %d out of %d shards: %w", len(uploaded), len(shards), errNotEnoughHosts)
 			break
 		}
+		host := uploadCandidates[0]
+		uploadCandidates = uploadCandidates[1:]
 
 		if ctx.Err() != nil {
 			uploadErr = fmt.Errorf("uploaded %d out of %d shards: %w", len(uploaded), len(shards), ctx.Err())
@@ -113,7 +72,6 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 			logger.Debug("failed to debit service account for sector write", zap.Error(err))
 		}
 
-		candidates.used(host)
 		uploaded = append(uploaded, Shard{
 			Root:    root,
 			HostKey: host.PublicKey,

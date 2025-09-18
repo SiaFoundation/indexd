@@ -73,11 +73,11 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 		return fmt.Errorf("failed to fetch slab %s: %w", slabID, err)
 	}
 
-	indices, usableHosts := sectorsToMigrate(slab, allHosts, goodContracts, period, m.disableCIDRChecks)
+	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, goodContracts, period, m.disableCIDRChecks)
 	if len(indices) == 0 {
 		logger.Debug("tried to migrate slab but no indices require migration")
 		return nil
-	} else if len(usableHosts) == 0 {
+	} else if len(uploadCandidates) == 0 {
 		logger.Warn("tried to migrate slab but no hosts are available for migration")
 		return nil
 	}
@@ -113,7 +113,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	}
 
 	// upload the missing shards
-	migratedShards, err := m.uploadShards(ctx, slab, shards, usableHosts, logger)
+	migratedShards, err := m.uploadShards(ctx, slab, shards, uploadCandidates, logger)
 
 	// update the database with the new locations for the migrated shards
 	for _, shard := range migratedShards {
@@ -137,7 +137,9 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 }
 
 // sectorsToMigrate filters the sectors of a slab and returns the indices of the
-// sectors that require migration together with the contracts to use for them.
+// sectors that require migration together with hosts that can be used to
+// migrate bad sectors to. These hosts are guaranteed to not have overlapping
+// CIDRs and are returned in random order.
 func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, disableCIDRChecks bool) ([]int, []hosts.Host) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
@@ -182,38 +184,43 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 		// public key to ensure we don't migrate the bad sector to a used host
 		if disableCIDRChecks {
 			usedCIDRs[sector.HostKey.String()] = struct{}{}
-		} else {
-			for _, network := range hostsMap[*sector.HostKey].Networks {
-				usedCIDRs[network] = struct{}{}
-			}
+			continue
+		}
+
+		for _, network := range hostsMap[*sector.HostKey].Networks {
+			usedCIDRs[network] = struct{}{}
 		}
 	}
 
-	// return all hosts with contracts that are good, not in use and are not
-	// stored on bad hosts
-	var remainingHosts []hosts.Host
-	usedHost := make(map[types.PublicKey]struct{})
+	// return all hosts with contracts that are good, currently not in use and
+	// don't have overlapping CIDRs, if CIDR checks are disabled we only check
+	// against the host key to ensure unique hosts are used
+	var candidates []hosts.Host
+	if disableCIDRChecks {
+		for _, contract := range goodContractMap {
+			if _, used := usedCIDRs[contract.HostKey.String()]; used {
+				continue
+			}
+			usedCIDRs[contract.HostKey.String()] = struct{}{}
+			candidates = append(candidates, hostsMap[contract.HostKey])
+		}
+		return toMigrate, candidates
+	}
+
 LOOP:
 	for _, contract := range goodContractMap {
-		h := hostsMap[contract.HostKey]
-		if disableCIDRChecks {
-			if _, ok := usedCIDRs[contract.HostKey.String()]; ok {
-				// if CIDR checks are disabled, we only check the host key
-				// against the used CIDRs
+		host := hostsMap[contract.HostKey]
+		for _, network := range host.Networks {
+			if _, ok := usedCIDRs[network]; ok {
 				continue LOOP
 			}
-		} else {
-			for _, network := range h.Networks {
-				if _, ok := usedCIDRs[network]; ok {
-					continue LOOP
-				}
-			}
 		}
-		if _, ok := usedHost[contract.HostKey]; ok {
-			continue LOOP
+
+		for _, network := range host.Networks {
+			usedCIDRs[network] = struct{}{}
 		}
-		remainingHosts = append(remainingHosts, h)
-		usedHost[contract.HostKey] = struct{}{}
+		candidates = append(candidates, host)
 	}
-	return toMigrate, remainingHosts
+
+	return toMigrate, candidates
 }

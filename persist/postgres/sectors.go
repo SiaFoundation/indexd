@@ -23,31 +23,44 @@ func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, ro
 	if len(roots) == 0 {
 		return nil
 	}
+
+	sqlRoots := make([]sqlHash256, len(roots))
+	for i, root := range roots {
+		sqlRoots[i] = sqlHash256(root)
+	}
+
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		sqlRoots := make([]sqlHash256, len(roots))
-		for i, root := range roots {
-			sqlRoots[i] = sqlHash256(root)
-		}
-		resp, err := tx.Exec(ctx, `
-			UPDATE sectors
-			SET contract_sectors_map_id = NULL, host_id = NULL
-			WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)
-			AND sector_root = ANY($2)
-		`, sqlPublicKey(hostKey), sqlRoots)
+		var hostID int64
+		err := tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = $1", sqlPublicKey(hostKey)).Scan(&hostID)
 		if err != nil {
-			return err
-		} else if resp.RowsAffected() == 0 {
+			return fmt.Errorf("failed to get host ID: %w", err)
+		}
+
+		rows, err := tx.Query(ctx, `
+			SELECT id, contract_sectors_map_id
+			FROM sectors
+			WHERE host_id = $1 AND sector_root = ANY($2)`, hostID, sqlRoots)
+		if err != nil {
+			return fmt.Errorf("failed to query sectors: %w", err)
+		}
+		defer rows.Close()
+
+		sectorIDs, pinned, _, err := scanSectorIDs(rows)
+		if err != nil {
+			return fmt.Errorf("failed to scan sectors: %w", err)
+		} else if len(sectorIDs) == 0 {
 			return nil
 		}
-		_, err = tx.Exec(ctx, `
-			UPDATE hosts
-			SET lost_sectors = lost_sectors + $1
-			WHERE public_key = $2
-		`, resp.RowsAffected(), sqlPublicKey(hostKey))
-		if err != nil {
+
+		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id = ANY($1)`, sectorIDs); err != nil {
+			return fmt.Errorf("failed to mark sectors as lost: %w", err)
+		} else if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, len(sectorIDs), hostID); err != nil {
 			return fmt.Errorf("failed to increment host's lost sectors: %w", err)
+		} else if err := s.incrementNumPinnedSectors(ctx, tx, -pinned); err != nil {
+			return fmt.Errorf("failed to update pinned sectors: %w", err)
+		} else {
+			return nil
 		}
-		return nil
 	})
 	return err
 }
@@ -116,27 +129,63 @@ func (s *Store) SectorsForIntegrityCheck(ctx context.Context, hostKey types.Publ
 // MarkFailingSectorsLost marks sectors as lost if they have failed the
 // integrity checks >= maxChecks times.
 func (s *Store) MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxChecks uint) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		resp, err := tx.Exec(ctx, `
-			UPDATE sectors
-			SET contract_sectors_map_id = NULL, host_id = NULL
-			WHERE
-				host_id = (SELECT id FROM hosts WHERE public_key = $1)
-				AND consecutive_failed_checks >= $2
-		`, sqlPublicKey(hostKey), maxChecks)
+	const batchSize = 1000
+	for {
+		updated, err := s.markFailingSectorsLostBatch(ctx, hostKey, maxChecks, batchSize)
+		if err != nil {
+			return err
+		} else if updated < batchSize {
+			break
+		}
+	}
+	return nil
+}
+
+// markFailingSectorsLostBatch marks a batch of failing sectors as lost. We have
+// to batch it because we first need to select all sectors to update in order to
+// correctly updated the pinned sectors statistics.
+func (s *Store) markFailingSectorsLostBatch(ctx context.Context, hostKey types.PublicKey, maxChecks, batchSize uint) (int, error) {
+	var totalUpdated int
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		var hostID int64
+		err := tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = $1", sqlPublicKey(hostKey)).Scan(&hostID)
+		if err != nil {
+			return fmt.Errorf("failed to get host ID: %w", err)
+		}
+
+		rows, err := tx.Query(ctx, `
+			SELECT id, contract_sectors_map_id
+			FROM sectors
+			WHERE host_id = $1 AND consecutive_failed_checks >= $2
+			LIMIT $3
+		`, hostID, maxChecks, batchSize)
 		if err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		}
-		_, err = tx.Exec(ctx, `
-			UPDATE hosts
-			SET lost_sectors = lost_sectors + $1
-			WHERE public_key = $2
-		`, resp.RowsAffected(), sqlPublicKey(hostKey))
+		defer rows.Close()
+
+		sectorIDs, pinned, _, err := scanSectorIDs(rows)
 		if err != nil {
-			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
+			return fmt.Errorf("failed to scan sectors: %w", err)
+		} else if len(sectorIDs) == 0 {
+			return nil
 		}
-		return nil
-	})
+
+		totalUpdated = len(sectorIDs)
+		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id = ANY($1)`, sectorIDs); err != nil {
+			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
+		} else if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, totalUpdated, hostID); err != nil {
+			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
+		} else if err := s.incrementNumPinnedSectors(ctx, tx, -pinned); err != nil {
+			return fmt.Errorf("failed to update pinned sectors: %w", err)
+		} else {
+			return nil
+		}
+	}); err != nil {
+		return 0, err
+	}
+
+	return totalUpdated, nil
 }
 
 // PinSlab adds a slab to the database for pinning. The slab is associated with
@@ -448,30 +497,43 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 	}
 
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		resp, err := tx.Exec(ctx, `
-			UPDATE sectors
-			SET (host_id, contract_sectors_map_id) = (result.host_id, result.contract_sectors_map_id)
-			FROM (
-				SELECT hosts.id AS host_id, contracts.id AS contract_sectors_map_id
-				FROM contract_sectors_map
-				INNER JOIN contracts ON contracts.contract_id = contract_sectors_map.contract_id
-				INNER JOIN hosts ON contracts.host_id = hosts.id
-				WHERE contract_sectors_map.contract_id = $1
-			) AS result
-			WHERE sector_root = ANY($2) AND result.contract_sectors_map_id IS NOT NULL
-		`, sqlHash256(contractID), sqlRoots)
+		var hostID, contractMapID int64
+		err := tx.QueryRow(ctx, `
+			SELECT c.host_id, csm.id
+			FROM contract_sectors_map csm
+			INNER JOIN contracts c ON c.contract_id = csm.contract_id
+			WHERE csm.contract_id = $1
+		`, sqlHash256(contractID)).Scan(&hostID, &contractMapID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return contracts.ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to get contract's host: %w", err)
+		}
+
+		rows, err := tx.Query(ctx, `
+			SELECT id, contract_sectors_map_id
+			FROM sectors
+			WHERE sector_root = ANY($1) AND (contract_sectors_map_id IS NULL OR contract_sectors_map_id != $2)`, sqlRoots, contractMapID)
 		if err != nil {
-			return err
-		} else if resp.RowsAffected() == 0 {
-			// if no sectors were updated, check if the contract exists
-			var exists bool
-			if err := tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM contracts WHERE contracts.contract_id = $1)", sqlHash256(contractID)).
-				Scan(&exists); err != nil {
-				return fmt.Errorf("failed to check if contract exists: %w", err)
-			} else if !exists {
-				return contracts.ErrNotFound
+			return fmt.Errorf("failed to query sectors: %w", err)
+		}
+		defer rows.Close()
+
+		sectorIDs, _, unpinned, err := scanSectorIDs(rows)
+		if err != nil {
+			return fmt.Errorf("failed to scan sectors: %w", err)
+		} else if len(sectorIDs) == 0 {
+			return nil
+		}
+
+		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = $1, contract_sectors_map_id = $2 WHERE id = ANY($3)`, hostID, contractMapID, sectorIDs); err != nil {
+			return fmt.Errorf("failed to pin sectors: %w", err)
+		} else if unpinned > 0 {
+			if err := s.incrementNumPinnedSectors(ctx, tx, unpinned); err != nil {
+				return fmt.Errorf("failed to update number of pinned sectors: %w", err)
 			}
 		}
+
 		return nil
 	})
 }
@@ -590,17 +652,55 @@ func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, 
 // ID since a freshly migrated sector isn't pinned yet. To pin a sector
 // 'PinSectors' is used. If the host is not found, e.g. due to being deleted in
 // the meantime, this operation is a no-op.
-func (s *Store) MigrateSector(ctx context.Context, root types.Hash256, hostKey types.PublicKey) (bool, error) {
-	var migrated bool
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		resp, err := tx.Exec(ctx, `
+func (s *Store) MigrateSector(ctx context.Context, root types.Hash256, hostKey types.PublicKey) (migrated bool, err error) {
+	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		var contractMapID sql.NullInt64
+		err := tx.QueryRow(ctx, `
+			SELECT contract_sectors_map_id
+			FROM sectors
+			WHERE sector_root = $1`, sqlHash256(root)).Scan(&contractMapID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil // not migrated
+		}
+
+		res, err := tx.Exec(ctx, `
 			UPDATE sectors
 			SET host_id = hosts.id, contract_sectors_map_id = NULL, consecutive_failed_checks = 0, uploaded_at=NOW()
 			FROM hosts
 			WHERE sector_root = $1 AND hosts.public_key = $2
 		`, sqlHash256(root), sqlPublicKey(hostKey))
-		migrated = resp.RowsAffected() > 0
-		return err
+		if err != nil {
+			return fmt.Errorf("failed to update migrated sector: %w", err)
+		} else if res.RowsAffected() > 0 {
+			migrated = true
+			if contractMapID.Valid {
+				// sector was pinned before, update stats
+				if err := s.incrementNumPinnedSectors(ctx, tx, -1); err != nil {
+					return fmt.Errorf("failed to decrement pinned sectors: %w", err)
+				}
+			}
+		}
+
+		return nil
 	})
-	return migrated, err
+	return
+}
+
+// scanSectorIDs scans sector IDs from the given rows. It also counts how many
+// of the sectors are currently pinned and unpinned.
+func scanSectorIDs(rows *rows) (sectorIDs []int64, pinned, unpinned int64, err error) {
+	for rows.Next() {
+		var sectorID int64
+		var contractMapID sql.NullInt64
+		if err := rows.Scan(&sectorID, &contractMapID); err != nil {
+			return nil, 0, 0, fmt.Errorf("failed to scan sector row: %w", err)
+		} else if contractMapID.Valid {
+			pinned++
+		} else {
+			unpinned++
+		}
+		sectorIDs = append(sectorIDs, sectorID)
+	}
+	err = rows.Err()
+	return
 }

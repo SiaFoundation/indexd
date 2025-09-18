@@ -769,6 +769,10 @@ components:
           type: integer
           format: int64
           description: Number of slabs currently pinned by this instance
+        numPinnedSectors:
+          type: integer
+          format: int64
+          description: Number of sectors currently pinned to a contract by this instance
         numUnpinnableSectors:
           type: integer
           format: int64

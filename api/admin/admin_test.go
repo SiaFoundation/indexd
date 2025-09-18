@@ -49,7 +49,7 @@ func TestAppConnectKeys(t *testing.T) {
 	for i := range 100 {
 		description := fmt.Sprintf("key %d", i)
 		uses := frand.Intn(1000) + 1
-		created, err := adminClient.AddAppConnectKey(context.Background(), admin.AddConnectKeyRequest{
+		created, err := adminClient.AddAppConnectKey(context.Background(), accounts.AddConnectKeyRequest{
 			Description:   description,
 			RemainingUses: uses,
 		})
@@ -813,7 +813,7 @@ func TestSectorStatsAPI(t *testing.T) {
 	slabID, err := indexer.App(account).PinSlab(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{1},
 		MinShards:     1,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{Root: frand.Entropy256(), HostKey: hk1},
 			{Root: frand.Entropy256(), HostKey: hk2},
 			{Root: frand.Entropy256(), HostKey: hk3},
