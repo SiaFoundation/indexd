@@ -1330,7 +1330,7 @@ func TestPinnedSectorsStatistics(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{HostKey: hk, Root: r1},
 			{HostKey: hk, Root: r2},
 			{HostKey: hk, Root: r3},
