@@ -297,7 +297,7 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 		// update number of unpinned sectors
 		if unpinned > 0 {
 			if err := s.incrementUnpinnedSectors(ctx, tx, unpinned); err != nil {
-				return fmt.Errorf("failed to decrement number of unpinned sectors: %w", err)
+				return fmt.Errorf("failed to increment number of unpinned sectors: %w", err)
 			}
 		}
 
