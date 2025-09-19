@@ -65,6 +65,16 @@ func (s *mockStore) PruneHosts(ctx context.Context, lastSuccessfulScanCutoff tim
 }
 
 func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks []string, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	host := s.hosts[hk]
+	if scanSucceeded {
+		host.Settings = hs
+		s.hosts[hk] = host
+	}
 	return nil
 }
 
@@ -385,6 +395,57 @@ func TestResolveHost(t *testing.T) {
 		t.Fatal("unexpected", len(networks))
 	} else if loc != mockLocation {
 		t.Fatalf("expected location %v, got %v", mockLocation, loc)
+	}
+}
+
+type blockingScanner struct {
+	delay    time.Duration
+	settings proto4.HostSettings
+}
+
+func (bs *blockingScanner) Settings(ctx context.Context, _ types.PublicKey, _ string) (proto4.HostSettings, error) {
+	time.Sleep(bs.delay)
+	return bs.settings, nil
+}
+
+func TestScanTimeout(t *testing.T) {
+	r := &mockResolver{
+		ips: map[string][]net.IPAddr{
+			"1.1.1.1": {{IP: net.IPv4(1, 1, 1, 1)}},
+		},
+	}
+
+	hostKey := types.PublicKey{1}
+	db := &mockStore{hosts: map[types.PublicKey]Host{
+		hostKey: {
+			Addresses: []chain.NetAddress{
+				testMuxAddr("1.1.1.1:1111"),
+			},
+		},
+	}}
+
+	// create host manager
+	mgr, err := NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mockLocator{}, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mgr.resolver = r
+	mgr.scanner = &blockingScanner{
+		delay: 500 * time.Millisecond,
+		settings: proto4.HostSettings{
+			Release: "delayedScan",
+		},
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	host, err := mgr.ScanHost(ctx, hostKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if host.Settings.Release != "delayedScan" {
+		t.Fatal("unexpected", host.Settings)
 	}
 }
 

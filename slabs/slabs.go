@@ -54,23 +54,17 @@ type (
 		PinnedAt      time.Time `json:"pinnedAt"`
 	}
 
-	// SectorPinParams describes an uploaded sector to be pinned.
-	SectorPinParams struct {
+	// A PinnedSector is a sector that has been pinned to a host.
+	PinnedSector struct {
 		Root    types.Hash256   `json:"root"`
 		HostKey types.PublicKey `json:"hostKey"`
 	}
 
 	// SlabPinParams is the input to PinSlabs
 	SlabPinParams struct {
-		EncryptionKey [32]byte          `json:"encryptionKey"`
-		MinShards     uint              `json:"minShards"`
-		Sectors       []SectorPinParams `json:"sectors"`
-	}
-
-	// A PinnedSector is a sector that has been pinned to a host.
-	PinnedSector struct {
-		Root    types.Hash256   `json:"root"`
-		HostKey types.PublicKey `json:"hostKey"`
+		EncryptionKey [32]byte       `json:"encryptionKey"`
+		MinShards     uint           `json:"minShards"`
+		Sectors       []PinnedSector `json:"sectors"`
 	}
 
 	// A PinnedSlab is a slab that has been pinned to hosts.

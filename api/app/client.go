@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
@@ -206,6 +207,12 @@ func (c *Client) DeleteObject(ctx context.Context, key types.Hash256) (err error
 	return
 }
 
+// Account retrieves the account of the current user.
+func (c *Client) Account(ctx context.Context) (resp accounts.Account, err error) {
+	err = c.signedRequestJSON(ctx, http.MethodGet, "/account", nil, &resp)
+	return
+}
+
 // CreateSharedObjectURL generates a signed URL for accessing the object with the given
 // key. The URL is valid until the specified validUntil time.
 func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, encryptionKey [32]byte, validUntil time.Time) (string, error) {
@@ -217,37 +224,38 @@ func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash
 	return u.String(), nil
 }
 
-// RetrieveSharedObject retrieves an object using the pre-signed URL.
-func (c *Client) RetrieveSharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, error) {
+// SharedObject retrieves an object using the pre-signed URL.
+func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, *[32]byte, error) {
 	u, err := url.Parse(sharedURL)
 	if err != nil {
-		return slabs.SharedObject{}, fmt.Errorf("failed to parse shared URL: %w", err)
+		return slabs.SharedObject{}, nil, fmt.Errorf("failed to parse shared URL: %w", err)
 	}
-	if !strings.HasPrefix(u.Path, "/objects/") && !strings.HasSuffix(u.Path, "/shared") {
-		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: path must start with /objects/")
+	if !(strings.HasPrefix(u.Path, "/objects/") && strings.HasSuffix(u.Path, "/shared")) {
+		return slabs.SharedObject{}, nil, fmt.Errorf("path must start with '/objects/' and end with '/shared'")
 	}
 	fields := strings.Split(u.Fragment, "=")
 	if len(fields) != 2 || fields[0] != "encryption_key" {
-		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: missing encryption key")
+		return slabs.SharedObject{}, nil, fmt.Errorf("missing encryption key")
 	}
+
 	var encryptionKey [32]byte
 	if n, err := hex.Decode(encryptionKey[:], []byte(fields[1])); err != nil {
-		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: invalid encryption key: %w", err)
+		return slabs.SharedObject{}, nil, fmt.Errorf("invalid encryption key: %w", err)
 	} else if n != 32 {
-		return slabs.SharedObject{}, fmt.Errorf("invalid shared URL: invalid encryption key length: expected 32 bytes, got %d", n)
+		return slabs.SharedObject{}, nil, fmt.Errorf("invalid encryption key length: expected 32 bytes, got %d", n)
 	}
 
 	var obj slabs.SharedObject
 	resp, err := doRequest(ctx, http.MethodGet, u, nil, applicationJSON)
 	if err != nil {
-		return slabs.SharedObject{}, fmt.Errorf("failed to fetch shared object: %w", err)
+		return slabs.SharedObject{}, nil, fmt.Errorf("failed to fetch shared object: %w", err)
 	}
 	defer io.Copy(io.Discard, resp)
 	defer resp.Close()
 
 	dec := json.NewDecoder(resp)
 	err = dec.Decode(&obj)
-	return obj, err
+	return obj, &encryptionKey, err
 }
 
 // RequestAppConnection requests an application connection to the indexer.

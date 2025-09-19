@@ -43,7 +43,7 @@ func TestMigrateSector(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
 				HostKey: hk1,
@@ -86,19 +86,19 @@ func TestMigrateSector(t *testing.T) {
 	}
 
 	// helper to assert sector state
-	assertSector := func(root types.Hash256, expectedHostKey types.PublicKey, expectedContractID types.FileContractID, expectedFailures int) {
+	assertSector := func(root types.Hash256, expectedHostKey types.PublicKey, expectedContractID types.FileContractID, expectedFailures, expectedMigrated int) {
 		t.Helper()
 
 		var hostKey types.PublicKey
 		var contractID types.FileContractID
-		var failures int
+		var migrated, failures int
 		err := store.pool.QueryRow(context.Background(), `
-			SELECT hosts.public_key, contract_sectors_map.contract_id, consecutive_failed_checks
+			SELECT hosts.public_key, contract_sectors_map.contract_id, consecutive_failed_checks, num_migrated
 			FROM sectors
 			INNER JOIN hosts ON sectors.host_id = hosts.id
 			LEFT JOIN contract_sectors_map ON sectors.contract_sectors_map_id = contract_sectors_map.id
 			WHERE sector_root = $1
-		`, sqlHash256(root)).Scan(asNullable((*sqlPublicKey)(&hostKey)), asNullable((*sqlHash256)(&contractID)), &failures)
+		`, sqlHash256(root)).Scan(asNullable((*sqlPublicKey)(&hostKey)), asNullable((*sqlHash256)(&contractID)), &failures, &migrated)
 		if err != nil {
 			t.Fatal(err)
 		} else if hostKey != expectedHostKey {
@@ -107,6 +107,20 @@ func TestMigrateSector(t *testing.T) {
 			t.Fatalf("expected contract ID %v, got %v", expectedContractID, contractID)
 		} else if failures != expectedFailures {
 			t.Fatalf("expected %d consecutive failures, got %d", expectedFailures, failures)
+		} else if migrated != expectedMigrated {
+			t.Fatalf("expected %d migrations, got %d", expectedMigrated, migrated)
+		}
+	}
+
+	assertMigratedSectors := func(expected int64) {
+		t.Helper()
+
+		var got int64
+		err = store.pool.QueryRow(context.Background(), `SELECT num_migrated_sectors FROM sectors_stats`).Scan(&got)
+		if err != nil {
+			t.Fatal(err)
+		} else if got != expected {
+			t.Fatalf("expected %d migrated sectors, got %d", expected, got)
 		}
 	}
 
@@ -129,23 +143,27 @@ func TestMigrateSector(t *testing.T) {
 	}
 
 	// assert initial state
-	assertSector(root1, hk1, fcid1, 1)
-	assertSector(root2, hk1, fcid1, 1)
+	assertSector(root1, hk1, fcid1, 1, 0)
+	assertSector(root2, hk1, fcid1, 1, 0)
+	assertMigratedSectors(0)
 
 	// migrate sector 1 to host 2
 	migrate(root1, hk2, true)
-	assertSector(root1, hk2, types.FileContractID{}, 0)
-	assertSector(root2, hk1, fcid1, 1)
+	assertSector(root1, hk2, types.FileContractID{}, 0, 1)
+	assertSector(root2, hk1, fcid1, 1, 0)
+	assertMigratedSectors(1)
 
 	// migrate sector 2 to unknown host, this should be a no-op
 	migrate(root2, types.PublicKey{10}, false)
-	assertSector(root1, hk2, types.FileContractID{}, 0)
-	assertSector(root2, hk1, fcid1, 1)
+	assertSector(root1, hk2, types.FileContractID{}, 0, 1)
+	assertSector(root2, hk1, fcid1, 1, 0)
+	assertMigratedSectors(1)
 
 	// migrate sector 2 to host 2
 	migrate(root2, hk2, true)
-	assertSector(root1, hk2, types.FileContractID{}, 0)
-	assertSector(root2, hk2, types.FileContractID{}, 0)
+	assertSector(root1, hk2, types.FileContractID{}, 0, 1)
+	assertSector(root2, hk2, types.FileContractID{}, 0, 1)
+	assertMigratedSectors(2)
 }
 
 func TestRecordIntegrityCheck(t *testing.T) {
@@ -167,7 +185,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
 				HostKey: hk,
@@ -312,7 +330,7 @@ func TestSectorsForIntegrityCheck(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
 				HostKey: hk,
@@ -398,7 +416,7 @@ func TestSlabIDs(t *testing.T) {
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
 			MinShards:     10,
-			Sectors: []slabs.SectorPinParams{
+			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
 					HostKey: hk1,
@@ -489,7 +507,7 @@ func TestPinSlabs(t *testing.T) {
 		slab := slabs.SlabPinParams{
 			EncryptionKey: [32]byte{i},
 			MinShards:     10,
-			Sectors: []slabs.SectorPinParams{
+			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
 					HostKey: hk1,
@@ -738,7 +756,7 @@ func TestUnpinSlab(t *testing.T) {
 		params = append(params, slabs.SlabPinParams{
 			EncryptionKey: [32]byte{},
 			MinShards:     2,
-			Sectors: []slabs.SectorPinParams{
+			Sectors: []slabs.PinnedSector{
 				{Root: frand.Entropy256(), HostKey: hk},
 				{Root: frand.Entropy256(), HostKey: hk},
 			},
@@ -864,7 +882,7 @@ func TestPinSectors(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				HostKey: hk,
 				Root:    types.Hash256{1},
@@ -1102,6 +1120,18 @@ func TestUnhealthySlabs(t *testing.T) {
 	resetLastRepairAttempt(oneHourAgo)
 	assertUnhealthySlabs(0, 10, now)
 
+	// recalculate sectors_stats
+	_, err = store.pool.Exec(context.Background(), `
+		UPDATE sectors_stats
+		SET num_pinned_sectors = (
+			SELECT COUNT(id)
+			FROM sectors
+			WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NOT NULL
+		)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// prune expired contract
 	err = store.PruneContractSectorsMap(context.Background(), 0)
 	if err != nil {
@@ -1146,7 +1176,7 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
 				HostKey: hk,
@@ -1223,7 +1253,7 @@ func TestUnpinnedSectors(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				HostKey: hk,
 				Root:    types.Hash256{1},
@@ -1288,6 +1318,113 @@ func TestUnpinnedSectors(t *testing.T) {
 	}
 }
 
+func TestPinnedSectorsStatistics(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	assertPinnedSectors := func(expected int64) {
+		t.Helper()
+
+		got, err := store.SectorStats(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		} else if got.NumPinnedSectors != expected {
+			t.Fatalf("expected %d pinned sectors, got %d", expected, got.NumPinnedSectors)
+		}
+	}
+
+	// create host with account
+	account := proto.Account{1}
+	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
+		t.Fatal("failed to add account:", err)
+	}
+	hk := store.addTestHost(t)
+
+	r1 := types.Hash256{1}
+	r2 := types.Hash256{2}
+	r3 := types.Hash256{3}
+	r4 := types.Hash256{4}
+
+	// create 4 sectors
+	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     10,
+		Sectors: []slabs.PinnedSector{
+			{HostKey: hk, Root: r1},
+			{HostKey: hk, Root: r2},
+			{HostKey: hk, Root: r3},
+			{HostKey: hk, Root: r4},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertPinnedSectors(0)
+
+	// add contract and pin all sectors
+	fcid := store.addTestContract(t, hk)
+	if err := store.PinSectors(t.Context(), fcid, []types.Hash256{r1, r2, r3, r4}); err != nil {
+		t.Fatal(err)
+	}
+	assertPinnedSectors(4)
+
+	// create another host and migrate the fourth sector
+	other := store.addTestHost(t)
+	if _, err := store.MigrateSector(t.Context(), r4, other); err != nil {
+		t.Fatal(err)
+	}
+	assertPinnedSectors(3)
+
+	// migrate it again and assert pinned sectors doesn't change
+	other = store.addTestHost(t)
+	if _, err := store.MigrateSector(t.Context(), r4, other); err != nil {
+		t.Fatal(err)
+	}
+	assertPinnedSectors(3)
+
+	// mark fourth sector as lost - shouldn't change the number of pinned sectors
+	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r4}); err != nil {
+		t.Fatal(err)
+	}
+	assertPinnedSectors(3)
+
+	// mark third sector as lost
+	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r3}); err != nil {
+		t.Fatal(err)
+	}
+	assertPinnedSectors(2)
+
+	// manually manipulate the second and third sector to have consecutive_failed_checks exceeding the threshold
+	if _, err := store.pool.Exec(t.Context(), "UPDATE sectors SET consecutive_failed_checks = 10 WHERE sector_root IN ($1, $2)", sqlHash256(r2), sqlHash256(r3)); err != nil {
+		t.Fatal(err)
+	}
+
+	// mark failing sectors as lost - should update the number of pinned sectors
+	if err := store.MarkFailingSectorsLost(t.Context(), hk, 10); err != nil {
+		t.Fatal(err)
+	}
+	assertPinnedSectors(1)
+
+	// mark first sector as lost - should update the number of pinned sectors
+	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r1}); err != nil {
+		t.Fatal(err)
+	}
+	assertPinnedSectors(0)
+
+	// assert marking all of them lost doesn't go negative
+	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r1, r2, r3, r4}); err != nil {
+		t.Fatal(err)
+	}
+	assertPinnedSectors(0)
+
+	// assert pinning them twice doesn't double the count
+	if err := store.PinSectors(t.Context(), fcid, []types.Hash256{r1, r2, r3, r4}); err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(t.Context(), fcid, []types.Hash256{r1, r2, r3, r4}); err != nil {
+		t.Fatal(err)
+	}
+	assertPinnedSectors(4)
+}
+
 // BenchmarkSlabs benchmarks Slabs and PinSlabs in various batch sizes. The
 // results are expressed in time per operation as well as equivalent
 // upload/download throughput.
@@ -1307,9 +1444,9 @@ func BenchmarkSlabs(b *testing.B) {
 
 	// helper to create slabs
 	newSlab := func() slabs.SlabPinParams {
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for i := range hks {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hks[i],
 			})
@@ -1448,9 +1585,9 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hk,
 			})
@@ -1533,9 +1670,9 @@ func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hk,
 			})
@@ -1596,9 +1733,9 @@ func BenchmarkPinSectors(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hk,
 			})
@@ -1693,9 +1830,9 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 
 	// helper to create slabs
 	newSlab := func() slabs.SlabPinParams {
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for i := range hks {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hks[i],
 			})
@@ -1801,10 +1938,10 @@ func BenchmarkUnpinSlab(b *testing.B) {
 
 	// insert slabs
 	slabIDs := make([]slabs.SlabID, nSlabs)
-	sectors := make([]slabs.SectorPinParams, 30)
+	sectors := make([]slabs.PinnedSector, 30)
 	for i := range nSlabs {
 		for j := range 30 {
-			sectors[j] = slabs.SectorPinParams{
+			sectors[j] = slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hk,
 			}
@@ -1862,10 +1999,10 @@ func BenchmarkRecordIntegrityChecks(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
 			root := frand.Entropy256()
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    root,
 				HostKey: hk,
 			})
@@ -1925,10 +2062,10 @@ func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
 			root := frand.Entropy256()
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    root,
 				HostKey: hk,
 			})
@@ -1989,10 +2126,10 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
 			root := frand.Entropy256()
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    root,
 				HostKey: hk,
 			})
@@ -2065,7 +2202,7 @@ func TestMarkSectorsLost(t *testing.T) {
 	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
-		Sectors: []slabs.SectorPinParams{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
 				HostKey: hk1,
@@ -2169,9 +2306,9 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    frand.Entropy256(),
 				HostKey: hk,
 			})
@@ -2194,6 +2331,18 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 			SET contract_sectors_map_id = 1, host_id = 1
 			WHERE contract_sectors_map_id IS NULL AND host_id IS NULL
 		`)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		// recalculate sectors_stats
+		_, err = store.pool.Exec(context.Background(), `
+		UPDATE sectors_stats
+		SET num_pinned_sectors = (
+			SELECT COUNT(id)
+			FROM sectors
+			WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NOT NULL
+		)`)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -2292,11 +2441,11 @@ func BenchmarkMigrateSector(b *testing.B) {
 	for remainingSectors := nSectors; remainingSectors > 0; {
 		batchSize := min(remainingSectors, 10000)
 		remainingSectors -= batchSize
-		var sectors []slabs.SectorPinParams
+		var sectors []slabs.PinnedSector
 		for range batchSize {
 			hk := hks[hostIdx]
 			root := frand.Entropy256()
-			sectors = append(sectors, slabs.SectorPinParams{
+			sectors = append(sectors, slabs.PinnedSector{
 				Root:    root,
 				HostKey: hks[hostIdx],
 			})
@@ -2340,11 +2489,11 @@ func (s *Store) pinTestSlab(t testing.TB, account proto.Account, minShards uint,
 	params := slabs.SlabPinParams{
 		EncryptionKey: [32]byte(types.GeneratePrivateKey()),
 		MinShards:     minShards,
-		Sectors:       make([]slabs.SectorPinParams, len(hks)),
+		Sectors:       make([]slabs.PinnedSector, len(hks)),
 	}
 
 	for i, hk := range hks {
-		params.Sectors[i] = slabs.SectorPinParams{
+		params.Sectors[i] = slabs.PinnedSector{
 			Root:    frand.Entropy256(),
 			HostKey: hk,
 		}

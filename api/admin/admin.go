@@ -318,7 +318,7 @@ func (a *admin) handleGETAppConnectKeys(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTAppConnectKeys(jc jape.Context) {
-	var req AddConnectKeyRequest
+	var req accounts.AddConnectKeyRequest
 	if jc.Decode(&req) != nil {
 		return
 	}

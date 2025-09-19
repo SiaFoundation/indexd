@@ -257,7 +257,7 @@ func TestSharedObjects(t *testing.T) {
 		s := slabs.SlabPinParams{
 			MinShards:     uint(frand.Intn(255)),
 			EncryptionKey: frand.Entropy256(),
-			Sectors:       make([]slabs.SectorPinParams, 30),
+			Sectors:       make([]slabs.PinnedSector, 30),
 		}
 		for i := range s.Sectors {
 			s.Sectors[i].HostKey = hostKeys[i%len(hostKeys)]
@@ -274,12 +274,14 @@ func TestSharedObjects(t *testing.T) {
 		}
 
 		so := slabs.SharedObjectSlab{
-			ID:            slabID,
-			EncryptionKey: s.EncryptionKey,
-			MinShards:     s.MinShards,
-			Sectors:       make([]slabs.PinnedSector, len(s.Sectors)),
-			Offset:        uint32(frand.Uint64n(math.MaxInt32)),
-			Length:        uint32(frand.Uint64n(math.MaxInt32)),
+			PinnedSlab: slabs.PinnedSlab{
+				ID:            slabID,
+				EncryptionKey: s.EncryptionKey,
+				MinShards:     s.MinShards,
+				Sectors:       make([]slabs.PinnedSector, len(s.Sectors)),
+			},
+			Offset: uint32(frand.Uint64n(math.MaxInt32)),
+			Length: uint32(frand.Uint64n(math.MaxInt32)),
 		}
 		for i := range s.Sectors {
 			so.Sectors[i] = slabs.PinnedSector{
@@ -323,10 +325,10 @@ func TestSharedObjects(t *testing.T) {
 	for _, slab := range expectedSharedObj.Slabs {
 		_, err := store.PinSlab(t.Context(), acc2, time.Time{}, slabs.SlabPinParams{
 			MinShards: slab.MinShards,
-			Sectors: func() []slabs.SectorPinParams {
-				sps := make([]slabs.SectorPinParams, len(slab.Sectors))
+			Sectors: func() []slabs.PinnedSector {
+				sps := make([]slabs.PinnedSector, len(slab.Sectors))
 				for i := range slab.Sectors {
-					sps[i] = slabs.SectorPinParams{
+					sps[i] = slabs.PinnedSector{
 						Root:    slab.Sectors[i].Root,
 						HostKey: slab.Sectors[i].HostKey,
 					}
@@ -337,6 +339,91 @@ func TestSharedObjects(t *testing.T) {
 		})
 		if err != nil {
 			t.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkSaveObject(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	// create 2 accounts
+	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
+	for _, acc := range []proto4.Account{acc1, acc2} {
+		err := store.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{})
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	hostKeys := make([]types.PublicKey, 30)
+	for i := range hostKeys {
+		hostKeys[i] = types.GeneratePrivateKey().PublicKey()
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.AddHostAnnouncement(hostKeys[i], chain.V2HostAnnouncement{{Protocol: quic.Protocol, Address: "[::]:4848"}}, time.Now())
+		}); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	var objs []slabs.Object
+	pinObject := func(b *testing.B) (obj slabs.Object) {
+		b.Helper()
+
+		s := slabs.SlabPinParams{
+			MinShards:     uint(frand.Intn(255)) + 1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       make([]slabs.PinnedSector, 30),
+		}
+		for i := range s.Sectors {
+			s.Sectors[i].HostKey = hostKeys[i%len(hostKeys)]
+			s.Sectors[i].Root = frand.Entropy256()
+		}
+
+		slabID, err := store.PinSlab(b.Context(), acc1, time.Time{}, s)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		id, err := s.Digest()
+		if err != nil {
+			b.Fatal(err)
+		} else if id != slabID {
+			b.Fatalf("expected slab ID %v, got %v", id, slabID)
+		}
+
+		obj.Slabs = append(obj.Slabs, slabs.SlabSlice{
+			SlabID: id,
+			Offset: 0,
+			Length: 256,
+		})
+		for i := 0; i < 20 && i < len(objs); i++ {
+			obj.Slabs = append(obj.Slabs, slabs.SlabSlice{
+				SlabID: objs[i].Slabs[0].SlabID,
+				Offset: 0,
+				Length: 256,
+			})
+		}
+
+		obj.Key = frand.Entropy256()
+		obj.Meta = make([]byte, 1024)
+		frand.Read(obj.Meta)
+
+		return
+	}
+
+	for i := 0; i < 10000; i++ {
+		obj := pinObject(b)
+		if err := store.SaveObject(b.Context(), acc1, obj); err != nil {
+			b.Fatal(err)
+		}
+		objs = append(objs, obj)
+	}
+
+	obj := pinObject(b)
+	for b.Loop() {
+		obj.Key = frand.Entropy256()
+		if err := store.SaveObject(b.Context(), acc1, obj); err != nil {
+			b.Fatal(err)
 		}
 	}
 }

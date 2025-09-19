@@ -8,13 +8,6 @@ import (
 )
 
 type (
-	// AddConnectKeyRequest is the request body for adding a new application connection key.
-	AddConnectKeyRequest struct {
-		Description   string `json:"description"`
-		MaxPinnedData int64  `json:"maxPinnedData,omitempty"`
-		RemainingUses int    `json:"remainingUses"`
-	}
-
 	// BuildState contains static information about the build.
 	BuildState struct {
 		Version   string    `json:"version"`
@@ -37,7 +30,9 @@ type (
 
 	// SectorsStatsResponse is the response body for the [GET] /stats/sectors
 	SectorsStatsResponse struct {
-		NumSlabs int64 `json:"numSlabs"`
+		NumSlabs           int64 `json:"numSlabs"`
+		NumMigratedSectors int64 `json:"numMigratedSectors"`
+		NumPinnedSectors   int64 `json:"numPinnedSectors"`
 	}
 
 	// State is the response body for the [GET] /state endpoint.

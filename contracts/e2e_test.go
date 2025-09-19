@@ -58,7 +58,7 @@ func TestContractPruning(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		params.Sectors = append(params.Sectors, slabs.SectorPinParams{Root: proto.SectorRoot(&sector), HostKey: host.PublicKey})
+		params.Sectors = append(params.Sectors, slabs.PinnedSector{Root: proto.SectorRoot(&sector), HostKey: host.PublicKey})
 	}
 
 	// pin the slab
@@ -161,7 +161,7 @@ func TestSectorPinning(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		params.Sectors = append(params.Sectors, slabs.SectorPinParams{Root: proto.SectorRoot(&sector), HostKey: host.PublicKey})
+		params.Sectors = append(params.Sectors, slabs.PinnedSector{Root: proto.SectorRoot(&sector), HostKey: host.PublicKey})
 	}
 
 	// pin the slab

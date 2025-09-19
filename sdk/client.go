@@ -41,11 +41,15 @@ type (
 
 	// An AppClient is an interface for the application API of the indexer.
 	AppClient interface {
+		Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error)
+
+		CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, encryptionKey [32]byte, validUntil time.Time) (string, error)
+		SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, *[32]byte, error)
+		SaveObject(ctx context.Context, obj slabs.Object) (err error)
+
+		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
 		PinSlab(context.Context, slabs.SlabPinParams) (slabs.SlabID, error)
 		UnpinSlab(context.Context, slabs.SlabID) error
-
-		Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error)
-		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
 	}
 
 	// A HostDialer is an interface for writing and reading sectors to/from hosts.
@@ -112,7 +116,7 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 	slab := slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
 		MinShards:     uint(dataShards),
-		Sectors:       make([]slabs.SectorPinParams, len(shards)),
+		Sectors:       make([]slabs.PinnedSector, len(shards)),
 	}
 
 	var hostsMu sync.Mutex
@@ -159,7 +163,7 @@ func (s *SDK) uploadSlab(ctx context.Context, encryptionKey [32]byte, shards [][
 
 				root, err := uploadShard(ctx, sector, hostKey, s.dialer, timeout) // error can be ignored, hosts will be retried until none are left and the upload fails.
 				if err == nil {
-					slab.Sectors[index] = slabs.SectorPinParams{
+					slab.Sectors[index] = slabs.PinnedSector{
 						HostKey: hostKey,
 						Root:    root,
 					}
@@ -338,13 +342,11 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 // Download downloads object metadata
 //
 // TODO: support seeks
-func (s *SDK) Download(ctx context.Context, w io.Writer, metadata Object, opts ...DownloadOption) error {
-	if len(metadata.Slabs) == 0 {
+func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...DownloadOption) error {
+	if len(obj.Slabs) == 0 {
 		return errors.New("no slabs to download")
-	}
-
-	if metadata.Key != nil {
-		w = decrypt(metadata.Key, w, 0)
+	} else if obj.Key != nil {
+		w = decrypt(obj.Key, w, 0)
 	}
 
 	do := downloadOption{
@@ -355,38 +357,106 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata Object, opts .
 		opt(&do)
 	}
 
+	var curr int
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SharedObjectSlab, error) {
+		if curr >= len(obj.Slabs) {
+			return slabs.SharedObjectSlab{}, nil
+		}
+		slab := obj.Slabs[curr]
+		curr++
+
+		pinned, err := s.client.Slab(ctx, slab.ID)
+		if err != nil {
+			return slabs.SharedObjectSlab{}, fmt.Errorf("failed to get slab %d metadata: %w", curr, err)
+		}
+		return slabs.SharedObjectSlab{
+			PinnedSlab: pinned,
+			Offset:     slab.Offset,
+			Length:     slab.Length,
+		}, nil
+	})
+}
+
+// DownloadSharedObject downloads a shared object from a shared URL
+func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, url string, opts ...DownloadOption) error {
+	obj, encryptionKey, err := s.client.SharedObject(ctx, url)
+	if err != nil {
+		return err
+	} else if len(obj.Slabs) == 0 {
+		return errors.New("no slabs to download")
+	} else {
+		w = decrypt(encryptionKey, w, 0)
+	}
+
+	do := downloadOption{
+		hostTimeout: 4 * time.Second, // ~10 Mbps
+		maxInflight: 10,
+	}
+	for _, opt := range opts {
+		opt(&do)
+	}
+
+	var curr int
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SharedObjectSlab, error) {
+		if curr >= len(obj.Slabs) {
+			return slabs.SharedObjectSlab{}, nil
+		}
+		slab := obj.Slabs[curr]
+		curr++
+		return slab, nil
+	})
+}
+
+type slabIterFn func() (slabs.SharedObjectSlab, error)
+
+func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, next slabIterFn) error {
 	type work struct {
 		shards [][]byte
+		length int
 		err    error
 	}
 	workCh := make(chan work, 1)
+
+	sendErr := func(err error) {
+		select {
+		case workCh <- work{err: err}:
+		case <-ctx.Done():
+		}
+	}
+
 	go func() {
-		for i, meta := range metadata.Slabs {
-			pinned, err := s.client.Slab(ctx, meta.ID)
+		for {
+			slab, err := next()
 			if err != nil {
-				workCh <- work{err: fmt.Errorf("failed to get slab %d metadata: %w", i, err)}
+				sendErr(fmt.Errorf("failed to get next slab: %w", err))
+				return
+			} else if slab.Length == 0 {
+				break
+			}
+
+			enc, err := reedsolomon.New(int(slab.MinShards), len(slab.Sectors)-int(slab.MinShards))
+			if err != nil {
+				sendErr(fmt.Errorf("failed to create erasure coder: %w", err))
 				return
 			}
-			enc, err := reedsolomon.New(int(pinned.MinShards), len(pinned.Sectors)-int(pinned.MinShards))
+			shards, err := s.downloadSlab(ctx, slab.PinnedSlab, maxInflight, hostTimeout)
 			if err != nil {
-				workCh <- work{err: fmt.Errorf("failed to create erasure coder for slab %d: %w", i, err)}
-				return
-			}
-			shards, err := s.downloadSlab(ctx, pinned, do.maxInflight, do.hostTimeout)
-			if err != nil {
-				workCh <- work{err: fmt.Errorf("failed to download slab %d: %w", i, err)}
+				sendErr(fmt.Errorf("failed to download slab: %w", err))
 				return
 			} else if err := enc.ReconstructData(shards); err != nil {
-				workCh <- work{err: fmt.Errorf("failed to reconstruct slab %d data: %w", i, err)}
+				sendErr(fmt.Errorf("failed to reconstruct slab data: %w", err))
 				return
 			}
 			nonce := make([]byte, 24)
 			for i := range shards {
 				nonce[0] = byte(i)
-				c, _ := chacha20.NewUnauthenticatedCipher(pinned.EncryptionKey[:], nonce)
+				c, _ := chacha20.NewUnauthenticatedCipher(slab.EncryptionKey[:], nonce)
 				c.XORKeyStream(shards[i], shards[i]) // decrypt shard in place
 			}
-			workCh <- work{shards: shards[:pinned.MinShards]}
+			workCh <- work{
+				shards: shards[:slab.MinShards],
+				length: int(slab.Length),
+			}
 		}
 		workCh <- work{err: io.EOF}
 	}()
@@ -407,8 +477,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, metadata Object, opts .
 			} else if err != nil {
 				return err
 			}
-			slab := metadata.Slabs[i]
-			if err := stripedJoin(bw, work.shards, int(slab.Length)); err != nil {
+			if err := stripedJoin(bw, work.shards, work.length); err != nil {
 				return fmt.Errorf("failed to write slab %d: %w", i, err)
 			}
 		}

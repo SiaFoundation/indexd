@@ -14,12 +14,9 @@ type (
 	// A SharedObjectSlab represents a slab of a shared object.
 	// It contains all the metadata needed to retrieve a slab.
 	SharedObjectSlab struct {
-		ID            SlabID         `json:"id"`
-		EncryptionKey [32]byte       `json:"encryptionKey"`
-		MinShards     uint           `json:"minShards"`
-		Sectors       []PinnedSector `json:"sectors"`
-		Offset        uint32         `json:"offset"`
-		Length        uint32         `json:"length"`
+		PinnedSlab
+		Offset uint32 `json:"offset"`
+		Length uint32 `json:"length"`
 	}
 
 	// SharedObject provides all the metadata necessary to retrieve
@@ -73,6 +70,9 @@ var (
 	ErrObjectMinimumSlabs = errors.New("object must have at least one slab")
 	// ErrObjectMetadataLimitExceeded is returned when the provided metadata is too large.
 	ErrObjectMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", metadataLimit)
+	// ErrObjectUnpinnedSlab is returned when an user attempts to save an
+	// object containing a slab that is not pinned to their account.
+	ErrObjectUnpinnedSlab = errors.New("object contains unpinned slab")
 )
 
 // Object retrieves the object with the given key for the given account.

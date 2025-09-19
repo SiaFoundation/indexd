@@ -100,8 +100,10 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 		} else if err != nil {
 			contractLog.Debug("failed to replenish accounts", zap.Error(err))
 			continue
-		} else if res.Revision.RenterOutput.Value.Cmp(target) < 0 {
-			contractLog.Debug("contract was drained by replenish RPC")
+		} else if res.Revision.RemainingAllowance().Cmp(target) < 0 {
+			contractLog.Debug("contract was drained by replenish RPC",
+				zap.Stringer("remainingAllowance", res.Revision.RemainingAllowance()),
+				zap.Stringer("target", target))
 			drained++
 		}
 

@@ -16,8 +16,25 @@ tags:
     description: List, save, retrieve and delete objects
   - name: slabs
     description: List, pin, unpin and retrieve pinned slab details
+  - name: accounts
+    description: Retrieve current account
 
 paths:
+  /account:
+    get:
+      tags:
+        - accounts
+      summary: Retrieve details of current authenticated account including used storage and remaining storage
+      responses:
+        "200":
+          description: Details of the account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "404":
+          description: Account not found
+
   /hosts:
     get:
       tags:
@@ -619,6 +636,8 @@ components:
       $ref: "./components.yml#/components/schemas/Hash256"
     HostInfo:
       $ref: "./components.yml#/components/schemas/HostInfo"
+    Account:
+      $ref: "./components.yml#/components/schemas/Account"
     Object:
       $ref: "./components.yml#/components/schemas/Object"
     PublicKey:
