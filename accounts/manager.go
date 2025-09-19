@@ -20,8 +20,7 @@ const (
 )
 
 var (
-	// defaultFundTarget is the target amount of funds per host per active
-	// account.
+	// defaultFundTarget is the target amount of funds per account per host.
 	defaultFundTarget = types.Siacoins(1)
 )
 
