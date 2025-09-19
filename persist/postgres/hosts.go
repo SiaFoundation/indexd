@@ -461,8 +461,8 @@ SET
 	last_successful_scan = NOW(),
 	next_scan = $3,
 
-	country_code = $4,
-	location = $5,
+	country_code = CASE WHEN $4 <> '' THEN $4 ELSE country_code END,
+	location = CASE WHEN $4 <> '' THEN $5 ELSE location END,
 
 	settings_protocol_version = $6,
 	settings_release = $7,
