@@ -311,8 +311,8 @@ func TestSlabPruning(t *testing.T) {
 
 func BenchmarkPruneSlabs(b *testing.B) {
 	const (
-		numAccounts       = 50_000
-		objectsPerAccount = 10
+		numAccounts       = 1000
+		objectsPerAccount = 500
 		slabsPerObject    = 3
 	)
 
