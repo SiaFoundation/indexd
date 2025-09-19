@@ -769,6 +769,10 @@ components:
           type: integer
           format: int64
           description: Number of slabs currently pinned by this instance
+        numMigratedSectors:
+          type: integer
+          format: int64
+          description: Total number of sectors that have been migrated
         numPinnedSectors:
           type: integer
           format: int64

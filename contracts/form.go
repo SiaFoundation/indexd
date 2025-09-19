@@ -200,7 +200,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			return false
 		} else if usedBy, used := hasCidrConflict(host); used && !force {
 			// host should be on a unique cidr unless 'full'
-			log.Debug("host is not usable cidr is already in use", zap.Stringer("usedBy", usedBy))
+			if host.PublicKey != usedBy {
+				log.Debug("host is not usable cidr is already in use", zap.Stringer("usedBy", usedBy))
+			}
 			return false
 		} else if host.Settings.RemainingStorage < minRemainingStorage {
 			// host should at least have 10GB of storage left
