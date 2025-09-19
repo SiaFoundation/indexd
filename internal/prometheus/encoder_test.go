@@ -30,7 +30,7 @@ func TestEncode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := string(b.Bytes())
+	got := b.String()
 	const expected = `test{label="10"} 1.5`
 	if got != expected {
 		t.Fatalf("prometheus marshaling: expected %s, got %s", expected, got)
@@ -53,7 +53,7 @@ func TestEncodeSlice(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got := string(b.Bytes())
+	got := b.String()
 	const expected = `test{label="10"} 1.5
 test{label="10"} 1.4`
 	if got != expected {
