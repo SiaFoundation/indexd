@@ -370,12 +370,12 @@ RETURNING slab_id`, accountID, args)
 	}
 
 	// get all of the slabs that are not pinned by another account
-	var notPinned []int64
+	var toDelete []int64
 	for _, sID := range sIDs {
 		if _, ok := seen[sID]; ok {
 			continue
 		}
-		notPinned = append(notPinned, sID)
+		toDelete = append(toDelete, sID)
 	}
 
 	// prune the slab and its sectors
@@ -390,14 +390,14 @@ RETURNING slab_id`, accountID, args)
 						WHERE ss2.sector_id = ss.sector_id AND ss2.slab_id <> ANY($1)
 					)
 				)
-				DELETE FROM sectors WHERE id IN (SELECT sector_id FROM candidate_sectors);`, notPinned)
-	batch.Queue(`DELETE FROM slabs WHERE id = ANY($1)`, notPinned)
+				DELETE FROM sectors WHERE id IN (SELECT sector_id FROM candidate_sectors);`, toDelete)
+	batch.Queue(`DELETE FROM slabs WHERE id = ANY($1)`, toDelete)
 	if err := tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
 		return fmt.Errorf("failed to prune slab: %w", err)
 	}
 
 	// update slab stats
-	if err := s.incrementNumSlabs(ctx, tx, -int64(len(notPinned))); err != nil {
+	if err := s.incrementNumSlabs(ctx, tx, -int64(len(toDelete))); err != nil {
 		return fmt.Errorf("failed to decrement number of slabs: %w", err)
 	}
 
