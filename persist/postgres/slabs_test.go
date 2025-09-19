@@ -330,17 +330,20 @@ func BenchmarkPruneSlabs(b *testing.B) {
 			var encryptionKey [32]byte
 			frand.Read(encryptionKey[:])
 
-			slabDigest := sqlHash256(frand.Entropy256())
 			objectKey := sqlHash256(frand.Entropy256())
-
-			slabID++
-			batch.Queue(`INSERT INTO slabs(digest, encryption_key, min_shards) VALUES ($1, $2, 1);`, slabDigest, sqlHash256(encryptionKey))
-			batch.Queue(`INSERT INTO account_slabs(account_id, slab_id) VALUES ($1, $2)`, accountID, slabID)
-
 			if j%2 == 0 {
 				objectID++
 				batch.Queue(`INSERT INTO objects(object_key, account_id) VALUES ($1, $2)`, objectKey, accountID)
-				batch.Queue(`INSERT INTO object_slabs(object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, 0, 0, 0)`, objectID, slabDigest)
+			}
+			for k := range 3 {
+				slabID++
+				slabDigest := sqlHash256(frand.Entropy256())
+
+				batch.Queue(`INSERT INTO slabs(digest, encryption_key, min_shards) VALUES ($1, $2, 1);`, slabDigest, sqlHash256(encryptionKey))
+				batch.Queue(`INSERT INTO account_slabs(account_id, slab_id) VALUES ($1, $2)`, accountID, slabID)
+				if j%2 == 0 {
+					batch.Queue(`INSERT INTO object_slabs(object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, $3, 0, 0)`, objectID, slabDigest, k)
+				}
 			}
 		}
 	}
