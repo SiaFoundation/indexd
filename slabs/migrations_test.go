@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
 
@@ -72,7 +73,7 @@ func TestMigrateSlab(t *testing.T) {
 	db.contracts[h4.PublicKey] = c4
 
 	// prepare shards
-	shards, roots := newTestShards(t, 2, 2)
+	encryptionKey, shards, roots := NewTestShards(t, 2, 2)
 	r1 := roots[0]
 	r2 := roots[1]
 	r3 := roots[2]
@@ -84,7 +85,7 @@ func TestMigrateSlab(t *testing.T) {
 
 	// pin a slab
 	slabID, err := db.PinSlab(context.Background(), proto.Account(a1), time.Time{}, SlabPinParams{
-		EncryptionKey: [32]byte{},
+		EncryptionKey: encryptionKey,
 		MinShards:     2,
 		Sectors: []PinnedSector{
 			{Root: r1, HostKey: h1.PublicKey},
@@ -329,7 +330,9 @@ func newTestContract(hk types.PublicKey) contracts.Contract {
 	}
 }
 
-func newTestShards(t *testing.T, dataShards, parityShards int) ([][]byte, []types.Hash256) {
+// NewTestShards returns a new set of test shards along with their encryption
+// key and roots.
+func NewTestShards(t *testing.T, dataShards, parityShards int) ([32]byte, [][]byte, []types.Hash256) {
 	enc, err := reedsolomon.New(dataShards, parityShards)
 	if err != nil {
 		t.Fatal(err)
@@ -349,12 +352,21 @@ func newTestShards(t *testing.T, dataShards, parityShards int) ([][]byte, []type
 		t.Fatalf("failed to encode shards: %v", err)
 	}
 
+	var encryptionKey [32]byte
+	frand.Read(encryptionKey[:])
+	nonce := make([]byte, 24)
+	for i := range shards {
+		nonce[0] = byte(i)
+		c, _ := chacha20.NewUnauthenticatedCipher(encryptionKey[:], nonce)
+		c.XORKeyStream(shards[i], shards[i])
+	}
+
 	var roots []types.Hash256
 	for _, shard := range shards {
 		roots = append(roots, proto.SectorRoot((*[proto.SectorSize]byte)(shard)))
 	}
 
-	return shards, roots
+	return encryptionKey, shards, roots
 }
 
 func stripedSplit(data []byte, dataShards [][]byte) {

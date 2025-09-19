@@ -317,7 +317,8 @@ CREATE TABLE sectors_stats (
     num_slabs BIGINT NOT NULL DEFAULT 0 CHECK (num_slabs >= 0), -- total number of slabs
     num_migrated_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_migrated_sectors >= 0), -- total number of migrated sectors
     num_pinned_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_pinned_sectors >= 0), -- total number of pinned sectors
-    num_unpinnable_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinnable_sectors >= 0) -- total number of unpinnable sectors
+    num_unpinnable_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinnable_sectors >= 0), -- total number of unpinnable sectors
+    num_unpinned_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinned_sectors >= 0) -- total number of unpinned sectors
 );
 
 -- quick lookup of sectors that failed the integrity checks too many times

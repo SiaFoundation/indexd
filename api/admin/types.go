@@ -34,6 +34,7 @@ type (
 		NumMigratedSectors   int64 `json:"numMigratedSectors"`
 		NumPinnedSectors     int64 `json:"numPinnedSectors"`
 		NumUnpinnableSectors int64 `json:"numUnpinnableSectors"`
+		NumUnpinnedSectors   int64 `json:"numUnpinnedSectors"`
 	}
 
 	// State is the response body for the [GET] /state endpoint.
