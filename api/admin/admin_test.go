@@ -772,6 +772,27 @@ func TestWalletAPI(t *testing.T) {
 	}
 }
 
+func TestContractsStatsAPI(t *testing.T) {
+	// create cluster with three hosts
+	logger := newTestLogger(false)
+	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
+	indexer := cluster.Indexer
+	adminClient := indexer.Admin
+
+	var stats admin.ContractsStatsResponse
+	for range 5 {
+		time.Sleep(time.Second)
+
+		stats, err := adminClient.StatsContracts(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		} else if stats.Contracts != 0 {
+			return // done
+		}
+	}
+	t.Fatalf("expected some contracts, got %d", stats.Contracts)
+}
+
 func TestSectorStatsAPI(t *testing.T) {
 	// create cluster with three hosts
 	logger := newTestLogger(false)

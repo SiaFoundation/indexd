@@ -41,9 +41,9 @@ func (s *Store) ContractsStats(ctx context.Context) (resp admin.ContractsStatsRe
        		)
 			SELECT
 				COUNT(*),       -- all contracts
-				SUM(good::int), -- good contracts
-				SUM(capacity),  -- total capacity
-				SUM(size)      -- total size
+				COALESCE(SUM(good::int), 0), -- good contracts
+				COALESCE(SUM(capacity), 0),  -- total capacity
+				COALESCE(SUM(size), 0)      -- total size
 			FROM contracts
 			CROSS JOIN globals
 			WHERE
