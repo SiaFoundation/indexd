@@ -1,6 +1,10 @@
 package admin
 
-import "go.sia.tech/indexd/internal/prometheus"
+import (
+	"time"
+
+	"go.sia.tech/indexd/internal/prometheus"
+)
 
 // PrometheusMetric implements the prometheus.Marshaller interface for the
 // sector stats response.
@@ -44,7 +48,7 @@ func (s State) PrometheusMetric() (metrics []prometheus.Metric) {
 		},
 		{
 			Name:  "indexd_runtime",
-			Value: float64(s.StartTime.UnixMilli()),
+			Value: float64(time.Since(s.StartTime).Milliseconds()),
 		},
 	}
 }
