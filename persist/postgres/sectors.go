@@ -405,9 +405,8 @@ RETURNING slab_id`, accountID, args)
 }
 
 // UnpinSlab removes the association between the account and the given slab. If
-// this slab was only referenced by the given account, it will also be deleted.
-// The sectors are potentially orphaned and will be removed by a background
-// process.
+// this slab was only owned by the given account, it will also be deleted.  The
+// sectors of the slab will also be removed in that case.
 func (s *Store) UnpinSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		id, err := accountID(ctx, tx, account)
