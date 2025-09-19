@@ -61,6 +61,7 @@ loop:
 			}()
 
 			if err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+				hostLog = hostLog.With(zap.Stringer("protocolVersion", host.Settings.ProtocolVersion))
 				return cm.performContractPruningOnHost(ctx, host, hostLog)
 			}); err != nil {
 				hostLog.Debug("failed to prune contracts", zap.Error(err))

@@ -659,21 +659,25 @@ func (s *Store) MigrateSector(ctx context.Context, root types.Hash256, hostKey t
 			return nil // not migrated
 		}
 
-		res, err := tx.Exec(ctx, `
+		resp, err := tx.Exec(ctx, `
 			UPDATE sectors
-			SET host_id = hosts.id, contract_sectors_map_id = NULL, consecutive_failed_checks = 0, uploaded_at=NOW()
+			SET host_id = hosts.id, contract_sectors_map_id = NULL, consecutive_failed_checks = 0, num_migrated = num_migrated + 1, uploaded_at=NOW()
 			FROM hosts
 			WHERE sector_root = $1 AND hosts.public_key = $2
 		`, sqlHash256(root), sqlPublicKey(hostKey))
 		if err != nil {
-			return fmt.Errorf("failed to update migrated sector: %w", err)
-		} else if res.RowsAffected() > 0 {
-			migrated = true
-			if contractMapID.Valid {
-				// sector was pinned before, update stats
-				if err := s.incrementPinnedSectors(ctx, tx, -1); err != nil {
-					return fmt.Errorf("failed to decrement pinned sectors: %w", err)
-				}
+			return fmt.Errorf("failed to migrate sector: %w", err)
+		} else if resp.RowsAffected() == 0 {
+			return nil
+		}
+
+		migrated = true
+		if err := s.incrementNumMigratedSectors(ctx, tx); err != nil {
+			return fmt.Errorf("failed to increment number of migrated sectors: %w", err)
+		} else if contractMapID.Valid {
+			// sector was pinned before, update stats
+			if err := s.incrementPinnedSectors(ctx, tx, -1); err != nil {
+				return fmt.Errorf("failed to decrement pinned sectors: %w", err)
 			}
 		}
 
