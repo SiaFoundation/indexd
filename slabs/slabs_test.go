@@ -49,6 +49,12 @@ func TestSlabPinParamsValidate(t *testing.T) {
 	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "minimum redundancy of 3x is not met") {
 		t.Fatal("unexpected", err)
 	}
+
+	// assert exceeding max total shards is illegal
+	params.Sectors = make([]PinnedSector, MaxTotalShards+1)
+	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "exceeds maximum") {
+		t.Fatal("unexpected", err)
+	}
 }
 
 // TestSlabPinParamsDigest is a unit test for the SlabPinParams.Digest method.
