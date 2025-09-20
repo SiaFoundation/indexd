@@ -438,6 +438,8 @@ func (s *Store) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpir
 			return err
 		} else if err := s.incrementPinnedSectors(ctx, tx, -totalUnpinned); err != nil {
 			return fmt.Errorf("failed to update number of pinned sectors: %w", err)
+		} else if err := s.incrementUnpinnedSectors(ctx, tx, totalUnpinned); err != nil {
+			return fmt.Errorf("failed to update number of unpinned sectors: %w", err)
 		}
 
 		if err := tx.SendBatch(ctx, pruneBatch).Close(); err != nil {

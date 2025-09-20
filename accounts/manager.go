@@ -145,7 +145,6 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 		}
 	}
 
-	log.Debug("funding successful")
 	return nil
 }
 

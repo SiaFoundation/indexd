@@ -6,13 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/klauspost/reedsolomon"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
-	"lukechampine.com/frand"
 )
 
 func TestMigrations(t *testing.T) {
@@ -41,7 +39,7 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// upload sectors to hosts
-	shards, roots := newTestShards(t, 2, 4)
+	encryptionKey, shards, roots := slabs.NewTestShards(t, 2, 4)
 	for i := range shards {
 		client := indexer.HostClient(t, hosts[i].PublicKey)
 		hs, err := client.Settings(context.Background())
@@ -55,7 +53,7 @@ func TestMigrations(t *testing.T) {
 
 	// pin the slab
 	slabID, err := app.PinSlab(context.Background(), slabs.SlabPinParams{
-		EncryptionKey: frand.Entropy256(),
+		EncryptionKey: encryptionKey,
 		MinShards:     2,
 		Sectors: []slabs.PinnedSector{
 			{Root: roots[0], HostKey: hosts[0].PublicKey},
@@ -96,42 +94,5 @@ func TestMigrations(t *testing.T) {
 		t.Fatalf("expected 6 pinned sectors, got %d", len(pinned.Sectors))
 	} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != hosts[6].PublicKey {
 		t.Fatalf("expected sector %s on host %s, got %s on host %s", roots[0], hosts[6].PublicKey, pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
-	}
-}
-
-func newTestShards(t *testing.T, dataShards, parityShards int) ([][]byte, []types.Hash256) {
-	enc, err := reedsolomon.New(dataShards, parityShards)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	shards := make([][]byte, dataShards+parityShards)
-	for i := range shards {
-		shards[i] = make([]byte, proto.SectorSize)
-	}
-
-	buf := make([]byte, proto.SectorSize*dataShards)
-	frand.Read(buf)
-
-	stripedSplit(buf, shards[:dataShards])
-	err = enc.Encode(shards)
-	if err != nil {
-		t.Fatalf("failed to encode shards: %v", err)
-	}
-
-	var roots []types.Hash256
-	for _, shard := range shards {
-		roots = append(roots, proto.SectorRoot((*[proto.SectorSize]byte)(shard)))
-	}
-
-	return shards, roots
-}
-
-func stripedSplit(data []byte, dataShards [][]byte) {
-	buf := bytes.NewBuffer(data)
-	for off := 0; buf.Len() > 0; off += proto.LeafSize {
-		for _, shard := range dataShards {
-			copy(shard[off:], buf.Next(proto.LeafSize))
-		}
 	}
 }

@@ -86,19 +86,19 @@ func TestMigrateSector(t *testing.T) {
 	}
 
 	// helper to assert sector state
-	assertSector := func(root types.Hash256, expectedHostKey types.PublicKey, expectedContractID types.FileContractID, expectedFailures int) {
+	assertSector := func(root types.Hash256, expectedHostKey types.PublicKey, expectedContractID types.FileContractID, expectedFailures, expectedMigrated int) {
 		t.Helper()
 
 		var hostKey types.PublicKey
 		var contractID types.FileContractID
-		var failures int
+		var migrated, failures int
 		err := store.pool.QueryRow(context.Background(), `
-			SELECT hosts.public_key, contract_sectors_map.contract_id, consecutive_failed_checks
+			SELECT hosts.public_key, contract_sectors_map.contract_id, consecutive_failed_checks, num_migrated
 			FROM sectors
 			INNER JOIN hosts ON sectors.host_id = hosts.id
 			LEFT JOIN contract_sectors_map ON sectors.contract_sectors_map_id = contract_sectors_map.id
 			WHERE sector_root = $1
-		`, sqlHash256(root)).Scan(asNullable((*sqlPublicKey)(&hostKey)), asNullable((*sqlHash256)(&contractID)), &failures)
+		`, sqlHash256(root)).Scan(asNullable((*sqlPublicKey)(&hostKey)), asNullable((*sqlHash256)(&contractID)), &failures, &migrated)
 		if err != nil {
 			t.Fatal(err)
 		} else if hostKey != expectedHostKey {
@@ -107,6 +107,20 @@ func TestMigrateSector(t *testing.T) {
 			t.Fatalf("expected contract ID %v, got %v", expectedContractID, contractID)
 		} else if failures != expectedFailures {
 			t.Fatalf("expected %d consecutive failures, got %d", expectedFailures, failures)
+		} else if migrated != expectedMigrated {
+			t.Fatalf("expected %d migrations, got %d", expectedMigrated, migrated)
+		}
+	}
+
+	assertMigratedSectors := func(expected int64) {
+		t.Helper()
+
+		var got int64
+		err = store.pool.QueryRow(context.Background(), `SELECT num_migrated_sectors FROM sectors_stats`).Scan(&got)
+		if err != nil {
+			t.Fatal(err)
+		} else if got != expected {
+			t.Fatalf("expected %d migrated sectors, got %d", expected, got)
 		}
 	}
 
@@ -129,23 +143,27 @@ func TestMigrateSector(t *testing.T) {
 	}
 
 	// assert initial state
-	assertSector(root1, hk1, fcid1, 1)
-	assertSector(root2, hk1, fcid1, 1)
+	assertSector(root1, hk1, fcid1, 1, 0)
+	assertSector(root2, hk1, fcid1, 1, 0)
+	assertMigratedSectors(0)
 
 	// migrate sector 1 to host 2
 	migrate(root1, hk2, true)
-	assertSector(root1, hk2, types.FileContractID{}, 0)
-	assertSector(root2, hk1, fcid1, 1)
+	assertSector(root1, hk2, types.FileContractID{}, 0, 1)
+	assertSector(root2, hk1, fcid1, 1, 0)
+	assertMigratedSectors(1)
 
 	// migrate sector 2 to unknown host, this should be a no-op
 	migrate(root2, types.PublicKey{10}, false)
-	assertSector(root1, hk2, types.FileContractID{}, 0)
-	assertSector(root2, hk1, fcid1, 1)
+	assertSector(root1, hk2, types.FileContractID{}, 0, 1)
+	assertSector(root2, hk1, fcid1, 1, 0)
+	assertMigratedSectors(1)
 
 	// migrate sector 2 to host 2
 	migrate(root2, hk2, true)
-	assertSector(root1, hk2, types.FileContractID{}, 0)
-	assertSector(root2, hk2, types.FileContractID{}, 0)
+	assertSector(root1, hk2, types.FileContractID{}, 0, 1)
+	assertSector(root2, hk2, types.FileContractID{}, 0, 1)
+	assertMigratedSectors(2)
 }
 
 func TestRecordIntegrityCheck(t *testing.T) {
@@ -507,6 +525,17 @@ func TestPinSlabs(t *testing.T) {
 		return slabID, slab
 	}
 
+	assertUnpinnedSectors := func(expected uint64) {
+		t.Helper()
+		var got uint64
+		err := store.pool.QueryRow(context.Background(), "SELECT num_unpinned_sectors FROM sectors_stats WHERE id = 0").Scan(&got)
+		if err != nil {
+			t.Fatal(err)
+		} else if got != expected {
+			t.Fatalf("expected %d unpinned sectors, got %d", expected, got)
+		}
+	}
+
 	assertPinnedData := func(acc proto.Account, pinned uint64) {
 		t.Helper()
 		var pinnedData uint64
@@ -519,6 +548,7 @@ func TestPinSlabs(t *testing.T) {
 	}
 	assertPinnedData(account, 0)
 	assertPinnedData(account2, 0)
+	assertUnpinnedSectors(0)
 
 	// pin slabs
 	slab1ID, slab1 := newSlab(1)
@@ -535,6 +565,7 @@ func TestPinSlabs(t *testing.T) {
 	}
 	assertPinnedData(account, 2*slabSize)
 	assertPinnedData(account2, 0)
+	assertUnpinnedSectors(4)
 
 	sectorUploadedAt := func(root types.Hash256) (uploadedAt time.Time) {
 		t.Helper()
@@ -613,6 +644,7 @@ func TestPinSlabs(t *testing.T) {
 	}
 	assertPinnedData(account, 2*slabSize)
 	assertPinnedData(account2, 2*slabSize)
+	assertUnpinnedSectors(4)
 
 	// fetch slabs for account 2
 	fetched, err = store.Slabs(context.Background(), account2, expectedIDs)
@@ -651,6 +683,7 @@ func TestPinSlabs(t *testing.T) {
 	}
 	assertPinnedData(account, 2*slabSize)
 	assertPinnedData(account2, 3*slabSize)
+	assertUnpinnedSectors(4)
 
 	// assert we still have 3 slabs now, but still only have 4 sectors
 	assertCount("account_slabs", 5) // 2 slabs for each account + the new one
@@ -681,6 +714,7 @@ func TestPinSlabs(t *testing.T) {
 	}
 	assertPinnedData(account, 2*slabSize)
 	assertPinnedData(account2, 3*slabSize)
+	assertUnpinnedSectors(4)
 
 	// pinning one more slab should fail
 	_, slab3 := newSlab(3)
@@ -690,6 +724,7 @@ func TestPinSlabs(t *testing.T) {
 	}
 	assertPinnedData(account, 2*slabSize)
 	assertPinnedData(account2, 3*slabSize)
+	assertUnpinnedSectors(4)
 }
 
 func TestUnpinSlab(t *testing.T) {
@@ -1303,14 +1338,16 @@ func TestUnpinnedSectors(t *testing.T) {
 func TestPinnedSectorsStatistics(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	assertPinnedSectors := func(expected int64) {
+	assertStats := func(pinned, unpinned int64) {
 		t.Helper()
 
 		got, err := store.SectorStats(t.Context())
 		if err != nil {
 			t.Fatal(err)
-		} else if got.NumPinnedSectors != expected {
-			t.Fatalf("expected %d pinned sectors, got %d", expected, got.NumPinnedSectors)
+		} else if got.NumUnpinnedSectors != unpinned {
+			t.Fatalf("expected %d unpinned sectors, got %d", unpinned, got.NumUnpinnedSectors)
+		} else if got.NumPinnedSectors != pinned {
+			t.Fatalf("expected %d pinned sectors, got %d", pinned, got.NumPinnedSectors)
 		}
 	}
 
@@ -1340,40 +1377,40 @@ func TestPinnedSectorsStatistics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedSectors(0)
+	assertStats(0, 4)
 
 	// add contract and pin all sectors
 	fcid := store.addTestContract(t, hk)
 	if err := store.PinSectors(t.Context(), fcid, []types.Hash256{r1, r2, r3, r4}); err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedSectors(4)
+	assertStats(4, 0)
 
 	// create another host and migrate the fourth sector
 	other := store.addTestHost(t)
 	if _, err := store.MigrateSector(t.Context(), r4, other); err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedSectors(3)
+	assertStats(3, 1)
 
 	// migrate it again and assert pinned sectors doesn't change
 	other = store.addTestHost(t)
 	if _, err := store.MigrateSector(t.Context(), r4, other); err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedSectors(3)
+	assertStats(3, 1)
 
 	// mark fourth sector as lost - shouldn't change the number of pinned sectors
 	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r4}); err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedSectors(3)
+	assertStats(3, 1)
 
 	// mark third sector as lost
 	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r3}); err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedSectors(2)
+	assertStats(2, 2)
 
 	// manually manipulate the second and third sector to have consecutive_failed_checks exceeding the threshold
 	if _, err := store.pool.Exec(t.Context(), "UPDATE sectors SET consecutive_failed_checks = 10 WHERE sector_root IN ($1, $2)", sqlHash256(r2), sqlHash256(r3)); err != nil {
@@ -1384,19 +1421,19 @@ func TestPinnedSectorsStatistics(t *testing.T) {
 	if err := store.MarkFailingSectorsLost(t.Context(), hk, 10); err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedSectors(1)
+	assertStats(1, 3)
 
 	// mark first sector as lost - should update the number of pinned sectors
 	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r1}); err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedSectors(0)
+	assertStats(0, 4)
 
 	// assert marking all of them lost doesn't go negative
 	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r1, r2, r3, r4}); err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedSectors(0)
+	assertStats(0, 4)
 
 	// assert pinning them twice doesn't double the count
 	if err := store.PinSectors(t.Context(), fcid, []types.Hash256{r1, r2, r3, r4}); err != nil {
@@ -1404,7 +1441,7 @@ func TestPinnedSectorsStatistics(t *testing.T) {
 	} else if err := store.PinSectors(t.Context(), fcid, []types.Hash256{r1, r2, r3, r4}); err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedSectors(4)
+	assertStats(4, 0)
 }
 
 // BenchmarkSlabs benchmarks Slabs and PinSlabs in various batch sizes. The

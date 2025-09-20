@@ -343,7 +343,12 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 		scanExponentialBackoffMaxHours,
 	)
 
-	err = m.store.UpdateHost(ctx, hk, networks, settings, loc, success, nextScan)
+	// derive a context from the background context for persisting the scan
+	// results to prevent a scan that timed out from not being recorded
+	updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	err = m.store.UpdateHost(updateCtx, hk, networks, settings, loc, success, nextScan)
 	if err != nil {
 		return Host{}, fmt.Errorf("failed to update host, %w", err)
 	}

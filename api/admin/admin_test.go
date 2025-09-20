@@ -15,7 +15,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
@@ -26,7 +25,6 @@ import (
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/slabs"
-	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest"
@@ -775,10 +773,16 @@ func TestWalletAPI(t *testing.T) {
 }
 
 func TestSectorStatsAPI(t *testing.T) {
-	// create indexer
-	c := testutils.NewConsensusNode(t, zap.NewNop())
-	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	// create cluster with three hosts
+	logger := newTestLogger(false)
+	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
+	indexer := cluster.Indexer
 	adminClient := indexer.Admin
+
+	// convenience variables
+	h1 := cluster.Hosts[0]
+	h2 := cluster.Hosts[1]
+	h3 := cluster.Hosts[2]
 
 	// assert 0 slabs
 	stats, err := adminClient.StatsSectors(context.Background())
@@ -788,35 +792,16 @@ func TestSectorStatsAPI(t *testing.T) {
 		t.Fatalf("expected no slabs, got %d", stats.NumSlabs)
 	}
 
-	hk1 := types.GeneratePrivateKey().PublicKey()
-	hk2 := types.GeneratePrivateKey().PublicKey()
-	hk3 := types.GeneratePrivateKey().PublicKey()
-
-	store := indexer.Store()
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		if err := tx.AddHostAnnouncement(hk1, chain.V2HostAnnouncement{ha}, time.Now()); err != nil {
-			return err
-		} else if err := tx.AddHostAnnouncement(hk2, chain.V2HostAnnouncement{ha}, time.Now()); err != nil {
-			return err
-		} else if err := tx.AddHostAnnouncement(hk3, chain.V2HostAnnouncement{ha}, time.Now()); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	// pin a slab
 	account := types.GeneratePrivateKey()
-	store.AddAccount(context.Background(), account.PublicKey(), accounts.AccountMeta{})
+	indexer.Store().AddAccount(context.Background(), account.PublicKey(), accounts.AccountMeta{})
 	slabID, err := indexer.App(account).PinSlab(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{1},
 		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
-			{Root: frand.Entropy256(), HostKey: hk1},
-			{Root: frand.Entropy256(), HostKey: hk2},
-			{Root: frand.Entropy256(), HostKey: hk3},
+			{Root: frand.Entropy256(), HostKey: h1.PublicKey()},
+			{Root: frand.Entropy256(), HostKey: h2.PublicKey()},
+			{Root: frand.Entropy256(), HostKey: h3.PublicKey()},
 		},
 	})
 	if err != nil {

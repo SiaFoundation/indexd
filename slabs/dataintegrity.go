@@ -34,6 +34,7 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, hostKey
 				return err
 			})
 			if errors.Is(err, context.Canceled) || errors.Is(err, errInsufficientServiceAccountBalance) || errors.Is(err, errHostUnreachable) {
+				logger.Debug("integrity checks got interrupted", zap.Error(err))
 				interrupt = true
 				break
 			}
@@ -42,6 +43,9 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, hostKey
 				return
 			}
 			results = append(results, batch...)
+		}
+		if len(results) == 0 {
+			return
 		}
 
 		var lost, failed, success []types.Hash256
