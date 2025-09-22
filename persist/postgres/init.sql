@@ -34,6 +34,9 @@ CREATE TABLE hosts (
     location POINT NOT NULL DEFAULT POINT(0.0, 0.0),
     lost_sectors INTEGER NOT NULL DEFAULT 0,
 
+    usage_account_funding NUMERIC(50,0) NOT NULL DEFAULT 0,
+    usage_total_spent NUMERIC(50,0) NOT NULL DEFAULT 0,
+
     settings_protocol_version BYTEA NOT NULL DEFAULT '\x000000'::bytea CHECK (LENGTH(settings_protocol_version) = 3),
     settings_release TEXT NOT NULL DEFAULT '',
     settings_wallet_address BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(settings_wallet_address) = 32),
