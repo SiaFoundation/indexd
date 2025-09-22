@@ -234,10 +234,6 @@ func TestApplicationAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 1 {
-		hosts, _ := indexer.Store().Hosts(t.Context(), 0, 10)
-		for _, h := range hosts {
-			t.Log(h.PublicKey.String(), h.CountryCode, h.Usability)
-		}
 		t.Fatal("expected 1 host, got", len(usableHosts))
 	} else if usableHosts[0].PublicKey != h1.PublicKey {
 		t.Fatal("got wrong quic host")

@@ -1223,6 +1223,23 @@ func TestUpdateHost(t *testing.T) {
 	} else if h.Longitude != location.Longitude {
 		t.Fatal("unexpected Longitude", h.Longitude)
 	}
+
+	// assert updating with an empty location doesn't affect the host's
+	// geolocation
+	err = db.UpdateHost(context.Background(), hk, networks, hs, geoip.Location{}, true, nextScan)
+	if err != nil {
+		t.Fatal(err)
+	} else if h, err := db.Host(context.Background(), hk); err != nil {
+		t.Fatal(err)
+	} else if len(h.Networks) != 1 {
+		t.Fatal("unexpected networks", h.Networks)
+	} else if h.CountryCode != location.CountryCode {
+		t.Fatal("unexpected country code", h.CountryCode)
+	} else if h.Latitude != location.Latitude {
+		t.Fatal("unexpected Latitude", h.Latitude)
+	} else if h.Longitude != location.Longitude {
+		t.Fatal("unexpected Longitude", h.Longitude)
+	}
 }
 
 // BenchmarkHosts is a set of benchmarks that verify the performance of the host
