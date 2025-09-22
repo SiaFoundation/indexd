@@ -10,7 +10,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.17.5
 	go.sia.tech/coreutils v0.18.4
-	go.sia.tech/jape v0.14.1-0.20250909191153-3486055546b3
+	go.sia.tech/jape v0.14.1
 	go.sia.tech/web/indexd v0.7.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0
@@ -38,10 +38,10 @@ require (
 	go.sia.tech/web v0.0.0-20240422221546-c1709d16b6ef // indirect
 	go.uber.org/mock v0.5.2 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/mod v0.27.0 // indirect
-	golang.org/x/net v0.43.0 // indirect
+	golang.org/x/mod v0.28.0 // indirect
+	golang.org/x/net v0.44.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
-	golang.org/x/tools v0.36.0 // indirect
+	golang.org/x/tools v0.37.0 // indirect
 )
