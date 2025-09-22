@@ -347,6 +347,10 @@ func (s *storeMock) UpdateContractRevision(ctx context.Context, contract rhp.Con
 	return errors.New("contract not found")
 }
 
+func (s *storeMock) UpdateHostUsage(hostKey types.PublicKey, usage proto.Usage) error {
+	return nil
+}
+
 // mockUpdateTx is a mocked implementation of UpdateTx which allows for unit
 // testing the contract manager's chain updates without a full database.
 type mockUpdateTx struct {

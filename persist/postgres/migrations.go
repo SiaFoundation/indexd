@@ -181,4 +181,16 @@ CREATE INDEX object_slabs_object_id_slab_index_idx ON object_slabs(object_id, sl
 		// no need to initialize it as it's a number-go-up statistic
 		return nil
 	},
+	// add host usage stats
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN usage_account_funding NUMERIC(50,0) NOT NULL DEFAULT 0;`)
+		if err != nil {
+			return fmt.Errorf("failed to add usage_account_funding column: %w", err)
+		}
+		_, err = tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN usage_total_spent NUMERIC(50,0) NOT NULL DEFAULT 0;`)
+		if err != nil {
+			return fmt.Errorf("failed to add usage_total_spent column: %w", err)
+		}
+		return nil
+	},
 }

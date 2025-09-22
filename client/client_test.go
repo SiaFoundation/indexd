@@ -28,8 +28,9 @@ func (c *mockChainManager) V2TransactionSet(basis types.ChainIndex, txn types.V2
 }
 
 type mockStore struct {
-	revisions map[types.FileContractID]types.V2FileContract
-	renewed   map[types.FileContractID]bool
+	fundsSpent map[types.PublicKey]types.Currency
+	revisions  map[types.FileContractID]types.V2FileContract
+	renewed    map[types.FileContractID]bool
 }
 
 func (s *mockStore) ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
@@ -51,10 +52,16 @@ func (s *mockStore) UpdateContractRevision(ctx context.Context, contract rhp.Con
 	return nil
 }
 
+func (s *mockStore) UpdateHostUsage(ctx context.Context, hostKey types.PublicKey, usage proto.Usage) error {
+	s.fundsSpent[hostKey] = s.fundsSpent[hostKey].Add(usage.RenterCost())
+	return nil
+}
+
 func TestWithRevision(t *testing.T) {
 	db := &mockStore{
-		revisions: make(map[types.FileContractID]types.V2FileContract),
-		renewed:   make(map[types.FileContractID]bool),
+		fundsSpent: make(map[types.PublicKey]types.Currency),
+		revisions:  make(map[types.FileContractID]types.V2FileContract),
+		renewed:    make(map[types.FileContractID]bool),
 	}
 	cm := &mockChainManager{
 		state: consensus.State{
@@ -72,10 +79,13 @@ func TestWithRevision(t *testing.T) {
 	db.renewed[fcid1] = true                                                                // renewed
 	db.revisions[fcid2] = types.V2FileContract{ProofHeight: 100 + revisionSubmissionBuffer} // not revisable
 	db.revisions[fcid3] = types.V2FileContract{ProofHeight: 200, RevisionNumber: 1}
+	db.revisions[types.FileContractID{12}] = types.V2FileContract{ProofHeight: 200, RevisionNumber: 1}
 
-	noopFn := func(contract rhp.ContractRevision) (rhp.ContractRevision, error) { return rhp.ContractRevision{}, nil }
-	invalidSigFn := func(contract rhp.ContractRevision) (rhp.ContractRevision, error) {
-		return rhp.ContractRevision{}, proto.ErrInvalidSignature
+	noopFn := func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		return rhp.ContractRevision{}, proto.Usage{}, nil
+	}
+	invalidSigFn := func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		return rhp.ContractRevision{}, proto.Usage{}, proto.ErrInvalidSignature
 	}
 
 	// assert ErrContractRenewed is returned for a renewed contract
@@ -97,8 +107,8 @@ func TestWithRevision(t *testing.T) {
 	}
 
 	// assert withRevision only updates the store if the revised revision number is greater than the local revision number
-	err = c.withRevision(context.Background(), fcid3, func(rhp.ContractRevision) (rhp.ContractRevision, error) {
-		return rhp.ContractRevision{ID: fcid3, Revision: db.revisions[fcid3]}, nil
+	err = c.withRevision(context.Background(), fcid3, func(rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		return rhp.ContractRevision{ID: fcid3, Revision: db.revisions[fcid3]}, proto.Usage{}, nil
 	})
 	if err != nil || db.revisions[fcid3].ProofHeight != 200 {
 		t.Fatalf("expected no error and revision to not be updated, got: %v, revision: %v", err, db.revisions[fcid3])
@@ -106,26 +116,26 @@ func TestWithRevision(t *testing.T) {
 
 	// assert withRevision errors out if the revise function returns an unexpected error
 	errUnexpected := errors.New("unexpected error")
-	if err := c.withRevision(context.Background(), fcid4, func(contract rhp.ContractRevision) (rhp.ContractRevision, error) {
-		return rhp.ContractRevision{}, errUnexpected
+	if err := c.withRevision(context.Background(), fcid4, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		return rhp.ContractRevision{}, proto.Usage{}, errUnexpected
 	}); err != errUnexpected {
 		t.Fatalf("expected unexpected error, got: %v", err)
 	}
 
 	// assert withRevision persists the revision if no error occurs and we don't need to sync the revision
 	update := frand.Uint64n(math.MaxUint64)
-	err = c.withRevision(context.Background(), fcid4, func(contract rhp.ContractRevision) (rhp.ContractRevision, error) {
+	err = c.withRevision(context.Background(), fcid4, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		contract.Revision.RevisionNumber = update
-		return contract, nil
+		return contract, proto.Usage{}, nil
 	})
 	if err != nil || db.revisions[fcid4].RevisionNumber != update {
 		t.Fatalf("expected no error and revision to be updated, got: %v, revision: %v", err, db.revisions[types.FileContractID{4}])
 	}
 
 	// assert withRevision does not return an error if the update fails to persist
-	err = c.withRevision(context.Background(), types.FileContractID{5, 0, 0}, func(contract rhp.ContractRevision) (rhp.ContractRevision, error) {
+	err = c.withRevision(context.Background(), types.FileContractID{5, 0, 0}, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		contract.Revision.RevisionNumber = update
-		return contract, nil
+		return contract, proto.Usage{}, nil
 	})
 	if err != nil || db.revisions[types.FileContractID{5, 0, 0}].RevisionNumber != 0 {
 		t.Fatalf("expected no error and revision to not be persisted, got: %v, revision: %v", err, db.revisions[types.FileContractID{5, 0, 0}])
@@ -162,12 +172,12 @@ func TestWithRevision(t *testing.T) {
 			Renewed:   false,
 		}, nil
 	}
-	err = c.withRevision(context.Background(), types.FileContractID{8}, func(contract rhp.ContractRevision) (rhp.ContractRevision, error) {
+	err = c.withRevision(context.Background(), types.FileContractID{8}, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		if contract.Revision.RevisionNumber != update {
-			return rhp.ContractRevision{}, proto.ErrInvalidSignature
+			return rhp.ContractRevision{}, proto.Usage{}, proto.ErrInvalidSignature
 		}
 		contract.Revision.RevisionNumber++
-		return contract, nil
+		return contract, proto.Usage{}, nil
 	})
 	if err != nil || db.revisions[types.FileContractID{8}].RevisionNumber != update+1 {
 		t.Fatalf("expected no error and revision to be updated, got: %v, revision: %v", err, db.revisions[types.FileContractID{8}])
@@ -200,13 +210,28 @@ func TestWithRevision(t *testing.T) {
 	}
 
 	// assert withRevision doesn't persist the revision if the revise function renewed the contract
-	err = c.withRevision(context.Background(), types.FileContractID{11}, func(contract rhp.ContractRevision) (rhp.ContractRevision, error) {
-		return contract, nil
+	err = c.withRevision(context.Background(), types.FileContractID{11}, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		return contract, proto.Usage{}, nil
 	})
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
-	} else if _, exists := db.revisions[types.FileContractID{12}]; exists {
+	} else if _, exists := db.revisions[types.FileContractID{11}]; exists {
 		t.Fatalf("expected no revision to be persisted, but found one")
+	}
+
+	// assert withRevision updates the host usage if the contract was revised
+	err = c.withRevision(context.Background(), types.FileContractID{12}, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		contract.Revision.RevisionNumber++
+		return contract, proto.Usage{RPC: types.NewCurrency64(1)}, nil
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	} else if contract, exists := db.revisions[types.FileContractID{12}]; !exists {
+		t.Fatalf("expected revision to be persisted, but found none")
+	} else if contract.RevisionNumber != 2 {
+		t.Fatalf("expected revision number to be 2, got: %v", contract.RevisionNumber)
+	} else if db.fundsSpent[c.hostKey] != types.NewCurrency64(1) {
+		t.Fatalf("expected funds spent to be updated, got: %v", db.fundsSpent[c.hostKey])
 	}
 }
 

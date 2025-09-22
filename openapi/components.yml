@@ -584,6 +584,10 @@ components:
           type: integer
           format: uint64
           description: The number of sectors the host lost
+        fundsSpent:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The total amount of funds spent on this host
         countryCode:
           type: string
           description: The ISO 3166-1 A-2 country code of the host inferred from its IP address.
