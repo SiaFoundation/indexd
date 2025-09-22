@@ -29,6 +29,8 @@ func TestNewCluster(t *testing.T) {
 		t.Fatal("explorer is not enabled")
 	} else if state.Explorer.URL == "" {
 		t.Fatal("explorer URL is empty")
+	} else if state.StartTime.IsZero() {
+		t.Fatal("start time is zero")
 	}
 
 	// assert indexer was funded

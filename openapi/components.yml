@@ -781,6 +781,14 @@ components:
           type: integer
           format: int64
           description: Number of sectors currently pinned to a contract by this instance
+        numUnpinnableSectors:
+          type: integer
+          format: int64
+          description: Number of unpinnable sectors that were pruned because they could not be pinned to a contract in due time
+        numUnpinnedSectors:
+          type: integer
+          format: int64
+          description: Number of sectors currently not pinned to any contract by this instance
 
     ConnectKey:
       type: object

@@ -23,6 +23,7 @@ import (
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/internal/prometheus"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
@@ -499,7 +500,7 @@ func (a *admin) handleGETState(jc jape.Context) {
 	}
 
 	ts := a.chain.TipState()
-	jc.Encode(State{
+	writeResponse(jc, State{
 		Network:   ts.Network.Name,
 		StartTime: startTime,
 		Explorer:  explorer,
@@ -756,7 +757,7 @@ func (a *admin) handleGETWallet(jc jape.Context) {
 		return
 	}
 
-	jc.Encode(WalletResponse{
+	writeResponse(jc, WalletResponse{
 		Balance: balance,
 		Address: a.wallet.Address(),
 	})
@@ -852,5 +853,26 @@ func (a *admin) handleGETStatsSectors(jc jape.Context) {
 	if jc.Check("failed to retrieve sector stats", err) != nil {
 		return
 	}
-	jc.Encode(stats)
+	writeResponse(jc, stats)
+}
+
+func writeResponse(jc jape.Context, resp prometheus.Marshaller) {
+	if resp == nil {
+		return
+	}
+
+	var responseFormat string
+	if jc.Check("failed to decode form", jc.DecodeForm("response", &responseFormat)) != nil {
+		return
+	}
+	switch responseFormat {
+	case "prometheus":
+		jc.Request.Header.Set("Content-Type", "text/plain; version=0.0.4")
+		enc := prometheus.NewEncoder(jc.ResponseWriter)
+		if jc.Check("failed to marshal prometheus response", enc.Append(resp)) != nil {
+			return
+		}
+	default:
+		jc.Encode(resp)
+	}
 }
