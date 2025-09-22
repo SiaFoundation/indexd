@@ -280,6 +280,13 @@ func (c *Client) WalletSendSiacoins(ctx context.Context, address types.Address, 
 	return
 }
 
+// StatsAccounts returns statistics about the accounts registered on the
+// indexer.
+func (c *Client) StatsAccounts(ctx context.Context) (resp AccountStatsResponse, err error) {
+	err = c.c.GET(ctx, "/stats/accounts", &resp)
+	return
+}
+
 // StatsSectors returns statistics about the sectors managed by the indexer.
 func (c *Client) StatsSectors(ctx context.Context) (resp SectorsStatsResponse, err error) {
 	err = c.c.GET(ctx, "/stats/sectors", &resp)
