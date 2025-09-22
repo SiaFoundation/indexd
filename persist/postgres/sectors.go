@@ -431,10 +431,17 @@ func (s *Store) UnpinSlab(ctx context.Context, account proto.Account, slabID sla
 		if err != nil {
 			return fmt.Errorf("failed to get account ID: %w", err)
 		}
-		if err := s.unpinSlabs(ctx, tx, id, []slabs.SlabID{slabID}); errors.Is(err, sql.ErrNoRows) {
+
+		var exists bool
+		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_slabs WHERE account_id = $1 and slab_id = (SELECT id FROM slabs WHERE digest = $2))`, id, sqlHash256(slabID)).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("failed to check if slab exists: %w", err)
+		} else if !exists {
 			return slabs.ErrSlabNotFound
-		} else if err != nil {
-			return err
+		}
+
+		if err := s.unpinSlabs(ctx, tx, id, []slabs.SlabID{slabID}); err != nil {
+			return fmt.Errorf("failed to unpin slab: %w", err)
 		}
 		return nil
 	})
