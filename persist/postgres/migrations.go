@@ -193,4 +193,12 @@ CREATE INDEX object_slabs_object_id_slab_index_idx ON object_slabs(object_id, sl
 		}
 		return nil
 	},
+	// add the account_stats table
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE TABLE account_stats (
+    id INTEGER PRIMARY KEY NOT NULL DEFAULT 0 CHECK (id = 0), -- enforce a single row
+    num_registered BIGINT NOT NULL DEFAULT 0 CHECK (num_registered >= 0) -- number of accounts currently registered
+);`)
+		return err
+	},
 }

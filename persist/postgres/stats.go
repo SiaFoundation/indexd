@@ -52,6 +52,11 @@ func (s *Store) incrementNumAccounts(ctx context.Context, tx *txn, delta int64) 
 	return err
 }
 
+func (s *Store) initAccountStats(ctx context.Context, tx *txn) error {
+	_, err := tx.Exec(ctx, "INSERT INTO account_stats (id) VALUES (0) ON CONFLICT(id) DO NOTHING")
+	return err
+}
+
 // AccountStats reports statistics about the accounts stored in the database.
 func (s *Store) AccountStats(ctx context.Context) (admin.AccountStatsResponse, error) {
 	var stats admin.AccountStatsResponse

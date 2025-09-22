@@ -838,6 +838,52 @@ func TestSectorStatsAPI(t *testing.T) {
 	}
 }
 
+func TestContractsStatsAPI(t *testing.T) {
+	// create cluster with three hosts
+	logger := newTestLogger(false)
+	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
+	indexer := cluster.Indexer
+	adminClient := indexer.Admin
+
+	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
+		t.Fatal(err)
+	} else if stats.Registered != 0 {
+		t.Fatalf("expected 0 registered accounts, got %d", stats.Registered)
+	}
+
+	account1 := types.GeneratePrivateKey().PublicKey()
+	if err := indexer.Store().AddAccount(t.Context(), account1, accounts.AccountMeta{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
+		t.Fatal(err)
+	} else if stats.Registered != 1 {
+		t.Fatalf("expected 1 registered accounts, got %d", stats.Registered)
+	}
+
+	account2 := types.GeneratePrivateKey().PublicKey()
+	if err := indexer.Store().AddAccount(t.Context(), account2, accounts.AccountMeta{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
+		t.Fatal(err)
+	} else if stats.Registered != 2 {
+		t.Fatalf("expected 2 registered accounts, got %d", stats.Registered)
+	}
+
+	if err := indexer.Store().DeleteAccount(t.Context(), account1); err != nil {
+		t.Fatal(err)
+	}
+
+	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
+		t.Fatal(err)
+	} else if stats.Registered != 1 {
+		t.Fatalf("expected 1 registered accounts, got %d", stats.Registered)
+	}
+}
+
 // newTestLogger creates a console logger used for testing.
 func newTestLogger(enable bool) *zap.Logger {
 	if !enable {
