@@ -119,8 +119,37 @@ func TestRoundtrip(t *testing.T) {
 	url, err := s.client.CreateSharedObjectURL(context.Background(), objKey, encryptionKey, time.Now().Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
+	} else if err := s.DownloadSharedObject(context.Background(), buf, url); err != nil {
+		t.Fatal("unexpected error", err)
+	} else if !bytes.Equal(buf.Bytes(), data) {
+		t.Fatal("data mismatch")
 	}
 
+	// delete all data shards
+	sharedObj, _, err := s.client.SharedObject(context.Background(), url)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(sharedObj.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(sharedObj.Slabs))
+	}
+	slab := sharedObj.Slabs[0]
+	for i, sector := range slab.Sectors {
+		delete(dialer.hostSectors[sector.HostKey], sector.Root)
+		if i == int(slab.MinShards) {
+			break
+		}
+	}
+
+	// ensure download still works
+	buf = bytes.NewBuffer(nil)
+	if err := s.Download(context.Background(), buf, obj); err != nil {
+		t.Fatal(err)
+	} else if !bytes.Equal(buf.Bytes(), data) {
+		t.Fatal("data mismatch")
+	}
+
+	// ensure download shared object still works
+	buf = bytes.NewBuffer(nil)
 	if err := s.DownloadSharedObject(context.Background(), buf, url); err != nil {
 		t.Fatal("unexpected error", err)
 	} else if !bytes.Equal(buf.Bytes(), data) {
@@ -249,6 +278,8 @@ func TestDownload(t *testing.T) {
 		err = s.Download(context.Background(), buf, obj, WithDownloadHostTimeout(200*time.Millisecond))
 		if err != nil {
 			t.Fatal(err)
+		} else if !bytes.Equal(buf.Bytes(), data) {
+			t.Fatal("data mismatch")
 		}
 	})
 }

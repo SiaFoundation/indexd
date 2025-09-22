@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/contracts"
@@ -40,6 +41,21 @@ func (s *Store) UpdateContractRevision(ctx context.Context, contract rhp.Contrac
 			return fmt.Errorf("failed to update contract revision: %w", err)
 		} else if res.RowsAffected() != 1 {
 			return fmt.Errorf("contract %q: %w", contract.ID, contracts.ErrNotFound)
+		}
+		return nil
+	})
+}
+
+// UpdateHostUsage takes the usage and adds the renter cost to the host's total
+// funds spent, thereby tracking how much funds have been spent on a host.
+func (s *Store) UpdateHostUsage(ctx context.Context, hostKey types.PublicKey, usage proto.Usage) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		query := `UPDATE hosts SET usage_account_funding = usage_account_funding + $1, usage_total_spent = usage_total_spent + $2 WHERE public_key = $3`
+		res, err := tx.Exec(ctx, query, sqlCurrency(usage.AccountFunding), sqlCurrency(usage.RenterCost()), sqlPublicKey(hostKey))
+		if err != nil {
+			return fmt.Errorf("failed to update host usage: %w", err)
+		} else if res.RowsAffected() != 1 {
+			return fmt.Errorf("host %q: %w", hostKey, hosts.ErrNotFound)
 		}
 		return nil
 	})
@@ -436,7 +452,7 @@ func (s *Store) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpir
 		}
 		if err := res.Close(); err != nil {
 			return err
-		} else if err := s.incrementPinnedSectors(ctx, tx, -totalUnpinned); err != nil {
+		} else if err := s.incrementNumPinnedSectors(ctx, tx, -totalUnpinned); err != nil {
 			return fmt.Errorf("failed to update number of pinned sectors: %w", err)
 		} else if err := s.incrementUnpinnedSectors(ctx, tx, totalUnpinned); err != nil {
 			return fmt.Errorf("failed to update number of unpinned sectors: %w", err)

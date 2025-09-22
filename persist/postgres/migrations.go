@@ -172,6 +172,27 @@ CREATE INDEX object_slabs_object_id_slab_index_idx ON object_slabs(object_id, sl
 		}
 		return nil
 	},
+	// adds the "num_unpinnable_sectors" column to sectors_stats
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE sectors_stats ADD COLUMN num_unpinnable_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinnable_sectors >= 0);`)
+		if err != nil {
+			return fmt.Errorf("failed to add num_unpinnable_sectors column: %w", err)
+		}
+		// no need to initialize it as it's a number-go-up statistic
+		return nil
+	},
+	// add host usage stats
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN usage_account_funding NUMERIC(50,0) NOT NULL DEFAULT 0;`)
+		if err != nil {
+			return fmt.Errorf("failed to add usage_account_funding column: %w", err)
+		}
+		_, err = tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN usage_total_spent NUMERIC(50,0) NOT NULL DEFAULT 0;`)
+		if err != nil {
+			return fmt.Errorf("failed to add usage_total_spent column: %w", err)
+		}
+		return nil
+	},
 	// add indexes to speed up unpinning slabs
 	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
 		if _, err := tx.Exec(ctx, `CREATE INDEX account_slabs_slab_id_idx ON account_slabs(slab_id);`); err != nil {

@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
@@ -1268,6 +1269,43 @@ func TestUpdateContractRevision(t *testing.T) {
 		t.Fatalf("expected ErrContractNotFound, got %v", err)
 	} else if err := store.UpdateContractRevision(context.Background(), rhp.ContractRevision{Revision: newTestRevision(types.PublicKey{})}); !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatalf("expected ErrContractNotFound, got %v", err)
+	}
+}
+
+func TestUpdateHostUsage(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	hk := store.addTestHost(t)
+
+	// assert initial fund spent is zero
+	host, err := store.Host(context.Background(), hk)
+	if err != nil {
+		t.Fatal(err)
+	} else if !host.TotalSpent.IsZero() {
+		t.Fatalf("unexpected usage: %+v", host.TotalSpent)
+	}
+
+	// update usage
+	funding := types.NewCurrency64(frand.Uint64n(math.MaxUint64))
+	egress := types.NewCurrency64(frand.Uint64n(funding.Big().Uint64()))
+	if err := store.UpdateHostUsage(context.Background(), hk, proto.Usage{AccountFunding: funding, Egress: egress}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert usage was updated correctly
+	host, err = store.Host(context.Background(), hk)
+	if err != nil {
+		t.Fatal(err)
+	} else if !host.AccountFunding.Equals(funding) {
+		t.Fatalf("unexpected usage: %+v", host.AccountFunding)
+	} else if !host.TotalSpent.Equals((funding.Add(egress))) {
+		t.Fatalf("unexpected usage: %+v", host.TotalSpent)
+	}
+
+	// assert it returns [hosts.ErrHostNotFound] for non-existing host
+	err = store.UpdateHostUsage(context.Background(), types.PublicKey{}, proto.Usage{})
+	if !errors.Is(err, hosts.ErrNotFound) {
+		t.Fatalf("expected ErrHostNotFound, got %v", err)
 	}
 }
 
