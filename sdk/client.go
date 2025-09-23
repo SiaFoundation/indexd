@@ -113,11 +113,8 @@ func (s *SDK) uploadSlab(ctx context.Context, shards [][]byte, dataShards uint8,
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var encryptionKey [32]byte
-	frand.Read(encryptionKey[:])
-
 	slab := slabs.SlabPinParams{
-		EncryptionKey: encryptionKey,
+		EncryptionKey: frand.Entropy256(),
 		MinShards:     uint(dataShards),
 		Sectors:       make([]slabs.PinnedSector, len(shards)),
 	}
@@ -134,7 +131,7 @@ func (s *SDK) uploadSlab(ctx context.Context, shards [][]byte, dataShards uint8,
 	for i := range shards {
 		// encrypt the shard before upload
 		nonce[0] = byte(i)
-		c, _ := chacha20.NewUnauthenticatedCipher(encryptionKey[:], nonce)
+		c, _ := chacha20.NewUnauthenticatedCipher(slab.EncryptionKey[:], nonce)
 		c.XORKeyStream(shards[i], shards[i])
 
 		select {

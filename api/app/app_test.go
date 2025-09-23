@@ -685,8 +685,7 @@ func TestSharedObjects(t *testing.T) {
 	}
 
 	// generate a random encryption key
-	var encryptionKey [32]byte
-	frand.Read(encryptionKey[:])
+	encryptionKey := frand.Entropy256()
 
 	// create a shared URL for the object
 	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.Key, encryptionKey, time.Now().Add(time.Second))
