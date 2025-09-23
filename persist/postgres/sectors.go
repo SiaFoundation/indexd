@@ -318,21 +318,18 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 }
 
 func (s *Store) unpinSlabs(ctx context.Context, tx *txn, accountID int64, slabIDs []slabs.SlabID) error {
-	if _, err := tx.Exec(ctx, `SET LOCAL enable_seqscan=FALSE`); err != nil {
-		return fmt.Errorf("failed to disable seqscan: %w", err)
-	}
-
 	var args []sqlHash256
 	for _, slabID := range slabIDs {
 		args = append(args, sqlHash256(slabID))
 	}
 
 	// delete the association between the account and the slab
-	rows, err := tx.Query(ctx, `DELETE FROM account_slabs
-WHERE
-	account_id = $1 AND
-	slab_id = ANY(SELECT id FROM slabs WHERE digest = ANY($2))
-RETURNING slab_id`, accountID, args)
+	rows, err := tx.Query(ctx, `DELETE FROM account_slabs a
+USING slabs s
+WHERE a.account_id = $1
+  AND a.slab_id = s.id
+  AND s.digest = ANY($2)
+RETURNING a.slab_id;`, accountID, args)
 	if err != nil {
 		return fmt.Errorf("failed to unpin slab: %w", err)
 	}
