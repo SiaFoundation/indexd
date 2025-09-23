@@ -202,9 +202,13 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 
 	// helper to create a good host
 	goodHost := func(i int) hosts.Host {
+		countries := []string{"US", "DE", "FR", "CN", "JP", "IN", "BR", "RU", "GB", "IT", "ES", "CA", "AU"}
 		return hosts.Host{
-			PublicKey: types.PublicKey{byte(i)},
-			Networks:  []string{fmt.Sprintf("127.0.0.%d/24", i)},
+			PublicKey:   types.PublicKey{byte(i)},
+			CountryCode: countries[frand.Intn(len(countries))],
+			Latitude:    frand.Float64()*180 - 90,
+			Longitude:   frand.Float64()*360 - 180,
+			Networks:    []string{fmt.Sprintf("127.0.0.%d/24", i)},
 			Addresses: []chain.NetAddress{
 				{
 					Protocol: siamux.Protocol,
@@ -225,15 +229,14 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 	good1 := goodHost(1)
 	hm.settings[good1.PublicKey] = goodSettings
 
-	// second one is bad since the network overlaps with the first one
+	// second one is bad since the location matches the first one
 	bad1 := goodHost(2)
-	bad1.Networks = append(bad1.Networks, good1.Networks[0])
+	bad1.Latitude = good1.Latitude
+	bad1.Longitude = good1.Longitude
 	hm.settings[bad1.PublicKey] = goodSettings
 
-	// third one is good even though it overlaps with the second one which
-	// didn't get picked
+	// third one is good again
 	good2 := goodHost(3)
-	good2.Networks = append(good2.Networks, bad1.Networks[0])
 	hm.settings[good2.PublicKey] = goodSettings
 
 	// fourth one is bad due to bad usability
@@ -357,9 +360,13 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 
 	// helper to create a good host
 	goodHost := func(i int) hosts.Host {
+		countries := []string{"US", "DE", "FR", "CN", "JP", "IN", "BR", "RU", "GB", "IT", "ES", "CA", "AU"}
 		return hosts.Host{
-			PublicKey: types.PublicKey{byte(i)},
-			Networks:  []string{fmt.Sprintf("127.0.0.%d/24", i)},
+			PublicKey:   types.PublicKey{byte(i)},
+			CountryCode: countries[frand.Intn(len(countries))],
+			Latitude:    frand.Float64()*180 - 90,
+			Longitude:   frand.Float64()*360 - 180,
+			Networks:    []string{fmt.Sprintf("127.0.0.%d/24", i)},
 			Addresses: []chain.NetAddress{
 				{
 					Protocol: siamux.Protocol,
@@ -369,6 +376,13 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 			Settings:  goodSettings, // default to good settings to consider every host
 			Usability: hosts.GoodUsability,
 		}
+	}
+
+	badHost := func(i int) hosts.Host {
+		h := goodHost(i)
+		h.Usability.AcceptingContracts = false
+		h.Settings.AcceptingContracts = false
+		return h
 	}
 
 	store := newStoreMock()
@@ -394,42 +408,35 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 
 	// first one is good and has a good contract already -> no formation
 	good1 := goodHost(1)
-	hm.settings[good1.PublicKey] = goodSettings
 	formContract(good1.PublicKey, true)
 
 	// second one is bad with a good contract that shouldn't count -> no formation
-	bad1 := goodHost(2)
-	bad1.Networks = append(bad1.Networks, good1.Networks[0])
-	hm.settings[bad1.PublicKey] = goodSettings
+	bad1 := badHost(2)
 	formContract(bad1.PublicKey, true)
 
-	// third one is good, but shares the subnet with the first one -> no formation
+	// third one is good, but has the same location as the first one -> no formation
 	good2 := goodHost(3)
-	good2.Networks = append(good2.Networks, good1.Networks[0])
-	hm.settings[good2.PublicKey] = goodSettings
+	good2.Latitude = good1.Latitude
+	good2.Longitude = good1.Longitude
 
-	// fourth one is good and shares a subnet with bad1 which is ok since bad1
-	// is bad -> forms a contract
+	// fourth one is good and has the same location as bad1 which is ok since
+	// bad1 is bad -> forms a contract
 	good3 := goodHost(4)
-	good3.Networks = append(good3.Networks, bad1.Networks[0])
-	hm.settings[good3.PublicKey] = goodSettings
+	good3.Latitude = bad1.Latitude
+	good3.Longitude = bad1.Longitude
 
 	// fifth one is good -> forms a contract
 	good4 := goodHost(5)
-	hm.settings[good4.PublicKey] = goodSettings
 
 	// sixth one is a good host with a bad contract which won't count -> forms a contract
 	good5 := goodHost(6)
-	hm.settings[good5.PublicKey] = goodSettings
 	formContract(good5.PublicKey, false)
 
 	// seventh one is good but full host takes priority -> no formation
 	good6 := goodHost(7)
-	hm.settings[good6.PublicKey] = goodSettings
 
 	// eighth one is good and has a full contract
 	good7 := goodHost(8)
-	hm.settings[good7.PublicKey] = goodSettings
 	formContract(good7.PublicKey, true)
 	for i := range store.contracts {
 		if store.contracts[i].ID == types.FileContractID(good7.PublicKey) {
@@ -438,10 +445,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 	}
 
 	// ninth one is bad and has an unpinned sector
-	bad2 := goodHost(9)
-	badSettings := goodSettings
-	badSettings.AcceptingContracts = false
-	hm.settings[bad2.PublicKey] = badSettings
+	bad2 := badHost(9)
 	store.sectors[bad2.PublicKey] = []sector{
 		{
 			root:       frand.Entropy256(),
@@ -451,7 +455,6 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 
 	// tenth one is good and has an unpinned sector
 	good8 := goodHost(10)
-	hm.settings[good8.PublicKey] = goodSettings
 	store.sectors[good8.PublicKey] = []sector{
 		{
 			root:       frand.Entropy256(),
@@ -462,13 +465,11 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 	// eleventh one is good and has a contract that is close to the max
 	// collateral
 	good9 := goodHost(11)
-	maxCollSettings := goodSettings
-	maxCollSettings.MaxCollateral = types.Siacoins(1000)
-	hm.settings[good9.PublicKey] = maxCollSettings
+	good9.Settings.MaxCollateral = types.Siacoins(1000)
 	formContract(good9.PublicKey, true)
 	for i := range store.contracts {
 		if store.contracts[i].ID == types.FileContractID(good9.PublicKey) {
-			store.contracts[i].UsedCollateral = maxCollSettings.MaxCollateral.Sub(minHostCollateral)
+			store.contracts[i].UsedCollateral = good9.Settings.MaxCollateral.Sub(minHostCollateral)
 		}
 	}
 
@@ -485,6 +486,11 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 		bad2.PublicKey:  bad2,
 		good8.PublicKey: good8,
 		good9.PublicKey: good9,
+	}
+
+	// populate host settings
+	for hk := range store.hosts {
+		hm.settings[hk] = store.hosts[hk].Settings
 	}
 
 	dialer := newDialerMock()
@@ -530,7 +536,7 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 	// settings and params
 	nCalls := dialer.TotalFormations()
 	if nCalls != wanted-1 {
-		t.Fatalf("expected %v calls, got %v", wanted-1, nCalls)
+		t.Fatalf("expected %v formations, got %v", wanted-1, nCalls)
 	}
 	assertFormation(good3)
 	assertFormation(good4)

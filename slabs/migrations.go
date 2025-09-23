@@ -9,6 +9,7 @@ import (
 	"github.com/klauspost/reedsolomon"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/chacha20"
@@ -74,7 +75,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 		return fmt.Errorf("failed to fetch slab %s: %w", slabID, err)
 	}
 
-	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, goodContracts, period, m.disableCIDRChecks)
+	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, goodContracts, period, m.minHostDistance)
 	if len(indices) == 0 {
 		logger.Debug("tried to migrate slab but no indices require migration")
 		return nil
@@ -154,9 +155,9 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 
 // sectorsToMigrate filters the sectors of a slab and returns the indices of the
 // sectors that require migration together with hosts that can be used to
-// migrate bad sectors to. These hosts are guaranteed to not have overlapping
-// CIDRs and are returned in random order.
-func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, disableCIDRChecks bool) ([]int, []hosts.Host) {
+// migrate bad sectors to. These hosts are guaranteed to be at least
+// minHostDistance apart from each other and are returned in random order.
+func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, minHostDistance geoip.Distance) ([]int, []hosts.Host) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range allHosts {
@@ -174,10 +175,11 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 		}
 	}
 
-	// remember the CIDRs of the hosts that good sectors are stored on. We don't
-	// care if two good sectors are stored on the same CIDR but we don't want to
-	// migrate bad sectors to the same CIDR.
-	usedCIDRs := make(map[string]struct{})
+	// keep track of hosts in a spaced set, ensuring we store sectors on hosts
+	// that are sufficiently far apart. We don't care if two good sectors on
+	// hosts that are too close to one another, but we don't want to migrate bad
+	// sectors to hosts that are too close to those same hosts
+	set := hosts.NewSpacedSet(minHostDistance)
 
 	// determine whether the sector needs to be migrated. That's the case if
 	// one of the following is true:
@@ -195,47 +197,21 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 		// remove contract from the map since we don't want to use it again
 		delete(goodContractMap, *sector.ContractID)
 
-		// NOTE: in testing CIDR checks are disabled because the hosts' network
-		// is an unspecified IPv6 address, in those cases we use the host's
-		// public key to ensure we don't migrate the bad sector to a used host
-		if disableCIDRChecks {
-			usedCIDRs[sector.HostKey.String()] = struct{}{}
-			continue
-		}
-
-		for _, network := range hostsMap[*sector.HostKey].Networks {
-			usedCIDRs[network] = struct{}{}
+		// add the host to the spaced set to ensure we don't use hosts that are
+		// too close to existing hosts
+		if host, ok := hostsMap[*sector.HostKey]; ok {
+			set.Add(host)
 		}
 	}
 
 	// return all hosts with contracts that are good, currently not in use and
-	// don't have overlapping CIDRs, if CIDR checks are disabled we only check
-	// against the host key to ensure unique hosts are used
+	// are sufficiently far apart
 	var candidates []hosts.Host
-	if disableCIDRChecks {
-		for _, contract := range goodContractMap {
-			if _, used := usedCIDRs[contract.HostKey.String()]; used {
-				continue
-			}
-			usedCIDRs[contract.HostKey.String()] = struct{}{}
-			candidates = append(candidates, hostsMap[contract.HostKey])
-		}
-		return toMigrate, candidates
-	}
-
-LOOP:
 	for _, contract := range goodContractMap {
-		host := hostsMap[contract.HostKey]
-		for _, network := range host.Networks {
-			if _, ok := usedCIDRs[network]; ok {
-				continue LOOP
-			}
+		if host, ok := hostsMap[contract.HostKey]; ok && set.CanAddHost(host) {
+			set.Add(host)
+			candidates = append(candidates, host)
 		}
-
-		for _, network := range host.Networks {
-			usedCIDRs[network] = struct{}{}
-		}
-		candidates = append(candidates, host)
 	}
 
 	return toMigrate, candidates

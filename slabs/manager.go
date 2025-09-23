@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -25,13 +26,12 @@ type (
 	// checking their integrity on the network and migrating their sectors if
 	// necessary.
 	SlabManager struct {
-		disableCIDRChecks bool
-
 		healthCheckInterval time.Duration
 
 		integrityCheckInterval       time.Duration
 		failedIntegrityCheckInterval time.Duration
 		maxFailedIntegrityChecks     uint
+		minHostDistance              geoip.Distance
 
 		migrationAccount    proto.Account
 		migrationAccountKey types.PrivateKey
@@ -123,13 +123,6 @@ var (
 // An Option is a functional option for the SlabManager.
 type Option func(*SlabManager)
 
-// WithDisabledCIDRChecks disables the CIDR checks for the slab manager.
-func WithDisabledCIDRChecks() Option {
-	return func(m *SlabManager) {
-		m.disableCIDRChecks = true
-	}
-}
-
 // WithHealthCheckInterval sets the interval for health checks.
 func WithHealthCheckInterval(interval time.Duration) Option {
 	return func(m *SlabManager) {
@@ -142,6 +135,15 @@ func WithIntegrityCheckIntervals(success, failure time.Duration) Option {
 	return func(m *SlabManager) {
 		m.integrityCheckInterval = success
 		m.failedIntegrityCheckInterval = failure
+	}
+}
+
+// WithMinHostDistance sets the minimum distance between hosts used for storing
+// sectors of the same slab. The default is 10km, if set to 0, the distance
+// check is disabled.
+func WithMinHostDistance(d geoip.Distance) Option {
+	return func(m *SlabManager) {
+		m.minHostDistance = d
 	}
 }
 
@@ -192,6 +194,7 @@ func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Diale
 		integrityCheckInterval:       7 * 24 * time.Hour,
 		failedIntegrityCheckInterval: 6 * time.Hour,
 		maxFailedIntegrityChecks:     5,
+		minHostDistance:              geoip.Km(10),
 
 		migrationAccount:    proto.Account(migrationAccount.PublicKey()),
 		migrationAccountKey: migrationAccount,
