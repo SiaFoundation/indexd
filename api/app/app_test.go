@@ -704,6 +704,25 @@ func TestSharedObjects(t *testing.T) {
 		t.Fatal("shared object mismatch")
 	}
 
+	// make sure client2 has no objects
+	if objs, err := client2.ListObjects(ctx, slabs.Cursor{}, 100); err != nil {
+		t.Fatal(err)
+	} else if len(objs) != 0 {
+		t.Fatalf("expected 0 objects, got %d", len(objs))
+	}
+
+	// try to pin shared object to client2 account
+	if err := client2.PinSharedObject(ctx, sharedObj); err != nil {
+		t.Fatal(err)
+	}
+
+	// client2 should have 1 object
+	if objs, err := client2.ListObjects(ctx, slabs.Cursor{}, 100); err != nil {
+		t.Fatal(err)
+	} else if len(objs) != 1 {
+		t.Fatalf("expected 1 objects, got %d", len(objs))
+	}
+
 	time.Sleep(time.Second * 2)
 	// try to retrieve the object again, should be expired
 	_, _, err = client1.SharedObject(ctx, shareURL)

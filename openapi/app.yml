@@ -221,6 +221,26 @@ paths:
         "404":
           description: Object not found
 
+  /objects/shared:
+    post:
+      tags:
+        - objects
+      summary: Create an object for the current account based on a shared object
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              allOf:
+                - $ref: "#/components/schemas/SharedObject"
+                - description: Shared object
+      responses:
+        "200":
+          description: Slabs pinned and object created or updated successfully
+        "400":
+          description: Object has no slabs or metadata exceeds size limit
+
   /slabs:
     get:
       tags:

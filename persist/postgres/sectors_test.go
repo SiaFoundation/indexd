@@ -40,7 +40,7 @@ func TestMigrateSector(t *testing.T) {
 	pinTime := time.Now().Round(time.Microsecond)
 	root1 := types.Hash256{1}
 	root2 := types.Hash256{2}
-	_, err := store.PinSlab(context.Background(), account, pinTime, slabs.SlabPinParams{
+	_, err := store.PinSlabs(context.Background(), account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
 		Sectors: []slabs.PinnedSector{
@@ -182,7 +182,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	pinTime := time.Now().Round(time.Microsecond)
 	root1 := types.Hash256{1}
 	root2 := types.Hash256{2}
-	_, err := store.PinSlab(context.Background(), account, pinTime, slabs.SlabPinParams{
+	_, err := store.PinSlabs(context.Background(), account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
 		Sectors: []slabs.PinnedSector{
@@ -327,7 +327,7 @@ func TestSectorsForIntegrityCheck(t *testing.T) {
 	root2 := frand.Entropy256()
 	root3 := frand.Entropy256()
 	root4 := frand.Entropy256()
-	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
 		Sectors: []slabs.PinnedSector{
@@ -430,14 +430,16 @@ func TestSlabIDs(t *testing.T) {
 	}
 
 	// pin 2 slabs on account 1
-	slabID1, err := store.PinSlab(context.Background(), a1, time.Time{}, params())
+	slabIDs1, err := store.PinSlabs(context.Background(), a1, time.Time{}, params())
 	if err != nil {
 		t.Fatal(err)
 	}
-	slabID2, err := store.PinSlab(context.Background(), a1, time.Time{}, params())
+	slabIDs2, err := store.PinSlabs(context.Background(), a1, time.Time{}, params())
 	if err != nil {
 		t.Fatal(err)
 	}
+	slabID1 := slabIDs1[0]
+	slabID2 := slabIDs2[0]
 
 	// assert account 2 has no slab IDs
 	slabIDs, err := store.SlabIDs(context.Background(), a2, 0, 10)
@@ -484,7 +486,7 @@ func TestPinSlabs(t *testing.T) {
 
 	// pin without an account
 	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
-	_, err := store.PinSlab(context.Background(), account, nextCheck, slabs.SlabPinParams{})
+	_, err := store.PinSlabs(context.Background(), account, nextCheck, slabs.SlabPinParams{})
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected ErrNotFound, got", err)
 	}
@@ -556,11 +558,11 @@ func TestPinSlabs(t *testing.T) {
 	toPin := []slabs.SlabPinParams{slab1, slab2}
 	expectedIDs := []slabs.SlabID{slab1ID, slab2ID}
 	for i := range toPin {
-		slabID, err := store.PinSlab(context.Background(), proto.Account{1}, nextCheck, toPin[i])
+		slabIDs, err := store.PinSlabs(context.Background(), proto.Account{1}, nextCheck, toPin[i])
 		if err != nil {
 			t.Fatal(err)
-		} else if slabID != expectedIDs[i] {
-			t.Fatalf("expected slab ID %v, got %v", expectedIDs[i], slabID)
+		} else if slabIDs[0] != expectedIDs[i] {
+			t.Fatalf("expected slab ID %v, got %v", expectedIDs[i], slabIDs[0])
 		}
 	}
 	assertPinnedData(account, 2*slabSize)
@@ -628,11 +630,11 @@ func TestPinSlabs(t *testing.T) {
 			beforeUploadedAt = append(beforeUploadedAt, sectorUploadedAt(sector.Root))
 		}
 
-		slabID, err := store.PinSlab(context.Background(), account2, nextCheck, toPin[i])
+		slabIDs, err := store.PinSlabs(context.Background(), account2, nextCheck, toPin[i])
 		if err != nil {
 			t.Fatal(err)
-		} else if slabID != expectedIDs[i] {
-			t.Fatalf("expected slab IDs %v, got %v", expectedIDs[i], slabID)
+		} else if slabIDs[0] != expectedIDs[i] {
+			t.Fatalf("expected slab IDs %v, got %v", expectedIDs[i], slabIDs[0])
 		}
 
 		for i, sector := range toPin[i].Sectors {
@@ -675,11 +677,11 @@ func TestPinSlabs(t *testing.T) {
 
 	// swap roots of slab 2 and re-pin on account 2
 	slab2.Sectors[0].Root, slab2.Sectors[1].Root = slab2.Sectors[1].Root, slab2.Sectors[0].Root
-	slabID, err := store.PinSlab(context.Background(), account2, nextCheck, slab2)
+	slabIDs, err := store.PinSlabs(context.Background(), account2, nextCheck, slab2)
 	if err != nil {
 		t.Fatal(err)
-	} else if slabID == expectedIDs[0] || slabID == expectedIDs[1] {
-		t.Fatalf("expected new slab ID, got %v (%v)", slabID, expectedIDs)
+	} else if slabIDs[0] == expectedIDs[0] || slabIDs[0] == expectedIDs[1] {
+		t.Fatalf("expected new slab ID, got %v (%v)", slabIDs[0], expectedIDs)
 	}
 	assertPinnedData(account, 2*slabSize)
 	assertPinnedData(account2, 3*slabSize)
@@ -702,7 +704,7 @@ func TestPinSlabs(t *testing.T) {
 	pinnedAt := slab1Full.PinnedAt
 
 	// pin slab 1 again and fetch it again
-	_, err = store.PinSlab(context.Background(), account2, nextCheck, toPin[0])
+	_, err = store.PinSlabs(context.Background(), account2, nextCheck, toPin[0])
 	if err != nil {
 		t.Fatal(err)
 	} else if slabs, err := store.Slabs(context.Background(), account, ids); err != nil {
@@ -718,7 +720,7 @@ func TestPinSlabs(t *testing.T) {
 
 	// pinning one more slab should fail
 	_, slab3 := newSlab(3)
-	_, err = store.PinSlab(context.Background(), account, nextCheck, slab3)
+	_, err = store.PinSlabs(context.Background(), account, nextCheck, slab3)
 	if !errors.Is(err, accounts.ErrStorageLimitExceeded) {
 		t.Fatal("expected ErrStorageLimitExceeded, got", err)
 	}
@@ -788,9 +790,9 @@ func TestUnpinSlab(t *testing.T) {
 	if err := store.AddAccount(context.Background(), types.PublicKey(acc1), accounts.AccountMeta{}); err != nil {
 		t.Fatal("failed to add account:", err)
 	}
-	if _, err := store.PinSlab(context.Background(), acc1, time.Time{}, params[0]); err != nil {
+	if _, err := store.PinSlabs(context.Background(), acc1, time.Time{}, params[0]); err != nil {
 		t.Fatal(err)
-	} else if _, err := store.PinSlab(context.Background(), acc1, time.Time{}, params[1]); err != nil {
+	} else if _, err := store.PinSlabs(context.Background(), acc1, time.Time{}, params[1]); err != nil {
 		t.Fatal(err)
 	}
 
@@ -799,9 +801,9 @@ func TestUnpinSlab(t *testing.T) {
 	if err := store.AddAccount(context.Background(), types.PublicKey(acc2), accounts.AccountMeta{}); err != nil {
 		t.Fatal("failed to add account:", err)
 	}
-	if _, err := store.PinSlab(context.Background(), acc2, time.Time{}, params[1]); err != nil {
+	if _, err := store.PinSlabs(context.Background(), acc2, time.Time{}, params[1]); err != nil {
 		t.Fatal(err)
-	} else if _, err := store.PinSlab(context.Background(), acc2, time.Time{}, params[2]); err != nil {
+	} else if _, err := store.PinSlabs(context.Background(), acc2, time.Time{}, params[2]); err != nil {
 		t.Fatal(err)
 	}
 
@@ -896,7 +898,7 @@ func TestPinSectors(t *testing.T) {
 	contractID2 := store.addTestContract(t, hk, types.FileContractID{2})
 
 	// create 4 sectors
-	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
 		Sectors: []slabs.PinnedSector{
@@ -1201,7 +1203,7 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 	root1 := frand.Entropy256()
 	root2 := frand.Entropy256()
 	root3 := frand.Entropy256()
-	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
 		Sectors: []slabs.PinnedSector{
@@ -1285,7 +1287,7 @@ func TestUnpinnedSectors(t *testing.T) {
 	store.addTestContract(t, hk)
 
 	// create 4 sectors
-	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
 		Sectors: []slabs.PinnedSector{
@@ -1382,7 +1384,7 @@ func TestPinnedSectorsStatistics(t *testing.T) {
 	r4 := types.Hash256{4}
 
 	// create 4 sectors
-	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
 		Sectors: []slabs.PinnedSector{
@@ -1502,11 +1504,11 @@ func BenchmarkSlabs(b *testing.B) {
 	// prepare base db
 	var initialSlabIDs []slabs.SlabID
 	for range dbBaseSize / slabSize {
-		slabID, err := store.PinSlab(context.Background(), account, time.Time{}, newSlab())
+		slabIDs, err := store.PinSlabs(context.Background(), account, time.Time{}, newSlab())
 		if err != nil {
 			b.Fatal(err)
 		}
-		initialSlabIDs = append(initialSlabIDs, slabID)
+		initialSlabIDs = append(initialSlabIDs, slabIDs[0])
 	}
 
 	runSlabsBenchmark := func(b *testing.B, nSlabs int) {
@@ -1532,7 +1534,7 @@ func BenchmarkSlabs(b *testing.B) {
 		b.SetBytes(slabSize)
 		b.ResetTimer()
 		for b.Loop() {
-			_, err := store.PinSlab(context.Background(), proto.Account{1}, time.Time{}, newSlab())
+			_, err := store.PinSlabs(context.Background(), proto.Account{1}, time.Time{}, newSlab())
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -1540,7 +1542,7 @@ func BenchmarkSlabs(b *testing.B) {
 	})
 
 	b.Run("Slab", func(b *testing.B) {
-		id, err := store.PinSlab(context.Background(), proto.Account{1}, time.Time{}, newSlab())
+		ids, err := store.PinSlabs(context.Background(), proto.Account{1}, time.Time{}, newSlab())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1548,7 +1550,7 @@ func BenchmarkSlabs(b *testing.B) {
 		b.SetBytes(slabSize)
 		b.ResetTimer()
 		for b.Loop() {
-			_, err := store.Slab(context.Background(), id)
+			_, err := store.Slab(context.Background(), ids[0])
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -1556,7 +1558,7 @@ func BenchmarkSlabs(b *testing.B) {
 	})
 
 	b.Run("PinnedSlab", func(b *testing.B) {
-		id, err := store.PinSlab(context.Background(), proto.Account{1}, time.Time{}, newSlab())
+		ids, err := store.PinSlabs(context.Background(), proto.Account{1}, time.Time{}, newSlab())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1564,7 +1566,7 @@ func BenchmarkSlabs(b *testing.B) {
 		b.SetBytes(slabSize)
 		b.ResetTimer()
 		for b.Loop() {
-			_, err := store.PinnedSlab(context.Background(), id)
+			_, err := store.PinnedSlab(context.Background(), ids[0])
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -1629,7 +1631,7 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 				HostKey: hk,
 			})
 		}
-		_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -1714,7 +1716,7 @@ func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
 				HostKey: hk,
 			})
 		}
-		if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
+		if _, err := store.PinSlabs(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -1777,7 +1779,7 @@ func BenchmarkPinSectors(b *testing.B) {
 				HostKey: hk,
 			})
 		}
-		_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -1887,7 +1889,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 
 	// prepare base db
 	for range dbBaseSize / slabSize {
-		_, err = store.PinSlab(context.Background(), account, time.Time{}, newSlab())
+		_, err = store.PinSlabs(context.Background(), account, time.Time{}, newSlab())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1983,7 +1985,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 				HostKey: hk,
 			}
 		}
-		slabID, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		slabIDs, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -1991,7 +1993,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		slabIDs[i] = slabID
+		slabIDs[i] = slabIDs[0]
 	}
 
 	var iter int
@@ -2045,7 +2047,7 @@ func BenchmarkRecordIntegrityChecks(b *testing.B) {
 			})
 			sectorRoots = append(sectorRoots, root)
 		}
-		if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
+		if _, err := store.PinSlabs(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -2107,7 +2109,7 @@ func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 				HostKey: hk,
 			})
 		}
-		if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
+		if _, err := store.PinSlabs(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -2171,7 +2173,7 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 				HostKey: hk,
 			})
 		}
-		if _, err := store.PinSlab(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
+		if _, err := store.PinSlabs(context.Background(), account, time.Now().Add(time.Hour), slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -2236,7 +2238,7 @@ func TestMarkSectorsLost(t *testing.T) {
 	root2 := frand.Entropy256()
 	root3 := frand.Entropy256()
 	root4 := frand.Entropy256()
-	_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     10,
 		Sectors: []slabs.PinnedSector{
@@ -2350,7 +2352,7 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 				HostKey: hk,
 			})
 		}
-		_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -2492,7 +2494,7 @@ func BenchmarkMigrateSector(b *testing.B) {
 		}
 
 		// pin slab
-		_, err := store.PinSlab(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -2535,9 +2537,9 @@ func (s *Store) pinTestSlab(t testing.TB, account proto.Account, minShards uint,
 			HostKey: hk,
 		}
 	}
-	slabId, err := s.PinSlab(context.Background(), account, time.Time{}, params)
+	slabIDs, err := s.PinSlabs(context.Background(), account, time.Time{}, params)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return slabId
+	return slabIDs[0]
 }

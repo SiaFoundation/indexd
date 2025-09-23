@@ -51,13 +51,13 @@ func TestSlab(t *testing.T) {
 	}
 
 	// pin slab
-	slabID, err := store.PinSlab(context.Background(), account, time.Time{}, params)
+	slabIDs, err := store.PinSlabs(context.Background(), account, time.Time{}, params)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch slab
-	got, err := store.Slab(context.Background(), slabID)
+	got, err := store.Slab(context.Background(), slabIDs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestSlab(t *testing.T) {
 	}
 
 	// fetch slab again
-	got, err = store.Slab(context.Background(), slabID)
+	got, err = store.Slab(context.Background(), slabIDs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,12 +142,12 @@ func TestPinnedSlab(t *testing.T) {
 		expected.Sectors[i] = slabs.PinnedSector(sector)
 	}
 
-	slabID, err := store.PinSlab(context.Background(), account, time.Time{}, pinned)
+	slabIDs, err := store.PinSlabs(context.Background(), account, time.Time{}, pinned)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	slab, err := store.PinnedSlab(context.Background(), slabID)
+	slab, err := store.PinnedSlab(context.Background(), slabIDs[0])
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(slab, expected) {
@@ -162,7 +162,7 @@ func TestPinnedSlab(t *testing.T) {
 	}
 
 	// assert the slab no longer contains the lost sectors
-	slab, err = store.PinnedSlab(context.Background(), slabID)
+	slab, err = store.PinnedSlab(context.Background(), slabIDs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestPinnedSlab(t *testing.T) {
 		}
 	}
 
-	_, err = store.PinnedSlab(context.Background(), slabID)
+	_, err = store.PinnedSlab(context.Background(), slabIDs[0])
 	if !errors.Is(err, slabs.ErrUnrecoverable) {
 		t.Fatalf("expected ErrUnrecoverable, got %v", err)
 	}

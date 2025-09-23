@@ -35,6 +35,8 @@ type (
 
 	// Slabs defines the slab interface for the application API.
 	Slabs interface {
+		PinSlabs(context.Context, proto.Account, time.Time, ...slabs.SlabPinParams) ([]slabs.SlabID, error)
+
 		Object(ctx context.Context, account proto.Account, key types.Hash256) (slabs.Object, error)
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		SaveObject(ctx context.Context, account proto.Account, obj slabs.Object) error
@@ -294,6 +296,59 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	}
 
 	jc.Encode(slabID)
+}
+
+func (a *app) handlePOSTObjectsShared(jc jape.Context, pk types.PublicKey) {
+	var shared slabs.SharedObject
+	if jc.Decode(&shared) != nil {
+		return
+	}
+
+	var toPin []slabs.SlabPinParams
+	for _, slab := range shared.Slabs {
+		sectors := make([]slabs.SectorPinParams, 0, len(slab.Sectors))
+		for _, sector := range slab.Sectors {
+			sectors = append(sectors, slabs.SectorPinParams{
+				Root:    sector.Root,
+				HostKey: sector.HostKey,
+			})
+		}
+
+		toPin = append(toPin, slabs.SlabPinParams{
+			EncryptionKey: slab.EncryptionKey,
+			MinShards:     slab.MinShards,
+			Sectors:       sectors,
+		})
+	}
+
+	if _, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), time.Now(), toPin...); err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	var objSlabs []slabs.SlabSlice
+	for _, slab := range shared.Slabs {
+		objSlabs = append(objSlabs, slabs.SlabSlice{
+			SlabID: slab.ID,
+			Offset: slab.Offset,
+			Length: slab.Length,
+		})
+	}
+	obj := slabs.Object{
+		Key:   shared.Key,
+		Slabs: objSlabs,
+		Meta:  shared.Meta,
+	}
+
+	err := a.slabs.SaveObject(jc.Request.Context(), proto.Account(pk), obj)
+	if errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+	jc.Encode(nil)
 }
 
 func encodeBinary(jc jape.Context, resp types.EncoderTo) {

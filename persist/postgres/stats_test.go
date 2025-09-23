@@ -56,23 +56,23 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 	assertStats(0)
 
 	// pin some slabs
-	var slabIDs []slabs.SlabID
+	var pinned []slabs.SlabID
 	for i := range byte(10) {
-		slabID, err := store.PinSlab(context.Background(), account, time.Now(), newSlab(i))
+		slabIDs, err := store.PinSlabs(context.Background(), account, time.Now(), newSlab(i))
 		if err != nil {
 			t.Fatal(err)
 		}
-		slabIDs = append(slabIDs, slabID)
-		assertStats(int64(len(slabIDs)))
+		pinned = append(pinned, slabIDs[0])
+		assertStats(int64(len(pinned)))
 	}
 
 	// unpin them again
-	for len(slabIDs) > 0 {
-		slabID := slabIDs[0]
+	for len(pinned) > 0 {
+		slabID := pinned[0]
 		if err := store.UnpinSlab(context.Background(), account, slabID); err != nil {
 			t.Fatal(err)
 		}
-		slabIDs = slabIDs[1:]
-		assertStats(int64(len(slabIDs)))
+		pinned = pinned[1:]
+		assertStats(int64(len(pinned)))
 	}
 }
