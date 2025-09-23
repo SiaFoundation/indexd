@@ -57,6 +57,7 @@ type (
 	RevisionStore interface {
 		ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error)
 		UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision) error
+		UpdateHostUsage(ctx context.Context, hostKey types.PublicKey, usage proto.Usage) error
 	}
 )
 
@@ -114,16 +115,16 @@ func (c *HostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPri
 
 	// append sectors
 	var res rhp.RPCAppendSectorsResult
-	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
+	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
 		if contract.Revision.Filesize > maxContractSize {
-			return rhp.ContractRevision{}, fmt.Errorf("contract is too large, %d > %d", contract.Revision.Filesize, maxContractSize)
+			return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("contract is too large, %d > %d", contract.Revision.Filesize, maxContractSize)
 		}
 		res, err = rhp.RPCAppendSectors(ctx, c.client, c.signer, c.cm.TipState(), hostPrices, contract, sectors)
 		if err != nil {
-			return rhp.ContractRevision{}, fmt.Errorf("failed to append sectors: %w", err)
+			return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("failed to append sectors: %w", err)
 		}
 		contract.Revision = res.Revision
-		return contract, nil
+		return contract, res.Usage, nil
 	}); err != nil {
 		return rhp.RPCAppendSectorsResult{}, fmt.Errorf("failed to append sectors: %w", err)
 	}
@@ -140,6 +141,8 @@ func (c *HostClient) FormContract(ctx context.Context, settings proto.HostSettin
 	res, err := rhp.RPCFormContract(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, c.hostKey, settings.WalletAddress, params)
 	if err != nil {
 		return rhp.RPCFormContractResult{}, fmt.Errorf("failed to form contract: %w", err)
+	} else if err := c.store.UpdateHostUsage(ctx, c.hostKey, res.Usage); err != nil {
+		return rhp.RPCFormContractResult{}, fmt.Errorf("failed to update host usage: %w", err)
 	}
 	return res, nil
 }
@@ -147,13 +150,13 @@ func (c *HostClient) FormContract(ctx context.Context, settings proto.HostSettin
 // SectorRoots returns the sector roots for a contract.
 func (c *HostClient) SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error) {
 	var res rhp.RPCSectorRootsResult
-	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
+	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
 		res, err = rhp.RPCSectorRoots(ctx, c.client, c.cm.TipState(), hostPrices, c.signer, contract, offset, length)
 		if err != nil {
-			return rhp.ContractRevision{}, fmt.Errorf("failed to fetch sector roots: %w", err)
+			return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("failed to fetch sector roots: %w", err)
 		}
 		contract.Revision = res.Revision
-		return contract, nil
+		return contract, res.Usage, nil
 	}); err != nil {
 		return rhp.RPCSectorRootsResult{}, fmt.Errorf("failed to fetch sector roots: %w", err)
 	}
@@ -163,13 +166,13 @@ func (c *HostClient) SectorRoots(ctx context.Context, hostPrices proto.HostPrice
 // FreeSectors frees the specified sectors in the contract.
 func (c *HostClient) FreeSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, indices []uint64) (rhp.RPCFreeSectorsResult, error) {
 	var res rhp.RPCFreeSectorsResult
-	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
+	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
 		res, err = rhp.RPCFreeSectors(ctx, c.client, c.signer, c.cm.TipState(), hostPrices, contract, indices)
 		if err != nil {
-			return rhp.ContractRevision{}, fmt.Errorf("failed to free sectors: %w", err)
+			return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("failed to free sectors: %w", err)
 		}
 		contract.Revision = res.Revision
-		return contract, nil
+		return contract, res.Usage, nil
 	}); err != nil {
 		return rhp.RPCFreeSectorsResult{}, fmt.Errorf("failed to fetch free sectors: %w", err)
 	}
@@ -184,19 +187,19 @@ func (c *HostClient) ReadSector(ctx context.Context, hostPrices proto.HostPrices
 // RefreshContract refreshes the contract with the host.
 func (c *HostClient) RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error) {
 	var res rhp.RPCRefreshContractResult
-	if err := c.withRevision(ctx, params.ContractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
+	if err := c.withRevision(ctx, params.ContractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
 		if settings.ProtocolVersion.Cmp(rhp.ProtocolVersion500) >= 0 {
 			res, err = rhp.RPCRefreshContractPartialRollover(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, params)
 		} else {
 			res, err = rhp.RPCRefreshContractFullRollover(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, params)
 		}
 		if err != nil {
-			return rhp.ContractRevision{}, err
+			return rhp.ContractRevision{}, proto.Usage{}, err
 		}
 		// renewals return the old (or 'renewed') revision, the revision of the
 		// renewal will be persisted in the database when the renewed contract
 		// is added
-		return contract, nil
+		return contract, res.Usage, nil
 	}); err != nil {
 		return rhp.RPCRefreshContractResult{}, fmt.Errorf("failed to refresh contract: %w", err)
 	}
@@ -206,16 +209,16 @@ func (c *HostClient) RefreshContract(ctx context.Context, settings proto.HostSet
 // RenewContract renews the contract with the host.
 func (c *HostClient) RenewContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRenewContractParams) (rhp.RPCRenewContractResult, error) {
 	var res rhp.RPCRenewContractResult
-	if err := c.withRevision(ctx, params.ContractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, err error) {
+	if err := c.withRevision(ctx, params.ContractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
 		res, err = rhp.RPCRenewContract(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, params)
 		if err != nil {
-			return rhp.ContractRevision{}, err
+			return rhp.ContractRevision{}, proto.Usage{}, err
 		}
 
 		// renewals return the old (or 'renewed') revision, the revision of the
 		// renewal will be persisted in the database when the renewed contract
 		// is added
-		return contract, nil
+		return contract, res.Usage, nil
 	}); err != nil {
 		return rhp.RPCRenewContractResult{}, fmt.Errorf("failed to renew contract: %w", err)
 	}
@@ -224,9 +227,9 @@ func (c *HostClient) RenewContract(ctx context.Context, settings proto.HostSetti
 
 // ReplenishAccounts replenishes the accounts in the contract to the target value.
 func (c *HostClient) ReplenishAccounts(ctx context.Context, contractID types.FileContractID, accounts []proto.Account, target types.Currency) (res rhp.RPCReplenishAccountsResult, funded int, _ error) {
-	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (rhp.ContractRevision, error) {
+	if err := c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		if contract.Revision.RenterOutput.Value.Cmp(target) < 0 {
-			return rhp.ContractRevision{}, ErrContractInsufficientFunds
+			return rhp.ContractRevision{}, proto.Usage{}, ErrContractInsufficientFunds
 		}
 
 		// prepare batch
@@ -243,10 +246,10 @@ func (c *HostClient) ReplenishAccounts(ctx context.Context, contractID types.Fil
 		var err error
 		res, err = rhp.RPCReplenishAccounts(ctx, c.client, params, c.cm.TipState(), c.signer)
 		if err != nil {
-			return rhp.ContractRevision{}, err
+			return rhp.ContractRevision{}, proto.Usage{}, err
 		}
 		contract.Revision = res.Revision
-		return contract, nil
+		return contract, res.Usage, nil
 	}); err != nil {
 		return rhp.RPCReplenishAccountsResult{}, 0, fmt.Errorf("failed to replenish accounts: %w", err)
 	}
@@ -307,7 +310,7 @@ func (c *HostClient) syncRevision(ctx context.Context, contractID types.FileCont
 // reports an invalid signature, suggesting the local revision is out of sync,
 // it will synchronize with the host and retry the function using the updated
 // revision. Therefore, the revise function must be idempotent.
-func (c *HostClient) withRevision(ctx context.Context, contractID types.FileContractID, reviseFn func(contract rhp.ContractRevision) (rhp.ContractRevision, error)) error {
+func (c *HostClient) withRevision(ctx context.Context, contractID types.FileContractID, reviseFn func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error)) error {
 	cs := c.cm.TipState()
 	bh := cs.Index.Height
 
@@ -322,7 +325,7 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 	}
 
 	// revise the contract
-	revised, err := reviseFn(contract)
+	revised, usage, err := reviseFn(contract)
 
 	// try and sync the revision if we got an error that indicates the revision is invalid
 	if err != nil && strings.Contains(err.Error(), proto.ErrInvalidSignature.Error()) {
@@ -338,7 +341,7 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 		c.log.Debug("synced contract revision", zap.Uint64("revisionNumber", contract.Revision.RevisionNumber), zap.Stringer("contractID", contractID))
 
 		// try and revise the contract again
-		revised, err = reviseFn(contract)
+		revised, usage, err = reviseFn(contract)
 	}
 	if err != nil {
 		return err
@@ -350,6 +353,8 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 	if revised.Revision.RevisionNumber > contract.Revision.RevisionNumber {
 		if err := c.store.UpdateContractRevision(ctx, revised); err != nil {
 			c.log.Error("failed to update contract revision", zap.Error(err))
+		} else if err := c.store.UpdateHostUsage(ctx, c.hostKey, usage); err != nil {
+			c.log.Error("failed to update host usage", zap.Error(err))
 		}
 	}
 

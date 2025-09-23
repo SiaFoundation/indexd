@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
@@ -675,8 +676,6 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal("unexpected", len(hosts))
 	} else if hosts[0].PublicKey != uh1 {
 		t.Fatal("unexpected host", hosts[0])
-	} else if hosts[0].PublicKey != uh1 {
-		t.Fatal("unexpected host", hosts[0])
 	} else if hosts[0].CountryCode != locationUS.CountryCode {
 		t.Fatalf("expected country code %v, got %v", locationUS.CountryCode, hosts[0].CountryCode)
 	} else if hosts[0].Latitude != locationUS.Latitude {
@@ -698,6 +697,57 @@ func TestUsableHosts(t *testing.T) {
 	} else if hosts[0].Longitude != locationAU.Longitude {
 		t.Fatalf("expected longitude %v, got %v", locationAU.Longitude, hosts[0].Longitude)
 	}
+
+	// block usable hosts and add 3 new usable hosts in the EU
+	db.BlockHosts(context.Background(), []types.PublicKey{uh1, uh2}, t.Name())
+	uh1 = addHost(10, geoip.Location{
+		CountryCode: "ES",    // Spain
+		Latitude:    41.3851, // Barcelona
+		Longitude:   2.1734,
+	}, siamuxProtocol, true, false, true)
+	uh2 = addHost(11, geoip.Location{
+		CountryCode: "DE",    // Germany
+		Latitude:    50.1109, // Frankfurt
+		Longitude:   8.6821,
+	}, siamuxProtocol, true, false, true)
+	uh3 := addHost(12, geoip.Location{
+		CountryCode: "FR",    // France
+		Latitude:    48.8566, // Paris
+		Longitude:   2.3522,
+	}, siamuxProtocol, true, false, true)
+
+	// assert sorting by distance works
+	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.SortByDistance(50.8503, 4.3517)); err != nil { // Brussels
+		t.Fatal("unexpected", err)
+	} else if len(hosts) != 3 {
+		t.Fatal("unexpected", len(hosts))
+	} else if hosts[0].PublicKey != uh3 {
+		t.Fatal("unexpected host", hosts[0])
+	} else if hosts[1].PublicKey != uh2 {
+		t.Fatal("unexpected host", hosts[1])
+	} else if hosts[2].PublicKey != uh1 {
+		t.Fatal("unexpected host", hosts[2])
+	}
+
+	// now try fetching it from Portugal
+	if hosts, err := db.UsableHosts(context.Background(), 0, 10, hosts.SortByDistance(38.7223, -9.1393)); err != nil { // Lisbon
+		t.Fatal("unexpected", err)
+	} else if len(hosts) != 3 {
+		t.Fatal("unexpected", len(hosts))
+	} else if hosts[0].PublicKey != uh1 {
+		t.Fatal("unexpected host", hosts[0])
+	} else if hosts[1].PublicKey != uh3 {
+		t.Fatal("unexpected host", hosts[1])
+	} else if hosts[2].PublicKey != uh2 {
+		t.Fatal("unexpected host", hosts[2])
+	}
+
+	// add host without location
+	_ = addHost(13, geoip.Location{
+		CountryCode: "FR", // France
+		Latitude:    0,
+		Longitude:   0,
+	}, siamuxProtocol, true, false, true)
 }
 
 func TestHostsForScanning(t *testing.T) {
@@ -1342,6 +1392,230 @@ func BenchmarkHosts(b *testing.B) {
 			i++
 		}
 	})
+}
+
+// BenchmarkUsableHosts is a set of benchmarks that verify the performance of
+// the UsableHosts method.
+func BenchmarkUsableHosts(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	// update global settings to make hosts pass all checks
+	if err := store.UpdateUsabilitySettings(context.Background(), hosts.UsabilitySettings{
+		MaxEgressPrice:     types.MaxCurrency,
+		MaxIngressPrice:    types.MaxCurrency,
+		MaxStoragePrice:    types.MaxCurrency,
+		MinCollateral:      types.ZeroCurrency,
+		MinProtocolVersion: rhp.ProtocolVersion400,
+	}); err != nil {
+		b.Fatal(err)
+	}
+	if err := store.UpdateMaintenanceSettings(context.Background(), contracts.MaintenanceSettings{
+		Period:          2,
+		RenewWindow:     1,
+		WantedContracts: 1,
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	randomCountry := func() string {
+		countries := []string{"US", "DE", "FR", "CN", "JP", "IN", "BR", "RU", "GB", "IT", "ES", "CA", "AU"}
+		return countries[frand.Intn(len(countries))]
+	}
+
+	randomLocation := func() pgtype.Point {
+		return pgtype.Point{
+			P: pgtype.Vec2{
+				X: frand.Float64()*180 - 90,
+				Y: frand.Float64()*360 - 180,
+			},
+			Valid: true,
+		}
+	}
+
+	randomProtocol := func() chain.Protocol {
+		protocols := []chain.Protocol{siamux.Protocol, quic.Protocol}
+		return protocols[frand.Intn(len(protocols))]
+	}
+
+	randomTime := func() time.Time {
+		maxOneHour := time.Duration(frand.Uint64n(60*60)) * time.Second
+		return time.Now().Add(-30 * time.Minute).Add(maxOneHour)
+	}
+
+	// define parameters
+	const (
+		numHosts     = 10_000
+		numBlocklist = 1000
+		defaultLimit = 100
+		maxLimit     = 500
+	)
+
+	// prepare random blocklist (we LEFT JOIN the blocklist in UsableHosts)
+	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		for range numBlocklist {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO hosts_blocklist (public_key, reason) 
+				VALUES ($1, 'none')`, sqlPublicKey(types.GeneratePrivateKey().PublicKey())); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// prepare random hosts
+	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		for range numHosts {
+			hk := types.GeneratePrivateKey().PublicKey()
+			hs := newTestHostSettings(hk)
+
+			var hostID int64
+			err := tx.QueryRow(context.Background(), `
+				INSERT INTO hosts (
+					public_key, 
+					last_announcement,
+					last_successful_scan,
+					settings_protocol_version,
+					settings_release,
+					settings_wallet_address,
+					settings_accepting_contracts,
+					settings_max_collateral,
+					settings_max_contract_duration,
+					settings_remaining_storage,
+					settings_total_storage,
+					settings_contract_price,
+					settings_collateral,
+					settings_storage_price,
+					settings_ingress_price,
+					settings_egress_price,
+					settings_free_sector_price,
+					settings_tip_height,
+					settings_valid_until,
+					settings_signature,
+					location,
+					country_code
+				) VALUES ($1, NOW(), NOW(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20) RETURNING id;`,
+				sqlPublicKey(hk),
+				sqlProtocolVersion(hs.ProtocolVersion),
+				hs.Release,
+				sqlHash256(hs.WalletAddress),
+				hs.AcceptingContracts,
+				sqlCurrency(hs.MaxCollateral),
+				hs.MaxContractDuration,
+				hs.RemainingStorage,
+				hs.TotalStorage,
+				sqlCurrency(hs.Prices.ContractPrice),
+				sqlCurrency(hs.Prices.Collateral),
+				sqlCurrency(hs.Prices.StoragePrice),
+				sqlCurrency(hs.Prices.IngressPrice),
+				sqlCurrency(hs.Prices.EgressPrice),
+				sqlCurrency(hs.Prices.FreeSectorPrice),
+				hs.Prices.TipHeight,
+				hs.Prices.ValidUntil,
+				sqlSignature(hs.Prices.Signature),
+				randomLocation(),
+				randomCountry(),
+			).Scan(&hostID)
+			if err != nil {
+				return err
+			}
+
+			// add host addresses (50% QUIC)
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO host_addresses (host_id, net_address, protocol) 
+				VALUES ($1, $2, $3)`, hostID, "foo.com", sqlNetworkProtocol(randomProtocol())); err != nil {
+				return fmt.Errorf("failed to insert host address: %w", err)
+			}
+
+			// add CIDRs
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO host_resolved_cidrs (host_id, cidr) 
+				VALUES ($1, $2), ($1, $3)`, hostID, "1.2.3.4/32", "2.3.4.5/32"); err != nil {
+				return err
+			}
+
+			// add contract
+			revision := newTestRevision(hk)
+			revision.Filesize = frand.Uint64n(1e9)                                                            // random size
+			revision.Capacity = revision.Filesize + frand.Uint64n(1e3)                                        // random capacity
+			revision.RenterOutput.Value = types.Siacoins(100).Add(types.Siacoins(uint32(frand.Uint64n(100)))) // random allowance
+			if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, next_prune) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
+				hostID,
+				sqlHash256(types.FileContractID(hk)),
+				sqlFileContract(revision),
+				sqlCurrency(types.ZeroCurrency),
+				sqlCurrency(types.ZeroCurrency),
+				sqlCurrency(types.ZeroCurrency),
+				sqlCurrency(revision.RemainingAllowance().Add(types.Siacoins(1))), // 1SC more than initial allowance
+				sqlCurrency(revision.RemainingAllowance()),
+				sqlContractState(uint8(frand.Uint64n(5))), // random contract state (40% active)
+				frand.Uint64n(2) == 0,                     // random good state (50% good)
+				revision.Filesize,
+				revision.Capacity,
+				randomTime(), // random last_broadcast_attempt
+				randomTime(), // random next_prune
+			); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	for _, test := range []struct {
+		name  string
+		limit int
+	}{
+		{"DefaultLimit", defaultLimit},
+		{"MaxLimit", maxLimit},
+	} {
+		b.Run("UsableHosts_"+test.name, func(b *testing.B) {
+			for b.Loop() {
+				hosts, err := store.UsableHosts(context.Background(), 0, test.limit)
+				if err != nil {
+					b.Fatal(err)
+				} else if len(hosts) != test.limit {
+					b.Fatalf("sanity check failed, found %d usable hosts", len(hosts))
+				}
+			}
+		})
+
+		b.Run("UsableHosts_WithProtocol_"+test.name, func(b *testing.B) {
+			for b.Loop() {
+				hosts, err := store.UsableHosts(context.Background(), 0, test.limit, hosts.WithProtocol(randomProtocol()))
+				if err != nil {
+					b.Fatal(err)
+				} else if len(hosts) != test.limit {
+					b.Fatalf("sanity check failed, found %d usable hosts", len(hosts))
+				}
+			}
+		})
+
+		b.Run("UsableHosts_WithCountry_"+test.name, func(b *testing.B) {
+			for b.Loop() {
+				hosts, err := store.UsableHosts(context.Background(), 0, test.limit, hosts.WithCountry(randomCountry()))
+				if err != nil {
+					b.Fatal(err)
+				} else if len(hosts) < test.limit/10 {
+					b.Fatalf("sanity check failed, found %d usable hosts", len(hosts))
+				}
+			}
+		})
+
+		b.Run("UsableHosts_WithProximity_"+test.name, func(b *testing.B) {
+			for b.Loop() {
+				point := randomLocation()
+				hosts, err := store.UsableHosts(context.Background(), 0, test.limit, hosts.SortByDistance(point.P.X, point.P.Y))
+				if err != nil {
+					b.Fatal(err)
+				} else if len(hosts) != test.limit {
+					b.Fatalf("sanity check failed, found %d usable hosts", len(hosts))
+				}
+			}
+		})
+	}
 }
 
 func newTestHostSettings(pk types.PublicKey) proto4.HostSettings {

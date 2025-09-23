@@ -75,7 +75,7 @@ WITH globals AS (
 ), hosts AS (
 	SELECT
 		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, COALESCE(hb.reason, ''), lost_sectors,
-		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime,
+		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime, usage_account_funding, usage_total_spent,
 		country_code, location,
 		settings_protocol_version, settings_release, settings_wallet_address,
 		settings_accepting_contracts, settings_max_collateral, settings_max_contract_duration,
@@ -152,7 +152,7 @@ WITH globals AS (
 ), hosts AS (
 	SELECT
 		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, COALESCE(hb.reason, ''), lost_sectors,
-		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime,
+		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime, usage_account_funding, usage_total_spent,
 		country_code, location,
 		settings_protocol_version, settings_release, settings_wallet_address,
 		settings_accepting_contracts, settings_max_collateral, settings_max_contract_duration,
@@ -559,7 +559,7 @@ func (s *Store) UsableHosts(ctx context.Context, offset, limit int, opts ...host
 
 	var usable []hosts.HostInfo
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
-		rows, err := tx.Query(ctx, `
+		baseQuery := `
 WITH globals AS (
     SELECT
 		contracts_period,
@@ -629,8 +629,16 @@ WHERE
 	-- active contracts
 	EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state <= 1) AND
 	-- protocol filter
-	($4::smallint IS NULL OR EXISTS (SELECT 1 FROM host_addresses WHERE host_id = hosts.id AND protocol = $4::smallint))
-LIMIT $1 OFFSET $2;`, limit, offset, queryOpts.CountryCode, (*sqlNetworkProtocol)(queryOpts.Protocol))
+	($4::smallint IS NULL OR EXISTS (SELECT 1 FROM host_addresses WHERE host_id = hosts.id AND protocol = $4::smallint)) `
+		args := []any{limit, offset, queryOpts.CountryCode, (*sqlNetworkProtocol)(queryOpts.Protocol)}
+
+		if queryOpts.Location != nil {
+			baseQuery += `ORDER BY location <-> point($5, $6) `
+			args = append(args, queryOpts.Location[0], queryOpts.Location[1])
+		}
+		baseQuery += `LIMIT $1 OFFSET $2;`
+
+		rows, err := tx.Query(ctx, baseQuery, args...)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts: %w", err)
 		}
@@ -745,6 +753,8 @@ func scanHost(s scanner) (dbHost, error) {
 		&host.NextScan,
 		&host.ConsecutiveFailedScans,
 		&host.RecentUptime,
+		(*sqlCurrency)(&host.AccountFunding),
+		(*sqlCurrency)(&host.TotalSpent),
 		&host.CountryCode,
 		&point,
 		(*sqlProtocolVersion)(&host.Settings.ProtocolVersion),

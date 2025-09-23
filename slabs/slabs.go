@@ -13,6 +13,9 @@ import (
 const (
 	// DefaultRedundancy is the default minimum redundancy for slabs.
 	DefaultRedundancy = 3
+
+	// MaxTotalShards is the maximum number of total shards (data + parity) allowed in a slab.
+	MaxTotalShards = 256
 )
 
 var (
@@ -121,6 +124,8 @@ func (s SlabPinParams) Validate() error {
 		return errors.New("encryption key is empty")
 	} else if len(s.Sectors) < int(s.MinShards*DefaultRedundancy) {
 		return fmt.Errorf("%w: minimum redundancy of %dx is not met", ErrInsufficientRedundancy, DefaultRedundancy)
+	} else if len(s.Sectors) > MaxTotalShards {
+		return fmt.Errorf("total number of shards %d exceeds maximum of %d", len(s.Sectors), MaxTotalShards)
 	}
 
 	hks := make(map[types.PublicKey]struct{}, len(s.Sectors))

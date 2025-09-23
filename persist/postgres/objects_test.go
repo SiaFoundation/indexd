@@ -255,7 +255,7 @@ func TestSharedObjects(t *testing.T) {
 		t.Helper()
 
 		s := slabs.SlabPinParams{
-			MinShards:     uint(frand.Intn(255)),
+			MinShards:     uint(frand.Intn(255)) + 1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       make([]slabs.PinnedSector, 30),
 		}

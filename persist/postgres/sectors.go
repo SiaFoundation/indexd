@@ -56,7 +56,7 @@ func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, ro
 			return fmt.Errorf("failed to mark sectors as lost: %w", err)
 		} else if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, len(sectorIDs), hostID); err != nil {
 			return fmt.Errorf("failed to increment host's lost sectors: %w", err)
-		} else if err := s.incrementPinnedSectors(ctx, tx, -pinned); err != nil {
+		} else if err := s.incrementNumPinnedSectors(ctx, tx, -pinned); err != nil {
 			return fmt.Errorf("failed to update pinned sectors: %w", err)
 		} else if err := s.incrementUnpinnedSectors(ctx, tx, pinned); err != nil {
 			return fmt.Errorf("failed to update unpinned sectors: %w", err)
@@ -178,7 +178,7 @@ func (s *Store) markFailingSectorsLostBatch(ctx context.Context, hostKey types.P
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		} else if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, totalUpdated, hostID); err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
-		} else if err := s.incrementPinnedSectors(ctx, tx, -pinned); err != nil {
+		} else if err := s.incrementNumPinnedSectors(ctx, tx, -pinned); err != nil {
 			return fmt.Errorf("failed to update pinned sectors: %w", err)
 		} else if err := s.incrementUnpinnedSectors(ctx, tx, pinned); err != nil {
 			return fmt.Errorf("failed to update unpinned sectors: %w", err)
@@ -547,7 +547,7 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = $1, contract_sectors_map_id = $2 WHERE id = ANY($3)`, hostID, contractMapID, sectorIDs); err != nil {
 			return fmt.Errorf("failed to pin sectors: %w", err)
 		} else if unpinned > 0 {
-			if err := s.incrementPinnedSectors(ctx, tx, unpinned); err != nil {
+			if err := s.incrementNumPinnedSectors(ctx, tx, unpinned); err != nil {
 				return fmt.Errorf("failed to update number of pinned sectors: %w", err)
 			} else if err := s.incrementUnpinnedSectors(ctx, tx, -unpinned); err != nil {
 				return fmt.Errorf("failed to update number of unpinned sectors: %w", err)
@@ -562,7 +562,7 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 // by the threshold time to NULL.
 func (s *Store) PruneUnpinnableSectors(ctx context.Context, threshold time.Time) error {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
+		res, err := tx.Exec(ctx, `
             UPDATE sectors
             SET host_id = NULL
             WHERE host_id IS NOT NULL
@@ -570,6 +570,10 @@ func (s *Store) PruneUnpinnableSectors(ctx context.Context, threshold time.Time)
 	            AND uploaded_at <= $1`, threshold)
 		if err != nil {
 			return fmt.Errorf("failed to prune unpinnable sectors: %w", err)
+		} else if res.RowsAffected() > 0 {
+			if err := s.incrementNumUnpinnableSlabs(ctx, tx, uint64(res.RowsAffected())); err != nil {
+				return fmt.Errorf("failed to increment unpinnable sectors: %w", err)
+			}
 		}
 		return nil
 	})
@@ -696,7 +700,7 @@ func (s *Store) MigrateSector(ctx context.Context, root types.Hash256, hostKey t
 			return fmt.Errorf("failed to increment number of migrated sectors: %w", err)
 		} else if contractMapID.Valid {
 			// sector was pinned before, update stats
-			if err := s.incrementPinnedSectors(ctx, tx, -1); err != nil {
+			if err := s.incrementNumPinnedSectors(ctx, tx, -1); err != nil {
 				return fmt.Errorf("failed to decrement pinned sectors: %w", err)
 			} else if err := s.incrementUnpinnedSectors(ctx, tx, 1); err != nil {
 				return fmt.Errorf("failed to increment unpinned sectors: %w", err)

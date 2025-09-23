@@ -99,7 +99,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		GenesisID:  genesis.ID(),
 		UniqueID:   gateway.GenerateUniqueID(),
 		NetAddress: syncerAddr,
-	}, syncer.WithLogger(log.Named("syncer")))
+	}, syncer.WithLogger(log.Named("syncer").WithOptions(zap.IncreaseLevel(zap.InfoLevel)))) // increase to info to reduce log spam
 	go s.Run()
 	defer s.Close()
 

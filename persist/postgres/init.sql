@@ -34,6 +34,9 @@ CREATE TABLE hosts (
     location POINT NOT NULL DEFAULT POINT(0.0, 0.0),
     lost_sectors INTEGER NOT NULL DEFAULT 0,
 
+    usage_account_funding NUMERIC(50,0) NOT NULL DEFAULT 0,
+    usage_total_spent NUMERIC(50,0) NOT NULL DEFAULT 0,
+
     settings_protocol_version BYTEA NOT NULL DEFAULT '\x000000'::bytea CHECK (LENGTH(settings_protocol_version) = 3),
     settings_release TEXT NOT NULL DEFAULT '',
     settings_wallet_address BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(settings_wallet_address) = 32),
@@ -59,6 +62,9 @@ CREATE INDEX hosts_lost_sectors_idx ON hosts(lost_sectors);
 
 -- speed up querying by country
 CREATE INDEX hosts_country_code_idx ON hosts(country_code);
+
+-- speed up ordering by distance to a location
+CREATE INDEX hosts_location_gist_idx ON hosts USING GIST (location);
 
 CREATE TABLE account_hosts (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -234,6 +240,9 @@ CREATE TABLE contract_sectors_map (
 );
 CREATE INDEX contract_sectors_map_contract_id_idx ON contract_sectors_map(contract_id);
 
+-- speeds up usable hosts lookup
+CREATE INDEX contracts_host_active_idx ON contracts (host_id) WHERE state <= 1;
+
 CREATE TABLE contract_elements (
     id SERIAL PRIMARY KEY,
     contract_id BYTEA NOT NULL UNIQUE REFERENCES contracts(contract_id) ON DELETE CASCADE,
@@ -318,6 +327,7 @@ CREATE TABLE sectors_stats (
     num_slabs BIGINT NOT NULL DEFAULT 0 CHECK (num_slabs >= 0), -- total number of slabs
     num_migrated_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_migrated_sectors >= 0), -- total number of migrated sectors
     num_pinned_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_pinned_sectors >= 0), -- total number of pinned sectors
+    num_unpinnable_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinnable_sectors >= 0), -- total number of unpinnable sectors
     num_unpinned_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinned_sectors >= 0) -- total number of unpinned sectors
 );
 

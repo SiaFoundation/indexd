@@ -1176,6 +1176,17 @@ func TestUnhealthySlabs(t *testing.T) {
 func TestPruneUnpinnableSectors(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
+	assertUnpinnableSectors := func(expected uint64) {
+		t.Helper()
+		var got uint64
+		err := store.pool.QueryRow(context.Background(), "SELECT num_unpinnable_sectors FROM sectors_stats WHERE id = 0").Scan(&got)
+		if err != nil {
+			t.Fatal(err)
+		} else if got != expected {
+			t.Fatalf("expected %d unpinnable sectors, got %d", expected, got)
+		}
+	}
+
 	// add account
 	account := proto.Account{1}
 	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
@@ -1212,6 +1223,9 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// assert initial count
+	assertUnpinnableSectors(0)
+
 	// make sure some time passes since the default time that is set when the
 	// slab is pinned
 	time.Sleep(100 * time.Millisecond)
@@ -1241,6 +1255,8 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
 	}
 
+	assertUnpinnableSectors(0)
+
 	if err := store.PruneUnpinnableSectors(context.Background(), time.Now().Add(-3*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
@@ -1253,6 +1269,8 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 	} else if len(unhealthyIDs) != 1 {
 		t.Fatalf("expected 1 unhealthy slabs, got %d", len(unhealthyIDs))
 	}
+
+	assertUnpinnableSectors(1)
 }
 
 func TestUnpinnedSectors(t *testing.T) {

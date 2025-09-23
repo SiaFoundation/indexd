@@ -100,6 +100,8 @@ type (
 		Blocked                bool                `json:"blocked"`
 		BlockedReason          string              `json:"blockedReason"`
 		LostSectors            uint64              `json:"lostSectors"`
+		AccountFunding         types.Currency      `json:"accountFunding"`
+		TotalSpent             types.Currency      `json:"totalSpent"`
 	}
 
 	// HostInfo is a subset of the Host struct that contains only the public
