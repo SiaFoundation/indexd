@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"net"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -106,12 +105,8 @@ FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 			return fmt.Errorf("host %q: %w", hk, hosts.ErrNotFound)
 		} else if err != nil {
 			return fmt.Errorf("failed to query host: %w", err)
-		}
-
-		if err := decorateHostAddresses(ctx, tx, &dbHost); err != nil {
+		} else if err := decorateHostAddresses(ctx, tx, &dbHost); err != nil {
 			return fmt.Errorf("failed to decorate host addresses: %w", err)
-		} else if err := decorateHostNetworks(ctx, tx, &dbHost); err != nil {
-			return fmt.Errorf("failed to decorate host networks: %w", err)
 		}
 
 		host = dbHost.Host
@@ -221,12 +216,8 @@ WHERE
 			return err
 		} else if len(dbHosts) == 0 {
 			return nil
-		}
-
-		if err := decorateHostAddresses(ctx, tx, dbHosts...); err != nil {
+		} else if err := decorateHostAddresses(ctx, tx, dbHosts...); err != nil {
 			return fmt.Errorf("failed to decorate host addresses: %w", err)
-		} else if err := decorateHostNetworks(ctx, tx, dbHosts...); err != nil {
-			return fmt.Errorf("failed to decorate host networks: %w", err)
 		}
 
 		for _, h := range dbHosts {
@@ -398,10 +389,7 @@ func (s *Store) PruneHosts(ctx context.Context, minLastSuccessfulScan time.Time,
 }
 
 // UpdateHost updates a host in the database, the given parameters are the result of scanning the host.
-func (s *Store) UpdateHost(ctx context.Context, hk types.PublicKey, networks []string, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
-	if len(networks) == 0 && scanSucceeded {
-		return hosts.ErrNoNetworks
-	}
+func (s *Store) UpdateHost(ctx context.Context, hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		if !scanSucceeded {
 			if res, err := tx.Exec(ctx, `
@@ -519,26 +507,6 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 		} else if hostID == 0 {
 			return errors.New("failed to return host id after successful update") // sanity check
 		}
-
-		if scanSucceeded {
-			_, err = tx.Exec(ctx, `DELETE FROM host_resolved_cidrs WHERE host_id = $1`, hostID)
-			if err != nil {
-				return err
-			}
-
-			for _, cidr := range networks {
-				_, ipnet, err := net.ParseCIDR(cidr)
-				if err != nil {
-					return fmt.Errorf("failed to parse CIDR: %w", err)
-				}
-
-				_, err = tx.Exec(ctx, `INSERT INTO host_resolved_cidrs (host_id, cidr) VALUES ($1, $2)`, hostID, ipnet)
-				if err != nil {
-					return fmt.Errorf("failed to insert host resolved CIDR: %w", err)
-				}
-			}
-		}
-
 		return nil
 	})
 }
@@ -705,32 +673,6 @@ func decorateHostAddresses(ctx context.Context, tx *txn, hosts ...*dbHost) error
 			return fmt.Errorf("failed to scan host address: %w", err)
 		}
 		hosts[idToIdx[hostID]].Addresses = append(hosts[idToIdx[hostID]].Addresses, na)
-	}
-
-	return rows.Err()
-}
-
-func decorateHostNetworks(ctx context.Context, tx *txn, hosts ...*dbHost) error {
-	hostIDs := make([]int64, 0, len(hosts))
-	idToIdx := make(map[int64]int64, len(hosts))
-	for i := range hosts {
-		idToIdx[hosts[i].id] = int64(i)
-		hostIDs = append(hostIDs, hosts[i].id)
-	}
-
-	rows, err := tx.Query(ctx, `SELECT host_id, cidr FROM host_resolved_cidrs WHERE host_id = ANY($1)`, hostIDs)
-	if err != nil {
-		return fmt.Errorf("failed to query host networks: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var hostID int64
-		var cidr net.IPNet
-		if err := rows.Scan(&hostID, &cidr); err != nil {
-			return fmt.Errorf("failed to scan host network: %w", err)
-		}
-		hosts[idToIdx[hostID]].Networks = append(hosts[idToIdx[hostID]].Networks, cidr.String())
 	}
 
 	return rows.Err()

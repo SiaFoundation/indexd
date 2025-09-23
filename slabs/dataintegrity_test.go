@@ -20,7 +20,6 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	// prepare host
 	hk := types.PublicKey{1}
 	host := hosts.Host{
-		Networks:  []string{"1.1.1.1"},
 		PublicKey: hk,
 		Settings: proto.HostSettings{
 			Prices: proto.HostPrices{
@@ -112,7 +111,6 @@ func TestPerformIntegrityChecksForHostExpiredPrices(t *testing.T) {
 	// prepare host
 	hk := types.PublicKey{1}
 	host := hosts.Host{
-		Networks:  []string{"1.1.1.1"},
 		PublicKey: hk,
 		Settings: proto.HostSettings{
 			Prices: proto.HostPrices{

@@ -64,7 +64,7 @@ loop:
 func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, host hosts.Host, hostLog *zap.Logger) error {
 	// check host is good
 	if !host.IsGood() {
-		return fmt.Errorf("host is bad: blocked=%t, usable=%t, networks=%d", host.Blocked, host.Usability.Usable(), len(host.Networks))
+		return fmt.Errorf("host is bad: blocked=%t, usable=%t", host.Blocked, host.Usability.Usable())
 	}
 
 	// dial the host

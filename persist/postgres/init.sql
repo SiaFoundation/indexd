@@ -99,13 +99,6 @@ CREATE TABLE host_addresses (
 );
 CREATE INDEX host_addresses_host_id_idx ON host_addresses (host_id);
 
-CREATE TABLE host_resolved_cidrs (
-    id SERIAL PRIMARY KEY,
-    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
-    cidr CIDR NOT NULL
-);
-CREATE INDEX host_resolved_cidrs_host_id_idx ON host_resolved_cidrs (host_id);
-
 CREATE TABLE syncer_peers (
     ip_address INET NOT NULL,
     port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),

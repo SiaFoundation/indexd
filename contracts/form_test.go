@@ -208,7 +208,6 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 			CountryCode: countries[frand.Intn(len(countries))],
 			Latitude:    frand.Float64()*180 - 90,
 			Longitude:   frand.Float64()*360 - 180,
-			Networks:    []string{fmt.Sprintf("127.0.0.%d/24", i)},
 			Addresses: []chain.NetAddress{
 				{
 					Protocol: siamux.Protocol,
@@ -366,7 +365,6 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 			CountryCode: countries[frand.Intn(len(countries))],
 			Latitude:    frand.Float64()*180 - 90,
 			Longitude:   frand.Float64()*360 - 180,
-			Networks:    []string{fmt.Sprintf("127.0.0.%d/24", i)},
 			Addresses: []chain.NetAddress{
 				{
 					Protocol: siamux.Protocol,
