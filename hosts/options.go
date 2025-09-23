@@ -49,10 +49,22 @@ type (
 	// UsableHostsQueryOpts holds optional parameters for querying usable
 	// hosts.
 	UsableHostsQueryOpts struct {
-		Protocol    *chain.Protocol
 		CountryCode *string
+		Protocol    *chain.Protocol
+
+		// sorting
+		Location *[2]float64
 	}
 )
+
+// WithCountry causes UsableHosts to only return hosts located in the given
+// country.
+func WithCountry(countryCode string) UsableHostQueryOpt {
+	return func(opts *UsableHostsQueryOpts) {
+		countryCode = strings.ToUpper(countryCode)
+		opts.CountryCode = &countryCode
+	}
+}
 
 // WithProtocol causes UsableHosts to only return hosts with the given protocol.
 func WithProtocol(protocol chain.Protocol) UsableHostQueryOpt {
@@ -61,11 +73,10 @@ func WithProtocol(protocol chain.Protocol) UsableHostQueryOpt {
 	}
 }
 
-// WithCountry causes UsableHosts to only return hosts located in the given
-// country.
-func WithCountry(countryCode string) UsableHostQueryOpt {
+// SortByDistance causes UsableHosts to sort the results by distance to the
+// given location (latitude, longitude).
+func SortByDistance(lat, lng float64) UsableHostQueryOpt {
 	return func(opts *UsableHostsQueryOpts) {
-		countryCode = strings.ToUpper(countryCode)
-		opts.CountryCode = &countryCode
+		opts.Location = &[2]float64{lat, lng}
 	}
 }
