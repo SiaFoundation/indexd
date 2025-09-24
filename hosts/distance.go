@@ -1,6 +1,7 @@
 package hosts
 
 import (
+	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/geoip"
 )
 
@@ -8,19 +9,22 @@ import (
 // minimum distance. A spaced set is not thread-safe.
 type SpacedSet struct {
 	minDistance geoip.Distance
-	selected    []Host
+	selected    map[types.PublicKey]geoip.Location
 }
 
 // NewSpacedSet creates a new SpacedSet with the given minimum distance.
 func NewSpacedSet(minDistance geoip.Distance) *SpacedSet {
-	return &SpacedSet{minDistance: minDistance}
+	return &SpacedSet{
+		minDistance: minDistance,
+		selected:    make(map[types.PublicKey]geoip.Location),
+	}
 }
 
 // Add adds the host to the set if it is sufficiently spaced apart from the
 // existing hosts. It returns true if the host was added, false otherwise.
 func (s *SpacedSet) Add(h Host) bool {
 	if s.CanAddHost(h) {
-		s.selected = append(s.selected, h)
+		s.selected[h.PublicKey] = h.Location()
 		return true
 	}
 	return false
@@ -31,25 +35,17 @@ func (s *SpacedSet) Add(h Host) bool {
 // for uniqueness.
 func (s *SpacedSet) CanAddHost(h Host) bool {
 	if s.minDistance.IsZero() {
-		return !s.contains(h)
+		_, exists := s.selected[h.PublicKey]
+		return !exists
 	}
 
 	location := h.Location()
 	for _, other := range s.selected {
-		distance := location.HaversineDistance(other.Location())
+		distance := location.HaversineDistance(other)
 		if distance.LessThan(s.minDistance) {
 			return false
 		}
 	}
 
 	return true
-}
-
-func (s *SpacedSet) contains(h Host) bool {
-	for _, other := range s.selected {
-		if h.PublicKey == other.PublicKey {
-			return true
-		}
-	}
-	return false
 }
