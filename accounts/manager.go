@@ -19,6 +19,11 @@ const (
 	accountExpBackoffMaxMinutes = 128
 )
 
+var (
+	// defaultFundTarget is the target amount of funds per account per host.
+	defaultFundTarget = types.Siacoins(1)
+)
+
 type (
 	// Store defines an interface to fetch accounts that need to be funded and
 	// update them after funding.
@@ -183,7 +188,7 @@ func NewManager(store Store, funder AccountFunder, opts ...Option) *AccountManag
 		serviceAccounts: make(map[proto.Account]struct{}),
 		store:           store,
 		funder:          funder,
-		fundTarget:      types.Siacoins(1),
+		fundTarget:      defaultFundTarget,
 		log:             zap.NewNop(),
 	}
 	for _, opt := range opts {

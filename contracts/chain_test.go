@@ -53,6 +53,10 @@ func newStoreMock() *storeMock {
 	}
 }
 
+func (s *storeMock) ActiveAccounts(ctx context.Context, threshold time.Time) (uint64, error) {
+	return 1, nil
+}
+
 func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency) error {
 	s.contracts = append(s.contracts, Contract{
 		ID:      contractID,

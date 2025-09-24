@@ -32,6 +32,12 @@ const (
 	// refreshes due to how long it would take to reasonably upload
 	// that amount of data with a 10 Gbps connection.
 	maxContractGrowthRate = 256 << 30
+
+	// accountActivityThreshold is the threshold for determining whether an
+	// account has been active recently.  An account is considered active if it
+	// has been used within the threshold period.  We multiply the funding per
+	// contract by the number of active accounts.
+	accountActivityThreshold = 24 * 7 * time.Hour
 )
 
 var (
@@ -239,6 +245,13 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		addHost(host)
 	}
 
+	activeAccounts, err := cm.store.ActiveAccounts(ctx, time.Now().Add(-accountActivityThreshold))
+	if err != nil {
+		return fmt.Errorf("failed to get active accounts: %w", err)
+	} else if activeAccounts == 0 {
+		activeAccounts = 1
+	}
+
 	// randomize the candidate order to avoid preferring any host
 	cm.shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
 
@@ -263,7 +276,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 				return fmt.Errorf("host is not good: %s", host.PublicKey)
 			}
 
-			allowance, collateral := contractFunding(host.Settings, 0, minAllowance, minHostCollateral, period)
+			allowance, collateral := contractFunding(host.Settings, 0, minAllowance.Mul64(activeAccounts), minHostCollateral, period)
 			formationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			hc, err := cm.dialer.DialHost(formationCtx, host.PublicKey, host.SiamuxAddr())

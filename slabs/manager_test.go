@@ -199,6 +199,22 @@ func (s *mockStore) PinSlab(ctx context.Context, account proto.Account, nextInte
 	return slabID, nil
 }
 
+func (s *mockStore) UnpinSlab(ctx context.Context, account proto.Account, slabID SlabID) error {
+	if _, ok := s.pinnedSlabs[account][slabID]; !ok {
+		return ErrSlabNotFound
+	}
+	delete(s.pinnedSlabs[account], slabID)
+	return nil
+}
+
+func (s *mockStore) PinnedSlab(ctx context.Context, account proto.Account, slabID SlabID) (PinnedSlab, error) {
+	return PinnedSlab{}, nil
+}
+
+func (s *mockStore) SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]SlabID, error) {
+	return nil, nil
+}
+
 func (s *mockStore) RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
 	if _, ok := s.failedChecks[hostKey]; !ok {
 		s.failedChecks[hostKey] = make(map[types.Hash256]int)

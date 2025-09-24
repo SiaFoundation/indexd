@@ -148,7 +148,28 @@ func (m *SlabManager) PinSlab(ctx context.Context, account proto.Account, nextIn
 	return m.store.PinSlab(ctx, account, nextIntegrityCheck, slab)
 }
 
+// UnpinSlab removes the association between the account and the given slab. If
+// this slab was only referenced by the given account, it will also be deleted.
+// The sectors are potentially orphaned and will be removed by a background
+// process.
+func (m *SlabManager) UnpinSlab(ctx context.Context, account proto.Account, slabID SlabID) error {
+	return m.store.UnpinSlab(ctx, account, slabID)
+}
+
 // Slabs returns the slabs with the given IDs from the database.
-func (m *SlabManager) Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error) {
-	return m.store.Slabs(ctx, accountID, slabIDs)
+func (m *SlabManager) Slabs(ctx context.Context, account proto.Account, slabIDs []SlabID) ([]Slab, error) {
+	return m.store.Slabs(ctx, account, slabIDs)
+}
+
+// PinnedSlab retrieves a pinned slab from the database by its ID.  If account
+// is not nil, the last used field of that account will be updated.
+func (m *SlabManager) PinnedSlab(ctx context.Context, account proto.Account, slabID SlabID) (PinnedSlab, error) {
+	return m.store.PinnedSlab(ctx, account, slabID)
+}
+
+// SlabIDs returns the IDs of slabs associated with the given account. The IDs
+// are returned in descending order of the `pinned_at` timestamp, which is the
+// time when the slab was pinned to the indexer.
+func (m *SlabManager) SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]SlabID, error) {
+	return m.store.SlabIDs(ctx, account, offset, limit)
 }

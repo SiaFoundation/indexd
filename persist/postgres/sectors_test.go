@@ -1564,7 +1564,7 @@ func BenchmarkSlabs(b *testing.B) {
 		b.SetBytes(slabSize)
 		b.ResetTimer()
 		for b.Loop() {
-			_, err := store.PinnedSlab(context.Background(), id)
+			_, err := store.PinnedSlab(context.Background(), account, id)
 			if err != nil {
 				b.Fatal(err)
 			}

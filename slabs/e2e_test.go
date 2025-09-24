@@ -96,3 +96,107 @@ func TestMigrations(t *testing.T) {
 		t.Fatalf("expected sector %s on host %s, got %s on host %s", roots[0], hosts[6].PublicKey, pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
 	}
 }
+
+func TestUpdateLastUsed(t *testing.T) {
+	// create cluster
+	logger := testutils.NewLogger(false)
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(3), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
+
+	// create some more utxos
+	indexer := cluster.Indexer
+	cluster.ConsensusNode.MineBlocks(t, indexer.WalletAddr(), 10)
+
+	// add an account
+	a1 := types.GeneratePrivateKey()
+	err := indexer.Store().AddAccount(context.Background(), a1.PublicKey(), accounts.AccountMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// convenience variables
+	app := indexer.App(a1)
+
+	// fetch hosts
+	hosts := testutils.WaitForHosts(t, app, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// upload sectors to hosts
+	encryptionKey, shards, roots := slabs.NewTestShards(t, 1, 2)
+	for i := range shards {
+		client := indexer.HostClient(t, hosts[i].PublicKey)
+		hs, err := client.Settings(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := client.WriteSector(context.Background(), hs.Prices, proto.NewAccountToken(a1, hosts[i].PublicKey), bytes.NewReader(shards[i]), proto.SectorSize); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	now := time.Now()
+
+	// last used time should be around account creation and thus should predate
+	// `now` timestamp
+	account, err := app.Account(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !account.LastUsed.Before(now) {
+		t.Fatal("LastUsed time later than expected")
+	}
+
+	// pin the slab
+	// pin the slab
+	slabID, err := app.PinSlab(context.Background(), slabs.SlabPinParams{
+		EncryptionKey: encryptionKey,
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{Root: roots[0], HostKey: hosts[0].PublicKey},
+			{Root: roots[1], HostKey: hosts[1].PublicKey},
+			{Root: roots[2], HostKey: hosts[2].PublicKey},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// last used time should be time of PinSlab invocation and thus should be
+	// after `now` timestamp
+	account, err = app.Account(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !account.LastUsed.After(now) {
+		t.Fatal("LastUsed time earlier than expected")
+	}
+	now = account.LastUsed
+
+	// assert sectors were pinned
+	time.Sleep(time.Second)
+	if _, err := app.Slab(context.Background(), slabID); err != nil {
+		t.Fatal(err)
+	}
+
+	// last used time should be time of Slab invocation (which causes the server
+	// to call PinnedSlab) and thus should be after the timestamp from when
+	// PinSlab was invoked
+	account, err = app.Account(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !account.LastUsed.After(now) {
+		t.Fatal("LastUsed time earlier than expected")
+	}
+	now = account.LastUsed
+
+	if err := app.UnpinSlab(context.Background(), slabID); err != nil {
+		t.Fatal(err)
+	}
+
+	// last used time should not have changed as a result of UnpinSlab
+	account, err = app.Account(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	} else if !account.LastUsed.Equal(now) {
+		t.Fatal("LastUsed time different than expected")
+	}
+}

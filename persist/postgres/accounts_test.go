@@ -719,6 +719,54 @@ func TestServiceAccounts(t *testing.T) {
 	assertBalance(types.ZeroCurrency)
 }
 
+func TestActiveAccounts(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	now := time.Now()
+	insert := func(d time.Duration) {
+		lastUsed := now.Add(-d)
+		if _, err := store.pool.Exec(
+			t.Context(),
+			`INSERT INTO accounts (public_key, last_used, max_pinned_data) VALUES ($1, $2, 1000000);`,
+			sqlPublicKey(types.GeneratePrivateKey().PublicKey()),
+			lastUsed,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// only 3 accounts
+	const day = 24 * time.Hour
+	insert(1 * day)
+	insert(7 * day)
+
+	assertActive := func(n uint64, threshold time.Time) {
+		t.Helper()
+		active, err := store.ActiveAccounts(t.Context(), threshold)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if active != n {
+			t.Fatalf("expected %d active accounts, got %d", n, active)
+		}
+	}
+
+	// 0 days
+	threshold := now
+	assertActive(0, threshold.Add(-time.Second))
+	assertActive(0, threshold.Add(time.Second))
+
+	// 1 day
+	threshold = now.Add(-1 * day)
+	assertActive(0, threshold.Add(time.Second))
+	assertActive(1, threshold.Add(-time.Second))
+
+	// 7 days
+	threshold = now.Add(-7 * day)
+	assertActive(2, threshold.Add(-time.Second))
+	assertActive(1, threshold.Add(time.Second))
+}
+
 // BenchmarkServiceAccounts benchmarks the service account related methods
 func BenchmarkServiceAccounts(b *testing.B) {
 	// define parameters
@@ -786,4 +834,31 @@ func BenchmarkServiceAccounts(b *testing.B) {
 			}
 		}
 	})
+}
+
+// BenchmarkActiveAccounts benchmarks the ActiveAccounts function on the store.
+func BenchmarkActiveAccounts(b *testing.B) {
+	// define parameters
+	const (
+		numAccounts = 100000
+	)
+
+	// prepare database
+	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
+
+	batch := &pgx.Batch{}
+	for range numAccounts {
+		lastUsed := time.Now().Add(-24 * 7 * time.Hour * time.Duration(frand.Intn(30)))
+		batch.Queue(`INSERT INTO accounts (public_key, last_used, max_pinned_data) VALUES ($1, $2, 1000000);`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()), lastUsed)
+	}
+	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
+		b.Fatal(err)
+	}
+
+	threshold := time.Now().Add(-24 * 7 * time.Hour)
+	for b.Loop() {
+		if _, err := store.ActiveAccounts(b.Context(), threshold); err != nil {
+			b.Fatal(err)
+		}
+	}
 }

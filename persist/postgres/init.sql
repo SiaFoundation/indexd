@@ -6,8 +6,10 @@ CREATE TABLE accounts (
     service_account BOOLEAN NOT NULL DEFAULT FALSE, -- true if this is a service account
     description TEXT NOT NULL DEFAULT '',
     logo_url TEXT NOT NULL DEFAULT '',
-    service_url TEXT NOT NULL DEFAULT ''
+    service_url TEXT NOT NULL DEFAULT '',
+    last_used TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+CREATE INDEX accounts_last_used_idx ON accounts(last_used);
 
 CREATE TABLE app_connect_keys (
     app_key TEXT PRIMARY KEY,

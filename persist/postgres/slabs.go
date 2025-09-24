@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
 )
@@ -59,9 +60,13 @@ func (s *Store) Slab(ctx context.Context, slabID slabs.SlabID) (slab slabs.Slab,
 }
 
 // PinnedSlab retrieves a pinned slab from the database by its ID.
-func (s *Store) PinnedSlab(ctx context.Context, slabID slabs.SlabID) (slab slabs.PinnedSlab, err error) {
+func (s *Store) PinnedSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) (slab slabs.PinnedSlab, err error) {
 	slab.ID = slabID
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		if _, err := tx.Exec(ctx, `UPDATE accounts SET last_used = NOW() WHERE public_key = $1`, sqlPublicKey(account)); err != nil {
+			return fmt.Errorf("failed to update last used: %w", err)
+		}
+
 		var dbID int64
 		err = tx.QueryRow(ctx, `SELECT s.id, s.encryption_key, s.min_shards FROM slabs s WHERE digest = $1`, sqlHash256(slabID)).Scan(
 			&dbID, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)

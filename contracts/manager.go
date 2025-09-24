@@ -92,6 +92,8 @@ type (
 	// Store is the minimal interface of Store functionality the ContractManager
 	// requires.
 	Store interface {
+		ActiveAccounts(ctx context.Context, threshold time.Time) (uint64, error)
+
 		Contract(ctx context.Context, id types.FileContractID) (Contract, error)
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 
