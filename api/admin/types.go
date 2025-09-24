@@ -30,11 +30,11 @@ type (
 
 	// SectorsStatsResponse is the response body for the [GET] /stats/sectors
 	SectorsStatsResponse struct {
-		NumSlabs             int64 `json:"numSlabs"`
-		NumMigratedSectors   int64 `json:"numMigratedSectors"`
-		NumPinnedSectors     int64 `json:"numPinnedSectors"`
-		NumUnpinnableSectors int64 `json:"numUnpinnableSectors"`
-		NumUnpinnedSectors   int64 `json:"numUnpinnedSectors"`
+		NumSlabs             int64 `json:"slabs"`
+		NumMigratedSectors   int64 `json:"migrated"`
+		NumPinnedSectors     int64 `json:"pinned"`
+		NumUnpinnableSectors int64 `json:"unpinnable"`
+		NumUnpinnedSectors   int64 `json:"unpinned"`
 	}
 
 	// AccountStatsResponse is the response body for the [GET] /stats/accounts.

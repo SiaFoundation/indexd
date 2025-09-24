@@ -26,8 +26,20 @@ func (s SectorsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 			Value: float64(s.NumSlabs),
 		},
 		{
+			Name:  "indexd_num_migrated_sectors",
+			Value: float64(s.NumMigratedSectors),
+		},
+		{
 			Name:  "indexd_num_pinned_sectors",
 			Value: float64(s.NumPinnedSectors),
+		},
+		{
+			Name:  "indexd_num_unpinnable_sectors",
+			Value: float64(s.NumUnpinnableSectors),
+		},
+		{
+			Name:  "indexd_num_unpinned_sectors",
+			Value: float64(s.NumUnpinnedSectors),
 		},
 	}
 }
