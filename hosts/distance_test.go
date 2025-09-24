@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/geoip"
 )
 
 func TestSpacedSet(t *testing.T) {
@@ -34,7 +33,7 @@ func TestSpacedSet(t *testing.T) {
 	} // Liège
 
 	// assert behaviour of the spaced set with a min distance of 100 km
-	s := NewSpacedSet(geoip.Km(100))
+	s := NewSpacedSet(100)
 	if !s.Add(brussels) {
 		t.Fatal("expected to add Brussels")
 	} else if s.Add(ghent) {
@@ -44,7 +43,7 @@ func TestSpacedSet(t *testing.T) {
 	}
 
 	// lower threshold to 45km
-	s2 := NewSpacedSet(geoip.Km(45))
+	s2 := NewSpacedSet(45)
 	if !s2.Add(brussels) {
 		t.Fatal("expected to add Brussels")
 	} else if !s2.Add(ghent) {
@@ -54,7 +53,7 @@ func TestSpacedSet(t *testing.T) {
 	}
 
 	// assert behaviour of the spaced set with a min distance of 0 km (only uniqueness)
-	s3 := NewSpacedSet(geoip.Km(0))
+	s3 := NewSpacedSet(0)
 	if !s3.Add(brussels) {
 		t.Fatal("expected to add Brussels")
 	} else if !s3.Add(ghent) {

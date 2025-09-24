@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/contracts"
-	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -31,7 +30,7 @@ type (
 		integrityCheckInterval       time.Duration
 		failedIntegrityCheckInterval time.Duration
 		maxFailedIntegrityChecks     uint
-		minHostDistance              geoip.Distance
+		minHostDistanceKm            float64
 
 		migrationAccount    proto.Account
 		migrationAccountKey types.PrivateKey
@@ -144,9 +143,9 @@ func WithIntegrityCheckIntervals(success, failure time.Duration) Option {
 // WithMinHostDistance sets the minimum distance between hosts used for storing
 // sectors of the same slab. The default is 10km, if set to 0, the distance
 // check is disabled.
-func WithMinHostDistance(d geoip.Distance) Option {
+func WithMinHostDistance(km float64) Option {
 	return func(m *SlabManager) {
-		m.minHostDistance = d
+		m.minHostDistanceKm = km
 	}
 }
 
@@ -197,7 +196,7 @@ func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Diale
 		integrityCheckInterval:       7 * 24 * time.Hour,
 		failedIntegrityCheckInterval: 6 * time.Hour,
 		maxFailedIntegrityChecks:     5,
-		minHostDistance:              geoip.Km(10),
+		minHostDistanceKm:            10,
 
 		migrationAccount:    proto.Account(migrationAccount.PublicKey()),
 		migrationAccountKey: migrationAccount,
