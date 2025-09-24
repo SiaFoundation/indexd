@@ -8,15 +8,15 @@ import (
 // SpacedSet is a set of hosts that are sufficiently spaced apart based on a
 // minimum distance. A spaced set is not thread-safe.
 type SpacedSet struct {
-	minDistance geoip.Distance
-	selected    map[types.PublicKey]geoip.Location
+	minDistanceKm float64
+	selected      map[types.PublicKey]geoip.Location
 }
 
 // NewSpacedSet creates a new SpacedSet with the given minimum distance.
-func NewSpacedSet(minDistance geoip.Distance) *SpacedSet {
+func NewSpacedSet(minDistanceKm float64) *SpacedSet {
 	return &SpacedSet{
-		minDistance: minDistance,
-		selected:    make(map[types.PublicKey]geoip.Location),
+		minDistanceKm: minDistanceKm,
+		selected:      make(map[types.PublicKey]geoip.Location),
 	}
 }
 
@@ -34,15 +34,15 @@ func (s *SpacedSet) Add(h Host) bool {
 // existing hosts in the set. If the minimum distance is zero, it only checks
 // for uniqueness.
 func (s *SpacedSet) CanAddHost(h Host) bool {
-	if s.minDistance.IsZero() {
+	if s.minDistanceKm == 0 {
 		_, exists := s.selected[h.PublicKey]
 		return !exists
 	}
 
 	location := h.Location()
 	for _, other := range s.selected {
-		distance := location.HaversineDistance(other)
-		if distance.LessThan(s.minDistance) {
+		distance := location.HaversineDistanceKm(other)
+		if distance < s.minDistanceKm {
 			return false
 		}
 	}

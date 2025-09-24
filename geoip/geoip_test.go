@@ -48,13 +48,13 @@ func TestHaversineDistance(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := tc.a.HaversineDistance(tc.b).ToKm()
+			got := tc.a.HaversineDistanceKm(tc.b)
 			if !almostEqual(got, tc.expected, tc.tolerance) {
 				t.Fatalf("HaversineDistance(%+v, %+v) = %.12f km, want %.12f km (±%.6f)",
 					tc.a, tc.b, got, tc.expected, tc.tolerance)
 			}
 			// Symmetry check: d(a,b) == d(b,a)
-			gotBA := tc.b.HaversineDistance(tc.a).ToKm()
+			gotBA := tc.b.HaversineDistanceKm(tc.a)
 			if !almostEqual(got, gotBA, tc.tolerance) {
 				t.Fatalf("distance not symmetric: d(a,b)=%.12f, d(b,a)=%.12f (±%.6f)",
 					got, gotBA, tc.tolerance)

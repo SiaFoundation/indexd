@@ -162,7 +162,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	}
 
 	// helper to check if a host is good to form a contract with
-	set := hosts.NewSpacedSet(cm.minHostDistance)
+	set := hosts.NewSpacedSet(cm.minHostDistanceKm)
 	isGood := func(host hosts.Host, log *zap.Logger) bool {
 		force := forceFormation[host.PublicKey]
 		if good := host.Usability.Usable(); !good {

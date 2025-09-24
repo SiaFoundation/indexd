@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/client"
-	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -196,7 +195,7 @@ type (
 		expiredContractPruneBuffer        uint64
 		expiredContractSectorsPruneBuffer uint64
 		maintenanceFrequency              time.Duration
-		minHostDistance                   geoip.Distance
+		minHostDistanceKm                 float64
 		pruneIntervalSuccess              time.Duration
 		pruneIntervalFailure              time.Duration
 		syncPollInterval                  time.Duration
@@ -220,11 +219,11 @@ func WithMaintenanceFrequency(frequency time.Duration) ContractManagerOpt {
 }
 
 // WithMinHostDistance sets the minimum geographic separation required between
-// hosts for the contract manager. The default is 10km (6.2 miles), when set to
+// hosts for the contract manager. The default is 10km, when set to
 // 0, the distance check is disabled.
-func WithMinHostDistance(d geoip.Distance) ContractManagerOpt {
+func WithMinHostDistance(km float64) ContractManagerOpt {
 	return func(cm *ContractManager) {
-		cm.minHostDistance = d
+		cm.minHostDistanceKm = km
 	}
 }
 
@@ -419,7 +418,7 @@ func newContractManager(renterKey types.PublicKey, accounts AccountManager, chai
 		expiredContractPruneBuffer:        144,           // 144 blocks after broadcast
 		expiredContractSectorsPruneBuffer: 36,            // 36 blocks (~6 hours) after expiration
 		maintenanceFrequency:              10 * time.Minute,
-		minHostDistance:                   geoip.Km(10),       // 10km
+		minHostDistanceKm:                 10,                 // 10km
 		pruneIntervalSuccess:              24 * time.Hour,     // 1 day
 		pruneIntervalFailure:              3 * time.Hour,      // 3 hours
 		revisionBroadcastInterval:         7 * 24 * time.Hour, // 1 week,

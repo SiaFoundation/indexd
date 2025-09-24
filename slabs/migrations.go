@@ -9,7 +9,6 @@ import (
 	"github.com/klauspost/reedsolomon"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
-	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/chacha20"
@@ -75,7 +74,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 		return fmt.Errorf("failed to fetch slab %s: %w", slabID, err)
 	}
 
-	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, goodContracts, period, m.minHostDistance)
+	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, goodContracts, period, m.minHostDistanceKm)
 	if len(indices) == 0 {
 		logger.Debug("tried to migrate slab but no indices require migration")
 		return nil
@@ -157,7 +156,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 // sectors that require migration together with hosts that can be used to
 // migrate bad sectors to. These hosts are guaranteed to be at least
 // minHostDistance apart from each other and are returned in random order.
-func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, minHostDistance geoip.Distance) ([]int, []hosts.Host) {
+func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, minHostDistanceKm float64) ([]int, []hosts.Host) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range allHosts {
@@ -179,7 +178,7 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 	// that are sufficiently far apart. We don't care if two good sectors on
 	// hosts that are too close to one another, but we don't want to migrate bad
 	// sectors to hosts that are too close to those same hosts
-	set := hosts.NewSpacedSet(minHostDistance)
+	set := hosts.NewSpacedSet(minHostDistanceKm)
 
 	// determine whether the sector needs to be migrated. That's the case if
 	// one of the following is true:
@@ -208,8 +207,7 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 	// are sufficiently far apart
 	var candidates []hosts.Host
 	for _, contract := range goodContractMap {
-		if host, ok := hostsMap[contract.HostKey]; ok && set.CanAddHost(host) {
-			set.Add(host)
+		if host, ok := hostsMap[contract.HostKey]; ok && set.Add(host) {
 			candidates = append(candidates, host)
 		}
 	}
