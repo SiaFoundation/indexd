@@ -20,7 +20,6 @@ import (
 //
 // It has no public fields to prevent accidental leakage of unencrypted data.
 type Object struct {
-	id        types.Hash256
 	masterKey []byte
 	slabs     []slabs.SlabSlice
 	metadata  json.RawMessage
@@ -28,9 +27,13 @@ type Object struct {
 	updatedAt time.Time
 }
 
-// ID returns the object's unique ID
+// ID returns the object's ID, which is a hash of its slabs.
 func (o *Object) ID() types.Hash256 {
-	return o.id
+	h := types.NewHasher()
+	for _, slab := range o.slabs {
+		slab.EncodeTo(h.E)
+	}
+	return h.Sum()
 }
 
 // CreatedAt returns the time the object was created.
@@ -53,7 +56,6 @@ func (o *Object) Lock(appKey types.PrivateKey) slabs.LockedObject {
 	nonce = frand.Bytes(metaCipher.NonceSize())
 	encryptedMeta := metaCipher.Seal(nonce, nonce, o.metadata, nil)
 	return slabs.LockedObject{
-		ID:                 o.id,
 		EncryptedMasterKey: encryptedMasterKey,
 		Slabs:              o.slabs,
 		EncryptedMetadata:  encryptedMeta,
@@ -115,16 +117,7 @@ func (s *SDK) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256
 	if err != nil {
 		return "", fmt.Errorf("failed to get object: %w", err)
 	}
-	return s.client.CreateSharedObjectURL(ctx, obj.id, obj.masterKey, validUntil)
-}
-
-// ID returns the object's ID, which is a hash of its slabs.
-func objectID(slabs []slabs.SlabSlice) types.Hash256 {
-	h := types.NewHasher()
-	for _, slab := range slabs {
-		slab.EncodeTo(h.E)
-	}
-	return h.Sum()
+	return s.client.CreateSharedObjectURL(ctx, obj.ID(), obj.masterKey, validUntil)
 }
 
 func masterKeyCipher(appKey types.PrivateKey) cipher.AEAD {
@@ -157,7 +150,6 @@ func unlockEncryptedMetadata(masterKey []byte, encryptedMeta []byte) (json.RawMe
 
 func newObjectFromLockedObject(lo slabs.LockedObject, appKey types.PrivateKey) (Object, error) {
 	obj := Object{
-		id:        lo.ID,
 		slabs:     slices.Clone(lo.Slabs),
 		createdAt: lo.CreatedAt,
 		updatedAt: lo.UpdatedAt,

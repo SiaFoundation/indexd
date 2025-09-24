@@ -225,14 +225,14 @@ func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (sl
 		})
 	}
 
-	return slabs.SharedObject{ID: obj.ID, Slabs: objSlabs}, encryptionKey, nil
+	return slabs.SharedObject{Slabs: objSlabs}, encryptionKey, nil
 }
 
 // SaveObject implements the [AppClient] interface.
 func (mc *mockAppClient) SaveObject(ctx context.Context, obj slabs.LockedObject) (err error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
-	mc.objects[obj.ID] = obj
+	mc.objects[obj.ID()] = obj
 	return nil
 }
 
@@ -241,13 +241,13 @@ func (mc *mockAppClient) CreateSharedObjectURL(ctx context.Context, objectKey ty
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 
-	obj, ok := mc.objects[objectKey]
+	_, ok := mc.objects[objectKey]
 	if !ok {
 		return "", errors.New("object not found")
 	}
 
 	key := make([]byte, 64)
-	copy(key[:32], obj.ID[:])
+	copy(key[:32], objectKey[:])
 	copy(key[32:], encryptionKey)
 	return hex.EncodeToString(key), nil
 }

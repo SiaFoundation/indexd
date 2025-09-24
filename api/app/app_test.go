@@ -343,7 +343,6 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	obj := slabs.LockedObject{
-		ID:                 types.Hash256(frand.Entropy256()),
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			{
@@ -381,30 +380,30 @@ func TestApplicationAPI(t *testing.T) {
 
 	if objs, err := client.ListObjects(context.Background(), slabs.Cursor{
 		After: obj1.UpdatedAt,
-		Key:   obj1.ID,
+		Key:   obj1.ID(),
 	}, 100); err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
 		t.Fatalf("expected 0 objects, got %d", len(objs))
 	}
 
-	obj, err = client.Object(context.Background(), obj1.ID)
+	obj, err = client.Object(context.Background(), obj1.ID())
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(obj, objs[0]) {
 		t.Fatal("objects not equal")
 	}
 
-	if err := client.DeleteObject(context.Background(), obj1.ID); err != nil {
+	if err := client.DeleteObject(context.Background(), obj1.ID()); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = client.Object(context.Background(), obj1.ID)
+	_, err = client.Object(context.Background(), obj1.ID())
 	if err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
 		t.Fatal("expected object to be not found, got", err)
 	}
 
-	if err := client.DeleteObject(context.Background(), obj1.ID); err == nil || err.Error() != slabs.ErrObjectNotFound.Error() {
+	if err := client.DeleteObject(context.Background(), obj1.ID()); err == nil || err.Error() != slabs.ErrObjectNotFound.Error() {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
 	}
 
@@ -427,7 +426,6 @@ func TestApplicationAPI(t *testing.T) {
 	}
 	// Try to save an object referencing that slab on first account
 	badObj := slabs.LockedObject{
-		ID:                 types.Hash256(frand.Entropy256()),
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{{
 			SlabID: slabID,
@@ -616,7 +614,6 @@ func TestSharedObjects(t *testing.T) {
 	}
 
 	expectedSharedObj := slabs.SharedObject{
-		ID: types.Hash256(frand.Entropy256()),
 		Slabs: []slabs.SharedSlab{
 			{
 				PinnedSlab: slabs.PinnedSlab{
@@ -662,7 +659,6 @@ func TestSharedObjects(t *testing.T) {
 
 	// add the object to the db
 	obj := slabs.LockedObject{
-		ID:                 expectedSharedObj.ID,
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			{
@@ -682,7 +678,7 @@ func TestSharedObjects(t *testing.T) {
 	}
 
 	// populate the object's created and updated fields
-	obj, err = client1.Object(ctx, obj.ID)
+	obj, err = client1.Object(ctx, obj.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -691,7 +687,7 @@ func TestSharedObjects(t *testing.T) {
 	encryptionKey := frand.Bytes(32)
 
 	// create a shared URL for the object
-	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.ID, encryptionKey, time.Now().Add(time.Second))
+	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.ID(), encryptionKey, time.Now().Add(time.Second))
 	if err != nil {
 		t.Fatal("failed to create shared object URL:", err)
 	}

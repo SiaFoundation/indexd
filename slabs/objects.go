@@ -16,12 +16,11 @@ type (
 	// It can be safely serialized and shared, but cannot be used to access
 	// the underlying data until it has been unlocked with the app key.
 	LockedObject struct {
-		ID                 types.Hash256 `json:"id"`
-		EncryptedMasterKey []byte        `json:"encryptedMasterKey"`
-		Slabs              []SlabSlice   `json:"slabs"`
-		EncryptedMetadata  []byte        `json:"encryptedMetadata"`
-		CreatedAt          time.Time     `json:"createdAt"`
-		UpdatedAt          time.Time     `json:"updatedAt"`
+		EncryptedMasterKey []byte      `json:"encryptedMasterKey"`
+		Slabs              []SlabSlice `json:"slabs"`
+		EncryptedMetadata  []byte      `json:"encryptedMetadata"`
+		CreatedAt          time.Time   `json:"createdAt"`
+		UpdatedAt          time.Time   `json:"updatedAt"`
 	}
 
 	// A SharedSlab represents a slab of a shared object.
@@ -35,9 +34,8 @@ type (
 	// SharedObject provides all the metadata necessary to retrieve
 	// and decrypt an object.
 	SharedObject struct {
-		ID                types.Hash256 `json:"id"`
-		Slabs             []SharedSlab  `json:"slabs"`
-		EncryptedMetadata []byte        `json:"encryptedMetadata"`
+		Slabs             []SharedSlab `json:"slabs"`
+		EncryptedMetadata []byte       `json:"encryptedMetadata"`
 	}
 
 	// Cursor describes a cursor for paginating through objects. During
@@ -78,6 +76,15 @@ var (
 	// object containing a slab that is not pinned to their account.
 	ErrObjectUnpinnedSlab = errors.New("object contains unpinned slab")
 )
+
+// ID returns the object's ID, which is a hash of its slabs.
+func (lo *LockedObject) ID() types.Hash256 {
+	h := types.NewHasher()
+	for _, slab := range lo.Slabs {
+		slab.EncodeTo(h.E)
+	}
+	return h.Sum()
+}
 
 // Object retrieves the object with the given key for the given account.
 func (m *SlabManager) Object(ctx context.Context, account proto.Account, key types.Hash256) (LockedObject, error) {

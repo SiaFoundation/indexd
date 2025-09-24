@@ -40,6 +40,8 @@ func TestLockedObjectRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	obj2.createdAt = obj.createdAt
+	obj2.updatedAt = obj.updatedAt
 	if !reflect.DeepEqual(obj, obj2) {
 		t.Fatalf("object mismatch: expected %+v, got %+v", obj, obj2)
 	}

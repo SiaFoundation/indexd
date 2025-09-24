@@ -61,7 +61,6 @@ func (s *SlabSlice) DecodeFrom(d *types.Decoder) {
 
 // EncodeTo implements types.EncoderTo.
 func (lo LockedObject) EncodeTo(e *types.Encoder) {
-	lo.ID.EncodeTo(e)
 	e.WriteBytes(lo.EncryptedMasterKey)
 	types.EncodeSlice(e, lo.Slabs)
 	e.WriteBytes(lo.EncryptedMetadata)
@@ -71,7 +70,6 @@ func (lo LockedObject) EncodeTo(e *types.Encoder) {
 
 // DecodeFrom implements types.DecoderFrom.
 func (lo *LockedObject) DecodeFrom(d *types.Decoder) {
-	lo.ID.DecodeFrom(d)
 	lo.EncryptedMasterKey = d.ReadBytes()
 	types.DecodeSlice(d, &lo.Slabs)
 	lo.EncryptedMetadata = d.ReadBytes()

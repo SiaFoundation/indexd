@@ -314,7 +314,6 @@ top:
 		}
 	}
 	// pin the object
-	obj.id = objectID(obj.slabs)
 	return obj, s.client.SaveObject(ctx, obj.Lock(s.appKey))
 }
 

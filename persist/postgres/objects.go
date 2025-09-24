@@ -17,8 +17,8 @@ import (
 func (s *Store) SharedObject(ctx context.Context, key types.Hash256) (obj slabs.SharedObject, _ error) {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var objID int64
-		err := tx.QueryRow(ctx, `SELECT id, object_key, encrypted_metadata FROM objects WHERE object_key = $1
-		`, sqlHash256(key)).Scan(&objID, (*sqlHash256)(&obj.ID), &obj.EncryptedMetadata)
+		err := tx.QueryRow(ctx, `SELECT id, encrypted_metadata FROM objects WHERE object_key = $1
+		`, sqlHash256(key)).Scan(&objID, &obj.EncryptedMetadata)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrObjectNotFound
 		} else if err != nil {
@@ -87,8 +87,8 @@ func (s *Store) Object(ctx context.Context, account proto.Account, key types.Has
 		}
 
 		var objID int64
-		err = tx.QueryRow(ctx, `SELECT id, object_key, encrypted_master_key, encrypted_metadata, created_at, updated_at FROM objects WHERE account_id = $1 AND object_key = $2
-		`, accountID, sqlHash256(key)).Scan(&objID, (*sqlHash256)(&obj.ID), &obj.EncryptedMasterKey, &obj.EncryptedMetadata, &obj.CreatedAt, &obj.UpdatedAt)
+		err = tx.QueryRow(ctx, `SELECT id, encrypted_master_key, encrypted_metadata, created_at, updated_at FROM objects WHERE account_id = $1 AND object_key = $2
+		`, accountID, sqlHash256(key)).Scan(&objID, &obj.EncryptedMasterKey, &obj.EncryptedMetadata, &obj.CreatedAt, &obj.UpdatedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrObjectNotFound
 		} else if err != nil {
@@ -129,7 +129,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT id, object_key, encrypted_master_key, encrypted_metadata, created_at, updated_at
+			SELECT id, encrypted_master_key, encrypted_metadata, created_at, updated_at
 			FROM objects
 			WHERE (updated_at > $1 OR (updated_at = $1 AND object_key > $2)) AND account_id = $3
 			ORDER BY updated_at ASC, object_key ASC
@@ -144,7 +144,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 		for rows.Next() {
 			var obj slabs.LockedObject
 			var objID int64
-			err := rows.Scan(&objID, (*sqlHash256)(&obj.ID), &obj.EncryptedMasterKey, &obj.EncryptedMetadata, &obj.CreatedAt, &obj.UpdatedAt)
+			err := rows.Scan(&objID, &obj.EncryptedMasterKey, &obj.EncryptedMetadata, &obj.CreatedAt, &obj.UpdatedAt)
 			if err != nil {
 				return fmt.Errorf("failed to scan object: %w", err)
 			}
@@ -224,7 +224,7 @@ func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs
 			INSERT INTO objects (object_key, account_id, encrypted_master_key, encrypted_metadata) VALUES ($1, $2, $3, $4)
 			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_master_key, encrypted_metadata, updated_at) = (EXCLUDED.encrypted_master_key, EXCLUDED.encrypted_metadata, NOW())
 			RETURNING id`,
-			sqlHash256(obj.ID), accountID, obj.EncryptedMasterKey, obj.EncryptedMetadata).Scan(&objectID)
+			sqlHash256(obj.ID()), accountID, obj.EncryptedMasterKey, obj.EncryptedMetadata).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
