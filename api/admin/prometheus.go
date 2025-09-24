@@ -14,6 +14,10 @@ func (s AccountStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 			Name:  "indexd_num_registered_accounts",
 			Value: float64(s.Registered),
 		},
+		{
+			Name:  "indexd_num_active_accounts",
+			Value: float64(s.Active),
+		},
 	}
 }
 
