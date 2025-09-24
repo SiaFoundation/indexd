@@ -775,8 +775,12 @@ components:
       properties:
         registered:
           type: integer
-          format: int64
+          format: uint64
           description: Number of accounts currently registered on the indexer
+        active:
+          type: integer
+          format: uint64
+          description: Number of accounts active in the last week.
 
     ContractsStatsResponse:
       type: object
