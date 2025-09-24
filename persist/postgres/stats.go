@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"go.sia.tech/indexd/api/admin"
 )
@@ -56,7 +58,15 @@ func (s *Store) incrementNumAccounts(ctx context.Context, tx *txn, delta int64) 
 func (s *Store) AccountStats(ctx context.Context) (admin.AccountStatsResponse, error) {
 	var stats admin.AccountStatsResponse
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, "SELECT num_accounts_registered FROM stats").Scan(&stats.Registered)
+		err := tx.QueryRow(ctx, "SELECT num_accounts_registered FROM stats").Scan(&stats.Registered)
+		if err != nil {
+			return fmt.Errorf("failed to get number of registered accounts: %w", err)
+		}
+		stats.Active, err = activeAccounts(ctx, tx, time.Now().Add(-24*7*time.Hour))
+		if err != nil {
+			return fmt.Errorf("failed to get active accounts: %w", err)
+		}
+		return nil
 	})
 	return stats, err
 }

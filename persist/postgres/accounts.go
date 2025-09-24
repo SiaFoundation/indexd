@@ -102,11 +102,17 @@ func (s *Store) HasAccount(ctx context.Context, ak types.PublicKey) (bool, error
 	return exists, nil
 }
 
+func activeAccounts(ctx context.Context, tx *txn, threshold time.Time) (count uint64, err error) {
+	err = tx.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE last_used >= $1;`, threshold).Scan(&count)
+	return
+}
+
 // ActiveAccounts returns the number of accounts that have been used since the threshold
 // time.
 func (s *Store) ActiveAccounts(ctx context.Context, threshold time.Time) (count uint64, err error) {
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE last_used >= $1;`, threshold).Scan(&count)
+	err = s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
+		count, err = activeAccounts(ctx, tx, threshold)
+		return
 	})
 	return
 }

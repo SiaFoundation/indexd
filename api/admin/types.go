@@ -49,7 +49,8 @@ type (
 
 	// AccountStatsResponse is the response body for the [GET] /stats/accounts.
 	AccountStatsResponse struct {
-		Registered int64 `json:"registered"`
+		Registered uint64 `json:"registered"`
+		Active     uint64 `json:"active"`
 	}
 
 	// State is the response body for the [GET] /state endpoint.
