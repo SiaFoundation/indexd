@@ -428,7 +428,7 @@ func TestApplicationAPI(t *testing.T) {
 	// Try to save an object referencing that slab on first account
 	badObj := slabs.LockedObject{
 		ID:                 types.Hash256(frand.Entropy256()),
-		EncryptedMasterKey: frand.Bytes(32),
+		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{{
 			SlabID: slabID,
 			Offset: 0,
@@ -663,7 +663,7 @@ func TestSharedObjects(t *testing.T) {
 	// add the object to the db
 	obj := slabs.LockedObject{
 		ID:                 expectedSharedObj.ID,
-		EncryptedMasterKey: frand.Bytes(32),
+		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			{
 				SlabID: slab1ID,

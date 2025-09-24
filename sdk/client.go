@@ -285,8 +285,8 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 			shards := work.shards
 
 			if errors.Is(err, io.EOF) {
-				// no more slabs to upload, return the pinned slabs
-				return obj, nil
+				// no more slabs to upload, save the object, and return the pinned slabs
+				return obj, s.client.SaveObject(ctx, obj.Lock(s.appKey))
 			} else if work.err != nil {
 				return Object{}, work.err
 			}
