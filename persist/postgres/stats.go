@@ -62,7 +62,9 @@ func (s *Store) AccountStats(ctx context.Context) (admin.AccountStatsResponse, e
 		if err != nil {
 			return fmt.Errorf("failed to get number of registered accounts: %w", err)
 		}
-		stats.Active, err = activeAccounts(ctx, tx, time.Now().Add(-24*7*time.Hour))
+
+		const activeAccountThreshold = 7 * 24 * time.Hour
+		stats.Active, err = activeAccounts(ctx, tx, time.Now().Add(-activeAccountThreshold))
 		if err != nil {
 			return fmt.Errorf("failed to get active accounts: %w", err)
 		}
