@@ -102,6 +102,7 @@ type (
 	// A Store is a persistent store for the indexer.
 	Store interface {
 		AccountStats(ctx context.Context) (AccountStatsResponse, error)
+		ContractsStats(ctx context.Context) (ContractsStatsResponse, error)
 		SectorStats(ctx context.Context) (SectorsStatsResponse, error)
 
 		LastScannedIndex(context.Context) (types.ChainIndex, error)
@@ -240,8 +241,9 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"POST /wallet/send":      a.handlePOSTWalletSend,
 
 		// stats endpoints
-		"GET /stats/accounts": a.handleGETStatsAccounts,
-		"GET /stats/sectors":  a.handleGETStatsSectors,
+		"GET /stats/accounts":  a.handleGETStatsAccounts,
+		"GET /stats/contracts": a.handleGETStatsContracts,
+		"GET /stats/sectors":   a.handleGETStatsSectors,
 	}
 
 	// debug endpoints
@@ -853,6 +855,14 @@ func (a *admin) handlePOSTWalletSend(jc jape.Context) {
 func (a *admin) handleGETStatsAccounts(jc jape.Context) {
 	stats, err := a.store.AccountStats(jc.Request.Context())
 	if jc.Check("failed to retrieve account stats", err) != nil {
+		return
+	}
+	writeResponse(jc, stats)
+}
+
+func (a *admin) handleGETStatsContracts(jc jape.Context) {
+	stats, err := a.store.ContractsStats(jc.Request.Context())
+	if jc.Check("failed to retrieve contracts stats", err) != nil {
 		return
 	}
 	writeResponse(jc, stats)

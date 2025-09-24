@@ -5,7 +5,7 @@ components:
     # Core types
     #
     #############################
-    
+
     Address:
       allOf:
         - $ref: "#/components/schemas/Hash256"
@@ -159,11 +159,11 @@ components:
     IPNet:
       type: object
       properties:
-        ip: 
+        ip:
           type: string
           description: The IP address in CIDR notation
           example: 100.82.250.91
-        mask: 
+        mask:
           type: string
           description: The subnet mask in CIDR notation
           example: 24
@@ -363,8 +363,8 @@ components:
           description: The base URL of the explorer API
 
     Severity:
-        type: string
-        enum: [info, warning, error, critical]
+      type: string
+      enum: [info, warning, error, critical]
 
     Alert:
       type: object
@@ -444,7 +444,7 @@ components:
           type: string
           description: The time of the last revision broadcast attempt for the contract.
           format: date-time
-          
+
         revisionNumber:
           allOf:
             - $ref: "#/components/schemas/RevisionNumber"
@@ -620,7 +620,7 @@ components:
           type: number
           format: float
           description: Approximate longitude of the host inferred from its IP address.
-    
+
     HostUsability:
       type: object
       properties:
@@ -656,7 +656,7 @@ components:
           description: Whether the host's ingress price is below the maximum ingress price
         egressPrice:
           type: boolean
-          description: Whether the host's egress price is below the maximum egress price  
+          description: Whether the host's egress price is below the maximum egress price
         freeSectorPrice:
           type: boolean
           description: Whether the host's free sector price is below the maximum free sector price
@@ -773,6 +773,30 @@ components:
           type: integer
           format: int64
           description: Number of accounts currently registered on the indexer
+
+    ContractsStatsResponse:
+      type: object
+      properties:
+        contracts:
+          type: integer
+          format: int64
+          description: Total number of active contracts managed by this instance
+        badContracts:
+          type: integer
+          format: int64
+          description: Total number of active, bad contracts managed by this instance
+        renewing:
+          type: integer
+          format: int64
+          description: Number of contracts currently within their renew window
+        totalCapacity:
+          type: integer
+          format: int64
+          description: Total capacity of all active contracts
+        totalSize:
+          type: integer
+          format: int64
+          description: Total size of all active contracts
 
     SectorStatsResponse:
       type: object

@@ -230,6 +230,10 @@ CREATE INDEX contracts_last_broadcast_attempt_contract_id_idx ON contracts (last
 CREATE INDEX contracts_host_id_remaining_allowance_contract_id_idx ON contracts (host_id, remaining_allowance DESC, contract_id) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for funding
 CREATE INDEX contracts_capacity_size_contract_id_idx ON contracts (capacity DESC, size DESC, contract_id) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for pinning
 
+-- stats indices
+CREATE INDEX contracts_proof_height_idx ON contracts (proof_height);
+CREATE INDEX contracts_state_active_idx ON contracts(state) WHERE state = 0 OR state = 1;
+
 -- foreign key constraint index
 CREATE INDEX contracts_host_id_idx ON contracts(host_id);
 

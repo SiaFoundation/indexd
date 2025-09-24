@@ -16,6 +16,16 @@ type (
 		BuildTime time.Time `json:"buildTime"`
 	}
 
+	// ContractsStatsResponse is the response body for the [GET] /stats/contracts
+	ContractsStatsResponse struct {
+		Contracts    uint64 `json:"contracts"`
+		BadContracts uint64 `json:"badContracts"`
+		Renewing     uint64 `json:"renewing"`
+
+		TotalCapacity uint64 `json:"totalCapacity"`
+		TotalSize     uint64 `json:"totalSize"`
+	}
+
 	// ExplorerState contains static information about explorer data sources.
 	ExplorerState struct {
 		Enabled bool   `json:"enabled"`

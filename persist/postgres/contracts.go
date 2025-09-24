@@ -11,6 +11,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
@@ -29,6 +30,61 @@ func (s *Store) ContractRevision(ctx context.Context, contractID types.FileContr
 		return rhp.ContractRevision{}, false, fmt.Errorf("failed to fetch contract revision: %w", err)
 	}
 	return rhp.ContractRevision{ID: contractID, Revision: types.V2FileContract(revision)}, renewed, nil
+}
+
+// ContractsStats returns statistics about the contracts in the database.
+func (s *Store) ContractsStats(ctx context.Context) (resp admin.ContractsStatsResponse, _ error) {
+	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		var numContracts, numGood, totalCapacity, totalSize uint64
+		err := tx.QueryRow(ctx, `
+			WITH globals AS (
+    			SELECT scanned_height FROM global_settings
+       		)
+			SELECT
+				COUNT(*),       				-- non-expired contracts
+				COALESCE(SUM(good::int), 0), 	-- good contracts
+				COALESCE(SUM(capacity), 0),  	-- total capacity
+				COALESCE(SUM(size), 0)      	-- total size
+			FROM contracts
+			CROSS JOIN globals
+			WHERE
+				proof_height > globals.scanned_height AND
+				(state = $1 OR state = $2)
+		`, contracts.ContractStatePending, contracts.ContractStateActive).
+			Scan(&numContracts, &numGood, &totalCapacity, &totalSize)
+		if err != nil {
+			return err
+		}
+
+		var numRenewing uint64
+		err = tx.QueryRow(ctx, `
+			WITH globals AS (
+				SELECT contracts_renew_window, scanned_height FROM global_settings
+			)
+			SELECT COUNT(*)
+			FROM contracts
+			CROSS JOIN globals
+			WHERE
+				proof_height > globals.scanned_height AND
+				(state = $1 OR state = $2) AND
+				globals.scanned_height + globals.contracts_renew_window >= proof_height
+		`, contracts.ContractStatePending, contracts.ContractStateActive).
+			Scan(&numRenewing)
+		if err != nil {
+			return err
+		}
+
+		resp = admin.ContractsStatsResponse{
+			Contracts:    numContracts,
+			BadContracts: numContracts - numGood,
+			Renewing:     numRenewing,
+
+			TotalCapacity: totalCapacity,
+			TotalSize:     totalSize,
+		}
+		return nil
+	})
+	return resp, err
 }
 
 // UpdateContractRevision updates the contract revision in the database.
