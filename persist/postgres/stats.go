@@ -42,7 +42,7 @@ func (s *Store) SectorStats(ctx context.Context) (admin.SectorsStatsResponse, er
 	var stats admin.SectorsStatsResponse
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		row := tx.QueryRow(ctx, "SELECT num_slabs, num_migrated_sectors, num_pinned_sectors, num_unpinnable_sectors, num_unpinned_sectors FROM stats")
-		return row.Scan(&stats.NumSlabs, &stats.NumMigratedSectors, &stats.NumPinnedSectors, &stats.NumUnpinnableSectors, &stats.NumUnpinnedSectors)
+		return row.Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned)
 	})
 	return stats, err
 }

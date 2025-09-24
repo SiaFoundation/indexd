@@ -47,8 +47,8 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 		stats, err := store.SectorStats(context.Background())
 		if err != nil {
 			t.Fatal(err)
-		} else if stats.NumSlabs != numSlabs {
-			t.Fatalf("expected %d slabs, got %d", numSlabs, stats.NumSlabs)
+		} else if stats.Slabs != numSlabs {
+			t.Fatalf("expected %d slabs, got %d", numSlabs, stats.Slabs)
 		}
 	}
 
