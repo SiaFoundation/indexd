@@ -1448,6 +1448,24 @@ func TestContractsStats(t *testing.T) {
 	} else if !reflect.DeepEqual(stats, expected) {
 		t.Fatalf("mismatch: \n%+v\n%+v", expected, stats)
 	}
+
+	// renew fcid3
+	fcid5 := types.FileContractID{5}
+	err = store.AddRenewedContract(t.Context(), fcid3, fcid5, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// make sure fcid5 has the same attributes as its parent
+	updateContract(fcid5, true, 5000, 6000, 100)
+
+	// assert stats stay the same
+	stats, err = store.ContractsStats(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(stats, expected) {
+		t.Fatalf("mismatch: \n%+v\n%+v", expected, stats)
+	}
 }
 
 // BenchmarkContracts is a benchmark to ensure the performance of
