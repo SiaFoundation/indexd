@@ -183,14 +183,14 @@ func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOptio
 }
 
 // Object retrieves the object with the given key for the given account.
-func (c *Client) Object(ctx context.Context, key types.Hash256) (resp slabs.LockedObject, err error) {
-	err = c.signedRequestJSON(ctx, http.MethodGet, fmt.Sprintf("/objects/%s", key), nil, &resp)
+func (c *Client) Object(ctx context.Context, objectID types.Hash256) (resp slabs.SealedObject, err error) {
+	err = c.signedRequestJSON(ctx, http.MethodGet, fmt.Sprintf("/objects/%s", objectID), nil, &resp)
 	return
 }
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
-func (c *Client) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) (resp []slabs.LockedObject, err error) {
+func (c *Client) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) (resp []slabs.SealedObject, err error) {
 	values := url.Values{}
 	values.Set("limit", fmt.Sprintf("%d", limit))
 	values.Set("after", cursor.After.Format(time.RFC3339Nano))
@@ -202,7 +202,7 @@ func (c *Client) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int
 
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (c *Client) SaveObject(ctx context.Context, obj slabs.LockedObject) (err error) {
+func (c *Client) SaveObject(ctx context.Context, obj slabs.SealedObject) (err error) {
 	err = c.signedRequestJSON(ctx, http.MethodPost, "/objects", obj, nil)
 	return
 }

@@ -79,7 +79,7 @@ ORDER BY ss.slab_index ASC`, slabDBID).Query(func(rows pgx.Rows) error {
 }
 
 // Object retrieves the object with the given key for the given account.
-func (s *Store) Object(ctx context.Context, account proto.Account, key types.Hash256) (obj slabs.LockedObject, _ error) {
+func (s *Store) Object(ctx context.Context, account proto.Account, key types.Hash256) (obj slabs.SealedObject, _ error) {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -87,8 +87,8 @@ func (s *Store) Object(ctx context.Context, account proto.Account, key types.Has
 		}
 
 		var objID int64
-		err = tx.QueryRow(ctx, `SELECT id, encrypted_master_key, encrypted_metadata, created_at, updated_at FROM objects WHERE account_id = $1 AND object_key = $2
-		`, accountID, sqlHash256(key)).Scan(&objID, &obj.EncryptedMasterKey, &obj.EncryptedMetadata, &obj.CreatedAt, &obj.UpdatedAt)
+		err = tx.QueryRow(ctx, `SELECT id, encrypted_master_key, encrypted_metadata, signature, created_at, updated_at FROM objects WHERE account_id = $1 AND object_key = $2
+		`, accountID, sqlHash256(key)).Scan(&objID, &obj.EncryptedMasterKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.Signature), &obj.CreatedAt, &obj.UpdatedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrObjectNotFound
 		} else if err != nil {
@@ -121,7 +121,7 @@ func (s *Store) Object(ctx context.Context, account proto.Account, key types.Has
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
-func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (objs []slabs.LockedObject, _ error) {
+func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (objs []slabs.SealedObject, _ error) {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -129,7 +129,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT id, encrypted_master_key, encrypted_metadata, created_at, updated_at
+			SELECT id, encrypted_master_key, encrypted_metadata, signature, created_at, updated_at
 			FROM objects
 			WHERE (updated_at > $1 OR (updated_at = $1 AND object_key > $2)) AND account_id = $3
 			ORDER BY updated_at ASC, object_key ASC
@@ -142,9 +142,9 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 		// read objects
 		var objectIDs []int64
 		for rows.Next() {
-			var obj slabs.LockedObject
+			var obj slabs.SealedObject
 			var objID int64
-			err := rows.Scan(&objID, &obj.EncryptedMasterKey, &obj.EncryptedMetadata, &obj.CreatedAt, &obj.UpdatedAt)
+			err := rows.Scan(&objID, &obj.EncryptedMasterKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.Signature), &obj.CreatedAt, &obj.UpdatedAt)
 			if err != nil {
 				return fmt.Errorf("failed to scan object: %w", err)
 			}
@@ -212,7 +212,7 @@ func (s *Store) DeleteObject(ctx context.Context, account proto.Account, objectK
 
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs.LockedObject) error {
+func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs.SealedObject) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -221,10 +221,10 @@ func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs
 
 		var objectID int64
 		err = tx.QueryRow(ctx, `
-			INSERT INTO objects (object_key, account_id, encrypted_master_key, encrypted_metadata) VALUES ($1, $2, $3, $4)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_master_key, encrypted_metadata, updated_at) = (EXCLUDED.encrypted_master_key, EXCLUDED.encrypted_metadata, NOW())
+			INSERT INTO objects (object_key, account_id, encrypted_master_key, encrypted_metadata, signature) VALUES ($1, $2, $3, $4, $5)
+			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_master_key, encrypted_metadata, signature, updated_at) = (EXCLUDED.encrypted_master_key, EXCLUDED.encrypted_metadata, EXCLUDED.signature, NOW())
 			RETURNING id`,
-			sqlHash256(obj.ID()), accountID, obj.EncryptedMasterKey, obj.EncryptedMetadata).Scan(&objectID)
+			sqlHash256(obj.ID()), accountID, obj.EncryptedMasterKey, obj.EncryptedMetadata, sqlSignature(obj.Signature)).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}

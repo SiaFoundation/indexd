@@ -11,16 +11,19 @@ import (
 )
 
 type (
-
-	// A LockedObject is an object that has been locked with an app key.
+	// A SealedObject is an object that has been locked with an app key.
 	// It can be safely serialized and shared, but cannot be used to access
 	// the underlying data until it has been unlocked with the app key.
-	LockedObject struct {
+	SealedObject struct {
 		EncryptedMasterKey []byte      `json:"encryptedMasterKey"`
 		Slabs              []SlabSlice `json:"slabs"`
 		EncryptedMetadata  []byte      `json:"encryptedMetadata"`
-		CreatedAt          time.Time   `json:"createdAt"`
-		UpdatedAt          time.Time   `json:"updatedAt"`
+		// Signature is a signature of the blake2b(object ID, encrypted_master_key, and encrypted_metadata)
+		// to attest that the object has not been tampered with.
+		Signature types.Signature `json:"signature"`
+
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
 	}
 
 	// A SharedSlab represents a slab of a shared object.
@@ -66,6 +69,8 @@ type (
 const metadataLimit = 1024
 
 var (
+	// ErrInvalidObjectSignature is returned when an object's signature is invalid.
+	ErrInvalidObjectSignature = errors.New("invalid object signature")
 	// ErrObjectNotFound is returned when an object is not found in the database.
 	ErrObjectNotFound = errors.New("object not found")
 	// ErrObjectMinimumSlabs is returned when the object has no slabs.
@@ -78,16 +83,26 @@ var (
 )
 
 // ID returns the object's ID, which is a hash of its slabs.
-func (lo *LockedObject) ID() types.Hash256 {
+func (so *SealedObject) ID() types.Hash256 {
 	h := types.NewHasher()
-	for _, slab := range lo.Slabs {
+	for _, slab := range so.Slabs {
 		slab.EncodeTo(h.E)
 	}
 	return h.Sum()
 }
 
+// SigHash returns the hash that should be signed to attest to the validity of
+// the object.
+func (so *SealedObject) SigHash() types.Hash256 {
+	h := types.NewHasher()
+	so.ID().EncodeTo(h.E)
+	h.E.Write(so.EncryptedMasterKey)
+	h.E.Write(so.EncryptedMetadata)
+	return h.Sum()
+}
+
 // Object retrieves the object with the given key for the given account.
-func (m *SlabManager) Object(ctx context.Context, account proto.Account, key types.Hash256) (LockedObject, error) {
+func (m *SlabManager) Object(ctx context.Context, account proto.Account, key types.Hash256) (SealedObject, error) {
 	return m.store.Object(ctx, account, key)
 }
 
@@ -98,11 +113,13 @@ func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, o
 
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj LockedObject) error {
+func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj SealedObject) error {
 	if len(obj.Slabs) == 0 {
 		return ErrObjectMinimumSlabs
 	} else if len(obj.EncryptedMetadata) > metadataLimit {
 		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(obj.EncryptedMetadata))
+	} else if !types.PublicKey(account).VerifyHash(obj.SigHash(), obj.Signature) {
+		return ErrInvalidObjectSignature
 	}
 
 	return m.store.SaveObject(ctx, account, obj)
@@ -110,7 +127,7 @@ func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
-func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]LockedObject, error) {
+func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]SealedObject, error) {
 	return m.store.ListObjects(ctx, account, cursor, limit)
 }
 

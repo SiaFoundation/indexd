@@ -342,7 +342,14 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("unexpected sector roots in slab")
 	}
 
-	obj := slabs.LockedObject{
+	objs, err := client.ListObjects(context.Background(), slabs.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(objs) != 0 {
+		t.Fatalf("expected 0 objects, got %d", len(objs))
+	}
+
+	obj := slabs.SealedObject{
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			{
@@ -359,13 +366,13 @@ func TestApplicationAPI(t *testing.T) {
 		EncryptedMetadata: nil,
 	}
 
-	objs, err := client.ListObjects(context.Background(), slabs.Cursor{}, 100)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(objs) != 0 {
-		t.Fatalf("expected 0 objects, got %d", len(objs))
+	// try to save the object with an invalid signature
+	if err := client.SaveObject(context.Background(), obj); err == nil || !strings.Contains(err.Error(), slabs.ErrInvalidObjectSignature.Error()) {
+		t.Fatalf("expected %v, got %v", slabs.ErrInvalidObjectSignature, err)
 	}
 
+	// sign and save the object
+	obj.Signature = sk.SignHash(obj.SigHash())
 	if err := client.SaveObject(context.Background(), obj); err != nil {
 		t.Fatal(err)
 	}
@@ -425,7 +432,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("failed to pin slab:", err)
 	}
 	// Try to save an object referencing that slab on first account
-	badObj := slabs.LockedObject{
+	badObj := slabs.SealedObject{
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{{
 			SlabID: slabID,
@@ -433,6 +440,7 @@ func TestApplicationAPI(t *testing.T) {
 			Length: 256,
 		}},
 	}
+	badObj.Signature = sk.SignHash(badObj.SigHash())
 	if err := client.SaveObject(context.Background(), badObj); err == nil || err.Error() != slabs.ErrObjectUnpinnedSlab.Error() {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectUnpinnedSlab, err)
 	}
@@ -548,7 +556,7 @@ func TestSharedObjects(t *testing.T) {
 	}
 
 	// prepare accounts
-	prepareAcccount := func(t *testing.T) *app.Client {
+	prepareAcccount := func(t *testing.T) (*app.Client, types.PrivateKey) {
 		sk := types.GeneratePrivateKey()
 		client := indexer.App(sk)
 
@@ -570,11 +578,11 @@ func TestSharedObjects(t *testing.T) {
 		}
 
 		respondToAppConnection(t, connectResp.ResponseURL, key.Key, true)
-		return client
+		return client, sk
 	}
 
-	client1 := prepareAcccount(t)
-	client2 := prepareAcccount(t)
+	client1, sk1 := prepareAcccount(t)
+	client2, _ := prepareAcccount(t)
 
 	h1 := hosts[0]
 	h2 := hosts[1]
@@ -658,7 +666,7 @@ func TestSharedObjects(t *testing.T) {
 	}
 
 	// add the object to the db
-	obj := slabs.LockedObject{
+	obj := slabs.SealedObject{
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			{
@@ -673,6 +681,7 @@ func TestSharedObjects(t *testing.T) {
 			},
 		},
 	}
+	obj.Signature = sk1.SignHash(obj.SigHash())
 	if err := client1.SaveObject(ctx, obj); err != nil {
 		t.Fatal(err)
 	}

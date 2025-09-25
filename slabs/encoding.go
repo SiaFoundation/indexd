@@ -60,21 +60,23 @@ func (s *SlabSlice) DecodeFrom(d *types.Decoder) {
 }
 
 // EncodeTo implements types.EncoderTo.
-func (lo LockedObject) EncodeTo(e *types.Encoder) {
-	e.WriteBytes(lo.EncryptedMasterKey)
-	types.EncodeSlice(e, lo.Slabs)
-	e.WriteBytes(lo.EncryptedMetadata)
-	e.WriteTime(lo.CreatedAt)
-	e.WriteTime(lo.UpdatedAt)
+func (so SealedObject) EncodeTo(e *types.Encoder) {
+	e.WriteBytes(so.EncryptedMasterKey)
+	types.EncodeSlice(e, so.Slabs)
+	e.WriteBytes(so.EncryptedMetadata)
+	so.Signature.EncodeTo(e)
+	e.WriteTime(so.CreatedAt)
+	e.WriteTime(so.UpdatedAt)
 }
 
 // DecodeFrom implements types.DecoderFrom.
-func (lo *LockedObject) DecodeFrom(d *types.Decoder) {
-	lo.EncryptedMasterKey = d.ReadBytes()
-	types.DecodeSlice(d, &lo.Slabs)
-	lo.EncryptedMetadata = d.ReadBytes()
-	lo.CreatedAt = d.ReadTime()
-	lo.UpdatedAt = d.ReadTime()
+func (so *SealedObject) DecodeFrom(d *types.Decoder) {
+	so.EncryptedMasterKey = d.ReadBytes()
+	types.DecodeSlice(d, &so.Slabs)
+	so.EncryptedMetadata = d.ReadBytes()
+	so.Signature.DecodeFrom(d)
+	so.CreatedAt = d.ReadTime()
+	so.UpdatedAt = d.ReadTime()
 }
 
 // MarshalSia is a convenience method to encode the object metadata into bytes
@@ -84,10 +86,10 @@ func (lo *LockedObject) DecodeFrom(d *types.Decoder) {
 // obj.EncodeTo(e)
 // e.Flush()
 // buf now contains encoded Object
-func (lo *LockedObject) MarshalSia() ([]byte, error) {
+func (so *SealedObject) MarshalSia() ([]byte, error) {
 	var buf bytes.Buffer
 	e := types.NewEncoder(&buf)
-	lo.EncodeTo(e)
+	so.EncodeTo(e)
 	e.Flush()
 	return buf.Bytes(), nil
 }
@@ -97,8 +99,8 @@ func (lo *LockedObject) MarshalSia() ([]byte, error) {
 // d := types.NewBufDecoder(bv)
 // obj.DecodeFrom(d)
 // return d.Err()
-func (lo *LockedObject) UnmarshalSia(b []byte) error {
+func (so *SealedObject) UnmarshalSia(b []byte) error {
 	d := types.NewBufDecoder(b)
-	lo.DecodeFrom(d)
+	so.DecodeFrom(d)
 	return d.Err()
 }

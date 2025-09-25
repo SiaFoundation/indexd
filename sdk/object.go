@@ -46,8 +46,8 @@ func (o *Object) UpdatedAt() time.Time {
 	return o.updatedAt
 }
 
-// Lock returns a LockedObject that can be safely serialized and shared.
-func (o *Object) Lock(appKey types.PrivateKey) slabs.LockedObject {
+// Seal returns a SealedObject that can be safely serialized and shared.
+func (o *Object) Seal(appKey types.PrivateKey) slabs.SealedObject {
 	keyCipher := masterKeyCipher(appKey)
 	nonce := frand.Bytes(keyCipher.NonceSize())
 	encryptedMasterKey := keyCipher.Seal(nonce, nonce, o.masterKey, nil)
@@ -55,13 +55,16 @@ func (o *Object) Lock(appKey types.PrivateKey) slabs.LockedObject {
 	metaCipher := metadataCipher(o.masterKey)
 	nonce = frand.Bytes(metaCipher.NonceSize())
 	encryptedMeta := metaCipher.Seal(nonce, nonce, o.metadata, nil)
-	return slabs.LockedObject{
+
+	so := slabs.SealedObject{
 		EncryptedMasterKey: encryptedMasterKey,
 		Slabs:              o.slabs,
 		EncryptedMetadata:  encryptedMeta,
 		CreatedAt:          o.createdAt,
 		UpdatedAt:          o.updatedAt,
 	}
+	so.Signature = appKey.SignHash(so.SigHash())
+	return so
 }
 
 // Slabs returns a copy of the object's slabs.
@@ -85,7 +88,7 @@ func (s *SDK) Object(ctx context.Context, objectKey types.Hash256) (Object, erro
 	if err != nil {
 		return Object{}, fmt.Errorf("failed to get locked object: %w", err)
 	}
-	return newObjectFromLockedObject(lo, s.appKey)
+	return objectFromSealedObject(lo, s.appKey)
 }
 
 // ListObjects lists objects, starting from the given cursor, up to the given limit.
@@ -96,7 +99,7 @@ func (s *SDK) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) (
 	}
 	objs := make([]Object, 0, len(los))
 	for _, lo := range los {
-		obj, err := newObjectFromLockedObject(lo, s.appKey)
+		obj, err := objectFromSealedObject(lo, s.appKey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unlock object: %w", err)
 		}
@@ -148,23 +151,29 @@ func unlockEncryptedMetadata(masterKey []byte, encryptedMeta []byte) (json.RawMe
 	return metadata, nil
 }
 
-func newObjectFromLockedObject(lo slabs.LockedObject, appKey types.PrivateKey) (Object, error) {
+func objectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Object, error) {
 	obj := Object{
-		slabs:     slices.Clone(lo.Slabs),
-		createdAt: lo.CreatedAt,
-		updatedAt: lo.UpdatedAt,
+		slabs:     slices.Clone(so.Slabs),
+		createdAt: so.CreatedAt,
+		updatedAt: so.UpdatedAt,
 	}
+	if so.ID() != obj.ID() {
+		return Object{}, fmt.Errorf("object ID mismatch")
+	} else if !appKey.PublicKey().VerifyHash(so.SigHash(), so.Signature) {
+		return Object{}, fmt.Errorf("invalid object signature")
+	}
+
 	keyCipher := masterKeyCipher(appKey)
-	if len(lo.EncryptedMasterKey) < keyCipher.NonceSize() {
+	if len(so.EncryptedMasterKey) < keyCipher.NonceSize() {
 		return Object{}, fmt.Errorf("encrypted master key too short")
 	}
-	nonce := lo.EncryptedMasterKey[:keyCipher.NonceSize()]
+	nonce := so.EncryptedMasterKey[:keyCipher.NonceSize()]
 	var err error
-	obj.masterKey, err = keyCipher.Open(nil, nonce, lo.EncryptedMasterKey[keyCipher.NonceSize():], nil)
+	obj.masterKey, err = keyCipher.Open(nil, nonce, so.EncryptedMasterKey[keyCipher.NonceSize():], nil)
 	if err != nil {
 		return Object{}, fmt.Errorf("failed to unlock master key: %w", err)
 	}
-	obj.metadata, err = unlockEncryptedMetadata(obj.masterKey, lo.EncryptedMetadata)
+	obj.metadata, err = unlockEncryptedMetadata(obj.masterKey, so.EncryptedMetadata)
 	if err != nil {
 		return Object{}, fmt.Errorf("failed to unlock metadata: %w", err)
 	}

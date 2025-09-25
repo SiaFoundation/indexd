@@ -43,9 +43,9 @@ type (
 		CreateSharedObjectURL(ctx context.Context, objectID types.Hash256, encryptionKey []byte, validUntil time.Time) (string, error)
 		SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, []byte, error)
 
-		ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) ([]slabs.LockedObject, error)
-		Object(ctx context.Context, key types.Hash256) (slabs.LockedObject, error)
-		SaveObject(ctx context.Context, obj slabs.LockedObject) error
+		ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) ([]slabs.SealedObject, error)
+		Object(ctx context.Context, key types.Hash256) (slabs.SealedObject, error)
+		SaveObject(ctx context.Context, obj slabs.SealedObject) error
 
 		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
 		PinSlab(context.Context, slabs.SlabPinParams) (slabs.SlabID, error)
@@ -314,7 +314,7 @@ top:
 		}
 	}
 	// pin the object
-	return obj, s.client.SaveObject(ctx, obj.Lock(s.appKey))
+	return obj, s.client.SaveObject(ctx, obj.Seal(s.appKey))
 }
 
 // Download downloads object metadata

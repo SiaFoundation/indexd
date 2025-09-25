@@ -23,19 +23,19 @@ func TestLockedObjectRoundtrip(t *testing.T) {
 		metadata:  frand.Bytes(128),
 	}
 
-	locked := obj.Lock(appKey)
+	locked := obj.Seal(appKey)
 
 	data, err := locked.MarshalSia()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	var decoded slabs.LockedObject
+	var decoded slabs.SealedObject
 	if err := decoded.UnmarshalSia(data); err != nil {
 		t.Fatal(err)
 	}
 
-	obj2, err := newObjectFromLockedObject(decoded, appKey)
+	obj2, err := objectFromSealedObject(decoded, appKey)
 	if err != nil {
 		t.Fatal(err)
 	}
