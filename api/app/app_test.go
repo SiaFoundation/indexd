@@ -716,10 +716,23 @@ func TestSharedObjects(t *testing.T) {
 	}
 
 	// client2 should have 1 object
-	if objs, err := client2.ListObjects(ctx, slabs.Cursor{}, 100); err != nil {
+	objs, err := client2.ListObjects(ctx, slabs.Cursor{}, 100)
+	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 {
 		t.Fatalf("expected 1 objects, got %d", len(objs))
+	}
+	objs[0].CreatedAt, objs[0].UpdatedAt = obj.CreatedAt, obj.UpdatedAt
+	if !reflect.DeepEqual(obj, objs[0]) {
+		t.Fatalf("object mismatch: expected %+v, got %+v", obj, objs[0])
+	}
+
+	for _, slab := range obj.Slabs {
+		if got, err := client2.Slab(ctx, slab.SlabID); err != nil {
+			t.Fatal(err)
+		} else if slab.ID != got.SlabID {
+			t.Fatal("slab mismatch")
+		}
 	}
 
 	time.Sleep(time.Second * 2)
