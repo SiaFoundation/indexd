@@ -326,15 +326,18 @@ func (a *app) handlePOSTObjectsShared(jc jape.Context, pk types.PublicKey) {
 			})
 		}
 
-		toPin = append(toPin, slabs.SlabPinParams{
+		s := slabs.SlabPinParams{
 			EncryptionKey: slab.EncryptionKey,
 			MinShards:     slab.MinShards,
 			Sectors:       sectors,
-		})
+		}
+		if jc.Check("failed to validate slab", s.Validate()) != nil {
+			return
+		}
+		toPin = append(toPin, s)
 	}
 
-	if _, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), time.Now(), toPin...); err != nil {
-		jc.Error(err, http.StatusInternalServerError)
+	if _, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), time.Now(), toPin...); jc.Check("failed to pin slabs", err) != nil {
 		return
 	}
 
@@ -356,8 +359,7 @@ func (a *app) handlePOSTObjectsShared(jc jape.Context, pk types.PublicKey) {
 	if errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) {
 		jc.Error(err, http.StatusBadRequest)
 		return
-	} else if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
+	} else if jc.Check("failed to save object", err) != nil {
 		return
 	}
 	jc.Encode(nil)
