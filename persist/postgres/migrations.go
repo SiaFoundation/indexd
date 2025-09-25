@@ -272,4 +272,16 @@ ALTER TABLE objects ADD COLUMN signature BYTEA UNIQUE NOT NULL CHECK (LENGTH(sig
 		_, err := tx.Exec(ctx, query)
 		return err
 	},
+	// add indices to support host stats
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX hosts_usage_total_spent_idx ON hosts(usage_total_spent DESC);`)
+		if err != nil {
+			return fmt.Errorf("failed to create hosts_usage_total_spent_idx index: %w", err)
+		}
+		_, err = tx.Exec(ctx, `CREATE INDEX contracts_active_host_size_idx ON contracts(proof_height, host_id) INCLUDE (size) WHERE (state = 0 OR state = 1) AND renewed_to IS NULL;`)
+		if err != nil {
+			return fmt.Errorf("failed to create contracts_active_host_size_idx index: %w", err)
+		}
+		return nil
+	},
 }

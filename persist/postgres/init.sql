@@ -61,6 +61,7 @@ CREATE INDEX hosts_next_scan_idx ON hosts(next_scan);
 
 CREATE INDEX hosts_last_integrity_check_idx ON hosts(last_integrity_check ASC);
 CREATE INDEX hosts_lost_sectors_idx ON hosts(lost_sectors);
+CREATE INDEX hosts_usage_total_spent_idx ON hosts(usage_total_spent DESC);
 
 -- speed up querying by country
 CREATE INDEX hosts_country_code_idx ON hosts(country_code);
@@ -228,6 +229,7 @@ CREATE INDEX contracts_capacity_size_contract_id_idx ON contracts (capacity DESC
 -- stats indices
 CREATE INDEX contracts_proof_height_idx ON contracts (proof_height);
 CREATE INDEX contracts_state_active_idx ON contracts(state) WHERE state = 0 OR state = 1;
+CREATE INDEX contracts_active_host_size_idx ON contracts(proof_height, host_id) INCLUDE (size) WHERE (state = 0 OR state = 1) AND renewed_to IS NULL;
 
 -- foreign key constraint index
 CREATE INDEX contracts_host_id_idx ON contracts(host_id);

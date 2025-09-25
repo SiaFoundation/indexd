@@ -1480,29 +1480,7 @@ func BenchmarkContracts(b *testing.B) {
 
 			hostContractIDs := make([]types.FileContractID, numContractsPerHost)
 			for i := range numContractsPerHost {
-				revision := newTestRevision(hk)
-				frand.Read(hostContractIDs[i][:])
-				revision.Filesize = frand.Uint64n(1e9)                                                            // random size
-				revision.Capacity = revision.Filesize + frand.Uint64n(1e3)                                        // random capacity
-				revision.RenterOutput.Value = types.Siacoins(100).Add(types.Siacoins(uint32(frand.Uint64n(100)))) // random allowance
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, next_prune) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
-					hostID,
-					sqlHash256(hostContractIDs[i][:]),
-					sqlFileContract(revision),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(revision.RemainingAllowance().Add(types.Siacoins(1))), // 1SC more than initial allowance
-					sqlCurrency(revision.RemainingAllowance()),
-					sqlContractState(uint8(frand.Uint64n(5))), // random contract state (40% active)
-					frand.Uint64n(2) == 0,                     // random good state (50% good)
-					revision.Filesize,
-					revision.Capacity,
-					randomTime(), // random last_broadcast_attempt
-					randomTime(), // random next_prune
-				); err != nil {
-					return err
-				}
+				hostContractIDs[i] = insertRandomContract(b, tx, hostID, hk)
 			}
 			for i := 1; i < len(hostContractIDs)-1; i++ {
 				if _, err := tx.Exec(ctx, `UPDATE contracts SET renewed_from = $1, renewed_to = $2 WHERE contract_id = $3;`, hostContractIDs[i-1], hostContractIDs[i+1], hostContractIDs[i]); err != nil {
@@ -1791,4 +1769,42 @@ func newTestRevision(hk types.PublicKey) types.V2FileContract {
 		RevisionNumber:   1,
 		TotalCollateral:  types.Siacoins(100),
 	}
+}
+
+func insertRandomContract(b *testing.B, tx *txn, hostID int64, hostKey types.PublicKey) (fcid types.FileContractID) {
+	frand.Read(fcid[:])
+
+	randomTime := func() time.Time {
+		maxOneHour := time.Duration(frand.Uint64n(60*60)) * time.Second
+		return time.Now().Add(-30 * time.Minute).Add(maxOneHour)
+	}
+
+	revision := newTestRevision(hostKey)
+	revision.Filesize = frand.Uint64n(1e9)                                                            // random size
+	revision.Capacity = revision.Filesize + frand.Uint64n(1e3)                                        // random capacity
+	revision.RenterOutput.Value = types.Siacoins(100).Add(types.Siacoins(uint32(frand.Uint64n(100)))) // random allowance
+
+	if _, err := tx.Exec(b.Context(), `
+		INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, next_prune) VALUES ($1, $2, $3, 1, 2, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
+		hostID,
+		sqlHash256(fcid),
+		sqlFileContract(revision),
+		sqlCurrency(types.ZeroCurrency),
+		sqlCurrency(types.ZeroCurrency),
+		sqlCurrency(types.ZeroCurrency),
+		sqlCurrency(revision.RemainingAllowance().Add(types.Siacoins(1))), // 1SC more than initial allowance
+		sqlCurrency(revision.RemainingAllowance()),
+		sqlContractState(uint8(frand.Uint64n(5))), // random contract state (40% active)
+		frand.Uint64n(2) == 0,                     // random good state (50% good)
+		revision.Filesize,
+		revision.Capacity,
+		randomTime(), // random last_broadcast_attempt
+		randomTime(), // random next_prune
+	); err != nil {
+		b.Fatal(err)
+	} else if _, err := tx.Exec(b.Context(), `INSERT INTO contract_sectors_map (contract_id) VALUES ($1)`, sqlHash256(fcid)); err != nil {
+		b.Fatal(err)
+	}
+
+	return
 }

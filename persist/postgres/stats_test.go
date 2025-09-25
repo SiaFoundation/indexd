@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
@@ -105,5 +106,123 @@ func TestAccountStatsRegistered(t *testing.T) {
 		} else if expected := uint64(len(accs)) - uint64(i) - 1; stats.Registered != expected {
 			t.Fatalf("expected %d accounts, got %d", expected, stats.Registered)
 		}
+	}
+}
+
+func TestHostStats(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	updateUsageTotalSpent := func(hk types.PublicKey, spent types.Currency) {
+		t.Helper()
+		if _, err := store.pool.Exec(
+			t.Context(),
+			"UPDATE hosts SET usage_total_spent = $1 WHERE public_key = $2", sqlCurrency(spent), sqlPublicKey(hk)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// add three hosts
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
+	hk3 := store.addTestHost(t)
+
+	// assert empty stats
+	stats, err := store.HostStats(t.Context(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(stats) != 0 {
+		t.Fatalf("expected 0 hosts, got %d", len(stats))
+	}
+
+	// add test contracts
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID(hk1))
+	store.addTestContract(t, hk2, types.FileContractID(hk2))
+	store.addTestContract(t, hk3, types.FileContractID(hk3))
+
+	// assert empty stats - no usage
+	stats, err = store.HostStats(t.Context(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(stats) != 0 {
+		t.Fatalf("expected 0 hosts, got %d", len(stats))
+	}
+
+	// update usage spent
+	updateUsageTotalSpent(hk1, types.NewCurrency64(10))
+	updateUsageTotalSpent(hk2, types.NewCurrency64(20))
+	// hk3 remains at 0
+
+	testRevision := newTestRevision(types.PublicKey{})
+
+	// assert updated stats
+
+	stats, err = store.HostStats(t.Context(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(stats) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(stats))
+	} else if stats[0].PublicKey != hk2 {
+		t.Fatalf("expected first host to be hk2, got %s", stats[0].PublicKey.String())
+	} else if stats[1].PublicKey != hk1 {
+		t.Fatalf("expected second host to be hk1, got %s", stats[1].PublicKey.String())
+	} else if stats[0].ActiveContractsSize != int64(testRevision.Filesize) {
+		t.Fatalf("expected first host to have %d active contract size, got %d", testRevision.Filesize, stats[0].ActiveContractsSize)
+	} else if stats[1].ActiveContractsSize != int64(testRevision.Filesize) {
+		t.Fatalf("expected second host to have %d active contract size, got %d", testRevision.Filesize, stats[1].ActiveContractsSize)
+	}
+
+	// resolve first contract manually - should exclude it from total_contract_size
+	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET state = $1 WHERE contract_id = $2", sqlContractState(2), sqlHash256(fcid1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert updated stats
+	stats, err = store.HostStats(t.Context(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(stats) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(stats))
+	} else if stats[0].PublicKey != hk2 {
+		t.Fatalf("expected first host to be hk2, got %s", stats[0].PublicKey.String())
+	} else if stats[1].PublicKey != hk1 {
+		t.Fatalf("expected second host to be hk1, got %s", stats[1].PublicKey.String())
+	} else if stats[0].ActiveContractsSize != int64(testRevision.Filesize) {
+		t.Fatalf("expected first host to have %d active contract size, got %d", testRevision.Filesize, stats[0].ActiveContractsSize)
+	} else if stats[1].ActiveContractsSize != 0 {
+		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[1].ActiveContractsSize)
+	}
+
+	// set scanned height to the proof height - should exclude it
+	proofHeight := testRevision.ProofHeight
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: proofHeight})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert updated stats
+	stats, err = store.HostStats(t.Context(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(stats) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(stats))
+	} else if stats[0].ActiveContractsSize != 0 {
+		t.Fatalf("expected first host to have 0 active contract size, got %d", stats[0].ActiveContractsSize)
+	} else if stats[1].ActiveContractsSize != 0 {
+		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[1].ActiveContractsSize)
+	}
+
+	// assert limit and offset are applied
+	if stats, err := store.HostStats(t.Context(), 1, 1); err != nil {
+		t.Fatal(err)
+	} else if len(stats) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(stats))
+	} else if stats[0].PublicKey != hk1 {
+		t.Fatalf("expected host to be hk1, got %s", stats[0].PublicKey.String())
+	} else if stats, err := store.HostStats(t.Context(), 2, 1); err != nil {
+		t.Fatal(err)
+	} else if len(stats) != 0 {
+		t.Fatalf("expected 0 hosts, got %d", len(stats))
 	}
 }

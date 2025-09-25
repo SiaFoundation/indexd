@@ -62,6 +62,15 @@ type (
 		log *zap.Logger
 	}
 
+	// HostStats contains various statistics about a single host.
+	HostStats struct {
+		AccountUsage        types.Currency  `json:"accountUsage"`
+		ActiveContractsSize int64           `json:"activeContractsSize"`
+		PublicKey           types.PublicKey `json:"publicKey"`
+		LostSectors         int64           `json:"lostSectors"`
+		TotalUsage          types.Currency  `json:"totalUsage"`
+	}
+
 	// OnlineChecker defines an interface to check whether the indexer is online. It's
 	// used to ensure hosts aren't punished for failing a scan if the indexer is
 	// offline.
@@ -84,6 +93,7 @@ type (
 	Store interface {
 		Host(ctx context.Context, hk types.PublicKey) (Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error)
+		HostStats(ctx context.Context, offset, limit int) ([]HostStats, error)
 
 		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
 		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
@@ -380,6 +390,11 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 		}
 	}
 	return nil
+}
+
+// Stats returns statistics about the hosts in the database.
+func (m *HostManager) Stats(ctx context.Context, offset, limit int) ([]HostStats, error) {
+	return m.store.HostStats(ctx, offset, limit)
 }
 
 // hostsForScanning returns the public keys of the hosts that need to be

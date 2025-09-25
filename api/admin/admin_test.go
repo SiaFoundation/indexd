@@ -800,6 +800,37 @@ func TestContractsStatsAPI(t *testing.T) {
 	t.Fatalf("expected some contracts, got %d", stats.Contracts)
 }
 
+func TestHostsStatsAPI(t *testing.T) {
+	// create cluster with two hosts
+	cluster := testutils.NewCluster(t, testutils.WithHosts(2))
+	admin := cluster.Indexer.Admin
+	time.Sleep(time.Second)
+
+	res, err := admin.StatsHosts(t.Context(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Hosts) != 2 {
+		t.Fatal("expected 2 hosts", len(res.Hosts))
+	} else if res.Hosts[0].PublicKey == res.Hosts[1].PublicKey {
+		t.Fatal("expected hosts to have different public keys")
+	}
+
+	// assert offset and limit are being applied
+	res, err = admin.StatsHosts(t.Context(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Hosts) != 1 {
+		t.Fatal("expected 1 host", len(res.Hosts))
+	}
+
+	res, err = admin.StatsHosts(t.Context(), 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Hosts) != 0 {
+		t.Fatal("expected 0 hosts", len(res.Hosts))
+	}
+}
+
 func TestSectorStatsAPI(t *testing.T) {
 	// create cluster with three hosts
 	logger := newTestLogger(false)

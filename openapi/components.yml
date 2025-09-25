@@ -806,6 +806,35 @@ components:
           format: int64
           description: Total size of all active contracts
 
+    HostsStatsResponse:
+      type: object
+      properties:
+        hosts:
+          type: array
+          items:
+            type: object
+            properties:
+              accountUsage:
+                allOf:
+                  - $ref: "#/components/schemas/Currency"
+                  - description: Total amount spent on ephemeral accounts
+              activeContractsSize:
+                type: integer
+                format: int64
+                description: Total size of all active contracts on this host
+              publicKey:
+                allOf:
+                  - $ref: "#/components/schemas/PublicKey"
+                  - description: The public key of the host
+              lostSectors:
+                type: integer
+                format: int64
+                description: Total number of sectors lost on this host
+              totalUsage:
+                allOf:
+                  - $ref: "#/components/schemas/Currency"
+                  - description: Total amount spent on this host
+
     SectorStatsResponse:
       type: object
       properties:

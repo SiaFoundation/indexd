@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"go.sia.tech/indexd/api/admin"
+	"go.sia.tech/indexd/hosts"
 )
 
 func incrementNumAccounts(ctx context.Context, tx *txn, delta int64) error {
@@ -69,6 +70,57 @@ func (s *Store) AccountStats(ctx context.Context) (admin.AccountStatsResponse, e
 			return fmt.Errorf("failed to get active accounts: %w", err)
 		}
 		return nil
+	})
+	return stats, err
+}
+
+// HostStats reports statistics about used hosts. We consider a host to be used
+// as soon as we spent any funds on it.
+func (s *Store) HostStats(ctx context.Context, offset, limit int) ([]hosts.HostStats, error) {
+	var stats []hosts.HostStats
+	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+			WITH globals AS (
+				SELECT scanned_height FROM global_settings
+			),
+			selected_hosts AS (
+				SELECT id, public_key, lost_sectors, usage_account_funding, usage_total_spent
+				FROM hosts
+				WHERE usage_total_spent > 0
+				ORDER BY usage_total_spent DESC
+				OFFSET $1
+				LIMIT $2
+			)
+			SELECT
+				h.public_key,
+				h.lost_sectors,
+				COALESCE(cs.total_contracts_size, 0) AS total_contracts_size,
+				h.usage_account_funding,
+				h.usage_total_spent
+			FROM selected_hosts h
+			LEFT JOIN LATERAL (
+			SELECT SUM(size) AS total_contracts_size
+			FROM contracts
+			WHERE host_id = h.id
+				AND (state = 0 OR state = 1)
+				AND renewed_to IS NULL
+				AND proof_height > (SELECT scanned_height FROM globals)
+			) cs ON TRUE
+			ORDER BY h.usage_total_spent DESC;
+		`, offset, limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var hs hosts.HostStats
+			if err := rows.Scan((*sqlPublicKey)(&hs.PublicKey), &hs.LostSectors, &hs.ActiveContractsSize, (*sqlCurrency)(&hs.AccountUsage), (*sqlCurrency)(&hs.TotalUsage)); err != nil {
+				return err
+			}
+			stats = append(stats, hs)
+		}
+		return rows.Err()
 	})
 	return stats, err
 }
