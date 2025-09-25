@@ -14,6 +14,10 @@ func (s AccountStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 			Name:  "indexd_num_registered_accounts",
 			Value: float64(s.Registered),
 		},
+		{
+			Name:  "indexd_num_active_accounts",
+			Value: float64(s.Active),
+		},
 	}
 }
 
@@ -50,11 +54,23 @@ func (s SectorsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	return []prometheus.Metric{
 		{
 			Name:  "indexd_num_slabs",
-			Value: float64(s.NumSlabs),
+			Value: float64(s.Slabs),
+		},
+		{
+			Name:  "indexd_num_migrated_sectors",
+			Value: float64(s.Migrated),
 		},
 		{
 			Name:  "indexd_num_pinned_sectors",
-			Value: float64(s.NumPinnedSectors),
+			Value: float64(s.Pinned),
+		},
+		{
+			Name:  "indexd_num_unpinnable_sectors",
+			Value: float64(s.Unpinnable),
+		},
+		{
+			Name:  "indexd_num_unpinned_sectors",
+			Value: float64(s.Unpinned),
 		},
 	}
 }

@@ -78,7 +78,7 @@ type (
 func defaultIndexerCfg() *indexerCfg {
 	return &indexerCfg{
 		maintenanceSettings: MaintenanceSettings,
-		slabOpts:            []slabs.Option{slabs.WithDisabledCIDRChecks()},
+		slabOpts:            []slabs.Option{slabs.WithMinHostDistance(0)}, // disable distance checks in tests
 	}
 }
 
@@ -143,7 +143,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	am := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithLogger(log.Named("accounts")))
 
 	contractOpts := []contracts.ContractManagerOpt{
-		contracts.WithDisabledCIDRChecks(),
+		contracts.WithMinHostDistance(0), // disable location checks in tests
 		contracts.WithLogger(log.Named("contracts")),
 		contracts.WithMaintenanceFrequency(200 * time.Millisecond),
 		contracts.WithSyncPollInterval(100 * time.Millisecond),

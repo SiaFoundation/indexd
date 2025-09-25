@@ -89,7 +89,7 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 }
 
 // performContractFormation makes sure that we have at least 'wanted' good
-// contracts with good hosts in unique CIDRs.
+// contracts with good hosts that are sufficiently spaced apart.
 func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted int64, log *zap.Logger) error {
 	formationLog := log.Named("formation")
 	formationLog.Debug("started", zap.Uint64("period", period), zap.Int64("wanted", wanted))
@@ -124,7 +124,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	formationLog.Debug("found candidates", zap.Uint64("n", uint64(len(candidates))))
 
 	// forceFormation is a map of hosts that we will always form a contract with
-	// regardless of how many we already have or what CIDR they are on
+	// regardless of how many we already have or where the host is located
 	forceFormation := make(map[types.PublicKey]bool)
 
 	// determine which hosts are 'full', meaning they have exclusively full
@@ -167,48 +167,16 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		forceFormation[hostKey] = true
 	}
 
-	// helpers for CIDR check
-	usedCidrs := make(map[string]types.PublicKey)
-	addHost := func(host hosts.Host) {
-		// NOTE: in testing CIDR checks are disabled because the hosts' network
-		// is an unspecified IPv6 address, in those cases we use the host's
-		// public key to ensure we don't keep forming contracts with the same
-		// host.
-		if cm.disableCIDRChecks {
-			usedCidrs[host.PublicKey.String()] = host.PublicKey
-		} else {
-			for _, network := range host.Networks {
-				usedCidrs[network] = host.PublicKey
-			}
-		}
-
-		wanted--
-	}
-	hasCidrConflict := func(host hosts.Host) (types.PublicKey, bool) {
-		if cm.disableCIDRChecks {
-			hk, known := usedCidrs[host.PublicKey.String()]
-			return hk, known
-		}
-		for _, cidr := range host.Networks {
-			if hk, known := usedCidrs[cidr]; known {
-				return hk, true
-			}
-		}
-		return types.PublicKey{}, false
-	}
-
 	// helper to check if a host is good to form a contract with
+	set := hosts.NewSpacedSet(cm.minHostDistanceKm)
 	isGood := func(host hosts.Host, log *zap.Logger) bool {
 		force := forceFormation[host.PublicKey]
 		if good := host.Usability.Usable(); !good {
 			// host should be good
 			log.Debug("host is not usable due to bad usability", zap.String("reasons", host.Usability.FailedChecks()))
 			return false
-		} else if usedBy, used := hasCidrConflict(host); used && !force {
-			// host should be on a unique cidr unless 'full'
-			if host.PublicKey != usedBy {
-				log.Debug("host is not usable cidr is already in use", zap.Stringer("usedBy", usedBy))
-			}
+		} else if spaced := set.CanAddHost(host); !spaced && !force {
+			// host should be sufficiently spaced from other hosts
 			return false
 		} else if host.Settings.RemainingStorage < minRemainingStorage {
 			// host should at least have 10GB of storage left
@@ -242,7 +210,8 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		}
 
 		// contract is good
-		addHost(host)
+		set.Add(host)
+		wanted--
 	}
 
 	activeAccounts, err := cm.store.ActiveAccounts(ctx, time.Now().Add(-accountActivityThreshold))
@@ -305,7 +274,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			}
 
 			// contract formed successfully
-			addHost(host)
+			set.Add(host)
+			wanted--
+
 			hostLog.Debug("formed contract", zap.Stringer("contractID", contract.ID))
 			return nil
 		})

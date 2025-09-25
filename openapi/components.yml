@@ -775,8 +775,12 @@ components:
       properties:
         registered:
           type: integer
-          format: int64
+          format: uint64
           description: Number of accounts currently registered on the indexer
+        active:
+          type: integer
+          format: uint64
+          description: Number of accounts active in the last week.
 
     ContractsStatsResponse:
       type: object
@@ -805,23 +809,23 @@ components:
     SectorStatsResponse:
       type: object
       properties:
-        numSlabs:
+        slabs:
           type: integer
           format: int64
           description: Number of slabs currently pinned by this instance
-        numMigratedSectors:
+        migrated:
           type: integer
           format: int64
           description: Total number of sectors that have been migrated
-        numPinnedSectors:
+        pinned:
           type: integer
           format: int64
           description: Number of sectors currently pinned to a contract by this instance
-        numUnpinnableSectors:
+        unpinnable:
           type: integer
           format: int64
           description: Number of unpinnable sectors that were pruned because they could not be pinned to a contract in due time
-        numUnpinnedSectors:
+        unpinned:
           type: integer
           format: int64
           description: Number of sectors currently not pinned to any contract by this instance

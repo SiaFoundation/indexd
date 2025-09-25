@@ -29,7 +29,7 @@ type (
 // uploadShards uploads the shards to the given hosts. If not all shards were
 // migrated, an error is returned but any finished shards will still be returned
 // and should be tracked in the database. The given shards must not be nil and
-// the given hosts must all be good and not have overlapping CIDRs.
+// the given hosts must all be good and be sufficiently spaced apart.
 func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, uploadCandidates []hosts.Host, logger *zap.Logger) ([]Shard, error) {
 	uploaded := make([]Shard, 0, len(shards))
 

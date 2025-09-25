@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/geoip"
 )
 
 const (
@@ -167,6 +168,15 @@ type (
 // IsGood returns true if the host is considered good for storing data.
 func (h *Host) IsGood() bool {
 	return h.Usability.Usable() && !h.Blocked && len(h.Networks) > 0
+}
+
+// Location returns the geoip.Location of the host.
+func (h *Host) Location() geoip.Location {
+	return geoip.Location{
+		CountryCode: h.CountryCode,
+		Latitude:    h.Latitude,
+		Longitude:   h.Longitude,
+	}
 }
 
 // GoodUsability is the usability struct indicating that all checks passed.

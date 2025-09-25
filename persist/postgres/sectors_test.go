@@ -1362,10 +1362,10 @@ func TestPinnedSectorsStatistics(t *testing.T) {
 		got, err := store.SectorStats(t.Context())
 		if err != nil {
 			t.Fatal(err)
-		} else if got.NumUnpinnedSectors != unpinned {
-			t.Fatalf("expected %d unpinned sectors, got %d", unpinned, got.NumUnpinnedSectors)
-		} else if got.NumPinnedSectors != pinned {
-			t.Fatalf("expected %d pinned sectors, got %d", pinned, got.NumPinnedSectors)
+		} else if got.Unpinned != unpinned {
+			t.Fatalf("expected %d unpinned sectors, got %d", unpinned, got.Unpinned)
+		} else if got.Pinned != pinned {
+			t.Fatalf("expected %d pinned sectors, got %d", pinned, got.Pinned)
 		}
 	}
 

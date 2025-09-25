@@ -2,6 +2,8 @@ package postgres
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"go.sia.tech/indexd/api/admin"
 )
@@ -42,7 +44,7 @@ func (s *Store) SectorStats(ctx context.Context) (admin.SectorsStatsResponse, er
 	var stats admin.SectorsStatsResponse
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		row := tx.QueryRow(ctx, "SELECT num_slabs, num_migrated_sectors, num_pinned_sectors, num_unpinnable_sectors, num_unpinned_sectors FROM stats")
-		return row.Scan(&stats.NumSlabs, &stats.NumMigratedSectors, &stats.NumPinnedSectors, &stats.NumUnpinnableSectors, &stats.NumUnpinnedSectors)
+		return row.Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned)
 	})
 	return stats, err
 }
@@ -56,7 +58,17 @@ func (s *Store) incrementNumAccounts(ctx context.Context, tx *txn, delta int64) 
 func (s *Store) AccountStats(ctx context.Context) (admin.AccountStatsResponse, error) {
 	var stats admin.AccountStatsResponse
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, "SELECT num_accounts_registered FROM stats").Scan(&stats.Registered)
+		err := tx.QueryRow(ctx, "SELECT num_accounts_registered FROM stats").Scan(&stats.Registered)
+		if err != nil {
+			return fmt.Errorf("failed to get number of registered accounts: %w", err)
+		}
+
+		const activeAccountThreshold = 7 * 24 * time.Hour
+		stats.Active, err = activeAccounts(ctx, tx, time.Now().Add(-activeAccountThreshold))
+		if err != nil {
+			return fmt.Errorf("failed to get active accounts: %w", err)
+		}
+		return nil
 	})
 	return stats, err
 }

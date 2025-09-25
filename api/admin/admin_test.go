@@ -816,8 +816,8 @@ func TestSectorStatsAPI(t *testing.T) {
 	stats, err := adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if stats.NumSlabs != 0 {
-		t.Fatalf("expected no slabs, got %d", stats.NumSlabs)
+	} else if stats.Slabs != 0 {
+		t.Fatalf("expected no slabs, got %d", stats.Slabs)
 	}
 
 	// pin a slab
@@ -840,8 +840,8 @@ func TestSectorStatsAPI(t *testing.T) {
 	stats, err = adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if stats.NumSlabs != 1 {
-		t.Fatalf("expected 1 slab, got %d", stats.NumSlabs)
+	} else if stats.Slabs != 1 {
+		t.Fatalf("expected 1 slab, got %d", stats.Slabs)
 	}
 
 	// unpin the slab
@@ -853,8 +853,8 @@ func TestSectorStatsAPI(t *testing.T) {
 	stats, err = adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if stats.NumSlabs != 0 {
-		t.Fatalf("expected no slabs, got %d", stats.NumSlabs)
+	} else if stats.Slabs != 0 {
+		t.Fatalf("expected no slabs, got %d", stats.Slabs)
 	}
 }
 
