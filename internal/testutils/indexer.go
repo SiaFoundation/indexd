@@ -331,10 +331,7 @@ func (idx *Indexer) AddAccount(ctx context.Context, ak types.PublicKey, meta acc
 		return err
 	}
 
-	if err := store.UseAppConnectKey(ctx, connectKey, ak, meta); err != nil {
-		return err
-	}
-	return nil
+	return store.UseAppConnectKey(ctx, connectKey, ak, meta)
 }
 
 // closeWithTimeout is a helper which closes a resource and panics if it takes
