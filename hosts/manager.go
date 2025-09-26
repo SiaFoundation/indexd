@@ -76,7 +76,8 @@ type (
 
 	// Scanner defines an interface to scan hosts.
 	Scanner interface {
-		Settings(context.Context, types.PublicKey, string) (proto4.HostSettings, error)
+		ScanSiamux(context.Context, types.PublicKey, string) (proto4.HostSettings, error)
+		ScanQuic(context.Context, types.PublicKey, string) (proto4.HostSettings, error)
 	}
 
 	// Store defines an interface to fetch hosts that need to be scanned and
@@ -486,18 +487,27 @@ loop:
 func fetchSettings(ctx context.Context, scanner Scanner, hk types.PublicKey, addresses []chain.NetAddress, log *zap.Logger) (proto4.HostSettings, error) {
 	var settings []proto4.HostSettings
 	for _, addr := range addresses {
-		if addr.Protocol == siamux.Protocol {
-			hs, err := scanner.Settings(ctx, hk, addr.Address)
-			if errors.Is(err, context.Canceled) {
-				return proto4.HostSettings{}, err
-			} else if err != nil {
-				log.Debug("failed to get host settings", zap.String("address", addr.Address), zap.Error(err))
-				settings = nil // require host to be available on all addresses
-				break
-			}
-			settings = append(settings, hs)
+		var hs proto4.HostSettings
+		var err error
+		switch addr.Protocol {
+		case siamux.Protocol:
+			hs, err = scanner.ScanSiamux(ctx, hk, addr.Address)
+		case quic.Protocol:
+			hs, err = scanner.ScanQuic(ctx, hk, addr.Address)
+		default:
+			continue // ignore
 		}
-		// TODO: add support for QUIC
+		if errors.Is(err, context.Canceled) {
+			return proto4.HostSettings{}, err
+		} else if err != nil {
+			log.Debug("failed to get host settings",
+				zap.String("address", addr.Address),
+				zap.String("protocol", string(addr.Protocol)),
+				zap.Error(err))
+			settings = nil // require host to be available on all addresses
+			break
+		}
+		settings = append(settings, hs)
 	}
 
 	// return a random setting to avoid the host cheating us by providing
