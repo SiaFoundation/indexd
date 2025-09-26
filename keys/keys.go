@@ -8,14 +8,14 @@ import (
 	"golang.org/x/crypto/hkdf"
 )
 
-// DerivePrivateKey derives a key from the given private key and purpose using HKDF.
+// DerivePrivateKey derives a new ed25519 private key from the given private key and purpose using HKDF.
 func DerivePrivateKey(key types.PrivateKey, purpose string) types.PrivateKey {
 	buf := Derive(key[:], purpose, 32)
 	defer clear(buf)
 	return types.NewPrivateKeyFromSeed(buf)
 }
 
-// Derive derives a key from the given key and purpose using HKDF.
+// Derive derives a generic key from the given key and purpose using HKDF.
 // It will return exactly n bytes.
 func Derive(key []byte, purpose string, n int) []byte {
 	buf := make([]byte, n)
