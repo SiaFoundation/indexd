@@ -2,6 +2,7 @@ package contracts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -150,24 +151,45 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 		case <-ticker.C:
 		}
 
-		if err := cm.performContractMaintenance(ctx, log); err != nil {
-			log.Error("contract maintenance failed", zap.Error(err))
+		if !performMaintenanceJob("contract maintenance", func() error {
+			return cm.performContractMaintenance(ctx, log)
+		}, log) {
+			return
 		}
 
-		if err := cm.performAccountFunding(ctx, false, log); err != nil {
-			log.Error("account funding failed", zap.Error(err))
+		if !performMaintenanceJob("account funding", func() error {
+			return cm.performAccountFunding(ctx, false, log)
+		}, log) {
+			return
 		}
 
-		if err := cm.performContractPruning(ctx, false, log); err != nil {
-			log.Error("contract pruning failed", zap.Error(err))
+		if !performMaintenanceJob("contract pruning", func() error {
+			return cm.performContractPruning(ctx, false, log)
+		}, log) {
+			return
 		}
 
-		if err := cm.performSectorPinning(ctx, log); err != nil {
-			log.Error("sector pinning failed", zap.Error(err))
+		if !performMaintenanceJob("sector pinning", func() error {
+			return cm.performSectorPinning(ctx, log)
+		}, log) {
+			return
 		}
 
-		if err := cm.store.PruneUnpinnableSectors(ctx, time.Now().Add(-pruneUnpinnableThreshold)); err != nil {
-			log.Error("failed to prune unpinnable sectors", zap.Error(err))
+		threshold := time.Now().Add(-pruneUnpinnableThreshold)
+		if !performMaintenanceJob("pruning unpinnable sectors", func() error {
+			return cm.store.PruneUnpinnableSectors(ctx, threshold)
+		}, log) {
+			return
 		}
 	}
+}
+
+func performMaintenanceJob(descr string, fn func() error, log *zap.Logger) bool {
+	if err := fn(); err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return false
+		}
+		log.Error(descr+" failed", zap.Error(err))
+	}
+	return true
 }

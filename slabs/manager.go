@@ -281,12 +281,16 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 	}
 
 	launch(func() {
-		if err := m.performIntegrityChecks(ctx); err != nil {
+		if err := m.performIntegrityChecks(ctx); errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		} else if err != nil {
 			m.log.Error("failed to perform integrity checks", zap.Error(err))
 		}
 	})
 	launch(func() {
-		if err := m.performSlabMigrations(ctx); err != nil {
+		if err := m.performSlabMigrations(ctx); errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return
+		} else if err != nil {
 			m.log.Error("failed to perform slab migrations", zap.Error(err))
 		}
 	})

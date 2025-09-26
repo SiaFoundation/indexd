@@ -280,7 +280,10 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			hostLog.Debug("formed contract", zap.Stringer("contractID", contract.ID))
 			return nil
 		})
-		if errors.Is(err, hosts.ErrBadHost) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			formationLog.Warn("context cancelled, stopping contract formation")
+			break
+		} else if errors.Is(err, hosts.ErrBadHost) {
 			continue // ignore bad host
 		} else if err != nil {
 			hostLog.Error("failed to form contract", zap.Error(err))
