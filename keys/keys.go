@@ -19,7 +19,7 @@ func DerivePrivateKey(key types.PrivateKey, purpose string) types.PrivateKey {
 // It will return exactly n bytes.
 func Derive(key []byte, purpose string, n int) []byte {
 	buf := make([]byte, n)
-	hkdf := hkdf.New(blake2b.New256, key[:], []byte(purpose), nil)
+	hkdf := hkdf.New(blake2b.New256, key, []byte(purpose), nil)
 	if _, err := io.ReadFull(hkdf, buf); err != nil {
 		panic(err) // never happens
 	}
