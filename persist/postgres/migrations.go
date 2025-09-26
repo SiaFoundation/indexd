@@ -244,4 +244,9 @@ CREATE INDEX object_slabs_object_id_slab_index_idx ON object_slabs(object_id, sl
 		}
 		return nil
 	},
+	// drop host_resolved_cidrs table
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `DROP TABLE IF EXISTS host_resolved_cidrs;`)
+		return err
+	},
 }

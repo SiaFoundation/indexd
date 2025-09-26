@@ -21,10 +21,6 @@ var (
 	// ErrNotFound is returned by database operations that fail due to a host
 	// not being found.
 	ErrNotFound = errors.New("host not found")
-
-	// ErrNoNetworks is returned when a host has no networks even though it
-	// should.
-	ErrNoNetworks = errors.New("host has no networks")
 )
 var (
 	// DefaultHostsQueryOpts re the default options applied when querying hosts. By
@@ -92,7 +88,6 @@ type (
 		ConsecutiveFailedScans int                 `json:"consecutiveFailedScans"`
 		RecentUptime           float64             `json:"recentUptime"`
 		Addresses              []chain.NetAddress  `json:"addresses"`
-		Networks               []string            `json:"networks"`
 		CountryCode            string              `json:"countryCode"`
 		Latitude               float64             `json:"latitude"`
 		Longitude              float64             `json:"longitude"`
@@ -167,7 +162,7 @@ type (
 
 // IsGood returns true if the host is considered good for storing data.
 func (h *Host) IsGood() bool {
-	return h.Usability.Usable() && !h.Blocked && len(h.Networks) > 0
+	return h.Usability.Usable() && !h.Blocked
 }
 
 // Location returns the geoip.Location of the host.

@@ -569,10 +569,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NetAddress"
-        networks:
-          type: array
-          items:
-            $ref: "#/components/schemas/IPNet"
         settings:
           $ref: "#/components/schemas/HostSettings"
         usability:

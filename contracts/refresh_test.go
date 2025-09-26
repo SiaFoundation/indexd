@@ -65,7 +65,6 @@ func TestPerformContractRefreshes(t *testing.T) {
 			PublicKey: types.PublicKey{byte(i)},
 			Settings:  goodSettings,
 			Usability: hosts.GoodUsability,
-			Networks:  []string{""},
 		}
 	}
 

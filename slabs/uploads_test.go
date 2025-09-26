@@ -3,7 +3,6 @@ package slabs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -153,7 +152,6 @@ func newTestHost(hk types.PublicKey) hosts.Host {
 		CountryCode: countries[frand.Intn(len(countries))],
 		Latitude:    frand.Float64()*180 - 90,
 		Longitude:   frand.Float64()*360 - 180,
-		Networks:    []string{fmt.Sprintf("127.0.0.%d/24", hk[0])},
 	}
 }
 

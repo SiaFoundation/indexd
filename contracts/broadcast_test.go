@@ -28,7 +28,6 @@ func TestBroadcastContractRevisions(t *testing.T) {
 	store.hosts = map[types.PublicKey]hosts.Host{
 		hk: {
 			PublicKey: hk,
-			Networks:  []string{"127.0.0.1/24"},
 			Addresses: []chain.NetAddress{{Protocol: siamux.Protocol, Address: "host.com"}},
 			Settings:  goodSettings,
 			Usability: hosts.GoodUsability,

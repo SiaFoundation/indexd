@@ -24,9 +24,6 @@ import (
 const (
 	announcementMaxAddressesPerProtocol = 2
 
-	ipv4FilterRange = 24
-	ipv6FilterRange = 32
-
 	pruneFrequency                  = time.Hour * 24
 	pruneMinConsecutiveScanFailures = 10
 	pruneMinDowntime                = time.Hour * 24 * 365 // 1 year
@@ -98,7 +95,7 @@ type (
 		UnblockHost(ctx context.Context, hk types.PublicKey) error
 
 		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
-		UpdateHost(ctx context.Context, hk types.PublicKey, networks []string, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error
+		UpdateHost(ctx context.Context, hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error
 
 		UsabilitySettings(ctx context.Context) (UsabilitySettings, error)
 		UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error
@@ -275,7 +272,7 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 	if err != nil {
 		return fmt.Errorf("failed to get host, %w", err)
 	} else if !host.IsGood() {
-		return fmt.Errorf("%w: blocked=%t, usable=%t, networks=%d", ErrBadHost, host.Blocked, host.Usability.Usable(), len(host.Networks))
+		return fmt.Errorf("%w: blocked=%t, usable=%t", ErrBadHost, host.Blocked, host.Usability.Usable())
 	}
 
 	// optimistically call the function if the prices are still valid for a
@@ -295,7 +292,7 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 	if err != nil {
 		return fmt.Errorf("failed to scan host, %w", err)
 	} else if !host.IsGood() {
-		return fmt.Errorf("%w: blocked=%t, usable=%t, networks=%d", ErrBadHost, host.Blocked, host.Usability.Usable(), len(host.Networks))
+		return fmt.Errorf("%w: blocked=%t, usable=%t", ErrBadHost, host.Blocked, host.Usability.Usable())
 	}
 
 	// try again
@@ -315,7 +312,7 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 		return Host{}, fmt.Errorf("failed to get host, %w", err)
 	}
 
-	addrs, networks, loc, err := resolveHost(ctx, m.resolver, m.locator, host.Addresses, logger)
+	addrs, loc, err := resolveHost(ctx, m.resolver, m.locator, host.Addresses, logger)
 	if err != nil {
 		return Host{}, fmt.Errorf("failed to resolve host, %w", err)
 	}
@@ -348,7 +345,7 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 	updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	err = m.store.UpdateHost(updateCtx, hk, networks, settings, loc, success, nextScan)
+	err = m.store.UpdateHost(updateCtx, hk, settings, loc, success, nextScan)
 	if err != nil {
 		return Host{}, fmt.Errorf("failed to update host, %w", err)
 	}
@@ -537,9 +534,8 @@ func calculateNextScanTime(lastScan time.Time, success bool, consecScanFailures 
 // and/or private addresses, and a list of networks in CIDR notation. The only
 // error this function returns is [context.Canceled], other errors that occur
 // during the resolving and parsing are debug logged but otherwise ignored.
-func resolveHost(ctx context.Context, resolver Resolver, locator Locator, addresses []chain.NetAddress, log *zap.Logger) ([]chain.NetAddress, []string, geoip.Location, error) {
+func resolveHost(ctx context.Context, resolver Resolver, locator Locator, addresses []chain.NetAddress, log *zap.Logger) ([]chain.NetAddress, geoip.Location, error) {
 	var filtered []chain.NetAddress
-	var networks []string
 	var loc geoip.Location
 	for _, na := range addresses {
 		host, _, err := net.SplitHostPort(na.Address)
@@ -550,9 +546,12 @@ func resolveHost(ctx context.Context, resolver Resolver, locator Locator, addres
 
 		ips, err := resolver.LookupIPAddr(ctx, host)
 		if errors.Is(err, context.Canceled) {
-			return nil, nil, geoip.Location{}, err
+			return nil, geoip.Location{}, err
 		} else if err != nil {
 			log.Debug("failed to resolve host", zap.String("host", host), zap.Error(err))
+			continue
+		} else if len(ips) == 0 {
+			log.Debug("no IPs found for host", zap.String("host", host))
 			continue
 		}
 
@@ -568,37 +567,17 @@ func resolveHost(ctx context.Context, resolver Resolver, locator Locator, addres
 			continue
 		}
 
-		var ipnets []net.IPNet
-		for _, ip := range ips {
-			ipRange := ipv6FilterRange
-			if ip.IP.To4() != nil {
-				ipRange = ipv4FilterRange
-			}
-
-			cidr := fmt.Sprintf("%s/%d", ip.IP.String(), ipRange)
-			_, ipnet, err := net.ParseCIDR(cidr)
-			if err != nil {
-				log.Debug("failed to parse CIDR", zap.String("CIDR", cidr), zap.Error(err))
-				continue
-			}
-			ipnets = append(ipnets, *ipnet)
-		}
-
-		if len(ipnets) > 0 {
-			for _, ipnet := range ipnets {
-				networks = append(networks, ipnet.String())
-			}
-			filtered = append(filtered, na)
-		}
-
-		if len(ips) > 0 && loc.CountryCode == "" {
+		if loc.CountryCode == "" {
 			loc, err = locator.Locate(ips[0].IP)
 			if err != nil {
 				log.Debug("failed to locate IP address", zap.Error(err))
 			}
 		}
+
+		filtered = append(filtered, na)
 	}
-	return filtered, networks, loc, nil
+
+	return filtered, loc, nil
 }
 
 func isPrivateIP(ip net.IP) bool {
