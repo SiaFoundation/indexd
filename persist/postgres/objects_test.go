@@ -25,10 +25,7 @@ func TestObjects(t *testing.T) {
 	// create 2 accounts
 	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
 	for _, acc := range []proto4.Account{acc1, acc2} {
-		err := store.addTestAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		store.addTestAccount(t, types.PublicKey(acc), accounts.AccountMeta{})
 	}
 
 	// pin slab for both accounts
@@ -181,14 +178,11 @@ func TestListObjectsRegression(t *testing.T) {
 
 	// create account
 	acc := proto4.Account{1}
-	err := store.addTestAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, types.PublicKey(acc), accounts.AccountMeta{})
 
 	// pin slab for both accounts
 	slab := slabs.SlabPinParams{MinShards: 1}
-	_, err = store.PinSlab(context.Background(), acc, time.Time{}, slab)
+	_, err := store.PinSlab(context.Background(), acc, time.Time{}, slab)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,10 +229,7 @@ func TestSharedObjects(t *testing.T) {
 	// create 2 accounts
 	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
 	for _, acc := range []proto4.Account{acc1, acc2} {
-		err := store.addTestAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		store.addTestAccount(t, types.PublicKey(acc), accounts.AccountMeta{})
 	}
 
 	hostKeys := make([]types.PublicKey, 30)
@@ -349,10 +340,7 @@ func BenchmarkSaveObject(b *testing.B) {
 	// create 2 accounts
 	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
 	for _, acc := range []proto4.Account{acc1, acc2} {
-		err := store.addTestAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{})
-		if err != nil {
-			b.Fatal(err)
-		}
+		store.addTestAccount(b, types.PublicKey(acc), accounts.AccountMeta{})
 	}
 
 	hostKeys := make([]types.PublicKey, 30)

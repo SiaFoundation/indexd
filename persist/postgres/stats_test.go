@@ -18,9 +18,7 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 
 	// add account and host
 	account := proto.Account{1}
-	if err := store.addTestAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		t.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(t, types.PublicKey(account), accounts.AccountMeta{})
 	hk := store.addTestHost(t)
 
 	// helper to create slabs
@@ -89,9 +87,7 @@ func TestAccountStatsRegistered(t *testing.T) {
 		}
 
 		acc := types.GeneratePrivateKey().PublicKey()
-		if err := store.addTestAccount(t.Context(), acc, accounts.AccountMeta{}); err != nil {
-			t.Fatal(err)
-		}
+		store.addTestAccount(t, acc, accounts.AccountMeta{})
 		accs = append(accs, acc)
 	}
 
