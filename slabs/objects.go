@@ -127,8 +127,17 @@ func (m *SlabManager) PinSharedObject(ctx context.Context, account proto.Account
 		toPin = append(toPin, s)
 	}
 
-	if _, err := m.PinSlabs(ctx, account, time.Now(), toPin...); err != nil {
+	digests, err := m.PinSlabs(ctx, account, time.Now(), toPin...)
+	if err != nil {
 		return fmt.Errorf("failed to pin slabs: %w", err)
+	} else if len(digests) != len(shared.Slabs) {
+		return fmt.Errorf("some slabs were not pinned: %w", err)
+	}
+
+	for i, slab := range shared.Slabs {
+		if slab.ID != digests[i] {
+			return fmt.Errorf("unexpected slab was pinned: expected %v, got %v", slab.ID, digests[i])
+		}
 	}
 
 	var objSlabs []SlabSlice
