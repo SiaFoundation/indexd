@@ -60,10 +60,10 @@ func (s *storeMock) ContractsForPinning(ctx context.Context, hk types.PublicKey,
 		}
 	}
 	sort.Slice(contracts, func(i, j int) bool {
-		if contracts[i].Capacity == contracts[j].Capacity {
-			return contracts[i].Size > contracts[j].Size
-		}
-		return contracts[i].Capacity > contracts[j].Capacity
+		// prefer contracts with more empty capacity
+		remainingI := contracts[i].Capacity - contracts[i].Size
+		remainingJ := contracts[j].Capacity - contracts[j].Size
+		return remainingI > remainingJ
 	})
 
 	out := make([]types.FileContractID, len(contracts))
@@ -194,7 +194,7 @@ func TestPerformSectorPinningOnHost(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// make fcid2 the better contract for pinning
+	// contracts with more
 	for i, c := range store.contracts {
 		switch c.ID {
 		case fcid1:

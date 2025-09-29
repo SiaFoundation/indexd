@@ -323,7 +323,8 @@ SELECT c.contract_id
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
 WHERE h.public_key = $1 AND c.good = TRUE AND c.state <= $2 AND c.remaining_allowance > 0 AND c.size < $3
-ORDER BY c.capacity DESC, c.size DESC`, sqlPublicKey(hk), sqlContractState(contracts.ContractStateActive), maxContractSize)
+-- sort by empty capacity desc to prefer heavily pruned contracts 
+ORDER BY (c.capacity - c.size) DESC`, sqlPublicKey(hk), sqlContractState(contracts.ContractStateActive), maxContractSize)
 		if err != nil {
 			return fmt.Errorf("failed to fetch contracts for pinning: %w", err)
 		}
