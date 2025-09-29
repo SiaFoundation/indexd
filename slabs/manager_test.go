@@ -276,6 +276,10 @@ func (s *mockStore) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Ti
 	return result, nil
 }
 
+func (s *mockStore) PruneSlabs(ctx context.Context, account proto.Account) error {
+	return nil
+}
+
 func (s *mockStore) Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error) {
 	return Object{}, nil
 }

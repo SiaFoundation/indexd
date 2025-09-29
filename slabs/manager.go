@@ -102,6 +102,7 @@ type (
 		Slabs(ctx context.Context, account proto.Account, slabIDs []SlabID) ([]Slab, error)
 		SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]SlabID, error)
 		UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]SlabID, error)
+		PruneSlabs(ctx context.Context, account proto.Account) error
 
 		// Object methods
 		Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error)

@@ -445,6 +445,16 @@ paths:
               // ...
             }
 
+  /slabs/prune:
+    post:
+      tags:
+        - slabs
+      summary: Unpin all slabs not used by an object currently pinned by the user
+      operationId: pruneSlabs
+      responses:
+        "200":
+          description: Slabs pruned successfully
+
   /auth/connect:
     post:
       tags:

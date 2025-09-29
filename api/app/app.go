@@ -35,6 +35,7 @@ type (
 
 	// Slabs defines the slab interface for the application API.
 	Slabs interface {
+		PruneSlabs(ctx context.Context, account proto.Account) error
 		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab slabs.SlabPinParams) (slabs.SlabID, error)
 		PinnedSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) (slabs.PinnedSlab, error)
 		SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]slabs.SlabID, error)
@@ -306,6 +307,15 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	}
 
 	jc.Encode(slabID)
+}
+
+func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
+	err := a.slabs.PruneSlabs(jc.Request.Context(), proto.Account(pk))
+	if jc.Check("failed to prune slabs", err) != nil {
+		return
+	}
+
+	jc.Encode(nil)
 }
 
 func encodeBinary(jc jape.Context, resp types.EncoderTo) {
@@ -650,6 +660,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 
 		"GET /slabs":            wrapCORS(wrapSignedAuth(a.handleGETSlabs)),
 		"POST /slabs":           wrapCORS(wrapSignedAuth(a.handlePOSTSlabs)),
+		"POST /slabs/prune":     wrapCORS(wrapSignedAuth(a.handlePOSTSlabsPrune)),
 		"GET /slabs/:slabid":    wrapCORS(wrapSignedAuth(a.handleGETSlab)),
 		"DELETE /slabs/:slabid": wrapCORS(wrapSignedAuth(a.handleDELETESlab)),
 	}), nil

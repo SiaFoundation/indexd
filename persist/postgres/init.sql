@@ -302,6 +302,9 @@ CREATE TABLE account_slabs (
     PRIMARY KEY (account_id, slab_id)
 );
 
+-- speed up query used when unpinning slabs
+CREATE INDEX account_slabs_slab_id_idx ON account_slabs(slab_id);
+
 CREATE TABLE sectors (
     id BIGSERIAL PRIMARY KEY,
     sector_root BYTEA UNIQUE NOT NULL,
@@ -373,3 +376,6 @@ CREATE INDEX slab_sectors_sector_id_idx ON slab_sectors(sector_id);
 
 -- speed up fetching sectors for slab ordered by their position within the slab
 CREATE UNIQUE INDEX slab_sectors_slab_id_slab_index_idx ON slab_sectors(slab_id, slab_index ASC);
+
+-- speeds up finding sectors for deletion when unpinning slabs
+CREATE UNIQUE INDEX slab_sectors_sector_id_slab_id_idx ON slab_sectors(sector_id, slab_id);
