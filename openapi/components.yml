@@ -182,7 +182,7 @@ components:
             - quic
           description: The protocol used by the host
 
-    LockedObject:
+    SealedObject:
       type: object
       properties:
         id:

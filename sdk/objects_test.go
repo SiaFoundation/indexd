@@ -9,7 +9,7 @@ import (
 	"lukechampine.com/frand"
 )
 
-func TestLockedObjectRoundtrip(t *testing.T) {
+func TestSealedObjectRoundtrip(t *testing.T) {
 	appKey := types.GeneratePrivateKey()
 
 	ss := []slabs.SlabSlice{
