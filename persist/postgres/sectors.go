@@ -202,7 +202,7 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 	return digest, s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		var accountID int64
 		var pinnedData, maxPinnedData uint64
-		err = tx.QueryRow(ctx, "UPDATE accounts SET last_used = NOW() WHERE public_key = $1 RETURNING id, pinned_data, max_pinned_data", sqlPublicKey(account)).Scan(&accountID, &pinnedData, &maxPinnedData)
+		err = tx.QueryRow(ctx, "SELECT id, pinned_data, max_pinned_data FROM accounts WHERE public_key = $1", sqlPublicKey(account)).Scan(&accountID, &pinnedData, &maxPinnedData)
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrNotFound
 		} else if err != nil {
@@ -246,7 +246,7 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 				return accounts.ErrStorageLimitExceeded
 			}
 
-			_, err := tx.Exec(ctx, `UPDATE accounts SET pinned_data = $1 WHERE id = $2`, newPinnedData, accountID)
+			_, err := tx.Exec(ctx, `UPDATE accounts SET last_used=NOW(), pinned_data = $1 WHERE id = $2`, newPinnedData, accountID)
 			if err != nil {
 				return fmt.Errorf("failed to update account's pinned data: %w", err)
 			}

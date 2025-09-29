@@ -29,9 +29,6 @@ type (
 		parityShards uint8
 		hostTimeout  time.Duration
 		maxInflight  int
-
-		customKey         *[32]byte
-		disableEncryption bool
 	}
 
 	downloadOption struct {
@@ -39,21 +36,24 @@ type (
 		maxInflight int
 	}
 
-	// An AppClient is an interface for the application API of the indexer.
-	AppClient interface {
+	// An appClient is an interface for the application API of the indexer.
+	appClient interface {
 		Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error)
 
-		CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, encryptionKey [32]byte, validUntil time.Time) (string, error)
-		SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, *[32]byte, error)
-		SaveObject(ctx context.Context, obj slabs.Object) (err error)
+		CreateSharedObjectURL(ctx context.Context, objectID types.Hash256, encryptionKey []byte, validUntil time.Time) (string, error)
+		SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, []byte, error)
+
+		ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) ([]slabs.SealedObject, error)
+		Object(ctx context.Context, key types.Hash256) (slabs.SealedObject, error)
+		SaveObject(ctx context.Context, obj slabs.SealedObject) error
 
 		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
 		PinSlab(context.Context, slabs.SlabPinParams) (slabs.SlabID, error)
 		UnpinSlab(context.Context, slabs.SlabID) error
 	}
 
-	// A HostDialer is an interface for writing and reading sectors to/from hosts.
-	HostDialer interface {
+	// A hostDialer is an interface for writing and reading sectors to/from hosts.
+	hostDialer interface {
 		// Hosts returns the public keys of all hosts that are available for
 		// upload or download.
 		Hosts() []types.PublicKey
@@ -70,26 +70,12 @@ type (
 	// A DownloadOption configures the download behavior
 	DownloadOption func(*downloadOption)
 
-	// A Slab represents a collection of erasure-coded sectors
-	Slab struct {
-		ID     slabs.SlabID `json:"id"`
-		Offset uint32       `json:"offset"`
-		Length uint32       `json:"length"`
-	}
-
-	// An Object represents a collection of slabs that are associated with a
-	// specific key.
-	Object struct {
-		Key   *[32]byte
-		Slabs []Slab
-	}
-
 	// An SDK is a client for the indexd service.
 	SDK struct {
 		appKey types.PrivateKey
-		client AppClient
+		client appClient
 
-		dialer HostDialer
+		dialer hostDialer
 	}
 )
 
@@ -241,21 +227,13 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 
 	if (uo.parityShards+uo.dataShards)/uo.dataShards < 2 {
 		return Object{}, errors.New("redundancy must be at least 2x")
-	} else if uo.disableEncryption && uo.customKey != nil {
-		return Object{}, errors.New("custom key provided but encryption disabled ")
 	}
 
-	var obj Object
-	if !uo.disableEncryption {
-		if uo.customKey != nil {
-			obj.Key = uo.customKey
-		} else {
-			obj.Key = new([32]byte)
-			frand.Read(obj.Key[:])
-		}
-
-		r = encrypt(obj.Key, r, 0)
+	masterKey := frand.Bytes(32)
+	obj := Object{
+		masterKey: masterKey,
 	}
+	r = encrypt((*[32]byte)(masterKey), r, 0)
 
 	type work struct {
 		length int
@@ -298,6 +276,7 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 	}()
 
 	// TODO: cleanup on failure
+top:
 	for i := 0; ; i++ {
 		select {
 		case <-ctx.Done():
@@ -307,8 +286,8 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 			shards := work.shards
 
 			if errors.Is(err, io.EOF) {
-				// no more slabs to upload, return the pinned slabs
-				return obj, nil
+				// all slabs complete
+				break top
 			} else if work.err != nil {
 				return Object{}, work.err
 			}
@@ -327,24 +306,30 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 			} else if slabID != expectedSlabID {
 				return Object{}, fmt.Errorf("pinned slab %d id %s does not match expected id %s", i, slabID.String(), expectedSlabID.String())
 			}
-			obj.Slabs = append(obj.Slabs, Slab{
-				ID:     slabID,
+			obj.slabs = append(obj.slabs, slabs.SlabSlice{
+				SlabID: slabID,
 				Offset: 0,
 				Length: uint32(work.length),
 			})
 		}
 	}
+	// pin the object
+	return obj, s.client.SaveObject(ctx, obj.Seal(s.appKey))
 }
 
 // Download downloads object metadata
 //
 // TODO: support seeks
 func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...DownloadOption) error {
-	if len(obj.Slabs) == 0 {
+	if len(obj.slabs) == 0 {
 		return errors.New("no slabs to download")
-	} else if obj.Key != nil {
-		w = decrypt(obj.Key, w, 0)
 	}
+
+	if len(obj.masterKey) != 32 {
+		return fmt.Errorf("invalid master key length: %d", len(obj.masterKey))
+	}
+	w = decrypt((*[32]byte)(obj.masterKey), w, 0)
+
 	do := downloadOption{
 		hostTimeout: 4 * time.Second, // ~10 Mbps
 		maxInflight: 10,
@@ -354,18 +339,18 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 	}
 
 	var curr int
-	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SharedObjectSlab, error) {
-		if curr >= len(obj.Slabs) {
-			return slabs.SharedObjectSlab{}, nil
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SharedSlab, error) {
+		if curr >= len(obj.slabs) {
+			return slabs.SharedSlab{}, nil
 		}
-		slab := obj.Slabs[curr]
+		slab := obj.slabs[curr]
 		curr++
 
-		pinned, err := s.client.Slab(ctx, slab.ID)
+		pinned, err := s.client.Slab(ctx, slab.SlabID)
 		if err != nil {
-			return slabs.SharedObjectSlab{}, fmt.Errorf("failed to get slab %d metadata: %w", curr, err)
+			return slabs.SharedSlab{}, fmt.Errorf("failed to get slab %d metadata: %w", curr, err)
 		}
-		return slabs.SharedObjectSlab{
+		return slabs.SharedSlab{
 			PinnedSlab: pinned,
 			Offset:     slab.Offset,
 			Length:     slab.Length,
@@ -374,14 +359,14 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 }
 
 // DownloadSharedObject downloads a shared object from a shared URL
-func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, url string, opts ...DownloadOption) error {
-	obj, encryptionKey, err := s.client.SharedObject(ctx, url)
+func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL string, opts ...DownloadOption) error {
+	obj, encryptionKey, err := s.client.SharedObject(ctx, sharedURL)
 	if err != nil {
 		return err
 	} else if len(obj.Slabs) == 0 {
 		return errors.New("no slabs to download")
 	} else {
-		w = decrypt(encryptionKey, w, 0)
+		w = decrypt((*[32]byte)(encryptionKey), w, 0)
 	}
 
 	do := downloadOption{
@@ -393,9 +378,9 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, url string,
 	}
 
 	var curr int
-	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SharedObjectSlab, error) {
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SharedSlab, error) {
 		if curr >= len(obj.Slabs) {
-			return slabs.SharedObjectSlab{}, nil
+			return slabs.SharedSlab{}, nil
 		}
 		slab := obj.Slabs[curr]
 		curr++
@@ -403,7 +388,7 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, url string,
 	})
 }
 
-type slabIterFn func() (slabs.SharedObjectSlab, error)
+type slabIterFn func() (slabs.SharedSlab, error)
 
 func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, next slabIterFn) error {
 	type work struct {
@@ -515,14 +500,14 @@ func stripedJoin(dst io.Writer, dataShards [][]byte, writeLen int) error {
 }
 
 // downloadShard reads a sector from a host
-func downloadShard(ctx context.Context, root types.Hash256, hostKey types.PublicKey, dialer HostDialer, timeout time.Duration) (*[proto4.SectorSize]byte, error) {
+func downloadShard(ctx context.Context, root types.Hash256, hostKey types.PublicKey, dialer hostDialer, timeout time.Duration) (*[proto4.SectorSize]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	return dialer.ReadSector(ctx, hostKey, root)
 }
 
 // uploadShard uploads a shard to a host
-func uploadShard(ctx context.Context, sector *[proto4.SectorSize]byte, hostKey types.PublicKey, dialer HostDialer, timeout time.Duration) (types.Hash256, error) {
+func uploadShard(ctx context.Context, sector *[proto4.SectorSize]byte, hostKey types.PublicKey, dialer hostDialer, timeout time.Duration) (types.Hash256, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
@@ -589,23 +574,6 @@ func WithUploadInflight(maxInflight int) UploadOption {
 	}
 }
 
-// WithDisableEncryption disables client side encryption for uploads.  By
-// default client side encryption is enabled.
-func WithDisableEncryption() UploadOption {
-	return func(uo *uploadOption) {
-		uo.disableEncryption = true
-	}
-}
-
-// WithXChaCha20Secret sets a custom key for client side encryption.  By
-// default a randomly generated key is used.  In both cases, the key will be
-// returned alongside the slabs in the Object.
-func WithXChaCha20Secret(key [32]byte) UploadOption {
-	return func(uo *uploadOption) {
-		uo.customKey = &key
-	}
-}
-
 // WithDownloadHostTimeout sets the timeout for reading sectors
 // from individual hosts. This avoids long hangs when a host is unresponsive
 // or slow. The default is 4 seconds, worst case around 300Mbps.
@@ -624,7 +592,7 @@ func WithDownloadInflight(maxInflight int) DownloadOption {
 	}
 }
 
-func initSDK(client AppClient, dialer HostDialer, appKey types.PrivateKey) (*SDK, error) {
+func initSDK(client appClient, dialer hostDialer, appKey types.PrivateKey) (*SDK, error) {
 	if client == nil {
 		return nil, errors.New("app client is required")
 	} else if dialer == nil {
@@ -666,7 +634,7 @@ func NewSDK(baseURL string, appKey types.PrivateKey, opts ...Option) (*SDK, erro
 	options.logger = options.logger.Named("sdk") // decorate logger
 
 	c := app.NewClient(baseURL, appKey)
-	dialer, err := NewDialer(c, appKey, options.logger)
+	dialer, err := newDialer(c, appKey, options.logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create host dialer: %w", err)
 	}

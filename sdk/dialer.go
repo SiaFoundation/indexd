@@ -22,7 +22,7 @@ import (
 	"go.uber.org/zap"
 )
 
-var _ HostDialer = (*Dialer)(nil)
+var _ hostDialer = (*dialer)(nil)
 
 type connEntry struct {
 	hostKey types.PublicKey
@@ -71,12 +71,12 @@ func (c *connEntry) setTransport(tc rhp.TransportClient, assign bool) {
 	c.dial = nil
 }
 
-// Dialer implements the [HostDialer] interface.
-type Dialer struct {
+// dialer implements the [HostDialer] interface.
+type dialer struct {
 	log *zap.Logger
 	tg  *threadgroup.ThreadGroup
 
-	c      AppClient
+	c      appClient
 	appKey types.PrivateKey
 
 	mu             sync.Mutex
@@ -85,9 +85,9 @@ type Dialer struct {
 	cachedSettings map[types.PublicKey]proto.HostSettings
 }
 
-// NewDialer returns a new Dialer.
-func NewDialer(c AppClient, appKey types.PrivateKey, log *zap.Logger) (*Dialer, error) {
-	d := &Dialer{
+// newDialer returns a new Dialer.
+func newDialer(c appClient, appKey types.PrivateKey, log *zap.Logger) (*dialer, error) {
+	d := &dialer{
 		log: log.Named("dialer"),
 
 		c:      c,
@@ -106,7 +106,7 @@ func NewDialer(c AppClient, appKey types.PrivateKey, log *zap.Logger) (*Dialer, 
 }
 
 // Close closes all the open connections on the dialer.
-func (d *Dialer) Close() {
+func (d *dialer) Close() {
 	d.tg.Stop()
 
 	d.mu.Lock()
@@ -119,7 +119,7 @@ func (d *Dialer) Close() {
 	clear(d.conns)
 }
 
-func (d *Dialer) initHosts() error {
+func (d *dialer) initHosts() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -130,12 +130,11 @@ func (d *Dialer) initHosts() error {
 	}
 
 	// refresh in background thread
-	ctx, cancel, err = d.tg.AddContext(context.Background())
-	if err != nil {
-		return err
-	}
-
 	go func() {
+		ctx, cancel, err = d.tg.AddContext(context.Background())
+		if err != nil {
+			return
+		}
 		defer cancel()
 
 		ticker := time.NewTicker(10 * time.Minute)
@@ -147,7 +146,7 @@ func (d *Dialer) initHosts() error {
 				if err := d.updateHosts(context.Background()); err != nil {
 					d.log.Warn("Failed to refresh hosts list", zap.Error(err))
 				}
-			case <-d.tg.Done():
+			case <-ctx.Done():
 				return
 			}
 		}
@@ -156,7 +155,7 @@ func (d *Dialer) initHosts() error {
 	return nil
 }
 
-func (d *Dialer) updateHosts(ctx context.Context) error {
+func (d *dialer) updateHosts(ctx context.Context) error {
 	ctx, cancel, err := d.tg.AddContext(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to add thread to thread group: %w", err)
@@ -188,7 +187,7 @@ func (d *Dialer) updateHosts(ctx context.Context) error {
 }
 
 // clearHostConnection clears the connection for a host
-func (d *Dialer) clearHostConnection(hostKey types.PublicKey) {
+func (d *dialer) clearHostConnection(hostKey types.PublicKey) {
 	d.mu.Lock()
 	entry, exists := d.conns[hostKey]
 	d.mu.Unlock()
@@ -200,7 +199,7 @@ func (d *Dialer) clearHostConnection(hostKey types.PublicKey) {
 }
 
 // Hosts implements the [HostDialer] interface.
-func (d *Dialer) Hosts() (hks []types.PublicKey) {
+func (d *dialer) Hosts() (hks []types.PublicKey) {
 	// grab current state
 	d.mu.Lock()
 	addrs := slices.Collect(maps.Keys(d.addrs))
@@ -226,7 +225,7 @@ func (d *Dialer) Hosts() (hks []types.PublicKey) {
 	return
 }
 
-func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.TransportClient, error) {
+func (d *dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.TransportClient, error) {
 	d.mu.Lock()
 	h, ok := d.addrs[hostKey]
 	if !ok {
@@ -301,7 +300,7 @@ func (d *Dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.Tra
 	return nil, err
 }
 
-func (d *Dialer) retry(ctx context.Context, hostKey types.PublicKey, fn func(rhp.TransportClient) error) error {
+func (d *dialer) retry(ctx context.Context, hostKey types.PublicKey, fn func(rhp.TransportClient) error) error {
 	// First attempt
 	tc, err := d.dialHost(ctx, hostKey)
 	if err != nil {
@@ -324,7 +323,7 @@ func (d *Dialer) retry(ctx context.Context, hostKey types.PublicKey, fn func(rhp
 	return fn(tc)
 }
 
-func (d *Dialer) prices(ctx context.Context, hostKey types.PublicKey) (proto.HostPrices, error) {
+func (d *dialer) prices(ctx context.Context, hostKey types.PublicKey) (proto.HostPrices, error) {
 	d.mu.Lock()
 	if settings, ok := d.cachedSettings[hostKey]; ok && time.Now().Add(5*time.Second).Before(settings.Prices.ValidUntil) {
 		d.mu.Unlock()
@@ -349,7 +348,7 @@ func (d *Dialer) prices(ctx context.Context, hostKey types.PublicKey) (proto.Hos
 }
 
 // WriteSector implements the [HostDialer] interface.
-func (d *Dialer) WriteSector(ctx context.Context, hostKey types.PublicKey, sector *[proto.SectorSize]byte) (types.Hash256, error) {
+func (d *dialer) WriteSector(ctx context.Context, hostKey types.PublicKey, sector *[proto.SectorSize]byte) (types.Hash256, error) {
 	ctx, cancel, err := d.tg.AddContext(ctx)
 	if err != nil {
 		return types.Hash256{}, fmt.Errorf("failed to add thread to thread group: %w", err)
@@ -375,7 +374,7 @@ func (d *Dialer) WriteSector(ctx context.Context, hostKey types.PublicKey, secto
 }
 
 // ReadSector implements the [HostDialer] interface.
-func (d *Dialer) ReadSector(ctx context.Context, hostKey types.PublicKey, sectorRoot types.Hash256) (*[proto.SectorSize]byte, error) {
+func (d *dialer) ReadSector(ctx context.Context, hostKey types.PublicKey, sectorRoot types.Hash256) (*[proto.SectorSize]byte, error) {
 	ctx, cancel, err := d.tg.AddContext(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add thread to thread group: %w", err)

@@ -280,19 +280,19 @@ func (s *mockStore) PruneSlabs(ctx context.Context, account proto.Account) error
 	return nil
 }
 
-func (s *mockStore) Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error) {
-	return Object{}, nil
+func (s *mockStore) Object(ctx context.Context, account proto.Account, key types.Hash256) (SealedObject, error) {
+	return SealedObject{}, nil
 }
 
 func (s *mockStore) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
 	return nil
 }
 
-func (s *mockStore) SaveObject(ctx context.Context, account proto.Account, obj Object) error {
+func (s *mockStore) SaveObject(ctx context.Context, account proto.Account, obj SealedObject) error {
 	return nil
 }
 
-func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]Object, error) {
+func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]SealedObject, error) {
 	return nil, nil
 }
 

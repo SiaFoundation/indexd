@@ -28,28 +28,27 @@ func TestRoundtrip(t *testing.T) {
 	// each upload has varying encryption configurations so we should get
 	// different slab IDs every time
 	seen := make(map[slabs.SlabID]struct{})
-	checkSlabIDs := func(slabs []Slab) {
+	checkSlabIDs := func(slabs []slabs.SlabSlice) {
 		t.Helper()
 
 		for _, slab := range slabs {
-			if _, ok := seen[slab.ID]; ok {
+			if _, ok := seen[slab.SlabID]; ok {
 				t.Fatal("slab ID seen twice")
 			}
-			seen[slab.ID] = struct{}{}
+			seen[slab.SlabID] = struct{}{}
 		}
 	}
 
-	// without client side encryption
 	data := frand.Bytes(4096)
-	obj, err := s.Upload(context.Background(), bytes.NewReader(data), WithDisableEncryption())
+	obj, err := s.Upload(context.Background(), bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("failed to upload: %v", err)
-	} else if len(obj.Slabs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
-	} else if obj.Slabs[0].Length != uint32(len(data)) {
-		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs[0].Length)
+	} else if len(obj.Slabs()) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs()))
+	} else if obj.Slabs()[0].Length != uint32(len(data)) {
+		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs()[0].Length)
 	}
-	checkSlabIDs(obj.Slabs)
+	checkSlabIDs(obj.Slabs())
 
 	buf := bytes.NewBuffer(nil)
 	if err := s.Download(context.Background(), buf, obj); err != nil {
@@ -58,65 +57,10 @@ func TestRoundtrip(t *testing.T) {
 		t.Fatal("data mismatch")
 	}
 
-	// with client side encryption
-	obj, err = s.Upload(context.Background(), bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("failed to upload: %v", err)
-	} else if len(obj.Slabs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
-	} else if obj.Slabs[0].Length != uint32(len(data)) {
-		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs[0].Length)
-	}
-	checkSlabIDs(obj.Slabs)
+	objID := obj.ID()
 
-	buf = bytes.NewBuffer(nil)
-	if err := s.Download(context.Background(), buf, obj); err != nil {
-		t.Fatal(err)
-	} else if !bytes.Equal(buf.Bytes(), data) {
-		t.Fatal("data mismatch")
-	}
-
-	// with client side encryption, custom encryptionKey
-	var encryptionKey [32]byte
-	frand.Read(encryptionKey[:])
-	obj, err = s.Upload(context.Background(), bytes.NewReader(data), WithXChaCha20Secret(encryptionKey))
-	if err != nil {
-		t.Fatalf("failed to upload: %v", err)
-	} else if len(obj.Slabs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
-	} else if obj.Slabs[0].Length != uint32(len(data)) {
-		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs[0].Length)
-	}
-	checkSlabIDs(obj.Slabs)
-
-	buf = bytes.NewBuffer(nil)
-	if err := s.Download(context.Background(), buf, obj); err != nil {
-		t.Fatal(err)
-	} else if !bytes.Equal(buf.Bytes(), data) {
-		t.Fatal("data mismatch")
-	}
-
-	// save the object
-	var objKey types.Hash256
-	frand.Read(objKey[:])
-	if err := s.client.SaveObject(context.Background(), slabs.Object{
-		Key: objKey,
-		Slabs: func() (out []slabs.SlabSlice) {
-			for _, slab := range obj.Slabs {
-				out = append(out, slabs.SlabSlice{
-					SlabID: slab.ID,
-					Offset: slab.Offset,
-					Length: slab.Length,
-				})
-			}
-			return out
-		}(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	buf = bytes.NewBuffer(nil)
-	url, err := s.client.CreateSharedObjectURL(context.Background(), objKey, encryptionKey, time.Now().Add(time.Minute))
+	buf.Reset()
+	url, err := s.CreateSharedObjectURL(context.Background(), objID, time.Now().Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	} else if err := s.DownloadSharedObject(context.Background(), buf, url); err != nil {
@@ -141,7 +85,7 @@ func TestRoundtrip(t *testing.T) {
 	}
 
 	// ensure download still works
-	buf = bytes.NewBuffer(nil)
+	buf.Reset()
 	if err := s.Download(context.Background(), buf, obj); err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(buf.Bytes(), data) {
@@ -149,15 +93,11 @@ func TestRoundtrip(t *testing.T) {
 	}
 
 	// ensure download shared object still works
-	buf = bytes.NewBuffer(nil)
+	buf.Reset()
 	if err := s.DownloadSharedObject(context.Background(), buf, url); err != nil {
 		t.Fatal("unexpected error", err)
 	} else if !bytes.Equal(buf.Bytes(), data) {
 		t.Fatal("data mismatch")
-	}
-
-	if _, err = s.Upload(context.Background(), bytes.NewReader(data), WithDisableEncryption(), WithXChaCha20Secret(encryptionKey)); err == nil {
-		t.Fatal("expected error when disabling encryption but still passing custom key")
 	}
 }
 
@@ -187,10 +127,10 @@ func TestRoundtripCount(t *testing.T) {
 	obj, err := s.Upload(context.Background(), bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("failed to upload: %v", err)
-	} else if len(obj.Slabs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
-	} else if obj.Slabs[0].Length != uint32(len(data)) {
-		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs[0].Length)
+	} else if len(obj.Slabs()) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs()))
+	} else if obj.Slabs()[0].Length != uint32(len(data)) {
+		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs()[0].Length)
 	}
 
 	buf := bytes.NewBuffer(nil)
@@ -232,8 +172,8 @@ func TestUpload(t *testing.T) {
 		obj, err := s.Upload(context.Background(), bytes.NewReader(data), WithUploadHostTimeout(100*time.Millisecond))
 		if err != nil {
 			t.Fatal(err)
-		} else if len(obj.Slabs) != 1 {
-			t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
+		} else if len(obj.Slabs()) != 1 {
+			t.Fatalf("expected 1 slab, got %d", len(obj.Slabs()))
 		}
 	})
 }

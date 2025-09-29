@@ -182,19 +182,23 @@ components:
             - quic
           description: The protocol used by the host
 
-    Object:
+    SealedObject:
       type: object
       properties:
-        key:
+        id:
           allOf:
             - $ref: "#/components/schemas/Hash256"
-            - description: The object's key
+            - description: The object's unique ID
+        encryptedMasterKey:
+          type: string
+          format: byte
+          description: The encrypted master key used to encrypt and decrypt the object's data and metadata
         slabs:
           type: array
           items:
             $ref: "#/components/schemas/SlabSlice"
           description: The list of slabs that make up the object
-        meta:
+        encryptedMetadata:
           type: string
           format: byte
           description: Optional metadata stored on the object
@@ -212,22 +216,22 @@ components:
     SharedObject:
       type: object
       properties:
-        key:
+        id:
           allOf:
             - $ref: "#/components/schemas/Hash256"
-            - description: The shared object's key
+            - description: The shared object's unique ID
         slabs:
           type: array
           description: The list of slabs that make up the shared object
           items:
-            $ref: "#/components/schemas/SharedObjectSlab"
-        meta:
+            $ref: "#/components/schemas/SharedSlab"
+        encryptedMetadata:
           type: string
           format: byte
           description: Optional metadata stored on the object
 
     # A slab of a shared object including decryption info and slice bounds.
-    SharedObjectSlab:
+    SharedSlab:
       type: object
       properties:
         id:

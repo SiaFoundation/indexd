@@ -153,7 +153,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
 
-	slabs, err := slabs.NewManager(am, hm, store, dialer, alerts.NewManager(), keys.DeriveKey(walletKey, "migration"), keys.DeriveKey(walletKey, "integrity"), cfg.slabOpts...)
+	slabs, err := slabs.NewManager(am, hm, store, dialer, alerts.NewManager(), keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), cfg.slabOpts...)
 	if err != nil {
 		t.Fatalf("failed to create slab manager: %v", err)
 	}

@@ -131,7 +131,7 @@ paths:
                   slabs:
                     type: array
                     items:
-                      $ref: "#/components/schemas/Object"
+                      $ref: "#/components/schemas/SealedObject"
     post:
       tags:
         - objects
@@ -147,16 +147,21 @@ paths:
                 - slabs
                 - meta
               properties:
-                key:
+                id:
                   allOf:
                     - $ref: "#/components/schemas/Hash256"
-                    - description: The object's key
+                    - description: The object's unique ID
+                encryptedMasterKey:
+                  type: string
+                  format: byte
+                  length: 72
+                  description: The encrypted master key used to encrypt the object's shards (base64-encoded in JSON)
                 slabs:
                   type: array
                   items:
                     $ref: "#/components/schemas/SlabSlice"
                   description: The list of slabs that make up the object
-                meta:
+                encryptedMetadata:
                   type: string
                   format: byte
                   description: Optional metadata stored as a byte array (base64-encoded in JSON)
@@ -182,7 +187,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Object"
+                $ref: "#/components/schemas/SealedObject"
         "404":
           description: Object not found
     delete:
@@ -648,8 +653,8 @@ components:
       $ref: "./components.yml#/components/schemas/HostInfo"
     Account:
       $ref: "./components.yml#/components/schemas/Account"
-    Object:
-      $ref: "./components.yml#/components/schemas/Object"
+    SealedObject:
+      $ref: "./components.yml#/components/schemas/SealedObject"
     PublicKey:
       $ref: "./components.yml#/components/schemas/PublicKey"
     RegisterAppResponse:

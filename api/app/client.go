@@ -183,14 +183,14 @@ func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOptio
 }
 
 // Object retrieves the object with the given key for the given account.
-func (c *Client) Object(ctx context.Context, key types.Hash256) (resp slabs.Object, err error) {
-	err = c.signedRequestJSON(ctx, http.MethodGet, fmt.Sprintf("/objects/%s", key), nil, &resp)
+func (c *Client) Object(ctx context.Context, objectID types.Hash256) (resp slabs.SealedObject, err error) {
+	err = c.signedRequestJSON(ctx, http.MethodGet, fmt.Sprintf("/objects/%s", objectID), nil, &resp)
 	return
 }
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
-func (c *Client) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) (resp []slabs.Object, err error) {
+func (c *Client) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) (resp []slabs.SealedObject, err error) {
 	values := url.Values{}
 	values.Set("limit", fmt.Sprintf("%d", limit))
 	values.Set("after", cursor.After.Format(time.RFC3339Nano))
@@ -202,7 +202,7 @@ func (c *Client) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int
 
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (c *Client) SaveObject(ctx context.Context, obj slabs.Object) (err error) {
+func (c *Client) SaveObject(ctx context.Context, obj slabs.SealedObject) (err error) {
 	err = c.signedRequestJSON(ctx, http.MethodPost, "/objects", obj, nil)
 	return
 }
@@ -221,17 +221,17 @@ func (c *Client) Account(ctx context.Context) (resp accounts.Account, err error)
 
 // CreateSharedObjectURL generates a signed URL for accessing the object with the given
 // key. The URL is valid until the specified validUntil time.
-func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, encryptionKey [32]byte, validUntil time.Time) (string, error) {
+func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, masterKey []byte, validUntil time.Time) (string, error) {
 	u, _, err := sign(c.appkey, validUntil, http.MethodGet, fmt.Sprintf("%s/objects/%s/shared", c.baseURL, objectKey), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign request: %w", err)
 	}
-	u.Fragment = fmt.Sprintf("encryption_key=%x", encryptionKey)
+	u.Fragment = fmt.Sprintf("encryption_key=%x", masterKey)
 	return u.String(), nil
 }
 
 // SharedObject retrieves an object using the pre-signed URL.
-func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, *[32]byte, error) {
+func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, []byte, error) {
 	u, err := url.Parse(sharedURL)
 	if err != nil {
 		return slabs.SharedObject{}, nil, fmt.Errorf("failed to parse shared URL: %w", err)
@@ -239,18 +239,22 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 	if !(strings.HasPrefix(u.Path, "/objects/") && strings.HasSuffix(u.Path, "/shared")) {
 		return slabs.SharedObject{}, nil, fmt.Errorf("path must start with '/objects/' and end with '/shared'")
 	}
-	fields := strings.Split(u.Fragment, "=")
-	if len(fields) != 2 || fields[0] != "encryption_key" {
+	values, err := url.ParseQuery(u.Fragment)
+	if err != nil {
+		return slabs.SharedObject{}, nil, fmt.Errorf("failed to parse URL fragment: %w", err)
+	}
+
+	keyStr := values.Get("encryption_key")
+	if len(keyStr) != 64 { // 32 hex-encoded bytes
 		return slabs.SharedObject{}, nil, fmt.Errorf("missing encryption key")
 	}
 
-	var encryptionKey [32]byte
-	if n, err := hex.Decode(encryptionKey[:], []byte(fields[1])); err != nil {
+	encryptionKey, err := hex.DecodeString(keyStr)
+	if err != nil {
 		return slabs.SharedObject{}, nil, fmt.Errorf("invalid encryption key: %w", err)
-	} else if n != 32 {
-		return slabs.SharedObject{}, nil, fmt.Errorf("invalid encryption key length: expected 32 bytes, got %d", n)
 	}
 
+	u.Fragment = ""
 	var obj slabs.SharedObject
 	resp, err := doRequest(ctx, http.MethodGet, u, nil, applicationJSON)
 	if err != nil {
@@ -261,7 +265,7 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 
 	dec := json.NewDecoder(resp)
 	err = dec.Decode(&obj)
-	return obj, &encryptionKey, err
+	return obj, encryptionKey, err
 }
 
 // RequestAppConnection requests an application connection to the indexer.

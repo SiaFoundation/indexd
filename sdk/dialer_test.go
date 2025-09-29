@@ -30,7 +30,7 @@ func TestHostDialer(t *testing.T) {
 	}
 	time.Sleep(2 * time.Second)
 
-	dialer, err := NewDialer(app, a1, zap.NewNop())
+	dialer, err := newDialer(app, a1, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +59,7 @@ func TestHostDialer(t *testing.T) {
 	}
 	dialer.Close()
 
-	dialer, err = NewDialer(app, a1, zap.NewNop())
+	dialer, err = newDialer(app, a1, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestHostDialerParallel(t *testing.T) {
 	}
 	time.Sleep(2 * time.Second)
 
-	dialer, err := NewDialer(app, a1, logger.Named("Dialer"))
+	dialer, err := newDialer(app, a1, logger.Named("Dialer"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +151,7 @@ func TestHostDialerHosts(t *testing.T) {
 	}
 	time.Sleep(2 * time.Second)
 
-	dialer, err := NewDialer(app, a1, zap.NewNop())
+	dialer, err := newDialer(app, a1, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

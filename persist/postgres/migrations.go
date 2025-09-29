@@ -258,4 +258,18 @@ CREATE INDEX object_slabs_object_id_slab_index_idx ON object_slabs(object_id, sl
 		}
 		return nil
 	},
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		// note: it is not practical to migrate the existing object data since
+		// the master key column does not exist.
+		if _, err := tx.Exec(ctx, `TRUNCATE objects CASCADE;`); err != nil {
+			return fmt.Errorf("failed to drop objects table: %w", err)
+		}
+		const query = `
+ALTER TABLE objects DROP COLUMN meta;
+ALTER TABLE objects ADD COLUMN encrypted_master_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(encrypted_master_key) = 72); -- user provided, master encryption key (xchacha20 nonce + key + tag)
+ALTER TABLE objects ADD COLUMN encrypted_metadata BYTEA; -- user provided, encrypted metadata
+ALTER TABLE objects ADD COLUMN signature BYTEA UNIQUE NOT NULL CHECK (LENGTH(signature) = 64); -- signature of blake2b(object_key || encrypted_master_key || encrypted_metadata)`
+		_, err := tx.Exec(ctx, query)
+		return err
+	},
 }
