@@ -321,7 +321,7 @@ func (a *app) handlePOSTObjectsShared(jc jape.Context, pk types.PublicKey) {
 	if errors.Is(err, slabs.ErrInvalidSlab) || errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) {
 		jc.Error(err, http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to save object", err) != nil {
+	} else if jc.Check("failed to pin shared object", err) != nil {
 		return
 	}
 	jc.Encode(nil)
