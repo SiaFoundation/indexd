@@ -136,7 +136,7 @@ func (c Contract) OutOfFunds() bool {
 // collateral and should be refreshed.
 func (c Contract) OutOfCollateral() bool {
 	remaining := c.TotalCollateral.Sub(c.UsedCollateral)
-	return remaining.Cmp(c.TotalCollateral.Div64(10)) < 0
+	return c.Size == c.Capacity && remaining.Cmp(c.TotalCollateral.Div64(10)) < 0
 }
 
 // String implements the fmt.Stringer interface.
