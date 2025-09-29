@@ -188,9 +188,7 @@ func TestSlabPruning(t *testing.T) {
 	// create 2 accounts
 	acc1, acc2 := proto.Account{1}, proto.Account{2}
 	for _, acc := range []proto.Account{acc1, acc2} {
-		if err := store.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{}); err != nil {
-			t.Fatal(err)
-		}
+		store.addTestAccount(t, types.PublicKey(acc))
 	}
 
 	// pin slab for both accounts

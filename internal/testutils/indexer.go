@@ -316,24 +316,26 @@ func (idx *Indexer) WalletAddr() types.Address {
 
 // AddAccount creates a test app connect key if it does not already exist and
 // creates an account using it.
-func (idx *Indexer) AddAccount(ctx context.Context, ak types.PublicKey, meta accounts.AccountMeta) error {
+func (idx *Indexer) AddAccount(t testing.TB, ak types.PublicKey, meta accounts.AccountMeta) {
 	store := idx.Store()
 
 	const connectKey = "test"
-	if _, err := store.ValidAppConnectKey(ctx, connectKey); errors.Is(err, accounts.ErrKeyNotFound) {
-		_, err := store.AddAppConnectKey(ctx, accounts.UpdateAppConnectKey{
+	if _, err := store.ValidAppConnectKey(t.Context(), connectKey); errors.Is(err, accounts.ErrKeyNotFound) {
+		_, err := store.AddAppConnectKey(t.Context(), accounts.UpdateAppConnectKey{
 			Key:           connectKey,
 			MaxPinnedData: 1e10,
 			RemainingUses: 10000,
 		})
 		if err != nil {
-			return err
+			t.Fatal(err)
 		}
 	} else if err != nil {
-		return err
+		t.Fatal(err)
 	}
 
-	return store.UseAppConnectKey(ctx, connectKey, ak, meta)
+	if err := store.UseAppConnectKey(t.Context(), connectKey, ak, meta); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // closeWithTimeout is a helper which closes a resource and panics if it takes

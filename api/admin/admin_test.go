@@ -151,10 +151,7 @@ func TestAccountsAPI(t *testing.T) {
 	var accs []types.PublicKey
 	for range 10 {
 		accs = append(accs, types.GeneratePrivateKey().PublicKey())
-		err := indexer.AddAccount(context.Background(), accs[len(accs)-1], accounts.AccountMeta{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		indexer.AddAccount(t, accs[len(accs)-1], accounts.AccountMeta{})
 	}
 
 	accounts, err := admin.Accounts(context.Background(), api.WithServiceAccount(false))
@@ -822,7 +819,7 @@ func TestSectorStatsAPI(t *testing.T) {
 
 	// pin a slab
 	account := types.GeneratePrivateKey()
-	indexer.AddAccount(context.Background(), account.PublicKey(), accounts.AccountMeta{})
+	indexer.AddAccount(t, account.PublicKey(), accounts.AccountMeta{})
 	slabID, err := indexer.App(account).PinSlab(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{1},
 		MinShards:     1,
@@ -872,9 +869,7 @@ func TestAccountStatsAPI(t *testing.T) {
 	}
 
 	account1 := types.GeneratePrivateKey().PublicKey()
-	if err := indexer.AddAccount(t.Context(), account1, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	indexer.AddAccount(t, account1, accounts.AccountMeta{})
 
 	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
 		t.Fatal(err)
@@ -883,9 +878,7 @@ func TestAccountStatsAPI(t *testing.T) {
 	}
 
 	account2 := types.GeneratePrivateKey().PublicKey()
-	if err := indexer.AddAccount(t.Context(), account2, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	indexer.AddAccount(t, account2, accounts.AccountMeta{})
 
 	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
 		t.Fatal(err)

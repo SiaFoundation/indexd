@@ -25,10 +25,7 @@ func TestContractPruning(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	err := indexer.AddAccount(context.Background(), a1.PublicKey(), accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	indexer.AddAccount(t, a1.PublicKey(), accounts.AccountMeta{})
 
 	// assert we have 3 usable hosts
 	time.Sleep(time.Second)
@@ -129,10 +126,7 @@ func TestSectorPinning(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	err := indexer.AddAccount(context.Background(), a1.PublicKey(), accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	indexer.AddAccount(t, a1.PublicKey(), accounts.AccountMeta{})
 
 	// assert we have 3 usable hosts
 	time.Sleep(time.Second)
