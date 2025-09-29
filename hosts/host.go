@@ -38,7 +38,7 @@ var (
 		MaxIngressPrice:    types.Siacoins(3000).Div64(oneTB),                       // 3000 SC / TB
 		MaxStoragePrice:    types.Siacoins(3000).Div64(oneTB).Div64(blocksPerMonth), // 3000 SC / TB / month
 		MinCollateral:      types.Siacoins(100).Div64(oneTB).Div64(blocksPerMonth),  // 100 SC / TB / month
-		MinProtocolVersion: rhp.ProtocolVersion400,
+		MinProtocolVersion: rhp.ProtocolVersion501,
 	}
 )
 
