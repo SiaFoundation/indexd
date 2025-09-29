@@ -285,7 +285,6 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 			return nil // 'fn' succeeded so we're done
 		}
 	}
-	logger.Debug("host has outdated prices, rescan")
 
 	// scan the host if the prices were outdated
 	host, err = m.ScanHost(ctx, hk)
