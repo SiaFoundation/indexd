@@ -72,6 +72,9 @@ func (dc *downloadCandidates) next() (hosts.Host, bool) {
 // downloadShards downloads at least the minimum number of shards required to
 // recover the slab.
 func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, allHosts []hosts.Host, logger *zap.Logger) ([][]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, m.slabTimeout)
+	defer cancel()
+
 	shards := make([][]byte, len(slab.Sectors))
 	var downloaded atomic.Uint32
 
@@ -79,9 +82,6 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, allHosts []
 	if uint(len(candidates.indices)) < slab.MinShards {
 		return nil, fmt.Errorf("%w: only %d sectors available, minimum required: %d", errNotEnoughShards, len(candidates.indices), slab.MinShards)
 	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, slab.MinShards)
