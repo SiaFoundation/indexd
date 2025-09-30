@@ -45,7 +45,6 @@ type (
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		SaveObject(ctx context.Context, account proto.Account, obj slabs.SealedObject) error
 		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.SealedObject, error)
-		PinSharedObject(ctx context.Context, account proto.Account, encryptedMasterKey []byte, shared slabs.SharedObject) error
 		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
 
@@ -102,12 +101,6 @@ type (
 	// ApproveAppRequest is the request body for approving or rejecting an application connection request.
 	ApproveAppRequest struct {
 		Approve bool `json:"approve"`
-	}
-
-	// PinSharedObjectRequest is the request body for pinning a shared object.
-	PinSharedObjectRequest struct {
-		SharedObject       slabs.SharedObject `json:"sharedObject"`
-		EncryptedMasterKey []byte             `json:"encryptedMasterKey"`
 	}
 
 	app struct {
@@ -316,22 +309,6 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	}
 
 	jc.Encode(slabIDs[0])
-}
-
-func (a *app) handlePOSTObjectsShared(jc jape.Context, pk types.PublicKey) {
-	var req PinSharedObjectRequest
-	if jc.Decode(&req) != nil {
-		return
-	}
-
-	err := a.slabs.PinSharedObject(jc.Request.Context(), proto.Account(pk), req.EncryptedMasterKey, req.SharedObject)
-	if errors.Is(err, slabs.ErrInvalidSlab) || errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) {
-		jc.Error(err, http.StatusBadRequest)
-		return
-	} else if jc.Check("failed to pin shared object", err) != nil {
-		return
-	}
-	jc.Encode(nil)
 }
 
 func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
@@ -682,7 +659,6 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		"GET /objects/:key/shared": wrapCORS(wrapSignedAuth(a.handleGETObjectShared)),
 		"POST /objects":            wrapCORS(wrapSignedAuth(a.handlePOSTObjects)),
 		"DELETE /objects/:key":     wrapCORS(wrapSignedAuth(a.handleDELETEObjects)),
-		"POST /objects/shared":     wrapCORS(wrapSignedAuth(a.handlePOSTObjectsShared)),
 
 		"GET /slabs":            wrapCORS(wrapSignedAuth(a.handleGETSlabs)),
 		"POST /slabs":           wrapCORS(wrapSignedAuth(a.handlePOSTSlabs)),

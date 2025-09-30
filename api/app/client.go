@@ -219,16 +219,6 @@ func (c *Client) Account(ctx context.Context) (resp accounts.Account, err error)
 	return
 }
 
-// PinSharedObject pins slabs from the shared object to the provided account
-// and saves the resultant object.
-func (c *Client) PinSharedObject(ctx context.Context, encryptedMasterKey []byte, shared slabs.SharedObject) (err error) {
-	err = c.signedRequestJSON(ctx, http.MethodPost, "/objects/shared", PinSharedObjectRequest{
-		SharedObject:       shared,
-		EncryptedMasterKey: encryptedMasterKey,
-	}, nil)
-	return
-}
-
 // CreateSharedObjectURL generates a signed URL for accessing the object with the given
 // key. The URL is valid until the specified validUntil time.
 func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, masterKey []byte, validUntil time.Time) (string, error) {

@@ -718,38 +718,6 @@ func TestSharedObjects(t *testing.T) {
 		t.Fatalf("expected 0 objects, got %d", len(objs))
 	}
 
-	// try to pin shared object to client2 account
-	if err := client2.PinSharedObject(ctx, frand.Bytes(72), sharedObj); err != nil {
-		t.Fatal(err)
-	}
-
-	// client2 should have 1 object
-	objs, err := client2.ListObjects(ctx, slabs.Cursor{}, 100)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(objs) != 1 {
-		t.Fatalf("expected 1 objects, got %d", len(objs))
-	}
-	if !reflect.DeepEqual(obj.Slabs, objs[0].Slabs) {
-		t.Fatalf("slabs mismatch: expected %+v, got %+v", obj.Slabs, objs[0].Slabs)
-	} else if !reflect.DeepEqual(obj.EncryptedMetadata, objs[0].EncryptedMetadata) {
-		t.Fatalf("metadata mismatch: expected %+v, got %+v", obj.EncryptedMetadata, objs[0].EncryptedMetadata)
-	}
-
-	for _, slab := range obj.Slabs {
-		if got, err := client2.Slab(ctx, slab.SlabID); err != nil {
-			t.Fatal(err)
-		} else if slab.SlabID != got.ID {
-			t.Fatal("slab mismatch")
-		}
-	}
-
-	// corrupt the object and make sure it errors
-	sharedObj.Slabs[0].ID[0] ^= 255
-	if err := client2.PinSharedObject(ctx, frand.Bytes(72), sharedObj); err == nil || !strings.Contains(err.Error(), slabs.ErrInvalidSlab.Error()) {
-		t.Fatalf("expected %v", slabs.ErrInvalidSlab)
-	}
-
 	time.Sleep(time.Second * 2)
 	// try to retrieve the object again, should be expired
 	_, _, err = client1.SharedObject(ctx, shareURL)
