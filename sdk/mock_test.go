@@ -137,27 +137,32 @@ type mockAppClient struct {
 }
 
 // PinSlab implements the [AppClient] interface.
-func (mc *mockAppClient) PinSlab(_ context.Context, s slabs.SlabPinParams) (slabs.SlabID, error) {
+func (mc *mockAppClient) PinSlabs(_ context.Context, toPin ...slabs.SlabPinParams) (digests []slabs.SlabID, err error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
-	id, err := s.Digest()
-	if err != nil {
-		return slabs.SlabID{}, err
-	}
-	ps := slabs.PinnedSlab{
-		ID:            id,
-		EncryptionKey: s.EncryptionKey,
-		MinShards:     s.MinShards,
-		Sectors:       make([]slabs.PinnedSector, len(s.Sectors)),
-	}
-	for i, sector := range s.Sectors {
-		ps.Sectors[i] = slabs.PinnedSector{
-			Root:    sector.Root,
-			HostKey: sector.HostKey,
+
+	for _, s := range toPin {
+		id, err := s.Digest()
+		if err != nil {
+			return nil, err
 		}
+		digests = append(digests, id)
+
+		ps := slabs.PinnedSlab{
+			ID:            id,
+			EncryptionKey: s.EncryptionKey,
+			MinShards:     s.MinShards,
+			Sectors:       make([]slabs.PinnedSector, len(s.Sectors)),
+		}
+		for i, sector := range s.Sectors {
+			ps.Sectors[i] = slabs.PinnedSector{
+				Root:    sector.Root,
+				HostKey: sector.HostKey,
+			}
+		}
+		mc.pinned[id] = ps
 	}
-	mc.pinned[id] = ps
-	return id, nil
+	return
 }
 
 // UnpinSlab implements the [AppClient] interface.

@@ -52,7 +52,7 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// pin the slab
-	slabID, err := app.PinSlab(context.Background(), slabs.SlabPinParams{
+	slabIDs, err := app.PinSlabs(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
 		MinShards:     2,
 		Sectors: []slabs.PinnedSector{
@@ -67,6 +67,7 @@ func TestMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	slabID := slabIDs[0]
 
 	// assert sectors were pinned
 	time.Sleep(time.Second)
@@ -147,7 +148,7 @@ func TestUpdateLastUsed(t *testing.T) {
 	}
 
 	// pin the slab
-	slabID, err := app.PinSlab(context.Background(), slabs.SlabPinParams{
+	slabIDs, err := app.PinSlabs(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
 		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
@@ -159,6 +160,7 @@ func TestUpdateLastUsed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	slabID := slabIDs[0]
 
 	// last used time should be time of PinSlab invocation and thus should be
 	// after `now` timestamp

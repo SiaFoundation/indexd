@@ -48,7 +48,7 @@ type (
 		SaveObject(ctx context.Context, obj slabs.SealedObject) error
 
 		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
-		PinSlabs(context.Context, ...slabs.SlabPinParams) (slabs.SlabID, error)
+		PinSlabs(context.Context, ...slabs.SlabPinParams) ([]slabs.SlabID, error)
 		UnpinSlab(context.Context, slabs.SlabID) error
 	}
 
@@ -300,10 +300,13 @@ top:
 				return Object{}, fmt.Errorf("failed to compute slab id for slab %d: %w", i, err)
 			}
 
-			slabID, err := s.client.PinSlabs(ctx, params)
+			slabIDs, err := s.client.PinSlabs(ctx, params)
 			if err != nil {
 				return Object{}, fmt.Errorf("failed to pin slab %d: %w", i, err)
-			} else if slabID != expectedSlabID {
+			}
+			slabID := slabIDs[0]
+
+			if slabID != expectedSlabID {
 				return Object{}, fmt.Errorf("pinned slab %d id %s does not match expected id %s", i, slabID.String(), expectedSlabID.String())
 			}
 			obj.slabs = append(obj.slabs, slabs.SlabSlice{
