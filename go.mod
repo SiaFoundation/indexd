@@ -9,7 +9,7 @@ require (
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.17.5
-	go.sia.tech/coreutils v0.18.4
+	go.sia.tech/coreutils v0.18.5
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/web/indexd v0.10.0
 	go.uber.org/goleak v1.3.0
