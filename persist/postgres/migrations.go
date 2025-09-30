@@ -301,4 +301,13 @@ ALTER TABLE objects ADD COLUMN signature BYTEA UNIQUE NOT NULL CHECK (LENGTH(sig
 		}
 		return nil
 	},
+	// changes the pinning ordering to prefer contracts with available capacity
+	func(ctx context.Context, t *txn, _ *zap.Logger) error {
+		const query = `
+DROP INDEX IF EXISTS contracts_state_active_idx;
+CREATE INDEX contracts_capacity_size_contract_id_idx ON contracts (contract_id, size, capacity - size DESC) WHERE good = true AND remaining_allowance > 0;`
+
+		_, err := t.Exec(ctx, query)
+		return err
+	},
 }

@@ -224,7 +224,7 @@ CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- fo
 CREATE INDEX contracts_state_good_idx ON contracts(state) WHERE state <= 1 AND good; -- for filtering contracts
 CREATE INDEX contracts_last_broadcast_attempt_contract_id_idx ON contracts (last_broadcast_attempt ASC, contract_id) WHERE renewed_to IS NULL; -- for fetching contracts for broadcasting
 CREATE INDEX contracts_host_id_remaining_allowance_contract_id_idx ON contracts (host_id, remaining_allowance DESC, contract_id) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for funding
-CREATE INDEX contracts_capacity_size_contract_id_idx ON contracts (capacity DESC, size DESC, contract_id) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for pinning
+CREATE INDEX contracts_capacity_size_contract_id_idx ON contracts (contract_id, size, capacity - size DESC) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for pinning
 
 -- stats indices
 CREATE INDEX contracts_proof_height_idx ON contracts (proof_height);

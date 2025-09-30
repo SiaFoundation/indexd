@@ -120,9 +120,6 @@ func (cm *ContractManager) pinSectors(ctx context.Context, client HostClient, ho
 			continue
 		}
 
-		// TODO: this should be atomic with the contract revision. Any time a
-		// revision is saved the sectors that were added or removed should
-		// be updated in the same transaction for consistency.
 		if err := cm.store.PinSectors(ctx, contractID, res.Sectors); err != nil {
 			return fmt.Errorf("failed to pin sectors: %w", err)
 		}
@@ -130,7 +127,7 @@ func (cm *ContractManager) pinSectors(ctx context.Context, client HostClient, ho
 		// Only the sectors that were attempted should be marked
 		// as missing. So sectors that were not part of the append
 		// call can be pinned to other contracts.
-		if len(res.Sectors) != len(sectors[:attempted]) {
+		if len(res.Sectors) != attempted {
 			lookup := make(map[types.Hash256]struct{}, attempted)
 			for _, sector := range sectors[:attempted] {
 				lookup[sector] = struct{}{}
