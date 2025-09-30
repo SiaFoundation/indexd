@@ -142,9 +142,8 @@ func (c *HostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPri
 		// only attempt to append up to the calculated maximum number of sectors
 		if uint64(len(sectors)) > maxAppendSectors {
 			sectors = sectors[:maxAppendSectors]
-			attempted = len(sectors)
 		}
-
+		attempted = len(sectors)
 		res, err = rhp.RPCAppendSectors(ctx, c.client, c.signer, c.cm.TipState(), hostPrices, contract, sectors)
 		if err != nil {
 			return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("failed to append sectors: %w", err)
