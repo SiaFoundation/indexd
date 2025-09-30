@@ -780,6 +780,26 @@ func TestWalletAPI(t *testing.T) {
 	}
 }
 
+func TestContractsStatsAPI(t *testing.T) {
+	// create cluster with three hosts
+	cluster := testutils.NewCluster(t, testutils.WithHosts(1))
+	indexer := cluster.Indexer
+	adminClient := indexer.Admin
+
+	var stats admin.ContractsStatsResponse
+	for range 5 {
+		time.Sleep(time.Second)
+
+		stats, err := adminClient.StatsContracts(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		} else if stats.Contracts != 0 {
+			return // done
+		}
+	}
+	t.Fatalf("expected some contracts, got %d", stats.Contracts)
+}
+
 func TestSectorStatsAPI(t *testing.T) {
 	// create cluster with three hosts
 	logger := newTestLogger(false)
@@ -796,8 +816,8 @@ func TestSectorStatsAPI(t *testing.T) {
 	stats, err := adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if stats.NumSlabs != 0 {
-		t.Fatalf("expected no slabs, got %d", stats.NumSlabs)
+	} else if stats.Slabs != 0 {
+		t.Fatalf("expected no slabs, got %d", stats.Slabs)
 	}
 
 	// pin a slab
@@ -820,8 +840,8 @@ func TestSectorStatsAPI(t *testing.T) {
 	stats, err = adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if stats.NumSlabs != 1 {
-		t.Fatalf("expected 1 slab, got %d", stats.NumSlabs)
+	} else if stats.Slabs != 1 {
+		t.Fatalf("expected 1 slab, got %d", stats.Slabs)
 	}
 
 	// unpin the slab
@@ -833,8 +853,8 @@ func TestSectorStatsAPI(t *testing.T) {
 	stats, err = adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
-	} else if stats.NumSlabs != 0 {
-		t.Fatalf("expected no slabs, got %d", stats.NumSlabs)
+	} else if stats.Slabs != 0 {
+		t.Fatalf("expected no slabs, got %d", stats.Slabs)
 	}
 }
 

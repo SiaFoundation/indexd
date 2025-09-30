@@ -5,7 +5,7 @@ components:
     # Core types
     #
     #############################
-    
+
     Address:
       allOf:
         - $ref: "#/components/schemas/Hash256"
@@ -159,11 +159,11 @@ components:
     IPNet:
       type: object
       properties:
-        ip: 
+        ip:
           type: string
           description: The IP address in CIDR notation
           example: 100.82.250.91
-        mask: 
+        mask:
           type: string
           description: The subnet mask in CIDR notation
           example: 24
@@ -182,19 +182,23 @@ components:
             - quic
           description: The protocol used by the host
 
-    Object:
+    SealedObject:
       type: object
       properties:
-        key:
+        id:
           allOf:
             - $ref: "#/components/schemas/Hash256"
-            - description: The object's key
+            - description: The object's unique ID
+        encryptedMasterKey:
+          type: string
+          format: byte
+          description: The encrypted master key used to encrypt and decrypt the object's data and metadata
         slabs:
           type: array
           items:
             $ref: "#/components/schemas/SlabSlice"
           description: The list of slabs that make up the object
-        meta:
+        encryptedMetadata:
           type: string
           format: byte
           description: Optional metadata stored on the object
@@ -212,22 +216,22 @@ components:
     SharedObject:
       type: object
       properties:
-        key:
+        id:
           allOf:
             - $ref: "#/components/schemas/Hash256"
-            - description: The shared object's key
+            - description: The shared object's unique ID
         slabs:
           type: array
           description: The list of slabs that make up the shared object
           items:
-            $ref: "#/components/schemas/SharedObjectSlab"
-        meta:
+            $ref: "#/components/schemas/SharedSlab"
+        encryptedMetadata:
           type: string
           format: byte
           description: Optional metadata stored on the object
 
     # A slab of a shared object including decryption info and slice bounds.
-    SharedObjectSlab:
+    SharedSlab:
       type: object
       properties:
         id:
@@ -363,8 +367,8 @@ components:
           description: The base URL of the explorer API
 
     Severity:
-        type: string
-        enum: [info, warning, error, critical]
+      type: string
+      enum: [info, warning, error, critical]
 
     Alert:
       type: object
@@ -415,6 +419,10 @@ components:
           type: string
           format: uri
           description: The homepage of the app
+        lastUsed:
+          type: string
+          format: date-time
+          description: The last time the account was used. Updated when pinning a slab or retrieving a slab.
 
     Contract:
       type: object
@@ -444,7 +452,7 @@ components:
           type: string
           description: The time of the last revision broadcast attempt for the contract.
           format: date-time
-          
+
         revisionNumber:
           allOf:
             - $ref: "#/components/schemas/RevisionNumber"
@@ -565,10 +573,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/NetAddress"
-        networks:
-          type: array
-          items:
-            $ref: "#/components/schemas/IPNet"
         settings:
           $ref: "#/components/schemas/HostSettings"
         usability:
@@ -620,7 +624,7 @@ components:
           type: number
           format: float
           description: Approximate longitude of the host inferred from its IP address.
-    
+
     HostUsability:
       type: object
       properties:
@@ -656,7 +660,7 @@ components:
           description: Whether the host's ingress price is below the maximum ingress price
         egressPrice:
           type: boolean
-          description: Whether the host's egress price is below the maximum egress price  
+          description: Whether the host's egress price is below the maximum egress price
         freeSectorPrice:
           type: boolean
           description: Whether the host's free sector price is below the maximum free sector price
@@ -771,29 +775,57 @@ components:
       properties:
         registered:
           type: integer
-          format: int64
+          format: uint64
           description: Number of accounts currently registered on the indexer
+        active:
+          type: integer
+          format: uint64
+          description: Number of accounts active in the last week.
+
+    ContractsStatsResponse:
+      type: object
+      properties:
+        contracts:
+          type: integer
+          format: int64
+          description: Total number of active contracts managed by this instance
+        badContracts:
+          type: integer
+          format: int64
+          description: Total number of active, bad contracts managed by this instance
+        renewing:
+          type: integer
+          format: int64
+          description: Number of contracts currently within their renew window
+        totalCapacity:
+          type: integer
+          format: int64
+          description: Total capacity of all active contracts
+        totalSize:
+          type: integer
+          format: int64
+          description: Total size of all active contracts
 
     SectorStatsResponse:
       type: object
       properties:
-        numSlabs:
+        slabs:
           type: integer
           format: int64
           description: Number of slabs currently pinned by this instance
-        numMigratedSectors:
+        migrated:
           type: integer
           format: int64
           description: Total number of sectors that have been migrated
-        numPinnedSectors:
+        pinned:
           type: integer
           format: int64
           description: Number of sectors currently pinned to a contract by this instance
-        numUnpinnableSectors:
+        unpinnable:
           type: integer
           format: int64
           description: Number of unpinnable sectors that were pruned because they could not be pinned to a contract in due time
-        numUnpinnedSectors:
+        unpinned:
           type: integer
           format: int64
           description: Number of sectors currently not pinned to any contract by this instance

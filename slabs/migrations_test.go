@@ -3,7 +3,6 @@ package slabs
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -46,7 +45,8 @@ func TestMigrateSlab(t *testing.T) {
 	h1 := newTestHost(types.PublicKey{1})
 	h2 := newTestHost(types.PublicKey{2})
 	h3 := newTestHost(types.PublicKey{3})
-	h3.Networks = h1.Networks // redundant CIDR
+	h3.Latitude = h1.Latitude   // same location as h1
+	h3.Longitude = h1.Longitude // same location as h1
 	h4 := newTestHost(types.PublicKey{4})
 	dialer := newMockDialer([]hosts.Host{h1, h2, h3, h4})
 
@@ -180,17 +180,16 @@ func TestMigrateSlab(t *testing.T) {
 }
 
 func TestSectorsToMigrate(t *testing.T) {
-	newHost := func(i byte, usable, blocked, networks bool) hosts.Host {
+	newHost := func(i byte, usable, blocked bool) hosts.Host {
 		h := hosts.Host{
 			Blocked:   blocked,
 			PublicKey: types.PublicKey{i},
 			Settings:  goodSettings,
+			Latitude:  frand.Float64()*180 - 90,
+			Longitude: frand.Float64()*360 - 180,
 		}
 		if usable {
 			h.Usability = hosts.GoodUsability
-		}
-		if networks {
-			h.Networks = []string{fmt.Sprintf("1.1.1.%d/24", i)}
 		}
 		return h
 	}
@@ -211,16 +210,17 @@ func TestSectorsToMigrate(t *testing.T) {
 	}
 
 	// good host with good contract
-	goodHost := newHost(1, true, false, true)
+	goodHost := newHost(1, true, false)
 	goodContract := newContract(1, goodHost.PublicKey, true)
 
 	// good host with bad contract
 	badContract := newContract(2, goodHost.PublicKey, false)
 
-	// good host with redundant CIDR
-	redundantCIDRHost := newHost(2, true, false, true)
-	redundantCIDRHost.Networks = goodHost.Networks
-	redundantCIDRContract := newContract(3, redundantCIDRHost.PublicKey, true)
+	// good host with identical location as the good host
+	sameLocationHost := newHost(2, true, false)
+	sameLocationHost.Latitude = goodHost.Latitude
+	sameLocationHost.Longitude = goodHost.Longitude
+	sameLocationContract := newContract(3, sameLocationHost.PublicKey, true)
 
 	// prepare a slab that has one good sector and multiple bad sectors for
 	// various reasons
@@ -244,11 +244,11 @@ func TestSectorsToMigrate(t *testing.T) {
 				ContractID: &badContract.ID,
 				HostKey:    &badContract.HostKey,
 			},
-			// good contract with host on redundant CIDR -> don't migrate
+			// good contract with host on same location -> don't migrate
 			{
 				Root:       types.Hash256{4},
-				ContractID: &redundantCIDRContract.ID,
-				HostKey:    &redundantCIDRContract.HostKey,
+				ContractID: &sameLocationContract.ID,
+				HostKey:    &sameLocationContract.HostKey,
 			},
 		},
 	}
@@ -256,7 +256,7 @@ func TestSectorsToMigrate(t *testing.T) {
 	// helper to assert result of contractsForRepair
 	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots, expectedHosts []int) {
 		t.Helper()
-		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 100, false)
+		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 100, 10)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {
@@ -284,40 +284,38 @@ func TestSectorsToMigrate(t *testing.T) {
 
 	// calling contractsForRepair with just the hosts and contracts the slab is stored on should
 	// return the missing sectors and no contracts
-	allHosts := []hosts.Host{goodHost, redundantCIDRHost}
-	allContracts := []contracts.Contract{goodContract, badContract, redundantCIDRContract}
+	allHosts := []hosts.Host{goodHost, sameLocationHost}
+	allContracts := []contracts.Contract{goodContract, badContract, sameLocationContract}
 	assertResult(allHosts, allContracts, []int{1, 2}, []int{})
 
 	// prepare a bunch of hosts and contracts which can't be used for repairs
-	badHost2 := newHost(3, false, false, true)
+	badHost2 := newHost(3, false, false)
 	cBadHost2 := newContract(4, badHost2.PublicKey, true)
 
-	hostWithoutNetworks := newHost(4, true, false, false)
-	cHostWithoutNetworks := newContract(5, hostWithoutNetworks.PublicKey, true)
+	blockedHost := newHost(4, true, true)
+	cBlockedHost := newContract(5, blockedHost.PublicKey, true)
 
-	blockedHost := newHost(5, true, true, false)
-	cBlockedHost := newContract(6, blockedHost.PublicKey, true)
-
-	redundantCIDRHost2 := newHost(6, true, false, true)
-	redundantCIDRHost2.Networks = goodHost.Networks
-	cRedundantCIDRHost2 := newContract(7, redundantCIDRHost2.PublicKey, true)
+	sameLocationHost2 := newHost(5, true, false)
+	sameLocationHost2.Latitude = goodHost.Latitude
+	sameLocationHost2.Longitude = goodHost.Longitude
+	cSameLocationHost2 := newContract(6, sameLocationHost2.PublicKey, true)
 
 	// add the bad hosts+contracts and try again - expect same result
-	allHosts = append(allHosts, badHost2, hostWithoutNetworks, blockedHost, redundantCIDRHost2)
-	allContracts = append(allContracts, cBadHost2, cHostWithoutNetworks, cBlockedHost, cRedundantCIDRHost2)
+	allHosts = append(allHosts, badHost2, blockedHost, sameLocationHost2)
+	allContracts = append(allContracts, cBadHost2, cBlockedHost, cSameLocationHost2)
 	assertResult(allHosts, allContracts, []int{1, 2}, []int{})
 
 	// prepare 2 good hosts
-	goodHost2 := newHost(7, true, false, true)
-	cGoodHost2 := newContract(8, goodHost2.PublicKey, true)
+	goodHost2 := newHost(6, true, false)
+	cGoodHost2 := newContract(7, goodHost2.PublicKey, true)
 
-	goodHost3 := newHost(8, true, false, true)
-	cGoodHost3 := newContract(9, goodHost3.PublicKey, true)
+	goodHost3 := newHost(7, true, false)
+	cGoodHost3 := newContract(8, goodHost3.PublicKey, true)
 
 	// should use them
 	allHosts = append(allHosts, goodHost2, goodHost3)
 	allContracts = append(allContracts, cGoodHost2, cGoodHost3)
-	assertResult(allHosts, allContracts, []int{1, 2}, []int{7, 8})
+	assertResult(allHosts, allContracts, []int{1, 2}, []int{6, 7})
 }
 
 func newTestContract(hk types.PublicKey) contracts.Contract {

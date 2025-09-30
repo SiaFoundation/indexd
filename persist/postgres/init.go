@@ -49,7 +49,7 @@ func (s *Store) initNewDatabase(ctx context.Context, target int64, ms contracts.
 			return err
 		} else if err := initSettings(ctx, tx, ms, us); err != nil {
 			return fmt.Errorf("failed to init settings: %w", err)
-		} else if err := s.initStats(ctx, tx); err != nil {
+		} else if err := initStats(ctx, tx); err != nil {
 			return fmt.Errorf("failed to init stats: %w", err)
 		} else if err := setDBVersion(ctx, tx, target); err != nil {
 			return fmt.Errorf("failed to set initial database version: %w", err)

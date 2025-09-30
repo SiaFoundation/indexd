@@ -2,6 +2,7 @@ package geoip
 
 import (
 	_ "embed" // needed for geolocation database
+	"math"
 	"net"
 	"sync"
 
@@ -11,6 +12,8 @@ import (
 //go:embed GeoLite2-City.mmdb
 var maxMindCityDB []byte
 
+const radiusKm = 6371.0088
+
 // A Location represents an ISO 3166-1 A-2 country codes and an approximate
 // latitude/longitude.
 type Location struct {
@@ -18,6 +21,21 @@ type Location struct {
 
 	Latitude  float64 `json:"latitude"`
 	Longitude float64 `json:"longitude"`
+}
+
+// HaversineDistanceKm returns the great-circle distance between the location and
+// the other location in kilometers.
+func (l Location) HaversineDistanceKm(other Location) float64 {
+	φ1 := l.Latitude * math.Pi / 180
+	φ2 := other.Latitude * math.Pi / 180
+	dφ := (other.Latitude - l.Latitude) * math.Pi / 180
+	dλ := (other.Longitude - l.Longitude) * math.Pi / 180
+
+	sinDφ := math.Sin(dφ / 2)
+	sinDλ := math.Sin(dλ / 2)
+	a := sinDφ*sinDφ + math.Cos(φ1)*math.Cos(φ2)*sinDλ*sinDλ
+	c := 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
+	return radiusKm * c
 }
 
 // A Locator maps IP addresses to their location.

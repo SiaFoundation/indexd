@@ -199,6 +199,22 @@ func (s *mockStore) PinSlab(ctx context.Context, account proto.Account, nextInte
 	return slabID, nil
 }
 
+func (s *mockStore) UnpinSlab(ctx context.Context, account proto.Account, slabID SlabID) error {
+	if _, ok := s.pinnedSlabs[account][slabID]; !ok {
+		return ErrSlabNotFound
+	}
+	delete(s.pinnedSlabs[account], slabID)
+	return nil
+}
+
+func (s *mockStore) PinnedSlab(ctx context.Context, account proto.Account, slabID SlabID) (PinnedSlab, error) {
+	return PinnedSlab{}, nil
+}
+
+func (s *mockStore) SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]SlabID, error) {
+	return nil, nil
+}
+
 func (s *mockStore) RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
 	if _, ok := s.failedChecks[hostKey]; !ok {
 		s.failedChecks[hostKey] = make(map[types.Hash256]int)
@@ -260,19 +276,23 @@ func (s *mockStore) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Ti
 	return result, nil
 }
 
-func (s *mockStore) Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error) {
-	return Object{}, nil
+func (s *mockStore) PruneSlabs(ctx context.Context, account proto.Account) error {
+	return nil
+}
+
+func (s *mockStore) Object(ctx context.Context, account proto.Account, key types.Hash256) (SealedObject, error) {
+	return SealedObject{}, nil
 }
 
 func (s *mockStore) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
 	return nil
 }
 
-func (s *mockStore) SaveObject(ctx context.Context, account proto.Account, obj Object) error {
+func (s *mockStore) SaveObject(ctx context.Context, account proto.Account, obj SealedObject) error {
 	return nil
 }
 
-func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]Object, error) {
+func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]SealedObject, error) {
 	return nil, nil
 }
 

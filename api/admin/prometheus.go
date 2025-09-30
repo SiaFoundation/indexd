@@ -14,6 +14,37 @@ func (s AccountStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 			Name:  "indexd_num_registered_accounts",
 			Value: float64(s.Registered),
 		},
+		{
+			Name:  "indexd_num_active_accounts",
+			Value: float64(s.Active),
+		},
+	}
+}
+
+// PrometheusMetric implements the prometheus.Marshaller interface for the
+// sector stats response.
+func (s ContractsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
+	return []prometheus.Metric{
+		{
+			Name:  "indexd_contracts_total",
+			Value: float64(s.Contracts),
+		},
+		{
+			Name:  "indexd_contracts_bad",
+			Value: float64(s.BadContracts),
+		},
+		{
+			Name:  "indexd_contracts_renewing",
+			Value: float64(s.Renewing),
+		},
+		{
+			Name:  "indexd_contracts_total_capacity",
+			Value: float64(s.TotalCapacity),
+		},
+		{
+			Name:  "indexd_contracts_total_size",
+			Value: float64(s.TotalSize),
+		},
 	}
 }
 
@@ -23,11 +54,23 @@ func (s SectorsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	return []prometheus.Metric{
 		{
 			Name:  "indexd_num_slabs",
-			Value: float64(s.NumSlabs),
+			Value: float64(s.Slabs),
+		},
+		{
+			Name:  "indexd_num_migrated_sectors",
+			Value: float64(s.Migrated),
 		},
 		{
 			Name:  "indexd_num_pinned_sectors",
-			Value: float64(s.NumPinnedSectors),
+			Value: float64(s.Pinned),
+		},
+		{
+			Name:  "indexd_num_unpinnable_sectors",
+			Value: float64(s.Unpinnable),
+		},
+		{
+			Name:  "indexd_num_unpinned_sectors",
+			Value: float64(s.Unpinned),
 		},
 	}
 }

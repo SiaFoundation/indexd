@@ -108,13 +108,6 @@ type (
 		State    ContractState    `json:"state"`
 		Spending ContractSpending `json:"spending"`
 	}
-
-	// ContractSettings contains various settings used by the manager for
-	// forming and renewing contracts.
-	ContractSettings struct {
-		Period      uint64 `json:"period"`
-		RenewWindow uint64 `json:"renewWindow"`
-	}
 )
 
 // GoodForUpload indicates whether a contract should be uploaded to

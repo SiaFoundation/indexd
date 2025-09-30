@@ -133,7 +133,7 @@ func newMockDialer(hosts int) *mockHostDialer {
 type mockAppClient struct {
 	mu      sync.Mutex
 	pinned  map[slabs.SlabID]slabs.PinnedSlab
-	objects map[types.Hash256]slabs.Object
+	objects map[types.Hash256]slabs.SealedObject
 }
 
 // PinSlab implements the [AppClient] interface.
@@ -184,67 +184,77 @@ func (mc *mockAppClient) Hosts(context.Context, ...api.URLQueryParameterOption) 
 	return nil, nil
 }
 
+func (mc *mockAppClient) Object(ctx context.Context, objectKey types.Hash256) (slabs.SealedObject, error) {
+	return mc.objects[objectKey], nil
+}
+
+func (mc *mockAppClient) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) ([]slabs.SealedObject, error) {
+	var objs []slabs.SealedObject
+	for _, obj := range mc.objects {
+		objs = append(objs, obj)
+	}
+	return objs, nil
+}
+
 // SharedObject implements the [AppClient] interface.
-func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, *[32]byte, error) {
+func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, []byte, error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 
-	var objKey types.Hash256
-	err := objKey.UnmarshalText([]byte(sharedURL[:64]))
+	buf, err := hex.DecodeString(sharedURL)
 	if err != nil {
 		return slabs.SharedObject{}, nil, errors.New("invalid shared URL")
-	}
-	var encryptionKey [32]byte
-	key, err := hex.DecodeString(sharedURL[64:])
-	if err != nil || len(key) != 32 {
+	} else if len(buf) != 64 {
 		return slabs.SharedObject{}, nil, errors.New("invalid shared URL")
 	}
-	copy(encryptionKey[:], key)
+
+	objKey := (types.Hash256)(buf[:32])
+	encryptionKey := buf[32:]
 
 	obj, ok := mc.objects[objKey]
 	if !ok {
 		return slabs.SharedObject{}, nil, errors.New("object not found")
 	}
 
-	var objSlabs []slabs.SharedObjectSlab
+	var objSlabs []slabs.SharedSlab
 	for _, slab := range obj.Slabs {
-		objSlabs = append(objSlabs, slabs.SharedObjectSlab{
+		objSlabs = append(objSlabs, slabs.SharedSlab{
 			PinnedSlab: mc.pinned[slab.SlabID],
 			Offset:     slab.Offset,
 			Length:     slab.Length,
 		})
 	}
 
-	return slabs.SharedObject{Key: obj.Key, Slabs: objSlabs}, &encryptionKey, nil
+	return slabs.SharedObject{Slabs: objSlabs}, encryptionKey, nil
 }
 
 // SaveObject implements the [AppClient] interface.
-func (mc *mockAppClient) SaveObject(ctx context.Context, obj slabs.Object) (err error) {
+func (mc *mockAppClient) SaveObject(ctx context.Context, obj slabs.SealedObject) (err error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
-	mc.objects[obj.Key] = obj
+	mc.objects[obj.ID()] = obj
 	return nil
 }
 
 // CreateSharedObjectURL implements the [AppClient] interface.
-func (mc *mockAppClient) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, encryptionKey [32]byte, validUntil time.Time) (string, error) {
+func (mc *mockAppClient) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, encryptionKey []byte, validUntil time.Time) (string, error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 
-	obj, ok := mc.objects[objectKey]
+	_, ok := mc.objects[objectKey]
 	if !ok {
 		return "", errors.New("object not found")
 	}
 
 	key := make([]byte, 64)
-	copy(key[:32], obj.Key[:])
-	copy(key[32:], encryptionKey[:])
+	copy(key[:32], objectKey[:])
+	copy(key[32:], encryptionKey)
 	return hex.EncodeToString(key), nil
 }
 
 func newMockAppClient() *mockAppClient {
 	return &mockAppClient{
-		objects: make(map[types.Hash256]slabs.Object),
+		objects: make(map[types.Hash256]slabs.SealedObject),
 		pinned:  make(map[slabs.SlabID]slabs.PinnedSlab),
 	}
 }

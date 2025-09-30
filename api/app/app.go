@@ -35,19 +35,21 @@ type (
 
 	// Slabs defines the slab interface for the application API.
 	Slabs interface {
-		Object(ctx context.Context, account proto.Account, key types.Hash256) (slabs.Object, error)
+		PruneSlabs(ctx context.Context, account proto.Account) error
+		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab slabs.SlabPinParams) (slabs.SlabID, error)
+		PinnedSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) (slabs.PinnedSlab, error)
+		SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]slabs.SlabID, error)
+		UnpinSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) error
+
+		Object(ctx context.Context, account proto.Account, key types.Hash256) (slabs.SealedObject, error)
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
-		SaveObject(ctx context.Context, account proto.Account, obj slabs.Object) error
-		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (objs []slabs.Object, _ error)
+		SaveObject(ctx context.Context, account proto.Account, obj slabs.SealedObject) error
+		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (objs []slabs.SealedObject, _ error)
 		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
 
 	// Store defines the store interface for the application API.
 	Store interface {
-		PinSlab(context.Context, proto.Account, time.Time, slabs.SlabPinParams) (slabs.SlabID, error)
-		PinnedSlab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
-		SlabIDs(ctx context.Context, accountID proto.Account, offset, limit int) ([]slabs.SlabID, error)
-		UnpinSlab(context.Context, proto.Account, slabs.SlabID) error
 		UsableHosts(ctx context.Context, offset, limit int, opts ...hosts.UsableHostQueryOpt) ([]hosts.HostInfo, error)
 	}
 
@@ -256,7 +258,7 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 }
 
 func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
-	var obj slabs.Object
+	var obj slabs.SealedObject
 	if jc.Decode(&obj) != nil {
 		return
 	}
@@ -299,12 +301,21 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	slabID, err := a.store.PinSlab(jc.Request.Context(), proto.Account(pk), time.Now(), params)
+	slabID, err := a.slabs.PinSlab(jc.Request.Context(), proto.Account(pk), time.Now(), params)
 	if jc.Check("failed to pin slab", err) != nil {
 		return
 	}
 
 	jc.Encode(slabID)
+}
+
+func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
+	err := a.slabs.PruneSlabs(jc.Request.Context(), proto.Account(pk))
+	if jc.Check("failed to prune slabs", err) != nil {
+		return
+	}
+
+	jc.Encode(nil)
 }
 
 func encodeBinary(jc jape.Context, resp types.EncoderTo) {
@@ -325,7 +336,7 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	slab, err := a.store.PinnedSlab(jc.Request.Context(), slabID)
+	slab, err := a.slabs.PinnedSlab(jc.Request.Context(), proto.Account(pk), slabID)
 	if errors.Is(err, slabs.ErrSlabNotFound) {
 		jc.Error(slabs.ErrSlabNotFound, http.StatusNotFound)
 		return
@@ -346,7 +357,7 @@ func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	slabIDs, err := a.store.SlabIDs(jc.Request.Context(), proto.Account(pk), offset, limit)
+	slabIDs, err := a.slabs.SlabIDs(jc.Request.Context(), proto.Account(pk), offset, limit)
 	if jc.Check("failed to fetch slab digests", err) != nil {
 		return
 	}
@@ -360,7 +371,7 @@ func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	err := a.store.UnpinSlab(jc.Request.Context(), proto.Account(pk), slabID)
+	err := a.slabs.UnpinSlab(jc.Request.Context(), proto.Account(pk), slabID)
 	if errors.Is(err, slabs.ErrSlabNotFound) {
 		jc.Error(fmt.Errorf("slab %s not found", slabID), http.StatusNotFound)
 		return
@@ -649,6 +660,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 
 		"GET /slabs":            wrapCORS(wrapSignedAuth(a.handleGETSlabs)),
 		"POST /slabs":           wrapCORS(wrapSignedAuth(a.handlePOSTSlabs)),
+		"POST /slabs/prune":     wrapCORS(wrapSignedAuth(a.handlePOSTSlabsPrune)),
 		"GET /slabs/:slabid":    wrapCORS(wrapSignedAuth(a.handleGETSlab)),
 		"DELETE /slabs/:slabid": wrapCORS(wrapSignedAuth(a.handleDELETESlab)),
 	}), nil

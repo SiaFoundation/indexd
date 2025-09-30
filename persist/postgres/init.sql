@@ -6,8 +6,10 @@ CREATE TABLE accounts (
     service_account BOOLEAN NOT NULL DEFAULT FALSE, -- true if this is a service account
     description TEXT NOT NULL DEFAULT '',
     logo_url TEXT NOT NULL DEFAULT '',
-    service_url TEXT NOT NULL DEFAULT ''
+    service_url TEXT NOT NULL DEFAULT '',
+    last_used TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
+CREATE INDEX accounts_last_used_idx ON accounts(last_used);
 
 CREATE TABLE app_connect_keys (
     app_key TEXT PRIMARY KEY,
@@ -96,13 +98,6 @@ CREATE TABLE host_addresses (
     protocol SMALLINT NOT NULL
 );
 CREATE INDEX host_addresses_host_id_idx ON host_addresses (host_id);
-
-CREATE TABLE host_resolved_cidrs (
-    id SERIAL PRIMARY KEY,
-    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
-    cidr CIDR NOT NULL
-);
-CREATE INDEX host_resolved_cidrs_host_id_idx ON host_resolved_cidrs (host_id);
 
 CREATE TABLE syncer_peers (
     ip_address INET NOT NULL,
@@ -230,6 +225,10 @@ CREATE INDEX contracts_last_broadcast_attempt_contract_id_idx ON contracts (last
 CREATE INDEX contracts_host_id_remaining_allowance_contract_id_idx ON contracts (host_id, remaining_allowance DESC, contract_id) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for funding
 CREATE INDEX contracts_capacity_size_contract_id_idx ON contracts (capacity DESC, size DESC, contract_id) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for pinning
 
+-- stats indices
+CREATE INDEX contracts_proof_height_idx ON contracts (proof_height);
+CREATE INDEX contracts_state_active_idx ON contracts(state) WHERE state = 0 OR state = 1;
+
 -- foreign key constraint index
 CREATE INDEX contracts_host_id_idx ON contracts(host_id);
 
@@ -268,11 +267,13 @@ CREATE INDEX slabs_id_last_repair_attempt_idx ON slabs(last_repair_attempt ASC);
 
 CREATE TABLE objects (
     id BIGSERIAL PRIMARY KEY,
-    object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32), -- user provided, object identifier
+    object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32),
+    encrypted_master_key BYTEA UNIQUE NOT NULL CHECK(LENGTH(encrypted_master_key) = 72), -- user provided, master encryption key (xchacha20 nonce + key + tag)
     account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns object
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by update time
-    meta BYTEA -- user provided, encrypted metadata
+    encrypted_metadata BYTEA, -- user provided, encrypted metadata
+    signature BYTEA UNIQUE NOT NULL CHECK(LENGTH(signature) = 64) -- signature of blake2b(object_key || encrypted_master_key || encrypted_metadata)
 );
 
 -- object_key is unique per account
@@ -302,6 +303,9 @@ CREATE TABLE account_slabs (
     slab_id BIGSERIAL REFERENCES slabs(id) NOT NULL,
     PRIMARY KEY (account_id, slab_id)
 );
+
+-- speed up query used when unpinning slabs
+CREATE INDEX account_slabs_slab_id_idx ON account_slabs(slab_id);
 
 CREATE TABLE sectors (
     id BIGSERIAL PRIMARY KEY,
@@ -374,3 +378,6 @@ CREATE INDEX slab_sectors_sector_id_idx ON slab_sectors(sector_id);
 
 -- speed up fetching sectors for slab ordered by their position within the slab
 CREATE UNIQUE INDEX slab_sectors_slab_id_slab_index_idx ON slab_sectors(slab_id, slab_index ASC);
+
+-- speeds up finding sectors for deletion when unpinning slabs
+CREATE UNIQUE INDEX slab_sectors_sector_id_slab_id_idx ON slab_sectors(sector_id, slab_id);

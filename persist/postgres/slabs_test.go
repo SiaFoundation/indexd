@@ -3,14 +3,17 @@ package postgres
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
@@ -147,7 +150,7 @@ func TestPinnedSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	slab, err := store.PinnedSlab(context.Background(), slabID)
+	slab, err := store.PinnedSlab(context.Background(), account, slabID)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(slab, expected) {
@@ -162,7 +165,7 @@ func TestPinnedSlab(t *testing.T) {
 	}
 
 	// assert the slab no longer contains the lost sectors
-	slab, err = store.PinnedSlab(context.Background(), slabID)
+	slab, err = store.PinnedSlab(context.Background(), account, slabID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,8 +181,185 @@ func TestPinnedSlab(t *testing.T) {
 		}
 	}
 
-	_, err = store.PinnedSlab(context.Background(), slabID)
+	_, err = store.PinnedSlab(context.Background(), account, slabID)
 	if !errors.Is(err, slabs.ErrUnrecoverable) {
 		t.Fatalf("expected ErrUnrecoverable, got %v", err)
+	}
+}
+
+func TestSlabPruning(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	// create 2 accounts
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	for _, acc := range []proto.Account{acc1, acc2} {
+		if err := store.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// pin slab for both accounts
+	slab1 := slabs.SlabPinParams{MinShards: 1}
+	for _, acc := range []proto.Account{acc1, acc2} {
+		if _, err := store.PinSlab(context.Background(), acc, time.Time{}, slab1); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// pin second slab for first account
+	slab2 := slabs.SlabPinParams{MinShards: 2}
+	if _, err := store.PinSlab(context.Background(), acc1, time.Time{}, slab2); err != nil {
+		t.Fatal(err)
+	}
+
+	// add objects for both accounts
+	slab1ID, _ := slab1.Digest()
+	obj1 := slabs.SealedObject{
+		EncryptedMasterKey: frand.Bytes(72),
+		Slabs: []slabs.SlabSlice{
+			{
+				SlabID: slab1ID,
+				Offset: 10,
+				Length: 100,
+			},
+			{
+				SlabID: slab1ID,
+				Offset: 110,
+				Length: 200,
+			},
+		},
+		Signature: types.Signature(frand.Bytes(64)),
+	}
+	obj1Key := obj1.ID()
+	for _, acc := range []proto.Account{acc1, acc2} {
+		// note: unique key and signature are required per object. It does not change the object ID
+		obj1.EncryptedMasterKey = frand.Bytes(72)
+		obj1.Signature = types.Signature(frand.Bytes(64))
+		if err := store.SaveObject(context.Background(), acc, obj1); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// pin this object to first account only
+	slab2ID, _ := slab2.Digest()
+	obj2 := slabs.SealedObject{
+		EncryptedMasterKey: frand.Bytes(72),
+		Slabs: []slabs.SlabSlice{
+			{
+				SlabID: slab2ID,
+				Offset: 10,
+				Length: 100,
+			},
+			{
+				SlabID: slab2ID,
+				Offset: 110,
+				Length: 200,
+			},
+		},
+	}
+
+	if err := store.SaveObject(context.Background(), acc1, obj2); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSlabs := func(acc proto.Account, expected ...slabs.SlabID) {
+		t.Helper()
+
+		got, err := store.SlabIDs(context.Background(), acc, 0, math.MaxInt64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(expected, got) {
+			t.Fatal("mismatched slab IDs")
+		}
+	}
+
+	assertSlabs(acc1, slab2ID, slab1ID)
+	assertSlabs(acc2, slab1ID)
+
+	// delete object for acc1
+	if err := store.DeleteObject(context.Background(), acc1, obj1Key); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSlabs(acc1, slab2ID, slab1ID)
+	assertSlabs(acc2, slab1ID)
+
+	// prune slabs for acc1
+	if err := store.PruneSlabs(context.Background(), acc1); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSlabs(acc1, slab2ID)
+	assertSlabs(acc2, slab1ID)
+
+	// delete object for acc2
+	if err := store.DeleteObject(context.Background(), acc2, obj1Key); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSlabs(acc1, slab2ID)
+	assertSlabs(acc2, slab1ID)
+
+	// prune slabs for acc2
+	if err := store.PruneSlabs(context.Background(), acc2); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSlabs(acc1, slab2ID)
+	assertSlabs(acc2)
+}
+
+func BenchmarkPruneSlabs(b *testing.B) {
+	const (
+		numAccounts       = 1000
+		objectsPerAccount = 500
+		slabsPerObject    = 3
+	)
+
+	store := initPostgres(b, zap.NewNop())
+
+	batch := &pgx.Batch{}
+	var accs []proto.Account
+	var slabID, objectID int64
+	for i := range numAccounts {
+		pk := types.GeneratePrivateKey().PublicKey()
+		accs = append(accs, proto.Account(pk))
+
+		batch.Queue(`INSERT INTO accounts(public_key, max_pinned_data) VALUES ($1, 1000000);`, sqlPublicKey(pk))
+		for j := range objectsPerAccount {
+			accountID := i + 1
+
+			var encryptionKey [32]byte
+			frand.Read(encryptionKey[:])
+
+			objectKey := sqlHash256(frand.Entropy256())
+			if j%2 == 0 {
+				objectID++
+				batch.Queue(`INSERT INTO objects(object_key, account_id) VALUES ($1, $2)`, objectKey, accountID)
+			}
+			for k := range slabsPerObject {
+				slabID++
+				slabDigest := sqlHash256(frand.Entropy256())
+
+				batch.Queue(`INSERT INTO slabs(digest, encryption_key, min_shards) VALUES ($1, $2, 1);`, slabDigest, sqlHash256(encryptionKey))
+				batch.Queue(`INSERT INTO account_slabs(account_id, slab_id) VALUES ($1, $2)`, accountID, slabID)
+				if j%2 == 0 {
+					batch.Queue(`INSERT INTO object_slabs(object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, $3, 0, 0)`, objectID, slabDigest, k)
+				}
+			}
+		}
+	}
+	batch.Queue(`UPDATE stats SET num_slabs = $1`, slabID)
+	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
+		b.Fatal(err)
+	}
+
+	for b.Loop() {
+		b.ReportMetric(float64(objectsPerAccount)*float64(slabsPerObject)/2.0, "slabs/op")
+
+		if err := store.PruneSlabs(b.Context(), accs[frand.Intn(len(accs))]); err != nil {
+			b.Fatal(err)
+		}
 	}
 }

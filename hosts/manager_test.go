@@ -64,7 +64,7 @@ func (s *mockStore) PruneHosts(ctx context.Context, lastSuccessfulScanCutoff tim
 	return 0, nil
 }
 
-func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, networks []string, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
+func (s *mockStore) UpdateHost(ctx context.Context, hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -364,13 +364,13 @@ func TestResolveHost(t *testing.T) {
 	locator := &mockLocator{}
 
 	// assert [context.Cancelled] is returned when context is cancelled
-	_, _, _, err := resolveHost(cancelledCtx, r, locator, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
+	_, _, err := resolveHost(cancelledCtx, r, locator, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
 	if !errors.Is(err, context.Canceled) {
 		t.Fatal(err)
 	}
 
 	// assert incorrect addresses are filtered out
-	addrs, _, _, err := resolveHost(context.Background(), r, locator, []chain.NetAddress{testMuxAddr("h1.com")}, zap.NewNop())
+	addrs, _, err := resolveHost(context.Background(), r, locator, []chain.NetAddress{testMuxAddr("h1.com")}, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(addrs) != 0 {
@@ -378,21 +378,19 @@ func TestResolveHost(t *testing.T) {
 	}
 
 	// assert net addresses with private IPs are filtered out
-	addrs, _, _, err = resolveHost(context.Background(), r, locator, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
+	addrs, _, err = resolveHost(context.Background(), r, locator, []chain.NetAddress{testMuxAddr("h1.com:1234")}, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(addrs) != 0 {
 		t.Fatal("unexpected", len(addrs))
 	}
 
-	// assert net addresses get resolved and networks are returned
-	addrs, networks, loc, err := resolveHost(context.Background(), r, locator, []chain.NetAddress{testMuxAddr("h2.com:1234")}, zap.NewNop())
+	// assert net addresses get resolved
+	addrs, loc, err := resolveHost(context.Background(), r, locator, []chain.NetAddress{testMuxAddr("h2.com:1234")}, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(addrs) != 1 {
 		t.Fatal("unexpected", len(addrs))
-	} else if len(networks) != 1 {
-		t.Fatal("unexpected", len(networks))
 	} else if loc != mockLocation {
 		t.Fatalf("expected location %v, got %v", mockLocation, loc)
 	}

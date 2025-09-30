@@ -3,7 +3,6 @@ package slabs
 import (
 	"context"
 	"errors"
-	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -144,11 +143,15 @@ func TestUploadShards(t *testing.T) {
 }
 
 func newTestHost(hk types.PublicKey) hosts.Host {
+	countries := []string{"US", "DE", "FR", "CN", "JP", "IN", "BR", "RU", "GB", "IT", "ES", "CA", "AU"}
 	return hosts.Host{
-		Networks:  []string{fmt.Sprintf("127.0.0.%d/24", hk[0])},
 		PublicKey: hk,
 		Settings:  goodSettings,
 		Usability: hosts.GoodUsability,
+
+		CountryCode: countries[frand.Intn(len(countries))],
+		Latitude:    frand.Float64()*180 - 90,
+		Longitude:   frand.Float64()*360 - 180,
 	}
 }
 

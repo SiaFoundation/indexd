@@ -57,7 +57,6 @@ func TestPerformContractRenewals(t *testing.T) {
 			PublicKey: types.PublicKey{byte(i)},
 			Settings:  badSettings, // will be updated by scan to good settings
 			Usability: hosts.GoodUsability,
-			Networks:  []string{""},
 		}
 	}
 

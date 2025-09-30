@@ -47,8 +47,8 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 		stats, err := store.SectorStats(context.Background())
 		if err != nil {
 			t.Fatal(err)
-		} else if stats.NumSlabs != numSlabs {
-			t.Fatalf("expected %d slabs, got %d", numSlabs, stats.NumSlabs)
+		} else if stats.Slabs != numSlabs {
+			t.Fatalf("expected %d slabs, got %d", numSlabs, stats.Slabs)
 		}
 	}
 
@@ -84,7 +84,7 @@ func TestAccountStatsRegistered(t *testing.T) {
 	for i := range 5 {
 		if stats, err := store.AccountStats(t.Context()); err != nil {
 			t.Fatal(err)
-		} else if stats.Registered != int64(i) {
+		} else if stats.Registered != uint64(i) {
 			t.Fatalf("expected %d accounts, got %d", i, stats.Registered)
 		}
 
@@ -102,7 +102,7 @@ func TestAccountStatsRegistered(t *testing.T) {
 
 		if stats, err := store.AccountStats(t.Context()); err != nil {
 			t.Fatal(err)
-		} else if expected := int64(len(accs)) - int64(i) - 1; stats.Registered != expected {
+		} else if expected := uint64(len(accs)) - uint64(i) - 1; stats.Registered != expected {
 			t.Fatalf("expected %d accounts, got %d", expected, stats.Registered)
 		}
 	}

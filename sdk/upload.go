@@ -58,9 +58,6 @@ type (
 		parityShards uint8
 		hostTimeout  time.Duration
 		maxInflight  int
-
-		customKey         *[32]byte
-		disableEncryption bool
 	}
 )
 
@@ -173,7 +170,7 @@ func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Rea
 	}
 }
 
-func runUploadWorkers(ctx context.Context, dialer HostDialer, queue chan shardUpload, maxInflight int, hostTimeout time.Duration) {
+func runUploadWorkers(ctx context.Context, dialer hostDialer, queue chan shardUpload, maxInflight int, hostTimeout time.Duration) {
 	sema := make(chan struct{}, maxInflight)
 	for job := range queue {
 		sema <- struct{}{}

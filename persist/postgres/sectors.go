@@ -56,9 +56,9 @@ func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, ro
 			return fmt.Errorf("failed to mark sectors as lost: %w", err)
 		} else if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, len(sectorIDs), hostID); err != nil {
 			return fmt.Errorf("failed to increment host's lost sectors: %w", err)
-		} else if err := s.incrementNumPinnedSectors(ctx, tx, -pinned); err != nil {
+		} else if err := incrementNumPinnedSectors(ctx, tx, -pinned); err != nil {
 			return fmt.Errorf("failed to update pinned sectors: %w", err)
-		} else if err := s.incrementUnpinnedSectors(ctx, tx, pinned); err != nil {
+		} else if err := incrementUnpinnedSectors(ctx, tx, pinned); err != nil {
 			return fmt.Errorf("failed to update unpinned sectors: %w", err)
 		} else {
 			return nil
@@ -178,9 +178,9 @@ func (s *Store) markFailingSectorsLostBatch(ctx context.Context, hostKey types.P
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		} else if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, totalUpdated, hostID); err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
-		} else if err := s.incrementNumPinnedSectors(ctx, tx, -pinned); err != nil {
+		} else if err := incrementNumPinnedSectors(ctx, tx, -pinned); err != nil {
 			return fmt.Errorf("failed to update pinned sectors: %w", err)
-		} else if err := s.incrementUnpinnedSectors(ctx, tx, pinned); err != nil {
+		} else if err := incrementUnpinnedSectors(ctx, tx, pinned); err != nil {
 			return fmt.Errorf("failed to update unpinned sectors: %w", err)
 		} else {
 			return nil
@@ -193,7 +193,7 @@ func (s *Store) markFailingSectorsLostBatch(ctx context.Context, hostKey types.P
 }
 
 // PinSlab adds a slab to the database for pinning. The slab is associated with
-// the provided account.
+// the provided account.  The last used timestamp of the account is updated.
 func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab slabs.SlabPinParams) (slabs.SlabID, error) {
 	digest, err := slab.Digest()
 	if err != nil {
@@ -246,7 +246,7 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 				return accounts.ErrStorageLimitExceeded
 			}
 
-			_, err := tx.Exec(ctx, `UPDATE accounts SET pinned_data = $1 WHERE id = $2`, newPinnedData, accountID)
+			_, err := tx.Exec(ctx, `UPDATE accounts SET last_used=NOW(), pinned_data = $1 WHERE id = $2`, newPinnedData, accountID)
 			if err != nil {
 				return fmt.Errorf("failed to update account's pinned data: %w", err)
 			}
@@ -258,7 +258,7 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 		}
 
 		// update slab stats
-		if err := s.incrementNumSlabs(ctx, tx, 1); err != nil {
+		if err := incrementNumSlabs(ctx, tx, 1); err != nil {
 			return fmt.Errorf("failed to increment number of slabs: %w", err)
 		}
 
@@ -296,7 +296,7 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 
 		// update number of unpinned sectors
 		if unpinned > 0 {
-			if err := s.incrementUnpinnedSectors(ctx, tx, unpinned); err != nil {
+			if err := incrementUnpinnedSectors(ctx, tx, unpinned); err != nil {
 				return fmt.Errorf("failed to increment number of unpinned sectors: %w", err)
 			}
 		}
@@ -317,73 +317,129 @@ func (s *Store) PinSlab(ctx context.Context, account proto.Account, nextIntegrit
 	})
 }
 
-// UnpinSlab removes the association between the account and the given slab. If
-// this slab was only referenced by the given account, it will also be deleted.
-// The sectors are potentially orphaned and will be removed by a background
-// process.
-func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID slabs.SlabID) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		// delete the association between the account and the slab
+func (s *Store) unpinSlabs(ctx context.Context, tx *txn, accountID int64, slabIDs []slabs.SlabID) error {
+	var args []sqlHash256
+	for _, slabID := range slabIDs {
+		args = append(args, sqlHash256(slabID))
+	}
+
+	// delete the association between the account and the slab
+	rows, err := tx.Query(ctx, `DELETE FROM account_slabs a
+USING slabs s
+WHERE a.account_id = $1
+  AND a.slab_id = s.id
+  AND s.digest = ANY($2)
+RETURNING a.slab_id;`, accountID, args)
+	if err != nil {
+		return fmt.Errorf("failed to unpin slab: %w", err)
+	}
+	defer rows.Close()
+
+	var sIDs []int64
+	for rows.Next() {
 		var sID int64
-		err := tx.QueryRow(ctx, `
-			DELETE FROM account_slabs
-			WHERE
-				account_id = (SELECT id FROM accounts WHERE public_key = $1) AND
-				slab_id = (SELECT id FROM slabs WHERE digest = $2)
-			RETURNING slab_id`, sqlPublicKey(accountID), sqlHash256(slabID)).Scan(&sID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return slabs.ErrSlabNotFound
-		} else if err != nil {
-			return fmt.Errorf("failed to unpin slab: %w", err)
+		if err := rows.Scan(&sID); err != nil {
+			return fmt.Errorf("failed to scan slab ID: %w", err)
 		}
 
-		// update the account's pinned data
-		_, err = tx.Exec(ctx, `
+		sIDs = append(sIDs, sID)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to get slab IDs: %w", err)
+	}
+	if len(sIDs) == 0 {
+		return nil
+	}
+
+	// update the account's pinned data
+	_, err = tx.Exec(ctx, `
 			UPDATE accounts
 			SET pinned_data = pinned_data - (
 				SELECT COUNT(*) * $1
-				FROM slabs
-				INNER JOIN slab_sectors ON slabs.id = slab_sectors.slab_id
-				WHERE slabs.id = $2
+				FROM slab_sectors
+				WHERE slab_id = ANY($2)
 			)
-			WHERE public_key = $3
-		`, proto.SectorSize, sID, sqlPublicKey(accountID))
-		if err != nil {
-			return fmt.Errorf("failed to update account's pinned data: %w", err)
-		}
+			WHERE id = $3
+		`, proto.SectorSize, sIDs, accountID)
+	if err != nil {
+		return fmt.Errorf("failed to update account's pinned data: %w", err)
+	}
 
-		// return early if the slab is pinned by another account
-		var pinned bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM account_slabs WHERE slab_id = $1)`, sID).Scan(&pinned)
-		if err != nil {
-			return fmt.Errorf("failed to check if slab was pinned: %w", err)
-		} else if pinned {
-			return nil
-		}
+	// ignore the slabs that are pinned by another account
+	rows, err = tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE slab_id = ANY($1)`, sIDs)
+	if err != nil {
+		return fmt.Errorf("failed to check if slab was pinned: %w", err)
+	}
+	defer rows.Close()
 
-		// prune the slab and its sectors
-		batch := &pgx.Batch{}
-		batch.Queue(`
-			WITH candidate_sectors AS (
-				SELECT ss.sector_id
-				FROM slab_sectors ss
-				WHERE ss.slab_id = $1 AND NOT EXISTS (
-					SELECT 1
-					FROM slab_sectors ss2
-					WHERE ss2.sector_id = ss.sector_id AND ss2.slab_id <> $1
+	seen := make(map[int64]struct{})
+	for rows.Next() {
+		var sID int64
+		if err := rows.Scan(&sID); err != nil {
+			return fmt.Errorf("failed to check pinned slab: %w", err)
+		}
+		seen[sID] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("failed to get pinned slabs: %w", err)
+	}
+
+	// get all of the slabs that are not pinned by another account
+	var toDelete []int64
+	for _, sID := range sIDs {
+		if _, ok := seen[sID]; ok {
+			continue
+		}
+		toDelete = append(toDelete, sID)
+	}
+
+	// prune the slab and its sectors
+	batch := &pgx.Batch{}
+	batch.Queue(`
+				WITH candidate_sectors AS (
+					SELECT ss.sector_id
+					FROM slab_sectors ss
+					WHERE ss.slab_id = ANY($1) AND NOT EXISTS (
+						SELECT 1
+						FROM slab_sectors ss2
+						WHERE ss2.sector_id = ss.sector_id AND ss2.slab_id <> ANY($1)
+					)
 				)
-			)
-			DELETE FROM sectors WHERE id IN (SELECT sector_id FROM candidate_sectors);`, sID)
-		batch.Queue(`DELETE FROM slabs WHERE id = $1`, sID)
-		if err := tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
-			return fmt.Errorf("failed to prune slab: %w", err)
+				DELETE FROM sectors WHERE id IN (SELECT sector_id FROM candidate_sectors);`, toDelete)
+	batch.Queue(`DELETE FROM slabs WHERE id = ANY($1)`, toDelete)
+	if err := tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("failed to prune slab: %w", err)
+	}
+
+	// update slab stats
+	if err := incrementNumSlabs(ctx, tx, -int64(len(toDelete))); err != nil {
+		return fmt.Errorf("failed to decrement number of slabs: %w", err)
+	}
+
+	return nil
+}
+
+// UnpinSlab removes the association between the account and the given slab. If
+// this slab was only owned by the given account, it will also be deleted.  The
+// sectors of the slab will also be removed in that case.
+func (s *Store) UnpinSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		id, err := accountID(ctx, tx, account)
+		if err != nil {
+			return fmt.Errorf("failed to get account ID: %w", err)
 		}
 
-		// update slab stats
-		if err := s.incrementNumSlabs(ctx, tx, -1); err != nil {
-			return fmt.Errorf("failed to decrement number of slabs: %w", err)
+		var exists bool
+		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_slabs WHERE account_id = $1 and slab_id = (SELECT id FROM slabs WHERE digest = $2))`, id, sqlHash256(slabID)).Scan(&exists)
+		if err != nil {
+			return fmt.Errorf("failed to check if slab exists: %w", err)
+		} else if !exists {
+			return slabs.ErrSlabNotFound
 		}
 
+		if err := s.unpinSlabs(ctx, tx, id, []slabs.SlabID{slabID}); err != nil {
+			return fmt.Errorf("failed to unpin slab: %w", err)
+		}
 		return nil
 	})
 }
@@ -391,7 +447,7 @@ func (s *Store) UnpinSlab(ctx context.Context, accountID proto.Account, slabID s
 // SlabIDs returns the IDs of slabs associated with the given account. The IDs
 // are returned in descending order of the `pinned_at` timestamp, which is the
 // time when the slab was pinned to the indexer.
-func (s *Store) SlabIDs(ctx context.Context, accountID proto.Account, offset, limit int) ([]slabs.SlabID, error) {
+func (s *Store) SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]slabs.SlabID, error) {
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
 	} else if limit == 0 {
@@ -406,7 +462,7 @@ func (s *Store) SlabIDs(ctx context.Context, accountID proto.Account, offset, li
 			INNER JOIN accounts a ON a.id = ac.account_id
 			WHERE a.public_key = $1
 			ORDER BY s.pinned_at DESC
-			LIMIT $2 OFFSET $3`, sqlPublicKey(accountID), limit, offset)
+			LIMIT $2 OFFSET $3`, sqlPublicKey(account), limit, offset)
 		if err != nil {
 			return fmt.Errorf("failed to query slab digests: %w", err)
 		}
@@ -428,7 +484,7 @@ func (s *Store) SlabIDs(ctx context.Context, accountID proto.Account, offset, li
 }
 
 // Slabs returns the slabs with the given IDs from the database.
-func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []slabs.SlabID) ([]slabs.Slab, error) {
+func (s *Store) Slabs(ctx context.Context, account proto.Account, slabIDs []slabs.SlabID) ([]slabs.Slab, error) {
 	if len(slabIDs) == 0 {
 		return nil, nil
 	}
@@ -443,7 +499,7 @@ func (s *Store) Slabs(ctx context.Context, accountID proto.Account, slabIDs []sl
 				FROM slabs s
 				INNER JOIN account_slabs ac ON s.id = ac.slab_id
 				INNER JOIN accounts a ON a.id = ac.account_id
-				WHERE digest = $1 AND a.public_key = $2`, sqlHash256(slabID), sqlPublicKey(accountID)).QueryRow(func(row pgx.Row) error {
+				WHERE digest = $1 AND a.public_key = $2`, sqlHash256(slabID), sqlPublicKey(account)).QueryRow(func(row pgx.Row) error {
 				results[i].ID = slabID
 				var dbID int64
 				if err := row.Scan(&dbID, (*sqlHash256)(&results[i].EncryptionKey), &results[i].MinShards, &results[i].PinnedAt); err != nil {
@@ -547,9 +603,9 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = $1, contract_sectors_map_id = $2 WHERE id = ANY($3)`, hostID, contractMapID, sectorIDs); err != nil {
 			return fmt.Errorf("failed to pin sectors: %w", err)
 		} else if unpinned > 0 {
-			if err := s.incrementNumPinnedSectors(ctx, tx, unpinned); err != nil {
+			if err := incrementNumPinnedSectors(ctx, tx, unpinned); err != nil {
 				return fmt.Errorf("failed to update number of pinned sectors: %w", err)
-			} else if err := s.incrementUnpinnedSectors(ctx, tx, -unpinned); err != nil {
+			} else if err := incrementUnpinnedSectors(ctx, tx, -unpinned); err != nil {
 				return fmt.Errorf("failed to update number of unpinned sectors: %w", err)
 			}
 		}
@@ -571,7 +627,7 @@ func (s *Store) PruneUnpinnableSectors(ctx context.Context, threshold time.Time)
 		if err != nil {
 			return fmt.Errorf("failed to prune unpinnable sectors: %w", err)
 		} else if res.RowsAffected() > 0 {
-			if err := s.incrementNumUnpinnableSlabs(ctx, tx, uint64(res.RowsAffected())); err != nil {
+			if err := incrementNumUnpinnableSlabs(ctx, tx, uint64(res.RowsAffected())); err != nil {
 				return fmt.Errorf("failed to increment unpinnable sectors: %w", err)
 			}
 		}
@@ -696,13 +752,13 @@ func (s *Store) MigrateSector(ctx context.Context, root types.Hash256, hostKey t
 		}
 
 		migrated = true
-		if err := s.incrementNumMigratedSectors(ctx, tx); err != nil {
+		if err := incrementNumMigratedSectors(ctx, tx); err != nil {
 			return fmt.Errorf("failed to increment number of migrated sectors: %w", err)
 		} else if contractMapID.Valid {
 			// sector was pinned before, update stats
-			if err := s.incrementNumPinnedSectors(ctx, tx, -1); err != nil {
+			if err := incrementNumPinnedSectors(ctx, tx, -1); err != nil {
 				return fmt.Errorf("failed to decrement pinned sectors: %w", err)
-			} else if err := s.incrementUnpinnedSectors(ctx, tx, 1); err != nil {
+			} else if err := incrementUnpinnedSectors(ctx, tx, 1); err != nil {
 				return fmt.Errorf("failed to increment unpinned sectors: %w", err)
 			}
 		}

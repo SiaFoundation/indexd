@@ -82,6 +82,13 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		if err := cm.store.AddRenewedContract(ctx, contract.ID, renewed.ID, renewed.Revision, host.Settings.Prices.ContractPrice, minerFee); err != nil {
 			return fmt.Errorf("failed to store renewed contract: %w", err)
 		}
+
+		contractLog.Info("successfully refreshed contract",
+			zap.Stringer("computedAllowance", allowance),
+			zap.Stringer("computedCollateral", collateral),
+			zap.Stringer("newRemainingAllowance", renewed.Revision.RemainingAllowance()),
+			zap.Stringer("newRemainingCollateral", renewed.Revision.RemainingCollateral()),
+			zap.Stringer("newContractID", renewed.ID))
 		return nil
 	})
 }

@@ -59,7 +59,7 @@ func TestAccountFunding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if !balance.Equals(target) {
-		t.Fatal("expected account balance to be funded to 1SC")
+		t.Fatalf("expected account to be funded to %v, got %v", target, balance)
 	}
 
 	// spend some money

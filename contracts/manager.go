@@ -92,6 +92,8 @@ type (
 	// Store is the minimal interface of Store functionality the ContractManager
 	// requires.
 	Store interface {
+		ActiveAccounts(ctx context.Context, threshold time.Time) (uint64, error)
+
 		Contract(ctx context.Context, id types.FileContractID) (Contract, error)
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 
@@ -191,11 +193,11 @@ type (
 		tg      *threadgroup.ThreadGroup
 
 		contractRejectBuffer              time.Duration
-		disableCIDRChecks                 bool
 		expiredContractBroadcastBuffer    uint64
 		expiredContractPruneBuffer        uint64
 		expiredContractSectorsPruneBuffer uint64
 		maintenanceFrequency              time.Duration
+		minHostDistanceKm                 float64
 		pruneIntervalSuccess              time.Duration
 		pruneIntervalFailure              time.Duration
 		syncPollInterval                  time.Duration
@@ -210,18 +212,20 @@ func WithLogger(l *zap.Logger) ContractManagerOpt {
 	}
 }
 
-// WithDisabledCIDRChecks disables the CIDR checks for the contract manager.
-func WithDisabledCIDRChecks() ContractManagerOpt {
-	return func(cm *ContractManager) {
-		cm.disableCIDRChecks = true
-	}
-}
-
 // WithMaintenanceFrequency sets the frequency at which the contract manager
 // performs maintenance tasks. The default is 10 minutes.
 func WithMaintenanceFrequency(frequency time.Duration) ContractManagerOpt {
 	return func(cm *ContractManager) {
 		cm.maintenanceFrequency = frequency
+	}
+}
+
+// WithMinHostDistance sets the minimum geographic separation required between
+// hosts for the contract manager. The default is 10km, when set to
+// 0, the distance check is disabled.
+func WithMinHostDistance(km float64) ContractManagerOpt {
+	return func(cm *ContractManager) {
+		cm.minHostDistanceKm = km
 	}
 }
 
@@ -416,6 +420,7 @@ func newContractManager(renterKey types.PublicKey, accounts AccountManager, chai
 		expiredContractPruneBuffer:        144,           // 144 blocks after broadcast
 		expiredContractSectorsPruneBuffer: 36,            // 36 blocks (~6 hours) after expiration
 		maintenanceFrequency:              10 * time.Minute,
+		minHostDistanceKm:                 10,                 // 10km
 		pruneIntervalSuccess:              24 * time.Hour,     // 1 day
 		pruneIntervalFailure:              3 * time.Hour,      // 3 hours
 		revisionBroadcastInterval:         7 * 24 * time.Hour, // 1 week,

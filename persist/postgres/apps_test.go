@@ -114,6 +114,15 @@ func TestAppConnectKeys(t *testing.T) {
 	if _, err := store.ValidAppConnectKey(ctx, "foobar"); !errors.Is(err, accounts.ErrKeyNotFound) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
+
+	stats, err := store.AccountStats(ctx)
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.Active != 1 {
+		t.Fatal("expected 1 active account, got", stats.Active)
+	} else if stats.Registered != 1 {
+		t.Fatal("expected 1 registered account, got", stats.Registered)
+	}
 }
 
 func TestAppConnectKey(t *testing.T) {

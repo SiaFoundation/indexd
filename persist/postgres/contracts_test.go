@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
@@ -1386,6 +1387,69 @@ func TestMarkBroadcastAttempt(t *testing.T) {
 	}
 }
 
+func TestContractsStats(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	hk := types.PublicKey{1}
+	fcid1 := types.FileContractID{1}
+	fcid2 := types.FileContractID{2}
+	fcid3 := types.FileContractID{3}
+	fcid4 := types.FileContractID{4}
+
+	store.addTestHost(t, hk)
+	store.addTestContract(t, hk, fcid1)
+	store.addTestContract(t, hk, fcid2)
+	store.addTestContract(t, hk, fcid3)
+	store.addTestContract(t, hk, fcid4)
+
+	updateContract := func(id types.FileContractID, good bool, size, capacity, proofHeight uint64) {
+		t.Helper()
+		res, err := store.pool.Exec(t.Context(), `UPDATE contracts SET good = $1, size = $2, capacity = $3, proof_height = $4 WHERE contract_id = $5`,
+			good, size, capacity, proofHeight, sqlHash256(id))
+		if err != nil {
+			t.Fatal(err)
+		} else if res.RowsAffected() != 1 {
+			t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
+		}
+	}
+
+	// set scanned height to 100 and renew window to 20
+	res, err := store.pool.Exec(t.Context(), "UPDATE global_settings SET scanned_height = $1, contracts_renew_window = $2",
+		80, 20)
+	if err != nil {
+		t.Fatal(err)
+	} else if res.RowsAffected() != 1 {
+		t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
+	}
+
+	// fcid1: good, active, not in renew window
+	updateContract(fcid1, true, 1000, 2000, 200)
+
+	// fcid2: bad, active, not in renew window
+	updateContract(fcid2, false, 3000, 4000, 200)
+
+	// fcid3: good, active, in renew window
+	updateContract(fcid3, true, 5000, 6000, 100)
+
+	// fcid4: bad, already expired
+	updateContract(fcid4, true, 6000, 7000, 10)
+
+	expected := admin.ContractsStatsResponse{
+		Contracts:     3,     // all but fcid4
+		BadContracts:  1,     // fcid2
+		Renewing:      1,     // fcid3
+		TotalCapacity: 12000, // (2000 + 4000 + 6000) = 12000
+		TotalSize:     9000,  // (1000 + 3000 + 5000) = 9000
+	}
+
+	stats, err := store.ContractsStats(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(stats, expected) {
+		t.Fatalf("mismatch: \n%+v\n%+v", expected, stats)
+	}
+}
+
 // BenchmarkContracts is a benchmark to ensure the performance of
 // all methods on the store that return either a contract or a list of
 // contract IDs.
@@ -1541,6 +1605,71 @@ func BenchmarkContracts(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkContractsStats(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	hk := types.PublicKey{1}
+
+	store.addTestHost(b, hk)
+
+	const (
+		generations  = 100 // about 10 years of renewals at a 6 week period
+		numContracts = 100 // number of active contracts
+	)
+
+	fcids := make([]types.FileContractID, numContracts)
+	for i := range numContracts {
+		fcids[i] = types.FileContractID{byte(i + 1)}
+		store.addTestContract(b, hk, fcids[i])
+	}
+
+	for range generations {
+		for i := range numContracts {
+			from := fcids[i]
+			to := from.V2RenewalID()
+			fcids[i] = to
+
+			err := store.AddRenewedContract(b.Context(), from, to, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency)
+			if err != nil {
+				b.Fatal(err)
+			}
+		}
+	}
+
+	// make sure only the last generation is active
+	err := store.UpdateChainState(b.Context(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(b.Context(), types.ChainIndex{Height: 100})
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	_, err = store.pool.Exec(b.Context(), `
+		UPDATE contracts
+		SET proof_height = 99, state = $1
+		WHERE renewed_to IS NOT NULL;
+	`, contracts.ContractStateResolved)
+	if err != nil {
+		b.Fatal(err)
+	}
+	_, err = store.pool.Exec(b.Context(), `
+		UPDATE contracts
+		SET proof_height = 101, state = $1
+		WHERE renewed_to IS NULL;
+	`, contracts.ContractStateActive)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	for b.Loop() {
+		stats, err := store.ContractsStats(b.Context())
+		if err != nil {
+			b.Fatal(err)
+		} else if stats.Contracts != numContracts {
+			b.Fatalf("expected %d contracts, got %d", numContracts, stats.Contracts)
+		}
+	}
 }
 
 func BenchmarkPrunableContractRoots(b *testing.B) {

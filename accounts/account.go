@@ -72,6 +72,7 @@ type (
 		Description    string        `json:"description,omitempty"`
 		LogoURL        string        `json:"logoURL,omitempty"`
 		ServiceURL     string        `json:"serviceURL,omitempty"`
+		LastUsed       time.Time     `json:"lastUsed"`
 	}
 
 	// HostAccount represents an ephemeral account on a host.

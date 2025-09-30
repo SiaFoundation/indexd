@@ -1,10 +1,12 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"math"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -40,7 +42,7 @@ func TestObjects(t *testing.T) {
 		}
 	}
 
-	assertObjects := func(acc proto4.Account, n int) []slabs.Object {
+	assertObjects := func(acc proto4.Account, n int) []slabs.SealedObject {
 		t.Helper()
 		objects, err := store.ListObjects(context.Background(), acc, slabs.Cursor{}, 10)
 		if err != nil {
@@ -56,32 +58,64 @@ func TestObjects(t *testing.T) {
 	assertObjects(acc2, 0)
 
 	// add objects for both accounts
-	objKey := frand.Entropy256()
-	slabID, _ := slab.Digest()
-	obj := slabs.Object{
-		Key: objKey,
-		Slabs: []slabs.SlabSlice{
-			{
-				SlabID: slabID,
-				Offset: 10,
-				Length: 100,
-			},
-			{
-				SlabID: slabID,
-				Offset: 110,
-				Length: 200,
-			},
-		},
-		Meta: []byte("hello world"),
-	}
-	for _, acc := range []proto4.Account{acc1, acc2} {
-		err := store.SaveObject(context.Background(), acc, obj)
-		if err != nil {
-			t.Fatal(err)
+	randomSlabs := func(n int) []slabs.SlabPinParams {
+		s := make([]slabs.SlabPinParams, n)
+		for i := range s {
+			s[i] = slabs.SlabPinParams{
+				EncryptionKey: frand.Entropy256(),
+				MinShards:     1,
+			}
 		}
+		return s
 	}
 
-	assertObj := func(obj, other slabs.Object) {
+	pinSlabs := func(acc proto4.Account, params []slabs.SlabPinParams) []slabs.SlabSlice {
+		t.Helper()
+
+		var ss []slabs.SlabSlice
+		for _, p := range params {
+			id, err := store.PinSlab(context.Background(), acc, time.Time{}, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ss = append(ss, slabs.SlabSlice{
+				SlabID: id,
+				Offset: 10,
+				Length: 120,
+			})
+		}
+		return ss
+	}
+
+	randomObject := func(s []slabs.SlabSlice) slabs.SealedObject {
+		return slabs.SealedObject{
+			EncryptedMasterKey: frand.Bytes(72),
+			Slabs:              s,
+			EncryptedMetadata:  []byte("hello world"),
+			Signature:          (types.Signature)(frand.Bytes(64)),
+		}
+	}
+	obj1Slabs := randomSlabs(3)
+	pinSlabs(acc1, obj1Slabs)
+	pinSlabs(acc2, obj1Slabs)
+	obj1Acc1 := randomObject(pinSlabs(acc1, obj1Slabs))
+
+	if err := store.SaveObject(context.Background(), acc1, obj1Acc1); err != nil {
+		t.Fatal(err)
+	}
+	// pin the same object for acc2 with different master key and sig to satisfy unique constraint
+	obj1Acc2 := obj1Acc1
+	obj1Acc2.EncryptedMasterKey = frand.Bytes(72)
+	obj1Acc2.Signature = (types.Signature)(frand.Bytes(64))
+	if err := store.SaveObject(context.Background(), acc2, obj1Acc2); err != nil {
+		t.Fatal(err)
+	}
+
+	if obj1Acc1.ID() != obj1Acc2.ID() {
+		t.Fatal("expected object IDs to match")
+	}
+
+	assertObj := func(obj, other slabs.SealedObject) {
 		t.Helper()
 		if other.CreatedAt.IsZero() || other.UpdatedAt.IsZero() {
 			t.Fatalf("expected non-zero timestamps, got %v and %v", other.CreatedAt, other.UpdatedAt)
@@ -95,24 +129,23 @@ func TestObjects(t *testing.T) {
 
 	// 1 object should exist for both accounts
 	objs := assertObjects(acc1, 1)
-	assertObj(obj, objs[0])
+	assertObj(obj1Acc1, objs[0])
 
 	objs = assertObjects(acc2, 1)
-	assertObj(obj, objs[0])
+	assertObj(obj1Acc2, objs[0])
 
 	// delete object for acc1
-	if err := store.DeleteObject(context.Background(), acc1, objKey); err != nil {
+	if err := store.DeleteObject(context.Background(), acc1, obj1Acc1.ID()); err != nil {
 		t.Fatal(err)
 	}
 
 	// no object should exist for acc1, 1 for acc2
 	assertObjects(acc1, 0)
 	objs = assertObjects(acc2, 1)
-	assertObj(obj, objs[0])
+	assertObj(obj1Acc2, objs[0])
 
 	// add another object to acc2
-	obj2 := obj
-	obj2.Key = frand.Entropy256()
+	obj2 := randomObject(pinSlabs(acc2, randomSlabs(2)))
 	if err := store.SaveObject(context.Background(), acc2, obj2); err != nil {
 		t.Fatal(err)
 	}
@@ -120,13 +153,12 @@ func TestObjects(t *testing.T) {
 	// listing the objects should return obj1 first since it was updated first
 	assertObjects(acc1, 0)
 	objs = assertObjects(acc2, 2)
-	assertObj(obj, objs[0])
+	assertObj(obj1Acc2, objs[0])
 	assertObj(obj2, objs[1])
 
 	// save object 1 again to update its timestamp
-	obj3 := obj // same key as obj
-	obj3.Meta = []byte("updated meta")
-	if err := store.SaveObject(context.Background(), acc2, obj3); err != nil {
+	obj1Acc2.EncryptedMetadata = []byte("updated meta")
+	if err := store.SaveObject(context.Background(), acc2, obj1Acc2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -134,7 +166,7 @@ func TestObjects(t *testing.T) {
 	assertObjects(acc1, 0)
 	objs = assertObjects(acc2, 2)
 	assertObj(obj2, objs[0])
-	assertObj(obj3, objs[1])
+	assertObj(obj1Acc2, objs[1])
 
 	// make sure the limit works
 	objs, err := store.ListObjects(context.Background(), acc2, slabs.Cursor{}, 1)
@@ -153,7 +185,7 @@ func TestObjects(t *testing.T) {
 	}
 
 	// assert we can fetch a single object
-	obj, err = store.Object(context.Background(), acc2, obj2.Key)
+	obj, err := store.Object(context.Background(), acc2, obj2.ID())
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.CreatedAt.IsZero() || obj.UpdatedAt.IsZero() {
@@ -162,7 +194,7 @@ func TestObjects(t *testing.T) {
 	assertObj(obj2, obj)
 
 	// assert account is taken into consideration when fetching an object
-	_, err = store.Object(context.Background(), acc1, obj2.Key)
+	_, err = store.Object(context.Background(), acc1, obj2.ID())
 	if !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
@@ -187,32 +219,50 @@ func TestListObjectsRegression(t *testing.T) {
 	}
 
 	// pin slab for both accounts
-	slab := slabs.SlabPinParams{MinShards: 1}
-	_, err = store.PinSlab(context.Background(), acc, time.Time{}, slab)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slabID, err := slab.Digest()
-	if err != nil {
-		t.Fatal(err)
-	}
 
-	// add multiple objects
-	for i := 3; i >= 1; i-- {
-		if err := store.SaveObject(context.Background(), acc, slabs.Object{
-			Key: types.Hash256{byte(i)},
+	randomObject := func() slabs.SealedObject {
+		slab := slabs.SlabPinParams{EncryptionKey: frand.Entropy256(), MinShards: 1}
+		_, err = store.PinSlab(context.Background(), acc, time.Time{}, slab)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slabID, err := slab.Digest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slabs.SealedObject{
+			EncryptedMasterKey: frand.Bytes(72),
 			Slabs: []slabs.SlabSlice{
 				{
 					SlabID: slabID,
-					Offset: 0,
-					Length: 12,
+					Offset: 10,
+					Length: 100,
+				},
+				{
+					SlabID: slabID,
+					Offset: 110,
+					Length: 200,
 				},
 			},
-			Meta: []byte("meta"),
-		}); err != nil {
+			EncryptedMetadata: []byte("hello world"),
+			Signature:         (types.Signature)(frand.Bytes(64)),
+		}
+	}
+
+	// add multiple objects
+	var objectIDs []types.Hash256
+	for range 3 {
+		obj := randomObject()
+		objectIDs = append(objectIDs, obj.ID())
+		if err := store.SaveObject(context.Background(), acc, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
+	// list objects returns objects in updated_at ASC then lexicographical order of ID
+	sort.Slice(objectIDs, func(i, j int) bool {
+		return bytes.Compare(objectIDs[i][:], objectIDs[j][:]) < 0
+	})
+
 	ts := time.Now().Round(time.Second)
 	_, err = store.pool.Exec(context.Background(), "UPDATE objects SET updated_at = $1", ts)
 	if err != nil {
@@ -222,10 +272,13 @@ func TestListObjectsRegression(t *testing.T) {
 	objs, err := store.ListObjects(context.Background(), acc, slabs.Cursor{After: ts}, 10)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(objs) != 3 {
+	} else if len(objs) != len(objectIDs) {
 		t.Fatal("expected 3 objects, got", len(objs))
-	} else if objs[0].Key != (types.Hash256{1}) || objs[1].Key != (types.Hash256{2}) || objs[2].Key != (types.Hash256{3}) {
-		t.Fatal("objects not in expected order")
+	}
+	for i, obj := range objs {
+		if obj.ID() != objectIDs[i] {
+			t.Fatalf("expected object ID %v, got %v", objectIDs[i], obj.ID())
+		}
 	}
 }
 
@@ -251,7 +304,7 @@ func TestSharedObjects(t *testing.T) {
 		}
 	}
 
-	pinRandomSlab := func(t *testing.T) slabs.SharedObjectSlab {
+	pinRandomSlab := func(t *testing.T) slabs.SharedSlab {
 		t.Helper()
 
 		s := slabs.SlabPinParams{
@@ -273,7 +326,7 @@ func TestSharedObjects(t *testing.T) {
 			t.Fatalf("expected slab ID %v, got %v", id, slabID)
 		}
 
-		so := slabs.SharedObjectSlab{
+		so := slabs.SharedSlab{
 			PinnedSlab: slabs.PinnedSlab{
 				ID:            slabID,
 				EncryptionKey: s.EncryptionKey,
@@ -294,14 +347,13 @@ func TestSharedObjects(t *testing.T) {
 
 	// add an object with multiple slabs
 	expectedSharedObj := slabs.SharedObject{
-		Key:   frand.Entropy256(),
-		Slabs: []slabs.SharedObjectSlab{pinRandomSlab(t), pinRandomSlab(t), pinRandomSlab(t)},
-		Meta:  []byte("hello world"),
+		Slabs:             []slabs.SharedSlab{pinRandomSlab(t), pinRandomSlab(t), pinRandomSlab(t)},
+		EncryptedMetadata: []byte("hello world"),
 	}
-	obj := slabs.Object{
-		Key:   expectedSharedObj.Key,
-		Slabs: make([]slabs.SlabSlice, len(expectedSharedObj.Slabs)),
-		Meta:  expectedSharedObj.Meta,
+	obj := slabs.SealedObject{
+		EncryptedMasterKey: frand.Bytes(72),
+		Slabs:              make([]slabs.SlabSlice, len(expectedSharedObj.Slabs)),
+		EncryptedMetadata:  expectedSharedObj.EncryptedMetadata,
 	}
 	for i, slab := range expectedSharedObj.Slabs {
 		obj.Slabs[i] = slabs.SlabSlice{
@@ -314,7 +366,7 @@ func TestSharedObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sharedObj, err := store.SharedObject(t.Context(), obj.Key)
+	sharedObj, err := store.SharedObject(t.Context(), obj.ID())
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(expectedSharedObj, sharedObj) {
@@ -365,8 +417,8 @@ func BenchmarkSaveObject(b *testing.B) {
 		}
 	}
 
-	var objs []slabs.Object
-	pinObject := func(b *testing.B) (obj slabs.Object) {
+	var objs []slabs.SealedObject
+	pinObject := func(b *testing.B) (obj slabs.SealedObject) {
 		b.Helper()
 
 		s := slabs.SlabPinParams{
@@ -403,10 +455,7 @@ func BenchmarkSaveObject(b *testing.B) {
 				Length: 256,
 			})
 		}
-
-		obj.Key = frand.Entropy256()
-		obj.Meta = make([]byte, 1024)
-		frand.Read(obj.Meta)
+		obj.EncryptedMetadata = frand.Bytes(1024)
 
 		return
 	}
@@ -421,7 +470,6 @@ func BenchmarkSaveObject(b *testing.B) {
 
 	obj := pinObject(b)
 	for b.Loop() {
-		obj.Key = frand.Entropy256()
 		if err := store.SaveObject(b.Context(), acc1, obj); err != nil {
 			b.Fatal(err)
 		}

@@ -25,13 +25,12 @@ type (
 	// checking their integrity on the network and migrating their sectors if
 	// necessary.
 	SlabManager struct {
-		disableCIDRChecks bool
-
 		healthCheckInterval time.Duration
 
 		integrityCheckInterval       time.Duration
 		failedIntegrityCheckInterval time.Duration
 		maxFailedIntegrityChecks     uint
+		minHostDistanceKm            float64
 
 		migrationAccount    proto.Account
 		migrationAccountKey types.PrivateKey
@@ -95,17 +94,21 @@ type (
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		MigrateSector(ctx context.Context, root types.Hash256, hostKey types.PublicKey) (bool, error)
 		PinSlab(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slab SlabPinParams) (SlabID, error)
+		UnpinSlab(context.Context, proto.Account, SlabID) error
 		RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error
 		SectorsForIntegrityCheck(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
+		PinnedSlab(ctx context.Context, account proto.Account, slabID SlabID) (PinnedSlab, error)
 		Slab(ctx context.Context, slabID SlabID) (Slab, error)
-		Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error)
+		Slabs(ctx context.Context, account proto.Account, slabIDs []SlabID) ([]Slab, error)
+		SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]SlabID, error)
 		UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]SlabID, error)
+		PruneSlabs(ctx context.Context, account proto.Account) error
 
 		// Object methods
-		Object(ctx context.Context, account proto.Account, key types.Hash256) (Object, error)
+		Object(ctx context.Context, account proto.Account, key types.Hash256) (SealedObject, error)
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
-		SaveObject(ctx context.Context, account proto.Account, obj Object) error
-		ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) (objs []Object, _ error)
+		SaveObject(ctx context.Context, account proto.Account, obj SealedObject) error
+		ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]SealedObject, error)
 		SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error)
 	}
 
@@ -123,13 +126,6 @@ var (
 // An Option is a functional option for the SlabManager.
 type Option func(*SlabManager)
 
-// WithDisabledCIDRChecks disables the CIDR checks for the slab manager.
-func WithDisabledCIDRChecks() Option {
-	return func(m *SlabManager) {
-		m.disableCIDRChecks = true
-	}
-}
-
 // WithHealthCheckInterval sets the interval for health checks.
 func WithHealthCheckInterval(interval time.Duration) Option {
 	return func(m *SlabManager) {
@@ -142,6 +138,15 @@ func WithIntegrityCheckIntervals(success, failure time.Duration) Option {
 	return func(m *SlabManager) {
 		m.integrityCheckInterval = success
 		m.failedIntegrityCheckInterval = failure
+	}
+}
+
+// WithMinHostDistance sets the minimum distance between hosts used for storing
+// sectors of the same slab. The default is 10km, if set to 0, the distance
+// check is disabled.
+func WithMinHostDistance(km float64) Option {
+	return func(m *SlabManager) {
+		m.minHostDistanceKm = km
 	}
 }
 
@@ -192,6 +197,7 @@ func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Diale
 		integrityCheckInterval:       7 * 24 * time.Hour,
 		failedIntegrityCheckInterval: 6 * time.Hour,
 		maxFailedIntegrityChecks:     5,
+		minHostDistanceKm:            10,
 
 		migrationAccount:    proto.Account(migrationAccount.PublicKey()),
 		migrationAccountKey: migrationAccount,

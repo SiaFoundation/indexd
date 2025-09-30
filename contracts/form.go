@@ -32,6 +32,12 @@ const (
 	// refreshes due to how long it would take to reasonably upload
 	// that amount of data with a 10 Gbps connection.
 	maxContractGrowthRate = 256 << 30
+
+	// accountActivityThreshold is the threshold for determining whether an
+	// account has been active recently.  An account is considered active if it
+	// has been used within the threshold period.  We multiply the funding per
+	// contract by the number of active accounts.
+	accountActivityThreshold = 24 * 7 * time.Hour
 )
 
 var (
@@ -83,7 +89,7 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 }
 
 // performContractFormation makes sure that we have at least 'wanted' good
-// contracts with good hosts in unique CIDRs.
+// contracts with good hosts that are sufficiently spaced apart.
 func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted int64, log *zap.Logger) error {
 	formationLog := log.Named("formation")
 	formationLog.Debug("started", zap.Uint64("period", period), zap.Int64("wanted", wanted))
@@ -118,7 +124,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 	formationLog.Debug("found candidates", zap.Uint64("n", uint64(len(candidates))))
 
 	// forceFormation is a map of hosts that we will always form a contract with
-	// regardless of how many we already have or what CIDR they are on
+	// regardless of how many we already have or where the host is located
 	forceFormation := make(map[types.PublicKey]bool)
 
 	// determine which hosts are 'full', meaning they have exclusively full
@@ -161,48 +167,16 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		forceFormation[hostKey] = true
 	}
 
-	// helpers for CIDR check
-	usedCidrs := make(map[string]types.PublicKey)
-	addHost := func(host hosts.Host) {
-		// NOTE: in testing CIDR checks are disabled because the hosts' network
-		// is an unspecified IPv6 address, in those cases we use the host's
-		// public key to ensure we don't keep forming contracts with the same
-		// host.
-		if cm.disableCIDRChecks {
-			usedCidrs[host.PublicKey.String()] = host.PublicKey
-		} else {
-			for _, network := range host.Networks {
-				usedCidrs[network] = host.PublicKey
-			}
-		}
-
-		wanted--
-	}
-	hasCidrConflict := func(host hosts.Host) (types.PublicKey, bool) {
-		if cm.disableCIDRChecks {
-			hk, known := usedCidrs[host.PublicKey.String()]
-			return hk, known
-		}
-		for _, cidr := range host.Networks {
-			if hk, known := usedCidrs[cidr]; known {
-				return hk, true
-			}
-		}
-		return types.PublicKey{}, false
-	}
-
 	// helper to check if a host is good to form a contract with
+	set := hosts.NewSpacedSet(cm.minHostDistanceKm)
 	isGood := func(host hosts.Host, log *zap.Logger) bool {
 		force := forceFormation[host.PublicKey]
 		if good := host.Usability.Usable(); !good {
 			// host should be good
 			log.Debug("host is not usable due to bad usability", zap.String("reasons", host.Usability.FailedChecks()))
 			return false
-		} else if usedBy, used := hasCidrConflict(host); used && !force {
-			// host should be on a unique cidr unless 'full'
-			if host.PublicKey != usedBy {
-				log.Debug("host is not usable cidr is already in use", zap.Stringer("usedBy", usedBy))
-			}
+		} else if spaced := set.CanAddHost(host); !spaced && !force {
+			// host should be sufficiently spaced from other hosts
 			return false
 		} else if host.Settings.RemainingStorage < minRemainingStorage {
 			// host should at least have 10GB of storage left
@@ -236,7 +210,15 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		}
 
 		// contract is good
-		addHost(host)
+		set.Add(host)
+		wanted--
+	}
+
+	activeAccounts, err := cm.store.ActiveAccounts(ctx, time.Now().Add(-accountActivityThreshold))
+	if err != nil {
+		return fmt.Errorf("failed to get active accounts: %w", err)
+	} else if activeAccounts == 0 {
+		activeAccounts = 1
 	}
 
 	// randomize the candidate order to avoid preferring any host
@@ -260,10 +242,10 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
 			// make sure host is still good
 			if !isGood(host, hostLog) {
-				return fmt.Errorf("host is not good: %s", host.PublicKey)
+				return fmt.Errorf("%w: %s", hosts.ErrBadHost, host.PublicKey)
 			}
 
-			allowance, collateral := contractFunding(host.Settings, 0, minAllowance, minHostCollateral, period)
+			allowance, collateral := contractFunding(host.Settings, 0, minAllowance.Mul64(activeAccounts), minHostCollateral, period)
 			formationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			hc, err := cm.dialer.DialHost(formationCtx, host.PublicKey, host.SiamuxAddr())
@@ -292,7 +274,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			}
 
 			// contract formed successfully
-			addHost(host)
+			set.Add(host)
+			wanted--
+
 			hostLog.Debug("formed contract", zap.Stringer("contractID", contract.ID))
 			return nil
 		})

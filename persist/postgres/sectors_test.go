@@ -1362,10 +1362,10 @@ func TestPinnedSectorsStatistics(t *testing.T) {
 		got, err := store.SectorStats(t.Context())
 		if err != nil {
 			t.Fatal(err)
-		} else if got.NumUnpinnedSectors != unpinned {
-			t.Fatalf("expected %d unpinned sectors, got %d", unpinned, got.NumUnpinnedSectors)
-		} else if got.NumPinnedSectors != pinned {
-			t.Fatalf("expected %d pinned sectors, got %d", pinned, got.NumPinnedSectors)
+		} else if got.Unpinned != unpinned {
+			t.Fatalf("expected %d unpinned sectors, got %d", unpinned, got.Unpinned)
+		} else if got.Pinned != pinned {
+			t.Fatalf("expected %d pinned sectors, got %d", pinned, got.Pinned)
 		}
 	}
 
@@ -1564,7 +1564,7 @@ func BenchmarkSlabs(b *testing.B) {
 		b.SetBytes(slabSize)
 		b.ResetTimer()
 		for b.Loop() {
-			_, err := store.PinnedSlab(context.Background(), id)
+			_, err := store.PinnedSlab(context.Background(), account, id)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -1649,6 +1649,18 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	unpinSectors := func() {
 		b.Helper()
 		_, err := store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id = NULL`)
+		if err != nil {
+			b.Fatal(err)
+		}
+
+		// recalculate sector stats
+		_, err = store.pool.Exec(context.Background(), `
+			UPDATE stats
+			SET num_unpinned_sectors = (
+				SELECT COUNT(id)
+				FROM sectors
+				WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NULL
+			)`)
 		if err != nil {
 			b.Fatal(err)
 		}

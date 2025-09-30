@@ -149,6 +149,10 @@ func (s *mockStore) DeleteAccount(ctx context.Context, ak types.PublicKey) error
 	return nil
 }
 
+func (s *mockStore) ActiveAccounts(ctx context.Context, threshold time.Time) (uint64, error) {
+	return uint64(len(s.accounts)), nil
+}
+
 func (s *mockStore) HasAccount(ctx context.Context, pk types.PublicKey) (bool, error) {
 	_, ok := s.accounts[pk]
 	return ok, nil
@@ -383,6 +387,7 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	// assert batches were applied correctly
+	target := defaultFundTarget
 	if len(f.calls) != 2 {
 		t.Fatal("expected two calls to fund accounts")
 	} else if len(f.calls[0].accounts) != accountFundBatch {
@@ -393,10 +398,10 @@ func TestAccountManager(t *testing.T) {
 		t.Fatal("expected first call to have two contract IDs")
 	} else if len(f.calls[1].contractIDs) != 1 {
 		t.Fatal("expected second call to have one contract ID")
-	} else if !f.calls[0].target.Equals(types.Siacoins(1)) {
-		t.Fatalf("expected target to be %v, got %v", types.Siacoins(1), f.calls[0].target)
-	} else if !f.calls[1].target.Equals(types.Siacoins(1)) {
-		t.Fatalf("expected target to be %v, got %v", types.Siacoins(1), f.calls[0].target)
+	} else if !f.calls[0].target.Equals(target) {
+		t.Fatalf("expected target to be %v, got %v", target, f.calls[0].target)
+	} else if !f.calls[1].target.Equals(target) {
+		t.Fatalf("expected target to be %v, got %v", target, f.calls[1].target)
 	}
 
 	// assert all accounts next fund was updated and consecutive failed funds was reset

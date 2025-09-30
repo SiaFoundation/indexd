@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/api/app"
 )
 
@@ -58,6 +59,24 @@ func (cr *ConnectAppRequest) WaitForApproval(ctx context.Context) (bool, error) 
 			}
 		}
 	}
+}
+
+// NewSeedPhrase generates a new seed phrase.
+func NewSeedPhrase() string {
+	return wallet.NewSeedPhrase()
+}
+
+// AppKey derives an application key from the given seed phrase and app ID.
+// The app ID should be a unique 12-byte identifier for the application.
+// This function is deterministic: the same phrase and app ID will always
+// produce the same key.
+func AppKey(phrase string, appID [12]byte) (types.PrivateKey, error) {
+	var seed [32]byte
+	if err := wallet.SeedFromPhrase(&seed, phrase); err != nil {
+		return types.PrivateKey{}, fmt.Errorf("failed to derive seed from phrase: %w", err)
+	}
+	seed = types.HashBytes(append(seed[:], appID[:]...))
+	return types.NewPrivateKeyFromSeed(seed[:]), nil
 }
 
 // Connect requests permission to connect an application to the indexer.
