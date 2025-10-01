@@ -168,6 +168,11 @@ func (m *AccountManager) DeleteAccount(ctx context.Context, ak types.PublicKey) 
 	return m.store.DeleteAccount(ctx, ak)
 }
 
+// FundTarget returns the configured fund target of the account manager.
+func (am *AccountManager) FundTarget() types.Currency {
+	return am.fundTarget
+}
+
 func updateFundedAccounts(accounts []HostAccount, n int) {
 	if n > len(accounts) {
 		panic("illegal number of funded accounts") // developer error

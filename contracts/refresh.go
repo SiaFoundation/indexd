@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/indexd/hosts"
@@ -59,11 +60,12 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		}
 		defer hc.Close()
 
-		// scale funding by active account count
-		activeAccounts, err := cm.activeAccounts(ctx)
+		// scale funding by number of active accounts
+		activeAccounts, err := cm.store.ActiveAccounts(ctx, time.Now().Add(-accountActivityThreshold))
 		if err != nil {
-			return fmt.Errorf("failed to get active accounts: %w", err)
+			return fmt.Errorf("failed to get number of active accounts: %w", err)
 		}
+		target := maxCurrency(minAllowance, cm.accounts.FundTarget().Mul64(activeAccounts))
 
 		// TODO: Right now this isn't quite correct since allowance and
 		// collateral are added on top of the existing one. This should fix
@@ -72,7 +74,7 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		// 1. If the contract is out of funds we also add collateral and vice versa
 		// 2. The total collateral might exceed the host's maximum collateral
 		//    since 'contractFunding' doesn't take into account existing collateral
-		allowance, collateral := contractFunding(host.Settings, contract.Size, minAllowance.Mul64(activeAccounts), minHostCollateral, period)
+		allowance, collateral := contractFunding(host.Settings, contract.Size, target, minHostCollateral, period)
 		res, err := hc.RefreshContract(ctx, host.Settings, proto.RPCRefreshContractParams{
 			Allowance:  allowance,
 			Collateral: collateral,

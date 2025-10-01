@@ -88,16 +88,11 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 	s.w.SignV2Inputs(txn, toSign)
 }
 
-// activeAccounts returns the number of accounts that have been active within
-// the accountActivityThreshold, floored at 1
-func (cm *ContractManager) activeAccounts(ctx context.Context) (uint64, error) {
-	activeAccounts, err := cm.store.ActiveAccounts(ctx, time.Now().Add(-accountActivityThreshold))
-	if err != nil {
-		return 0, err
-	} else if activeAccounts == 0 {
-		activeAccounts = 1
+func maxCurrency(a, b types.Currency) types.Currency {
+	if a.Cmp(b) >= 0 {
+		return a
 	}
-	return activeAccounts, nil
+	return b
 }
 
 // performContractFormation makes sure that we have at least 'wanted' good
@@ -226,11 +221,12 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		wanted--
 	}
 
-	// scale funding by active account count
-	activeAccounts, err := cm.activeAccounts(ctx)
+	// scale funding by number of active accounts
+	activeAccounts, err := cm.store.ActiveAccounts(ctx, time.Now().Add(-accountActivityThreshold))
 	if err != nil {
-		return fmt.Errorf("failed to get active accounts: %w", err)
+		return fmt.Errorf("failed to get number of active accounts: %w", err)
 	}
+	target := maxCurrency(minAllowance, cm.accounts.FundTarget().Mul64(activeAccounts))
 
 	// randomize the candidate order to avoid preferring any host
 	cm.shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
@@ -256,7 +252,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 				return fmt.Errorf("host is not good: %s", host.PublicKey)
 			}
 
-			allowance, collateral := contractFunding(host.Settings, 0, minAllowance.Mul64(activeAccounts), minHostCollateral, period)
+			allowance, collateral := contractFunding(host.Settings, 0, target, minHostCollateral, period)
 			formationCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
 			hc, err := cm.dialer.DialHost(formationCtx, host.PublicKey, host.SiamuxAddr())

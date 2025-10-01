@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.sia.tech/core/rhp/v4"
 	"go.sia.tech/indexd/hosts"
@@ -58,10 +59,11 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		defer hc.Close()
 
 		// scale funding by active account count
-		activeAccounts, err := cm.activeAccounts(ctx)
+		activeAccounts, err := cm.store.ActiveAccounts(ctx, time.Now().Add(-accountActivityThreshold))
 		if err != nil {
-			return fmt.Errorf("failed to get active accounts: %w", err)
+			return fmt.Errorf("failed to get number of active accounts: %w", err)
 		}
+		target := maxCurrency(minAllowance, cm.accounts.FundTarget().Mul64(activeAccounts))
 
 		// NOTE: In theory using 'contractFunding' here might push the
 		// collateral over the max collateral of the host. Previously we tried
@@ -72,7 +74,7 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		// might as well keep the funding logic consistent with formations and
 		// refreshes and rely on the host checks to identify hosts with a
 		// MaxCollateral too low for us to use them.
-		allowance, collateral := contractFunding(host.Settings, contract.Size, minAllowance.Mul64(activeAccounts), minHostCollateral, period)
+		allowance, collateral := contractFunding(host.Settings, contract.Size, target, minHostCollateral, period)
 
 		res, err := hc.RenewContract(ctx, host.Settings, rhp.RPCRenewContractParams{
 			Allowance:   allowance,
