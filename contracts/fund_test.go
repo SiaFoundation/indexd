@@ -23,6 +23,10 @@ type accountsManagerMock struct {
 	calls []fundAccountsCall
 }
 
+func (am *accountsManagerMock) FundTarget() types.Currency {
+	return types.Siacoins(1)
+}
+
 func (am *accountsManagerMock) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, _ bool, log *zap.Logger) error {
 	am.mu.Lock()
 	defer am.mu.Unlock()
