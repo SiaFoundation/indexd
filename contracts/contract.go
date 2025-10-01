@@ -135,6 +135,10 @@ func (c Contract) OutOfFunds() bool {
 // OutOfCollateral indicates that a contract is running low on unallocated
 // collateral and should be refreshed.
 func (c Contract) OutOfCollateral() bool {
+	// TODO: change this to be based on host prices
+	if c.Capacity > c.Size {
+		return false
+	}
 	remaining := c.TotalCollateral.Sub(c.UsedCollateral)
 	return remaining.Cmp(c.TotalCollateral.Div64(10)) < 0
 }

@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
@@ -121,9 +120,8 @@ func TestHost(t *testing.T) {
 
 	// pin a sector and mark it as lost
 	r1 := types.Hash256{1}
-	if err := db.AddAccount(context.Background(), hk, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	} else if _, err := db.PinSlab(context.Background(), proto4.Account(hk), time.Now(), slabs.SlabPinParams{
+	db.addTestAccount(t, hk)
+	if _, err := db.PinSlab(context.Background(), proto4.Account(hk), time.Now(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     1,
 		Sectors:       []slabs.PinnedSector{{Root: r1, HostKey: hk}},
@@ -799,9 +797,7 @@ func TestHostsWithLostSectors(t *testing.T) {
 
 	// add account
 	account := proto4.Account{1}
-	if err := db.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		t.Fatal("failed to add account:", err)
-	}
+	db.addTestAccount(t, types.PublicKey(account))
 
 	// add two hosts
 	hk1 := db.addTestHost(t)
@@ -890,9 +886,7 @@ func TestHostsWithUnpinnableSectors(t *testing.T) {
 
 	// add account
 	account := proto4.Account{1}
-	if err := db.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		t.Fatal("failed to add account:", err)
-	}
+	db.addTestAccount(t, types.PublicKey(account))
 
 	// add hosts
 
@@ -1267,7 +1261,8 @@ func BenchmarkHosts(b *testing.B) {
 	// define parameters
 	const (
 		numHosts     = 10_000
-		numBlocklist = 1000
+		numBlocklist = 1_000
+		numContracts = 25 // ~40% is active
 	)
 
 	// prepare database
@@ -1277,7 +1272,12 @@ func BenchmarkHosts(b *testing.B) {
 		for i := range numHosts {
 			var hostID int64
 			hk := types.GeneratePrivateKey().PublicKey()
-			err := tx.QueryRow(context.Background(), `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
+			err := tx.QueryRow(context.Background(), `INSERT INTO hosts (public_key, lost_sectors, usage_account_funding, usage_total_spent, last_announcement) VALUES ($1, $2, $3, $4, NOW()) RETURNING id;`,
+				sqlPublicKey(hk),
+				frand.Uint64n(1e3), // random lost sectors
+				sqlCurrency(types.NewCurrency64(frand.Uint64n(1e6))), // random account funding
+				sqlCurrency(types.NewCurrency64(frand.Uint64n(1e6))), // random total spent
+			).Scan(&hostID)
 			if err != nil {
 				return err
 			}
@@ -1287,6 +1287,10 @@ func BenchmarkHosts(b *testing.B) {
 			_, err = tx.Exec(ctx, `INSERT INTO host_addresses (host_id, net_address, protocol) VALUES ($1, $2, $3)`, hostID, na.Address, sqlNetworkProtocol(na.Protocol))
 			if err != nil {
 				return fmt.Errorf("failed to insert host address: %w", err)
+			}
+
+			for range numContracts {
+				insertRandomContract(b, tx, hostID, hk)
 			}
 		}
 
@@ -1299,6 +1303,13 @@ func BenchmarkHosts(b *testing.B) {
 		}
 		return nil
 	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// analyze tables to ensure query planner has up-to-date statistics
+	if _, err := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`); err != nil {
+		b.Fatal(err)
+	} else if _, err := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`); err != nil {
 		b.Fatal(err)
 	}
 
@@ -1322,6 +1333,20 @@ func BenchmarkHosts(b *testing.B) {
 					b.Fatal(err)
 				} else if len(hosts) != limit {
 					b.Fatalf("expected %d hosts, got %d", limit, len(hosts)) // sanity check
+				}
+			}
+		})
+	}
+
+	for _, limit := range []int{100, 500} {
+		b.Run(fmt.Sprintf("HostStats_%d", limit), func(b *testing.B) {
+			for b.Loop() {
+				offset := frand.Intn(numHosts - limit)
+				stats, err := store.HostStats(context.Background(), offset, limit)
+				if err != nil {
+					b.Fatal(err)
+				} else if len(stats) != limit {
+					b.Fatalf("expected %d host stats, got %d", limit, len(stats)) // sanity check
 				}
 			}
 		})
@@ -1404,11 +1429,6 @@ func BenchmarkUsableHosts(b *testing.B) {
 	randomProtocol := func() chain.Protocol {
 		protocols := []chain.Protocol{siamux.Protocol, quic.Protocol}
 		return protocols[frand.Intn(len(protocols))]
-	}
-
-	randomTime := func() time.Time {
-		maxOneHour := time.Duration(frand.Uint64n(60*60)) * time.Second
-		return time.Now().Add(-30 * time.Minute).Add(maxOneHour)
 	}
 
 	// define parameters
@@ -1498,28 +1518,7 @@ func BenchmarkUsableHosts(b *testing.B) {
 			}
 
 			// add contract
-			revision := newTestRevision(hk)
-			revision.Filesize = frand.Uint64n(1e9)                                                            // random size
-			revision.Capacity = revision.Filesize + frand.Uint64n(1e3)                                        // random capacity
-			revision.RenterOutput.Value = types.Siacoins(100).Add(types.Siacoins(uint32(frand.Uint64n(100)))) // random allowance
-			if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, next_prune) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14);`,
-				hostID,
-				sqlHash256(types.FileContractID(hk)),
-				sqlFileContract(revision),
-				sqlCurrency(types.ZeroCurrency),
-				sqlCurrency(types.ZeroCurrency),
-				sqlCurrency(types.ZeroCurrency),
-				sqlCurrency(revision.RemainingAllowance().Add(types.Siacoins(1))), // 1SC more than initial allowance
-				sqlCurrency(revision.RemainingAllowance()),
-				sqlContractState(uint8(frand.Uint64n(5))), // random contract state (40% active)
-				frand.Uint64n(2) == 0,                     // random good state (50% good)
-				revision.Filesize,
-				revision.Capacity,
-				randomTime(), // random last_broadcast_attempt
-				randomTime(), // random next_prune
-			); err != nil {
-				return err
-			}
+			insertRandomContract(b, tx, hostID, hk)
 		}
 		return nil
 	}); err != nil {
@@ -1614,9 +1613,7 @@ func TestHostsForPinning(t *testing.T) {
 
 	// add account
 	acc := proto4.Account{1}
-	if err := db.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	db.addTestAccount(t, types.PublicKey(acc))
 
 	// pin a slab with sector on both hosts
 	r1 := frand.Entropy256()
@@ -1697,9 +1694,7 @@ func TestHostsForPruning(t *testing.T) {
 
 	// add account
 	acc := proto4.Account{1}
-	if err := db.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	db.addTestAccount(t, types.PublicKey(acc))
 
 	// add contract for both hosts
 	fcid1 := db.addTestContract(t, hk1)
@@ -1755,9 +1750,7 @@ func BenchmarkHostsForPruning(b *testing.B) {
 
 	// add account
 	account := proto4.Account{1}
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	const (
 		nHosts            = 1000
@@ -1765,13 +1758,7 @@ func BenchmarkHostsForPruning(b *testing.B) {
 		nBlocklistHosts   = 1000
 	)
 
-	randomTime := func() time.Time {
-		maxOneHour := time.Duration(frand.Uint64n(60*60)) * time.Second
-		return time.Now().Add(-30 * time.Minute).Add(maxOneHour)
-	}
-
 	// prepare database
-	hostToContractID := make(map[types.PublicKey]types.FileContractID, nHosts)
 	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		for range nHosts {
 			// add host
@@ -1783,27 +1770,9 @@ func BenchmarkHostsForPruning(b *testing.B) {
 			}
 
 			// add contracts
-			var fcid types.FileContractID
 			for range nContractsPerHost {
-				frand.Read(fcid[:])
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, next_prune) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11);`,
-					hostID,
-					sqlHash256(fcid[:]),
-					sqlFileContract(newTestRevision(hk)),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlContractState(uint8(frand.Uint64n(5))), // random contract state (40% active)
-					frand.Uint64n(2) == 0,                     // random good state (50% good)
-					randomTime(),                              // random next prune time
-
-				); err != nil {
-					return err
-				}
+				insertRandomContract(b, tx, hostID, hk)
 			}
-			hostToContractID[hk] = fcid
 		}
 
 		// we LEFT JOIN the blocklist so we populate it with random entries
@@ -1840,9 +1809,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 
 	// add account
 	acc := proto4.Account{1}
-	if err := db.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	db.addTestAccount(t, types.PublicKey(acc))
 
 	// helper to pin sector with a given checkTime
 	pinSector := func(hk types.PublicKey, root types.Hash256, nextCheck time.Time) {
@@ -1938,9 +1905,7 @@ func BenchmarkHostsForPinning(b *testing.B) {
 
 	// add account
 	account := proto4.Account{1}
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	const (
 		dbBaseSize = 1 << 40 // 1TiB of sectors
@@ -1952,7 +1917,7 @@ func BenchmarkHostsForPinning(b *testing.B) {
 	)
 
 	// prepare database
-	hostToContractID := make(map[types.PublicKey]types.FileContractID, nHosts)
+	hostToContractIDs := make(map[types.PublicKey][]types.FileContractID, nHosts)
 	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		for range nHosts {
 			// add host
@@ -1964,30 +1929,9 @@ func BenchmarkHostsForPinning(b *testing.B) {
 			}
 
 			// add contracts
-			var fcid types.FileContractID
 			for range nContractsPerHost {
-				frand.Read(fcid[:])
-				size := frand.Uint64n(1e9)
-				if _, err := tx.Exec(ctx, `INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity) VALUES ($1, $2, $3, 0, 0, $4, $5, $6, $7, $8, $9, $10, $11, $12);`,
-					hostID,
-					sqlHash256(fcid),
-					sqlFileContract(newTestRevision(hk)),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.ZeroCurrency),
-					sqlCurrency(types.NewCurrency64(frand.Uint64n(5))), // random remaining allowance
-					sqlContractState(uint8(frand.Uint64n(5))),          // random contract state (40% active)
-					frand.Uint64n(2) == 0,                              // random good state (50% good)
-					size,                                               // random size
-					size+frand.Uint64n(1e3),                            // random capacity
-				); err != nil {
-					return err
-				} else if _, err := tx.Exec(ctx, `INSERT INTO contract_sectors_map (contract_id) VALUES ($1)`, sqlHash256(fcid)); err != nil {
-					return err
-				}
+				hostToContractIDs[hk] = append(hostToContractIDs[hk], insertRandomContract(b, tx, hostID, hk))
 			}
-			hostToContractID[hk] = fcid
 		}
 
 		// we LEFT JOIN the blocklist so we populate it with random entries
@@ -2004,8 +1948,12 @@ func BenchmarkHostsForPinning(b *testing.B) {
 	}
 
 	// add sectors
-	for hk, fcid := range hostToContractID {
+	for hk, fcids := range hostToContractIDs {
+		var idx int
 		for remainingSectors := nSectorsPerHost; remainingSectors > 0; {
+			fcid := fcids[idx%len(fcids)]
+			idx++
+
 			batchSize := min(remainingSectors, 10000)
 			remainingSectors -= batchSize
 			var sectors []slabs.PinnedSector
@@ -2049,9 +1997,7 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto4.Account{1}
 
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	const (
 		nHosts          = 10000
@@ -2112,9 +2058,7 @@ func BenchmarkHostsWithLostSectors(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto4.Account{1}
 
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	const (
 		nHosts          = 10000
@@ -2168,9 +2112,7 @@ func BenchmarkHostsWithUnpinnableSectors(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto4.Account{1}
 
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	const (
 		nHosts          = 1000

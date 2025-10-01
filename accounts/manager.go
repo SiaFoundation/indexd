@@ -46,7 +46,6 @@ type (
 		AppConnectKeys(ctx context.Context, offset, limit int) ([]ConnectKey, error)
 
 		Account(context.Context, types.PublicKey) (Account, error)
-		AddAccount(context.Context, types.PublicKey, AccountMeta, ...AddAccountOption) error
 		Accounts(ctx context.Context, offset, limit int, opts ...QueryAccountsOpt) ([]Account, error)
 		HasAccount(context.Context, types.PublicKey) (bool, error)
 		DeleteAccount(ctx context.Context, ak types.PublicKey) error

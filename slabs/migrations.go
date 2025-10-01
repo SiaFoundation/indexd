@@ -83,10 +83,9 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 		return nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, m.slabTimeout)
-	defer cancel()
-
 	// download enough shards to reconstruct the slab's shards
+	// note: timeouts are set within downloadShards to avoid timing
+	// out the database
 	shards, err := m.downloadShards(ctx, slab, allHosts, logger)
 	if err != nil {
 		return fmt.Errorf("failed to download slab %s: %w", slab.ID, err)
@@ -129,6 +128,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	}
 
 	// migrate the shards
+	// note: timeouts are set within uploadShards to avoid timing out the database
 	migratedShards, err := m.uploadShards(ctx, slab, shards, uploadCandidates, logger)
 
 	// update the database with the new locations for the migrated shards

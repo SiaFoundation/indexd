@@ -48,6 +48,10 @@ func (s *mockStore) Hosts(ctx context.Context, offset, limit int, opts ...HostQu
 
 func (s *mockStore) HostsForScanning(ctx context.Context) ([]types.PublicKey, error) { return nil, nil }
 
+func (s *mockStore) HostStats(ctx context.Context, offset, limit int) ([]HostStats, error) {
+	return nil, nil
+}
+
 func (s *mockStore) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error {
 	return nil
 }

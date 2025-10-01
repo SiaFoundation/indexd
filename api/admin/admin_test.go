@@ -151,10 +151,7 @@ func TestAccountsAPI(t *testing.T) {
 	var accs []types.PublicKey
 	for range 10 {
 		accs = append(accs, types.GeneratePrivateKey().PublicKey())
-		err := indexer.Store().AddAccount(context.Background(), accs[len(accs)-1], accounts.AccountMeta{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		indexer.AddAccount(t, accs[len(accs)-1])
 	}
 
 	accounts, err := admin.Accounts(context.Background(), api.WithServiceAccount(false))
@@ -800,6 +797,37 @@ func TestContractsStatsAPI(t *testing.T) {
 	t.Fatalf("expected some contracts, got %d", stats.Contracts)
 }
 
+func TestHostsStatsAPI(t *testing.T) {
+	// create cluster with two hosts
+	cluster := testutils.NewCluster(t, testutils.WithHosts(2))
+	admin := cluster.Indexer.Admin
+	time.Sleep(time.Second)
+
+	res, err := admin.StatsHosts(t.Context(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Hosts) != 2 {
+		t.Fatal("expected 2 hosts", len(res.Hosts))
+	} else if res.Hosts[0].PublicKey == res.Hosts[1].PublicKey {
+		t.Fatal("expected hosts to have different public keys")
+	}
+
+	// assert offset and limit are being applied
+	res, err = admin.StatsHosts(t.Context(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Hosts) != 1 {
+		t.Fatal("expected 1 host", len(res.Hosts))
+	}
+
+	res, err = admin.StatsHosts(t.Context(), 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res.Hosts) != 0 {
+		t.Fatal("expected 0 hosts", len(res.Hosts))
+	}
+}
+
 func TestSectorStatsAPI(t *testing.T) {
 	// create cluster with three hosts
 	logger := newTestLogger(false)
@@ -822,7 +850,7 @@ func TestSectorStatsAPI(t *testing.T) {
 
 	// pin a slab
 	account := types.GeneratePrivateKey()
-	indexer.Store().AddAccount(context.Background(), account.PublicKey(), accounts.AccountMeta{})
+	indexer.AddAccount(t, account.PublicKey())
 	slabID, err := indexer.App(account).PinSlab(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{1},
 		MinShards:     1,
@@ -873,9 +901,7 @@ func TestAccountStatsAPI(t *testing.T) {
 	}
 
 	account1 := types.GeneratePrivateKey().PublicKey()
-	if err := indexer.Store().AddAccount(t.Context(), account1, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	indexer.AddAccount(t, account1)
 
 	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
 		t.Fatal(err)
@@ -884,9 +910,7 @@ func TestAccountStatsAPI(t *testing.T) {
 	}
 
 	account2 := types.GeneratePrivateKey().PublicKey()
-	if err := indexer.Store().AddAccount(t.Context(), account2, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	indexer.AddAccount(t, account2)
 
 	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
 		t.Fatal(err)

@@ -70,16 +70,6 @@ func (s *Store) Account(ctx context.Context, ak types.PublicKey) (accounts.Accou
 	return account, err
 }
 
-// AddAccount adds a new account in the database with given account key.
-func (s *Store) AddAccount(ctx context.Context, ak types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		if err := addAccount(ctx, tx, ak, false, meta, opts...); err != nil {
-			return fmt.Errorf("failed to add account: %w", err)
-		}
-		return nil
-	})
-}
-
 // AddServiceAccount adds a new service account in the database with given
 // account key.
 func (s *Store) AddServiceAccount(ctx context.Context, ak types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
