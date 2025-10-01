@@ -203,10 +203,6 @@ func (s *mockStore) PinSlabs(ctx context.Context, account proto.Account, nextInt
 	return digests, nil
 }
 
-func (s *mockStore) PinSharedObject(ctx context.Context, account proto.Account, shared SharedObject) error {
-	return nil
-}
-
 func (s *mockStore) UnpinSlab(ctx context.Context, account proto.Account, slabID SlabID) error {
 	if _, ok := s.pinnedSlabs[account][slabID]; !ok {
 		return ErrSlabNotFound
