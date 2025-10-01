@@ -1824,7 +1824,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 
 	// 30 hosts to simulate default redundancy
 	var hks []types.PublicKey
-	for i := byte(0); i < 30; i++ {
+	for i := range byte(30) {
 		hks = append(hks, store.addTestHost(b, types.PublicKey{i}))
 	}
 
