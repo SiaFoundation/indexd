@@ -7,7 +7,6 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap/zaptest"
@@ -19,9 +18,7 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 
 	// add account and host
 	account := proto.Account{1}
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		t.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(t, types.PublicKey(account))
 	hk := store.addTestHost(t)
 
 	// helper to create slabs
@@ -90,9 +87,7 @@ func TestAccountStatsRegistered(t *testing.T) {
 		}
 
 		acc := types.GeneratePrivateKey().PublicKey()
-		if err := store.AddAccount(t.Context(), acc, accounts.AccountMeta{}); err != nil {
-			t.Fatal(err)
-		}
+		store.addTestAccount(t, acc)
 		accs = append(accs, acc)
 	}
 

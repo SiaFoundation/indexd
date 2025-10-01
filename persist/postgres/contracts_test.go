@@ -12,7 +12,6 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
@@ -463,9 +462,7 @@ func TestPrunableContractRoots(t *testing.T) {
 
 	// add account
 	account := proto.Account{1}
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		t.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(t, types.PublicKey(account))
 
 	// add two hosts
 	hk1 := store.addTestHost(t)
@@ -1662,9 +1659,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 
 	// add account
 	account := proto.Account{1}
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	// add hosts and contracts
 	var hks []types.PublicKey

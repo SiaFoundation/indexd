@@ -14,7 +14,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
@@ -27,10 +26,7 @@ func TestObjects(t *testing.T) {
 	// create 2 accounts
 	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
 	for _, acc := range []proto4.Account{acc1, acc2} {
-		err := store.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		store.addTestAccount(t, types.PublicKey(acc))
 	}
 
 	// pin slab for both accounts
@@ -213,16 +209,11 @@ func TestListObjectsRegression(t *testing.T) {
 
 	// create account
 	acc := proto4.Account{1}
-	err := store.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// pin slab for both accounts
+	store.addTestAccount(t, types.PublicKey(acc))
 
 	randomObject := func() slabs.SealedObject {
 		slab := slabs.SlabPinParams{EncryptionKey: frand.Entropy256(), MinShards: 1}
-		_, err = store.PinSlab(context.Background(), acc, time.Time{}, slab)
+		_, err := store.PinSlab(context.Background(), acc, time.Time{}, slab)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -264,7 +255,7 @@ func TestListObjectsRegression(t *testing.T) {
 	})
 
 	ts := time.Now().Round(time.Second)
-	_, err = store.pool.Exec(context.Background(), "UPDATE objects SET updated_at = $1", ts)
+	_, err := store.pool.Exec(context.Background(), "UPDATE objects SET updated_at = $1", ts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -288,10 +279,7 @@ func TestSharedObjects(t *testing.T) {
 	// create 2 accounts
 	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
 	for _, acc := range []proto4.Account{acc1, acc2} {
-		err := store.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{})
-		if err != nil {
-			t.Fatal(err)
-		}
+		store.addTestAccount(t, types.PublicKey(acc))
 	}
 
 	hostKeys := make([]types.PublicKey, 30)
@@ -401,10 +389,7 @@ func BenchmarkSaveObject(b *testing.B) {
 	// create 2 accounts
 	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
 	for _, acc := range []proto4.Account{acc1, acc2} {
-		err := store.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{})
-		if err != nil {
-			b.Fatal(err)
-		}
+		store.addTestAccount(b, types.PublicKey(acc))
 	}
 
 	hostKeys := make([]types.PublicKey, 30)

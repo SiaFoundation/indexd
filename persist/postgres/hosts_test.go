@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
@@ -121,9 +120,8 @@ func TestHost(t *testing.T) {
 
 	// pin a sector and mark it as lost
 	r1 := types.Hash256{1}
-	if err := db.AddAccount(context.Background(), hk, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	} else if _, err := db.PinSlab(context.Background(), proto4.Account(hk), time.Now(), slabs.SlabPinParams{
+	db.addTestAccount(t, hk)
+	if _, err := db.PinSlab(context.Background(), proto4.Account(hk), time.Now(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     1,
 		Sectors:       []slabs.PinnedSector{{Root: r1, HostKey: hk}},
@@ -799,9 +797,7 @@ func TestHostsWithLostSectors(t *testing.T) {
 
 	// add account
 	account := proto4.Account{1}
-	if err := db.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		t.Fatal("failed to add account:", err)
-	}
+	db.addTestAccount(t, types.PublicKey(account))
 
 	// add two hosts
 	hk1 := db.addTestHost(t)
@@ -890,9 +886,7 @@ func TestHostsWithUnpinnableSectors(t *testing.T) {
 
 	// add account
 	account := proto4.Account{1}
-	if err := db.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		t.Fatal("failed to add account:", err)
-	}
+	db.addTestAccount(t, types.PublicKey(account))
 
 	// add hosts
 
@@ -1619,9 +1613,7 @@ func TestHostsForPinning(t *testing.T) {
 
 	// add account
 	acc := proto4.Account{1}
-	if err := db.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	db.addTestAccount(t, types.PublicKey(acc))
 
 	// pin a slab with sector on both hosts
 	r1 := frand.Entropy256()
@@ -1702,9 +1694,7 @@ func TestHostsForPruning(t *testing.T) {
 
 	// add account
 	acc := proto4.Account{1}
-	if err := db.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	db.addTestAccount(t, types.PublicKey(acc))
 
 	// add contract for both hosts
 	fcid1 := db.addTestContract(t, hk1)
@@ -1760,9 +1750,7 @@ func BenchmarkHostsForPruning(b *testing.B) {
 
 	// add account
 	account := proto4.Account{1}
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	const (
 		nHosts            = 1000
@@ -1821,9 +1809,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 
 	// add account
 	acc := proto4.Account{1}
-	if err := db.AddAccount(context.Background(), types.PublicKey(acc), accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	db.addTestAccount(t, types.PublicKey(acc))
 
 	// helper to pin sector with a given checkTime
 	pinSector := func(hk types.PublicKey, root types.Hash256, nextCheck time.Time) {
@@ -1919,9 +1905,7 @@ func BenchmarkHostsForPinning(b *testing.B) {
 
 	// add account
 	account := proto4.Account{1}
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	const (
 		dbBaseSize = 1 << 40 // 1TiB of sectors
@@ -2013,9 +1997,7 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto4.Account{1}
 
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	const (
 		nHosts          = 10000
@@ -2076,9 +2058,7 @@ func BenchmarkHostsWithLostSectors(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto4.Account{1}
 
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	const (
 		nHosts          = 10000
@@ -2132,9 +2112,7 @@ func BenchmarkHostsWithUnpinnableSectors(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto4.Account{1}
 
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal("failed to add account:", err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	const (
 		nHosts          = 1000
