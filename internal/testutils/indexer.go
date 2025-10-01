@@ -314,6 +314,30 @@ func (idx *Indexer) WalletAddr() types.Address {
 	return idx.wallet.Address()
 }
 
+// AddAccount creates a test app connect key if it does not already exist and
+// creates an account using it.
+func (idx *Indexer) AddAccount(t testing.TB, ak types.PublicKey) {
+	store := idx.Store()
+
+	const connectKey = "test"
+	if _, err := store.ValidAppConnectKey(t.Context(), connectKey); errors.Is(err, accounts.ErrKeyNotFound) {
+		_, err := store.AddAppConnectKey(t.Context(), accounts.UpdateAppConnectKey{
+			Key:           connectKey,
+			MaxPinnedData: 1e10,
+			RemainingUses: 10000,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	} else if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.UseAppConnectKey(t.Context(), connectKey, ak, accounts.AccountMeta{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // closeWithTimeout is a helper which closes a resource and panics if it takes
 // longer than 30 seconds.
 func closeWithTimeout(closeFn func() error) error {

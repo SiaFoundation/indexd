@@ -272,4 +272,33 @@ ALTER TABLE objects ADD COLUMN signature BYTEA UNIQUE NOT NULL CHECK (LENGTH(sig
 		_, err := tx.Exec(ctx, query)
 		return err
 	},
+	// add indices to support host stats
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX hosts_usage_total_spent_idx ON hosts(usage_total_spent DESC);`)
+		if err != nil {
+			return fmt.Errorf("failed to create hosts_usage_total_spent_idx index: %w", err)
+		}
+		_, err = tx.Exec(ctx, `CREATE INDEX contracts_active_host_size_idx ON contracts(proof_height, host_id) INCLUDE (size) WHERE (state = 0 OR state = 1) AND renewed_to IS NULL;`)
+		if err != nil {
+			return fmt.Errorf("failed to create contracts_active_host_size_idx index: %w", err)
+		}
+		return nil
+	},
+	// drop index 'contracts_state_active_idx' and recreate it
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		if _, err := tx.Exec(ctx, `DROP INDEX contracts_state_active_idx;`); err != nil {
+			return fmt.Errorf("failed to drop index: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `CREATE INDEX contracts_state_active_idx ON contracts(state) WHERE (state = 0 OR state = 1) AND renewed_to IS NULL;`); err != nil {
+			return fmt.Errorf("failed to create index: %w", err)
+		}
+		return nil
+	},
+	// reset registered accounts
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		if _, err := tx.Exec(ctx, `UPDATE stats SET num_accounts_registered = (SELECT COUNT(*) FROM accounts);`); err != nil {
+			return fmt.Errorf("failed to reset num_accounts_registered: %w", err)
+		}
+		return nil
+	},
 }

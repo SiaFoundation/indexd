@@ -70,16 +70,6 @@ func (s *Store) Account(ctx context.Context, ak types.PublicKey) (accounts.Accou
 	return account, err
 }
 
-// AddAccount adds a new account in the database with given account key.
-func (s *Store) AddAccount(ctx context.Context, ak types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		if err := addAccount(ctx, tx, ak, false, meta, opts...); err != nil {
-			return fmt.Errorf("failed to add account: %w", err)
-		}
-		return nil
-	})
-}
-
 // AddServiceAccount adds a new service account in the database with given
 // account key.
 func (s *Store) AddServiceAccount(ctx context.Context, ak types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
@@ -315,10 +305,8 @@ func addAccount(ctx context.Context, tx *txn, account types.PublicKey, serviceAc
 	} else if res.RowsAffected() == 0 {
 		return accounts.ErrExists
 	}
-	if !serviceAccount {
-		if err := incrementNumAccounts(ctx, tx, 1); err != nil {
-			return fmt.Errorf("failed to increment registered accounts: %w", err)
-		}
+	if err := incrementNumAccounts(ctx, tx, 1); err != nil {
+		return fmt.Errorf("failed to increment registered accounts: %w", err)
 	}
 	return nil
 }

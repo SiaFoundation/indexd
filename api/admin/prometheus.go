@@ -49,6 +49,43 @@ func (s ContractsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric)
 }
 
 // PrometheusMetric implements the prometheus.Marshaller interface for the
+// host stats response.
+func (h HostStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
+	metrics = prometheus.Slice(h.Hosts).PrometheusMetric()
+	return
+}
+
+// PrometheusMetric implements the prometheus.Marshaller interface for a single
+// host's stats.
+func (h HostStats) PrometheusMetric() (metrics []prometheus.Metric) {
+	labels := map[string]any{
+		"public_key": h.PublicKey.String(),
+	}
+	return []prometheus.Metric{
+		{
+			Name:   "indexd_host_account_usage",
+			Labels: labels,
+			Value:  float64(h.AccountUsage.Siacoins()),
+		},
+		{
+			Name:   "indexd_host_total_usage",
+			Labels: labels,
+			Value:  float64(h.TotalUsage.Siacoins()),
+		},
+		{
+			Name:   "indexd_host_lost_sectors",
+			Labels: labels,
+			Value:  float64(h.LostSectors),
+		},
+		{
+			Name:   "indexd_host_active_contracts_size",
+			Labels: labels,
+			Value:  float64(h.ActiveContractsSize),
+		},
+	}
+}
+
+// PrometheusMetric implements the prometheus.Marshaller interface for the
 // sector stats response.
 func (s SectorsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	return []prometheus.Metric{

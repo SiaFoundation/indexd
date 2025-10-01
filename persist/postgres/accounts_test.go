@@ -20,6 +20,18 @@ import (
 	"lukechampine.com/frand"
 )
 
+func (s *Store) addTestAccount(t testing.TB, ak types.PublicKey, opts ...accounts.AddAccountOption) {
+	err := s.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+		if err := addAccount(ctx, tx, ak, false, accounts.AccountMeta{}, opts...); err != nil {
+			return fmt.Errorf("failed to add account: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("failed to add account: %v", err)
+	}
+}
+
 func TestAccounts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
@@ -36,22 +48,16 @@ func TestAccounts(t *testing.T) {
 	}
 
 	pk1 := types.GeneratePrivateKey().PublicKey()
-	err := store.AddAccount(context.Background(), pk1, accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, pk1)
 
 	pk2 := types.GeneratePrivateKey().PublicKey()
-	err = store.AddServiceAccount(context.Background(), pk2, accounts.AccountMeta{})
+	err := store.AddServiceAccount(context.Background(), pk2, accounts.AccountMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	pk3 := types.GeneratePrivateKey().PublicKey()
-	err = store.AddAccount(context.Background(), pk3, accounts.AccountMeta{}, accounts.WithMaxPinnedData(100))
-	if err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, pk3, accounts.WithMaxPinnedData(100))
 
 	// fetch all
 	accs, err := store.Accounts(context.Background(), 0, 10)
@@ -155,9 +161,16 @@ func TestAddAccount(t *testing.T) {
 
 	t.Run("user account", func(t *testing.T) {
 		test(t, func(pk types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) (bool, error) {
-			if err := store.AddAccount(context.Background(), pk, meta, opts...); err != nil {
+			err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+				if err := addAccount(ctx, tx, pk, false, meta, opts...); err != nil {
+					return fmt.Errorf("failed to add account: %w", err)
+				}
+				return nil
+			})
+			if err != nil {
 				return false, err
 			}
+
 			return false, nil // 'false' for user account
 		})
 	})
@@ -181,10 +194,7 @@ func TestDeleteAccount(t *testing.T) {
 		t.Fatal("expected [accounts.ErrNotFound]")
 	}
 
-	err = store.AddAccount(context.Background(), pk, accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, pk)
 
 	found, err := store.HasAccount(context.Background(), pk)
 	if err != nil {
@@ -252,21 +262,15 @@ func TestUpdateAccount(t *testing.T) {
 
 	// add an account
 	pk1 := types.GeneratePrivateKey().PublicKey()
-	err := store.AddAccount(context.Background(), pk1, accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, pk1)
 	db1 := dbID(pk1)
 
 	// add another account
 	pk2 := types.GeneratePrivateKey().PublicKey()
-	err = store.AddAccount(context.Background(), pk2, accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, pk2)
 
 	// assert updating to an existing account fails
-	err = store.UpdateAccount(context.Background(), pk1, pk2)
+	err := store.UpdateAccount(context.Background(), pk1, pk2)
 	if !errors.Is(err, accounts.ErrExists) {
 		t.Fatal("expected [accounts.ErrExists], got", err)
 	}
@@ -316,10 +320,7 @@ func TestHasAccount(t *testing.T) {
 	} else if found {
 		t.Fatal("unexpected")
 	}
-	err = store.AddAccount(context.Background(), pk, accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, pk)
 
 	found, err = store.HasAccount(context.Background(), pk)
 	if err != nil {
@@ -358,9 +359,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 
 	// add an account
 	ak1 := types.PublicKey{1, 1}
-	if err := store.AddAccount(context.Background(), ak1, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, ak1)
 
 	// assert there's now one account to fund
 	accs, err = store.HostAccountsForFunding(context.Background(), hk1, 10)
@@ -404,9 +403,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 
 	// add another account
 	ak2 := types.PublicKey{2, 2}
-	if err := store.AddAccount(context.Background(), ak2, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, ak2)
 
 	// assert h1 has one account to fund
 	accs, err = store.HostAccountsForFunding(context.Background(), hk1, 10)
@@ -464,9 +461,7 @@ func TestUpdateHostAccounts(t *testing.T) {
 	// add a host and an account
 	hk := store.addTestHost(t)
 	ak := types.GeneratePrivateKey().PublicKey()
-	if err := store.AddAccount(context.Background(), ak, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, ak)
 
 	// fetch accounts for funding
 	accounts, err := store.HostAccountsForFunding(context.Background(), hk, 10)
@@ -653,10 +648,7 @@ func TestServiceAccounts(t *testing.T) {
 
 	// setup
 	account := types.GeneratePrivateKey().PublicKey()
-	err := store.AddAccount(context.Background(), account, accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, account)
 	hk := types.GeneratePrivateKey().PublicKey()
 	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
 	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
@@ -666,13 +658,10 @@ func TestServiceAccounts(t *testing.T) {
 	}
 
 	// add account
-	err = store.AddAccount(context.Background(), hk, accounts.AccountMeta{})
-	if err != nil {
-		t.Fatal(err)
-	}
+	store.addTestAccount(t, hk)
 
 	// account not found
-	_, err = store.ServiceAccountBalance(context.Background(), hk, proto.Account(account))
+	_, err := store.ServiceAccountBalance(context.Background(), hk, proto.Account(account))
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal(err)
 	}
@@ -783,9 +772,7 @@ func BenchmarkServiceAccounts(b *testing.B) {
 	}
 
 	account := proto.Account(types.GeneratePrivateKey().PublicKey())
-	if err := store.AddAccount(context.Background(), types.PublicKey(account), accounts.AccountMeta{}); err != nil {
-		b.Fatal(err)
-	}
+	store.addTestAccount(b, types.PublicKey(account))
 
 	var hosts []types.PublicKey
 	for range numHosts {

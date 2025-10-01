@@ -5,6 +5,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/hosts"
 )
 
 type (
@@ -52,6 +53,14 @@ type (
 		Registered uint64 `json:"registered"`
 		Active     uint64 `json:"active"`
 	}
+
+	// HostStatsResponse is the response body for the [GET] /stats/hosts.
+	HostStatsResponse struct {
+		Hosts []HostStats `json:"hosts"`
+	}
+
+	// HostStats wraps hosts.HostStats to provide a custom PrometheusMetric method.
+	HostStats hosts.HostStats
 
 	// State is the response body for the [GET] /state endpoint.
 	State struct {
