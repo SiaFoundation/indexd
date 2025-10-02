@@ -1463,7 +1463,7 @@ func TestContractsStats(t *testing.T) {
 
 	// renew fcid3
 	fcid5 := types.FileContractID{5}
-	err = store.AddRenewedContract(t.Context(), fcid3, fcid5, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency)
+	err = store.AddRenewedContract(t.Context(), fcid3, fcid5, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
 	if err != nil {
 		t.Fatal(err)
 	}

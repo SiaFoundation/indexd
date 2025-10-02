@@ -325,14 +325,8 @@ func TestPerformSectorPinningOnHostOverflow(t *testing.T) {
 	store.hosts[hk1] = h1
 
 	// add two contracts for h1
-	fcid1 := types.FileContractID{1}
-	if err := store.AddFormedContract(context.Background(), hk1, fcid1, newTestRevision(hk1), types.ZeroCurrency, types.NewCurrency64(1), types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
-	fcid2 := types.FileContractID{2}
-	if err := store.AddFormedContract(context.Background(), hk1, fcid2, newTestRevision(hk1), types.ZeroCurrency, types.NewCurrency64(1), types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
+	fcid1 := store.addTestContract(t, hk1, true, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk1, true, types.FileContractID{2})
 
 	// make fcid2 the better contract for pinning
 	for i, c := range store.contracts {
