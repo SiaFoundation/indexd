@@ -192,7 +192,7 @@ func (s *Store) markFailingSectorsLostBatch(ctx context.Context, hostKey types.P
 	return totalUpdated, nil
 }
 
-// PinSlabs adds slabs to the database for pinning. The slab are associated
+// PinSlabs adds slabs to the database for pinning. The slabs are associated
 // with the provided account.
 func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
 	var digests []slabs.SlabID
