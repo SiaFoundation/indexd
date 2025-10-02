@@ -680,48 +680,62 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 //
 // NOTE: For the sake of scalability, we don't prioritize any slabs and instead
 // simply fetch the first batch we find.
-func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]slabs.SlabID, error) {
+func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) (results []slabs.SlabID, err error) {
 	now := time.Now()
 	if maxRepairAttempt.After(now) {
 		return nil, fmt.Errorf("maxRepairAttempt (%v) must be in the past (current time: %v)", maxRepairAttempt, now) // developer error
 	}
 
-	var results []slabs.SlabID
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		for range limit {
-			var slabID slabs.SlabID
-			err := tx.QueryRow(ctx, `UPDATE slabs
-				SET last_repair_attempt = $1
-				WHERE id = (
-					SELECT slabs.id
-					FROM slabs
-					INNER JOIN slab_sectors ON slabs.id = slab_sectors.slab_id
-					INNER JOIN sectors ON slab_sectors.sector_id = sectors.id
-					LEFT JOIN contract_sectors_map csm ON sectors.contract_sectors_map_id = csm.id
-					LEFT JOIN contracts ON csm.contract_id = contracts.contract_id
-					WHERE
-						(
-							-- stored on bad contract
-							(sectors.contract_sectors_map_id IS NOT NULL AND contracts.good = FALSE) OR
-							contracts.state NOT IN ($2, $3) OR
-							-- not stored on any host
-							(sectors.host_id IS NULL)
-						)
-						AND (slabs.last_repair_attempt < $4)
-					LIMIT 1
-				)
-				RETURNING digest
-		`, now, sqlContractState(contracts.ContractStateActive), sqlContractState(contracts.ContractStatePending), maxRepairAttempt).Scan((*sqlHash256)(&slabID))
-			if errors.Is(err, sql.ErrNoRows) {
-				break
-			} else if err != nil {
-				return fmt.Errorf("failed to query unhealthy slabs: %w", err)
+	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		const query = `SELECT s.id, s.digest
+FROM slabs s
+WHERE s.last_repair_attempt < $1
+AND EXISTS (
+  SELECT 1
+  FROM slab_sectors ss
+  JOIN sectors sec ON sec.id = ss.sector_id
+  LEFT JOIN contract_sectors_map csm ON csm.id = sec.contract_sectors_map_id
+  LEFT JOIN contracts c ON c.contract_id = csm.contract_id
+  WHERE ss.slab_id = s.id
+    AND (
+      sec.host_id IS NULL
+      OR (sec.contract_sectors_map_id IS NOT NULL
+          AND (c.good = FALSE OR c.state NOT IN ($2, $3)))
+    )
+)
+ORDER BY s.last_repair_attempt ASC
+LIMIT $4;`
+		var selected []int64
+		rows, err := tx.Query(ctx, query, maxRepairAttempt, sqlContractState(contracts.ContractStateActive), sqlContractState(contracts.ContractStatePending), limit)
+		if err != nil {
+			return fmt.Errorf("failed to query unhealthy slabs: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var id int64
+			var digest slabs.SlabID
+			if err := rows.Scan(&id, (*sqlHash256)(&digest)); err != nil {
+				return fmt.Errorf("failed to scan unhealthy slab: %w", err)
 			}
-			results = append(results, slabID)
+			results = append(results, digest)
+			selected = append(selected, id)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to read unhealthy slabs: %w", err)
+		}
+		rows.Close()
+		if len(selected) == 0 {
+			return nil
+		}
+
+		// update last_repair_attempt for the selected slabs
+		if _, err := tx.Exec(ctx, `UPDATE slabs SET last_repair_attempt = $1 WHERE id = ANY($2)`, now, selected); err != nil {
+			return fmt.Errorf("failed to update last_repair_attempt: %w", err)
 		}
 		return nil
 	})
-	return results, err
+	return
 }
 
 // MigrateSector updates a sector that was just migrated in the database to be
