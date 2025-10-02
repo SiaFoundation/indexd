@@ -143,7 +143,7 @@ func (s SlabPinParams) Validate() error {
 	return nil
 }
 
-// PinSlabs adds slabs to the database for pinning. The slab are associated
+// PinSlabs adds slabs to the database for pinning. The slabs are associated
 // with the provided account.
 func (m *SlabManager) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error) {
 	return m.store.PinSlabs(ctx, account, nextIntegrityCheck, toPin...)
