@@ -161,6 +161,7 @@ func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 		return
 	} else if protocol != "" && protocol != string(siamux.Protocol) && protocol != string(quic.Protocol) {
 		jc.Error(fmt.Errorf("invalid protocol %q", protocol), http.StatusBadRequest)
+		return
 	} else if protocol != "" {
 		opts = append(opts, hosts.WithProtocol(chain.Protocol(protocol)))
 	}
@@ -309,6 +310,7 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	} else if len(slabIDs) == 0 {
 		jc.Error(fmt.Errorf("PinSlabs did not return any slab IDs"), http.StatusInternalServerError)
+		return
 	}
 
 	jc.Encode(slabIDs)
