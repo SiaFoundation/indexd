@@ -130,7 +130,7 @@ type (
 	}
 )
 
-// SiamuxAddr returns a siamux protocol address of the host to use.
+// RHP4Addrs returns the addresses of the host.
 func (h *Host) RHP4Addrs() []chain.NetAddress {
 	return h.Addresses
 }
