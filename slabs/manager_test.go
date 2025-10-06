@@ -296,7 +296,7 @@ func (s *mockStore) SaveObject(ctx context.Context, account proto.Account, obj S
 	return nil
 }
 
-func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]SealedObject, error) {
+func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error) {
 	return nil, nil
 }
 

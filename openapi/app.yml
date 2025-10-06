@@ -122,7 +122,7 @@ paths:
             format: date-time
       responses:
         "200":
-          description: A list of objects
+          description: A list of object events
           content:
             application/json:
               schema:
@@ -131,7 +131,7 @@ paths:
                   slabs:
                     type: array
                     items:
-                      $ref: "#/components/schemas/SealedObject"
+                      $ref: "#/components/schemas/ObjectEvent"
     post:
       tags:
         - objects
@@ -655,6 +655,8 @@ components:
       $ref: "./components.yml#/components/schemas/Account"
     SealedObject:
       $ref: "./components.yml#/components/schemas/SealedObject"
+    ObjectEvent:
+      $ref: "./components.yml#/components/schemas/ObjectEvent"
     PublicKey:
       $ref: "./components.yml#/components/schemas/PublicKey"
     RegisterAppResponse:

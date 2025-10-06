@@ -281,9 +281,6 @@ CREATE TABLE objects (
 -- object_key is unique per account
 CREATE UNIQUE INDEX objects_account_id_object_key_idx ON objects(account_id, object_key);
 
--- fast sorting by update time and key
-CREATE INDEX objects_updated_at_object_key_idx ON objects(updated_at ASC, object_key ASC);
-
 CREATE TABLE object_slabs (
     object_id BIGINT REFERENCES objects(id) ON DELETE CASCADE,
     slab_digest BYTEA REFERENCES slabs(digest) ON DELETE CASCADE,
@@ -299,6 +296,17 @@ CREATE INDEX object_slabs_slab_digest_idx ON object_slabs(slab_digest);
 
 -- speed up sorting by slab_index
 CREATE INDEX object_slabs_object_id_slab_index_idx ON object_slabs(object_id, slab_index ASC);
+
+CREATE TABLE object_events (
+    object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32), -- not a FK since deletions need to hang around
+    account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    was_deleted BOOLEAN NOT NULL, -- true if deleted, false otherwise
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), -- last time the object was created/updated/deleted
+    PRIMARY KEY (account_id, object_key)
+);
+
+-- fast sorting by update time and key
+CREATE INDEX object_events_updated_at_object_key_idx ON object_events(updated_at ASC, object_key ASC);
 
 CREATE TABLE account_slabs (
     account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns slab

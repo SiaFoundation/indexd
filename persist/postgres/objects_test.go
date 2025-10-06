@@ -38,20 +38,34 @@ func TestObjects(t *testing.T) {
 		}
 	}
 
-	assertObjects := func(acc proto4.Account, n int) []slabs.SealedObject {
+	assertObjects := func(acc proto4.Account, expectedDeleted, expectedExist int) []slabs.ObjectEvent {
 		t.Helper()
 		objects, err := store.ListObjects(context.Background(), acc, slabs.Cursor{}, 10)
 		if err != nil {
 			t.Fatal(err)
-		} else if len(objects) != n {
-			t.Fatalf("expected %d objects, got %d", n, len(objects))
 		}
+
+		var exist, deleted int
+		for _, obj := range objects {
+			if obj.Deleted {
+				deleted++
+			} else {
+				exist++
+			}
+		}
+		if expectedExist != exist {
+			t.Fatalf("expected %d objects to exist, got %d", expectedExist, exist)
+		}
+		if expectedDeleted != deleted {
+			t.Fatalf("expected %d objects to be deleted, got %d", expectedDeleted, deleted)
+		}
+
 		return objects
 	}
 
 	// no objects should exist
-	assertObjects(acc1, 0)
-	assertObjects(acc2, 0)
+	assertObjects(acc1, 0, 0)
+	assertObjects(acc2, 0, 0)
 
 	// add objects for both accounts
 	randomSlabs := func(n int) []slabs.SlabPinParams {
@@ -111,23 +125,28 @@ func TestObjects(t *testing.T) {
 		t.Fatal("expected object IDs to match")
 	}
 
-	assertObj := func(obj, other slabs.SealedObject) {
+	assertObj := func(obj slabs.SealedObject, other slabs.ObjectEvent) {
 		t.Helper()
-		if other.CreatedAt.IsZero() || other.UpdatedAt.IsZero() {
-			t.Fatalf("expected non-zero timestamps, got %v and %v", other.CreatedAt, other.UpdatedAt)
+		if other.Deleted {
+			t.Fatal("object was unexpectedly deleted")
 		}
-		other.CreatedAt = time.Time{}
-		other.UpdatedAt = time.Time{}
-		if !reflect.DeepEqual(obj, other) {
-			t.Fatalf("objects not equal: expected %+v, got %+v", obj, other)
+
+		otherObj := *other.Object
+		if otherObj.CreatedAt.IsZero() || otherObj.UpdatedAt.IsZero() {
+			t.Fatalf("expected non-zero timestamps, got %v and %v", otherObj.CreatedAt, otherObj.UpdatedAt)
+		}
+		otherObj.CreatedAt = time.Time{}
+		otherObj.UpdatedAt = time.Time{}
+		if !reflect.DeepEqual(obj, otherObj) {
+			t.Fatalf("objects not equal: expected %+v, got %+v", obj, otherObj)
 		}
 	}
 
 	// 1 object should exist for both accounts
-	objs := assertObjects(acc1, 1)
+	objs := assertObjects(acc1, 0, 1)
 	assertObj(obj1Acc1, objs[0])
 
-	objs = assertObjects(acc2, 1)
+	objs = assertObjects(acc2, 0, 1)
 	assertObj(obj1Acc2, objs[0])
 
 	// delete object for acc1
@@ -135,9 +154,10 @@ func TestObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// no object should exist for acc1, 1 for acc2
-	assertObjects(acc1, 0)
-	objs = assertObjects(acc2, 1)
+	// no object should exist for acc1 (1 deleted), 1 for acc2
+	assertObjects(acc1, 1, 0)
+
+	objs = assertObjects(acc2, 0, 1)
 	assertObj(obj1Acc2, objs[0])
 
 	// add another object to acc2
@@ -147,8 +167,8 @@ func TestObjects(t *testing.T) {
 	}
 
 	// listing the objects should return obj1 first since it was updated first
-	assertObjects(acc1, 0)
-	objs = assertObjects(acc2, 2)
+	assertObjects(acc1, 1, 0)
+	objs = assertObjects(acc2, 0, 2)
 	assertObj(obj1Acc2, objs[0])
 	assertObj(obj2, objs[1])
 
@@ -159,8 +179,8 @@ func TestObjects(t *testing.T) {
 	}
 
 	// the order should be reversed now
-	assertObjects(acc1, 0)
-	objs = assertObjects(acc2, 2)
+	assertObjects(acc1, 1, 0)
+	objs = assertObjects(acc2, 0, 2)
 	assertObj(obj2, objs[0])
 	assertObj(obj1Acc2, objs[1])
 
@@ -187,7 +207,11 @@ func TestObjects(t *testing.T) {
 	} else if obj.CreatedAt.IsZero() || obj.UpdatedAt.IsZero() {
 		t.Fatalf("expected non-zero timestamps, got %v and %v", obj.CreatedAt, obj.UpdatedAt)
 	}
-	assertObj(obj2, obj)
+	obj.CreatedAt = time.Time{}
+	obj.UpdatedAt = time.Time{}
+	if !reflect.DeepEqual(obj2, obj) {
+		t.Fatalf("expected object %+v, got %+v", obj2, obj)
+	}
 
 	// assert account is taken into consideration when fetching an object
 	_, err = store.Object(context.Background(), acc1, obj2.ID())
@@ -259,6 +283,10 @@ func TestListObjectsRegression(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	_, err = store.pool.Exec(context.Background(), "UPDATE object_events SET updated_at = $1", ts)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	objs, err := store.ListObjects(context.Background(), acc, slabs.Cursor{After: ts}, 10)
 	if err != nil {
@@ -267,8 +295,8 @@ func TestListObjectsRegression(t *testing.T) {
 		t.Fatal("expected 3 objects, got", len(objs))
 	}
 	for i, obj := range objs {
-		if obj.ID() != objectIDs[i] {
-			t.Fatalf("expected object ID %v, got %v", objectIDs[i], obj.ID())
+		if obj.Object.ID() != objectIDs[i] {
+			t.Fatalf("expected object ID %v, got %v", objectIDs[i], obj.Object.ID())
 		}
 	}
 }

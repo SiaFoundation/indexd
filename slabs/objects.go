@@ -41,6 +41,17 @@ type (
 		EncryptedMetadata []byte       `json:"encryptedMetadata"`
 	}
 
+	// ObjectEvent represents an event on an object, such as it being created,
+	// updated, or deleted.  The object itself is included if it has not been
+	// deleted.
+	ObjectEvent struct {
+		Key       types.Hash256 `json:"key"`
+		Deleted   bool          `json:"deleted"`
+		UpdatedAt time.Time     `json:"updatedAt"`
+
+		Object *SealedObject `json:"object,omitempty"`
+	}
+
 	// Cursor describes a cursor for paginating through objects. During
 	// pagination, 'After' is meant to be set to the 'UpdatedAt' value of the
 	// last object received and 'Key' is meant to be set to the 'Key' value of
@@ -130,7 +141,7 @@ func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
-func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]SealedObject, error) {
+func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error) {
 	return m.store.ListObjects(ctx, account, cursor, limit)
 }
 

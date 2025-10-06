@@ -121,7 +121,7 @@ func (s *Store) Object(ctx context.Context, account proto.Account, key types.Has
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
-func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (objs []slabs.SealedObject, _ error) {
+func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, _ error) {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -129,8 +129,8 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT id, encrypted_master_key, encrypted_metadata, signature, created_at, updated_at
-			FROM objects
+			SELECT object_key, was_deleted, updated_at
+			FROM object_events
 			WHERE (updated_at > $1 OR (updated_at = $1 AND object_key > $2)) AND account_id = $3
 			ORDER BY updated_at ASC, object_key ASC
 			LIMIT $4
@@ -139,16 +139,36 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 			return fmt.Errorf("failed to query objects: %w", err)
 		}
 
-		// read objects
-		var objectIDs []int64
 		for rows.Next() {
+			var event slabs.ObjectEvent
+			err := rows.Scan((*sqlHash256)(&event.Key), &event.Deleted, &event.UpdatedAt)
+			if err != nil {
+				return fmt.Errorf("failed to scan object event: %w", err)
+			}
+			events = append(events, event)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		var objectIDs []int64
+		for i := range events {
+			if events[i].Deleted {
+				continue
+			}
+
 			var obj slabs.SealedObject
 			var objID int64
-			err := rows.Scan(&objID, &obj.EncryptedMasterKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.Signature), &obj.CreatedAt, &obj.UpdatedAt)
+			err := tx.QueryRow(ctx, `SELECT id, encrypted_master_key, encrypted_metadata, signature, created_at, updated_at
+				FROM objects
+				WHERE account_id = $1 AND object_key = $2`,
+				accountID,
+				sqlHash256(events[i].Key),
+			).Scan(&objID, &obj.EncryptedMasterKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.Signature), &obj.CreatedAt, &obj.UpdatedAt)
 			if err != nil {
-				return fmt.Errorf("failed to scan object: %w", err)
+				return fmt.Errorf("failed to query objects: %w", err)
 			}
-			objs = append(objs, obj)
+			events[i].Object = &obj
 			objectIDs = append(objectIDs, objID)
 		}
 		if err := rows.Err(); err != nil {
@@ -156,7 +176,11 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 		}
 
 		// populate slabs
-		for i := range objs {
+		for i := range events {
+			if events[i].Deleted {
+				continue
+			}
+
 			rows, err = tx.Query(ctx, `
 				SELECT slab_digest, slab_offset, slab_length
 				FROM object_slabs
@@ -172,7 +196,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 				if err != nil {
 					return fmt.Errorf("failed to scan slab: %w", err)
 				}
-				objs[i].Slabs = append(objs[i].Slabs, slab)
+				events[i].Object.Slabs = append(events[i].Object.Slabs, slab)
 			}
 			if err := rows.Err(); err != nil {
 				return err
@@ -180,7 +204,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 		}
 		return nil
 	})
-	return objs, err
+	return events, err
 }
 
 // DeleteObject deletes the object with the given key for the given account.
@@ -206,6 +230,15 @@ func (s *Store) DeleteObject(ctx context.Context, account proto.Account, objectK
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
+
+		_, err = tx.Exec(ctx, `
+			UPDATE object_events SET was_deleted = TRUE, updated_at = NOW()
+			WHERE account_id = $1 AND object_key = $2`,
+			accountID, sqlHash256(objectKey))
+		if err != nil {
+			return fmt.Errorf("failed to update object event: %w", err)
+		}
+
 		return nil
 	})
 }
@@ -227,6 +260,14 @@ func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs
 			sqlHash256(obj.ID()), accountID, obj.EncryptedMasterKey, obj.EncryptedMetadata, sqlSignature(obj.Signature)).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
+		}
+
+		_, err = tx.Exec(ctx, `
+			INSERT INTO object_events (object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)
+			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, NOW())`,
+			sqlHash256(obj.ID()), accountID)
+		if err != nil {
+			return fmt.Errorf("failed to insert object event: %w", err)
 		}
 
 		// check that this account has pinned these slabs

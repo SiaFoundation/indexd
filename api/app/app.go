@@ -44,7 +44,7 @@ type (
 		Object(ctx context.Context, account proto.Account, key types.Hash256) (slabs.SealedObject, error)
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		SaveObject(ctx context.Context, account proto.Account, obj slabs.SealedObject) error
-		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.SealedObject, error)
+		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
 		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
 

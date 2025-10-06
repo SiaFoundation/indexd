@@ -385,9 +385,9 @@ func TestApplicationAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 {
-		t.Fatalf("expected 1 objects, got %d", len(objs))
+		t.Fatalf("expected 1 object, got %d", len(objs))
 	}
-	obj1 := objs[0]
+	obj1 := *objs[0].Object
 
 	if objs, err := client.ListObjects(context.Background(), slabs.Cursor{
 		After: obj1.UpdatedAt,
@@ -401,7 +401,7 @@ func TestApplicationAPI(t *testing.T) {
 	obj, err = client.Object(context.Background(), obj1.ID())
 	if err != nil {
 		t.Fatal(err)
-	} else if !reflect.DeepEqual(obj, objs[0]) {
+	} else if !reflect.DeepEqual(obj, *objs[0].Object) {
 		t.Fatal("objects not equal")
 	}
 
@@ -421,8 +421,10 @@ func TestApplicationAPI(t *testing.T) {
 	objs, err = client.ListObjects(context.Background(), slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(objs) != 0 {
-		t.Fatalf("expected 0 objects, got %d", len(objs))
+	} else if len(objs) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objs))
+	} else if !objs[0].Deleted {
+		t.Fatalf("expected object to be deleted")
 	}
 
 	// We are not allowed to create objects using slabs that we have not pinned

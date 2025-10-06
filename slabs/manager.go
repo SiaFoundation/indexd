@@ -107,7 +107,7 @@ type (
 		Object(ctx context.Context, account proto.Account, key types.Hash256) (SealedObject, error)
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		SaveObject(ctx context.Context, account proto.Account, obj SealedObject) error
-		ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]SealedObject, error)
+		ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
 		SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error)
 	}
 

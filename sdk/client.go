@@ -43,7 +43,7 @@ type (
 		CreateSharedObjectURL(ctx context.Context, objectID types.Hash256, encryptionKey []byte, validUntil time.Time) (string, error)
 		SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, []byte, error)
 
-		ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) ([]slabs.SealedObject, error)
+		ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
 		Object(ctx context.Context, key types.Hash256) (slabs.SealedObject, error)
 		SaveObject(ctx context.Context, obj slabs.SealedObject) error
 

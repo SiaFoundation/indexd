@@ -193,10 +193,15 @@ func (mc *mockAppClient) Object(ctx context.Context, objectKey types.Hash256) (s
 	return mc.objects[objectKey], nil
 }
 
-func (mc *mockAppClient) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) ([]slabs.SealedObject, error) {
-	var objs []slabs.SealedObject
+func (mc *mockAppClient) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error) {
+	var objs []slabs.ObjectEvent
 	for _, obj := range mc.objects {
-		objs = append(objs, obj)
+		objs = append(objs, slabs.ObjectEvent{
+			Key:       obj.ID(),
+			Deleted:   false,
+			UpdatedAt: obj.UpdatedAt,
+			Object:    &obj,
+		})
 	}
 	return objs, nil
 }

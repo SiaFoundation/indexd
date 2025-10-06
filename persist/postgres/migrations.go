@@ -310,4 +310,50 @@ CREATE INDEX contracts_capacity_size_contract_id_idx ON contracts (host_id, (cap
 		_, err := t.Exec(ctx, query)
 		return err
 	},
+	// changes the pinning ordering to prefer contracts with available capacity
+	func(ctx context.Context, t *txn, _ *zap.Logger) error {
+		const query = `
+DROP INDEX IF EXISTS contracts_capacity_size_contract_id_idx;
+CREATE INDEX contracts_capacity_size_contract_id_idx ON contracts (host_id, (capacity - size) DESC, size) WHERE good = true AND state <= 1 AND remaining_allowance > 0;`
+
+		_, err := t.Exec(ctx, query)
+		return err
+	},
+	// create object events table and inserting existing objects
+	func(ctx context.Context, t *txn, _ *zap.Logger) error {
+		_, err := t.Exec(ctx, `CREATE TABLE object_events (
+    object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32), -- not a FK since deletions need to hang around
+    account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    was_deleted BOOLEAN NOT NULL, -- true if deleted, false otherwise
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), -- last time the object was created/updated/deleted
+    PRIMARY KEY (account_id, object_key)
+);`)
+		if err != nil {
+			return fmt.Errorf("failed to create object events table: %w", err)
+		}
+
+		_, err = t.Exec(ctx, `
+INSERT INTO object_events (object_key, account_id, was_deleted, updated_at)
+SELECT o.object_key,
+       o.account_id,
+       FALSE,
+       o.updated_at
+FROM objects o;
+`)
+		if err != nil {
+			return fmt.Errorf("failed to insert object events: %w", err)
+		}
+
+		_, err = t.Exec(ctx, `CREATE INDEX object_events_updated_at_object_key_idx ON object_events(updated_at ASC, object_key ASC);`)
+		if err != nil {
+			return fmt.Errorf("failed to create object event index: %w", err)
+		}
+
+		_, err = t.Exec(ctx, `DROP INDEX objects_updated_at_object_key_idx;`)
+		if err != nil {
+			return fmt.Errorf("failed to drop old index: %w", err)
+		}
+
+		return nil
+	},
 }

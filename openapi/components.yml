@@ -279,6 +279,25 @@ components:
             - $ref: "#/components/schemas/PublicKey"
             - description: The public key of the host storing the sector
 
+    ObjectEvent:
+      type: object
+      properties:
+        key:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The object's unique ID
+        deleted:
+          type: boolean
+          description: Whether the object was deleted or not
+        lastUpdated:
+          type: string
+          format: date-time
+          description: Last time the object was created, updated, or deleted.
+        object:
+          allOf:
+            - $ref: "#/components/schemas/SealedObject"
+            - description: The object, if it exists
+
     PublicKey:
       type: string
       pattern: "^ed25519:[0-9a-fA-F]{64}$"

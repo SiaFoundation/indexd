@@ -101,7 +101,10 @@ func (s *SDK) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) (
 	}
 	objs := make([]Object, 0, len(los))
 	for _, lo := range los {
-		obj, err := objectFromSealedObject(lo, s.appKey)
+		if lo.Deleted {
+			continue
+		}
+		obj, err := objectFromSealedObject(*lo.Object, s.appKey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unlock object: %w", err)
 		}
