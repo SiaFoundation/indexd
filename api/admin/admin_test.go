@@ -595,6 +595,20 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatalf("invalid number of hosts: %d", len(notContracted))
 	}
 
+	// test filtering by public key
+	hosts, err := adminClient.Hosts(context.Background(), admin.WithPublicKeys([]types.PublicKey{h1.PublicKey()}))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(hosts))
+	} else if hosts[0].PublicKey != h1.PublicKey() {
+		t.Fatal("expected public key for host 1")
+	} else if hosts, err := adminClient.Hosts(context.Background(), admin.WithPublicKeys([]types.PublicKey{h1.PublicKey(), h2.PublicKey()})); err != nil {
+		t.Fatal(err)
+	} else if len(hosts) != 2 {
+		t.Fatalf("expected 2 host, got %d", len(hosts))
+	}
+
 	// manually scan host
 	host1, err := adminClient.Host(context.Background(), h1.PublicKey())
 	if err != nil {

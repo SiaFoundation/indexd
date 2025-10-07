@@ -1,9 +1,9 @@
 package admin
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/alerts"
@@ -88,8 +88,11 @@ func WithActiveContracts(activeContracts bool) HostQueryParameterOption {
 // WithPublicKeys sets the 'publickeys' parameter.
 func WithPublicKeys(hks []types.PublicKey) HostQueryParameterOption {
 	return func(q url.Values) {
-		data, _ := json.Marshal(hks)
-		q.Set("publickeys", string(data))
+		strs := make([]string, len(hks))
+		for i := range hks {
+			strs[i] = hks[i].String()
+		}
+		q.Set("publickeys", strings.Join(strs, ","))
 	}
 }
 

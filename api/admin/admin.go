@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"net/http"
+	"strings"
 
 	"errors"
 	"fmt"
@@ -667,9 +668,20 @@ func (a *admin) handleGETHosts(jc jape.Context) {
 		opts = append(opts, hosts.WithActiveContracts(activeContracts))
 	}
 	if jc.Request.FormValue("publickeys") != "" {
-		var hks []types.PublicKey
-		if jc.DecodeForm("publickeys", &hks) != nil {
+		var s string
+		if jc.DecodeForm("publickeys", &s) != nil {
 			return
+		}
+		split := strings.Split(s, ",")
+
+		hks := make([]types.PublicKey, len(split))
+		for i := range split {
+			var hk types.PublicKey
+			if err := hk.UnmarshalText([]byte(split[i])); err != nil {
+				jc.Error(fmt.Errorf("failed to parse host key %s: %w", split[i], err), http.StatusBadRequest)
+				return
+			}
+			hks[i] = hk
 		}
 		opts = append(opts, hosts.WithPublicKeys(hks))
 	}
