@@ -47,9 +47,10 @@ type (
 	HostQueryOpt func(*hostsQueryOpts)
 
 	hostsQueryOpts struct {
-		ActiveContracts *bool // return hosts that have active contracts or not
-		Blocked         *bool // return (un)blocked hosts
-		Good            *bool // return good/bad hosts
+		ActiveContracts *bool             // return hosts that have active contracts or not
+		Blocked         *bool             // return (un)blocked hosts
+		Good            *bool             // return good/bad hosts
+		PublicKeys      []types.PublicKey // do not return hosts with public keys outside of this list
 	}
 )
 
@@ -74,6 +75,14 @@ func WithBlocked(blocked bool) HostQueryOpt {
 func WithActiveContracts(activeContracts bool) HostQueryOpt {
 	return func(opts *hostsQueryOpts) {
 		opts.ActiveContracts = &activeContracts
+	}
+}
+
+// WithPublicKeys limits the set of returned to hosts to those with a public
+// key in the provided slice.
+func WithPublicKeys(hks []types.PublicKey) HostQueryOpt {
+	return func(opts *hostsQueryOpts) {
+		opts.PublicKeys = hks
 	}
 }
 

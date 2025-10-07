@@ -666,6 +666,13 @@ func (a *admin) handleGETHosts(jc jape.Context) {
 		}
 		opts = append(opts, hosts.WithActiveContracts(activeContracts))
 	}
+	if jc.Request.FormValue("publickeys") != "" {
+		var hks []types.PublicKey
+		if jc.DecodeForm("publickeys", &hks) != nil {
+			return
+		}
+		opts = append(opts, hosts.WithPublicKeys(hks))
+	}
 
 	hosts, err := a.hosts.Hosts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get hosts", err) != nil {

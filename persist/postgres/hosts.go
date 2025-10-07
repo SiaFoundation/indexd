@@ -129,6 +129,11 @@ func (s *Store) Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts
 		opt(&opts)
 	}
 
+	hks := make([]sqlPublicKey, len(opts.PublicKeys))
+	for i := range hks {
+		hks[i] = sqlPublicKey(opts.PublicKeys[i])
+	}
+
 	var hosts []hosts.Host
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		rows, err := tx.Query(ctx, `
@@ -196,8 +201,10 @@ WHERE
 	AND (($4::boolean IS NULL) OR ($4::boolean = hosts.blocked))
 	-- active contracts filter
 	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state >= $6 AND state <= $7)))
+	-- public key filter
+	AND ((CARDINALITY($8::bytea[]) = 0) OR (public_key = ANY($8)))
 	LIMIT $1 OFFSET $2
-;`, limit, offset, opts.Good, opts.Blocked, opts.ActiveContracts, contracts.ContractStatePending, contracts.ContractStateActive)
+;`, limit, offset, opts.Good, opts.Blocked, opts.ActiveContracts, contracts.ContractStatePending, contracts.ContractStateActive, hks)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts: %w", err)
 		}

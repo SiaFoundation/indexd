@@ -1,9 +1,11 @@
 package admin
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/url"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/api"
 	"go.uber.org/zap"
@@ -80,6 +82,14 @@ func WithUsable(usable bool) HostQueryParameterOption {
 func WithActiveContracts(activeContracts bool) HostQueryParameterOption {
 	return func(q url.Values) {
 		q.Set("activecontracts", fmt.Sprint(activeContracts))
+	}
+}
+
+// WithPublicKeys sets the 'publickeys' parameter.
+func WithPublicKeys(hks []types.PublicKey) HostQueryParameterOption {
+	return func(q url.Values) {
+		data, _ := json.Marshal(hks)
+		q.Set("publickeys", string(data))
 	}
 }
 
