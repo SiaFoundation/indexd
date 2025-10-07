@@ -3,7 +3,6 @@ package admin
 import (
 	"fmt"
 	"net/url"
-	"strings"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/alerts"
@@ -92,7 +91,7 @@ func WithPublicKeys(hks []types.PublicKey) HostQueryParameterOption {
 		for i := range hks {
 			strs[i] = hks[i].String()
 		}
-		q.Set("publickeys", strings.Join(strs, ","))
+		q["pk"] = strs
 	}
 }
 
