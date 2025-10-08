@@ -84,14 +84,15 @@ func WithActiveContracts(activeContracts bool) HostQueryParameterOption {
 	}
 }
 
-// WithPublicKeys sets the 'publickeys' parameter.
+// WithPublicKeys sets the 'hostkey' parameter (multiple times if there is more
+// than one host key provided).
 func WithPublicKeys(hks []types.PublicKey) HostQueryParameterOption {
 	return func(q url.Values) {
 		strs := make([]string, len(hks))
 		for i := range hks {
 			strs[i] = hks[i].String()
 		}
-		q["pk"] = strs
+		q["hostkey"] = strs
 	}
 }
 

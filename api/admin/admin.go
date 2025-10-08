@@ -666,7 +666,7 @@ func (a *admin) handleGETHosts(jc jape.Context) {
 		}
 		opts = append(opts, hosts.WithActiveContracts(activeContracts))
 	}
-	if strs := jc.Request.Form["pk"]; len(strs) > 0 {
+	if strs := jc.Request.Form["hostkey"]; len(strs) > 0 {
 		hks := make([]types.PublicKey, len(strs))
 		for i := range strs {
 			var hk types.PublicKey
