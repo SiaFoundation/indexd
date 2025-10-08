@@ -75,6 +75,82 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 	}
 }
 
+// TestSectorStats is a regression test that verifies that the sector stats are
+// updated correctly when sectors are pinned, unpinned, migrated and pruned.
+func TestSectorStats(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
+	fcid := store.addTestContract(t, hk1)
+
+	root := types.Hash256(frand.Entropy256())
+	slab := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    root,
+			HostKey: hk1,
+		}},
+	}
+	if _, err := store.PinSlabs(t.Context(), account, time.Time{}, slab); err != nil {
+		t.Fatal(err)
+	}
+
+	assertStats := func(pinned, unpinned, unpinnable, migrated int64) {
+		t.Helper()
+		stats, err := store.SectorStats(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stats.Pinned != pinned || stats.Unpinned != unpinned || stats.Unpinnable != unpinnable || stats.Migrated != migrated {
+			t.Fatalf("unexpected sector stats: pinned=%d unpinned=%d unpinnable=%d migrated=%d", stats.Pinned, stats.Unpinned, stats.Unpinnable, stats.Migrated)
+		}
+	}
+
+	assertStats(0, 1, 0, 0)
+
+	if err := store.PinSectors(t.Context(), fcid, []types.Hash256{root}); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(1, 0, 0, 0)
+
+	if migrated, err := store.MigrateSector(t.Context(), root, hk2); err != nil {
+		t.Fatal(err)
+	} else if !migrated {
+		t.Fatal("expected sector to be migrated")
+	}
+	assertStats(0, 1, 0, 1)
+
+	var uploadedAt time.Time
+	if err := store.pool.QueryRow(t.Context(), `
+		SELECT uploaded_at
+		FROM sectors
+		WHERE sector_root = $1
+	`, sqlHash256(root)).Scan(&uploadedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PruneUnpinnableSectors(t.Context(), uploadedAt.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(0, 0, 1, 1)
+
+	if migrated, err := store.MigrateSector(t.Context(), root, hk1); err != nil {
+		t.Fatal(err)
+	} else if !migrated {
+		t.Fatal("expected sector to be migrated")
+	}
+	assertStats(0, 1, 0, 2)
+
+	if err := store.PinSectors(t.Context(), fcid, []types.Hash256{root}); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(1, 0, 0, 2)
+}
+
 func TestAccountStatsRegistered(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

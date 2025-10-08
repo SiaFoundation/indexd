@@ -29,12 +29,12 @@ func incrementNumPinnedSectors(ctx context.Context, tx *txn, delta int64) error 
 	return err
 }
 
-func incrementNumUnpinnableSlabs(ctx context.Context, tx *txn, incr uint64) error {
-	_, err := tx.Exec(ctx, "UPDATE stats SET num_unpinnable_sectors = num_unpinnable_sectors + $1", incr)
+func incrementNumUnpinnableSectors(ctx context.Context, tx *txn, delta int64) error {
+	_, err := tx.Exec(ctx, "UPDATE stats SET num_unpinnable_sectors = num_unpinnable_sectors + $1", delta)
 	return err
 }
 
-func incrementUnpinnedSectors(ctx context.Context, tx *txn, delta int64) error {
+func incrementNumUnpinnedSectors(ctx context.Context, tx *txn, delta int64) error {
 	_, err := tx.Exec(ctx, "UPDATE stats SET num_unpinned_sectors = num_unpinned_sectors + $1", delta)
 	return err
 }
