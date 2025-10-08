@@ -360,6 +360,13 @@ func TestContractsAPI(t *testing.T) {
 		t.Fatal("expected no contract", len(contracts))
 	}
 
+	// assert ID filtering works
+	if contracts, err := adminClient.Contracts(context.Background(), admin.WithIDs([]types.FileContractID{contract.ID})); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	}
+
 	// assert WithRevisable filters out non-revisable contracts
 	if contracts, err := adminClient.Contracts(context.Background(), admin.WithRevisable(true)); err != nil {
 		t.Fatal(err)
