@@ -601,6 +601,7 @@ func (a *admin) handleGETContracts(jc jape.Context) {
 		opts = append(opts, contracts.WithGood(good))
 	}
 
+	// filter by ID
 	if strs := jc.Request.Form["id"]; len(strs) > 0 {
 		ids := make([]types.FileContractID, len(strs))
 		for i := range strs {
@@ -612,6 +613,20 @@ func (a *admin) handleGETContracts(jc jape.Context) {
 			ids[i] = id
 		}
 		opts = append(opts, contracts.WithIDs(ids))
+	}
+
+	// filter by host public key
+	if strs := jc.Request.Form["hostkey"]; len(strs) > 0 {
+		hks := make([]types.PublicKey, len(strs))
+		for i := range strs {
+			var hk types.PublicKey
+			if err := hk.UnmarshalText([]byte(strs[i])); err != nil {
+				jc.Error(fmt.Errorf("failed to parse public key %s: %w", strs[i], err), http.StatusBadRequest)
+				return
+			}
+			hks[i] = hk
+		}
+		opts = append(opts, contracts.WithHostKeys(hks))
 	}
 
 	contracts, err := a.contracts.Contracts(jc.Request.Context(), offset, limit, opts...)

@@ -505,6 +505,15 @@ paths:
               $ref: "#/components/schemas/FileContractID"
           style: form
           explode: true
+        - name: hostkey
+          in: query
+          description: If provided, only include contracts assigned to this set of hosts.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/PublicKey"
+          style: form
+          explode: true
       responses:
         "200":
           description: A list of contracts
