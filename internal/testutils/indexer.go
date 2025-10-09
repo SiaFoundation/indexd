@@ -75,6 +75,16 @@ type (
 	}
 )
 
+type mockLocator struct{}
+
+// NewMockLocator returns a new instance of a mock Locator.
+func NewMockLocator() geoip.Locator {
+	return &mockLocator{}
+}
+
+func (mockLocator) Close() error                             { return nil }
+func (mockLocator) Locate(ip net.IP) (geoip.Location, error) { return geoip.Location{}, nil }
+
 func defaultIndexerCfg() *indexerCfg {
 	return &indexerCfg{
 		maintenanceSettings: MaintenanceSettings,
@@ -127,13 +137,8 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	walletKey := types.GeneratePrivateKey()
 	wm := NewWallet(t, c, walletKey)
 
-	locator, err := geoip.NewMaxMindLocator("")
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	syncer := NewSyncer(t, c.genesis.ID(), c.cm)
-	hm, err := hosts.NewManager(syncer, locator, store, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(200*time.Millisecond), hosts.WithScanInterval(time.Second))
+	hm, err := hosts.NewManager(syncer, NewMockLocator(), store, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(200*time.Millisecond), hosts.WithScanInterval(time.Second))
 	if err != nil {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
