@@ -76,84 +76,202 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 }
 
 // TestSectorStats is a regression test that verifies that the sector stats are
-// updated correctly when sectors are pinned, unpinned, migrated and pruned.
+// updated correctly when sectors are pinned, unpinned, migrated, pruned and
+// marked as lost.
 func TestSectorStats(t *testing.T) {
-	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	t.Run("PinnedSectorStatistics", func(t *testing.T) {
+		store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	account := proto.Account{1}
-	store.addTestAccount(t, types.PublicKey(account))
+		account := proto.Account{1}
+		store.addTestAccount(t, types.PublicKey(account))
 
-	hk1 := store.addTestHost(t)
-	hk2 := store.addTestHost(t)
-	fcid := store.addTestContract(t, hk1)
+		hk := store.addTestHost(t)
+		hk2 := store.addTestHost(t)
+		hk3 := store.addTestHost(t)
+		fcid := store.addTestContract(t, hk)
 
-	root := types.Hash256(frand.Entropy256())
-	slab := slabs.SlabPinParams{
-		EncryptionKey: frand.Entropy256(),
-		MinShards:     1,
-		Sectors: []slabs.PinnedSector{{
-			Root:    root,
-			HostKey: hk1,
-		}},
-	}
-	if _, err := store.PinSlabs(t.Context(), account, time.Time{}, slab); err != nil {
-		t.Fatal(err)
-	}
+		assertStats := func(pinned, unpinned, unpinnable, migrated int64) {
+			t.Helper()
+			stats, err := store.SectorStats(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stats.Pinned != pinned || stats.Unpinned != unpinned || stats.Unpinnable != unpinnable || stats.Migrated != migrated {
+				t.Fatalf("unexpected sector stats: pinned=%d unpinned=%d unpinnable=%d migrated=%d", stats.Pinned, stats.Unpinned, stats.Unpinnable, stats.Migrated)
+			}
+		}
 
-	assertStats := func(pinned, unpinned, unpinnable, migrated int64) {
-		t.Helper()
-		stats, err := store.SectorStats(t.Context())
-		if err != nil {
+		roots := []types.Hash256{
+			frand.Entropy256(),
+			frand.Entropy256(),
+			frand.Entropy256(),
+			frand.Entropy256(),
+		}
+		if _, err := store.PinSlabs(t.Context(), account, time.Time{}, slabs.SlabPinParams{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     10,
+			Sectors: []slabs.PinnedSector{
+				{HostKey: hk, Root: roots[0]},
+				{HostKey: hk, Root: roots[1]},
+				{HostKey: hk, Root: roots[2]},
+				{HostKey: hk, Root: roots[3]},
+			},
+		}); err != nil {
 			t.Fatal(err)
 		}
-		if stats.Pinned != pinned || stats.Unpinned != unpinned || stats.Unpinnable != unpinnable || stats.Migrated != migrated {
-			t.Fatalf("unexpected sector stats: pinned=%d unpinned=%d unpinnable=%d migrated=%d", stats.Pinned, stats.Unpinned, stats.Unpinnable, stats.Migrated)
+		assertStats(0, 4, 0, 0)
+
+		if err := store.PinSectors(t.Context(), fcid, roots); err != nil {
+			t.Fatal(err)
 		}
-	}
+		assertStats(4, 0, 0, 0)
 
-	assertStats(0, 1, 0, 0)
+		if migrated, err := store.MigrateSector(t.Context(), roots[3], hk2); err != nil {
+			t.Fatal(err)
+		} else if !migrated {
+			t.Fatal("expected sector to be migrated")
+		}
+		assertStats(3, 1, 0, 1)
 
-	if err := store.PinSectors(t.Context(), fcid, []types.Hash256{root}); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(1, 0, 0, 0)
+		if migrated, err := store.MigrateSector(t.Context(), roots[3], hk3); err != nil {
+			t.Fatal(err)
+		} else if !migrated {
+			t.Fatal("expected sector to be migrated")
+		}
+		assertStats(3, 1, 0, 2)
 
-	if migrated, err := store.MigrateSector(t.Context(), root, hk2); err != nil {
-		t.Fatal(err)
-	} else if !migrated {
-		t.Fatal("expected sector to be migrated")
-	}
-	assertStats(0, 1, 0, 1)
+		if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{roots[3]}); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(3, 1, 0, 2)
 
-	var uploadedAt time.Time
-	if err := store.pool.QueryRow(t.Context(), `
-		SELECT uploaded_at
-		FROM sectors
-		WHERE sector_root = $1
-	`, sqlHash256(root)).Scan(&uploadedAt); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.PruneUnpinnableSectors(t.Context(), uploadedAt.Add(time.Second)); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(0, 0, 1, 1)
+		if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{roots[2]}); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(2, 1, 1, 2)
 
-	if migrated, err := store.MigrateSector(t.Context(), root, hk1); err != nil {
-		t.Fatal(err)
-	} else if !migrated {
-		t.Fatal("expected sector to be migrated")
-	}
-	assertStats(0, 1, 0, 2)
+		if _, err := store.pool.Exec(t.Context(), `
+			UPDATE sectors
+			SET consecutive_failed_checks = 10
+			WHERE sector_root IN ($1, $2)
+		`, sqlHash256(roots[1]), sqlHash256(roots[2])); err != nil {
+			t.Fatal(err)
+		}
 
-	if err := store.PinSectors(t.Context(), fcid, []types.Hash256{root}); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(1, 0, 0, 2)
+		if err := store.MarkFailingSectorsLost(t.Context(), hk, 10); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(1, 1, 2, 2)
 
-	if err := store.MarkSectorsLost(t.Context(), hk1, []types.Hash256{root}); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(0, 0, 1, 2)
+		if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{roots[0]}); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(0, 1, 3, 2)
+
+		if err := store.MarkSectorsLost(t.Context(), hk, roots); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(0, 1, 3, 2)
+
+		for _, root := range roots[:3] {
+			migrated, err := store.MigrateSector(t.Context(), root, hk)
+			if err != nil {
+				t.Fatal(err)
+			} else if !migrated {
+				t.Fatalf("expected sector %v to be migrated", root)
+			}
+		}
+		assertStats(0, 4, 0, 5)
+
+		if err := store.PinSectors(t.Context(), fcid, roots); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(4, 0, 0, 5)
+
+		if err := store.PinSectors(t.Context(), fcid, roots); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(4, 0, 0, 5)
+	})
+
+	t.Run("Lifecycle", func(t *testing.T) {
+		store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+		account := proto.Account{1}
+		store.addTestAccount(t, types.PublicKey(account))
+
+		hk1 := store.addTestHost(t)
+		hk2 := store.addTestHost(t)
+		fcid := store.addTestContract(t, hk1)
+
+		root := types.Hash256(frand.Entropy256())
+		slab := slabs.SlabPinParams{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors: []slabs.PinnedSector{{
+				Root:    root,
+				HostKey: hk1,
+			}},
+		}
+		if _, err := store.PinSlabs(t.Context(), account, time.Time{}, slab); err != nil {
+			t.Fatal(err)
+		}
+
+		assertStats := func(pinned, unpinned, unpinnable, migrated int64) {
+			t.Helper()
+			stats, err := store.SectorStats(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stats.Pinned != pinned || stats.Unpinned != unpinned || stats.Unpinnable != unpinnable || stats.Migrated != migrated {
+				t.Fatalf("unexpected sector stats: pinned=%d unpinned=%d unpinnable=%d migrated=%d", stats.Pinned, stats.Unpinned, stats.Unpinnable, stats.Migrated)
+			}
+		}
+
+		assertStats(0, 1, 0, 0)
+
+		if err := store.PinSectors(t.Context(), fcid, []types.Hash256{root}); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(1, 0, 0, 0)
+
+		if migrated, err := store.MigrateSector(t.Context(), root, hk2); err != nil {
+			t.Fatal(err)
+		} else if !migrated {
+			t.Fatal("expected sector to be migrated")
+		}
+		assertStats(0, 1, 0, 1)
+
+		var uploadedAt time.Time
+		if err := store.pool.QueryRow(t.Context(), `
+			SELECT uploaded_at
+			FROM sectors
+			WHERE sector_root = $1
+		`, sqlHash256(root)).Scan(&uploadedAt); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.PruneUnpinnableSectors(t.Context(), uploadedAt.Add(time.Second)); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(0, 0, 1, 1)
+
+		if migrated, err := store.MigrateSector(t.Context(), root, hk1); err != nil {
+			t.Fatal(err)
+		} else if !migrated {
+			t.Fatal("expected sector to be migrated")
+		}
+		assertStats(0, 1, 0, 2)
+
+		if err := store.PinSectors(t.Context(), fcid, []types.Hash256{root}); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(1, 0, 0, 2)
+
+		if err := store.MarkSectorsLost(t.Context(), hk1, []types.Hash256{root}); err != nil {
+			t.Fatal(err)
+		}
+		assertStats(0, 0, 1, 2)
+	})
 }
 
 func TestAccountStatsRegistered(t *testing.T) {
