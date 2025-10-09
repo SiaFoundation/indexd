@@ -639,9 +639,9 @@ func (s *Store) PinSectors(ctx context.Context, contractID types.FileContractID,
 	})
 }
 
-// PruneUnpinnableSectors sets the host ID for sectors that haven't been pinned
+// MarkSectorsUnpinnable sets the host ID for sectors that haven't been pinned
 // by the threshold time to NULL.
-func (s *Store) PruneUnpinnableSectors(ctx context.Context, threshold time.Time) error {
+func (s *Store) MarkSectorsUnpinnable(ctx context.Context, threshold time.Time) error {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		res, err := tx.Exec(ctx, `
             UPDATE sectors

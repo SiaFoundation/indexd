@@ -1232,7 +1232,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 }
 
-func TestPruneUnpinnableSectors(t *testing.T) {
+func TestMarkSectorsUnpinnable(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	assertUnpinnableSectors := func(expected uint64) {
@@ -1314,11 +1314,11 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 
 	assertUnpinnableSectors(0)
 
-	if err := store.PruneUnpinnableSectors(context.Background(), time.Now().Add(-3*24*time.Hour)); err != nil {
+	if err := store.MarkSectorsUnpinnable(context.Background(), time.Now().Add(-3*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
-	// sector should have had host_id nulled out due to PruneUnpinnableSectors
+	// sector should have had host_id nulled out due to MarkSectorsUnpinnable
 	// and should now be unhealthy
 	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
@@ -2083,8 +2083,8 @@ func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 	}
 }
 
-// BenchmarkPruneUnpinnableSectors benchmarks PruneUnpinnableSectors
-func BenchmarkPruneUnpinnableSectors(b *testing.B) {
+// BenchmarkMarkSectorsUnpinnable benchmarks MarkSectorsUnpinnable
+func BenchmarkMarkSectorsUnpinnable(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto.Account{1}
 
@@ -2140,7 +2140,7 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 		b.Run(fmt.Sprintf("%.3f%%", 1.0/float32(fraction)*100), func(b *testing.B) {
 			for b.Loop() {
 				b.SetBytes(proto.SectorSize * nSectors / fraction)
-				err := store.PruneUnpinnableSectors(context.Background(), now.Add(-3*day))
+				err := store.MarkSectorsUnpinnable(context.Background(), now.Add(-3*day))
 				if err != nil {
 					b.Fatal(err)
 				}

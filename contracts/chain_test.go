@@ -295,7 +295,7 @@ func (s *storeMock) MarkUnrenewableContractsBad(ctx context.Context, minProofHei
 	return nil
 }
 
-func (s *storeMock) PruneUnpinnableSectors(ctx context.Context, threshold time.Time) error {
+func (s *storeMock) MarkSectorsUnpinnable(ctx context.Context, threshold time.Time) error {
 	return nil
 }
 

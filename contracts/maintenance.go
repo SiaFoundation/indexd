@@ -175,9 +175,9 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 			return
 		}
 
-		threshold := time.Now().Add(-pruneUnpinnableThreshold)
+		threshold := time.Now().Add(-unpinnableSectorThreshold)
 		if !performMaintenanceJob("pruning unpinnable sectors", func() error {
-			return cm.store.PruneUnpinnableSectors(ctx, threshold)
+			return cm.store.MarkSectorsUnpinnable(ctx, threshold)
 		}, log) {
 			return
 		}

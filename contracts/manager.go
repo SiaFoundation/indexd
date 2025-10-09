@@ -29,7 +29,7 @@ const (
 
 	fundTimeout = 2 * time.Minute
 
-	pruneUnpinnableThreshold = 3 * 24 * time.Hour
+	unpinnableSectorThreshold = 3 * 24 * time.Hour
 )
 
 var (
@@ -122,7 +122,7 @@ type (
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
 		MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error
 		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
-		PruneUnpinnableSectors(ctx context.Context, threshold time.Time) error
+		MarkSectorsUnpinnable(ctx context.Context, threshold time.Time) error
 		PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error
 		PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
