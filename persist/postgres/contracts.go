@@ -227,7 +227,7 @@ WHERE
 	-- ID filter
 	AND ((CARDINALITY($5::bytea[]) = 0) OR (contract_id = ANY($5)))
 	-- public key filter
-	AND ((CARDINALITY($6::bytea[]) = 0) OR (contract_id = ANY($6)))
+	AND ((CARDINALITY($6::bytea[]) = 0) OR (h.public_key = ANY($6)))
 LIMIT $3 OFFSET $4`, opts.Good, opts.Revisable, limit, offset, ids, hks)
 		if err != nil {
 			return fmt.Errorf("failed to query contracts: %w", err)

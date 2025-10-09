@@ -31,10 +31,11 @@ func TestContracts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add a host with three contracts
-	hk := store.addTestHost(t)
-	fcid1 := store.addTestContract(t, hk, types.FileContractID{1})
-	fcid2 := store.addTestContract(t, hk, types.FileContractID{2})
-	fcid3 := store.addTestContract(t, hk, types.FileContractID{3})
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk1, types.FileContractID{2})
+	fcid3 := store.addTestContract(t, hk2, types.FileContractID{3})
 
 	// mark the second one resolved so it's considered inactive
 	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
@@ -82,6 +83,19 @@ func TestContracts(t *testing.T) {
 		t.Fatalf("expected contract %v, got %v", fcid3, css[0].ID)
 	}
 
+	// assert public key filtering works
+	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithHostKeys([]types.PublicKey{hk1})); err != nil {
+		t.Fatal(err)
+	} else if len(css) != 2 {
+		t.Fatal("expected 2 contracts, got", len(css))
+	} else if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithHostKeys([]types.PublicKey{hk2})); err != nil {
+		t.Fatal(err)
+	} else if len(css) != 1 {
+		t.Fatal("expected 1 contract, got", len(css))
+	} else if css[0].ID != fcid3 {
+		t.Fatalf("expected contract %v, got %v", fcid3, css[0].ID)
+	}
+
 	// assert WithRevisable(true)
 	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true)); err != nil {
 		t.Fatal(err)
@@ -118,7 +132,7 @@ func TestContracts(t *testing.T) {
 
 	// assert WithRevisable(true) takes into account renewed_to
 	fcid4 := types.FileContractID{4}
-	if err := store.AddRenewedContract(context.Background(), fcid1, fcid4, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+	if err := store.AddRenewedContract(context.Background(), fcid1, fcid4, newTestRevision(hk1), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 		t.Fatal(err)
 	} else if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true), contracts.WithGood(true)); err != nil {
 		t.Fatal(err)
