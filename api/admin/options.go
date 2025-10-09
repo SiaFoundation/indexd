@@ -63,7 +63,7 @@ func WithIDs(ids []types.FileContractID) ContractQueryParameterOption {
 
 // WithHostKeys sets the 'hostkey' parameter (multiple times if there is more
 // than one host key provided).
-func WithHostKeys(ids []types.FileContractID) ContractQueryParameterOption {
+func WithHostKeys(ids []types.PublicKey) ContractQueryParameterOption {
 	return func(q url.Values) {
 		strs := make([]string, len(ids))
 		for i := range ids {

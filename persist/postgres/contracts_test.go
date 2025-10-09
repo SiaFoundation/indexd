@@ -33,8 +33,9 @@ func TestContracts(t *testing.T) {
 	// add a host with three contracts
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
-	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
-	fcid2 := store.addTestContract(t, hk1, types.FileContractID{2})
+	fcid1 := types.FileContractID{1}
+	fcid2 := types.FileContractID{2}
+	store.addTestContracts(t, hk1, fcid1, fcid2)
 	fcid3 := store.addTestContract(t, hk2, types.FileContractID{3})
 
 	// mark the second one resolved so it's considered inactive
@@ -1896,6 +1897,18 @@ func (s *Store) addTestContract(t testing.TB, hk types.PublicKey, fcids ...types
 		t.Fatal(err)
 	}
 	return fcid
+}
+
+func (s *Store) addTestContracts(t testing.TB, hk types.PublicKey, fcids ...types.FileContractID) {
+	t.Helper()
+
+	for _, fcid := range fcids {
+		err := s.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return
 }
 
 func newTestRevision(hk types.PublicKey) types.V2FileContract {
