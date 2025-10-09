@@ -30,6 +30,7 @@ type (
 		Revisable *bool
 		Good      *bool
 		IDs       []types.FileContractID
+		HostKeys  []types.PublicKey
 	}
 
 	// ContractQueryOpt is a functional option for querying contracts.
@@ -55,6 +56,14 @@ func WithRevisable(revisable bool) ContractQueryOpt {
 func WithIDs(ids []types.FileContractID) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.IDs = ids
+	}
+}
+
+// WithHostKeys limits the set of returned contracts to those assigned to a
+// host with a public key in the provided slice
+func WithHostKeys(hks []types.PublicKey) ContractQueryOpt {
+	return func(opts *ContractQueryOpts) {
+		opts.HostKeys = hks
 	}
 }
 
