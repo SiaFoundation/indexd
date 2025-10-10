@@ -60,7 +60,7 @@ func WithIDs(ids []types.FileContractID) ContractQueryOpt {
 }
 
 // WithHostKeys limits the set of returned contracts to those on a host with a
-// a public key in the provided slice
+// public key in the provided slice
 func WithHostKeys(hks []types.PublicKey) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.HostKeys = hks
