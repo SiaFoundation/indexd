@@ -1662,6 +1662,15 @@ func BenchmarkContracts(b *testing.B) {
 				}
 			}
 		})
+
+		b.Run(fmt.Sprintf("contracts_hosts_%d", limit), func(b *testing.B) {
+			for b.Loop() {
+				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithHostKeys(hosts))
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 
 	for _, limit := range apiLimits {
