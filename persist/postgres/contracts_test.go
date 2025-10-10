@@ -1917,7 +1917,6 @@ func (s *Store) addTestContracts(t testing.TB, hk types.PublicKey, fcids ...type
 			t.Fatal(err)
 		}
 	}
-	return
 }
 
 func newTestRevision(hk types.PublicKey) types.V2FileContract {
