@@ -507,7 +507,7 @@ paths:
           explode: true
         - name: hostkey
           in: query
-          description: If provided, only include contracts assigned to this set of hosts.
+          description: If provided, only include contracts on this set of hosts.
           schema:
             type: array
             items:
