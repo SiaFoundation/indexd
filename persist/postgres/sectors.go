@@ -764,7 +764,7 @@ func (s *Store) MigrateSector(ctx context.Context, root types.Hash256, hostKey t
 			WHERE sector_root = $1 AND hosts.public_key = $2
 		`, sqlHash256(root), sqlPublicKey(hostKey))
 		if err != nil {
-			return fmt.Errorf("failed to migrate sector: %w", err)
+			return err
 		} else if resp.RowsAffected() == 0 {
 			return nil
 		}

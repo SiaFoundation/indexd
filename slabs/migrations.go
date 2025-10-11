@@ -2,9 +2,9 @@ package slabs
 
 import (
 	"context"
-	"encoding/hex"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/klauspost/reedsolomon"
 	"go.sia.tech/core/types"
@@ -12,12 +12,9 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/chacha20"
-	"lukechampine.com/frand"
 )
 
-func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, l *zap.Logger) error {
-	logger := l.Named(hex.EncodeToString(frand.Bytes(16))) // unique id per batch
-
+func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, log *zap.Logger) error {
 	// fetch all available contracts
 	var goodContracts []contracts.Contract
 	const batchSize = 50
@@ -53,43 +50,45 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, l *zap
 
 	var wg sync.WaitGroup
 	for _, slabID := range slabIDs {
+		log := log.With(zap.String("slab", slabID.String()))
 		wg.Add(1)
-		go func() {
+		go func(slabID SlabID) {
 			defer wg.Done()
-			if err := m.migrateSlab(ctx, slabID, allHosts, goodContracts, ms.Period, logger); err != nil {
-				logger.Error("failed to migrate slab", zap.Error(err))
-				return
-			}
-		}()
+			m.migrateSlab(ctx, slabID, allHosts, goodContracts, ms.Period, log)
+		}(slabID)
 	}
 	wg.Wait()
 	return nil
 }
 
-func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, l *zap.Logger) error {
-	logger := l.Named(slabID.String())
-
+func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, log *zap.Logger) {
+	start := time.Now()
 	slab, err := m.store.Slab(ctx, slabID)
 	if err != nil {
-		return fmt.Errorf("failed to fetch slab %s: %w", slabID, err)
+		log.Error("failed to fetch slab", zap.Error(err))
+		return
 	}
 
 	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, goodContracts, period, m.minHostDistanceKm)
 	if len(indices) == 0 {
-		logger.Debug("tried to migrate slab but no indices require migration")
-		return nil
+		log.Debug("tried to migrate slab but no indices require migration")
+		return
 	} else if len(uploadCandidates) == 0 {
-		logger.Warn("tried to migrate slab but no hosts are available for migration")
-		return nil
+		log.Warn("tried to migrate slab but no hosts are available for migration")
+		return
 	}
+	log = log.With(zap.Int("toMigrate", len(indices)), zap.Int("candidates", len(uploadCandidates)))
 
 	// download enough shards to reconstruct the slab's shards
 	// note: timeouts are set within downloadShards to avoid timing
 	// out the database
-	shards, err := m.downloadShards(ctx, slab, allHosts, logger)
+	shards, err := m.downloadShards(ctx, slab, allHosts, log.Named("recover"))
 	if err != nil {
-		return fmt.Errorf("failed to download slab %s: %w", slab.ID, err)
+		log.Error("failed to download slab", zap.Error(err))
+		return
 	}
+	log = log.With(zap.Duration("downloadElapsed", time.Since(start)))
+	log.Debug("recovered shards")
 
 	// decrypt the shards
 	nonce := make([]byte, 24)
@@ -110,9 +109,15 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	// reconstruct the missing shards
 	rs, err := reedsolomon.New(int(slab.MinShards), len(slab.Sectors)-int(slab.MinShards))
 	if err != nil {
-		return fmt.Errorf("failed to create reedsolomon encoder: %w", err)
+		// both of these are developer errors. New will only return an error
+		// if the parameters are invalid, which they shouldn't be since they
+		// originate from the database.
+		log.Panic("failed to create reedsolomon encoder", zap.Error(err))
 	} else if err := rs.ReconstructSome(shards, required); err != nil {
-		return fmt.Errorf("failed to reconstruct shards for slab %s: %w", slab.ID, err)
+		// reconstructing should only fail if there are not enough shards
+		// available, which should not happen since the download should have
+		// errored if not enough shards could be retrieved.
+		log.Panic("failed to reconstruct shards", zap.Error(err))
 	}
 
 	// re-encrypt the shards that are required
@@ -129,27 +134,26 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 
 	// migrate the shards
 	// note: timeouts are set within uploadShards to avoid timing out the database
-	migratedShards, err := m.uploadShards(ctx, slab, shards, uploadCandidates, logger)
-
+	uploadStart := time.Now()
+	migrated, err := m.uploadShards(ctx, slab, shards, uploadCandidates, log.Named("migrate"))
+	log = log.With(zap.Duration("uploadElapsed", time.Since(uploadStart)))
 	// update the database with the new locations for the migrated shards
-	for _, shard := range migratedShards {
-		if migrated, err := m.store.MigrateSector(ctx, shard.Root, shard.HostKey); err != nil {
-			return fmt.Errorf("failed to migrate sector %s: %w", shard.Root, err)
-		} else if !migrated {
-			logger.Warn("sector was not migrated", zap.String("root", shard.Root.String()), zap.String("host", shard.HostKey.String()))
+	for _, shard := range migrated {
+		if ok, err := m.store.MigrateSector(ctx, shard.Root, shard.HostKey); err != nil {
+			log.Error("failed to migrate sector", zap.Error(err))
+		} else if !ok {
+			log.Warn("sector was not migrated", zap.String("root", shard.Root.String()), zap.String("host", shard.HostKey.String()))
 		}
 	}
-
-	// return an error if the slab wasn't fully repaired
-	if err != nil {
-		return fmt.Errorf("failed to upload migrated shards for slab %s: %w", slab.ID, err)
-	} else if len(migratedShards) == 0 {
-		logger.Debug("no shards were migrated")
-		return nil
+	log = log.With(zap.Int("migrated", len(migrated)), zap.Duration("totalElapsed", time.Since(start)))
+	switch {
+	case err != nil:
+		log.Debug("failed to migrate all sectors", zap.Error(err)) // debug since this is not user actionable and will be retried
+	case len(migrated) == 0:
+		log.Error("did not migrate any sectors") // error since this is unexpected
+	default:
+		log.Debug("successfully migrated slab")
 	}
-
-	logger.Debug("successfully migrated slab", zap.Int("toMigrate", len(indices)), zap.Int("migrated", len(migratedShards)))
-	return nil
 }
 
 // sectorsToMigrate filters the sectors of a slab and returns the indices of the

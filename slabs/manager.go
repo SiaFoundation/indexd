@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"runtime"
 	"sync"
 	"time"
 
@@ -36,8 +37,8 @@ type (
 		migrationAccount    proto.Account
 		migrationAccountKey types.PrivateKey
 
-		shardTimeout time.Duration
-		slabTimeout  time.Duration
+		migrationBatchSize int
+		shardTimeout       time.Duration
 
 		alerter AlertsManager
 		am      AccountManager
@@ -141,6 +142,21 @@ func WithIntegrityCheckIntervals(success, failure time.Duration) Option {
 	}
 }
 
+// WithMigrationBatchSize sets the number of slabs to migrate in a single batch.
+// This directly impacts the number of concurrent downloads/uploads the contract
+// manager will perform when repairing slabs and the number of slabs held in
+// memory during repairs.
+//
+// The default is runtime.NumCPU().
+func WithMigrationBatchSize(size int) Option {
+	return func(m *SlabManager) {
+		if size <= 0 {
+			panic("migration batch size must be positive") // developer error
+		}
+		m.migrationBatchSize = size
+	}
+}
+
 // WithMinHostDistance sets the minimum distance between hosts used for storing
 // sectors of the same slab. The default is 10km, if set to 0, the distance
 // check is disabled.
@@ -192,7 +208,7 @@ func NewManager(am AccountManager, hm HostManager, store Store, dialer *client.D
 
 func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
 	m := &SlabManager{
-		healthCheckInterval: 30 * time.Minute,
+		healthCheckInterval: 10 * time.Minute,
 
 		integrityCheckInterval:       7 * 24 * time.Hour,
 		failedIntegrityCheckInterval: 6 * time.Hour,
@@ -202,8 +218,8 @@ func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Diale
 		migrationAccount:    proto.Account(migrationAccount.PublicKey()),
 		migrationAccountKey: migrationAccount,
 
-		shardTimeout: 30 * time.Second,
-		slabTimeout:  time.Minute,
+		shardTimeout:       2 * time.Minute,
+		migrationBatchSize: runtime.NumCPU(),
 
 		am:       am,
 		dialer:   dialer,
@@ -277,7 +293,7 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 					return
 				}
 				if err := task(ctx); err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
-					m.log.Error("failed to perform "+descr, zap.Error(err))
+					m.log.Error("maintenance failed", zap.String("task", descr), zap.Error(err))
 				}
 			}
 		}()
@@ -354,10 +370,10 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 
 func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	start := time.Now()
-	logger := m.log.Named("migrations")
-	logger.Debug("starting slab migrations", zap.Time("start", start))
+	log := m.log.Named("migrations")
+	log.Debug("starting slab migrations", zap.Time("start", start))
 
-	const slabsPerBatch = 10
+	slabsPerBatch := m.migrationBatchSize
 	var exhausted bool
 	for !exhausted {
 		batch, err := m.store.UnhealthySlabs(ctx, start, slabsPerBatch)
@@ -367,7 +383,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 			exhausted = true
 		}
 
-		err = m.migrateSlabs(ctx, batch, logger)
+		err = m.migrateSlabs(ctx, batch, log)
 		if errors.Is(err, context.Canceled) {
 			break
 		} else if err != nil {
@@ -375,6 +391,6 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 		}
 	}
 
-	logger.Debug("finished slab migrations", zap.Duration("elapsed", time.Since(start)))
+	log.Debug("finished slab migrations", zap.Duration("elapsed", time.Since(start)))
 	return nil
 }
