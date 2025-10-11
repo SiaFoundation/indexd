@@ -13,7 +13,6 @@ import (
 
 func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool, log *zap.Logger) error {
 	start := time.Now()
-	log = log.Named("accounts")
 
 	// fund accounts on usable hosts with active contracts
 	opts := []hosts.HostQueryOpt{
@@ -69,8 +68,6 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 }
 
 func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *zap.Logger) error {
-	log.Debug("performing contract maintenance")
-
 	// fetch settings and determine if maintenance is supposed to run
 	settings, err := cm.store.MaintenanceSettings(ctx)
 	if err != nil {
@@ -119,9 +116,8 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 // to perform on contracts
 func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 	log := cm.log.Named("maintenance")
-
-	ticker := time.NewTicker(cm.maintenanceFrequency)
-	defer ticker.Stop()
+	t := time.NewTimer(cm.maintenanceFrequency)
+	defer t.Stop()
 
 	for {
 		if !cm.waitUntilSynced(ctx, log) {
@@ -142,54 +138,33 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 			if err := cm.performContractPruning(ctx, true, log); err != nil {
 				log.Error("contract pruning failed", zap.Error(err))
 			}
+			continue
 		case <-cm.triggerMaintenanceChan:
-			// reset ticker
-			ticker.Stop()
-			ticker = time.NewTicker(cm.maintenanceFrequency)
-
 			log.Debug("triggering maintenance")
-		case <-ticker.C:
+		case <-t.C:
+			log.Debug("starting scheduled maintenance")
 		}
 
-		if !performMaintenanceJob("contract maintenance", func() error {
-			return cm.performContractMaintenance(ctx, log)
-		}, log) {
-			return
-		}
+		contractMaintenanceLog := log.Named("contracts")
+		logError(cm.performContractMaintenance(ctx, contractMaintenanceLog), contractMaintenanceLog)
+		fundingLog := log.Named("accounts")
+		logError(cm.performAccountFunding(ctx, false, fundingLog), fundingLog)
+		pruningLog := log.Named("pruning")
+		logError(cm.performContractPruning(ctx, false, pruningLog), pruningLog)
+		pinningLog := log.Named("pinning")
+		logError(cm.performSectorPinning(ctx, pinningLog), pinningLog)
 
-		if !performMaintenanceJob("account funding", func() error {
-			return cm.performAccountFunding(ctx, false, log)
-		}, log) {
-			return
-		}
-
-		if !performMaintenanceJob("contract pruning", func() error {
-			return cm.performContractPruning(ctx, false, log)
-		}, log) {
-			return
-		}
-
-		if !performMaintenanceJob("sector pinning", func() error {
-			return cm.performSectorPinning(ctx, log)
-		}, log) {
-			return
-		}
-
+		unpinnableLog := log.Named("unpinnable")
 		threshold := time.Now().Add(-pruneUnpinnableThreshold)
-		if !performMaintenanceJob("pruning unpinnable sectors", func() error {
-			return cm.store.PruneUnpinnableSectors(ctx, threshold)
-		}, log) {
-			return
-		}
+		logError(cm.store.PruneUnpinnableSectors(ctx, threshold), unpinnableLog)
+		t.Reset(cm.maintenanceFrequency)
+		log.Debug("maintenance complete")
 	}
 }
 
-func performMaintenanceJob(descr string, fn func() error, log *zap.Logger) bool {
-	if err := fn(); err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return false
-		}
-		log.Error(descr+" failed", zap.Error(err))
+func logError(err error, log *zap.Logger) {
+	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return
 	}
-	return true
+	log.Error("maintenance failed", zap.Error(err))
 }
