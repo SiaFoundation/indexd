@@ -1,6 +1,7 @@
 package slabs
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -12,20 +13,15 @@ func TestSlabPinParamsValidate(t *testing.T) {
 	params := SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     1,
-		Sectors: []PinnedSector{
-			{
-				Root:    frand.Entropy256(),
-				HostKey: frand.Entropy256(),
-			},
-			{
-				Root:    frand.Entropy256(),
-				HostKey: frand.Entropy256(),
-			},
-			{
-				Root:    frand.Entropy256(),
-				HostKey: frand.Entropy256(),
-			},
-		},
+		Sectors: func() (s []PinnedSector) {
+			for range 30 {
+				s = append(s, PinnedSector{
+					Root:    frand.Entropy256(),
+					HostKey: frand.Entropy256(),
+				})
+			}
+			return s
+		}(),
 	}
 	if err := params.Validate(); err != nil {
 		t.Fatal("unexpected", err)
@@ -46,12 +42,12 @@ func TestSlabPinParamsValidate(t *testing.T) {
 
 	// assert insufficient redundancy is illegal
 	params.Sectors = params.Sectors[:1]
-	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "minimum redundancy of 3x is not met") {
+	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "not enough redundancy") {
 		t.Fatal("unexpected", err)
 	}
 
 	// assert exceeding max total shards is illegal
-	params.Sectors = make([]PinnedSector, MaxTotalShards+1)
+	params.Sectors = make([]PinnedSector, maxTotalShards+1)
 	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "exceeds maximum") {
 		t.Fatal("unexpected", err)
 	}
@@ -88,5 +84,67 @@ func TestSlabPinParamsDigest(t *testing.T) {
 		t.Fatal(err)
 	} else if slabID != expectedID {
 		t.Fatalf("expected %v, got %v", expectedID, slabID)
+	}
+}
+
+func TestValidateECParams(t *testing.T) {
+	tests := []struct {
+		minShards   int
+		totalShards int
+		ok          bool
+	}{
+		{
+			minShards:   0,
+			totalShards: 6,
+			ok:          false,
+		},
+		{
+			minShards:   6,
+			totalShards: 0,
+			ok:          false,
+		},
+		{
+			minShards:   4,
+			totalShards: 2,
+			ok:          false,
+		},
+		{
+			minShards:   1,
+			totalShards: 3,
+			ok:          false,
+		},
+		{
+			minShards:   2,
+			totalShards: 6,
+			ok:          false,
+		},
+		{
+			minShards:   4,
+			totalShards: 8,
+			ok:          false,
+		},
+		{
+			minShards:   1,
+			totalShards: 10,
+			ok:          true,
+		},
+		{
+			minShards:   10,
+			totalShards: 30,
+			ok:          true,
+		},
+		{
+			minShards:   30,
+			totalShards: 60,
+			ok:          true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(fmt.Sprintf("%d-of-%d", test.minShards, test.totalShards), func(t *testing.T) {
+			err := ValidateECParams(test.minShards, test.totalShards)
+			if (err == nil) != test.ok {
+				t.Fatalf("expected %v, got %v", test.ok, err == nil)
+			}
+		})
 	}
 }

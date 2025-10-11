@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -11,17 +12,16 @@ import (
 )
 
 const (
-	// DefaultRedundancy is the default minimum redundancy for slabs.
-	DefaultRedundancy = 3
+	// minRecoveryProbability is the minimum acceptable probability of being able to
+	// recover the original data. If the calculated probability is below this
+	// threshold, the slab will be rejected.
+	minRecoveryProbability = 99.99
 
-	// MaxTotalShards is the maximum number of total shards (data + parity) allowed in a slab.
-	MaxTotalShards = 256
+	// maxTotalShards is the maximum number of total shards (data + parity) allowed in a slab.
+	maxTotalShards = 256
 )
 
 var (
-	// ErrInsufficientRedundancy is returned when the minimum redundancy of slabs is not met.
-	ErrInsufficientRedundancy = errors.New("insufficient redundancy")
-
 	// ErrSlabNotFound is returned when a slab is not found in the database.
 	ErrSlabNotFound = errors.New("slab not found")
 
@@ -121,21 +121,19 @@ func (s SlabPinParams) Size() uint64 {
 // are no duplicate host keys or empty roots in the sectors.
 func (s SlabPinParams) Validate() error {
 	if s.EncryptionKey == ([32]byte{}) {
-		return fmt.Errorf("%w: encryption key is empty", ErrInvalidSlab)
-	} else if len(s.Sectors) < int(s.MinShards*DefaultRedundancy) {
-		return fmt.Errorf("%w: %w: minimum redundancy of %dx is not met", ErrInvalidSlab, ErrInsufficientRedundancy, DefaultRedundancy)
-	} else if len(s.Sectors) > MaxTotalShards {
-		return fmt.Errorf("%w: total number of shards %d exceeds maximum of %d", ErrInvalidSlab, len(s.Sectors), MaxTotalShards)
+		return errors.New("encryption key is empty")
+	} else if err := ValidateECParams(int(s.MinShards), len(s.Sectors)); err != nil {
+		return err
 	}
 
 	hks := make(map[types.PublicKey]struct{}, len(s.Sectors))
 	for i, sector := range s.Sectors {
 		if sector.Root == (types.Hash256{}) {
-			return fmt.Errorf("%w: sector root is empty", ErrInvalidSlab)
+			return fmt.Errorf("sector %d invalid: root is empty", i)
 		} else if sector.HostKey == (types.PublicKey{}) {
-			return fmt.Errorf("%w: sector %d host key is empty", ErrInvalidSlab, i)
+			return fmt.Errorf("sector %d invalid: host key is empty", i)
 		} else if _, exists := hks[sector.HostKey]; exists {
-			return fmt.Errorf("%w: duplicate host key %s in slab pin params", ErrInvalidSlab, sector.HostKey)
+			return fmt.Errorf("sector %d is invalid: duplicate host key %q", i, sector.HostKey)
 		}
 		hks[sector.HostKey] = struct{}{}
 	}
@@ -179,4 +177,45 @@ func (m *SlabManager) SlabIDs(ctx context.Context, account proto.Account, offset
 // object.
 func (m *SlabManager) PruneSlabs(ctx context.Context, account proto.Account) error {
 	return m.store.PruneSlabs(ctx, account)
+}
+
+// ValidateECParams checks the erasure coding parameters are
+// acceptable and ensure sufficient durability of the data. If they
+// are not, an error is returned.
+//
+// It does this by calculating the probability of being able to recover
+// the original data. The calculation assumes that each shard has a
+// fixed probability of being available, and uses the binomial
+// distribution to calculate the probability of having at least
+// `n` data shards available out of `m` total shards.
+func ValidateECParams(dataShards, totalShards int) error {
+	switch {
+	case totalShards > maxTotalShards:
+		return fmt.Errorf("total number of shards %d exceeds maximum of %d", totalShards, maxTotalShards)
+	case dataShards == 0:
+		return errors.New("data shards cannot be zero")
+	case totalShards == 0:
+		return errors.New("total shards cannot be zero")
+	case dataShards > totalShards:
+		return fmt.Errorf("data shards %d cannot be greater than total shards %d", dataShards, totalShards)
+	}
+
+	const recoveryProbability = 0.75 // probability of being able to recover a single shard.
+	q := 1 - recoveryProbability
+	term := math.Pow(q, float64(totalShards))
+	for i := range dataShards {
+		term *= float64(totalShards-i) / float64(i+1) * (recoveryProbability / q)
+	}
+	sum := term
+	for i := dataShards; i < totalShards; i++ {
+		term *= float64(totalShards-i) / float64(i+1) * (recoveryProbability / q)
+		sum += term
+	}
+	prob := sum * 100
+	if prob < minRecoveryProbability {
+		// the error message is rounded down to two decimal places since more precision
+		// is not useful and `%0.2f` can round up creating confusing error messages.
+		return fmt.Errorf("not enough redundancy %d-of-%d: recovery probability %0.2f%% is below minimum threshold of %0.2f%%", dataShards, totalShards, math.Floor(prob*100)/100, minRecoveryProbability)
+	}
+	return nil
 }

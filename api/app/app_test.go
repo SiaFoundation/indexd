@@ -100,7 +100,7 @@ func TestApplicationAPI(t *testing.T) {
 	ctx := t.Context()
 	// create cluster with three hosts
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
+	cluster := testutils.NewCluster(t, testutils.WithHosts(10), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
 	time.Sleep(time.Second)
@@ -109,13 +109,9 @@ func TestApplicationAPI(t *testing.T) {
 	hosts, err := adminClient.Hosts(ctx)
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
-	} else if len(hosts) != 3 {
-		t.Fatal("expected 3 hosts, got", len(hosts))
+	} else if len(hosts) != 10 {
+		t.Fatal("expected 10 hosts, got", len(hosts))
 	}
-
-	h1 := hosts[0]
-	h2 := hosts[1]
-	h3 := hosts[2]
 
 	// prepare account
 	sk, key := newAccount(t, cluster)
@@ -143,20 +139,15 @@ func TestApplicationAPI(t *testing.T) {
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
 			MinShards:     1,
-			Sectors: []slabs.PinnedSector{
-				{
-					Root:    frand.Entropy256(),
-					HostKey: h1.PublicKey,
-				},
-				{
-					Root:    frand.Entropy256(),
-					HostKey: h2.PublicKey,
-				},
-				{
-					Root:    frand.Entropy256(),
-					HostKey: h3.PublicKey,
-				},
-			},
+			Sectors: func() (s []slabs.PinnedSector) {
+				for _, host := range hosts {
+					s = append(s, slabs.PinnedSector{
+						Root:    frand.Entropy256(),
+						HostKey: host.PublicKey,
+					})
+				}
+				return s
+			}(),
 		}
 	}
 
@@ -176,8 +167,8 @@ func TestApplicationAPI(t *testing.T) {
 	p := params()
 	p.Sectors = p.Sectors[:2]
 	_, err = client.PinSlabs(context.Background(), p)
-	if err == nil || !strings.Contains(err.Error(), slabs.ErrInsufficientRedundancy.Error()) {
-		t.Fatal("expected [slabs.ErrInsufficientRedundancy], got:", err)
+	if err == nil || !strings.Contains(err.Error(), "not enough redundancy") {
+		t.Fatal("expected redundancy error, got:", err)
 	}
 
 	// assert hosts returns all usable hosts
@@ -185,17 +176,17 @@ func TestApplicationAPI(t *testing.T) {
 	usableHosts, err := client.Hosts(context.Background())
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
-	} else if len(usableHosts) != 3 {
-		t.Fatal("expected 3 usable hosts, got", len(usableHosts))
+	} else if len(usableHosts) != 10 {
+		t.Fatal("expected 10 usable hosts, got", len(usableHosts))
 	}
 
 	// add quic to h1
 	if err := indexer.Store().UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		h1.Addresses = append(h1.Addresses, chain.NetAddress{
+		hosts[0].Addresses = append(hosts[0].Addresses, chain.NetAddress{
 			Protocol: quic.Protocol,
 			Address:  "127.0.0.1:1234",
 		})
-		return tx.AddHostAnnouncement(h1.PublicKey, chain.V2HostAnnouncement(h1.Addresses), time.Now())
+		return tx.AddHostAnnouncement(hosts[0].PublicKey, chain.V2HostAnnouncement(hosts[0].Addresses), time.Now())
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -212,11 +203,11 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// set h1 to US
-	if err := indexer.Store().UpdateHost(context.Background(), h1.PublicKey, h1.Settings, locationUS, true, h1.LastSuccessfulScan); err != nil {
+	if err := indexer.Store().UpdateHost(context.Background(), hosts[0].PublicKey, hosts[0].Settings, locationUS, true, hosts[0].LastSuccessfulScan); err != nil {
 		t.Fatal(err)
 	}
 	// set h2 to AU
-	if err := indexer.Store().UpdateHost(context.Background(), h2.PublicKey, h2.Settings, locationAU, true, h2.LastSuccessfulScan); err != nil {
+	if err := indexer.Store().UpdateHost(context.Background(), hosts[1].PublicKey, hosts[1].Settings, locationAU, true, hosts[1].LastSuccessfulScan); err != nil {
 		t.Fatal(err)
 	}
 
@@ -226,7 +217,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 1 {
 		t.Fatal("expected 1 host, got", len(usableHosts))
-	} else if usableHosts[0].PublicKey != h1.PublicKey {
+	} else if usableHosts[0].PublicKey != hosts[0].PublicKey {
 		t.Fatal("got wrong quic host")
 	}
 
@@ -236,7 +227,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 1 {
 		t.Fatal("expected 1 host, got", len(usableHosts))
-	} else if usableHosts[0].PublicKey != h1.PublicKey {
+	} else if usableHosts[0].PublicKey != hosts[0].PublicKey {
 		t.Fatal("got wrong quic host")
 	} else if usableHosts[0].CountryCode != locationUS.CountryCode {
 		t.Fatalf("expected country code %v, got %v", locationUS.CountryCode, usableHosts[0].CountryCode)
@@ -252,7 +243,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 1 {
 		t.Fatal("expected 1 host, got", len(usableHosts))
-	} else if usableHosts[0].PublicKey != h2.PublicKey {
+	} else if usableHosts[0].PublicKey != hosts[1].PublicKey {
 		t.Fatal("got wrong quic host")
 	} else if usableHosts[0].CountryCode != locationAU.CountryCode {
 		t.Fatalf("expected country code %v, got %v", locationAU.CountryCode, usableHosts[0].CountryCode)
@@ -263,7 +254,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// block h1
-	err = adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey}, "test blocklist reason")
+	err = adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{hosts[0].PublicKey}, "test blocklist reason")
 	if err != nil {
 		t.Fatal("failed to add host to blocklist:", err)
 	}
@@ -272,8 +263,8 @@ func TestApplicationAPI(t *testing.T) {
 	usableHosts, err = client.Hosts(context.Background())
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
-	} else if len(usableHosts) != 2 {
-		t.Fatal("expected 2 usable hosts, got", len(usableHosts))
+	} else if len(usableHosts) != 9 {
+		t.Fatal("expected 9 usable hosts, got", len(usableHosts))
 	}
 
 	// assert limit and offset are applied
@@ -281,7 +272,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("failed to get hosts with limit:", err)
 	} else if len(usableHosts) != 1 {
 		t.Fatal("expected 1 usable host, got", len(usableHosts))
-	} else if usableHosts, err := client.Hosts(context.Background(), api.WithOffset(2), api.WithLimit(1)); err != nil {
+	} else if usableHosts, err := client.Hosts(context.Background(), api.WithOffset(9), api.WithLimit(1)); err != nil {
 		t.Fatal("failed to get hosts with limit:", err)
 	} else if len(usableHosts) != 0 {
 		t.Fatal("expected 0 usable hosts, got", len(usableHosts))
@@ -550,7 +541,7 @@ func TestSharedObjects(t *testing.T) {
 
 	// create cluster with three hosts
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
+	cluster := testutils.NewCluster(t, testutils.WithHosts(12), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
 	time.Sleep(time.Second)
@@ -559,8 +550,8 @@ func TestSharedObjects(t *testing.T) {
 	hosts, err := adminClient.Hosts(ctx)
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
-	} else if len(hosts) != 3 {
-		t.Fatal("expected 3 hosts, got", len(hosts))
+	} else if len(hosts) != 12 {
+		t.Fatal("expected 12 hosts, got", len(hosts))
 	}
 
 	// prepare accounts
@@ -592,29 +583,20 @@ func TestSharedObjects(t *testing.T) {
 	client1, sk1 := prepareAcccount(t)
 	client2, _ := prepareAcccount(t)
 
-	h1 := hosts[0]
-	h2 := hosts[1]
-	h3 := hosts[2]
-
 	// helper to generate slab pin parameters
 	randomSlab := func() slabs.SlabPinParams {
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
 			MinShards:     1,
-			Sectors: []slabs.PinnedSector{
-				{
-					Root:    frand.Entropy256(),
-					HostKey: h1.PublicKey,
-				},
-				{
-					Root:    frand.Entropy256(),
-					HostKey: h2.PublicKey,
-				},
-				{
-					Root:    frand.Entropy256(),
-					HostKey: h3.PublicKey,
-				},
-			},
+			Sectors: func() (s []slabs.PinnedSector) {
+				for _, h := range hosts {
+					s = append(s, slabs.PinnedSector{
+						Root:    frand.Entropy256(),
+						HostKey: h.PublicKey,
+					})
+				}
+				return s
+			}(),
 		}
 	}
 	// generate and pin a slab
