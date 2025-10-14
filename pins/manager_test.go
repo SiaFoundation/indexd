@@ -11,8 +11,11 @@ import (
 	"github.com/shopspring/decimal"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/pins"
+	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
 
@@ -49,24 +52,6 @@ func (s *mockHostManager) UpdateUsabilitySettings(_ context.Context, us hosts.Us
 	return nil
 }
 
-type mockStore struct {
-	mu sync.Mutex
-	ps pins.PinnedSettings
-}
-
-func (s *mockStore) PinnedSettings(context.Context) (pins.PinnedSettings, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.ps, nil
-}
-
-func (s *mockStore) UpdatePinnedSettings(_ context.Context, ps pins.PinnedSettings) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.ps = ps
-	return nil
-}
-
 type mockExplorer struct {
 	mu   sync.Mutex
 	rate float64
@@ -87,7 +72,7 @@ func (e *mockExplorer) updateRate(rate float64) {
 func TestPinManager(t *testing.T) {
 	ps := pins.PinnedSettings{Currency: "usd"}
 	e := &mockExplorer{rate: 1}
-	s := &mockStore{ps: ps}
+	s := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
 	h := &mockHostManager{us: testUsabilitySettings}
 
 	pm, err := pins.NewManager(e, h, s)
@@ -164,8 +149,12 @@ func TestUpdatePricesThreshold(t *testing.T) {
 		MinCollateral:   1,
 	}
 	e := &mockExplorer{rate: 1}
-	s := &mockStore{ps: ps}
+	s := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
 	h := &mockHostManager{us: testUsabilitySettings}
+
+	if err := s.UpdatePinnedSettings(context.Background(), ps); err != nil {
+		t.Fatal(err)
+	}
 
 	opts := []pins.PinManagerOpt{
 		pins.WithPriceUpdateFrequency(100 * time.Millisecond),
