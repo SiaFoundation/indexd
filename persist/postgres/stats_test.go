@@ -85,7 +85,7 @@ func TestSectorStats(t *testing.T) {
 
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
-	fcid := store.addTestContract(t, hk1)
+	fcid := store.addTestContract(t, hk1, types.FileContractID(hk1))
 
 	root := types.Hash256(frand.Entropy256())
 	slab := slabs.SlabPinParams{

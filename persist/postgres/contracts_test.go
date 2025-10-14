@@ -33,9 +33,8 @@ func TestContracts(t *testing.T) {
 	// add a host with three contracts
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
-	fcid1 := types.FileContractID{1}
-	fcid2 := types.FileContractID{2}
-	store.addTestContracts(t, hk1, fcid1, fcid2)
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
+	fcid2 := store.addTestContract(t, hk1, types.FileContractID{2})
 	fcid3 := store.addTestContract(t, hk2, types.FileContractID{3})
 
 	// mark the second one resolved so it's considered inactive
@@ -157,7 +156,7 @@ func TestContractElement(t *testing.T) {
 	}
 
 	// add a contract and an element
-	fcid := store.addTestContract(t, hk)
+	fcid := store.addTestContract(t, hk, types.FileContractID(hk))
 	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractElements(types.V2FileContractElement{
 			ID: fcid,
@@ -1215,7 +1214,7 @@ func TestUpdateNextPruned(t *testing.T) {
 
 	// add a host with one contract
 	hk := store.addTestHost(t)
-	fcid := store.addTestContract(t, hk)
+	fcid := store.addTestContract(t, hk, types.FileContractID(hk))
 
 	// assert contract is marked to be pruned within 24h
 	tomorrow := time.Now().Add(24 * time.Hour)
@@ -1307,7 +1306,7 @@ func TestUpdateContractRevision(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	hk := store.addTestHost(t)
-	contractID := store.addTestContract(t, hk)
+	contractID := store.addTestContract(t, hk, types.FileContractID(hk))
 
 	contract, renewed, err := store.ContractRevision(context.Background(), contractID)
 	if err != nil {
@@ -1369,9 +1368,9 @@ func TestUpdateContractRenewedTo(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	hk1 := store.addTestHost(t)
-	contractID := store.addTestContract(t, hk1)
+	contractID := store.addTestContract(t, hk1, types.FileContractID(hk1))
 	hk2 := store.addTestHost(t)
-	renewedToID := store.addTestContract(t, hk2)
+	renewedToID := store.addTestContract(t, hk2, types.FileContractID(hk2))
 
 	if contract, err := store.Contract(context.Background(), contractID); err != nil {
 		t.Fatal(err)
@@ -1419,7 +1418,7 @@ func TestMarkBroadcastAttempt(t *testing.T) {
 	hk := store.addTestHost(t)
 
 	// assert broadcast attempt is defaulted
-	fcid := store.addTestContract(t, hk)
+	fcid := store.addTestContract(t, hk, types.FileContractID(hk))
 	contract, err := store.Contract(context.Background(), fcid)
 	if err != nil {
 		t.Fatal(err)
@@ -1820,7 +1819,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	var hks []types.PublicKey
 	for range nHosts {
 		hk := store.addTestHost(b)
-		store.addTestContract(b, hk)
+		store.addTestContract(b, hk, types.FileContractID(hk))
 		hks = append(hks, hk)
 	}
 
@@ -1888,35 +1887,14 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	}
 }
 
-func (s *Store) addTestContract(t testing.TB, hk types.PublicKey, fcids ...types.FileContractID) types.FileContractID {
+func (s *Store) addTestContract(t testing.TB, hk types.PublicKey, fcid types.FileContractID) types.FileContractID {
 	t.Helper()
-
-	var fcid types.FileContractID
-	switch len(fcids) {
-	case 0:
-		fcid = types.FileContractID(hk)
-	case 1:
-		fcid = fcids[0]
-	default:
-		panic("developer error")
-	}
 
 	err := s.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return fcid
-}
-
-func (s *Store) addTestContracts(t testing.TB, hk types.PublicKey, fcids ...types.FileContractID) {
-	t.Helper()
-
-	for _, fcid := range fcids {
-		err := s.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
 }
 
 func newTestRevision(hk types.PublicKey) types.V2FileContract {
