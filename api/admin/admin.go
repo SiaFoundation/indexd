@@ -601,6 +601,19 @@ func (a *admin) handleGETContracts(jc jape.Context) {
 		opts = append(opts, contracts.WithGood(good))
 	}
 
+	if strs := jc.Request.Form["id"]; len(strs) > 0 {
+		ids := make([]types.FileContractID, len(strs))
+		for i := range strs {
+			var id types.FileContractID
+			if err := id.UnmarshalText([]byte(strs[i])); err != nil {
+				jc.Error(fmt.Errorf("failed to parse contract ID %s: %w", strs[i], err), http.StatusBadRequest)
+				return
+			}
+			ids[i] = id
+		}
+		opts = append(opts, contracts.WithIDs(ids))
+	}
+
 	contracts, err := a.contracts.Contracts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get contracts", err) != nil {
 		return

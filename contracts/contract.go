@@ -29,6 +29,7 @@ type (
 	ContractQueryOpts struct {
 		Revisable *bool
 		Good      *bool
+		IDs       []types.FileContractID
 	}
 
 	// ContractQueryOpt is a functional option for querying contracts.
@@ -46,6 +47,14 @@ func WithGood(good bool) ContractQueryOpt {
 func WithRevisable(revisable bool) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.Revisable = &revisable
+	}
+}
+
+// WithIDs limits the set of returned contracts to those with an ID in the
+// provided slice.
+func WithIDs(ids []types.FileContractID) ContractQueryOpt {
+	return func(opts *ContractQueryOpts) {
+		opts.IDs = ids
 	}
 }
 

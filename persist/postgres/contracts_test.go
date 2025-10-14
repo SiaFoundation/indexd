@@ -69,11 +69,33 @@ func TestContracts(t *testing.T) {
 		t.Fatal("expected no contracts, got", len(css))
 	}
 
+	// assert ID filtering works
+	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithIDs([]types.FileContractID{fcid1, fcid2})); err != nil {
+		t.Fatal(err)
+	} else if len(css) != 2 {
+		t.Fatal("expected 2 contracts, got", len(css))
+	} else if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithIDs([]types.FileContractID{fcid3})); err != nil {
+		t.Fatal(err)
+	} else if len(css) != 1 {
+		t.Fatal("expected 1 contract, got", len(css))
+	} else if css[0].ID != fcid3 {
+		t.Fatalf("expected contract %v, got %v", fcid3, css[0].ID)
+	}
+
 	// assert WithRevisable(true)
 	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true)); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 2 {
 		t.Fatal("expected 2 contracts, got", len(css))
+	}
+
+	// assert WithRevisable(true) + ID filtering
+	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true), contracts.WithIDs([]types.FileContractID{fcid2, fcid3})); err != nil {
+		t.Fatal(err)
+	} else if len(css) != 1 {
+		t.Fatal("expected 1 contract, got", len(css))
+	} else if css[0].ID != fcid3 {
+		t.Fatalf("expected contract %v, got %v", fcid3, css[0].ID)
 	}
 
 	// assert WithRevisable(false)
@@ -1608,6 +1630,18 @@ func BenchmarkContracts(b *testing.B) {
 		b.Run(fmt.Sprintf("contracts_nonrevisable_bad_limit_%d", limit), func(b *testing.B) {
 			for b.Loop() {
 				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithRevisable(false), contracts.WithGood(false))
+				if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+
+		b.Run(fmt.Sprintf("contracts_ids_%d", limit), func(b *testing.B) {
+			for b.Loop() {
+				idx := frand.Intn(len(contractIDs) - limit)
+				ids := contractIDs[idx : idx+limit]
+
+				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithIDs(ids))
 				if err != nil {
 					b.Fatal(err)
 				}

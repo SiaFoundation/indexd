@@ -496,6 +496,15 @@ paths:
           required: false
           schema:
             type: boolean
+        - name: id
+          in: query
+          description: If provided, only include contracts from this set of IDs.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/FileContractID"
+          style: form
+          explode: true
       responses:
         "200":
           description: A list of contracts
