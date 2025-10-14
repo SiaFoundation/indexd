@@ -19,8 +19,6 @@ RUN git config --global --add safe.directory .
 # codegen
 RUN go generate ./...
 
-RUN git status
-
 # build
 RUN go build -o bin/ -tags='netgo timetzdata' -trimpath -a -ldflags '-s -w'  ./cmd/indexd
 
