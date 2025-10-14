@@ -12,20 +12,20 @@ func TestSpacedSet(t *testing.T) {
 	// Brussels–Liège: ~90 km
 	// Ghent–Liège: ~125 km
 
-	brussels := Host{
+	brussels := HostInfo{
 		PublicKey:   types.PublicKey{1},
 		CountryCode: "BE",
 		Latitude:    50.8503,
 		Longitude:   4.3517,
 	} // Brussels
 
-	ghent := Host{
+	ghent := HostInfo{
 		PublicKey:   types.PublicKey{2},
 		CountryCode: "BE",
 		Latitude:    51.0543,
 		Longitude:   3.7174,
 	} // Ghent
-	liege := Host{
+	liege := HostInfo{
 		PublicKey:   types.PublicKey{3},
 		CountryCode: "BE",
 		Latitude:    50.6326,

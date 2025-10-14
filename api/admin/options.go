@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/api"
 	"go.uber.org/zap"
@@ -80,6 +81,18 @@ func WithUsable(usable bool) HostQueryParameterOption {
 func WithActiveContracts(activeContracts bool) HostQueryParameterOption {
 	return func(q url.Values) {
 		q.Set("activecontracts", fmt.Sprint(activeContracts))
+	}
+}
+
+// WithPublicKeys sets the 'hostkey' parameter (multiple times if there is more
+// than one host key provided).
+func WithPublicKeys(hks []types.PublicKey) HostQueryParameterOption {
+	return func(q url.Values) {
+		strs := make([]string, len(hks))
+		for i := range hks {
+			strs[i] = hks[i].String()
+		}
+		q["hostkey"] = strs
 	}
 }
 

@@ -11,7 +11,7 @@ COPY . .
 # codegen
 RUN go generate ./...
 # build
-RUN go build -o bin/ -tags='netgo timetzdata' -trimpath -a -ldflags '-s -w'  ./cmd/indexd
+RUN go build -o bin/ -tags='netgo timetzdata' -trimpath -buildvcs=false -a -ldflags '-s -w'  ./cmd/indexd
 
 FROM debian:bookworm-slim
 

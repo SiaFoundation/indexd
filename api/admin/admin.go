@@ -666,6 +666,18 @@ func (a *admin) handleGETHosts(jc jape.Context) {
 		}
 		opts = append(opts, hosts.WithActiveContracts(activeContracts))
 	}
+	if strs := jc.Request.Form["hostkey"]; len(strs) > 0 {
+		hks := make([]types.PublicKey, len(strs))
+		for i := range strs {
+			var hk types.PublicKey
+			if err := hk.UnmarshalText([]byte(strs[i])); err != nil {
+				jc.Error(fmt.Errorf("failed to parse host key %s: %w", strs[i], err), http.StatusBadRequest)
+				return
+			}
+			hks[i] = hk
+		}
+		opts = append(opts, hosts.WithPublicKeys(hks))
+	}
 
 	hosts, err := a.hosts.Hosts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get hosts", err) != nil {

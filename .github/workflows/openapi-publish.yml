@@ -19,6 +19,7 @@ jobs:
       docs_slug: sia
     secrets:
       SCALAR_API_KEY: ${{ secrets.SCALAR_API_KEY }}
+      SCALAR_ACCESS_TOKEN: ${{ secrets.SCALAR_ACCESS_TOKEN }}
 
   app:
     uses: SiaFoundation/workflows/.github/workflows/publish-openapi.yml@master
@@ -28,3 +29,4 @@ jobs:
       docs_slug: sia
     secrets:
       SCALAR_API_KEY: ${{ secrets.SCALAR_API_KEY }}
+      SCALAR_ACCESS_TOKEN: ${{ secrets.SCALAR_ACCESS_TOKEN }}

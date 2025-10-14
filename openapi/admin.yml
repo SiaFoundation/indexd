@@ -737,6 +737,15 @@ paths:
           required: false
           schema:
             type: boolean
+        - name: hostkey
+          in: query
+          description: If provided, only include hosts from this set of public keys.
+          schema:
+            type: array
+            items:
+              $ref: "#/components/schemas/PublicKey"
+          style: form
+          explode: true
       responses:
         "200":
           description: A list of hosts

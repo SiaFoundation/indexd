@@ -13,12 +13,12 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
@@ -76,13 +76,14 @@ type dialer struct {
 	log *zap.Logger
 	tg  *threadgroup.ThreadGroup
 
-	c      appClient
-	appKey types.PrivateKey
+	c                 appClient
+	appKey            types.PrivateKey
+	minHostDistanceKm float64
 
 	mu             sync.Mutex
-	addrs          map[types.PublicKey][]chain.NetAddress
 	conns          map[types.PublicKey]*connEntry
 	cachedSettings map[types.PublicKey]proto.HostSettings
+	hosts          map[types.PublicKey]hosts.HostInfo
 }
 
 // newDialer returns a new Dialer.
@@ -90,13 +91,14 @@ func newDialer(c appClient, appKey types.PrivateKey, log *zap.Logger) (*dialer, 
 	d := &dialer{
 		log: log.Named("dialer"),
 
-		c:      c,
-		appKey: appKey,
+		c:                 c,
+		appKey:            appKey,
+		minHostDistanceKm: 10,
 
 		tg:             threadgroup.New(),
-		addrs:          make(map[types.PublicKey][]chain.NetAddress),
 		conns:          make(map[types.PublicKey]*connEntry),
 		cachedSettings: make(map[types.PublicKey]proto.HostSettings),
+		hosts:          make(map[types.PublicKey]hosts.HostInfo),
 	}
 	if err := d.initHosts(); err != nil {
 		return nil, err
@@ -163,25 +165,25 @@ func (d *dialer) updateHosts(ctx context.Context) error {
 	defer cancel()
 
 	offset, limit := 0, 100
-	addrs := make(map[types.PublicKey][]chain.NetAddress)
+	hosts := make(map[types.PublicKey]hosts.HostInfo)
 	for {
-		hosts, err := d.c.Hosts(ctx, api.WithOffset(offset), api.WithLimit(limit))
+		batch, err := d.c.Hosts(ctx, api.WithOffset(offset), api.WithLimit(limit))
 		if err != nil {
 			return fmt.Errorf("failed to get hosts: %w", err)
 		}
 
-		for _, host := range hosts {
-			addrs[host.PublicKey] = host.Addresses
+		for _, host := range batch {
+			hosts[host.PublicKey] = host
 		}
 
-		offset += len(hosts)
-		if len(hosts) < limit {
+		offset += len(batch)
+		if len(batch) < limit {
 			break
 		}
 	}
 
 	d.mu.Lock()
-	d.addrs = addrs
+	d.hosts = hosts
 	d.mu.Unlock()
 	return nil
 }
@@ -202,9 +204,15 @@ func (d *dialer) clearHostConnection(hostKey types.PublicKey) {
 func (d *dialer) Hosts() (hks []types.PublicKey) {
 	// grab current state
 	d.mu.Lock()
-	addrs := slices.Collect(maps.Keys(d.addrs))
+	infos := slices.Collect(maps.Values(d.hosts))
 	conns := slices.Collect(maps.Values(d.conns))
 	d.mu.Unlock()
+
+	// build lookup map
+	lookup := make(map[types.PublicKey]hosts.HostInfo)
+	for _, hi := range infos {
+		lookup[hi.PublicKey] = hi
+	}
 
 	// prioritize hosts we already have a connection with
 	seen := make(map[types.PublicKey]struct{})
@@ -216,18 +224,30 @@ func (d *dialer) Hosts() (hks []types.PublicKey) {
 	}
 
 	// add remaining hosts
-	for _, hk := range addrs {
+	for hk := range lookup {
 		if _, ok := seen[hk]; !ok {
 			hks = append(hks, hk)
 		}
 	}
 
-	return
+	// enforce minimum distance between hosts
+	set := hosts.NewSpacedSet(d.minHostDistanceKm)
+	spaced := make([]types.PublicKey, 0, len(hks))
+	others := make([]types.PublicKey, 0, len(hks))
+	for _, hk := range hks {
+		if hi, ok := lookup[hk]; ok && set.Add(hi) {
+			spaced = append(spaced, hk)
+		} else {
+			others = append(others, hk)
+		}
+	}
+
+	return append(spaced, others...)
 }
 
 func (d *dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.TransportClient, error) {
 	d.mu.Lock()
-	h, ok := d.addrs[hostKey]
+	h, ok := d.hosts[hostKey]
 	if !ok {
 		d.mu.Unlock()
 		return nil, fmt.Errorf("missing host with key: %v", hostKey)
@@ -275,7 +295,7 @@ func (d *dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.Tra
 		entry.setTransport(tc, err == nil)
 	}()
 
-	for _, addr := range h {
+	for _, addr := range h.Addresses {
 		if addr.Protocol == siamux.Protocol {
 			tc, err = siamux.Dial(ctx, addr.Address, hostKey)
 			if err == nil {
@@ -285,7 +305,7 @@ func (d *dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.Tra
 			}
 		}
 	}
-	for _, addr := range h {
+	for _, addr := range h.Addresses {
 		if addr.Protocol == quic.Protocol {
 			tc, err = quic.Dial(ctx, addr.Address, hostKey)
 			if err == nil {

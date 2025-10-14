@@ -168,7 +168,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			// host should be good
 			log.Debug("host is not usable due to bad usability", zap.String("reasons", host.Usability.FailedChecks()))
 			return false
-		} else if spaced := set.CanAddHost(host); !spaced && !force {
+		} else if spaced := set.CanAddHost(host.Info()); !spaced && !force {
 			// host should be sufficiently spaced from other hosts
 			return false
 		} else if host.Settings.RemainingStorage < minRemainingStorage {
@@ -203,7 +203,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		}
 
 		// contract is good
-		set.Add(host)
+		set.Add(host.Info())
 		wanted--
 	}
 
@@ -273,7 +273,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			}
 
 			// contract formed successfully
-			set.Add(host)
+			set.Add(host.Info())
 			wanted--
 
 			log.Debug("formed contract")

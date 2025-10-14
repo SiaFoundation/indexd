@@ -72,7 +72,7 @@ func (dc *downloadCandidates) next() (hosts.Host, bool) {
 // downloadShards downloads at least the minimum number of shards required to
 // recover the slab.
 func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, allHosts []hosts.Host, logger *zap.Logger) ([][]byte, error) {
-	ctx, cancel := context.WithTimeout(ctx, m.slabTimeout)
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	shards := make([][]byte, len(slab.Sectors))

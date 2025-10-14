@@ -31,9 +31,6 @@ type (
 // and should be tracked in the database. The given shards must not be nil and
 // the given hosts must all be good and be sufficiently spaced apart.
 func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, uploadCandidates []hosts.Host, logger *zap.Logger) ([]Shard, error) {
-	ctx, cancel := context.WithTimeout(ctx, m.slabTimeout)
-	defer cancel()
-
 	uploaded := make([]Shard, 0, len(shards))
 
 	if len(slab.Sectors) != len(shards) {
