@@ -140,28 +140,28 @@ func (pm *PinManager) updatePrices(ctx context.Context, force bool, log *zap.Log
 	}
 
 	if pins.MaxEgressPrice.Enabled() {
-		value, err := convertCurrencyToSC(decimal.NewFromFloat(float64(pins.MaxEgressPrice)), decimal.NewFromFloat(rate))
+		value, err := ConvertCurrencyToSC(decimal.NewFromFloat(float64(pins.MaxEgressPrice)), decimal.NewFromFloat(rate))
 		if err != nil {
 			return fmt.Errorf("failed to convert MaxEgressPrice price, %w", err)
 		}
 		settings.MaxEgressPrice = value.Div64(oneTB)
 	}
 	if pins.MaxIngressPrice.Enabled() {
-		value, err := convertCurrencyToSC(decimal.NewFromFloat(float64(pins.MaxIngressPrice)), decimal.NewFromFloat(rate))
+		value, err := ConvertCurrencyToSC(decimal.NewFromFloat(float64(pins.MaxIngressPrice)), decimal.NewFromFloat(rate))
 		if err != nil {
 			return fmt.Errorf("failed to convert MaxIngressPrice price, %w", err)
 		}
 		settings.MaxIngressPrice = value.Div64(oneTB)
 	}
 	if pins.MaxStoragePrice.Enabled() {
-		value, err := convertCurrencyToSC(decimal.NewFromFloat(float64(pins.MaxStoragePrice)), decimal.NewFromFloat(rate))
+		value, err := ConvertCurrencyToSC(decimal.NewFromFloat(float64(pins.MaxStoragePrice)), decimal.NewFromFloat(rate))
 		if err != nil {
 			return fmt.Errorf("failed to convert MaxStoragePrice price, %w", err)
 		}
 		settings.MaxStoragePrice = value.Div64(oneTB).Div64(oneMonth)
 	}
 	if pins.MinCollateral.Enabled() {
-		value, err := convertCurrencyToSC(decimal.NewFromFloat(float64(pins.MinCollateral)), decimal.NewFromFloat(rate))
+		value, err := ConvertCurrencyToSC(decimal.NewFromFloat(float64(pins.MinCollateral)), decimal.NewFromFloat(rate))
 		if err != nil {
 			return fmt.Errorf("failed to convert MinCollateral price, %w", err)
 		}
@@ -292,9 +292,9 @@ func NewManager(explorer Explorer, hosts HostManager, store Store, opts ...PinMa
 	return pm, nil
 }
 
-// convertCurrencyToSC converts a value in an external currency and an exchange
+// ConvertCurrencyToSC converts a value in an external currency and an exchange
 // rate to Siacoins.
-func convertCurrencyToSC(target decimal.Decimal, rate decimal.Decimal) (types.Currency, error) {
+func ConvertCurrencyToSC(target decimal.Decimal, rate decimal.Decimal) (types.Currency, error) {
 	if rate.IsZero() {
 		return types.Currency{}, errors.New("zero rate")
 	}
