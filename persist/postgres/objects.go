@@ -151,7 +151,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 			return err
 		}
 
-		objectIDs := make(map[types.Hash256]int64, len(events))
+		objectIDs := make(map[types.Hash256]int64)
 		for i := range events {
 			if events[i].Deleted {
 				continue
