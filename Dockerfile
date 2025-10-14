@@ -2,6 +2,7 @@ FROM golang:1.25 AS builder
 
 WORKDIR /indexd
 
+
 # get dependencies
 COPY go.mod go.sum ./
 RUN go mod download
@@ -10,6 +11,9 @@ RUN go mod download
 COPY . .
 # codegen
 RUN go generate ./...
+
+RUN git status
+
 # build
 RUN go build -o bin/ -tags='netgo timetzdata' -trimpath -a -ldflags '-s -w'  ./cmd/indexd
 
