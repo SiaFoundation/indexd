@@ -199,6 +199,16 @@ func (s *Store) Contracts(ctx context.Context, offset, limit int, queryOpts ...c
 		opt(&opts)
 	}
 
+	ids := make([]sqlHash256, len(opts.IDs))
+	for i := range ids {
+		ids[i] = sqlHash256(opts.IDs[i])
+	}
+
+	hks := make([]sqlPublicKey, len(opts.HostKeys))
+	for i := range hks {
+		hks[i] = sqlPublicKey(opts.HostKeys[i])
+	}
+
 	var contracts []contracts.Contract
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		rows, err := tx.Query(ctx, `
@@ -214,7 +224,11 @@ WHERE
 		($2::boolean = TRUE AND c.state IN (0,1) AND c.renewed_to IS NULL) OR
 		($2::boolean = FALSE AND c.state IN (2,3,4))
 	)
-LIMIT $3 OFFSET $4`, opts.Good, opts.Revisable, limit, offset)
+	-- ID filter
+	AND ((CARDINALITY($5::bytea[]) = 0) OR (contract_id = ANY($5)))
+	-- public key filter
+	AND ((CARDINALITY($6::bytea[]) = 0) OR (h.public_key = ANY($6)))
+LIMIT $3 OFFSET $4`, opts.Good, opts.Revisable, limit, offset, ids, hks)
 		if err != nil {
 			return fmt.Errorf("failed to query contracts: %w", err)
 		}

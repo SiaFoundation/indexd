@@ -96,8 +96,8 @@ func TestSectorStats(t *testing.T) {
 	hk2 := store.addTestHost(t)
 	hk3 := store.addTestHost(t)
 	hk4 := store.addTestHost(t)
-	fcidHK1 := store.addTestContract(t, hk1)
-	fcidHK4 := store.addTestContract(t, hk4)
+	fcidHK1 := store.addTestContract(t, hk1, types.FileContractID{1})
+	fcidHK4 := store.addTestContract(t, hk4, types.FileContractID{2})
 
 	roots := []types.Hash256{
 		frand.Entropy256(),

@@ -32,7 +32,7 @@ func TestMigrateSector(t *testing.T) {
 	hk2 := store.addTestHost(t)
 
 	// add contract for first host
-	fcid1 := store.addTestContract(t, hk1)
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID(hk1))
 
 	// pin a slab to add 2 sectors which are both stored on the first host
 	pinTime := time.Now().Round(time.Microsecond)
@@ -1090,7 +1090,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// add a host and a contract
 	hk := store.addTestHost(t)
-	contractID := store.addTestContract(t, hk)
+	contractID := store.addTestContract(t, hk, types.FileContractID(hk))
 
 	// add two slabs & immediately reset the LRA-time
 	slabID1 := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
@@ -1252,7 +1252,7 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 
 	// add host with a contract
 	hk := store.addTestHost(t)
-	store.addTestContract(t, hk)
+	store.addTestContract(t, hk, types.FileContractID(hk))
 
 	// pin a slab to add a few sectors to the database
 	root1 := frand.Entropy256()
@@ -1337,7 +1337,7 @@ func TestUnpinnedSectors(t *testing.T) {
 	account := proto.Account{1}
 	store.addTestAccount(t, types.PublicKey(account))
 	hk := store.addTestHost(t)
-	store.addTestContract(t, hk)
+	store.addTestContract(t, hk, types.FileContractID(hk))
 
 	// create 4 sectors
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
@@ -1552,7 +1552,7 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk)
+	store.addTestContract(b, hk, types.FileContractID(hk))
 
 	// prepare base db
 	const (
@@ -1708,7 +1708,7 @@ func BenchmarkPinSectors(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk)
+	store.addTestContract(b, hk, types.FileContractID(hk))
 
 	// prepare base db
 	const (
@@ -1802,8 +1802,8 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 	}
 
 	// add 2 contracts
-	store.addTestContract(b, hks[0])
-	store.addTestContract(b, hks[1])
+	store.addTestContract(b, hks[0], types.FileContractID(hks[0]))
+	store.addTestContract(b, hks[1], types.FileContractID(hks[1]))
 
 	// mark the second contract as bad
 	res, err := store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE id = 2") // id 2 is bad
@@ -1911,7 +1911,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 
 	// add host with one contract
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk)
+	store.addTestContract(b, hk, types.FileContractID(hk))
 
 	// prepare base db
 	const (
@@ -2166,8 +2166,8 @@ func TestMarkSectorsLost(t *testing.T) {
 	hk2 := store.addTestHost(t)
 
 	// add a contract for each host
-	fcid1 := store.addTestContract(t, hk1)
-	_ = store.addTestContract(t, hk2)
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
+	_ = store.addTestContract(t, hk2, types.FileContractID{2})
 
 	// pin a slab that adds 2 sectors to each host
 	root1 := frand.Entropy256()
@@ -2293,7 +2293,7 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk)
+	store.addTestContract(b, hk, types.FileContractID(hk))
 
 	// prepare base db
 	const (
@@ -2421,7 +2421,7 @@ func BenchmarkMigrateSector(b *testing.B) {
 	var hks []types.PublicKey
 	for range 100 {
 		hk := store.addTestHost(b)
-		store.addTestContract(b, hk)
+		store.addTestContract(b, hk, types.FileContractID(hk))
 		hks = append(hks, hk)
 	}
 
