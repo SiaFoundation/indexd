@@ -400,8 +400,8 @@ func TestContractsAPI(t *testing.T) {
 	host, err := adminClient.Host(context.Background(), h.PublicKey())
 	if err != nil {
 		t.Fatal(err)
-	} else if !host.AccountFunding.Equals(types.Siacoins(2)) {
-		t.Fatal("expected host account funding to be exactly 2 SC")
+	} else if !host.AccountFunding.Equals(types.Siacoins(4)) {
+		t.Fatal("expected host account funding to be exactly 4 SC")
 	} else if host.TotalSpent.Cmp(host.AccountFunding) <= 0 {
 		t.Fatal("expected host total spent to greater than account funding", host.TotalSpent, host.AccountFunding)
 	}
