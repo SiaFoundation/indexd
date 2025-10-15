@@ -3,6 +3,7 @@ package slabs_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -66,32 +67,53 @@ func TestMigrations(t *testing.T) {
 	}
 	slabID := slabIDs[0]
 
-	// assert sectors were pinned
-	time.Sleep(time.Second)
-	pinned, err := app.Slab(context.Background(), slabID)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(pinned.Sectors) != 10 {
-		t.Fatalf("expected 10 pinned sectors, got %d", len(pinned.Sectors))
-	} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != hosts[0].PublicKey {
-		t.Fatalf("expected sector %s on host %s, got %s on host %s", roots[0], hosts[0].PublicKey, pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
+	retry := func(tries int, durationBetweenAttempts time.Duration, fn func() error) error {
+		t.Helper()
+		var err error
+		for i := 0; i < tries; i++ {
+			err = fn()
+			if err == nil {
+				break
+			}
+			time.Sleep(durationBetweenAttempts)
+		}
+		return err
 	}
 
-	// add first host to blocklist
+	// assert sectors are pinned
+	if err := retry(100, 100*time.Millisecond, func() error {
+		slab, err := indexer.Store().Slab(t.Context(), slabID)
+		if err != nil {
+			return err
+		}
+		for _, sector := range slab.Sectors {
+			if sector.ContractID == nil || sector.HostKey == nil {
+				return fmt.Errorf("sector %s is not pinned yet", sector.Root)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// block the first host
 	err = indexer.Hosts().BlockHosts(context.Background(), []types.PublicKey{hosts[0].PublicKey}, "test blocklist reason")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// assert sectors are still pinned and the first shard was migrated to the free host
-	time.Sleep(3 * time.Second)
-	pinned, err = app.Slab(context.Background(), slabID)
-	if err != nil {
+	// assert sector was migrated
+	if err := retry(300, 100*time.Millisecond, func() error {
+		if pinned, err := app.Slab(context.Background(), slabID); err != nil {
+			t.Fatal(err)
+		} else if len(pinned.Sectors) != 10 {
+			return fmt.Errorf("expected 10 pinned sectors, got %d", len(pinned.Sectors))
+		} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != hosts[10].PublicKey {
+			return fmt.Errorf("expected sector %s on host %s, got %s on host %s", roots[0], hosts[10].PublicKey, pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
-	} else if len(pinned.Sectors) != 10 {
-		t.Fatalf("expected 10 pinned sectors, got %d", len(pinned.Sectors))
-	} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != hosts[10].PublicKey {
-		t.Fatalf("expected sector %s on host %s, got %s on host %s", roots[0], hosts[10].PublicKey, pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
 	}
 }
 

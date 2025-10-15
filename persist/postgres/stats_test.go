@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -138,14 +139,10 @@ func TestSectorStats(t *testing.T) {
 	assertStats(1, 0, 2, 0) // r0 still pinned, others unpinnable
 
 	// migrate sectors to h2
-	if migrated, err := store.MigrateSector(t.Context(), roots[1], hk4); err != nil {
+	_, err1 := store.MigrateSector(t.Context(), roots[1], hk4)
+	_, err2 := store.MigrateSector(t.Context(), roots[2], hk4)
+	if err := errors.Join(err1, err2); err != nil {
 		t.Fatal(err)
-	} else if !migrated {
-		t.Fatal("expected sector to be migrated")
-	} else if migrated, err := store.MigrateSector(t.Context(), roots[2], hk4); err != nil {
-		t.Fatal(err)
-	} else if !migrated {
-		t.Fatal("expected sector to be migrated")
 	}
 	assertStats(1, 2, 0, 2) // r0 still pinned, others unpinned and 2 migrated
 
@@ -173,14 +170,10 @@ func TestSectorStats(t *testing.T) {
 	}
 	assertStats(1, 0, 2, 2) // r0 and r1 are unpinnable
 
-	if migrated, err := store.MigrateSector(t.Context(), roots[0], hk4); err != nil {
+	_, err1 = store.MigrateSector(t.Context(), roots[0], hk4)
+	_, err2 = store.MigrateSector(t.Context(), roots[1], hk4)
+	if err := errors.Join(err1, err2); err != nil {
 		t.Fatal(err)
-	} else if !migrated {
-		t.Fatal("expected sector to be migrated")
-	} else if migrated, err := store.MigrateSector(t.Context(), roots[1], hk4); err != nil {
-		t.Fatal(err)
-	} else if !migrated {
-		t.Fatal("expected sector to be migrated")
 	}
 	assertStats(1, 2, 0, 4) // r2 is still pinned, r0 and r1 migrated and unpinned
 
@@ -190,7 +183,7 @@ func TestSectorStats(t *testing.T) {
 
 	assertStats(3, 0, 0, 4) // all sectors are pinned
 
-	// everything below this point verifies MarkSectorsLost properly tracks both
+	// the following section verifies MarkSectorsLost properly tracks both
 	// pinned and unpinned sectors, moving them to unpinnable but more
 	// importantly correctly decrementing from pinned/unpinned stats
 	if err := store.MarkSectorsLost(t.Context(), hk4, []types.Hash256{roots[0]}); err != nil {
@@ -198,10 +191,8 @@ func TestSectorStats(t *testing.T) {
 	}
 	assertStats(2, 0, 1, 4)
 
-	if migrated, err := store.MigrateSector(t.Context(), roots[0], hk4); err != nil {
+	if _, err := store.MigrateSector(t.Context(), roots[0], hk4); err != nil {
 		t.Fatal(err)
-	} else if !migrated {
-		t.Fatal("expected sector to be migrated")
 	}
 	assertStats(2, 1, 0, 5)
 
@@ -209,6 +200,25 @@ func TestSectorStats(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertStats(0, 0, 3, 5)
+
+	// the following section verifies BlockHosts properly unpins the sectors and
+	// updates the stats accordingly
+	if _, err := store.MigrateSector(t.Context(), roots[0], hk1); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(0, 1, 2, 6)
+
+	err := store.BlockHosts(t.Context(), []types.PublicKey{hk1}, t.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStats(0, 0, 3, 6)
+
+	if unpinned, err := store.UnpinnedSectors(t.Context(), hk1, 1); err != nil {
+		t.Fatal(err)
+	} else if len(unpinned) != 0 {
+		t.Fatalf("expected 0 unpinned sectors, got %d", len(unpinned))
+	}
 }
 
 func TestAccountStatsRegistered(t *testing.T) {

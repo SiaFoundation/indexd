@@ -280,16 +280,32 @@ func (s *Store) BlockHosts(ctx context.Context, hks []types.PublicKey, reason st
 			if err != nil {
 				return fmt.Errorf("failed to add host %q to blocklist: %w", hk, err)
 			}
-			_, err = tx.Exec(ctx, `
-				UPDATE contracts
-				SET good = FALSE
-				FROM contracts c
-				INNER JOIN hosts h ON h.id = c.host_id
-				INNER JOIN hosts_blocklist hb ON hb.public_key = h.public_key
-				WHERE contracts.id = c.id AND h.public_key = $1
-				`, sqlPublicKey(hk))
+
+			var hostID int64
+			err = tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = $1", sqlPublicKey(hk)).Scan(&hostID)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue // host does not exist in db, nothing to mark as bad
+			} else if err != nil {
+				return fmt.Errorf("failed to fetch host ID %q: %w", hk, err)
+			}
+
+			_, err = tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE host_id = $1`, hostID)
 			if err != nil {
 				return fmt.Errorf("failed to update contracts: %w", err)
+			}
+
+			res, err := tx.Exec(ctx, `
+				UPDATE sectors
+				SET host_id = NULL
+				WHERE host_id = $1 AND contract_sectors_map_id IS NULL`, hostID)
+			if err != nil {
+				return fmt.Errorf("failed to update sectors: %w", err)
+			} else if unpinnable := res.RowsAffected(); unpinnable > 0 {
+				if err := incrementNumUnpinnableSectors(ctx, tx, unpinnable); err != nil {
+					return fmt.Errorf("failed to increment unpinnable sectors: %w", err)
+				} else if err := incrementNumUnpinnedSectors(ctx, tx, -unpinnable); err != nil {
+					return fmt.Errorf("failed to decrement unpinned sectors: %w", err)
+				}
 			}
 		}
 		return nil
