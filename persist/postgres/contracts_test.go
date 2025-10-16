@@ -223,7 +223,10 @@ func TestContractElementsForBroadcast(t *testing.T) {
 
 	// add contract element, 1 contract to broadcast
 	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.UpdateContractElements(fce)
+		return errors.Join(
+			tx.UpdateContractElements(fce),
+			tx.UpdateContractState(fcid, contracts.ContractStateActive),
+		)
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -233,7 +236,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	assertContractsToBroadcast(10, 1) // not within bounds
 
 	// assert fce matches expected
-	fces, err := store.ContractElementsForBroadcast(context.Background(), 9)
+	fces, err := store.ContractElementsForBroadcast(context.Background(), 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(fces) != 1 {
@@ -241,6 +244,28 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	} else if !reflect.DeepEqual(fces[0], fce) {
 		t.Fatalf("mismatch: \n%+v\n%+v", fce, fces[0])
 	}
+
+	// assert contract state are taken into account
+	for _, state := range []contracts.ContractState{contracts.ContractStatePending, contracts.ContractStateResolved, contracts.ContractStateRejected} {
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.UpdateContractState(fcid, state)
+		}); err != nil {
+			t.Fatal(err)
+		}
+		assertContractsToBroadcast(10, 0)
+	}
+	// assert renewed_to is taken into account
+	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateContractState(fcid, contracts.ContractStateActive)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertContractsToBroadcast(10, 1)
+	fcid2 := types.FileContractID{2}
+	if err := store.AddRenewedContract(t.Context(), fcid, fcid2, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	assertContractsToBroadcast(10, 0)
 }
 
 func TestContractsForBroadcasting(t *testing.T) {
@@ -1574,7 +1599,8 @@ func BenchmarkContracts(b *testing.B) {
 	// analyze tables to ensure query planner has up-to-date statistics
 	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`)
 	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`)
-	if err := errors.Join(vErr1, vErr2); err != nil {
+	_, vErr3 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contract_elements;`)
+	if err := errors.Join(vErr1, vErr2, vErr3); err != nil {
 		b.Fatal(err)
 	}
 
@@ -1682,6 +1708,23 @@ func BenchmarkContracts(b *testing.B) {
 			}
 		})
 	}
+
+	b.Run("contracts_elements_for_broadcast", func(b *testing.B) {
+		if err := store.UpdateChainState(b.Context(), func(tx subscriber.UpdateTx) error {
+			return tx.UpdateLastScannedIndex(b.Context(), types.ChainIndex{Height: 700})
+		}); err != nil {
+			b.Fatal(err)
+		}
+
+		for b.Loop() {
+			eles, err := store.ContractElementsForBroadcast(context.Background(), frand.Uint64n(10))
+			if err != nil {
+				b.Fatal(err)
+			} else if len(eles) == 0 {
+				b.Fatal("expected at least one element")
+			}
+		}
+	})
 
 	for _, limit := range apiLimits {
 		b.Run(fmt.Sprintf("contracts_for_funding_limit_%d", limit), func(b *testing.B) {
@@ -1946,12 +1989,14 @@ func insertRandomContract(b *testing.B, tx *txn, hostID int64, hostKey types.Pub
 	revision.Filesize = frand.Uint64n(1e9)                                                            // random size
 	revision.Capacity = revision.Filesize + frand.Uint64n(1e3)                                        // random capacity
 	revision.RenterOutput.Value = types.Siacoins(100).Add(types.Siacoins(uint32(frand.Uint64n(100)))) // random allowance
-
+	revision.ExpirationHeight = revision.ProofHeight + 1 + frand.Uint64n(200)                         // random expiration height
 	if _, err := tx.Exec(b.Context(), `
-		INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, next_prune, formation) VALUES ($1, $2, $3, 1, 2, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15);`,
+		INSERT INTO contracts (host_id, contract_id, raw_revision, proof_height, expiration_height, contract_price, initial_allowance, miner_fee, total_collateral, remaining_allowance, state, good, size, capacity, last_broadcast_attempt, next_prune, formation) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17);`,
 		hostID,
 		sqlHash256(fcid),
 		sqlFileContract(revision),
+		revision.ProofHeight,
+		revision.ExpirationHeight,
 		sqlCurrency(types.ZeroCurrency),
 		sqlCurrency(types.ZeroCurrency),
 		sqlCurrency(types.ZeroCurrency),
@@ -1967,6 +2012,8 @@ func insertRandomContract(b *testing.B, tx *txn, hostID int64, hostKey types.Pub
 	); err != nil {
 		b.Fatal(err)
 	} else if _, err := tx.Exec(b.Context(), `INSERT INTO contract_sectors_map (contract_id) VALUES ($1)`, sqlHash256(fcid)); err != nil {
+		b.Fatal(err)
+	} else if _, err := tx.Exec(b.Context(), `INSERT INTO contract_elements (contract_id, contract, leaf_index, merkle_proof) VALUES ($1, $2, $3, $4)`, sqlHash256(fcid), sqlFileContract(revision), 1, sqlMerkleProof([]types.Hash256{{1}})); err != nil {
 		b.Fatal(err)
 	}
 

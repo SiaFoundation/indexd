@@ -427,4 +427,9 @@ FROM objects o;
 		}
 		return nil
 	},
+	// add index to speed up contract elements for broadcasting
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX contracts_expiration_height_contract_id_idx ON contracts (expiration_height, contract_id) WHERE state = 1 AND renewed_to IS NULL;`)
+		return err
+	},
 }

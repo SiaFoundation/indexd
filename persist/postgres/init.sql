@@ -236,6 +236,9 @@ CREATE INDEX contracts_host_id_inactive_bad_idx ON contracts (host_id) WHERE sta
 -- contracts for broadcasting
 CREATE INDEX contracts_last_broadcast_attempt_active_idx ON contracts (last_broadcast_attempt ASC, contract_id) WHERE state IN (0,1) AND renewed_to IS NULL;
 
+-- contract elements for broadcasting
+CREATE INDEX contracts_expiration_height_contract_id_idx ON contracts (expiration_height, contract_id) WHERE state = 1 AND renewed_to IS NULL;
+
 -- contracts for funding
 CREATE INDEX contracts_host_id_remaining_allowance_active_idx ON contracts (host_id, remaining_allowance DESC, contract_id) WHERE state IN (0,1) AND renewed_to IS NULL AND good AND remaining_allowance > 0;
 

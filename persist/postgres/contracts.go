@@ -407,20 +407,24 @@ func (s *Store) ContractElementsForBroadcast(ctx context.Context, maxBlocksSince
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 WITH current_height AS (
-    SELECT scanned_height FROM global_settings
+	SELECT scanned_height FROM global_settings
 )
 SELECT
-    fces.contract_id,
-    fces.contract,
-    fces.leaf_index,
-    fces.merkle_proof
-FROM contract_elements fces
-INNER JOIN contracts c ON fces.contract_id = c.contract_id
+	fces.contract_id,
+	fces.contract,
+	fces.leaf_index,
+	fces.merkle_proof
+FROM contracts c
+INNER JOIN contract_elements fces ON fces.contract_id = c.contract_id
 CROSS JOIN current_height
-WHERE current_height.scanned_height >= c.expiration_height + $1;`, maxBlocksSinceExpiry)
+WHERE current_height.scanned_height >= c.expiration_height + $1
+	AND c.state = 1
+	AND c.renewed_to IS NULL;`, maxBlocksSinceExpiry)
 		if err != nil {
 			return err
 		}
+		defer rows.Close()
+
 		for rows.Next() {
 			fce, err := scanContractElement(rows)
 			if err != nil {
