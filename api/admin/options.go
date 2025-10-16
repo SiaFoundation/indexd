@@ -102,8 +102,8 @@ func WithPublicKeys(hks []types.PublicKey) HostQueryParameterOption {
 // are "ASC" and "DESC".
 func WithSort(sortby, sortdir string) HostQueryParameterOption {
 	return func(q url.Values) {
-		q.Set("sortby", sortby)
-		q.Set("sortdir", sortdir)
+		q.Add("sortby", sortby)
+		q.Add("sortdir", sortdir)
 	}
 }
 
