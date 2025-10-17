@@ -22,6 +22,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// TestStore represents a postgres database for testing with some helpers for
+// common actions in testing like adding accounts and running SQL queries.
 type TestStore struct {
 	*postgres.Store
 
@@ -76,14 +78,19 @@ func NewDB(t testing.TB, maintenanceSettings contracts.MaintenanceSettings, log 
 	}
 }
 
+// Query executes a query that returns rows, typically a SELECT. The
+// args are for any placeholder parameters in the query.
 func (ts TestStore) Query(ctx context.Context, query string, args ...any) (pgx.Rows, error) {
 	return ts.pool.Query(ctx, query, args...)
 }
 
+// Exec executes a query without returning any rows. The args are for
+// any placeholder parameters in the query.
 func (ts TestStore) Exec(ctx context.Context, query string, args ...any) (pgconn.CommandTag, error) {
 	return ts.pool.Exec(ctx, query, args...)
 }
 
+// AddTestHost adds a host to the database for testing.
 func (ts TestStore) AddTestHost(t testing.TB, host hosts.Host) {
 	t.Helper()
 
@@ -98,6 +105,7 @@ func (ts TestStore) AddTestHost(t testing.TB, host hosts.Host) {
 	}
 }
 
+// AddTestHost adds an account to the database for testing.
 func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 	t.Helper()
 
@@ -120,6 +128,7 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 	}
 }
 
+// AddTestServiceAccount adds a service account to the database for testing.
 func (s TestStore) AddTestServiceAccount(t testing.TB, hk types.PublicKey, ak proto.Account) {
 	t.Helper()
 

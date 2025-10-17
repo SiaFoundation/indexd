@@ -155,7 +155,6 @@ func TestAccountManager(t *testing.T) {
 	// assert the accounts were updated
 	eas := s.hostAccounts(t)
 	if len(eas) != 2 {
-		panic(len(eas))
 		t.Fatal("expected two accounts to be updated")
 	}
 	expected := time.Now().Add(accounts.AccountFundInterval)
