@@ -96,14 +96,14 @@ func WithPublicKeys(hks []types.PublicKey) HostQueryParameterOption {
 	}
 }
 
-// WithSort sets the 'sortby' and 'sortdir' parameter, it can be called multiple
+// WithSort sets the 'sortby' and 'desc' parameter, it can be called multiple
 // times to add multiple sorting options. The parameters must be provided in
-// pairs, i.e. both 'sortby' and 'sortdir' must be set. Valid sort directions
-// are "ASC" and "DESC".
-func WithSort(sortby, sortdir string) HostQueryParameterOption {
+// pairs, i.e. both 'sortby' and 'desc' must be set. If desc is true, the sorting
+// will be done in descending order.
+func WithSort(sortby string, desc bool) HostQueryParameterOption {
 	return func(q url.Values) {
 		q.Add("sortby", sortby)
-		q.Add("sortdir", sortdir)
+		q.Add("desc", fmt.Sprint(desc))
 	}
 }
 
