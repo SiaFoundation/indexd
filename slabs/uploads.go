@@ -89,6 +89,7 @@ func (m *SlabManager) uploadShard(ctx context.Context, h hosts.Host, shard io.Re
 	if err != nil {
 		return proto.Usage{}, types.Hash256{}, fmt.Errorf("failed to dial host: %w", err)
 	}
+	defer client.Close()
 
 	settings, err := client.Settings(ctx)
 	if err != nil {
