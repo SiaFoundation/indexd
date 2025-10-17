@@ -291,6 +291,7 @@ func (idx *Indexer) HostClient(t *testing.T, hk types.PublicKey) *client.HostCli
 	if err != nil {
 		t.Fatalf("failed to dial host %s: %v", hk, err) // developer error
 	}
+	t.Cleanup(func() { hc.Close() })
 	return hc
 }
 
