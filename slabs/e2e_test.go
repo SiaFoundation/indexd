@@ -23,7 +23,7 @@ func TestMigrations(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 
 	// convenience variables
 	app := indexer.App(a1)
@@ -106,7 +106,7 @@ func TestUpdateLastUsed(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 
 	// convenience variables
 	app := indexer.App(a1)

@@ -23,7 +23,7 @@ func TestHostDialer(t *testing.T) {
 	// add an account
 	a1 := types.GeneratePrivateKey()
 	app := indexer.App(a1)
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 	time.Sleep(2 * time.Second)
 
 	dialer, err := newDialer(app, a1, zap.NewNop())
@@ -82,7 +82,7 @@ func TestHostDialerParallel(t *testing.T) {
 	// add an account
 	a1 := types.GeneratePrivateKey()
 	app := indexer.App(a1)
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 	time.Sleep(2 * time.Second)
 
 	dialer, err := newDialer(app, a1, logger.Named("Dialer"))
@@ -138,7 +138,7 @@ func TestHostDialerHosts(t *testing.T) {
 	// add an account
 	a1 := types.GeneratePrivateKey()
 	app := indexer.App(a1)
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 	time.Sleep(2 * time.Second)
 
 	dialer, err := newDialer(app, a1, zap.NewNop())
