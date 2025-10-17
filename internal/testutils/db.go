@@ -105,7 +105,7 @@ func (ts TestStore) AddTestHost(t testing.TB, host hosts.Host) {
 	}
 }
 
-// AddTestHost adds an account to the database for testing.
+// AddTestAccount adds an account to the database for testing.
 func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 	t.Helper()
 
