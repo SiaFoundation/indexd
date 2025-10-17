@@ -624,7 +624,7 @@ WHERE
 		args := []any{limit, offset, hosts.DefaultUsabilityPriceThreshold, queryOpts.CountryCode, (*sqlNetworkProtocol)(queryOpts.Protocol)}
 
 		if queryOpts.Location != nil {
-			baseQuery += `ORDER BY location <-> point($5, $6) `
+			baseQuery += `ORDER BY location <-> point($6, $7) `
 			args = append(args, queryOpts.Location[0], queryOpts.Location[1])
 		}
 		baseQuery += `LIMIT $1 OFFSET $2;`

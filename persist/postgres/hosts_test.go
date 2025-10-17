@@ -302,17 +302,20 @@ func TestHostChecks(t *testing.T) {
 	assertCheckOK("Collateral")
 
 	// adjust storage price so we pass the check
-	hs.Prices.StoragePrice = settingMaxStoragePrice
+	// We have to be within DefaultUsabilityPriceThreshold
+	hs.Prices.StoragePrice = settingMaxStoragePrice.Mul64(8).Div64(10)
 	_ = db.UpdateHost(context.Background(), hk, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("StoragePrice")
 
 	// adjust egress price so we pass the check
-	hs.Prices.EgressPrice = settingMaxEgressPrice
+	// We have to be within DefaultUsabilityPriceThreshold
+	hs.Prices.EgressPrice = settingMaxEgressPrice.Mul64(8).Div64(10)
 	_ = db.UpdateHost(context.Background(), hk, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("EgressPrice")
 
 	// adjust ingress price so we pass the check
-	hs.Prices.IngressPrice = settingMaxIngressPrice
+	// We have to be within DefaultUsabilityPriceThreshold
+	hs.Prices.IngressPrice = settingMaxIngressPrice.Mul64(8).Div64(10)
 	_ = db.UpdateHost(context.Background(), hk, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("IngressPrice")
 
