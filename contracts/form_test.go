@@ -183,6 +183,10 @@ func (s *hostManagerMock) BlockHosts(ctx context.Context, hostKeys []types.Publi
 	return s.store.BlockHosts(ctx, hostKeys, reason)
 }
 
+func (s *hostManagerMock) UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error) {
+	return s.store.UsabilitySettings(ctx)
+}
+
 // TestPerformContractFormationWithoutContracts tests the
 // performContractFormation method assuming that we don't have any contracts
 // yet.
