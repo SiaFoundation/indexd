@@ -353,6 +353,10 @@ func (s *storeMock) UpdateContractRevision(ctx context.Context, contract rhp.Con
 	return errors.New("contract not found")
 }
 
+func (s *storeMock) UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error) {
+	return hosts.DefaultUsabilitySettings, nil
+}
+
 func (s *storeMock) addTestContract(t *testing.T, hk types.PublicKey, good bool, fcids ...types.FileContractID) types.FileContractID {
 	t.Helper()
 

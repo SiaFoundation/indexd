@@ -94,6 +94,7 @@ type (
 		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
 		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
+		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)
 
 		WithScannedHost(ctx context.Context, hk types.PublicKey, fn func(h hosts.Host) error) error
 	}

@@ -32,6 +32,10 @@ const (
 	// refreshes due to how long it would take to reasonably upload
 	// that amount of data with a 10 Gbps connection.
 	maxContractGrowthRate = 256 << 30
+
+	// usabilityPriceLimit defines the maximum acceptable host prices as 80% of
+	// the price gouging maximum.
+	usabilityPriceLimit = 0.8
 )
 
 var (
@@ -160,6 +164,11 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		forceFormation[hostKey] = true
 	}
 
+	usabilitySettings, err := cm.hosts.UsabilitySettings(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get usability settings: %w", err)
+	}
+
 	// helper to check if a host is good to form a contract with
 	set := hosts.NewSpacedSet(cm.minHostDistanceKm)
 	isGood := func(host hosts.Host, log *zap.Logger) bool {
@@ -174,6 +183,18 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		} else if host.Settings.RemainingStorage < minRemainingStorage {
 			// host should at least have 10GB of storage left
 			log.Debug("host is not usable since host has less than 10GiB of storage left", zap.Uint64("remainingStorage", host.Settings.RemainingStorage))
+			return false
+		}
+
+		num, den := uint64(usabilityPriceLimit*10000), uint64(10000)
+		if host.Settings.Prices.StoragePrice.Cmp(usabilitySettings.MaxStoragePrice.Mul64(num).Div64(den)) > 0 {
+			log.Debug("host is not usable since storage price is not below price gouging setting")
+			return false
+		} else if host.Settings.Prices.IngressPrice.Cmp(usabilitySettings.MaxIngressPrice.Mul64(num).Div64(den)) > 0 {
+			log.Debug("host is not usable since ingress price is not below price gouging setting")
+			return false
+		} else if host.Settings.Prices.EgressPrice.Cmp(usabilitySettings.MaxEgressPrice.Mul64(num).Div64(den)) > 0 {
+			log.Debug("host is not usable since egress price is not below price gouging setting")
 			return false
 		}
 		return true
