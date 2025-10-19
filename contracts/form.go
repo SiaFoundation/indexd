@@ -86,7 +86,7 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 	s.w.SignV2Inputs(txn, toSign)
 }
 
-func mulFloat(c types.Currency, f float64) types.Currency {
+func mulUsabilityLimit(c types.Currency) types.Currency {
 	num, den := uint64(usabilityPriceLimit*10000), uint64(10000)
 	return c.Mul64(num).Div64(den)
 }
@@ -191,13 +191,13 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			return false
 		}
 
-		if host.Settings.Prices.StoragePrice.Cmp(mulFloat(usabilitySettings.MaxStoragePrice, usabilityPriceLimit)) > 0 {
+		if host.Settings.Prices.StoragePrice.Cmp(mulUsabilityLimit(usabilitySettings.MaxStoragePrice)) > 0 {
 			log.Debug("host is not usable since storage price is not sufficiently below price gouging setting")
 			return false
-		} else if host.Settings.Prices.IngressPrice.Cmp(mulFloat(usabilitySettings.MaxStoragePrice, usabilityPriceLimit)) > 0 {
+		} else if host.Settings.Prices.IngressPrice.Cmp(mulUsabilityLimit(usabilitySettings.MaxIngressPrice)) > 0 {
 			log.Debug("host is not usable since ingress price is not sufficiently below price gouging setting")
 			return false
-		} else if host.Settings.Prices.EgressPrice.Cmp(mulFloat(usabilitySettings.MaxStoragePrice, usabilityPriceLimit)) > 0 {
+		} else if host.Settings.Prices.EgressPrice.Cmp(mulUsabilityLimit(usabilitySettings.MaxEgressPrice)) > 0 {
 			log.Debug("host is not usable since egress price is not sufficiently below price gouging setting")
 			return false
 		}
