@@ -256,7 +256,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 	good3 := goodHost(6)
 	hm.settings[good3.PublicKey] = goodSettings
 
-	// 7th one is bad due to prices not being 20% below price gouging settingns
+	// 7th one is bad due to prices not being 20% below price gouging settings
 	bad4 := goodHost(7)
 	bad4.Settings.Prices.StoragePrice = hosts.DefaultUsabilitySettings.MaxStoragePrice
 	hm.settings[bad4.PublicKey] = bad4.Settings
