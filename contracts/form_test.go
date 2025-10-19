@@ -263,7 +263,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 
 	// 8th one is good again, because the storage price is 20% below price gouging settings
 	good4 := goodHost(8)
-	good4.Settings.Prices.StoragePrice = hosts.DefaultUsabilitySettings.MaxStoragePrice.Mul64(uint64(usabilityPriceLimit * 10000)).Div64(10000)
+	good4.Settings.Prices.StoragePrice = mulFloat(hosts.DefaultUsabilitySettings.MaxStoragePrice, usabilityPriceLimit)
 	hm.settings[good4.PublicKey] = good4.Settings
 
 	// 9th one is good again but will be ignored since we only want 4 contracts
