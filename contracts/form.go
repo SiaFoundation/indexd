@@ -188,13 +188,13 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 
 		num, den := uint64(usabilityPriceLimit*10000), uint64(10000)
 		if host.Settings.Prices.StoragePrice.Cmp(usabilitySettings.MaxStoragePrice.Mul64(num).Div64(den)) > 0 {
-			log.Debug("host is not usable since storage price is not below price gouging setting")
+			log.Debug("host is not usable since storage price is not sufficiently below price gouging setting")
 			return false
 		} else if host.Settings.Prices.IngressPrice.Cmp(usabilitySettings.MaxIngressPrice.Mul64(num).Div64(den)) > 0 {
-			log.Debug("host is not usable since ingress price is not below price gouging setting")
+			log.Debug("host is not usable since ingress price is not sufficiently below price gouging setting")
 			return false
 		} else if host.Settings.Prices.EgressPrice.Cmp(usabilitySettings.MaxEgressPrice.Mul64(num).Div64(den)) > 0 {
-			log.Debug("host is not usable since egress price is not below price gouging setting")
+			log.Debug("host is not usable since egress price is not sufficiently below price gouging setting")
 			return false
 		}
 		return true
