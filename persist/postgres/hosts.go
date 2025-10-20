@@ -210,7 +210,9 @@ WHERE
 	-- active contracts filter
 	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state >= $6 AND state <= $7)))
 	-- public key filter
-	AND ((CARDINALITY($8::bytea[]) = 0) OR (public_key = ANY($8))) %s LIMIT $1 OFFSET $2`, orderClause), limit, offset, opts.Good, opts.Blocked, opts.ActiveContracts, contracts.ContractStatePending, contracts.ContractStateActive, hks)
+	AND ((CARDINALITY($8::bytea[]) = 0) OR (public_key = ANY($8)))
+	%s -- orderClause
+	LIMIT $1 OFFSET $2`, orderClause), limit, offset, opts.Good, opts.Blocked, opts.ActiveContracts, contracts.ContractStatePending, contracts.ContractStateActive, hks)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts: %w", err)
 		}
