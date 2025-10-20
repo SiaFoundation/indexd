@@ -25,7 +25,6 @@ import (
 	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
@@ -61,7 +60,7 @@ type (
 		contracts *contracts.ContractManager
 		hosts     *hosts.HostManager
 		alerter   *alerts.Manager
-		store     *postgres.Store
+		store     TestStore
 		syncer    *Syncer
 		wallet    *wallet.SingleAddressWallet
 	}
@@ -301,7 +300,7 @@ func (idx *Indexer) Alerter() *alerts.Manager {
 }
 
 // Store returns the underlying store.
-func (idx *Indexer) Store() *postgres.Store {
+func (idx *Indexer) Store() TestStore {
 	return idx.store
 }
 
@@ -313,30 +312,6 @@ func (idx *Indexer) Tip() (types.ChainIndex, error) {
 // WalletAddr returns the address of the wallet.
 func (idx *Indexer) WalletAddr() types.Address {
 	return idx.wallet.Address()
-}
-
-// AddAccount creates a test app connect key if it does not already exist and
-// creates an account using it.
-func (idx *Indexer) AddAccount(t testing.TB, ak types.PublicKey) {
-	store := idx.Store()
-
-	const connectKey = "test"
-	if _, err := store.ValidAppConnectKey(t.Context(), connectKey); errors.Is(err, accounts.ErrKeyNotFound) {
-		_, err := store.AddAppConnectKey(t.Context(), accounts.UpdateAppConnectKey{
-			Key:           connectKey,
-			MaxPinnedData: 1e10,
-			RemainingUses: 10000,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	} else if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := store.UseAppConnectKey(t.Context(), connectKey, ak, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
 }
 
 // closeWithTimeout is a helper which closes a resource and panics if it takes

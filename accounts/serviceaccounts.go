@@ -53,9 +53,9 @@ func (m *AccountManager) serviceAccountExists(account proto.Account) bool {
 	return exists
 }
 
-// updateServiceAccounts updates the balance of all accounts registered as
+// UpdateServiceAccounts updates the balance of all accounts registered as
 // service accounts to 'balance'.
-func (m *AccountManager) updateServiceAccounts(ctx context.Context, accounts []HostAccount, balance types.Currency) error {
+func (m *AccountManager) UpdateServiceAccounts(ctx context.Context, accounts []HostAccount, balance types.Currency) error {
 	m.serviceAccountsMu.Lock()
 	var toUpdate []HostAccount
 	for _, account := range accounts {

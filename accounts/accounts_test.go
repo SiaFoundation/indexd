@@ -22,7 +22,7 @@ func TestAccountFunding(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 
 	// assert we have one usable host
 	time.Sleep(time.Second)

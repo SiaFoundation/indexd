@@ -1,21 +1,23 @@
-package accounts
+package accounts_test
 
 import (
 	"context"
 	"errors"
-	"maps"
 	"math"
 	"reflect"
 	"slices"
 	"testing"
 	"time"
 
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/internal/testutils"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
 var (
@@ -37,232 +39,9 @@ var (
 	}
 )
 
-var _ Store = (*mockStore)(nil)
-
-type mockStore struct {
-	accounts        map[types.PublicKey]Account
-	hosts           map[types.PublicKey]hosts.Host
-	eas             map[types.PublicKey]map[types.PublicKey]*HostAccount
-	serviceAccounts map[proto.Account]map[types.PublicKey]types.Currency
-	connectKeys     map[string]ConnectKey
-}
-
-func newMockStore() *mockStore {
-	return &mockStore{
-		accounts:        make(map[types.PublicKey]Account),
-		hosts:           make(map[types.PublicKey]hosts.Host),
-		eas:             make(map[types.PublicKey]map[types.PublicKey]*HostAccount),
-		serviceAccounts: make(map[proto.Account]map[types.PublicKey]types.Currency),
-	}
-}
-
-func (s *mockStore) AddAppConnectKey(ctx context.Context, key UpdateAppConnectKey) (ConnectKey, error) {
-	s.connectKeys[key.Key] = ConnectKey{
-		Key:           key.Key,
-		Description:   key.Description,
-		RemainingUses: key.RemainingUses,
-		MaxPinnedData: key.MaxPinnedData,
-		DateCreated:   time.Now(),
-		LastUpdated:   time.Now(),
-	}
-	return s.connectKeys[key.Key], nil
-}
-
-func (s *mockStore) UpdateAppConnectKey(ctx context.Context, key UpdateAppConnectKey) (ConnectKey, error) {
-	if _, ok := s.connectKeys[key.Key]; !ok {
-		return ConnectKey{}, ErrKeyNotFound
-	}
-	s.connectKeys[key.Key] = ConnectKey{
-		Key:           key.Key,
-		Description:   key.Description,
-		RemainingUses: key.RemainingUses,
-		MaxPinnedData: key.MaxPinnedData,
-		DateCreated:   time.Now(),
-		LastUpdated:   time.Now(),
-	}
-	return s.connectKeys[key.Key], nil
-}
-
-func (s *mockStore) AppConnectKey(ctx context.Context, key string) (ConnectKey, error) {
-	if connectKey, ok := s.connectKeys[key]; ok {
-		return connectKey, nil
-	}
-	return ConnectKey{}, ErrNotFound
-}
-
-func (s *mockStore) AppConnectKeys(ctx context.Context, offset, limit int) ([]ConnectKey, error) {
-	keys := slices.Collect(maps.Values(s.connectKeys))
-	if offset > len(keys) {
-		return nil, nil
-	}
-	if offset+limit > len(keys) {
-		limit = len(keys) - offset
-	}
-	return keys[offset : offset+limit], nil
-}
-
-func (s *mockStore) ValidAppConnectKey(ctx context.Context, key string) (bool, error) {
-	ck, ok := s.connectKeys[key]
-	if !ok {
-		return false, ErrNotFound
-	}
-	return ck.RemainingUses > 0, nil
-}
-
-func (s *mockStore) UseAppConnectKey(ctx context.Context, key string, pk types.PublicKey, meta AccountMeta) error {
-	ck, ok := s.connectKeys[key]
-	if !ok {
-		return ErrNotFound
-	}
-	if ck.RemainingUses == 0 {
-		return ErrKeyExhausted
-	}
-	ck.RemainingUses--
-	s.connectKeys[key] = ck
-	s.accounts[pk] = Account{
-		AccountKey:     proto.Account(pk),
-		ServiceAccount: false,
-	}
-	return nil
-}
-
-func (s *mockStore) DeleteAppConnectKey(ctx context.Context, key string) error {
-	delete(s.connectKeys, key)
-	return nil
-}
-
-func (s *mockStore) AddAccount(ctx context.Context, pk types.PublicKey, meta AccountMeta, opts ...AddAccountOption) error {
-	var options AddAccountOptions
-	for _, opt := range opts {
-		opt(&options)
-	}
-	s.accounts[pk] = Account{
-		AccountKey:     proto.Account(pk),
-		ServiceAccount: false,
-		MaxPinnedData:  options.MaxPinnedData,
-	}
-	return nil
-}
-
-func (s *mockStore) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
-	delete(s.accounts, ak)
-	return nil
-}
-
-func (s *mockStore) ActiveAccounts(ctx context.Context, threshold time.Time) (uint64, error) {
-	return uint64(len(s.accounts)), nil
-}
-
-func (s *mockStore) HasAccount(ctx context.Context, pk types.PublicKey) (bool, error) {
-	_, ok := s.accounts[pk]
-	return ok, nil
-}
-
-func (s *mockStore) Account(ctx context.Context, ak types.PublicKey) (Account, error) {
-	acc, ok := s.accounts[ak]
-	if !ok {
-		return Account{}, ErrNotFound
-	}
-	return acc, nil
-}
-
-func (s *mockStore) Accounts(ctx context.Context, offset, limit int, opts ...QueryAccountsOpt) ([]Account, error) {
-	var options QueryAccountsOptions
-	for _, opt := range opts {
-		opt(&options)
-	}
-	accounts := slices.Collect(maps.Values(s.accounts))
-	if options.ServiceAccount != nil && *options.ServiceAccount {
-		filtered := accounts[:0]
-		for _, acc := range accounts {
-			if !acc.ServiceAccount {
-				filtered = append(filtered, acc)
-			}
-		}
-		accounts = filtered
-	}
-	if offset > len(accounts) {
-		return nil, nil
-	}
-	if offset+limit > len(accounts) {
-		limit = len(accounts) - offset
-	}
-	return accounts[offset : offset+limit], nil
-}
-
-func (s *mockStore) Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error) {
-	host, ok := s.hosts[hostKey]
-	if !ok {
-		return hosts.Host{}, hosts.ErrNotFound
-	}
-	return host, nil
-}
-
-func (s *mockStore) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, limit int) (out []HostAccount, _ error) {
-	_, err := s.Host(ctx, hk)
-	if err != nil {
-		return nil, err
-	}
-
-	existing, ok := s.eas[hk]
-	if !ok {
-		for acc := range s.accounts {
-			out = append(out, HostAccount{
-				HostKey:    hk,
-				AccountKey: proto.Account(acc),
-				NextFund:   time.Now(),
-			})
-		}
-	} else {
-		for acc := range s.accounts {
-			ea, ok := existing[acc]
-			if !ok {
-				out = append(out, HostAccount{
-					HostKey:    hk,
-					AccountKey: proto.Account(acc),
-					NextFund:   time.Now(),
-				})
-			} else if time.Now().After(ea.NextFund) {
-				out = append(out, *ea)
-			}
-		}
-	}
-
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return
-}
-
-func (s *mockStore) ScheduleAccountsForFunding(ctx context.Context, hostKey types.PublicKey) error {
-	for _, acc := range s.eas[hostKey] {
-		acc.NextFund = time.Now()
-	}
-	return nil
-}
-
-func (s *mockStore) UpdateHostAccounts(ctx context.Context, accounts []HostAccount) error {
-	for _, acc := range accounts {
-		_, ok := s.eas[acc.HostKey]
-		if !ok {
-			s.eas[acc.HostKey] = make(map[types.PublicKey]*HostAccount)
-		}
-		s.eas[acc.HostKey][types.PublicKey(acc.AccountKey)] = &acc
-	}
-	return nil
-}
-
-func (s *mockStore) resetNextFund() {
-	for _, eas := range s.eas {
-		for _, ea := range eas {
-			ea.NextFund = time.Now()
-		}
-	}
-}
-
 type fundAccountCall struct {
 	host        hosts.Host
-	accounts    []HostAccount
+	accounts    []accounts.HostAccount
 	contractIDs []types.FileContractID
 	target      types.Currency
 }
@@ -272,7 +51,7 @@ type mockFunder struct {
 	fail  bool
 }
 
-func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accounts []HostAccount, target types.Currency, log *zap.Logger) (funded int, drained int, _ error) {
+func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accounts []accounts.HostAccount, target types.Currency, log *zap.Logger) (funded int, drained int, _ error) {
 	f.calls = append(f.calls, fundAccountCall{
 		host:        host,
 		accounts:    accounts,
@@ -285,14 +64,56 @@ func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, contract
 	return len(accounts), 1, nil
 }
 
+type testStore struct {
+	testutils.TestStore
+}
+
+func (s testStore) resetNextFund(t testing.TB) {
+	t.Helper()
+	if _, err := s.Exec(t.Context(), `UPDATE account_hosts SET next_fund = NOW()`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (s testStore) hostAccounts(t testing.TB) (result []accounts.HostAccount) {
+	t.Helper()
+
+	rows, err := s.Query(t.Context(), `SELECT next_fund FROM account_hosts`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var account accounts.HostAccount
+		if err := rows.Scan(&account.NextFund); err != nil {
+			t.Fatal(err)
+		}
+		result = append(result, account)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return
+}
+
+func newTestStore(t testing.TB) testStore {
+	s := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
+	t.Cleanup(func() {
+		s.Close()
+	})
+
+	return testStore{s}
+}
+
 // TestAccountManager is a unit test that covers the functionality of the
 // account manager. It asserts FundAccounts fetches and updates accounts for
 // funding and the returned usage is calculated correctly.
 func TestAccountManager(t *testing.T) {
-	s := newMockStore()
+	s := newTestStore(t)
 	f := &mockFunder{}
 
-	am := NewManager(s, f)
+	am := accounts.NewManager(s, f)
 	defer am.Close()
 
 	host := hosts.Host{
@@ -308,18 +129,13 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	// add a host and two accounts
-	s.hosts[host.PublicKey] = host
+	s.AddTestHost(t, host)
+
 	pk1 := types.GeneratePrivateKey().PublicKey()
-	s.accounts[pk1] = Account{
-		AccountKey:     proto.Account(pk1),
-		ServiceAccount: false,
-	}
+	s.AddTestAccount(t, pk1)
 
 	pk2 := types.GeneratePrivateKey().PublicKey()
-	s.accounts[pk2] = Account{
-		AccountKey:     proto.Account(pk2),
-		ServiceAccount: false,
-	}
+	s.AddTestAccount(t, pk2)
 
 	// fund accounts
 	err = am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
@@ -337,12 +153,13 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	// assert the accounts were updated
-	if len(s.eas[host.PublicKey]) != 2 {
+	eas := s.hostAccounts(t)
+	if len(eas) != 2 {
 		t.Fatal("expected two accounts to be updated")
 	}
-	expected := time.Now().Add(accountFundInterval)
-	for _, ea := range s.eas[host.PublicKey] {
-		if !ea.NextFund.After(expected.Add(-time.Second)) || !ea.NextFund.Before(expected.Add(time.Second)) {
+	expected := time.Now().Add(accounts.AccountFundInterval)
+	for _, ea := range eas {
+		if !approxEqual(ea.NextFund, expected) {
 			t.Fatal("expected next fund to be updated to the next fund interval", ea.NextFund)
 		}
 	}
@@ -350,7 +167,7 @@ func TestAccountManager(t *testing.T) {
 	// simulate a couple of failed fund attempts
 	f.fail = true
 	for range 3 {
-		s.resetNextFund()
+		s.resetNextFund(t)
 		err = am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
 		if err != nil {
 			t.Fatal(err)
@@ -359,8 +176,8 @@ func TestAccountManager(t *testing.T) {
 
 	// assert the exponential backoff was applied
 	expected = time.Now().Add(8 * time.Minute)
-	for _, ea := range s.eas[host.PublicKey] {
-		if !approxEqual(ea.NextFund, expected, time.Second) {
+	for _, ea := range s.hostAccounts(t) {
+		if !approxEqual(ea.NextFund, expected) {
 			t.Fatal("expected next fund to be updated to the exponential backoff", ea.NextFund)
 		}
 	}
@@ -368,15 +185,12 @@ func TestAccountManager(t *testing.T) {
 	// reset state
 	f.fail = false
 	f.calls = f.calls[:0]
-	s.resetNextFund()
+	s.resetNextFund(t)
 
 	// add another 1000 accounts
 	for range 1000 {
 		pk := types.GeneratePrivateKey().PublicKey()
-		s.accounts[pk] = Account{
-			AccountKey:     proto.Account(pk),
-			ServiceAccount: false,
-		}
+		s.AddTestAccount(t, pk)
 	}
 
 	// fund accounts
@@ -387,10 +201,10 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	// assert batches were applied correctly
-	target := defaultFundTarget
+	target := accounts.DefaultFundTarget
 	if len(f.calls) != 2 {
 		t.Fatal("expected two calls to fund accounts")
-	} else if len(f.calls[0].accounts) != accountFundBatch {
+	} else if len(f.calls[0].accounts) != accounts.AccountFundBatch {
 		t.Fatal("expected first call to fund 1000 accounts")
 	} else if len(f.calls[1].accounts) != 2 {
 		t.Fatal("expected second call to fund 2 accounts")
@@ -406,8 +220,8 @@ func TestAccountManager(t *testing.T) {
 
 	// assert all accounts next fund was updated and consecutive failed funds was reset
 	expected = time.Now().Add(time.Hour)
-	for _, ea := range s.eas[host.PublicKey] {
-		if !approxEqual(ea.NextFund, expected, time.Second) {
+	for _, ea := range s.hostAccounts(t) {
+		if !approxEqual(ea.NextFund, expected) {
 			t.Fatal("expected next fund to be updated to the next fund interval", ea.NextFund)
 		}
 	}
@@ -436,13 +250,13 @@ func TestAccountManager(t *testing.T) {
 func TestUpdateFundedAccounts(t *testing.T) {
 	tests := []struct {
 		name   string
-		accs   []HostAccount
+		accs   []accounts.HostAccount
 		funded int
 		panic  bool
 	}{
 		{
 			name: "all funded",
-			accs: []HostAccount{
+			accs: []accounts.HostAccount{
 				{ConsecutiveFailedFunds: 3},
 				{ConsecutiveFailedFunds: 5},
 			},
@@ -450,7 +264,7 @@ func TestUpdateFundedAccounts(t *testing.T) {
 		},
 		{
 			name: "none funded",
-			accs: []HostAccount{
+			accs: []accounts.HostAccount{
 				{ConsecutiveFailedFunds: 0},
 				{ConsecutiveFailedFunds: 1},
 			},
@@ -458,7 +272,7 @@ func TestUpdateFundedAccounts(t *testing.T) {
 		},
 		{
 			name: "partially funded",
-			accs: []HostAccount{
+			accs: []accounts.HostAccount{
 				{ConsecutiveFailedFunds: 2},
 				{ConsecutiveFailedFunds: 4},
 				{ConsecutiveFailedFunds: 0},
@@ -467,7 +281,7 @@ func TestUpdateFundedAccounts(t *testing.T) {
 		},
 		{
 			name: "sanity check",
-			accs: []HostAccount{
+			accs: []accounts.HostAccount{
 				{ConsecutiveFailedFunds: 1},
 			},
 			funded: 2,
@@ -484,12 +298,12 @@ func TestUpdateFundedAccounts(t *testing.T) {
 						t.Errorf("expected panic but function did not panic")
 					}
 				}()
-				updateFundedAccounts(tc.accs, tc.funded)
+				accounts.UpdateFundedAccounts(tc.accs, tc.funded)
 				return
 			}
 
 			updated := slices.Clone(tc.accs)
-			updateFundedAccounts(updated, tc.funded)
+			accounts.UpdateFundedAccounts(updated, tc.funded)
 
 			for i, acc := range updated {
 				// calculate expected values
@@ -497,16 +311,16 @@ func TestUpdateFundedAccounts(t *testing.T) {
 				var wantNextFund time.Time
 				if i < tc.funded {
 					wantConsecFailures = 0
-					wantNextFund = time.Now().Add(accountFundInterval)
+					wantNextFund = time.Now().Add(accounts.AccountFundInterval)
 				} else {
 					wantConsecFailures = tc.accs[i].ConsecutiveFailedFunds + 1
-					wantNextFund = time.Now().Add(time.Duration(min(math.Pow(2, float64(wantConsecFailures)), accountExpBackoffMaxMinutes)) * time.Minute)
+					wantNextFund = time.Now().Add(time.Duration(min(math.Pow(2, float64(wantConsecFailures)), accounts.AccountExpBackoffMaxMinutes)) * time.Minute)
 				}
 
 				// assert updates
 				if acc.ConsecutiveFailedFunds != wantConsecFailures {
 					t.Fatal("unexpected consecutive failed funds", acc.ConsecutiveFailedFunds, wantConsecFailures)
-				} else if !approxEqual(acc.NextFund, wantNextFund, time.Second) {
+				} else if !approxEqual(acc.NextFund, wantNextFund) {
 					t.Fatal("unexpected next fund", acc.NextFund, wantNextFund)
 				}
 			}
@@ -514,8 +328,11 @@ func TestUpdateFundedAccounts(t *testing.T) {
 	}
 }
 
-// approxEqual checks if two time.Time values are within a given tolerance
-func approxEqual(t1, t2 time.Time, tol time.Duration) bool {
+// approxEqual checks if two time.Time values are within a second of each
+// other.
+func approxEqual(t1, t2 time.Time) bool {
+	const tol = time.Second
+
 	diff := t1.Sub(t2)
 	if diff < 0 {
 		diff = -diff
