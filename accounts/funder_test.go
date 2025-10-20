@@ -1,4 +1,4 @@
-package accounts_test
+package accounts
 
 import (
 	"context"
@@ -9,17 +9,16 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
 type dialerMock struct {
-	clients map[types.PublicKey]accounts.HostClient
+	clients map[types.PublicKey]HostClient
 }
 
-func (d *dialerMock) DialHost(ctx context.Context, hk types.PublicKey, addrs []chain.NetAddress) (accounts.HostClient, error) {
+func (d *dialerMock) DialHost(ctx context.Context, hk types.PublicKey, addrs []chain.NetAddress) (HostClient, error) {
 	if client, ok := d.clients[hk]; ok {
 		return client, nil
 	}
@@ -51,11 +50,11 @@ func (h *hostClientMock) ReplenishAccounts(ctx context.Context, contractID types
 // TestFunder is a unit test that checks the various edge cases in FundAccounts
 func TestFunder(t *testing.T) {
 	// prepare funder
-	dialer := &dialerMock{clients: make(map[types.PublicKey]accounts.HostClient)}
-	f := &accounts.Funder{Dialer: dialer}
+	dialer := &dialerMock{clients: make(map[types.PublicKey]HostClient)}
+	f := &Funder{dialer: dialer}
 
 	// prepare accounts
-	accounts := []accounts.HostAccount{
+	accounts := []HostAccount{
 		{AccountKey: proto.Account{1}},
 		{AccountKey: proto.Account{2}},
 		{AccountKey: proto.Account{3}},

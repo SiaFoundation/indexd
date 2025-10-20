@@ -28,7 +28,7 @@ const (
 
 var (
 	// DefaultFundTarget is the target amount of funds per account per host.
-	DefaultFundTarget = types.Siacoins(1)
+	DefaultFundTarget = types.Siacoins(2)
 
 	// accountActivityThreshold is the threshold for determining whether an
 	// account has been active recently for the purposes of contract funding.

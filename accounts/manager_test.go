@@ -14,11 +14,8 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
-	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
-	"go.sia.tech/indexd/persist/postgres"
-	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 )
@@ -68,71 +65,36 @@ func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, contract
 }
 
 type testStore struct {
-	*postgres.Store
-	eas map[types.PublicKey]map[types.PublicKey]*accounts.HostAccount
-}
-
-func (s testStore) addTestHost(t testing.TB, host hosts.Host) {
-	t.Helper()
-
-	if err := s.Store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(host.PublicKey, host.Addresses, time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.Store.UpdateHost(context.Background(), host.PublicKey, host.Settings, geoip.Location{}, true, time.Now()); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func (s testStore) addTestAccount(t testing.TB, ak types.PublicKey) {
-	t.Helper()
-
-	const connectKey = "test"
-	if _, err := s.Store.ValidAppConnectKey(t.Context(), connectKey); errors.Is(err, accounts.ErrKeyNotFound) {
-		_, err := s.Store.AddAppConnectKey(t.Context(), accounts.UpdateAppConnectKey{
-			Key:           connectKey,
-			MaxPinnedData: 1e10,
-			RemainingUses: 10000,
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-	} else if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := s.Store.UseAppConnectKey(t.Context(), connectKey, ak, accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-func (s testStore) UpdateHostAccounts(ctx context.Context, accs []accounts.HostAccount) error {
-	for _, acc := range accs {
-		_, ok := s.eas[acc.HostKey]
-		if !ok {
-			s.eas[acc.HostKey] = make(map[types.PublicKey]*accounts.HostAccount)
-		}
-		s.eas[acc.HostKey][types.PublicKey(acc.AccountKey)] = &acc
-	}
-	return s.Store.UpdateHostAccounts(ctx, accs)
+	testutils.TestStore
 }
 
 func (s testStore) resetNextFund(t testing.TB) {
 	t.Helper()
-
-	var accs []accounts.HostAccount
-	for _, ea := range s.eas {
-		for _, acc := range ea {
-			acc.NextFund = time.Now()
-			accs = append(accs, *acc)
-		}
-	}
-
-	if err := s.UpdateHostAccounts(t.Context(), accs); err != nil {
+	if _, err := s.Exec(t.Context(), `UPDATE account_hosts SET next_fund = NOW()`); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func (s testStore) hostAccounts(t testing.TB) (result []accounts.HostAccount) {
+	t.Helper()
+
+	rows, err := s.Query(t.Context(), `SELECT next_fund FROM account_hosts`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var account accounts.HostAccount
+		if err := rows.Scan(&account.NextFund); err != nil {
+			t.Fatal(err)
+		}
+		result = append(result, account)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return
 }
 
 func newTestStore(t testing.TB) testStore {
@@ -141,10 +103,7 @@ func newTestStore(t testing.TB) testStore {
 		s.Close()
 	})
 
-	return testStore{
-		Store: s,
-		eas:   make(map[types.PublicKey]map[types.PublicKey]*accounts.HostAccount),
-	}
+	return testStore{s}
 }
 
 // TestAccountManager is a unit test that covers the functionality of the
@@ -170,13 +129,13 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	// add a host and two accounts
-	s.addTestHost(t, host)
+	s.AddTestHost(t, host)
 
 	pk1 := types.GeneratePrivateKey().PublicKey()
-	s.addTestAccount(t, pk1)
+	s.AddTestAccount(t, pk1)
 
 	pk2 := types.GeneratePrivateKey().PublicKey()
-	s.addTestAccount(t, pk2)
+	s.AddTestAccount(t, pk2)
 
 	// fund accounts
 	err = am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
@@ -194,11 +153,12 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	// assert the accounts were updated
-	if len(s.eas[host.PublicKey]) != 2 {
+	eas := s.hostAccounts(t)
+	if len(eas) != 2 {
 		t.Fatal("expected two accounts to be updated")
 	}
 	expected := time.Now().Add(accounts.AccountFundInterval)
-	for _, ea := range s.eas[host.PublicKey] {
+	for _, ea := range eas {
 		if !approxEqual(ea.NextFund, expected) {
 			t.Fatal("expected next fund to be updated to the next fund interval", ea.NextFund)
 		}
@@ -216,7 +176,7 @@ func TestAccountManager(t *testing.T) {
 
 	// assert the exponential backoff was applied
 	expected = time.Now().Add(8 * time.Minute)
-	for _, ea := range s.eas[host.PublicKey] {
+	for _, ea := range s.hostAccounts(t) {
 		if !approxEqual(ea.NextFund, expected) {
 			t.Fatal("expected next fund to be updated to the exponential backoff", ea.NextFund)
 		}
@@ -230,7 +190,7 @@ func TestAccountManager(t *testing.T) {
 	// add another 1000 accounts
 	for range 1000 {
 		pk := types.GeneratePrivateKey().PublicKey()
-		s.addTestAccount(t, pk)
+		s.AddTestAccount(t, pk)
 	}
 
 	// fund accounts
@@ -260,7 +220,7 @@ func TestAccountManager(t *testing.T) {
 
 	// assert all accounts next fund was updated and consecutive failed funds was reset
 	expected = time.Now().Add(time.Hour)
-	for _, ea := range s.eas[host.PublicKey] {
+	for _, ea := range s.hostAccounts(t) {
 		if !approxEqual(ea.NextFund, expected) {
 			t.Fatal("expected next fund to be updated to the next fund interval", ea.NextFund)
 		}

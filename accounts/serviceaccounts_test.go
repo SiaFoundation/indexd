@@ -13,17 +13,6 @@ import (
 	"go.sia.tech/indexd/hosts"
 )
 
-func (s testStore) addTestServiceAccount(t testing.TB, hk types.PublicKey, ak proto.Account) {
-	t.Helper()
-
-	if err := s.Store.AddServiceAccount(t.Context(), types.PublicKey(ak), accounts.AccountMeta{}); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.Store.UpdateServiceAccountBalance(t.Context(), hk, ak, types.ZeroCurrency); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func TestServiceAccounts(t *testing.T) {
 	s := newTestStore(t)
 
@@ -33,13 +22,13 @@ func TestServiceAccounts(t *testing.T) {
 		Addresses: []chain.NetAddress{{Protocol: siamux.Protocol, Address: "foo"}},
 		Usability: goodUsability,
 	}
-	s.addTestHost(t, host)
+	s.AddTestHost(t, host)
 
 	// add accounts
 	account1 := proto.Account(types.GeneratePrivateKey().PublicKey())
 	account2 := proto.Account(types.GeneratePrivateKey().PublicKey())
-	s.addTestServiceAccount(t, host.PublicKey, account1)
-	s.addTestServiceAccount(t, host.PublicKey, account2)
+	s.AddTestServiceAccount(t, host.PublicKey, account1)
+	s.AddTestServiceAccount(t, host.PublicKey, account2)
 
 	f := &mockFunder{}
 	am := accounts.NewManager(s, f)
