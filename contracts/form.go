@@ -32,10 +32,6 @@ const (
 	// refreshes due to how long it would take to reasonably upload
 	// that amount of data with a 10 Gbps connection.
 	maxContractGrowthRate = 256 << 30
-
-	// usabilityPriceLimit defines the maximum acceptable host prices as 80% of
-	// the price gouging maximum.
-	usabilityPriceLimit = 0.8
 )
 
 var (
@@ -86,9 +82,9 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 	s.w.SignV2Inputs(txn, toSign)
 }
 
-func mulUsabilityLimit(c types.Currency) types.Currency {
-	num, den := uint64(usabilityPriceLimit*10000), uint64(10000)
-	return c.Mul64(num).Div64(den)
+func withinGougingLeeway(cost, limit types.Currency) bool {
+	// cost must be 20% lower than the limit
+	return cost.Mul64(10).Cmp(limit.Mul64(8)) > 0
 }
 
 // performContractFormation makes sure that we have at least 'wanted' good
@@ -191,13 +187,13 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			return false
 		}
 
-		if host.Settings.Prices.StoragePrice.Cmp(mulUsabilityLimit(usabilitySettings.MaxStoragePrice)) > 0 {
+		if withinGougingLeeway(host.Settings.Prices.StoragePrice, usabilitySettings.MaxStoragePrice) {
 			log.Debug("host is not usable since storage price is not sufficiently below price gouging setting")
 			return false
-		} else if host.Settings.Prices.IngressPrice.Cmp(mulUsabilityLimit(usabilitySettings.MaxIngressPrice)) > 0 {
+		} else if withinGougingLeeway(host.Settings.Prices.IngressPrice, usabilitySettings.MaxIngressPrice) {
 			log.Debug("host is not usable since ingress price is not sufficiently below price gouging setting")
 			return false
-		} else if host.Settings.Prices.EgressPrice.Cmp(mulUsabilityLimit(usabilitySettings.MaxEgressPrice)) > 0 {
+		} else if withinGougingLeeway(host.Settings.Prices.EgressPrice, usabilitySettings.MaxEgressPrice) {
 			log.Debug("host is not usable since egress price is not sufficiently below price gouging setting")
 			return false
 		}
