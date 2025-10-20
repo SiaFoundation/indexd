@@ -427,4 +427,18 @@ FROM objects o;
 		}
 		return nil
 	},
+	// migrate hosts_blocklist reason column to TEXT[] array and add GIN index
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+			-- add reasons column and migrate data
+			ALTER TABLE hosts_blocklist ADD COLUMN reasons TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+			UPDATE hosts_blocklist SET reasons = ARRAY[reason];
+			
+			-- drop old column and create index
+			DROP INDEX hosts_blocklist_reason_idx;
+			ALTER TABLE hosts_blocklist DROP COLUMN reason;
+			CREATE INDEX hosts_blocklist_reasons_gin_idx ON hosts_blocklist USING GIN(reasons);
+		`)
+		return err
+	},
 }

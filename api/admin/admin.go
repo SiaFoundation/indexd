@@ -66,7 +66,7 @@ type (
 		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 
-		BlockHosts(ctx context.Context, hks []types.PublicKey, reason string) error
+		BlockHosts(ctx context.Context, hks []types.PublicKey, reasons []string) error
 		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		UnblockHost(ctx context.Context, hk types.PublicKey) error
 
@@ -731,7 +731,7 @@ func (a *admin) handlePUTHostsBlocklist(jc jape.Context) {
 	if jc.Decode(&hosts) != nil {
 		return
 	}
-	jc.Check("failed to add host keys to blocklist", a.hosts.BlockHosts(jc.Request.Context(), hosts.HostKeys, hosts.Reason))
+	jc.Check("failed to add host keys to blocklist", a.hosts.BlockHosts(jc.Request.Context(), hosts.HostKeys, hosts.Reasons))
 	jc.Encode(nil)
 }
 

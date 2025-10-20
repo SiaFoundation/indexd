@@ -97,7 +97,7 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// block the first host
-	err = indexer.Hosts().BlockHosts(context.Background(), []types.PublicKey{hosts[0].PublicKey}, "test blocklist reason")
+	err = indexer.Hosts().BlockHosts(context.Background(), []types.PublicKey{hosts[0].PublicKey}, []string{t.Name()})
 	if err != nil {
 		t.Fatal(err)
 	}

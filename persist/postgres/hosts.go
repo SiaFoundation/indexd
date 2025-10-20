@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -73,7 +74,7 @@ WITH globals AS (
 	FROM global_settings
 ), hosts AS (
 	SELECT
-		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, COALESCE(hb.reason, ''), lost_sectors,
+		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, hb.reasons, lost_sectors,
 		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime, usage_account_funding, usage_total_spent,
 		country_code, location,
 		settings_protocol_version, settings_release, settings_wallet_address,
@@ -151,7 +152,7 @@ WITH globals AS (
     FROM global_settings
 ), hosts AS (
 	SELECT
-		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, COALESCE(hb.reason, ''), lost_sectors,
+		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, hb.reasons, lost_sectors,
 		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime, usage_account_funding, usage_total_spent,
 		country_code, location,
 		settings_protocol_version, settings_release, settings_wallet_address,
@@ -270,23 +271,29 @@ func (s *Store) BlockedHosts(ctx context.Context, offset, limit int) ([]types.Pu
 }
 
 // BlockHosts adds the given host keys to the blocklist and marks all of its
-// contracts as bad.
-// If a host is already on the blocklist, the reason remains unchanged to
-// preserve the original reason for blocking.
-func (s *Store) BlockHosts(ctx context.Context, hks []types.PublicKey, reason string) error {
+// contracts as bad. If a host is already on the blocklist, the reasons are
+// updated to include any new reasons for blocking.
+func (s *Store) BlockHosts(ctx context.Context, hks []types.PublicKey, reasons []string) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		for _, hk := range hks {
-			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key, reason) VALUES ($1, $2) ON CONFLICT (public_key) DO NOTHING", sqlPublicKey(hk), reason)
-			if err != nil {
-				return fmt.Errorf("failed to add host %q to blocklist: %w", hk, err)
+			var hostID int64
+			var updated []string
+			err := tx.QueryRow(ctx, `SELECT h.id, COALESCE(hb.reasons, '{}') FROM hosts h LEFT JOIN hosts_blocklist hb ON hb.public_key = h.public_key WHERE h.public_key = $1`, sqlPublicKey(hk)).Scan(&hostID, &updated)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return fmt.Errorf("failed to check existing blocklist entry for host %q: %w", hk, err)
 			}
 
-			var hostID int64
-			err = tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = $1", sqlPublicKey(hk)).Scan(&hostID)
-			if errors.Is(err, sql.ErrNoRows) {
-				continue // host does not exist in db, nothing to mark as bad
-			} else if err != nil {
-				return fmt.Errorf("failed to fetch host ID %q: %w", hk, err)
+			// deduplicate reasons
+			updated = append(updated, reasons...)
+			slices.Sort(updated)
+			updated = slices.Compact(updated)
+
+			// update blocklist
+			_, err = tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key, reasons) VALUES ($1, $2) ON CONFLICT (public_key) DO UPDATE SET reasons = $2", sqlPublicKey(hk), updated)
+			if err != nil {
+				return fmt.Errorf("failed to add host %q to blocklist: %w", hk, err)
+			} else if hostID == 0 {
+				continue // nothing to update
 			}
 
 			_, err = tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE host_id = $1`, hostID)
@@ -710,7 +717,7 @@ func scanHost(s scanner) (dbHost, error) {
 		(*sqlPublicKey)(&host.PublicKey),
 		&host.LastAnnouncement,
 		&host.Blocked,
-		&host.BlockedReason,
+		&host.BlockedReasons,
 		&host.LostSectors,
 		&lastFailedScan,
 		&lastSuccessfulScan,

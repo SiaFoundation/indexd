@@ -166,7 +166,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		force := forceFormation[host.PublicKey]
 		if good := host.Usability.Usable(); !good {
 			// host should be good
-			log.Debug("host is not usable due to bad usability", zap.String("reasons", host.Usability.FailedChecks()))
+			log.Debug("host is not usable due to bad usability", zap.Strings("reasons", host.Usability.FailedChecks()))
 			return false
 		} else if spaced := set.CanAddHost(host.Info()); !spaced && !force {
 			// host should be sufficiently spaced from other hosts

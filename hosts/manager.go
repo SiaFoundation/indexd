@@ -101,7 +101,7 @@ type (
 		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
 		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
 
-		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
+		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error
 		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		UnblockHost(ctx context.Context, hk types.PublicKey) error
 
@@ -155,9 +155,9 @@ func (hm *HostManager) HostsForPinning(ctx context.Context) ([]types.PublicKey, 
 	return hm.store.HostsForPinning(ctx)
 }
 
-// BlockHosts blocks the given hosts for the given reason
-func (hm *HostManager) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error {
-	return hm.store.BlockHosts(ctx, hostKeys, reason)
+// BlockHosts blocks the given hosts for the given list of reasons
+func (hm *HostManager) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error {
+	return hm.store.BlockHosts(ctx, hostKeys, reasons)
 }
 
 // HostsWithUnpinnableSectors returns any hosts that have sectors that could not be pinned

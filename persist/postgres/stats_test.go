@@ -208,7 +208,7 @@ func TestSectorStats(t *testing.T) {
 	}
 	assertStats(0, 1, 2, 6)
 
-	err := store.BlockHosts(t.Context(), []types.PublicKey{hk1}, t.Name())
+	err := store.BlockHosts(t.Context(), []types.PublicKey{hk1}, []string{t.Name()})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -386,7 +386,7 @@ func TestContractsAPI(t *testing.T) {
 	}
 
 	// block host and assert it's not returned
-	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h.PublicKey()}, t.Name()); err != nil {
+	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h.PublicKey()}, []string{t.Name()}); err != nil {
 		t.Fatal(err)
 	} else if contracts, err := adminClient.Contracts(context.Background(), admin.WithGood(true)); err != nil {
 		t.Fatal(err)
@@ -538,7 +538,7 @@ func TestHostsAPI(t *testing.T) {
 	}
 
 	// block both hosts
-	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey(), h2.PublicKey()}, t.Name()); err != nil {
+	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey(), h2.PublicKey()}, []string{t.Name()}); err != nil {
 		t.Fatal(err)
 	} else if blocklist, err := adminClient.HostsBlocklist(context.Background()); err != nil {
 		t.Fatal(err)
@@ -548,14 +548,14 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if !h1.Blocked {
 		t.Fatal("expected host to be blocked", h1.Blocked)
-	} else if h1.BlockedReason != t.Name() {
-		t.Fatalf("expected host to be blocked with reason %s, got %s", t.Name(), h1.BlockedReason)
+	} else if !reflect.DeepEqual(h1.BlockedReasons, []string{t.Name()}) {
+		t.Fatalf("expected host to be blocked with reasons %s, got %s", t.Name(), h1.BlockedReasons)
 	} else if h2, err := adminClient.Host(context.Background(), h2.PublicKey()); err != nil {
 		t.Fatal(err)
 	} else if !h2.Blocked {
 		t.Fatal("expected host to be blocked", h2.Blocked)
-	} else if h2.BlockedReason != t.Name() {
-		t.Fatalf("expected host to be blocked with reason %s, got %s", t.Name(), h2.BlockedReason)
+	} else if !reflect.DeepEqual(h2.BlockedReasons, []string{t.Name()}) {
+		t.Fatalf("expected host to be blocked with reasons %s, got %s", t.Name(), h2.BlockedReasons)
 	}
 
 	// unblock h1

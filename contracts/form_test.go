@@ -179,8 +179,8 @@ func (s *hostManagerMock) Hosts(ctx context.Context, offset int, limit int, quer
 	return s.store.Hosts(ctx, offset, limit, queryOpts...)
 }
 
-func (s *hostManagerMock) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error {
-	return s.store.BlockHosts(ctx, hostKeys, reason)
+func (s *hostManagerMock) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error {
+	return s.store.BlockHosts(ctx, hostKeys, reasons)
 }
 
 // TestPerformContractFormationWithoutContracts tests the

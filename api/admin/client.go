@@ -182,10 +182,10 @@ func (c *Client) HostsBlocklist(ctx context.Context, opts ...api.URLQueryParamet
 }
 
 // HostsBlocklistAdd adds the given host keys to the blocklist.
-func (c *Client) HostsBlocklistAdd(ctx context.Context, hostKeys []types.PublicKey, reason string) (err error) {
+func (c *Client) HostsBlocklistAdd(ctx context.Context, hostKeys []types.PublicKey, reasons []string) (err error) {
 	err = c.c.PUT(ctx, "/hosts/blocklist", HostsBlocklistRequest{
 		HostKeys: hostKeys,
-		Reason:   reason,
+		Reasons:  reasons,
 	})
 	return
 }
