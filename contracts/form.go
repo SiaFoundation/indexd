@@ -187,15 +187,17 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			return false
 		}
 
-		if withinGougingLeeway(host.Settings.Prices.StoragePrice, usabilitySettings.MaxStoragePrice) {
-			log.Debug("host is not usable since storage price is not sufficiently below price gouging setting")
-			return false
-		} else if withinGougingLeeway(host.Settings.Prices.IngressPrice, usabilitySettings.MaxIngressPrice) {
-			log.Debug("host is not usable since ingress price is not sufficiently below price gouging setting")
-			return false
-		} else if withinGougingLeeway(host.Settings.Prices.EgressPrice, usabilitySettings.MaxEgressPrice) {
-			log.Debug("host is not usable since egress price is not sufficiently below price gouging setting")
-			return false
+		if !force {
+			if withinGougingLeeway(host.Settings.Prices.StoragePrice, usabilitySettings.MaxStoragePrice) {
+				log.Debug("host is not usable since storage price is not sufficiently below price gouging setting")
+				return false
+			} else if withinGougingLeeway(host.Settings.Prices.IngressPrice, usabilitySettings.MaxIngressPrice) {
+				log.Debug("host is not usable since ingress price is not sufficiently below price gouging setting")
+				return false
+			} else if withinGougingLeeway(host.Settings.Prices.EgressPrice, usabilitySettings.MaxEgressPrice) {
+				log.Debug("host is not usable since egress price is not sufficiently below price gouging setting")
+				return false
+			}
 		}
 		return true
 	}
