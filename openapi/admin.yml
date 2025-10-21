@@ -764,6 +764,40 @@ paths:
               $ref: "#/components/schemas/PublicKey"
           style: form
           explode: true
+        - name: sortby
+          in: query
+          description: Field to sort by. Can be specified multiple times for multi-level sorting.
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - recentUptime
+                - settings.protocolVersion
+                - settings.acceptingContracts
+                - settings.maxCollateral
+                - settings.maxContractDuration
+                - settings.remainingStorage
+                - settings.totalStorage
+                - settings.prices.contractPrice
+                - settings.prices.collateral
+                - settings.prices.storagePrice
+                - settings.prices.ingressPrice
+                - settings.prices.egressPrice
+                - settings.prices.freeSectorPrice
+          style: form
+          explode: true
+        - name: desc
+          in: query
+          description: Whether to sort in descending order. Must be provided for each sortby parameter.
+          required: false
+          schema:
+            type: array
+            items:
+              type: boolean
+          style: form
+          explode: true
       responses:
         "200":
           description: A list of hosts

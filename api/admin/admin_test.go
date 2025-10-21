@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"reflect"
 	"slices"
@@ -622,6 +623,36 @@ func TestHostsAPI(t *testing.T) {
 	} else if len(hosts) != 2 {
 		t.Fatalf("expected 2 host, got %d", len(hosts))
 	}
+
+	assertErr := func(got, expected error) {
+		t.Helper()
+		if got == nil || !strings.Contains(got.Error(), expected.Error()) {
+			t.Fatalf("expected error %v, got %v", expected, got)
+		}
+	}
+
+	// test sorting
+	hosts, err = adminClient.Hosts(t.Context(), admin.WithSort("recentUptime", false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = adminClient.Hosts(t.Context(), func(q url.Values) {
+		q.Add("sortby", "recentUptime")
+		q.Add("desc", "invalid")
+	})
+	assertErr(err, api.ErrInvalidSortPair)
+
+	_, err = adminClient.Hosts(t.Context(), func(q url.Values) {
+		q.Add("sortby", "")
+		q.Add("desc", "true")
+	})
+	assertErr(err, api.ErrInvalidSortPair)
+
+	_, err = adminClient.Hosts(t.Context(), func(q url.Values) { q.Add("sortby", "recentUptime") })
+	assertErr(err, api.ErrMissingSortPair)
+
+	_, err = adminClient.Hosts(t.Context(), admin.WithSort("foo.bar", false))
+	assertErr(err, errors.New("invalid sort field"))
 
 	// manually scan host
 	host1, err := adminClient.Host(context.Background(), h1.PublicKey())

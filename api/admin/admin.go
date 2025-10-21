@@ -671,6 +671,10 @@ func (a *admin) handleGETHosts(jc jape.Context) {
 	if !ok {
 		return
 	}
+	sorts, ok := api.ParseSortOptions(jc)
+	if !ok {
+		return
+	}
 
 	var opts []hosts.HostQueryOpt
 	if jc.Request.FormValue("usable") != "" {
@@ -706,12 +710,18 @@ func (a *admin) handleGETHosts(jc jape.Context) {
 		}
 		opts = append(opts, hosts.WithPublicKeys(hks))
 	}
+	for _, sort := range sorts {
+		opts = append(opts, hosts.WithSorting(sort.Field, sort.Descending))
+	}
 
-	hosts, err := a.hosts.Hosts(jc.Request.Context(), offset, limit, opts...)
-	if jc.Check("failed to get hosts", err) != nil {
+	res, err := a.hosts.Hosts(jc.Request.Context(), offset, limit, opts...)
+	if errors.Is(err, hosts.ErrInvalidSortField) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("failed to get hosts", err) != nil {
 		return
 	}
-	jc.Encode(hosts)
+	jc.Encode(res)
 }
 
 func (a *admin) handleGETHostsBlocklist(jc jape.Context) {

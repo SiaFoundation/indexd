@@ -574,6 +574,75 @@ func TestHosts(t *testing.T) {
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithBlocked(false))
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithActiveContracts(true))
 	assertHosts([]types.PublicKey{hk3}, 1, 1, hosts.WithPublicKeys([]types.PublicKey{hk2, hk3, hk4}))
+
+	// helper to update hosts
+	updateHost := func(hk types.PublicKey, column string, value any) {
+		t.Helper()
+
+		switch column {
+		case "settings_storage_price",
+			"settings_contract_price",
+			"settings_collateral",
+			"settings_ingress_price",
+			"settings_egress_price",
+			"settings_free_sector_price",
+			"settings_max_collateral":
+			value = sqlCurrency(value.(types.Currency))
+		case "settings_protocol_version":
+			value = sqlProtocolVersion(value.(proto4.ProtocolVersion))
+		default:
+		}
+		res, err := db.pool.Exec(context.Background(), fmt.Sprintf(`UPDATE hosts SET %s = $1 WHERE public_key = $2`, column), value, sqlPublicKey(hk))
+		if err != nil {
+			t.Fatal(err)
+		} else if res.RowsAffected() != 1 {
+			t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
+		}
+	}
+
+	assertHostsOrder := func(hks []types.PublicKey, offset, limit int, queryOpts ...hosts.HostQueryOpt) {
+		t.Helper()
+		hosts, err := db.Hosts(context.Background(), offset, limit, queryOpts...)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(hosts) != len(hks) {
+			t.Fatalf("expected %v hosts, got %v", len(hks), len(hosts))
+		}
+		for i, host := range hosts {
+			if host.PublicKey != hks[i] {
+				t.Fatalf("expected hk %v, got %v", hks[i], host.PublicKey)
+			}
+		}
+	}
+
+	// sorting
+	withHKFilter := hosts.WithPublicKeys([]types.PublicKey{hk1, hk2})
+	settings := newSettings(types.PublicKey{})
+	sortCases := []struct {
+		name        string
+		column      string
+		low, higher any
+	}{
+		{"recentUptime", "recent_uptime", 0.91, 0.92},
+		{"settings.protocolVersion", "settings_protocol_version", rhp.ProtocolVersion400, rhp.ProtocolVersion501},
+		{"settings.acceptingContracts", "settings_accepting_contracts", false, true},
+		{"settings.maxCollateral", "settings_max_collateral", types.Siacoins(1), types.Siacoins(2)},
+		{"settings.maxContractDuration", "settings_max_contract_duration", int64(10), int64(20)},
+		{"settings.remainingStorage", "settings_remaining_storage", int64(50), int64(100)},
+		{"settings.totalStorage", "settings_total_storage", int64(60), int64(120)},
+		{"settings.prices.contractPrice", "settings_contract_price", settings.Prices.ContractPrice, settings.Prices.ContractPrice.Mul64(2)},
+		{"settings.prices.collateral", "settings_collateral", settings.Prices.Collateral, settings.Prices.Collateral.Mul64(2)},
+		{"settings.prices.storagePrice", "settings_storage_price", settings.Prices.StoragePrice, settings.Prices.StoragePrice.Mul64(2)},
+		{"settings.prices.ingressPrice", "settings_ingress_price", settings.Prices.IngressPrice, settings.Prices.IngressPrice.Mul64(2)},
+		{"settings.prices.egressPrice", "settings_egress_price", settings.Prices.EgressPrice, settings.Prices.EgressPrice.Mul64(2)},
+		{"settings.prices.freeSectorPrice", "settings_free_sector_price", types.NewCurrency64(1), types.NewCurrency64(2)},
+	}
+	for _, tc := range sortCases {
+		updateHost(hk1, tc.column, tc.low)
+		updateHost(hk2, tc.column, tc.higher)
+		assertHostsOrder([]types.PublicKey{hk1, hk2}, 0, 2, withHKFilter, hosts.WithSorting(tc.name, false))
+		assertHostsOrder([]types.PublicKey{hk2, hk1}, 0, 2, withHKFilter, hosts.WithSorting(tc.name, true))
+	}
 }
 
 func TestUsableHosts(t *testing.T) {

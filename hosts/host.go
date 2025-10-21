@@ -20,14 +20,15 @@ var (
 	// ErrNotFound is returned by database operations that fail due to a host
 	// not being found.
 	ErrNotFound = errors.New("host not found")
+
+	// ErrInvalidSortField is returned when we don't support sorting by the
+	// requested field.
+	ErrInvalidSortField = errors.New("invalid sort field")
 )
 var (
-	// DefaultHostsQueryOpts re the default options applied when querying hosts. By
+	// DefaultHostsQueryOpts are the default options applied when querying hosts. By
 	// default no hosts are filtered out.
-	DefaultHostsQueryOpts = hostsQueryOpts{
-		Blocked: nil,
-		Good:    nil,
-	}
+	DefaultHostsQueryOpts = hostsQueryOpts{}
 
 	// DefaultUsabilitySettings are the default settings used to determine
 	// whether a host is usable or not. These settings are configured in the
@@ -45,13 +46,31 @@ type (
 	// HostQueryOpt is a functional option for querying hosts.
 	HostQueryOpt func(*hostsQueryOpts)
 
+	// HostSortOpt specifies a sorting option for querying hosts.
+	HostSortOpt struct {
+		Field      string
+		Descending bool
+	}
+
 	hostsQueryOpts struct {
 		ActiveContracts *bool             // return hosts that have active contracts or not
 		Blocked         *bool             // return (un)blocked hosts
 		Good            *bool             // return good/bad hosts
 		PublicKeys      []types.PublicKey // do not return hosts with public keys outside of this list
+		Sorting         []HostSortOpt     // return hosts sorted by the provided options
 	}
 )
+
+// WithSorting adds a sorting option to the host query. Multiple sorting options
+// can be provided and will be applied in the order they were added.
+func WithSorting(field string, descending bool) HostQueryOpt {
+	return func(opts *hostsQueryOpts) {
+		opts.Sorting = append(opts.Sorting, HostSortOpt{
+			Field:      field,
+			Descending: descending,
+		})
+	}
+}
 
 // WithUsable causes only usable or unusable hosts being returned depending on
 // whether 'usable' is true or false.

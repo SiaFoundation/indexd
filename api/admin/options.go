@@ -3,6 +3,7 @@ package admin
 import (
 	"fmt"
 	"net/url"
+	"strconv"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/alerts"
@@ -117,6 +118,17 @@ func WithPublicKeys(hks []types.PublicKey) HostQueryParameterOption {
 			strs[i] = hks[i].String()
 		}
 		q["hostkey"] = strs
+	}
+}
+
+// WithSort sets the 'sortby' and 'desc' parameter, it can be called multiple
+// times to add multiple sorting options. The parameters must be provided in
+// pairs, i.e. both 'sortby' and 'desc' must be set. If desc is true, the sorting
+// will be done in descending order.
+func WithSort(sortby string, desc bool) HostQueryParameterOption {
+	return func(q url.Values) {
+		q.Add("sortby", sortby)
+		q.Add("desc", strconv.FormatBool(desc))
 	}
 }
 
