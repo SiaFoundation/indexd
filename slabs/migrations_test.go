@@ -103,7 +103,7 @@ func TestMigrateSlab(t *testing.T) {
 	msk := types.GeneratePrivateKey()
 	ssk := types.GeneratePrivateKey()
 	alerter := alerts.NewManager()
-	mgr, err := newSlabManager(am, hm, db, dialer, alerter, msk, ssk)
+	mgr, err := newSlabManager(am, nil, hm, db, dialer, alerter, msk, ssk)
 	if err != nil {
 		t.Fatal(err)
 	}

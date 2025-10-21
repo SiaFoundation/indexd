@@ -363,6 +363,21 @@ func (m *mockAccountManager) DebitServiceAccount(ctx context.Context, hostKey ty
 	return nil
 }
 
+type mockContractManager struct {
+	triggeredRefills map[proto.Account]int
+}
+
+func newMockContractManager() *mockContractManager {
+	return &mockContractManager{
+		triggeredRefills: make(map[proto.Account]int),
+	}
+}
+
+func (m *mockContractManager) TriggerAccountRefill(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
+	m.triggeredRefills[account]++
+	return nil
+}
+
 type mockhostManager struct {
 	hosts map[types.PublicKey]hosts.Host
 

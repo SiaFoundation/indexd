@@ -42,6 +42,7 @@ type (
 
 		alerter AlertsManager
 		am      AccountManager
+		cm      ContractManager
 		hm      HostManager
 
 		dialer   Dialer
@@ -55,10 +56,16 @@ type (
 	// AccountManager defines the SlabManager's dependencies on the account
 	// manager.
 	AccountManager interface {
+		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
 		RegisterServiceAccount(account proto.Account)
 		ResetAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) error
 		ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error)
-		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
+	}
+
+	// ContractManager defines the SlabManager's dependencies on the contract
+	// manager.
+	ContractManager interface {
+		TriggerAccountRefill(ctx context.Context, hostKey types.PublicKey, account proto.Account) error
 	}
 
 	// A Dialer is an interface for writing and reading sectors to/from hosts.
@@ -187,8 +194,8 @@ func (w *wrapper) DialHost(ctx context.Context, hostKey types.PublicKey, addrs [
 }
 
 // NewManager creates a new slab manager.
-func NewManager(am AccountManager, hm HostManager, store Store, dialer *client.Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
-	sm, err := newSlabManager(am, hm, store, &wrapper{d: dialer}, alerter, migrationAccount, integrityAccount, opts...)
+func NewManager(am AccountManager, cm ContractManager, hm HostManager, store Store, dialer *client.Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+	sm, err := newSlabManager(am, cm, hm, store, &wrapper{d: dialer}, alerter, migrationAccount, integrityAccount, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +213,7 @@ func NewManager(am AccountManager, hm HostManager, store Store, dialer *client.D
 	return sm, nil
 }
 
-func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store Store, dialer Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
 	m := &SlabManager{
 		healthCheckInterval: 10 * time.Minute,
 
@@ -222,6 +229,7 @@ func newSlabManager(am AccountManager, hm HostManager, store Store, dialer Diale
 		migrationBatchSize: runtime.NumCPU(),
 
 		am:       am,
+		cm:       cm,
 		dialer:   dialer,
 		hm:       hm,
 		store:    store,

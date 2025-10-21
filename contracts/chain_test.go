@@ -332,6 +332,10 @@ func (s *storeMock) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceE
 	return nil
 }
 
+func (s *storeMock) ScheduleAccountForFunding(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
+	return nil
+}
+
 func (s *storeMock) UpdateHostSettings(hostKey types.PublicKey, settings proto.HostSettings) error {
 	h, ok := s.hosts[hostKey]
 	if !ok {

@@ -125,6 +125,7 @@ type (
 		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
 		PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpiry uint64) error
 		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
+		ScheduleAccountForFunding(ctx context.Context, hostKey types.PublicKey, account proto.Account) error
 		ScheduleContractsForPruning(ctx context.Context) error
 		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 		UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision, usage proto.Usage) error
@@ -392,6 +393,15 @@ func (cm *ContractManager) MaintenanceSettings(ctx context.Context) (Maintenance
 	return cm.store.MaintenanceSettings(ctx)
 }
 
+// TriggerAccountRefill triggers a refill for the given account by marking it
+// for funding and then triggering the account funding process.
+func (cm *ContractManager) TriggerAccountRefill(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
+	if err := cm.store.ScheduleAccountForFunding(ctx, hostKey, account); err != nil {
+		return fmt.Errorf("failed to schedule account for funding: %w", err)
+	}
+	return cm.TriggerAccountFunding(true)
+}
+
 // UpdateMaintenanceSettings updates the maintenance settings.
 func (cm *ContractManager) UpdateMaintenanceSettings(ctx context.Context, settings MaintenanceSettings) error {
 	return cm.store.UpdateMaintenanceSettings(ctx, settings)
@@ -430,7 +440,7 @@ func newContractManager(renterKey types.PublicKey, accounts AccountManager, chai
 		expiredContractBroadcastBuffer:    144,           // 144 block after expiration
 		expiredContractPruneBuffer:        144,           // 144 blocks after broadcast
 		expiredContractSectorsPruneBuffer: 36,            // 36 blocks (~6 hours) after expiration
-		maintenanceFrequency:              time.Minute,
+		maintenanceFrequency:              5 * time.Minute,
 		minHostDistanceKm:                 10,                 // 10km
 		pruneIntervalSuccess:              24 * time.Hour,     // 1 day
 		pruneIntervalFailure:              3 * time.Hour,      // 3 hours

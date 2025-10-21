@@ -118,7 +118,7 @@ func TestDownloadShards(t *testing.T) {
 		hk3: newClient(sector3, host3.Settings),
 	}}
 
-	sm, err := newSlabManager(am, hm, store, dialer, alerts.NewManager(), account, types.GeneratePrivateKey())
+	sm, err := newSlabManager(am, nil, hm, store, dialer, alerts.NewManager(), account, types.GeneratePrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}

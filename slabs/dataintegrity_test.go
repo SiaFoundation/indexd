@@ -33,6 +33,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	// prepare managers
 	store := newMockStore()
 	am := newMockAccountManager(store)
+	cm := newMockContractManager()
 	hm := newMockHostManager()
 	host.Usability = hosts.GoodUsability
 	hm.hosts[host.PublicKey] = host // make host scannable
@@ -42,7 +43,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	acc := proto.Account(sk.PublicKey())
 
 	// prepare slab manager
-	sm, err := newSlabManager(am, hm, store, dialer, nil, sk, sk)
+	sm, err := newSlabManager(am, cm, hm, store, dialer, nil, sk, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,6 +106,17 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	} else if _, exists := store.lostSectors[host.PublicKey][r3]; !exists {
 		t.Fatalf("expected lost sector %v, got %v", r3, store.lostSectors)
 	}
+
+	// empty the service account to trigger a "not enough funds" error which
+	// causes triggering a refill.
+	if cm.triggeredRefills[acc] != 0 {
+		t.Fatalf("expected 0 triggered refill, got %d", cm.triggeredRefills[acc])
+	}
+	_ = am.UpdateServiceAccountBalance(context.Background(), hk, acc, types.ZeroCurrency)
+	sm.performIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
+	if cm.triggeredRefills[acc] != 1 {
+		t.Fatalf("expected 1 triggered refill, got %d", cm.triggeredRefills[acc])
+	}
 }
 
 func TestPerformIntegrityChecksForHostExpiredPrices(t *testing.T) {
@@ -124,6 +136,7 @@ func TestPerformIntegrityChecksForHostExpiredPrices(t *testing.T) {
 	// prepare managers
 	store := newMockStore()
 	am := newMockAccountManager(store)
+	cm := newMockContractManager()
 	hm := newMockHostManager()
 	hm.refreshPrices = true // refresh prices after first scan
 	host.Usability = hosts.GoodUsability
@@ -134,7 +147,7 @@ func TestPerformIntegrityChecksForHostExpiredPrices(t *testing.T) {
 	acc := proto.Account(sk.PublicKey())
 
 	// prepare slab manager
-	sm, err := newSlabManager(am, hm, store, dialer, nil, sk, sk)
+	sm, err := newSlabManager(am, cm, hm, store, dialer, nil, sk, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +177,7 @@ func TestPerformIntegrityChecksForHostExpiredPrices(t *testing.T) {
 func TestIntegrityChecksAlert(t *testing.T) {
 	store := newMockStore()
 	alerter := alerts.NewManager()
-	sm, err := newSlabManager(newMockAccountManager(store), nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
+	sm, err := newSlabManager(newMockAccountManager(store), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}

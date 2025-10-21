@@ -45,7 +45,7 @@ func TestUploadShards(t *testing.T) {
 
 	// create manager
 	alerter := alerts.NewManager()
-	sm, err := newSlabManager(am, hm, store, dialer, alerter, account, types.GeneratePrivateKey())
+	sm, err := newSlabManager(am, nil, hm, store, dialer, alerter, account, types.GeneratePrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}

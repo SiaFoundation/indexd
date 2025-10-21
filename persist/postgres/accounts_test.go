@@ -453,6 +453,27 @@ func TestHostAccountsForFunding(t *testing.T) {
 	} else if len(accs) != 2 {
 		t.Fatal("expected two accounts")
 	}
+
+	// set the next funding time for all accounts of hk1 into the future and
+	// schedule a refill for ak1
+	for i := range accs {
+		accs[i].NextFund = time.Now().Add(time.Hour)
+	}
+	if err := store.UpdateHostAccounts(context.Background(), accs); err != nil {
+		t.Fatal(err)
+	} else if err := store.ScheduleAccountForFunding(t.Context(), hk1, proto.Account(ak1)); err != nil {
+		t.Fatal(err)
+	}
+
+	// only ak1 should be returned
+	accs, err = store.HostAccountsForFunding(context.Background(), hk1, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accs) != 1 {
+		t.Fatal("expected one account")
+	} else if accs[0].AccountKey != proto.Account(ak1) {
+		t.Fatal("unexpected account")
+	}
 }
 
 func TestUpdateHostAccounts(t *testing.T) {

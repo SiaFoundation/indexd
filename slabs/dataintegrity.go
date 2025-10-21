@@ -35,6 +35,11 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, hostKey
 			})
 			if errors.Is(err, context.Canceled) || errors.Is(err, errInsufficientServiceAccountBalance) || errors.Is(err, errHostUnreachable) {
 				logger.Debug("integrity checks got interrupted", zap.Error(err))
+				if errors.Is(err, errInsufficientServiceAccountBalance) {
+					if err := m.cm.TriggerAccountRefill(ctx, hostKey, m.verifier.account()); err != nil {
+						logger.Error("failed to trigger refill for integrity check service account", zap.Error(err))
+					}
+				}
 				interrupt = true
 				break
 			}

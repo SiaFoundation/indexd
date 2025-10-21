@@ -197,6 +197,20 @@ func (s *Store) ScheduleAccountsForFunding(ctx context.Context, hostKey types.Pu
 	})
 }
 
+// ScheduleAccountForFunding marks the given account for the given host key as
+// due for funding.
+func (s *Store) ScheduleAccountForFunding(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE account_hosts
+			SET next_fund = '1970-01-01 00:00:00+00' -- make sure it's at the front of the queue
+			WHERE account_id = (SELECT id FROM accounts WHERE public_key = $1)
+			AND host_id = (SELECT id FROM hosts WHERE public_key = $2)
+		`, sqlPublicKey(account), sqlPublicKey(hostKey))
+		return err
+	})
+}
+
 // UpdateHostAccounts updates the given host accounts in the database.
 func (s *Store) UpdateHostAccounts(ctx context.Context, accounts []accounts.HostAccount) error {
 	if len(accounts) == 0 {
