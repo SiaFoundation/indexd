@@ -50,6 +50,30 @@ func WithRevisable(revisable bool) ContractQueryParameterOption {
 	}
 }
 
+// WithIDs sets the 'id' parameter (multiple times if there is more than one
+// contract ID provided).
+func WithIDs(ids []types.FileContractID) ContractQueryParameterOption {
+	return func(q url.Values) {
+		strs := make([]string, len(ids))
+		for i := range ids {
+			strs[i] = ids[i].String()
+		}
+		q["id"] = strs
+	}
+}
+
+// WithHostKeys sets the 'hostkey' parameter (multiple times if there is more
+// than one host key provided).
+func WithHostKeys(ids []types.PublicKey) ContractQueryParameterOption {
+	return func(q url.Values) {
+		strs := make([]string, len(ids))
+		for i := range ids {
+			strs[i] = ids[i].String()
+		}
+		q["hostkey"] = strs
+	}
+}
+
 // WithGood sets the 'good' parameter. When good is set to 'true', all contracts
 // that are considered bad will be filtered out. Examples of such contracts are
 // contracts with blocked hosts or those that failed to renew when nearing their

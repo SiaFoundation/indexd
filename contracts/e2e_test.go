@@ -18,21 +18,20 @@ import (
 func TestContractPruning(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(3))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10))
 	indexer := cluster.Indexer
 	time.Sleep(time.Second)
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 
-	// assert we have 3 usable hosts
 	time.Sleep(time.Second)
 	hosts, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true), hosts.WithActiveContracts(true))
 	if err != nil {
 		t.Fatal(err)
-	} else if len(hosts) != 3 {
-		t.Fatalf("expected 3 usable hosts, got %d", len(hosts))
+	} else if len(hosts) != 10 {
+		t.Fatalf("expected 10 usable hosts, got %d", len(hosts))
 	}
 
 	// convenience variables
@@ -117,22 +116,21 @@ func TestContractPruning(t *testing.T) {
 func TestSectorPinning(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(3))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10))
 	indexer := cluster.Indexer
 	store := indexer.Store()
 	time.Sleep(time.Second)
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 
-	// assert we have 3 usable hosts
 	time.Sleep(time.Second)
 	hosts, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true), hosts.WithActiveContracts(true))
 	if err != nil {
 		t.Fatal(err)
-	} else if len(hosts) != 3 {
-		t.Fatalf("expected 3 usable hosts, got %d", len(hosts))
+	} else if len(hosts) != 10 {
+		t.Fatalf("expected 10 usable hosts, got %d", len(hosts))
 	}
 
 	// convenience variables

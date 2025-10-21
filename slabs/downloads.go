@@ -150,6 +150,7 @@ func (m *SlabManager) downloadShard(ctx context.Context, h hosts.Host, sector Se
 	if err != nil {
 		return proto.Usage{}, nil, fmt.Errorf("failed to dial host: %w", err)
 	}
+	defer client.Close()
 
 	settings, err := client.Settings(ctx)
 	if err != nil {

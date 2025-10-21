@@ -151,7 +151,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 			return err
 		}
 
-		var objectIDs []int64
+		objectIDs := make(map[types.Hash256]int64)
 		for i := range events {
 			if events[i].Deleted {
 				continue
@@ -169,7 +169,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 				return fmt.Errorf("failed to query objects: %w", err)
 			}
 			events[i].Object = &obj
-			objectIDs = append(objectIDs, objID)
+			objectIDs[events[i].Key] = objID
 		}
 		if err := rows.Err(); err != nil {
 			return err
@@ -186,7 +186,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 				FROM object_slabs
 				WHERE object_id = $1
 				ORDER BY slab_index ASC
-			`, objectIDs[i])
+			`, objectIDs[events[i].Key])
 			if err != nil {
 				return fmt.Errorf("failed to query slabs: %w", err)
 			}

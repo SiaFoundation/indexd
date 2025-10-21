@@ -138,8 +138,9 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 		opt(&uo)
 	}
 
-	if (uo.parityShards+uo.dataShards)/uo.dataShards < 2 {
-		return Object{}, errors.New("redundancy must be at least 2x")
+	totalShards := int(uo.dataShards) + int(uo.parityShards)
+	if err := slabs.ValidateECParams(int(uo.dataShards), totalShards); err != nil {
+		return Object{}, err
 	}
 
 	obj := Object{masterKey: frand.Bytes(32)}

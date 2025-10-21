@@ -20,7 +20,6 @@ const (
 
 func (cm *ContractManager) performContractPruning(ctx context.Context, force bool, log *zap.Logger) error {
 	start := time.Now()
-	log = log.Named("contractpruning")
 
 	// if force is true, schedule all (active and good) contracts for pruning
 	if force {

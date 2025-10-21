@@ -152,7 +152,7 @@ func TestAccountsAPI(t *testing.T) {
 	var accs []types.PublicKey
 	for range 10 {
 		accs = append(accs, types.GeneratePrivateKey().PublicKey())
-		indexer.AddAccount(t, accs[len(accs)-1])
+		indexer.Store().AddTestAccount(t, accs[len(accs)-1])
 	}
 
 	accounts, err := admin.Accounts(context.Background(), api.WithServiceAccount(false))
@@ -361,6 +361,20 @@ func TestContractsAPI(t *testing.T) {
 		t.Fatal("expected no contract", len(contracts))
 	}
 
+	// assert ID filtering works
+	if contracts, err := adminClient.Contracts(context.Background(), admin.WithIDs([]types.FileContractID{contract.ID})); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	}
+
+	// assert public key filtering works
+	if contracts, err := adminClient.Contracts(context.Background(), admin.WithHostKeys([]types.PublicKey{h.PublicKey()})); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 1 {
+		t.Fatal("expected 1 contract", len(contracts))
+	}
+
 	// assert WithRevisable filters out non-revisable contracts
 	if contracts, err := adminClient.Contracts(context.Background(), admin.WithRevisable(true)); err != nil {
 		t.Fatal(err)
@@ -373,7 +387,7 @@ func TestContractsAPI(t *testing.T) {
 	}
 
 	// block host and assert it's not returned
-	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h.PublicKey()}, t.Name()); err != nil {
+	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h.PublicKey()}, []string{t.Name()}); err != nil {
 		t.Fatal(err)
 	} else if contracts, err := adminClient.Contracts(context.Background(), admin.WithGood(true)); err != nil {
 		t.Fatal(err)
@@ -387,8 +401,8 @@ func TestContractsAPI(t *testing.T) {
 	host, err := adminClient.Host(context.Background(), h.PublicKey())
 	if err != nil {
 		t.Fatal(err)
-	} else if !host.AccountFunding.Equals(types.Siacoins(2)) {
-		t.Fatal("expected host account funding to be exactly 2 SC")
+	} else if !host.AccountFunding.Equals(types.Siacoins(4)) {
+		t.Fatal("expected host account funding to be exactly 4 SC")
 	} else if host.TotalSpent.Cmp(host.AccountFunding) <= 0 {
 		t.Fatal("expected host total spent to greater than account funding", host.TotalSpent, host.AccountFunding)
 	}
@@ -525,7 +539,7 @@ func TestHostsAPI(t *testing.T) {
 	}
 
 	// block both hosts
-	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey(), h2.PublicKey()}, t.Name()); err != nil {
+	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h1.PublicKey(), h2.PublicKey()}, []string{t.Name()}); err != nil {
 		t.Fatal(err)
 	} else if blocklist, err := adminClient.HostsBlocklist(context.Background()); err != nil {
 		t.Fatal(err)
@@ -535,14 +549,14 @@ func TestHostsAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if !h1.Blocked {
 		t.Fatal("expected host to be blocked", h1.Blocked)
-	} else if h1.BlockedReason != t.Name() {
-		t.Fatalf("expected host to be blocked with reason %s, got %s", t.Name(), h1.BlockedReason)
+	} else if !reflect.DeepEqual(h1.BlockedReasons, []string{t.Name()}) {
+		t.Fatalf("expected host to be blocked with reasons %s, got %s", t.Name(), h1.BlockedReasons)
 	} else if h2, err := adminClient.Host(context.Background(), h2.PublicKey()); err != nil {
 		t.Fatal(err)
 	} else if !h2.Blocked {
 		t.Fatal("expected host to be blocked", h2.Blocked)
-	} else if h2.BlockedReason != t.Name() {
-		t.Fatalf("expected host to be blocked with reason %s, got %s", t.Name(), h2.BlockedReason)
+	} else if !reflect.DeepEqual(h2.BlockedReasons, []string{t.Name()}) {
+		t.Fatalf("expected host to be blocked with reasons %s, got %s", t.Name(), h2.BlockedReasons)
 	}
 
 	// unblock h1
@@ -889,14 +903,9 @@ func TestHostsStatsAPI(t *testing.T) {
 func TestSectorStatsAPI(t *testing.T) {
 	// create cluster with three hosts
 	logger := newTestLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
+	cluster := testutils.NewCluster(t, testutils.WithHosts(10), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
-
-	// convenience variables
-	h1 := cluster.Hosts[0]
-	h2 := cluster.Hosts[1]
-	h3 := cluster.Hosts[2]
 
 	// assert 0 slabs
 	stats, err := adminClient.StatsSectors(context.Background())
@@ -908,15 +917,16 @@ func TestSectorStatsAPI(t *testing.T) {
 
 	// pin a slab
 	account := types.GeneratePrivateKey()
-	indexer.AddAccount(t, account.PublicKey())
+	indexer.Store().AddTestAccount(t, account.PublicKey())
 	slabIDs, err := indexer.App(account).PinSlabs(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{1},
 		MinShards:     1,
-		Sectors: []slabs.PinnedSector{
-			{Root: frand.Entropy256(), HostKey: h1.PublicKey()},
-			{Root: frand.Entropy256(), HostKey: h2.PublicKey()},
-			{Root: frand.Entropy256(), HostKey: h3.PublicKey()},
-		},
+		Sectors: func() (s []slabs.PinnedSector) {
+			for _, h := range cluster.Hosts {
+				s = append(s, slabs.PinnedSector{Root: frand.Entropy256(), HostKey: h.PublicKey()})
+			}
+			return s
+		}(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -960,7 +970,7 @@ func TestAccountStatsAPI(t *testing.T) {
 	}
 
 	account1 := types.GeneratePrivateKey().PublicKey()
-	indexer.AddAccount(t, account1)
+	indexer.Store().AddTestAccount(t, account1)
 
 	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
 		t.Fatal(err)
@@ -969,7 +979,7 @@ func TestAccountStatsAPI(t *testing.T) {
 	}
 
 	account2 := types.GeneratePrivateKey().PublicKey()
-	indexer.AddAccount(t, account2)
+	indexer.Store().AddTestAccount(t, account2)
 
 	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
 		t.Fatal(err)

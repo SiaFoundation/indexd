@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"go.sia.tech/core/rhp/v4"
@@ -36,7 +37,7 @@ func TestBlockBadHosts(t *testing.T) {
 	}
 
 	// helper to assert a blocked host has a blocked contract and vice versa
-	assertHostAndContract := func(hk types.PublicKey, blocked bool, reason string) {
+	assertHostAndContract := func(hk types.PublicKey, blocked bool, reasons []string) {
 		t.Helper()
 
 		host, err := store.Host(context.Background(), hk)
@@ -44,8 +45,8 @@ func TestBlockBadHosts(t *testing.T) {
 			t.Fatal(err)
 		} else if host.Blocked != blocked {
 			t.Fatalf("expected host %v to be blocked=%v, got blocked=%v", hk, blocked, host.Blocked)
-		} else if host.Blocked && host.BlockedReason != reason {
-			t.Fatalf("expected host %v to be blocked due to %s, got blocked due to %v", hk, reason, host.BlockedReason)
+		} else if host.Blocked && !reflect.DeepEqual(host.BlockedReasons, reasons) {
+			t.Fatalf("expected host %v to be blocked due to %v, got blocked due to %v", hk, reasons, host.BlockedReasons)
 		}
 		contract, err := store.Contract(context.Background(), types.FileContractID(hk))
 		if errors.Is(err, ErrNotFound) && hk == unusedBadHost.PublicKey {
@@ -58,11 +59,11 @@ func TestBlockBadHosts(t *testing.T) {
 	}
 
 	// a good host shouldn't be blocked
-	assertHostAndContract(goodHost.PublicKey, false, "")
+	assertHostAndContract(goodHost.PublicKey, false, nil)
 
 	// a bad host and its contract should be blocked
-	assertHostAndContract(badHost.PublicKey, true, blockingReasonUsability)
+	assertHostAndContract(badHost.PublicKey, true, badHost.Usability.FailedChecks())
 
 	// an unused host shouldn't be blocked
-	assertHostAndContract(unusedBadHost.PublicKey, false, "")
+	assertHostAndContract(unusedBadHost.PublicKey, false, nil)
 }

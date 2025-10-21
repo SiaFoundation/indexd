@@ -84,6 +84,54 @@ func TestAddHostAnnouncement(t *testing.T) {
 	}
 }
 
+func TestBlockHosts(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	store := initPostgres(t, log.Named("postgres"))
+
+	hk1 := store.addTestHost(t, types.PublicKey{1})
+	hk2 := store.addTestHost(t, types.PublicKey{2})
+	hk3 := types.PublicKey{3} // not in DB
+
+	// assert block reasons
+	reasons := []string{"a", "b"}
+	if err := store.BlockHosts(t.Context(), []types.PublicKey{hk1, hk2}, reasons); err != nil {
+		t.Fatal(err)
+	}
+	for _, hk := range []types.PublicKey{hk1, hk2} {
+		host, err := store.Host(t.Context(), hk)
+		if err != nil {
+			t.Fatal(err)
+		} else if !host.Blocked {
+			t.Fatal("expected host to be blocked")
+		} else if !reflect.DeepEqual(host.BlockedReasons, reasons) {
+			t.Fatal("expected host to have correct blocked reasons", host.BlockedReasons)
+		}
+	}
+
+	// assert blocking unknown host works and doesn't error
+	if err := store.BlockHosts(t.Context(), []types.PublicKey{hk3}, reasons); err != nil {
+		t.Fatal(err)
+	}
+	if hks, err := store.BlockedHosts(t.Context(), 0, 10); err != nil {
+		t.Fatal(err)
+	} else if len(hks) != 3 {
+		t.Fatal("expected 3 blocked hosts, got", len(hks))
+	}
+
+	// assert reasons are deduplicated when blocking the same host
+	reasons = []string{"b", "c"}
+	if err := store.BlockHosts(t.Context(), []types.PublicKey{hk1}, reasons); err != nil {
+		t.Fatal(err)
+	}
+	host, err := store.Host(t.Context(), hk1)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(host.BlockedReasons, []string{"a", "b", "c"}) {
+		t.Fatal("expected host to have correct blocked reasons", host.BlockedReasons)
+	}
+}
+
 func TestHost(t *testing.T) {
 	// create database
 	log := zaptest.NewLogger(t)
@@ -409,7 +457,7 @@ func TestHosts(t *testing.T) {
 
 		// block host
 		if blocked {
-			err := db.BlockHosts(context.Background(), []types.PublicKey{hk}, "test")
+			err := db.BlockHosts(context.Background(), []types.PublicKey{hk}, []string{t.Name()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -417,7 +465,7 @@ func TestHosts(t *testing.T) {
 
 		// form contract
 		if contract {
-			db.addTestContract(t, hk)
+			db.addTestContract(t, hk, types.FileContractID(hk))
 		}
 		return hk
 	}
@@ -477,8 +525,8 @@ func TestHosts(t *testing.T) {
 				t.Fatal("invalid settings")
 			} else if host.Blocked != blocked {
 				t.Fatalf("expected blocked %v, got %v", blocked, host.Blocked)
-			} else if host.Blocked && host.BlockedReason != "test" {
-				t.Fatalf("expected blocked reason 'test', got %v", host.BlockedReason)
+			} else if host.Blocked && !reflect.DeepEqual(host.BlockedReasons, []string{t.Name()}) {
+				t.Fatalf("expected blocked reasons 'test', got %v", host.BlockedReasons)
 			} else if host.Usability != usability {
 				t.Fatalf("expected usability %+v, got %+v", usability, host.Usability)
 			}
@@ -648,7 +696,7 @@ func TestUsableHosts(t *testing.T) {
 
 		// handle blocked
 		if blocked {
-			err := db.BlockHosts(context.Background(), []types.PublicKey{hk}, "test")
+			err := db.BlockHosts(context.Background(), []types.PublicKey{hk}, []string{t.Name()})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -656,7 +704,7 @@ func TestUsableHosts(t *testing.T) {
 
 		// handle contract
 		if contract {
-			db.addTestContract(t, hk)
+			db.addTestContract(t, hk, types.FileContractID(hk))
 		}
 		return hk
 	}
@@ -757,7 +805,7 @@ func TestUsableHosts(t *testing.T) {
 	}
 
 	// block usable hosts and add 3 new usable hosts in the EU
-	db.BlockHosts(context.Background(), []types.PublicKey{uh1, uh2}, t.Name())
+	db.BlockHosts(context.Background(), []types.PublicKey{uh1, uh2}, []string{t.Name()})
 	uh1 = addHost(10, geoip.Location{
 		CountryCode: "ES",    // Spain
 		Latitude:    41.3851, // Barcelona
@@ -871,8 +919,8 @@ func TestHostsWithLostSectors(t *testing.T) {
 	hk2 := db.addTestHost(t)
 
 	// add a contract for each host
-	db.addTestContract(t, hk1)
-	db.addTestContract(t, hk2)
+	db.addTestContract(t, hk1, types.FileContractID(hk1))
+	db.addTestContract(t, hk2, types.FileContractID(hk2))
 
 	// pin a slab that adds 2 sectors to each host
 	root1 := frand.Entropy256()
@@ -962,14 +1010,14 @@ func TestHostsWithUnpinnableSectors(t *testing.T) {
 
 	// host2 has a contract but no sectors -> not returned
 	hk2 := db.addTestHost(t)
-	db.addTestContract(t, hk2)
+	db.addTestContract(t, hk2, types.FileContractID(hk2))
 
 	// host3 has no contracts but a sector -> returned
 	hk3 := db.addTestHost(t)
 
 	// host4 has a contract and a pinned sector -> not returned
 	hk4 := db.addTestHost(t)
-	db.addTestContract(t, hk4)
+	db.addTestContract(t, hk4, types.FileContractID(hk4))
 
 	_, err := db.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
@@ -1187,7 +1235,7 @@ func TestPruneHosts(t *testing.T) {
 	}
 
 	// add contract to h2
-	db.addTestContract(t, h2)
+	db.addTestContract(t, h2, types.FileContractID(h2))
 
 	// assert only h1 got pruned if we set the cutoff in the future
 	n, err = db.PruneHosts(context.Background(), time.Now().Add(time.Second), 1)
@@ -1363,7 +1411,7 @@ func BenchmarkHosts(b *testing.B) {
 
 		// we LEFT JOIN the blocklist so we populate it with random entries
 		for range numBlocklist {
-			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key, reason) VALUES ($1, 'none') ON CONFLICT (public_key) DO NOTHING", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
+			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key) VALUES ($1)", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
 			if err != nil {
 				return err
 			}
@@ -1509,9 +1557,8 @@ func BenchmarkUsableHosts(b *testing.B) {
 	// prepare random blocklist (we LEFT JOIN the blocklist in UsableHosts)
 	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		for range numBlocklist {
-			if _, err := tx.Exec(ctx, `
-				INSERT INTO hosts_blocklist (public_key, reason) 
-				VALUES ($1, 'none')`, sqlPublicKey(types.GeneratePrivateKey().PublicKey())); err != nil {
+			_, err := tx.Exec(ctx, `INSERT INTO hosts_blocklist (public_key) VALUES ($1)`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
+			if err != nil {
 				return err
 			}
 		}
@@ -1710,8 +1757,8 @@ func TestHostsForPinning(t *testing.T) {
 	}
 
 	// add contract for both hosts
-	fcid1 := db.addTestContract(t, hk1)
-	_ = db.addTestContract(t, hk2)
+	fcid1 := db.addTestContract(t, hk1, types.FileContractID(hk1))
+	_ = db.addTestContract(t, hk2, types.FileContractID(hk2))
 
 	// assert both hosts are returned now
 	hks, err = db.HostsForPinning(context.Background())
@@ -1737,7 +1784,7 @@ func TestHostsForPinning(t *testing.T) {
 	}
 
 	// block host 2
-	if err := db.BlockHosts(context.Background(), []types.PublicKey{hk2}, "test"); err != nil {
+	if err := db.BlockHosts(context.Background(), []types.PublicKey{hk2}, []string{t.Name()}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1764,8 +1811,8 @@ func TestHostsForPruning(t *testing.T) {
 	db.addTestAccount(t, types.PublicKey(acc))
 
 	// add contract for both hosts
-	fcid1 := db.addTestContract(t, hk1)
-	fcid2 := db.addTestContract(t, hk2)
+	fcid1 := db.addTestContract(t, hk1, types.FileContractID(hk1))
+	fcid2 := db.addTestContract(t, hk2, types.FileContractID(hk2))
 
 	// assert there's no hosts for pruning yet
 	if hks, err := db.HostsForPruning(context.Background()); err != nil {
@@ -1784,7 +1831,7 @@ func TestHostsForPruning(t *testing.T) {
 	}
 
 	// block host 2 and assert it is not returned anymore
-	if err := db.BlockHosts(context.Background(), []types.PublicKey{hk2}, "test"); err != nil {
+	if err := db.BlockHosts(context.Background(), []types.PublicKey{hk2}, []string{t.Name()}); err != nil {
 		t.Fatal(err)
 	} else if hks, err := db.HostsForPruning(context.Background()); err != nil {
 		t.Fatal(err)
@@ -1829,7 +1876,7 @@ func BenchmarkHostsForPruning(b *testing.B) {
 	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		for range nHosts {
 			// add host
-			hk := types.PublicKey(frand.Entropy256())
+			hk := types.GeneratePrivateKey().PublicKey()
 			var hostID int64
 			err := tx.QueryRow(ctx, `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
 			if err != nil {
@@ -1844,7 +1891,7 @@ func BenchmarkHostsForPruning(b *testing.B) {
 
 		// we LEFT JOIN the blocklist so we populate it with random entries
 		for range nBlocklistHosts {
-			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key, reason) VALUES ($1, 'none') ON CONFLICT (public_key) DO NOTHING", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
+			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key) VALUES ($1)", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
 			if err != nil {
 				return err
 			}
@@ -1955,7 +2002,7 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 	}
 
 	// block host 1 so that it's also not returned anymore
-	if err := db.BlockHosts(context.Background(), []types.PublicKey{hk1}, ""); err != nil {
+	if err := db.BlockHosts(context.Background(), []types.PublicKey{hk1}, []string{t.Name()}); err != nil {
 		t.Fatal(err)
 	}
 	hosts, err = db.HostsForIntegrityChecks(context.Background(), oneHFromNow, 10)
@@ -1987,8 +2034,9 @@ func BenchmarkHostsForPinning(b *testing.B) {
 	hostToContractIDs := make(map[types.PublicKey][]types.FileContractID, nHosts)
 	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 		for range nHosts {
+			hk := types.GeneratePrivateKey().PublicKey()
+
 			// add host
-			hk := types.PublicKey(frand.Entropy256())
 			var hostID int64
 			err := tx.QueryRow(ctx, `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
 			if err != nil {
@@ -2003,7 +2051,7 @@ func BenchmarkHostsForPinning(b *testing.B) {
 
 		// we LEFT JOIN the blocklist so we populate it with random entries
 		for range nBlocklistHosts {
-			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key, reason) VALUES ($1, 'none') ON CONFLICT (public_key) DO NOTHING", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
+			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key) VALUES ($1)", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
 			if err != nil {
 				return err
 			}
@@ -2214,7 +2262,7 @@ func BenchmarkHostsWithUnpinnableSectors(b *testing.B) {
 
 		// 10% of hosts have unpinned sectors which results in 100 out of 1000.
 		if i%10 != 0 {
-			store.addTestContract(b, hk)
+			store.addTestContract(b, hk, types.FileContractID(hk))
 		}
 	}
 

@@ -3,6 +3,7 @@ package slabs_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -15,24 +16,24 @@ import (
 func TestMigrations(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(7), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(11), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(500*time.Millisecond))))
 
 	// create some more utxos
 	indexer := cluster.Indexer
-	cluster.ConsensusNode.MineBlocks(t, indexer.WalletAddr(), 10)
+	cluster.ConsensusNode.MineBlocks(t, indexer.WalletAddr(), 11)
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 
 	// convenience variables
 	app := indexer.App(a1)
 
 	// fetch hosts
-	hosts := testutils.WaitForHosts(t, app, 7)
+	hosts := testutils.WaitForHosts(t, app, 11)
 
 	// upload sectors to hosts
-	encryptionKey, shards, roots := slabs.NewTestShards(t, 2, 4)
+	encryptionKey, shards, roots := slabs.NewTestShards(t, 1, 10)
 	for i := range shards {
 		client := indexer.HostClient(t, hosts[i].PublicKey)
 		hs, err := client.Settings(context.Background())
@@ -47,7 +48,7 @@ func TestMigrations(t *testing.T) {
 	// pin the slab
 	slabIDs, err := app.PinSlabs(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
-		MinShards:     2,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{Root: roots[0], HostKey: hosts[0].PublicKey},
 			{Root: roots[1], HostKey: hosts[1].PublicKey},
@@ -55,6 +56,10 @@ func TestMigrations(t *testing.T) {
 			{Root: roots[3], HostKey: hosts[3].PublicKey},
 			{Root: roots[4], HostKey: hosts[4].PublicKey},
 			{Root: roots[5], HostKey: hosts[5].PublicKey},
+			{Root: roots[6], HostKey: hosts[6].PublicKey},
+			{Root: roots[7], HostKey: hosts[7].PublicKey},
+			{Root: roots[8], HostKey: hosts[8].PublicKey},
+			{Root: roots[9], HostKey: hosts[9].PublicKey},
 		},
 	})
 	if err != nil {
@@ -62,39 +67,60 @@ func TestMigrations(t *testing.T) {
 	}
 	slabID := slabIDs[0]
 
-	// assert sectors were pinned
-	time.Sleep(time.Second)
-	pinned, err := app.Slab(context.Background(), slabID)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(pinned.Sectors) != 6 {
-		t.Fatalf("expected 6 pinned sectors, got %d", len(pinned.Sectors))
-	} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != hosts[0].PublicKey {
-		t.Fatalf("expected sector %s on host %s, got %s on host %s", roots[0], hosts[0].PublicKey, pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
+	retry := func(tries int, durationBetweenAttempts time.Duration, fn func() error) error {
+		t.Helper()
+		var err error
+		for i := 0; i < tries; i++ {
+			err = fn()
+			if err == nil {
+				break
+			}
+			time.Sleep(durationBetweenAttempts)
+		}
+		return err
 	}
 
-	// add h1 to blocklist
-	err = indexer.Hosts().BlockHosts(context.Background(), []types.PublicKey{hosts[0].PublicKey}, "test blocklist reason")
+	// assert sectors are pinned
+	if err := retry(100, 100*time.Millisecond, func() error {
+		slab, err := indexer.Store().Slab(t.Context(), slabID)
+		if err != nil {
+			return err
+		}
+		for _, sector := range slab.Sectors {
+			if sector.ContractID == nil || sector.HostKey == nil {
+				return fmt.Errorf("sector %s is not pinned yet", sector.Root)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// block the first host
+	err = indexer.Hosts().BlockHosts(context.Background(), []types.PublicKey{hosts[0].PublicKey}, []string{t.Name()})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// assert sectors are still pinned and the first shard was migrated to the free host
-	time.Sleep(3 * time.Second)
-	pinned, err = app.Slab(context.Background(), slabID)
-	if err != nil {
+	// assert sector was migrated
+	if err := retry(300, 100*time.Millisecond, func() error {
+		if pinned, err := app.Slab(context.Background(), slabID); err != nil {
+			t.Fatal(err)
+		} else if len(pinned.Sectors) != 10 {
+			return fmt.Errorf("expected 10 pinned sectors, got %d", len(pinned.Sectors))
+		} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != hosts[10].PublicKey {
+			return fmt.Errorf("expected sector %s on host %s, got %s on host %s", roots[0], hosts[10].PublicKey, pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
+		}
+		return nil
+	}); err != nil {
 		t.Fatal(err)
-	} else if len(pinned.Sectors) != 6 {
-		t.Fatalf("expected 6 pinned sectors, got %d", len(pinned.Sectors))
-	} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != hosts[6].PublicKey {
-		t.Fatalf("expected sector %s on host %s, got %s on host %s", roots[0], hosts[6].PublicKey, pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
 	}
 }
 
 func TestUpdateLastUsed(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(3), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
 
 	// create some more utxos
 	indexer := cluster.Indexer
@@ -102,16 +128,16 @@ func TestUpdateLastUsed(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 
 	// convenience variables
 	app := indexer.App(a1)
 
 	// fetch hosts
-	hosts := testutils.WaitForHosts(t, app, 3)
+	hosts := testutils.WaitForHosts(t, app, 10)
 
 	// upload sectors to hosts
-	encryptionKey, shards, roots := slabs.NewTestShards(t, 1, 2)
+	encryptionKey, shards, roots := slabs.NewTestShards(t, 1, 9)
 	for i := range shards {
 		client := indexer.HostClient(t, hosts[i].PublicKey)
 		hs, err := client.Settings(context.Background())
@@ -138,11 +164,12 @@ func TestUpdateLastUsed(t *testing.T) {
 	slabIDs, err := app.PinSlabs(context.Background(), slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
 		MinShards:     1,
-		Sectors: []slabs.PinnedSector{
-			{Root: roots[0], HostKey: hosts[0].PublicKey},
-			{Root: roots[1], HostKey: hosts[1].PublicKey},
-			{Root: roots[2], HostKey: hosts[2].PublicKey},
-		},
+		Sectors: func() (s []slabs.PinnedSector) {
+			for i, h := range hosts {
+				s = append(s, slabs.PinnedSector{Root: roots[i], HostKey: h.PublicKey})
+			}
+			return s
+		}(),
 	})
 	if err != nil {
 		t.Fatal(err)

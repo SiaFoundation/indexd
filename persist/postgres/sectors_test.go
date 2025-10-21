@@ -32,7 +32,7 @@ func TestMigrateSector(t *testing.T) {
 	hk2 := store.addTestHost(t)
 
 	// add contract for first host
-	fcid1 := store.addTestContract(t, hk1)
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID(hk1))
 
 	// pin a slab to add 2 sectors which are both stored on the first host
 	pinTime := time.Now().Round(time.Microsecond)
@@ -251,6 +251,22 @@ func TestRecordIntegrityCheck(t *testing.T) {
 		}
 	}
 
+	assertSectorStats := func(expectedPinned, expectedUnpinned, expectedUnpinnable int64) {
+		t.Helper()
+		var pinned, unpinned, unpinnable int64
+		err := store.pool.QueryRow(context.Background(), `
+			SELECT num_pinned_sectors, num_unpinned_sectors, num_unpinnable_sectors
+			FROM stats
+			WHERE id = 0`,
+		).Scan(&pinned, &unpinned, &unpinnable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pinned != expectedPinned || unpinned != expectedUnpinned || unpinnable != expectedUnpinnable {
+			t.Fatalf("unexpected sector stats: pinned=%d (want %d) unpinned=%d (want %d) unpinnable=%d (want %d)", pinned, expectedPinned, unpinned, expectedUnpinned, unpinnable, expectedUnpinnable)
+		}
+	}
+
 	record := func(success bool, nextCheck time.Time, roots []types.Hash256) {
 		t.Helper()
 		err := store.RecordIntegrityCheck(context.Background(), success, nextCheck, hk, roots)
@@ -294,12 +310,14 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	if err := store.MarkFailingSectorsLost(context.Background(), hk, 3); err != nil {
 		t.Fatal(err)
 	}
+	assertSectorStats(0, 2, 0)
 	assertFailingSectors([]types.Hash256{root1}, 2)
 
 	// one more time with threshold of 1
 	if err := store.MarkFailingSectorsLost(context.Background(), hk, 2); err != nil {
 		t.Fatal(err)
 	}
+	assertSectorStats(0, 1, 1)
 	assertFailingSectors([]types.Hash256{}, 2)
 
 	// host should have lost sector
@@ -1072,7 +1090,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// add a host and a contract
 	hk := store.addTestHost(t)
-	contractID := store.addTestContract(t, hk)
+	contractID := store.addTestContract(t, hk, types.FileContractID(hk))
 
 	// add two slabs & immediately reset the LRA-time
 	slabID1 := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
@@ -1214,7 +1232,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 }
 
-func TestPruneUnpinnableSectors(t *testing.T) {
+func TestMarkSectorsUnpinnable(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	assertUnpinnableSectors := func(expected uint64) {
@@ -1234,7 +1252,7 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 
 	// add host with a contract
 	hk := store.addTestHost(t)
-	store.addTestContract(t, hk)
+	store.addTestContract(t, hk, types.FileContractID(hk))
 
 	// pin a slab to add a few sectors to the database
 	root1 := frand.Entropy256()
@@ -1296,11 +1314,11 @@ func TestPruneUnpinnableSectors(t *testing.T) {
 
 	assertUnpinnableSectors(0)
 
-	if err := store.PruneUnpinnableSectors(context.Background(), time.Now().Add(-3*24*time.Hour)); err != nil {
+	if err := store.MarkSectorsUnpinnable(context.Background(), time.Now().Add(-3*24*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
-	// sector should have had host_id nulled out due to PruneUnpinnableSectors
+	// sector should have had host_id nulled out due to MarkSectorsUnpinnable
 	// and should now be unhealthy
 	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
 	if err != nil {
@@ -1319,7 +1337,7 @@ func TestUnpinnedSectors(t *testing.T) {
 	account := proto.Account{1}
 	store.addTestAccount(t, types.PublicKey(account))
 	hk := store.addTestHost(t)
-	store.addTestContract(t, hk)
+	store.addTestContract(t, hk, types.FileContractID(hk))
 
 	// create 4 sectors
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
@@ -1388,113 +1406,6 @@ func TestUnpinnedSectors(t *testing.T) {
 	} else if unpinned[0] != (types.Hash256{4}) {
 		t.Fatalf("expected root %v, got %v", types.Hash256{4}, unpinned[0])
 	}
-}
-
-func TestPinnedSectorsStatistics(t *testing.T) {
-	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
-
-	assertStats := func(pinned, unpinned int64) {
-		t.Helper()
-
-		got, err := store.SectorStats(t.Context())
-		if err != nil {
-			t.Fatal(err)
-		} else if got.Unpinned != unpinned {
-			t.Fatalf("expected %d unpinned sectors, got %d", unpinned, got.Unpinned)
-		} else if got.Pinned != pinned {
-			t.Fatalf("expected %d pinned sectors, got %d", pinned, got.Pinned)
-		}
-	}
-
-	// create host with account
-	account := proto.Account{1}
-	store.addTestAccount(t, types.PublicKey(account))
-	hk := store.addTestHost(t)
-
-	r1 := types.Hash256{1}
-	r2 := types.Hash256{2}
-	r3 := types.Hash256{3}
-	r4 := types.Hash256{4}
-
-	// create 4 sectors
-	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
-		EncryptionKey: frand.Entropy256(),
-		MinShards:     10,
-		Sectors: []slabs.PinnedSector{
-			{HostKey: hk, Root: r1},
-			{HostKey: hk, Root: r2},
-			{HostKey: hk, Root: r3},
-			{HostKey: hk, Root: r4},
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertStats(0, 4)
-
-	// add contract and pin all sectors
-	fcid := store.addTestContract(t, hk)
-	if err := store.PinSectors(t.Context(), fcid, []types.Hash256{r1, r2, r3, r4}); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(4, 0)
-
-	// create another host and migrate the fourth sector
-	other := store.addTestHost(t)
-	if _, err := store.MigrateSector(t.Context(), r4, other); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(3, 1)
-
-	// migrate it again and assert pinned sectors doesn't change
-	other = store.addTestHost(t)
-	if _, err := store.MigrateSector(t.Context(), r4, other); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(3, 1)
-
-	// mark fourth sector as lost - shouldn't change the number of pinned sectors
-	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r4}); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(3, 1)
-
-	// mark third sector as lost
-	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r3}); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(2, 2)
-
-	// manually manipulate the second and third sector to have consecutive_failed_checks exceeding the threshold
-	if _, err := store.pool.Exec(t.Context(), "UPDATE sectors SET consecutive_failed_checks = 10 WHERE sector_root IN ($1, $2)", sqlHash256(r2), sqlHash256(r3)); err != nil {
-		t.Fatal(err)
-	}
-
-	// mark failing sectors as lost - should update the number of pinned sectors
-	if err := store.MarkFailingSectorsLost(t.Context(), hk, 10); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(1, 3)
-
-	// mark first sector as lost - should update the number of pinned sectors
-	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r1}); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(0, 4)
-
-	// assert marking all of them lost doesn't go negative
-	if err := store.MarkSectorsLost(t.Context(), hk, []types.Hash256{r1, r2, r3, r4}); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(0, 4)
-
-	// assert pinning them twice doesn't double the count
-	if err := store.PinSectors(t.Context(), fcid, []types.Hash256{r1, r2, r3, r4}); err != nil {
-		t.Fatal(err)
-	} else if err := store.PinSectors(t.Context(), fcid, []types.Hash256{r1, r2, r3, r4}); err != nil {
-		t.Fatal(err)
-	}
-	assertStats(4, 0)
 }
 
 // BenchmarkSlabs benchmarks Slabs and PinSlabs in various batch sizes. The
@@ -1641,7 +1552,7 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk)
+	store.addTestContract(b, hk, types.FileContractID(hk))
 
 	// prepare base db
 	const (
@@ -1797,7 +1708,7 @@ func BenchmarkPinSectors(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk)
+	store.addTestContract(b, hk, types.FileContractID(hk))
 
 	// prepare base db
 	const (
@@ -1891,8 +1802,8 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 	}
 
 	// add 2 contracts
-	store.addTestContract(b, hks[0])
-	store.addTestContract(b, hks[1])
+	store.addTestContract(b, hks[0], types.FileContractID(hks[0]))
+	store.addTestContract(b, hks[1], types.FileContractID(hks[1]))
 
 	// mark the second contract as bad
 	res, err := store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE id = 2") // id 2 is bad
@@ -2000,7 +1911,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 
 	// add host with one contract
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk)
+	store.addTestContract(b, hk, types.FileContractID(hk))
 
 	// prepare base db
 	const (
@@ -2172,8 +2083,8 @@ func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 	}
 }
 
-// BenchmarkPruneUnpinnableSectors benchmarks PruneUnpinnableSectors
-func BenchmarkPruneUnpinnableSectors(b *testing.B) {
+// BenchmarkMarkSectorsUnpinnable benchmarks MarkSectorsUnpinnable
+func BenchmarkMarkSectorsUnpinnable(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	account := proto.Account{1}
 
@@ -2229,7 +2140,7 @@ func BenchmarkPruneUnpinnableSectors(b *testing.B) {
 		b.Run(fmt.Sprintf("%.3f%%", 1.0/float32(fraction)*100), func(b *testing.B) {
 			for b.Loop() {
 				b.SetBytes(proto.SectorSize * nSectors / fraction)
-				err := store.PruneUnpinnableSectors(context.Background(), now.Add(-3*day))
+				err := store.MarkSectorsUnpinnable(context.Background(), now.Add(-3*day))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -2255,8 +2166,8 @@ func TestMarkSectorsLost(t *testing.T) {
 	hk2 := store.addTestHost(t)
 
 	// add a contract for each host
-	store.addTestContract(t, hk1)
-	store.addTestContract(t, hk2)
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
+	_ = store.addTestContract(t, hk2, types.FileContractID{2})
 
 	// pin a slab that adds 2 sectors to each host
 	root1 := frand.Entropy256()
@@ -2288,6 +2199,29 @@ func TestMarkSectorsLost(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
+	assertSectorStats := func(expectedPinned, expectedUnpinned, expectedUnpinnable int64) {
+		t.Helper()
+		var pinned, unpinned, unpinnable int64
+		err := store.pool.QueryRow(context.Background(), `
+			SELECT num_pinned_sectors, num_unpinned_sectors, num_unpinnable_sectors
+			FROM stats
+			WHERE id = 0`,
+		).Scan(&pinned, &unpinned, &unpinnable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if pinned != expectedPinned || unpinned != expectedUnpinned || unpinnable != expectedUnpinnable {
+			t.Fatalf("unexpected sector stats: pinned=%d (want %d) unpinned=%d (want %d) unpinnable=%d (want %d)", pinned, expectedPinned, unpinned, expectedUnpinned, unpinnable, expectedUnpinnable)
+		}
+	}
+
+	assertSectorStats(0, 4, 0)
+
+	if err := store.PinSectors(context.Background(), fcid1, []types.Hash256{root1, root2}); err != nil {
+		t.Fatal(err)
+	}
+	assertSectorStats(2, 2, 0)
 
 	assertSectorLost := func(root types.Hash256, lost bool) {
 		t.Helper()
@@ -2328,7 +2262,9 @@ func TestMarkSectorsLost(t *testing.T) {
 
 	// mark sectors 1 to 3 lost
 	markSectorLost(hk1, []types.Hash256{root1, root2})
+	assertSectorStats(0, 2, 2)
 	markSectorLost(hk2, []types.Hash256{root3})
+	assertSectorStats(0, 1, 3)
 
 	assertLostSectors(hk1, 2)
 	assertLostSectors(hk2, 1)
@@ -2339,6 +2275,7 @@ func TestMarkSectorsLost(t *testing.T) {
 
 	// mark last sector lost as well
 	markSectorLost(hk2, []types.Hash256{root4})
+	assertSectorStats(0, 0, 4)
 
 	assertLostSectors(hk1, 2)
 	assertLostSectors(hk2, 2)
@@ -2356,7 +2293,7 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk)
+	store.addTestContract(b, hk, types.FileContractID(hk))
 
 	// prepare base db
 	const (
@@ -2484,7 +2421,7 @@ func BenchmarkMigrateSector(b *testing.B) {
 	var hks []types.PublicKey
 	for range 100 {
 		hk := store.addTestHost(b)
-		store.addTestContract(b, hk)
+		store.addTestContract(b, hk, types.FileContractID(hk))
 		hks = append(hks, hk)
 	}
 

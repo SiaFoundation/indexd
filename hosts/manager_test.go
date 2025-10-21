@@ -52,7 +52,7 @@ func (s *mockStore) HostStats(ctx context.Context, offset, limit int) ([]HostSta
 	return nil, nil
 }
 
-func (s *mockStore) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error {
+func (s *mockStore) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error {
 	return nil
 }
 

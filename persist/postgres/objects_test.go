@@ -224,6 +224,13 @@ func TestObjects(t *testing.T) {
 	if !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
+
+	// assert listing objects for accounts that include a deleted object works
+	obj2Acc1 := randomObject(pinSlabs(acc1, randomSlabs(3)))
+	if err := store.SaveObject(context.Background(), acc1, obj2Acc1); err != nil {
+		t.Fatal(err)
+	}
+	assertObjects(acc1, 1, 1)
 }
 
 // TestListObjectsRegression is a small regression tests that asserts proper

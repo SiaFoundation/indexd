@@ -91,9 +91,6 @@ var (
 	// ErrObjectUnpinnedSlab is returned when an user attempts to save an
 	// object containing a slab that is not pinned to their account.
 	ErrObjectUnpinnedSlab = errors.New("object contains unpinned slab")
-
-	// ErrInvalidSlab is returned when an invalid slab is being pinned
-	ErrInvalidSlab = errors.New("slab is invalid")
 )
 
 // ID returns the object's ID, which is a hash of its slabs.

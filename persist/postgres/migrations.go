@@ -407,4 +407,38 @@ FROM objects o;
 		}
 		return nil
 	},
+	// reset stats
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		if _, err := tx.Exec(ctx, `
+		WITH counts AS (
+			SELECT
+				COUNT(*) FILTER (WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NOT NULL)::bigint AS pinned,
+				COUNT(*) FILTER (WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NULL)::bigint     AS unpinned,
+				COUNT(*) FILTER (WHERE host_id IS NULL     AND contract_sectors_map_id IS NULL)::bigint     AS unpinnable
+			FROM sectors
+		)
+		UPDATE stats s
+		SET
+			num_pinned_sectors     = counts.pinned,
+			num_unpinned_sectors   = counts.unpinned,
+			num_unpinnable_sectors = counts.unpinnable
+		FROM counts`); err != nil {
+			return fmt.Errorf("failed to reset sector stats: %w", err)
+		}
+		return nil
+	},
+	// migrate hosts_blocklist reason column to TEXT[] array and add GIN index
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+			-- add reasons column and migrate data
+			ALTER TABLE hosts_blocklist ADD COLUMN reasons TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
+			UPDATE hosts_blocklist SET reasons = ARRAY[reason];
+			
+			-- drop old column and create index
+			DROP INDEX hosts_blocklist_reason_idx;
+			ALTER TABLE hosts_blocklist DROP COLUMN reason;
+			CREATE INDEX hosts_blocklist_reasons_gin_idx ON hosts_blocklist USING GIN(reasons);
+		`)
+		return err
+	},
 }

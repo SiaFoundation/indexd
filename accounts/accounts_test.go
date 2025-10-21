@@ -22,7 +22,7 @@ func TestAccountFunding(t *testing.T) {
 
 	// add an account
 	a1 := types.GeneratePrivateKey()
-	indexer.AddAccount(t, a1.PublicKey())
+	indexer.Store().AddTestAccount(t, a1.PublicKey())
 
 	// assert we have one usable host
 	time.Sleep(time.Second)
@@ -39,7 +39,7 @@ func TestAccountFunding(t *testing.T) {
 	hp := hosts[0].Settings.Prices
 	hc := indexer.HostClient(t, hk)
 	token := proto.NewAccountToken(a1, hk)
-	target := types.Siacoins(1)
+	target := types.Siacoins(2)
 
 	// assert we have one active contract
 	time.Sleep(time.Second)
