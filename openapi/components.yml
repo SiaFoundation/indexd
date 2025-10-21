@@ -599,10 +599,12 @@ components:
         blocked:
           type: boolean
           description: Whether the host is blocked
-        blockedReason:
-          type: string
-          description: The reason why the host is blocked
-          example: "Host has been offline for too long"
+        blockedReasons:
+          type: array
+          items:
+            type: string
+          description: The reasons why the host is blocked
+          example: ["Uptime"]
         lostSectors:
           type: integer
           format: uint64

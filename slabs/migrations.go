@@ -15,6 +15,11 @@ import (
 )
 
 func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, log *zap.Logger) error {
+	// return early if there are no slabs to migrate
+	if len(slabIDs) == 0 {
+		return nil
+	}
+
 	// fetch all available contracts
 	var goodContracts []contracts.Contract
 	const batchSize = 50

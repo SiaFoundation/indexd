@@ -254,7 +254,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// block h1
-	err = adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{hosts[0].PublicKey}, "test blocklist reason")
+	err = adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{hosts[0].PublicKey}, []string{t.Name()})
 	if err != nil {
 		t.Fatal("failed to add host to blocklist:", err)
 	}

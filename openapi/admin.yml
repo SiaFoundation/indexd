@@ -872,9 +872,11 @@ paths:
                   type: array
                   items:
                     $ref: "#/components/schemas/PublicKey"
-                reason:
-                  type: string
-                  description: Reason for blocking the hosts
+                reasons:
+                  type: array
+                  items:
+                    type: string
+                  description: Reasons for blocking the hosts
       responses:
         "200":
           description: Blocklist updated successfully
@@ -907,7 +909,7 @@ paths:
             })
             await admin.hostsBlocklistUpdate({
               hostkeys: ["ed25519:host-key-a", "ed25519:host-key-b"],
-              reason: "maintenance"
+              reasons: ["maintenance"]
             })
   /hosts/blocklist/{hostkey}:
     delete:

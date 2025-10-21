@@ -2,7 +2,6 @@ package hosts
 
 import (
 	"errors"
-	"strings"
 	"time"
 
 	proto4 "go.sia.tech/core/rhp/v4"
@@ -103,7 +102,7 @@ type (
 		Settings               proto4.HostSettings `json:"settings"`
 		Usability              Usability           `json:"usability"`
 		Blocked                bool                `json:"blocked"`
-		BlockedReason          string              `json:"blockedReason"`
+		BlockedReasons         []string            `json:"blockedReasons"`
 		LostSectors            uint64              `json:"lostSectors"`
 		AccountFunding         types.Currency      `json:"accountFunding"`
 		TotalSpent             types.Currency      `json:"totalSpent"`
@@ -216,7 +215,7 @@ func (u Usability) Usable() bool {
 }
 
 // FailedChecks returns a string representing all failed Usability checks.
-func (u Usability) FailedChecks() string {
+func (u Usability) FailedChecks() []string {
 	var reasons []string
 	if !u.Uptime {
 		reasons = append(reasons, "Uptime")
@@ -254,5 +253,5 @@ func (u Usability) FailedChecks() string {
 	if !u.FreeSectorPrice {
 		reasons = append(reasons, "FreeSectorPrice")
 	}
-	return strings.Join(reasons, ",")
+	return reasons
 }

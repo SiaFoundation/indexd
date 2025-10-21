@@ -121,7 +121,7 @@ func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewed
 	return nil
 }
 
-func (s *storeMock) BlockHosts(_ context.Context, hostKeys []types.PublicKey, reason string) error {
+func (s *storeMock) BlockHosts(_ context.Context, hostKeys []types.PublicKey, reasons []string) error {
 	for _, hostKey := range hostKeys {
 		host, ok := s.hosts[hostKey]
 		if !ok {
@@ -129,7 +129,7 @@ func (s *storeMock) BlockHosts(_ context.Context, hostKeys []types.PublicKey, re
 		}
 		if !host.Blocked {
 			host.Blocked = true
-			host.BlockedReason = reason
+			host.BlockedReasons = reasons
 			s.hosts[hostKey] = host
 		}
 
@@ -351,6 +351,10 @@ func (s *storeMock) UpdateContractRevision(ctx context.Context, contract rhp.Con
 		}
 	}
 	return errors.New("contract not found")
+}
+
+func (s *storeMock) UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error) {
+	return hosts.DefaultUsabilitySettings, nil
 }
 
 func (s *storeMock) addTestContract(t *testing.T, hk types.PublicKey, good bool, fcids ...types.FileContractID) types.FileContractID {

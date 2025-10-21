@@ -36,7 +36,7 @@ type (
 	// HostsBlocklistRequest is the request body for the [POST] /hosts/blocklist.
 	HostsBlocklistRequest struct {
 		HostKeys []types.PublicKey `json:"hostKeys"`
-		Reason   string            `json:"reason"`
+		Reasons  []string          `json:"reasons"`
 	}
 
 	// SectorsStatsResponse is the response body for the [GET] /stats/sectors

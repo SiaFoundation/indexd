@@ -88,9 +88,9 @@ CREATE TABLE service_accounts (
 CREATE TABLE hosts_blocklist (
     public_key BYTEA PRIMARY KEY CHECK (LENGTH(public_key) = 32),
     added TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    reason TEXT NOT NULL
+    reasons TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]
 );
-CREATE INDEX hosts_blocklist_reason_idx ON hosts_blocklist (reason);
+CREATE INDEX hosts_blocklist_reasons_gin_idx ON hosts_blocklist USING GIN(reasons);
 
 CREATE TABLE host_addresses (
     id SERIAL PRIMARY KEY,

@@ -82,6 +82,11 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 	s.w.SignV2Inputs(txn, toSign)
 }
 
+func withinGougingLeeway(cost, limit types.Currency) bool {
+	// cost must be 20% lower than the limit
+	return cost.Mul64(10).Cmp(limit.Mul64(8)) > 0
+}
+
 // performContractFormation makes sure that we have at least 'wanted' good
 // contracts with good hosts that are sufficiently spaced apart.
 func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted int64, log *zap.Logger) error {
@@ -160,13 +165,18 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		forceFormation[hostKey] = true
 	}
 
+	usabilitySettings, err := cm.hosts.UsabilitySettings(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get usability settings: %w", err)
+	}
+
 	// helper to check if a host is good to form a contract with
 	set := hosts.NewSpacedSet(cm.minHostDistanceKm)
 	isGood := func(host hosts.Host, log *zap.Logger) bool {
 		force := forceFormation[host.PublicKey]
 		if good := host.Usability.Usable(); !good {
 			// host should be good
-			log.Debug("host is not usable due to bad usability", zap.String("reasons", host.Usability.FailedChecks()))
+			log.Debug("host is not usable due to bad usability", zap.Strings("reasons", host.Usability.FailedChecks()))
 			return false
 		} else if spaced := set.CanAddHost(host.Info()); !spaced && !force {
 			// host should be sufficiently spaced from other hosts
@@ -175,6 +185,19 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			// host should at least have 10GB of storage left
 			log.Debug("host is not usable since host has less than 10GiB of storage left", zap.Uint64("remainingStorage", host.Settings.RemainingStorage))
 			return false
+		}
+
+		if !force {
+			if withinGougingLeeway(host.Settings.Prices.StoragePrice, usabilitySettings.MaxStoragePrice) {
+				log.Debug("host is not usable since storage price is not sufficiently below price gouging setting")
+				return false
+			} else if withinGougingLeeway(host.Settings.Prices.IngressPrice, usabilitySettings.MaxIngressPrice) {
+				log.Debug("host is not usable since ingress price is not sufficiently below price gouging setting")
+				return false
+			} else if withinGougingLeeway(host.Settings.Prices.EgressPrice, usabilitySettings.MaxEgressPrice) {
+				log.Debug("host is not usable since egress price is not sufficiently below price gouging setting")
+				return false
+			}
 		}
 		return true
 	}

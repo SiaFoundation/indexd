@@ -20,10 +20,6 @@ import (
 )
 
 const (
-	blockingReasonUsability = "usability"
-
-	hostsFetchLimit = 100
-
 	minRemainingStorage = (10 * 1 << 30) / uint64(proto.SectorSize) // 10GB
 	maxContractSize     = 10 * 1 << 40                              // 10TB
 
@@ -92,8 +88,9 @@ type (
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
 		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
-		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error
+		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error
 		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
+		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)
 
 		WithScannedHost(ctx context.Context, hk types.PublicKey, fn func(h hosts.Host) error) error
 	}
@@ -305,26 +302,31 @@ func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
 	defer cancel()
 	log := cm.log.Named("blockhosts")
 
-	var hostsToBlock []hosts.Host
-	for offset := 0; ; offset += hostsFetchLimit {
-		hosts, err := cm.hosts.Hosts(ctx, offset, hostsFetchLimit,
-			hosts.WithUsable(false), hosts.WithBlocked(false), hosts.WithActiveContracts(true))
+	const batchSize = 100
+	toBlock := make(map[types.PublicKey][]string)
+	for offset := 0; ; offset += batchSize {
+		hosts, err := cm.hosts.Hosts(ctx, offset, batchSize,
+			hosts.WithUsable(false),
+			hosts.WithBlocked(false),
+			hosts.WithActiveContracts(true))
 		if err != nil {
 			return fmt.Errorf("failed to fetch hosts to block: %w", err)
 		}
-		hostsToBlock = append(hostsToBlock, hosts...)
-		if len(hosts) < hostsFetchLimit {
+		for _, host := range hosts {
+			toBlock[host.PublicKey] = host.Usability.FailedChecks()
+		}
+		if len(hosts) < batchSize {
 			break
 		}
 	}
 
-	for _, host := range hostsToBlock {
-		hostLog := log.With(zap.Stringer("hostKey", host.PublicKey))
-		if err := cm.hosts.BlockHosts(ctx, []types.PublicKey{host.PublicKey}, blockingReasonUsability); err != nil {
+	for hk, reasons := range toBlock {
+		hostLog := log.With(zap.Stringer("hostKey", hk))
+		if err := cm.hosts.BlockHosts(ctx, []types.PublicKey{hk}, reasons); err != nil {
 			hostLog.Error("failed to block host", zap.Error(err))
 			continue
 		}
-		log.Warn("blocking unusable host", zap.Any("usability", host.Usability))
+		log.Warn("blocking unusable host", zap.Any("usability", reasons))
 	}
 	return nil
 }

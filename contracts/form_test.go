@@ -179,8 +179,12 @@ func (s *hostManagerMock) Hosts(ctx context.Context, offset int, limit int, quer
 	return s.store.Hosts(ctx, offset, limit, queryOpts...)
 }
 
-func (s *hostManagerMock) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reason string) error {
-	return s.store.BlockHosts(ctx, hostKeys, reason)
+func (s *hostManagerMock) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error {
+	return s.store.BlockHosts(ctx, hostKeys, reasons)
+}
+
+func (s *hostManagerMock) UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error) {
+	return s.store.UsabilitySettings(ctx)
 }
 
 // TestPerformContractFormationWithoutContracts tests the
@@ -194,7 +198,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 
 	const (
 		period = 100
-		wanted = 3
+		wanted = 4
 	)
 
 	// prepare bad settings that indicate the host is out of storage
@@ -252,19 +256,31 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 	good3 := goodHost(6)
 	hm.settings[good3.PublicKey] = goodSettings
 
-	// 7th one is good again but will be ignored since we only want 3 contracts
-	good4 := goodHost(7)
-	hm.settings[good4.PublicKey] = goodSettings
+	// 7th one is bad due to prices not being 20% below price gouging settings
+	bad4 := goodHost(7)
+	bad4.Settings.Prices.StoragePrice = hosts.DefaultUsabilitySettings.MaxStoragePrice
+	hm.settings[bad4.PublicKey] = bad4.Settings
+
+	// 8th one is good again, because the storage price is 20% below price gouging settings
+	good4 := goodHost(8)
+	good4.Settings.Prices.StoragePrice = hosts.DefaultUsabilitySettings.MaxStoragePrice.Div64(10).Mul64(8)
+	hm.settings[good4.PublicKey] = good4.Settings
+
+	// 9th one is good again but will be ignored since we only want 4 contracts
+	good5 := goodHost(9)
+	hm.settings[good5.PublicKey] = goodSettings
 
 	// populate store
 	store.hosts = map[types.PublicKey]hosts.Host{
-		good1.PublicKey: good1,
 		bad1.PublicKey:  bad1,
-		good2.PublicKey: good2,
+		good1.PublicKey: good1,
 		bad2.PublicKey:  bad2,
+		good2.PublicKey: good2,
 		bad3.PublicKey:  bad3,
 		good3.PublicKey: good3,
+		bad4.PublicKey:  bad4,
 		good4.PublicKey: good4,
+		good5.PublicKey: good5,
 	}
 
 	dialer := newDialerMock()
@@ -283,11 +299,12 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 			t.Fatalf("expected 1 call for host %v, got %v", h.PublicKey, len(calls))
 		}
 		call := calls[0]
-		if call.settings != goodSettings {
-			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
+		settings := hm.settings[h.PublicKey]
+		if call.settings != settings {
+			t.Fatalf("expected settings %v+, got %v+", settings, call.settings)
 		}
 		// assert params
-		allowance, collateral := contractFunding(goodSettings, 0, minAllowance, minHostCollateral, period)
+		allowance, collateral := contractFunding(settings, 0, minAllowance, minHostCollateral, period)
 		if !call.params.Allowance.Equals(allowance) {
 			t.Fatalf("expected allowance %v, got %v", allowance, call.params.Allowance)
 		} else if !call.params.Collateral.Equals(collateral) {
@@ -318,6 +335,7 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 	assertFormation(good1)
 	assertFormation(good2)
 	assertFormation(good3)
+	assertFormation(good4)
 
 	// assert formations made it into the store
 	if len(store.contracts) != wanted {
