@@ -386,6 +386,38 @@ func TestContractsAPI(t *testing.T) {
 		t.Fatal("expected no contract", len(contracts))
 	}
 
+	assertErr := func(got, expected error) {
+		t.Helper()
+		if got == nil || !strings.Contains(got.Error(), expected.Error()) {
+			t.Fatalf("expected error %v, got %v", expected, got)
+		}
+	}
+
+	if _, err := adminClient.Contracts(t.Context(), admin.WithContractSort("formation", false)); err != nil {
+		t.Fatal(err)
+	}
+
+	var err error
+	_, err = adminClient.Contracts(t.Context(), func(q url.Values) {
+		q.Add("sortby", "formation")
+		q.Add("desc", "invalid")
+	})
+	assertErr(err, api.ErrInvalidSortPair)
+
+	_, err = adminClient.Contracts(t.Context(), func(q url.Values) {
+		q.Add("sortby", "")
+		q.Add("desc", "true")
+	})
+	assertErr(err, api.ErrInvalidSortPair)
+
+	_, err = adminClient.Contracts(t.Context(), func(q url.Values) {
+		q.Add("sortby", "formation")
+	})
+	assertErr(err, api.ErrMissingSortPair)
+
+	_, err = adminClient.Contracts(t.Context(), admin.WithContractSort("does.not.exist", false))
+	assertErr(err, contracts.ErrInvalidSortField)
+
 	// block host and assert it's not returned
 	if err := adminClient.HostsBlocklistAdd(context.Background(), []types.PublicKey{h.PublicKey()}, []string{t.Name()}); err != nil {
 		t.Fatal(err)

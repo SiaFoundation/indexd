@@ -514,6 +514,51 @@ paths:
               $ref: "#/components/schemas/PublicKey"
           style: form
           explode: true
+        - name: sortby
+          in: query
+          description: Field to sort by. Can be specified multiple times for multi-level sorting.
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+              enum:
+                - id
+                - hostKey
+                - formation
+                - renewedFrom
+                - nextPrune
+                - lastBroadcastAttempt
+                - revisionNumber
+                - proofHeight
+                - expirationHeight
+                - capacity
+                - size
+                - initialAllowance
+                - remainingAllowance
+                - totalCollateral
+                - renewedTo
+                - usedCollateral
+                - contractPrice
+                - minerFee
+                - good
+                - state
+                - spending.appendSector
+                - spending.freeSector
+                - spending.fundAccount
+                - spending.sectorRoots
+          style: form
+          explode: true
+        - name: desc
+          in: query
+          description: Whether to sort in descending order. Must be provided for each sortby parameter.
+          required: false
+          schema:
+            type: array
+            items:
+              type: boolean
+          style: form
+          explode: true
       responses:
         "200":
           description: A list of contracts

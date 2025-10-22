@@ -5,6 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -209,9 +212,14 @@ func (s *Store) Contracts(ctx context.Context, offset, limit int, queryOpts ...c
 		hks[i] = sqlPublicKey(opts.HostKeys[i])
 	}
 
+	orderClause, err := buildContractOrderByClause(opts.Sorting)
+	if err != nil {
+		return nil, err
+	}
+
 	var contracts []contracts.Contract
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
-		rows, err := tx.Query(ctx, `
+		rows, err := tx.Query(ctx, fmt.Sprintf(`
 SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
 FROM contracts c
 INNER JOIN hosts h ON c.host_id = h.id
@@ -228,7 +236,8 @@ WHERE
 	AND ((CARDINALITY($5::bytea[]) = 0) OR (contract_id = ANY($5)))
 	-- public key filter
 	AND ((CARDINALITY($6::bytea[]) = 0) OR (h.public_key = ANY($6)))
-LIMIT $3 OFFSET $4`, opts.Good, opts.Revisable, limit, offset, ids, hks)
+%s -- order by clause
+LIMIT $3 OFFSET $4`, orderClause), opts.Good, opts.Revisable, limit, offset, ids, hks)
 		if err != nil {
 			return fmt.Errorf("failed to query contracts: %w", err)
 		}
@@ -247,6 +256,54 @@ LIMIT $3 OFFSET $4`, opts.Good, opts.Revisable, limit, offset, ids, hks)
 	}
 
 	return contracts, nil
+}
+
+func buildContractOrderByClause(sorts []contracts.ContractSortOpt) (string, error) {
+	if len(sorts) == 0 {
+		return "", nil
+	}
+
+	sortMapping := map[string]string{
+		"id":                    "c.contract_id",
+		"hostKey":               "h.public_key",
+		"formation":             "c.formation",
+		"renewedFrom":           "c.renewed_from",
+		"nextPrune":             "c.next_prune",
+		"lastBroadcastAttempt":  "c.last_broadcast_attempt",
+		"revisionNumber":        "c.revision_number",
+		"proofHeight":           "c.proof_height",
+		"expirationHeight":      "c.expiration_height",
+		"capacity":              "c.capacity",
+		"size":                  "c.size",
+		"initialAllowance":      "c.initial_allowance",
+		"remainingAllowance":    "c.remaining_allowance",
+		"totalCollateral":       "c.total_collateral",
+		"renewedTo":             "c.renewed_to",
+		"usedCollateral":        "c.used_collateral",
+		"contractPrice":         "c.contract_price",
+		"minerFee":              "c.miner_fee",
+		"good":                  "c.good",
+		"state":                 "c.state",
+		"spending.appendSector": "c.append_sector_spending",
+		"spending.freeSector":   "c.free_sector_spending",
+		"spending.fundAccount":  "c.fund_account_spending",
+		"spending.sectorRoots":  "c.sector_roots_spending",
+	}
+
+	parts := make([]string, 0, len(sorts))
+	for _, sort := range sorts {
+		column, ok := sortMapping[sort.Field]
+		if !ok {
+			return "", fmt.Errorf("%w: invalid sort column: %q, must be one of %v", contracts.ErrInvalidSortField, sort.Field, slices.Collect(maps.Keys(sortMapping)))
+		}
+		if sort.Descending {
+			parts = append(parts, fmt.Sprintf("%s DESC", column))
+		} else {
+			parts = append(parts, fmt.Sprintf("%s ASC", column))
+		}
+	}
+
+	return "ORDER BY " + strings.Join(parts, ", "), nil
 }
 
 // ContractsForBroadcasting returns up to 'limit' contracts that need their
