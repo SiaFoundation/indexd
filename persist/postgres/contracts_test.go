@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -140,6 +141,131 @@ func TestContracts(t *testing.T) {
 		t.Fatal("expected 1 contract, got", len(css))
 	} else if css[0].ID != fcid4 {
 		t.Fatalf("expected contract %v, got %v", fcid4, css[0].ID)
+	}
+
+	updateContract := func(id types.FileContractID, column string, value any) {
+		t.Helper()
+
+		switch column {
+		case "initial_allowance",
+			"remaining_allowance",
+			"total_collateral",
+			"used_collateral",
+			"contract_price",
+			"miner_fee",
+			"append_sector_spending",
+			"free_sector_spending",
+			"fund_account_spending",
+			"sector_roots_spending":
+			value = sqlCurrency(value.(types.Currency))
+		case "renewed_from", "renewed_to":
+			value = sqlHash256(value.(types.FileContractID))
+		}
+
+		res, err := store.pool.Exec(context.Background(), fmt.Sprintf(`UPDATE contracts SET %s = $1 WHERE contract_id = $2`, column), value, sqlHash256(id))
+		if err != nil {
+			t.Fatal(err)
+		} else if res.RowsAffected() != 1 {
+			t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
+		}
+	}
+
+	assertContractsOrder := func(ids []types.FileContractID, opts ...contracts.ContractQueryOpt) {
+		t.Helper()
+
+		idFilter := contracts.WithIDs(append([]types.FileContractID(nil), ids...))
+		queryOpts := append([]contracts.ContractQueryOpt{idFilter}, opts...)
+		cs, err := store.Contracts(context.Background(), 0, len(ids), queryOpts...)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(cs) != len(ids) {
+			t.Fatalf("expected %d contracts, got %d", len(ids), len(cs))
+		}
+		for i, contract := range cs {
+			if contract.ID != ids[i] {
+				t.Fatalf("expected contract %v at index %d, got %v", ids[i], i, contract.ID)
+			}
+		}
+	}
+
+	sortCases := []struct {
+		name   string
+		column string
+		low    any
+		high   any
+	}{
+		{"formation", "formation", time.Unix(10, 0), time.Unix(20, 0)},
+		{"nextPrune", "next_prune", time.Unix(30, 0), time.Unix(40, 0)},
+		{"lastBroadcastAttempt", "last_broadcast_attempt", time.Unix(50, 0), time.Unix(60, 0)},
+		{"revisionNumber", "revision_number", int64(1), int64(2)},
+		{"proofHeight", "proof_height", int64(100), int64(200)},
+		{"expirationHeight", "expiration_height", int64(300), int64(400)},
+		{"capacity", "capacity", int64(500), int64(600)},
+		{"size", "size", int64(700), int64(800)},
+		{"initialAllowance", "initial_allowance", types.NewCurrency64(1), types.NewCurrency64(2)},
+		{"remainingAllowance", "remaining_allowance", types.NewCurrency64(3), types.NewCurrency64(4)},
+		{"totalCollateral", "total_collateral", types.NewCurrency64(5), types.NewCurrency64(6)},
+		{"usedCollateral", "used_collateral", types.NewCurrency64(7), types.NewCurrency64(8)},
+		{"contractPrice", "contract_price", types.NewCurrency64(9), types.NewCurrency64(10)},
+		{"minerFee", "miner_fee", types.NewCurrency64(11), types.NewCurrency64(12)},
+		{"good", "good", false, true},
+		{"state", "state", int16(0), int16(4)},
+		{"spending.appendSector", "append_sector_spending", types.NewCurrency64(13), types.NewCurrency64(14)},
+		{"spending.freeSector", "free_sector_spending", types.NewCurrency64(15), types.NewCurrency64(16)},
+		{"spending.fundAccount", "fund_account_spending", types.NewCurrency64(17), types.NewCurrency64(18)},
+		{"spending.sectorRoots", "sector_roots_spending", types.NewCurrency64(19), types.NewCurrency64(20)},
+	}
+	for _, tc := range sortCases {
+		switch tc.name {
+		case "capacity":
+			updateContract(fcid1, "size", int64(0))
+			updateContract(fcid3, "size", int64(0))
+		case "size":
+			updateContract(fcid1, "capacity", int64(1000))
+			updateContract(fcid3, "capacity", int64(1000))
+		case "usedCollateral":
+			updateContract(fcid1, "total_collateral", types.NewCurrency64(100))
+			updateContract(fcid3, "total_collateral", types.NewCurrency64(200))
+		}
+
+		updateContract(fcid1, tc.column, tc.low)
+		updateContract(fcid3, tc.column, tc.high)
+		assertContractsOrder([]types.FileContractID{fcid1, fcid3}, contracts.WithSorting(tc.name, false))
+		assertContractsOrder([]types.FileContractID{fcid3, fcid1}, contracts.WithSorting(tc.name, true))
+	}
+
+	assertContractsOrder([]types.FileContractID{fcid1, fcid3}, contracts.WithSorting("id", false))
+	assertContractsOrder([]types.FileContractID{fcid3, fcid1}, contracts.WithSorting("id", true))
+
+	if bytes.Compare(hk1[:], hk2[:]) < 0 {
+		assertContractsOrder([]types.FileContractID{fcid1, fcid3}, contracts.WithSorting("hostKey", false))
+		assertContractsOrder([]types.FileContractID{fcid3, fcid1}, contracts.WithSorting("hostKey", true))
+	} else {
+		assertContractsOrder([]types.FileContractID{fcid3, fcid1}, contracts.WithSorting("hostKey", false))
+		assertContractsOrder([]types.FileContractID{fcid1, fcid3}, contracts.WithSorting("hostKey", true))
+	}
+
+	fcid5 := types.FileContractID{5}
+	if err := store.AddRenewedContract(context.Background(), fcid3, fcid5, newTestRevision(hk2), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+
+	renewedFromAsc := []types.FileContractID{fcid4, fcid5}
+	if bytes.Compare(fcid1[:], fcid3[:]) > 0 {
+		renewedFromAsc = []types.FileContractID{fcid5, fcid4}
+	}
+	assertContractsOrder(renewedFromAsc, contracts.WithSorting("renewedFrom", false))
+	assertContractsOrder([]types.FileContractID{renewedFromAsc[1], renewedFromAsc[0]}, contracts.WithSorting("renewedFrom", true))
+
+	renewedToAsc := []types.FileContractID{fcid1, fcid3}
+	if bytes.Compare(fcid4[:], fcid5[:]) > 0 {
+		renewedToAsc = []types.FileContractID{fcid3, fcid1}
+	}
+	assertContractsOrder(renewedToAsc, contracts.WithSorting("renewedTo", false))
+	assertContractsOrder([]types.FileContractID{renewedToAsc[1], renewedToAsc[0]}, contracts.WithSorting("renewedTo", true))
+
+	if _, err := store.Contracts(context.Background(), 0, 10, contracts.WithSorting("does.not.exist", false)); !errors.Is(err, contracts.ErrInvalidSortField) {
+		t.Fatalf("expected ErrInvalidSortField, got %v", err)
 	}
 }
 
