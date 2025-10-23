@@ -109,21 +109,17 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's unhealthy
-<<<<<<< HEAD
 	unhealthSlabIDs, err := db.UnhealthySlabs(context.Background(), 1)
-=======
-	unhealthSlabs, err := db.UnhealthySlabs(context.Background(), 1)
->>>>>>> 644f48b (store: add exp. backoff mechanism to unhealthy slabs)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(unhealthSlabs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(unhealthSlabs))
-	} else if unhealthSlabs[0] != slabID {
-		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabs[0])
+	} else if len(unhealthSlabIDs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(unhealthSlabIDs))
+	} else if unhealthSlabIDs[0] != slabID {
+		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabIDs[0])
 	}
 
 	// migrate the slab
-	err = mgr.migrateSlabs(context.Background(), unhealthSlabs, zap.NewNop())
+	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,17 +139,13 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's still unhealthy
-<<<<<<< HEAD
 	unhealthSlabIDs, err = db.UnhealthySlabs(context.Background(), 1)
-=======
-	unhealthSlabs, err = db.UnhealthySlabs(context.Background(), 1)
->>>>>>> 644f48b (store: add exp. backoff mechanism to unhealthy slabs)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(unhealthSlabs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(unhealthSlabs))
-	} else if unhealthSlabs[0] != slabID {
-		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabs[0])
+	} else if len(unhealthSlabIDs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(unhealthSlabIDs))
+	} else if unhealthSlabIDs[0] != slabID {
+		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabIDs[0])
 	}
 
 	// add another good host
@@ -167,7 +159,7 @@ func TestMigrateSlab(t *testing.T) {
 	db.contracts[h5.PublicKey] = c5
 
 	// migrate the slab again
-	err = mgr.migrateSlabs(context.Background(), unhealthSlabs, zap.NewNop())
+	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,14 +172,10 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's now healthy
-<<<<<<< HEAD
 	unhealthSlabIDs, err = db.UnhealthySlabs(context.Background(), 1)
-=======
-	unhealthSlabs, err = db.UnhealthySlabs(context.Background(), 1)
->>>>>>> 644f48b (store: add exp. backoff mechanism to unhealthy slabs)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(unhealthSlabs) != 0 {
+	} else if len(unhealthSlabIDs) != 0 {
 		t.Fatal("expected no unhealthy slabs")
 	}
 }

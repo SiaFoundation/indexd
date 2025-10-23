@@ -58,14 +58,10 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, log *z
 		wg.Add(1)
 		go func(slabID SlabID, log *zap.Logger) {
 			defer wg.Done()
-<<<<<<< HEAD
 			err := m.migrateSlab(ctx, slabID, allHosts, goodContracts, ms.Period, log)
 			if err := m.store.MarkSlabRepaired(ctx, slabID, err == nil); err != nil {
 				log.Error("failed to mark slab repaired", zap.Error(err))
 			}
-=======
-			m.migrateSlab(ctx, slabID, allHosts, goodContracts, ms.Period, log)
->>>>>>> 644f48b (store: add exp. backoff mechanism to unhealthy slabs)
 		}(slabID, log.With(zap.Stringer("slab", slabID)))
 	}
 	wg.Wait()
@@ -95,14 +91,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	shards, err := m.downloadShards(ctx, slab, allHosts, log.Named("recover"))
 	if err != nil {
 		log.Error("failed to download slab", zap.Error(err))
-<<<<<<< HEAD
 		return err
-=======
-		if err := m.store.MarkSlabRepaired(ctx, slab.ID, false); err != nil {
-			log.Error("failed to mark slab repair as failed", zap.Error(err))
-		}
-		return
->>>>>>> 644f48b (store: add exp. backoff mechanism to unhealthy slabs)
 	}
 	log = log.With(zap.Duration("downloadElapsed", time.Since(start)))
 	log.Debug("recovered shards")
@@ -166,26 +155,13 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	switch {
 	case err != nil:
 		log.Debug("failed to migrate all sectors", zap.Error(err)) // debug since this is not user actionable and will be retried
-<<<<<<< HEAD
 		return err
-=======
-		if err := m.store.MarkSlabRepaired(ctx, slab.ID, false); err != nil {
-			log.Error("failed to mark slab repair as failed", zap.Error(err))
-		}
-		return
->>>>>>> 644f48b (store: add exp. backoff mechanism to unhealthy slabs)
 	case len(migrated) == 0:
 		log.Error("did not migrate any sectors") // error since this is unexpected
 	default:
 		log.Debug("successfully migrated slab")
 	}
-<<<<<<< HEAD
 	return nil
-=======
-	if err := m.store.MarkSlabRepaired(ctx, slab.ID, true); err != nil {
-		log.Error("failed to mark slab repair as successful", zap.Error(err))
-	}
->>>>>>> 644f48b (store: add exp. backoff mechanism to unhealthy slabs)
 }
 
 // sectorsToMigrate filters the sectors of a slab and returns the indices of the

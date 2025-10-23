@@ -677,7 +677,6 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 	return roots, err
 }
 
-<<<<<<< HEAD
 // UnhealthySlabs returns the IDs of slabs which have at least one sector that
 // needs to be migrated and have not been abandoned.
 //
@@ -748,8 +747,6 @@ func (s *Store) UnhealthySlabs(ctx context.Context, limit int) (unhealthy []slab
 	return
 }
 
-=======
->>>>>>> 644f48b (store: add exp. backoff mechanism to unhealthy slabs)
 // MigrateSector updates a sector that was just migrated in the database to be
 // linked to the new host identified by 'hostKey'. This will reset the contract
 // ID since a freshly migrated sector isn't pinned yet. To pin a sector
