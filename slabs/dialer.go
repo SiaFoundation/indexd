@@ -77,12 +77,12 @@ func newDialer(d Dialer, log *zap.Logger) *dialer {
 func (d *dialer) Close() {
 	d.mu.Lock()
 	conns := slices.Collect(maps.Values(d.conns))
+	clear(d.conns)
 	d.mu.Unlock()
 
 	for _, entry := range conns {
 		entry.close(d.log)
 	}
-	clear(d.conns)
 }
 
 // clearHostConnection clears the connection for a host
