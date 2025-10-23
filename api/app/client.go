@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -231,7 +230,7 @@ func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash
 	if err != nil {
 		return "", fmt.Errorf("failed to sign request: %w", err)
 	}
-	u.Fragment = fmt.Sprintf("encryption_key=%x", masterKey)
+	u.Fragment = fmt.Sprintf("encryption_key=%s", base64.URLEncoding.EncodeToString(masterKey))
 	return u.String(), nil
 }
 
@@ -250,13 +249,12 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 	}
 
 	keyStr := values.Get("encryption_key")
-	if len(keyStr) != 64 { // 32 hex-encoded bytes
-		return slabs.SharedObject{}, nil, fmt.Errorf("missing encryption key")
-	}
-
-	encryptionKey, err := hex.DecodeString(keyStr)
+	encryptionKey := make([]byte, 32)
+	n, err := base64.URLEncoding.Decode(encryptionKey, []byte(keyStr))
 	if err != nil {
-		return slabs.SharedObject{}, nil, fmt.Errorf("invalid encryption key: %w", err)
+		return slabs.SharedObject{}, nil, fmt.Errorf("invalid base64 encoding for encryption key: %w", err)
+	} else if n != 32 {
+		return slabs.SharedObject{}, nil, fmt.Errorf("missing encryption key")
 	}
 
 	u.Fragment = ""
