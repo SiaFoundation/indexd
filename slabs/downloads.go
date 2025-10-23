@@ -12,6 +12,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -71,7 +72,7 @@ func (dc *downloadCandidates) next() (hosts.Host, bool) {
 
 // downloadShards downloads at least the minimum number of shards required to
 // recover the slab.
-func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, allHosts []hosts.Host, logger *zap.Logger) ([][]byte, error) {
+func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, allHosts []hosts.Host, d *dialer, logger *zap.Logger) ([][]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -115,7 +116,7 @@ outer:
 			}()
 
 			var usage proto.Usage
-			usage, shards[sectorIdx], err = m.downloadShard(ctx, host, slab.Sectors[sectorIdx])
+			usage, shards[sectorIdx], err = m.downloadShard(ctx, host, slab.Sectors[sectorIdx], d)
 			if isErrLostSector(err) {
 				m.markSectorLost(ctx, host, slab.Sectors[sectorIdx].Root, logger)
 				return
@@ -142,25 +143,26 @@ outer:
 	return shards, nil
 }
 
-func (m *SlabManager) downloadShard(ctx context.Context, h hosts.Host, sector Sector) (proto.Usage, []byte, error) {
+func (m *SlabManager) downloadShard(ctx context.Context, h hosts.Host, sector Sector, d *dialer) (proto.Usage, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.shardTimeout)
 	defer cancel()
 
-	client, err := m.dialer.DialHost(ctx, h.PublicKey, h.RHP4Addrs())
-	if err != nil {
-		return proto.Usage{}, nil, fmt.Errorf("failed to dial host: %w", err)
-	}
-	defer client.Close()
-
-	settings, err := client.Settings(ctx)
-	if err != nil {
-		return proto.Usage{}, nil, fmt.Errorf("failed to fetch host settings: %w", err)
-	}
-
+	var result rhp.RPCReadSectorResult
 	buf := new(bytes.Buffer)
-	result, err := client.ReadSector(ctx, settings.Prices, m.migrationToken(h), buf, sector.Root, 0, proto.SectorSize)
+	err := d.retry(ctx, h.PublicKey, h.RHP4Addrs(), func(client HostClient) error {
+		settings, err := client.Settings(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch host settings: %w", err)
+		}
+
+		result, err = client.ReadSector(ctx, settings.Prices, m.migrationToken(h), buf, sector.Root, 0, proto.SectorSize)
+		if err != nil {
+			return fmt.Errorf("failed to read sector: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return proto.Usage{}, nil, fmt.Errorf("failed to read sector: %w", err)
+		return proto.Usage{}, nil, err
 	}
 
 	return result.Usage, buf.Bytes(), nil

@@ -9,6 +9,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -30,7 +31,7 @@ type (
 // migrated, an error is returned but any finished shards will still be returned
 // and should be tracked in the database. The given shards must not be nil and
 // the given hosts must all be good and be sufficiently spaced apart.
-func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, uploadCandidates []hosts.Host, logger *zap.Logger) ([]Shard, error) {
+func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, uploadCandidates []hosts.Host, d *dialer, logger *zap.Logger) ([]Shard, error) {
 	uploaded := make([]Shard, 0, len(shards))
 
 	if len(slab.Sectors) != len(shards) {
@@ -56,7 +57,7 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 			break
 		}
 
-		usage, root, err := m.uploadShard(ctx, host, bytes.NewReader(shard))
+		usage, root, err := m.uploadShard(ctx, host, bytes.NewReader(shard), d)
 		if err != nil {
 			logger.Debug("failed to upload shard", zap.Stringer("hostKey", host.PublicKey), zap.Error(err))
 			goto nextCandidate
@@ -81,24 +82,25 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 	return uploaded, uploadErr
 }
 
-func (m *SlabManager) uploadShard(ctx context.Context, h hosts.Host, shard io.Reader) (proto.Usage, types.Hash256, error) {
+func (m *SlabManager) uploadShard(ctx context.Context, h hosts.Host, shard io.Reader, d *dialer) (proto.Usage, types.Hash256, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.shardTimeout)
 	defer cancel()
 
-	client, err := m.dialer.DialHost(ctx, h.PublicKey, h.RHP4Addrs())
-	if err != nil {
-		return proto.Usage{}, types.Hash256{}, fmt.Errorf("failed to dial host: %w", err)
-	}
-	defer client.Close()
+	var result rhp.RPCWriteSectorResult
+	err := d.retry(ctx, h.PublicKey, h.RHP4Addrs(), func(client HostClient) error {
+		settings, err := client.Settings(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch host settings: %w", err)
+		}
 
-	settings, err := client.Settings(ctx)
+		result, err = client.WriteSector(ctx, settings.Prices, m.migrationToken(h), shard, proto.SectorSize)
+		if err != nil {
+			return fmt.Errorf("failed to write sector: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
-		return proto.Usage{}, types.Hash256{}, fmt.Errorf("failed to fetch host settings: %w", err)
-	}
-
-	result, err := client.WriteSector(ctx, settings.Prices, m.migrationToken(h), shard, proto.SectorSize)
-	if err != nil {
-		return proto.Usage{}, types.Hash256{}, fmt.Errorf("failed to write sector: %w", err)
+		return proto.Usage{}, types.Hash256{}, err
 	}
 
 	return result.Usage, result.Root, nil
