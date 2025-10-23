@@ -30,7 +30,7 @@ type (
 // migrated, an error is returned but any finished shards will still be returned
 // and should be tracked in the database. The given shards must not be nil and
 // the given hosts must all be good and be sufficiently spaced apart.
-func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, uploadCandidates []hosts.Host, c *connPool, logger *zap.Logger) ([]Shard, error) {
+func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, uploadCandidates []hosts.Host, logger *zap.Logger) ([]Shard, error) {
 	uploaded := make([]Shard, 0, len(shards))
 
 	if len(slab.Sectors) != len(shards) {
@@ -56,7 +56,7 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 			break
 		}
 
-		usage, root, err := m.uploadShard(ctx, host, bytes.NewReader(shard), c)
+		usage, root, err := m.uploadShard(ctx, host, bytes.NewReader(shard))
 		if err != nil {
 			logger.Debug("failed to upload shard", zap.Stringer("hostKey", host.PublicKey), zap.Error(err))
 			goto nextCandidate
@@ -81,11 +81,11 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 	return uploaded, uploadErr
 }
 
-func (m *SlabManager) uploadShard(ctx context.Context, h hosts.Host, shard io.Reader, c *connPool) (proto.Usage, types.Hash256, error) {
+func (m *SlabManager) uploadShard(ctx context.Context, h hosts.Host, shard io.Reader) (proto.Usage, types.Hash256, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.shardTimeout)
 	defer cancel()
 
-	return c.uploadShard(ctx, h, m.migrationToken(h), shard)
+	return m.pool.uploadShard(ctx, h, m.migrationToken(h), shard)
 }
 
 func (m *SlabManager) migrationToken(h hosts.Host) proto.AccountToken {

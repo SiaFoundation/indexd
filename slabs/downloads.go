@@ -70,7 +70,7 @@ func (dc *downloadCandidates) next() (hosts.Host, bool) {
 
 // downloadShards downloads at least the minimum number of shards required to
 // recover the slab.
-func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, allHosts []hosts.Host, c *connPool, logger *zap.Logger) ([][]byte, error) {
+func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, allHosts []hosts.Host, logger *zap.Logger) ([][]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -114,7 +114,7 @@ outer:
 			}()
 
 			var usage proto.Usage
-			usage, shards[sectorIdx], err = m.downloadShard(ctx, host, slab.Sectors[sectorIdx], c)
+			usage, shards[sectorIdx], err = m.downloadShard(ctx, host, slab.Sectors[sectorIdx])
 			if isErrLostSector(err) {
 				m.markSectorLost(ctx, host, slab.Sectors[sectorIdx].Root, logger)
 				return
@@ -141,11 +141,11 @@ outer:
 	return shards, nil
 }
 
-func (m *SlabManager) downloadShard(ctx context.Context, h hosts.Host, sector Sector, c *connPool) (proto.Usage, []byte, error) {
+func (m *SlabManager) downloadShard(ctx context.Context, h hosts.Host, sector Sector) (proto.Usage, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.shardTimeout)
 	defer cancel()
 
-	return c.downloadShard(ctx, h, m.migrationToken(h), sector)
+	return m.pool.downloadShard(ctx, h, m.migrationToken(h), sector)
 }
 
 func (m *SlabManager) markSectorLost(ctx context.Context, host hosts.Host, root types.Hash256, log *zap.Logger) {

@@ -55,13 +55,13 @@ func TestUploadShards(t *testing.T) {
 	defer c.Close()
 
 	// assert passing in no hosts returns an error
-	_, err = sm.uploadShards(context.Background(), slab, shards, nil, c, zap.NewNop())
+	_, err = sm.uploadShards(context.Background(), slab, shards, nil, zap.NewNop())
 	if !errors.Is(err, errNotEnoughHosts) {
 		t.Fatalf("expected [errNotEnoughHosts] got %v", err)
 	}
 
 	// assert passing in too few hosts returns the uploaded shards alongside an error
-	uploaded, err := sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2}, c, zap.NewNop())
+	uploaded, err := sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2}, zap.NewNop())
 	if !errors.Is(err, errNotEnoughHosts) {
 		t.Fatalf("expected [errNotEnoughHosts] got %v", err)
 	} else if len(uploaded) != 2 {
@@ -69,7 +69,7 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// assert passing in enough hosts uploads all shards
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2, h3}, c, zap.NewNop())
+	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2, h3}, zap.NewNop())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if len(uploaded) != 3 {
@@ -78,7 +78,7 @@ func TestUploadShards(t *testing.T) {
 
 	// assert hosts are tried until one succeeds
 	dialer.clients[h1.PublicKey].delay = time.Second
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2, h3, h4}, c, zap.NewNop())
+	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2, h3, h4}, zap.NewNop())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if len(uploaded) != 3 {
@@ -88,7 +88,7 @@ func TestUploadShards(t *testing.T) {
 	// assert the upload fails upon a root mismatch
 	corrupted := Slab{Sectors: slices.Clone(slab.Sectors)}
 	corrupted.Sectors[1].Root = types.Hash256{}
-	uploaded, err = sm.uploadShards(context.Background(), corrupted, shards, []hosts.Host{h1, h2, h3, h4}, c, zap.NewNop())
+	uploaded, err = sm.uploadShards(context.Background(), corrupted, shards, []hosts.Host{h1, h2, h3, h4}, zap.NewNop())
 	if !errors.Is(err, errRootMismatch) {
 		t.Fatalf("expected [errRootMismatch] got %v", err)
 	} else if len(uploaded) != 1 {
@@ -100,7 +100,7 @@ func TestUploadShards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h2}, c, zap.NewNop())
+	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h2}, zap.NewNop())
 	if !errors.Is(err, errNotEnoughHosts) {
 		t.Fatalf("expected [errNotEnoughHosts] got %v", err)
 	} else if len(uploaded) != 1 {
@@ -121,7 +121,7 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// assert uploaded shards are stored on the hosts
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2, h3}, c, zap.NewNop())
+	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2, h3}, zap.NewNop())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if len(uploaded) != 3 {

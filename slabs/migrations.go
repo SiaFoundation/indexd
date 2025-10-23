@@ -14,7 +14,7 @@ import (
 	"golang.org/x/crypto/chacha20"
 )
 
-func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, c *connPool, log *zap.Logger) error {
+func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, log *zap.Logger) error {
 	// return early if there are no slabs to migrate
 	if len(slabIDs) == 0 {
 		return nil
@@ -59,14 +59,14 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, c *con
 		wg.Add(1)
 		go func(slabID SlabID) {
 			defer wg.Done()
-			m.migrateSlab(ctx, slabID, allHosts, goodContracts, ms.Period, c, log)
+			m.migrateSlab(ctx, slabID, allHosts, goodContracts, ms.Period, log)
 		}(slabID)
 	}
 	wg.Wait()
 	return nil
 }
 
-func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, c *connPool, log *zap.Logger) {
+func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, log *zap.Logger) {
 	start := time.Now()
 	slab, err := m.store.Slab(ctx, slabID)
 	if err != nil {
@@ -87,7 +87,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	// download enough shards to reconstruct the slab's shards
 	// note: timeouts are set within downloadShards to avoid timing
 	// out the database
-	shards, err := m.downloadShards(ctx, slab, allHosts, c, log.Named("recover"))
+	shards, err := m.downloadShards(ctx, slab, allHosts, log.Named("recover"))
 	if err != nil {
 		log.Error("failed to download slab", zap.Error(err))
 		return
@@ -140,7 +140,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	// migrate the shards
 	// note: timeouts are set within uploadShards to avoid timing out the database
 	uploadStart := time.Now()
-	migrated, err := m.uploadShards(ctx, slab, shards, uploadCandidates, c, log.Named("migrate"))
+	migrated, err := m.uploadShards(ctx, slab, shards, uploadCandidates, log.Named("migrate"))
 	log = log.With(zap.Duration("uploadElapsed", time.Since(uploadStart)))
 	// update the database with the new locations for the migrated shards
 	for _, shard := range migrated {

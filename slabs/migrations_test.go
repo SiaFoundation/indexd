@@ -122,7 +122,7 @@ func TestMigrateSlab(t *testing.T) {
 	c := newConnPool(dialer, zap.NewNop())
 	defer c.Close()
 
-	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, c, zap.NewNop())
+	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestMigrateSlab(t *testing.T) {
 	db.contracts[h5.PublicKey] = c5
 
 	// migrate the slab again
-	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, c, zap.NewNop())
+	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

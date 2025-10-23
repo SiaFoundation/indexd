@@ -46,6 +46,7 @@ type (
 		hm      HostManager
 
 		dialer   Dialer
+		pool     *connPool
 		store    Store
 		verifier *SectorVerifier
 
@@ -238,6 +239,8 @@ func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store
 		tg:       threadgroup.New(),
 		log:      zap.NewNop(),
 	}
+	m.pool = newConnPool(dialer, m.log)
+
 	for _, opt := range opts {
 		opt(m)
 	}
@@ -381,8 +384,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	log := m.log.Named("migrations")
 	log.Debug("starting slab migrations", zap.Time("start", start))
 
-	c := newConnPool(m.dialer, log)
-	defer c.Close()
+	defer m.pool.Close()
 
 	slabsPerBatch := m.migrationBatchSize
 	var exhausted bool
@@ -394,7 +396,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 			exhausted = true
 		}
 
-		err = m.migrateSlabs(ctx, batch, c, log)
+		err = m.migrateSlabs(ctx, batch, log)
 		if errors.Is(err, context.Canceled) {
 			break
 		} else if err != nil {
