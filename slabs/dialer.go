@@ -43,12 +43,6 @@ func (c *connEntry) clear() {
 	}
 }
 
-func (c *connEntry) isConnected() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.tc != nil
-}
-
 func (c *connEntry) setTransport(tc HostClient, assign bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -69,7 +63,7 @@ type dialer struct {
 	conns map[types.PublicKey]*connEntry
 }
 
-// newDialer returns a new dialer.
+// newDialer returns a new dialer that reuses existing connections if possible.
 func newDialer(d Dialer, log *zap.Logger) *dialer {
 	return &dialer{
 		log:    log.Named("dialer"),
