@@ -32,7 +32,7 @@ func TestObjects(t *testing.T) {
 	// pin slab for both accounts
 	slab := slabs.SlabPinParams{MinShards: 1}
 	for _, acc := range []proto4.Account{acc1, acc2} {
-		_, err := store.PinSlabs(context.Background(), acc, time.Time{}, slab)
+		_, err := store.PinSlabs(context.Background(), acc, time.Time{}, false, slab)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -84,7 +84,7 @@ func TestObjects(t *testing.T) {
 
 		var ss []slabs.SlabSlice
 		for _, p := range params {
-			ids, err := store.PinSlabs(context.Background(), acc, time.Time{}, p)
+			ids, err := store.PinSlabs(context.Background(), acc, time.Time{}, false, p)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -244,7 +244,7 @@ func TestListObjectsRegression(t *testing.T) {
 
 	randomObject := func() slabs.SealedObject {
 		slab := slabs.SlabPinParams{EncryptionKey: frand.Entropy256(), MinShards: 1}
-		_, err := store.PinSlabs(context.Background(), acc, time.Time{}, slab)
+		_, err := store.PinSlabs(context.Background(), acc, time.Time{}, false, slab)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -340,7 +340,7 @@ func TestSharedObjects(t *testing.T) {
 			s.Sectors[i].Root = frand.Entropy256()
 		}
 
-		slabIDs, err := store.PinSlabs(t.Context(), acc1, time.Time{}, s)
+		slabIDs, err := store.PinSlabs(t.Context(), acc1, time.Time{}, false, s)
 		if err != nil {
 			t.Fatal(err)
 		} else if id, err := s.Digest(); err != nil {
@@ -398,7 +398,7 @@ func TestSharedObjects(t *testing.T) {
 
 	// pin the slabs to the second account
 	for _, slab := range expectedSharedObj.Slabs {
-		_, err := store.PinSlabs(t.Context(), acc2, time.Time{}, slabs.SlabPinParams{
+		_, err := store.PinSlabs(t.Context(), acc2, time.Time{}, false, slabs.SlabPinParams{
 			MinShards: slab.MinShards,
 			Sectors: func() []slabs.PinnedSector {
 				sps := make([]slabs.PinnedSector, len(slab.Sectors))
@@ -451,7 +451,7 @@ func BenchmarkSaveObject(b *testing.B) {
 			s.Sectors[i].Root = frand.Entropy256()
 		}
 
-		slabIDs, err := store.PinSlabs(b.Context(), acc1, time.Time{}, s)
+		slabIDs, err := store.PinSlabs(b.Context(), acc1, time.Time{}, false, s)
 		if err != nil {
 			b.Fatal(err)
 		}

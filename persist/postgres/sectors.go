@@ -193,7 +193,7 @@ func (s *Store) markFailingSectorsLostBatch(ctx context.Context, hostKey types.P
 
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
 // with the provided account.
-func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
+func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, checkHosts bool, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
 	var digests []slabs.SlabID
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var accountID int64
@@ -203,6 +203,23 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 			return accounts.ErrNotFound
 		} else if err != nil {
 			return err
+		}
+
+		goodHosts := make(map[types.PublicKey]struct{})
+		if checkHosts {
+			hostRows, err := tx.Query(ctx, `SELECT h.public_key FROM contracts c INNER JOIN hosts h ON c.host_id = h.id WHERE state IN (0,1) AND renewed_to IS NULL AND good`)
+			if err != nil {
+				return fmt.Errorf("failed to get good hosts: %w", err)
+			}
+			defer hostRows.Close()
+
+			for hostRows.Next() {
+				var hk types.PublicKey
+				if err := hostRows.Scan((*sqlPublicKey)(&hk)); err != nil {
+					return fmt.Errorf("failed to scan host key: %w", err)
+				}
+				goodHosts[hk] = struct{}{}
+			}
 		}
 
 		for _, slab := range toPin {
@@ -279,6 +296,10 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 			br := tx.SendBatch(ctx, batch)
 			sectorIDs := make([]int64, len(slab.Sectors))
 			for i, sector := range slab.Sectors {
+				if _, ok := goodHosts[sector.HostKey]; checkHosts && !ok {
+					return fmt.Errorf("bad host %q for sector", sector.HostKey)
+				}
+
 				var inserted bool
 				if err := br.QueryRow().Scan(&sectorIDs[i], &inserted); err != nil {
 					br.Close()
