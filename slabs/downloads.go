@@ -148,14 +148,16 @@ func (m *SlabManager) downloadShard(ctx context.Context, h hosts.Host, sector Se
 	defer cancel()
 
 	var result rhp.RPCReadSectorResult
-	buf := new(bytes.Buffer)
+	var buf bytes.Buffer
 	err := d.retry(ctx, h.PublicKey, h.RHP4Addrs(), func(client HostClient) error {
+		buf.Reset()
+
 		settings, err := client.Settings(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to fetch host settings: %w", err)
 		}
 
-		result, err = client.ReadSector(ctx, settings.Prices, m.migrationToken(h), buf, sector.Root, 0, proto.SectorSize)
+		result, err = client.ReadSector(ctx, settings.Prices, m.migrationToken(h), &buf, sector.Root, 0, proto.SectorSize)
 		if err != nil {
 			return fmt.Errorf("failed to read sector: %w", err)
 		}
