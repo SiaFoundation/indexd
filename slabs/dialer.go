@@ -1,8 +1,10 @@
 package slabs
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"maps"
 	"slices"
 	"sync"
@@ -10,6 +12,8 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
@@ -54,8 +58,9 @@ func (c *connEntry) setTransport(tc HostClient, assign bool) {
 	c.dial = nil
 }
 
-// dialer implements the [HostDialer] interface.
-type dialer struct {
+// connPool is a connection pool that wraps a [Dialer] and caches its
+// connections.
+type connPool struct {
 	log    *zap.Logger
 	dialer Dialer
 
@@ -63,9 +68,9 @@ type dialer struct {
 	conns map[types.PublicKey]*connEntry
 }
 
-// newDialer returns a new dialer that reuses existing connections if possible.
-func newDialer(d Dialer, log *zap.Logger) *dialer {
-	return &dialer{
+// newConnPool returns a new connection pool.
+func newConnPool(d Dialer, log *zap.Logger) *connPool {
+	return &connPool{
 		log:    log.Named("dialer"),
 		dialer: d,
 
@@ -74,22 +79,22 @@ func newDialer(d Dialer, log *zap.Logger) *dialer {
 }
 
 // Close closes all the open connections on the dialer.
-func (d *dialer) Close() {
-	d.mu.Lock()
-	conns := slices.Collect(maps.Values(d.conns))
-	clear(d.conns)
-	d.mu.Unlock()
+func (c *connPool) Close() {
+	c.mu.Lock()
+	conns := slices.Collect(maps.Values(c.conns))
+	clear(c.conns)
+	c.mu.Unlock()
 
 	for _, entry := range conns {
-		entry.close(d.log)
+		entry.close(c.log)
 	}
 }
 
 // clearHostConnection clears the connection for a host
-func (d *dialer) clearHostConnection(hostKey types.PublicKey) {
-	d.mu.Lock()
-	entry, exists := d.conns[hostKey]
-	d.mu.Unlock()
+func (c *connPool) clearHostConnection(hostKey types.PublicKey) {
+	c.mu.Lock()
+	entry, exists := c.conns[hostKey]
+	c.mu.Unlock()
 	if !exists {
 		return
 	}
@@ -97,15 +102,15 @@ func (d *dialer) clearHostConnection(hostKey types.PublicKey) {
 	entry.clear()
 }
 
-func (d *dialer) dialHost(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress) (HostClient, error) {
-	d.mu.Lock()
+func (c *connPool) dialHost(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress) (HostClient, error) {
+	c.mu.Lock()
 	// Get or create connection entry
-	entry, exists := d.conns[hostKey]
+	entry, exists := c.conns[hostKey]
 	if !exists {
 		entry = &connEntry{hostKey: hostKey}
-		d.conns[hostKey] = entry
+		c.conns[hostKey] = entry
 	}
-	d.mu.Unlock()
+	c.mu.Unlock()
 
 	for {
 		entry.mu.Lock()
@@ -142,16 +147,16 @@ func (d *dialer) dialHost(ctx context.Context, hostKey types.PublicKey, addrs []
 		entry.setTransport(tc, err == nil)
 	}()
 
-	tc, err = d.dialer.DialHost(ctx, hostKey, addrs)
+	tc, err = c.dialer.DialHost(ctx, hostKey, addrs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial host: %w", err)
 	}
 	return tc, nil
 }
 
-func (d *dialer) retry(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress, fn func(HostClient) error) error {
-	// First attempt
-	tc, err := d.dialHost(ctx, hostKey, addrs)
+func (c *connPool) retry(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress, fn func(HostClient) error) error {
+	// first attempt
+	tc, err := c.dialHost(ctx, hostKey, addrs)
 	if err != nil {
 		return fmt.Errorf("failed to dial host: %w", err)
 	}
@@ -161,13 +166,58 @@ func (d *dialer) retry(ctx context.Context, hostKey types.PublicKey, addrs []cha
 		return err
 	}
 
-	// Clear connection if we got transport error
-	d.clearHostConnection(hostKey)
+	// clear connection if we got transport error
+	c.clearHostConnection(hostKey)
 
-	// Second attempt
-	tc, err = d.dialHost(ctx, hostKey, addrs)
+	// second attempt
+	tc, err = c.dialHost(ctx, hostKey, addrs)
 	if err != nil {
 		return fmt.Errorf("failed to redial host: %w", err)
 	}
 	return fn(tc)
+}
+
+func (c *connPool) downloadShard(ctx context.Context, h hosts.Host, migrationToken proto.AccountToken, sector Sector) (proto.Usage, []byte, error) {
+	var result rhp.RPCReadSectorResult
+	var buf bytes.Buffer
+	err := c.retry(ctx, h.PublicKey, h.RHP4Addrs(), func(client HostClient) error {
+		buf.Reset()
+
+		settings, err := client.Settings(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch host settings: %w", err)
+		}
+
+		result, err = client.ReadSector(ctx, settings.Prices, migrationToken, &buf, sector.Root, 0, proto.SectorSize)
+		if err != nil {
+			return fmt.Errorf("failed to read sector: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return proto.Usage{}, nil, err
+	}
+
+	return result.Usage, buf.Bytes(), nil
+}
+
+func (c *connPool) uploadShard(ctx context.Context, h hosts.Host, migrationToken proto.AccountToken, shard io.Reader) (proto.Usage, types.Hash256, error) {
+	var result rhp.RPCWriteSectorResult
+	err := c.retry(ctx, h.PublicKey, h.RHP4Addrs(), func(client HostClient) error {
+		settings, err := client.Settings(ctx)
+		if err != nil {
+			return fmt.Errorf("failed to fetch host settings: %w", err)
+		}
+
+		result, err = client.WriteSector(ctx, settings.Prices, migrationToken, shard, proto.SectorSize)
+		if err != nil {
+			return fmt.Errorf("failed to write sector: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return proto.Usage{}, types.Hash256{}, err
+	}
+
+	return result.Usage, result.Root, nil
 }
