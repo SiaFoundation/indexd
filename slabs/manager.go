@@ -381,8 +381,8 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	log := m.log.Named("migrations")
 	log.Debug("starting slab migrations", zap.Time("start", start))
 
-	c := newConnPool(m.dialer, log)
-	defer c.Close()
+	pool := newConnPool(m.dialer, log)
+	defer pool.Close()
 
 	slabsPerBatch := m.migrationBatchSize
 	var exhausted bool
@@ -394,7 +394,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 			exhausted = true
 		}
 
-		err = m.migrateSlabs(ctx, batch, c, log)
+		err = m.migrateSlabs(ctx, batch, pool, log)
 		if errors.Is(err, context.Canceled) {
 			break
 		} else if err != nil {
