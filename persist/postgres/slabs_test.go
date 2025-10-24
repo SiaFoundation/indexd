@@ -130,11 +130,11 @@ func TestMarkSlabRepaired(t *testing.T) {
 		}
 
 		var consecutiveFailedRepairs int
-		var lastRepairAttempt, nextRepairAttempt time.Time
+		var nextRepairAttempt time.Time
 		if err := store.pool.QueryRow(t.Context(), `
 			SELECT consecutive_failed_repairs, next_repair_attempt 
 			FROM slabs 
-			WHERE digest = $1`, sqlHash256(slabIDs[0])).Scan(&consecutiveFailedRepairs, &lastRepairAttempt, &nextRepairAttempt); err != nil {
+			WHERE digest = $1`, sqlHash256(slabIDs[0])).Scan(&consecutiveFailedRepairs, &nextRepairAttempt); err != nil {
 			t.Fatal(err)
 		} else if consecutiveFailedRepairs != expectedRepairs {
 			t.Fatalf("expected %d consecutive failed repairs, got %d", expectedRepairs, consecutiveFailedRepairs)
