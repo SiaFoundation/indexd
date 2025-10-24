@@ -292,12 +292,13 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 					nextIntegrityCheck)
 			}
 
+			var badHosts int
 			var unpinned int64
 			br := tx.SendBatch(ctx, batch)
 			sectorIDs := make([]int64, len(slab.Sectors))
 			for i, sector := range slab.Sectors {
-				if _, ok := goodHosts[sector.HostKey]; checkHosts && !ok {
-					return fmt.Errorf("bad host %q for sector", sector.HostKey)
+				if _, ok := goodHosts[sector.HostKey]; !ok {
+					badHosts++
 				}
 
 				var inserted bool
@@ -312,6 +313,14 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 				}
 			}
 			br.Close()
+
+			if checkHosts {
+				// if more than 20% of parity shards are on bad hosts, don't allow slab to be pinned
+				parityShards := max(0, len(slab.Sectors)-int(slab.MinShards))
+				if badHosts > (parityShards / 5) {
+					return slabs.ErrBadHosts
+				}
+			}
 
 			// update number of unpinned sectors
 			if unpinned > 0 {

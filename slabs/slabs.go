@@ -27,6 +27,10 @@ var (
 
 	// ErrUnrecoverable is returned when a slab is unrecoverable, meaning it cannot be repaired or migrated.
 	ErrUnrecoverable = errors.New("slab is unrecoverable")
+
+	// ErrBadHosts is returned when attempting to pin a slab with too many
+	// sectors on bad hosts.
+	ErrBadHosts = errors.New("slab has too many sectors on bad hosts")
 )
 
 type (
