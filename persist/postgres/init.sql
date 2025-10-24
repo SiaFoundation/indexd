@@ -221,9 +221,6 @@ CREATE TABLE contracts (
   raw_revision BYTEA NOT NULL
 );
 
--- speeds up lookup of unhealthy slabs
-CREATE INDEX contracts_bad_or_inactive_contract_id_idx ON contracts (contract_id) WHERE (NOT good) OR (state NOT IN (0,1)); 
-
 -- foreign key constraint index
 CREATE INDEX contracts_host_id_idx ON contracts(host_id);
 

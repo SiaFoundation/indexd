@@ -452,9 +452,8 @@ FROM objects o;
 			ALTER TABLE slabs DROP COLUMN last_repair_attempt;
 			ALTER TABLE slabs ADD COLUMN consecutive_failed_repairs SMALLINT NOT NULL DEFAULT 0 CHECK (consecutive_failed_repairs >= 0);
 			ALTER TABLE slabs ADD COLUMN next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW();
-			DROP INDEX slab_sectors_sector_id_idx;
 			CREATE INDEX slabs_id_next_repair_attempt_idx ON slabs(next_repair_attempt ASC);
-			CREATE INDEX contracts_bad_or_inactive_contract_id_idx ON contracts (contract_id) WHERE (NOT good) OR (state NOT IN (0,1)); 
+			DROP INDEX slab_sectors_sector_id_idx;
 		`)
 		return err
 	},
