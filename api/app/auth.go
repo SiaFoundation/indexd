@@ -2,7 +2,7 @@ package app
 
 import (
 	"bytes"
-	"encoding/hex"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"io"
@@ -41,9 +41,9 @@ var (
 )
 
 const (
-	queryParamCredential = "SiaIdx-Credential"
-	queryParamSignature  = "SiaIdx-Signature"
-	queryParamValidUntil = "SiaIdx-ValidUntil"
+	queryParamCredential = "sc"
+	queryParamSignature  = "ss"
+	queryParamValidUntil = "sv"
 )
 
 // validateURLSignature extracts the signed public key from the request
@@ -120,28 +120,24 @@ func validateSignedURLAuth(jc jape.Context, hostname, path string, store Account
 	return pk, true
 }
 
-func parseCredential(req *http.Request) (types.PublicKey, error) {
-	credStr := req.URL.Query().Get(queryParamCredential)
-	var pk types.PublicKey
-	err := pk.UnmarshalText([]byte(credStr))
+func parseCredential(req *http.Request) (pk types.PublicKey, _ error) {
+	n, err := base64.URLEncoding.Decode(pk[:], []byte(req.URL.Query().Get(queryParamCredential)))
 	if err != nil {
-		return types.PublicKey{}, fmt.Errorf("invalid credential %q, must be a valid public key", queryParamCredential)
+		return types.PublicKey{}, errors.New("invalid base64 encoding for credential")
+	} else if n != len(pk) {
+		return types.PublicKey{}, fmt.Errorf("invalid credential length: expected %d bytes", len(pk))
 	}
-	return pk, nil
+	return
 }
 
-func parseSignature(req *http.Request) (types.Signature, error) {
-	sigStr := req.URL.Query().Get(queryParamSignature)
-	sigBytes, err := hex.DecodeString(sigStr)
+func parseSignature(req *http.Request) (sig types.Signature, _ error) {
+	n, err := base64.URLEncoding.Decode(sig[:], []byte(req.URL.Query().Get(queryParamSignature)))
 	if err != nil {
-		return types.Signature{}, fmt.Errorf("invalid signature %q: must be a %d-byte hex string, %w", queryParamSignature, len(types.Signature{}), err)
-	} else if len(sigBytes) != len(types.Signature{}) {
-		return types.Signature{}, fmt.Errorf("invalid signature length: expected %d bytes", len(types.Signature{}))
+		return types.Signature{}, errors.New("invalid base64 encoding for signature")
+	} else if n != len(sig) {
+		return types.Signature{}, fmt.Errorf("invalid signature length: expected %d bytes", len(sig))
 	}
-
-	var sig types.Signature
-	copy(sig[:], sigBytes)
-	return sig, nil
+	return
 }
 
 func parseValidUntil(req *http.Request) (time.Time, error) {

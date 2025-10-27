@@ -113,12 +113,12 @@ func (d *dialer) Close() {
 
 	d.mu.Lock()
 	conns := slices.Collect(maps.Values(d.conns))
+	clear(d.conns)
 	d.mu.Unlock()
 
 	for _, entry := range conns {
 		entry.close(d.log)
 	}
-	clear(d.conns)
 }
 
 func (d *dialer) initHosts() error {
@@ -321,7 +321,7 @@ func (d *dialer) dialHost(ctx context.Context, hostKey types.PublicKey) (rhp.Tra
 }
 
 func (d *dialer) retry(ctx context.Context, hostKey types.PublicKey, fn func(rhp.TransportClient) error) error {
-	// First attempt
+	// first attempt
 	tc, err := d.dialHost(ctx, hostKey)
 	if err != nil {
 		return fmt.Errorf("failed to dial host: %w", err)
@@ -332,10 +332,10 @@ func (d *dialer) retry(ctx context.Context, hostKey types.PublicKey, fn func(rhp
 		return err
 	}
 
-	// Clear connection if we got transport error
+	// clear connection if we got transport error
 	d.clearHostConnection(hostKey)
 
-	// Second attempt
+	// second attempt
 	tc, err = d.dialHost(ctx, hostKey)
 	if err != nil {
 		return fmt.Errorf("failed to redial host: %w", err)

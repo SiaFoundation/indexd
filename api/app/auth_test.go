@@ -3,18 +3,19 @@ package app
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"testing"
 	"time"
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/jape"
+	"lukechampine.com/frand"
 )
 
 type mockAccounts struct{ tokens map[types.PublicKey]struct{} }
@@ -41,36 +42,29 @@ func (s *mockAccounts) UseAppConnectKey(ctx context.Context, connectKey string, 
 }
 
 func TestAuth(t *testing.T) {
-	const hostname = "indexer.sia.tech"
-	const path = "/foo"
 	sk := types.GeneratePrivateKey()
 	s := &mockAccounts{tokens: map[types.PublicKey]struct{}{sk.PublicKey(): {}}}
 
+	h := func(jc jape.Context) {
+		hostname := jc.Request.Host
+		path := jc.Request.URL.Path
+		if _, ok := validateSignedURLAuth(jc, hostname, path, s); ok {
+			jc.ResponseWriter.WriteHeader(http.StatusOK)
+		}
+	}
 	server := httptest.NewServer(jape.Mux(map[string]jape.Handler{
-		"GET /foo": func(jc jape.Context) {
-			if _, ok := validateSignedURLAuth(jc, hostname, path, s); ok {
-				jc.ResponseWriter.WriteHeader(http.StatusOK)
-			}
-		},
-		"POST /foo": func(jc jape.Context) {
-			if _, ok := validateSignedURLAuth(jc, hostname, path, s); ok {
-				jc.ResponseWriter.WriteHeader(http.StatusOK)
-			}
-		},
+		"GET /foo":  h,
+		"POST /foo": h,
 	}))
 	defer server.Close()
 
-	doRequest := func(method string, params url.Values, buf []byte) (int, string) {
-		var body io.Reader = http.NoBody
-		if buf != nil {
-			body = bytes.NewReader(buf)
-		}
+	doRequest := func(method string, requestURL string, requestBody io.Reader) (int, string) {
 		t.Helper()
-		req, err := http.NewRequest(method, server.URL+"/foo", body)
+
+		req, err := http.NewRequest(method, requestURL, requestBody)
 		if err != nil {
 			t.Fatal(err)
 		}
-		req.URL.RawQuery = params.Encode()
 
 		resp, err := server.Client().Do(req)
 		if err != nil {
@@ -89,100 +83,151 @@ func TestAuth(t *testing.T) {
 		return resp.StatusCode, string(bytes)
 	}
 
-	validUntil := time.Now().Add(time.Hour)
-	goodParams := func(method string, body []byte) url.Values {
-		val := url.Values{}
-		val.Set(queryParamValidUntil, fmt.Sprint(validUntil.Unix()))
-		val.Set(queryParamCredential, sk.PublicKey().String())
-		val.Set(queryParamSignature, sk.SignHash(requestHash(method, hostname, path, validUntil, body)).String())
-		return val
+	tests := []struct {
+		name       string
+		method     string
+		validUntil time.Time
+		body       []byte
+		modify     func(httpMethod *string, url *url.URL, body []byte)
+		ok         bool
+	}{
+		{
+			name:       "valid",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify:     nil,
+			ok:         true,
+		},
+		{
+			name:       "valid",
+			method:     "POST",
+			validUntil: time.Now().Add(time.Hour),
+			body:       []byte("hello world"),
+			modify:     nil,
+			ok:         true,
+		},
+		{
+			name:       "missing parameters",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, u *url.URL, _ []byte) {
+				u.RawQuery = ""
+			},
+			ok: false,
+		},
+		{
+			name:       "invalid credential",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, u *url.URL, _ []byte) {
+				values := u.Query()
+				values.Set(queryParamCredential, "invalid")
+				u.RawQuery = values.Encode()
+			},
+			ok: false,
+		},
+		{
+			name:       "invalid signature",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, u *url.URL, _ []byte) {
+				values := u.Query()
+				values.Set(queryParamSignature, "invalid")
+				u.RawQuery = values.Encode()
+			},
+			ok: false,
+		},
+		{
+			name:       "invalid timestamp",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, u *url.URL, _ []byte) {
+				values := u.Query()
+				values.Set(queryParamValidUntil, "invalid")
+				u.RawQuery = values.Encode()
+			},
+			ok: false,
+		},
+		{
+			name:       "expired timestamp",
+			method:     "GET",
+			validUntil: time.Now().Add(-time.Hour),
+			modify:     nil,
+			ok:         false,
+		},
+		{
+			name:       "method mismatch",
+			method:     "POST",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(httpMethod *string, _ *url.URL, _ []byte) {
+				*httpMethod = "GET"
+			},
+			ok: false,
+		},
+		{
+			name:       "body mismatch",
+			method:     "POST",
+			validUntil: time.Now().Add(time.Hour),
+			body:       []byte("hello world"),
+			modify: func(_ *string, _ *url.URL, body []byte) {
+				copy(body, "goodbye world")
+			},
+			ok: false,
+		},
+		{
+			name:       "timestamp mismatch",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, url *url.URL, _ []byte) {
+				values := url.Query()
+				values.Set(queryParamValidUntil, fmt.Sprintf("%d", time.Now().Add(2*time.Hour).Unix()))
+				url.RawQuery = values.Encode()
+			},
+			ok: false,
+		},
+		{
+			name:       "public key mismatch",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, url *url.URL, _ []byte) {
+				values := url.Query()
+				cred := base64.URLEncoding.EncodeToString(frand.Bytes(32))
+				values.Set(queryParamCredential, cred)
+				url.RawQuery = values.Encode()
+			},
+			ok: false,
+		},
+		{
+			name:       "signature mismatch",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, url *url.URL, _ []byte) {
+				values := url.Query()
+				sig := base64.URLEncoding.EncodeToString(frand.Bytes(64))
+				values.Set(queryParamSignature, sig)
+				url.RawQuery = values.Encode()
+			},
+			ok: false,
+		},
 	}
-
-	// assert authorized if everything is valid
-	status, errorMsg := doRequest(http.MethodGet, goodParams(http.MethodGet, nil), nil)
-	if status != http.StatusOK {
-		t.Fatal("unexpected", status, errorMsg)
-	}
-
-	// assert authorized if the body does match
-	params := goodParams(http.MethodPost, []byte("hello, world!"))
-	status, errorMsg = doRequest(http.MethodPost, params, []byte("hello, world!"))
-	if errorMsg != "" {
-		t.Fatal("unexpected", errorMsg)
-	} else if status != http.StatusOK {
-		t.Fatal("unexpected", status)
-	}
-
-	// assert unauthorized if no auth was set
-	status, _ = doRequest(http.MethodGet, url.Values{}, nil)
-	if status != http.StatusUnauthorized {
-		t.Fatal("unexpected", status)
-	}
-
-	// assert unauthorized if 'SiaIdx-ValidUntil' is invalid
-	params = goodParams(http.MethodGet, nil)
-	params.Set(queryParamValidUntil, "invalid")
-	status, errorMsg = doRequest(http.MethodGet, params, nil)
-	if status != http.StatusUnauthorized {
-		t.Fatal("unexpected", status)
-	} else if !strings.Contains(errorMsg, "must be a unix timestamp") {
-		t.Fatal("unexpected", errorMsg)
-	}
-
-	// assert unauthorized if 'SiaIdx-Credential' is invalid
-	params = goodParams(http.MethodGet, nil)
-	params.Set(queryParamCredential, "invalid")
-	status, errorMsg = doRequest(http.MethodGet, params, nil)
-	if status != http.StatusUnauthorized {
-		t.Fatal("unexpected", status)
-	} else if !strings.Contains(errorMsg, "must be a valid public key") {
-		t.Fatal("unexpected", errorMsg)
-	}
-
-	// assert unauthorized if 'SiaIdx-Signature' is invalid
-	params = goodParams(http.MethodGet, nil)
-	params.Set(queryParamSignature, "invalid")
-	status, errorMsg = doRequest(http.MethodGet, params, nil)
-	if status != http.StatusUnauthorized {
-		t.Fatal("unexpected", status)
-	} else if !strings.Contains(errorMsg, "must be a 64-byte hex string") {
-		t.Fatal("unexpected", errorMsg)
-	}
-
-	// assert unauthorized if the timestamp is in the past
-	params = goodParams(http.MethodGet, nil)
-	params.Set(queryParamValidUntil, fmt.Sprint(time.Now().Unix()-1))
-	status, errorMsg = doRequest(http.MethodGet, params, nil)
-	if status != http.StatusUnauthorized {
-		t.Fatal("unexpected", status)
-	} else if !strings.Contains(errorMsg, ErrSignatureExpired.Error()) {
-		t.Fatal("unexpected", errorMsg)
-	}
-
-	// assert unauthorized if the body doesn't match
-	params = goodParams(http.MethodPost, []byte("invalid"))
-	status, errorMsg = doRequest(http.MethodPost, params, []byte("hello, world!"))
-	if status != http.StatusUnauthorized {
-		t.Fatal("unexpected", status)
-	} else if !strings.Contains(errorMsg, "invalid signature") {
-		t.Fatal("unexpected", errorMsg)
-	}
-
-	// assert unauthorized if the method doesn't match
-	params = goodParams(http.MethodPut, []byte("hello, world!"))
-	status, errorMsg = doRequest(http.MethodPost, params, []byte("hello, world!"))
-	if status != http.StatusUnauthorized {
-		t.Fatal("unexpected", status)
-	} else if !strings.Contains(errorMsg, "invalid signature") {
-		t.Fatal("unexpected", errorMsg)
-	}
-
-	// assert unauthorized if the account is unknown
-	s.tokens = map[types.PublicKey]struct{}{}
-	status, errorMsg = doRequest(http.MethodGet, goodParams(http.MethodGet, nil), nil)
-	if status != http.StatusUnauthorized {
-		t.Fatal("unexpected", status)
-	} else if !strings.Contains(errorMsg, ErrUnknownAccount.Error()) {
-		t.Fatal("unexpected", errorMsg)
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("[%s] %s", tt.method, tt.name), func(t *testing.T) {
+			u, _, err := sign(sk, tt.validUntil, tt.method, server.URL+"/foo", tt.body)
+			if err != nil {
+				t.Fatal(err)
+			} else if tt.modify != nil {
+				tt.modify(&tt.method, u, tt.body)
+			}
+			var body io.Reader = http.NoBody
+			if tt.body != nil {
+				body = bytes.NewReader(tt.body)
+			}
+			status, errorMsg := doRequest(tt.method, u.String(), body)
+			if tt.ok && status != http.StatusOK {
+				t.Fatal("unexpected", status, errorMsg)
+			} else if !tt.ok && status != http.StatusUnauthorized {
+				t.Fatal("expected unauthorized, got", status, errorMsg)
+			}
+		})
 	}
 }

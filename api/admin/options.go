@@ -84,6 +84,15 @@ func WithGood(good bool) ContractQueryParameterOption {
 	}
 }
 
+// WithContractSort sets the 'sortby' and 'desc' parameters for contract
+// queries. It can be called multiple times to add multi-level sorting.
+func WithContractSort(sortby string, desc bool) ContractQueryParameterOption {
+	return func(q url.Values) {
+		q.Add("sortby", sortby)
+		q.Add("desc", strconv.FormatBool(desc))
+	}
+}
+
 // HostQueryParameterOption is an option to configure the query string for the
 // Hosts endpoint.
 type HostQueryParameterOption api.URLQueryParameterOption

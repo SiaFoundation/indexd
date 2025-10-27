@@ -22,6 +22,10 @@ var (
 	// ErrNotFound is returned by database operations that fail due to a
 	// contract not being found.
 	ErrNotFound = errors.New("contract not found")
+
+	// ErrInvalidSortField is returned when we don't support sorting by the
+	// requested field.
+	ErrInvalidSortField = errors.New("invalid sort field")
 )
 
 type (
@@ -31,10 +35,17 @@ type (
 		Good      *bool
 		IDs       []types.FileContractID
 		HostKeys  []types.PublicKey
+		Sorting   []ContractSortOpt
 	}
 
 	// ContractQueryOpt is a functional option for querying contracts.
 	ContractQueryOpt func(*ContractQueryOpts)
+
+	// ContractSortOpt specifies a sorting option for querying contracts.
+	ContractSortOpt struct {
+		Field      string
+		Descending bool
+	}
 )
 
 // WithGood filters contracts by whether they are considered good.
@@ -64,6 +75,17 @@ func WithIDs(ids []types.FileContractID) ContractQueryOpt {
 func WithHostKeys(hks []types.PublicKey) ContractQueryOpt {
 	return func(opts *ContractQueryOpts) {
 		opts.HostKeys = hks
+	}
+}
+
+// WithSorting adds a sorting option to the contract query. Multiple sorting
+// options can be provided and will be applied in the order they were added.
+func WithSorting(field string, descending bool) ContractQueryOpt {
+	return func(opts *ContractQueryOpts) {
+		opts.Sorting = append(opts.Sorting, ContractSortOpt{
+			Field:      field,
+			Descending: descending,
+		})
 	}
 }
 

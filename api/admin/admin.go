@@ -581,6 +581,10 @@ func (a *admin) handleGETContracts(jc jape.Context) {
 	if !ok {
 		return
 	}
+	sorts, ok := api.ParseSortOptions(jc)
+	if !ok {
+		return
+	}
 
 	var opts []contracts.ContractQueryOpt
 	if jc.Request.FormValue("revisable") != "" {
@@ -629,11 +633,18 @@ func (a *admin) handleGETContracts(jc jape.Context) {
 		opts = append(opts, contracts.WithHostKeys(hks))
 	}
 
-	contracts, err := a.contracts.Contracts(jc.Request.Context(), offset, limit, opts...)
-	if jc.Check("failed to get contracts", err) != nil {
+	for _, sort := range sorts {
+		opts = append(opts, contracts.WithSorting(sort.Field, sort.Descending))
+	}
+
+	res, err := a.contracts.Contracts(jc.Request.Context(), offset, limit, opts...)
+	if errors.Is(err, contracts.ErrInvalidSortField) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("failed to get contracts", err) != nil {
 		return
 	}
-	jc.Encode(contracts)
+	jc.Encode(res)
 }
 
 func (a *admin) handleGETHost(jc jape.Context) {

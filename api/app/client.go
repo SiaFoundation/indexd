@@ -3,7 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,28 +36,24 @@ type Client struct {
 
 // sign signs the request with the appropriate headers and returns the signed URL
 // and request body.
-func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL string, req any) (*url.URL, io.Reader, error) {
+func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL string, requestBuf []byte) (*url.URL, io.Reader, error) {
 	u, err := url.Parse(endpointURL)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to parse URL: %w", err)
 	}
 
-	var buf []byte
-	if req != nil {
-		var err error
-		buf, err = json.Marshal(req)
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to marshal request: %w", err)
-		}
-	}
 	// prepare request hash
-	sigHash := requestHash(method, u.Host, u.Path, validUntil, buf)
+	sigHash := requestHash(method, u.Host, u.Path, validUntil, requestBuf)
 
 	// prepare query parameters
 	val := url.Values{}
-	val.Set("SiaIdx-ValidUntil", fmt.Sprint(validUntil.Unix()))
-	val.Set("SiaIdx-Credential", appKey.PublicKey().String())
-	val.Set("SiaIdx-Signature", appKey.SignHash(sigHash).String())
+	val.Set(queryParamValidUntil, fmt.Sprint(validUntil.Unix()))
+
+	pk := appKey.PublicKey()
+	val.Set(queryParamCredential, base64.URLEncoding.EncodeToString(pk[:]))
+
+	sig := appKey.SignHash(sigHash)
+	val.Set(queryParamSignature, base64.URLEncoding.EncodeToString(sig[:]))
 
 	// merge query params
 	q := u.Query()
@@ -68,8 +64,8 @@ func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL str
 	}
 	u.RawQuery = q.Encode()
 	var body io.Reader = http.NoBody
-	if buf != nil {
-		body = bytes.NewReader(buf)
+	if requestBuf != nil {
+		body = bytes.NewReader(requestBuf)
 	}
 	return u, body, nil
 }
@@ -101,8 +97,16 @@ func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, a
 	return r.Body, nil
 }
 
-func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route string, data any) (io.ReadCloser, error) {
-	u, body, err := sign(c.appkey, time.Now().Add(c.validity), method, fmt.Sprintf("%s%s", c.baseURL, route), data)
+func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route string, request any) (io.ReadCloser, error) {
+	var requestBuf []byte
+	if request != nil {
+		var err error
+		requestBuf, err = json.Marshal(request)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal request data: %w", err)
+		}
+	}
+	u, body, err := sign(c.appkey, time.Now().Add(c.validity), method, fmt.Sprintf("%s%s", c.baseURL, route), requestBuf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign request: %w", err)
 	}
@@ -226,7 +230,7 @@ func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash
 	if err != nil {
 		return "", fmt.Errorf("failed to sign request: %w", err)
 	}
-	u.Fragment = fmt.Sprintf("encryption_key=%x", masterKey)
+	u.Fragment = fmt.Sprintf("encryption_key=%s", base64.URLEncoding.EncodeToString(masterKey))
 	return u.String(), nil
 }
 
@@ -245,13 +249,12 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 	}
 
 	keyStr := values.Get("encryption_key")
-	if len(keyStr) != 64 { // 32 hex-encoded bytes
-		return slabs.SharedObject{}, nil, fmt.Errorf("missing encryption key")
-	}
-
-	encryptionKey, err := hex.DecodeString(keyStr)
+	encryptionKey := make([]byte, 32)
+	n, err := base64.URLEncoding.Decode(encryptionKey, []byte(keyStr))
 	if err != nil {
-		return slabs.SharedObject{}, nil, fmt.Errorf("invalid encryption key: %w", err)
+		return slabs.SharedObject{}, nil, fmt.Errorf("invalid base64 encoding for encryption key: %w", err)
+	} else if n != 32 {
+		return slabs.SharedObject{}, nil, fmt.Errorf("missing encryption key")
 	}
 
 	u.Fragment = ""
