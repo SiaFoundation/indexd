@@ -83,18 +83,18 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 			Labels: labels,
 			Value:  float64(h.ActiveContractsSize),
 		},
+		{
+			Name:   "indexd_host_blocked",
+			Labels: labels,
+			Value: func() float64 {
+				if h.Blocked {
+					return 1
+				}
+				return 0
+			}(),
+		},
 	}
 
-	metrics = append(metrics, prometheus.Metric{
-		Name:   "indexd_host_blocked",
-		Labels: labels,
-		Value: func() float64 {
-			if h.Blocked {
-				return 1
-			}
-			return 0
-		}(),
-	})
 	for _, reason := range h.BlockedReasons {
 		metrics = append(metrics, prometheus.Metric{
 			Name: "indexd_host_blocked_reason",
