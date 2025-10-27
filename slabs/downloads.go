@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -123,10 +124,12 @@ outer:
 				return
 			}
 
-			err = m.am.DebitServiceAccount(ctx, host.PublicKey, m.migrationAccount, usage.RenterCost())
+			debitCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			err = m.am.DebitServiceAccount(debitCtx, host.PublicKey, m.migrationAccount, usage.RenterCost())
 			if err != nil {
 				logger.Debug("failed to debit service account for sector read", zap.Error(err))
 			}
+			cancel()
 
 			if n := downloaded.Add(1); n >= uint32(slab.MinShards) {
 				cancel()

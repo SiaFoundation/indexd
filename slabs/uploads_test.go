@@ -54,26 +54,42 @@ func TestUploadShards(t *testing.T) {
 	pool := newConnPool(sm.dialer, zap.NewNop())
 	defer pool.Close()
 
+	// set balance to 1SC
+	for _, h := range []hosts.Host{h1, h2, h3, h4} {
+		err = am.UpdateServiceAccountBalance(context.Background(), h.PublicKey, sm.migrationAccount, types.Siacoins(1))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	// assert passing in no hosts returns an error
 	_, err = sm.uploadShards(context.Background(), slab, shards, nil, pool, zap.NewNop())
 	if !errors.Is(err, errNotEnoughHosts) {
 		t.Fatalf("expected [errNotEnoughHosts] got %v", err)
 	}
 
-	// assert passing in too few hosts returns the uploaded shards alongside an error
-	uploaded, err := sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2}, pool, zap.NewNop())
-	if !errors.Is(err, errNotEnoughHosts) {
-		t.Fatalf("expected [errNotEnoughHosts] got %v", err)
-	} else if len(uploaded) != 2 {
-		t.Fatalf("expected 2 uploaded shards, got %d", len(uploaded))
-	}
-
 	// assert passing in enough hosts uploads all shards
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2, h3}, pool, zap.NewNop())
+	uploaded, err := sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2, h3}, pool, zap.NewNop())
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if len(uploaded) != 3 {
 		t.Fatalf("expected 3 uploaded shards, got %d", len(uploaded))
+	}
+
+	// asserts hosts are debited for the upload
+	for _, h := range []hosts.Host{h1, h2, h3} {
+		balance, err := sm.am.ServiceAccountBalance(context.Background(), h.PublicKey, sm.migrationAccount)
+		if err != nil {
+			t.Fatal(err)
+		} else if !balance.Equals(types.Siacoins(1).Sub(h.Settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost())) {
+			t.Fatalf("unexpected balance %v", balance)
+		}
+	}
+
+	// assert passing in too few hosts returns the uploaded shards alongside an error
+	_, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2}, pool, zap.NewNop())
+	if !errors.Is(err, errNotEnoughHosts) {
+		t.Fatalf("expected [errNotEnoughHosts] got %v", err)
 	}
 
 	// assert hosts are tried until one succeeds
@@ -88,30 +104,9 @@ func TestUploadShards(t *testing.T) {
 	// assert the upload fails upon a root mismatch
 	corrupted := Slab{Sectors: slices.Clone(slab.Sectors)}
 	corrupted.Sectors[1].Root = types.Hash256{}
-	uploaded, err = sm.uploadShards(context.Background(), corrupted, shards, []hosts.Host{h1, h2, h3, h4}, pool, zap.NewNop())
+	_, err = sm.uploadShards(context.Background(), corrupted, shards, []hosts.Host{h1, h2, h3, h4}, pool, zap.NewNop())
 	if !errors.Is(err, errRootMismatch) {
 		t.Fatalf("expected [errRootMismatch] got %v", err)
-	} else if len(uploaded) != 1 {
-		t.Fatalf("expected 1 uploaded shard, got %d", len(uploaded))
-	}
-
-	// asserts hosts are debited for the upload
-	err = am.UpdateServiceAccountBalance(context.Background(), h2.PublicKey, sm.migrationAccount, types.Siacoins(1))
-	if err != nil {
-		t.Fatal(err)
-	}
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h2}, pool, zap.NewNop())
-	if !errors.Is(err, errNotEnoughHosts) {
-		t.Fatalf("expected [errNotEnoughHosts] got %v", err)
-	} else if len(uploaded) != 1 {
-		t.Fatalf("expected 1 uploaded shard, got %d", len(uploaded))
-	}
-
-	balance, err := sm.am.ServiceAccountBalance(context.Background(), h2.PublicKey, sm.migrationAccount)
-	if err != nil {
-		t.Fatal(err)
-	} else if !balance.Equals(types.Siacoins(1).Sub(h2.Settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost())) {
-		t.Fatalf("unexpected balance %v", balance)
 	}
 
 	// reset clients
