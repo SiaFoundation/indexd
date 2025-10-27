@@ -1204,17 +1204,6 @@ func TestUnhealthySlabs(t *testing.T) {
 	// assert slab1 is not considered unhealthy since it is considered uploaded
 	// to a host but not yet pinned
 	assertUnhealthySlabs(0, 10)
-
-	// assert slab becomes unrepairable after max consecutive failed repairs
-	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id = 1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = store.pool.Exec(context.Background(), "UPDATE slabs SET consecutive_failed_repairs = $1", maxConsecutiveRepairFailures)
-	if err != nil {
-		t.Fatal(err)
-	}
-	assertUnhealthySlabs(0, 10)
 }
 
 func TestMarkSectorsUnpinnable(t *testing.T) {

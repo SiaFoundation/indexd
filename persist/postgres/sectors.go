@@ -16,9 +16,8 @@ import (
 )
 
 const (
-	maxConsecutiveRepairFailures = 10
-	minRepairBackoff             = time.Hour
-	maxRepairBackoff             = 24 * time.Hour
+	minRepairBackoff = time.Hour
+	maxRepairBackoff = 24 * time.Hour
 )
 
 // MarkSectorsLost marks the sectors as lost by setting both the contract ID and
@@ -696,7 +695,6 @@ func (s *Store) UnhealthySlabs(ctx context.Context, limit int) (unhealthy []slab
 		const query = `SELECT s.id, s.digest
 			FROM slabs s
 			WHERE s.next_repair_attempt < NOW()
-				AND s.consecutive_failed_repairs < $1
 				AND EXISTS (
 					SELECT 1
 					FROM slab_sectors ss
@@ -707,12 +705,12 @@ func (s *Store) UnhealthySlabs(ctx context.Context, limit int) (unhealthy []slab
 						AND (
 						sec.host_id IS NULL
 						OR (sec.contract_sectors_map_id IS NOT NULL
-							AND (c.good = FALSE OR c.state NOT IN ($2, $3)))
+							AND (c.good = FALSE OR c.state NOT IN (0, 1)))
 						)
 				)
 			ORDER BY s.next_repair_attempt ASC
-			LIMIT $4;`
-		rows, err := tx.Query(ctx, query, maxConsecutiveRepairFailures, sqlContractState(contracts.ContractStateActive), sqlContractState(contracts.ContractStatePending), limit)
+			LIMIT $1;`
+		rows, err := tx.Query(ctx, query, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query unhealthy slabs: %w", err)
 		}
