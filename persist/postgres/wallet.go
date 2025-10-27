@@ -24,8 +24,7 @@ var (
 var _ wallet.SingleAddressStore = (*Store)(nil)
 
 // VerifyWalletKey checks that the wallet seed matches the seed hash.
-// This detects if the user's recovery phrase has changed and the wallet needs
-// to rescan.
+// This detects if the user's recovery phrase has changed.
 func (s *Store) VerifyWalletKey(seedHash types.Hash256) error {
 	var hash []byte
 	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
