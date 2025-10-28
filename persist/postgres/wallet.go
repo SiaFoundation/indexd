@@ -23,6 +23,24 @@ var (
 
 var _ wallet.SingleAddressStore = (*Store)(nil)
 
+// VerifyWalletKey checks that the wallet seed matches the seed hash.
+// This detects if the user's recovery phrase has changed.
+func (s *Store) VerifyWalletKey(seedHash types.Hash256) error {
+	var hash []byte
+	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		err := tx.QueryRow(ctx, `SELECT wallet_hash FROM global_settings`).Scan(&hash)
+		if err != nil {
+			return fmt.Errorf("failed to query wallet seed hash: %w", err)
+		} else if hash == nil {
+			_, err := tx.Exec(ctx, `UPDATE global_settings SET wallet_hash = $1`, sqlHash256(seedHash)) // wallet not initialized, set seed hash
+			return err
+		} else if seedHash != [32]byte(hash) {
+			return wallet.ErrDifferentSeed
+		}
+		return nil
+	})
+}
+
 // AddBroadcastedSet adds a set of broadcasted transactions. The wallet will
 // periodically rebroadcast the transactions in this set until all transactions
 // are gone from the transaction pool or one week has passed.

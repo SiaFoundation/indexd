@@ -103,6 +103,13 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	go s.Run()
 	defer s.Close()
 
+	walletHash := types.HashBytes(walletKey[:])
+	if err := store.VerifyWalletKey(walletHash); errors.Is(err, wallet.ErrDifferentSeed) {
+		return errors.New("wallet seed change detected, cannot proceed")
+	} else if err != nil {
+		return fmt.Errorf("failed to verify wallet key: %w", err)
+	}
+
 	wm, err := wallet.NewSingleAddressWallet(walletKey, cm, store, s, wallet.WithLogger(log.Named("wallet")), wallet.WithReservationDuration(3*time.Hour))
 	if err != nil {
 		return fmt.Errorf("failed to create wallet: %w", err)

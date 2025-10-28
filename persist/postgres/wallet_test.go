@@ -15,6 +15,33 @@ import (
 	"lukechampine.com/frand"
 )
 
+func TestVerifyWalletKey(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	hash1 := types.Hash256(frand.Entropy256())
+	// set initial seed hash
+	if err := store.VerifyWalletKey(hash1); err != nil {
+		t.Fatal(err)
+	}
+
+	// try to verify with same hash - should succeed
+	if err := store.VerifyWalletKey(hash1); err != nil {
+		t.Fatal(err)
+	}
+
+	// try to verify with another hash - should fail
+	hash2 := types.Hash256(frand.Entropy256())
+
+	if err := store.VerifyWalletKey(hash2); err == nil || !errors.Is(err, wallet.ErrDifferentSeed) {
+		t.Fatalf("expected error %v, got %v", wallet.ErrDifferentSeed, err)
+	}
+
+	// initial hash should still succeed
+	if err := store.VerifyWalletKey(hash1); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSingleAddressWalletStoreTip(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

@@ -4,15 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 var errNotEnoughShards = errors.New("not enough shards")
@@ -42,17 +43,15 @@ func newDownloadCandidates(allHosts []hosts.Host, slab Slab) downloadCandidates 
 		indices[hk] = i
 	}
 
-	// build sorted list of hosts, cheapest first
+	// build list of hosts, randomize order to avoid bias
 	hosts := make([]hosts.Host, 0, len(lookup))
 	for _, h := range allHosts {
 		if _, ok := indices[h.PublicKey]; ok {
 			hosts = append(hosts, h)
 		}
 	}
-	sort.Slice(hosts, func(i, j int) bool {
-		hiep := hosts[i].Settings.Prices.EgressPrice
-		hjep := hosts[j].Settings.Prices.EgressPrice
-		return hiep.Cmp(hjep) < 0
+	frand.Shuffle(len(hosts), func(i, j int) {
+		hosts[i], hosts[j] = hosts[j], hosts[i]
 	})
 
 	return downloadCandidates{hosts: hosts, indices: indices}
@@ -113,13 +112,17 @@ outer:
 				wg.Done()
 			}()
 
+			start := time.Now()
 			var usage proto.Usage
 			usage, shards[sectorIdx], err = m.downloadShard(ctx, host, slab.Sectors[sectorIdx], pool)
 			if isErrLostSector(err) {
 				m.markSectorLost(ctx, host, slab.Sectors[sectorIdx].Root, logger)
 				return
 			} else if err != nil {
-				logger.Debug("failed to download shard", zap.Error(err))
+				logger.Debug("failed to download shard",
+					zap.Bool("timeout", time.Since(start) > m.shardTimeout),
+					zap.Error(err),
+				)
 				return
 			}
 

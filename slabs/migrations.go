@@ -83,7 +83,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 		log.Warn("tried to migrate slab but no hosts are available for migration")
 		return nil
 	}
-	log = log.With(zap.Int("toMigrate", len(indices)), zap.Int("candidates", len(uploadCandidates)))
+	log = log.With(zap.Int("toMigrate", len(indices)), zap.Int("uploadCandidates", len(uploadCandidates)))
 
 	// download enough shards to reconstruct the slab's shards
 	// note: timeouts are set within downloadShards to avoid timing
