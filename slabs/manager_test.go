@@ -167,7 +167,7 @@ func (s *mockStore) MigrateSector(ctx context.Context, root types.Hash256, hostK
 	return false, nil
 }
 
-func (s *mockStore) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, checkHosts bool, slabs ...SlabPinParams) ([]SlabID, error) {
+func (s *mockStore) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slabs ...SlabPinParams) ([]SlabID, error) {
 	var digests []SlabID
 	for _, slab := range slabs {
 		slabID, err := slab.Digest()
