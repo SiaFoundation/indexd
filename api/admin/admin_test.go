@@ -951,6 +951,7 @@ func TestSectorStatsAPI(t *testing.T) {
 	account := types.GeneratePrivateKey()
 	indexer.Store().AddTestAccount(t, account.PublicKey())
 	slabIDs, err := indexer.App(account).PinSlabs(context.Background(), slabs.SlabPinParams{
+		IgnoreBadHosts: true,
 		EncryptionKey: [32]byte{1},
 		MinShards:     1,
 		Sectors: func() (s []slabs.PinnedSector) {
