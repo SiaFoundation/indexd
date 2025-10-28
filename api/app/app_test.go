@@ -689,7 +689,7 @@ func TestSharedObjects(t *testing.T) {
 	encryptionKey := frand.Bytes(32)
 
 	// create a shared URL for the object
-	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.ID(), encryptionKey, time.Now().Add(time.Second))
+	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.ID(), encryptionKey, time.Now().Add(2*time.Second))
 	if err != nil {
 		t.Fatal("failed to create shared object URL:", err)
 	}
