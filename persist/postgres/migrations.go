@@ -446,4 +446,9 @@ FROM objects o;
 		_, err := tx.Exec(ctx, `CREATE INDEX contracts_expiration_height_contract_id_idx ON contracts (expiration_height, contract_id) WHERE state = 1 AND renewed_to IS NULL;`)
 		return err
 	},
+	// add wallet_hash to global_settings to detect seed changes
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE global_settings ADD COLUMN wallet_hash BYTEA CHECK(wallet_hash IS NULL OR LENGTH(wallet_hash) = 32);`)
+		return err
+	},
 }

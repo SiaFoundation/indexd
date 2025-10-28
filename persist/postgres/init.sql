@@ -155,6 +155,9 @@ CREATE TABLE global_settings (
     scanned_height BIGINT NOT NULL DEFAULT 0 CHECK(scanned_height >= 0),
     scanned_block_id BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(scanned_block_id) = 32),
 
+    -- wallet info
+    wallet_hash BYTEA CHECK(wallet_hash IS NULL OR LENGTH(wallet_hash) = 32), -- used to prevent wallet seed changes
+
     -- contract manager settings
     contracts_maintenance_enabled BOOLEAN NOT NULL DEFAULT FALSE,
     contracts_wanted INTEGER NOT NULL DEFAULT 50 CHECK(contracts_wanted > 0), -- number of contracts to maintain
