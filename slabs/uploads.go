@@ -39,8 +39,8 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 		panic(fmt.Sprintf("slab %s has %d sectors but %d shards", slab.ID, len(slab.Sectors), len(shards))) // developer error
 	}
 
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	ctx, uploadCancel := context.WithCancel(ctx)
+	defer uploadCancel()
 
 	var uploadMu sync.Mutex
 	var uploadErr error
@@ -75,7 +75,7 @@ loop:
 				if len(candidates) == 0 {
 					uploadErr = errNotEnoughHosts
 					uploadMu.Unlock()
-					cancel()
+					uploadCancel()
 					return
 				}
 				host := candidates[0]
@@ -96,7 +96,7 @@ loop:
 					uploadMu.Lock()
 					uploadErr = fmt.Errorf("failed to upload shard %d: %w", shardIndex, errRootMismatch)
 					uploadMu.Unlock()
-					cancel()
+					uploadCancel()
 					return
 				}
 
