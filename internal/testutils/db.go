@@ -105,6 +105,7 @@ func (ts TestStore) AddTestHost(t testing.TB, host hosts.Host) {
 	}
 }
 
+// AddTestContract adds a contract associated with `hk` to the database.
 func (ts TestStore) AddTestContract(t testing.TB, hk types.PublicKey, fcid types.FileContractID) {
 	rev := types.V2FileContract{
 		HostPublicKey:  hk,
