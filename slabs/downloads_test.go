@@ -84,7 +84,15 @@ func TestDownloadShards(t *testing.T) {
 	host1 := hosts.Host{PublicKey: hk1, Settings: goodSettings}
 	host2 := hosts.Host{PublicKey: hk2, Settings: goodSettings}
 	host3 := hosts.Host{PublicKey: hk3, Settings: goodSettings}
+
+	// assert costs are non-zero
 	allHosts := []hosts.Host{host1, host2, host3}
+	for _, host := range allHosts {
+		cost := host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost()
+		if cost.IsZero() {
+			t.Fatal("expected non-zero cost for reading sector")
+		}
+	}
 
 	hm.hosts = map[types.PublicKey]hosts.Host{
 		hk1: host1,
@@ -224,15 +232,16 @@ func TestDownloadShards(t *testing.T) {
 	// assert service account balance after downloads
 	assertBalance := func(host hosts.Host, nSectors uint64) {
 		t.Helper()
-		cost := host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(nSectors)
-		balance, err := sm.am.ServiceAccountBalance(context.Background(), host.PublicKey, sm.migrationAccount)
+		cost := host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost()
+		expected := initialFunds.Sub(cost.Mul64(nSectors))
+		got, err := sm.am.ServiceAccountBalance(context.Background(), host.PublicKey, sm.migrationAccount)
 		if err != nil {
 			t.Fatal(err)
-		} else if !balance.Equals(initialFunds.Sub(cost)) {
-			t.Fatalf("expected balance for host %v is %v, got %v", host.PublicKey, initialFunds.Sub(cost), balance)
+		} else if !got.Equals(expected) {
+			t.Fatalf("expected balance for host %v is %v, got %v", host.PublicKey, expected, got)
 		}
 	}
 	assertBalance(host1, 1)
-	assertBalance(host2, 3)
-	assertBalance(host3, 2)
+	assertBalance(host2, 2)
+	assertBalance(host3, 0)
 }
