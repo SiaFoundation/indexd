@@ -294,11 +294,8 @@ func (c *Client) StatsContracts(ctx context.Context) (resp ContractsStatsRespons
 }
 
 // StatsHosts returns statistics about the hosts managed by the indexer.
-func (c *Client) StatsHosts(ctx context.Context, offset, limit int) (resp HostStatsResponse, err error) {
-	values := url.Values{}
-	values.Set("offset", fmt.Sprintf("%d", offset))
-	values.Set("limit", fmt.Sprintf("%d", limit))
-	err = c.c.GET(ctx, "/stats/hosts?"+values.Encode(), &resp)
+func (c *Client) StatsHosts(ctx context.Context) (resp HostStatsResponse, err error) {
+	err = c.c.GET(ctx, "/stats/hosts", &resp)
 	return
 }
 
