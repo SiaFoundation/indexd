@@ -3,6 +3,7 @@ package slabs
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -154,14 +155,16 @@ func (c *connPool) dialHost(ctx context.Context, hostKey types.PublicKey, addrs 
 	return tc, nil
 }
 
-func (c *connPool) retry(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress, fn func(HostClient) error) error {
+func (c *connPool) retry(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress, fn func(context.Context, HostClient) error) error {
 	// first attempt
 	tc, err := c.dialHost(ctx, hostKey, addrs)
 	if err != nil {
 		return fmt.Errorf("failed to dial host: %w", err)
 	}
-	if err := fn(tc); err == nil {
+	if err := fn(ctx, tc); err == nil {
 		return nil
+	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
 	} else if proto.ErrorCode(err) != proto.ErrorCodeTransport {
 		return err
 	}
@@ -174,13 +177,13 @@ func (c *connPool) retry(ctx context.Context, hostKey types.PublicKey, addrs []c
 	if err != nil {
 		return fmt.Errorf("failed to redial host: %w", err)
 	}
-	return fn(tc)
+	return fn(ctx, tc)
 }
 
 func (c *connPool) downloadShard(ctx context.Context, h hosts.Host, migrationToken proto.AccountToken, sector Sector) (proto.Usage, []byte, error) {
 	var result rhp.RPCReadSectorResult
 	var buf bytes.Buffer
-	err := c.retry(ctx, h.PublicKey, h.RHP4Addrs(), func(client HostClient) error {
+	err := c.retry(ctx, h.PublicKey, h.RHP4Addrs(), func(ctx context.Context, client HostClient) error {
 		buf.Reset()
 
 		settings, err := client.Settings(ctx)
@@ -203,7 +206,7 @@ func (c *connPool) downloadShard(ctx context.Context, h hosts.Host, migrationTok
 
 func (c *connPool) uploadShard(ctx context.Context, h hosts.Host, migrationToken proto.AccountToken, shard io.Reader) (proto.Usage, types.Hash256, error) {
 	var result rhp.RPCWriteSectorResult
-	err := c.retry(ctx, h.PublicKey, h.RHP4Addrs(), func(client HostClient) error {
+	err := c.retry(ctx, h.PublicKey, h.RHP4Addrs(), func(ctx context.Context, client HostClient) error {
 		settings, err := client.Settings(ctx)
 		if err != nil {
 			return fmt.Errorf("failed to fetch host settings: %w", err)
