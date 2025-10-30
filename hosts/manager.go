@@ -96,7 +96,7 @@ type (
 	Store interface {
 		Host(ctx context.Context, hk types.PublicKey) (Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error)
-		HostStats(ctx context.Context, offset, limit int) ([]HostStats, error)
+		HostStats(ctx context.Context) ([]HostStats, error)
 
 		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
 		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
@@ -391,8 +391,8 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 }
 
 // Stats returns statistics about the hosts in the database.
-func (m *HostManager) Stats(ctx context.Context, offset, limit int) ([]HostStats, error) {
-	return m.store.HostStats(ctx, offset, limit)
+func (m *HostManager) Stats(ctx context.Context) ([]HostStats, error) {
+	return m.store.HostStats(ctx)
 }
 
 // hostsForScanning returns the public keys of the hosts that need to be

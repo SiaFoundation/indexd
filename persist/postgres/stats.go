@@ -76,7 +76,7 @@ func (s *Store) AccountStats(ctx context.Context) (admin.AccountStatsResponse, e
 
 // HostStats reports statistics about used hosts. We consider a host to be used
 // as soon as we spent any funds on it.
-func (s *Store) HostStats(ctx context.Context, offset, limit int) ([]hosts.HostStats, error) {
+func (s *Store) HostStats(ctx context.Context) ([]hosts.HostStats, error) {
 	var stats []hosts.HostStats
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
@@ -96,8 +96,6 @@ func (s *Store) HostStats(ctx context.Context, offset, limit int) ([]hosts.HostS
 				LEFT JOIN hosts_blocklist hb ON hb.public_key = h.public_key
 				WHERE h.usage_total_spent > 0
 				ORDER BY h.usage_total_spent DESC
-				OFFSET $1
-				LIMIT $2
 			)
 			SELECT
 				h.public_key,
@@ -116,8 +114,7 @@ func (s *Store) HostStats(ctx context.Context, offset, limit int) ([]hosts.HostS
 				AND renewed_to IS NULL
 				AND proof_height > (SELECT scanned_height FROM globals)
 			) cs ON TRUE
-			ORDER BY h.usage_total_spent DESC;
-		`, offset, limit)
+			ORDER BY h.usage_total_spent DESC;`)
 		if err != nil {
 			return err
 		}

@@ -1453,20 +1453,6 @@ func BenchmarkHosts(b *testing.B) {
 		})
 	}
 
-	for _, limit := range []int{100, 500} {
-		b.Run(fmt.Sprintf("HostStats_%d", limit), func(b *testing.B) {
-			for b.Loop() {
-				offset := frand.Intn(numHosts - limit)
-				stats, err := store.HostStats(context.Background(), offset, limit)
-				if err != nil {
-					b.Fatal(err)
-				} else if len(stats) != limit {
-					b.Fatalf("expected %d host stats, got %d", limit, len(stats)) // sanity check
-				}
-			}
-		})
-	}
-
 	b.Run("UpdateHost", func(b *testing.B) {
 		ts := time.Now()
 		hs := proto4.HostSettings{
@@ -2333,12 +2319,11 @@ func BenchmarkHostStats(b *testing.B) {
 	}
 
 	for b.Loop() {
-		offset := frand.Intn(numHosts - limit)
-		stats, err := store.HostStats(b.Context(), offset, limit)
+		stats, err := store.HostStats(b.Context())
 		if err != nil {
 			b.Fatal(err)
-		} else if len(stats) != limit {
-			b.Fatalf("expected %d host stats, got %d", limit, len(stats))
+		} else if len(stats) == 0 {
+			b.Fatalf("expected host stats, got none")
 		}
 	}
 }

@@ -73,7 +73,7 @@ type (
 		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)
 		UpdateUsabilitySettings(ctx context.Context, us hosts.UsabilitySettings) error
 
-		Stats(ctx context.Context, offset, limit int) ([]hosts.HostStats, error)
+		Stats(ctx context.Context) ([]hosts.HostStats, error)
 	}
 
 	// PinManager defines an interface for managing pinned settings.
@@ -105,7 +105,7 @@ type (
 	Store interface {
 		AccountStats(ctx context.Context) (AccountStatsResponse, error)
 		ContractsStats(ctx context.Context) (ContractsStatsResponse, error)
-		HostStats(ctx context.Context, offset, limit int) ([]hosts.HostStats, error)
+		HostStats(ctx context.Context) ([]hosts.HostStats, error)
 		SectorStats(ctx context.Context) (SectorsStatsResponse, error)
 
 		LastScannedIndex(context.Context) (types.ChainIndex, error)
@@ -934,12 +934,7 @@ func (a *admin) handleGETStatsContracts(jc jape.Context) {
 }
 
 func (a *admin) handleGETStatsHosts(jc jape.Context) {
-	offset, limit, ok := api.ParseOffsetLimit(jc)
-	if !ok {
-		return
-	}
-
-	stats, err := a.hosts.Stats(jc.Request.Context(), offset, limit)
+	stats, err := a.hosts.Stats(jc.Request.Context())
 	if jc.Check("failed to retrieve host stats", err) != nil {
 		return
 	}

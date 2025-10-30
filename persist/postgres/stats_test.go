@@ -269,7 +269,7 @@ func TestHostStats(t *testing.T) {
 	hk3 := store.addTestHost(t)
 
 	// assert empty stats
-	stats, err := store.HostStats(t.Context(), 0, 10)
+	stats, err := store.HostStats(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(stats) != 0 {
@@ -282,7 +282,7 @@ func TestHostStats(t *testing.T) {
 	store.addTestContract(t, hk3, types.FileContractID(hk3))
 
 	// assert empty stats - no usage
-	stats, err = store.HostStats(t.Context(), 0, 10)
+	stats, err = store.HostStats(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(stats) != 0 {
@@ -297,8 +297,7 @@ func TestHostStats(t *testing.T) {
 	testRevision := newTestRevision(types.PublicKey{})
 
 	// assert updated stats
-
-	stats, err = store.HostStats(t.Context(), 0, 10)
+	stats, err = store.HostStats(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(stats) != 2 {
@@ -321,7 +320,7 @@ func TestHostStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stats, err = store.HostStats(t.Context(), 0, 10)
+	stats, err = store.HostStats(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(stats) != 2 {
@@ -341,7 +340,7 @@ func TestHostStats(t *testing.T) {
 	}
 
 	// assert updated stats
-	stats, err = store.HostStats(t.Context(), 0, 10)
+	stats, err = store.HostStats(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(stats) != 2 {
@@ -365,7 +364,7 @@ func TestHostStats(t *testing.T) {
 	}
 
 	// assert updated stats
-	stats, err = store.HostStats(t.Context(), 0, 10)
+	stats, err = store.HostStats(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(stats) != 2 {
@@ -374,18 +373,5 @@ func TestHostStats(t *testing.T) {
 		t.Fatalf("expected first host to have 0 active contract size, got %d", stats[0].ActiveContractsSize)
 	} else if stats[1].ActiveContractsSize != 0 {
 		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[1].ActiveContractsSize)
-	}
-
-	// assert limit and offset are applied
-	if stats, err := store.HostStats(t.Context(), 1, 1); err != nil {
-		t.Fatal(err)
-	} else if len(stats) != 1 {
-		t.Fatalf("expected 1 host, got %d", len(stats))
-	} else if stats[0].PublicKey != hk1 {
-		t.Fatalf("expected host to be hk1, got %s", stats[0].PublicKey.String())
-	} else if stats, err := store.HostStats(t.Context(), 2, 1); err != nil {
-		t.Fatal(err)
-	} else if len(stats) != 0 {
-		t.Fatalf("expected 0 hosts, got %d", len(stats))
 	}
 }
