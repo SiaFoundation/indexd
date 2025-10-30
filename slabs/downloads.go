@@ -70,6 +70,7 @@ func (dc *downloadCandidates) next() (hosts.Host, bool) {
 // downloadShards downloads at least the minimum number of shards required to
 // recover the slab.
 func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, allHosts []hosts.Host, pool *connPool, logger *zap.Logger) ([][]byte, error) {
+	start := time.Now()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -85,15 +86,30 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, allHosts []
 	sema := make(chan struct{}, slab.MinShards)
 	var downloadErr error
 
+	var stalledCnt uint8
+	var stalledDur time.Duration
+	const stallThreshold = 15 * time.Second
+
+	var slowMu sync.Mutex
+	var slowHosts []types.PublicKey
+
 outer:
 	for {
+		waiting := time.Now()
 		select {
 		case <-ctx.Done():
+		case sema <- struct{}{}:
+		}
+
+		if time.Since(waiting) > stallThreshold {
+			stalledCnt++
+			stalledDur += time.Since(waiting)
+		}
+		if ctx.Err() != nil {
 			if n := downloaded.Load(); uint(n) < slab.MinShards {
 				downloadErr = fmt.Errorf("downloaded %d out of %d shards: %w", downloaded.Load(), slab.MinShards, ctx.Err())
 			}
 			break outer
-		case sema <- struct{}{}:
 		}
 
 		host, ok := candidates.next()
@@ -119,8 +135,15 @@ outer:
 				m.markSectorLost(ctx, host, slab.Sectors[sectorIdx].Root, logger)
 				return
 			} else if err != nil {
+				elapsed := time.Since(start)
+				if elapsed >= m.shardTimeout {
+					slowMu.Lock()
+					slowHosts = append(slowHosts, host.PublicKey)
+					slowMu.Unlock()
+				}
+
 				logger.Debug("failed to download shard",
-					zap.Bool("timeout", time.Since(start) > m.shardTimeout),
+					zap.Duration("elapsed", elapsed),
 					zap.Error(err),
 				)
 				return
@@ -138,6 +161,17 @@ outer:
 	}
 
 	wg.Wait()
+
+	if len(slowHosts) > 0 {
+		m.log.Warn("slow download",
+			zap.Uint8("stallCount", stalledCnt),
+			zap.Duration("stallDuration", stalledDur),
+			zap.Duration("totalDuration", time.Since(start)),
+			zap.Stringers("slowestHosts", slowHosts),
+			zap.Error(downloadErr),
+		)
+	}
+
 	if downloadErr != nil {
 		return nil, downloadErr
 	}
@@ -147,7 +181,6 @@ outer:
 func (m *SlabManager) downloadShard(ctx context.Context, h hosts.Host, sector Sector, pool *connPool) (proto.Usage, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.shardTimeout)
 	defer cancel()
-
 	return pool.downloadShard(ctx, h, m.migrationToken(h), sector)
 }
 
