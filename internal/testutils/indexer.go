@@ -348,7 +348,7 @@ func WaitForHosts(t *testing.T, app *app.Client, n int) []hosts.HostInfo {
 	start := time.Now()
 	limit := 10 * time.Second
 	for {
-		hosts, err := app.Hosts(context.Background())
+		hosts, err := app.Hosts(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		} else if len(hosts) == n {
@@ -366,7 +366,7 @@ func WaitForContracts(t *testing.T, admin *admin.Client, n int) {
 	start := time.Now()
 	limit := 10 * time.Second
 	for {
-		contracts, err := admin.Contracts(context.Background())
+		contracts, err := admin.Contracts(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		} else if len(contracts) == n {

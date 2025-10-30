@@ -31,6 +31,11 @@ var (
 	// ErrBadHosts is returned when attempting to pin a slab with too many
 	// sectors on bad hosts.
 	ErrBadHosts = errors.New("slab has too many sectors on bad hosts")
+
+	// ErrMinShards is returned when attempting to pin a slab with an invalid
+	// number of minimum shards, for example if `MinShards` exceeds the number
+	// of sectors.
+	ErrMinShards = errors.New("slab has invalid number of minimum shards")
 )
 
 type (

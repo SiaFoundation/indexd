@@ -224,6 +224,10 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 		}
 
 		for _, slab := range toPin {
+			if slab.MinShards <= 0 || uint(len(slab.Sectors)) < slab.MinShards {
+				return slabs.ErrMinShards
+			}
+
 			digest, err := slab.Digest()
 			if err != nil {
 				return fmt.Errorf("failed to calculate slab digest: %w", err)

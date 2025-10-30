@@ -930,7 +930,7 @@ func TestHostsWithLostSectors(t *testing.T) {
 	root4 := frand.Entropy256()
 	_, err := db.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,

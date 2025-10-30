@@ -675,7 +675,7 @@ func TestPrunableContractRoots(t *testing.T) {
 	// pin two slabs to add sectors
 	_, err := store.PinSlabs(context.Background(), account, time.Now(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     11,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{Root: roots[0], HostKey: hk1},
 			{Root: roots[2], HostKey: hk2},
@@ -686,7 +686,7 @@ func TestPrunableContractRoots(t *testing.T) {
 	}
 	slabIDs, err := store.PinSlabs(context.Background(), account, time.Now(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     11,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{Root: roots[1], HostKey: hk1},
 			{Root: roots[3], HostKey: hk2},

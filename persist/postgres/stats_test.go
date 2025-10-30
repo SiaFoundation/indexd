@@ -27,7 +27,7 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 	newSlab := func(i byte) slabs.SlabPinParams {
 		slab := slabs.SlabPinParams{
 			EncryptionKey: [32]byte{i},
-			MinShards:     10,
+			MinShards:     1,
 			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
