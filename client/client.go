@@ -211,11 +211,20 @@ func (c *HostClient) ReadSector(ctx context.Context, hostPrices proto.HostPrices
 func (c *HostClient) RefreshContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRefreshContractParams) (rhp.RPCRefreshContractResult, error) {
 	var res rhp.RPCRefreshContractResult
 	if err := c.withRevision(ctx, params.ContractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
-		if settings.ProtocolVersion.Cmp(rhp.ProtocolVersion500) >= 0 {
-			res, err = rhp.RPCRefreshContractPartialRollover(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, params)
-		} else {
-			res, err = rhp.RPCRefreshContractFullRollover(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, params)
+		if settings.ProtocolVersion.Cmp(rhp.ProtocolVersion500) < 0 {
+			return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("host does not support contract refresh, protocol version %s < %s", settings.ProtocolVersion, rhp.ProtocolVersion500)
 		}
+
+		totalCollateral := contract.Revision.RiskedCollateral().Add(params.Collateral)
+		if totalCollateral.Cmp(settings.MaxCollateral) > 0 {
+			capped, underflow := settings.MaxCollateral.SubWithUnderflow(contract.Revision.RiskedCollateral()) // cap to remaining collateral
+			if underflow {
+				capped = types.ZeroCurrency
+			}
+			params.Collateral = capped
+		}
+
+		res, err = rhp.RPCRefreshContractPartialRollover(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, params)
 		if err != nil {
 			return rhp.ContractRevision{}, proto.Usage{}, err
 		}
@@ -233,6 +242,15 @@ func (c *HostClient) RefreshContract(ctx context.Context, settings proto.HostSet
 func (c *HostClient) RenewContract(ctx context.Context, settings proto.HostSettings, params proto.RPCRenewContractParams) (rhp.RPCRenewContractResult, error) {
 	var res rhp.RPCRenewContractResult
 	if err := c.withRevision(ctx, params.ContractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
+		estimatedRenewal, _ := proto.RenewContract(contract.Revision, settings.Prices, params)
+		if estimatedRenewal.NewContract.TotalCollateral.Cmp(settings.MaxCollateral) > 0 {
+			capped, underflow := settings.MaxCollateral.SubWithUnderflow(contract.Revision.RiskedCollateral()) // cap to remaining collateral
+			if underflow {
+				capped = types.ZeroCurrency
+			}
+			params.Collateral = capped
+		}
+
 		res, err = rhp.RPCRenewContract(ctx, c.client, c.cm, c.signer, c.cm.TipState(), settings.Prices, contract.Revision, params)
 		if err != nil {
 			return rhp.ContractRevision{}, proto.Usage{}, err
