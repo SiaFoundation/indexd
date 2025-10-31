@@ -322,12 +322,11 @@ func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
 	}
 
 	for hk, reasons := range toBlock {
-		hostLog := log.With(zap.Stringer("hostKey", hk))
 		if err := cm.hosts.BlockHosts(ctx, []types.PublicKey{hk}, reasons); err != nil {
-			hostLog.Error("failed to block host", zap.Error(err))
+			log.Error("failed to block host", zap.Stringer("hostKey", hk), zap.Error(err))
 			continue
 		}
-		log.Warn("blocking unusable host", zap.Any("usability", reasons))
+		log.Warn("blocking unusable host", zap.Stringer("hostKey", hk), zap.Strings("usability", reasons))
 	}
 	return nil
 }
