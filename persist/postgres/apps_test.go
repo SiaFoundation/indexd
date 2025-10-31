@@ -136,7 +136,6 @@ func TestAppConnectKeys(t *testing.T) {
 	if _, err := store.ValidAppConnectKey(ctx, connectKey); !errors.Is(err, accounts.ErrKeyNotFound) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
-
 }
 
 func TestAppConnectKey(t *testing.T) {
