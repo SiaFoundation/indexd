@@ -224,7 +224,7 @@ func TestDownloadShards(t *testing.T) {
 	t.Run("mark sector lost", func(t *testing.T) {
 		dialer.clients[hk1].sectors = make(map[types.Hash256][proto.SectorSize]byte)
 		_, err := sm.downloadShards(context.Background(), slab, []hosts.Host{host1, host2}, pool, zap.NewNop())
-		if !errors.Is(err, errNotEnoughHosts) {
+		if !errors.Is(err, errNotEnoughShards) {
 			t.Fatal("expected not enough hosts error due to lost sector")
 		} else if sectors, ok := store.lostSectors[hk1]; !ok {
 			t.Fatalf("expected lost sector for host %v, got none", hk1)
