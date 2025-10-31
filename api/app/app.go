@@ -306,7 +306,10 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	}
 
 	slabIDs, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), time.Now(), params...)
-	if jc.Check("failed to pin slab", err) != nil {
+	if errors.Is(err, slabs.ErrBadHosts) || errors.Is(err, slabs.ErrMinShards) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("failed to pin slab", err) != nil {
 		return
 	} else if len(slabIDs) == 0 {
 		jc.Error(fmt.Errorf("PinSlabs did not return any slab IDs"), http.StatusInternalServerError)

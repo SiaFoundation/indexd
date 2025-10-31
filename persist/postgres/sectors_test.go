@@ -32,7 +32,7 @@ func TestMigrateSector(t *testing.T) {
 	hk2 := store.addTestHost(t)
 
 	// add contract for first host
-	fcid1 := store.addTestContract(t, hk1, types.FileContractID(hk1))
+	fcid1 := store.addTestContract(t, hk1)
 
 	// pin a slab to add 2 sectors which are both stored on the first host
 	pinTime := time.Now().Round(time.Microsecond)
@@ -40,7 +40,7 @@ func TestMigrateSector(t *testing.T) {
 	root2 := types.Hash256{2}
 	_, err := store.PinSlabs(context.Background(), account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
@@ -173,6 +173,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 
 	// add host
 	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
 
 	// pin a slab to add 2 sectors
 	pinTime := time.Now().Round(time.Microsecond)
@@ -180,7 +181,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	root2 := types.Hash256{2}
 	_, err := store.PinSlabs(context.Background(), account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
@@ -333,6 +334,7 @@ func TestSectorsForIntegrityCheck(t *testing.T) {
 
 	// add host
 	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
 
 	// pin a slab to add a few sectors to the database
 	root1 := frand.Entropy256()
@@ -341,7 +343,7 @@ func TestSectorsForIntegrityCheck(t *testing.T) {
 	root4 := frand.Entropy256()
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
@@ -418,12 +420,14 @@ func TestSlabIDs(t *testing.T) {
 	// add two hosts
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
+	store.addTestContract(t, hk1)
+	store.addTestContract(t, hk2)
 
 	// helper to create slab pin params
 	params := func() slabs.SlabPinParams {
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
-			MinShards:     10,
+			MinShards:     1,
 			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
@@ -508,12 +512,14 @@ func TestPinSlabs(t *testing.T) {
 	// add two hosts
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
+	store.addTestContract(t, hk1)
+	store.addTestContract(t, hk2)
 
 	// helper to create slabs
 	newSlab := func(i byte) (slabs.SlabID, slabs.SlabPinParams) {
 		slab := slabs.SlabPinParams{
 			EncryptionKey: [32]byte{i},
-			MinShards:     10,
+			MinShards:     1,
 			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
@@ -573,6 +579,14 @@ func TestPinSlabs(t *testing.T) {
 	assertPinnedData(account, 2*slabSize)
 	assertPinnedData(account2, 0)
 	assertUnpinnedSectors(4)
+
+	// check that pinning with too large MinShards fails
+	_, slab3 := newSlab(3)
+	slab3.MinShards = 100
+	_, err = store.PinSlabs(context.Background(), proto.Account{1}, nextCheck, slab3)
+	if err == nil || !errors.Is(err, slabs.ErrMinShards) {
+		t.Fatalf("expected error %v, got %v", slabs.ErrMinShards, err)
+	}
 
 	sectorUploadedAt := func(root types.Hash256) (uploadedAt time.Time) {
 		t.Helper()
@@ -724,7 +738,7 @@ func TestPinSlabs(t *testing.T) {
 	assertUnpinnedSectors(4)
 
 	// pinning one more slab should fail
-	_, slab3 := newSlab(3)
+	_, slab3 = newSlab(3)
 	_, err = store.PinSlabs(context.Background(), account, nextCheck, slab3)
 	if !errors.Is(err, accounts.ErrStorageLimitExceeded) {
 		t.Fatal("expected ErrStorageLimitExceeded, got", err)
@@ -734,6 +748,54 @@ func TestPinSlabs(t *testing.T) {
 	assertUnpinnedSectors(4)
 }
 
+func TestPinSlabsBadHost(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	account := proto.Account{1}
+
+	// add accounts - account1 can pin 2 slabs and account2 can pin 3 slabs
+	store.addTestAccount(t, types.PublicKey(account))
+
+	// this host is good because it has an active good contract on it
+	hk1 := store.addTestHost(t)
+	store.addTestContract(t, hk1)
+	// this host is considered bad by PinSlabs because there are no
+	// contracts formed on it
+	hk2 := store.addTestHost(t)
+
+	// helper to create slabs
+	newSlab := func(i byte, hks ...types.PublicKey) (slabs.SlabID, slabs.SlabPinParams) {
+		slab := slabs.SlabPinParams{
+			EncryptionKey: [32]byte{i},
+			MinShards:     1,
+		}
+		for _, hk := range hks {
+			slab.Sectors = append(slab.Sectors, slabs.PinnedSector{
+				Root:    frand.Entropy256(),
+				HostKey: hk,
+			})
+		}
+		slabID, err := slab.Digest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slabID, slab
+	}
+	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
+
+	// pin slabs
+	slab1ID, slab1 := newSlab(1, hk1)
+	if slabIDs, err := store.PinSlabs(context.Background(), proto.Account{1}, nextCheck, slab1); err != nil {
+		t.Fatal(err)
+	} else if slabIDs[0] != slab1ID {
+		t.Fatalf("expected slab ID %v, got %v", slab1ID, slabIDs[0])
+	}
+
+	_, slab2 := newSlab(1, hk2)
+	if _, err := store.PinSlabs(context.Background(), proto.Account{1}, nextCheck, slab2); err == nil || !errors.Is(err, slabs.ErrBadHosts) {
+		t.Fatalf("expected error %v, got %v", slabs.ErrBadHosts, err)
+	}
+}
+
 func TestPinSlabsConflict(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 	account := proto.Account{1}
@@ -741,6 +803,7 @@ func TestPinSlabsConflict(t *testing.T) {
 
 	store.addTestAccount(t, types.PublicKey(account))
 	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
 
 	// helper to create slabs
 	newSlab := func() (slabs.SlabID, slabs.SlabPinParams) {
@@ -832,6 +895,7 @@ func TestUnpinSlab(t *testing.T) {
 
 	// add host
 	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
 
 	// precreate 3 slabs, 2 sectors each
 	var params []slabs.SlabPinParams
@@ -959,7 +1023,7 @@ func TestPinSectors(t *testing.T) {
 	// create 4 sectors
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				HostKey: hk,
@@ -1090,7 +1154,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// add a host and a contract
 	hk := store.addTestHost(t)
-	contractID := store.addTestContract(t, hk, types.FileContractID(hk))
+	contractID := store.addTestContract(t, hk)
 
 	// add two slabs & immediately reset the LRA-time
 	slabID1 := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
@@ -1252,7 +1316,7 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 
 	// add host with a contract
 	hk := store.addTestHost(t)
-	store.addTestContract(t, hk, types.FileContractID(hk))
+	store.addTestContract(t, hk)
 
 	// pin a slab to add a few sectors to the database
 	root1 := frand.Entropy256()
@@ -1260,7 +1324,7 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 	root3 := frand.Entropy256()
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
@@ -1337,12 +1401,12 @@ func TestUnpinnedSectors(t *testing.T) {
 	account := proto.Account{1}
 	store.addTestAccount(t, types.PublicKey(account))
 	hk := store.addTestHost(t)
-	store.addTestContract(t, hk, types.FileContractID(hk))
+	store.addTestContract(t, hk)
 
 	// create 4 sectors
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				HostKey: hk,
@@ -1422,6 +1486,10 @@ func BenchmarkSlabs(b *testing.B) {
 	for i := byte(0); i < 30; i++ {
 		hks = append(hks, store.addTestHost(b, types.PublicKey{i}))
 	}
+	// add 500 other hosts to reflect mainnet
+	for range 500 {
+		store.addTestHost(b)
+	}
 
 	// helper to create slabs
 	newSlab := func() slabs.SlabPinParams {
@@ -1434,7 +1502,7 @@ func BenchmarkSlabs(b *testing.B) {
 		}
 		slab := slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
-			MinShards:     10,
+			MinShards:     1,
 			Sectors:       sectors,
 		}
 		return slab
@@ -1552,7 +1620,7 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk, types.FileContractID(hk))
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -1708,7 +1776,7 @@ func BenchmarkPinSectors(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk, types.FileContractID(hk))
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -1802,8 +1870,8 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 	}
 
 	// add 2 contracts
-	store.addTestContract(b, hks[0], types.FileContractID(hks[0]))
-	store.addTestContract(b, hks[1], types.FileContractID(hks[1]))
+	store.addTestContract(b, hks[0])
+	store.addTestContract(b, hks[1])
 
 	// mark the second contract as bad
 	res, err := store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE id = 2") // id 2 is bad
@@ -1824,7 +1892,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		}
 		slab := slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
-			MinShards:     10,
+			MinShards:     1,
 			Sectors:       sectors,
 		}
 		return slab
@@ -1911,7 +1979,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 
 	// add host with one contract
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk, types.FileContractID(hk))
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -2166,8 +2234,8 @@ func TestMarkSectorsLost(t *testing.T) {
 	hk2 := store.addTestHost(t)
 
 	// add a contract for each host
-	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
-	_ = store.addTestContract(t, hk2, types.FileContractID{2})
+	fcid1 := store.addTestContract(t, hk1)
+	_ = store.addTestContract(t, hk2)
 
 	// pin a slab that adds 2 sectors to each host
 	root1 := frand.Entropy256()
@@ -2176,7 +2244,7 @@ func TestMarkSectorsLost(t *testing.T) {
 	root4 := frand.Entropy256()
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
@@ -2293,7 +2361,7 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk, types.FileContractID(hk))
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -2421,7 +2489,7 @@ func BenchmarkMigrateSector(b *testing.B) {
 	var hks []types.PublicKey
 	for range 100 {
 		hk := store.addTestHost(b)
-		store.addTestContract(b, hk, types.FileContractID(hk))
+		store.addTestContract(b, hk)
 		hks = append(hks, hk)
 	}
 

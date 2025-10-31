@@ -348,13 +348,31 @@ func WaitForHosts(t *testing.T, app *app.Client, n int) []hosts.HostInfo {
 	start := time.Now()
 	limit := 10 * time.Second
 	for {
-		hosts, err := app.Hosts(context.Background())
+		hosts, err := app.Hosts(t.Context())
 		if err != nil {
 			t.Fatal(err)
 		} else if len(hosts) == n {
 			return hosts
 		} else if time.Since(start) > limit {
 			t.Fatalf("timed out waiting for %d hosts, got %d", n, len(hosts))
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// WaitForContracts waits for the given number of contracts to be formed.
+func WaitForContracts(t *testing.T, admin *admin.Client, n int) {
+	t.Helper()
+	start := time.Now()
+	limit := 10 * time.Second
+	for {
+		contracts, err := admin.Contracts(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		} else if len(contracts) == n {
+			return
+		} else if time.Since(start) > limit {
+			t.Fatalf("timed out waiting for %d hosts, got %d", n, len(contracts))
 		}
 		time.Sleep(100 * time.Millisecond)
 	}

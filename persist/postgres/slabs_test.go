@@ -28,6 +28,7 @@ func TestSlab(t *testing.T) {
 	hosts := make([]types.PublicKey, 30)
 	for i := range hosts {
 		hosts[i] = store.addTestHost(t)
+		store.addTestContract(t, hosts[i], frand.Entropy256())
 	}
 
 	// pin slab
@@ -113,6 +114,7 @@ func TestPinnedSlab(t *testing.T) {
 	hosts := make([]types.PublicKey, 30)
 	for i := range hosts {
 		hosts[i] = store.addTestHost(t)
+		store.addTestContract(t, hosts[i])
 	}
 
 	pinned := slabs.SlabPinParams{
@@ -192,8 +194,17 @@ func TestSlabPruning(t *testing.T) {
 		store.addTestAccount(t, types.PublicKey(acc))
 	}
 
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
 	// pin slab for both accounts
-	slab1 := slabs.SlabPinParams{MinShards: 1}
+	slab1 := slabs.SlabPinParams{
+		MinShards: 1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
 	for _, acc := range []proto.Account{acc1, acc2} {
 		if _, err := store.PinSlabs(context.Background(), acc, time.Time{}, slab1); err != nil {
 			t.Fatal(err)
@@ -201,7 +212,13 @@ func TestSlabPruning(t *testing.T) {
 	}
 
 	// pin second slab for first account
-	slab2 := slabs.SlabPinParams{MinShards: 2}
+	slab2 := slabs.SlabPinParams{
+		MinShards: 1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
 	if _, err := store.PinSlabs(context.Background(), acc1, time.Time{}, slab2); err != nil {
 		t.Fatal(err)
 	}

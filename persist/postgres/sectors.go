@@ -15,6 +15,12 @@ import (
 	"go.sia.tech/indexd/slabs"
 )
 
+const (
+	// maxBadParityShards is the maximum proportion of parity shards that can be
+	// on bad hosts when pinning a slab.
+	maxBadParityShards = 0.2
+)
+
 // MarkSectorsLost marks the sectors as lost by setting both the contract ID and
 // host ID to NULL. This is meant to be used in 2 cases:
 // - The host reports that the sector is lost (e.g. when pinning it, during the integrity check or when fetching it for migration)
@@ -205,7 +211,29 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 			return err
 		}
 
+		hostRows, err := tx.Query(ctx, `SELECT h.public_key FROM contracts c INNER JOIN hosts h ON c.host_id = h.id WHERE state IN (0,1) AND renewed_to IS NULL AND good`)
+		if err != nil {
+			return fmt.Errorf("failed to get good hosts: %w", err)
+		}
+		defer hostRows.Close()
+
+		goodHosts := make(map[types.PublicKey]struct{})
+		for hostRows.Next() {
+			var hk types.PublicKey
+			if err := hostRows.Scan((*sqlPublicKey)(&hk)); err != nil {
+				return fmt.Errorf("failed to scan host key: %w", err)
+			}
+			goodHosts[hk] = struct{}{}
+		}
+		if err := hostRows.Err(); err != nil {
+			return fmt.Errorf("failed to get good host rows: %w", err)
+		}
+
 		for _, slab := range toPin {
+			if slab.MinShards <= 0 || uint(len(slab.Sectors)) < slab.MinShards {
+				return slabs.ErrMinShards
+			}
+
 			digest, err := slab.Digest()
 			if err != nil {
 				return fmt.Errorf("failed to calculate slab digest: %w", err)
@@ -275,10 +303,15 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 					nextIntegrityCheck)
 			}
 
+			var badHosts int
 			var unpinned int64
 			br := tx.SendBatch(ctx, batch)
 			sectorIDs := make([]int64, len(slab.Sectors))
 			for i, sector := range slab.Sectors {
+				if _, ok := goodHosts[sector.HostKey]; !ok {
+					badHosts++
+				}
+
 				var inserted bool
 				if err := br.QueryRow().Scan(&sectorIDs[i], &inserted); err != nil {
 					br.Close()
@@ -291,6 +324,12 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 				}
 			}
 			br.Close()
+
+			// if more than 20% of parity shards are on bad hosts, don't allow slab to be pinned
+			parityShards := len(slab.Sectors) - int(slab.MinShards)
+			if float64(badHosts) > maxBadParityShards*float64(parityShards) {
+				return slabs.ErrBadHosts
+			}
 
 			// update number of unpinned sectors
 			if unpinned > 0 {
