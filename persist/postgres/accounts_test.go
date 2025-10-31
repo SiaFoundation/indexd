@@ -447,6 +447,14 @@ func TestHostAccountsForFunding(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// if we raise threshold neither account should be returned
+	accs, err = store.HostAccountsForFunding(context.Background(), hk1, activeThreshold.Add(2*time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accs) != 0 {
+		t.Fatal("expected zero accounts")
+	}
+
 	// assert both accounts are returned
 	accs, err = store.HostAccountsForFunding(context.Background(), hk1, activeThreshold, 10)
 	if err != nil {
