@@ -255,6 +255,11 @@ func TestSectorsToMigrate(t *testing.T) {
 				ContractID: &sameLocationContract.ID,
 				HostKey:    &sameLocationContract.HostKey,
 			},
+			// unpinned sector -> don't migrate (pinning loop will take care of it)
+			{
+				Root:    types.Hash256{5},
+				HostKey: &goodContract.HostKey,
+			},
 		},
 	}
 
@@ -285,7 +290,7 @@ func TestSectorsToMigrate(t *testing.T) {
 
 	// with no contracts or hosts, all sectors require migration but no
 	// contracts are available
-	assertResult(nil, nil, []int{0, 1, 2, 3}, []int{})
+	assertResult(nil, nil, []int{0, 1, 2, 3, 4}, []int{})
 
 	// calling contractsForRepair with just the hosts and contracts the slab is stored on should
 	// return the missing sectors and no contracts
