@@ -141,7 +141,6 @@ func TestAppConnectKeys(t *testing.T) {
 	if err := store.DeleteAppConnectKey(ctx, connectKey); !errors.Is(err, accounts.ErrKeyNotFound) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
-
 }
 
 func TestAppConnectKey(t *testing.T) {
