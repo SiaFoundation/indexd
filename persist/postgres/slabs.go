@@ -5,11 +5,53 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
 )
+
+// MarkSlabRepaired marks the slab as repaired or increments the failed repair
+// count. If the repair was successful, the consecutive_failed_repairs counter
+// is reset to zero. If the repair failed, the counter is incremented and the
+// next repair attempt time is set using exponential backoff.
+func (s *Store) MarkSlabRepaired(ctx context.Context, slabID slabs.SlabID, success bool) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		if success {
+			if res, err := tx.Exec(ctx, `UPDATE slabs SET consecutive_failed_repairs = 0 WHERE digest = $1`, sqlHash256(slabID)); err != nil {
+				return fmt.Errorf("failed to mark slab as repaired: %w", err)
+			} else if res.RowsAffected() == 0 {
+				return slabs.ErrSlabNotFound
+			}
+			return nil
+		}
+
+		var currentFailures int
+		err := tx.QueryRow(ctx, `
+			SELECT consecutive_failed_repairs
+			FROM slabs
+			WHERE digest = $1
+			FOR UPDATE
+		`, sqlHash256(slabID)).Scan(&currentFailures)
+		if errors.Is(err, sql.ErrNoRows) {
+			return slabs.ErrSlabNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to fetch repair state: %w", err)
+		}
+
+		nextRepairBackoff := min(minRepairBackoff*time.Duration(1<<(currentFailures)), maxRepairBackoff)
+		_, err = tx.Exec(ctx, `
+			UPDATE slabs 
+			SET consecutive_failed_repairs = $2, next_repair_attempt = $3 
+			WHERE digest = $1`, sqlHash256(slabID), currentFailures+1, time.Now().Add(nextRepairBackoff))
+		if err != nil {
+			return fmt.Errorf("failed to update repair state: %w", err)
+		}
+
+		return nil
+	})
+}
 
 // Slab retrieves a slab from the database by its ID.
 func (s *Store) Slab(ctx context.Context, slabID slabs.SlabID) (slab slabs.Slab, err error) {

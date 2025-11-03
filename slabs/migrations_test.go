@@ -110,7 +110,7 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's unhealthy
-	unhealthSlabIDs, err := db.UnhealthySlabs(context.Background(), time.Now(), 1)
+	unhealthSlabIDs, err := db.UnhealthySlabs(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthSlabIDs) != 1 {
@@ -143,7 +143,7 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's still unhealthy
-	unhealthSlabIDs, err = db.UnhealthySlabs(context.Background(), time.Now(), 1)
+	unhealthSlabIDs, err = db.UnhealthySlabs(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthSlabIDs) != 1 {
@@ -176,7 +176,7 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's now healthy
-	unhealthSlabIDs, err = db.UnhealthySlabs(context.Background(), time.Now(), 1)
+	unhealthSlabIDs, err = db.UnhealthySlabs(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthSlabIDs) != 0 {
@@ -185,10 +185,12 @@ func TestMigrateSlab(t *testing.T) {
 }
 
 func TestSectorsToMigrate(t *testing.T) {
-	newHost := func(i byte, usable, blocked bool) hosts.Host {
+	hostIndex := byte(0)
+	newHost := func(usable, blocked bool) hosts.Host {
+		hostIndex++
 		h := hosts.Host{
 			Blocked:   blocked,
-			PublicKey: types.PublicKey{i},
+			PublicKey: types.PublicKey{hostIndex},
 			Settings:  goodSettings,
 			Latitude:  frand.Float64()*180 - 90,
 			Longitude: frand.Float64()*360 - 180,
@@ -199,9 +201,11 @@ func TestSectorsToMigrate(t *testing.T) {
 		return h
 	}
 
-	newContract := func(i byte, hk types.PublicKey, goodForUpload bool) contracts.Contract {
+	contractIndex := byte(0)
+	newContract := func(hk types.PublicKey, goodForUpload bool) contracts.Contract {
+		contractIndex++
 		c := contracts.Contract{
-			ID:                 types.FileContractID{i},
+			ID:                 types.FileContractID{contractIndex},
 			HostKey:            hk,
 			Good:               goodForUpload,
 			RemainingAllowance: types.MaxCurrency,
@@ -209,23 +213,26 @@ func TestSectorsToMigrate(t *testing.T) {
 		}
 		if isGood := c.GoodForUpload(goodSettings.Prices, goodSettings.MaxCollateral, 100); isGood != goodForUpload {
 			// sanity check
-			t.Fatalf("contract %d: expected goodForUpload %v, got %v", i, goodForUpload, isGood)
+			t.Fatalf("contract %d: expected goodForUpload %v, got %v", contractIndex, goodForUpload, isGood)
 		}
 		return c
 	}
 
 	// good host with good contract
-	goodHost := newHost(1, true, false)
-	goodContract := newContract(1, goodHost.PublicKey, true)
+	goodHost := newHost(true, false)
+	goodContract := newContract(goodHost.PublicKey, true)
+
+	// good host with no contract
+	goodHostNoContract := newHost(true, false)
 
 	// good host with bad contract
-	badContract := newContract(2, goodHost.PublicKey, false)
+	badContract := newContract(goodHost.PublicKey, false)
 
 	// good host with identical location as the good host
-	sameLocationHost := newHost(2, true, false)
+	sameLocationHost := newHost(true, false)
 	sameLocationHost.Latitude = goodHost.Latitude
 	sameLocationHost.Longitude = goodHost.Longitude
-	sameLocationContract := newContract(3, sameLocationHost.PublicKey, true)
+	sameLocationContract := newContract(sameLocationHost.PublicKey, true)
 
 	// prepare a slab that has one good sector and multiple bad sectors for
 	// various reasons
@@ -255,11 +262,16 @@ func TestSectorsToMigrate(t *testing.T) {
 				ContractID: &sameLocationContract.ID,
 				HostKey:    &sameLocationContract.HostKey,
 			},
+			// unpinned sector -> don't migrate (pinning loop will take care of it)
+			{
+				Root:    types.Hash256{5},
+				HostKey: &goodHostNoContract.PublicKey,
+			},
 		},
 	}
 
 	// helper to assert result of contractsForRepair
-	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots, expectedHosts []int) {
+	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
 		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 100, 10)
 		if len(toRepair) != len(expectedRoots) {
@@ -274,7 +286,7 @@ func TestSectorsToMigrate(t *testing.T) {
 		}
 		expectedHostsMap := make(map[types.PublicKey]struct{})
 		for i := range expectedHosts {
-			expectedHostsMap[types.PublicKey{byte(expectedHosts[i])}] = struct{}{}
+			expectedHostsMap[expectedHosts[i].PublicKey] = struct{}{}
 		}
 		for i := range toUse {
 			if _, ok := expectedHostsMap[toUse[i].PublicKey]; !ok {
@@ -285,42 +297,42 @@ func TestSectorsToMigrate(t *testing.T) {
 
 	// with no contracts or hosts, all sectors require migration but no
 	// contracts are available
-	assertResult(nil, nil, []int{0, 1, 2, 3}, []int{})
+	assertResult(nil, nil, []int{0, 1, 2, 3, 4}, nil)
 
 	// calling contractsForRepair with just the hosts and contracts the slab is stored on should
 	// return the missing sectors and no contracts
-	allHosts := []hosts.Host{goodHost, sameLocationHost}
+	allHosts := []hosts.Host{goodHost, goodHostNoContract, sameLocationHost}
 	allContracts := []contracts.Contract{goodContract, badContract, sameLocationContract}
-	assertResult(allHosts, allContracts, []int{1, 2}, []int{})
+	assertResult(allHosts, allContracts, []int{1, 2}, nil)
 
 	// prepare a bunch of hosts and contracts which can't be used for repairs
-	badHost2 := newHost(3, false, false)
-	cBadHost2 := newContract(4, badHost2.PublicKey, true)
+	badHost2 := newHost(false, false)
+	cBadHost2 := newContract(badHost2.PublicKey, true)
 
-	blockedHost := newHost(4, true, true)
-	cBlockedHost := newContract(5, blockedHost.PublicKey, true)
+	blockedHost := newHost(true, true)
+	cBlockedHost := newContract(blockedHost.PublicKey, true)
 
-	sameLocationHost2 := newHost(5, true, false)
+	sameLocationHost2 := newHost(true, false)
 	sameLocationHost2.Latitude = goodHost.Latitude
 	sameLocationHost2.Longitude = goodHost.Longitude
-	cSameLocationHost2 := newContract(6, sameLocationHost2.PublicKey, true)
+	cSameLocationHost2 := newContract(sameLocationHost2.PublicKey, true)
 
 	// add the bad hosts+contracts and try again - expect same result
 	allHosts = append(allHosts, badHost2, blockedHost, sameLocationHost2)
 	allContracts = append(allContracts, cBadHost2, cBlockedHost, cSameLocationHost2)
-	assertResult(allHosts, allContracts, []int{1, 2}, []int{})
+	assertResult(allHosts, allContracts, []int{1, 2}, nil)
 
 	// prepare 2 good hosts
-	goodHost2 := newHost(6, true, false)
-	cGoodHost2 := newContract(7, goodHost2.PublicKey, true)
+	goodHost2 := newHost(true, false)
+	cGoodHost2 := newContract(goodHost2.PublicKey, true)
 
-	goodHost3 := newHost(7, true, false)
-	cGoodHost3 := newContract(8, goodHost3.PublicKey, true)
+	goodHost3 := newHost(true, false)
+	cGoodHost3 := newContract(goodHost3.PublicKey, true)
 
 	// should use them
 	allHosts = append(allHosts, goodHost2, goodHost3)
 	allContracts = append(allContracts, cGoodHost2, cGoodHost3)
-	assertResult(allHosts, allContracts, []int{1, 2}, []int{6, 7})
+	assertResult(allHosts, allContracts, []int{1, 2}, []hosts.Host{goodHost2, goodHost3})
 }
 
 func newTestContract(hk types.PublicKey) contracts.Contract {

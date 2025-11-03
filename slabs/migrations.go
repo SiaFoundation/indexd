@@ -55,32 +55,33 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, pool *
 
 	var wg sync.WaitGroup
 	for _, slabID := range slabIDs {
-		log := log.With(zap.String("slab", slabID.String()))
 		wg.Add(1)
-		go func(slabID SlabID) {
+		go func(slabID SlabID, log *zap.Logger) {
 			defer wg.Done()
-			m.migrateSlab(ctx, slabID, allHosts, goodContracts, ms.Period, pool, log)
-		}(slabID)
+			err := m.migrateSlab(ctx, slabID, allHosts, goodContracts, ms.Period, pool, log)
+			if err := m.store.MarkSlabRepaired(ctx, slabID, err == nil); err != nil {
+				log.Error("failed to mark slab repaired", zap.Error(err))
+			}
+		}(slabID, log.With(zap.Stringer("slab", slabID)))
 	}
 	wg.Wait()
 	return nil
 }
 
-func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, pool *connPool, log *zap.Logger) {
+func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, goodContracts []contracts.Contract, period uint64, pool *connPool, log *zap.Logger) error {
 	start := time.Now()
 	slab, err := m.store.Slab(ctx, slabID)
 	if err != nil {
 		log.Error("failed to fetch slab", zap.Error(err))
-		return
+		return err
 	}
-
 	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, goodContracts, period, m.minHostDistanceKm)
 	if len(indices) == 0 {
 		log.Debug("tried to migrate slab but no indices require migration")
-		return
+		return nil
 	} else if len(uploadCandidates) == 0 {
 		log.Warn("tried to migrate slab but no hosts are available for migration")
-		return
+		return nil
 	}
 	log = log.With(zap.Int("toMigrate", len(indices)), zap.Int("uploadCandidates", len(uploadCandidates)))
 
@@ -91,20 +92,23 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	shards, err := m.downloadShards(ctx, slab, allHosts, pool, log.Named("recover"))
 	if err != nil {
 		log.Error("failed to download slab", zap.Error(err))
-		return
+		return err
 	}
 	log = log.With(zap.Duration("downloadElapsed", time.Since(downloadStart)))
-	log.Debug("recovered shards")
 
 	// decrypt the shards
 	nonce := make([]byte, 24)
+	var recovered int
 	for i := range shards {
-		if len(shards[i]) > 0 {
-			nonce[0] = byte(i)
-			c, _ := chacha20.NewUnauthenticatedCipher(slab.EncryptionKey[:], nonce)
-			c.XORKeyStream(shards[i], shards[i])
+		if len(shards[i]) == 0 {
+			continue
 		}
+		nonce[0] = byte(i)
+		c, _ := chacha20.NewUnauthenticatedCipher(slab.EncryptionKey[:], nonce)
+		c.XORKeyStream(shards[i], shards[i])
+		recovered++
 	}
+	log.Debug("recovered shards", zap.Int("recovered", recovered))
 
 	// indicate what shards are required
 	required := make([]bool, len(slab.Sectors))
@@ -155,11 +159,13 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	switch {
 	case err != nil:
 		log.Debug("failed to migrate all sectors", zap.Error(err)) // debug since this is not user actionable and will be retried
+		return err
 	case len(migrated) == 0:
 		log.Error("did not migrate any sectors") // error since this is unexpected
 	default:
 		log.Debug("successfully migrated slab")
 	}
+	return nil
 }
 
 // sectorsToMigrate filters the sectors of a slab and returns the indices of the
@@ -192,25 +198,37 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 
 	// determine whether the sector needs to be migrated. That's the case if
 	// one of the following is true:
-	// - the sector was marked lost (contract ID and host key are nil)
+	// - the sector is stored on a bad host
+	// - the sector is lost (host key is nil)
 	// - the sector is stored on a bad contract
 	var toMigrate []int
 	for i, sector := range slab.Sectors {
-		isLost := sector.ContractID == nil && sector.HostKey == nil
-		goodContract := sector.ContractID != nil && goodContractMap[*sector.ContractID] != contracts.Contract{}
-		if isLost || !goodContract {
+		if sector.HostKey == nil {
+			// sector is lost
 			toMigrate = append(toMigrate, i)
 			continue
 		}
 
-		// remove contract from the map since we don't want to use it again
-		delete(goodContractMap, *sector.ContractID)
-
-		// add the host to the spaced set to ensure we don't use hosts that are
-		// too close to existing hosts
-		if host, ok := hostsMap[*sector.HostKey]; ok {
-			set.Add(host.Info())
+		host, ok := hostsMap[*sector.HostKey]
+		if !ok {
+			// sector is on a bad host
+			toMigrate = append(toMigrate, i)
+			continue
 		}
+
+		if sector.ContractID != nil {
+			if _, ok := goodContractMap[*sector.ContractID]; !ok {
+				// sector is on a bad contract
+				toMigrate = append(toMigrate, i)
+				continue
+			}
+			delete(goodContractMap, *sector.ContractID)
+		}
+
+		// sector will not be migrated. Remove it from the hosts map
+		// and add it to the spaced set.
+		delete(hostsMap, *sector.HostKey)
+		set.Add(host.Info())
 	}
 
 	// return all hosts with contracts that are good, currently not in use and

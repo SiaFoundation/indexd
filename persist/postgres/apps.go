@@ -123,10 +123,18 @@ func (s *Store) AppConnectKeys(ctx context.Context, offset, limit int) (keys []a
 // DeleteAppConnectKey deletes an application connection key from the database.
 func (s *Store) DeleteAppConnectKey(ctx context.Context, connectKey string) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		var count int64
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE connect_key_id = (SELECT id FROM app_connect_keys WHERE app_key = $1)`, connectKey).Scan(&count); err != nil {
+		var connectKeyID int64
+		if err := tx.QueryRow(ctx, `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey).Scan(&connectKeyID); errors.Is(err, sql.ErrNoRows) {
+			return accounts.ErrKeyNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to get connect key ID: %w", err)
+		}
+
+		var inUse bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE connect_key_id = $1)`, connectKeyID).Scan(&inUse); err != nil {
 			return fmt.Errorf("failed to check if connect key in use: %w", err)
-		} else if count != 0 {
+		} else if inUse {
+			// it is only safe to delete if there are no accounts linked to this connect key
 			return accounts.ErrKeyInUse
 		}
 

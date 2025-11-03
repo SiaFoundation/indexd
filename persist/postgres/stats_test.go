@@ -22,12 +22,13 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 	account := proto.Account{1}
 	store.addTestAccount(t, types.PublicKey(account))
 	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
 
 	// helper to create slabs
 	newSlab := func(i byte) slabs.SlabPinParams {
 		slab := slabs.SlabPinParams{
 			EncryptionKey: [32]byte{i},
-			MinShards:     10,
+			MinShards:     1,
 			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
@@ -98,6 +99,8 @@ func TestSectorStats(t *testing.T) {
 	hk2 := store.addTestHost(t)
 	hk3 := store.addTestHost(t)
 	hk4 := store.addTestHost(t)
+	store.addTestContract(t, hk2)
+	store.addTestContract(t, hk3)
 	fcidHK1 := store.addTestContract(t, hk1, types.FileContractID{1})
 	fcidHK4 := store.addTestContract(t, hk4, types.FileContractID{2})
 
@@ -277,9 +280,9 @@ func TestHostStats(t *testing.T) {
 	}
 
 	// add test contracts
-	fcid1 := store.addTestContract(t, hk1, types.FileContractID(hk1))
-	store.addTestContract(t, hk2, types.FileContractID(hk2))
-	store.addTestContract(t, hk3, types.FileContractID(hk3))
+	fcid1 := store.addTestContract(t, hk1)
+	store.addTestContract(t, hk2)
+	store.addTestContract(t, hk3)
 
 	// assert empty stats - no usage
 	stats, err = store.HostStats(t.Context(), 0, 10)

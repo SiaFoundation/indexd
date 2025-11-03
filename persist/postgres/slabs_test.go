@@ -28,6 +28,7 @@ func TestSlab(t *testing.T) {
 	hosts := make([]types.PublicKey, 30)
 	for i := range hosts {
 		hosts[i] = store.addTestHost(t)
+		store.addTestContract(t, hosts[i], frand.Entropy256())
 	}
 
 	// pin slab
@@ -102,6 +103,94 @@ func TestSlab(t *testing.T) {
 	}
 }
 
+func TestMarkSlabRepaired(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	// add account
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	// add host
+	host := store.addTestHost(t)
+	store.addTestContract(t, host)
+
+	// add slab
+	slabIDs, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{Root: frand.Entropy256(), HostKey: host},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertSlabState := func(expectedRepairs int, expectedNextAttempt time.Time) {
+		t.Helper()
+
+		roughlyEqual := func(a, b time.Time, slack time.Duration) bool {
+			if diff := a.Sub(b); diff < -slack || diff > slack {
+				return false
+			}
+			return true
+		}
+
+		var consecutiveFailedRepairs int
+		var nextRepairAttempt time.Time
+		if err := store.pool.QueryRow(t.Context(), `
+			SELECT consecutive_failed_repairs, next_repair_attempt 
+			FROM slabs 
+			WHERE digest = $1`, sqlHash256(slabIDs[0])).Scan(&consecutiveFailedRepairs, &nextRepairAttempt); err != nil {
+			t.Fatal(err)
+		} else if consecutiveFailedRepairs != expectedRepairs {
+			t.Fatalf("expected %d consecutive failed repairs, got %d", expectedRepairs, consecutiveFailedRepairs)
+		} else if !roughlyEqual(nextRepairAttempt, expectedNextAttempt, time.Second) {
+			t.Fatalf("expected next repair attempt %s, got %s", expectedNextAttempt, nextRepairAttempt)
+		}
+	}
+
+	simulateFailedRepair := func() {
+		t.Helper()
+		if err = store.MarkSlabRepaired(t.Context(), slabIDs[0], false); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	simulateSuccessfulRepair := func() {
+		t.Helper()
+		if err = store.MarkSlabRepaired(t.Context(), slabIDs[0], true); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assert initial state
+	assertSlabState(0, time.Now())
+
+	// assert state after failed repair
+	simulateFailedRepair()
+	assertSlabState(1, time.Now().Add(minRepairBackoff))
+
+	// assert backoff is capped at maxRepairBackoff (at 6 consec. failures we exceed it)
+	for i := range 6 {
+		simulateFailedRepair()
+		if i < 4 {
+			assertSlabState(i+2, time.Now().Add(minRepairBackoff*time.Duration(1<<(i+1))))
+		} else {
+			assertSlabState(i+2, time.Now().Add(maxRepairBackoff))
+		}
+	}
+
+	// assert state after successful repair
+	oneHourAgo := time.Now().Add(-1 * time.Hour)
+	_, err = store.pool.Exec(t.Context(), "UPDATE slabs SET next_repair_attempt = $1", oneHourAgo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	simulateSuccessfulRepair()
+	assertSlabState(0, oneHourAgo)
+}
+
 func TestPinnedSlab(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 	account := proto.Account{1}
@@ -113,6 +202,7 @@ func TestPinnedSlab(t *testing.T) {
 	hosts := make([]types.PublicKey, 30)
 	for i := range hosts {
 		hosts[i] = store.addTestHost(t)
+		store.addTestContract(t, hosts[i])
 	}
 
 	pinned := slabs.SlabPinParams{
@@ -192,8 +282,17 @@ func TestSlabPruning(t *testing.T) {
 		store.addTestAccount(t, types.PublicKey(acc))
 	}
 
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
 	// pin slab for both accounts
-	slab1 := slabs.SlabPinParams{MinShards: 1}
+	slab1 := slabs.SlabPinParams{
+		MinShards: 1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
 	for _, acc := range []proto.Account{acc1, acc2} {
 		if _, err := store.PinSlabs(context.Background(), acc, time.Time{}, slab1); err != nil {
 			t.Fatal(err)
@@ -201,7 +300,13 @@ func TestSlabPruning(t *testing.T) {
 	}
 
 	// pin second slab for first account
-	slab2 := slabs.SlabPinParams{MinShards: 2}
+	slab2 := slabs.SlabPinParams{
+		MinShards: 1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
 	if _, err := store.PinSlabs(context.Background(), acc1, time.Time{}, slab2); err != nil {
 		t.Fatal(err)
 	}

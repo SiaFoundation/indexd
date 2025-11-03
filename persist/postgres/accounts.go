@@ -145,9 +145,9 @@ func (s *Store) UpdateAccount(ctx context.Context, oldAK, newAK types.PublicKey)
 	})
 }
 
-// HostAccountsForFunding returns up to limit accounts for the given host key
-// that are due for funding.
-func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]accounts.HostAccount, error) {
+// HostAccountsForFunding returns up to `limit` active (after the `threshold`
+// time) accounts for the given host key that are due for funding.
+func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
 	if limit < 0 {
 		return nil, errors.New("limit can not be negative")
 	} else if limit == 0 {
@@ -164,7 +164,7 @@ func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, 
 			return err
 		}
 
-		newAccs, err := newHostAccountsForFunding(ctx, tx, hk, hostID, limit)
+		newAccs, err := newHostAccountsForFunding(ctx, tx, hk, hostID, threshold, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query new accounts for funding: %w", err)
 		} else if len(newAccs) >= limit {
@@ -173,7 +173,7 @@ func (s *Store) HostAccountsForFunding(ctx context.Context, hk types.PublicKey, 
 		}
 
 		limit -= len(newAccs)
-		existingAccs, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, limit)
+		existingAccs, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, threshold, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query existing accounts for funding: %w", err)
 		}
@@ -339,15 +339,15 @@ func addAccount(ctx context.Context, tx *txn, connectKey *string, account types.
 	return nil
 }
 
-func newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, limit int) ([]accounts.HostAccount, error) {
+func newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
 	accs := make([]accounts.HostAccount, 0, limit)
 
 	rows, err := tx.Query(ctx, `
 SELECT a.public_key
 FROM accounts a
 LEFT JOIN account_hosts ah ON a.id = ah.account_id AND ah.host_id = $1
-WHERE ah.account_id IS NULL
-LIMIT $2;`, hostID, limit)
+WHERE ah.account_id IS NULL AND a.last_used >= $2
+LIMIT $3;`, hostID, threshold, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -367,16 +367,16 @@ LIMIT $2;`, hostID, limit)
 	return accs, nil
 }
 
-func existingHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, limit int) ([]accounts.HostAccount, error) {
+func existingHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
 	accs := make([]accounts.HostAccount, 0, limit)
 
 	rows, err := tx.Query(ctx, `
 SELECT public_key, consecutive_failed_funds, next_fund
 FROM account_hosts ha
 INNER JOIN accounts a ON a.id = ha.account_id
-WHERE ha.host_id = $1 AND ha.next_fund <= NOW()
+WHERE ha.host_id = $1 AND ha.next_fund <= NOW() AND a.last_used >= $2
 ORDER BY next_fund ASC
-LIMIT $2`, hostID, limit)
+LIMIT $3`, hostID, threshold, limit)
 	if err != nil {
 		return nil, err
 	}

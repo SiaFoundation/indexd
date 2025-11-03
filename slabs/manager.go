@@ -100,16 +100,17 @@ type (
 		MaintenanceSettings(ctx context.Context) (contracts.MaintenanceSettings, error)
 		MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxFailedIntegrityChecks uint) error
 		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
+		MarkSlabRepaired(ctx context.Context, slabID SlabID, success bool) error
 		MigrateSector(ctx context.Context, root types.Hash256, hostKey types.PublicKey) (bool, error)
 		PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error)
 		UnpinSlab(context.Context, proto.Account, SlabID) error
 		RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error
 		SectorsForIntegrityCheck(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 		PinnedSlab(ctx context.Context, account proto.Account, slabID SlabID) (PinnedSlab, error)
-		Slab(ctx context.Context, slabID SlabID) (Slab, error)
+		Slab(ctx context.Context, slabID SlabID) (slab Slab, err error)
 		Slabs(ctx context.Context, account proto.Account, slabIDs []SlabID) ([]Slab, error)
 		SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]SlabID, error)
-		UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) ([]SlabID, error)
+		UnhealthySlabs(ctx context.Context, limit int) ([]SlabID, error)
 		PruneSlabs(ctx context.Context, account proto.Account) error
 
 		// Object methods
@@ -379,18 +380,17 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	start := time.Now()
 	log := m.log.Named("migrations")
-	log.Debug("starting slab migrations", zap.Time("start", start))
+	log.Debug("starting slab migrations")
 
 	pool := newConnPool(m.dialer, log)
 	defer pool.Close()
 
-	slabsPerBatch := m.migrationBatchSize
 	var exhausted bool
 	for !exhausted {
-		batch, err := m.store.UnhealthySlabs(ctx, start, slabsPerBatch)
+		batch, err := m.store.UnhealthySlabs(ctx, m.migrationBatchSize)
 		if err != nil {
 			return err
-		} else if len(batch) < slabsPerBatch {
+		} else if len(batch) < m.migrationBatchSize {
 			exhausted = true
 		}
 

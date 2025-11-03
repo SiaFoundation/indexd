@@ -141,6 +141,10 @@ func (s *mockStore) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey
 	return nil
 }
 
+func (s *mockStore) MarkSlabRepaired(ctx context.Context, slabID SlabID, success bool) error {
+	return nil
+}
+
 func (s *mockStore) MigrateSector(ctx context.Context, root types.Hash256, hostKey types.PublicKey) (bool, error) {
 	_, ok := s.migratedSectors[hostKey]
 	if !ok {
@@ -255,7 +259,7 @@ func (s *mockStore) Slabs(ctx context.Context, accountID proto.Account, slabIDs 
 	return slabs, nil
 }
 
-func (s *mockStore) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) (result []SlabID, _ error) {
+func (s *mockStore) UnhealthySlabs(ctx context.Context, limit int) (result []SlabID, _ error) {
 	for acc := range s.accounts {
 		for _, slab := range s.pinnedSlabs[acc] {
 			for _, sector := range slab.Sectors {

@@ -350,7 +350,8 @@ func TestHostAccountsForFunding(t *testing.T) {
 	hk2 := store.addTestHost(t)
 
 	// assert there are no accounts to fund
-	accs, err := store.HostAccountsForFunding(context.Background(), hk1, 10)
+	threshold := time.Now().Add(-time.Hour)
+	accs, err := store.HostAccountsForFunding(context.Background(), hk1, threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 0 {
@@ -362,7 +363,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	store.addTestAccount(t, ak1)
 
 	// assert there's now one account to fund
-	accs, err = store.HostAccountsForFunding(context.Background(), hk1, 10)
+	accs, err = store.HostAccountsForFunding(context.Background(), hk1, threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
@@ -394,7 +395,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	}
 
 	// assert there are no accounts to fund
-	accs, err = store.HostAccountsForFunding(context.Background(), hk1, 10)
+	accs, err = store.HostAccountsForFunding(context.Background(), hk1, threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 0 {
@@ -406,7 +407,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	store.addTestAccount(t, ak2)
 
 	// assert h1 has one account to fund
-	accs, err = store.HostAccountsForFunding(context.Background(), hk1, 10)
+	accs, err = store.HostAccountsForFunding(context.Background(), hk1, threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
@@ -418,7 +419,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	}
 
 	// assert h2 has two accounts to fund
-	accs, err = store.HostAccountsForFunding(context.Background(), hk2, 10)
+	accs, err = store.HostAccountsForFunding(context.Background(), hk2, threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 2 {
@@ -428,7 +429,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	}
 
 	// assert limit is applied
-	accs, err = store.HostAccountsForFunding(context.Background(), hk2, 1)
+	accs, err = store.HostAccountsForFunding(context.Background(), hk2, threshold, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
@@ -446,8 +447,16 @@ func TestHostAccountsForFunding(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// if we raise threshold neither account should be returned
+	accs, err = store.HostAccountsForFunding(context.Background(), hk1, threshold.Add(2*time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accs) != 0 {
+		t.Fatal("expected zero accounts")
+	}
+
 	// assert both accounts are returned
-	accs, err = store.HostAccountsForFunding(context.Background(), hk1, 10)
+	accs, err = store.HostAccountsForFunding(context.Background(), hk1, threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 2 {
@@ -466,7 +475,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	}
 
 	// only ak1 should be returned
-	accs, err = store.HostAccountsForFunding(context.Background(), hk1, 10)
+	accs, err = store.HostAccountsForFunding(context.Background(), hk1, threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
@@ -485,7 +494,8 @@ func TestUpdateHostAccounts(t *testing.T) {
 	store.addTestAccount(t, ak)
 
 	// fetch accounts for funding
-	accounts, err := store.HostAccountsForFunding(context.Background(), hk, 10)
+	threshold := time.Now().Add(-time.Hour)
+	accounts, err := store.HostAccountsForFunding(context.Background(), hk, threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accounts) != 1 {
@@ -559,6 +569,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 	}
 
 	// run benchmark for different number of accounts
+	threshold := time.Now().Add(-time.Hour)
 	for _, numAccounts := range []int{10_000, 100_000, 1_000_000} {
 		// prepare accounts
 		prune("accounts")
@@ -578,7 +589,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 		for _, hk := range hosts {
 			var accs []accounts.HostAccount
 			if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) (err error) {
-				accs, err = newHostAccountsForFunding(context.Background(), tx, hk, hostIDs[hk], batchSize)
+				accs, err = newHostAccountsForFunding(context.Background(), tx, hk, hostIDs[hk], threshold, batchSize)
 				return
 			}); err != nil {
 				b.Fatal(err)
@@ -599,14 +610,14 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 
 				if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
 					// fetch accounts without account_host entry
-					if accounts, err := newHostAccountsForFunding(context.Background(), tx, hk, hostID, batchSize); err != nil {
+					if accounts, err := newHostAccountsForFunding(context.Background(), tx, hk, hostID, threshold, batchSize); err != nil {
 						return err
 					} else if len(accounts) != batchSize {
 						return fmt.Errorf("expected %d new accounts, got %d", batchSize, len(accounts))
 					}
 
 					// fetch accounts with account_host entry
-					if accounts, err := existingHostAccountsForFunding(context.Background(), tx, hk, hostID, batchSize); err != nil {
+					if accounts, err := existingHostAccountsForFunding(context.Background(), tx, hk, hostID, threshold, batchSize); err != nil {
 						return err
 					} else if len(accounts) != batchSize {
 						return fmt.Errorf("expected %d new accounts, got %d", batchSize, len(accounts))
@@ -648,10 +659,11 @@ func BenchmarkUpdateHostAccounts(b *testing.B) {
 		}
 	}
 
+	threshold := time.Now().Add(-time.Hour)
 	b.ResetTimer()
 	for i := range b.N {
 		b.StopTimer()
-		accounts, err := store.HostAccountsForFunding(context.Background(), hosts[i%numHosts], batchSize)
+		accounts, err := store.HostAccountsForFunding(context.Background(), hosts[i%numHosts], threshold, batchSize)
 		if err != nil {
 			b.Fatal(err)
 		}

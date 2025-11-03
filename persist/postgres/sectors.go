@@ -15,6 +15,14 @@ import (
 	"go.sia.tech/indexd/slabs"
 )
 
+const (
+	minRepairBackoff = time.Hour
+	maxRepairBackoff = 24 * time.Hour
+	// maxBadParityShards is the maximum proportion of parity shards that can be
+	// on bad hosts when pinning a slab.
+	maxBadParityShards = 0.2
+)
+
 // MarkSectorsLost marks the sectors as lost by setting both the contract ID and
 // host ID to NULL. This is meant to be used in 2 cases:
 // - The host reports that the sector is lost (e.g. when pinning it, during the integrity check or when fetching it for migration)
@@ -205,7 +213,29 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 			return err
 		}
 
+		hostRows, err := tx.Query(ctx, `SELECT h.public_key FROM contracts c INNER JOIN hosts h ON c.host_id = h.id WHERE state IN (0,1) AND renewed_to IS NULL AND good`)
+		if err != nil {
+			return fmt.Errorf("failed to get good hosts: %w", err)
+		}
+		defer hostRows.Close()
+
+		goodHosts := make(map[types.PublicKey]struct{})
+		for hostRows.Next() {
+			var hk types.PublicKey
+			if err := hostRows.Scan((*sqlPublicKey)(&hk)); err != nil {
+				return fmt.Errorf("failed to scan host key: %w", err)
+			}
+			goodHosts[hk] = struct{}{}
+		}
+		if err := hostRows.Err(); err != nil {
+			return fmt.Errorf("failed to get good host rows: %w", err)
+		}
+
 		for _, slab := range toPin {
+			if slab.MinShards <= 0 || uint(len(slab.Sectors)) < slab.MinShards {
+				return slabs.ErrMinShards
+			}
+
 			digest, err := slab.Digest()
 			if err != nil {
 				return fmt.Errorf("failed to calculate slab digest: %w", err)
@@ -275,10 +305,15 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 					nextIntegrityCheck)
 			}
 
+			var badHosts int
 			var unpinned int64
 			br := tx.SendBatch(ctx, batch)
 			sectorIDs := make([]int64, len(slab.Sectors))
 			for i, sector := range slab.Sectors {
+				if _, ok := goodHosts[sector.HostKey]; !ok {
+					badHosts++
+				}
+
 				var inserted bool
 				if err := br.QueryRow().Scan(&sectorIDs[i], &inserted); err != nil {
 					br.Close()
@@ -291,6 +326,12 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 				}
 			}
 			br.Close()
+
+			// if more than 20% of parity shards are on bad hosts, don't allow slab to be pinned
+			parityShards := len(slab.Sectors) - int(slab.MinShards)
+			if float64(badHosts) > maxBadParityShards*float64(parityShards) {
+				return slabs.ErrBadHosts
+			}
 
 			// update number of unpinned sectors
 			if unpinned > 0 {
@@ -671,69 +712,69 @@ func (s *Store) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, li
 	return roots, err
 }
 
-// UnhealthySlabs returns the ID of slabs which have at least one sector that
-// needs to be migrated to a new host and hasn't had a repair attempted since
-// 'maxRepairAttempt'. The condition for such a slab is that it either has:
-// a). a sector that is not stored on a host (host_id == null)
-// b). a sector that is stored in a bad contract (contract_id != null && contract.good = false)
-// If a slab is found, it will have its last_repair_attempt updated to the time
-// of the call. To prevent subsequent or parallel calls from returning the same slab.
+// UnhealthySlabs returns the IDs of slabs which have at least one sector that
+// needs to be migrated and have not been abandoned.
 //
-// NOTE: For the sake of scalability, we don't prioritize any slabs and instead
-// simply fetch the first batch we find.
-func (s *Store) UnhealthySlabs(ctx context.Context, maxRepairAttempt time.Time, limit int) (results []slabs.SlabID, err error) {
-	now := time.Now()
-	if maxRepairAttempt.After(now) {
-		return nil, fmt.Errorf("maxRepairAttempt (%v) must be in the past (current time: %v)", maxRepairAttempt, now) // developer error
-	}
-
+// The condition for such a sector is that it's either not stored on a host or
+// it's not pinned to a good contract.
+//
+// NOTE: Subsequent calls to this function do not return the same slabs because
+// a minimum of 1 hour must pass between consecutive migration attempts. The
+// caller is expected to update the slab with the repair result after the
+// migration was attempted.
+//
+// NOTE: For the sake of scalability, we don't prioritize slabs based on their
+// health but simply return the slabs that have been waiting the longest for a
+// repair first.
+func (s *Store) UnhealthySlabs(ctx context.Context, limit int) (unhealthy []slabs.SlabID, err error) {
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		const query = `SELECT s.id, s.digest
-FROM slabs s
-WHERE s.last_repair_attempt < $1
-AND EXISTS (
-  SELECT 1
-  FROM slab_sectors ss
-  JOIN sectors sec ON sec.id = ss.sector_id
-  LEFT JOIN contract_sectors_map csm ON csm.id = sec.contract_sectors_map_id
-  LEFT JOIN contracts c ON c.contract_id = csm.contract_id
-  WHERE ss.slab_id = s.id
-    AND (
-      sec.host_id IS NULL
-      OR (sec.contract_sectors_map_id IS NOT NULL
-          AND (c.good = FALSE OR c.state NOT IN ($2, $3)))
-    )
-)
-ORDER BY s.last_repair_attempt ASC
-LIMIT $4;`
-		var selected []int64
-		rows, err := tx.Query(ctx, query, maxRepairAttempt, sqlContractState(contracts.ContractStateActive), sqlContractState(contracts.ContractStatePending), limit)
+			FROM slabs s
+			WHERE s.next_repair_attempt < NOW()
+				AND EXISTS (
+					SELECT 1
+					FROM slab_sectors ss
+					JOIN sectors sec ON sec.id = ss.sector_id
+					LEFT JOIN contract_sectors_map csm ON csm.id = sec.contract_sectors_map_id
+					LEFT JOIN contracts c ON c.contract_id = csm.contract_id
+					WHERE ss.slab_id = s.id
+						AND (
+						sec.host_id IS NULL
+						OR (sec.contract_sectors_map_id IS NOT NULL
+							AND (c.good = FALSE OR c.state NOT IN (0, 1)))
+						)
+				)
+			ORDER BY s.next_repair_attempt ASC
+			LIMIT $1;`
+		rows, err := tx.Query(ctx, query, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query unhealthy slabs: %w", err)
 		}
 		defer rows.Close()
 
+		var slabIDs []int64
 		for rows.Next() {
 			var id int64
-			var digest slabs.SlabID
-			if err := rows.Scan(&id, (*sqlHash256)(&digest)); err != nil {
+			var slabID slabs.SlabID
+			if err := rows.Scan(&id, (*sqlHash256)(&slabID)); err != nil {
 				return fmt.Errorf("failed to scan unhealthy slab: %w", err)
 			}
-			results = append(results, digest)
-			selected = append(selected, id)
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("failed to read unhealthy slabs: %w", err)
+			unhealthy = append(unhealthy, slabID)
+			slabIDs = append(slabIDs, id)
 		}
 		rows.Close()
-		if len(selected) == 0 {
-			return nil
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to get unhealthy slabs: %w", err)
+		} else if len(slabIDs) == 0 {
+			return nil // no unhealthy slabs
 		}
 
-		// update last_repair_attempt for the selected slabs
-		if _, err := tx.Exec(ctx, `UPDATE slabs SET last_repair_attempt = $1 WHERE id = ANY($2)`, now, selected); err != nil {
-			return fmt.Errorf("failed to update last_repair_attempt: %w", err)
+		// update next repair attempt time
+		_, err = tx.Exec(ctx, `UPDATE slabs SET next_repair_attempt = $1 WHERE id = ANY($2)`, time.Now().Add(minRepairBackoff), slabIDs)
+		if err != nil {
+			return fmt.Errorf("failed to update next repair attempt: %w", err)
 		}
+
 		return nil
 	})
 	return

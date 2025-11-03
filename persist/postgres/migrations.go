@@ -451,6 +451,17 @@ FROM objects o;
 		_, err := tx.Exec(ctx, `ALTER TABLE global_settings ADD COLUMN wallet_hash BYTEA CHECK(wallet_hash IS NULL OR LENGTH(wallet_hash) = 32);`)
 		return err
 	},
+	// add consecutive_failed_repairs and next_repair_attempt to slabs
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+			ALTER TABLE slabs DROP COLUMN last_repair_attempt;
+			ALTER TABLE slabs ADD COLUMN consecutive_failed_repairs SMALLINT NOT NULL DEFAULT 0 CHECK (consecutive_failed_repairs >= 0);
+			ALTER TABLE slabs ADD COLUMN next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW();
+			CREATE INDEX slabs_id_next_repair_attempt_idx ON slabs(next_repair_attempt ASC);
+			DROP INDEX slab_sectors_sector_id_idx;
+		`)
+		return err
+	},
 	// add connect_key to accounts
 	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
 		_, err := tx.Exec(ctx, `

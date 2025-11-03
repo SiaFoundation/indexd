@@ -32,7 +32,7 @@ func TestMigrateSector(t *testing.T) {
 	hk2 := store.addTestHost(t)
 
 	// add contract for first host
-	fcid1 := store.addTestContract(t, hk1, types.FileContractID(hk1))
+	fcid1 := store.addTestContract(t, hk1)
 
 	// pin a slab to add 2 sectors which are both stored on the first host
 	pinTime := time.Now().Round(time.Microsecond)
@@ -40,7 +40,7 @@ func TestMigrateSector(t *testing.T) {
 	root2 := types.Hash256{2}
 	_, err := store.PinSlabs(context.Background(), account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
@@ -173,6 +173,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 
 	// add host
 	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
 
 	// pin a slab to add 2 sectors
 	pinTime := time.Now().Round(time.Microsecond)
@@ -180,7 +181,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 	root2 := types.Hash256{2}
 	_, err := store.PinSlabs(context.Background(), account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
@@ -333,6 +334,7 @@ func TestSectorsForIntegrityCheck(t *testing.T) {
 
 	// add host
 	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
 
 	// pin a slab to add a few sectors to the database
 	root1 := frand.Entropy256()
@@ -341,7 +343,7 @@ func TestSectorsForIntegrityCheck(t *testing.T) {
 	root4 := frand.Entropy256()
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
@@ -418,12 +420,14 @@ func TestSlabIDs(t *testing.T) {
 	// add two hosts
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
+	store.addTestContract(t, hk1)
+	store.addTestContract(t, hk2)
 
 	// helper to create slab pin params
 	params := func() slabs.SlabPinParams {
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
-			MinShards:     10,
+			MinShards:     1,
 			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
@@ -508,12 +512,14 @@ func TestPinSlabs(t *testing.T) {
 	// add two hosts
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
+	store.addTestContract(t, hk1)
+	store.addTestContract(t, hk2)
 
 	// helper to create slabs
 	newSlab := func(i byte) (slabs.SlabID, slabs.SlabPinParams) {
 		slab := slabs.SlabPinParams{
 			EncryptionKey: [32]byte{i},
-			MinShards:     10,
+			MinShards:     1,
 			Sectors: []slabs.PinnedSector{
 				{
 					Root:    frand.Entropy256(),
@@ -573,6 +579,14 @@ func TestPinSlabs(t *testing.T) {
 	assertPinnedData(account, 2*slabSize)
 	assertPinnedData(account2, 0)
 	assertUnpinnedSectors(4)
+
+	// check that pinning with too large MinShards fails
+	_, slab3 := newSlab(3)
+	slab3.MinShards = 100
+	_, err = store.PinSlabs(context.Background(), proto.Account{1}, nextCheck, slab3)
+	if err == nil || !errors.Is(err, slabs.ErrMinShards) {
+		t.Fatalf("expected error %v, got %v", slabs.ErrMinShards, err)
+	}
 
 	sectorUploadedAt := func(root types.Hash256) (uploadedAt time.Time) {
 		t.Helper()
@@ -724,7 +738,7 @@ func TestPinSlabs(t *testing.T) {
 	assertUnpinnedSectors(4)
 
 	// pinning one more slab should fail
-	_, slab3 := newSlab(3)
+	_, slab3 = newSlab(3)
 	_, err = store.PinSlabs(context.Background(), account, nextCheck, slab3)
 	if !errors.Is(err, accounts.ErrStorageLimitExceeded) {
 		t.Fatal("expected ErrStorageLimitExceeded, got", err)
@@ -734,6 +748,54 @@ func TestPinSlabs(t *testing.T) {
 	assertUnpinnedSectors(4)
 }
 
+func TestPinSlabsBadHost(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	account := proto.Account{1}
+
+	// add accounts - account1 can pin 2 slabs and account2 can pin 3 slabs
+	store.addTestAccount(t, types.PublicKey(account))
+
+	// this host is good because it has an active good contract on it
+	hk1 := store.addTestHost(t)
+	store.addTestContract(t, hk1)
+	// this host is considered bad by PinSlabs because there are no
+	// contracts formed on it
+	hk2 := store.addTestHost(t)
+
+	// helper to create slabs
+	newSlab := func(i byte, hks ...types.PublicKey) (slabs.SlabID, slabs.SlabPinParams) {
+		slab := slabs.SlabPinParams{
+			EncryptionKey: [32]byte{i},
+			MinShards:     1,
+		}
+		for _, hk := range hks {
+			slab.Sectors = append(slab.Sectors, slabs.PinnedSector{
+				Root:    frand.Entropy256(),
+				HostKey: hk,
+			})
+		}
+		slabID, err := slab.Digest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slabID, slab
+	}
+	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
+
+	// pin slabs
+	slab1ID, slab1 := newSlab(1, hk1)
+	if slabIDs, err := store.PinSlabs(context.Background(), proto.Account{1}, nextCheck, slab1); err != nil {
+		t.Fatal(err)
+	} else if slabIDs[0] != slab1ID {
+		t.Fatalf("expected slab ID %v, got %v", slab1ID, slabIDs[0])
+	}
+
+	_, slab2 := newSlab(1, hk2)
+	if _, err := store.PinSlabs(context.Background(), proto.Account{1}, nextCheck, slab2); err == nil || !errors.Is(err, slabs.ErrBadHosts) {
+		t.Fatalf("expected error %v, got %v", slabs.ErrBadHosts, err)
+	}
+}
+
 func TestPinSlabsConflict(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 	account := proto.Account{1}
@@ -741,6 +803,7 @@ func TestPinSlabsConflict(t *testing.T) {
 
 	store.addTestAccount(t, types.PublicKey(account))
 	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
 
 	// helper to create slabs
 	newSlab := func() (slabs.SlabID, slabs.SlabPinParams) {
@@ -832,6 +895,7 @@ func TestUnpinSlab(t *testing.T) {
 
 	// add host
 	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
 
 	// precreate 3 slabs, 2 sectors each
 	var params []slabs.SlabPinParams
@@ -959,7 +1023,7 @@ func TestPinSectors(t *testing.T) {
 	// create 4 sectors
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				HostKey: hk,
@@ -1049,36 +1113,26 @@ func TestPinSectors(t *testing.T) {
 func TestUnhealthySlabs(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
-	// convenience variables
-	now := time.Now()
-	oneHourAgo := now.Add(-time.Hour)
-
-	// define a helper to assert the number of unhealthy slabs
-	assertUnhealthySlabs := func(expected, limit int, maxLastRepairTime time.Time) []slabs.SlabID {
+	// assertUnhealthySlabs asserts the number of unhealthy slabs
+	assertUnhealthySlabs := func(expected, limit int) []slabs.SlabID {
 		t.Helper()
-		unhealthyIDs, err := store.UnhealthySlabs(context.Background(), maxLastRepairTime, limit)
+
+		unhealthy, err := store.UnhealthySlabs(context.Background(), limit)
 		if err != nil {
 			t.Fatal(err)
-		} else if len(unhealthyIDs) != expected {
-			t.Fatalf("expected %d unhealthy slabs, got %d", expected, len(unhealthyIDs))
+		} else if len(unhealthy) != expected {
+			t.Fatalf("expected %d unhealthy slabs, got %d", expected, len(unhealthy))
 		}
-
-		// always assert slabIDs are unique
-		seen := make(map[slabs.SlabID]struct{})
-		for _, id := range unhealthyIDs {
-			if _, exists := seen[id]; exists {
-				t.Fatalf("duplicate slab ID %v in unhealthy slabs", id)
-			}
-			seen[id] = struct{}{}
-		}
-
-		return unhealthyIDs
+		return unhealthy
 	}
 
-	// define a helper to reset the repair attempt time
-	resetLastRepairAttempt := func(val time.Time) {
+	// resetNextRepairAttemptTime sets the next_repair_attempt to an hour
+	// ago for all slabs to allow them to be returned again should they still be
+	// unhealthy
+	resetNextRepairAttemptTime := func() {
 		t.Helper()
-		_, err := store.pool.Exec(context.Background(), "UPDATE slabs SET last_repair_attempt = $1", val)
+
+		_, err := store.pool.Exec(context.Background(), "UPDATE slabs SET next_repair_attempt = NOW() - INTERVAL '1 hour'")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1090,12 +1144,12 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// add a host and a contract
 	hk := store.addTestHost(t)
-	contractID := store.addTestContract(t, hk, types.FileContractID(hk))
+	contractID := store.addTestContract(t, hk)
 
-	// add two slabs & immediately reset the LRA-time
+	// add two slabs
 	slabID1 := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
 	slabID2 := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
-	resetLastRepairAttempt(oneHourAgo)
+	resetNextRepairAttemptTime()
 
 	// pin all sectors to the contract
 	_, err := store.pool.Exec(context.Background(), "UPDATE sectors SET contract_sectors_map_id = 1")
@@ -1104,19 +1158,18 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// assert we have no unhealthy slabs
-	assertUnhealthySlabs(0, 10, now)
+	assertUnhealthySlabs(0, 10)
 
 	// renew the contract
-	renewedTo := types.FileContractID{1}
 	renewal := newTestRevision(hk)
 	renewal.ExpirationHeight = 0 // expired, will be pruned the next time PruneContractSectorsMap is called
-	err = store.AddRenewedContract(context.Background(), contractID, renewedTo, renewal, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
+	err = store.AddRenewedContract(context.Background(), contractID, types.FileContractID{1}, renewal, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert we still have no unhealthy slabs
-	assertUnhealthySlabs(0, 10, now)
+	assertUnhealthySlabs(0, 10)
 
 	// update the contract to be bad
 	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE")
@@ -1125,50 +1178,42 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// assert both slabs are unhealthy
-	assertUnhealthySlabs(2, 10, now)
+	assertUnhealthySlabs(2, 10)
 
-	// consecutive calls to unhealthy slabs return no new slabs since the
-	// LRA-time has been updated
-	assertUnhealthySlabs(0, 10, now)
+	// assert consecutive calls to unhealthy slabs return no new slabs
+	assertUnhealthySlabs(0, 10)
 
-	// reset the LRA-time and assert we have no unhealthy slabs since that time
-	resetLastRepairAttempt(oneHourAgo)
-	assertUnhealthySlabs(0, 10, oneHourAgo)
+	// reset the next repair attempt time and assert we have unhealthy slabs
+	resetNextRepairAttemptTime()
+	assertUnhealthySlabs(2, 10)
 
-	// do that again but with the current time, assert we have two unhealthy slabs
-	assertUnhealthySlabs(2, 10, now)
-
-	// reset the LRA-time and assert the limit is applied
-	resetLastRepairAttempt(oneHourAgo)
-	assertUnhealthySlabs(1, 1, now)
+	// reset the next repair attempt time and assert the limit is applied
+	resetNextRepairAttemptTime()
+	assertUnhealthySlabs(1, 1)
 
 	// we can call it again since we have one left, should be SlabID2
-	unhealthyIDs := assertUnhealthySlabs(1, 1, now)
-	if unhealthyIDs[0] != slabID2 {
-		t.Fatalf("expected slab ID %v, got %v", slabID2, unhealthyIDs[0])
+	unhealthy := assertUnhealthySlabs(1, 1)
+	if unhealthy[0] != slabID2 {
+		t.Fatalf("expected slab ID %v, got %v", slabID2, unhealthy[0])
 	}
+	resetNextRepairAttemptTime()
 
-	// reset the LRA-time and make the contract good again
-	resetLastRepairAttempt(oneHourAgo)
+	// make the contract good again and assert no unhealthy slabs
 	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET good = TRUE")
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertUnhealthySlabs(0, 10)
 
-	// assert no slabs are unhealthy
-	assertUnhealthySlabs(0, 10, now)
-
-	// update the contract to be no longer active or pending
+	// update the contract to be no longer active or pending and assert both slabs are unhealthy
 	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateExpired))
 	if err != nil {
 		t.Fatal(err)
 	}
+	assertUnhealthySlabs(2, 10)
+	resetNextRepairAttemptTime()
 
-	// assert both slabs are unhealthy
-	assertUnhealthySlabs(2, 10, now)
-
-	// reset the LRA-time and set the state back to active
-	resetLastRepairAttempt(oneHourAgo)
+	// set the state back to active
 	_, err = store.pool.Exec(context.Background(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateActive))
 	if err != nil {
 		t.Fatal(err)
@@ -1181,20 +1226,20 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// assert slab1 is unhealthy
-	unhealthyIDs = assertUnhealthySlabs(1, 10, now)
+	unhealthy = assertUnhealthySlabs(1, 10)
 	if err != nil {
 		t.Fatal(err)
-	} else if unhealthyIDs[0] != slabID1 {
-		t.Fatalf("expected slab ID %v, got %v", slabID1, unhealthyIDs[0])
+	} else if unhealthy[0] != slabID1 {
+		t.Fatalf("expected slab ID %v, got %v", slabID1, unhealthy[0])
 	}
+	resetNextRepairAttemptTime()
 
 	// add the sector back - the unhealthy slab should be gone
 	_, err = store.pool.Exec(context.Background(), "UPDATE sectors SET host_id = 1, contract_sectors_map_id = NULL WHERE id = 1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	resetLastRepairAttempt(oneHourAgo)
-	assertUnhealthySlabs(0, 10, now)
+	assertUnhealthySlabs(0, 10)
 
 	// recalculate sector stats
 	_, err = store.pool.Exec(context.Background(), `
@@ -1222,14 +1267,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// assert slab1 is not considered unhealthy since it is considered uploaded
 	// to a host but not yet pinned
-	resetLastRepairAttempt(oneHourAgo)
-	assertUnhealthySlabs(0, 10, now)
-
-	// assert maxLastRepairAttempt must be in the past
-	_, err = store.UnhealthySlabs(context.Background(), time.Now().Add(time.Second), 10)
-	if err == nil {
-		t.Fatal("expected error for future maxLastRepairAttempt, got nil")
-	}
+	assertUnhealthySlabs(0, 10)
 }
 
 func TestMarkSectorsUnpinnable(t *testing.T) {
@@ -1252,7 +1290,7 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 
 	// add host with a contract
 	hk := store.addTestHost(t)
-	store.addTestContract(t, hk, types.FileContractID(hk))
+	store.addTestContract(t, hk)
 
 	// pin a slab to add a few sectors to the database
 	root1 := frand.Entropy256()
@@ -1260,7 +1298,7 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 	root3 := frand.Entropy256()
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
@@ -1289,7 +1327,7 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 
 	// after pinning, no slab should be unhealthy since their sectors aren't
 	// pinned to contracts yet.
-	unhealthyIDs, err := store.UnhealthySlabs(context.Background(), time.Now(), 1)
+	unhealthyIDs, err := store.UnhealthySlabs(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthyIDs) != 0 {
@@ -1305,7 +1343,7 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 
 	// we should still have no unhealthy slabs because the host_id has not been
 	// set to null yet
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthyIDs) != 0 {
@@ -1320,7 +1358,7 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 
 	// sector should have had host_id nulled out due to MarkSectorsUnpinnable
 	// and should now be unhealthy
-	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), time.Now(), 1)
+	unhealthyIDs, err = store.UnhealthySlabs(context.Background(), 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthyIDs) != 1 {
@@ -1337,12 +1375,12 @@ func TestUnpinnedSectors(t *testing.T) {
 	account := proto.Account{1}
 	store.addTestAccount(t, types.PublicKey(account))
 	hk := store.addTestHost(t)
-	store.addTestContract(t, hk, types.FileContractID(hk))
+	store.addTestContract(t, hk)
 
 	// create 4 sectors
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				HostKey: hk,
@@ -1422,6 +1460,10 @@ func BenchmarkSlabs(b *testing.B) {
 	for i := byte(0); i < 30; i++ {
 		hks = append(hks, store.addTestHost(b, types.PublicKey{i}))
 	}
+	// add 500 other hosts to reflect mainnet
+	for range 500 {
+		store.addTestHost(b)
+	}
 
 	// helper to create slabs
 	newSlab := func() slabs.SlabPinParams {
@@ -1434,7 +1476,7 @@ func BenchmarkSlabs(b *testing.B) {
 		}
 		slab := slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
-			MinShards:     10,
+			MinShards:     1,
 			Sectors:       sectors,
 		}
 		return slab
@@ -1552,7 +1594,7 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk, types.FileContractID(hk))
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -1708,7 +1750,7 @@ func BenchmarkPinSectors(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk, types.FileContractID(hk))
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -1790,7 +1832,7 @@ func BenchmarkPinSectors(b *testing.B) {
 
 // BenchmarkUnhealthySlabs benchmarks UnhealthySlabs
 func BenchmarkUnhealthySlabs(b *testing.B) {
-	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
+	store := initPostgres(b, zap.NewNop())
 
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
@@ -1802,8 +1844,8 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 	}
 
 	// add 2 contracts
-	store.addTestContract(b, hks[0], types.FileContractID(hks[0]))
-	store.addTestContract(b, hks[1], types.FileContractID(hks[1]))
+	store.addTestContract(b, hks[0])
+	store.addTestContract(b, hks[1])
 
 	// mark the second contract as bad
 	res, err := store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE id = 2") // id 2 is bad
@@ -1824,7 +1866,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		}
 		slab := slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
-			MinShards:     10,
+			MinShards:     1,
 			Sectors:       sectors,
 		}
 		return slab
@@ -1839,13 +1881,6 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-	}
-
-	// make sure the slabs have a last_repair_attempt time between 1 and 7 days
-	// in the past
-	_, err = store.pool.Exec(context.Background(), "UPDATE slabs SET last_repair_attempt = NOW() - interval '1 day' - interval '1 week' * random()")
-	if err != nil {
-		b.Fatal(err)
 	}
 
 	// default to the good contract for all sectors
@@ -1866,33 +1901,42 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	reset := func(b *testing.B) {
-		// make sure the slabs have a last_repair_attempt time between 1 and 7 days
-		// in the past
-		_, err = store.pool.Exec(context.Background(), "UPDATE slabs SET last_repair_attempt = NOW() - interval '1 day' - interval '1 week' * random()")
+	// reset next_repair_attempt
+	resetUnhealthySlabs := func() {
+		b.Helper()
+		_, err = store.pool.Exec(context.Background(), "UPDATE slabs SET next_repair_attempt = (NOW() - interval '3 day') + interval '1 week' * random()")
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
 
-	for _, batchSize := range []int{10, 25, 50} {
-		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
-			reset(b)
-			b.ResetTimer()
+	// analyze tables to ensure query planner has up-to-date statistics
+	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) slabs;`)
+	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) sectors;`)
+	_, vErr3 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contract_sectors_map;`)
+	if err := errors.Join(vErr1, vErr2, vErr3); err != nil {
+		b.Fatal(err)
+	}
 
-			seenSlabs := make(map[slabs.SlabID]struct{})
+	for _, batchSize := range []int{50, 100, 250} {
+		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
+			var sanityCheck bool
 			for b.Loop() {
-				slabIDs, err := store.UnhealthySlabs(context.Background(), time.Now().Add(-time.Hour), batchSize)
+				slabIDs, err := store.UnhealthySlabs(context.Background(), batchSize)
 				if err != nil {
 					b.Fatal(err)
-				} else if len(slabIDs) == 0 && len(seenSlabs) == 0 {
-					// if UnhealthySlabs returns empty slice and hasn't returned
-					// any slabs yet for this iteration
-					b.Fatalf("got 0 slabs")
-				} else if _, exists := seenSlabs[slabIDs[0]]; exists {
-					b.Fatal("known slab was returned")
+				} else if len(slabIDs) < batchSize {
+					b.StopTimer()
+					resetUnhealthySlabs()
+					b.StartTimer()
+					continue
+				} else if len(slabIDs) != batchSize {
+					b.Fatalf("expected %d unhealthy slabs, got %d", batchSize, len(slabIDs))
 				}
-				seenSlabs[slabIDs[0]] = struct{}{}
+				sanityCheck = sanityCheck || len(slabIDs) > 0
+			}
+			if !sanityCheck {
+				b.Fatal("sanity check failed, no unhealthy slabs were ever returned")
 			}
 		})
 	}
@@ -1911,7 +1955,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 
 	// add host with one contract
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk, types.FileContractID(hk))
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -2166,8 +2210,8 @@ func TestMarkSectorsLost(t *testing.T) {
 	hk2 := store.addTestHost(t)
 
 	// add a contract for each host
-	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
-	_ = store.addTestContract(t, hk2, types.FileContractID{2})
+	fcid1 := store.addTestContract(t, hk1)
+	_ = store.addTestContract(t, hk2)
 
 	// pin a slab that adds 2 sectors to each host
 	root1 := frand.Entropy256()
@@ -2176,7 +2220,7 @@ func TestMarkSectorsLost(t *testing.T) {
 	root4 := frand.Entropy256()
 	_, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
-		MinShards:     10,
+		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
 			{
 				Root:    root1,
@@ -2293,7 +2337,7 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 	hk := store.addTestHost(b)
-	store.addTestContract(b, hk, types.FileContractID(hk))
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -2421,7 +2465,7 @@ func BenchmarkMigrateSector(b *testing.B) {
 	var hks []types.PublicKey
 	for range 100 {
 		hk := store.addTestHost(b)
-		store.addTestContract(b, hk, types.FileContractID(hk))
+		store.addTestContract(b, hk)
 		hks = append(hks, hk)
 	}
 

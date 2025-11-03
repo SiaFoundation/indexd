@@ -43,7 +43,7 @@ type (
 	// update them after funding.
 	Store interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
-		HostAccountsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]HostAccount, error)
+		HostAccountsForFunding(ctx context.Context, hk types.PublicKey, threshold time.Time, limit int) ([]HostAccount, error)
 		ScheduleAccountsForFunding(ctx context.Context, hostKey types.PublicKey) error
 		UpdateHostAccounts(ctx context.Context, accounts []HostAccount) error
 
@@ -124,7 +124,7 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 
 	var exhausted bool
 	for !exhausted {
-		accounts, err := m.store.HostAccountsForFunding(ctx, host.PublicKey, AccountFundBatch)
+		accounts, err := m.store.HostAccountsForFunding(ctx, host.PublicKey, time.Now().Add(-accountActivityThreshold), AccountFundBatch)
 		if err != nil {
 			return fmt.Errorf("failed to fetch accounts for funding: %w", err)
 		} else if len(accounts) < AccountFundBatch {
