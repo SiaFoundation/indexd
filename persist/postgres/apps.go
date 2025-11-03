@@ -124,9 +124,7 @@ func (s *Store) AppConnectKeys(ctx context.Context, offset, limit int) (keys []a
 func (s *Store) DeleteAppConnectKey(ctx context.Context, connectKey string) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var count int64
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE connect_key_id = (SELECT id FROM app_connect_keys WHERE app_key = $1)`, connectKey).Scan(&count); errors.Is(err, sql.ErrNoRows) {
-			return accounts.ErrKeyNotFound
-		} else if err != nil {
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE connect_key_id = (SELECT id FROM app_connect_keys WHERE app_key = $1)`, connectKey).Scan(&count); err != nil {
 			return fmt.Errorf("failed to check if connect key in use: %w", err)
 		} else if count != 0 {
 			return accounts.ErrKeyInUse

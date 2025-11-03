@@ -36,8 +36,7 @@ func (s *Store) Accounts(ctx context.Context, offset, limit int, opts ...account
 		rows, err := tx.Query(ctx, `
 			SELECT a.public_key, ak.app_key, a.service_account, a.max_pinned_data, a.pinned_data, a.description, a.logo_url, a.service_url, a.last_used
 			FROM accounts a
-			LEFT JOIN app_connect_keys ak
-			ON ak.id = a.connect_key_id
+			LEFT JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 			WHERE ($1::boolean IS NULL OR service_account = $1::boolean)
 			LIMIT $2 OFFSET $3
 		`, queryOpts.ServiceAccount, limit, offset)
@@ -68,8 +67,7 @@ func (s *Store) Account(ctx context.Context, ak types.PublicKey) (accounts.Accou
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
 		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.service_account, a.max_pinned_data, a.pinned_data, a.description, a.logo_url, a.service_url, a.last_used
 FROM accounts a
-LEFT JOIN app_connect_keys ak
-ON ak.id = a.connect_key_id
+LEFT JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 WHERE public_key = $1`, sqlPublicKey(ak)))
 		return err
 	})
@@ -322,7 +320,9 @@ func addAccount(ctx context.Context, tx *txn, connectKey *string, account types.
 
 	var connectKeyID sql.NullInt64
 	if connectKey != nil {
-		if err := tx.QueryRow(ctx, `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey).Scan(&connectKeyID); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey).Scan(&connectKeyID); errors.Is(err, sql.ErrNoRows) {
+			return accounts.ErrKeyNotFound
+		} else if err != nil {
 			return fmt.Errorf("failed to get app connect key ID: %w", err)
 		}
 	}
