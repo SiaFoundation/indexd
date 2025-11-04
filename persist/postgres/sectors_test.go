@@ -1840,27 +1840,19 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 	// 30 hosts to simulate default redundancy
 	var hks []types.PublicKey
 	for i := range byte(30) {
-		hks = append(hks, store.addTestHost(b, types.PublicKey{i}))
-	}
-
-	// add 2 contracts
-	store.addTestContract(b, hks[0])
-	store.addTestContract(b, hks[1])
-
-	// mark the second contract as bad
-	res, err := store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE id = 2") // id 2 is bad
-	if err != nil {
-		b.Fatal(err)
-	} else if res.RowsAffected() != 1 {
-		b.Fatal("expected to update 1 row")
+		hk := store.addTestHost(b, types.PublicKey{i})
+		store.addTestContract(b, hk, types.FileContractID(hk))
+		hks = append(hks, hk)
 	}
 
 	// helper to create slabs
+	hostSectors := make([][]types.Hash256, len(hks))
 	newSlab := func() slabs.SlabPinParams {
 		var sectors []slabs.PinnedSector
 		for i := range hks {
+			hostSectors[i] = append(hostSectors[i], frand.Entropy256())
 			sectors = append(sectors, slabs.PinnedSector{
-				Root:    frand.Entropy256(),
+				Root:    hostSectors[i][len(hostSectors[i])-1],
 				HostKey: hks[i],
 			})
 		}
@@ -1877,20 +1869,22 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 
 	// prepare base db
 	for range dbBaseSize / slabSize {
-		_, err = store.PinSlabs(context.Background(), account, time.Time{}, newSlab())
+		_, err := store.PinSlabs(context.Background(), account, time.Time{}, newSlab())
 		if err != nil {
 			b.Fatal(err)
 		}
 	}
 
-	// default to the good contract for all sectors
-	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id = 1`)
-	if err != nil {
-		b.Fatal(err)
+	// pin sectors
+	for i, hk := range hks {
+		err := store.PinSectors(b.Context(), types.FileContractID(hk), hostSectors[i])
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 
 	// 25% of the sectors are stored on a bad contract
-	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET contract_sectors_map_id = 2 WHERE id % 4 = 0`)
+	_, err := store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE id % 4 = 0")
 	if err != nil {
 		b.Fatal(err)
 	}
