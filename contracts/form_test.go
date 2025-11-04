@@ -159,16 +159,20 @@ func (s *hostManagerMock) WithScannedHost(ctx context.Context, hk types.PublicKe
 	return fn(h)
 }
 
-func (s *hostManagerMock) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) {
-	return s.store.HostsForPruning(ctx)
-}
-
 func (s *hostManagerMock) Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error) {
 	return s.store.Host(ctx, hk)
 }
 
+func (s *hostManagerMock) HostsForFunding(ctx context.Context) ([]types.PublicKey, error) {
+	return s.store.HostsForFunding(ctx)
+}
+
 func (s *hostManagerMock) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
 	return s.store.HostsForPinning(ctx)
+}
+
+func (s *hostManagerMock) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) {
+	return s.store.HostsForPruning(ctx)
 }
 
 func (s *hostManagerMock) HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error) {

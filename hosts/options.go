@@ -18,6 +18,13 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
+// WithScanner sets the scanner for the HostManager.
+func WithScanner(scanner Scanner) Option {
+	return func(m *HostManager) {
+		m.scanner = scanner
+	}
+}
+
 // WithAnnouncementMaxAge sets the maximum age of an announcement before it gets
 // ignored.
 func WithAnnouncementMaxAge(maxAge time.Duration) Option {

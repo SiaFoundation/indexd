@@ -86,6 +86,7 @@ type (
 	HostManager interface {
 		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
+		HostsForFunding(ctx context.Context) ([]types.PublicKey, error)
 		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
 		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error

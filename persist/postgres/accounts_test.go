@@ -483,6 +483,25 @@ func TestHostAccountsForFunding(t *testing.T) {
 	} else if accs[0].AccountKey != proto.Account(ak1) {
 		t.Fatal("unexpected account")
 	}
+
+	// add 2 service accounts
+	sa1 := types.GeneratePrivateKey().PublicKey()
+	sa2 := types.GeneratePrivateKey().PublicKey()
+	for _, sa := range []types.PublicKey{sa1, sa2} {
+		if err := store.AddServiceAccount(t.Context(), sa, accounts.AccountMeta{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// both service accounts should be returned for hk1
+	accs, err = store.HostAccountsForFunding(context.Background(), hk1, time.Now().Add(time.Hour), 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accs) != 2 {
+		t.Fatalf("expected two accounts, got %d", len(accs))
+	} else if accs[0].AccountKey != proto.Account(sa1) || accs[1].AccountKey != proto.Account(sa2) {
+		t.Fatal("unexpected accounts")
+	}
 }
 
 func TestUpdateHostAccounts(t *testing.T) {

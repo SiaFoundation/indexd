@@ -7,61 +7,53 @@ import (
 	"sync"
 	"time"
 
-	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/core/types"
 	"go.uber.org/zap"
 )
 
 func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool, log *zap.Logger) error {
 	start := time.Now()
 
-	// fund accounts on usable hosts with active contracts
-	opts := []hosts.HostQueryOpt{
-		hosts.WithUsable(true),
-		hosts.WithBlocked(false),
-		hosts.WithActiveContracts(true),
+	// fetch hosts
+	hostsToFund, err := cm.hosts.HostsForFunding(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch hosts for account funding: %w", err)
 	}
 
-	const batchSize = 50
-	for offset := 0; ; offset += batchSize {
-		// fetch hosts
-		hostsToFund, err := cm.hosts.Hosts(ctx, offset, batchSize, opts...)
-		if err != nil {
-			return fmt.Errorf("failed to fetch hosts for account funding: %w", err)
-		}
+	// fund accounts on all hosts
+	var wg sync.WaitGroup
+	for _, hk := range hostsToFund {
+		wg.Add(1)
+		go func(ctx context.Context, hostKey types.PublicKey, log *zap.Logger) {
+			ctx, cancel := context.WithTimeout(ctx, fundTimeout)
+			defer func() {
+				wg.Done()
+				cancel()
+			}()
 
-		// fund accounts on all hosts
-		var wg sync.WaitGroup
-		for _, host := range hostsToFund {
-			wg.Add(1)
-			go func(ctx context.Context, host hosts.Host, log *zap.Logger) {
-				ctx, cancel := context.WithTimeout(ctx, fundTimeout)
-				defer func() {
-					wg.Done()
-					cancel()
-				}()
+			host, err := cm.hosts.Host(ctx, hostKey)
+			if err != nil {
+				log.Error("failed to fetch host for funding", zap.Error(err))
+				return
+			}
 
-				contractIDs, err := cm.store.ContractsForFunding(ctx, host.PublicKey, 10)
-				if err != nil {
-					log.Error("failed to fetch contracts for funding", zap.Error(err))
-					return
-				} else if len(contractIDs) == 0 {
-					log.Debug("no contracts for funding")
-					return
-				}
+			contractIDs, err := cm.store.ContractsForFunding(ctx, host.PublicKey, 10)
+			if err != nil {
+				log.Error("failed to fetch contracts for funding", zap.Error(err))
+				return
+			} else if len(contractIDs) == 0 {
+				log.Debug("no contracts for funding")
+				return
+			}
 
-				err = cm.accounts.FundAccounts(ctx, host, contractIDs, force, log)
-				if err != nil {
-					log.Debug("failed to fund accounts", zap.Error(err))
-					return
-				}
-			}(ctx, host, log.With(zap.Stringer("hostKey", host.PublicKey)))
-		}
-		wg.Wait()
-
-		if len(hostsToFund) < batchSize {
-			break
-		}
+			err = cm.accounts.FundAccounts(ctx, host, contractIDs, force, log)
+			if err != nil {
+				log.Debug("failed to fund accounts", zap.Error(err))
+				return
+			}
+		}(ctx, hk, log.With(zap.Stringer("hostKey", hk)))
 	}
+	wg.Wait()
 
 	log.Debug("funding finished", zap.Duration("duration", time.Since(start)))
 	return ctx.Err()

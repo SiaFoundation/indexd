@@ -346,7 +346,7 @@ func newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey,
 SELECT a.public_key
 FROM accounts a
 LEFT JOIN account_hosts ah ON a.id = ah.account_id AND ah.host_id = $1
-WHERE ah.account_id IS NULL AND a.last_used >= $2
+WHERE ah.account_id IS NULL AND (a.last_used >= $2 OR a.service_account = TRUE)
 LIMIT $3;`, hostID, threshold, limit)
 	if err != nil {
 		return nil, err
@@ -374,7 +374,7 @@ func existingHostAccountsForFunding(ctx context.Context, tx *txn, hk types.Publi
 SELECT public_key, consecutive_failed_funds, next_fund
 FROM account_hosts ha
 INNER JOIN accounts a ON a.id = ha.account_id
-WHERE ha.host_id = $1 AND ha.next_fund <= NOW() AND a.last_used >= $2
+WHERE ha.host_id = $1 AND ha.next_fund <= NOW() AND (a.last_used >= $2 OR a.service_account = TRUE)
 ORDER BY next_fund ASC
 LIMIT $3`, hostID, threshold, limit)
 	if err != nil {

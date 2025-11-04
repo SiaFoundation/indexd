@@ -98,9 +98,10 @@ type (
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error)
 		HostStats(ctx context.Context, offset, limit int) ([]HostStats, error)
 
-		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
+		HostsForFunding(ctx context.Context) ([]types.PublicKey, error)
 		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
 		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
+		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
 		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
 
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error
@@ -145,6 +146,11 @@ func (hm *HostManager) Host(ctx context.Context, hostKey types.PublicKey) (Host,
 // Hosts returns a list of hosts filtered by the given query options.
 func (hm *HostManager) Hosts(ctx context.Context, offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error) {
 	return hm.store.Hosts(ctx, offset, limit, queryOpts...)
+}
+
+// HostsForFunding returns a list of hosts that need account funding.
+func (hm *HostManager) HostsForFunding(ctx context.Context) ([]types.PublicKey, error) {
+	return hm.store.HostsForFunding(ctx)
 }
 
 // HostsForPruning returns a list of hosts with sectors that need pruning

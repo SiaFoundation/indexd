@@ -830,8 +830,41 @@ func (s *Store) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.T
 	return hosts, nil
 }
 
+// HostsForFunding returns a list of host keys that need accounts funded on
+// them. A host is eligible for funding if it is not blocked and has an active
+// contract.
+func (s *Store) HostsForFunding(ctx context.Context) ([]types.PublicKey, error) {
+	var hosts []types.PublicKey
+	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+			SELECT h.public_key
+			FROM hosts h
+			WHERE EXISTS (
+				SELECT 1
+				FROM contracts c
+				WHERE c.host_id = h.id AND c.state IN (0, 1) AND c.good AND c.renewed_to IS NULL
+			)`)
+		if err != nil {
+			return fmt.Errorf("failed to query hosts for funding: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var hk sqlPublicKey
+			if err := rows.Scan(&hk); err != nil {
+				return err
+			}
+			hosts = append(hosts, types.PublicKey(hk))
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
+	}
+	return hosts, nil
+}
+
 // HostsForPinning returns a list of host keys that can be used for sector
-// pinning. A host is eligble for pinning if it is not blocked, has unpinned
+// pinning. A host is eligible for pinning if it is not blocked, has unpinned
 // sectors and has an active contract.
 func (s *Store) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
 	var hosts []types.PublicKey

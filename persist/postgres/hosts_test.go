@@ -1725,6 +1725,90 @@ func newTestHostSettings(pk types.PublicKey) proto4.HostSettings {
 	}
 }
 
+func TestHostsForFunding(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	store := initPostgres(t, log.Named("postgres"))
+
+	// assertNumHostsForFunding asserts that the number of hosts returned by
+	// HostsForFunding matches the expected number, and returns the host keys.
+	assertNumHostsForFunding := func(expected int) []types.PublicKey {
+		t.Helper()
+		hks, err := store.HostsForFunding(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		} else if len(hks) != expected {
+			t.Fatalf("expected %d hosts, got %d", expected, len(hks))
+		}
+		return hks
+	}
+
+	// updateContractGood updates the 'good' field of the given contract.
+	updateContractGood := func(fcid types.FileContractID, good bool) {
+		t.Helper()
+		if _, err := store.pool.Exec(context.Background(), `UPDATE contracts SET good = $1 WHERE contract_id = $2`, good, sqlHash256(fcid)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// updateContractState updates the state of the given contract.
+	updateContractState := func(fcid types.FileContractID, state contracts.ContractState) {
+		t.Helper()
+		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+			return tx.UpdateContractState(fcid, state)
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// add two hosts
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
+
+	// assert no hosts are returned, they don't have active contracts
+	assertNumHostsForFunding(0)
+
+	// add contract for both hosts
+	fcid1 := store.addTestContract(t, hk1, types.FileContractID(hk1))
+	store.addTestContract(t, hk2, types.FileContractID(hk2))
+
+	// assert both hosts are returned now
+	assertNumHostsForFunding(2)
+
+	// block h2
+	if err := store.BlockHosts(context.Background(), []types.PublicKey{hk2}, []string{t.Name()}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert only h1 is returned
+	hks := assertNumHostsForFunding(1)
+	if hks[0] != hk1 {
+		t.Fatalf("expected host %v, got %v", hk1, hks[0])
+	}
+
+	// assert state is taken into account
+	updateContractState(fcid1, contracts.ContractStateResolved)
+	assertNumHostsForFunding(0)
+
+	// reset
+	updateContractState(fcid1, contracts.ContractStateActive)
+	assertNumHostsForFunding(1)
+
+	// assert good is taken into account
+	updateContractGood(fcid1, false)
+	assertNumHostsForFunding(0)
+	updateContractGood(fcid1, true)
+	assertNumHostsForFunding(1)
+
+	// assert renewed_to is taken into account
+	fcid3 := types.FileContractID{3}
+	if err := store.AddRenewedContract(t.Context(), fcid1, fcid3, newTestRevision(hk1), types.ZeroCurrency, types.ZeroCurrency, proto4.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	updateContractGood(fcid3, false)
+	assertNumHostsForFunding(0)
+}
+
 func TestHostsForPinning(t *testing.T) {
 	// create database
 	log := zaptest.NewLogger(t)
@@ -2030,6 +2114,66 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 		t.Fatal(err)
 	} else if len(hosts) != 0 {
 		t.Fatalf("expected 0 hosts, got %d", len(hosts))
+	}
+}
+
+// BenchmarkHostsForFunding benchmarks HostsForFunding.
+func BenchmarkHostsForFunding(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	const (
+		nHosts          = 1000
+		nBlocklistHosts = 1000
+	)
+
+	// prepare database
+	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		for range nHosts {
+			hk := types.GeneratePrivateKey().PublicKey()
+
+			// add host
+			var hostID int64
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO hosts (public_key, last_announcement) 
+				VALUES ($1, NOW()) 
+				RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID); err != nil {
+				return err
+			}
+
+			// add contract
+			if frand.Intn(10) < 8 {
+				fcid := insertRandomContract(b, tx, hostID, hk)
+
+				// make some contracts not good
+				if frand.Intn(10) < 2 {
+					_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(fcid))
+					if err != nil {
+						return err
+					}
+				}
+			}
+		}
+
+		// populate blocklist since we LEFT JOIN it in HostsForFunding
+		for range nBlocklistHosts {
+			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key) VALUES ($1)", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
+			if err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	for b.Loop() {
+		hosts, err := store.HostsForFunding(context.Background())
+		if err != nil {
+			b.Fatal(err)
+		} else if len(hosts) == 0 {
+			b.Fatal("expected some hosts, got none")
+		}
 	}
 }
 

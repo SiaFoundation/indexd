@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 )
 
+// scanner is the default implementation of Scanner.
 type scanner struct{}
 
 // ScanSiamux executes the RPCSettings RPC on the host and returns its settings
