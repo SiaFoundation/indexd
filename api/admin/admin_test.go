@@ -939,7 +939,8 @@ func TestSectorStatsAPI(t *testing.T) {
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
 
-	testutils.WaitForContracts(t, adminClient, len(cluster.Hosts))
+	// wait for contracts to be formed
+	cluster.WaitForContracts(t)
 
 	// assert 0 slabs
 	stats, err := adminClient.StatsSectors(context.Background())

@@ -9,6 +9,8 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/testutil"
+	"go.sia.tech/indexd/api/app"
+	"go.sia.tech/indexd/contracts"
 	"go.uber.org/zap"
 )
 
@@ -19,6 +21,7 @@ type (
 		indexerOpts []IndexerOpt
 		logger      *zap.Logger
 		hosts       int
+		apps        int
 	}
 
 	// ClusterOpt is a functional option for configuring a cluster for testing
@@ -29,6 +32,7 @@ type (
 // types as needed for integration testing.
 type Cluster struct {
 	ConsensusNode *ConsensusNode
+	Apps          []*app.Client
 	Hosts         []*Host
 	Indexer       *Indexer
 
@@ -46,6 +50,13 @@ var (
 		}
 	}
 )
+
+// WithApps allows for overriding the default number of apps
+func WithApps(n int) ClusterOpt {
+	return func(cfg *clusterCfg) {
+		cfg.apps = n
+	}
+}
 
 // WithLogger allows for attaching a custom logger to the cluster for debugging
 // if necessary
@@ -96,6 +107,7 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 
 	// add hosts
 	hosts := cluster.NewHosts(t, cfg.hosts)
+	cluster.AddApps(ctx, t, cfg.apps)
 	cluster.AddHosts(ctx, t, hosts...)
 	cluster.FundHosts(ctx, t, hosts...)
 	cluster.AnnounceHosts(ctx, t, hosts...)
@@ -105,6 +117,17 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	// - wait for contracts
 
 	return cluster
+}
+
+// AddApps adds n apps to the cluster.
+func (c *Cluster) AddApps(ctx context.Context, t testing.TB, n int) {
+	t.Helper()
+
+	for range n {
+		sk := types.GeneratePrivateKey()
+		c.Indexer.Store().AddTestAccount(t, sk.PublicKey())
+		c.Apps = append(c.Apps, c.Indexer.App(sk))
+	}
 }
 
 // AddHosts adds the given hosts to the cluster.
@@ -179,4 +202,36 @@ func (c *Cluster) NewHosts(t testing.TB, n int) []*Host {
 		hosts = append(hosts, cn.NewHost(t, pk, c.log.Named("host-"+pk.PublicKey().String())))
 	}
 	return hosts
+}
+
+// WaitForContracts waits until a contract is formed with every host in the cluster
+func (c *Cluster) WaitForContracts(t *testing.T) {
+	t.Helper()
+	cm := c.Indexer.Contracts()
+
+	required := make(map[types.PublicKey]struct{})
+	for _, h := range c.Hosts {
+		required[h.PublicKey()] = struct{}{}
+	}
+
+	for range 100 {
+		contracts, err := cm.Contracts(t.Context(), 0, math.MaxInt, contracts.WithGood(true), contracts.WithRevisable(true))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		seen := make(map[types.PublicKey]struct{})
+		for _, c := range contracts {
+			if _, ok := required[c.HostKey]; ok {
+				seen[c.HostKey] = struct{}{}
+			}
+		}
+
+		if len(seen) == len(required) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	t.Fatalf("not all contracts formed after timeout")
 }
