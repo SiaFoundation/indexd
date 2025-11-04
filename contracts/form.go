@@ -87,6 +87,7 @@ func withinGougingLeeway(cost, limit types.Currency) bool {
 }
 
 type candidateContract struct {
+	host           hosts.Host
 	contract       Contract
 	goodForRefresh error
 	goodForFunding error
@@ -225,7 +226,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 
 	// evaluate all existing contracts to see which hosts do not
 	// currently have a contract that is both good for uploading and
-	// funding
+	// funding and determine the best candidate for refreshing.
 	usableHostContracts := make(map[types.PublicKey]candidateContract)
 	for offset := 0; ; offset += batchSize {
 		batch, err := cm.store.Contracts(ctx, offset, batchSize, WithRevisable(true))
@@ -244,27 +245,24 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			appendErr := contract.GoodForAppend(host.Settings.Prices, height)
 			refreshErr := contract.GoodForRefresh(host.Settings, accountFundTarget, settings.Period)
 
-			cc, ok := usableHostContracts[contract.HostKey]
-			if !ok {
-				cc = candidateContract{
-					contract:       contract,
-					goodForRefresh: refreshErr,
-					goodForFunding: fundingErr,
-					goodForAppend:  appendErr,
-				}
-				usableHostContracts[contract.HostKey] = cc
-			} else if cc.goodForAppend == nil && cc.goodForFunding == nil {
+			current := candidateContract{
+				host:           host,
+				contract:       contract,
+				goodForRefresh: refreshErr,
+				goodForFunding: fundingErr,
+				goodForAppend:  appendErr,
+			}
+			// determine which contract to use for maintenance with this host.
+			existing, ok := usableHostContracts[contract.HostKey]
+			if ok && existing.goodForAppend == nil && existing.goodForFunding == nil {
 				// host already has a contract good for both uploading and funding
 				continue
-			} else if (appendErr == nil && fundingErr == nil) || contract.Size < cc.contract.Size {
-				// the contract is either good or prefer smaller contracts since they are cheaper to refresh
-				cc = candidateContract{
-					contract:       contract,
-					goodForRefresh: refreshErr,
-					goodForFunding: fundingErr,
-					goodForAppend:  appendErr,
-				}
-				usableHostContracts[contract.HostKey] = cc
+			} else if !ok || (appendErr == nil && fundingErr == nil) || contract.Size < existing.contract.Size {
+				// replace the existing contract if any, with the current one if:
+				// 1. this is the first contract for the host
+				// 2. this contract is good for both uploading and funding
+				// 3. this contract is smaller than the existing one since it is cheaper to refresh
+				usableHostContracts[contract.HostKey] = current
 			}
 		}
 		if len(batch) < batchSize {
@@ -359,12 +357,10 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		}
 
 		set := hosts.NewSpacedSet(cm.minHostDistanceKm)
-		for hostKey := range usableHostContracts {
-			host, ok := hostMap[hostKey]
-			if !ok {
-				panic("host missing from host map") // should never happen
-			}
-			set.Add(host.Info()) // add without checks
+		// add all existing hosts to the set to ensure spacing
+		// with new hosts
+		for _, cc := range usableHostContracts {
+			set.Add(cc.host.Info())
 		}
 		additional := int(settings.WantedContracts) - goodContracts
 		for _, host := range hostsWithoutContracts {
