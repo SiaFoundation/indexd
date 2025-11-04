@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/testutil"
+	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/contracts"
 	"go.uber.org/zap"
 )
@@ -20,6 +21,7 @@ type (
 		indexerOpts []IndexerOpt
 		logger      *zap.Logger
 		hosts       int
+		apps        int
 	}
 
 	// ClusterOpt is a functional option for configuring a cluster for testing
@@ -30,6 +32,7 @@ type (
 // types as needed for integration testing.
 type Cluster struct {
 	ConsensusNode *ConsensusNode
+	Apps          []*app.Client
 	Hosts         []*Host
 	Indexer       *Indexer
 
@@ -47,6 +50,13 @@ var (
 		}
 	}
 )
+
+// WithApps allows for overriding the default number of apps
+func WithApps(n int) ClusterOpt {
+	return func(cfg *clusterCfg) {
+		cfg.apps = n
+	}
+}
 
 // WithLogger allows for attaching a custom logger to the cluster for debugging
 // if necessary
@@ -97,6 +107,7 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 
 	// add hosts
 	hosts := cluster.NewHosts(t, cfg.hosts)
+	cluster.AddApps(ctx, t, cfg.apps)
 	cluster.AddHosts(ctx, t, hosts...)
 	cluster.FundHosts(ctx, t, hosts...)
 	cluster.AnnounceHosts(ctx, t, hosts...)
@@ -106,6 +117,17 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	// - wait for contracts
 
 	return cluster
+}
+
+// AddApps adds n apps to the cluster.
+func (c *Cluster) AddApps(ctx context.Context, t testing.TB, n int) {
+	t.Helper()
+
+	for range n {
+		sk := types.GeneratePrivateKey()
+		c.Indexer.Store().AddTestAccount(t, sk.PublicKey())
+		c.Apps = append(c.Apps, c.Indexer.App(sk))
+	}
 }
 
 // AddHosts adds the given hosts to the cluster.
@@ -206,6 +228,10 @@ func (c *Cluster) WaitForContracts(t *testing.T) {
 		}
 
 		if len(seen) == len(required) {
+			if err := cm.TriggerAccountFunding(true); err != nil {
+				t.Fatalf("failed to trigger account funding: %v", err)
+			}
+			time.Sleep(time.Second)
 			return
 		}
 		time.Sleep(100 * time.Millisecond)

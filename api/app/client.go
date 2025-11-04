@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
@@ -138,6 +139,11 @@ func (c *Client) signedRequestBinary(ctx context.Context, method, route string, 
 	d := types.NewDecoder(io.LimitedReader{R: body, N: math.MaxInt64})
 	resp.DecodeFrom(d)
 	return d.Err()
+}
+
+// AccountToken generates an account token for the given host.
+func (c *Client) AccountToken(host types.PublicKey) proto.AccountToken {
+	return proto.NewAccountToken(c.appkey, host)
 }
 
 // Hosts returns all usable hosts.

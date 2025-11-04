@@ -387,7 +387,7 @@ func (d *dialer) WriteSector(ctx context.Context, hostKey types.PublicKey, secto
 		return
 	})
 	if err != nil {
-		return types.Hash256{}, fmt.Errorf("failed to write sector: %w", err)
+		return types.Hash256{}, fmt.Errorf("failed to write sector to host %v: %w", hostKey, err)
 	}
 
 	return result.Root, nil
