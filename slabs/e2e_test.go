@@ -16,11 +16,13 @@ import (
 func TestMigrations(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithApps(1), testutils.WithHosts(11), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(500*time.Millisecond))))
-	app := cluster.Apps[0]
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(11), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(500*time.Millisecond))))
+	indexer := cluster.Indexer
+
+	// create an app
+	app := cluster.App(t)
 
 	// create some more utxos
-	indexer := cluster.Indexer
 	cluster.ConsensusNode.MineBlocks(t, indexer.WalletAddr(), 11)
 
 	// wait for contracts to be formed
@@ -114,8 +116,10 @@ func TestMigrations(t *testing.T) {
 func TestUpdateLastUsed(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithApps(1), testutils.WithHosts(10), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
-	app := cluster.Apps[0]
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
+
+	// create an app
+	app := cluster.App(t)
 
 	// create some more utxos
 	indexer := cluster.Indexer

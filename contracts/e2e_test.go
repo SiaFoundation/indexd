@@ -22,10 +22,11 @@ func TestContractPruning(t *testing.T) {
 
 	// convenience variables
 	indexer := cluster.Indexer
-	store := indexer.Store()
+
+	// create an app
+	app := cluster.App(t)
 
 	// fetch account
-	app := cluster.Apps[0]
 	acc, err := app.Account(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -67,7 +68,7 @@ func TestContractPruning(t *testing.T) {
 
 	// assert the slab is pinned
 	time.Sleep(time.Second)
-	res, err := store.Slabs(context.Background(), acc.AccountKey, slabIDs)
+	res, err := indexer.Store().Slabs(context.Background(), acc.AccountKey, slabIDs)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 1 {
@@ -105,7 +106,7 @@ func TestContractPruning(t *testing.T) {
 	// assert the contracts are pruned
 	time.Sleep(time.Second)
 	for _, host := range hosts {
-		contract, _, err := store.ContractRevision(context.Background(), contracts[host.PublicKey])
+		contract, _, err := indexer.Store().ContractRevision(context.Background(), contracts[host.PublicKey])
 		if err != nil {
 			t.Fatal(err)
 		} else if contract.Revision.Filesize != 0 {
@@ -121,11 +122,11 @@ func TestSectorPinning(t *testing.T) {
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10), testutils.WithApps(1))
 	indexer := cluster.Indexer
-	store := indexer.Store()
-	time.Sleep(time.Second)
+
+	// create an app
+	app := cluster.App(t)
 
 	// fetch account
-	app := cluster.Apps[0]
 	acc, err := app.Account(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -165,7 +166,7 @@ func TestSectorPinning(t *testing.T) {
 
 	// assert the slab is pinned
 	time.Sleep(time.Second)
-	res, err := store.Slabs(context.Background(), acc.AccountKey, slabIDs)
+	res, err := indexer.Store().Slabs(context.Background(), acc.AccountKey, slabIDs)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 1 {
@@ -185,7 +186,7 @@ func TestSectorPinning(t *testing.T) {
 	}
 
 	// assert the slab is unpinned
-	_, err = store.Slabs(context.Background(), acc.AccountKey, slabIDs)
+	_, err = indexer.Store().Slabs(context.Background(), acc.AccountKey, slabIDs)
 	if !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatal("unexpected error", err)
 	}

@@ -20,8 +20,10 @@ func TestAccountFunding(t *testing.T) {
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(1), testutils.WithApps(1))
 	indexer := cluster.Indexer
 
+	// create an app
+	app := cluster.App(t)
+
 	// fetch account
-	app := cluster.Apps[0]
 	acc, err := app.Account(t.Context())
 	if err != nil {
 		t.Fatal(err)
