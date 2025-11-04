@@ -241,23 +241,20 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			delete(hostsWithoutContracts, contract.HostKey) // host has at least one contract
 
 			// evaluate contract
-			fundingErr := contract.GoodForAccountFunding(accountFundTarget)
-			appendErr := contract.GoodForAppend(host.Settings.Prices, height)
-			refreshErr := contract.GoodForRefresh(host.Settings, accountFundTarget, settings.Period)
-
 			current := candidateContract{
 				host:           host,
 				contract:       contract,
-				goodForRefresh: refreshErr,
-				goodForFunding: fundingErr,
-				goodForAppend:  appendErr,
+				goodForRefresh: contract.GoodForRefresh(host.Settings, accountFundTarget, settings.Period),
+				goodForFunding: contract.GoodForAccountFunding(accountFundTarget),
+				goodForAppend:  contract.GoodForAppend(host.Settings.Prices, height),
 			}
+			goodForAppendAndFunding := current.goodForAppend == nil && current.goodForFunding == nil
 			// determine which contract to use for maintenance with this host.
 			existing, ok := usableHostContracts[contract.HostKey]
 			if ok && existing.goodForAppend == nil && existing.goodForFunding == nil {
 				// host already has a contract good for both uploading and funding
 				continue
-			} else if !ok || (appendErr == nil && fundingErr == nil) || contract.Size < existing.contract.Size {
+			} else if !ok || goodForAppendAndFunding || contract.Size < existing.contract.Size {
 				// replace the existing contract if any, with the current one if:
 				// 1. this is the first contract for the host
 				// 2. this contract is good for both uploading and funding
