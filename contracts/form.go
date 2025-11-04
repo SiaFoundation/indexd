@@ -95,6 +95,9 @@ type candidateContract struct {
 
 func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKey, period uint64, fundTarget types.Currency, log *zap.Logger) bool {
 	err := cm.hosts.WithScannedHost(ctx, host, func(host hosts.Host) error {
+		if !host.IsGood() {
+			return fmt.Errorf("host is not good")
+		}
 		allowance, collateral := contractFunding(host.Settings, 0, fundTarget, period)
 		formationCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // note: broadcasting on the host-side can block for up to a minute by default
 		defer cancel()
@@ -143,6 +146,9 @@ func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKe
 
 func (cm *ContractManager) refreshContract(ctx context.Context, contract Contract, height uint64, fundTarget types.Currency, log *zap.Logger) bool {
 	err := cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
+		if !host.IsGood() {
+			return fmt.Errorf("host is not good")
+		}
 		refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 
@@ -230,10 +236,8 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			host, ok := hostMap[contract.HostKey]
 			if !ok {
 				continue // host is not usable or is blocked
-			} else if !contract.Good {
-				continue // contract is not good
 			}
-			delete(hostsWithoutContracts, contract.HostKey) // host has at least one good contract
+			delete(hostsWithoutContracts, contract.HostKey) // host has at least one contract
 
 			// evaluate contract
 			fundingErr := contract.GoodForAccountFunding(accountFundTarget)
@@ -293,11 +297,13 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		return false
 	}
 
+	// run maintenance on existing contracts and count number of contracts
+	// that can be used for both uploading and funding
 	for hostKey, cc := range usableHostContracts {
-		switch {
-		case cc.goodForAppend == nil && cc.goodForFunding == nil:
+		if cc.goodForAppend == nil && cc.goodForFunding == nil {
 			continue // contract is good
-		case cc.goodForRefresh == nil:
+		} else if cc.goodForRefresh == nil {
+			// contract can be refreshed to become good
 			reason := cc.goodForAppend
 			if reason == nil {
 				reason = cc.goodForFunding
@@ -305,7 +311,8 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("contractID", cc.contract.ID))
 			log.Debug("refreshing existing contract", zap.NamedError("reason", reason))
 			refreshContract(ctx, cc.contract, log)
-		default:
+		} else {
+			// contract is full or cannot be refreshed, form a new contract
 			reason := cc.goodForAppend
 			if reason == nil {
 				reason = cc.goodForFunding
@@ -315,6 +322,11 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			formContract(ctx, hostKey, log)
 		}
 	}
+	// it is fine to consider every host that we already performed maintenance on
+	// as having a good contract now, since we either refreshed or formed a new
+	// contract with them. If it failed, it will be picked up in the next maintenance
+	// cycle. This is so contract formations don't try to form contracts
+	// with new hosts because of a temporary failure.
 	goodContracts := len(usableHostContracts)
 
 	// determine which hosts have unpinned sectors and no active contracts. We
@@ -331,6 +343,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		if _, ok := hostsWithoutContracts[hostKey]; ok {
 			log.Debug("forming new contract with host with unpinnable sectors", zap.Stringer("hostKey", hostKey))
 			if formContract(ctx, hostKey, log) {
+				// one more good contract
 				goodContracts++
 			}
 		}
