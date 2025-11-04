@@ -21,7 +21,6 @@ type (
 		indexerOpts []IndexerOpt
 		logger      *zap.Logger
 		hosts       int
-		apps        int
 	}
 
 	// ClusterOpt is a functional option for configuring a cluster for testing

@@ -18,19 +18,13 @@ import (
 func TestContractPruning(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithApps(1), testutils.WithHosts(10))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10))
 
 	// convenience variables
 	indexer := cluster.Indexer
 
 	// create an app
 	app := cluster.App(t)
-
-	// fetch account
-	acc, err := app.Account(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// wait for contracts to be formed
 	cluster.WaitForContracts(t)
@@ -62,6 +56,12 @@ func TestContractPruning(t *testing.T) {
 
 	// pin the slab
 	slabIDs, err := app.PinSlabs(context.Background(), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// fetch account
+	acc, err := app.Account(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,17 +120,11 @@ func TestContractPruning(t *testing.T) {
 func TestSectorPinning(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10), testutils.WithApps(1))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10))
 	indexer := cluster.Indexer
 
 	// create an app
 	app := cluster.App(t)
-
-	// fetch account
-	acc, err := app.Account(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	time.Sleep(time.Second)
 	hosts, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true), hosts.WithActiveContracts(true))
@@ -163,6 +157,12 @@ func TestSectorPinning(t *testing.T) {
 		t.Fatal(err)
 	}
 	slabID := slabIDs[0]
+
+	// fetch account
+	acc, err := app.Account(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// assert the slab is pinned
 	time.Sleep(time.Second)

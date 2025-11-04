@@ -17,17 +17,11 @@ import (
 func TestAccountFunding(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(1), testutils.WithApps(1))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(1))
 	indexer := cluster.Indexer
 
 	// create an app
 	app := cluster.App(t)
-
-	// fetch account
-	acc, err := app.Account(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// assert we have one usable host
 	time.Sleep(time.Second)
@@ -49,6 +43,12 @@ func TestAccountFunding(t *testing.T) {
 		t.Fatal(err)
 	} else if len(contracts) < 1 {
 		t.Fatalf("expected at least 1 contract, got %d", len(contracts))
+	}
+
+	// fetch account
+	acc, err := app.Account(t.Context())
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// assert the account is funded
