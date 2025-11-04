@@ -294,7 +294,7 @@ func TestPerformContractFormation(t *testing.T) {
 
 	// prepare hosts
 	var good []hosts.Host
-	for i := range 4 {
+	for i := range 3 {
 		h := goodHost(i + 1)
 		good = append(good, h)
 		hm.settings[h.PublicKey] = goodSettings
@@ -330,16 +330,15 @@ func TestPerformContractFormation(t *testing.T) {
 	wallet := &walletMock{}
 	contracts := newContractManager(renterKey, amMock, cmMock, store, dialer, hm, syncerMock, wallet)
 
-	assertGoodContracts := func(formations, refreshes int) {
+	assertGoodContracts := func(good, formations, refreshes int) {
 		t.Helper()
 
 		// fetch good contracts from the store
-		total := formations + refreshes
 		contracts, err := store.Contracts(context.Background(), 0, 100, WithGood(true))
 		if err != nil {
 			t.Fatal(err)
-		} else if len(contracts) != total {
-			t.Fatalf("expected %v contracts, got %v", total, len(contracts))
+		} else if len(contracts) != good {
+			t.Fatalf("expected %v contracts, got %v", good, len(contracts))
 		}
 
 		// assert that none of the contracts are with bad hosts
@@ -387,48 +386,89 @@ func TestPerformContractFormation(t *testing.T) {
 		}
 	}
 
-	// perform formations
+	// perform formations, should not be able to form enough contracts yet
 	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
+	assertGoodContracts(3, 3, 0)
 
-	assertGoodContracts(4, 0)
+	// add a host with the same location as an existing good host, should be
+	// ignored
+	duplicateLocationHost := goodHost(4)
+	duplicateLocationHost.Latitude = good[0].Latitude
+	duplicateLocationHost.Longitude = good[0].Longitude
+	store.hosts[duplicateLocationHost.PublicKey] = duplicateLocationHost
+	hm.settings[duplicateLocationHost.PublicKey] = duplicateLocationHost.Settings
+
+	// perform formations again, should be no-op with no good hosts
+	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+		t.Fatal(err)
+	}
+	assertGoodContracts(3, 3, 0)
+
+	// add a new good host
+	newGoodHost := goodHost(5)
+	store.hosts[newGoodHost.PublicKey] = newGoodHost
+	hm.settings[newGoodHost.PublicKey] = newGoodHost.Settings
+	good = append(good, newGoodHost)
+
+	reviseHostContract := func(hostKey types.PublicKey, fn func(c *Contract)) {
+		t.Helper()
+
+		for i := range store.contracts {
+			if store.contracts[i].HostKey == hostKey {
+				fn(&store.contracts[i])
+				return
+			}
+		}
+		t.Fatal("contract not found for host", hostKey)
+	}
+
+	// perform formations again, this time it should form a new contract
+	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+		t.Fatal(err)
+	}
+	assertGoodContracts(4, 4, 0)
 
 	// perform formations again, this time it's a no-op
 	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
-	assertGoodContracts(4, 0)
+	assertGoodContracts(4, 4, 0)
 
 	// revise one of the contracts so that it is empty
-	store.contracts[0].RemainingAllowance = types.ZeroCurrency
+	reviseHostContract(good[0].PublicKey, func(c *Contract) {
+		c.RemainingAllowance = types.ZeroCurrency
+	})
 
 	// perform formations again, should refresh the contract
 	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
-	assertGoodContracts(4, 1)
+	assertGoodContracts(5, 4, 1)
 
 	// perform formations again, this time it's a no-op
 	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
-	assertGoodContracts(4, 1)
+	assertGoodContracts(5, 4, 1)
 
 	// mark another contract as full
-	store.contracts[1].Size = maxContractSize
+	reviseHostContract(good[2].PublicKey, func(c *Contract) {
+		c.Size = maxContractSize
+	})
 
 	// perform formations again, should form a new contract
 	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
-	assertGoodContracts(5, 1)
+	assertGoodContracts(6, 5, 1)
 
 	// perform formations again, this time it's a no-op
 	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
-	assertGoodContracts(5, 1)
+	assertGoodContracts(6, 5, 1)
 
 	// mark one of the good hosts as bad
 	good[1].Settings.AcceptingContracts = false
@@ -440,10 +480,10 @@ func TestPerformContractFormation(t *testing.T) {
 	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
-	assertGoodContracts(5, 1)
+	assertGoodContracts(6, 5, 1)
 
 	// add a new good host
-	newGoodHost := goodHost(10)
+	newGoodHost = goodHost(10)
 	store.hosts[newGoodHost.PublicKey] = newGoodHost
 	hm.settings[newGoodHost.PublicKey] = newGoodHost.Settings
 
@@ -451,7 +491,30 @@ func TestPerformContractFormation(t *testing.T) {
 	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
-	assertGoodContracts(6, 1)
+	assertGoodContracts(7, 6, 1)
+
+	// block another good host
+	if err := store.BlockHosts(context.Background(), []types.PublicKey{good[3].PublicKey}, []string{"test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// perform formations again, should have one less good contract but
+	// otherwise be a no-op
+	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+		t.Fatal(err)
+	}
+	assertGoodContracts(6, 6, 1)
+
+	// add another new good host
+	newGoodHost = goodHost(11)
+	store.hosts[newGoodHost.PublicKey] = newGoodHost
+	hm.settings[newGoodHost.PublicKey] = newGoodHost.Settings
+
+	// perform formations again, should form a new contract
+	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+		t.Fatal(err)
+	}
+	assertGoodContracts(7, 7, 1)
 }
 
 func newTestRevision(hk types.PublicKey) types.V2FileContract {
