@@ -323,10 +323,10 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		}
 	}
 	// it is fine to consider every host that we already performed maintenance on
-	// as having a good contract now, since we either refreshed or formed a new
+	// as having a good contract now since we either refreshed or formed a new
 	// contract with them. If it failed, it will be picked up in the next maintenance
 	// cycle. This is so contract formations don't try to form contracts
-	// with new hosts because of a temporary failure.
+	// with new hosts because of a temporary failure with existing hosts.
 	goodContracts := len(usableHostContracts)
 
 	// determine which hosts have unpinned sectors and no active contracts. We
