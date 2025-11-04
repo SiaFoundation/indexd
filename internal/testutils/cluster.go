@@ -228,10 +228,6 @@ func (c *Cluster) WaitForContracts(t *testing.T) {
 		}
 
 		if len(seen) == len(required) {
-			if err := cm.TriggerAccountFunding(true); err != nil {
-				t.Fatalf("failed to trigger account funding: %v", err)
-			}
-			time.Sleep(time.Second)
 			return
 		}
 		time.Sleep(100 * time.Millisecond)

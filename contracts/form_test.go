@@ -307,7 +307,6 @@ func TestPerformContractFormationWithoutContracts(t *testing.T) {
 			t.Fatalf("expected settings %v+, got %v+", settings, call.settings)
 		}
 		// assert params
-		var minAllowance = types.Siacoins(10)
 		allowance, collateral := contractFunding(settings, 0, minAllowance, minHostCollateral, period)
 		if !call.params.Allowance.Equals(allowance) {
 			t.Fatalf("expected allowance %v, got %v", allowance, call.params.Allowance)
@@ -519,7 +518,6 @@ func TestPerformContractFormationWithContracts(t *testing.T) {
 			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
 		}
 		// assert params
-		var minAllowance = types.Siacoins(10)
 		allowance, collateral := contractFunding(goodSettings, 0, minAllowance, minHostCollateral, period)
 		if !call.params.Allowance.Equals(allowance) {
 			t.Fatalf("expected allowance %v, got %v", allowance, call.params.Allowance)
