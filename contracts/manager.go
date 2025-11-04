@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
 )
 
 const (
@@ -195,9 +194,8 @@ type (
 		triggerMaintenanceChan chan struct{}
 		triggerPruningChan     chan struct{}
 
-		log     *zap.Logger
-		shuffle func(int, func(i, j int))
-		tg      *threadgroup.ThreadGroup
+		log *zap.Logger
+		tg  *threadgroup.ThreadGroup
 
 		contractRejectBuffer              time.Duration
 		expiredContractBroadcastBuffer    uint64
@@ -431,9 +429,8 @@ func newContractManager(renterKey types.PublicKey, accounts AccountManager, chai
 		triggerMaintenanceChan: make(chan struct{}, 1),
 		triggerPruningChan:     make(chan struct{}, 1),
 
-		log:     zap.NewNop(),
-		shuffle: frand.Shuffle,
-		tg:      threadgroup.New(),
+		log: zap.NewNop(),
+		tg:  threadgroup.New(),
 
 		contractRejectBuffer:              6 * time.Hour, // 6 hours after formation
 		expiredContractBroadcastBuffer:    144,           // 144 block after expiration

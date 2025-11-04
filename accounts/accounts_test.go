@@ -11,12 +11,13 @@ import (
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
+	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
 
 func TestAccountFunding(t *testing.T) {
 	// create cluster
-	logger := testutils.NewLogger(false)
+	logger := zaptest.NewLogger(t)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(1))
 	indexer := cluster.Indexer
 

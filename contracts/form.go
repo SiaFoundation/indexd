@@ -4,7 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -87,70 +88,205 @@ func withinGougingLeeway(cost, limit types.Currency) bool {
 	return cost.Mul64(10).Cmp(limit.Mul64(8)) > 0
 }
 
-// performContractFormation makes sure that we have at least 'wanted' good
-// contracts with good hosts that are sufficiently spaced apart.
-func (cm *ContractManager) performContractFormation(ctx context.Context, period uint64, wanted int64, log *zap.Logger) error {
-	log.Debug("started", zap.Uint64("period", period), zap.Int64("wanted", wanted))
+type candidateContract struct {
+	contract       Contract
+	goodForRefresh error
+	goodForFunding error
+	goodForAppend  error
+}
 
-	// fetch all revisable contracts
-	var activeContracts []Contract
-	const batchSize = 50
-	for offset := 0; ; offset += batchSize {
-		batch, err := cm.store.Contracts(ctx, offset, batchSize, WithRevisable(true))
+func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKey, period uint64, fundTarget types.Currency, log *zap.Logger) bool {
+	err := cm.hosts.WithScannedHost(ctx, host, func(host hosts.Host) error {
+		allowance, collateral := contractFunding(host.Settings, 0, fundTarget, period)
+		formationCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // note: broadcasting on the host-side can block for up to a minute by default
+		defer cancel()
+		hc, err := cm.dialer.DialHost(formationCtx, host.PublicKey, host.RHP4Addrs())
 		if err != nil {
-			return fmt.Errorf("failed to fetch active contracts: %w", err)
+			return fmt.Errorf("failed to dial host: %w", err)
 		}
-		activeContracts = append(activeContracts, batch...)
-		if len(batch) < batchSize {
-			break
-		}
-	}
+		defer hc.Close()
 
+		res, err := hc.FormContract(formationCtx, host.Settings, proto.RPCFormContractParams{
+			RenterPublicKey: cm.renterKey,
+			RenterAddress:   cm.wallet.Address(),
+			Allowance:       allowance,
+			Collateral:      collateral,
+			ProofHeight:     cm.chain.TipState().Index.Height + period,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to form contract: %w", err)
+		}
+		log := log.With(zap.Stringer("contractID", res.Contract.ID))
+		if err := cm.wallet.BroadcastV2TransactionSet(res.FormationSet.Basis, res.FormationSet.Transactions); err != nil {
+			// error is ignored as it is assumed the host has validated the transaction set.
+			// It will eventually be mined or rejected. This is to prevent minor synchronization
+			// differences from causing a renewal to not be registered in the database but later
+			// confirmed.
+			log.Warn("failed to broadcast contract formation transaction set", zap.Error(err))
+		}
+
+		contract := res.Contract
+		minerFee := res.FormationSet.Transactions[len(res.FormationSet.Transactions)-1].MinerFee
+		err = cm.store.AddFormedContract(ctx, host.PublicKey, contract.ID, contract.Revision, host.Settings.Prices.ContractPrice, allowance, minerFee, res.Usage)
+		if err != nil {
+			return fmt.Errorf("failed to add formed contract: %w", err)
+		}
+
+		log.Debug("successfully formed contract",
+			zap.Stringer("allowance", contract.Revision.RemainingAllowance()),
+			zap.Stringer("collateral", contract.Revision.RemainingCollateral()))
+		return nil
+	})
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		log.Warn("failed to form contract", zap.Error(err))
+	}
+	return err == nil
+}
+
+func (cm *ContractManager) refreshContract(ctx context.Context, contract Contract, period uint64, fundTarget types.Currency, log *zap.Logger) bool {
+	err := cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
+		refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+		defer cancel()
+
+		allowance, collateral := contractFunding(host.Settings, contract.Size, fundTarget, period)
+		hc, err := cm.dialer.DialHost(refreshCtx, host.PublicKey, host.RHP4Addrs())
+		if err != nil {
+			return fmt.Errorf("failed to dial host: %w", err)
+		}
+		defer hc.Close()
+
+		res, err := hc.RefreshContract(refreshCtx, host.Settings, proto.RPCRefreshContractParams{
+			Allowance:  allowance,
+			Collateral: collateral,
+			ContractID: contract.ID,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to refresh contract: %w", err)
+		}
+		log := log.With(zap.Stringer("newContractID", res.Contract.ID))
+		if err := cm.wallet.BroadcastV2TransactionSet(res.RenewalSet.Basis, res.RenewalSet.Transactions); err != nil {
+			// error is ignored as it is assumed the host has validated the transaction set.
+			// It will eventually be mined or rejected. This is to prevent minor synchronization
+			// differences from causing a renewal to not be registered in the database but later
+			// confirmed.
+			log.Warn("failed to broadcast contract refresh transaction set", zap.Error(err))
+		}
+		renewed := res.Contract
+		minerFee := res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1].MinerFee
+
+		if err := cm.store.AddRenewedContract(ctx, contract.ID, renewed.ID, renewed.Revision, host.Settings.Prices.ContractPrice, minerFee, res.Usage); err != nil {
+			return fmt.Errorf("failed to store refreshed contract %q: %w", renewed.ID, err)
+		}
+
+		log.Debug("successfully refreshed contract",
+			zap.Stringer("allowance", renewed.Revision.RemainingAllowance()),
+			zap.Stringer("collateral", renewed.Revision.RemainingCollateral()))
+		return nil
+	})
+	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		log.Warn("failed to refresh contract", zap.Error(err))
+	}
+	return err == nil
+}
+
+// performContractFormation ensures that the renter has enough good contracts to
+// use for uploading and account funding by refreshing existing contracts and
+// forming new contracts as necessary.
+func (cm *ContractManager) performContractFormation(ctx context.Context, settings MaintenanceSettings, height uint64, log *zap.Logger) error {
+	const batchSize = 100
+
+	log.Debug("started", zap.Uint64("period", settings.Period), zap.Int64("wanted", int64(settings.WantedContracts)))
 	// fetch all hosts that are usable and not blocked
-	var candidates []hosts.Host
+	hostMap := make(map[types.PublicKey]hosts.Host)
+	hostsWithoutContracts := make(map[types.PublicKey]struct{})
 	for offset := 0; ; offset += batchSize {
 		batch, err := cm.hosts.Hosts(ctx, offset, batchSize, hosts.WithUsable(true), hosts.WithBlocked(false))
 		if err != nil {
 			return fmt.Errorf("failed to fetch hosts to form contracts with: %w", err)
 		}
-		candidates = append(candidates, batch...)
+		for _, h := range batch {
+			hostMap[h.PublicKey] = h
+			hostsWithoutContracts[h.PublicKey] = struct{}{}
+		}
 		if len(batch) < batchSize {
 			break
 		}
 	}
 
-	log.Debug("found candidates", zap.Uint64("n", uint64(len(candidates))))
-
-	// forceFormation is a map of hosts that we will always form a contract with
-	// regardless of how many we already have or where the host is located
-	forceFormation := make(map[types.PublicKey]bool)
-
-	// determine which hosts are 'full', meaning they have exclusively full
-	// contracts or contracts with the max collateral.
-	settings := make(map[types.PublicKey]proto.HostSettings)
-	for _, host := range candidates {
-		settings[host.PublicKey] = host.Settings
+	accountFundTarget, err := cm.accounts.FundTarget(ctx, minAllowance)
+	if err != nil {
+		return fmt.Errorf("failed to get fund target: %w", err)
 	}
-	for _, contract := range activeContracts {
-		log := log.With(zap.Stringer("contractID", contract.ID), zap.Stringer("hostKey", contract.HostKey))
 
-		s, ok := settings[contract.HostKey]
-		maxCollReached := ok && contract.UsedCollateral.Add(minHostCollateral).Cmp(s.MaxCollateral) >= 0 // less than minHostCollateral from MaxCollateral
-		maxSizeReached := contract.Size >= maxContractSize
-		full := maxCollReached || maxSizeReached
-		if !full {
-			forceFormation[contract.HostKey] = false
-		} else if _, hasContract := forceFormation[contract.HostKey]; !hasContract {
-			forceFormation[contract.HostKey] = true
+	// evaluate all existing contracts to see which hosts do not
+	// currently have a contract that is both good for uploading and
+	// funding
+	usableHostContracts := make(map[types.PublicKey]candidateContract)
+	for offset := 0; ; offset += batchSize {
+		batch, err := cm.store.Contracts(ctx, offset, batchSize, WithRevisable(true))
+		if err != nil {
+			return fmt.Errorf("failed to fetch active contracts: %w", err)
 		}
+		for _, contract := range batch {
+			host, ok := hostMap[contract.HostKey]
+			if !ok {
+				continue // host is not usable or is blocked
+			}
+			delete(hostsWithoutContracts, contract.HostKey) // host has at least one contract
 
-		if full {
-			log.Debug("contract is full", zap.Bool("maxCollReached", maxCollReached),
-				zap.Bool("maxSizeReached", maxSizeReached),
-				zap.Uint64("size", contract.Size),
-				zap.Stringer("usedCollateral", contract.UsedCollateral),
-				zap.Stringer("totalCollateral", contract.TotalCollateral),
-				zap.Stringer("maxCollateral", s.MaxCollateral))
+			// evaluate contract
+			fundingErr := contract.GoodForAccountFunding(accountFundTarget)
+			appendErr := contract.GoodForAppend(host.Settings.Prices, height)
+			refreshErr := contract.GoodForRefresh(host.Settings, accountFundTarget, settings.Period)
+
+			cc, ok := usableHostContracts[contract.HostKey]
+			if !ok {
+				cc = candidateContract{
+					contract:       contract,
+					goodForRefresh: refreshErr,
+					goodForFunding: fundingErr,
+					goodForAppend:  appendErr,
+				}
+				usableHostContracts[contract.HostKey] = cc
+			} else if cc.goodForAppend == nil && cc.goodForFunding == nil {
+				// host already has a contract good for both uploading and funding
+				continue
+			} else if contract.Size < cc.contract.Size {
+				// prefer smaller contracts since they are cheaper to refresh
+				cc = candidateContract{
+					contract:       contract,
+					goodForRefresh: refreshErr,
+					goodForFunding: fundingErr,
+					goodForAppend:  appendErr,
+				}
+				usableHostContracts[contract.HostKey] = cc
+			}
+		}
+		if len(batch) < batchSize {
+			break
+		}
+	}
+
+	var needsFormation []types.PublicKey
+	var needsRefresh []Contract
+	for hostKey, cc := range usableHostContracts {
+		switch {
+		case cc.goodForAppend == nil && cc.goodForFunding == nil:
+			continue // contract is good
+		case cc.goodForRefresh == nil:
+			needsRefresh = append(needsRefresh, cc.contract)
+			reason := cc.goodForAppend
+			if reason == nil {
+				reason = cc.goodForFunding
+			}
+			log.Debug("refreshing existing contract", zap.Stringer("hostKey", hostKey), zap.Stringer("contractID", cc.contract.ID), zap.NamedError("reason", reason))
+		default:
+			needsFormation = append(needsFormation, hostKey)
+			reason := cc.goodForAppend
+			if reason == nil {
+				reason = cc.goodForFunding
+			}
+			log.Debug("forming new contract with existing host", zap.Stringer("hostKey", hostKey), zap.Stringer("existingContractID", cc.contract.ID), zap.NamedError("reason", reason), zap.NamedError("refresh", cc.goodForRefresh))
 		}
 	}
 
@@ -162,162 +298,103 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 		return fmt.Errorf("failed to fetch hosts with unpinnable sectors: %w", err)
 	}
 	for _, hostKey := range hwus {
-		forceFormation[hostKey] = true
-	}
-
-	usabilitySettings, err := cm.hosts.UsabilitySettings(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to get usability settings: %w", err)
-	}
-
-	// helper to check if a host is good to form a contract with
-	set := hosts.NewSpacedSet(cm.minHostDistanceKm)
-	isGood := func(host hosts.Host, log *zap.Logger) bool {
-		force := forceFormation[host.PublicKey]
-		if !host.IsGood() {
-			// host should be good
-			log.Debug("host is not usable due to bad usability", zap.Bool("blocked", host.Blocked), zap.Strings("reasons", host.Usability.FailedChecks()))
-			return false
-		} else if spaced := set.CanAddHost(host.Info()); !spaced && !force {
-			// host should be sufficiently spaced from other hosts
-			return false
-		} else if host.Settings.RemainingStorage < minRemainingStorage {
-			// host should at least have 10GB of storage left
-			log.Debug("host is not usable since host has less than 10GiB of storage left", zap.Uint64("remainingStorage", host.Settings.RemainingStorage))
-			return false
+		// if the host already has a contract, the above logic will take
+		// care of it
+		if _, ok := hostsWithoutContracts[hostKey]; ok {
+			needsFormation = append(needsFormation, hostKey)
+			log.Debug("forming new contract with host with unpinnable sectors", zap.Stringer("hostKey", hostKey))
 		}
-
-		if !force {
-			if withinGougingLeeway(host.Settings.Prices.StoragePrice, usabilitySettings.MaxStoragePrice) {
-				log.Debug("host is not usable since storage price is not sufficiently below price gouging setting")
-				return false
-			} else if withinGougingLeeway(host.Settings.Prices.IngressPrice, usabilitySettings.MaxIngressPrice) {
-				log.Debug("host is not usable since ingress price is not sufficiently below price gouging setting")
-				return false
-			} else if withinGougingLeeway(host.Settings.Prices.EgressPrice, usabilitySettings.MaxEgressPrice) {
-				log.Debug("host is not usable since egress price is not sufficiently below price gouging setting")
-				return false
-			}
-		}
-		return true
 	}
 
-	// determine how many contracts we need to form
-	for _, contract := range activeContracts {
-		log := log.With(zap.Stringer("contractID", contract.ID), zap.Stringer("hostKey", contract.HostKey))
-
-		// host checks
-		host, err := cm.hosts.Host(ctx, contract.HostKey)
+	if len(usableHostContracts) < int(settings.WantedContracts) && len(hostsWithoutContracts) > 0 {
+		log.Debug("forming additional contracts to reach contract target", zap.Int("goodContracts", len(usableHostContracts)), zap.Uint64("wanted", settings.WantedContracts), zap.Int("candidates", len(hostsWithoutContracts)))
+		usabilitySettings, err := cm.hosts.UsabilitySettings(ctx)
 		if err != nil {
-			log.Error("failed to fetch host for contract", zap.Error(err))
-			continue
-		} else if !isGood(host, log) {
-			continue
+			return fmt.Errorf("failed to get usability settings: %w", err)
 		}
 
-		// contract is good if we can upload to it
-		if !contract.GoodForUpload(host.Settings.Prices, host.Settings.MaxCollateral, period) {
-			log.Debug("skipping contract since it's not good for uploading",
-				zap.Bool("good", contract.Good),
-				zap.Bool("maxSizeReached", contract.Size >= maxContractSize),
-				zap.Bool("maxCollateralReached", contract.UsedCollateral.Cmp(host.Settings.MaxCollateral) > 0),
-			)
-			continue
+		set := hosts.NewSpacedSet(cm.minHostDistanceKm)
+		for hostKey := range usableHostContracts {
+			host, ok := hostMap[hostKey]
+			if !ok {
+				panic("host missing from host map") // should never happen
+			}
+			set.Add(host.Info()) // add without checks
 		}
-
-		// contract is good
-		set.Add(host.Info())
-		wanted--
-	}
-
-	// scale funding by number of active accounts
-	target, err := cm.accounts.FundTarget(ctx, minAllowance)
-	if err != nil {
-		return fmt.Errorf("failed to get fund target: %w", err)
-	}
-
-	// randomize the candidate order to avoid preferring any host
-	cm.shuffle(len(candidates), func(i, j int) { candidates[i], candidates[j] = candidates[j], candidates[i] })
-
-	// move hosts we want to force a formation with to the front of the list
-	sort.SliceStable(candidates, func(i, j int) bool {
-		return forceFormation[candidates[i].PublicKey] && !forceFormation[candidates[j].PublicKey]
-	})
-
-	// we form contracts with all hosts in forceFormation and until we reach the
-	// wanted number of contracts
-	for i := range candidates {
-		if !forceFormation[candidates[i].PublicKey] && wanted <= 0 {
-			break
-		}
-
-		hostKey := candidates[i].PublicKey
-		log := log.With(zap.Stringer("hostKey", hostKey), zap.Bool("force", forceFormation[hostKey]))
-
-		err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
-			// make sure host is still good
-			if !isGood(host, log) {
-				return fmt.Errorf("%w: %s", hosts.ErrBadHost, host.PublicKey)
+		additional := int(settings.WantedContracts) - len(usableHostContracts)
+		for hostKey := range hostsWithoutContracts {
+			if additional <= 0 {
+				break
+			}
+			host, ok := hostMap[hostKey]
+			if !ok {
+				panic("host missing from host map") // should never happen
 			}
 
-			allowance, collateral := contractFunding(host.Settings, 0, target, minHostCollateral, period)
-			formationCtx, cancel := context.WithTimeout(ctx, 2*time.Minute) // note: broadcasting on the host-side can block for up to a minute by default
-			defer cancel()
-			hc, err := cm.dialer.DialHost(formationCtx, host.PublicKey, host.RHP4Addrs())
-			if err != nil {
-				return fmt.Errorf("failed to dial host: %w", err)
+			switch {
+			case host.Settings.RemainingStorage < minRemainingStorage:
+				log.Debug("candidate host is out of storage", zap.Stringer("hostKey", hostKey))
+				continue // host should at least have 10GB of storage left
+			case withinGougingLeeway(host.Settings.Prices.StoragePrice, usabilitySettings.MaxStoragePrice):
+				log.Debug("candidate host is above storage price gouging threshold", zap.Stringer("hostKey", hostKey))
+				continue // host should be sufficiently below price gouging setting
+			case withinGougingLeeway(host.Settings.Prices.IngressPrice, usabilitySettings.MaxIngressPrice):
+				log.Debug("candidate host is above ingress price gouging threshold", zap.Stringer("hostKey", hostKey))
+				continue // host should be sufficiently below price gouging setting
+			case withinGougingLeeway(host.Settings.Prices.EgressPrice, usabilitySettings.MaxEgressPrice):
+				log.Debug("candidate host is above egress price gouging threshold", zap.Stringer("hostKey", hostKey))
+				continue // host should be sufficiently below price gouging setting
 			}
-			defer hc.Close()
-
-			res, err := hc.FormContract(formationCtx, host.Settings, proto.RPCFormContractParams{
-				RenterPublicKey: cm.renterKey,
-				RenterAddress:   cm.wallet.Address(),
-				Allowance:       allowance,
-				Collateral:      collateral,
-				ProofHeight:     cm.chain.TipState().Index.Height + period,
-			})
-			if err != nil {
-				return fmt.Errorf("failed to form contract: %w", err)
+			// host must be sufficiently spaced from other hosts
+			if !set.Add(host.Info()) {
+				log.Debug("candidate host is too close to existing host", zap.Stringer("hostKey", hostKey))
+				continue
 			}
-			log := log.With(zap.Stringer("formedContractID", res.Contract.ID))
-			if err := cm.wallet.BroadcastV2TransactionSet(res.FormationSet.Basis, res.FormationSet.Transactions); err != nil {
-				// error is ignored as it is assumed the host has validated the transaction set.
-				// It will eventually be mined or rejected. This is to prevent minor synchronization
-				// differences from causing a renewal to not be registered in the database but later
-				// confirmed.
-				log.Warn("failed to broadcast contract formation transaction set", zap.Error(err))
-			}
-
-			contract := res.Contract
-			minerFee := res.FormationSet.Transactions[len(res.FormationSet.Transactions)-1].MinerFee
-			err = cm.store.AddFormedContract(ctx, hostKey, contract.ID, contract.Revision, host.Settings.Prices.ContractPrice, allowance, minerFee, res.Usage)
-			if err != nil {
-				return fmt.Errorf("failed to add formed contract: %w", err)
-			}
-
-			// contract formed successfully
-			set.Add(host.Info())
-			wanted--
-
-			log.Debug("formed contract")
-			return nil
-		})
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			break
-		} else if errors.Is(err, hosts.ErrBadHost) {
-			continue // ignore bad host
-		} else if err != nil {
-			log.Error("failed to form contract", zap.Error(err))
-			continue
+			needsFormation = append(needsFormation, hostKey)
+			additional--
+			log.Debug("forming contract with new host", zap.Stringer("hostKey", hostKey))
 		}
 	}
 
+	var formed, refreshed uint32
+	var wg sync.WaitGroup
+	sema := make(chan struct{}, 5) // concurrent formations and refreshes
+	// perform formations for all hosts that need it
+	for _, hostKey := range needsFormation {
+		log := log.With(zap.Stringer("hostKey", hostKey))
+		sema <- struct{}{}
+		wg.Add(1)
+
+		go func() {
+			defer wg.Done()
+			if cm.formContract(ctx, hostKey, settings.Period, accountFundTarget, log) {
+				atomic.AddUint32(&formed, 1)
+			}
+			<-sema
+		}()
+	}
+
+	// perform refreshes for all contracts that need it
+	for _, contract := range needsRefresh {
+		log := log.With(zap.Stringer("hostKey", contract.HostKey), zap.Stringer("contractID", contract.ID))
+		sema <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if cm.refreshContract(ctx, contract, settings.Period, accountFundTarget, log) {
+				atomic.AddUint32(&refreshed, 1)
+			}
+			<-sema
+		}()
+	}
+	wg.Wait()
+	log.Debug("formation finished", zap.Uint32("formedContracts", formed), zap.Uint32("refreshedContracts", refreshed))
 	return nil
 }
 
 // contractFunding is a helper that calculates the funding and collateral
 // that go into forming, refreshing or renewing a contract.
-func contractFunding(settings proto.HostSettings, existingData uint64, minAllowance, minCollateral types.Currency, duration uint64) (allowance, collateral types.Currency) {
+func contractFunding(settings proto.HostSettings, existingData uint64, minAllowance types.Currency, duration uint64) (allowance, collateral types.Currency) {
 	multiplier := 1 + (existingData / minContractGrowthRate)
 	contractGrowth := min(minContractGrowthRate*multiplier, maxContractGrowthRate) / proto.SectorSize // 100% growth clamped to [32GiB, 256GiB]
 	uploadCost := settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost().Mul64(contractGrowth)
@@ -332,8 +409,8 @@ func contractFunding(settings proto.HostSettings, existingData uint64, minAllowa
 	if collateral.Cmp(settings.MaxCollateral) > 0 {
 		collateral = settings.MaxCollateral
 	}
-	if collateral.Cmp(minCollateral) < 0 {
-		collateral = minCollateral // ensure we have at least the minimum collateral
+	if collateral.Cmp(minHostCollateral) < 0 {
+		collateral = minHostCollateral // ensure we have at least the minimum collateral
 	}
 	return
 }

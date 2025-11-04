@@ -139,7 +139,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	defer contracts.Close()
 
 	alerter := alerts.NewManager()
-	slabs, err := slabs.NewManager(am, contracts, hm, store, dialer, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), slabs.WithLogger(log.Named("slabs")))
+	slabs, err := slabs.NewManager(cm, am, contracts, hm, store, dialer, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), slabs.WithLogger(log.Named("slabs")))
 	if err != nil {
 		return fmt.Errorf("failed to create slabs manager: %w", err)
 	}

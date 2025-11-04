@@ -150,37 +150,57 @@ type (
 	}
 )
 
-// GoodForUpload indicates whether a contract should be uploaded to
-func (c Contract) GoodForUpload(prices proto.HostPrices, maxCollateral types.Currency, period uint64) bool {
-	appendUsage := prices.RPCAppendSectorsCost(1, period)
-	sectorAppendCost, sectorAppendCollateral := appendUsage.RenterCost(), appendUsage.HostRiskedCollateral()
-	return c.Good &&
-		c.Size < maxContractSize &&
-		c.UsedCollateral.Cmp(maxCollateral) < 0 &&
-		c.RemainingAllowance.Cmp(sectorAppendCost) > 0 &&
-		c.UsedCollateral.Add(sectorAppendCollateral).Cmp(c.TotalCollateral) < 0
-}
-
-// NeedsRefresh indicates that a contract should be refreshed.
-func (c Contract) NeedsRefresh() bool {
-	return c.Good && (c.OutOfFunds() || c.OutOfCollateral())
-}
-
-// OutOfFunds indicates that a contract is running low on funds and should be
-// refreshed.
-func (c Contract) OutOfFunds() bool {
-	return c.RemainingAllowance.Cmp(c.InitialAllowance.Div64(10)) < 0
-}
-
-// OutOfCollateral indicates that a contract is running low on unallocated
-// collateral and should be refreshed.
-func (c Contract) OutOfCollateral() bool {
-	// TODO: change this to be based on host prices
-	if c.Capacity > c.Size {
-		return false
+// GoodForAccountFunding indicates whether a contract has enough remaining
+// allowance to spend the target amount.
+func (c Contract) GoodForAccountFunding(target types.Currency) error {
+	switch {
+	case !c.Good:
+		return fmt.Errorf("contract is not good")
+	case c.RemainingAllowance.Cmp(target) < 0:
+		return fmt.Errorf("not enough remaining allowance to fund accounts, need %s, have %s", target, c.RemainingAllowance)
+	default:
+		return nil
 	}
-	remaining := c.TotalCollateral.Sub(c.UsedCollateral)
-	return remaining.Cmp(c.TotalCollateral.Div64(10)) < 0
+}
+
+// GoodForAppend indicates whether a contract can be used to append sectors
+func (c Contract) GoodForAppend(prices proto.HostPrices, height uint64) error {
+	switch {
+	case !c.Good:
+		return fmt.Errorf("contract is not good")
+	case c.Size >= maxContractSize:
+		return fmt.Errorf("contract has reached maximum size")
+	case c.ProofHeight <= height:
+		return fmt.Errorf("contract is not revisable")
+	case c.Size < c.Capacity:
+		return nil
+	}
+	// check if there is enough allowance and collateral to append at least one sector
+	appendUsage := prices.RPCAppendSectorsCost(1, c.ExpirationHeight-height)
+	renterCost, hostCollateral := appendUsage.RenterCost(), appendUsage.HostRiskedCollateral()
+	usedCollateral := c.UsedCollateral.Add(hostCollateral)
+	if c.RemainingAllowance.Cmp(renterCost) < 0 {
+		return fmt.Errorf("not enough remaining allowance to append a sector, need %s, have %s", renterCost, c.RemainingAllowance)
+	} else if c.TotalCollateral.Cmp(usedCollateral) < 0 {
+		return fmt.Errorf("not enough remaining collateral to append a sector, need %s, have %s", usedCollateral, c.TotalCollateral)
+	}
+	return nil
+}
+
+// GoodForRefresh indicates whether a contract is likely to succeed refreshing.
+func (c Contract) GoodForRefresh(settings proto.HostSettings, fundTarget types.Currency, period uint64) error {
+	_, collateral := contractFunding(settings, c.Size, fundTarget, period)
+	totalCollateral := c.TotalCollateral.Add(collateral)
+	switch {
+	case !c.Good:
+		return fmt.Errorf("contract is not good")
+	case c.Size >= maxContractSize:
+		return fmt.Errorf("contract has reached maximum size")
+	case totalCollateral.Cmp(settings.MaxCollateral) > 0:
+		return fmt.Errorf("host's max collateral %s is less than estimated collateral %s for refresh", settings.MaxCollateral, collateral)
+	default:
+		return nil
+	}
 }
 
 // String implements the fmt.Stringer interface.

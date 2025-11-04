@@ -14,7 +14,7 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
@@ -33,8 +33,10 @@ var goodSettings = proto.HostSettings{
 }
 
 func TestMigrateSlab(t *testing.T) {
+	log := zaptest.NewLogger(t)
 	// prepare dependencies
 	db := newMockStore()
+	chain := newMockChainManager()
 	am := newMockAccountManager(db)
 	hm := newMockHostManager()
 
@@ -104,7 +106,7 @@ func TestMigrateSlab(t *testing.T) {
 	msk := types.GeneratePrivateKey()
 	ssk := types.GeneratePrivateKey()
 	alerter := alerts.NewManager()
-	mgr, err := newSlabManager(am, nil, hm, db, dialer, alerter, msk, ssk)
+	mgr, err := newSlabManager(chain, am, nil, hm, db, dialer, alerter, msk, ssk, WithLogger(log.Named("slabs")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,10 +122,10 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// migrate the slab
-	pool := newConnPool(mgr.dialer, zap.NewNop())
+	pool := newConnPool(mgr.dialer, log.Named("pool"))
 	defer pool.Close()
 
-	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, pool, zap.NewNop())
+	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, pool, log.Named("migrate"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +165,7 @@ func TestMigrateSlab(t *testing.T) {
 	db.contracts[h5.PublicKey] = c5
 
 	// migrate the slab again
-	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, pool, zap.NewNop())
+	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, pool, log.Named("migrate"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,6 +187,7 @@ func TestMigrateSlab(t *testing.T) {
 }
 
 func TestSectorsToMigrate(t *testing.T) {
+	log := zaptest.NewLogger(t)
 	hostIndex := byte(0)
 	newHost := func(usable, blocked bool) hosts.Host {
 		hostIndex++
@@ -210,10 +213,13 @@ func TestSectorsToMigrate(t *testing.T) {
 			Good:               goodForUpload,
 			RemainingAllowance: types.MaxCurrency,
 			TotalCollateral:    types.MaxCurrency,
+
+			ProofHeight:      200,
+			ExpirationHeight: 300,
 		}
-		if isGood := c.GoodForUpload(goodSettings.Prices, goodSettings.MaxCollateral, 100); isGood != goodForUpload {
+		if err := c.GoodForAppend(goodSettings.Prices, 0); (err == nil) != goodForUpload {
 			// sanity check
-			t.Fatalf("contract %d: expected goodForUpload %v, got %v", contractIndex, goodForUpload, isGood)
+			t.Fatalf("contract %d: expected goodForUpload %v, got %v (%s)", contractIndex, goodForUpload, err == nil, err)
 		}
 		return c
 	}
@@ -273,7 +279,7 @@ func TestSectorsToMigrate(t *testing.T) {
 	// helper to assert result of contractsForRepair
 	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
-		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 100, 10)
+		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 100, 10, log)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {
@@ -342,6 +348,8 @@ func newTestContract(hk types.PublicKey) contracts.Contract {
 		Good:               true,
 		RemainingAllowance: types.MaxCurrency,
 		TotalCollateral:    types.MaxCurrency,
+		ProofHeight:        200,
+		ExpirationHeight:   300,
 	}
 }
 

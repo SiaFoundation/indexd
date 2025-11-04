@@ -82,6 +82,7 @@ func TestDownloadCandidates(t *testing.T) {
 
 func TestDownloadShards(t *testing.T) {
 	store := newMockStore()
+	chain := newMockChainManager()
 	am := newMockAccountManager(store)
 	hm := newMockHostManager()
 
@@ -135,7 +136,7 @@ func TestDownloadShards(t *testing.T) {
 	}}
 
 	account := types.GeneratePrivateKey()
-	sm, err := newSlabManager(am, nil, hm, store, dialer, alerts.NewManager(), account, types.GeneratePrivateKey())
+	sm, err := newSlabManager(chain, am, nil, hm, store, dialer, alerts.NewManager(), account, types.GeneratePrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}

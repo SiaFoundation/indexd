@@ -215,7 +215,11 @@ func (c *HostClient) RefreshContract(ctx context.Context, settings proto.HostSet
 			return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("host does not support contract refresh, protocol version %s < %s", settings.ProtocolVersion, rhp.ProtocolVersion500)
 		}
 
-		totalCollateral := contract.Revision.RiskedCollateral().Add(params.Collateral)
+		// TODO: this calculation matches the validation we do on the host, but it
+		// is incorrect. This should be checking that the new contract's collateral
+		// is not above the max collateral (existing risked + new collateral), not
+		// the existing total collateral after adding the additional collateral.
+		totalCollateral := contract.Revision.TotalCollateral.Add(params.Collateral)
 		if totalCollateral.Cmp(settings.MaxCollateral) > 0 {
 			capped, underflow := settings.MaxCollateral.SubWithUnderflow(contract.Revision.RiskedCollateral()) // cap to remaining collateral
 			if underflow {
