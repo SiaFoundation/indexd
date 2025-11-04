@@ -190,6 +190,9 @@ func (c Contract) GoodForAppend(prices proto.HostPrices, height uint64) error {
 // GoodForRefresh indicates whether a contract is likely to succeed refreshing.
 func (c Contract) GoodForRefresh(settings proto.HostSettings, fundTarget types.Currency, period uint64) error {
 	_, collateral := contractFunding(settings, c.Size, fundTarget, period)
+	// TODO: this logic is incorrect, but it matches the host. We need to fix both sides.
+	// The correct logic would be to check the new contract's total collateral is less than
+	// the host's max collateral. Not the existing total collateral after adding the new collateral.
 	totalCollateral := c.TotalCollateral.Add(collateral)
 	switch {
 	case !c.Good:
