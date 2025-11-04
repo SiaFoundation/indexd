@@ -279,7 +279,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			if err != nil {
 				return fmt.Errorf("failed to form contract: %w", err)
 			}
-			log := log.With(zap.Stringer("formedContractID", res.Contract.ID), zap.Stringer("allowance", allowance), zap.Stringer("collateral", collateral), zap.Stringer("fundTarget", minAllowance))
+			log := log.With(zap.Stringer("formedContractID", res.Contract.ID), zap.Stringer("allowance", allowance), zap.Stringer("collateral", collateral), zap.Stringer("minAllowance", minAllowance))
 			if err := cm.wallet.BroadcastV2TransactionSet(res.FormationSet.Basis, res.FormationSet.Transactions); err != nil {
 				// error is ignored as it is assumed the host has validated the transaction set.
 				// It will eventually be mined or rejected. This is to prevent minor synchronization
