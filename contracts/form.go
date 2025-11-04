@@ -35,6 +35,11 @@ const (
 )
 
 var (
+	// minAllowance is the minimum allowance the
+	// renter will use when forming, refreshing, or renewing a
+	// contract. This is because account funding is done using
+	// 1 SC increments.
+	minAllowance = types.Siacoins(10) // 10 SC
 	// minHostCollateral is the minimum collateral the
 	// renter will request when forming, refreshing, or renewing a
 	// contract.
@@ -250,7 +255,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, period 
 			}
 
 			// calculate funding target
-			minAllowance, err := cm.accounts.ContractFundTarget(ctx, host)
+			minAllowance, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
 			if err != nil {
 				return fmt.Errorf("failed to get fund target: %w", err)
 			}
