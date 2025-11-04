@@ -187,7 +187,6 @@ func TestMigrateSlab(t *testing.T) {
 }
 
 func TestSectorsToMigrate(t *testing.T) {
-	log := zaptest.NewLogger(t)
 	hostIndex := byte(0)
 	newHost := func(usable, blocked bool) hosts.Host {
 		hostIndex++
@@ -279,7 +278,7 @@ func TestSectorsToMigrate(t *testing.T) {
 	// helper to assert result of contractsForRepair
 	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
-		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 100, 10, log)
+		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 100, 10)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {
