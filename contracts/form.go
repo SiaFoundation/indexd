@@ -381,6 +381,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 				additional--
 			}
 		}
+		if additional > 0 {
+			log.Debug("could not form enough additional contracts to reach target", zap.Int("remaining", additional))
+		}
 	}
 
 	log.Debug("formation finished", zap.Uint32("formedContracts", formed), zap.Uint32("refreshedContracts", refreshed))
