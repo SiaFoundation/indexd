@@ -230,8 +230,10 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			host, ok := hostMap[contract.HostKey]
 			if !ok {
 				continue // host is not usable or is blocked
+			} else if !contract.Good {
+				continue // contract is not good
 			}
-			delete(hostsWithoutContracts, contract.HostKey) // host has at least one contract
+			delete(hostsWithoutContracts, contract.HostKey) // host has at least one good contract
 
 			// evaluate contract
 			fundingErr := contract.GoodForAccountFunding(accountFundTarget)
@@ -279,10 +281,10 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		return false
 	}
 
-	// renewContract is a helper to refresh the given contract
+	// refreshContract is a helper to refresh the given contract
 	// and log the result. It returns true if the refresh was successful. It is not
 	// thread-safe.
-	renewContract := func(ctx context.Context, contract Contract, log *zap.Logger) bool {
+	refreshContract := func(ctx context.Context, contract Contract, log *zap.Logger) bool {
 		if cm.refreshContract(ctx, contract, cm.chain.TipState().Index.Height, accountFundTarget, log) {
 			refreshed++
 			delete(hostsWithoutContracts, contract.HostKey) // sanity check
@@ -302,7 +304,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			}
 			log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("contractID", cc.contract.ID))
 			log.Debug("refreshing existing contract", zap.NamedError("reason", reason))
-			renewContract(ctx, cc.contract, log)
+			refreshContract(ctx, cc.contract, log)
 		default:
 			reason := cc.goodForAppend
 			if reason == nil {
