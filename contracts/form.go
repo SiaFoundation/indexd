@@ -299,9 +299,12 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 
 	// run maintenance on existing contracts and count number of contracts
 	// that can be used for both uploading and funding
+	var goodContracts int
 	for hostKey, cc := range usableHostContracts {
 		if cc.goodForAppend == nil && cc.goodForFunding == nil {
-			continue // contract is good
+			// contract is good
+			goodContracts++
+			continue
 		} else if cc.goodForRefresh == nil {
 			// contract can be refreshed to become good
 			reason := cc.goodForAppend
@@ -310,7 +313,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			}
 			log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("contractID", cc.contract.ID))
 			log.Debug("refreshing existing contract", zap.NamedError("reason", reason))
-			refreshContract(ctx, cc.contract, log)
+			if refreshContract(ctx, cc.contract, log) {
+				goodContracts++
+			}
 		} else {
 			// contract is full or cannot be refreshed, form a new contract
 			reason := cc.goodForAppend
@@ -319,15 +324,11 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			}
 			log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("existingContractID", cc.contract.ID))
 			log.Debug("forming new contract with existing host", zap.NamedError("reason", reason), zap.NamedError("refresh", cc.goodForRefresh))
-			formContract(ctx, hostKey, log)
+			if formContract(ctx, hostKey, log) {
+				goodContracts++
+			}
 		}
 	}
-	// it is fine to consider every host that we already performed maintenance on
-	// as having a good contract now since we either refreshed or formed a new
-	// contract with them. If it failed, it will be picked up in the next maintenance
-	// cycle. This is so contract formations don't try to form contracts
-	// with new hosts because of a temporary failure with existing hosts.
-	goodContracts := len(usableHostContracts)
 
 	// determine which hosts have unpinned sectors and no active contracts. We
 	// always form contracts with these hosts to be able to pin the sectors
