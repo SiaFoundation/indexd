@@ -96,7 +96,7 @@ type candidateContract struct {
 func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKey, period uint64, fundTarget types.Currency, log *zap.Logger) bool {
 	err := cm.hosts.WithScannedHost(ctx, host, func(host hosts.Host) error {
 		if !host.IsGood() {
-			return fmt.Errorf("host is not good")
+			return errors.New("host is not good")
 		}
 		allowance, collateral := contractFunding(host.Settings, 0, fundTarget, period)
 		formationCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // note: broadcasting on the host-side can block for up to a minute by default
@@ -147,7 +147,7 @@ func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKe
 func (cm *ContractManager) refreshContract(ctx context.Context, contract Contract, height uint64, fundTarget types.Currency, log *zap.Logger) bool {
 	err := cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
 		if !host.IsGood() {
-			return fmt.Errorf("host is not good")
+			return errors.New("host is not good")
 		}
 		refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
