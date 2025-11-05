@@ -7,7 +7,6 @@ import (
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
-	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
@@ -53,8 +52,7 @@ func TestAccountFunding(t *testing.T) {
 	}
 
 	// assert the account is funded
-	var balance types.Currency
-	balance, err = hc.AccountBalance(context.Background(), acc.AccountKey)
+	balance, err := hc.AccountBalance(context.Background(), acc.AccountKey)
 	if err != nil {
 		t.Fatal(err)
 	} else if balance.IsZero() {
