@@ -57,6 +57,13 @@ func WithServiceAccount(serviceAccount bool) URLQueryParameterOption {
 	}
 }
 
+// WithConnectKey sets the 'connectkey' parameter.
+func WithConnectKey(connectKey string) URLQueryParameterOption {
+	return func(q url.Values) {
+		q.Set("connectkey", connectKey)
+	}
+}
+
 // WithProtocol sets the 'protocol' parameter in Hosts
 func WithProtocol(protocol chain.Protocol) URLQueryParameterOption {
 	return func(q url.Values) {

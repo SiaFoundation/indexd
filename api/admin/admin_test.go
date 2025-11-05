@@ -167,6 +167,19 @@ func TestAccountsAPI(t *testing.T) {
 		t.Fatal("unexpected accounts", returned)
 	}
 
+	// all the test accounts have the same connect key
+	accounts, err = admin.Accounts(context.Background(), api.WithConnectKey(*accounts[0].ConnectKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned = returned[:0]
+	for _, acc := range accounts {
+		returned = append(returned, types.PublicKey(acc.AccountKey))
+	}
+	if !reflect.DeepEqual(accs, returned) {
+		t.Fatal("unexpected accounts", returned)
+	}
+
 	accounts, err = admin.Accounts(context.Background(), api.WithOffset(7), api.WithLimit(2), api.WithServiceAccount(false))
 	if err != nil {
 		t.Fatal(err)

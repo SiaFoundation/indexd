@@ -48,6 +48,7 @@ type (
 	// QueryAccountsOptions holds options for querying accounts.
 	QueryAccountsOptions struct {
 		ServiceAccount *bool
+		ConnectKey     *string
 	}
 
 	// QueryAccountsOpt is a functional option for querying accounts.
@@ -59,6 +60,14 @@ type (
 func WithServiceAccount(serviceAccount bool) QueryAccountsOpt {
 	return func(opt *QueryAccountsOptions) {
 		opt.ServiceAccount = &serviceAccount
+	}
+}
+
+// WithConnectKey filters the accounts by the connect key they are associated
+// with.
+func WithConnectKey(connectKey string) QueryAccountsOpt {
+	return func(opt *QueryAccountsOptions) {
+		opt.ConnectKey = &connectKey
 	}
 }
 

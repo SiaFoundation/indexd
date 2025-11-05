@@ -97,6 +97,34 @@ func TestAccounts(t *testing.T) {
 		t.Fatal("unexpected accounts", accs)
 	}
 	assertAccount(t, accs[0], pk2, math.MaxInt64, true)
+
+	// add accounts associated with connect key
+	const connectKey = "foobar"
+	if _, err := store.AddAppConnectKey(context.Background(), accounts.UpdateAppConnectKey{
+		Key:           connectKey,
+		MaxPinnedData: 100,
+		RemainingUses: 10,
+	}); err != nil {
+		t.Fatal("failed to add app connect key:", err)
+	}
+
+	pk4 := types.GeneratePrivateKey().PublicKey()
+	if err := store.UseAppConnectKey(context.Background(), connectKey, pk4, accounts.AccountMeta{}); err != nil {
+		t.Fatal("failed to use app connect key:", err)
+	}
+	pk5 := types.GeneratePrivateKey().PublicKey()
+	if err := store.UseAppConnectKey(context.Background(), connectKey, pk5, accounts.AccountMeta{}); err != nil {
+		t.Fatal("failed to use app connect key:", err)
+	}
+
+	accs, err = store.Accounts(context.Background(), 0, 10, accounts.WithConnectKey(connectKey))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accs) != 2 {
+		t.Fatal("unexpected accounts", accs)
+	}
+	assertAccount(t, accs[0], pk4, 100, false)
+	assertAccount(t, accs[1], pk5, 100, false)
 }
 
 func TestAccount(t *testing.T) {
