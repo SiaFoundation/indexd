@@ -125,6 +125,11 @@ func TestAccounts(t *testing.T) {
 	}
 	assertAccount(t, accs[0], pk4, 100, false)
 	assertAccount(t, accs[1], pk5, 100, false)
+
+	_, err = store.Accounts(context.Background(), 0, 10, accounts.WithConnectKey("invalidkey"))
+	if !errors.Is(err, accounts.ErrKeyNotFound) {
+		t.Fatalf("expected %q, got %q", accounts.ErrKeyNotFound, err)
+	}
 }
 
 func TestAccount(t *testing.T) {

@@ -428,11 +428,14 @@ func (a *admin) handleGETAccounts(jc jape.Context) {
 		opts = append(opts, accounts.WithConnectKey(connectKey))
 	}
 
-	accounts, err := a.accounts.Accounts(jc.Request.Context(), offset, limit, opts...)
-	if jc.Check("failed to get accounts", err) != nil {
+	accs, err := a.accounts.Accounts(jc.Request.Context(), offset, limit, opts...)
+	if errors.Is(err, accounts.ErrKeyNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get accounts", err) != nil {
 		return
 	}
-	jc.Encode(accounts)
+	jc.Encode(accs)
 }
 
 func (a *admin) handleDELETEAccount(jc jape.Context) {
