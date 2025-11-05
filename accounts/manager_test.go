@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
@@ -116,7 +117,16 @@ func TestAccountManager(t *testing.T) {
 	am := accounts.NewManager(s, f)
 	defer am.Close()
 
+	hs := proto.HostSettings{
+		Prices: proto.HostPrices{
+			EgressPrice:  types.Siacoins(1),
+			IngressPrice: types.Siacoins(1),
+			StoragePrice: types.Siacoins(1),
+		},
+	}
+
 	host := hosts.Host{
+		Settings:  hs,
 		PublicKey: types.GeneratePrivateKey().PublicKey(),
 		Addresses: []chain.NetAddress{{Protocol: siamux.Protocol, Address: "foo"}},
 		Usability: goodUsability,
@@ -201,7 +211,7 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	// assert batches were applied correctly
-	target := accounts.DefaultFundTarget
+	target := accounts.HostFundTarget(host)
 	if len(f.calls) != 2 {
 		t.Fatal("expected two calls to fund accounts")
 	} else if len(f.calls[0].accounts) != accounts.AccountFundBatch {

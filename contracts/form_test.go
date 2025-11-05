@@ -196,8 +196,7 @@ func (c *hostClientMock) FormContract(ctx context.Context, settings proto.HostSe
 
 type hostManagerMock struct {
 	settings map[types.PublicKey]proto.HostSettings
-
-	store *storeMock
+	store    *storeMock
 }
 
 func newHostManagerMock(store *storeMock) *hostManagerMock {

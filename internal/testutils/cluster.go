@@ -214,7 +214,10 @@ func (c *Cluster) WaitForContracts(t *testing.T) {
 			}
 		}
 
+		// ensure they are all confirmed
+		c.ConsensusNode.MineBlocks(t, types.VoidAddress, 1)
 		if len(seen) == len(required) {
+			time.Sleep(time.Second) // wait for indexing
 			return
 		}
 		time.Sleep(100 * time.Millisecond)

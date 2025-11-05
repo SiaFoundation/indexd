@@ -148,7 +148,7 @@ func (hm *HostManager) Hosts(ctx context.Context, offset, limit int, queryOpts .
 	return hm.store.Hosts(ctx, offset, limit, queryOpts...)
 }
 
-// HostsForFunding returns a list of hosts that need account funding.
+// HostsForFunding returns a list of hosts that have accounts that need funding
 func (hm *HostManager) HostsForFunding(ctx context.Context) ([]types.PublicKey, error) {
 	return hm.store.HostsForFunding(ctx)
 }

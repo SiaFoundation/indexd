@@ -219,11 +219,6 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		}
 	}
 
-	accountFundTarget, err := cm.accounts.FundTarget(ctx, minAllowance)
-	if err != nil {
-		return fmt.Errorf("failed to get fund target: %w", err)
-	}
-
 	// evaluate all existing contracts to see which hosts do not
 	// currently have a contract that is both good for uploading and
 	// funding and determine the best candidate for refreshing.
@@ -239,6 +234,11 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 				continue // host is not usable or is blocked
 			}
 			delete(hostsWithoutContracts, contract.HostKey) // host has at least one contract
+
+			accountFundTarget, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
+			if err != nil {
+				return fmt.Errorf("failed to get fund target: %w", err)
+			}
 
 			// evaluate contract
 			current := candidateContract{
@@ -271,10 +271,15 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	// formContract is a helper to form a contract with the given host
 	// and log the result. It returns true if the formation was successful. It is not
 	// thread-safe.
-	formContract := func(ctx context.Context, hostKey types.PublicKey, log *zap.Logger) bool {
-		if cm.formContract(ctx, hostKey, settings.Period, accountFundTarget, log) {
+	formContract := func(ctx context.Context, host hosts.Host, log *zap.Logger) bool {
+		accountFundTarget, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
+		if err != nil {
+			log.Warn("failed to get fund target", zap.Error(err))
+			return false
+		}
+		if cm.formContract(ctx, host.PublicKey, settings.Period, accountFundTarget, log) {
 			formed++
-			delete(hostsWithoutContracts, hostKey) // only form one contract per host
+			delete(hostsWithoutContracts, host.PublicKey) // only form one contract per host
 			return true
 		}
 		return false
@@ -283,7 +288,15 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	// refreshContract is a helper to refresh the given contract
 	// and log the result. It returns true if the refresh was successful. It is not
 	// thread-safe.
-	refreshContract := func(ctx context.Context, contract Contract, log *zap.Logger) bool {
+	refreshContract := func(ctx context.Context, host hosts.Host, contract Contract, log *zap.Logger) bool {
+		if host.PublicKey != contract.HostKey {
+			log.Panic("host key does not match contract host key") // sanity check
+		}
+		accountFundTarget, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
+		if err != nil {
+			log.Warn("failed to get fund target", zap.Error(err))
+			return false
+		}
 		if cm.refreshContract(ctx, contract, cm.chain.TipState().Index.Height, accountFundTarget, log) {
 			refreshed++
 			delete(hostsWithoutContracts, contract.HostKey) // sanity check
@@ -308,7 +321,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			}
 			log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("contractID", cc.contract.ID))
 			log.Debug("refreshing existing contract", zap.NamedError("reason", reason))
-			if refreshContract(ctx, cc.contract, log) {
+			if refreshContract(ctx, cc.host, cc.contract, log) {
 				goodContracts++
 			}
 		} else {
@@ -319,7 +332,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			}
 			log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("existingContractID", cc.contract.ID))
 			log.Debug("forming new contract with existing host", zap.NamedError("reason", reason), zap.NamedError("refresh", cc.goodForRefresh))
-			if formContract(ctx, hostKey, log) {
+			if formContract(ctx, cc.host, log) {
 				goodContracts++
 			}
 		}
@@ -336,9 +349,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		// if the host already has a contract, the above logic will take
 		// care of it. If the host is blocked, it will not be in the map
 		// and should not form a contract with it.
-		if _, ok := hostsWithoutContracts[hostKey]; ok {
+		if host, ok := hostsWithoutContracts[hostKey]; ok {
 			log.Debug("forming new contract with host with unpinnable sectors", zap.Stringer("hostKey", hostKey))
-			if formContract(ctx, hostKey, log) {
+			if formContract(ctx, host, log) {
 				// one more good contract
 				goodContracts++
 			}
@@ -384,7 +397,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 				continue // host must be sufficiently spaced from other hosts
 			}
 			log.Debug("forming contract with new host", zap.Int("remaining", additional))
-			if formContract(ctx, host.PublicKey, log) {
+			if formContract(ctx, host, log) {
 				set.Add(host.Info())
 				additional--
 			}

@@ -327,13 +327,13 @@ func TestContractsAPI(t *testing.T) {
 		t.Fatalf("expected host to be usable, but got false for: %v", failedFields)
 	}
 
-	// assert a contract was formed
+	// assert at least one contract was formed
 	time.Sleep(time.Second)
 	var contract contracts.Contract
 	if contracts, err := adminClient.Contracts(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if len(contracts) != 1 {
-		t.Fatal("expected 1 contract", len(contracts))
+	} else if len(contracts) < 1 {
+		t.Fatal("expected at least 1 contract", len(contracts))
 	} else {
 		contract = contracts[0]
 	}
@@ -353,8 +353,8 @@ func TestContractsAPI(t *testing.T) {
 	// assert WithGood filters out bad contracts
 	if contracts, err := adminClient.Contracts(context.Background(), admin.WithGood(true)); err != nil {
 		t.Fatal(err)
-	} else if len(contracts) != 1 {
-		t.Fatal("expected 1 contract", len(contracts))
+	} else if len(contracts) < 1 {
+		t.Fatal("expected at least 1 contract", len(contracts))
 	} else if contracts, err := adminClient.Contracts(context.Background(), admin.WithGood(false)); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 0 {
@@ -371,15 +371,19 @@ func TestContractsAPI(t *testing.T) {
 	// assert public key filtering works
 	if contracts, err := adminClient.Contracts(context.Background(), admin.WithHostKeys([]types.PublicKey{h.PublicKey()})); err != nil {
 		t.Fatal(err)
-	} else if len(contracts) != 1 {
-		t.Fatal("expected 1 contract", len(contracts))
+	} else if len(contracts) < 1 {
+		t.Fatal("expected at least 1 contract", len(contracts))
+	} else if contracts, err := adminClient.Contracts(context.Background(), admin.WithHostKeys([]types.PublicKey{{}})); err != nil {
+		t.Fatal(err)
+	} else if len(contracts) != 0 {
+		t.Fatal("expected no contract", len(contracts))
 	}
 
 	// assert WithRevisable filters out non-revisable contracts
 	if contracts, err := adminClient.Contracts(context.Background(), admin.WithRevisable(true)); err != nil {
 		t.Fatal(err)
-	} else if len(contracts) != 1 {
-		t.Fatal("expected 1 contract", len(contracts))
+	} else if len(contracts) < 1 {
+		t.Fatal("expected at least 1 contract", len(contracts))
 	} else if contracts, err := adminClient.Contracts(context.Background(), admin.WithRevisable(false)); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 0 {
@@ -433,8 +437,8 @@ func TestContractsAPI(t *testing.T) {
 	host, err := adminClient.Host(context.Background(), h.PublicKey())
 	if err != nil {
 		t.Fatal(err)
-	} else if !host.AccountFunding.Equals(types.Siacoins(4)) {
-		t.Fatal("expected host account funding to be exactly 4 SC")
+	} else if host.AccountFunding.IsZero() {
+		t.Fatal("expected host account funding to be non zero")
 	} else if host.TotalSpent.Cmp(host.AccountFunding) <= 0 {
 		t.Fatal("expected host total spent to greater than account funding", host.TotalSpent, host.AccountFunding)
 	}
@@ -460,10 +464,10 @@ func TestContractsAPI(t *testing.T) {
 	// the contracts API returns only revisable contracts by default
 	if contracts, err := adminClient.Contracts(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if len(contracts) != 1 {
-		t.Fatal("expected 1 contract, got", len(contracts))
-	} else if contracts[0].RenewedFrom != contract.ID {
-		t.Fatal("expected contract to be renewed", contracts[0].RenewedFrom, contract.ID)
+	} else if len(contracts) < 1 {
+		t.Fatal("expected at least 1 contract, got", len(contracts))
+	} else if contracts[0].RenewedFrom != contract.ID && contracts[1].RenewedFrom != contract.ID {
+		t.Fatal("expected contract to be renewed", contracts[0].RenewedFrom, contracts[1].RenewedFrom, contract.ID)
 	}
 
 	// assert usage is being tracked

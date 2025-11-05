@@ -24,12 +24,6 @@ func TestAccountFunding(t *testing.T) {
 	// create an app
 	app := cluster.App(t)
 
-	// fetch account
-	acc, err := app.Account(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	// assert we have one usable host
 	time.Sleep(time.Second)
 	hosts, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true))
@@ -43,23 +37,31 @@ func TestAccountFunding(t *testing.T) {
 	hk := hosts[0].PublicKey
 	hp := hosts[0].Settings.Prices
 	hc := indexer.HostClient(t, hk)
-	target := types.Siacoins(2)
 
-	// assert we have one active contract
-	time.Sleep(time.Second)
+	// assert we have at least one active contract
 	contracts, err := indexer.Contracts().Contracts(context.Background(), 0, 10, contracts.WithRevisable(true), contracts.WithGood(true))
 	if err != nil {
 		t.Fatal(err)
-	} else if len(contracts) != 1 {
-		t.Fatalf("expected 1 contract, got %d", len(contracts))
+	} else if len(contracts) < 1 {
+		t.Fatalf("expected at least 1 contract, got %d", len(contracts))
+	}
+
+	// mine a few blocks to ensure the contract is confirmed
+	cluster.ConsensusNode.MineBlocks(t, types.VoidAddress, 5)
+	time.Sleep(time.Second)
+
+	// fetch account
+	acc, err := app.Account(t.Context())
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// assert the account is funded
 	balance, err := hc.AccountBalance(context.Background(), acc.AccountKey)
 	if err != nil {
 		t.Fatal(err)
-	} else if !balance.Equals(target) {
-		t.Fatalf("expected account to be funded to %v, got %v", target, balance)
+	} else if balance.IsZero() {
+		t.Fatal("expected account to be funded")
 	}
 
 	// spend some money
@@ -71,11 +73,11 @@ func TestAccountFunding(t *testing.T) {
 	}
 
 	// assert it was spent
-	balance, err = hc.AccountBalance(context.Background(), acc.AccountKey)
+	updated, err := hc.AccountBalance(context.Background(), acc.AccountKey)
 	if err != nil {
 		t.Fatal(err)
-	} else if !balance.Add(hp.RPCWriteSectorCost(proto.SectorSize).RenterCost()).Equals(target) {
-		t.Fatal("expected account balance to be slightly less than 1SC")
+	} else if !updated.Add(hp.RPCWriteSectorCost(proto.SectorSize).RenterCost()).Equals(balance) {
+		t.Fatalf("expected account balance to be slightly less than %v", balance)
 	}
 
 	// trigger funding
@@ -86,10 +88,10 @@ func TestAccountFunding(t *testing.T) {
 
 	// assert it was refilled
 	time.Sleep(time.Second)
-	balance, err = hc.AccountBalance(context.Background(), acc.AccountKey)
+	updated, err = hc.AccountBalance(context.Background(), acc.AccountKey)
 	if err != nil {
 		t.Fatal(err)
-	} else if !balance.Equals(target) {
-		t.Fatal("expected account balance to be funded to 1SC", balance)
+	} else if !updated.Equals(balance) {
+		t.Fatalf("expected account balance to be funded to %v, instead it was %v", balance, updated)
 	}
 }

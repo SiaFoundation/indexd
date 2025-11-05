@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
@@ -31,13 +32,7 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 				cancel()
 			}()
 
-			host, err := cm.hosts.Host(ctx, hostKey)
-			if err != nil {
-				log.Error("failed to fetch host for funding", zap.Error(err))
-				return
-			}
-
-			contractIDs, err := cm.store.ContractsForFunding(ctx, host.PublicKey, 10)
+			contractIDs, err := cm.store.ContractsForFunding(ctx, hostKey, 10)
 			if err != nil {
 				log.Error("failed to fetch contracts for funding", zap.Error(err))
 				return
@@ -46,10 +41,10 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 				return
 			}
 
-			err = cm.accounts.FundAccounts(ctx, host, contractIDs, force, log)
-			if err != nil {
+			if err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+				return cm.accounts.FundAccounts(ctx, host, contractIDs, force, log)
+			}); err != nil {
 				log.Debug("failed to fund accounts", zap.Error(err))
-				return
 			}
 		}(ctx, hk, log.With(zap.Stringer("hostKey", hk)))
 	}

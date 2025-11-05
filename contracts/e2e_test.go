@@ -9,27 +9,25 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
 
 func TestContractPruning(t *testing.T) {
 	// create cluster
-	logger := zap.NewNop()
+	logger := zaptest.NewLogger(t)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10))
+
+	// convenience variables
 	indexer := cluster.Indexer
 
 	// create an app
 	app := cluster.App(t)
-
-	// fetch account
-	acc, err := app.Account(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	// wait for contracts to be formed
 	cluster.WaitForContracts(t)
@@ -65,6 +63,12 @@ func TestContractPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// fetch account
+	acc, err := app.Account(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// assert the slab is pinned
 	time.Sleep(time.Second)
 	res, err := indexer.Store().Slabs(context.Background(), acc.AccountKey, slabIDs)
@@ -74,17 +78,32 @@ func TestContractPruning(t *testing.T) {
 		t.Fatalf("expected 1 slab, got %d", len(res))
 	}
 
-	// assert the sectors were pinned
-	contracts := make(map[types.PublicKey]types.FileContractID)
-	for _, sector := range res[0].Sectors {
-		if sector.HostKey == nil || sector.ContractID == nil {
-			t.Fatal("sector is not pinned")
+	getActiveContract := func(hostKey types.PublicKey) types.FileContractID {
+		t.Helper()
+
+		active, err := indexer.Contracts().Contracts(context.Background(), 0, 100, contracts.WithRevisable(true), contracts.WithGood(true))
+		if err != nil {
+			t.Fatal(err)
 		}
-		contracts[*sector.HostKey] = *sector.ContractID
+		var contractID types.FileContractID
+		for _, c := range active {
+			if c.HostKey == hostKey {
+				if contractID != (types.FileContractID{}) {
+					// this should not happen unless the contract is full (impossible) or the maintenance
+					// is not working as expected.
+					t.Fatalf("found multiple usable contracts for host %s", hostKey)
+				}
+				contractID = c.ID
+			}
+		}
+		if contractID == (types.FileContractID{}) {
+			t.Fatalf("no usable contract found for host %s", hostKey)
+		}
+		return contractID
 	}
 
 	for _, host := range hosts {
-		res, err := indexer.HostClient(t, host.PublicKey).SectorRoots(context.Background(), host.Settings.Prices, contracts[host.PublicKey], 0, 1)
+		res, err := indexer.HostClient(t, host.PublicKey).SectorRoots(context.Background(), host.Settings.Prices, getActiveContract(host.PublicKey), 0, 1)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(res.Roots) != 1 {
@@ -105,13 +124,14 @@ func TestContractPruning(t *testing.T) {
 	// assert the contracts are pruned
 	time.Sleep(time.Second)
 	for _, host := range hosts {
-		contract, _, err := indexer.Store().ContractRevision(context.Background(), contracts[host.PublicKey])
+		contractID := getActiveContract(host.PublicKey)
+		contract, _, err := indexer.Store().ContractRevision(context.Background(), contractID)
 		if err != nil {
 			t.Fatal(err)
 		} else if contract.Revision.Filesize != 0 {
-			t.Fatalf("expected contract %s to be pruned, got filesize %d", contracts[host.PublicKey], contract.Revision.Filesize)
+			t.Fatalf("expected contract %s to be pruned, got filesize %d", contractID, contract.Revision.Filesize)
 		} else if contract.Revision.Capacity != proto.SectorSize {
-			t.Fatalf("expected contract %s to be pruned, got capacity %d", contracts[host.PublicKey], contract.Revision.Capacity)
+			t.Fatalf("expected contract %s to be pruned, got capacity %d", contractID, contract.Revision.Capacity)
 		}
 	}
 }
@@ -125,13 +145,10 @@ func TestSectorPinning(t *testing.T) {
 	// create an app
 	app := cluster.App(t)
 
-	// fetch account
-	acc, err := app.Account(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
+	// wait for contracts to be formed
+	cluster.WaitForContracts(t)
 
-	time.Sleep(time.Second)
+	// assert we have 10 usable hosts
 	hosts, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true), hosts.WithActiveContracts(true))
 	if err != nil {
 		t.Fatal(err)
@@ -162,6 +179,12 @@ func TestSectorPinning(t *testing.T) {
 		t.Fatal(err)
 	}
 	slabID := slabIDs[0]
+
+	// fetch account
+	acc, err := app.Account(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// assert the slab is pinned
 	time.Sleep(time.Second)

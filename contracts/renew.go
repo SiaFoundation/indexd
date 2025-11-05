@@ -46,13 +46,13 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 	log = log.With(zap.Stringer("hostKey", contract.HostKey), zap.Stringer("contractID", contract.ID))
 
 	return cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
-		// scale funding by active account count
-		target, err := cm.accounts.FundTarget(ctx, minAllowance)
+		// calculate funding target
+		minAllowance, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
 			return fmt.Errorf("failed to get fund target: %w", err)
 		}
 
-		allowance, collateral := contractFunding(host.Settings, contract.Size, target, period)
+		allowance, collateral := contractFunding(host.Settings, contract.Size, minAllowance, period)
 		renewCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 

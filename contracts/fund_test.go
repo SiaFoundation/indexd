@@ -24,12 +24,11 @@ type accountsManagerMock struct {
 	calls          []fundAccountsCall
 }
 
-func (am *accountsManagerMock) FundTarget(ctx context.Context, minAllowance types.Currency) (types.Currency, error) {
+func (am *accountsManagerMock) ContractFundTarget(ctx context.Context, host hosts.Host, minAllowance types.Currency) (types.Currency, error) {
 	target := types.Siacoins(1).Mul64(am.activeAccounts)
 	if minAllowance.Cmp(target) == 1 {
 		target = minAllowance
 	}
-
 	return target, nil
 }
 
@@ -168,6 +167,12 @@ func TestPerformAccountFunding(t *testing.T) {
 		HostKey:            hk4,
 		RemainingAllowance: types.Siacoins(1),
 	})
+
+	// give all hosts good settings
+	hmMock.settings[hk1] = goodSettings
+	hmMock.settings[hk2] = goodSettings
+	hmMock.settings[hk3] = goodSettings
+	hmMock.settings[hk4] = goodSettings
 
 	// fund accounts
 	err = cm.performAccountFunding(context.Background(), false, zap.NewNop())
