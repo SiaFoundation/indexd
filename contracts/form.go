@@ -379,14 +379,13 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			case withinGougingLeeway(host.Settings.Prices.EgressPrice, usabilitySettings.MaxEgressPrice):
 				log.Debug("candidate host is above egress price gouging threshold")
 				continue // host should be sufficiently below price gouging setting
-			}
-			// host must be sufficiently spaced from other hosts
-			if !set.Add(host.Info()) {
+			case !set.CanAddHost(host.Info()):
 				log.Debug("candidate host is too close to existing host")
-				continue
+				continue // host must be sufficiently spaced from other hosts
 			}
 			log.Debug("forming contract with new host", zap.Int("remaining", additional))
 			if formContract(ctx, host.PublicKey, log) {
+				set.Add(host.Info())
 				additional--
 			}
 		}
