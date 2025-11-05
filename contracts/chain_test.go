@@ -594,6 +594,10 @@ func (w *walletMock) BroadcastedSets() []types.V2Transaction {
 	return slices.Clone(w.broadcasted)
 }
 
+func (w *walletMock) SplitUTXO(n int, minValue types.Currency) (types.V2Transaction, error) {
+	return types.V2Transaction{}, nil
+}
+
 func (w *walletMock) Address() types.Address {
 	return types.Address{1, 2, 3}
 }

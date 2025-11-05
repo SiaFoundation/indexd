@@ -110,7 +110,10 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		return fmt.Errorf("failed to verify wallet key: %w", err)
 	}
 
-	wm, err := wallet.NewSingleAddressWallet(walletKey, cm, store, s, wallet.WithLogger(log.Named("wallet")), wallet.WithReservationDuration(3*time.Hour))
+	wm, err := wallet.NewSingleAddressWallet(walletKey, cm, store, s,
+		wallet.WithLogger(log.Named("wallet")),
+		wallet.WithReservationDuration(3*time.Hour),
+		wallet.WithDefragThreshold(500)) // defrag only when the wallet has over 500 UTXOs
 	if err != nil {
 		return fmt.Errorf("failed to create wallet: %w", err)
 	}

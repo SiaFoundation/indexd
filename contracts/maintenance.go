@@ -103,6 +103,7 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 
 	for {
 		if !cm.waitUntilSynced(ctx, log) {
+			log.Debug("shutting down maintenance loop")
 			return
 		}
 
@@ -135,6 +136,12 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 		logError(cm.performContractPruning(ctx, false, pruningLog), pruningLog)
 		pinningLog := log.Named("pinning")
 		logError(cm.performSectorPinning(ctx, pinningLog), pinningLog)
+		// this is done last as it leaves us with unconfirmed UTXOs that can't
+		// be used for contract maintenance until they are confirmed. This increases
+		// the chance that other maintenance tasks can run without being blocked on
+		// funding.
+		walletLog := log.Named("wallet")
+		logError(cm.performWalletMaintenance(walletLog), walletLog)
 
 		unpinnableLog := log.Named("unpinnable")
 		threshold := time.Now().Add(-unpinnableSectorThreshold)
@@ -142,6 +149,30 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 		t.Reset(cm.maintenanceFrequency)
 		log.Debug("maintenance complete")
 	}
+}
+
+func (cm *ContractManager) performWalletMaintenance(log *zap.Logger) error {
+	settings, err := cm.store.MaintenanceSettings(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to fetch maintenance settings: %w", err)
+	}
+	// note: 1KS is arbitrary, but it's a minimum. The actual value depends on
+	// the largest UTXO the wallet has. It might be better to make it configurable
+	// in a follow-up, but we should see how this performs first.
+	//
+	// These values mean that only a UTXO >= wanted contracts * 1KS will be
+	// split.
+	if txn, err := cm.wallet.SplitUTXO(int(settings.WantedContracts), types.Siacoins(1000)); err != nil {
+		return fmt.Errorf("failed to split UTXOs: %w", err)
+	} else if txn.ID() == (types.TransactionID{}) || len(txn.SiacoinInputs) == 0 || len(txn.SiacoinOutputs) == 0 {
+		log.Debug("enough UTXOs present, no split needed")
+	} else {
+		input := txn.SiacoinInputs[0].Parent.SiacoinOutput.Value
+		output := txn.SiacoinOutputs[0].Value
+		log.Info("split UTXO for contract funding", zap.Stringer("txnID", txn.ID()), zap.Stringer("fee", txn.MinerFee), zap.Stringer("input", input), zap.Stringer("output", output), zap.Int("created", len(txn.SiacoinOutputs)))
+	}
+
+	return nil
 }
 
 func logError(err error, log *zap.Logger) {
