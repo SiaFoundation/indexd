@@ -1869,7 +1869,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 
 	// prepare base db
 	for range dbBaseSize / slabSize {
-		_, err := store.PinSlabs(context.Background(), account, time.Time{}, newSlab())
+		_, err := store.PinSlabs(b.Context(), account, time.Time{}, newSlab())
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1884,13 +1884,13 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 	}
 
 	// 25% of the sectors are stored on a bad contract
-	_, err := store.pool.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE id % 4 = 0")
+	_, err := store.pool.Exec(b.Context(), "UPDATE contracts SET good = FALSE WHERE id % 4 = 0")
 	if err != nil {
 		b.Fatal(err)
 	}
 
 	// 25% of the sectors don't have a host at all
-	_, err = store.pool.Exec(context.Background(), `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id % 4 = 1`)
+	_, err = store.pool.Exec(b.Context(), `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id % 4 = 1`)
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -1898,7 +1898,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 	// reset next_repair_attempt
 	resetUnhealthySlabs := func() {
 		b.Helper()
-		_, err = store.pool.Exec(context.Background(), "UPDATE slabs SET next_repair_attempt = (NOW() - interval '3 day') + interval '1 week' * random()")
+		_, err = store.pool.Exec(b.Context(), "UPDATE slabs SET next_repair_attempt = (NOW() - interval '3 day') + interval '1 week' * random()")
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -1916,7 +1916,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
 			var sanityCheck bool
 			for b.Loop() {
-				slabIDs, err := store.UnhealthySlabs(context.Background(), batchSize)
+				slabIDs, err := store.UnhealthySlabs(b.Context(), batchSize)
 				if err != nil {
 					b.Fatal(err)
 				} else if len(slabIDs) < batchSize {
