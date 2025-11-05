@@ -136,9 +136,13 @@ func (c *HostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPri
 		if sectorCollateralCost.IsZero() {
 			sectorCollateralCost = types.NewCurrency64(1) // avoid division by zero
 		}
+		sectorRenterCost := appendSectorCost.RenterCost()
+		if sectorRenterCost.IsZero() {
+			sectorRenterCost = types.NewCurrency64(1) // avoid division by zero
+		}
 
 		maxSectorsByCollateral := contract.Revision.RemainingCollateral().Div(sectorCollateralCost).Big().Uint64()
-		maxSectorsByAllowance := contract.Revision.RemainingAllowance().Div(appendSectorCost.RenterCost()).Big().Uint64()
+		maxSectorsByAllowance := contract.Revision.RemainingAllowance().Div(sectorRenterCost).Big().Uint64()
 		maxAppendSectors += min(maxSectorsByAllowance, maxSectorsByCollateral)
 
 		// ensure the maximum contract size is not exceeded
