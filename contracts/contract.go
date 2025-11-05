@@ -200,7 +200,7 @@ func (c Contract) GoodForRefresh(settings proto.HostSettings, fundTarget types.C
 	case c.Size >= maxContractSize:
 		return fmt.Errorf("contract has reached maximum size")
 	case totalCollateral.Cmp(settings.MaxCollateral) > 0:
-		return fmt.Errorf("host's max collateral %s is less than estimated collateral %s for refresh", settings.MaxCollateral, collateral)
+		return fmt.Errorf("host's max collateral %s is less than estimated collateral %s for refresh", settings.MaxCollateral, totalCollateral)
 	default:
 		return nil
 	}
