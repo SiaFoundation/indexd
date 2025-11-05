@@ -418,6 +418,9 @@ components:
           allOf:
             - $ref: "#/components/schemas/PublicKey"
             - description: Public key of the account
+        connectKey:
+          type: string
+          description: The connect key associated with the account. Omitted for service accounts.
         serviceAccount:
           type: boolean
           description: Whether it is a service account or not.

@@ -545,7 +545,8 @@ func TestSharedObjects(t *testing.T) {
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
 
-	testutils.WaitForContracts(t, adminClient, len(cluster.Hosts))
+	// wait for contracts to be formed
+	cluster.WaitForContracts(t)
 
 	// assert hosts are registered
 	hosts, err := adminClient.Hosts(ctx)

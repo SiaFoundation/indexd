@@ -462,4 +462,30 @@ FROM objects o;
 		`)
 		return err
 	},
+	// add connect_key to accounts
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE app_connect_keys RENAME TO app_connect_keys_tmp;
+ALTER TABLE app_connect_keys_tmp DROP CONSTRAINT app_connect_keys_pkey;
+
+CREATE TABLE app_connect_keys (
+    id SERIAL PRIMARY KEY,
+    app_key TEXT UNIQUE NOT NULL,
+    use_description TEXT NOT NULL,
+    remaining_uses INTEGER NOT NULL,
+    total_uses INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_used TIMESTAMP WITH TIME ZONE,
+    max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0)
+);
+INSERT INTO app_connect_keys (app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data) SELECT app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data FROM app_connect_keys_tmp;
+DROP TABLE app_connect_keys_tmp;
+
+-- add connect key column and create index
+ALTER TABLE accounts ADD COLUMN connect_key_id INTEGER REFERENCES app_connect_keys(id);
+CREATE INDEX accounts_connect_key_id_idx ON accounts(connect_key_id);
+`)
+		return err
+	},
 }

@@ -19,18 +19,19 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
 
+	const connectKey = "foobar"
 	if key, err := store.AddAppConnectKey(ctx, accounts.UpdateAppConnectKey{
-		Key:           "foobar",
+		Key:           connectKey,
 		Description:   "test key",
 		MaxPinnedData: 10,
 		RemainingUses: 1,
 	}); err != nil {
 		t.Fatal("failed to add app connect key:", err)
-	} else if key.Key != "foobar" || key.Description != "test key" || key.RemainingUses != 1 {
+	} else if key.Key != connectKey || key.Description != "test key" || key.RemainingUses != 1 {
 		t.Fatalf("unexpected app connect key: %+v", key)
 	}
 
-	if ok, err := store.ValidAppConnectKey(ctx, "foobar"); err != nil {
+	if ok, err := store.ValidAppConnectKey(ctx, connectKey); err != nil {
 		t.Fatal("failed to validate app connect key:", err)
 	} else if !ok {
 		t.Fatal("expected app connect key to be valid")
@@ -51,6 +52,8 @@ func TestAppConnectKeys(t *testing.T) {
 			t.Fatalf("expected logo to be %q, got %q", logo, account.LogoURL)
 		} else if account.ServiceURL != service {
 			t.Fatalf("expected service url to be %q, got %q", service, account.ServiceURL)
+		} else if *account.ConnectKey != connectKey {
+			t.Fatalf("expected connect key to be %q, got %q", connectKey, *account.ConnectKey)
 		}
 	}
 
@@ -60,7 +63,7 @@ func TestAppConnectKeys(t *testing.T) {
 		LogoURL:     "logo",
 		ServiceURL:  "service",
 	}
-	if err := store.UseAppConnectKey(ctx, "foobar", acc, meta); err != nil {
+	if err := store.UseAppConnectKey(ctx, connectKey, acc, meta); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
 	assertAccount(acc, 0, 10, "desc", "logo", "service")
@@ -78,41 +81,33 @@ func TestAppConnectKeys(t *testing.T) {
 	}
 
 	// try again on an exhausted key
-	if err := store.UseAppConnectKey(ctx, "foobar", types.GeneratePrivateKey().PublicKey(), meta); !errors.Is(err, accounts.ErrKeyExhausted) {
+	if err := store.UseAppConnectKey(ctx, connectKey, types.GeneratePrivateKey().PublicKey(), meta); !errors.Is(err, accounts.ErrKeyExhausted) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyExhausted, err)
 	}
 
-	if ok, err := store.ValidAppConnectKey(ctx, "foobar"); err != nil {
+	if ok, err := store.ValidAppConnectKey(ctx, connectKey); err != nil {
 		t.Fatal("failed to validate app connect key:", err)
 	} else if ok {
 		t.Fatal("expected app connect key to be invalid")
 	}
 
 	if updated, err := store.UpdateAppConnectKey(ctx, accounts.UpdateAppConnectKey{
-		Key:           "foobar",
+		Key:           connectKey,
 		Description:   "updated key",
 		MaxPinnedData: 20,
 		RemainingUses: 1,
 	}); err != nil {
 		t.Fatal("failed to add app connect key:", err)
-	} else if updated.Key != "foobar" || updated.Description != "updated key" || updated.RemainingUses != 1 {
+	} else if updated.Key != connectKey || updated.Description != "updated key" || updated.RemainingUses != 1 {
 		t.Fatalf("unexpected updated app connect key: %+v", updated)
 	} else if updated.MaxPinnedData != 20 {
 		t.Fatalf("expected updated app connect key's max pinned data to be 20, got %d", updated.MaxPinnedData)
 	}
 
-	if ok, err := store.ValidAppConnectKey(ctx, "foobar"); err != nil {
+	if ok, err := store.ValidAppConnectKey(ctx, connectKey); err != nil {
 		t.Fatal("failed to validate app connect key:", err)
 	} else if !ok {
 		t.Fatal("expected app connect key to be valid")
-	}
-
-	if err := store.DeleteAppConnectKey(ctx, "foobar"); err != nil {
-		t.Fatal("failed to delete app connect key:", err)
-	}
-
-	if _, err := store.ValidAppConnectKey(ctx, "foobar"); !errors.Is(err, accounts.ErrKeyNotFound) {
-		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
 
 	stats, err := store.AccountStats(ctx)
@@ -122,6 +117,29 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatal("expected 1 active account, got", stats.Active)
 	} else if stats.Registered != 1 {
 		t.Fatal("expected 1 registered account, got", stats.Registered)
+	}
+
+	if err := store.DeleteAppConnectKey(ctx, connectKey); !errors.Is(err, accounts.ErrKeyInUse) {
+		t.Fatalf("expected err %q, got %q", accounts.ErrKeyInUse, err)
+	}
+
+	// delete account
+	if err := store.DeleteAccount(ctx, acc); err != nil {
+		t.Fatal(err)
+	}
+
+	// try deleting key again now that it's not in use
+	if err := store.DeleteAppConnectKey(ctx, connectKey); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := store.ValidAppConnectKey(ctx, connectKey); !errors.Is(err, accounts.ErrKeyNotFound) {
+		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
+	}
+
+	// try deleting key that does not exist
+	if err := store.DeleteAppConnectKey(ctx, connectKey); !errors.Is(err, accounts.ErrKeyNotFound) {
+		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
 }
 

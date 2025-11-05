@@ -17,30 +17,26 @@ func TestMigrations(t *testing.T) {
 	// create cluster
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(11), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(500*time.Millisecond))))
+	indexer := cluster.Indexer
+
+	// create an app
+	app := cluster.App(t)
 
 	// create some more utxos
-	indexer := cluster.Indexer
 	cluster.ConsensusNode.MineBlocks(t, indexer.WalletAddr(), 11)
 
-	// add an account
-	a1 := types.GeneratePrivateKey()
-	indexer.Store().AddTestAccount(t, a1.PublicKey())
-
-	// convenience variables
-	app := indexer.App(a1)
-
-	// fetch hosts
-	hosts := testutils.WaitForHosts(t, app, 11)
+	// wait for contracts to be formed
+	cluster.WaitForContracts(t)
 
 	// upload sectors to hosts
 	encryptionKey, shards, roots := slabs.NewTestShards(t, 1, 10)
 	for i := range shards {
-		client := indexer.HostClient(t, hosts[i].PublicKey)
+		client := indexer.HostClient(t, cluster.Hosts[i].PublicKey())
 		hs, err := client.Settings(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := client.WriteSector(context.Background(), hs.Prices, proto.NewAccountToken(a1, hosts[i].PublicKey), bytes.NewReader(shards[i]), proto.SectorSize); err != nil {
+		if _, err := client.WriteSector(context.Background(), hs.Prices, app.AccountToken(cluster.Hosts[i].PublicKey()), bytes.NewReader(shards[i]), proto.SectorSize); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -50,16 +46,16 @@ func TestMigrations(t *testing.T) {
 		EncryptionKey: encryptionKey,
 		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
-			{Root: roots[0], HostKey: hosts[0].PublicKey},
-			{Root: roots[1], HostKey: hosts[1].PublicKey},
-			{Root: roots[2], HostKey: hosts[2].PublicKey},
-			{Root: roots[3], HostKey: hosts[3].PublicKey},
-			{Root: roots[4], HostKey: hosts[4].PublicKey},
-			{Root: roots[5], HostKey: hosts[5].PublicKey},
-			{Root: roots[6], HostKey: hosts[6].PublicKey},
-			{Root: roots[7], HostKey: hosts[7].PublicKey},
-			{Root: roots[8], HostKey: hosts[8].PublicKey},
-			{Root: roots[9], HostKey: hosts[9].PublicKey},
+			{Root: roots[0], HostKey: cluster.Hosts[0].PublicKey()},
+			{Root: roots[1], HostKey: cluster.Hosts[1].PublicKey()},
+			{Root: roots[2], HostKey: cluster.Hosts[2].PublicKey()},
+			{Root: roots[3], HostKey: cluster.Hosts[3].PublicKey()},
+			{Root: roots[4], HostKey: cluster.Hosts[4].PublicKey()},
+			{Root: roots[5], HostKey: cluster.Hosts[5].PublicKey()},
+			{Root: roots[6], HostKey: cluster.Hosts[6].PublicKey()},
+			{Root: roots[7], HostKey: cluster.Hosts[7].PublicKey()},
+			{Root: roots[8], HostKey: cluster.Hosts[8].PublicKey()},
+			{Root: roots[9], HostKey: cluster.Hosts[9].PublicKey()},
 		},
 	})
 	if err != nil {
@@ -97,7 +93,7 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// block the first host
-	err = indexer.Hosts().BlockHosts(context.Background(), []types.PublicKey{hosts[0].PublicKey}, []string{t.Name()})
+	err = indexer.Hosts().BlockHosts(context.Background(), []types.PublicKey{cluster.Hosts[0].PublicKey()}, []string{t.Name()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,8 +104,8 @@ func TestMigrations(t *testing.T) {
 			t.Fatal(err)
 		} else if len(pinned.Sectors) != 10 {
 			return fmt.Errorf("expected 10 pinned sectors, got %d", len(pinned.Sectors))
-		} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != hosts[10].PublicKey {
-			return fmt.Errorf("expected sector %s on host %s, got %s on host %s", roots[0], hosts[10].PublicKey, pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
+		} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != cluster.Hosts[10].PublicKey() {
+			return fmt.Errorf("expected sector %s on host %s, got %s on host %s", roots[0], cluster.Hosts[10].PublicKey(), pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
 		}
 		return nil
 	}); err != nil {
@@ -122,29 +118,25 @@ func TestUpdateLastUsed(t *testing.T) {
 	logger := testutils.NewLogger(false)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
 
+	// create an app
+	app := cluster.App(t)
+
 	// create some more utxos
 	indexer := cluster.Indexer
 	cluster.ConsensusNode.MineBlocks(t, indexer.WalletAddr(), 10)
 
-	// add an account
-	a1 := types.GeneratePrivateKey()
-	indexer.Store().AddTestAccount(t, a1.PublicKey())
-
-	// convenience variables
-	app := indexer.App(a1)
-
-	// fetch hosts
-	hosts := testutils.WaitForHosts(t, app, 10)
+	// wait for contracts to be formed
+	cluster.WaitForContracts(t)
 
 	// upload sectors to hosts
 	encryptionKey, shards, roots := slabs.NewTestShards(t, 1, 9)
 	for i := range shards {
-		client := indexer.HostClient(t, hosts[i].PublicKey)
+		client := indexer.HostClient(t, cluster.Hosts[i].PublicKey())
 		hs, err := client.Settings(context.Background())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := client.WriteSector(context.Background(), hs.Prices, proto.NewAccountToken(a1, hosts[i].PublicKey), bytes.NewReader(shards[i]), proto.SectorSize); err != nil {
+		if _, err := client.WriteSector(context.Background(), hs.Prices, app.AccountToken(cluster.Hosts[i].PublicKey()), bytes.NewReader(shards[i]), proto.SectorSize); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -165,8 +157,8 @@ func TestUpdateLastUsed(t *testing.T) {
 		EncryptionKey: encryptionKey,
 		MinShards:     1,
 		Sectors: func() (s []slabs.PinnedSector) {
-			for i, h := range hosts {
-				s = append(s, slabs.PinnedSector{Root: roots[i], HostKey: h.PublicKey})
+			for i, h := range cluster.Hosts {
+				s = append(s, slabs.PinnedSector{Root: roots[i], HostKey: h.PublicKey()})
 			}
 			return s
 		}(),

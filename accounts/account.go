@@ -66,6 +66,7 @@ type (
 	// Account represents an account in the indexer.
 	Account struct {
 		AccountKey     proto.Account `json:"accountKey"`
+		ConnectKey     *string       `json:"connectKey,omitempty"`
 		ServiceAccount bool          `json:"serviceAccount"`
 		MaxPinnedData  uint64        `json:"maxPinnedData"`
 		PinnedData     uint64        `json:"pinnedData"`

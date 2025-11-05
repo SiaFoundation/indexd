@@ -9,6 +9,8 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/testutil"
+	"go.sia.tech/indexd/api/app"
+	"go.sia.tech/indexd/contracts"
 	"go.uber.org/zap"
 )
 
@@ -107,6 +109,14 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	return cluster
 }
 
+// App adds a new test account and returns an app client for it.
+func (c *Cluster) App(t testing.TB) *app.Client {
+	t.Helper()
+	sk := types.GeneratePrivateKey()
+	c.Indexer.Store().AddTestAccount(t, sk.PublicKey())
+	return c.Indexer.App(sk)
+}
+
 // AddHosts adds the given hosts to the cluster.
 func (c *Cluster) AddHosts(ctx context.Context, t testing.TB, hosts ...*Host) {
 	t.Helper()
@@ -179,4 +189,36 @@ func (c *Cluster) NewHosts(t testing.TB, n int) []*Host {
 		hosts = append(hosts, cn.NewHost(t, pk, c.log.Named("host-"+pk.PublicKey().String())))
 	}
 	return hosts
+}
+
+// WaitForContracts waits until a contract is formed with every host in the cluster
+func (c *Cluster) WaitForContracts(t *testing.T) {
+	t.Helper()
+	cm := c.Indexer.Contracts()
+
+	required := make(map[types.PublicKey]struct{})
+	for _, h := range c.Hosts {
+		required[h.PublicKey()] = struct{}{}
+	}
+
+	for range 100 {
+		contracts, err := cm.Contracts(t.Context(), 0, math.MaxInt, contracts.WithGood(true), contracts.WithRevisable(true))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		seen := make(map[types.PublicKey]struct{})
+		for _, c := range contracts {
+			if _, ok := required[c.HostKey]; ok {
+				seen[c.HostKey] = struct{}{}
+			}
+		}
+
+		if len(seen) == len(required) {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	t.Fatalf("not all contracts formed after timeout")
 }

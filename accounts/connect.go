@@ -15,6 +15,9 @@ var (
 	ErrKeyExhausted = errors.New("key has no remaining uses")
 	// ErrKeyNotFound is returned when an app connect key is not found.
 	ErrKeyNotFound = errors.New("key not found")
+	// ErrKeyInUse is returned when deleting an app connect key with accounts
+	// associated to it.
+	ErrKeyInUse = errors.New("key in use")
 )
 
 type (

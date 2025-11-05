@@ -22,7 +22,7 @@ import (
 
 func (s *Store) addTestAccount(t testing.TB, ak types.PublicKey, opts ...accounts.AddAccountOption) {
 	err := s.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
-		if err := addAccount(ctx, tx, ak, false, accounts.AccountMeta{}, opts...); err != nil {
+		if err := addAccount(ctx, tx, nil, ak, false, accounts.AccountMeta{}, opts...); err != nil {
 			return fmt.Errorf("failed to add account: %w", err)
 		}
 		return nil
@@ -162,7 +162,7 @@ func TestAddAccount(t *testing.T) {
 	t.Run("user account", func(t *testing.T) {
 		test(t, func(pk types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) (bool, error) {
 			err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
-				if err := addAccount(ctx, tx, pk, false, meta, opts...); err != nil {
+				if err := addAccount(ctx, tx, nil, pk, false, meta, opts...); err != nil {
 					return fmt.Errorf("failed to add account: %w", err)
 				}
 				return nil

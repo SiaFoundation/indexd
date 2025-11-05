@@ -20,9 +20,14 @@ func TestAccountFunding(t *testing.T) {
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(1))
 	indexer := cluster.Indexer
 
-	// add an account
-	a1 := types.GeneratePrivateKey()
-	indexer.Store().AddTestAccount(t, a1.PublicKey())
+	// create an app
+	app := cluster.App(t)
+
+	// fetch account
+	acc, err := app.Account(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// assert we have one usable host
 	time.Sleep(time.Second)
@@ -34,11 +39,9 @@ func TestAccountFunding(t *testing.T) {
 	}
 
 	// convenience variables
-	acc := proto.Account(a1.PublicKey())
 	hk := hosts[0].PublicKey
 	hp := hosts[0].Settings.Prices
 	hc := indexer.HostClient(t, hk)
-	token := proto.NewAccountToken(a1, hk)
 	target := types.Siacoins(2)
 
 	// assert we have one active contract
@@ -51,7 +54,7 @@ func TestAccountFunding(t *testing.T) {
 	}
 
 	// assert the account is funded
-	balance, err := hc.AccountBalance(context.Background(), acc)
+	balance, err := hc.AccountBalance(context.Background(), acc.AccountKey)
 	if err != nil {
 		t.Fatal(err)
 	} else if !balance.Equals(target) {
@@ -61,13 +64,13 @@ func TestAccountFunding(t *testing.T) {
 	// spend some money
 	var sector [proto.SectorSize]byte
 	frand.Read(sector[:])
-	_, err = hc.WriteSector(context.Background(), hp, token, bytes.NewReader(sector[:]), proto.SectorSize)
+	_, err = hc.WriteSector(context.Background(), hp, app.AccountToken(hk), bytes.NewReader(sector[:]), proto.SectorSize)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert it was spent
-	balance, err = hc.AccountBalance(context.Background(), acc)
+	balance, err = hc.AccountBalance(context.Background(), acc.AccountKey)
 	if err != nil {
 		t.Fatal(err)
 	} else if !balance.Add(hp.RPCWriteSectorCost(proto.SectorSize).RenterCost()).Equals(target) {
@@ -82,7 +85,7 @@ func TestAccountFunding(t *testing.T) {
 
 	// assert it was refilled
 	time.Sleep(time.Second)
-	balance, err = hc.AccountBalance(context.Background(), acc)
+	balance, err = hc.AccountBalance(context.Background(), acc.AccountKey)
 	if err != nil {
 		t.Fatal(err)
 	} else if !balance.Equals(target) {
