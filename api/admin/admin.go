@@ -430,7 +430,8 @@ func (a *admin) handleGETAccounts(jc jape.Context) {
 
 	accs, err := a.accounts.Accounts(jc.Request.Context(), offset, limit, opts...)
 	if errors.Is(err, accounts.ErrKeyNotFound) {
-		jc.Error(err, http.StatusNotFound)
+		// cast needed or empty response will be written
+		jc.Encode([]accounts.Account(nil))
 		return
 	} else if jc.Check("failed to get accounts", err) != nil {
 		return
