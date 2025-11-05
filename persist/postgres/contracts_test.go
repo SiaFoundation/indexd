@@ -1453,6 +1453,36 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 	assertContractGood(false)
 }
 
+// TestMarkContractBad tests marking a contract as bad.
+func TestMarkContractBad(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	hk := store.addTestHost(t)
+	fcid := store.addTestContract(t, hk)
+
+	contract, err := store.Contract(t.Context(), fcid)
+	if err != nil {
+		t.Fatal(err)
+	} else if !contract.Good {
+		t.Fatal("expected contract to be good initially")
+	}
+
+	if err := store.MarkContractBad(t.Context(), fcid); err != nil {
+		t.Fatalf("failed to mark contract bad: %v", err)
+	}
+	contract, err = store.Contract(t.Context(), fcid)
+	if err != nil {
+		t.Fatal(err)
+	} else if contract.Good {
+		t.Fatal("expected contract to be marked bad")
+	}
+
+	var missingID types.FileContractID
+	if err := store.MarkContractBad(t.Context(), missingID); !errors.Is(err, contracts.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got: %v", err)
+	}
+}
+
 func TestUpdateContractRevision(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
@@ -2053,6 +2083,44 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 				}
 			}
 		})
+	}
+}
+
+// BenchmarkMarkContractBad benchmarks the performance of marking contracts as
+// bad.
+func BenchmarkMarkContractBad(b *testing.B) {
+	const (
+		numHosts            = 1000
+		numContractsPerHost = 10
+	)
+
+	// prepare database
+	store := initPostgres(b, zap.NewNop())
+	contractIDs := make([]types.FileContractID, 0, numHosts*numContractsPerHost)
+	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		for range numHosts {
+			var hostID int64
+			hk := types.GeneratePrivateKey().PublicKey()
+			err := tx.QueryRow(ctx, `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
+			if err != nil {
+				return err
+			}
+			for range numContractsPerHost {
+				contractIDs = append(contractIDs, insertRandomContract(b, tx, hostID, hk))
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	for b.Loop() {
+		rIdx := frand.Intn(len(contractIDs))
+		fcid := contractIDs[rIdx]
+		contractIDs = append(contractIDs[:rIdx], contractIDs[rIdx+1:]...)
+		if err := store.MarkContractBad(b.Context(), fcid); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
 

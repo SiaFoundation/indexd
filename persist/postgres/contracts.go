@@ -649,6 +649,19 @@ func (s *Store) MarkUnrenewableContractsBad(ctx context.Context, minProofHeight 
 	})
 }
 
+// MarkContractBad marks a specific contract as bad.
+func (s *Store) MarkContractBad(ctx context.Context, contractID types.FileContractID) error {
+	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+		res, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(contractID))
+		if err != nil {
+			return fmt.Errorf("failed to mark contract bad: %w", err)
+		} else if res.RowsAffected() != 1 {
+			return fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
+		}
+		return nil
+	})
+}
+
 // RejectPendingContracts marks all contracts as rejected that are currently
 // pending and have a formation height older than 'maxFormation'.
 func (s *Store) RejectPendingContracts(ctx context.Context, maxFormation time.Time) error {
