@@ -242,6 +242,9 @@ func WithMinHostDistance(km float64) ContractManagerOpt {
 // WithSectorRootsBatchSize sets the batch size for fetching sector roots.
 // The default is 1TB worth of sectors.
 func WithSectorRootsBatchSize(batchSize uint64) ContractManagerOpt {
+	if batchSize < 1 {
+		panic("sector roots batch size must be at least 1") // developer error
+	}
 	return func(cm *ContractManager) {
 		cm.sectorRootsBatchSize = batchSize
 	}
