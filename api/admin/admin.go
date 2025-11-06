@@ -424,12 +424,19 @@ func (a *admin) handleGETAccounts(jc jape.Context) {
 		}
 		opts = append(opts, accounts.WithServiceAccount(serviceAccount))
 	}
+	if connectKey := jc.Request.FormValue("connectkey"); connectKey != "" {
+		opts = append(opts, accounts.WithConnectKey(connectKey))
+	}
 
-	accounts, err := a.accounts.Accounts(jc.Request.Context(), offset, limit, opts...)
-	if jc.Check("failed to get accounts", err) != nil {
+	accs, err := a.accounts.Accounts(jc.Request.Context(), offset, limit, opts...)
+	if errors.Is(err, accounts.ErrKeyNotFound) {
+		// cast needed or empty response will be written
+		jc.Encode([]accounts.Account(nil))
+		return
+	} else if jc.Check("failed to get accounts", err) != nil {
 		return
 	}
-	jc.Encode(accounts)
+	jc.Encode(accs)
 }
 
 func (a *admin) handleDELETEAccount(jc jape.Context) {

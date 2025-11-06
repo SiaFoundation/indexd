@@ -46,23 +46,13 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 	log = log.With(zap.Stringer("hostKey", contract.HostKey), zap.Stringer("contractID", contract.ID))
 
 	return cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
-		// scale funding by active account count
-		target, err := cm.accounts.FundTarget(ctx, minAllowance)
+		// calculate funding target
+		minAllowance, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
 			return fmt.Errorf("failed to get fund target: %w", err)
 		}
 
-		// NOTE: In theory using 'contractFunding' here might push the
-		// collateral over the max collateral of the host. Previously we tried
-		// to avoid that by not changing the allowance/collateral amounts in the
-		// contract when renewing but that has its own issues. Prices might
-		// change, the acceptable ratio of allowance and collateral as well and
-		// overall the host might just have lowered its max collateral. So we
-		// might as well keep the funding logic consistent with formations and
-		// refreshes and rely on the host checks to identify hosts with a
-		// MaxCollateral too low for us to use them.
-		allowance, collateral := contractFunding(host.Settings, contract.Size, target, minHostCollateral, period)
-
+		allowance, collateral := contractFunding(host.Settings, contract.Size, minAllowance, period)
 		renewCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 

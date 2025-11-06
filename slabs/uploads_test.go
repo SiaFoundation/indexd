@@ -18,6 +18,7 @@ import (
 func TestUploadShards(t *testing.T) {
 	// prepare dependencies
 	store := newMockStore()
+	chain := newMockChainManager()
 	am := newMockAccountManager(store)
 	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
@@ -45,7 +46,7 @@ func TestUploadShards(t *testing.T) {
 
 	// create manager
 	alerter := alerts.NewManager()
-	sm, err := newSlabManager(am, nil, hm, store, dialer, alerter, account, types.GeneratePrivateKey())
+	sm, err := newSlabManager(chain, am, nil, hm, store, dialer, alerter, account, types.GeneratePrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}

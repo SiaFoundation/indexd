@@ -41,6 +41,7 @@ type (
 		shardTimeout       time.Duration
 
 		alerter AlertsManager
+		chain   ChainManager
 		am      AccountManager
 		cm      ContractManager
 		hm      HostManager
@@ -51,6 +52,11 @@ type (
 
 		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
+	}
+
+	// ChainManager provides information about the current chain state.
+	ChainManager interface {
+		Tip() types.ChainIndex
 	}
 
 	// AccountManager defines the SlabManager's dependencies on the account
@@ -195,8 +201,8 @@ func (w *wrapper) DialHost(ctx context.Context, hostKey types.PublicKey, addrs [
 }
 
 // NewManager creates a new slab manager.
-func NewManager(am AccountManager, cm ContractManager, hm HostManager, store Store, dialer *client.Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
-	sm, err := newSlabManager(am, cm, hm, store, &wrapper{d: dialer}, alerter, migrationAccount, integrityAccount, opts...)
+func NewManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, dialer *client.Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+	sm, err := newSlabManager(chain, am, cm, hm, store, &wrapper{d: dialer}, alerter, migrationAccount, integrityAccount, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +220,7 @@ func NewManager(am AccountManager, cm ContractManager, hm HostManager, store Sto
 	return sm, nil
 }
 
-func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store Store, dialer Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, dialer Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
 	m := &SlabManager{
 		healthCheckInterval: 10 * time.Minute,
 
@@ -229,6 +235,7 @@ func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store
 		shardTimeout:       2 * time.Minute,
 		migrationBatchSize: runtime.NumCPU(),
 
+		chain:    chain,
 		am:       am,
 		cm:       cm,
 		dialer:   dialer,

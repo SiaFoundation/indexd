@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
@@ -31,13 +32,7 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 				cancel()
 			}()
 
-			host, err := cm.hosts.Host(ctx, hostKey)
-			if err != nil {
-				log.Error("failed to fetch host for funding", zap.Error(err))
-				return
-			}
-
-			contractIDs, err := cm.store.ContractsForFunding(ctx, host.PublicKey, 10)
+			contractIDs, err := cm.store.ContractsForFunding(ctx, hostKey, 10)
 			if err != nil {
 				log.Error("failed to fetch contracts for funding", zap.Error(err))
 				return
@@ -46,10 +41,10 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 				return
 			}
 
-			err = cm.accounts.FundAccounts(ctx, host, contractIDs, force, log)
-			if err != nil {
+			if err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+				return cm.accounts.FundAccounts(ctx, host, contractIDs, force, log)
+			}); err != nil {
 				log.Debug("failed to fund accounts", zap.Error(err))
-				return
 			}
 		}(ctx, hk, log.With(zap.Stringer("hostKey", hk)))
 	}
@@ -81,18 +76,13 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 		return fmt.Errorf("failed to renew contracts: %w", err)
 	}
 
-	// refresh any good contracts that are either out of collateral or funds
-	if err := cm.performContractRefreshes(ctx, settings.Period, log.Named("refresh")); err != nil {
-		return fmt.Errorf("failed to perform contract refreshes: %w", err)
-	}
-
 	// mark any contracts too close to their expiration height as bad
 	if err := cm.store.MarkUnrenewableContractsBad(ctx, blockHeight+settings.RenewWindow/2); err != nil {
 		return fmt.Errorf("failed to mark unrenewable contracts bad: %w", err)
 	}
 
 	// form new contracts until there are enough good contracts to use
-	if err := cm.performContractFormation(ctx, settings.Period, int64(settings.WantedContracts), log.Named("formation")); err != nil {
+	if err := cm.performContractFormation(ctx, settings, blockHeight, log.Named("maintenance")); err != nil {
 		return fmt.Errorf("failed to form contracts: %w", err)
 	}
 

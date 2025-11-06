@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"slices"
 	"sync"
 	"time"
@@ -19,6 +20,7 @@ import (
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/mux/v2"
 	"go.uber.org/zap"
 )
 
@@ -328,7 +330,16 @@ func (d *dialer) retry(ctx context.Context, hostKey types.PublicKey, fn func(rhp
 	}
 	if err := fn(tc); err == nil {
 		return nil
+	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return err
 	} else if proto.ErrorCode(err) != proto.ErrorCodeTransport {
+		return err
+	} else if errors.Is(err, mux.ErrClosedStream) || errors.Is(err, os.ErrDeadlineExceeded) {
+		// ErrClosedStream indicates that we closed the stream gracefully, so
+		// the transport is still intact. This usually happens because we close
+		// streams by cancelling or timing out contexts. os.ErrDeadlineExceeded
+		// is similar, indicating that the stream hit a timeout which was set
+		// using SetDeadline. In both cases, the mux is still healthy.
 		return err
 	}
 
@@ -387,7 +398,7 @@ func (d *dialer) WriteSector(ctx context.Context, hostKey types.PublicKey, secto
 		return
 	})
 	if err != nil {
-		return types.Hash256{}, fmt.Errorf("failed to write sector: %w", err)
+		return types.Hash256{}, fmt.Errorf("failed to write sector to host %v: %w", hostKey, err)
 	}
 
 	return result.Root, nil

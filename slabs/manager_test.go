@@ -15,7 +15,35 @@ import (
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"lukechampine.com/frand"
 )
+
+type mockChainManager struct {
+	mu  sync.Mutex
+	tip types.ChainIndex
+}
+
+func (m *mockChainManager) AdvanceToHeight(height uint64) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.tip.Height = height
+	m.tip.ID = frand.Entropy256()
+}
+
+func (m *mockChainManager) Tip() types.ChainIndex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.tip
+}
+
+func newMockChainManager() *mockChainManager {
+	return &mockChainManager{
+		tip: types.ChainIndex{
+			Height: 0,
+			ID:     frand.Entropy256(),
+		},
+	}
+}
 
 type mockStore struct {
 	accounts        map[proto.Account]struct{}

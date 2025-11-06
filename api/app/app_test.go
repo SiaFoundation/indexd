@@ -22,6 +22,7 @@ import (
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
@@ -99,7 +100,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 func TestApplicationAPI(t *testing.T) {
 	ctx := t.Context()
 	// create cluster with three hosts
-	logger := testutils.NewLogger(false)
+	logger := zap.NewNop()
 	cluster := testutils.NewCluster(t, testutils.WithHosts(10), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
@@ -448,7 +449,7 @@ func TestApplicationAPI(t *testing.T) {
 func TestAppConnect(t *testing.T) {
 	ctx := t.Context()
 	// create cluster with three hosts
-	logger := testutils.NewLogger(false)
+	logger := zap.NewNop()
 	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
@@ -540,7 +541,7 @@ func TestSharedObjects(t *testing.T) {
 	ctx := t.Context()
 
 	// create cluster with three hosts
-	logger := testutils.NewLogger(false)
+	logger := zap.NewNop()
 	cluster := testutils.NewCluster(t, testutils.WithHosts(12), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin

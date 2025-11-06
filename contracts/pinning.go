@@ -16,7 +16,7 @@ import (
 func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Logger) error {
 	start := time.Now()
 
-	// fetch hosts for pinning, a host is eligble for pinning if it is not
+	// fetch hosts for pinning, a host is eligible for pinning if it is not
 	// blocked, has unpinned sectors and has an active contract
 	hfp, err := cm.hosts.HostsForPinning(ctx)
 	if err != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
 	"slices"
 	"sync"
 
@@ -15,6 +16,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/mux/v2"
 	"go.uber.org/zap"
 )
 
@@ -166,6 +168,13 @@ func (c *connPool) retry(ctx context.Context, hostKey types.PublicKey, addrs []c
 	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return err
 	} else if proto.ErrorCode(err) != proto.ErrorCodeTransport {
+		return err
+	} else if errors.Is(err, mux.ErrClosedStream) || errors.Is(err, os.ErrDeadlineExceeded) {
+		// ErrClosedStream indicates that we closed the stream gracefully, so
+		// the transport is still intact. This usually happens because we close
+		// streams by cancelling or timing out contexts. os.ErrDeadlineExceeded
+		// is similar, indicating that the stream hit a timeout which was set
+		// using SetDeadline. In both cases, the mux is still healthy.
 		return err
 	}
 

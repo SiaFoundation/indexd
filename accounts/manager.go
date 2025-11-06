@@ -26,9 +26,16 @@ const (
 	AccountExpBackoffMaxMinutes = 128
 )
 
+const (
+	// fundTargetBytes is the number of bytes used to calculate the fund target
+	// per host. We fund accounts to cover this amount of read and write usage.
+	// It roughly comes down to uploading and downloading to and from a host at
+	// ~1Gbps for a period of 2 minutes. With 30 good hosts, this results in about
+	// 30Gbps of maximum theoretical throughput.
+	fundTargetBytes = uint64(16 << 30) // 16 GiB
+)
+
 var (
-	// DefaultFundTarget is the target amount of funds per account per host.
-	DefaultFundTarget = types.Siacoins(2)
 
 	// accountActivityThreshold is the threshold for determining whether an
 	// account has been active recently for the purposes of contract funding.
@@ -73,10 +80,9 @@ type (
 
 	// AccountManager manages accounts.
 	AccountManager struct {
-		store      Store
-		funder     AccountFunder
-		fundTarget types.Currency
-		log        *zap.Logger
+		store  Store
+		funder AccountFunder
+		log    *zap.Logger
 
 		serviceAccountsMu sync.Mutex
 		serviceAccounts   map[proto.Account]struct{}
@@ -122,6 +128,13 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 		}
 	}
 
+	// calculate the fund target for this host
+	fundTarget := HostFundTarget(host)
+	if fundTarget.IsZero() {
+		log.Warn("fund target is zero, skipping funding")
+		return nil
+	}
+
 	var exhausted bool
 	for !exhausted {
 		accounts, err := m.store.HostAccountsForFunding(ctx, host.PublicKey, time.Now().Add(-accountActivityThreshold), AccountFundBatch)
@@ -135,7 +148,7 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 		}
 
 		// fund accounts
-		funded, drained, err := m.funder.FundAccounts(ctx, host, contractIDs, accounts, m.fundTarget, log)
+		funded, drained, err := m.funder.FundAccounts(ctx, host, contractIDs, accounts, fundTarget, log)
 		if err != nil {
 			return fmt.Errorf("failed to fund accounts: %w", err)
 		}
@@ -148,7 +161,7 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 		}
 
 		// update service accounts
-		if err := m.UpdateServiceAccounts(ctx, accounts[:funded], m.fundTarget); err != nil {
+		if err := m.UpdateServiceAccounts(ctx, accounts[:funded], fundTarget); err != nil {
 			m.log.Warn("failed to update service account balance", zap.Error(err))
 		}
 
@@ -182,17 +195,25 @@ func (m *AccountManager) DeleteAccount(ctx context.Context, ak types.PublicKey) 
 	return m.store.DeleteAccount(ctx, ak)
 }
 
-// FundTarget returns the configured fund target of the account manager.
-func (am *AccountManager) FundTarget(ctx context.Context, minAllowance types.Currency) (types.Currency, error) {
-	activeAccounts, err := am.store.ActiveAccounts(ctx, time.Now().Add(-accountActivityThreshold))
+// ContractFundTarget calculates the fund target for a contract on the given
+// host. We scale the fund target by the number of active accounts, if there are
+// any.
+func (am *AccountManager) ContractFundTarget(ctx context.Context, host hosts.Host, minAllowance types.Currency) (types.Currency, error) {
+	// fetch number of active accounts
+	n, err := am.store.ActiveAccounts(ctx, time.Now().Add(-accountActivityThreshold))
 	if err != nil {
 		return types.ZeroCurrency, err
+	} else if n == 0 {
+		n = 1
 	}
 
-	// get the greater of the min allowance or the funding target multiplied by
-	// the number of active accounts
-	target := am.fundTarget.Mul64(activeAccounts)
-	if minAllowance.Cmp(target) == 1 {
+	// calculate the target and scale by number of active accounts and double
+	// it to have a buffer so contracts are not refreshed immediately
+	// after one funding round.
+	target := HostFundTarget(host).Mul64(n).Mul64(2)
+
+	// ensure target is at least minAllowance
+	if target.Cmp(minAllowance) < 0 {
 		target = minAllowance
 	}
 
@@ -216,13 +237,20 @@ func UpdateFundedAccounts(accounts []HostAccount, n int) {
 	}
 }
 
+// HostFundTarget calculates the fund target for the given host. We fund
+// accounts to cover 128GB of read and write usage.
+func HostFundTarget(host hosts.Host) types.Currency {
+	u1 := host.Settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost().Mul64(fundTargetBytes / proto.SectorSize).Div64(2)
+	u2 := host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(fundTargetBytes / proto.SectorSize).Div64(2)
+	return u1.Add(u2)
+}
+
 // NewManager creates a new AccountManager.
 func NewManager(store Store, funder AccountFunder, opts ...Option) *AccountManager {
 	m := &AccountManager{
 		serviceAccounts: make(map[proto.Account]struct{}),
 		store:           store,
 		funder:          funder,
-		fundTarget:      DefaultFundTarget,
 		log:             zap.NewNop(),
 	}
 	for _, opt := range opts {

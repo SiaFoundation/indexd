@@ -32,6 +32,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 
 	// prepare managers
 	store := newMockStore()
+	chain := newMockChainManager()
 	am := newMockAccountManager(store)
 	cm := newMockContractManager()
 	hm := newMockHostManager()
@@ -43,7 +44,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	acc := proto.Account(sk.PublicKey())
 
 	// prepare slab manager
-	sm, err := newSlabManager(am, cm, hm, store, dialer, nil, sk, sk)
+	sm, err := newSlabManager(chain, am, cm, hm, store, dialer, nil, sk, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,6 +136,7 @@ func TestPerformIntegrityChecksForHostExpiredPrices(t *testing.T) {
 
 	// prepare managers
 	store := newMockStore()
+	chain := newMockChainManager()
 	am := newMockAccountManager(store)
 	cm := newMockContractManager()
 	hm := newMockHostManager()
@@ -147,7 +149,7 @@ func TestPerformIntegrityChecksForHostExpiredPrices(t *testing.T) {
 	acc := proto.Account(sk.PublicKey())
 
 	// prepare slab manager
-	sm, err := newSlabManager(am, cm, hm, store, dialer, nil, sk, sk)
+	sm, err := newSlabManager(chain, am, cm, hm, store, dialer, nil, sk, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +179,7 @@ func TestPerformIntegrityChecksForHostExpiredPrices(t *testing.T) {
 func TestIntegrityChecksAlert(t *testing.T) {
 	store := newMockStore()
 	alerter := alerts.NewManager()
-	sm, err := newSlabManager(newMockAccountManager(store), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
+	sm, err := newSlabManager(newMockChainManager(), newMockAccountManager(store), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}

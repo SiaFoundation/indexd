@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
+	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
 
@@ -28,7 +29,7 @@ func TestContractPruning(t *testing.T) {
 	)
 
 	// create cluster
-	logger := testutils.NewLogger(false)
+	logger := zaptest.NewLogger(t)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(nHosts), testutils.WithIndexer(testutils.WithContractOptions(contracts.WithSectorRootsBatchSize(batchSize))))
 	indexer := cluster.Indexer
 
@@ -164,20 +165,17 @@ func TestContractPruning(t *testing.T) {
 
 func TestSectorPinning(t *testing.T) {
 	// create cluster
-	logger := testutils.NewLogger(false)
+	logger := zaptest.NewLogger(t)
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10))
 	indexer := cluster.Indexer
 
 	// create an app
 	app := cluster.App(t)
 
-	// fetch account
-	acc, err := app.Account(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
+	// wait for contracts to be formed
+	cluster.WaitForContracts(t)
 
-	time.Sleep(time.Second)
+	// assert we have 10 usable hosts
 	hosts, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true), hosts.WithActiveContracts(true))
 	if err != nil {
 		t.Fatal(err)
@@ -208,6 +206,12 @@ func TestSectorPinning(t *testing.T) {
 		t.Fatal(err)
 	}
 	slabID := slabIDs[0]
+
+	// fetch account
+	acc, err := app.Account(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// assert the slab is pinned
 	time.Sleep(time.Second)

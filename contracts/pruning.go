@@ -29,7 +29,7 @@ func (cm *ContractManager) performContractPruning(ctx context.Context, force boo
 		}
 	}
 
-	// fetch hosts for pruning, a host is eligble for pruning if it is not
+	// fetch hosts for pruning, a host is eligible for pruning if it is not
 	// blocked and has active contracts that haven't been pruned in the last 24
 	// hours
 	hfp, err := cm.hosts.HostsForPruning(ctx)

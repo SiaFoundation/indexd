@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
-	"lukechampine.com/frand"
 )
 
 const (
@@ -45,7 +44,7 @@ type (
 	// AccountManager defines an interface that allows funding accounts on the
 	// host using a given set of contracts.
 	AccountManager interface {
-		FundTarget(ctx context.Context, minAllowance types.Currency) (types.Currency, error)
+		ContractFundTarget(ctx context.Context, host hosts.Host, minAllowance types.Currency) (types.Currency, error)
 		FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, force bool, log *zap.Logger) error
 	}
 
@@ -197,9 +196,8 @@ type (
 		triggerMaintenanceChan chan struct{}
 		triggerPruningChan     chan struct{}
 
-		log     *zap.Logger
-		shuffle func(int, func(i, j int))
-		tg      *threadgroup.ThreadGroup
+		log *zap.Logger
+		tg  *threadgroup.ThreadGroup
 
 		contractRejectBuffer              time.Duration
 		expiredContractBroadcastBuffer    uint64
@@ -445,15 +443,14 @@ func newContractManager(renterKey types.PublicKey, accounts AccountManager, chai
 		triggerMaintenanceChan: make(chan struct{}, 1),
 		triggerPruningChan:     make(chan struct{}, 1),
 
-		log:     zap.NewNop(),
-		shuffle: frand.Shuffle,
-		tg:      threadgroup.New(),
+		log: zap.NewNop(),
+		tg:  threadgroup.New(),
 
 		contractRejectBuffer:              6 * time.Hour, // 6 hours after formation
 		expiredContractBroadcastBuffer:    144,           // 144 block after expiration
 		expiredContractPruneBuffer:        144,           // 144 blocks after broadcast
 		expiredContractSectorsPruneBuffer: 36,            // 36 blocks (~6 hours) after expiration
-		maintenanceFrequency:              5 * time.Minute,
+		maintenanceFrequency:              2 * time.Minute,
 		minHostDistanceKm:                 10,                 // 10km
 		pruneIntervalSuccess:              24 * time.Hour,     // 1 day
 		pruneIntervalFailure:              3 * time.Hour,      // 3 hours

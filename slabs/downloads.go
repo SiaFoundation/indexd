@@ -12,6 +12,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/mux/v2"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -114,11 +115,15 @@ outer:
 			usage, data, err := m.downloadShard(ctx, host, sector, pool)
 			if err != nil {
 				lost := isErrLostSector(err)
-				log.Debug("failed to download shard",
-					zap.Bool("timeout", time.Since(start) > m.shardTimeout),
-					zap.Bool("lost", lost),
-					zap.Error(err),
-				)
+				interrupted := ctx.Err() != nil && (errors.Is(err, mux.ErrClosedStream) || errors.Is(err, ctx.Err()))
+				if !interrupted {
+					log.Debug("failed to download shard",
+						zap.Bool("timeout", time.Since(start) > m.shardTimeout),
+						zap.Duration("elapsed", time.Since(start)),
+						zap.Bool("lost", lost),
+						zap.Error(err),
+					)
+				}
 				if lost {
 					if err := m.store.MarkSectorsLost(ctx, host.PublicKey, []types.Hash256{sector.Root}); err != nil {
 						log.Error("failed to mark sector as lost", zap.Error(err))

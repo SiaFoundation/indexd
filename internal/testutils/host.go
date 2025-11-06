@@ -149,6 +149,10 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 			t.Fatal(err)
 		}
 
+		if err := contractor.UpdateChainState(reverted, applied); err != nil {
+			t.Fatal(err)
+		}
+
 		if err := ws.UpdateChainState(func(tx wallet.UpdateTx) error {
 			return w.UpdateChainState(tx, reverted, applied)
 		}); err != nil {

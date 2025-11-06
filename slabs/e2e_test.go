@@ -11,11 +11,12 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
+	"go.uber.org/zap"
 )
 
 func TestMigrations(t *testing.T) {
 	// create cluster
-	logger := testutils.NewLogger(false)
+	logger := zap.NewNop()
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(11), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(500*time.Millisecond))))
 	indexer := cluster.Indexer
 
@@ -115,7 +116,7 @@ func TestMigrations(t *testing.T) {
 
 func TestUpdateLastUsed(t *testing.T) {
 	// create cluster
-	logger := testutils.NewLogger(false)
+	logger := zap.NewNop()
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
 
 	// create an app

@@ -27,19 +27,30 @@ func (s *Store) Accounts(ctx context.Context, offset, limit int, opts ...account
 
 	queryOpts := accounts.QueryAccountsOptions{
 		ServiceAccount: nil, // default to all accounts
+		ConnectKey:     nil, // default to all accounts
 	}
 	for _, opt := range opts {
 		opt(&queryOpts)
 	}
 
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
+		var connectKeyID sql.NullInt64
+		if queryOpts.ConnectKey != nil {
+			if err := tx.QueryRow(ctx, `SELECT id FROM app_connect_keys WHERE app_key = $1`, *queryOpts.ConnectKey).Scan(&connectKeyID); errors.Is(err, sql.ErrNoRows) {
+				return accounts.ErrKeyNotFound
+			} else if err != nil {
+				return fmt.Errorf("failed to get connect key ID: %w", err)
+			}
+		}
+
 		rows, err := tx.Query(ctx, `
 			SELECT a.public_key, ak.app_key, a.service_account, a.max_pinned_data, a.pinned_data, a.description, a.logo_url, a.service_url, a.last_used
 			FROM accounts a
 			LEFT JOIN app_connect_keys ak ON ak.id = a.connect_key_id
-			WHERE ($1::boolean IS NULL OR service_account = $1::boolean)
-			LIMIT $2 OFFSET $3
-		`, queryOpts.ServiceAccount, limit, offset)
+			WHERE ($1::boolean IS NULL OR service_account = $1::boolean) AND
+			($2::integer IS NULL OR connect_key_id = $2::integer)
+			LIMIT $3 OFFSET $4
+		`, queryOpts.ServiceAccount, connectKeyID, limit, offset)
 		if err != nil {
 			return fmt.Errorf("failed to query accounts: %w", err)
 		}
