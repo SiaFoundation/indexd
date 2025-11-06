@@ -337,13 +337,13 @@ func (s *Store) HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicK
 			WHERE EXISTS (
 				SELECT 1
 				FROM sectors
-				WHERE sectors.host_id = hosts.id AND sectors.contract_sectors_map_id IS NULL
+				WHERE host_id = hosts.id AND contract_sectors_map_id IS NULL
 			) AND NOT EXISTS (
 				SELECT 1
 				FROM contracts
-				WHERE contracts.host_id = hosts.id AND (contracts.state <> $1 OR contracts.state <> $2)
+				WHERE host_id = hosts.id AND renewed_to IS NULL AND good AND state IN (0, 1)
 			)
-		`, contracts.ContractStatePending, contracts.ContractStateActive)
+		`)
 		if err != nil {
 			return err
 		}
