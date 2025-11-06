@@ -68,6 +68,7 @@ func (s *Store) ContractsStats(ctx context.Context) (resp admin.ContractsStatsRe
 			FROM contracts
 			CROSS JOIN globals
 			WHERE
+				good = TRUE AND
 				state IN (0,1) AND
 				renewed_to IS NULL AND
 				proof_height > globals.scanned_height AND
