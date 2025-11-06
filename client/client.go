@@ -57,6 +57,7 @@ type (
 	RevisionStore interface {
 		ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error)
 		UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision, usage proto.Usage) error
+		MarkContractBad(ctx context.Context, contractID types.FileContractID) error
 	}
 )
 
@@ -348,6 +349,14 @@ func (c *HostClient) syncRevision(ctx context.Context, contractID types.FileCont
 		c.log.Debug("failed to fetch latest revision", zap.Error(err))
 		return types.V2FileContract{}, false, fmt.Errorf("%w; failed to fetch latest revision", err)
 	} else if resp.Contract.RevisionNumber < revision.RevisionNumber {
+		c.log.Warn("contract is out of sync, marking it as bad since this situation can not be recovered from",
+			zap.Stringer("contractID", contractID),
+			zap.Uint64("hostRevisionNumber", resp.Contract.RevisionNumber),
+			zap.Uint64("localRevisionNumber", revision.RevisionNumber),
+		)
+		if err := c.store.MarkContractBad(ctx, contractID); err != nil {
+			c.log.Error("failed to mark contract as bad", zap.Stringer("contractID", contractID), zap.Error(err))
+		}
 		return types.V2FileContract{}, false, errors.New("local revision is newer than host revision")
 	}
 

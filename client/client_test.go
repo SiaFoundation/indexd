@@ -31,6 +31,7 @@ type mockStore struct {
 	fundsSpent map[types.PublicKey]types.Currency
 	revisions  map[types.FileContractID]types.V2FileContract
 	renewed    map[types.FileContractID]bool
+	good       map[types.FileContractID]bool
 }
 
 func (s *mockStore) ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
@@ -53,11 +54,17 @@ func (s *mockStore) UpdateContractRevision(ctx context.Context, contract rhp.Con
 	return nil
 }
 
+func (s *mockStore) MarkContractBad(ctx context.Context, contractID types.FileContractID) error {
+	s.good[contractID] = false
+	return nil
+}
+
 func TestWithRevision(t *testing.T) {
 	db := &mockStore{
 		fundsSpent: make(map[types.PublicKey]types.Currency),
 		revisions:  make(map[types.FileContractID]types.V2FileContract),
 		renewed:    make(map[types.FileContractID]bool),
+		good:       make(map[types.FileContractID]bool),
 	}
 	cm := &mockChainManager{
 		state: consensus.State{
@@ -147,8 +154,10 @@ func TestWithRevision(t *testing.T) {
 		t.Fatal("unexpected error", err)
 	}
 
-	// assert withRevision returns an error if the local revision is newer than the host revision
+	// assert withRevision returns an error if the local revision is newer than
+	// the host revision, it should also have marked the contract as bad
 	db.revisions[types.FileContractID{7}] = types.V2FileContract{ProofHeight: 200, RevisionNumber: 2, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(1)}}
+	db.good[types.FileContractID{7}] = true
 	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
 			Contract:  types.V2FileContract{RevisionNumber: 1},
@@ -159,7 +168,10 @@ func TestWithRevision(t *testing.T) {
 	err = c.withRevision(context.Background(), types.FileContractID{7}, invalidSigFn)
 	if err == nil || !strings.Contains(err.Error(), "local revision is newer than host revision") {
 		t.Fatal("unexpected error", err)
+	} else if db.good[types.FileContractID{7}] {
+		t.Fatal("expected contract to be marked as bad")
 	}
+
 	// assert withRevision updates the revision in the database after syncing it with the host
 	revision, _, _ := db.ContractRevision(t.Context(), types.FileContractID{8})
 	remaining := revision.Revision.RenterOutput
