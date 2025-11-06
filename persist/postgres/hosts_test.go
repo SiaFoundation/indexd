@@ -2475,7 +2475,7 @@ func BenchmarkHostsWithUnpinnableSectors(b *testing.B) {
 
 		// 10% of hosts have unpinned sectors which results in 100 out of 1000.
 		if i%10 == 0 {
-			if res, err := store.pool.Exec(b.Context(), `UPDATE contracts SET state = 3 WHERE contract_id = $1`, sqlHash256(types.FileContractID(hk))); err != nil {
+			if res, err := store.pool.Exec(b.Context(), `UPDATE contracts SET state = $1 WHERE contract_id = $2`, sqlContractState(contracts.ContractStateResolved), sqlHash256(types.FileContractID(hk))); err != nil {
 				b.Fatal(err)
 			} else if res.RowsAffected() != 1 {
 				b.Fatal("expected to update 1 contract")
