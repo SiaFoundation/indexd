@@ -103,6 +103,7 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 
 	for {
 		if !cm.waitUntilSynced(ctx, log) {
+			log.Debug("shutting down maintenance loop")
 			return
 		}
 
@@ -127,6 +128,13 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 			log.Debug("starting scheduled maintenance")
 		}
 
+		// this is done first so that fragmenting the wallet can be prioritized before
+		// being used for other maintenance tasks
+		walletLog := log.Named("wallet")
+		if err := cm.performWalletMaintenance(ctx, walletLog); err != nil {
+			log.Debug("maintenance failed", zap.Error(err)) // wallet maintenance is best-effort
+		}
+
 		contractMaintenanceLog := log.Named("contracts")
 		logError(cm.performContractMaintenance(ctx, contractMaintenanceLog), contractMaintenanceLog)
 		fundingLog := log.Named("accounts")
@@ -142,6 +150,43 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 		t.Reset(cm.maintenanceFrequency)
 		log.Debug("maintenance complete")
 	}
+}
+
+func (cm *ContractManager) performWalletMaintenance(ctx context.Context, log *zap.Logger) error {
+	const maxUTXOs = 250 // cap at 250 UTXOs
+
+	settings, err := cm.store.MaintenanceSettings(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch maintenance settings: %w", err)
+	}
+
+	// estimate the number of UTXOs needed per block based
+	// on the number of hosts we have a contract with since
+	// each contract potentially requires maintenance (renewal, funding, etc).
+	hosts, err := cm.hosts.Hosts(ctx, 0, maxUTXOs, hosts.WithActiveContracts(true), hosts.WithUsable(true))
+	if err != nil {
+		return fmt.Errorf("failed to fetch active contracts: %w", err)
+	}
+
+	utxoCount := min(max(len(hosts), int(settings.WantedContracts), 1), maxUTXOs)
+
+	// note: 1KS is arbitrary, but it's a minimum. The actual value depends on
+	// the largest UTXO the wallet has. It might be better to make it configurable
+	// in a follow-up, but we should see how this performs first.
+	//
+	// These values mean that only a UTXO >= wanted contracts * 1KS will be
+	// split.
+	if txn, err := cm.wallet.SplitUTXO(utxoCount, types.Siacoins(1000)); err != nil {
+		return fmt.Errorf("failed to split UTXOs: %w", err)
+	} else if txn.ID() == (types.TransactionID{}) || len(txn.SiacoinInputs) == 0 || len(txn.SiacoinOutputs) == 0 {
+		log.Debug("enough UTXOs present, no split needed")
+	} else {
+		input := txn.SiacoinInputs[0].Parent.SiacoinOutput.Value
+		output := txn.SiacoinOutputs[0].Value
+		log.Info("split UTXO for contract funding", zap.Stringer("txnID", txn.ID()), zap.Stringer("fee", txn.MinerFee), zap.Stringer("input", input), zap.Stringer("output", output), zap.Int("created", len(txn.SiacoinOutputs)))
+	}
+
+	return nil
 }
 
 func logError(err error, log *zap.Logger) {
