@@ -305,7 +305,7 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 		}
 	}
 
-	slabIDs, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), time.Now(), params...)
+	slabIDs, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), time.Now().AddDate(0, 0, 7), params...)
 	if errors.Is(err, slabs.ErrBadHosts) || errors.Is(err, slabs.ErrMinShards) {
 		jc.Error(err, http.StatusBadRequest)
 		return
