@@ -121,11 +121,7 @@ loop:
 }
 
 func (cm *ContractManager) pruneContract(ctx context.Context, client HostClient, hostPrices proto.HostPrices, contractID types.FileContractID) (int, error) {
-	const (
-		oneTB          = 1 << 40
-		sectorsPerTB   = oneTB / proto.SectorSize
-		rootsBatchSize = 10000
-	)
+	const dbRootsBatchSize = 10000
 
 	contract, renewed, err := cm.store.ContractRevision(ctx, contractID)
 	if err != nil {
@@ -137,8 +133,8 @@ func (cm *ContractManager) pruneContract(ctx context.Context, client HostClient,
 	contractSectors := contract.Revision.Filesize / proto.SectorSize
 
 	var pruned int
-	for offset := uint64(0); offset < contractSectors; offset += sectorsPerTB {
-		length := min(sectorsPerTB, contractSectors-offset)
+	for offset := uint64(0); offset < contractSectors; offset += cm.sectorRootsBatchSize {
+		length := min(cm.sectorRootsBatchSize, contractSectors-offset)
 		res, err := client.SectorRoots(ctx, hostPrices, contractID, offset, length)
 		if err != nil {
 			return pruned, fmt.Errorf("failed to fetch contract sectors: %w", err)
@@ -147,8 +143,8 @@ func (cm *ContractManager) pruneContract(ctx context.Context, client HostClient,
 		}
 
 		prunable := make(map[types.Hash256]struct{}, len(res.Roots))
-		for start := 0; start < len(res.Roots); start += rootsBatchSize {
-			end := min(start+rootsBatchSize, len(res.Roots))
+		for start := 0; start < len(res.Roots); start += dbRootsBatchSize {
+			end := min(start+dbRootsBatchSize, len(res.Roots))
 			batch, err := cm.store.PrunableContractRoots(ctx, contractID, res.Roots[start:end])
 			if err != nil {
 				return pruned, fmt.Errorf("failed to fetch prunable contract roots: %w", err)

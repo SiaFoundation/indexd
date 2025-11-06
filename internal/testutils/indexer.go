@@ -71,6 +71,7 @@ type (
 	indexerCfg struct {
 		maintenanceSettings contracts.MaintenanceSettings
 		slabOpts            []slabs.Option
+		contractOpts        []contracts.ContractManagerOpt
 	}
 )
 
@@ -85,6 +86,13 @@ func defaultIndexerCfg() *indexerCfg {
 func WithMaintenanceSettings(ms contracts.MaintenanceSettings) IndexerOpt {
 	return func(cfg *indexerCfg) {
 		cfg.maintenanceSettings = ms
+	}
+}
+
+// WithContractOptions allows for passing contract options to the indexer
+func WithContractOptions(opts ...contracts.ContractManagerOpt) IndexerOpt {
+	return func(cfg *indexerCfg) {
+		cfg.contractOpts = append(cfg.contractOpts, opts...)
 	}
 }
 
@@ -146,7 +154,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		contracts.WithLogger(log.Named("contracts")),
 		contracts.WithMaintenanceFrequency(200 * time.Millisecond),
 		contracts.WithSyncPollInterval(100 * time.Millisecond),
+		contracts.WithSectorRootsBatchSize(5), // small batch size for testing
 	}
+	contractOpts = append(contractOpts, cfg.contractOpts...)
 	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, dialer, hm, s, wm, contractOpts...)
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
