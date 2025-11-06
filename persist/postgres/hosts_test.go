@@ -1004,21 +1004,19 @@ func TestHostsWithUnpinnableSectors(t *testing.T) {
 	account := proto4.Account{1}
 	db.addTestAccount(t, types.PublicKey(account))
 
-	// add hosts
-
-	// host1 has no contracts and no sectors -> not returned
+	// host1 has no sectors and no contracts -> not returned
 	db.addTestHost(t)
 
-	// host2 has a contract but no sectors -> not returned
+	// host2 has no sectors, but a contract -> not returned
 	hk2 := db.addTestHost(t)
-	db.addTestContract(t, hk2)
+	hk2FCID := db.addTestContract(t, hk2)
 
-	// host3 has no contracts but a sector -> returned
+	// host3 has a sector, but no contracts -> returned
 	hk3 := db.addTestHost(t)
 
-	// host4 has a contract and a pinned sector -> not returned
+	// host4 has a sector and a contract -> not returned
 	hk4 := db.addTestHost(t)
-	db.addTestContract(t, hk4)
+	hk4FCID := db.addTestContract(t, hk4)
 
 	_, err := db.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
@@ -1054,20 +1052,70 @@ func TestHostsWithUnpinnableSectors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// pin sector for host4 but not host3
-	err = db.PinSectors(context.Background(), types.FileContractID(hk4), []types.Hash256{types.Hash256(hk4)})
-	if err != nil {
+	assertHostsWithUnpinnableSectors := func(expected []types.PublicKey) {
+		t.Helper()
+		hosts, err := db.HostsWithUnpinnableSectors(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		} else if len(expected) != len(hosts) {
+			t.Fatalf("expected %d hosts, got %d", len(expected), len(hosts))
+		}
+		for i, host := range hosts {
+			if host != expected[i] {
+				t.Fatalf("expected PublicKey %v, got %v", expected[i], host)
+			}
+		}
+	}
+
+	assertHostsWithUnpinnableSectors([]types.PublicKey{hk3})
+
+	// manually pin the sector for h3 to a random contract
+	if res, err := db.pool.Exec(t.Context(), `UPDATE sectors SET contract_sectors_map_id = 1 WHERE sector_root = $1`, sqlHash256(types.Hash256(hk3))); err != nil {
+		t.Fatal(err)
+	} else if res.RowsAffected() != 1 {
+		t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
+	}
+
+	// assert no hosts are returned now because the sector is no longer unpinned
+	assertHostsWithUnpinnableSectors(nil)
+
+	// mark contract for host4 as resolved - contract should now be invalid
+	if err := db.UpdateChainState(t.Context(), func(tx subscriber.UpdateTx) error {
+		return tx.UpdateContractState(hk4FCID, contracts.ContractStateResolved)
+	}); err != nil {
 		t.Fatal(err)
 	}
 
-	hosts, err := db.HostsWithUnpinnableSectors(context.Background())
-	if err != nil {
+	assertHostsWithUnpinnableSectors([]types.PublicKey{hk4})
+
+	// reset the contract state, but mark the contract bad - contract should
+	// still be considered invalid and host4 returned
+	if res, err := db.pool.Exec(t.Context(), `UPDATE contracts SET good = FALSE, state = 0 WHERE contract_id = $1`, sqlHash256(hk4FCID)); err != nil {
 		t.Fatal(err)
-	} else if len(hosts) != 1 {
-		t.Fatalf("expected 1 host with unpinned sectors, got %d", len(hosts))
-	} else if hosts[0] != hk3 {
-		t.Fatalf("expected host %v with unpinned sectors, got %v", hk3, hosts[0])
+	} else if res.RowsAffected() != 1 {
+		t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
 	}
+
+	assertHostsWithUnpinnableSectors([]types.PublicKey{hk4})
+
+	// reset the contract to good, but now indicate it's renewed - contract should
+	// still be considered invalid and host4 returned
+	if res, err := db.pool.Exec(t.Context(), `UPDATE contracts SET good = TRUE, renewed_to = $1 WHERE contract_id = $2`, sqlHash256(hk2FCID), sqlHash256(hk4FCID)); err != nil {
+		t.Fatal(err)
+	} else if res.RowsAffected() != 1 {
+		t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
+	}
+
+	assertHostsWithUnpinnableSectors([]types.PublicKey{hk4})
+
+	// reset renewed_to - contract should be considered valid and no hosts returned
+	if res, err := db.pool.Exec(t.Context(), `UPDATE contracts SET renewed_to = NULL WHERE contract_id = $1`, sqlHash256(hk4FCID)); err != nil {
+		t.Fatal(err)
+	} else if res.RowsAffected() != 1 {
+		t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
+	}
+
+	assertHostsWithUnpinnableSectors(nil)
 }
 
 func TestHostsRecentUptime(t *testing.T) {
@@ -2402,6 +2450,7 @@ func BenchmarkHostsWithUnpinnableSectors(b *testing.B) {
 	// add hosts
 	for i := range nHosts {
 		hk := store.addTestHost(b)
+		store.addTestContract(b, hk)
 
 		// add sectors
 		for remainingSectors := nSectorsPerHost; remainingSectors > 0; {
@@ -2425,9 +2474,21 @@ func BenchmarkHostsWithUnpinnableSectors(b *testing.B) {
 		}
 
 		// 10% of hosts have unpinned sectors which results in 100 out of 1000.
-		if i%10 != 0 {
-			store.addTestContract(b, hk)
+		if i%10 == 0 {
+			if res, err := store.pool.Exec(b.Context(), `UPDATE contracts SET state = $1 WHERE contract_id = $2`, sqlContractState(contracts.ContractStateResolved), sqlHash256(types.FileContractID(hk))); err != nil {
+				b.Fatal(err)
+			} else if res.RowsAffected() != 1 {
+				b.Fatal("expected to update 1 contract")
+			}
 		}
+	}
+
+	// analyze tables to ensure query planner has up-to-date statistics
+	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`)
+	_, vErr3 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) sectors;`)
+	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`)
+	if err := errors.Join(vErr1, vErr2, vErr3); err != nil {
+		b.Fatal(err)
 	}
 
 	for b.Loop() {
