@@ -152,18 +152,22 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 }
 
 func (cm *ContractManager) performWalletMaintenance(ctx context.Context, log *zap.Logger) error {
+	const maxUTXOs = 250 // cap at 250 UTXOs
+
 	settings, err := cm.store.MaintenanceSettings(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to fetch maintenance settings: %w", err)
 	}
 
-	// TODO: replace with COUNT(*)?
-	active, err := cm.store.Contracts(ctx, 0, 1000, WithRevisable(true)) // note: this does not check good since bad contracts are attempted to be replaced
+	// estimate the number of UTXOs needed per block based
+	// on the number of hosts we have a contract with since
+	// each contract potentially requires maintenance (renewal, funding, etc).
+	hosts, err := cm.hosts.Hosts(ctx, 0, maxUTXOs, hosts.WithActiveContracts(true), hosts.WithUsable(true))
 	if err != nil {
 		return fmt.Errorf("failed to fetch active contracts: %w", err)
 	}
 
-	utxoCount := max(len(active), int(settings.WantedContracts), 1)
+	utxoCount := min(max(len(hosts), int(settings.WantedContracts), 1), maxUTXOs)
 
 	// note: 1KS is arbitrary, but it's a minimum. The actual value depends on
 	// the largest UTXO the wallet has. It might be better to make it configurable
