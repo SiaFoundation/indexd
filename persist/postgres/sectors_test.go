@@ -748,6 +748,77 @@ func TestPinSlabs(t *testing.T) {
 	assertUnpinnedSectors(4)
 }
 
+func TestPinSlabsKeyStorageLimit(t *testing.T) {
+	ctx := t.Context()
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add two hosts
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
+	store.addTestContract(t, hk1)
+	store.addTestContract(t, hk2)
+
+	// helper to create slabs
+	newSlab := func(i byte) (slabs.SlabID, slabs.SlabPinParams) {
+		slab := slabs.SlabPinParams{
+			EncryptionKey: [32]byte{i},
+			MinShards:     1,
+			Sectors: []slabs.PinnedSector{
+				{
+					Root:    frand.Entropy256(),
+					HostKey: hk1,
+				},
+				{
+					Root:    frand.Entropy256(),
+					HostKey: hk2,
+				},
+			},
+		}
+		slabID, err := slab.Digest()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slabID, slab
+	}
+
+	const connectKey = "foobar"
+	if _, err := store.AddAppConnectKey(ctx, accounts.UpdateAppConnectKey{
+		Key:           connectKey,
+		MaxPinnedData: 2 * proto.SectorSize,
+		RemainingUses: 2,
+	}); err != nil {
+		t.Fatal("failed to add app connect key:", err)
+	}
+
+	acc1 := types.GeneratePrivateKey().PublicKey()
+	if err := store.UseAppConnectKey(ctx, connectKey, acc1, accounts.AccountMeta{}); err != nil {
+		t.Fatal("failed to use app connect key:", err)
+	}
+	acc2 := types.GeneratePrivateKey().PublicKey()
+	if err := store.UseAppConnectKey(ctx, connectKey, acc2, accounts.AccountMeta{}); err != nil {
+		t.Fatal("failed to use app connect key:", err)
+	}
+	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
+
+	_, slab1 := newSlab(1)
+	_, err := store.PinSlabs(context.Background(), proto.Account(acc1), nextCheck, slab1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, slab2 := newSlab(2)
+	_, err = store.PinSlabs(context.Background(), proto.Account(acc1), nextCheck, slab2)
+	if !errors.Is(err, accounts.ErrStorageLimitExceeded) {
+		t.Fatalf("expected error %v, got %v", accounts.ErrStorageLimitExceeded, err)
+	}
+
+	_, slab3 := newSlab(3)
+	_, err = store.PinSlabs(context.Background(), proto.Account(acc2), nextCheck, slab3)
+	if !errors.Is(err, accounts.ErrKeyStorageLimitExceeded) {
+		t.Fatalf("expected error %v, got %v", accounts.ErrKeyStorageLimitExceeded, err)
+	}
+}
+
 func TestPinSlabsBadHost(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 	account := proto.Account{1}
