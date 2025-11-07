@@ -260,7 +260,7 @@ func (c *HostClient) RenewContract(ctx context.Context, settings proto.HostSetti
 	if err := c.withRevision(ctx, params.ContractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
 		estimatedRenewal, _ := proto.RenewContract(contract.Revision, settings.Prices, params)
 		if estimatedRenewal.NewContract.TotalCollateral.Cmp(settings.MaxCollateral) > 0 {
-			capped, underflow := settings.MaxCollateral.SubWithUnderflow(contract.Revision.RiskedCollateral()) // cap to remaining collateral
+			capped, underflow := settings.MaxCollateral.SubWithUnderflow(estimatedRenewal.NewContract.RiskedCollateral()) // cap to remaining collateral
 			if underflow {
 				capped = types.ZeroCurrency
 			}
