@@ -1600,12 +1600,14 @@ func TestContractsStats(t *testing.T) {
 	fcid2 := types.FileContractID{2}
 	fcid3 := types.FileContractID{3}
 	fcid4 := types.FileContractID{4}
+	fcid5 := types.FileContractID{5}
 
 	store.addTestHost(t, hk)
 	store.addTestContract(t, hk, fcid1)
 	store.addTestContract(t, hk, fcid2)
 	store.addTestContract(t, hk, fcid3)
 	store.addTestContract(t, hk, fcid4)
+	store.addTestContract(t, hk, fcid5)
 
 	updateContract := func(id types.FileContractID, good bool, size, capacity, proofHeight uint64) {
 		t.Helper()
@@ -1633,18 +1635,21 @@ func TestContractsStats(t *testing.T) {
 	// fcid2: bad, active, not in renew window
 	updateContract(fcid2, false, 3000, 4000, 200)
 
-	// fcid3: good, active, in renew window
-	updateContract(fcid3, true, 5000, 6000, 100)
+	// fcid3: bad, active, in renew window
+	updateContract(fcid3, false, 5000, 6000, 100)
 
-	// fcid4: bad, already expired
-	updateContract(fcid4, true, 6000, 7000, 10)
+	// fcid4: good, active, in renew window
+	updateContract(fcid4, true, 7000, 8000, 100)
+
+	// fcid5: bad, already expired
+	updateContract(fcid5, true, 9000, 10_000, 10)
 
 	expected := admin.ContractsStatsResponse{
-		Contracts:     3,     // all but fcid4
-		BadContracts:  1,     // fcid2
-		Renewing:      1,     // fcid3
-		TotalCapacity: 12000, // (2000 + 4000 + 6000) = 12000
-		TotalSize:     9000,  // (1000 + 3000 + 5000) = 9000
+		Contracts:     4,     // all but fcid5
+		BadContracts:  2,     // fcid2, fcid3
+		Renewing:      1,     // fcid4
+		TotalCapacity: 20000, // (2000 + 4000 + 6000 + 8000) = 20000
+		TotalSize:     16000, // (1000 + 3000 + 5000 + 7000) = 16000
 	}
 
 	stats, err := store.ContractsStats(t.Context())
@@ -1654,15 +1659,15 @@ func TestContractsStats(t *testing.T) {
 		t.Fatalf("mismatch: \n%+v\n%+v", expected, stats)
 	}
 
-	// renew fcid3
-	fcid5 := types.FileContractID{5}
-	err = store.AddRenewedContract(t.Context(), fcid3, fcid5, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
+	// renew fcid4
+	fcid6 := types.FileContractID{6}
+	err = store.AddRenewedContract(t.Context(), fcid4, fcid6, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// make sure fcid5 has the same attributes as its parent
-	updateContract(fcid5, true, 5000, 6000, 100)
+	// make sure fcid6 has the same attributes as its parent
+	updateContract(fcid6, true, 7000, 8000, 100)
 
 	// assert stats stay the same
 	stats, err = store.ContractsStats(t.Context())
