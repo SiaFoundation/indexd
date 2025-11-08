@@ -133,7 +133,7 @@ outer:
 			}
 			shards[sectorIdx] = data
 
-			err = m.am.DebitServiceAccount(ctx, host.PublicKey, m.migrationAccount, usage.RenterCost())
+			err = m.am.DebitServiceAccount(context.Background(), host.PublicKey, m.migrationAccount, usage.RenterCost())
 			if err != nil {
 				log.Debug("failed to debit service account for sector read", zap.Error(err))
 			}
