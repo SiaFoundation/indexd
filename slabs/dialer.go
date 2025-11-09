@@ -223,7 +223,8 @@ func (c *connPool) uploadShard(ctx context.Context, h hosts.Host, migrationToken
 		if err != nil {
 			return fmt.Errorf("failed to fetch host settings: %w", err)
 		}
-		if settings.RemainingStorage < proto.SectorSize {
+		// not enough space left for 1 sector
+		if settings.RemainingStorage < 1 {
 			return proto.ErrNotEnoughStorage
 		}
 
