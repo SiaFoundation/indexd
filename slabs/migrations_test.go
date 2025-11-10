@@ -130,18 +130,25 @@ func TestMigrateSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert we migrated r2 to h4
+	// assert we migrated one of the sectors to h4, we don't know which one
+	// because shards are uploaded in parallel
 	if len(db.migratedSectors[h4.PublicKey]) != 1 {
 		t.Fatal("expected 1 migrated sector for host", len(db.migratedSectors[h4.PublicKey]))
-	} else if _, ok := db.migratedSectors[h4.PublicKey][r2]; !ok {
-		t.Fatal("expected migrated sector r2 for host h4")
+	}
+	var rUnhealthy types.Hash256
+	_, r2ok := db.migratedSectors[h4.PublicKey][r2]
+	_, r4ok := db.migratedSectors[h4.PublicKey][r4]
+	if !r2ok && !r4ok {
+		t.Fatal("expected migrated sector r2 or r4 for host h4", db.migratedSectors[h4.PublicKey])
+	} else if r2ok {
+		rUnhealthy = r4
+	} else {
+		rUnhealthy = r2
 	}
 
 	// assert that's the only slab we migrated (we only had one good host left)
 	if len(db.migratedSectors) != 1 {
 		t.Fatalf("expected 1 migrated host, got %d", len(db.migratedSectors))
-	} else if len(db.migratedSectors[h4.PublicKey]) != 1 {
-		t.Fatalf("expected 1 migrated sector for host %v, got %d", h4.PublicKey, len(db.migratedSectors[h4.PublicKey]))
 	}
 
 	// assert it's still unhealthy
@@ -170,11 +177,11 @@ func TestMigrateSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert we migrated r4 to h5
+	// assert we migrated the last sector to h5
 	if len(db.migratedSectors[h5.PublicKey]) != 1 {
 		t.Fatal("expected 1 migrated sector for host", len(db.migratedSectors[h5.PublicKey]))
-	} else if _, ok := db.migratedSectors[h5.PublicKey][r4]; !ok {
-		t.Fatal("expected migrated sector r4 for host h5")
+	} else if _, ok := db.migratedSectors[h5.PublicKey][rUnhealthy]; !ok {
+		t.Fatal("expected migrated sector r2 or r4 for host h5", db.migratedSectors[h5.PublicKey])
 	}
 
 	// assert it's now healthy
