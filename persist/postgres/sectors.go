@@ -280,14 +280,14 @@ func (s *Store) PinSlabs(ctx context.Context, account proto.Account, nextIntegri
 			if res.RowsAffected() > 0 {
 				newPinnedData := pinnedData + slab.Size()
 				if newPinnedData > maxPinnedData {
-					return accounts.ErrStorageLimitExceeded
+					return accounts.ErrAccountStorageLimitExceeded
 				}
 				pinnedData = newPinnedData
 
 				if connectKeyID.Valid {
 					newKeyPinnedData := keyPinnedData + slab.Size()
 					if newKeyPinnedData > keyMaxPinnedData {
-						return accounts.ErrKeyStorageLimitExceeded
+						return accounts.ErrAppKeyStorageLimitExceeded
 					}
 					keyPinnedData = newKeyPinnedData
 				}

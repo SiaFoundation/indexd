@@ -21,9 +21,12 @@ var (
 	// being a service account.
 	ErrServiceAccount = errors.New("account is a service account")
 
-	// ErrStorageLimitExceeded is returned when an operation fails due to the
-	// account exceeding its storage limit.
-	ErrStorageLimitExceeded = errors.New("account storage limit exceeded")
+	// ErrAccountStorageLimitExceeded is returned when an operation fails due
+	// to the account exceeding its storage limit.  We use the term "app
+	// storage limit" here because from the user's perspective, they will have
+	// one connect key with multiple apps attached, each of which is
+	// actually represented by an account in the database.
+	ErrAccountStorageLimitExceeded = errors.New("app storage limit exceeded")
 )
 
 type (

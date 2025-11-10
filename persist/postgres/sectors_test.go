@@ -834,8 +834,8 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 	// error
 	_, slab2 := newSlab(2)
 	_, err = store.PinSlabs(context.Background(), acc1, nextCheck, slab2)
-	if !errors.Is(err, accounts.ErrStorageLimitExceeded) {
-		t.Fatalf("expected error %v, got %v", accounts.ErrStorageLimitExceeded, err)
+	if !errors.Is(err, accounts.ErrAccountStorageLimitExceeded) {
+		t.Fatalf("expected error %v, got %v", accounts.ErrAccountStorageLimitExceeded, err)
 	}
 	assertPinnedData(acc1, 2*proto.SectorSize)
 	assertPinnedData(acc2, 0)
@@ -846,8 +846,8 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 	// these two sectors will cause us to exceed the limit per connect key
 	_, slab3 := newSlab(3)
 	_, err = store.PinSlabs(context.Background(), acc2, nextCheck, slab3)
-	if !errors.Is(err, accounts.ErrKeyStorageLimitExceeded) {
-		t.Fatalf("expected error %v, got %v", accounts.ErrKeyStorageLimitExceeded, err)
+	if !errors.Is(err, accounts.ErrAppKeyStorageLimitExceeded) {
+		t.Fatalf("expected error %v, got %v", accounts.ErrAppKeyStorageLimitExceeded, err)
 	}
 	assertPinnedData(acc1, 2*proto.SectorSize)
 	assertPinnedData(acc2, 0)
