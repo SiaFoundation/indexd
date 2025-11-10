@@ -129,7 +129,7 @@ func TestContractPruning(t *testing.T) {
 		}
 		nSectors := contract.Revision.Filesize / proto.SectorSize
 
-		// fetch host hc
+		// fetch host client
 		hc := indexer.HostClient(t, hk)
 		hs, err := hc.Settings(t.Context())
 		if err != nil {
