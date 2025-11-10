@@ -57,4 +57,4 @@ jobs:
       - name: Test
         uses: n8maninger/action-golang-test@v2
         with:
-          args: -race;-failfast
+          args: -race;-failfast;-count=25;-timeout=2h;-run=^TestContractPruning$

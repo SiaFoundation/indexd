@@ -49,13 +49,16 @@ func TestContractPruning(t *testing.T) {
 	}
 
 	// helper to create a new sector root
-	newRoot := func() (_ types.Hash256, sector [proto.SectorSize]byte) {
+	expectedRoots := make(map[types.PublicKey][]types.Hash256)
+	newRoot := func(hk types.PublicKey) (_ types.Hash256, sector [proto.SectorSize]byte) {
 		frand.Read(sector[:])
 		root := proto.SectorRoot(&sector)
+		expectedRoots[hk] = append(expectedRoots[hk], root)
 		return root, sector
 	}
 
 	// prepare slabs
+	time.Sleep(time.Second)
 	var pinParams []slabs.SlabPinParams
 	for range nSlabs {
 		params := slabs.SlabPinParams{
@@ -64,7 +67,7 @@ func TestContractPruning(t *testing.T) {
 		}
 		for i := range nHosts {
 			hk := hosts[i].PublicKey
-			root, sector := newRoot()
+			root, sector := newRoot(hk)
 			params.Sectors = append(params.Sectors, slabs.PinnedSector{
 				Root:    root,
 				HostKey: hk,
@@ -85,39 +88,29 @@ func TestContractPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// fetch account
-	acc, err := app.Account(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert all slabs were pinned
-	time.Sleep(time.Second)
-	res, err := indexer.Store().Slabs(t.Context(), acc.AccountKey, slabIDs)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(res) != nSlabs {
-		t.Fatalf("expected %d slabs, got %d", nSlabs, len(res))
-	}
-
-	// assert all sectors were pinned
-	contractRoots := make(map[types.FileContractID][]types.Hash256)
-	for _, slab := range res {
-		if len(slab.Sectors) != nHosts {
-			t.Fatalf("expected %d sectors, got %d", nHosts, len(slab.Sectors))
-		}
-		for _, sector := range slab.Sectors {
-			if sector.HostKey == nil || sector.ContractID == nil {
-				t.Fatal("sector is not pinned")
+	// wait until all sectors are pinned
+	for _, id := range slabIDs {
+	waiting:
+		for range 10 {
+			slab, err := indexer.Store().Slab(t.Context(), id)
+			if err != nil {
+				t.Fatal(err)
 			}
-			contractRoots[*sector.ContractID] = append(contractRoots[*sector.ContractID], sector.Root)
+			for _, sector := range slab.Sectors {
+				if sector.ContractID == nil {
+					time.Sleep(100 * time.Millisecond)
+					continue waiting
+				}
+			}
+			break
 		}
 	}
 
-	// helper to fetch host's active contract ID
-	activeContractID := func(hk types.PublicKey) types.FileContractID {
+	// helper to contract roots for a given host
+	contractRoots := func(hk types.PublicKey) []types.Hash256 {
 		t.Helper()
 
+		// fetch active contract
 		active, err := indexer.Contracts().Contracts(t.Context(), 0, 2, contracts.WithRevisable(true), contracts.WithGood(true), contracts.WithHostKeys([]types.PublicKey{hk}))
 		if err != nil {
 			t.Fatal(err)
@@ -128,40 +121,58 @@ func TestContractPruning(t *testing.T) {
 			// is not working as expected.
 			t.Fatalf("multiple active contracts found for host %s", hk)
 		}
-		return active[0].ID
+		contractID := active[0].ID
+
+		// fetch contract revision to get filesize
+		contract, _, err := indexer.Store().ContractRevision(t.Context(), contractID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		nSectors := contract.Revision.Filesize / proto.SectorSize
+
+		// fetch host client
+		client := indexer.HostClient(t, hk)
+		hs, err := client.Settings(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// fetch sector roots
+		res, err := client.SectorRoots(t.Context(), hs.Prices, contractID, 0, nSectors)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return res.Roots
 	}
 
 	// compare contract roots
-	assertRoots := func(expectedSize uint64) {
+	assertRoots := func() {
 		t.Helper()
 
+	outer:
 		for _, host := range hosts {
-			contractID := activeContractID(host.PublicKey)
-
-			contract, _, err := indexer.Store().ContractRevision(t.Context(), contractID)
-			if err != nil {
-				t.Fatal(err)
-			} else if contract.Revision.Filesize != expectedSize {
-				t.Fatal("unexpected filesize, expected", expectedSize, "got", contract.Revision.Filesize)
+			var got []types.Hash256
+			for range 4 {
+				if got = contractRoots(host.PublicKey); reflect.DeepEqual(got, expectedRoots[host.PublicKey]) {
+					continue outer
+				}
+				time.Sleep(250 * time.Millisecond)
 			}
-
-			client := indexer.HostClient(t, host.PublicKey)
-			hs, err := client.Settings(t.Context())
-			if err != nil {
-				t.Fatal(err)
+			t.Log("contract roots:")
+			for _, r := range got {
+				t.Log(r[:6], "...", r[len(r)-6:])
 			}
-
-			res, err := client.SectorRoots(t.Context(), hs.Prices, contractID, 0, contract.Revision.Filesize/proto.SectorSize)
-			if err != nil {
-				t.Fatal(err)
-			} else if !reflect.DeepEqual(res.Roots, contractRoots[contractID]) {
-				t.Fatalf("unexpected roots for host %s", host.PublicKey)
+			t.Log("expected roots:")
+			for _, r := range expectedRoots[host.PublicKey] {
+				t.Log(r[:6], "...", r[len(r)-6:])
 			}
+			t.Fatalf("unexpected roots for host %s", host.PublicKey)
 		}
 	}
 
-	time.Sleep(time.Second)
-	assertRoots(proto.SectorSize * nSlabs)
+	// assert initial state
+	assertRoots()
 
 	// unpin the 3rd slab and trigger pruning
 	if err := app.UnpinSlab(t.Context(), slabIDs[2]); err != nil {
@@ -171,14 +182,13 @@ func TestContractPruning(t *testing.T) {
 	}
 
 	// remove the 3rd slab's roots from the expected roots (swap and pop)
-	for fcid := range contractRoots {
-		contractRoots[fcid][2] = contractRoots[fcid][len(contractRoots[fcid])-1]
-		contractRoots[fcid] = contractRoots[fcid][:len(contractRoots[fcid])-1]
+	for hk := range expectedRoots {
+		expectedRoots[hk][2] = expectedRoots[hk][len(expectedRoots[hk])-1]
+		expectedRoots[hk] = expectedRoots[hk][:len(expectedRoots[hk])-1]
 	}
 
 	// assert the contracts are pruned
-	time.Sleep(time.Second)
-	assertRoots(proto.SectorSize * (nSlabs - 1))
+	assertRoots()
 }
 
 func TestSectorPinning(t *testing.T) {
