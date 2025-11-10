@@ -58,7 +58,6 @@ func TestContractPruning(t *testing.T) {
 	}
 
 	// prepare slabs
-	time.Sleep(time.Second)
 	var pinParams []slabs.SlabPinParams
 	for range nSlabs {
 		params := slabs.SlabPinParams{
@@ -106,7 +105,7 @@ func TestContractPruning(t *testing.T) {
 		}
 	}
 
-	// helper to contract roots for a given host
+	// helper to fetch contract roots for a given host
 	contractRoots := func(hk types.PublicKey) []types.Hash256 {
 		t.Helper()
 
@@ -172,6 +171,7 @@ func TestContractPruning(t *testing.T) {
 	}
 
 	// assert initial state
+	time.Sleep(time.Second)
 	assertRoots()
 
 	// unpin the 3rd slab and trigger pruning
@@ -188,6 +188,7 @@ func TestContractPruning(t *testing.T) {
 	}
 
 	// assert the contracts are pruned
+	time.Sleep(time.Second)
 	assertRoots()
 }
 
