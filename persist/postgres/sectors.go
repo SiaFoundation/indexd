@@ -70,6 +70,10 @@ func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, ro
 		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, totalLost); err != nil {
 			return fmt.Errorf("failed to update sector stats: %w", err)
 		}
+		if err := incrementNumSectorsLost(ctx, tx, totalLost); err != nil {
+			return fmt.Errorf("failed to increment sectors lost stat: %w", err)
+		}
+
 		return nil
 	})
 	return err
@@ -99,7 +103,19 @@ func (s *Store) RecordIntegrityCheck(ctx context.Context, success bool, nextChec
 					sector_root = ANY($3)
 			`, nextCheck, sqlPublicKey(hostKey), sqlRoots)
 		}
-		return err
+		if err != nil {
+			return fmt.Errorf("failed to record integrity check: %w", err)
+		}
+
+		if err := incrementNumSectorsChecked(ctx, tx, int64(len(roots))); err != nil {
+			return fmt.Errorf("failed to increment sectors checked stat: %w", err)
+		}
+		if !success {
+			if err := incrementNumSectorsFailed(ctx, tx, int64(len(roots))); err != nil {
+				return fmt.Errorf("failed to increment sectors failed stat: %w", err)
+			}
+		}
+		return nil
 	})
 }
 

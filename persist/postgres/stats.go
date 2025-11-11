@@ -39,6 +39,21 @@ func incrementNumUnpinnedSectors(ctx context.Context, tx *txn, delta int64) erro
 	return err
 }
 
+func incrementNumSectorsChecked(ctx context.Context, tx *txn, delta int64) error {
+	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_checked = num_sectors_checked + $1", delta)
+	return err
+}
+
+func incrementNumSectorsLost(ctx context.Context, tx *txn, delta int64) error {
+	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_lost = num_sectors_lost + $1", delta)
+	return err
+}
+
+func incrementNumSectorsFailed(ctx context.Context, tx *txn, delta int64) error {
+	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_failed = num_sectors_failed + $1", delta)
+	return err
+}
+
 func initStats(ctx context.Context, tx *txn) error {
 	_, err := tx.Exec(ctx, "INSERT INTO stats (id) VALUES (0) ON CONFLICT(id) DO NOTHING")
 	return err

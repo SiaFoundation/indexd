@@ -365,7 +365,11 @@ CREATE TABLE stats (
     num_unpinnable_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinnable_sectors >= 0), -- total number of unpinnable sectors
     num_unpinned_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinned_sectors >= 0), -- total number of unpinned sectors
     -- account stats
-    num_accounts_registered BIGINT NOT NULL DEFAULT 0 CHECK (num_accounts_registered >= 0) -- number of accounts currently registered
+    num_accounts_registered BIGINT NOT NULL DEFAULT 0 CHECK (num_accounts_registered >= 0), -- number of accounts currently registered
+    -- integrity check stats
+    num_sectors_checked BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_checked >= 0),
+    num_sectors_lost BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_lost >= 0),
+    num_sectors_failed BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_failed >= 0)
 );
 
 -- quick lookup of sectors that failed the integrity checks too many times
