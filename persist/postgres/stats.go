@@ -39,18 +39,18 @@ func incrementNumUnpinnedSectors(ctx context.Context, tx *txn, delta int64) erro
 	return err
 }
 
-func incrementNumSectorsChecked(ctx context.Context, tx *txn, delta int64) error {
-	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_checked = num_sectors_checked + $1", delta)
-	return err
-}
-
 func incrementNumSectorsLost(ctx context.Context, tx *txn, delta int64) error {
 	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_lost = num_sectors_lost + $1", delta)
 	return err
 }
 
+func incrementNumSectorsChecked(ctx context.Context, tx *txn, delta int64) error {
+	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_checked = num_sectors_checked + $1", delta)
+	return err
+}
+
 func incrementNumSectorsFailed(ctx context.Context, tx *txn, delta int64) error {
-	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_failed = num_sectors_failed + $1", delta)
+	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_check_failed = num_sectors_check_failed + $1", delta)
 	return err
 }
 
@@ -64,8 +64,8 @@ func initStats(ctx context.Context, tx *txn) error {
 func (s *Store) SectorStats(ctx context.Context) (admin.SectorsStatsResponse, error) {
 	var stats admin.SectorsStatsResponse
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
-		row := tx.QueryRow(ctx, "SELECT num_slabs, num_migrated_sectors, num_pinned_sectors, num_unpinnable_sectors, num_unpinned_sectors FROM stats")
-		return row.Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned)
+		row := tx.QueryRow(ctx, "SELECT num_slabs, num_migrated_sectors, num_pinned_sectors, num_unpinnable_sectors, num_unpinned_sectors, num_sectors_lost, num_sectors_checked, num_sectors_check_failed FROM stats")
+		return row.Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned, &stats.Lost, &stats.Checked, &stats.CheckFailed)
 	})
 	return stats, err
 }
