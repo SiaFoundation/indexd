@@ -301,7 +301,7 @@ func TestIntegrityCheckStats(t *testing.T) {
 	record(true, now, []types.Hash256{root2})
 	assertSectorStats(0, 6, 3)
 
-	// mark sectors lost with a threshold of 2 which is too high to mark
+	// mark sectors lost with a threshold of 3 which is too high to mark
 	// root1 as lost
 	if err := store.MarkFailingSectorsLost(context.Background(), hk, 3); err != nil {
 		t.Fatal(err)
