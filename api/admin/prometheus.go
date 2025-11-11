@@ -133,6 +133,18 @@ func (s SectorsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 			Name:  "indexd_num_unpinned_sectors",
 			Value: float64(s.Unpinned),
 		},
+		{
+			Name:  "indexd_num_lost_sectors",
+			Value: float64(s.Lost),
+		},
+		{
+			Name:  "indexd_num_checked_sectors",
+			Value: float64(s.Checked),
+		},
+		{
+			Name:  "indexd_num_failed_check_sectors",
+			Value: float64(s.CheckFailed),
+		},
 	}
 }
 
