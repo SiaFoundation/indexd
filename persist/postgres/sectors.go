@@ -207,6 +207,9 @@ func (s *Store) markFailingSectorsLostBatch(ctx context.Context, hostKey types.P
 		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, totalLost); err != nil {
 			return fmt.Errorf("failed to update sector stats: %w", err)
 		}
+		if err := incrementNumSectorsLost(ctx, tx, totalLost); err != nil {
+			return fmt.Errorf("failed to increment sectors lost stat: %w", err)
+		}
 		return nil
 	}); err != nil {
 		return 0, err
