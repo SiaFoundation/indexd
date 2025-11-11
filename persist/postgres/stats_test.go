@@ -308,8 +308,8 @@ func TestIntegrityCheckStats(t *testing.T) {
 	}
 	assertSectorStats(0, 6, 3)
 
-	// one more time with threshold of 1
-	if err := store.MarkFailingSectorsLost(context.Background(), hk, 1); err != nil {
+	// one more time with threshold of 2
+	if err := store.MarkFailingSectorsLost(context.Background(), hk, 2); err != nil {
 		t.Fatal(err)
 	}
 
