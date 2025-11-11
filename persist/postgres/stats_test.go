@@ -315,6 +315,12 @@ func TestIntegrityCheckStats(t *testing.T) {
 
 	// host should have lost sector
 	assertSectorStats(1, 6, 3)
+
+	// marking both lost should result in lost=2 because root1 is already lost
+	if err := store.MarkSectorsLost(context.Background(), hk, []types.Hash256{root1, root2}); err != nil {
+		t.Fatal(err)
+	}
+	assertSectorStats(2, 6, 3)
 }
 
 func TestAccountStatsRegistered(t *testing.T) {
