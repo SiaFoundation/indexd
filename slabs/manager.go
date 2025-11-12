@@ -98,33 +98,33 @@ type (
 	// Store defines an interface to store and update slab related information
 	// in the database.
 	Store interface {
-		AddServiceAccount(ctx context.Context, ak types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error
-		Contracts(ctx context.Context, offset, limit int, queryOpts ...contracts.ContractQueryOpt) ([]contracts.Contract, error)
-		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
-		HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.Time, limit int) ([]types.PublicKey, error)
-		HostsWithLostSectors(ctx context.Context) ([]types.PublicKey, error)
-		MaintenanceSettings(ctx context.Context) (contracts.MaintenanceSettings, error)
-		MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxFailedIntegrityChecks uint) error
-		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
-		MarkSlabRepaired(ctx context.Context, slabID SlabID, success bool) error
-		MigrateSector(ctx context.Context, root types.Hash256, hostKey types.PublicKey) (bool, error)
-		PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error)
-		UnpinSlab(context.Context, proto.Account, SlabID) error
-		RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error
-		SectorsForIntegrityCheck(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
-		PinnedSlab(ctx context.Context, account proto.Account, slabID SlabID) (PinnedSlab, error)
-		Slab(ctx context.Context, slabID SlabID) (slab Slab, err error)
-		Slabs(ctx context.Context, account proto.Account, slabIDs []SlabID) ([]Slab, error)
-		SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]SlabID, error)
-		UnhealthySlabs(ctx context.Context, limit int) ([]SlabID, error)
-		PruneSlabs(ctx context.Context, account proto.Account) error
+		AddServiceAccount(ak types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error
+		Contracts(offset, limit int, queryOpts ...contracts.ContractQueryOpt) ([]contracts.Contract, error)
+		Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
+		HostsForIntegrityChecks(maxLastCheck time.Time, limit int) ([]types.PublicKey, error)
+		HostsWithLostSectors() ([]types.PublicKey, error)
+		MaintenanceSettings() (contracts.MaintenanceSettings, error)
+		MarkFailingSectorsLost(hostKey types.PublicKey, maxFailedIntegrityChecks uint) error
+		MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) error
+		MarkSlabRepaired(slabID SlabID, success bool) error
+		MigrateSector(root types.Hash256, hostKey types.PublicKey) (bool, error)
+		PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error)
+		UnpinSlab(proto.Account, SlabID) error
+		RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error
+		SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]types.Hash256, error)
+		PinnedSlab(account proto.Account, slabID SlabID) (PinnedSlab, error)
+		Slab(slabID SlabID) (slab Slab, err error)
+		Slabs(account proto.Account, slabIDs []SlabID) ([]Slab, error)
+		SlabIDs(account proto.Account, offset, limit int) ([]SlabID, error)
+		UnhealthySlabs(limit int) ([]SlabID, error)
+		PruneSlabs(account proto.Account) error
 
 		// Object methods
-		Object(ctx context.Context, account proto.Account, key types.Hash256) (SealedObject, error)
-		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
-		SaveObject(ctx context.Context, account proto.Account, obj SealedObject) error
-		ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
-		SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error)
+		Object(account proto.Account, key types.Hash256) (SealedObject, error)
+		DeleteObject(account proto.Account, objectKey types.Hash256) error
+		SaveObject(account proto.Account, obj SealedObject) error
+		ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
+		SharedObject(key types.Hash256) (SharedObject, error)
 	}
 
 	// AlertsManager defines an interface to register alerts.
@@ -265,9 +265,6 @@ func (m *SlabManager) Close() error {
 }
 
 func (m *SlabManager) initServiceAccounts(migrationAccount, integrityAccount types.PublicKey) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
 	for _, acc := range []struct {
 		description string
 		key         types.PublicKey
@@ -276,7 +273,7 @@ func (m *SlabManager) initServiceAccounts(migrationAccount, integrityAccount typ
 		{"data integrity checks", integrityAccount},
 	} {
 		// ensure account is added to the store
-		err := m.store.AddServiceAccount(ctx, acc.key, accounts.AccountMeta{
+		err := m.store.AddServiceAccount(acc.key, accounts.AccountMeta{
 			Description: acc.description,
 			LogoURL:     "", // service accounts don't need a logo
 			ServiceURL:  "", // service accounts don't need a service URL
@@ -339,7 +336,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 	logger.Debug("starting integrity checks", zap.Time("start", start))
 
 	for {
-		usedHosts, err := m.store.HostsForIntegrityChecks(ctx, start, 100)
+		usedHosts, err := m.store.HostsForIntegrityChecks(start, 100)
 		if err != nil {
 			return fmt.Errorf("failed to fetch hosts to block: %w", err)
 		} else if len(usedHosts) == 0 {
@@ -368,7 +365,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 		wg.Wait()
 	}
 
-	hks, err := m.store.HostsWithLostSectors(ctx)
+	hks, err := m.store.HostsWithLostSectors()
 	if err != nil {
 		return fmt.Errorf("failed to get hosts with lost sectors: %w", err)
 	}
@@ -394,7 +391,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 
 	var exhausted bool
 	for !exhausted {
-		batch, err := m.store.UnhealthySlabs(ctx, m.migrationBatchSize)
+		batch, err := m.store.UnhealthySlabs(m.migrationBatchSize)
 		if err != nil {
 			return err
 		} else if len(batch) < m.migrationBatchSize {

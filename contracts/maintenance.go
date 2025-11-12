@@ -32,7 +32,7 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 				cancel()
 			}()
 
-			contractIDs, err := cm.store.ContractsForFunding(ctx, hostKey, 10)
+			contractIDs, err := cm.store.ContractsForFunding(hostKey, 10)
 			if err != nil {
 				log.Error("failed to fetch contracts for funding", zap.Error(err))
 				return
@@ -56,7 +56,7 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 
 func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *zap.Logger) error {
 	// fetch settings and determine if maintenance is supposed to run
-	settings, err := cm.store.MaintenanceSettings(ctx)
+	settings, err := cm.store.MaintenanceSettings()
 	if err != nil {
 		return fmt.Errorf("failed to fetch settings for contract maintenance: %w", err)
 	} else if !settings.Enabled {
@@ -77,7 +77,7 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 	}
 
 	// mark any contracts too close to their expiration height as bad
-	if err := cm.store.MarkUnrenewableContractsBad(ctx, blockHeight+settings.RenewWindow/2); err != nil {
+	if err := cm.store.MarkUnrenewableContractsBad(blockHeight + settings.RenewWindow/2); err != nil {
 		return fmt.Errorf("failed to mark unrenewable contracts bad: %w", err)
 	}
 
@@ -146,7 +146,7 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 
 		unpinnableLog := log.Named("unpinnable")
 		threshold := time.Now().Add(-unpinnableSectorThreshold)
-		logError(cm.store.MarkSectorsUnpinnable(ctx, threshold), unpinnableLog)
+		logError(cm.store.MarkSectorsUnpinnable(threshold), unpinnableLog)
 		t.Reset(cm.maintenanceFrequency)
 		log.Debug("maintenance complete")
 	}
@@ -155,7 +155,7 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 func (cm *ContractManager) performWalletMaintenance(ctx context.Context, log *zap.Logger) error {
 	const maxUTXOs = 250 // cap at 250 UTXOs
 
-	settings, err := cm.store.MaintenanceSettings(ctx)
+	settings, err := cm.store.MaintenanceSettings()
 	if err != nil {
 		return fmt.Errorf("failed to fetch maintenance settings: %w", err)
 	}

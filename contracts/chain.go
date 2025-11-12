@@ -51,7 +51,7 @@ func (tx *updateTx) IsKnownContract(fcid types.FileContractID) (bool, error) {
 func (m *ContractManager) ProcessActions(ctx context.Context) error {
 	// reject all contracts that have been pending for more than 'contractRejectBuffer'
 	maxFormation := time.Now().Add(-m.contractRejectBuffer)
-	if err := m.store.RejectPendingContracts(ctx, maxFormation); err != nil {
+	if err := m.store.RejectPendingContracts(maxFormation); err != nil {
 		return fmt.Errorf("failed to reject pending contracts: %w", err)
 	}
 
@@ -64,13 +64,13 @@ func (m *ContractManager) ProcessActions(ctx context.Context) error {
 
 	// prune expired contracts 'expiredContractPruneBuffer' blocks after
 	// we begin broadcasting resolutions
-	if err := m.store.PruneExpiredContractElements(ctx, m.expiredContractBroadcastBuffer+m.expiredContractPruneBuffer); err != nil {
+	if err := m.store.PruneExpiredContractElements(m.expiredContractBroadcastBuffer + m.expiredContractPruneBuffer); err != nil {
 		return fmt.Errorf("failed to prune expired contracts: %w", err)
 	}
 
 	// prune expired contracts from contract_sectors_map
 	// 'expiredContractSectorsPruneBuffer' blocks after the contract expired
-	if err := m.store.PruneContractSectorsMap(ctx, m.expiredContractSectorsPruneBuffer); err != nil {
+	if err := m.store.PruneContractSectorsMap(m.expiredContractSectorsPruneBuffer); err != nil {
 		return fmt.Errorf("failed to prune expired contracts: %w", err)
 	}
 	return nil
@@ -201,7 +201,7 @@ func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2File
 }
 
 func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
-	expiredFCEs, err := m.store.ContractElementsForBroadcast(ctx, m.expiredContractBroadcastBuffer)
+	expiredFCEs, err := m.store.ContractElementsForBroadcast(m.expiredContractBroadcastBuffer)
 	if err != nil {
 		return fmt.Errorf("failed to get expired contracts for broadcast: %w", err)
 	}

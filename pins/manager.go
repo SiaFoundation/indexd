@@ -60,8 +60,8 @@ type (
 	// Store defines an interface to fetch and update pinned settings from the
 	// database.
 	Store interface {
-		PinnedSettings(context.Context) (PinnedSettings, error)
-		UpdatePinnedSettings(context.Context, PinnedSettings) error
+		PinnedSettings() (PinnedSettings, error)
+		UpdatePinnedSettings(PinnedSettings) error
 	}
 
 	// PinnedSettings contains the settings that can be optionally pinned to an
@@ -103,7 +103,7 @@ func (pm *PinManager) updatePrices(ctx context.Context, force bool, log *zap.Log
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
-	pins, err := pm.store.PinnedSettings(ctx)
+	pins, err := pm.store.PinnedSettings()
 	if err != nil {
 		return fmt.Errorf("failed to retrieve pinned settings, %w", err)
 	} else if pins.Currency == "" {
@@ -214,7 +214,7 @@ func (pm *PinManager) addRate(currency string, rate float64) bool {
 
 // PinnedSettings returns the pinned settings from the store.
 func (pm *PinManager) PinnedSettings(ctx context.Context) (PinnedSettings, error) {
-	return pm.store.PinnedSettings(ctx)
+	return pm.store.PinnedSettings()
 }
 
 // UpdatePinnedSettings updates the pinned settings in the store and forces a
@@ -226,7 +226,7 @@ func (pm *PinManager) UpdatePinnedSettings(ctx context.Context, ps PinnedSetting
 	}
 	defer cancel()
 
-	err = pm.store.UpdatePinnedSettings(ctx, ps)
+	err = pm.store.UpdatePinnedSettings(ps)
 	if err != nil {
 		return fmt.Errorf("failed to update pinned settings: %w", err)
 	}

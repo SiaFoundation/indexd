@@ -94,13 +94,13 @@ func (ts TestStore) Exec(ctx context.Context, query string, args ...any) (pgconn
 func (ts TestStore) AddTestHost(t testing.TB, host hosts.Host) {
 	t.Helper()
 
-	if err := ts.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := ts.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.AddHostAnnouncement(host.PublicKey, host.Addresses, time.Now())
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := ts.UpdateHost(context.Background(), host.PublicKey, host.Settings, geoip.Location{}, true, time.Now()); err != nil {
+	if err := ts.UpdateHost(host.PublicKey, host.Settings, geoip.Location{}, true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -110,8 +110,8 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 	t.Helper()
 
 	const connectKey = "test"
-	if _, err := ts.ValidAppConnectKey(t.Context(), connectKey); errors.Is(err, accounts.ErrKeyNotFound) {
-		_, err := ts.AddAppConnectKey(t.Context(), accounts.UpdateAppConnectKey{
+	if _, err := ts.ValidAppConnectKey(connectKey); errors.Is(err, accounts.ErrKeyNotFound) {
+		_, err := ts.AddAppConnectKey(accounts.UpdateAppConnectKey{
 			Key:           connectKey,
 			MaxPinnedData: 1e10,
 			RemainingUses: 10000,
@@ -123,7 +123,7 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 		t.Fatal(err)
 	}
 
-	if err := ts.UseAppConnectKey(t.Context(), connectKey, ak, accounts.AccountMeta{}); err != nil {
+	if err := ts.UseAppConnectKey(connectKey, ak, accounts.AccountMeta{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -132,10 +132,10 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 func (s TestStore) AddTestServiceAccount(t testing.TB, hk types.PublicKey, ak proto.Account) {
 	t.Helper()
 
-	if err := s.Store.AddServiceAccount(t.Context(), types.PublicKey(ak), accounts.AccountMeta{}); err != nil {
+	if err := s.Store.AddServiceAccount(types.PublicKey(ak), accounts.AccountMeta{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.Store.UpdateServiceAccountBalance(t.Context(), hk, ak, types.ZeroCurrency); err != nil {
+	if err := s.Store.UpdateServiceAccountBalance(hk, ak, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 }

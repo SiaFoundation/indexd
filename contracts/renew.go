@@ -17,7 +17,7 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 
 	batchSize := 50
 	for offset := 0; ; offset += batchSize {
-		contracts, err := cm.store.Contracts(ctx, offset, batchSize, WithGood(true), WithRevisable(true))
+		contracts, err := cm.store.Contracts(offset, batchSize, WithGood(true), WithRevisable(true))
 		if err != nil {
 			return fmt.Errorf("failed to fetch contracts for renewal: %w", err)
 		}
@@ -85,7 +85,7 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		renewed := res.Contract
 		minerFee := res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1].MinerFee
 
-		if err := cm.store.AddRenewedContract(ctx, contract.ID, renewed.ID, renewed.Revision, host.Settings.Prices.ContractPrice, minerFee, res.Usage); err != nil {
+		if err := cm.store.AddRenewedContract(contract.ID, renewed.ID, renewed.Revision, host.Settings.Prices.ContractPrice, minerFee, res.Usage); err != nil {
 			return fmt.Errorf("failed to store renewed contract %q: %w", renewed.ID, err)
 		}
 

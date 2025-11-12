@@ -15,7 +15,7 @@ func (cm *ContractManager) performBroadcastContractRevisions(ctx context.Context
 
 	var exhausted bool
 	for !exhausted {
-		contracts, err := cm.store.ContractsForBroadcasting(ctx, minBroadcast, 10)
+		contracts, err := cm.store.ContractsForBroadcasting(minBroadcast, 10)
 		if err != nil {
 			return fmt.Errorf("failed to fetch contracts for broadcasting: %w", err)
 		} else if len(contracts) < 10 {
@@ -28,7 +28,7 @@ func (cm *ContractManager) performBroadcastContractRevisions(ctx context.Context
 				broadcastLog.Error("failed to broadcast contract revision", zap.Error(err))
 			}
 
-			err = cm.store.MarkBroadcastAttempt(ctx, contractID)
+			err = cm.store.MarkBroadcastAttempt(contractID)
 			if err != nil {
 				broadcastLog.Error("failed to mark broadcast attempt", zap.Error(err))
 			}
@@ -44,13 +44,13 @@ func (cm *ContractManager) broadcastContractRevision(ctx context.Context, contra
 	defer cancel()
 
 	// fetch contract element
-	fce, err := cm.store.ContractElement(ctx, contractID)
+	fce, err := cm.store.ContractElement(contractID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contract element: %w", err)
 	}
 
 	// fetch latest revision
-	contract, _, err := cm.store.ContractRevision(ctx, contractID)
+	contract, _, err := cm.store.ContractRevision(contractID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contract revision: %w", err)
 	}

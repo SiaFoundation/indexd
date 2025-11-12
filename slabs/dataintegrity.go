@@ -16,7 +16,7 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, hostKey
 
 	const batchSize = 1000 // batch size for sector retrieval
 	for interrupt := false; !interrupt; {
-		toCheck, err := m.store.SectorsForIntegrityCheck(ctx, hostKey, batchSize)
+		toCheck, err := m.store.SectorsForIntegrityCheck(hostKey, batchSize)
 		if err != nil {
 			logger.Error("failed to fetch sectors for integrity check", zap.Error(err))
 			return
@@ -72,26 +72,23 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, hostKey
 		// timeout, to make sure even when the integrity checks are
 		// interrupted, we give it some time to persist the results.
 		err = func() error {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-			defer cancel()
-
 			// update lost, failed and successful sectors
-			if err := m.store.MarkSectorsLost(ctx, hostKey, lost); err != nil {
+			if err := m.store.MarkSectorsLost(hostKey, lost); err != nil {
 				logger.Error("failed to mark sectors as lost", zap.Error(err))
 				return fmt.Errorf("failed to mark sectors as lost: %w", err)
 			}
-			if err := m.store.RecordIntegrityCheck(ctx, false, time.Now().Add(m.failedIntegrityCheckInterval), hostKey, failed); err != nil {
+			if err := m.store.RecordIntegrityCheck(false, time.Now().Add(m.failedIntegrityCheckInterval), hostKey, failed); err != nil {
 				logger.Error("failed to record integrity check for failed sectors", zap.Error(err))
 				return fmt.Errorf("failed to record integrity check for failed sectors: %w", err)
 			}
-			if err := m.store.RecordIntegrityCheck(ctx, true, time.Now().Add(m.integrityCheckInterval), hostKey, success); err != nil {
+			if err := m.store.RecordIntegrityCheck(true, time.Now().Add(m.integrityCheckInterval), hostKey, success); err != nil {
 				logger.Error("failed to record integrity check for successful sectors", zap.Error(err))
 				return fmt.Errorf("failed to record integrity check for successful sectors: %w", err)
 			}
 
 			// fetch sector roots for sectors that have now failed the check 5+
 			// times and mark them lost as well
-			err := m.store.MarkFailingSectorsLost(ctx, hostKey, m.maxFailedIntegrityChecks)
+			err := m.store.MarkFailingSectorsLost(hostKey, m.maxFailedIntegrityChecks)
 			if err != nil {
 				logger.Error("failed to mark failing sectors as lost", zap.Error(err))
 				return fmt.Errorf("failed to mark failing sectors as lost: %w", err)

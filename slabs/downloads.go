@@ -125,7 +125,7 @@ outer:
 					)
 				}
 				if lost {
-					if err := m.store.MarkSectorsLost(ctx, host.PublicKey, []types.Hash256{sector.Root}); err != nil {
+					if err := m.store.MarkSectorsLost(host.PublicKey, []types.Hash256{sector.Root}); err != nil {
 						log.Error("failed to mark sector as lost", zap.Error(err))
 					}
 				}

@@ -26,7 +26,7 @@ func (m *AccountManager) ResetAccountBalance(ctx context.Context, hostKey types.
 	if !m.serviceAccountExists(account) {
 		return ErrNotFound
 	}
-	return m.store.UpdateServiceAccountBalance(ctx, hostKey, account, types.ZeroCurrency)
+	return m.store.UpdateServiceAccountBalance(hostKey, account, types.ZeroCurrency)
 }
 
 // ServiceAccountBalance returns the balance of a locked service account.
@@ -34,7 +34,7 @@ func (m *AccountManager) ServiceAccountBalance(ctx context.Context, hostKey type
 	if !m.serviceAccountExists(account) {
 		return types.ZeroCurrency, ErrNotFound
 	}
-	return m.store.ServiceAccountBalance(ctx, hostKey, account)
+	return m.store.ServiceAccountBalance(hostKey, account)
 }
 
 // DebitServiceAccount withdraws from a service account. This should be used
@@ -43,7 +43,7 @@ func (m *AccountManager) DebitServiceAccount(ctx context.Context, hostKey types.
 	if !m.serviceAccountExists(account) {
 		return ErrNotFound
 	}
-	return m.store.DebitServiceAccount(ctx, hostKey, account, amount)
+	return m.store.DebitServiceAccount(hostKey, account, amount)
 }
 
 func (m *AccountManager) serviceAccountExists(account proto.Account) bool {
@@ -68,7 +68,7 @@ func (m *AccountManager) UpdateServiceAccounts(ctx context.Context, accounts []H
 	m.serviceAccountsMu.Unlock()
 
 	for _, account := range toUpdate {
-		if err := m.store.UpdateServiceAccountBalance(ctx, account.HostKey, account.AccountKey, balance); err != nil {
+		if err := m.store.UpdateServiceAccountBalance(account.HostKey, account.AccountKey, balance); err != nil {
 			return err
 		}
 	}
