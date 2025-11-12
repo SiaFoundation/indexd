@@ -14,7 +14,7 @@ import (
 )
 
 // SharedObject retrieves the shared object with the given key for the given account.
-func (s *Store) SharedObject(ctx context.Context, key types.Hash256) (obj slabs.SharedObject, _ error) {
+func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error) {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var objID int64
 		err := tx.QueryRow(ctx, `SELECT id, encrypted_metadata FROM objects WHERE object_key = $1
@@ -79,7 +79,7 @@ ORDER BY ss.slab_index ASC`, slabDBID).Query(func(rows pgx.Rows) error {
 }
 
 // Object retrieves the object with the given key for the given account.
-func (s *Store) Object(ctx context.Context, account proto.Account, key types.Hash256) (obj slabs.SealedObject, _ error) {
+func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.SealedObject, _ error) {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -121,7 +121,7 @@ func (s *Store) Object(ctx context.Context, account proto.Account, key types.Has
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
-func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, _ error) {
+func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, _ error) {
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -208,7 +208,7 @@ func (s *Store) ListObjects(ctx context.Context, account proto.Account, cursor s
 }
 
 // DeleteObject deletes the object with the given key for the given account.
-func (s *Store) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
+func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -245,7 +245,7 @@ func (s *Store) DeleteObject(ctx context.Context, account proto.Account, objectK
 
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (s *Store) SaveObject(ctx context.Context, account proto.Account, obj slabs.SealedObject) error {
+func (s *Store) SaveObject(account proto.Account, obj slabs.SealedObject) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		accountID, err := accountID(ctx, tx, account)
 		if err != nil {

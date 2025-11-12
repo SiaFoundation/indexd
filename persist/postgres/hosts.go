@@ -58,7 +58,7 @@ func (u *updateTx) AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnoun
 }
 
 // Host returns the host for given public key
-func (s *Store) Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error) {
+func (s *Store) Host(hk types.PublicKey) (hosts.Host, error) {
 	var host hosts.Host
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		dbHost, err := scanHost(tx.QueryRow(ctx, `
@@ -121,7 +121,7 @@ FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 }
 
 // Hosts returns a list of hosts.
-func (s *Store) Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
+func (s *Store) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
 	} else if limit == 0 {
@@ -247,7 +247,7 @@ WHERE
 }
 
 // BlockedHosts returns a list of blocked hostkeys.
-func (s *Store) BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error) {
+func (s *Store) BlockedHosts(offset, limit int) ([]types.PublicKey, error) {
 	// sanity check input
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
@@ -280,7 +280,7 @@ func (s *Store) BlockedHosts(ctx context.Context, offset, limit int) ([]types.Pu
 // BlockHosts adds the given host keys to the blocklist and marks all of its
 // contracts as bad. If a host is already on the blocklist, the reasons are
 // updated to include any new reasons for blocking.
-func (s *Store) BlockHosts(ctx context.Context, hks []types.PublicKey, reasons []string) error {
+func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		for _, hk := range hks {
 			var hostID int64
@@ -328,7 +328,7 @@ func (s *Store) BlockHosts(ctx context.Context, hks []types.PublicKey, reasons [
 
 // HostsWithUnpinnableSectors returns a list of host public keys for hosts that
 // don't have any contracts but unpinned sectors.
-func (s *Store) HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error) {
+func (s *Store) HostsWithUnpinnableSectors() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
@@ -363,7 +363,7 @@ func (s *Store) HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicK
 
 // UnblockHost removes the given host key from the blocklist and marks its
 // contracts as good again.
-func (s *Store) UnblockHost(ctx context.Context, hk types.PublicKey) error {
+func (s *Store) UnblockHost(hk types.PublicKey) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, "DELETE FROM hosts_blocklist WHERE public_key = $1", sqlPublicKey(hk))
 		if err != nil {
@@ -384,7 +384,7 @@ func (s *Store) UnblockHost(ctx context.Context, hk types.PublicKey) error {
 }
 
 // HostsForScanning returns a list of hosts where the next scan is due.
-func (s *Store) HostsForScanning(ctx context.Context) ([]types.PublicKey, error) {
+func (s *Store) HostsForScanning() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `SELECT public_key FROM hosts WHERE next_scan <= NOW() ORDER BY next_scan ASC`)
@@ -410,7 +410,7 @@ func (s *Store) HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
 // PruneHosts removes hosts that have not been successfully scanned since the
 // given cutoff time and have failed scans consecutively for at least
 // minConsecutiveFailedScans times.
-func (s *Store) PruneHosts(ctx context.Context, minLastSuccessfulScan time.Time, minConsecutiveFailedScans int) (int64, error) {
+func (s *Store) PruneHosts(minLastSuccessfulScan time.Time, minConsecutiveFailedScans int) (int64, error) {
 	var n int64
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		res, err := tx.Exec(ctx, `DELETE FROM hosts WHERE (last_successful_scan IS NULL OR last_successful_scan <= $1) AND consecutive_failed_scans >= $2 AND NOT EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id)`, minLastSuccessfulScan, minConsecutiveFailedScans)
@@ -426,7 +426,7 @@ func (s *Store) PruneHosts(ctx context.Context, minLastSuccessfulScan time.Time,
 }
 
 // UpdateHost updates a host in the database, the given parameters are the result of scanning the host.
-func (s *Store) UpdateHost(ctx context.Context, hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
+func (s *Store) UpdateHost(hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		if !scanSucceeded {
 			if res, err := tx.Exec(ctx, `
@@ -550,7 +550,7 @@ WHERE hosts.id = computed.id RETURNING hosts.id`,
 
 // UsableHosts returns a list of hosts that are not blocked, usable and have an
 // active contract. It returns only the host's public key and addresses.
-func (s *Store) UsableHosts(ctx context.Context, offset, limit int, opts ...hosts.UsableHostQueryOpt) ([]hosts.HostInfo, error) {
+func (s *Store) UsableHosts(offset, limit int, opts ...hosts.UsableHostQueryOpt) ([]hosts.HostInfo, error) {
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
 	} else if limit == 0 {
@@ -787,7 +787,7 @@ func scanHost(s scanner) (dbHost, error) {
 
 // HostsForIntegrityChecks returns a list of hosts that have sectors
 // requiring integrity checks.
-func (s *Store) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.Time, limit int) ([]types.PublicKey, error) {
+func (s *Store) HostsForIntegrityChecks(maxLastCheck time.Time, limit int) ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
@@ -833,7 +833,7 @@ func (s *Store) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.T
 // HostsForFunding returns a list of host keys that need accounts funded on
 // them. A host is eligible for funding if it is not blocked and has an active
 // contract.
-func (s *Store) HostsForFunding(ctx context.Context) ([]types.PublicKey, error) {
+func (s *Store) HostsForFunding() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
@@ -866,7 +866,7 @@ func (s *Store) HostsForFunding(ctx context.Context) ([]types.PublicKey, error) 
 // HostsForPinning returns a list of host keys that can be used for sector
 // pinning. A host is eligible for pinning if it is not blocked, has unpinned
 // sectors and has an active contract.
-func (s *Store) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
+func (s *Store) HostsForPinning() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
@@ -906,7 +906,7 @@ func (s *Store) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) 
 
 // HostsForPruning returns a list of host keys that have contracts that need
 // pruning.
-func (s *Store) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) {
+func (s *Store) HostsForPruning() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
@@ -944,7 +944,7 @@ func (s *Store) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) 
 
 // HostsWithLostSectors returns a list of host keys that have contracts with
 // lost sectors.
-func (s *Store) HostsWithLostSectors(ctx context.Context) ([]types.PublicKey, error) {
+func (s *Store) HostsWithLostSectors() ([]types.PublicKey, error) {
 	var hks []types.PublicKey
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `

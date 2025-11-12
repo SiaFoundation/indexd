@@ -16,7 +16,7 @@ import (
 // count. If the repair was successful, the consecutive_failed_repairs counter
 // is reset to zero. If the repair failed, the counter is incremented and the
 // next repair attempt time is set using exponential backoff.
-func (s *Store) MarkSlabRepaired(ctx context.Context, slabID slabs.SlabID, success bool) error {
+func (s *Store) MarkSlabRepaired(slabID slabs.SlabID, success bool) error {
 	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		if success {
 			if res, err := tx.Exec(ctx, `UPDATE slabs SET consecutive_failed_repairs = 0 WHERE digest = $1`, sqlHash256(slabID)); err != nil {
@@ -54,7 +54,7 @@ func (s *Store) MarkSlabRepaired(ctx context.Context, slabID slabs.SlabID, succe
 }
 
 // Slab retrieves a slab from the database by its ID.
-func (s *Store) Slab(ctx context.Context, slabID slabs.SlabID) (slab slabs.Slab, err error) {
+func (s *Store) Slab(slabID slabs.SlabID) (slab slabs.Slab, err error) {
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var dbID int64
 		err = tx.QueryRow(ctx, `SELECT s.id, s.encryption_key, s.min_shards, s.pinned_at FROM slabs s WHERE digest = $1`, sqlHash256(slabID)).Scan(
@@ -102,7 +102,7 @@ func (s *Store) Slab(ctx context.Context, slabID slabs.SlabID) (slab slabs.Slab,
 }
 
 // PinnedSlab retrieves a pinned slab from the database by its ID.
-func (s *Store) PinnedSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) (slab slabs.PinnedSlab, err error) {
+func (s *Store) PinnedSlab(account proto.Account, slabID slabs.SlabID) (slab slabs.PinnedSlab, err error) {
 	slab.ID = slabID
 	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		if _, err := tx.Exec(ctx, `UPDATE accounts SET last_used = NOW() WHERE public_key = $1`, sqlPublicKey(account)); err != nil {
@@ -148,7 +148,7 @@ ORDER BY ss.slab_index ASC`, dbID)
 
 // PruneSlabs prunes all pinned slabs of a user not currently connected to an
 // object.
-func (s *Store) PruneSlabs(ctx context.Context, account proto.Account) error {
+func (s *Store) PruneSlabs(account proto.Account) error {
 	var id int64
 	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var err error
