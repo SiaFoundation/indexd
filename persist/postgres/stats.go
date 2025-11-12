@@ -39,17 +39,17 @@ func incrementNumUnpinnedSectors(ctx context.Context, tx *txn, delta int64) erro
 	return err
 }
 
-func incrementNumSectorsLost(ctx context.Context, tx *txn, delta int64) error {
+func incrementNumSectorsLost(ctx context.Context, tx *txn, delta uint64) error {
 	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_lost = num_sectors_lost + $1", delta)
 	return err
 }
 
-func incrementNumSectorsChecked(ctx context.Context, tx *txn, delta int64) error {
+func incrementNumSectorsChecked(ctx context.Context, tx *txn, delta uint64) error {
 	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_checked = num_sectors_checked + $1", delta)
 	return err
 }
 
-func incrementNumSectorsFailed(ctx context.Context, tx *txn, delta int64) error {
+func incrementNumSectorsFailed(ctx context.Context, tx *txn, delta uint64) error {
 	_, err := tx.Exec(ctx, "UPDATE stats SET num_sectors_check_failed = num_sectors_check_failed + $1", delta)
 	return err
 }

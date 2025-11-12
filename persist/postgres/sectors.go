@@ -104,11 +104,11 @@ func (s *Store) RecordIntegrityCheck(ctx context.Context, success bool, nextChec
 			return fmt.Errorf("failed to record integrity check: %w", err)
 		}
 
-		if err := incrementNumSectorsChecked(ctx, tx, int64(len(roots))); err != nil {
+		if err := incrementNumSectorsChecked(ctx, tx, uint64(len(roots))); err != nil {
 			return fmt.Errorf("failed to increment sectors checked stat: %w", err)
 		}
 		if !success {
-			if err := incrementNumSectorsFailed(ctx, tx, int64(len(roots))); err != nil {
+			if err := incrementNumSectorsFailed(ctx, tx, uint64(len(roots))); err != nil {
 				return fmt.Errorf("failed to increment sectors failed stat: %w", err)
 			}
 		}
@@ -856,7 +856,7 @@ func updateSectorStats(ctx context.Context, tx *txn, pinnedDelta, unpinnedDelta,
 	if err := incrementNumUnpinnableSectors(ctx, tx, unpinnableDelta); err != nil {
 		return fmt.Errorf("failed to update unpinnable sectors: %w", err)
 	}
-	if err := incrementNumSectorsLost(ctx, tx, unpinnableDelta); err != nil {
+	if err := incrementNumSectorsLost(ctx, tx, uint64(unpinnableDelta)); err != nil {
 		return fmt.Errorf("failed to update sectors lost: %w", err)
 	}
 
