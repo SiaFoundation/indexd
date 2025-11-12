@@ -70,9 +70,6 @@ func (s *Store) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, ro
 		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, totalLost); err != nil {
 			return fmt.Errorf("failed to update sector stats: %w", err)
 		}
-		if err := incrementNumSectorsLost(ctx, tx, totalLost); err != nil {
-			return fmt.Errorf("failed to increment sectors lost stat: %w", err)
-		}
 
 		return nil
 	})
@@ -206,9 +203,6 @@ func (s *Store) markFailingSectorsLostBatch(ctx context.Context, hostKey types.P
 		}
 		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, totalLost); err != nil {
 			return fmt.Errorf("failed to update sector stats: %w", err)
-		}
-		if err := incrementNumSectorsLost(ctx, tx, totalLost); err != nil {
-			return fmt.Errorf("failed to increment sectors lost stat: %w", err)
 		}
 		return nil
 	}); err != nil {
@@ -862,6 +856,10 @@ func updateSectorStats(ctx context.Context, tx *txn, pinnedDelta, unpinnedDelta,
 	if err := incrementNumUnpinnableSectors(ctx, tx, unpinnableDelta); err != nil {
 		return fmt.Errorf("failed to update unpinnable sectors: %w", err)
 	}
+	if err := incrementNumSectorsLost(ctx, tx, unpinnableDelta); err != nil {
+		return fmt.Errorf("failed to update sectors lost: %w", err)
+	}
+
 	return nil
 }
 
