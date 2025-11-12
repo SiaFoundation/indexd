@@ -58,7 +58,7 @@ func (m *ContractManager) ProcessActions(ctx context.Context) error {
 	// broadcast resolutions for expired contracts
 	// 'expiredContractBroadcastBuffer' blocks after their window end to give
 	// hosts a chance to do it themselves before we do it
-	if err := m.broadcastExpiredContracts(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := m.broadcastExpiredContracts(); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("failed to broadcast expired contracts: %w", err)
 	}
 
@@ -200,7 +200,7 @@ func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2File
 	return nil
 }
 
-func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
+func (m *ContractManager) broadcastExpiredContracts() error {
 	expiredFCEs, err := m.store.ContractElementsForBroadcast(m.expiredContractBroadcastBuffer)
 	if err != nil {
 		return fmt.Errorf("failed to get expired contracts for broadcast: %w", err)

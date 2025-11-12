@@ -236,9 +236,9 @@ func NewManager(syncer Syncer, locator Locator, store Store, opts ...Option) (*H
 				scanTicker.Stop()
 				scanTicker = time.NewTicker(m.scanFrequency)
 				m.log.Debug("triggered host scanning")
-				m.scanHosts(ctx, m.hostsForScanning(ctx, true))
+				m.scanHosts(ctx, m.hostsForScanning(true))
 			case <-scanTicker.C:
-				m.scanHosts(ctx, m.hostsForScanning(ctx, false))
+				m.scanHosts(ctx, m.hostsForScanning(false))
 			case <-ctx.Done():
 				return
 			}
@@ -399,7 +399,7 @@ func (m *HostManager) Stats(ctx context.Context, offset, limit int) ([]HostStats
 // hostsForScanning returns the public keys of the hosts that need to be
 // scanned, if force is true, this method will return the public keys of all
 // hosts in the database.
-func (m *HostManager) hostsForScanning(ctx context.Context, force bool) []types.PublicKey {
+func (m *HostManager) hostsForScanning(force bool) []types.PublicKey {
 	if !force {
 		hosts, err := m.store.HostsForScanning()
 		if err != nil {
