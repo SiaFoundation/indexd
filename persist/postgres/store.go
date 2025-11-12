@@ -53,6 +53,11 @@ func (s *Store) transaction(ctx context.Context, fn func(context.Context, *txn) 
 	return nil
 }
 
+// ctx returns the default context used by the store.
+func (s *Store) ctx() context.Context {
+	return context.Background()
+}
+
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
 	s.pool.Close()

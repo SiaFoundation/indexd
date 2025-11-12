@@ -25,7 +25,7 @@ import (
 func (s *Store) ContractRevision(contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
 	var renewed bool
 	var revision sqlFileContract
-	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	if err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		return tx.QueryRow(ctx, `SELECT raw_revision, renewed_to IS NOT NULL FROM contracts WHERE contract_id = $1`, sqlHash256(contractID)).Scan(&revision, &renewed)
 	}); errors.Is(err, sql.ErrNoRows) {
 		return rhp.ContractRevision{}, false, fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
@@ -37,7 +37,7 @@ func (s *Store) ContractRevision(contractID types.FileContractID) (rhp.ContractR
 
 // ContractsStats returns statistics about the contracts in the database.
 func (s *Store) ContractsStats() (resp admin.ContractsStatsResponse, _ error) {
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		var numContracts, numGood, totalCapacity, totalSize uint64
 		err := tx.QueryRow(ctx, `
 			WITH globals AS (
@@ -92,9 +92,9 @@ func (s *Store) ContractsStats() (resp admin.ContractsStatsResponse, _ error) {
 }
 
 // UpdateContractRevision updates the contract revision in the database.
-func (s *Store) UpdateContractRevision(ontract rhp.ContractRevision, usage proto.Usage) error {
+func (s *Store) UpdateContractRevision(contract rhp.ContractRevision, usage proto.Usage) error {
 	update := contract.Revision
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		var existingRevisionNumber uint64
 		err := tx.QueryRow(ctx, `SELECT revision_number FROM contracts WHERE contract_id = $1 FOR UPDATE`, sqlHash256(contract.ID)).Scan(&existingRevisionNumber)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -119,7 +119,7 @@ func (s *Store) UpdateContractRevision(ontract rhp.ContractRevision, usage proto
 
 // AddFormedContract adds a freshly formed contract to the database.
 func (s *Store) AddFormedContract(hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency, usage proto.Usage) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		var hostID int64
 		if err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = $1`, sqlPublicKey(hostKey)).Scan(&hostID); errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("host %q: %w", hostKey, hosts.ErrNotFound)
@@ -148,7 +148,7 @@ func (s *Store) AddFormedContract(hostKey types.PublicKey, contractID types.File
 // the renewed contract and point it to the renewal, as well as update the
 // contract id in the contract sectors map.
 func (s *Store) AddRenewedContract(renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee types.Currency, usage proto.Usage) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 INSERT INTO contracts(host_id, contract_id, renewed_from, raw_revision, revision_number, proof_height, expiration_height, capacity, size, initial_allowance, remaining_allowance, total_collateral, used_collateral, contract_price, miner_fee)
 (SELECT host_id, $1, contract_id, $2, $3, $4, $5, $6, $7, $8, $8, $9, $10, $11, $12 FROM contracts WHERE contract_id = $13)`,
@@ -191,7 +191,7 @@ INSERT INTO contracts(host_id, contract_id, renewed_from, raw_revision, revision
 // Contract returns a single contract
 func (s *Store) Contract(contractID types.FileContractID) (contracts.Contract, error) {
 	var contract contracts.Contract
-	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
+	if err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) (err error) {
 		contract, err = scanContract(tx.QueryRow(ctx, `
 SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
 FROM contracts c
@@ -229,7 +229,7 @@ func (s *Store) Contracts(offset, limit int, queryOpts ...contracts.ContractQuer
 	}
 
 	var contracts []contracts.Contract
-	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
+	if err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) (err error) {
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
 FROM contracts c
@@ -323,7 +323,7 @@ func buildContractOrderByClause(sorts []contracts.ContractSortOpt) (string, erro
 // broadcast time.
 func (s *Store) ContractsForBroadcasting(minBroadcast time.Time, limit int) ([]types.FileContractID, error) {
 	var fcids []types.FileContractID
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 			SELECT c.contract_id
 			FROM contracts c
@@ -353,7 +353,7 @@ func (s *Store) ContractsForBroadcasting(minBroadcast time.Time, limit int) ([]t
 // by the remaining allowance in descending fashion.
 func (s *Store) ContractsForFunding(hk types.PublicKey, limit int) ([]types.FileContractID, error) {
 	var fcids []types.FileContractID
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 SELECT c.contract_id
 FROM contracts c
@@ -389,7 +389,7 @@ LIMIT $2
 // size, capacity in descending fashion.
 func (s *Store) ContractsForPinning(hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error) {
 	var fcids []types.FileContractID
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		// covered by index contracts_host_id_active_good_idx
 		rows, err := tx.Query(ctx, `
 SELECT c.contract_id
@@ -424,7 +424,7 @@ ORDER BY (c.capacity - c.size) DESC`, sqlPublicKey(hk), maxContractSize)
 // up for pruning. The contracts are sorted by size in descending fashion.
 func (s *Store) ContractsForPruning(hk types.PublicKey) ([]types.FileContractID, error) {
 	var fcids []types.FileContractID
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 SELECT c.contract_id
 FROM contracts c
@@ -457,7 +457,7 @@ ORDER BY c.size DESC`, sqlPublicKey(hk))
 // ContractElement returns the contract element for the given contract ID.
 func (s *Store) ContractElement(contractID types.FileContractID) (types.V2FileContractElement, error) {
 	var fce types.V2FileContractElement
-	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
+	if err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) (err error) {
 		fce, err = scanContractElement(tx.QueryRow(ctx, `SELECT contract_id, contract, leaf_index, merkle_proof FROM contract_elements fces WHERE contract_id = $1`, sqlHash256(contractID)))
 		return
 	}); errors.Is(err, sql.ErrNoRows) {
@@ -472,7 +472,7 @@ func (s *Store) ContractElement(contractID types.FileContractID) (types.V2FileCo
 // have been expired for at least 'maxBlocksSinceExpiry' blocks.
 func (s *Store) ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
 	var fces []types.V2FileContractElement
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 WITH current_height AS (
 	SELECT scanned_height FROM global_settings
@@ -508,7 +508,7 @@ WHERE current_height.scanned_height >= c.expiration_height + $1
 // MaintenanceSettings returns the current maintenance settings.
 func (s *Store) MaintenanceSettings() (contracts.MaintenanceSettings, error) {
 	var settings contracts.MaintenanceSettings
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		return tx.QueryRow(ctx, `SELECT contracts_maintenance_enabled, contracts_wanted, contracts_renew_window, contracts_period FROM global_settings`).
 			Scan(&settings.Enabled, &settings.WantedContracts, &settings.RenewWindow, &settings.Period)
 	})
@@ -518,7 +518,7 @@ func (s *Store) MaintenanceSettings() (contracts.MaintenanceSettings, error) {
 // PruneExpiredContractElements prunes contract elements for contracts that have
 // been expired for at least 'maxBlocksSinceExpiry' blocks.
 func (s *Store) PruneExpiredContractElements(maxBlocksSinceExpiry uint64) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 WITH current_height AS (
     SELECT scanned_height FROM global_settings
@@ -534,7 +534,7 @@ WHERE fces.contract_id = contracts.contract_id AND current_height.scanned_height
 // PruneContractSectorsMap prunes the contract_sectors_map table of contracts
 // that have been expired for at least 'maxBlocksSinceExpiry' blocks.
 func (s *Store) PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		// fetch rows to prune
 		var toPrune []int64
 		rows, err := tx.Query(ctx, `
@@ -637,7 +637,7 @@ func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, erro
 
 // MarkBroadcastAttempt marks a broadcast attempt for the given contract.
 func (s *Store) MarkBroadcastAttempt(contractID types.FileContractID) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `UPDATE contracts SET last_broadcast_attempt = NOW() WHERE contract_id = $1`, sqlHash256(contractID))
 		return err
 	})
@@ -645,7 +645,7 @@ func (s *Store) MarkBroadcastAttempt(contractID types.FileContractID) error {
 
 // UpdateNextPrune updates the contract's next prune time to the given time
 func (s *Store) UpdateNextPrune(contractID types.FileContractID, nextPrune time.Time) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `UPDATE contracts SET next_prune = $1 WHERE contract_id = $2`, nextPrune, sqlHash256(contractID))
 		return err
 	})
@@ -654,7 +654,7 @@ func (s *Store) UpdateNextPrune(contractID types.FileContractID, nextPrune time.
 // MarkUnrenewableContractsBad marks all contracts as bad that have a proof
 // height <= minProofHeight bad.
 func (s *Store) MarkUnrenewableContractsBad(minProofHeight uint64) error {
-	return s.transaction(ctx, func(tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE proof_height <= $1`, minProofHeight)
 		return err
 	})
@@ -662,7 +662,7 @@ func (s *Store) MarkUnrenewableContractsBad(minProofHeight uint64) error {
 
 // MarkContractBad marks a specific contract as bad.
 func (s *Store) MarkContractBad(contractID types.FileContractID) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		res, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(contractID))
 		if err != nil {
 			return fmt.Errorf("failed to mark contract bad: %w", err)
@@ -676,7 +676,7 @@ func (s *Store) MarkContractBad(contractID types.FileContractID) error {
 // RejectPendingContracts marks all contracts as rejected that are currently
 // pending and have a formation height older than 'maxFormation'.
 func (s *Store) RejectPendingContracts(maxFormation time.Time) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `UPDATE contracts SET state = 4 WHERE state = 0 AND formation < $1`, maxFormation)
 		return err
 	})
@@ -714,7 +714,7 @@ func (s *Store) PrunableContractRoots(contractID types.FileContractID, roots []t
 	}
 
 	prunable := make([]types.Hash256, 0, len(roots))
-	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	if err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 			SELECT s.sector_root
 			FROM sectors s
@@ -753,7 +753,7 @@ func (s *Store) PrunableContractRoots(contractID types.FileContractID, roots []t
 // ScheduleContractsForPruning schedules contracts for pruning by updating their
 // next prune time to the current time.
 func (s *Store) ScheduleContractsForPruning() error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `UPDATE contracts SET next_prune = NOW() WHERE good = TRUE AND state <= $1`, sqlContractState(contracts.ContractStateActive))
 		if err != nil {
 			return fmt.Errorf("failed to schedule contracts for pruning: %w", err)

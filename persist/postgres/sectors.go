@@ -37,7 +37,7 @@ func (s *Store) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) 
 		sqlRoots[i] = sqlHash256(root)
 	}
 
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		var hostID int64
 		err := tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = $1", sqlPublicKey(hostKey)).Scan(&hostID)
 		if err != nil {
@@ -78,7 +78,7 @@ func (s *Store) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) 
 // RecordIntegrityCheck records the result of integrity checks for the given
 // sectors stored on the given host.
 func (s *Store) RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		sqlRoots := make([]sqlHash256, len(roots))
 		for i, root := range roots {
 			sqlRoots[i] = sqlHash256(root)
@@ -107,7 +107,7 @@ func (s *Store) RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey 
 // integrity check.
 func (s *Store) SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
 	var sectors []types.Hash256
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 			WITH hid AS (
 				SELECT id FROM hosts WHERE public_key = $1
@@ -141,7 +141,7 @@ func (s *Store) SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]
 func (s *Store) MarkFailingSectorsLost(hostKey types.PublicKey, maxChecks uint) error {
 	const batchSize = 1000
 	for {
-		updated, err := s.markFailingSectorsLostBatch(ctx, hostKey, maxChecks, batchSize)
+		updated, err := s.markFailingSectorsLostBatch(s.ctx(), hostKey, maxChecks, batchSize)
 		if err != nil {
 			return err
 		} else if updated < batchSize {
@@ -154,7 +154,7 @@ func (s *Store) MarkFailingSectorsLost(hostKey types.PublicKey, maxChecks uint) 
 // markFailingSectorsLostBatch marks a batch of failing sectors as lost. We have
 // to batch it because we first need to select all sectors to update in order to
 // correctly updated the pinned sectors statistics.
-func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, batchSize uint) (int64, error) {
+func (s *Store) markFailingSectorsLostBatch(ctx context.Context, hostKey types.PublicKey, maxChecks, batchSize uint) (int64, error) {
 	var totalLost int64
 	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
 		var hostID int64
@@ -203,7 +203,7 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 // with the provided account.
 func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
 	var digests []slabs.SlabID
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		var accountID int64
 		var pinnedData, maxPinnedData uint64
 		err := tx.QueryRow(ctx, "UPDATE accounts SET last_used = NOW() WHERE public_key = $1 RETURNING id, pinned_data, max_pinned_data", sqlPublicKey(account)).Scan(&accountID, &pinnedData, &maxPinnedData)
@@ -464,7 +464,7 @@ RETURNING a.slab_id;`, accountID, args)
 // this slab was only owned by the given account, it will also be deleted.  The
 // sectors of the slab will also be removed in that case.
 func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		id, err := accountID(ctx, tx, account)
 		if err != nil {
 			return fmt.Errorf("failed to get account ID: %w", err)
@@ -496,7 +496,7 @@ func (s *Store) SlabIDs(account proto.Account, offset, limit int) ([]slabs.SlabI
 	}
 
 	var ids []slabs.SlabID
-	if err := s.transaction(ctx, func(ctx context.Context, tx *txn) (err error) {
+	if err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) (err error) {
 		rows, err := tx.Query(ctx, `SELECT digest
 			FROM slabs s
 			INNER JOIN account_slabs ac ON s.id = ac.slab_id
@@ -531,7 +531,7 @@ func (s *Store) Slabs(account proto.Account, slabIDs []slabs.SlabID) ([]slabs.Sl
 	}
 
 	results := make([]slabs.Slab, len(slabIDs))
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		dbIDMap := make(map[int64]int)
 		var dbIDs []int64
 		slabBatch := &pgx.Batch{}
@@ -611,7 +611,7 @@ func (s *Store) PinSectors(contractID types.FileContractID, roots []types.Hash25
 		sqlRoots[i] = sqlHash256(root)
 	}
 
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		var hostID, contractMapID int64
 		err := tx.QueryRow(ctx, `
 			SELECT c.host_id, csm.id
@@ -658,7 +658,7 @@ func (s *Store) PinSectors(contractID types.FileContractID, roots []types.Hash25
 // MarkSectorsUnpinnable sets the host ID for sectors that haven't been pinned
 // by the threshold time to NULL.
 func (s *Store) MarkSectorsUnpinnable(threshold time.Time) error {
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		res, err := tx.Exec(ctx, `
             UPDATE sectors
             SET host_id = NULL
@@ -683,7 +683,7 @@ func (s *Store) MarkSectorsUnpinnable(threshold time.Time) error {
 // not pinned to a contract yet.
 func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
 	roots := make([]types.Hash256, 0, limit)
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 			WITH hid AS (
 				SELECT id FROM hosts WHERE public_key = $1
@@ -727,7 +727,7 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 // health but simply return the slabs that have been waiting the longest for a
 // repair first.
 func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) {
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err = s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		const query = `SELECT s.id, s.digest
 			FROM slabs s
 			WHERE s.next_repair_attempt < NOW()
@@ -786,7 +786,7 @@ func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) 
 // 'PinSectors' is used. If the host is not found, e.g. due to being deleted in
 // the meantime, this operation is a no-op.
 func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migrated bool, err error) {
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err = s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		var hostID sql.NullInt64
 		var contractMapID sql.NullInt64
 		err := tx.QueryRow(ctx, `

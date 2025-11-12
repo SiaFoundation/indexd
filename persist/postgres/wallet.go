@@ -93,7 +93,7 @@ func (s *Store) RemoveBroadcastedSet(set wallet.BroadcastedSet) error {
 
 // Tip returns the last scanned index.
 func (s *Store) Tip() (ci types.ChainIndex, err error) {
-	return s.LastScannedIndex(context.Background())
+	return s.LastScannedIndex()
 }
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs

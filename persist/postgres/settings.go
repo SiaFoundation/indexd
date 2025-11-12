@@ -11,7 +11,7 @@ import (
 
 // PinnedSettings returns the pinned settings.
 func (s *Store) PinnedSettings() (ps pins.PinnedSettings, err error) {
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err = s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		query := `SELECT pins_currency, pins_min_collateral, pins_max_storage_price, pins_max_ingress_price, pins_max_egress_price FROM global_settings`
 		return tx.QueryRow(ctx, query).Scan(
 			&ps.Currency,
@@ -26,7 +26,7 @@ func (s *Store) PinnedSettings() (ps pins.PinnedSettings, err error) {
 
 // UpdatePinnedSettings updates the pinned settings.
 func (s *Store) UpdatePinnedSettings(ps pins.PinnedSettings) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		query := `UPDATE global_settings SET pins_currency = $1, pins_min_collateral = $2, pins_max_storage_price = $3, pins_max_ingress_price = $4, pins_max_egress_price = $5`
 		_, err := tx.Exec(ctx, query, ps.Currency, ps.MinCollateral, ps.MaxStoragePrice, ps.MaxIngressPrice, ps.MaxEgressPrice)
 		return err
@@ -35,12 +35,12 @@ func (s *Store) UpdatePinnedSettings(ps pins.PinnedSettings) error {
 
 // UpdateMaintenanceSettings updates the maintenance settings.
 func (s *Store) UpdateMaintenanceSettings(settings contracts.MaintenanceSettings) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error { return setMaintenanceSettings(ctx, tx, settings) })
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error { return setMaintenanceSettings(ctx, tx, settings) })
 }
 
 // UsabilitySettings returns the usability settings used in the host's usability checks.
 func (s *Store) UsabilitySettings() (us hosts.UsabilitySettings, err error) {
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err = s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		query := `SELECT hosts_max_egress_price, hosts_max_ingress_price, hosts_max_storage_price, hosts_min_collateral, hosts_min_protocol_version FROM global_settings`
 		return tx.QueryRow(ctx, query).Scan(
 			(*sqlCurrency)(&us.MaxEgressPrice),
@@ -55,19 +55,19 @@ func (s *Store) UsabilitySettings() (us hosts.UsabilitySettings, err error) {
 
 // UpdateUsabilitySettings updates the usability settings.
 func (s *Store) UpdateUsabilitySettings(us hosts.UsabilitySettings) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error { return setUsabilitySettings(ctx, tx, us) })
+	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error { return setUsabilitySettings(ctx, tx, us) })
 }
 
 // LastScannedIndex returns the last scanned index.
 func (s *Store) LastScannedIndex() (ci types.ChainIndex, err error) {
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err = s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
 		return tx.QueryRow(ctx, `SELECT scanned_height, scanned_block_id FROM global_settings`).Scan(&ci.Height, (*sqlHash256)(&ci.ID))
 	})
 	return
 }
 
 // UpdateLastScannedIndex updates the last scanned index.
-func (u *updateTx) UpdateLastScannedIndex(ci types.ChainIndex) error {
+func (u *updateTx) UpdateLastScannedIndex(ctx context.Context, ci types.ChainIndex) error {
 	_, err := u.tx.Exec(ctx, `UPDATE global_settings SET scanned_height = $1, scanned_block_id = $2`, ci.Height, sqlHash256(ci.ID))
 	return err
 }
