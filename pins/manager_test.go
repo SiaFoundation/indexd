@@ -152,7 +152,7 @@ func TestUpdatePricesThreshold(t *testing.T) {
 	s := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
 	h := &mockHostManager{us: testUsabilitySettings}
 
-	if err := s.UpdatePinnedSettings(context.Background(), ps); err != nil {
+	if err := s.UpdatePinnedSettings(ps); err != nil {
 		t.Fatal(err)
 	}
 

@@ -42,7 +42,7 @@ func TestMigrateSlab(t *testing.T) {
 
 	// prepare account
 	a1 := types.PublicKey{1}
-	db.AddAccount(context.Background(), a1, accounts.AccountMeta{})
+	db.AddAccount(a1, accounts.AccountMeta{})
 
 	// prepare 4 hosts
 	h1 := newTestHost(types.PublicKey{1})
@@ -87,7 +87,7 @@ func TestMigrateSlab(t *testing.T) {
 	dialer.clients[h3.PublicKey].sectors[r3] = ([proto.SectorSize]byte)(shards[2])
 
 	// pin a slab
-	slabIDs, err := db.PinSlabs(context.Background(), proto.Account(a1), time.Time{}, SlabPinParams{
+	slabIDs, err := db.PinSlabs(proto.Account(a1), time.Time{}, SlabPinParams{
 		EncryptionKey: encryptionKey,
 		MinShards:     2,
 		Sectors: []PinnedSector{
@@ -112,7 +112,7 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's unhealthy
-	unhealthSlabIDs, err := db.UnhealthySlabs(context.Background(), 1)
+	unhealthSlabIDs, err := db.UnhealthySlabs(1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthSlabIDs) != 1 {
@@ -152,7 +152,7 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's still unhealthy
-	unhealthSlabIDs, err = db.UnhealthySlabs(context.Background(), 1)
+	unhealthSlabIDs, err = db.UnhealthySlabs(1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthSlabIDs) != 1 {
@@ -185,7 +185,7 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert it's now healthy
-	unhealthSlabIDs, err = db.UnhealthySlabs(context.Background(), 1)
+	unhealthSlabIDs, err = db.UnhealthySlabs(1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(unhealthSlabIDs) != 0 {
