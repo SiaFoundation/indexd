@@ -890,6 +890,18 @@ components:
           type: integer
           format: int64
           description: Number of sectors currently not pinned to any contract by this instance
+        lost:
+          type: integer
+          format: int64
+          description: Number of sectors that have been marked as lost.
+        checked:
+          type: integer
+          format: int64
+          description: Total sectors that have been integrity checked.
+        checkFailed:
+          type: integer
+          format: int64
+          description: Number of sectors that have had failed integrity checks.
 
     ConnectKey:
       type: object

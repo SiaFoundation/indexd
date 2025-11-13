@@ -75,7 +75,9 @@ loop:
 				if len(candidates) == 0 {
 					uploadErr = errNotEnoughHosts
 					uploadMu.Unlock()
-					cancel()
+					// NOTE: we don't cancel ongoing uploads here because they
+					// are being migrated to good hosts and will improve the
+					// health of the slab
 					return
 				}
 				host := candidates[0]

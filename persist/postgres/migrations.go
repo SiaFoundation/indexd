@@ -488,12 +488,20 @@ CREATE INDEX accounts_connect_key_id_idx ON accounts(connect_key_id);
 `)
 		return err
 	},
+	// add integrity check stats to stats
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE stats ADD COLUMN num_sectors_checked BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_checked >= 0);
+ALTER TABLE stats ADD COLUMN num_sectors_lost BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_lost >= 0);
+ALTER TABLE stats ADD COLUMN num_sectors_check_failed BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_check_failed >= 0)
+`)
+		return err
+	},
 	// add pinned_data to app_connect_keys
 	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
 		_, err := tx.Exec(ctx, `
 ALTER TABLE app_connect_keys ADD COLUMN pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0);
-UPDATE app_connect_keys SET pinned_data = (SELECT COALESCE(SUM(accounts.pinned_data), 0) FROM accounts WHERE accounts.connect_key_id = app_connect_keys.id);
-`)
+UPDATE app_connect_keys SET pinned_data = (SELECT COALESCE(SUM(accounts.pinned_data), 0) FROM accounts WHERE accounts.connect_key_id = app_connect_keys.id);`)
 		return err
 	},
 }

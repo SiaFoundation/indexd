@@ -225,6 +225,104 @@ func TestSectorStats(t *testing.T) {
 	}
 }
 
+func TestIntegrityCheckStats(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	// add host
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// pin a slab to add 2 sectors
+	pinTime := time.Now().Round(time.Microsecond)
+	root1 := types.Hash256{1}
+	root2 := types.Hash256{2}
+	_, err := store.PinSlabs(context.Background(), account, pinTime, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{
+				Root:    root1,
+				HostKey: hk,
+			},
+			{
+				Root:    root2,
+				HostKey: hk,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assertSectorStats := func(expectedLost, expectedChecked, expectedCheckFailed int64) {
+		t.Helper()
+		var lost, checked, checkFailed int64
+		err := store.pool.QueryRow(context.Background(), `
+			SELECT num_sectors_lost, num_sectors_checked, num_sectors_check_failed
+			FROM stats
+			WHERE id = 0`,
+		).Scan(&lost, &checked, &checkFailed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if lost != expectedLost || checked != expectedChecked || checkFailed != expectedCheckFailed {
+			t.Fatalf("unexpected sector stats: lost=%d (want %d) checked=%d (want %d) checkFailed=%d (want %d)", lost, expectedLost, checked, expectedChecked, checkFailed, expectedCheckFailed)
+		}
+	}
+
+	record := func(success bool, nextCheck time.Time, roots []types.Hash256) {
+		t.Helper()
+		err := store.RecordIntegrityCheck(context.Background(), success, nextCheck, hk, roots)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// check initial state - 0 failures
+	assertSectorStats(0, 0, 0)
+
+	// record success for both
+	now := time.Now().Round(time.Microsecond)
+	record(true, now, []types.Hash256{root1, root2})
+	assertSectorStats(0, 2, 0)
+
+	// record failure for both
+	now = now.Add(time.Minute)
+	record(false, now, []types.Hash256{root1, root2})
+	assertSectorStats(0, 4, 2)
+
+	// one more failure for root1 and success for root2
+	now = now.Add(time.Minute)
+	record(false, now, []types.Hash256{root1})
+	record(true, now, []types.Hash256{root2})
+	assertSectorStats(0, 6, 3)
+
+	// mark sectors lost with a threshold of 3 which is too high to mark
+	// root1 as lost
+	if err := store.MarkFailingSectorsLost(context.Background(), hk, 3); err != nil {
+		t.Fatal(err)
+	}
+	assertSectorStats(0, 6, 3)
+
+	// one more time with threshold of 2
+	if err := store.MarkFailingSectorsLost(context.Background(), hk, 2); err != nil {
+		t.Fatal(err)
+	}
+
+	// host should have lost sector
+	assertSectorStats(1, 6, 3)
+
+	// marking both lost should result in lost=2 because root1 is already lost
+	if err := store.MarkSectorsLost(context.Background(), hk, []types.Hash256{root1, root2}); err != nil {
+		t.Fatal(err)
+	}
+	assertSectorStats(2, 6, 3)
+}
+
 func TestAccountStatsRegistered(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
