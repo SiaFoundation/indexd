@@ -51,6 +51,8 @@ type (
 	// Indexer is a test utility combining an indexer, an http client for the
 	// indexer and useful helpers for testing.
 	Indexer struct {
+		appApiAddr string
+
 		Admin *admin.Client
 		App   func(types.PrivateKey) *app.Client
 
@@ -112,6 +114,11 @@ func WithSlabOptions(opts ...slabs.Option) IndexerOpt {
 	return func(cfg *indexerCfg) {
 		cfg.slabOpts = append(cfg.slabOpts, opts...)
 	}
+}
+
+// AppAPIAddr returns the application API address of the indexer.
+func (i *Indexer) AppAPIAddr() string {
+	return i.appApiAddr
 }
 
 // Accounts returns the account manager for the indexer.
@@ -276,6 +283,8 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	})
 
 	return &Indexer{
+		appApiAddr: appAPIAddr,
+
 		Admin: admin.NewClient(adminAPIAddr, password),
 		App: func(appKey types.PrivateKey) *app.Client {
 			return app.NewClient(appAPIAddr, appKey)
@@ -291,6 +300,16 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		syncer:    syncer,
 		wallet:    wm,
 	}
+}
+
+// AddTestAccount adds a test account to the indexer and funds it.
+func (idx *Indexer) AddTestAccount(t *testing.T, pk types.PublicKey) {
+	t.Helper()
+	idx.store.AddTestAccount(t, pk)
+	if err := idx.contracts.TriggerAccountFunding(true); err != nil {
+		t.Fatalf("failed to trigger account funding: %v", err)
+	}
+	time.Sleep(50 * time.Millisecond) // wait for funding to complete
 }
 
 // HostClient returns a host client for the given host public key.

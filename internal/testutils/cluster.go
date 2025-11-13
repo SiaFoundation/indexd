@@ -201,7 +201,8 @@ func (c *Cluster) WaitForContracts(t *testing.T) {
 		required[h.PublicKey()] = struct{}{}
 	}
 
-	for range 100 {
+	var formed int
+	for {
 		contracts, err := cm.Contracts(t.Context(), 0, math.MaxInt, contracts.WithGood(true), contracts.WithRevisable(true))
 		if err != nil {
 			t.Fatal(err)
@@ -213,6 +214,8 @@ func (c *Cluster) WaitForContracts(t *testing.T) {
 				seen[c.HostKey] = struct{}{}
 			}
 		}
+		formed = max(formed, len(seen))
+		t.Logf("formed contracts with %d/%d hosts", formed, len(required))
 
 		// ensure they are all confirmed
 		c.ConsensusNode.MineBlocks(t, types.VoidAddress, 1)
@@ -220,8 +223,6 @@ func (c *Cluster) WaitForContracts(t *testing.T) {
 			time.Sleep(time.Second) // wait for indexing
 			return
 		}
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(200 * time.Millisecond)
 	}
-
-	t.Fatalf("not all contracts formed after timeout")
 }

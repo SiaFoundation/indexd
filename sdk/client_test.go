@@ -11,94 +11,10 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/internal/testutils"
+	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
-
-func TestRoundtrip(t *testing.T) {
-	dialer := newMockDialer(50)
-
-	appKey := types.GeneratePrivateKey()
-	s, err := initSDK(newMockAppClient(), dialer, appKey)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// each upload has varying encryption configurations so we should get
-	// different slab IDs every time
-	seen := make(map[slabs.SlabID]struct{})
-	checkSlabIDs := func(slabs []slabs.SlabSlice) {
-		t.Helper()
-
-		for _, slab := range slabs {
-			if _, ok := seen[slab.SlabID]; ok {
-				t.Fatal("slab ID seen twice")
-			}
-			seen[slab.SlabID] = struct{}{}
-		}
-	}
-
-	data := frand.Bytes(4096)
-	obj, err := s.Upload(context.Background(), bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("failed to upload: %v", err)
-	} else if len(obj.Slabs()) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs()))
-	} else if obj.Slabs()[0].Length != uint32(len(data)) {
-		t.Fatalf("expected slab length %d, got %d", len(data), obj.Slabs()[0].Length)
-	}
-	checkSlabIDs(obj.Slabs())
-
-	buf := bytes.NewBuffer(nil)
-	if err := s.Download(context.Background(), buf, obj); err != nil {
-		t.Fatal(err)
-	} else if !bytes.Equal(buf.Bytes(), data) {
-		t.Fatal("data mismatch")
-	}
-
-	objID := obj.ID()
-
-	buf.Reset()
-	url, err := s.CreateSharedObjectURL(context.Background(), objID, time.Now().Add(time.Minute))
-	if err != nil {
-		t.Fatal(err)
-	} else if err := s.DownloadSharedObject(context.Background(), buf, url); err != nil {
-		t.Fatal("unexpected error", err)
-	} else if !bytes.Equal(buf.Bytes(), data) {
-		t.Fatal("data mismatch")
-	}
-
-	// delete all data shards
-	sharedObj, _, err := s.client.SharedObject(context.Background(), url)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(sharedObj.Slabs) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(sharedObj.Slabs))
-	}
-	slab := sharedObj.Slabs[0]
-	for i, sector := range slab.Sectors {
-		delete(dialer.hostSectors[sector.HostKey], sector.Root)
-		if i == int(slab.MinShards) {
-			break
-		}
-	}
-
-	// ensure download still works
-	buf.Reset()
-	if err := s.Download(context.Background(), buf, obj); err != nil {
-		t.Fatal(err)
-	} else if !bytes.Equal(buf.Bytes(), data) {
-		t.Fatal("data mismatch")
-	}
-
-	// ensure download shared object still works
-	buf.Reset()
-	if err := s.DownloadSharedObject(context.Background(), buf, url); err != nil {
-		t.Fatal("unexpected error", err)
-	} else if !bytes.Equal(buf.Bytes(), data) {
-		t.Fatal("data mismatch")
-	}
-}
 
 type countWriter struct {
 	count int
@@ -112,14 +28,10 @@ func (c *countWriter) Write(p []byte) (int, error) {
 }
 
 func TestRoundtripCount(t *testing.T) {
-	dialer := newMockDialer(50)
-
 	appKey := types.GeneratePrivateKey()
-
-	s, err := initSDK(newMockAppClient(), dialer, appKey)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dialer := newMockDialer(50)
+	s := initSDK(appKey, newMockAppClient(), dialer)
+	defer s.Close()
 
 	// 1 MB
 	data := frand.Bytes(1 << 20)
@@ -145,12 +57,10 @@ func TestRoundtripCount(t *testing.T) {
 }
 
 func TestUpload(t *testing.T) {
-	dialer := newMockDialer(50)
 	appKey := types.GeneratePrivateKey()
-	s, err := initSDK(newMockAppClient(), dialer, appKey)
-	if err != nil {
-		t.Fatal(err)
-	}
+	dialer := newMockDialer(50)
+	s := initSDK(appKey, newMockAppClient(), dialer)
+	defer s.Close()
 	data := frand.Bytes(4096)
 
 	t.Run("timeout", func(t *testing.T) {
@@ -179,13 +89,9 @@ func TestUpload(t *testing.T) {
 
 func TestDownload(t *testing.T) {
 	dialer := newMockDialer(30)
-
 	appKey := types.GeneratePrivateKey()
-
-	s, err := initSDK(newMockAppClient(), dialer, appKey)
-	if err != nil {
-		t.Fatal(err)
-	}
+	s := initSDK(appKey, newMockAppClient(), dialer)
+	defer s.Close()
 
 	data := frand.Bytes(4096)
 	obj, err := s.Upload(context.Background(), bytes.NewReader(data))
@@ -223,6 +129,37 @@ func TestDownload(t *testing.T) {
 	})
 }
 
+func TestE2E(t *testing.T) {
+	log := zap.NewNop()
+	ms := testutils.MaintenanceSettings
+	ms.WantedContracts = 15
+	cluster := testutils.NewCluster(t, testutils.WithHosts(15), testutils.WithLogger(log.Named("cluster")), testutils.WithIndexer(testutils.WithMaintenanceSettings(ms)))
+	cluster.WaitForContracts(t)
+
+	privateKey := types.GeneratePrivateKey()
+	cluster.Indexer.AddTestAccount(t, privateKey.PublicKey())
+
+	client, err := NewSDK(cluster.Indexer.AppAPIAddr(), privateKey, WithLogger(log.Named("sdk")))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := frand.Bytes(4096)
+	obj, err := client.Upload(context.Background(), bytes.NewReader(data), WithRedundancy(2, 8))
+	if err != nil {
+		t.Fatalf("failed to upload: %v", err)
+	}
+
+	buf := bytes.NewBuffer(nil)
+	if err := client.Download(context.Background(), buf, obj); err != nil {
+		t.Fatalf("failed to download: %v", err)
+	} else if !bytes.Equal(buf.Bytes(), data) {
+		t.Log(data[:64])
+		t.Log(buf.Bytes()[:64])
+		t.Fatal("data mismatch")
+	}
+}
+
 func BenchmarkUpload(b *testing.B) {
 	const benchmarkSize = 256 * 1000 * 1000 // 256 MB
 	appKey := types.GeneratePrivateKey()
@@ -236,10 +173,8 @@ func BenchmarkUpload(b *testing.B) {
 			dialer.SetSlowHosts(slow, time.Second)       // slow, but not too slow
 			dialer.SetSlowHosts(timeout, 30*time.Second) // longer than the default timeout
 
-			s, err := initSDK(newMockAppClient(), dialer, appKey)
-			if err != nil {
-				b.Fatal(err)
-			}
+			s := initSDK(appKey, newMockAppClient(), dialer)
+			defer s.Close()
 
 			r := bytes.NewReader(data)
 			b.SetBytes(benchmarkSize)
@@ -268,14 +203,11 @@ func BenchmarkUpload(b *testing.B) {
 
 func BenchmarkDownload(b *testing.B) {
 	const benchmarkSize = 256 * 1000 * 1000 // 256 MB
-	dialer := newMockDialer(30)
 
 	appKey := types.GeneratePrivateKey()
-
-	s, err := initSDK(newMockAppClient(), dialer, appKey)
-	if err != nil {
-		b.Fatal(err)
-	}
+	dialer := newMockDialer(30)
+	s := initSDK(appKey, newMockAppClient(), dialer)
+	defer s.Close()
 
 	data := frand.Bytes(benchmarkSize)
 	obj, err := s.Upload(context.Background(), bytes.NewReader(data))

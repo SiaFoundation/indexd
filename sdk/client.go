@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/app"
+	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
@@ -24,9 +25,13 @@ import (
 )
 
 type (
-	downloadOption struct {
-		hostTimeout time.Duration
-		maxInflight int
+	hostClient interface {
+		WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (types.Hash256, error)
+		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, offset, length uint64) ([]byte, error)
+
+		Candidates() (*client.Candidates, error)
+		Prioritize(hosts []types.PublicKey) []types.PublicKey
+		Close() error
 	}
 
 	// An appClient is an interface for the application API of the indexer.
@@ -45,16 +50,9 @@ type (
 		UnpinSlab(context.Context, slabs.SlabID) error
 	}
 
-	// A hostDialer is an interface for writing and reading sectors to/from hosts.
-	hostDialer interface {
-		// Hosts returns the public keys of all hosts that are available for
-		// upload or download.
-		Hosts() []types.PublicKey
-
-		// WriteSector writes a sector to the host identified by the public key.
-		WriteSector(context.Context, types.PublicKey, *[proto4.SectorSize]byte) (types.Hash256, error)
-		// ReadSector reads a sector from the host identified by the public key.
-		ReadSector(context.Context, types.PublicKey, types.Hash256) (*[proto4.SectorSize]byte, error)
+	downloadOption struct {
+		hostTimeout time.Duration
+		maxInflight int
 	}
 
 	// An UploadOption configures the upload behavior
@@ -65,10 +63,10 @@ type (
 
 	// An SDK is a client for the indexd service.
 	SDK struct {
+		log    *zap.Logger
 		appKey types.PrivateKey
 		client appClient
-
-		dialer hostDialer
+		hosts  hostClient
 	}
 )
 
@@ -102,11 +100,11 @@ top:
 		go func(ctx context.Context, sector slabs.PinnedSector, i int) {
 			defer func() { <-sema }() // release semaphore
 			defer wg.Done()
-			data, err := downloadShard(ctx, sector.Root, sector.HostKey, s.dialer, timeout)
+			data, err := downloadShard(ctx, s.hosts, s.appKey, sector.HostKey, sector.Root, timeout)
 			if err != nil {
 				return
 			}
-			sectors[i] = data[:]
+			sectors[i] = data
 			if v := successful.Add(1); v >= uint32(slab.MinShards) {
 				// got enough pieces to recover
 				cancel()
@@ -291,6 +289,11 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 	})
 }
 
+// Close closes the SDK and releases all resources.
+func (s *SDK) Close() error {
+	return s.hosts.Close()
+}
+
 type slabIterFn func() (slabs.SharedSlab, error)
 
 func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, next slabIterFn) error {
@@ -403,30 +406,17 @@ func stripedJoin(dst io.Writer, dataShards [][]byte, writeLen int) error {
 }
 
 // downloadShard reads a sector from a host
-func downloadShard(ctx context.Context, root types.Hash256, hostKey types.PublicKey, dialer hostDialer, timeout time.Duration) (*[proto4.SectorSize]byte, error) {
+func downloadShard(ctx context.Context, client hostClient, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, timeout time.Duration) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return dialer.ReadSector(ctx, hostKey, root)
+	return client.ReadSector(ctx, accountKey, hostKey, root, 0, proto4.SectorSize)
 }
 
 // uploadShard uploads a shard to a host
-func uploadShard(ctx context.Context, sector *[proto4.SectorSize]byte, hostKey types.PublicKey, dialer hostDialer, timeout time.Duration) (types.Hash256, error) {
+func uploadShard(ctx context.Context, client hostClient, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte, timeout time.Duration) (types.Hash256, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-
-	rootCh := make(chan types.Hash256, 1)
-	go func() {
-		root := proto4.SectorRoot(sector)
-		rootCh <- root
-	}()
-
-	uploaded, err := dialer.WriteSector(ctx, hostKey, sector)
-	if err != nil {
-		return types.Hash256{}, fmt.Errorf("failed to upload shard to host %s: %w", hostKey.String(), err)
-	} else if root := <-rootCh; uploaded != root {
-		return types.Hash256{}, fmt.Errorf("uploaded shard root %s does not match expected root %s", uploaded.String(), root.String())
-	}
-	return uploaded, nil
+	return client.WriteSector(ctx, accountKey, hostKey, data)
 }
 
 // readAtMost reads from the reader until the buffer is filled,
@@ -495,51 +485,37 @@ func WithDownloadInflight(maxInflight int) DownloadOption {
 	}
 }
 
-func initSDK(client appClient, dialer hostDialer, appKey types.PrivateKey) (*SDK, error) {
-	if client == nil {
-		return nil, errors.New("app client is required")
-	} else if dialer == nil {
-		return nil, errors.New("host dialer is required")
-	}
-	return &SDK{
-		appKey: appKey,
-		client: client,
-		dialer: dialer,
-	}, nil
-}
-
-type (
-	option struct {
-		logger *zap.Logger
-	}
-
-	// Option is a functional option for configuring the SDK.
-	Option func(*option)
-)
+// An Option configures the SDK.
+type Option func(*SDK)
 
 // WithLogger sets the logger for the SDK. The default behavior is to not log
 // anything.
-func WithLogger(logger *zap.Logger) Option {
-	return func(o *option) {
-		o.logger = logger
+func WithLogger(log *zap.Logger) Option {
+	return func(s *SDK) {
+		s.log = log
 	}
+}
+
+func initSDK(appKey types.PrivateKey, app appClient, hosts hostClient, opts ...Option) *SDK {
+	sdk := &SDK{
+		appKey: appKey,
+
+		log:    zap.NewNop(), // no logging by default
+		hosts:  hosts,
+		client: app,
+	}
+	for _, opt := range opts {
+		opt(sdk)
+	}
+	return sdk
 }
 
 // NewSDK creates a new indexd client with the given app key and base URL.
 func NewSDK(baseURL string, appKey types.PrivateKey, opts ...Option) (*SDK, error) {
-	options := option{
-		logger: zap.NewNop(), // no logging by default
-	}
-	for _, opt := range opts {
-		opt(&options)
-	}
-
-	options.logger = options.logger.Named("sdk") // decorate logger
-
-	c := app.NewClient(baseURL, appKey)
-	dialer, err := newDialer(c, appKey, options.logger)
+	app := app.NewClient(baseURL, appKey)
+	hostStore, err := newCachedHostStore(app)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create host dialer: %w", err)
+		return nil, fmt.Errorf("failed to create host store: %w", err)
 	}
-	return initSDK(c, dialer, appKey)
+	return initSDK(appKey, app, client.New(client.NewProvider(hostStore)), opts...), nil
 }

@@ -5,12 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
+	"log"
 	"time"
 
 	"github.com/klauspost/reedsolomon"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/client/v2"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
@@ -23,11 +24,6 @@ const (
 )
 
 type (
-	candidates struct {
-		mu    sync.Mutex
-		hosts []types.PublicKey
-	}
-
 	shard struct {
 		host types.PublicKey
 		root types.Hash256
@@ -37,7 +33,7 @@ type (
 	}
 
 	shardUpload struct {
-		hosts  *candidates
+		hosts  *client.Candidates
 		shards chan shard
 
 		encryptionKey [32]byte
@@ -61,24 +57,12 @@ type (
 	}
 )
 
-func (c *candidates) next() types.PublicKey {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(c.hosts) == 0 {
-		return types.PublicKey{}
-	}
-
-	h := c.hosts[0]
-	c.hosts = c.hosts[1:]
-	return h
-}
-
 func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Reader, enc reedsolomon.Encoder, dataShards, parityShards, maxInflight int, hostTimeout time.Duration) {
 	shardsCh := make(chan shardUpload)
 	defer close(shardsCh)
 
 	// run 'maxInflight' upload workers that pull shards from the queue
-	go runUploadWorkers(ctx, s.dialer, shardsCh, maxInflight, hostTimeout)
+	go runUploadWorkers(ctx, s.hosts, s.appKey, shardsCh, maxInflight, hostTimeout)
 
 	// convenience variables
 	slabSize := dataShards * proto4.SectorSize
@@ -97,9 +81,12 @@ func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Rea
 		// prepare upload candidates, every shard upload holds a reference
 		// to the upload candidates to ensure every shard is uploaded to a
 		// unique host
-		candidates := &candidates{hosts: s.dialer.Hosts()}
-		if len(candidates.hosts) < totalShards {
-			sendErr(fmt.Errorf("not enough hosts available to upload slab %d: %d < %d", i, len(candidates.hosts), totalShards))
+		candidates, err := s.hosts.Candidates()
+		if err != nil {
+			sendErr(fmt.Errorf("failed to get upload candidates for slab %d: %w", i, err))
+			return
+		} else if candidates.Available() < totalShards {
+			sendErr(fmt.Errorf("not enough hosts available to upload slab %d: %d < %d", i, candidates.Available(), totalShards))
 			return
 		}
 
@@ -170,7 +157,7 @@ func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Rea
 	}
 }
 
-func runUploadWorkers(ctx context.Context, dialer hostDialer, queue chan shardUpload, maxInflight int, hostTimeout time.Duration) {
+func runUploadWorkers(ctx context.Context, client hostClient, accountKey types.PrivateKey, queue chan shardUpload, maxInflight int, hostTimeout time.Duration) {
 	sema := make(chan struct{}, maxInflight)
 	for job := range queue {
 		sema <- struct{}{}
@@ -184,15 +171,14 @@ func runUploadWorkers(ctx context.Context, dialer hostDialer, queue chan shardUp
 			c.XORKeyStream(job.sector, job.sector)
 
 			// try hosts until one works
-			for ctx.Err() == nil {
-				host := job.hosts.next()
-				if host == (types.PublicKey{}) {
-					job.shards <- shard{err: ErrNoMoreHosts}
+			for host := range job.hosts.Iter() {
+				if ctx.Err() != nil {
 					return
 				}
 
-				root, err := uploadShard(ctx, (*[proto4.SectorSize]byte)(job.sector), host, dialer, hostTimeout)
+				root, err := uploadShard(ctx, client, accountKey, host, job.sector, hostTimeout)
 				if err == nil {
+					log.Println("uploaded shard", root, "to host", host)
 					job.shards <- shard{
 						index: job.index,
 						host:  host,

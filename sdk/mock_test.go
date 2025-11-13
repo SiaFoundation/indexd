@@ -9,9 +9,10 @@ import (
 	"sync"
 	"time"
 
-	proto4 "go.sia.tech/core/rhp/v4"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 )
@@ -23,15 +24,30 @@ type mockHostDialer struct {
 	slowHosts map[types.PublicKey]time.Duration
 
 	sectorsMu   sync.Mutex
-	hostSectors map[types.PublicKey]map[types.Hash256][proto4.SectorSize]byte
+	hostSectors map[types.PublicKey]map[types.Hash256][]byte
 }
 
-// Hosts implements the [HostDialer] interface.
+// Close implements the [hostDialer] interface.
+func (m *mockHostDialer) Close() error {
+	return nil
+}
+
+// Candidates implements the [hostDialer] interface.
+func (m *mockHostDialer) Candidates() (*client.Candidates, error) {
+	return client.NewCandidates(slices.Collect(maps.Keys(m.hosts))), nil
+}
+
+// Prioritize implements the [hostDialer] interface.
+func (m *mockHostDialer) Prioritize(hosts []types.PublicKey) []types.PublicKey {
+	return hosts
+}
+
+// Hosts implements the [hostDialer] interface.
 func (m *mockHostDialer) Hosts() []types.PublicKey {
 	return slices.Collect(maps.Keys(m.hosts))
 }
 
-// ActiveHosts implements the [HostDialer] interface.
+// ActiveHosts implements the [hostDialer] interface.
 func (m *mockHostDialer) ActiveHosts() []types.PublicKey {
 	m.sectorsMu.Lock()
 	defer m.sectorsMu.Unlock()
@@ -53,8 +69,8 @@ func (m *mockHostDialer) delay(ctx context.Context, hostKey types.PublicKey) err
 	return ctx.Err()
 }
 
-// WriteSector implements the [HostDialer] interface.
-func (m *mockHostDialer) WriteSector(ctx context.Context, hostKey types.PublicKey, sector *[proto4.SectorSize]byte) (types.Hash256, error) {
+// WriteSector implements the [hostDialer] interface.
+func (m *mockHostDialer) WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (types.Hash256, error) {
 	if _, ok := m.hosts[hostKey]; !ok {
 		panic("host not found: " + hostKey.String()) // developer error
 	}
@@ -67,16 +83,19 @@ func (m *mockHostDialer) WriteSector(ctx context.Context, hostKey types.PublicKe
 	m.sectorsMu.Lock()
 	defer m.sectorsMu.Unlock()
 
-	root := proto4.SectorRoot(sector)
+	var sector [proto.SectorSize]byte
+	copy(sector[:], data)
+
+	root := proto.SectorRoot(&sector)
 	if _, ok := m.hostSectors[hostKey]; !ok {
-		m.hostSectors[hostKey] = make(map[types.Hash256][proto4.SectorSize]byte)
+		m.hostSectors[hostKey] = make(map[types.Hash256][]byte)
 	}
-	m.hostSectors[hostKey][root] = *sector
+	m.hostSectors[hostKey][root] = sector[:]
 	return root, nil
 }
 
-// ReadSector implements the [HostDialer] interface.
-func (m *mockHostDialer) ReadSector(ctx context.Context, hostKey types.PublicKey, sectorRoot types.Hash256) (*[proto4.SectorSize]byte, error) {
+// ReadSector implements the [hostDialer] interface.
+func (m *mockHostDialer) ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, sectorRoot types.Hash256, offset, length uint64) ([]byte, error) {
 	// simulate timeout
 	if err := m.delay(ctx, hostKey); err != nil {
 		return nil, err
@@ -85,16 +104,15 @@ func (m *mockHostDialer) ReadSector(ctx context.Context, hostKey types.PublicKey
 	m.sectorsMu.Lock()
 	defer m.sectorsMu.Unlock()
 
-	var sector [proto4.SectorSize]byte
 	sectors, ok := m.hostSectors[hostKey]
 	if !ok {
 		return nil, errors.New("host not found")
 	}
-	sector, ok = sectors[sectorRoot]
+	data, ok := sectors[sectorRoot]
 	if !ok {
 		return nil, errors.New("sector not found")
 	}
-	return &sector, nil
+	return slices.Clone(data[offset : offset+length]), nil
 }
 
 func (m *mockHostDialer) ResetSlowHosts() {
@@ -121,7 +139,7 @@ func newMockDialer(hosts int) *mockHostDialer {
 	m := &mockHostDialer{
 		hosts:       make(map[types.PublicKey]struct{}),
 		slowHosts:   make(map[types.PublicKey]time.Duration),
-		hostSectors: make(map[types.PublicKey]map[types.Hash256][proto4.SectorSize]byte),
+		hostSectors: make(map[types.PublicKey]map[types.Hash256][]byte),
 	}
 	for range hosts {
 		sk := types.GeneratePrivateKey()

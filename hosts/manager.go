@@ -97,6 +97,7 @@ type (
 		Host(hk types.PublicKey) (Host, error)
 		Hosts(offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error)
 		HostStats(offset, limit int) ([]HostStats, error)
+		UsableHosts(offset int, limit int, opts ...UsableHostQueryOpt) ([]HostInfo, error)
 
 		HostsForFunding() ([]types.PublicKey, error)
 		HostsForPruning() ([]types.PublicKey, error)

@@ -1,0 +1,325 @@
+// This is a temporary location for the new client implementation while
+// we transition from the old client to the new client. Once the new client
+// is integrated we will move it to the base client package.
+package client
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"sync"
+
+	"go.sia.tech/core/consensus"
+	proto "go.sia.tech/core/rhp/v4"
+	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/quic"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/coreutils/threadgroup"
+)
+
+type transport struct {
+	mu     sync.Mutex
+	dialCh chan struct{} // signals dial completion
+	tc     rhp.TransportClient
+}
+
+func (t *transport) close() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.tc != nil {
+		t.tc.Close()
+	}
+	t.tc = nil
+}
+
+func (t *transport) reset() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.tc != nil {
+		t.tc.Close()
+		t.tc = nil
+	}
+}
+
+func (t *transport) dial(ctx context.Context, hostKey types.PublicKey, addresses []chain.NetAddress) (rhp.TransportClient, error) {
+	t.mu.Lock()
+	if t.tc != nil {
+		// use cached transport
+		defer t.mu.Unlock()
+		return t.tc, nil
+	}
+
+	dialCh := t.dialCh
+	for dialCh != nil {
+		// wait for ongoing dial to complete
+		t.mu.Unlock()
+
+		select {
+		case <-dialCh:
+			// check if the transport was established
+			t.mu.Lock()
+			if t.tc != nil {
+				tc := t.tc
+				t.mu.Unlock()
+				return tc, nil
+			}
+			dialCh = t.dialCh
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
+	// start a new dial
+	dialCh = make(chan struct{})
+	defer func() {
+		t.mu.Lock()
+		t.dialCh = nil
+		close(dialCh)
+		t.mu.Unlock()
+	}()
+	t.dialCh = dialCh
+	t.tc = nil
+	t.mu.Unlock()
+
+	var wg sync.WaitGroup
+	sema := make(chan struct{}, 2)
+	var dialCtx, dialCancel = context.WithCancel(ctx)
+	defer dialCancel()
+
+top:
+	for _, addr := range addresses {
+		select {
+		case <-dialCtx.Done():
+			break top
+		case sema <- struct{}{}:
+		}
+		wg.Add(1)
+		go func(addr chain.NetAddress) {
+			defer func() {
+				<-sema
+				wg.Done()
+			}()
+			var transport rhp.TransportClient
+			var err error
+			switch addr.Protocol {
+			case siamux.Protocol:
+				transport, err = siamux.Dial(ctx, addr.Address, hostKey)
+			case quic.Protocol:
+				transport, err = quic.Dial(ctx, addr.Address, hostKey)
+			default:
+				return
+			}
+			if err != nil || dialCtx.Err() != nil {
+				// failed to connect or already connected elsewhere
+				return
+			}
+			dialCancel()
+			t.mu.Lock()
+			t.tc = transport
+			t.mu.Unlock()
+		}(addr)
+	}
+	// wait for all dial attempts to finish
+	wg.Wait()
+	// cache the transport
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.tc == nil {
+		return nil, fmt.Errorf("failed to connect to host %s", hostKey.String())
+	}
+	return t.tc, nil
+}
+
+// A Client is used to interact with Sia hosts over RHP4.
+type Client struct {
+	tg    *threadgroup.ThreadGroup
+	hosts *Provider
+
+	mu           sync.Mutex // protects the fields below
+	cachedPrices map[types.PublicKey]proto.HostPrices
+	transports   map[types.PublicKey]*transport
+}
+
+// hostTransport opens a transport connection to the specified host.
+func (c *Client) hostTransport(ctx context.Context, hostKey types.PublicKey, reset bool) (rhp.TransportClient, error) {
+	addresses, err := c.hosts.Addresses(hostKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get host addresses: %w", err)
+	} else if len(addresses) == 0 {
+		return nil, errors.New("no addresses found for host")
+	}
+
+	c.mu.Lock()
+	t := c.transports[hostKey]
+	if t == nil {
+		t = &transport{}
+		c.transports[hostKey] = t
+	} else if reset {
+		t.reset()
+	}
+	c.mu.Unlock()
+	return t.dial(ctx, hostKey, addresses)
+}
+
+func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx context.Context, transport rhp.TransportClient) error) error {
+	transport, err := c.hostTransport(ctx, hostKey, false)
+	if err != nil {
+		return fmt.Errorf("failed to get transport: %w", err)
+	}
+
+	if err := fn(ctx, transport); err == nil {
+		return nil
+	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || proto.ErrorCode(err) != proto.ErrorCodeTransport {
+		// do not reset on context errors or non-transport errors
+		return err
+	}
+
+	// reset the transport and try again.
+	transport, err = c.hostTransport(ctx, hostKey, true)
+	if err != nil {
+		return err
+	}
+	return fn(ctx, transport)
+}
+
+func (c *Client) prices(hostKey types.PublicKey, forceUpdate bool) (proto.HostPrices, error) {
+	if !forceUpdate {
+		c.mu.Lock()
+		prices := c.cachedPrices[hostKey]
+		if prices.Validate(hostKey) == nil {
+			c.mu.Unlock()
+			return prices, nil
+		}
+		c.mu.Unlock()
+	}
+
+	settings, err := c.HostSettings(context.Background(), hostKey)
+	if err != nil {
+		return proto.HostPrices{}, err
+	}
+	return settings.Prices, nil
+}
+
+// HostSettings fetches the host settings from the specified host.
+func (c *Client) HostSettings(ctx context.Context, hostKey types.PublicKey) (settings proto.HostSettings, err error) {
+	done, err := c.tg.Add()
+	if err != nil {
+		return proto.HostSettings{}, err
+	}
+	defer done()
+
+	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
+		settings, err = rhp.RPCSettings(ctx, transport)
+		return err
+	})
+	if err != nil {
+		return proto.HostSettings{}, err
+	}
+	if settings.Prices.Validate(hostKey) != nil {
+		c.mu.Lock()
+		c.cachedPrices[hostKey] = settings.Prices
+		c.mu.Unlock()
+	}
+	return
+}
+
+// WriteSector writes a sector to the specified host.
+//
+// It returns the verified Merkle root of the written sector.
+func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (root types.Hash256, err error) {
+	done, err := c.tg.Add()
+	if err != nil {
+		return types.Hash256{}, err
+	}
+	defer done()
+
+	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
+		prices, err := c.prices(hostKey, false)
+		if err != nil {
+			return fmt.Errorf("failed to get host prices: %w", err)
+		}
+		token := proto.NewAccountToken(accountKey, hostKey)
+		result, err := rhp.RPCWriteSector(ctx, transport, prices, token, bytes.NewReader(data), uint64(len(data)))
+		root = result.Root
+		return err
+	})
+	return
+}
+
+// ReadSector reads a sector from the specified host.
+func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, offset, length uint64) (data []byte, err error) {
+	done, err := c.tg.Add()
+	if err != nil {
+		return nil, err
+	}
+	defer done()
+
+	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
+		prices, err := c.prices(hostKey, false)
+		if err != nil {
+			return fmt.Errorf("failed to get host prices: %w", err)
+		}
+		token := proto.NewAccountToken(accountKey, hostKey)
+		buf := bytes.NewBuffer(make([]byte, 0, length))
+		if _, err = rhp.RPCReadSector(ctx, transport, prices, token, buf, root, offset, length); err != nil {
+			return err
+		}
+		data = buf.Bytes()
+		return nil
+	})
+	return
+}
+
+// AppendSectors appends sectors to the specified contract on the host.
+func (c *Client) AppendSectors(ctx context.Context, signer rhp.ContractSigner, cs consensus.State, hostPrices proto.HostPrices, revision rhp.ContractRevision, sectors []types.Hash256) (res rhp.RPCAppendSectorsResult, err error) {
+	done, err := c.tg.Add()
+	if err != nil {
+		return rhp.RPCAppendSectorsResult{}, err
+	}
+	defer done()
+
+	err = c.rpcFn(ctx, revision.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
+		res, err = rhp.RPCAppendSectors(ctx, transport, signer, cs, hostPrices, revision, sectors)
+		return err
+	})
+	return
+}
+
+// Candidates returns all host candidates ordered by their
+// historical performance.
+func (c *Client) Candidates() (*Candidates, error) {
+	return c.hosts.Candidates()
+}
+
+// Prioritize reorders the given hosts based on their historical performance.
+// The reordered slice is returned with unusable hosts removed.
+func (c *Client) Prioritize(hosts []types.PublicKey) []types.PublicKey {
+	return c.hosts.Prioritize(hosts)
+}
+
+// Close waits for all inflight RPCs to complete then closes all open transports.
+func (c *Client) Close() error {
+	c.tg.Stop()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, transport := range c.transports {
+		transport.close()
+	}
+	return nil
+}
+
+// New creates a new Client.
+func New(hosts *Provider) *Client {
+	return &Client{
+		tg:           threadgroup.New(),
+		hosts:        hosts,
+		cachedPrices: make(map[types.PublicKey]proto.HostPrices),
+		transports:   make(map[types.PublicKey]*transport),
+	}
+}
