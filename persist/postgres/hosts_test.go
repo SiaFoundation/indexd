@@ -1440,7 +1440,7 @@ func BenchmarkHosts(b *testing.B) {
 	// prepare database
 	hosts := make([]types.PublicKey, numHosts)
 	store := initPostgres(b, zap.NewNop())
-	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for i := range numHosts {
 			var hostID int64
 			hk := types.GeneratePrivateKey().PublicKey()
@@ -1612,7 +1612,7 @@ func BenchmarkUsableHosts(b *testing.B) {
 	)
 
 	// prepare random blocklist (we LEFT JOIN the blocklist in UsableHosts)
-	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range numBlocklist {
 			_, err := tx.Exec(ctx, `INSERT INTO hosts_blocklist (public_key) VALUES ($1)`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
 			if err != nil {
@@ -1625,7 +1625,7 @@ func BenchmarkUsableHosts(b *testing.B) {
 	}
 
 	// prepare random hosts
-	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range numHosts {
 			hk := types.GeneratePrivateKey().PublicKey()
 			hs := newTestHostSettings(hk)
@@ -2023,7 +2023,7 @@ func BenchmarkHostsForPruning(b *testing.B) {
 	)
 
 	// prepare database
-	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range nHosts {
 			// add host
 			hk := types.GeneratePrivateKey().PublicKey()
@@ -2175,7 +2175,7 @@ func BenchmarkHostsForFunding(b *testing.B) {
 	)
 
 	// prepare database
-	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range nHosts {
 			hk := types.GeneratePrivateKey().PublicKey()
 
@@ -2244,7 +2244,7 @@ func BenchmarkHostsForPinning(b *testing.B) {
 
 	// prepare database
 	hostToContractIDs := make(map[types.PublicKey][]types.FileContractID, nHosts)
-	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range nHosts {
 			hk := types.GeneratePrivateKey().PublicKey()
 
@@ -2511,7 +2511,7 @@ func BenchmarkHostStats(b *testing.B) {
 
 	store := initPostgres(b, zap.NewNop())
 
-	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for i := range numHosts {
 			hk := types.GeneratePrivateKey().PublicKey()
 

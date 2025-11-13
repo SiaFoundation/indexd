@@ -21,7 +21,7 @@ import (
 )
 
 func (s *Store) addTestAccount(t testing.TB, ak types.PublicKey, opts ...accounts.AddAccountOption) {
-	err := s.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		if err := addAccount(ctx, tx, nil, ak, false, accounts.AccountMeta{}, opts...); err != nil {
 			return fmt.Errorf("failed to add account: %w", err)
 		}
@@ -194,7 +194,7 @@ func TestAddAccount(t *testing.T) {
 
 	t.Run("user account", func(t *testing.T) {
 		test(t, func(pk types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) (bool, error) {
-			err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+			err := store.transaction(func(ctx context.Context, tx *txn) error {
 				if err := addAccount(ctx, tx, nil, pk, false, meta, opts...); err != nil {
 					return fmt.Errorf("failed to add account: %w", err)
 				}
@@ -285,7 +285,7 @@ func TestUpdateAccount(t *testing.T) {
 	// define helper to check the database id
 	dbID := func(ak types.PublicKey) (accID int64) {
 		t.Helper()
-		if err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+		if err := store.transaction(func(ctx context.Context, tx *txn) error {
 			return tx.QueryRow(ctx, `SELECT id FROM accounts WHERE public_key = $1`, sqlPublicKey(ak)).Scan(&accID)
 		}); err != nil {
 			t.Fatal(err)
@@ -369,7 +369,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	// define helper to count join table entries
 	numEAs := func() (cnt int64) {
 		t.Helper()
-		if err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+		if err := store.transaction(func(ctx context.Context, tx *txn) error {
 			err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM account_hosts`).Scan(&cnt)
 			return err
 		}); err != nil {
@@ -565,7 +565,7 @@ func TestUpdateHostAccounts(t *testing.T) {
 	// assert the account was upserted
 	var updatedFailures int
 	var updatedNextFund time.Time
-	if err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		err := tx.QueryRow(ctx, `SELECT consecutive_failed_funds, next_fund FROM account_hosts`).Scan(&updatedFailures, &updatedNextFund)
 		return err
 	}); err != nil {
@@ -604,7 +604,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 	// insert hosts
 	hosts := make([]types.PublicKey, 0, numHosts)
 	hostIDs := make(map[types.PublicKey]int64, numHosts)
-	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range numHosts {
 			var hostID int64
 			hk := types.GeneratePrivateKey().PublicKey()
@@ -625,7 +625,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 	for _, numAccounts := range []int{10_000, 100_000, 1_000_000} {
 		// prepare accounts
 		prune("accounts")
-		if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+		if err := store.transaction(func(ctx context.Context, tx *txn) error {
 			batch := &pgx.Batch{}
 			for range numAccounts {
 				pk := types.GeneratePrivateKey().PublicKey()
@@ -640,7 +640,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 		prune("account_hosts")
 		for _, hk := range hosts {
 			var accs []accounts.HostAccount
-			if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) (err error) {
+			if err := store.transaction(func(ctx context.Context, tx *txn) (err error) {
 				accs, err = newHostAccountsForFunding(ctx, tx, hk, hostIDs[hk], threshold, batchSize)
 				return
 			}); err != nil {
@@ -660,7 +660,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 				hk := hosts[frand.Intn(numHosts)]
 				hostID := hostIDs[hk]
 
-				if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+				if err := store.transaction(func(ctx context.Context, tx *txn) error {
 					// fetch accounts without account_host entry
 					if accounts, err := newHostAccountsForFunding(ctx, tx, hk, hostID, threshold, batchSize); err != nil {
 						return err

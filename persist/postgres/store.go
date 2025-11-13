@@ -37,7 +37,8 @@ func (ci ConnectionInfo) String() string {
 	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s", ci.Host, ci.Port, ci.User, ci.Password, ci.Database, ci.SSLMode)
 }
 
-func (s *Store) transaction(ctx context.Context, fn func(context.Context, *txn) error) error {
+func (s *Store) transaction(fn func(context.Context, *txn) error) error {
+	ctx := context.Background()
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)

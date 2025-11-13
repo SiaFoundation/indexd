@@ -68,7 +68,7 @@ func TestResetChainState(t *testing.T) {
 	assertTableCount("wallet_broadcasted_sets", 1)
 	assertTableCount("wallet_events", 1)
 
-	if err := store.ResetChainState(t.Context()); err != nil {
+	if err := store.ResetChainState(); err != nil {
 		t.Fatal(err)
 	}
 

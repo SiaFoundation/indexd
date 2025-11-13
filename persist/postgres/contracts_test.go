@@ -47,7 +47,7 @@ func TestContracts(t *testing.T) {
 	}
 
 	// mark the third as bad so it's considered not good
-	if err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(fcid3))
 		return err
 	}); err != nil {
@@ -405,7 +405,7 @@ func TestContractsForBroadcasting(t *testing.T) {
 
 	// tweak timestamp to assert order next
 	now := time.Now()
-	store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+	store.transaction(func(ctx context.Context, tx *txn) error {
 		_, err1 := tx.Exec(ctx, `UPDATE contracts SET last_broadcast_attempt = $1 WHERE contract_id = $2`, now.Add(-1*time.Minute), sqlHash256(fcid1))
 		_, err2 := tx.Exec(ctx, `UPDATE contracts SET last_broadcast_attempt = $1 WHERE contract_id = $2`, now.Add(-2*time.Minute), sqlHash256(fcid2))
 		return errors.Join(err1, err2)
@@ -514,7 +514,7 @@ func TestContractsForFunding(t *testing.T) {
 	}
 
 	// mark second one as bad
-	if err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(fcid2))
 		return err
 	}); err != nil {
@@ -819,7 +819,7 @@ func TestPruneExpiredContractElements(t *testing.T) {
 	assertContracts([]types.FileContractID{})
 
 	// assert only the elements got pruned but the contracts remain
-	if err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		var count int
 		err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM contracts").Scan(&count)
 		if err != nil {
@@ -919,7 +919,7 @@ func TestPruneContractSectorsMap(t *testing.T) {
 	assertContracts([]types.FileContractID{})
 
 	// assert only the map got pruned but the contracts remain
-	if err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		var count int
 		err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM contracts").Scan(&count)
 		if err != nil {
@@ -976,7 +976,7 @@ func TestFormRenewContract(t *testing.T) {
 	// define helper to simulate contract spending
 	simulateSpending := func(contractID types.FileContractID) {
 		t.Helper()
-		if err := store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+		if err := store.transaction(func(ctx context.Context, tx *txn) error {
 			resp, err := tx.Exec(t.Context(), `UPDATE contracts SET state = 1, good = FALSE, append_sector_spending = 1, free_sector_spending = 2, fund_account_spending = 3, sector_roots_spending = 4 WHERE contract_id = $1`, sqlHash256(contractID))
 			if err != nil {
 				return err
@@ -1190,7 +1190,7 @@ func TestRejectContracts(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = store.transaction(t.Context(), func(ctx context.Context, tx *txn) error {
+		err = store.transaction(func(ctx context.Context, tx *txn) error {
 			_, err := tx.Exec(ctx, `UPDATE contracts SET formation = $1 WHERE contract_id = $2`, formation, sqlHash256(id))
 			return err
 		})
@@ -1318,7 +1318,7 @@ func TestUpdateContractElement(t *testing.T) {
 // moved to `contracts.go` after adding a context to its list of args.
 func (s *Store) FileContractElement(contractID types.FileContractID) (types.V2FileContractElement, error) {
 	var fce types.V2FileContractElement
-	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) (err error) {
+	err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		fce, err = scanContractElement(tx.QueryRow(ctx, `SELECT contract_id, contract, leaf_index, merkle_proof FROM contract_elements WHERE contract_id = $1`, sqlHash256(contractID)))
 		return err
 	})
@@ -1740,7 +1740,7 @@ func BenchmarkContracts(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	hosts := make([]types.PublicKey, 0, numHosts)
 	contractIDs := make([]types.FileContractID, 0, numHosts*numContractsPerHost)
-	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range numHosts {
 			var hostID int64
 			hk := types.GeneratePrivateKey().PublicKey()
@@ -2111,7 +2111,7 @@ func BenchmarkMarkContractBad(b *testing.B) {
 	// prepare database
 	store := initPostgres(b, zap.NewNop())
 	contractIDs := make([]types.FileContractID, 0, numHosts*numContractsPerHost)
-	if err := store.transaction(b.Context(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range numHosts {
 			var hostID int64
 			hk := types.GeneratePrivateKey().PublicKey()

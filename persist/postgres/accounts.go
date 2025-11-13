@@ -33,7 +33,7 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 		opt(&queryOpts)
 	}
 
-	if err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) (err error) {
+	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		var connectKeyID sql.NullInt64
 		if queryOpts.ConnectKey != nil {
 			if err := tx.QueryRow(ctx, `SELECT id FROM app_connect_keys WHERE app_key = $1`, *queryOpts.ConnectKey).Scan(&connectKeyID); errors.Is(err, sql.ErrNoRows) {
@@ -75,7 +75,7 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 func (s *Store) Account(ak types.PublicKey) (accounts.Account, error) {
 	var account accounts.Account
 	account.AccountKey = proto.Account(ak) // no need to fetch key
-	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) (err error) {
+	err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.service_account, a.max_pinned_data, a.pinned_data, a.description, a.logo_url, a.service_url, a.last_used
 FROM accounts a
 LEFT JOIN app_connect_keys ak ON ak.id = a.connect_key_id
@@ -88,7 +88,7 @@ WHERE public_key = $1`, sqlPublicKey(ak)))
 // AddServiceAccount adds a new service account in the database with given
 // account key.
 func (s *Store) AddServiceAccount(ak types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
-	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		return addAccount(ctx, tx, nil, ak, true, meta, opts...)
 	})
 }
@@ -97,7 +97,7 @@ func (s *Store) AddServiceAccount(ak types.PublicKey, meta accounts.AccountMeta,
 // database.
 func (s *Store) HasAccount(ak types.PublicKey) (bool, error) {
 	var exists bool
-	if err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE public_key = $1)`, sqlPublicKey(ak)).Scan(&exists)
 	}); err != nil {
 		return false, fmt.Errorf("failed to check if account exists: %w", err)
@@ -113,7 +113,7 @@ func activeAccounts(ctx context.Context, tx *txn, threshold time.Time) (count ui
 // ActiveAccounts returns the number of accounts that have been used since the threshold
 // time.
 func (s *Store) ActiveAccounts(threshold time.Time) (count uint64, err error) {
-	err = s.transaction(s.ctx(), func(ctx context.Context, tx *txn) (err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		count, err = activeAccounts(ctx, tx, threshold)
 		return
 	})
@@ -122,7 +122,7 @@ func (s *Store) ActiveAccounts(threshold time.Time) (count uint64, err error) {
 
 // DeleteAccount deletes the account in the database with given account key.
 func (s *Store) DeleteAccount(ak types.PublicKey) error {
-	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		var serviceAccount bool
 		err := tx.QueryRow(ctx, `DELETE FROM accounts WHERE public_key = $1 RETURNING service_account`, sqlPublicKey(ak)).Scan(&serviceAccount)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -141,7 +141,7 @@ func (s *Store) DeleteAccount(ak types.PublicKey) error {
 // UpdateAccount updates the account in the database with given old account key
 // to the new account key, allowing the user to rotate his account key.
 func (s *Store) UpdateAccount(oldAK, newAK types.PublicKey) error {
-	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		res, err := tx.Exec(ctx, `UPDATE accounts SET public_key = $1 WHERE public_key = $2`, sqlPublicKey(newAK), sqlPublicKey(oldAK))
 		if err != nil {
 			var pgErr *pgconn.PgError
@@ -166,7 +166,7 @@ func (s *Store) HostAccountsForFunding(hk types.PublicKey, threshold time.Time, 
 	}
 
 	accs := make([]accounts.HostAccount, 0, limit)
-	if err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		var hostID int64
 		err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&hostID)
 		if err != nil && errors.Is(err, sql.ErrNoRows) {
@@ -202,7 +202,7 @@ func (s *Store) HostAccountsForFunding(hk types.PublicKey, threshold time.Time, 
 // ScheduleAccountsForFunding marks all accounts for the given host key as due
 // for funding.
 func (s *Store) ScheduleAccountsForFunding(hostKey types.PublicKey) error {
-	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 			UPDATE account_hosts
 			SET next_fund = NOW()
@@ -215,7 +215,7 @@ func (s *Store) ScheduleAccountsForFunding(hostKey types.PublicKey) error {
 // ScheduleAccountForFunding marks the given account for the given host key as
 // due for funding.
 func (s *Store) ScheduleAccountForFunding(hostKey types.PublicKey, account proto.Account) error {
-	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 			UPDATE account_hosts
 			SET next_fund = '1970-01-01 00:00:00+00' -- make sure it's at the front of the queue
@@ -233,7 +233,7 @@ func (s *Store) UpdateHostAccounts(accounts []accounts.HostAccount) error {
 	} else if len(accounts) > proto.MaxAccountBatchSize {
 		return errors.New("too many accounts to update") // sanity check batch size against max batch size used in replenish RPC
 	}
-	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		vals := make([]string, 0, len(accounts))
 		args := make([]any, 0, len(accounts)*4)
 		for i, account := range accounts {
@@ -270,7 +270,7 @@ DO UPDATE SET
 // account can't underflow, instead it will be set to 0 if the amount withdrawn
 // exceeds the stored balance.
 func (s *Store) DebitServiceAccount(hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
-	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		resp, err := tx.Exec(ctx, `
 			UPDATE service_accounts
 			SET balance = GREATEST(balance - $1, 0)
@@ -288,7 +288,7 @@ func (s *Store) DebitServiceAccount(hostKey types.PublicKey, account proto.Accou
 
 // UpdateServiceAccountBalance updates the balance of a service account.
 func (s *Store) UpdateServiceAccountBalance(hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
-	return s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO service_accounts (account_id, host_id, balance)
 			VALUES (
@@ -305,7 +305,7 @@ func (s *Store) UpdateServiceAccountBalance(hostKey types.PublicKey, account pro
 // ServiceAccountBalance returns the balance of a service account.
 func (s *Store) ServiceAccountBalance(hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
 	var balance types.Currency
-	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		err := tx.QueryRow(ctx, `
 			SELECT balance
 			FROM service_accounts

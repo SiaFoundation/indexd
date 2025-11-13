@@ -48,7 +48,7 @@ func initStats(ctx context.Context, tx *txn) error {
 // database.
 func (s *Store) SectorStats() (admin.SectorsStatsResponse, error) {
 	var stats admin.SectorsStatsResponse
-	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		row := tx.QueryRow(ctx, "SELECT num_slabs, num_migrated_sectors, num_pinned_sectors, num_unpinnable_sectors, num_unpinned_sectors FROM stats")
 		return row.Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned)
 	})
@@ -58,7 +58,7 @@ func (s *Store) SectorStats() (admin.SectorsStatsResponse, error) {
 // AccountStats reports statistics about the accounts stored in the database.
 func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 	var stats admin.AccountStatsResponse
-	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		err := tx.QueryRow(ctx, "SELECT num_accounts_registered FROM stats").Scan(&stats.Registered)
 		if err != nil {
 			return fmt.Errorf("failed to get number of registered accounts: %w", err)
@@ -78,7 +78,7 @@ func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 // as soon as we spent any funds on it.
 func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 	var stats []hosts.HostStats
-	err := s.transaction(s.ctx(), func(ctx context.Context, tx *txn) error {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 			WITH globals AS (
 				SELECT scanned_height FROM global_settings

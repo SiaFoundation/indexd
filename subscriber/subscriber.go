@@ -38,7 +38,7 @@ type (
 
 	// Store is a persistent store for the chain subscriber.
 	Store interface {
-		ResetChainState(ctx context.Context) error
+		ResetChainState() error
 		UpdateChainState(fn func(tx UpdateTx) error) error
 		LastScannedIndex() (types.ChainIndex, error)
 	}
@@ -171,7 +171,7 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 				return fmt.Errorf("failed to sync chain state after multiple attempts: %w", err)
 			}
 			s.log.Warn("failed to fetch updates, resetting chain state", zap.Uint64("height", index.Height), zap.Stringer("id", index.ID), zap.Int("attempt", resetAttempts), zap.Error(err))
-			if err := s.store.ResetChainState(ctx); err != nil {
+			if err := s.store.ResetChainState(); err != nil {
 				return fmt.Errorf("failed to reset consensus state: %w", err)
 			} else if index, err = s.store.LastScannedIndex(); err != nil {
 				return fmt.Errorf("failed to get last scanned index after reset: %w", err)
