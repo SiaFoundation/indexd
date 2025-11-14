@@ -152,7 +152,7 @@ func (p *Provider) cmpMetrics(a, b types.PublicKey) int {
 	if fc != 0 {
 		return fc
 	}
-	al := (am.rpcReadAverage.Value() + bm.rpcWriteAverage.Value()) / 2
+	al := (am.rpcReadAverage.Value() + am.rpcWriteAverage.Value()) / 2
 	bl := (bm.rpcReadAverage.Value() + bm.rpcWriteAverage.Value()) / 2
 	return cmp.Compare(al, bl)
 }
