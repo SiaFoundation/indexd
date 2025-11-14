@@ -80,16 +80,34 @@ var (
 	ErrNoMoreHosts = errors.New("no more hosts available")
 )
 
+type sectorDownload struct {
+	index  int
+	sector slabs.PinnedSector
+}
+
 func (s *SDK) downloadSlab(ctx context.Context, slab slabs.PinnedSlab, maxInflight int, timeout time.Duration) ([][]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+
+	slabSectors := make(map[types.PublicKey]sectorDownload)
+	slabHosts := make([]types.PublicKey, 0, len(slab.Sectors))
+	for i, sector := range slab.Sectors {
+		slabSectors[sector.HostKey] = sectorDownload{
+			index:  i,
+			sector: sector,
+		}
+		slabHosts = append(slabHosts, sector.HostKey)
+	}
+
+	// prioritize hosts
+	slabHosts = s.hosts.Prioritize(slabHosts)
 
 	var successful atomic.Uint32
 	var wg sync.WaitGroup
 	sectors := make([][]byte, len(slab.Sectors))
 	sema := make(chan struct{}, maxInflight)
 top:
-	for i, sector := range slab.Sectors {
+	for _, hostKey := range slabHosts {
 		select {
 		case <-ctx.Done():
 			break top
@@ -97,6 +115,10 @@ top:
 			// limit number of concurrent requests
 		}
 		wg.Add(1)
+		sector, ok := slabSectors[hostKey]
+		if !ok {
+			panic("missing slab for host") // developer error
+		}
 		go func(ctx context.Context, sector slabs.PinnedSector, i int) {
 			defer func() { <-sema }() // release semaphore
 			defer wg.Done()
@@ -109,7 +131,7 @@ top:
 				// got enough pieces to recover
 				cancel()
 			}
-		}(ctx, sector, i)
+		}(ctx, sector.sector, sector.index)
 	}
 
 	wg.Wait()
