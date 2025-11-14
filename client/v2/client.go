@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 
 	"go.sia.tech/core/consensus"
@@ -18,6 +19,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/threadgroup"
+	"go.sia.tech/mux/v2"
 )
 
 type transport struct {
@@ -174,8 +176,7 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 
 	if err := fn(ctx, transport); err == nil {
 		return nil
-	} else if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || proto.ErrorCode(err) != proto.ErrorCodeTransport {
-		// do not reset on context errors or non-transport errors
+	} else if !shouldResetTransport(err) {
 		return err
 	}
 
@@ -314,6 +315,24 @@ func (c *Client) Close() error {
 		transport.close()
 	}
 	return nil
+}
+
+func shouldResetTransport(err error) bool {
+	switch {
+	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
+		return false
+	case errors.Is(err, mux.ErrClosedStream):
+		// ErrClosedStream indicates that we closed the stream gracefully, so
+		// the transport is still intact. This usually happens because we close
+		// streams by cancelling or timing out contexts.
+		return false
+	case errors.Is(err, os.ErrDeadlineExceeded):
+		// os.ErrDeadlineExceeded indicates that the stream hit a timeout which was set
+		// using SetDeadline. In this case, the mux is still healthy.
+		return false
+	default:
+		return proto.ErrorCode(err) == proto.ErrorCodeTransport
+	}
 }
 
 // New creates a new Client.
