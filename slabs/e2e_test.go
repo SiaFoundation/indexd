@@ -17,7 +17,7 @@ import (
 func TestMigrations(t *testing.T) {
 	// create cluster
 	logger := zap.NewNop()
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(11), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(500*time.Millisecond))))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(11))
 	indexer := cluster.Indexer
 
 	// create an app
@@ -117,7 +117,7 @@ func TestMigrations(t *testing.T) {
 func TestUpdateLastUsed(t *testing.T) {
 	// create cluster
 	logger := zap.NewNop()
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10), testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithHealthCheckInterval(time.Second))))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10), testutils.WithIndexer())
 
 	// create an app
 	app := cluster.App(t)

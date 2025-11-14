@@ -75,10 +75,21 @@ type (
 	}
 )
 
-func defaultIndexerCfg() *indexerCfg {
+func defaultIndexerCfg(log *zap.Logger) *indexerCfg {
 	return &indexerCfg{
 		maintenanceSettings: MaintenanceSettings,
-		slabOpts:            []slabs.Option{slabs.WithMinHostDistance(0)}, // disable distance checks in tests
+		contractOpts: []contracts.ContractManagerOpt{
+			contracts.WithLogger(log.Named("contracts")),
+			contracts.WithMaintenanceFrequency(500 * time.Millisecond),
+			contracts.WithMinHostDistance(0), // disable location checks in tests
+			contracts.WithSyncPollInterval(500 * time.Millisecond),
+			contracts.WithSectorRootsBatchSize(5), // small batch size for testing
+		},
+		slabOpts: []slabs.Option{
+			slabs.WithLogger(log.Named("slabs")),
+			slabs.WithHealthCheckInterval(500 * time.Millisecond),
+			slabs.WithMinHostDistance(0), // disable location checks in tests
+		},
 	}
 }
 
@@ -121,7 +132,7 @@ func (i *Indexer) Hosts() *hosts.HostManager {
 // NewIndexer creates a new indexer for testing that is automatically closed up
 // after the test is finished.
 func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...IndexerOpt) *Indexer {
-	cfg := defaultIndexerCfg()
+	cfg := defaultIndexerCfg(log)
 	for _, opt := range opts {
 		opt(cfg)
 	}
@@ -149,15 +160,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	dialer := client.NewDialer(c.cm, signer, store, log, client.WithRevisionSubmissionBuffer(1))
 	am := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithLogger(log.Named("accounts")))
 
-	contractOpts := []contracts.ContractManagerOpt{
-		contracts.WithMinHostDistance(0), // disable location checks in tests
-		contracts.WithLogger(log.Named("contracts")),
-		contracts.WithMaintenanceFrequency(200 * time.Millisecond),
-		contracts.WithSyncPollInterval(100 * time.Millisecond),
-		contracts.WithSectorRootsBatchSize(5), // small batch size for testing
-	}
-	contractOpts = append(contractOpts, cfg.contractOpts...)
-	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, dialer, hm, s, wm, contractOpts...)
+	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, dialer, hm, s, wm, cfg.contractOpts...)
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
