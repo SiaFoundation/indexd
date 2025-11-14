@@ -11,6 +11,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/mux/v2"
 )
 
 const (
@@ -125,7 +126,7 @@ func (v *SectorVerifier) VerifySectors(ctx context.Context, host hosts.Host, roo
 
 		// verify the sector
 		res, err := hc.VerifySector(ctx, host.Settings.Prices, v.token(host.PublicKey), root)
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, mux.ErrClosedStream) {
 			return results, err // interrupted
 		}
 
