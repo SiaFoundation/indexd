@@ -64,7 +64,7 @@ func (v *SectorVerifier) CheckBalance(ctx context.Context, host hosts.Host) (typ
 	balance, err := v.am.ServiceAccountBalance(ctx, host.PublicKey, v.account())
 	if err != nil {
 		return types.ZeroCurrency, fmt.Errorf("failed to get service account balance: %w", err)
-	} else if balance.Cmp(host.Settings.Prices.RPCVerifySectorCost().RenterCost()) < 0 {
+	} else if balance.Cmp(host.Settings.Prices.RPCReadSectorCost(proto.LeafSize).RenterCost()) < 0 {
 		return types.ZeroCurrency, errInsufficientServiceAccountBalance
 	}
 	return balance, nil
@@ -103,7 +103,7 @@ func (v *SectorVerifier) VerifySectors(ctx context.Context, host hosts.Host, roo
 		return nil, err
 	}
 
-	cost := host.Settings.Prices.RPCVerifySectorCost().RenterCost()
+	cost := host.Settings.Prices.RPCReadSectorCost(proto.LeafSize).RenterCost()
 	var results []CheckSectorsResult
 	var resetOnce sync.Once
 	for _, root := range roots {

@@ -22,7 +22,7 @@ func (c *mockHostClient) VerifySector(ctx context.Context, hostPrices proto.Host
 	if !ok {
 		panic("unknown sector: " + root.String())
 	}
-	return rhp.RPCVerifySectorResult{Usage: hostPrices.RPCVerifySectorCost()}, err
+	return rhp.RPCVerifySectorResult{Usage: hostPrices.RPCReadSectorCost(proto.LeafSize)}, err
 }
 
 func TestSectorVerifier(t *testing.T) {
