@@ -11,6 +11,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/mux/v2"
 )
 
 func (c *mockHostClient) Close() error {
@@ -43,7 +44,7 @@ func TestSectorVerifier(t *testing.T) {
 		PublicKey: hk,
 		Settings: proto.HostSettings{
 			Prices: proto.HostPrices{
-				EgressPrice: oneSC.Div64(proto.SectorSize), // 1SC per sector
+				EgressPrice: oneSC.Div64(4096), // 1SC per checked sector
 				ValidUntil:  time.Now().Add(time.Hour),
 			},
 		},
@@ -129,7 +130,13 @@ func TestSectorVerifier(t *testing.T) {
 	dialer.clients[host.PublicKey].integrity[r2] = context.Canceled // verification interrupted
 	assertResults([]types.Hash256{r1, r2}, []CheckSectorsResult{SectorSuccess}, context.Canceled)
 
-	// case 5: interruption via expired prices
+	// case 5: interruption via gracefully closed stream
+	updateBalance(types.Siacoins(10))
+	dialer.clients[host.PublicKey].integrity[r1] = nil                 // good sector
+	dialer.clients[host.PublicKey].integrity[r2] = mux.ErrClosedStream // verification interrupted
+	assertResults([]types.Hash256{r1, r2}, []CheckSectorsResult{SectorSuccess}, mux.ErrClosedStream)
+
+	// case 6: interruption via expired prices
 	updateBalance(types.Siacoins(10))
 	dialer.clients[host.PublicKey].integrity[r1] = nil // good sector
 	host.Settings.Prices.ValidUntil = time.Time{}
