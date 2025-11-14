@@ -120,8 +120,10 @@ top:
 			panic("missing slab for host") // developer error
 		}
 		go func(ctx context.Context, sector slabs.PinnedSector, i int) {
-			defer func() { <-sema }() // release semaphore
-			defer wg.Done()
+			defer func() {
+				<-sema
+				wg.Done()
+			}()
 			data, err := downloadShard(ctx, s.hosts, s.appKey, sector.HostKey, sector.Root, timeout)
 			if err != nil {
 				return
