@@ -55,6 +55,21 @@ func (h HostStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	return
 }
 
+// PrometheusMetric implements the prometheus.Marshaller interface for the
+// sector stats response.
+func (s HostScanStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
+	return []prometheus.Metric{
+		{
+			Name:  "indexd_host_scans",
+			Value: float64(s.Scans),
+		},
+		{
+			Name:  "indexd_host_scans_failed",
+			Value: float64(s.ScansFailed),
+		},
+	}
+}
+
 // PrometheusMetric implements the prometheus.Marshaller interface for a single
 // host's stats.
 func (h HostStats) PrometheusMetric() []prometheus.Metric {

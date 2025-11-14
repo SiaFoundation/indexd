@@ -370,7 +370,10 @@ CREATE TABLE stats (
     num_sectors_lost BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_lost >= 0),
     num_sectors_check_failed BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_check_failed >= 0),
     -- account stats
-    num_accounts_registered BIGINT NOT NULL DEFAULT 0 CHECK (num_accounts_registered >= 0) -- number of accounts currently registered
+    num_accounts_registered BIGINT NOT NULL DEFAULT 0 CHECK (num_accounts_registered >= 0), -- number of accounts currently registered
+    -- host scan stats
+    num_scans BIGINT NOT NULL DEFAULT 0 CHECK (num_scans >= 0), -- total number of performed host scans
+    num_scans_failed BIGINT NOT NULL DEFAULT 0 CHECK (num_scans_failed >= 0) -- total number of failed host scans
 );
 
 -- quick lookup of sectors that failed the integrity checks too many times

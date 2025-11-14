@@ -504,4 +504,12 @@ ALTER TABLE app_connect_keys ADD COLUMN pinned_data BIGINT NOT NULL DEFAULT 0 CH
 UPDATE app_connect_keys SET pinned_data = (SELECT COALESCE(SUM(accounts.pinned_data), 0) FROM accounts WHERE accounts.connect_key_id = app_connect_keys.id);`)
 		return err
 	},
+	// add host scan stats to stats
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE stats ADD COLUMN num_scans BIGINT NOT NULL DEFAULT 0 CHECK (num_scans >= 0);
+ALTER TABLE stats ADD COLUMN num_scans_failed BIGINT NOT NULL DEFAULT 0 CHECK (num_scans_failed >= 0);
+`)
+		return err
+	},
 }

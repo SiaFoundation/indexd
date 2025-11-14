@@ -302,6 +302,12 @@ func (c *Client) StatsHosts(ctx context.Context, offset, limit int) (resp HostSt
 	return
 }
 
+// StatsHostsScans returns statistics about host scans for all hosts.
+func (c *Client) StatsHostsScans(ctx context.Context) (resp HostScanStatsResponse, err error) {
+	err = c.c.GET(ctx, "/stats/hosts/scans", &resp)
+	return
+}
+
 // StatsSectors returns statistics about the sectors managed by the indexer.
 func (c *Client) StatsSectors(ctx context.Context) (resp SectorsStatsResponse, err error) {
 	err = c.c.GET(ctx, "/stats/sectors", &resp)
