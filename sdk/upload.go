@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"time"
 
 	"github.com/klauspost/reedsolomon"
@@ -178,7 +177,6 @@ func runUploadWorkers(ctx context.Context, client hostClient, accountKey types.P
 
 				root, err := uploadShard(ctx, client, accountKey, host, job.sector, hostTimeout)
 				if err == nil {
-					log.Println("uploaded shard", root, "to host", host)
 					job.shards <- shard{
 						index: job.index,
 						host:  host,
