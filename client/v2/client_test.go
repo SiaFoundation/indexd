@@ -28,7 +28,7 @@ func TestHostClient(t *testing.T) {
 	indexer.Store().AddTestAccount(t, accountKey.PublicKey())
 	time.Sleep(2 * time.Second)
 
-	provider := client.NewProvider(hosts.NewProviderStore(indexer.Store()))
+	provider := client.NewProvider(hosts.NewHostStore(indexer.Store()))
 	client := client.New(provider)
 	defer client.Close()
 
@@ -91,7 +91,7 @@ func TestHostClientParallel(t *testing.T) {
 	indexer.Store().AddTestAccount(t, accountKey.PublicKey())
 	time.Sleep(2 * time.Second)
 
-	provider := client.NewProvider(hosts.NewProviderStore(indexer.Store()))
+	provider := client.NewProvider(hosts.NewHostStore(indexer.Store()))
 	client := client.New(provider)
 	defer client.Close()
 

@@ -4,9 +4,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"maps"
+	"math"
 	"slices"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -52,6 +54,31 @@ func TestFailureRate(t *testing.T) {
 	if v := fr.Value(); v != expected {
 		t.Fatalf("expected %f, got %f", expected, v)
 	}
+}
+
+func TestFailureRateTimeDecay(t *testing.T) {
+	const (
+		minutesBetweenDecays = 5
+		totalDecayMinutes    = 10
+	)
+	synctest.Test(t, func(t *testing.T) {
+		var fr failureRate
+
+		fr.AddSample(false)
+		expected := 1.0
+		if v := fr.Value(); v != expected {
+			t.Fatalf("expected %f, got %f", expected, v)
+		}
+
+		time.Sleep(totalDecayMinutes * time.Minute)
+		synctest.Wait()
+
+		decayFactor := math.Pow(1.0-emaAlpha, totalDecayMinutes/minutesBetweenDecays)
+		expected *= decayFactor
+		if v := fr.Value(); v != expected {
+			t.Fatalf("expected %f, got %f", expected, v)
+		}
+	})
 }
 
 type mockHostStore struct {

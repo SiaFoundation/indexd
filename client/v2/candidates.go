@@ -3,6 +3,7 @@ package client
 import (
 	"cmp"
 	"iter"
+	"math"
 	"sort"
 	"sync"
 	"time"
@@ -43,8 +44,9 @@ func (ra *rpcAverage) Value() float64 {
 }
 
 type failureRate struct {
-	value float64
-	init  bool
+	value       float64
+	init        bool
+	lastAttempt time.Time
 }
 
 // AddSample adds a new success/failure sample to the failure rate.
@@ -59,9 +61,15 @@ func (fr *failureRate) AddSample(success bool) {
 	} else {
 		fr.value = emaAlpha*sample + (1.0-emaAlpha)*fr.value
 	}
+	fr.lastAttempt = time.Now()
 }
 
 func (fr *failureRate) Value() float64 {
+	if fr.init && time.Since(fr.lastAttempt) >= 5*time.Minute {
+		elapsed := time.Since(fr.lastAttempt).Minutes() / 5
+		fr.value *= math.Pow(1.0-emaAlpha, elapsed)
+		fr.lastAttempt = time.Now()
+	}
 	return fr.value
 }
 
@@ -197,17 +205,12 @@ func (p *Provider) AddFailedRPC(hostKey types.PublicKey) {
 
 // Addresses returns the network addresses for the specified host.
 func (p *Provider) Addresses(hostKey types.PublicKey) ([]chain.NetAddress, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return p.store.Addresses(hostKey)
 }
 
 // Candidates returns all host candidates ordered by their
 // historical performance.
 func (p *Provider) Candidates() (*Candidates, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	hosts, err := p.store.UsableHosts()
 	if err != nil {
 		return nil, err
@@ -232,9 +235,6 @@ func (p *Provider) sortHosts(hosts []types.PublicKey) {
 // on their historical performance. The reordered slice is returned with
 // unusable hosts removed.
 func (p *Provider) Prioritize(hosts []types.PublicKey) []types.PublicKey {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	filtered := hosts[:0]
 	for _, host := range hosts {
 		if ok, err := p.store.Usable(host); err != nil || !ok {

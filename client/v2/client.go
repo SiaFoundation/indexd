@@ -108,9 +108,9 @@ top:
 			var err error
 			switch addr.Protocol {
 			case siamux.Protocol:
-				transport, err = siamux.Dial(ctx, addr.Address, hostKey)
+				transport, err = siamux.Dial(dialCtx, addr.Address, hostKey)
 			case quic.Protocol:
-				transport, err = quic.Dial(ctx, addr.Address, hostKey)
+				transport, err = quic.Dial(dialCtx, addr.Address, hostKey)
 			default:
 				return
 			}
@@ -187,18 +187,16 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	return fn(ctx, transport)
 }
 
-func (c *Client) prices(hostKey types.PublicKey, forceUpdate bool) (proto.HostPrices, error) {
-	if !forceUpdate {
-		c.mu.Lock()
-		prices := c.cachedPrices[hostKey]
-		if prices.Validate(hostKey) == nil {
-			c.mu.Unlock()
-			return prices, nil
-		}
+func (c *Client) prices(ctx context.Context, hostKey types.PublicKey) (proto.HostPrices, error) {
+	c.mu.Lock()
+	prices := c.cachedPrices[hostKey]
+	if prices.Validate(hostKey) == nil {
 		c.mu.Unlock()
+		return prices, nil
 	}
+	c.mu.Unlock()
 
-	settings, err := c.HostSettings(context.Background(), hostKey)
+	settings, err := c.HostSettings(ctx, hostKey)
 	if err != nil {
 		return proto.HostPrices{}, err
 	}
@@ -239,7 +237,7 @@ func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, h
 	defer done()
 
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(hostKey, false)
+		prices, err := c.prices(ctx, hostKey)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -260,7 +258,7 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 	defer done()
 
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(hostKey, false)
+		prices, err := c.prices(ctx, hostKey)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -284,7 +282,7 @@ func (c *Client) AppendSectors(ctx context.Context, signer rhp.ContractSigner, c
 	defer done()
 
 	err = c.rpcFn(ctx, revision.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(revision.Revision.HostPublicKey, false)
+		prices, err := c.prices(ctx, revision.Revision.HostPublicKey)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
