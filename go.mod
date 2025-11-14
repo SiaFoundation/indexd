@@ -8,8 +8,8 @@ require (
 	github.com/klauspost/reedsolomon v1.12.5
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.18.1
-	go.sia.tech/coreutils v0.18.7
+	go.sia.tech/core v0.18.2-0.20251113164615-c42e113353ff
+	go.sia.tech/coreutils v0.18.8-0.20251113201657-ec81d054671b
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/indexd v0.10.1

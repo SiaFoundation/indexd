@@ -192,7 +192,7 @@ func TestRenewalAllowance(t *testing.T) {
 		revision := newTestRevision(hostKey)
 		revision.ProofHeight = blockHeight + renewWindow + 1
 		revision.ExpirationHeight = 9999
-		err := store.AddFormedContract(context.Background(), hostKey, contractID, revision, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), proto.Usage{})
+		err := store.AddFormedContract(hostKey, contractID, revision, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), proto.Usage{})
 		if err != nil {
 			t.Fatal(err)
 		}

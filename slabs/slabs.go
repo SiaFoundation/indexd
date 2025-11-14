@@ -153,7 +153,7 @@ func (s SlabPinParams) Validate() error {
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
 // with the provided account.
 func (m *SlabManager) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error) {
-	return m.store.PinSlabs(ctx, account, nextIntegrityCheck, toPin...)
+	return m.store.PinSlabs(account, nextIntegrityCheck, toPin...)
 }
 
 // UnpinSlab removes the association between the account and the given slab. If
@@ -161,31 +161,31 @@ func (m *SlabManager) PinSlabs(ctx context.Context, account proto.Account, nextI
 // The sectors are potentially orphaned and will be removed by a background
 // process.
 func (m *SlabManager) UnpinSlab(ctx context.Context, account proto.Account, slabID SlabID) error {
-	return m.store.UnpinSlab(ctx, account, slabID)
+	return m.store.UnpinSlab(account, slabID)
 }
 
 // Slabs returns the slabs with the given IDs from the database.
 func (m *SlabManager) Slabs(ctx context.Context, account proto.Account, slabIDs []SlabID) ([]Slab, error) {
-	return m.store.Slabs(ctx, account, slabIDs)
+	return m.store.Slabs(account, slabIDs)
 }
 
 // PinnedSlab retrieves a pinned slab from the database by its ID.  If account
 // is not nil, the last used field of that account will be updated.
 func (m *SlabManager) PinnedSlab(ctx context.Context, account proto.Account, slabID SlabID) (PinnedSlab, error) {
-	return m.store.PinnedSlab(ctx, account, slabID)
+	return m.store.PinnedSlab(account, slabID)
 }
 
 // SlabIDs returns the IDs of slabs associated with the given account. The IDs
 // are returned in descending order of the `pinned_at` timestamp, which is the
 // time when the slab was pinned to the indexer.
 func (m *SlabManager) SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]SlabID, error) {
-	return m.store.SlabIDs(ctx, account, offset, limit)
+	return m.store.SlabIDs(account, offset, limit)
 }
 
 // PruneSlabs prunes all pinned slabs of a user not currently connected to an
 // object.
 func (m *SlabManager) PruneSlabs(ctx context.Context, account proto.Account) error {
-	return m.store.PruneSlabs(ctx, account)
+	return m.store.PruneSlabs(account)
 }
 
 // ValidateECParams checks the erasure coding parameters are

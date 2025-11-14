@@ -32,7 +32,7 @@ type freeSectorsCall struct {
 	indices    []uint64
 }
 
-func (s *storeMock) ContractsForPruning(ctx context.Context, hk types.PublicKey) ([]types.FileContractID, error) {
+func (s *storeMock) ContractsForPruning(hk types.PublicKey) ([]types.FileContractID, error) {
 	var contracts []Contract
 	for _, c := range s.contracts {
 		if c.HostKey == hk && !c.RemainingAllowance.IsZero() && time.Now().After(c.NextPrune) {
@@ -50,7 +50,7 @@ func (s *storeMock) ContractsForPruning(ctx context.Context, hk types.PublicKey)
 	return out, nil
 }
 
-func (s *storeMock) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) {
+func (s *storeMock) HostsForPruning() ([]types.PublicKey, error) {
 	hasContract := make(map[types.PublicKey]struct{})
 	for _, c := range s.contracts {
 		hasContract[c.HostKey] = struct{}{}
@@ -66,7 +66,7 @@ func (s *storeMock) HostsForPruning(ctx context.Context) ([]types.PublicKey, err
 	return hosts, nil
 }
 
-func (s *storeMock) UpdateNextPrune(ctx context.Context, contractID types.FileContractID, nextPrune time.Time) error {
+func (s *storeMock) UpdateNextPrune(contractID types.FileContractID, nextPrune time.Time) error {
 	for i, c := range s.contracts {
 		if c.ID == contractID {
 			s.contracts[i].NextPrune = nextPrune
@@ -76,7 +76,7 @@ func (s *storeMock) UpdateNextPrune(ctx context.Context, contractID types.FileCo
 	return ErrNotFound
 }
 
-func (s *storeMock) PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error) {
+func (s *storeMock) PrunableContractRoots(contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error) {
 	lookup := make(map[types.Hash256]struct{}, len(roots))
 	for _, root := range roots {
 		lookup[root] = struct{}{}
@@ -91,7 +91,7 @@ func (s *storeMock) PrunableContractRoots(ctx context.Context, contractID types.
 	return slices.Collect(maps.Keys(lookup)), nil
 }
 
-func (s *storeMock) ScheduleContractsForPruning(ctx context.Context) error {
+func (s *storeMock) ScheduleContractsForPruning() error {
 	for i := range s.contracts {
 		s.contracts[i].NextPrune = time.Now()
 	}
@@ -312,11 +312,11 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	}
 
 	// assert contracts are marked as pruned
-	if contracts, err := store.ContractsForPruning(context.Background(), hk1); err != nil {
+	if contracts, err := store.ContractsForPruning(hk1); err != nil {
 		t.Fatalf("failed to fetch contracts for pruning: %v", err)
 	} else if len(contracts) != 0 {
 		t.Fatalf("expected no contracts for pruning, got %v", contracts)
-	} else if contracts, err := store.ContractsForPruning(context.Background(), hk2); err != nil {
+	} else if contracts, err := store.ContractsForPruning(hk2); err != nil {
 		t.Fatalf("failed to fetch contracts for pruning: %v", err)
 	} else if len(contracts) != 0 {
 		t.Fatalf("expected no contracts for pruning, got %v", contracts)
@@ -346,7 +346,7 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 		t.Fatalf("failed to perform contract pruning: %v", err)
 	}
 
-	contracts, err := store.Contracts(context.Background(), 0, 10)
+	contracts, err := store.Contracts(0, 10)
 	if err != nil {
 		t.Fatalf("failed to fetch contracts: %v", err)
 	} else if len(contracts) != 4 {

@@ -49,28 +49,28 @@ type (
 	// Store defines an interface to fetch accounts that need to be funded and
 	// update them after funding.
 	Store interface {
-		Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error)
-		HostAccountsForFunding(ctx context.Context, hk types.PublicKey, threshold time.Time, limit int) ([]HostAccount, error)
-		ScheduleAccountsForFunding(ctx context.Context, hostKey types.PublicKey) error
-		UpdateHostAccounts(ctx context.Context, accounts []HostAccount) error
+		Host(hostKey types.PublicKey) (hosts.Host, error)
+		HostAccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]HostAccount, error)
+		ScheduleAccountsForFunding(hostKey types.PublicKey) error
+		UpdateHostAccounts(accounts []HostAccount) error
 
-		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
-		UpdateServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account, balance types.Currency) error
-		ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error)
+		DebitServiceAccount(hostKey types.PublicKey, account proto.Account, amount types.Currency) error
+		UpdateServiceAccountBalance(hostKey types.PublicKey, account proto.Account, balance types.Currency) error
+		ServiceAccountBalance(hostKey types.PublicKey, account proto.Account) (types.Currency, error)
 
-		ValidAppConnectKey(context.Context, string) (bool, error)
-		UseAppConnectKey(context.Context, string, types.PublicKey, AccountMeta) error
-		AddAppConnectKey(context.Context, UpdateAppConnectKey) (ConnectKey, error)
-		UpdateAppConnectKey(context.Context, UpdateAppConnectKey) (ConnectKey, error)
-		DeleteAppConnectKey(context.Context, string) error
-		AppConnectKey(ctx context.Context, key string) (ConnectKey, error)
-		AppConnectKeys(ctx context.Context, offset, limit int) ([]ConnectKey, error)
+		ValidAppConnectKey(string) (bool, error)
+		UseAppConnectKey(string, types.PublicKey, AccountMeta) error
+		AddAppConnectKey(UpdateAppConnectKey) (ConnectKey, error)
+		UpdateAppConnectKey(UpdateAppConnectKey) (ConnectKey, error)
+		DeleteAppConnectKey(string) error
+		AppConnectKey(key string) (ConnectKey, error)
+		AppConnectKeys(offset, limit int) ([]ConnectKey, error)
 
-		ActiveAccounts(ctx context.Context, threshold time.Time) (uint64, error)
-		Account(context.Context, types.PublicKey) (Account, error)
-		Accounts(ctx context.Context, offset, limit int, opts ...QueryAccountsOpt) ([]Account, error)
-		HasAccount(context.Context, types.PublicKey) (bool, error)
-		DeleteAccount(ctx context.Context, ak types.PublicKey) error
+		ActiveAccounts(threshold time.Time) (uint64, error)
+		Account(types.PublicKey) (Account, error)
+		Accounts(offset, limit int, opts ...QueryAccountsOpt) ([]Account, error)
+		HasAccount(types.PublicKey) (bool, error)
+		DeleteAccount(ak types.PublicKey) error
 	}
 
 	// AccountFunder defines an interface to fund accounts.
@@ -123,7 +123,7 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 	// next fund time, we do this to avoid having to fetch (and update) all
 	// accounts at once
 	if force {
-		if err := m.store.ScheduleAccountsForFunding(ctx, host.PublicKey); err != nil {
+		if err := m.store.ScheduleAccountsForFunding(host.PublicKey); err != nil {
 			return fmt.Errorf("failed to schedule accounts for funding: %w", err)
 		}
 	}
@@ -137,7 +137,7 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 
 	var exhausted bool
 	for !exhausted {
-		accounts, err := m.store.HostAccountsForFunding(ctx, host.PublicKey, time.Now().Add(-accountActivityThreshold), AccountFundBatch)
+		accounts, err := m.store.HostAccountsForFunding(host.PublicKey, time.Now().Add(-accountActivityThreshold), AccountFundBatch)
 		if err != nil {
 			return fmt.Errorf("failed to fetch accounts for funding: %w", err)
 		} else if len(accounts) < AccountFundBatch {
@@ -155,7 +155,7 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 
 		// update funded accounts
 		UpdateFundedAccounts(accounts, funded)
-		err = m.store.UpdateHostAccounts(ctx, accounts)
+		err = m.store.UpdateHostAccounts(accounts)
 		if err != nil {
 			return fmt.Errorf("failed to update accounts: %w", err)
 		}
@@ -177,22 +177,22 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 
 // HasAccount checks if the account exists.
 func (m *AccountManager) HasAccount(ctx context.Context, pk types.PublicKey) (bool, error) {
-	return m.store.HasAccount(ctx, pk)
+	return m.store.HasAccount(pk)
 }
 
 // Account returns the account for the given public key.
 func (m *AccountManager) Account(ctx context.Context, pk types.PublicKey) (Account, error) {
-	return m.store.Account(ctx, pk)
+	return m.store.Account(pk)
 }
 
 // Accounts returns a list of accounts.
 func (m *AccountManager) Accounts(ctx context.Context, offset, limit int, opts ...QueryAccountsOpt) ([]Account, error) {
-	return m.store.Accounts(ctx, offset, limit, opts...)
+	return m.store.Accounts(offset, limit, opts...)
 }
 
 // DeleteAccount deletes the account for the given public key.
 func (m *AccountManager) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
-	return m.store.DeleteAccount(ctx, ak)
+	return m.store.DeleteAccount(ak)
 }
 
 // ContractFundTarget calculates the fund target for a contract on the given
@@ -200,7 +200,7 @@ func (m *AccountManager) DeleteAccount(ctx context.Context, ak types.PublicKey) 
 // any.
 func (am *AccountManager) ContractFundTarget(ctx context.Context, host hosts.Host, minAllowance types.Currency) (types.Currency, error) {
 	// fetch number of active accounts
-	n, err := am.store.ActiveAccounts(ctx, time.Now().Add(-accountActivityThreshold))
+	n, err := am.store.ActiveAccounts(time.Now().Add(-accountActivityThreshold))
 	if err != nil {
 		return types.ZeroCurrency, err
 	} else if n == 0 {

@@ -37,7 +37,7 @@ func TestServiceAccounts(t *testing.T) {
 	// helper to assert balance
 	assertBalance := func(account proto.Account, expected types.Currency) {
 		t.Helper()
-		if balance, err := s.ServiceAccountBalance(context.Background(), host.PublicKey, account); err != nil {
+		if balance, err := s.ServiceAccountBalance(host.PublicKey, account); err != nil {
 			t.Fatal(err)
 		} else if !balance.Equals(expected) {
 			t.Fatalf("expected balance %v, got %v", expected, balance)

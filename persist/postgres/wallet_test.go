@@ -75,7 +75,7 @@ func TestSingleAddressWalletStoreUnspentSiacoinElements(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	ci := newTestChainIndex()
-	err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error { return tx.UpdateLastScannedIndex(context.Background(), ci) })
+	err := store.UpdateChainState(func(tx subscriber.UpdateTx) error { return tx.UpdateLastScannedIndex(ci) })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,7 +129,7 @@ func TestSingleAddressWalletStoreWalletEventsAndWalletEventCount(t *testing.T) {
 	}
 
 	update := newTestEvent()
-	err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	err := store.transaction(func(ctx context.Context, tx *txn) error {
 		return insertWalletEvent(ctx, tx, update)
 	})
 	if err != nil {
@@ -161,7 +161,7 @@ func TestSingleAddressWalletStoreWalletEvent(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	update := newTestEvent()
-	err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	err := store.transaction(func(ctx context.Context, tx *txn) error {
 		return insertWalletEvent(ctx, tx, update)
 	})
 	if err != nil {

@@ -292,7 +292,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 
 // HostClient returns a host client for the given host public key.
 func (idx *Indexer) HostClient(t *testing.T, hk types.PublicKey) *client.HostClient {
-	h, err := idx.store.Host(context.Background(), hk)
+	h, err := idx.store.Host(hk)
 	if err != nil {
 		t.Fatalf("failed to get host %s: %v", hk, err) // developer error
 	}

@@ -216,7 +216,7 @@ func (s *hostManagerMock) WithScannedHost(ctx context.Context, hk types.PublicKe
 	} else if err := s.store.UpdateHostSettings(hk, settings); err != nil {
 		return err
 	}
-	h, err := s.store.Host(ctx, hk)
+	h, err := s.store.Host(hk)
 	if err != nil {
 		return err
 	} else if !h.IsGood() {
@@ -226,35 +226,35 @@ func (s *hostManagerMock) WithScannedHost(ctx context.Context, hk types.PublicKe
 }
 
 func (s *hostManagerMock) Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error) {
-	return s.store.Host(ctx, hk)
+	return s.store.Host(hk)
 }
 
 func (s *hostManagerMock) HostsForFunding(ctx context.Context) ([]types.PublicKey, error) {
-	return s.store.HostsForFunding(ctx)
+	return s.store.HostsForFunding()
 }
 
 func (s *hostManagerMock) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
-	return s.store.HostsForPinning(ctx)
+	return s.store.HostsForPinning()
 }
 
 func (s *hostManagerMock) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) {
-	return s.store.HostsForPruning(ctx)
+	return s.store.HostsForPruning()
 }
 
 func (s *hostManagerMock) HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error) {
-	return s.store.HostsWithUnpinnableSectors(ctx)
+	return s.store.HostsWithUnpinnableSectors()
 }
 
 func (s *hostManagerMock) Hosts(ctx context.Context, offset int, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
-	return s.store.Hosts(ctx, offset, limit, queryOpts...)
+	return s.store.Hosts(offset, limit, queryOpts...)
 }
 
 func (s *hostManagerMock) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error {
-	return s.store.BlockHosts(ctx, hostKeys, reasons)
+	return s.store.BlockHosts(hostKeys, reasons)
 }
 
 func (s *hostManagerMock) UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error) {
-	return s.store.UsabilitySettings(ctx)
+	return s.store.UsabilitySettings()
 }
 
 func TestPerformContractFormation(t *testing.T) {
@@ -338,7 +338,7 @@ func TestPerformContractFormation(t *testing.T) {
 		t.Helper()
 
 		// fetch good contracts from the store
-		contracts, err := store.Contracts(context.Background(), 0, 100, WithGood(true))
+		contracts, err := store.Contracts(0, 100, WithGood(true))
 		if err != nil {
 			t.Fatal(err)
 		} else if len(contracts) != good {
@@ -498,7 +498,7 @@ func TestPerformContractFormation(t *testing.T) {
 	assertGoodContracts(7, 6, 1)
 
 	// block another good host
-	if err := store.BlockHosts(context.Background(), []types.PublicKey{good[3].PublicKey}, []string{"test"}); err != nil {
+	if err := store.BlockHosts([]types.PublicKey{good[3].PublicKey}, []string{"test"}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -68,7 +68,7 @@ func TestNewCluster(t *testing.T) {
 	}
 
 	// assert host announcements were persisted
-	hosts, err := indexer.store.Hosts(context.Background(), 0, 10)
+	hosts, err := indexer.store.Hosts(0, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(hosts) != 5 {

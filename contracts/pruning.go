@@ -23,7 +23,7 @@ func (cm *ContractManager) performContractPruning(ctx context.Context, force boo
 
 	// if force is true, schedule all (active and good) contracts for pruning
 	if force {
-		err := cm.store.ScheduleContractsForPruning(ctx)
+		err := cm.store.ScheduleContractsForPruning()
 		if err != nil {
 			return fmt.Errorf("failed to schedule contracts for pruning: %w", err)
 		}
@@ -83,7 +83,7 @@ func (cm *ContractManager) performContractPruningOnHost(ctx context.Context, hos
 	defer client.Close()
 
 	// fetch contract ids
-	contracts, err := cm.store.ContractsForPruning(ctx, host.PublicKey)
+	contracts, err := cm.store.ContractsForPruning(host.PublicKey)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contracts for pruning: %w", err)
 	} else if len(contracts) == 0 {
@@ -102,7 +102,7 @@ loop:
 
 		n, err := cm.pruneContract(ctx, client, host.Settings.Prices, contract)
 		if err != nil {
-			if updateErr := cm.store.UpdateNextPrune(ctx, contract, time.Now().Add(pruneIntervalFailure)); updateErr != nil {
+			if updateErr := cm.store.UpdateNextPrune(contract, time.Now().Add(pruneIntervalFailure)); updateErr != nil {
 				err = errors.Join(err, fmt.Errorf("failed to update contract: %w", updateErr))
 			}
 			hostLog.Debug("failed to prune contract", zap.Error(err))
@@ -111,7 +111,7 @@ loop:
 			hostLog.Debug("pruned contract", zap.Stringer("contractID", contract), zap.Int("sectors", n), zap.Int("bytes", n*proto.SectorSize))
 		}
 
-		err = cm.store.UpdateNextPrune(ctx, contract, time.Now().Add(pruneIntervalSuccess))
+		err = cm.store.UpdateNextPrune(contract, time.Now().Add(pruneIntervalSuccess))
 		if err != nil {
 			hostLog.Debug("failed to update contract", zap.Error(err))
 		}
@@ -123,7 +123,7 @@ loop:
 func (cm *ContractManager) pruneContract(ctx context.Context, client HostClient, hostPrices proto.HostPrices, contractID types.FileContractID) (int, error) {
 	const dbRootsBatchSize = 10000
 
-	contract, renewed, err := cm.store.ContractRevision(ctx, contractID)
+	contract, renewed, err := cm.store.ContractRevision(contractID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch contract revision: %w", err)
 	} else if renewed {
@@ -145,7 +145,7 @@ func (cm *ContractManager) pruneContract(ctx context.Context, client HostClient,
 		prunable := make(map[types.Hash256]struct{}, len(res.Roots))
 		for start := 0; start < len(res.Roots); start += dbRootsBatchSize {
 			end := min(start+dbRootsBatchSize, len(res.Roots))
-			batch, err := cm.store.PrunableContractRoots(ctx, contractID, res.Roots[start:end])
+			batch, err := cm.store.PrunableContractRoots(contractID, res.Roots[start:end])
 			if err != nil {
 				return pruned, fmt.Errorf("failed to fetch prunable contract roots: %w", err)
 			}

@@ -26,13 +26,13 @@ func TestEnsureDatabase(t *testing.T) {
 	ci.Database = hex.EncodeToString(rBytes[:])
 
 	// ensure the database exists
-	if err := ensureDatabase(context.Background(), ci); err != nil {
+	if err := ensureDatabase(t.Context(), ci); err != nil {
 		t.Fatalf("failed to ensure database: %v", err)
 	}
 
 	// cleanup - drop the database
 	store := initPostgres(t, zap.NewNop())
-	if _, err := store.pool.Exec(context.Background(), `DROP DATABASE `+pgx.Identifier{ci.Database}.Sanitize()); err != nil {
+	if _, err := store.pool.Exec(t.Context(), `DROP DATABASE `+pgx.Identifier{ci.Database}.Sanitize()); err != nil {
 		t.Fatalf("failed to drop database: %v", err)
 	}
 }

@@ -40,7 +40,7 @@ func TestBlockBadHosts(t *testing.T) {
 	assertHostAndContract := func(hk types.PublicKey, blocked bool, reasons []string) {
 		t.Helper()
 
-		host, err := store.Host(context.Background(), hk)
+		host, err := store.Host(hk)
 		if err != nil {
 			t.Fatal(err)
 		} else if host.Blocked != blocked {
@@ -48,7 +48,7 @@ func TestBlockBadHosts(t *testing.T) {
 		} else if host.Blocked && !reflect.DeepEqual(host.BlockedReasons, reasons) {
 			t.Fatalf("expected host %v to be blocked due to %v, got blocked due to %v", hk, reasons, host.BlockedReasons)
 		}
-		contract, err := store.Contract(context.Background(), types.FileContractID(hk))
+		contract, err := store.Contract(types.FileContractID(hk))
 		if errors.Is(err, ErrNotFound) && hk == unusedBadHost.PublicKey {
 			return // unused host doesn't have a contract
 		} else if err != nil {

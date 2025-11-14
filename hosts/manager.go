@@ -94,25 +94,25 @@ type (
 	// Store defines an interface to fetch hosts that need to be scanned and
 	// persist the scan results in the database.
 	Store interface {
-		Host(ctx context.Context, hk types.PublicKey) (Host, error)
-		Hosts(ctx context.Context, offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error)
-		HostStats(ctx context.Context, offset, limit int) ([]HostStats, error)
+		Host(hk types.PublicKey) (Host, error)
+		Hosts(offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error)
+		HostStats(offset, limit int) ([]HostStats, error)
 
-		HostsForFunding(ctx context.Context) ([]types.PublicKey, error)
-		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
-		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
-		HostsForScanning(ctx context.Context) ([]types.PublicKey, error)
-		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
+		HostsForFunding() ([]types.PublicKey, error)
+		HostsForPruning() ([]types.PublicKey, error)
+		HostsForPinning() ([]types.PublicKey, error)
+		HostsForScanning() ([]types.PublicKey, error)
+		HostsWithUnpinnableSectors() ([]types.PublicKey, error)
 
-		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error
-		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
-		UnblockHost(ctx context.Context, hk types.PublicKey) error
+		BlockHosts(hostKeys []types.PublicKey, reasons []string) error
+		BlockedHosts(offset, limit int) ([]types.PublicKey, error)
+		UnblockHost(hk types.PublicKey) error
 
-		PruneHosts(ctx context.Context, lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
-		UpdateHost(ctx context.Context, hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error
+		PruneHosts(lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
+		UpdateHost(hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error
 
-		UsabilitySettings(ctx context.Context) (UsabilitySettings, error)
-		UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error
+		UsabilitySettings() (UsabilitySettings, error)
+		UpdateUsabilitySettings(us UsabilitySettings) error
 	}
 
 	// Syncer defines an interface that exposes the Peers method.
@@ -140,47 +140,47 @@ func (h *Host) RHP4Addrs() []chain.NetAddress {
 
 // Host returns the host with the given key.
 func (hm *HostManager) Host(ctx context.Context, hostKey types.PublicKey) (Host, error) {
-	return hm.store.Host(ctx, hostKey)
+	return hm.store.Host(hostKey)
 }
 
 // Hosts returns a list of hosts filtered by the given query options.
 func (hm *HostManager) Hosts(ctx context.Context, offset, limit int, queryOpts ...HostQueryOpt) ([]Host, error) {
-	return hm.store.Hosts(ctx, offset, limit, queryOpts...)
+	return hm.store.Hosts(offset, limit, queryOpts...)
 }
 
 // HostsForFunding returns a list of hosts that have accounts that need funding
 func (hm *HostManager) HostsForFunding(ctx context.Context) ([]types.PublicKey, error) {
-	return hm.store.HostsForFunding(ctx)
+	return hm.store.HostsForFunding()
 }
 
 // HostsForPruning returns a list of hosts with sectors that need pruning
 func (hm *HostManager) HostsForPruning(ctx context.Context) ([]types.PublicKey, error) {
-	return hm.store.HostsForPruning(ctx)
+	return hm.store.HostsForPruning()
 }
 
 // HostsForPinning returns a list of hosts that have sectors that need pinning
 func (hm *HostManager) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
-	return hm.store.HostsForPinning(ctx)
+	return hm.store.HostsForPinning()
 }
 
 // BlockHosts blocks the given hosts for the given list of reasons
 func (hm *HostManager) BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error {
-	return hm.store.BlockHosts(ctx, hostKeys, reasons)
+	return hm.store.BlockHosts(hostKeys, reasons)
 }
 
 // HostsWithUnpinnableSectors returns any hosts that have sectors that could not be pinned
 func (hm *HostManager) HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error) {
-	return hm.store.HostsWithUnpinnableSectors(ctx)
+	return hm.store.HostsWithUnpinnableSectors()
 }
 
 // BlockedHosts returns a list of blocked hosts
 func (hm *HostManager) BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error) {
-	return hm.store.BlockedHosts(ctx, offset, limit)
+	return hm.store.BlockedHosts(offset, limit)
 }
 
 // UnblockHost unblocks the given host
 func (hm *HostManager) UnblockHost(ctx context.Context, hk types.PublicKey) error {
-	return hm.store.UnblockHost(ctx, hk)
+	return hm.store.UnblockHost(hk)
 }
 
 // NewManager creates a new host manager.
@@ -230,15 +230,15 @@ func NewManager(syncer Syncer, locator Locator, store Store, opts ...Option) (*H
 		for {
 			select {
 			case <-pruneTicker.C:
-				m.pruneHosts(ctx)
+				m.pruneHosts()
 			case <-m.triggerHostScanningChan:
 				// reset ticker
 				scanTicker.Stop()
 				scanTicker = time.NewTicker(m.scanFrequency)
 				m.log.Debug("triggered host scanning")
-				m.scanHosts(ctx, m.hostsForScanning(ctx, true))
+				m.scanHosts(ctx, m.hostsForScanning(true))
 			case <-scanTicker.C:
-				m.scanHosts(ctx, m.hostsForScanning(ctx, false))
+				m.scanHosts(ctx, m.hostsForScanning(false))
 			case <-ctx.Done():
 				return
 			}
@@ -264,13 +264,13 @@ func (m *HostManager) TriggerHostScanning() {
 
 // UsabilitySettings returns the current usability settings.
 func (m *HostManager) UsabilitySettings(ctx context.Context) (UsabilitySettings, error) {
-	return m.store.UsabilitySettings(ctx)
+	return m.store.UsabilitySettings()
 }
 
 // UpdateUsabilitySettings updates the host's usability settings.
 func (m *HostManager) UpdateUsabilitySettings(ctx context.Context, us UsabilitySettings) error {
 	// perhaps this should reset next_scan to NOW() on all hosts that succeeded their last scan?
-	return m.store.UpdateUsabilitySettings(ctx, us)
+	return m.store.UpdateUsabilitySettings(us)
 }
 
 // WithScannedHost calls the given function with the Host with the given host
@@ -280,7 +280,7 @@ func (m *HostManager) UpdateUsabilitySettings(ctx context.Context, us UsabilityS
 // called twice.
 func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, fn func(h Host) error) error {
 	// fetch host
-	host, err := m.store.Host(ctx, hk)
+	host, err := m.store.Host(hk)
 	if err != nil {
 		return fmt.Errorf("failed to get host, %w", err)
 	} else if !host.IsGood() {
@@ -318,7 +318,7 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
 	defer cancel()
 
-	host, err := m.store.Host(ctx, hk)
+	host, err := m.store.Host(hk)
 	if err != nil {
 		return Host{}, fmt.Errorf("failed to get host, %w", err)
 	}
@@ -351,17 +351,12 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 		scanExponentialBackoffMaxHours,
 	)
 
-	// derive a context from the background context for persisting the scan
-	// results to prevent a scan that timed out from not being recorded
-	updateCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	err = m.store.UpdateHost(updateCtx, hk, settings, loc, success, nextScan)
+	err = m.store.UpdateHost(hk, settings, loc, success, nextScan)
 	if err != nil {
 		return Host{}, fmt.Errorf("failed to update host, %w", err)
 	}
 
-	return m.store.Host(ctx, hk)
+	return m.store.Host(hk)
 }
 
 // UpdateChainState updates the host announcements in the database.
@@ -398,15 +393,15 @@ func (m *HostManager) UpdateChainState(tx UpdateTx, applied []chain.ApplyUpdate)
 
 // Stats returns statistics about the hosts in the database.
 func (m *HostManager) Stats(ctx context.Context, offset, limit int) ([]HostStats, error) {
-	return m.store.HostStats(ctx, offset, limit)
+	return m.store.HostStats(offset, limit)
 }
 
 // hostsForScanning returns the public keys of the hosts that need to be
 // scanned, if force is true, this method will return the public keys of all
 // hosts in the database.
-func (m *HostManager) hostsForScanning(ctx context.Context, force bool) []types.PublicKey {
+func (m *HostManager) hostsForScanning(force bool) []types.PublicKey {
 	if !force {
-		hosts, err := m.store.HostsForScanning(ctx)
+		hosts, err := m.store.HostsForScanning()
 		if err != nil {
 			m.log.Error("failed to get hosts for scanning", zap.Error(err))
 			return nil
@@ -417,7 +412,7 @@ func (m *HostManager) hostsForScanning(ctx context.Context, force bool) []types.
 	// forcing a rescan of all hosts is only exposed with the debug flag
 	// enabled, therefore it's fine to pay the price here and fetch all hosts
 	// from the database only to get their public keys
-	hosts, err := m.store.Hosts(ctx, 0, math.MaxInt)
+	hosts, err := m.store.Hosts(0, math.MaxInt)
 	if err != nil {
 		m.log.Error("failed to get hosts for scanning", zap.Error(err))
 		return nil
@@ -430,9 +425,9 @@ func (m *HostManager) hostsForScanning(ctx context.Context, force bool) []types.
 	return hks
 }
 
-func (m *HostManager) pruneHosts(ctx context.Context) {
+func (m *HostManager) pruneHosts() {
 	cutoff := time.Now().Add(-pruneMinDowntime)
-	n, err := m.store.PruneHosts(ctx, time.Now().Add(-pruneMinDowntime), pruneMinConsecutiveScanFailures)
+	n, err := m.store.PruneHosts(time.Now().Add(-pruneMinDowntime), pruneMinConsecutiveScanFailures)
 	if err != nil {
 		m.log.Error("failed to prune hosts",
 			zap.Time("minLastSuccessfulScan", cutoff),
@@ -512,7 +507,7 @@ func fetchSettings(ctx context.Context, scanner Scanner, hk types.PublicKey, add
 		default:
 			continue // ignore
 		}
-		if errors.Is(err, context.Canceled) {
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return proto4.HostSettings{}, err
 		} else if err != nil {
 			log.Debug("failed to get host settings",

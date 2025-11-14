@@ -74,7 +74,7 @@ func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, host 
 	defer client.Close()
 
 	// fetch contract ids
-	contractIDs, err := cm.store.ContractsForPinning(ctx, host.PublicKey, maxContractSize)
+	contractIDs, err := cm.store.ContractsForPinning(host.PublicKey, maxContractSize)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contracts for pinning: %w", err)
 	} else if len(contractIDs) == 0 {
@@ -83,7 +83,7 @@ func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, host 
 
 	var exhausted bool
 	for !exhausted && ctx.Err() == nil {
-		roots, err := cm.store.UnpinnedSectors(ctx, host.PublicKey, proto.MaxSectorBatchSize)
+		roots, err := cm.store.UnpinnedSectors(host.PublicKey, proto.MaxSectorBatchSize)
 		if err != nil {
 			return fmt.Errorf("failed to fetch unpinned sectors: %w", err)
 		} else if len(roots) < proto.MaxSectorBatchSize {
@@ -119,7 +119,7 @@ func (cm *ContractManager) pinSectors(ctx context.Context, client HostClient, ho
 			continue
 		}
 
-		if err := cm.store.PinSectors(ctx, contractID, res.Sectors); err != nil {
+		if err := cm.store.PinSectors(contractID, res.Sectors); err != nil {
 			return fmt.Errorf("failed to pin sectors: %w", err)
 		}
 
@@ -139,7 +139,7 @@ func (cm *ContractManager) pinSectors(ctx context.Context, client HostClient, ho
 				missing = append(missing, sector)
 			}
 
-			if err := cm.store.MarkSectorsLost(ctx, hostKey, missing); err != nil {
+			if err := cm.store.MarkSectorsLost(hostKey, missing); err != nil {
 				return fmt.Errorf("failed to mark sectors as lost: %w", err)
 			}
 			log = log.With(zap.Int("missing", len(missing)))

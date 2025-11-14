@@ -44,7 +44,7 @@ func TestHostManager(t *testing.T) {
 
 	// process chain update
 	cs := consensus.State{}
-	if err := db.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := db.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		err = mgr.UpdateChainState(tx, []chain.ApplyUpdate{
 			{
 				Block: types.Block{
@@ -108,7 +108,7 @@ func TestHostManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hosts, err := db.Hosts(t.Context(), 0, 100)
+	hosts, err := db.Hosts(0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,11 +128,17 @@ type blockingScanner struct {
 
 func (bs *blockingScanner) ScanSiamux(ctx context.Context, hk types.PublicKey, addr string) (proto4.HostSettings, error) {
 	time.Sleep(bs.delayMux)
+	if err := ctx.Err(); err != nil {
+		return proto4.HostSettings{}, err
+	}
 	return bs.settings, nil
 }
 
 func (bs *blockingScanner) ScanQuic(ctx context.Context, hk types.PublicKey, addr string) (proto4.HostSettings, error) {
 	time.Sleep(bs.delayQuic)
+	if err := ctx.Err(); err != nil {
+		return proto4.HostSettings{}, err
+	}
 	return bs.settings, nil
 }
 
@@ -142,7 +148,7 @@ func TestScanTimeout(t *testing.T) {
 		defer db.Close()
 
 		hostKey := types.PublicKey{1}
-		if err := db.UpdateChainState(t.Context(), func(tx subscriber.UpdateTx) error {
+		if err := db.UpdateChainState(func(tx subscriber.UpdateTx) error {
 			return tx.AddHostAnnouncement(hostKey, chain.V2HostAnnouncement{addr}, time.Now())
 		}); err != nil {
 			t.Fatal(err)

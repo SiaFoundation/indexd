@@ -2,7 +2,6 @@ package postgres
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"math"
 	"reflect"
@@ -41,7 +40,7 @@ func TestObjects(t *testing.T) {
 		}},
 	}
 	for _, acc := range []proto4.Account{acc1, acc2} {
-		_, err := store.PinSlabs(context.Background(), acc, time.Time{}, slab)
+		_, err := store.PinSlabs(acc, time.Time{}, slab)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -49,7 +48,7 @@ func TestObjects(t *testing.T) {
 
 	assertObjects := func(acc proto4.Account, expectedDeleted, expectedExist int) []slabs.ObjectEvent {
 		t.Helper()
-		objects, err := store.ListObjects(context.Background(), acc, slabs.Cursor{}, 10)
+		objects, err := store.ListObjects(acc, slabs.Cursor{}, 10)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -99,7 +98,7 @@ func TestObjects(t *testing.T) {
 
 		var ss []slabs.SlabSlice
 		for _, p := range params {
-			ids, err := store.PinSlabs(context.Background(), acc, time.Time{}, p)
+			ids, err := store.PinSlabs(acc, time.Time{}, p)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -125,14 +124,14 @@ func TestObjects(t *testing.T) {
 	pinSlabs(acc2, obj1Slabs)
 	obj1Acc1 := randomObject(pinSlabs(acc1, obj1Slabs))
 
-	if err := store.SaveObject(context.Background(), acc1, obj1Acc1); err != nil {
+	if err := store.SaveObject(acc1, obj1Acc1); err != nil {
 		t.Fatal(err)
 	}
 	// pin the same object for acc2 with different master key and sig to satisfy unique constraint
 	obj1Acc2 := obj1Acc1
 	obj1Acc2.EncryptedMasterKey = frand.Bytes(72)
 	obj1Acc2.Signature = (types.Signature)(frand.Bytes(64))
-	if err := store.SaveObject(context.Background(), acc2, obj1Acc2); err != nil {
+	if err := store.SaveObject(acc2, obj1Acc2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -165,7 +164,7 @@ func TestObjects(t *testing.T) {
 	assertObj(obj1Acc2, objs[0])
 
 	// delete object for acc1
-	if err := store.DeleteObject(context.Background(), acc1, obj1Acc1.ID()); err != nil {
+	if err := store.DeleteObject(acc1, obj1Acc1.ID()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -177,7 +176,7 @@ func TestObjects(t *testing.T) {
 
 	// add another object to acc2
 	obj2 := randomObject(pinSlabs(acc2, randomSlabs(2)))
-	if err := store.SaveObject(context.Background(), acc2, obj2); err != nil {
+	if err := store.SaveObject(acc2, obj2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -189,7 +188,7 @@ func TestObjects(t *testing.T) {
 
 	// save object 1 again to update its timestamp
 	obj1Acc2.EncryptedMetadata = []byte("updated meta")
-	if err := store.SaveObject(context.Background(), acc2, obj1Acc2); err != nil {
+	if err := store.SaveObject(acc2, obj1Acc2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,7 +199,7 @@ func TestObjects(t *testing.T) {
 	assertObj(obj1Acc2, objs[1])
 
 	// make sure the limit works
-	objs, err := store.ListObjects(context.Background(), acc2, slabs.Cursor{}, 1)
+	objs, err := store.ListObjects(acc2, slabs.Cursor{}, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 {
@@ -208,7 +207,7 @@ func TestObjects(t *testing.T) {
 	}
 
 	// increasing 'after' to now should not yield any results
-	objs, err = store.ListObjects(context.Background(), acc2, slabs.Cursor{After: time.Now()}, 1)
+	objs, err = store.ListObjects(acc2, slabs.Cursor{After: time.Now()}, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
@@ -216,7 +215,7 @@ func TestObjects(t *testing.T) {
 	}
 
 	// assert we can fetch a single object
-	obj, err := store.Object(context.Background(), acc2, obj2.ID())
+	obj, err := store.Object(acc2, obj2.ID())
 	if err != nil {
 		t.Fatal(err)
 	} else if obj.CreatedAt.IsZero() || obj.UpdatedAt.IsZero() {
@@ -229,20 +228,20 @@ func TestObjects(t *testing.T) {
 	}
 
 	// assert account is taken into consideration when fetching an object
-	_, err = store.Object(context.Background(), acc1, obj2.ID())
+	_, err = store.Object(acc1, obj2.ID())
 	if !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
 
 	// assert fetching a non-existent object returns the correct error
-	_, err = store.Object(context.Background(), acc2, frand.Entropy256())
+	_, err = store.Object(acc2, frand.Entropy256())
 	if !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
 
 	// assert listing objects for accounts that include a deleted object works
 	obj2Acc1 := randomObject(pinSlabs(acc1, randomSlabs(3)))
-	if err := store.SaveObject(context.Background(), acc1, obj2Acc1); err != nil {
+	if err := store.SaveObject(acc1, obj2Acc1); err != nil {
 		t.Fatal(err)
 	}
 	assertObjects(acc1, 1, 1)
@@ -269,7 +268,7 @@ func TestListObjectsRegression(t *testing.T) {
 				HostKey: hk,
 			}},
 		}
-		_, err := store.PinSlabs(context.Background(), acc, time.Time{}, slab)
+		_, err := store.PinSlabs(acc, time.Time{}, slab)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -301,7 +300,7 @@ func TestListObjectsRegression(t *testing.T) {
 	for range 3 {
 		obj := randomObject()
 		objectIDs = append(objectIDs, obj.ID())
-		if err := store.SaveObject(context.Background(), acc, obj); err != nil {
+		if err := store.SaveObject(acc, obj); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -311,16 +310,16 @@ func TestListObjectsRegression(t *testing.T) {
 	})
 
 	ts := time.Now().Round(time.Second)
-	_, err := store.pool.Exec(context.Background(), "UPDATE objects SET updated_at = $1", ts)
+	_, err := store.pool.Exec(t.Context(), "UPDATE objects SET updated_at = $1", ts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = store.pool.Exec(context.Background(), "UPDATE object_events SET updated_at = $1", ts)
+	_, err = store.pool.Exec(t.Context(), "UPDATE object_events SET updated_at = $1", ts)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	objs, err := store.ListObjects(context.Background(), acc, slabs.Cursor{After: ts}, 10)
+	objs, err := store.ListObjects(acc, slabs.Cursor{After: ts}, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != len(objectIDs) {
@@ -361,7 +360,7 @@ func TestSharedObjects(t *testing.T) {
 		}
 		s.MinShards = uint(len(s.Sectors))
 
-		slabIDs, err := store.PinSlabs(t.Context(), acc1, time.Time{}, s)
+		slabIDs, err := store.PinSlabs(acc1, time.Time{}, s)
 		if err != nil {
 			t.Fatal(err)
 		} else if id, err := s.Digest(); err != nil {
@@ -406,11 +405,11 @@ func TestSharedObjects(t *testing.T) {
 			Length: slab.Length,
 		}
 	}
-	if err := store.SaveObject(context.Background(), acc1, obj); err != nil {
+	if err := store.SaveObject(acc1, obj); err != nil {
 		t.Fatal(err)
 	}
 
-	sharedObj, err := store.SharedObject(t.Context(), obj.ID())
+	sharedObj, err := store.SharedObject(obj.ID())
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(expectedSharedObj, sharedObj) {
@@ -419,7 +418,7 @@ func TestSharedObjects(t *testing.T) {
 
 	// pin the slabs to the second account
 	for _, slab := range expectedSharedObj.Slabs {
-		_, err := store.PinSlabs(t.Context(), acc2, time.Time{}, slabs.SlabPinParams{
+		_, err := store.PinSlabs(acc2, time.Time{}, slabs.SlabPinParams{
 			MinShards: slab.MinShards,
 			Sectors: func() []slabs.PinnedSector {
 				sps := make([]slabs.PinnedSector, len(slab.Sectors))
@@ -451,7 +450,7 @@ func BenchmarkSaveObject(b *testing.B) {
 	hostKeys := make([]types.PublicKey, 30)
 	for i := range hostKeys {
 		hostKeys[i] = types.GeneratePrivateKey().PublicKey()
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 			return tx.AddHostAnnouncement(hostKeys[i], chain.V2HostAnnouncement{{Protocol: quic.Protocol, Address: "[::]:4848"}}, time.Now())
 		}); err != nil {
 			b.Fatal(err)
@@ -472,7 +471,7 @@ func BenchmarkSaveObject(b *testing.B) {
 			s.Sectors[i].Root = frand.Entropy256()
 		}
 
-		slabIDs, err := store.PinSlabs(b.Context(), acc1, time.Time{}, s)
+		slabIDs, err := store.PinSlabs(acc1, time.Time{}, s)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -504,7 +503,7 @@ func BenchmarkSaveObject(b *testing.B) {
 
 	for i := 0; i < 10000; i++ {
 		obj := pinObject(b)
-		if err := store.SaveObject(b.Context(), acc1, obj); err != nil {
+		if err := store.SaveObject(acc1, obj); err != nil {
 			b.Fatal(err)
 		}
 		objs = append(objs, obj)
@@ -512,7 +511,7 @@ func BenchmarkSaveObject(b *testing.B) {
 
 	obj := pinObject(b)
 	for b.Loop() {
-		if err := store.SaveObject(b.Context(), acc1, obj); err != nil {
+		if err := store.SaveObject(acc1, obj); err != nil {
 			b.Fatal(err)
 		}
 	}

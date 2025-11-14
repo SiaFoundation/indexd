@@ -61,9 +61,9 @@ func initStats(ctx context.Context, tx *txn) error {
 
 // SectorStats reports statistics about the sectors and slabs stored in the
 // database.
-func (s *Store) SectorStats(ctx context.Context) (admin.SectorsStatsResponse, error) {
+func (s *Store) SectorStats() (admin.SectorsStatsResponse, error) {
 	var stats admin.SectorsStatsResponse
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		row := tx.QueryRow(ctx, "SELECT num_slabs, num_migrated_sectors, num_pinned_sectors, num_unpinnable_sectors, num_unpinned_sectors, num_sectors_lost, num_sectors_checked, num_sectors_check_failed FROM stats")
 		return row.Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned, &stats.Lost, &stats.Checked, &stats.CheckFailed)
 	})
@@ -71,9 +71,9 @@ func (s *Store) SectorStats(ctx context.Context) (admin.SectorsStatsResponse, er
 }
 
 // AccountStats reports statistics about the accounts stored in the database.
-func (s *Store) AccountStats(ctx context.Context) (admin.AccountStatsResponse, error) {
+func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 	var stats admin.AccountStatsResponse
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		err := tx.QueryRow(ctx, "SELECT num_accounts_registered FROM stats").Scan(&stats.Registered)
 		if err != nil {
 			return fmt.Errorf("failed to get number of registered accounts: %w", err)
@@ -91,9 +91,9 @@ func (s *Store) AccountStats(ctx context.Context) (admin.AccountStatsResponse, e
 
 // HostStats reports statistics about used hosts. We consider a host to be used
 // as soon as we spent any funds on it.
-func (s *Store) HostStats(ctx context.Context, offset, limit int) ([]hosts.HostStats, error) {
+func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 	var stats []hosts.HostStats
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 			WITH globals AS (
 				SELECT scanned_height FROM global_settings

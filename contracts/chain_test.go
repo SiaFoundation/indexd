@@ -56,13 +56,13 @@ func newStoreMock() *storeMock {
 	}
 }
 
-func (s *storeMock) ActiveAccounts(ctx context.Context, threshold time.Time) (uint64, error) {
+func (s *storeMock) ActiveAccounts(threshold time.Time) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.activeAccounts, nil
 }
 
-func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency, _ proto.Usage) error {
+func (s *storeMock) AddFormedContract(hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency, _ proto.Usage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.contracts = append(s.contracts, Contract{
@@ -87,7 +87,7 @@ func (s *storeMock) AddFormedContract(ctx context.Context, hostKey types.PublicK
 	return nil
 }
 
-func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee types.Currency, _ proto.Usage) error {
+func (s *storeMock) AddRenewedContract(renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee types.Currency, _ proto.Usage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -129,7 +129,7 @@ func (s *storeMock) AddRenewedContract(ctx context.Context, renewedFrom, renewed
 	return nil
 }
 
-func (s *storeMock) BlockHosts(_ context.Context, hostKeys []types.PublicKey, reasons []string) error {
+func (s *storeMock) BlockHosts(hostKeys []types.PublicKey, reasons []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -154,7 +154,7 @@ func (s *storeMock) BlockHosts(_ context.Context, hostKeys []types.PublicKey, re
 	return nil
 }
 
-func (s *storeMock) ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
+func (s *storeMock) ContractRevision(contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -168,7 +168,7 @@ func (s *storeMock) ContractRevision(ctx context.Context, contractID types.FileC
 	return rhp.ContractRevision{}, false, errors.New("contract not found")
 }
 
-func (s *storeMock) ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error) {
+func (s *storeMock) ContractElement(contractID types.FileContractID) (types.V2FileContractElement, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -191,13 +191,13 @@ func (s *storeMock) ContractElement(ctx context.Context, contractID types.FileCo
 	return types.V2FileContractElement{}, ErrNotFound
 }
 
-func (s *storeMock) ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
+func (s *storeMock) ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.toBroadcast), nil
 }
 
-func (s *storeMock) Contract(_ context.Context, contractID types.FileContractID) (Contract, error) {
+func (s *storeMock) Contract(contractID types.FileContractID) (Contract, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, c := range s.contracts {
@@ -208,7 +208,7 @@ func (s *storeMock) Contract(_ context.Context, contractID types.FileContractID)
 	return Contract{}, ErrNotFound
 }
 
-func (s *storeMock) Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error) {
+func (s *storeMock) Contracts(offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var opts ContractQueryOpts
@@ -244,7 +244,7 @@ func (s *storeMock) Contracts(ctx context.Context, offset, limit int, queryOpts 
 	return filtered, nil
 }
 
-func (s *storeMock) Host(ctx context.Context, hostKey types.PublicKey) (hosts.Host, error) {
+func (s *storeMock) Host(hostKey types.PublicKey) (hosts.Host, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	host, ok := s.hosts[hostKey]
@@ -254,7 +254,7 @@ func (s *storeMock) Host(ctx context.Context, hostKey types.PublicKey) (hosts.Ho
 	return host, nil
 }
 
-func (s *storeMock) Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
+func (s *storeMock) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	copied := slices.Collect(maps.Values(s.hosts))
@@ -287,7 +287,7 @@ func (s *storeMock) Hosts(ctx context.Context, offset, limit int, queryOpts ...h
 	return filter, nil
 }
 
-func (s *storeMock) HostsWithUnpinnableSectors(ctx context.Context) (hks []types.PublicKey, _ error) {
+func (s *storeMock) HostsWithUnpinnableSectors() (hks []types.PublicKey, _ error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -303,26 +303,26 @@ func (s *storeMock) HostsWithUnpinnableSectors(ctx context.Context) (hks []types
 	return hks, nil
 }
 
-func (s *storeMock) LastScannedIndex(ctx context.Context) (ci types.ChainIndex, err error) {
+func (s *storeMock) LastScannedIndex() (ci types.ChainIndex, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return types.ChainIndex{}, nil
 }
 
-func (s *storeMock) MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error) {
+func (s *storeMock) MaintenanceSettings() (MaintenanceSettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.settings, nil
 }
 
-func (s *storeMock) UpdateMaintenanceSettings(ctx context.Context, ms MaintenanceSettings) error {
+func (s *storeMock) UpdateMaintenanceSettings(ms MaintenanceSettings) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.settings = ms
 	return nil
 }
 
-func (s *storeMock) MarkUnrenewableContractsBad(ctx context.Context, minProofHeight uint64) error {
+func (s *storeMock) MarkUnrenewableContractsBad(minProofHeight uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.contracts {
@@ -333,13 +333,13 @@ func (s *storeMock) MarkUnrenewableContractsBad(ctx context.Context, minProofHei
 	return nil
 }
 
-func (s *storeMock) MarkSectorsUnpinnable(ctx context.Context, threshold time.Time) error {
+func (s *storeMock) MarkSectorsUnpinnable(threshold time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return nil
 }
 
-func (s *storeMock) MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error {
+func (s *storeMock) MarkBroadcastAttempt(contractID types.FileContractID) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := range s.contracts {
@@ -350,7 +350,7 @@ func (s *storeMock) MarkBroadcastAttempt(ctx context.Context, contractID types.F
 	return nil
 }
 
-func (s *storeMock) RejectPendingContracts(_ context.Context, t time.Time) error {
+func (s *storeMock) RejectPendingContracts(t time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if t.IsZero() {
@@ -360,7 +360,7 @@ func (s *storeMock) RejectPendingContracts(_ context.Context, t time.Time) error
 	return nil
 }
 
-func (s *storeMock) PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error {
+func (s *storeMock) PruneExpiredContractElements(maxBlocksSinceExpiry uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if maxBlocksSinceExpiry == 0 {
@@ -370,7 +370,7 @@ func (s *storeMock) PruneExpiredContractElements(ctx context.Context, maxBlocksS
 	return nil
 }
 
-func (s *storeMock) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpiry uint64) error {
+func (s *storeMock) PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if maxBlocksSinceExpiry == 0 {
@@ -380,7 +380,7 @@ func (s *storeMock) PruneContractSectorsMap(ctx context.Context, maxBlocksSinceE
 	return nil
 }
 
-func (s *storeMock) ScheduleAccountForFunding(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
+func (s *storeMock) ScheduleAccountForFunding(hostKey types.PublicKey, account proto.Account) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return nil
@@ -399,7 +399,7 @@ func (s *storeMock) UpdateHostSettings(hostKey types.PublicKey, settings proto.H
 	return nil
 }
 
-func (s *storeMock) UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision, _ proto.Usage) error {
+func (s *storeMock) UpdateContractRevision(contract rhp.ContractRevision, _ proto.Usage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i, c := range s.contracts {
@@ -411,7 +411,7 @@ func (s *storeMock) UpdateContractRevision(ctx context.Context, contract rhp.Con
 	return errors.New("contract not found")
 }
 
-func (s *storeMock) UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error) {
+func (s *storeMock) UsabilitySettings() (hosts.UsabilitySettings, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return hosts.DefaultUsabilitySettings, nil
@@ -431,7 +431,7 @@ func (s *storeMock) addTestContract(t *testing.T, hk types.PublicKey, good bool,
 	}
 
 	revision := newTestRevision(hk)
-	err := s.AddFormedContract(t.Context(), hk, fcid, revision, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), proto.Usage{})
+	err := s.AddFormedContract(hk, fcid, revision, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), proto.Usage{})
 	if err != nil {
 		t.Fatal(err)
 	}

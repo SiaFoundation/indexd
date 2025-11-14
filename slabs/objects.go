@@ -114,12 +114,12 @@ func (so *SealedObject) SigHash() types.Hash256 {
 
 // Object retrieves the object with the given key for the given account.
 func (m *SlabManager) Object(ctx context.Context, account proto.Account, key types.Hash256) (SealedObject, error) {
-	return m.store.Object(ctx, account, key)
+	return m.store.Object(account, key)
 }
 
 // DeleteObject deletes the object with the given key for the given account.
 func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
-	return m.store.DeleteObject(ctx, account, objectKey)
+	return m.store.DeleteObject(account, objectKey)
 }
 
 // SaveObject saves the given object for the given account. If an object with
@@ -133,16 +133,16 @@ func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj
 		return ErrInvalidObjectSignature
 	}
 
-	return m.store.SaveObject(ctx, account, obj)
+	return m.store.SaveObject(account, obj)
 }
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
 func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error) {
-	return m.store.ListObjects(ctx, account, cursor, limit)
+	return m.store.ListObjects(account, cursor, limit)
 }
 
 // SharedObject retrieves the shared object with the given key for the given account.
 func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error) {
-	return m.store.SharedObject(ctx, key)
+	return m.store.SharedObject(key)
 }

@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -28,7 +27,7 @@ func TestResetChainState(t *testing.T) {
 	assertTableCount := func(table string, want int) {
 		t.Helper()
 		var got int
-		if err := store.pool.QueryRow(context.Background(), "SELECT COUNT(*) FROM "+table).Scan(&got); err != nil {
+		if err := store.pool.QueryRow(t.Context(), "SELECT COUNT(*) FROM "+table).Scan(&got); err != nil {
 			t.Fatal(err)
 		} else if got != want {
 			t.Fatalf("expected %d rows in %s, got %d", want, table, got)
@@ -47,10 +46,10 @@ func TestResetChainState(t *testing.T) {
 	}
 
 	// prepare store with random chain state
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return errors.Join(
 			tx.WalletApplyIndex(index, created, nil, events, time.Now()),
-			tx.UpdateLastScannedIndex(context.Background(), index),
+			tx.UpdateLastScannedIndex(index),
 		)
 	}); err != nil {
 		t.Fatal(err)
@@ -59,7 +58,7 @@ func TestResetChainState(t *testing.T) {
 	}
 
 	// assert chain state before reset
-	if ci, err := store.LastScannedIndex(context.Background()); err != nil {
+	if ci, err := store.LastScannedIndex(); err != nil {
 		t.Fatal(err)
 	} else if ci != index {
 		t.Fatal("unexpected last scanned index", ci, index)
@@ -69,12 +68,12 @@ func TestResetChainState(t *testing.T) {
 	assertTableCount("wallet_broadcasted_sets", 1)
 	assertTableCount("wallet_events", 1)
 
-	if err := store.ResetChainState(context.Background()); err != nil {
+	if err := store.ResetChainState(); err != nil {
 		t.Fatal(err)
 	}
 
 	// assert chain state after reset
-	if ci, err := store.LastScannedIndex(context.Background()); err != nil {
+	if ci, err := store.LastScannedIndex(); err != nil {
 		t.Fatal(err)
 	} else if ci != (types.ChainIndex{}) {
 		t.Fatal("unexpected last scanned index", ci, index)
@@ -93,14 +92,14 @@ func TestUpdateChainState(t *testing.T) {
 	events[0].Index = types.ChainIndex{Height: 1}
 
 	// assert err when spending non-existing output
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.WalletApplyIndex(types.ChainIndex{Height: 1}, nil, sces, events, time.Now())
 	}); !errors.Is(err, ErrSiacoinElementNotFound) {
 		t.Fatal("unexpected error", err)
 	}
 
 	// create elements
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.WalletApplyIndex(types.ChainIndex{Height: 1}, sces, nil, events, time.Now())
 	}); err != nil {
 		t.Fatal(err)
@@ -119,7 +118,7 @@ func TestUpdateChainState(t *testing.T) {
 	}
 
 	// spend it
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.WalletApplyIndex(types.ChainIndex{Height: 2}, nil, sces, nil, time.Now())
 	}); err != nil {
 		t.Fatal(err)
@@ -134,7 +133,7 @@ func TestUpdateChainState(t *testing.T) {
 	}
 
 	// revert spend
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.WalletRevertIndex(types.ChainIndex{Height: 2}, nil, sces, time.Now())
 	}); err != nil {
 		t.Fatal(err)
@@ -154,7 +153,7 @@ func TestUpdateChainState(t *testing.T) {
 
 	// update state elements
 	update := types.StateElement{LeafIndex: 2, MerkleProof: append(sces[0].StateElement.MerkleProof, types.Hash256{1})}
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.UpdateWalletSiacoinElementProofs(testProofUpdater{
 			fn: func(se *types.StateElement) {
 				se.LeafIndex = update.LeafIndex
@@ -176,7 +175,7 @@ func TestUpdateChainState(t *testing.T) {
 	}
 
 	// revert create
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.WalletRevertIndex(types.ChainIndex{Height: 1}, sces, nil, time.Now())
 	}); err != nil {
 		t.Fatal(err)
@@ -201,7 +200,7 @@ func BenchmarkUpdateWalletSiacoinElementProofs(b *testing.B) {
 	for range 1000 {
 		se := newTestSiacoinElement()
 		frand.Read(se.ID[:])
-		if _, err := store.pool.Exec(context.Background(), `INSERT INTO wallet_siacoin_elements (output_id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`,
+		if _, err := store.pool.Exec(b.Context(), `INSERT INTO wallet_siacoin_elements (output_id, value, address, merkle_proof, leaf_index, maturity_height) VALUES ($1, $2, $3, $4, $5, $6)`,
 			sqlHash256(se.ID),
 			sqlCurrency(se.SiacoinOutput.Value),
 			sqlHash256(se.SiacoinOutput.Address),
@@ -214,7 +213,7 @@ func BenchmarkUpdateWalletSiacoinElementProofs(b *testing.B) {
 	}
 
 	for b.Loop() {
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 			return tx.UpdateWalletSiacoinElementProofs(testProofUpdater{
 				fn: func(se *types.StateElement) {
 					se.LeafIndex++

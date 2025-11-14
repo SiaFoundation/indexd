@@ -56,9 +56,9 @@ type (
 	// RevisionStore defines an interface that allows fetching and updating a
 	// contract's revision.
 	RevisionStore interface {
-		ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error)
-		UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision, usage proto.Usage) error
-		MarkContractBad(ctx context.Context, contractID types.FileContractID) error
+		ContractRevision(contractID types.FileContractID) (rhp.ContractRevision, bool, error)
+		UpdateContractRevision(contract rhp.ContractRevision, usage proto.Usage) error
+		MarkContractBad(contractID types.FileContractID) error
 	}
 )
 
@@ -360,7 +360,7 @@ func (c *HostClient) syncRevision(ctx context.Context, contractID types.FileCont
 			zap.Uint64("hostRevisionNumber", resp.Contract.RevisionNumber),
 			zap.Uint64("localRevisionNumber", revision.RevisionNumber),
 		)
-		if err := c.store.MarkContractBad(ctx, contractID); err != nil {
+		if err := c.store.MarkContractBad(contractID); err != nil {
 			c.log.Error("failed to mark contract as bad", zap.Stringer("contractID", contractID), zap.Error(err))
 		}
 		return types.V2FileContract{}, false, errors.New("local revision is newer than host revision")
@@ -376,7 +376,7 @@ func (c *HostClient) syncRevision(ctx context.Context, contractID types.FileCont
 
 	// update latest revision
 	contract := rhp.ContractRevision{ID: contractID, Revision: resp.Contract}
-	err = c.store.UpdateContractRevision(ctx, contract, usage)
+	err = c.store.UpdateContractRevision(contract, usage)
 	if err != nil {
 		c.log.Error("failed to update contract revision", zap.Stringer("contractID", contractID), zap.Error(err))
 	}
@@ -394,7 +394,7 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 	bh := cs.Index.Height
 
 	// fetch revision from database
-	contract, renewed, err := c.store.ContractRevision(ctx, contractID)
+	contract, renewed, err := c.store.ContractRevision(contractID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contract revision: %w", err)
 	} else if renewed {
@@ -430,7 +430,7 @@ func (c *HostClient) withRevision(ctx context.Context, contractID types.FileCont
 
 	// update revision in the database
 	if revised.Revision.RevisionNumber > contract.Revision.RevisionNumber {
-		if err := c.store.UpdateContractRevision(ctx, revised, usage); err != nil {
+		if err := c.store.UpdateContractRevision(revised, usage); err != nil {
 			return fmt.Errorf("failed to update contract revision: %w", err)
 		}
 	}

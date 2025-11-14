@@ -91,7 +91,7 @@ func TestContractPruning(t *testing.T) {
 	for _, id := range slabIDs {
 	waiting:
 		for range 10 {
-			slab, err := indexer.Store().Slab(t.Context(), id)
+			slab, err := indexer.Store().Slab(id)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -123,7 +123,7 @@ func TestContractPruning(t *testing.T) {
 		contractID := active[0].ID
 
 		// fetch contract revision to get filesize
-		contract, _, err := indexer.Store().ContractRevision(t.Context(), contractID)
+		contract, _, err := indexer.Store().ContractRevision(contractID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -240,7 +240,7 @@ func TestSectorPinning(t *testing.T) {
 
 	// assert the slab is pinned
 	time.Sleep(time.Second)
-	res, err := indexer.Store().Slabs(context.Background(), acc.AccountKey, slabIDs)
+	res, err := indexer.Store().Slabs(acc.AccountKey, slabIDs)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 1 {
@@ -260,7 +260,7 @@ func TestSectorPinning(t *testing.T) {
 	}
 
 	// assert the slab is unpinned
-	_, err = indexer.Store().Slabs(context.Background(), acc.AccountKey, slabIDs)
+	_, err = indexer.Store().Slabs(acc.AccountKey, slabIDs)
 	if !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatal("unexpected error", err)
 	}

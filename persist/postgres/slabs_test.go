@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"context"
 	"errors"
 	"math"
 	"reflect"
@@ -52,13 +51,13 @@ func TestSlab(t *testing.T) {
 	}
 
 	// pin slab
-	slabIDs, err := store.PinSlabs(context.Background(), account, time.Time{}, params)
+	slabIDs, err := store.PinSlabs(account, time.Time{}, params)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch slab
-	got, err := store.Slab(context.Background(), slabIDs[0])
+	got, err := store.Slab(slabIDs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,14 +83,14 @@ func TestSlab(t *testing.T) {
 	// pin the first sector to a contract
 	hk := hosts[0]
 	fcid := types.FileContractID(hk)
-	if err := store.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+	if err := store.AddFormedContract(hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 		t.Fatal(err)
-	} else if err := store.PinSectors(context.Background(), fcid, []types.Hash256{params.Sectors[0].Root}); err != nil {
+	} else if err := store.PinSectors(fcid, []types.Hash256{params.Sectors[0].Root}); err != nil {
 		t.Fatal(err)
 	}
 
 	// fetch slab again
-	got, err = store.Slab(context.Background(), slabIDs[0])
+	got, err = store.Slab(slabIDs[0])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +114,7 @@ func TestMarkSlabRepaired(t *testing.T) {
 	store.addTestContract(t, host)
 
 	// add slab
-	slabIDs, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+	slabIDs, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
@@ -152,14 +151,14 @@ func TestMarkSlabRepaired(t *testing.T) {
 
 	simulateFailedRepair := func() {
 		t.Helper()
-		if err = store.MarkSlabRepaired(t.Context(), slabIDs[0], false); err != nil {
+		if err = store.MarkSlabRepaired(slabIDs[0], false); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	simulateSuccessfulRepair := func() {
 		t.Helper()
-		if err = store.MarkSlabRepaired(t.Context(), slabIDs[0], true); err != nil {
+		if err = store.MarkSlabRepaired(slabIDs[0], true); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -230,13 +229,13 @@ func TestPinnedSlab(t *testing.T) {
 		expected.Sectors[i] = slabs.PinnedSector(sector)
 	}
 
-	slabIDs, err := store.PinSlabs(context.Background(), account, time.Time{}, pinned)
+	slabIDs, err := store.PinSlabs(account, time.Time{}, pinned)
 	if err != nil {
 		t.Fatal(err)
 	}
 	slabID := slabIDs[0]
 
-	slab, err := store.PinnedSlab(context.Background(), account, slabID)
+	slab, err := store.PinnedSlab(account, slabID)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(slab, expected) {
@@ -245,13 +244,13 @@ func TestPinnedSlab(t *testing.T) {
 
 	// mark some of the sectors as lost
 	for i := range slab.Sectors[:10] {
-		if err := store.MarkSectorsLost(context.Background(), slab.Sectors[i].HostKey, []types.Hash256{slab.Sectors[i].Root}); err != nil {
+		if err := store.MarkSectorsLost(slab.Sectors[i].HostKey, []types.Hash256{slab.Sectors[i].Root}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// assert the slab no longer contains the lost sectors
-	slab, err = store.PinnedSlab(context.Background(), account, slabID)
+	slab, err = store.PinnedSlab(account, slabID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,12 +261,12 @@ func TestPinnedSlab(t *testing.T) {
 
 	// mark the remaining sectors as lost
 	for i := range slab.Sectors {
-		if err := store.MarkSectorsLost(context.Background(), slab.Sectors[i].HostKey, []types.Hash256{slab.Sectors[i].Root}); err != nil {
+		if err := store.MarkSectorsLost(slab.Sectors[i].HostKey, []types.Hash256{slab.Sectors[i].Root}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	_, err = store.PinnedSlab(context.Background(), account, slabID)
+	_, err = store.PinnedSlab(account, slabID)
 	if !errors.Is(err, slabs.ErrUnrecoverable) {
 		t.Fatalf("expected ErrUnrecoverable, got %v", err)
 	}
@@ -294,7 +293,7 @@ func TestSlabPruning(t *testing.T) {
 		}},
 	}
 	for _, acc := range []proto.Account{acc1, acc2} {
-		if _, err := store.PinSlabs(context.Background(), acc, time.Time{}, slab1); err != nil {
+		if _, err := store.PinSlabs(acc, time.Time{}, slab1); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -307,7 +306,7 @@ func TestSlabPruning(t *testing.T) {
 			HostKey: hk,
 		}},
 	}
-	if _, err := store.PinSlabs(context.Background(), acc1, time.Time{}, slab2); err != nil {
+	if _, err := store.PinSlabs(acc1, time.Time{}, slab2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -334,7 +333,7 @@ func TestSlabPruning(t *testing.T) {
 		// note: unique key and signature are required per object. It does not change the object ID
 		obj1.EncryptedMasterKey = frand.Bytes(72)
 		obj1.Signature = types.Signature(frand.Bytes(64))
-		if err := store.SaveObject(context.Background(), acc, obj1); err != nil {
+		if err := store.SaveObject(acc, obj1); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -357,14 +356,14 @@ func TestSlabPruning(t *testing.T) {
 		},
 	}
 
-	if err := store.SaveObject(context.Background(), acc1, obj2); err != nil {
+	if err := store.SaveObject(acc1, obj2); err != nil {
 		t.Fatal(err)
 	}
 
 	assertSlabs := func(acc proto.Account, expected ...slabs.SlabID) {
 		t.Helper()
 
-		got, err := store.SlabIDs(context.Background(), acc, 0, math.MaxInt64)
+		got, err := store.SlabIDs(acc, 0, math.MaxInt64)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -377,7 +376,7 @@ func TestSlabPruning(t *testing.T) {
 	assertSlabs(acc2, slab1ID)
 
 	// delete object for acc1
-	if err := store.DeleteObject(context.Background(), acc1, obj1Key); err != nil {
+	if err := store.DeleteObject(acc1, obj1Key); err != nil {
 		t.Fatal(err)
 	}
 
@@ -385,7 +384,7 @@ func TestSlabPruning(t *testing.T) {
 	assertSlabs(acc2, slab1ID)
 
 	// prune slabs for acc1
-	if err := store.PruneSlabs(context.Background(), acc1); err != nil {
+	if err := store.PruneSlabs(acc1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -393,7 +392,7 @@ func TestSlabPruning(t *testing.T) {
 	assertSlabs(acc2, slab1ID)
 
 	// delete object for acc2
-	if err := store.DeleteObject(context.Background(), acc2, obj1Key); err != nil {
+	if err := store.DeleteObject(acc2, obj1Key); err != nil {
 		t.Fatal(err)
 	}
 
@@ -401,7 +400,7 @@ func TestSlabPruning(t *testing.T) {
 	assertSlabs(acc2, slab1ID)
 
 	// prune slabs for acc2
-	if err := store.PruneSlabs(context.Background(), acc2); err != nil {
+	if err := store.PruneSlabs(acc2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -457,7 +456,7 @@ func BenchmarkPruneSlabs(b *testing.B) {
 	for b.Loop() {
 		b.ReportMetric(float64(objectsPerAccount)*float64(slabsPerObject)/2.0, "slabs/op")
 
-		if err := store.PruneSlabs(b.Context(), accs[frand.Intn(len(accs))]); err != nil {
+		if err := store.PruneSlabs(accs[frand.Intn(len(accs))]); err != nil {
 			b.Fatal(err)
 		}
 	}

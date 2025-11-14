@@ -130,7 +130,7 @@ func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKe
 
 		contract := res.Contract
 		minerFee := res.FormationSet.Transactions[len(res.FormationSet.Transactions)-1].MinerFee
-		err = cm.store.AddFormedContract(ctx, host.PublicKey, contract.ID, contract.Revision, host.Settings.Prices.ContractPrice, allowance, minerFee, res.Usage)
+		err = cm.store.AddFormedContract(host.PublicKey, contract.ID, contract.Revision, host.Settings.Prices.ContractPrice, allowance, minerFee, res.Usage)
 		if err != nil {
 			return fmt.Errorf("failed to add formed contract: %w", err)
 		}
@@ -177,7 +177,7 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		renewed := res.Contract
 		minerFee := res.RenewalSet.Transactions[len(res.RenewalSet.Transactions)-1].MinerFee
 
-		if err := cm.store.AddRenewedContract(ctx, contract.ID, renewed.ID, renewed.Revision, host.Settings.Prices.ContractPrice, minerFee, res.Usage); err != nil {
+		if err := cm.store.AddRenewedContract(contract.ID, renewed.ID, renewed.Revision, host.Settings.Prices.ContractPrice, minerFee, res.Usage); err != nil {
 			return fmt.Errorf("failed to store refreshed contract %q: %w", renewed.ID, err)
 		}
 
@@ -217,7 +217,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	// funding and determine the best candidate for refreshing.
 	usableHostContracts := make(map[types.PublicKey]candidateContract)
 	for offset := 0; ; offset += batchSize {
-		batch, err := cm.store.Contracts(ctx, offset, batchSize, WithRevisable(true))
+		batch, err := cm.store.Contracts(offset, batchSize, WithRevisable(true))
 		if err != nil {
 			return fmt.Errorf("failed to fetch active contracts: %w", err)
 		}

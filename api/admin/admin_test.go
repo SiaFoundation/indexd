@@ -1039,7 +1039,7 @@ func TestAccountStatsAPI(t *testing.T) {
 		t.Fatalf("expected 2 registered accounts, got %d", stats.Registered)
 	}
 
-	if err := indexer.Store().DeleteAccount(t.Context(), account1); err != nil {
+	if err := indexer.Store().DeleteAccount(account1); err != nil {
 		t.Fatal(err)
 	}
 

@@ -332,7 +332,7 @@ func TestMigrationConsistency(t *testing.T) {
 	})
 
 	// init db
-	ensureDatabase(context.Background(), ci)
+	ensureDatabase(ctx, ci)
 	pool, err := pgxpool.New(ctx, ci.String())
 	if err != nil {
 		t.Fatal(err)

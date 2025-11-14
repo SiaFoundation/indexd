@@ -29,13 +29,13 @@ func scanConnectKey(s scanner) (key accounts.ConnectKey, err error) {
 }
 
 // AddAppConnectKey adds or updates an application connection key in the database.
-func (s *Store) AddAppConnectKey(ctx context.Context, meta accounts.UpdateAppConnectKey) (key accounts.ConnectKey, err error) {
+func (s *Store) AddAppConnectKey(meta accounts.UpdateAppConnectKey) (key accounts.ConnectKey, err error) {
 	if meta.RemainingUses <= 0 {
 		return accounts.ConnectKey{}, accounts.ErrKeyExhausted
 	} else if meta.MaxPinnedData == 0 {
 		return accounts.ConnectKey{}, fmt.Errorf("max pinned data must be greater than 0")
 	}
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			INSERT INTO app_connect_keys (app_key, use_description, remaining_uses, max_pinned_data) VALUES ($1, $2, $3, $4)
 			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data;
@@ -47,13 +47,13 @@ func (s *Store) AddAppConnectKey(ctx context.Context, meta accounts.UpdateAppCon
 
 // UpdateAppConnectKey updates an existing application connection key in the database.
 // If the key does not exist, it returns [app.ErrKeyNotFound].
-func (s *Store) UpdateAppConnectKey(ctx context.Context, meta accounts.UpdateAppConnectKey) (key accounts.ConnectKey, err error) {
+func (s *Store) UpdateAppConnectKey(meta accounts.UpdateAppConnectKey) (key accounts.ConnectKey, err error) {
 	if meta.RemainingUses <= 0 {
 		return accounts.ConnectKey{}, accounts.ErrKeyExhausted
 	} else if meta.MaxPinnedData == 0 {
 		return accounts.ConnectKey{}, fmt.Errorf("max pinned data must be greater than 0")
 	}
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			UPDATE app_connect_keys SET (use_description, remaining_uses, max_pinned_data) = ($2, $3, $4) WHERE app_key = $1
 			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data;
@@ -64,9 +64,9 @@ func (s *Store) UpdateAppConnectKey(ctx context.Context, meta accounts.UpdateApp
 }
 
 // ValidAppConnectKey checks if an application connection key is valid.
-func (s *Store) ValidAppConnectKey(ctx context.Context, key string) (bool, error) {
+func (s *Store) ValidAppConnectKey(key string) (bool, error) {
 	var uses int
-	err := s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		return tx.QueryRow(ctx, `
 			SELECT remaining_uses FROM app_connect_keys WHERE app_key = $1
 		`, key).Scan(&uses)
@@ -80,8 +80,8 @@ func (s *Store) ValidAppConnectKey(ctx context.Context, key string) (bool, error
 }
 
 // AppConnectKey retrieves an application connection key from the database.
-func (s *Store) AppConnectKey(ctx context.Context, key string) (connectKey accounts.ConnectKey, err error) {
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+func (s *Store) AppConnectKey(key string) (connectKey accounts.ConnectKey, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		connectKey, err = scanConnectKey(tx.QueryRow(ctx, `
 			SELECT app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data
 			FROM app_connect_keys
@@ -95,8 +95,8 @@ func (s *Store) AppConnectKey(ctx context.Context, key string) (connectKey accou
 }
 
 // AppConnectKeys retrieves a list of application connection keys from the database.
-func (s *Store) AppConnectKeys(ctx context.Context, offset, limit int) (keys []accounts.ConnectKey, err error) {
-	err = s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+func (s *Store) AppConnectKeys(offset, limit int) (keys []accounts.ConnectKey, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
 			SELECT app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data
 			FROM app_connect_keys
@@ -121,8 +121,8 @@ func (s *Store) AppConnectKeys(ctx context.Context, offset, limit int) (keys []a
 }
 
 // DeleteAppConnectKey deletes an application connection key from the database.
-func (s *Store) DeleteAppConnectKey(ctx context.Context, connectKey string) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+func (s *Store) DeleteAppConnectKey(connectKey string) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		var connectKeyID int64
 		if err := tx.QueryRow(ctx, `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey).Scan(&connectKeyID); errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrKeyNotFound
@@ -147,8 +147,8 @@ func (s *Store) DeleteAppConnectKey(ctx context.Context, connectKey string) erro
 
 // UseAppConnectKey decrements the remaining uses of a connect key
 // and adds the app account.
-func (s *Store) UseAppConnectKey(ctx context.Context, connectKey string, appKey types.PublicKey, meta accounts.AccountMeta) error {
-	return s.transaction(ctx, func(ctx context.Context, tx *txn) error {
+func (s *Store) UseAppConnectKey(connectKey string, appKey types.PublicKey, meta accounts.AccountMeta) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		var uses int
 		var storageLimit uint64
 		err := tx.QueryRow(ctx, `

@@ -42,7 +42,7 @@ func (am *accountsManagerMock) FundAccounts(ctx context.Context, host hosts.Host
 	return nil
 }
 
-func (s *storeMock) ContractsForBroadcasting(_ context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error) {
+func (s *storeMock) ContractsForBroadcasting(minBroadcast time.Time, limit int) ([]types.FileContractID, error) {
 	var contracts []Contract
 	for _, c := range s.contracts {
 		if c.RenewedTo == (types.FileContractID{}) &&
@@ -65,7 +65,7 @@ func (s *storeMock) ContractsForBroadcasting(_ context.Context, minBroadcast tim
 	return out, nil
 }
 
-func (s *storeMock) ContractsForFunding(_ context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error) {
+func (s *storeMock) ContractsForFunding(hk types.PublicKey, limit int) ([]types.FileContractID, error) {
 	var contracts []Contract
 	for _, c := range s.contracts {
 		if c.HostKey == hk && !c.RemainingAllowance.IsZero() {
@@ -86,7 +86,7 @@ func (s *storeMock) ContractsForFunding(_ context.Context, hk types.PublicKey, l
 	return out, nil
 }
 
-func (s *storeMock) HostsForFunding(ctx context.Context) ([]types.PublicKey, error) {
+func (s *storeMock) HostsForFunding() ([]types.PublicKey, error) {
 	hasContract := make(map[types.PublicKey]struct{})
 	for _, c := range s.contracts {
 		hasContract[c.HostKey] = struct{}{}

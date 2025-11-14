@@ -84,7 +84,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 		t.Fatal("expected 1 broadcasted contract, got", len(walletMock.broadcasted))
 	} else if walletMock.broadcasted[0].FileContractRevisions[0].Revision != rev {
 		t.Fatal("unexpected revision", walletMock.broadcasted[0].FileContractRevisions[0].Revision, rev)
-	} else if contract, err := store.Contract(context.Background(), types.FileContractID{4}); err != nil {
+	} else if contract, err := store.Contract(types.FileContractID{4}); err != nil {
 		t.Fatal(err)
 	} else if contract.LastBroadcastAttempt.IsZero() {
 		t.Fatal("expected last successful broadcast to be set")

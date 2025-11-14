@@ -99,40 +99,40 @@ type (
 	// Store is the minimal interface of Store functionality the ContractManager
 	// requires.
 	Store interface {
-		ActiveAccounts(ctx context.Context, threshold time.Time) (uint64, error)
+		ActiveAccounts(threshold time.Time) (uint64, error)
 
-		Contract(ctx context.Context, id types.FileContractID) (Contract, error)
-		Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
+		Contract(id types.FileContractID) (Contract, error)
+		Contracts(offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 
-		AddFormedContract(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency, usage proto.Usage) error
-		AddRenewedContract(ctx context.Context, renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee types.Currency, usage proto.Usage) error
-		ContractElement(ctx context.Context, contractID types.FileContractID) (types.V2FileContractElement, error)
-		ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error)
-		ContractElementsForBroadcast(ctx context.Context, maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
-		ContractsForBroadcasting(ctx context.Context, minBroadcast time.Time, limit int) ([]types.FileContractID, error)
-		ContractsForFunding(ctx context.Context, hk types.PublicKey, limit int) ([]types.FileContractID, error)
-		ContractsForPinning(ctx context.Context, hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error)
-		ContractsForPruning(ctx context.Context, hk types.PublicKey) ([]types.FileContractID, error)
+		AddFormedContract(hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency, usage proto.Usage) error
+		AddRenewedContract(renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee types.Currency, usage proto.Usage) error
+		ContractElement(contractID types.FileContractID) (types.V2FileContractElement, error)
+		ContractRevision(contractID types.FileContractID) (rhp.ContractRevision, bool, error)
+		ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error)
+		ContractsForBroadcasting(minBroadcast time.Time, limit int) ([]types.FileContractID, error)
+		ContractsForFunding(hk types.PublicKey, limit int) ([]types.FileContractID, error)
+		ContractsForPinning(hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error)
+		ContractsForPruning(hk types.PublicKey) ([]types.FileContractID, error)
 
-		MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error)
-		UpdateMaintenanceSettings(ctx context.Context, ms MaintenanceSettings) error
+		MaintenanceSettings() (MaintenanceSettings, error)
+		UpdateMaintenanceSettings(ms MaintenanceSettings) error
 
-		MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error
-		MarkBroadcastAttempt(ctx context.Context, contractID types.FileContractID) error
-		MarkUnrenewableContractsBad(ctx context.Context, maxProofHeight uint64) error
-		MarkSectorsUnpinnable(ctx context.Context, threshold time.Time) error
-		PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error
-		PrunableContractRoots(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
-		PruneExpiredContractElements(ctx context.Context, maxBlocksSinceExpiry uint64) error
-		PruneContractSectorsMap(ctx context.Context, maxBlocksSinceExpiry uint64) error
-		RejectPendingContracts(ctx context.Context, maxFormation time.Time) error
-		ScheduleAccountForFunding(ctx context.Context, hostKey types.PublicKey, account proto.Account) error
-		ScheduleContractsForPruning(ctx context.Context) error
-		UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error)
-		UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision, usage proto.Usage) error
-		UpdateNextPrune(ctx context.Context, contractID types.FileContractID, nextPrune time.Time) error
+		MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) error
+		MarkBroadcastAttempt(contractID types.FileContractID) error
+		MarkUnrenewableContractsBad(maxProofHeight uint64) error
+		MarkSectorsUnpinnable(threshold time.Time) error
+		PinSectors(contractID types.FileContractID, roots []types.Hash256) error
+		PrunableContractRoots(contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
+		PruneExpiredContractElements(maxBlocksSinceExpiry uint64) error
+		PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error
+		RejectPendingContracts(maxFormation time.Time) error
+		ScheduleAccountForFunding(hostKey types.PublicKey, account proto.Account) error
+		ScheduleContractsForPruning() error
+		UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Hash256, error)
+		UpdateContractRevision(contract rhp.ContractRevision, usage proto.Usage) error
+		UpdateNextPrune(contractID types.FileContractID, nextPrune time.Time) error
 
-		LastScannedIndex(ctx context.Context) (ci types.ChainIndex, err error)
+		LastScannedIndex() (ci types.ChainIndex, err error)
 	}
 
 	// Syncer is the minimal interface of Syncer functionality the
@@ -279,7 +279,7 @@ func (w *wrapper) DialHost(ctx context.Context, hostKey types.PublicKey, addrs [
 
 func (cm *ContractManager) waitUntilSynced(ctx context.Context, log *zap.Logger) bool {
 	isSynced := func() (bool, error) {
-		ci, err := cm.store.LastScannedIndex(ctx)
+		ci, err := cm.store.LastScannedIndex()
 		if err != nil {
 			log.Debug("failed to get last scanned index", zap.Error(err))
 			return false, fmt.Errorf("failed to get last scanned index: %w", err)
@@ -401,23 +401,23 @@ func (cm *ContractManager) TriggerMaintenance() {
 
 // Contract retrieves a contract by its ID.
 func (cm *ContractManager) Contract(ctx context.Context, id types.FileContractID) (Contract, error) {
-	return cm.store.Contract(ctx, id)
+	return cm.store.Contract(id)
 }
 
 // Contracts retrieves a list of contracts.
 func (cm *ContractManager) Contracts(ctx context.Context, offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error) {
-	return cm.store.Contracts(ctx, offset, limit, queryOpts...)
+	return cm.store.Contracts(offset, limit, queryOpts...)
 }
 
 // MaintenanceSettings returns the current maintenance settings.
 func (cm *ContractManager) MaintenanceSettings(ctx context.Context) (MaintenanceSettings, error) {
-	return cm.store.MaintenanceSettings(ctx)
+	return cm.store.MaintenanceSettings()
 }
 
 // TriggerAccountRefill triggers a refill for the given account by marking it
 // for funding and then triggering the account funding process.
 func (cm *ContractManager) TriggerAccountRefill(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
-	if err := cm.store.ScheduleAccountForFunding(ctx, hostKey, account); err != nil {
+	if err := cm.store.ScheduleAccountForFunding(hostKey, account); err != nil {
 		return fmt.Errorf("failed to schedule account for funding: %w", err)
 	}
 	return cm.TriggerAccountFunding(true)
@@ -425,7 +425,7 @@ func (cm *ContractManager) TriggerAccountRefill(ctx context.Context, hostKey typ
 
 // UpdateMaintenanceSettings updates the maintenance settings.
 func (cm *ContractManager) UpdateMaintenanceSettings(ctx context.Context, settings MaintenanceSettings) error {
-	return cm.store.UpdateMaintenanceSettings(ctx, settings)
+	return cm.store.UpdateMaintenanceSettings(settings)
 }
 
 // Close closes the contract manager, terminates any background tasks and waits

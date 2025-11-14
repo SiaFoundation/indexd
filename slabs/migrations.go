@@ -24,7 +24,7 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, pool *
 	var goodContracts []contracts.Contract
 	const batchSize = 50
 	for offset := 0; ; offset += batchSize {
-		batch, err := m.store.Contracts(ctx, offset, batchSize, contracts.WithRevisable(true), contracts.WithGood(true))
+		batch, err := m.store.Contracts(offset, batchSize, contracts.WithRevisable(true), contracts.WithGood(true))
 		if err != nil {
 			return fmt.Errorf("failed to fetch contracts: %w", err)
 		}
@@ -37,7 +37,7 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, pool *
 	// fetch all available hosts with contracts
 	var allHosts []hosts.Host
 	for offset := 0; ; offset += batchSize {
-		batch, err := m.store.Hosts(ctx, offset, batchSize, hosts.WithBlocked(false), hosts.WithActiveContracts(true))
+		batch, err := m.store.Hosts(offset, batchSize, hosts.WithBlocked(false), hosts.WithActiveContracts(true))
 		if err != nil {
 			return fmt.Errorf("failed to fetch hosts: %w", err)
 		}
@@ -53,7 +53,7 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, pool *
 		go func(slabID SlabID, log *zap.Logger) {
 			defer wg.Done()
 			err := m.migrateSlab(ctx, slabID, allHosts, goodContracts, pool, log)
-			if err := m.store.MarkSlabRepaired(ctx, slabID, err == nil); err != nil {
+			if err := m.store.MarkSlabRepaired(slabID, err == nil); err != nil {
 				log.Error("failed to mark slab repaired", zap.Error(err))
 			}
 		}(slabID, log.With(zap.Stringer("slab", slabID)))
@@ -64,7 +64,7 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, pool *
 
 func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, goodContracts []contracts.Contract, pool *connPool, log *zap.Logger) error {
 	start := time.Now()
-	slab, err := m.store.Slab(ctx, slabID)
+	slab, err := m.store.Slab(slabID)
 	if err != nil {
 		log.Error("failed to fetch slab", zap.Error(err))
 		return err
@@ -143,7 +143,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	log = log.With(zap.Duration("uploadElapsed", time.Since(uploadStart)))
 	// update the database with the new locations for the migrated shards
 	for _, shard := range migrated {
-		if ok, err := m.store.MigrateSector(ctx, shard.Root, shard.HostKey); err != nil {
+		if ok, err := m.store.MigrateSector(shard.Root, shard.HostKey); err != nil {
 			log.Error("failed to migrate sector", zap.Error(err))
 		} else if !ok {
 			log.Warn("sector was not migrated", zap.String("root", shard.Root.String()), zap.String("host", shard.HostKey.String()))

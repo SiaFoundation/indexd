@@ -50,7 +50,7 @@ type (
 
 	// Store defines the store interface for the application API.
 	Store interface {
-		UsableHosts(ctx context.Context, offset, limit int, opts ...hosts.UsableHostQueryOpt) ([]hosts.HostInfo, error)
+		UsableHosts(offset, limit int, opts ...hosts.UsableHostQueryOpt) ([]hosts.HostInfo, error)
 	}
 
 	// Accounts defines the account management interface for the application API.
@@ -187,7 +187,7 @@ func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 		opts = append(opts, hosts.SortByDistance(lat, lng))
 	}
 
-	hosts, err := a.store.UsableHosts(jc.Request.Context(), offset, limit, opts...)
+	hosts, err := a.store.UsableHosts(offset, limit, opts...)
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}

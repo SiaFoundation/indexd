@@ -79,7 +79,7 @@ func TestMigrations(t *testing.T) {
 
 	// assert sectors are pinned
 	if err := retry(100, 100*time.Millisecond, func() error {
-		slab, err := indexer.Store().Slab(t.Context(), slabID)
+		slab, err := indexer.Store().Slab(slabID)
 		if err != nil {
 			return err
 		}

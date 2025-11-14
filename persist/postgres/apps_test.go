@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -12,15 +11,14 @@ import (
 )
 
 func TestAppConnectKeys(t *testing.T) {
-	ctx := t.Context()
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	if _, err := store.ValidAppConnectKey(ctx, "foobar"); !errors.Is(err, accounts.ErrKeyNotFound) {
+	if _, err := store.ValidAppConnectKey("foobar"); !errors.Is(err, accounts.ErrKeyNotFound) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
 
 	const connectKey = "foobar"
-	if key, err := store.AddAppConnectKey(ctx, accounts.UpdateAppConnectKey{
+	if key, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
 		Key:           connectKey,
 		Description:   "test key",
 		MaxPinnedData: 10,
@@ -31,7 +29,7 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatalf("unexpected app connect key: %+v", key)
 	}
 
-	if ok, err := store.ValidAppConnectKey(ctx, connectKey); err != nil {
+	if ok, err := store.ValidAppConnectKey(connectKey); err != nil {
 		t.Fatal("failed to validate app connect key:", err)
 	} else if !ok {
 		t.Fatal("expected app connect key to be valid")
@@ -39,7 +37,7 @@ func TestAppConnectKeys(t *testing.T) {
 
 	assertAccount := func(acc types.PublicKey, pinned, maxPinned uint64, desc, logo, service string) {
 		t.Helper()
-		account, err := store.Account(context.Background(), types.PublicKey(acc))
+		account, err := store.Account(types.PublicKey(acc))
 		if err != nil {
 			t.Fatal(err)
 		} else if account.PinnedData != pinned {
@@ -63,13 +61,13 @@ func TestAppConnectKeys(t *testing.T) {
 		LogoURL:     "logo",
 		ServiceURL:  "service",
 	}
-	if err := store.UseAppConnectKey(ctx, connectKey, acc, meta); err != nil {
+	if err := store.UseAppConnectKey(connectKey, acc, meta); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
 	assertAccount(acc, 0, 10, "desc", "logo", "service")
 
 	// ensure the key's last used field was updated
-	keys, err := store.AppConnectKeys(ctx, 0, 1)
+	keys, err := store.AppConnectKeys(0, 1)
 	if err != nil {
 		t.Fatal("failed to retrieve app connect keys:", err)
 	} else if len(keys) != 1 {
@@ -81,17 +79,17 @@ func TestAppConnectKeys(t *testing.T) {
 	}
 
 	// try again on an exhausted key
-	if err := store.UseAppConnectKey(ctx, connectKey, types.GeneratePrivateKey().PublicKey(), meta); !errors.Is(err, accounts.ErrKeyExhausted) {
+	if err := store.UseAppConnectKey(connectKey, types.GeneratePrivateKey().PublicKey(), meta); !errors.Is(err, accounts.ErrKeyExhausted) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyExhausted, err)
 	}
 
-	if ok, err := store.ValidAppConnectKey(ctx, connectKey); err != nil {
+	if ok, err := store.ValidAppConnectKey(connectKey); err != nil {
 		t.Fatal("failed to validate app connect key:", err)
 	} else if ok {
 		t.Fatal("expected app connect key to be invalid")
 	}
 
-	if updated, err := store.UpdateAppConnectKey(ctx, accounts.UpdateAppConnectKey{
+	if updated, err := store.UpdateAppConnectKey(accounts.UpdateAppConnectKey{
 		Key:           connectKey,
 		Description:   "updated key",
 		MaxPinnedData: 20,
@@ -104,13 +102,13 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatalf("expected updated app connect key's max pinned data to be 20, got %d", updated.MaxPinnedData)
 	}
 
-	if ok, err := store.ValidAppConnectKey(ctx, connectKey); err != nil {
+	if ok, err := store.ValidAppConnectKey(connectKey); err != nil {
 		t.Fatal("failed to validate app connect key:", err)
 	} else if !ok {
 		t.Fatal("expected app connect key to be valid")
 	}
 
-	stats, err := store.AccountStats(ctx)
+	stats, err := store.AccountStats()
 	if err != nil {
 		t.Fatal(err)
 	} else if stats.Active != 1 {
@@ -119,35 +117,34 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatal("expected 1 registered account, got", stats.Registered)
 	}
 
-	if err := store.DeleteAppConnectKey(ctx, connectKey); !errors.Is(err, accounts.ErrKeyInUse) {
+	if err := store.DeleteAppConnectKey(connectKey); !errors.Is(err, accounts.ErrKeyInUse) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyInUse, err)
 	}
 
 	// delete account
-	if err := store.DeleteAccount(ctx, acc); err != nil {
+	if err := store.DeleteAccount(acc); err != nil {
 		t.Fatal(err)
 	}
 
 	// try deleting key again now that it's not in use
-	if err := store.DeleteAppConnectKey(ctx, connectKey); err != nil {
+	if err := store.DeleteAppConnectKey(connectKey); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := store.ValidAppConnectKey(ctx, connectKey); !errors.Is(err, accounts.ErrKeyNotFound) {
+	if _, err := store.ValidAppConnectKey(connectKey); !errors.Is(err, accounts.ErrKeyNotFound) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
 
 	// try deleting key that does not exist
-	if err := store.DeleteAppConnectKey(ctx, connectKey); !errors.Is(err, accounts.ErrKeyNotFound) {
+	if err := store.DeleteAppConnectKey(connectKey); !errors.Is(err, accounts.ErrKeyNotFound) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
 }
 
 func TestAppConnectKey(t *testing.T) {
-	ctx := t.Context()
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	key, err := store.AddAppConnectKey(ctx, accounts.UpdateAppConnectKey{
+	key, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
 		Key:           "foobar",
 		Description:   "test key",
 		MaxPinnedData: 10,
@@ -157,7 +154,7 @@ func TestAppConnectKey(t *testing.T) {
 		t.Fatal("failed to add app connect key:", err)
 	}
 
-	got, err := store.AppConnectKey(ctx, "foobar")
+	got, err := store.AppConnectKey("foobar")
 	if err != nil {
 		t.Fatal("failed to validate app connect key:", err)
 	} else if !reflect.DeepEqual(key, got) {

@@ -27,7 +27,7 @@ var _ wallet.SingleAddressStore = (*Store)(nil)
 // This detects if the user's recovery phrase has changed.
 func (s *Store) VerifyWalletKey(seedHash types.Hash256) error {
 	var hash []byte
-	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		err := tx.QueryRow(ctx, `SELECT wallet_hash FROM global_settings`).Scan(&hash)
 		if err != nil {
 			return fmt.Errorf("failed to query wallet seed hash: %w", err)
@@ -45,7 +45,7 @@ func (s *Store) VerifyWalletKey(seedHash types.Hash256) error {
 // periodically rebroadcast the transactions in this set until all transactions
 // are gone from the transaction pool or one week has passed.
 func (s *Store) AddBroadcastedSet(set wallet.BroadcastedSet) error {
-	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO wallet_broadcasted_sets (chain_index, set_id, transactions, broadcasted_at)
 			VALUES ($1, $2, $3, $4)
@@ -57,7 +57,7 @@ func (s *Store) AddBroadcastedSet(set wallet.BroadcastedSet) error {
 
 // BroadcastedSets returns recently broadcasted sets.
 func (s *Store) BroadcastedSets() (sets []wallet.BroadcastedSet, err error) {
-	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `SELECT chain_index, transactions, broadcasted_at FROM wallet_broadcasted_sets ORDER BY broadcasted_at DESC`)
 		if err != nil {
 			return fmt.Errorf("failed to query broadcasted sets: %w", err)
@@ -80,7 +80,7 @@ func (s *Store) BroadcastedSets() (sets []wallet.BroadcastedSet, err error) {
 
 // RemoveBroadcastedSet removes a set so it's no longer rebroadcasted.
 func (s *Store) RemoveBroadcastedSet(set wallet.BroadcastedSet) error {
-	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		res, err := tx.Exec(ctx, `DELETE FROM wallet_broadcasted_sets WHERE set_id = $1`, sqlHash256(set.ID()))
 		if err != nil {
 			return fmt.Errorf("failed to remove broadcasted set: %w", err)
@@ -93,13 +93,13 @@ func (s *Store) RemoveBroadcastedSet(set wallet.BroadcastedSet) error {
 
 // Tip returns the last scanned index.
 func (s *Store) Tip() (ci types.ChainIndex, err error) {
-	return s.LastScannedIndex(context.Background())
+	return s.LastScannedIndex()
 }
 
 // UnspentSiacoinElements returns a list of all unspent siacoin outputs
 // including immature outputs.
 func (s *Store) UnspentSiacoinElements() (tip types.ChainIndex, sces []types.SiacoinElement, err error) {
-	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		err := tx.QueryRow(ctx, `SELECT scanned_height, scanned_block_id FROM global_settings`).Scan(&tip.Height, (*sqlHash256)(&tip.ID))
 		if err != nil {
 			return fmt.Errorf("failed to query last scanned index: %w", err)
@@ -125,7 +125,7 @@ func (s *Store) UnspentSiacoinElements() (tip types.ChainIndex, sces []types.Sia
 
 // WalletEvent returns an event with the given ID.
 func (s *Store) WalletEvent(id types.Hash256) (event wallet.Event, err error) {
-	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		tip, err := getTip(ctx, tx)
 		if err != nil {
 			return fmt.Errorf("failed to get tip: %w", err)
@@ -150,7 +150,7 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 	}
 
 	var events []wallet.Event
-	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		tip, err := getTip(ctx, tx)
 		if err != nil {
 			return fmt.Errorf("failed to get tip: %w", err)
@@ -178,7 +178,7 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 
 // WalletEventCount returns the total number of events relevant to the wallet.
 func (s *Store) WalletEventCount() (count uint64, err error) {
-	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM wallet_events`).Scan(&count)
 		return err
 	})

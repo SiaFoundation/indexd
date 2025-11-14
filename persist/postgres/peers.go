@@ -19,7 +19,7 @@ func (s *Store) AddPeer(addr string) error {
 	if err != nil {
 		return fmt.Errorf("invalid peer address: %w", err)
 	}
-	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		const query = `INSERT INTO syncer_peers (ip_address, port) VALUES ($1, $2) ON CONFLICT (ip_address, port) DO NOTHING`
 		_, err := tx.Exec(ctx, query, host, port)
 		return err
@@ -35,7 +35,7 @@ func (s *Store) PeerInfo(addr string) (syncer.PeerInfo, error) {
 	}
 
 	var info syncer.PeerInfo
-	if err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		var lastConnect sql.NullTime
 		const query = `SELECT first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers WHERE ip_address=$1 AND port=$2`
 		if err := tx.QueryRow(ctx, query, host, port).Scan(&info.FirstSeen, &lastConnect, &info.SyncedBlocks, (*sqlDurationMS)(&info.SyncDuration)); errors.Is(err, sql.ErrNoRows) {
@@ -56,7 +56,7 @@ func (s *Store) PeerInfo(addr string) (syncer.PeerInfo, error) {
 
 // Peers returns the set of known peers.
 func (s *Store) Peers() (infos []syncer.PeerInfo, err error) {
-	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		const query = `SELECT host(ip_address), port, first_seen, last_connect, synced_blocks, sync_duration FROM syncer_peers`
 		rows, err := tx.Query(ctx, query)
 		if err != nil {
@@ -89,7 +89,7 @@ func (s *Store) UpdatePeerInfo(addr string, fn func(*syncer.PeerInfo)) error {
 		return fmt.Errorf("invalid peer address: %w", err)
 	}
 
-	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		var lastConnect sql.NullTime
 		var info syncer.PeerInfo
 		err := tx.
@@ -125,7 +125,7 @@ func (s *Store) Ban(addr string, duration time.Duration, reason string) error {
 		return fmt.Errorf("failed to normalize peer: %w", err)
 	}
 	expiration := time.Now().Add(duration)
-	return s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
 		const query = `INSERT INTO syncer_bans (net_cidr, expiration, reason) VALUES ($1::INET, $2, $3) ON CONFLICT (net_cidr) DO UPDATE SET expiration=EXCLUDED.expiration, reason=EXCLUDED.reason`
 		_, err := tx.Exec(ctx, query, address, expiration, reason)
 		return err
@@ -146,7 +146,7 @@ func (s *Store) Banned(peer string) (bool, error) {
 	}
 
 	var banned bool
-	err = s.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		var expiration time.Time
 		query := `SELECT expiration FROM syncer_bans WHERE net_cidr >>= $1::INET ORDER BY expiration DESC LIMIT 1`
 		err := tx.QueryRow(ctx, query, net.String()).Scan(&expiration)

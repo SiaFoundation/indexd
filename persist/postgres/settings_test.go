@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"context"
 	"reflect"
 	"testing"
 
@@ -23,7 +22,7 @@ func TestContractSettings(t *testing.T) {
 	}
 
 	// check default settings
-	settings, err := store.MaintenanceSettings(context.Background())
+	settings, err := store.MaintenanceSettings()
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(settings, expectedSettings) {
@@ -35,9 +34,9 @@ func TestContractSettings(t *testing.T) {
 	expectedSettings.Period *= 2
 	expectedSettings.RenewWindow *= 2
 	expectedSettings.WantedContracts *= 2
-	if err := store.UpdateMaintenanceSettings(context.Background(), expectedSettings); err != nil {
+	if err := store.UpdateMaintenanceSettings(expectedSettings); err != nil {
 		t.Fatal(err)
-	} else if settings, err = store.MaintenanceSettings(context.Background()); err != nil {
+	} else if settings, err = store.MaintenanceSettings(); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(settings, expectedSettings) {
 		t.Fatalf("mismatch: \n%+v\n%+v", settings, expectedSettings)
@@ -48,7 +47,7 @@ func TestHostSettings(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
 
-	us, err := db.UsabilitySettings(context.Background())
+	us, err := db.UsabilitySettings()
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(us, hosts.DefaultUsabilitySettings) {
@@ -60,11 +59,11 @@ func TestHostSettings(t *testing.T) {
 	us.MaxStoragePrice = types.NewCurrency64(frand.Uint64n(1e6))
 	us.MinCollateral = types.NewCurrency64(frand.Uint64n(1e6))
 	frand.Read(us.MinProtocolVersion[:])
-	if err := db.UpdateUsabilitySettings(context.Background(), us); err != nil {
+	if err := db.UpdateUsabilitySettings(us); err != nil {
 		t.Fatal(err)
 	}
 
-	update, err := db.UsabilitySettings(context.Background())
+	update, err := db.UsabilitySettings()
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(us, update) {
@@ -76,7 +75,7 @@ func TestPricePinningSettings(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
 
-	ps, err := db.PinnedSettings(context.Background())
+	ps, err := db.PinnedSettings()
 	if err != nil {
 		t.Fatal(err)
 	} else if ps.Currency != "" {
@@ -96,11 +95,11 @@ func TestPricePinningSettings(t *testing.T) {
 	ps.MaxEgressPrice = 0.2
 	ps.MaxIngressPrice = 0.3
 	ps.MaxStoragePrice = 0.4
-	if err := db.UpdatePinnedSettings(context.Background(), ps); err != nil {
+	if err := db.UpdatePinnedSettings(ps); err != nil {
 		t.Fatal(err)
 	}
 
-	update, err := db.PinnedSettings(context.Background())
+	update, err := db.PinnedSettings()
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(ps, update) {

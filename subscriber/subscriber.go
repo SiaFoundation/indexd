@@ -38,9 +38,9 @@ type (
 
 	// Store is a persistent store for the chain subscriber.
 	Store interface {
-		ResetChainState(ctx context.Context) error
-		UpdateChainState(ctx context.Context, fn func(tx UpdateTx) error) error
-		LastScannedIndex(context.Context) (types.ChainIndex, error)
+		ResetChainState() error
+		UpdateChainState(fn func(tx UpdateTx) error) error
+		LastScannedIndex() (types.ChainIndex, error)
 	}
 
 	// UpdateTx allows atomically processing a chain update.
@@ -49,7 +49,7 @@ type (
 		wallet.UpdateTx
 		hosts.UpdateTx
 
-		UpdateLastScannedIndex(context.Context, types.ChainIndex) error
+		UpdateLastScannedIndex(ci types.ChainIndex) error
 	}
 
 	// WalletManager manages the wallet outputs and events as chain updates get
@@ -149,7 +149,7 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
-	index, err := s.store.LastScannedIndex(ctx)
+	index, err := s.store.LastScannedIndex()
 	if err != nil {
 		return fmt.Errorf("failed to get last scanned index: %w", err)
 	}
@@ -171,9 +171,9 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 				return fmt.Errorf("failed to sync chain state after multiple attempts: %w", err)
 			}
 			s.log.Warn("failed to fetch updates, resetting chain state", zap.Uint64("height", index.Height), zap.Stringer("id", index.ID), zap.Int("attempt", resetAttempts), zap.Error(err))
-			if err := s.store.ResetChainState(ctx); err != nil {
+			if err := s.store.ResetChainState(); err != nil {
 				return fmt.Errorf("failed to reset consensus state: %w", err)
-			} else if index, err = s.store.LastScannedIndex(ctx); err != nil {
+			} else if index, err = s.store.LastScannedIndex(); err != nil {
 				return fmt.Errorf("failed to get last scanned index after reset: %w", err)
 			}
 			continue
@@ -181,8 +181,7 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 			break
 		}
 
-		updateCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		err = s.store.UpdateChainState(updateCtx, func(tx UpdateTx) error {
+		err = s.store.UpdateChainState(func(tx UpdateTx) error {
 			if err := s.hm.UpdateChainState(tx, aus); err != nil {
 				return fmt.Errorf("failed to update host chain state: %w", err)
 			} else if err := s.contracts.UpdateChainState(tx, rus, aus); err != nil {
@@ -197,7 +196,7 @@ func (s *Subscriber) Sync(ctx context.Context) error {
 				index = rus[len(rus)-1].State.Index
 			}
 
-			if err := tx.UpdateLastScannedIndex(updateCtx, index); err != nil {
+			if err := tx.UpdateLastScannedIndex(index); err != nil {
 				return fmt.Errorf("failed to update last scanned index: %w", err)
 			}
 			return nil

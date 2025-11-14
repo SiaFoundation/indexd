@@ -144,7 +144,7 @@ func (c *Cluster) AnnounceHosts(ctx context.Context, t testing.TB, hosts ...*Hos
 	}
 
 	c.ConsensusNode.MineBlocks(t, types.VoidAddress, 1) // mine attestations
-	knownHosts, err := c.Indexer.store.Hosts(ctx, 0, math.MaxInt)
+	knownHosts, err := c.Indexer.store.Hosts(0, math.MaxInt)
 	if err != nil {
 		t.Fatal(err)
 	}

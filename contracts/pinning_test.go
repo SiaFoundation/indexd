@@ -52,7 +52,7 @@ func (c *hostClientMock) Settings(ctx context.Context) (proto.HostSettings, erro
 	return proto.HostSettings{}, nil
 }
 
-func (s *storeMock) ContractsForPinning(ctx context.Context, hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error) {
+func (s *storeMock) ContractsForPinning(hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error) {
 	var contracts []Contract
 	for _, c := range s.contracts {
 		if c.HostKey == hk && !c.RemainingAllowance.IsZero() {
@@ -73,7 +73,7 @@ func (s *storeMock) ContractsForPinning(ctx context.Context, hk types.PublicKey,
 	return out, nil
 }
 
-func (s *storeMock) HostsForPinning(ctx context.Context) ([]types.PublicKey, error) {
+func (s *storeMock) HostsForPinning() ([]types.PublicKey, error) {
 	hasContract := make(map[types.PublicKey]struct{})
 	for _, c := range s.contracts {
 		hasContract[c.HostKey] = struct{}{}
@@ -89,7 +89,7 @@ func (s *storeMock) HostsForPinning(ctx context.Context) ([]types.PublicKey, err
 	return hosts, nil
 }
 
-func (s *storeMock) PinSectors(ctx context.Context, contractID types.FileContractID, roots []types.Hash256) error {
+func (s *storeMock) PinSectors(contractID types.FileContractID, roots []types.Hash256) error {
 	// find host key
 	var hk types.PublicKey
 	for _, contract := range s.contracts {
@@ -119,7 +119,7 @@ func (s *storeMock) PinSectors(ctx context.Context, contractID types.FileContrac
 	return nil
 }
 
-func (s *storeMock) MarkSectorsLost(ctx context.Context, hk types.PublicKey, roots []types.Hash256) error {
+func (s *storeMock) MarkSectorsLost(hk types.PublicKey, roots []types.Hash256) error {
 	// build map
 	lookup := make(map[types.Hash256]struct{}, len(roots))
 	for _, root := range roots {
@@ -140,7 +140,7 @@ func (s *storeMock) MarkSectorsLost(ctx context.Context, hk types.PublicKey, roo
 	return nil
 }
 
-func (s *storeMock) UnpinnedSectors(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
+func (s *storeMock) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
 	sectors, ok := s.sectors[hostKey]
 	if !ok {
 		return nil, nil

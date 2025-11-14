@@ -40,14 +40,14 @@ func TestContracts(t *testing.T) {
 	fcid3 := store.addTestContract(t, hk2, types.FileContractID{3})
 
 	// mark the second one resolved so it's considered inactive
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractState(fcid2, contracts.ContractStateResolved)
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// mark the third as bad so it's considered not good
-	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(fcid3))
 		return err
 	}); err != nil {
@@ -55,29 +55,29 @@ func TestContracts(t *testing.T) {
 	}
 
 	// assert store returns all contracts without filters
-	if css, err := store.Contracts(context.Background(), 0, 10); err != nil {
+	if css, err := store.Contracts(0, 10); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 3 {
 		t.Fatal("expected 3 contracts, got", len(css))
 	}
 
 	// assert limit and offset
-	if css, err := store.Contracts(context.Background(), 1, 1); err != nil {
+	if css, err := store.Contracts(1, 1); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 1 {
 		t.Fatal("expected 1 contract, got", len(css))
-	} else if css, err := store.Contracts(context.Background(), 3, 1); err != nil {
+	} else if css, err := store.Contracts(3, 1); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 0 {
 		t.Fatal("expected no contracts, got", len(css))
 	}
 
 	// assert ID filtering works
-	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithIDs([]types.FileContractID{fcid1, fcid2})); err != nil {
+	if css, err := store.Contracts(0, 10, contracts.WithIDs([]types.FileContractID{fcid1, fcid2})); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 2 {
 		t.Fatal("expected 2 contracts, got", len(css))
-	} else if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithIDs([]types.FileContractID{fcid3})); err != nil {
+	} else if css, err := store.Contracts(0, 10, contracts.WithIDs([]types.FileContractID{fcid3})); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 1 {
 		t.Fatal("expected 1 contract, got", len(css))
@@ -86,11 +86,11 @@ func TestContracts(t *testing.T) {
 	}
 
 	// assert public key filtering works
-	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithHostKeys([]types.PublicKey{hk1})); err != nil {
+	if css, err := store.Contracts(0, 10, contracts.WithHostKeys([]types.PublicKey{hk1})); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 2 {
 		t.Fatal("expected 2 contracts, got", len(css))
-	} else if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithHostKeys([]types.PublicKey{hk2})); err != nil {
+	} else if css, err := store.Contracts(0, 10, contracts.WithHostKeys([]types.PublicKey{hk2})); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 1 {
 		t.Fatal("expected 1 contract, got", len(css))
@@ -99,14 +99,14 @@ func TestContracts(t *testing.T) {
 	}
 
 	// assert WithRevisable(true)
-	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true)); err != nil {
+	if css, err := store.Contracts(0, 10, contracts.WithRevisable(true)); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 2 {
 		t.Fatal("expected 2 contracts, got", len(css))
 	}
 
 	// assert WithRevisable(true) + ID filtering
-	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true), contracts.WithIDs([]types.FileContractID{fcid2, fcid3})); err != nil {
+	if css, err := store.Contracts(0, 10, contracts.WithRevisable(true), contracts.WithIDs([]types.FileContractID{fcid2, fcid3})); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 1 {
 		t.Fatal("expected 1 contract, got", len(css))
@@ -115,7 +115,7 @@ func TestContracts(t *testing.T) {
 	}
 
 	// assert WithRevisable(false)
-	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(false)); err != nil {
+	if css, err := store.Contracts(0, 10, contracts.WithRevisable(false)); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 1 {
 		t.Fatal("expected 1 contract, got", len(css))
@@ -124,7 +124,7 @@ func TestContracts(t *testing.T) {
 	}
 
 	// assert WithRevisable(true) + WithGood(true)
-	if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true), contracts.WithGood(true)); err != nil {
+	if css, err := store.Contracts(0, 10, contracts.WithRevisable(true), contracts.WithGood(true)); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 1 {
 		t.Fatal("expected 1 contract, got", len(css))
@@ -134,9 +134,9 @@ func TestContracts(t *testing.T) {
 
 	// assert WithRevisable(true) takes into account renewed_to
 	fcid4 := types.FileContractID{4}
-	if err := store.AddRenewedContract(context.Background(), fcid1, fcid4, newTestRevision(hk1), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+	if err := store.AddRenewedContract(fcid1, fcid4, newTestRevision(hk1), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 		t.Fatal(err)
-	} else if css, err := store.Contracts(context.Background(), 0, 10, contracts.WithRevisable(true), contracts.WithGood(true)); err != nil {
+	} else if css, err := store.Contracts(0, 10, contracts.WithRevisable(true), contracts.WithGood(true)); err != nil {
 		t.Fatal(err)
 	} else if len(css) != 1 {
 		t.Fatal("expected 1 contract, got", len(css))
@@ -163,7 +163,7 @@ func TestContracts(t *testing.T) {
 			value = sqlHash256(value.(types.FileContractID))
 		}
 
-		res, err := store.pool.Exec(context.Background(), fmt.Sprintf(`UPDATE contracts SET %s = $1 WHERE contract_id = $2`, column), value, sqlHash256(id))
+		res, err := store.pool.Exec(t.Context(), fmt.Sprintf(`UPDATE contracts SET %s = $1 WHERE contract_id = $2`, column), value, sqlHash256(id))
 		if err != nil {
 			t.Fatal(err)
 		} else if res.RowsAffected() != 1 {
@@ -176,7 +176,7 @@ func TestContracts(t *testing.T) {
 
 		idFilter := contracts.WithIDs(append([]types.FileContractID(nil), ids...))
 		queryOpts := append([]contracts.ContractQueryOpt{idFilter}, opts...)
-		cs, err := store.Contracts(context.Background(), 0, len(ids), queryOpts...)
+		cs, err := store.Contracts(0, len(ids), queryOpts...)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(cs) != len(ids) {
@@ -247,7 +247,7 @@ func TestContracts(t *testing.T) {
 	}
 
 	fcid5 := types.FileContractID{5}
-	if err := store.AddRenewedContract(context.Background(), fcid3, fcid5, newTestRevision(hk2), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+	if err := store.AddRenewedContract(fcid3, fcid5, newTestRevision(hk2), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -265,7 +265,7 @@ func TestContracts(t *testing.T) {
 	assertContractsOrder(renewedToAsc, contracts.WithSorting("renewedTo", false))
 	assertContractsOrder([]types.FileContractID{renewedToAsc[1], renewedToAsc[0]}, contracts.WithSorting("renewedTo", true))
 
-	if _, err := store.Contracts(context.Background(), 0, 10, contracts.WithSorting("does.not.exist", false)); !errors.Is(err, contracts.ErrInvalidSortField) {
+	if _, err := store.Contracts(0, 10, contracts.WithSorting("does.not.exist", false)); !errors.Is(err, contracts.ErrInvalidSortField) {
 		t.Fatalf("expected ErrInvalidSortField, got %v", err)
 	}
 }
@@ -277,14 +277,14 @@ func TestContractElement(t *testing.T) {
 	hk := store.addTestHost(t)
 
 	// assert contract element is not found
-	_, err := store.ContractElement(context.Background(), types.FileContractID(hk))
+	_, err := store.ContractElement(types.FileContractID(hk))
 	if !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatal(err)
 	}
 
 	// add a contract and an element
 	fcid := store.addTestContract(t, hk)
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractElements(types.V2FileContractElement{
 			ID: fcid,
 			StateElement: types.StateElement{
@@ -301,7 +301,7 @@ func TestContractElement(t *testing.T) {
 	}
 
 	// assert contract element is found
-	_, err = store.ContractElement(context.Background(), fcid)
+	_, err = store.ContractElement(fcid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 
 	// add a contract
 	fcid := store.addTestContract(t, hk, types.FileContractID{1})
-	revision, _, err := store.ContractRevision(t.Context(), fcid)
+	revision, _, err := store.ContractRevision(fcid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	// helper to assert contracts to broadcast
 	assertContractsToBroadcast := func(maxBlocksSinceExpiry uint64, n int) {
 		t.Helper()
-		fces, err := store.ContractElementsForBroadcast(context.Background(), maxBlocksSinceExpiry)
+		fces, err := store.ContractElementsForBroadcast(maxBlocksSinceExpiry)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(fces) != n {
@@ -332,8 +332,8 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	}
 
 	// set height to 10 blocks after expiration
-	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: revision.Revision.ExpirationHeight + 10})
+	err = store.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(types.ChainIndex{Height: revision.Revision.ExpirationHeight + 10})
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -349,7 +349,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	}
 
 	// add contract element, 1 contract to broadcast
-	err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	err = store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return errors.Join(
 			tx.UpdateContractElements(fce),
 			tx.UpdateContractState(fcid, contracts.ContractStateActive),
@@ -363,7 +363,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 	assertContractsToBroadcast(10, 1) // not within bounds
 
 	// assert fce matches expected
-	fces, err := store.ContractElementsForBroadcast(context.Background(), 10)
+	fces, err := store.ContractElementsForBroadcast(10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(fces) != 1 {
@@ -374,7 +374,7 @@ func TestContractElementsForBroadcast(t *testing.T) {
 
 	// assert contract state are taken into account
 	for _, state := range []contracts.ContractState{contracts.ContractStatePending, contracts.ContractStateResolved, contracts.ContractStateRejected} {
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 			return tx.UpdateContractState(fcid, state)
 		}); err != nil {
 			t.Fatal(err)
@@ -382,14 +382,14 @@ func TestContractElementsForBroadcast(t *testing.T) {
 		assertContractsToBroadcast(10, 0)
 	}
 	// assert renewed_to is taken into account
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractState(fcid, contracts.ContractStateActive)
 	}); err != nil {
 		t.Fatal(err)
 	}
 	assertContractsToBroadcast(10, 1)
 	fcid2 := types.FileContractID{2}
-	if err := store.AddRenewedContract(t.Context(), fcid, fcid2, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+	if err := store.AddRenewedContract(fcid, fcid2, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 		t.Fatal(err)
 	}
 	assertContractsToBroadcast(10, 0)
@@ -405,14 +405,14 @@ func TestContractsForBroadcasting(t *testing.T) {
 
 	// tweak timestamp to assert order next
 	now := time.Now()
-	store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	store.transaction(func(ctx context.Context, tx *txn) error {
 		_, err1 := tx.Exec(ctx, `UPDATE contracts SET last_broadcast_attempt = $1 WHERE contract_id = $2`, now.Add(-1*time.Minute), sqlHash256(fcid1))
 		_, err2 := tx.Exec(ctx, `UPDATE contracts SET last_broadcast_attempt = $1 WHERE contract_id = $2`, now.Add(-2*time.Minute), sqlHash256(fcid2))
 		return errors.Join(err1, err2)
 	})
 
 	// assert both are returned
-	res, err := store.ContractsForBroadcasting(context.Background(), now, 10)
+	res, err := store.ContractsForBroadcasting(now, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 2 {
@@ -422,7 +422,7 @@ func TestContractsForBroadcasting(t *testing.T) {
 	}
 
 	// assert limit is respected
-	res, err = store.ContractsForBroadcasting(context.Background(), now, 1)
+	res, err = store.ContractsForBroadcasting(now, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 1 {
@@ -430,13 +430,13 @@ func TestContractsForBroadcasting(t *testing.T) {
 	}
 
 	// mark broadcast attempt
-	err = store.MarkBroadcastAttempt(context.Background(), res[0])
+	err = store.MarkBroadcastAttempt(res[0])
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert only one gets returned
-	res, err = store.ContractsForBroadcasting(context.Background(), now, 10)
+	res, err = store.ContractsForBroadcasting(now, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 1 {
@@ -444,12 +444,12 @@ func TestContractsForBroadcasting(t *testing.T) {
 	}
 
 	// renew the contract
-	if err := store.AddRenewedContract(context.Background(), res[0], types.FileContractID{9, 9, 9}, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+	if err := store.AddRenewedContract(res[0], types.FileContractID{9, 9, 9}, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 		t.Fatal(err)
 	}
 
 	// assert none are returned
-	res, err = store.ContractsForBroadcasting(context.Background(), now, 10)
+	res, err = store.ContractsForBroadcasting(now, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 0 {
@@ -462,7 +462,7 @@ func TestContractsForFunding(t *testing.T) {
 
 	updateAllowance := func(contractID types.FileContractID, allowance types.Currency) {
 		t.Helper()
-		_, err := store.pool.Exec(context.Background(), `UPDATE contracts SET initial_allowance = $1, remaining_allowance = $1 WHERE contract_id = $2`, sqlCurrency(allowance), sqlHash256(contractID))
+		_, err := store.pool.Exec(t.Context(), `UPDATE contracts SET initial_allowance = $1, remaining_allowance = $1 WHERE contract_id = $2`, sqlCurrency(allowance), sqlHash256(contractID))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -486,7 +486,7 @@ func TestContractsForFunding(t *testing.T) {
 
 	// assert only 3 contracts are returned for h1, in order, the fourth has no
 	// remaining allowance and h2 doesn't have contracts yet
-	if fcids, err := store.ContractsForFunding(context.Background(), hk1, 10); err != nil {
+	if fcids, err := store.ContractsForFunding(hk1, 10); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(fcids) != 3 {
 		t.Fatalf("expected 3 contract, got %d", len(fcids))
@@ -496,25 +496,25 @@ func TestContractsForFunding(t *testing.T) {
 		t.Fatalf("expected contract %v, got %v", fcid3, fcids[1])
 	} else if fcids[2] != fcid1 {
 		t.Fatalf("expected contract %v, got %v", fcid1, fcids[2])
-	} else if fcids, err := store.ContractsForFunding(context.Background(), hk1, 1); err != nil {
+	} else if fcids, err := store.ContractsForFunding(hk1, 1); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(fcids) != 1 {
 		t.Fatalf("expected 1 contract, got %d", len(fcids))
-	} else if fcids, err := store.ContractsForFunding(context.Background(), hk2, 10); err != nil {
+	} else if fcids, err := store.ContractsForFunding(hk2, 10); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(fcids) != 0 {
 		t.Fatalf("expected no contracts, got %d", len(fcids))
 	}
 
 	// mark first contract as resolved
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractState(fcid1, contracts.ContractStateResolved)
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	// mark second one as bad
-	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE contract_id = $1`, sqlHash256(fcid2))
 		return err
 	}); err != nil {
@@ -526,13 +526,13 @@ func TestContractsForFunding(t *testing.T) {
 	updateAllowance(fcid5, types.Siacoins(1))
 
 	// assert we have only one contract for h1 now, and one on h2
-	if fcids, err := store.ContractsForFunding(context.Background(), hk1, 10); err != nil {
+	if fcids, err := store.ContractsForFunding(hk1, 10); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(fcids) != 1 {
 		t.Fatalf("expected 1 contract, got %d", len(fcids))
 	} else if fcids[0] != fcid3 {
 		t.Fatalf("expected contract %v, got %v", fcid3, fcids[0])
-	} else if fcids, err := store.ContractsForFunding(context.Background(), hk2, 10); err != nil {
+	} else if fcids, err := store.ContractsForFunding(hk2, 10); err != nil {
 		t.Fatal("unexpected", err)
 	} else if len(fcids) != 1 {
 		t.Fatalf("expected 1 contract, got %d", len(fcids))
@@ -548,7 +548,7 @@ func TestContractsForPinning(t *testing.T) {
 		t.Helper()
 		store.addTestContract(t, hk, fcid)
 		query := `UPDATE contracts SET size = $1, capacity = $2, state = $3, good = $4, initial_allowance = $5, remaining_allowance = $5 WHERE contract_id = $6`
-		_, err := store.pool.Exec(context.Background(), query, size, capacity, sqlContractState(state), good, sqlCurrency(allowance), sqlHash256(fcid))
+		_, err := store.pool.Exec(t.Context(), query, size, capacity, sqlContractState(state), good, sqlCurrency(allowance), sqlHash256(fcid))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -572,7 +572,7 @@ func TestContractsForPinning(t *testing.T) {
 	addContract(hk2, types.FileContractID{8}, types.NewCurrency64(1), 100, 100, contracts.ContractStateActive, true) // ok
 
 	// assert contracts for pinning for h1
-	contractIDs, err := store.ContractsForPinning(context.Background(), hk1, maxContractSize)
+	contractIDs, err := store.ContractsForPinning(hk1, maxContractSize)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contractIDs) != 3 {
@@ -586,7 +586,7 @@ func TestContractsForPinning(t *testing.T) {
 	}
 
 	// assert contracts for pinning for h2
-	contractIDs, err = store.ContractsForPinning(context.Background(), hk2, maxContractSize)
+	contractIDs, err = store.ContractsForPinning(hk2, maxContractSize)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contractIDs) != 1 {
@@ -603,7 +603,7 @@ func TestContractsForPruning(t *testing.T) {
 		t.Helper()
 		store.addTestContract(t, hk, fcid)
 		query := `UPDATE contracts SET state = $1, good = $2, size = $3, capacity = $4, next_prune = $5, initial_allowance = $6, remaining_allowance = $6 WHERE contract_id = $7`
-		_, err := store.pool.Exec(context.Background(), query, sqlContractState(state), good, size, size, nextPrune, sqlCurrency(allowance), sqlHash256(fcid))
+		_, err := store.pool.Exec(t.Context(), query, sqlContractState(state), good, size, size, nextPrune, sqlCurrency(allowance), sqlHash256(fcid))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -628,7 +628,7 @@ func TestContractsForPruning(t *testing.T) {
 	addContract(hk2, types.FileContractID{7}, types.NewCurrency64(1), 100, contracts.ContractStateActive, true, now) // ok
 
 	// assert contracts for pruning for h1
-	contractIDs, err := store.ContractsForPruning(context.Background(), hk1)
+	contractIDs, err := store.ContractsForPruning(hk1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contractIDs) != 2 {
@@ -640,7 +640,7 @@ func TestContractsForPruning(t *testing.T) {
 	}
 
 	// assert contracts for pruning for h2
-	contractIDs, err = store.ContractsForPruning(context.Background(), hk2)
+	contractIDs, err = store.ContractsForPruning(hk2)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(contractIDs) != 1 {
@@ -674,7 +674,7 @@ func TestPrunableContractRoots(t *testing.T) {
 	}
 
 	// pin two slabs to add sectors
-	_, err := store.PinSlabs(context.Background(), account, time.Now(), slabs.SlabPinParams{
+	_, err := store.PinSlabs(account, time.Now(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
@@ -685,7 +685,7 @@ func TestPrunableContractRoots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	slabIDs, err := store.PinSlabs(context.Background(), account, time.Now(), slabs.SlabPinParams{
+	slabIDs, err := store.PinSlabs(account, time.Now(), slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
@@ -699,41 +699,41 @@ func TestPrunableContractRoots(t *testing.T) {
 	slabID := slabIDs[0]
 
 	// pin sectors for h1
-	if sectors, err := store.UnpinnedSectors(context.Background(), hk1, 10); err != nil {
+	if sectors, err := store.UnpinnedSectors(hk1, 10); err != nil {
 		t.Fatal(err)
-	} else if err := store.PinSectors(context.Background(), fcid1, sectors); err != nil {
+	} else if err := store.PinSectors(fcid1, sectors); err != nil {
 		t.Fatal(err)
 	}
 
 	// pin sectors for h2
-	if sectors, err := store.UnpinnedSectors(context.Background(), hk2, 10); err != nil {
+	if sectors, err := store.UnpinnedSectors(hk2, 10); err != nil {
 		t.Fatal(err)
-	} else if err := store.PinSectors(context.Background(), fcid2, sectors); err != nil {
+	} else if err := store.PinSectors(fcid2, sectors); err != nil {
 		t.Fatal(err)
 	}
 
 	// assert no prunable roots for either contract
-	if indices, err := store.PrunableContractRoots(context.Background(), fcid1, roots[:2]); err != nil {
+	if indices, err := store.PrunableContractRoots(fcid1, roots[:2]); err != nil {
 		t.Fatal(err)
 	} else if len(indices) != 0 {
 		t.Fatalf("unexpected prunable indices, %+v", indices)
-	} else if indices, err := store.PrunableContractRoots(context.Background(), fcid2, roots[2:]); err != nil {
+	} else if indices, err := store.PrunableContractRoots(fcid2, roots[2:]); err != nil {
 		t.Fatal(err)
 	} else if len(indices) != 0 {
 		t.Fatalf("unexpected prunable indices, %+v", indices)
 	}
 
 	// unpin the second slab to remove sectors for both hosts
-	if err := store.UnpinSlab(context.Background(), account, slabID); err != nil {
+	if err := store.UnpinSlab(account, slabID); err != nil {
 		t.Fatal(err)
 	}
 
 	// assert prunable roots for both contracts
-	if prunable, err := store.PrunableContractRoots(context.Background(), fcid1, roots[:2]); err != nil {
+	if prunable, err := store.PrunableContractRoots(fcid1, roots[:2]); err != nil {
 		t.Fatal(err)
 	} else if len(prunable) != 1 || prunable[0] != roots[1] {
 		t.Fatalf("unexpected prunable roots, %+v", prunable)
-	} else if prunable, err := store.PrunableContractRoots(context.Background(), fcid2, roots[2:]); err != nil {
+	} else if prunable, err := store.PrunableContractRoots(fcid2, roots[2:]); err != nil {
 		t.Fatal(err)
 	} else if len(prunable) != 1 || prunable[0] != roots[3] {
 		t.Fatalf("unexpected prunable roots, %+v", prunable)
@@ -752,10 +752,10 @@ func TestPruneExpiredContractElements(t *testing.T) {
 
 		revision := newTestRevision(hk)
 		revision.ExpirationHeight = expirationHeight
-		if err := store.AddFormedContract(context.Background(), hk, contractID, revision, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+		if err := store.AddFormedContract(hk, contractID, revision, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 			return tx.UpdateContractElements(types.V2FileContractElement{
 				ID: contractID,
 			})
@@ -767,7 +767,7 @@ func TestPruneExpiredContractElements(t *testing.T) {
 
 	assertContracts := func(contractIDs []types.FileContractID) {
 		t.Helper()
-		_ = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		_ = store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 			fces, err := tx.ContractElements()
 			if err != nil {
 				t.Fatal(err)
@@ -789,8 +789,8 @@ func TestPruneExpiredContractElements(t *testing.T) {
 
 	// set height to block 12
 	bh := uint64(12)
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: bh})
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(types.ChainIndex{Height: bh})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -801,25 +801,25 @@ func TestPruneExpiredContractElements(t *testing.T) {
 	c3 := addContract(12)
 
 	// prune with a buffer of 3, should not prune anything
-	if err := store.PruneExpiredContractElements(context.Background(), 3); err != nil {
+	if err := store.PruneExpiredContractElements(3); err != nil {
 		t.Fatal(err)
 	}
 	assertContracts([]types.FileContractID{c1, c2, c3})
 
 	// prune with a buffer of 1, should prune c1 and c2
-	if err := store.PruneExpiredContractElements(context.Background(), 1); err != nil {
+	if err := store.PruneExpiredContractElements(1); err != nil {
 		t.Fatal(err)
 	}
 	assertContracts([]types.FileContractID{c3})
 
 	// prune with a buffer of 0 to prune c3 too
-	if err := store.PruneExpiredContractElements(context.Background(), 0); err != nil {
+	if err := store.PruneExpiredContractElements(0); err != nil {
 		t.Fatal(err)
 	}
 	assertContracts([]types.FileContractID{})
 
 	// assert only the elements got pruned but the contracts remain
-	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		var count int
 		err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM contracts").Scan(&count)
 		if err != nil {
@@ -846,7 +846,7 @@ func TestPruneContractSectorsMap(t *testing.T) {
 
 		revision := newTestRevision(hk)
 		revision.ExpirationHeight = expirationHeight
-		if err := store.AddFormedContract(context.Background(), hk, contractID, revision, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+		if err := store.AddFormedContract(hk, contractID, revision, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 			t.Fatal(err)
 		}
 		return contractID
@@ -854,7 +854,7 @@ func TestPruneContractSectorsMap(t *testing.T) {
 
 	assertContracts := func(contractIDs []types.FileContractID) {
 		t.Helper()
-		rows, err := store.pool.Query(context.Background(), "SELECT contract_id FROM contract_sectors_map")
+		rows, err := store.pool.Query(t.Context(), "SELECT contract_id FROM contract_sectors_map")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -886,8 +886,8 @@ func TestPruneContractSectorsMap(t *testing.T) {
 
 	// set height to block 12
 	bh := uint64(12)
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
-		return tx.UpdateLastScannedIndex(context.Background(), types.ChainIndex{Height: bh})
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(types.ChainIndex{Height: bh})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -901,25 +901,25 @@ func TestPruneContractSectorsMap(t *testing.T) {
 	assertContracts([]types.FileContractID{c1, c2, c3})
 
 	// prune with a buffer of 3, should not prune anything
-	if err := store.PruneContractSectorsMap(context.Background(), 3); err != nil {
+	if err := store.PruneContractSectorsMap(3); err != nil {
 		t.Fatal(err)
 	}
 	assertContracts([]types.FileContractID{c1, c2, c3})
 
 	// prune with a buffer of 1, should prune c1 and c2
-	if err := store.PruneContractSectorsMap(context.Background(), 1); err != nil {
+	if err := store.PruneContractSectorsMap(1); err != nil {
 		t.Fatal(err)
 	}
 	assertContracts([]types.FileContractID{c3})
 
 	// prune with a buffer of 0 to prune c3 too
-	if err := store.PruneContractSectorsMap(context.Background(), 0); err != nil {
+	if err := store.PruneContractSectorsMap(0); err != nil {
 		t.Fatal(err)
 	}
 	assertContracts([]types.FileContractID{})
 
 	// assert only the map got pruned but the contracts remain
-	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		var count int
 		err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM contracts").Scan(&count)
 		if err != nil {
@@ -944,7 +944,7 @@ func TestFormRenewContract(t *testing.T) {
 	assertContract := func(id types.FileContractID, expected contracts.Contract) {
 		t.Helper()
 
-		contract, err := store.Contract(context.Background(), id)
+		contract, err := store.Contract(id)
 		if err != nil {
 			t.Fatal("failed to fetch contract", err)
 		} else if contract.Formation.Before(start) || contract.Formation.After(time.Now().Round(time.Microsecond)) {
@@ -963,7 +963,7 @@ func TestFormRenewContract(t *testing.T) {
 	assertUsage := func(hk types.PublicKey, expectedAccountUsage, expectedTotalUsage types.Currency) {
 		t.Helper()
 
-		host, err := store.Host(t.Context(), hk)
+		host, err := store.Host(hk)
 		if err != nil {
 			t.Fatal("failed to fetch host", err)
 		} else if host.AccountFunding != expectedAccountUsage {
@@ -976,8 +976,8 @@ func TestFormRenewContract(t *testing.T) {
 	// define helper to simulate contract spending
 	simulateSpending := func(contractID types.FileContractID) {
 		t.Helper()
-		if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
-			resp, err := tx.Exec(context.Background(), `UPDATE contracts SET state = 1, good = FALSE, append_sector_spending = 1, free_sector_spending = 2, fund_account_spending = 3, sector_roots_spending = 4 WHERE contract_id = $1`, sqlHash256(contractID))
+		if err := store.transaction(func(ctx context.Context, tx *txn) error {
+			resp, err := tx.Exec(t.Context(), `UPDATE contracts SET state = 1, good = FALSE, append_sector_spending = 1, free_sector_spending = 2, fund_account_spending = 3, sector_roots_spending = 4 WHERE contract_id = $1`, sqlHash256(contractID))
 			if err != nil {
 				return err
 			} else if resp.RowsAffected() != 1 {
@@ -1020,7 +1020,7 @@ func TestFormRenewContract(t *testing.T) {
 
 		Good: true,
 	}
-	if err := store.AddFormedContract(context.Background(), hk, expectedFormed.ID, formation, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee, expectedUsage); err != nil {
+	if err := store.AddFormedContract(hk, expectedFormed.ID, formation, expectedFormed.ContractPrice, expectedFormed.InitialAllowance, expectedFormed.MinerFee, expectedUsage); err != nil {
 		t.Fatal("failed to add formed contract", err)
 	}
 
@@ -1032,7 +1032,7 @@ func TestFormRenewContract(t *testing.T) {
 
 	// assert the contract sector mapping exists
 	var mapID int64
-	if err := store.pool.QueryRow(context.Background(), `SELECT id FROM contract_sectors_map WHERE contract_id = $1`, sqlHash256(expectedFormed.ID)).Scan(&mapID); err != nil {
+	if err := store.pool.QueryRow(t.Context(), `SELECT id FROM contract_sectors_map WHERE contract_id = $1`, sqlHash256(expectedFormed.ID)).Scan(&mapID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1084,7 +1084,7 @@ func TestFormRenewContract(t *testing.T) {
 	}
 	expectedUsage = expectedUsage.Add(refreshUsage)
 
-	if err := store.AddRenewedContract(context.Background(), expectedRefreshed.RenewedFrom, expectedRefreshed.ID, refresh, expectedRefreshed.ContractPrice, expectedRefreshed.MinerFee, refreshUsage); err != nil {
+	if err := store.AddRenewedContract(expectedRefreshed.RenewedFrom, expectedRefreshed.ID, refresh, expectedRefreshed.ContractPrice, expectedRefreshed.MinerFee, refreshUsage); err != nil {
 		t.Fatal("failed to add refreshed contract", err)
 	}
 	expectedFormed.RenewedTo = expectedRefreshed.ID
@@ -1144,7 +1144,7 @@ func TestFormRenewContract(t *testing.T) {
 	}
 	expectedUsage = expectedUsage.Add(renewUsage)
 
-	if err := store.AddRenewedContract(context.Background(), expectedRenewed.RenewedFrom, expectedRenewed.ID, renewal, expectedRenewed.ContractPrice, expectedRenewed.MinerFee, renewUsage); err != nil {
+	if err := store.AddRenewedContract(expectedRenewed.RenewedFrom, expectedRenewed.ID, renewal, expectedRenewed.ContractPrice, expectedRenewed.MinerFee, renewUsage); err != nil {
 		t.Fatal("failed to add renewed contract", err)
 	}
 	expectedRefreshed.RenewedTo = expectedRenewed.ID
@@ -1157,7 +1157,7 @@ func TestFormRenewContract(t *testing.T) {
 
 	// assert `contract_sectors_map` entry was updated when renewing the contract
 	var currID int64
-	if err := store.pool.QueryRow(context.Background(), `SELECT id FROM contract_sectors_map WHERE contract_id = $1`, sqlHash256(expectedRenewed.ID)).Scan(&mapID); err != nil {
+	if err := store.pool.QueryRow(t.Context(), `SELECT id FROM contract_sectors_map WHERE contract_id = $1`, sqlHash256(expectedRenewed.ID)).Scan(&mapID); err != nil {
 		t.Fatal(err)
 	} else if currID == mapID {
 		t.Fatalf("expected contract_sectors_map entry to be updated, got %d", mapID)
@@ -1173,7 +1173,7 @@ func TestRejectContracts(t *testing.T) {
 	// helper to assert contract state
 	assertContractState := func(id types.FileContractID, state contracts.ContractState) {
 		t.Helper()
-		contract, err := store.Contract(context.Background(), id)
+		contract, err := store.Contract(id)
 		if err != nil {
 			t.Fatal("failed to fetch contract", err)
 		} else if contract.State != state {
@@ -1184,13 +1184,13 @@ func TestRejectContracts(t *testing.T) {
 	// helper to modify contract
 	updateStateAndFormation := func(id types.FileContractID, state contracts.ContractState, formation time.Time) {
 		t.Helper()
-		err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 			return tx.UpdateContractState(id, state)
 		})
 		if err != nil {
 			t.Fatal(err)
 		}
-		err = store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+		err = store.transaction(func(ctx context.Context, tx *txn) error {
 			_, err := tx.Exec(ctx, `UPDATE contracts SET formation = $1 WHERE contract_id = $2`, formation, sqlHash256(id))
 			return err
 		})
@@ -1222,7 +1222,7 @@ func TestRejectContracts(t *testing.T) {
 	assertContractState(activeID, contracts.ContractStateActive)
 
 	// reject pending contracts older than 30 minutes
-	if err := store.RejectPendingContracts(context.Background(), now.Add(-30*time.Minute)); err != nil {
+	if err := store.RejectPendingContracts(now.Add(-30 * time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1256,7 +1256,7 @@ func TestUpdateContractElement(t *testing.T) {
 			t.Fatalf("mismatch: \n%+v\n%+v", fce, ele)
 		}
 		var fces []types.V2FileContractElement
-		err = store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
+		err = store.UpdateChainState(func(tx subscriber.UpdateTx) (err error) {
 			fces, err = tx.ContractElements()
 			return
 		})
@@ -1275,7 +1275,7 @@ func TestUpdateContractElement(t *testing.T) {
 	assertKnownContract := func(known bool) {
 		t.Helper()
 		var storedKnown bool
-		if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) (err error) {
+		if err := store.UpdateChainState(func(tx subscriber.UpdateTx) (err error) {
 			storedKnown, err = tx.IsKnownContract(fce.ID)
 			return err
 		}); err != nil {
@@ -1292,7 +1292,7 @@ func TestUpdateContractElement(t *testing.T) {
 
 	updateElement := func() {
 		t.Helper()
-		err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 			return tx.UpdateContractElements(fce)
 		})
 		if err != nil {
@@ -1318,7 +1318,7 @@ func TestUpdateContractElement(t *testing.T) {
 // moved to `contracts.go` after adding a context to its list of args.
 func (s *Store) FileContractElement(contractID types.FileContractID) (types.V2FileContractElement, error) {
 	var fce types.V2FileContractElement
-	err := s.transaction(context.Background(), func(ctx context.Context, tx *txn) (err error) {
+	err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		fce, err = scanContractElement(tx.QueryRow(ctx, `SELECT contract_id, contract, leaf_index, merkle_proof FROM contract_elements WHERE contract_id = $1`, sqlHash256(contractID)))
 		return err
 	})
@@ -1336,7 +1336,7 @@ func TestUpdateContractState(t *testing.T) {
 
 	updateState := func(state contracts.ContractState) {
 		t.Helper()
-		err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+		err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 			return tx.UpdateContractState(contractID, state)
 		})
 		if err != nil {
@@ -1346,7 +1346,7 @@ func TestUpdateContractState(t *testing.T) {
 
 	assertState := func(state contracts.ContractState) {
 		t.Helper()
-		c, err := store.Contract(context.Background(), contractID)
+		c, err := store.Contract(contractID)
 		if err != nil {
 			t.Fatal(err)
 		} else if c.State != state {
@@ -1370,7 +1370,7 @@ func TestUpdateNextPruned(t *testing.T) {
 
 	// assert contract is marked to be pruned within 24h
 	tomorrow := time.Now().Add(24 * time.Hour)
-	if contract, err := store.Contract(context.Background(), fcid); err != nil {
+	if contract, err := store.Contract(fcid); err != nil {
 		t.Fatal(err)
 	} else if !(tomorrow.Add(-time.Second).Before(contract.NextPrune) && tomorrow.Add(time.Second).After(contract.NextPrune)) {
 		t.Fatal("contract should be scheduled for pruning 24h from now")
@@ -1378,16 +1378,16 @@ func TestUpdateNextPruned(t *testing.T) {
 
 	// mark as pruned and assert contract was updated correctly
 	oneHourFromNow := time.Now().Add(time.Hour).Round(time.Microsecond)
-	if err := store.UpdateNextPrune(context.Background(), fcid, oneHourFromNow); err != nil {
+	if err := store.UpdateNextPrune(fcid, oneHourFromNow); err != nil {
 		t.Fatal(err)
-	} else if contract, err := store.Contract(context.Background(), fcid); err != nil {
+	} else if contract, err := store.Contract(fcid); err != nil {
 		t.Fatal(err)
 	} else if !contract.NextPrune.Equal(oneHourFromNow) {
 		t.Fatal("contract next_prune should be updated")
 	}
 
 	// assert field is decorated in store.Contracts as well
-	if contracts, err := store.Contracts(context.Background(), 0, 10); err != nil {
+	if contracts, err := store.Contracts(0, 10); err != nil {
 		t.Fatal(err)
 	} else if len(contracts) != 1 {
 		t.Fatalf("expected 1 contract, got %d", len(contracts))
@@ -1414,7 +1414,7 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 		t.Helper()
 
 		// check test contract
-		contract, err := store.Contract(context.Background(), fcid)
+		contract, err := store.Contract(fcid)
 		if err != nil {
 			t.Fatal(err)
 		} else if contract.Good != good {
@@ -1422,7 +1422,7 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 		}
 
 		// check canary
-		contract, err = store.Contract(context.Background(), goodFCID)
+		contract, err = store.Contract(goodFCID)
 		if err != nil {
 			t.Fatal(err)
 		} else if !contract.Good {
@@ -1439,18 +1439,18 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 	revision2.ExpirationHeight = 9999
 
 	if err := errors.Join(
-		store.AddFormedContract(context.Background(), hk, fcid, revision1, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}),
-		store.AddFormedContract(context.Background(), hk, goodFCID, revision2, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}),
+		store.AddFormedContract(hk, fcid, revision1, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}),
+		store.AddFormedContract(hk, goodFCID, revision2, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}),
 	); err != nil {
 		t.Fatal(err)
 	}
 
 	assertContractGood(true)
-	store.MarkUnrenewableContractsBad(context.Background(), proofHeight-1)
+	store.MarkUnrenewableContractsBad(proofHeight - 1)
 	assertContractGood(true)
-	store.MarkUnrenewableContractsBad(context.Background(), proofHeight)
+	store.MarkUnrenewableContractsBad(proofHeight)
 	assertContractGood(false)
-	store.MarkUnrenewableContractsBad(context.Background(), proofHeight+1)
+	store.MarkUnrenewableContractsBad(proofHeight + 1)
 	assertContractGood(false)
 }
 
@@ -1461,17 +1461,17 @@ func TestMarkContractBad(t *testing.T) {
 	hk := store.addTestHost(t)
 	fcid := store.addTestContract(t, hk)
 
-	contract, err := store.Contract(t.Context(), fcid)
+	contract, err := store.Contract(fcid)
 	if err != nil {
 		t.Fatal(err)
 	} else if !contract.Good {
 		t.Fatal("expected contract to be good initially")
 	}
 
-	if err := store.MarkContractBad(t.Context(), fcid); err != nil {
+	if err := store.MarkContractBad(fcid); err != nil {
 		t.Fatalf("failed to mark contract bad: %v", err)
 	}
-	contract, err = store.Contract(t.Context(), fcid)
+	contract, err = store.Contract(fcid)
 	if err != nil {
 		t.Fatal(err)
 	} else if contract.Good {
@@ -1479,7 +1479,7 @@ func TestMarkContractBad(t *testing.T) {
 	}
 
 	var missingID types.FileContractID
-	if err := store.MarkContractBad(t.Context(), missingID); !errors.Is(err, contracts.ErrNotFound) {
+	if err := store.MarkContractBad(missingID); !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got: %v", err)
 	}
 }
@@ -1490,7 +1490,7 @@ func TestUpdateContractRevision(t *testing.T) {
 	hk := store.addTestHost(t)
 	contractID := store.addTestContract(t, hk)
 
-	contract, renewed, err := store.ContractRevision(context.Background(), contractID)
+	contract, renewed, err := store.ContractRevision(contractID)
 	if err != nil {
 		t.Fatal(err)
 	} else if renewed {
@@ -1508,9 +1508,9 @@ func TestUpdateContractRevision(t *testing.T) {
 	update.Revision.RenterOutput.Value = types.NewCurrency64(1000)
 	update.Revision.MissedHostValue = types.NewCurrency64(100)
 
-	if err := store.UpdateContractRevision(context.Background(), update, proto.Usage{}); err != nil {
+	if err := store.UpdateContractRevision(update, proto.Usage{}); err != nil {
 		t.Fatal(err)
-	} else if revision, renewed, err := store.ContractRevision(context.Background(), contractID); err != nil {
+	} else if revision, renewed, err := store.ContractRevision(contractID); err != nil {
 		t.Fatal(err)
 	} else if renewed {
 		t.Fatal("expected contract to not be renewed")
@@ -1518,9 +1518,9 @@ func TestUpdateContractRevision(t *testing.T) {
 		t.Fatalf("expected revision to be %v, got %v", update, revision)
 	}
 
-	if err := store.AddRenewedContract(context.Background(), contractID, types.FileContractID{2}, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+	if err := store.AddRenewedContract(contractID, types.FileContractID{2}, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 		t.Fatal(err)
-	} else if revision, renewed, err := store.ContractRevision(context.Background(), contractID); err != nil {
+	} else if revision, renewed, err := store.ContractRevision(contractID); err != nil {
 		t.Fatal(err)
 	} else if !renewed {
 		t.Fatal("expected contract to be renewed")
@@ -1529,27 +1529,27 @@ func TestUpdateContractRevision(t *testing.T) {
 	}
 
 	// assert we can't update with an older revision number
-	if revision, _, err := store.ContractRevision(context.Background(), contractID); err != nil {
+	if revision, _, err := store.ContractRevision(contractID); err != nil {
 		t.Fatal(err)
-	} else if err := store.UpdateContractRevision(context.Background(), revision, proto.Usage{}); err == nil || !strings.Contains(err.Error(), "is not strictly higher than the existing revision number") {
+	} else if err := store.UpdateContractRevision(revision, proto.Usage{}); err == nil || !strings.Contains(err.Error(), "is not strictly higher than the existing revision number") {
 		t.Fatalf("expected ErrHostNotFound, got %v", err)
 	}
 
 	// assert [contracts.ErrNotFound] is returned for non-existing contract
-	if _, _, err := store.ContractRevision(context.Background(), types.FileContractID{}); !errors.Is(err, contracts.ErrNotFound) {
+	if _, _, err := store.ContractRevision(types.FileContractID{}); !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatalf("expected ErrContractNotFound, got %v", err)
-	} else if err := store.UpdateContractRevision(context.Background(), rhp.ContractRevision{Revision: newTestRevision(types.PublicKey{})}, proto.Usage{}); !errors.Is(err, contracts.ErrNotFound) {
+	} else if err := store.UpdateContractRevision(rhp.ContractRevision{Revision: newTestRevision(types.PublicKey{})}, proto.Usage{}); !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatalf("expected ErrContractNotFound, got %v", err)
 	}
 
 	// assert it returns [hosts.ErrHostNotFound] for non-existing host
-	revision, _, err := store.ContractRevision(context.Background(), contractID)
+	revision, _, err := store.ContractRevision(contractID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	revision.Revision.RevisionNumber++
 	revision.Revision.HostPublicKey = types.PublicKey{} // non-existing host
-	if err := store.UpdateContractRevision(context.Background(), revision, proto.Usage{}); !errors.Is(err, hosts.ErrNotFound) {
+	if err := store.UpdateContractRevision(revision, proto.Usage{}); !errors.Is(err, hosts.ErrNotFound) {
 		t.Fatalf("expected ErrHostNotFound, got %v", err)
 	}
 }
@@ -1562,39 +1562,39 @@ func TestUpdateContractRenewedTo(t *testing.T) {
 	hk2 := store.addTestHost(t)
 	renewedToID := store.addTestContract(t, hk2)
 
-	if contract, err := store.Contract(context.Background(), contractID); err != nil {
+	if contract, err := store.Contract(contractID); err != nil {
 		t.Fatal(err)
 	} else if contract.RenewedTo != (types.FileContractID{}) {
 		t.Fatal("expected contract to not be renewed")
 	}
 
 	// renewing to a contract that does not exist should do nothing
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		fcID := types.FileContractID{255}
 		return tx.UpdateContractRenewedTo(contractID, &fcID)
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractRenewedTo(contractID, &renewedToID)
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	if contract, err := store.Contract(context.Background(), contractID); err != nil {
+	if contract, err := store.Contract(contractID); err != nil {
 		t.Fatal(err)
 	} else if contract.RenewedTo != renewedToID {
 		t.Fatalf("expected RenewedTo ID %v, got %v", renewedToID, contract.RenewedTo)
 	}
 
-	if err := store.UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
 		return tx.UpdateContractRenewedTo(contractID, nil)
 	}); err != nil {
 		t.Fatal(err)
 	}
 
-	if contract, err := store.Contract(context.Background(), contractID); err != nil {
+	if contract, err := store.Contract(contractID); err != nil {
 		t.Fatal(err)
 	} else if contract.RenewedTo != (types.FileContractID{}) {
 		t.Fatal("expected contract to not be renewed")
@@ -1609,7 +1609,7 @@ func TestMarkBroadcastAttempt(t *testing.T) {
 
 	// assert broadcast attempt is defaulted
 	fcid := store.addTestContract(t, hk)
-	contract, err := store.Contract(context.Background(), fcid)
+	contract, err := store.Contract(fcid)
 	if err != nil {
 		t.Fatal(err)
 	} else if contract.LastBroadcastAttempt.IsZero() {
@@ -1617,13 +1617,13 @@ func TestMarkBroadcastAttempt(t *testing.T) {
 	}
 
 	// mark broadcast attempt
-	err = store.MarkBroadcastAttempt(context.Background(), fcid)
+	err = store.MarkBroadcastAttempt(fcid)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert timestamp was updated
-	updated, err := store.Contract(context.Background(), fcid)
+	updated, err := store.Contract(fcid)
 	if err != nil {
 		t.Fatal(err)
 	} else if updated.LastBroadcastAttempt.IsZero() || !updated.LastBroadcastAttempt.After(contract.LastBroadcastAttempt) {
@@ -1691,7 +1691,7 @@ func TestContractsStats(t *testing.T) {
 		TotalSize:     16000, // (1000 + 3000 + 5000 + 7000) = 16000
 	}
 
-	stats, err := store.ContractsStats(t.Context())
+	stats, err := store.ContractsStats()
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(stats, expected) {
@@ -1700,7 +1700,7 @@ func TestContractsStats(t *testing.T) {
 
 	// renew fcid4
 	fcid6 := types.FileContractID{6}
-	err = store.AddRenewedContract(t.Context(), fcid4, fcid6, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
+	err = store.AddRenewedContract(fcid4, fcid6, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1709,7 +1709,7 @@ func TestContractsStats(t *testing.T) {
 	updateContract(fcid6, true, 7000, 8000, 100)
 
 	// assert stats stay the same
-	stats, err = store.ContractsStats(t.Context())
+	stats, err = store.ContractsStats()
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(stats, expected) {
@@ -1740,7 +1740,7 @@ func BenchmarkContracts(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 	hosts := make([]types.PublicKey, 0, numHosts)
 	contractIDs := make([]types.FileContractID, 0, numHosts*numContractsPerHost)
-	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range numHosts {
 			var hostID int64
 			hk := types.GeneratePrivateKey().PublicKey()
@@ -1780,7 +1780,7 @@ func BenchmarkContracts(b *testing.B) {
 		}
 		for b.Loop() {
 			rIdx := frand.Intn(len(contractIDs))
-			_, err := store.Contract(context.Background(), contractIDs[rIdx])
+			_, err := store.Contract(contractIDs[rIdx])
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -1790,14 +1790,14 @@ func BenchmarkContracts(b *testing.B) {
 	b.Run("contracts_revisions", func(b *testing.B) {
 		for b.Loop() {
 			contractID := contractIDs[frand.Intn(len(contractIDs))]
-			contract, _, err := store.ContractRevision(context.Background(), contractID)
+			contract, _, err := store.ContractRevision(contractID)
 			if err != nil {
 				b.Fatal(err)
 			}
 
 			contract.Revision.RevisionNumber++
 			randomUsage := proto.Usage{RPC: types.NewCurrency64(frand.Uint64n(math.MaxInt64))}
-			if err := store.UpdateContractRevision(context.Background(), contract, randomUsage); err != nil {
+			if err := store.UpdateContractRevision(contract, randomUsage); err != nil {
 				b.Fatal(err)
 			}
 		}
@@ -1807,7 +1807,7 @@ func BenchmarkContracts(b *testing.B) {
 	for _, limit := range apiLimits {
 		b.Run(fmt.Sprintf("contracts_%d", limit), func(b *testing.B) {
 			for b.Loop() {
-				_, err := store.Contracts(context.Background(), 0, limit)
+				_, err := store.Contracts(0, limit)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1815,7 +1815,7 @@ func BenchmarkContracts(b *testing.B) {
 		})
 		b.Run(fmt.Sprintf("contracts_revisable_good_limit_%d", limit), func(b *testing.B) {
 			for b.Loop() {
-				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithRevisable(true), contracts.WithGood(true))
+				_, err := store.Contracts(0, limit, contracts.WithRevisable(true), contracts.WithGood(true))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1823,7 +1823,7 @@ func BenchmarkContracts(b *testing.B) {
 		})
 		b.Run(fmt.Sprintf("contracts_revisable_bad_limit_%d", limit), func(b *testing.B) {
 			for b.Loop() {
-				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithRevisable(true), contracts.WithGood(false))
+				_, err := store.Contracts(0, limit, contracts.WithRevisable(true), contracts.WithGood(false))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1831,7 +1831,7 @@ func BenchmarkContracts(b *testing.B) {
 		})
 		b.Run(fmt.Sprintf("contracts_nonrevisable_good_limit_%d", limit), func(b *testing.B) {
 			for b.Loop() {
-				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithRevisable(false), contracts.WithGood(true))
+				_, err := store.Contracts(0, limit, contracts.WithRevisable(false), contracts.WithGood(true))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1839,7 +1839,7 @@ func BenchmarkContracts(b *testing.B) {
 		})
 		b.Run(fmt.Sprintf("contracts_nonrevisable_bad_limit_%d", limit), func(b *testing.B) {
 			for b.Loop() {
-				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithRevisable(false), contracts.WithGood(false))
+				_, err := store.Contracts(0, limit, contracts.WithRevisable(false), contracts.WithGood(false))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1851,7 +1851,7 @@ func BenchmarkContracts(b *testing.B) {
 				idx := frand.Intn(len(contractIDs) - limit)
 				ids := contractIDs[idx : idx+limit]
 
-				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithIDs(ids))
+				_, err := store.Contracts(0, limit, contracts.WithIDs(ids))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1860,7 +1860,7 @@ func BenchmarkContracts(b *testing.B) {
 
 		b.Run(fmt.Sprintf("contracts_hosts_%d", limit), func(b *testing.B) {
 			for b.Loop() {
-				_, err := store.Contracts(context.Background(), 0, limit, contracts.WithHostKeys(hosts))
+				_, err := store.Contracts(0, limit, contracts.WithHostKeys(hosts))
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1871,7 +1871,7 @@ func BenchmarkContracts(b *testing.B) {
 	for _, limit := range apiLimits {
 		b.Run(fmt.Sprintf("contracts_for_broadcasting_%d", limit), func(b *testing.B) {
 			for b.Loop() {
-				_, err := store.ContractsForBroadcasting(context.Background(), randomTime(), limit)
+				_, err := store.ContractsForBroadcasting(randomTime(), limit)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1880,14 +1880,14 @@ func BenchmarkContracts(b *testing.B) {
 	}
 
 	b.Run("contracts_elements_for_broadcast", func(b *testing.B) {
-		if err := store.UpdateChainState(b.Context(), func(tx subscriber.UpdateTx) error {
-			return tx.UpdateLastScannedIndex(b.Context(), types.ChainIndex{Height: 700})
+		if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
+			return tx.UpdateLastScannedIndex(types.ChainIndex{Height: 700})
 		}); err != nil {
 			b.Fatal(err)
 		}
 
 		for b.Loop() {
-			fces, err := store.ContractElementsForBroadcast(context.Background(), frand.Uint64n(10))
+			fces, err := store.ContractElementsForBroadcast(frand.Uint64n(10))
 			if err != nil {
 				b.Fatal(err)
 			} else if len(fces) == 0 {
@@ -1899,7 +1899,7 @@ func BenchmarkContracts(b *testing.B) {
 	for _, limit := range apiLimits {
 		b.Run(fmt.Sprintf("contracts_for_funding_limit_%d", limit), func(b *testing.B) {
 			for b.Loop() {
-				_, err := store.ContractsForFunding(context.Background(), hosts[frand.Intn(len(hosts))], limit)
+				_, err := store.ContractsForFunding(hosts[frand.Intn(len(hosts))], limit)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -1909,7 +1909,7 @@ func BenchmarkContracts(b *testing.B) {
 
 	b.Run("contracts_for_pinning", func(b *testing.B) {
 		for b.Loop() {
-			_, err := store.ContractsForPinning(context.Background(), hosts[frand.Intn(len(hosts))], maxContractSize)
+			_, err := store.ContractsForPinning(hosts[frand.Intn(len(hosts))], maxContractSize)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -1918,7 +1918,7 @@ func BenchmarkContracts(b *testing.B) {
 
 	b.Run("contracts_for_pruning", func(b *testing.B) {
 		for b.Loop() {
-			_, err := store.ContractsForPruning(context.Background(), hosts[frand.Intn(len(hosts))])
+			_, err := store.ContractsForPruning(hosts[frand.Intn(len(hosts))])
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -1930,7 +1930,7 @@ func BenchmarkContracts(b *testing.B) {
 		start := now.Add(-30 * time.Minute)
 
 		for b.Loop() {
-			err := store.RejectPendingContracts(context.Background(), start)
+			err := store.RejectPendingContracts(start)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -1973,7 +1973,7 @@ func BenchmarkContractsStats(b *testing.B) {
 			to := from.V2RenewalID()
 			fcids[i] = to
 
-			err := store.AddRenewedContract(b.Context(), from, to, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
+			err := store.AddRenewedContract(from, to, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -1981,8 +1981,8 @@ func BenchmarkContractsStats(b *testing.B) {
 	}
 
 	// make sure only the last generation is active
-	err := store.UpdateChainState(b.Context(), func(tx subscriber.UpdateTx) error {
-		return tx.UpdateLastScannedIndex(b.Context(), types.ChainIndex{Height: 100})
+	err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(types.ChainIndex{Height: 100})
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -2005,7 +2005,7 @@ func BenchmarkContractsStats(b *testing.B) {
 	}
 
 	for b.Loop() {
-		stats, err := store.ContractsStats(b.Context())
+		stats, err := store.ContractsStats()
 		if err != nil {
 			b.Fatal(err)
 		} else if stats.Contracts != numContracts {
@@ -2055,7 +2055,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 		}
 
 		// pin slab
-		if _, err := store.PinSlabs(context.Background(), account, time.Time{}, slabs.SlabPinParams{
+		if _, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -2066,7 +2066,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 
 	// pin all sectors to contracts
 	for contractID, roots := range rootsByContract {
-		err := store.PinSectors(context.Background(), contractID, roots)
+		err := store.PinSectors(contractID, roots)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -2089,7 +2089,7 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 			b.SetBytes(batchSize * proto.SectorSize)
 			for b.Loop() {
 				fcid := types.FileContractID(hks[frand.Intn(len(hks))])
-				prunable, err := store.PrunableContractRoots(context.Background(), fcid, rootsByContract[fcid][:batchSize])
+				prunable, err := store.PrunableContractRoots(fcid, rootsByContract[fcid][:batchSize])
 				if err != nil {
 					b.Fatal(err)
 				} else if len(prunable) == 0 || len(prunable) == int(batchSize) {
@@ -2111,7 +2111,7 @@ func BenchmarkMarkContractBad(b *testing.B) {
 	// prepare database
 	store := initPostgres(b, zap.NewNop())
 	contractIDs := make([]types.FileContractID, 0, numHosts*numContractsPerHost)
-	if err := store.transaction(context.Background(), func(ctx context.Context, tx *txn) error {
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range numHosts {
 			var hostID int64
 			hk := types.GeneratePrivateKey().PublicKey()
@@ -2132,7 +2132,7 @@ func BenchmarkMarkContractBad(b *testing.B) {
 		rIdx := frand.Intn(len(contractIDs))
 		fcid := contractIDs[rIdx]
 		contractIDs = append(contractIDs[:rIdx], contractIDs[rIdx+1:]...)
-		if err := store.MarkContractBad(b.Context(), fcid); err != nil {
+		if err := store.MarkContractBad(fcid); err != nil {
 			b.Fatal(err)
 		}
 	}
@@ -2151,7 +2151,7 @@ func (s *Store) addTestContract(t testing.TB, hk types.PublicKey, fcids ...types
 		panic("developer error")
 	}
 
-	err := s.AddFormedContract(context.Background(), hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
+	err := s.AddFormedContract(hk, fcid, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
 	if err != nil {
 		t.Fatal(err)
 	}

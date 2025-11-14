@@ -182,7 +182,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// add quic to h1
-	if err := indexer.Store().UpdateChainState(context.Background(), func(tx subscriber.UpdateTx) error {
+	if err := indexer.Store().UpdateChainState(func(tx subscriber.UpdateTx) error {
 		hosts[0].Addresses = append(hosts[0].Addresses, chain.NetAddress{
 			Protocol: quic.Protocol,
 			Address:  "127.0.0.1:1234",
@@ -204,11 +204,11 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// set h1 to US
-	if err := indexer.Store().UpdateHost(context.Background(), hosts[0].PublicKey, hosts[0].Settings, locationUS, true, hosts[0].LastSuccessfulScan); err != nil {
+	if err := indexer.Store().UpdateHost(hosts[0].PublicKey, hosts[0].Settings, locationUS, true, hosts[0].LastSuccessfulScan); err != nil {
 		t.Fatal(err)
 	}
 	// set h2 to AU
-	if err := indexer.Store().UpdateHost(context.Background(), hosts[1].PublicKey, hosts[1].Settings, locationAU, true, hosts[1].LastSuccessfulScan); err != nil {
+	if err := indexer.Store().UpdateHost(hosts[1].PublicKey, hosts[1].Settings, locationAU, true, hosts[1].LastSuccessfulScan); err != nil {
 		t.Fatal(err)
 	}
 

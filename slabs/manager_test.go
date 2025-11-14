@@ -70,21 +70,21 @@ func newMockStore() *mockStore {
 	}
 }
 
-func (s *mockStore) SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error) {
+func (s *mockStore) SharedObject(key types.Hash256) (SharedObject, error) {
 	panic("not implemented")
 }
 
-func (s *mockStore) AddAccount(ctx context.Context, account types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
+func (s *mockStore) AddAccount(account types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
 	s.accounts[proto.Account(account)] = struct{}{}
 	return nil
 }
 
-func (s *mockStore) AddServiceAccount(ctx context.Context, account types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
+func (s *mockStore) AddServiceAccount(account types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
 	s.accounts[proto.Account(account)] = struct{}{}
 	return nil
 }
 
-func (s *mockStore) Contracts(ctx context.Context, offset, limit int, opts ...contracts.ContractQueryOpt) ([]contracts.Contract, error) {
+func (s *mockStore) Contracts(offset, limit int, opts ...contracts.ContractQueryOpt) ([]contracts.Contract, error) {
 	opt := contracts.ContractQueryOpts{}
 	for _, o := range opts {
 		o(&opt)
@@ -103,7 +103,7 @@ func (s *mockStore) Contracts(ctx context.Context, offset, limit int, opts ...co
 	return contracts, nil
 }
 
-func (s *mockStore) FailingSectors(ctx context.Context, hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error) {
+func (s *mockStore) FailingSectors(hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error) {
 	var roots []types.Hash256
 	for root, failures := range s.failedChecks[hostKey] {
 		if failures >= minChecks {
@@ -113,7 +113,7 @@ func (s *mockStore) FailingSectors(ctx context.Context, hostKey types.PublicKey,
 	return roots, nil
 }
 
-func (s *mockStore) Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
+func (s *mockStore) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
 	opt := hosts.DefaultHostsQueryOpts
 	for _, o := range queryOpts {
 		o(&opt)
@@ -133,11 +133,11 @@ func (s *mockStore) Hosts(ctx context.Context, offset, limit int, queryOpts ...h
 	return hosts, nil
 }
 
-func (s *mockStore) HostsForIntegrityChecks(ctx context.Context, maxLastCheck time.Time, limit int) (result []types.PublicKey, err error) {
+func (s *mockStore) HostsForIntegrityChecks(maxLastCheck time.Time, limit int) (result []types.PublicKey, err error) {
 	return nil, nil
 }
 
-func (s *mockStore) HostsWithLostSectors(ctx context.Context) (hks []types.PublicKey, err error) {
+func (s *mockStore) HostsWithLostSectors() (hks []types.PublicKey, err error) {
 	for hk, lostSectors := range s.lostSectors {
 		if len(lostSectors) > 0 {
 			hks = append(hks, hk)
@@ -146,11 +146,11 @@ func (s *mockStore) HostsWithLostSectors(ctx context.Context) (hks []types.Publi
 	return
 }
 
-func (s *mockStore) MaintenanceSettings(ctx context.Context) (contracts.MaintenanceSettings, error) {
+func (s *mockStore) MaintenanceSettings() (contracts.MaintenanceSettings, error) {
 	return contracts.DefaultMaintenanceSettings, nil
 }
 
-func (s *mockStore) MarkFailingSectorsLost(ctx context.Context, hostKey types.PublicKey, maxFailedIntegrityChecks uint) error {
+func (s *mockStore) MarkFailingSectorsLost(hostKey types.PublicKey, maxFailedIntegrityChecks uint) error {
 	for root, failures := range s.failedChecks[hostKey] {
 		if failures >= int(maxFailedIntegrityChecks) {
 			s.lostSectors[hostKey][root] = struct{}{}
@@ -159,7 +159,7 @@ func (s *mockStore) MarkFailingSectorsLost(ctx context.Context, hostKey types.Pu
 	return nil
 }
 
-func (s *mockStore) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey, roots []types.Hash256) error {
+func (s *mockStore) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) error {
 	if _, ok := s.lostSectors[hostKey]; !ok {
 		s.lostSectors[hostKey] = make(map[types.Hash256]struct{})
 	}
@@ -169,11 +169,11 @@ func (s *mockStore) MarkSectorsLost(ctx context.Context, hostKey types.PublicKey
 	return nil
 }
 
-func (s *mockStore) MarkSlabRepaired(ctx context.Context, slabID SlabID, success bool) error {
+func (s *mockStore) MarkSlabRepaired(slabID SlabID, success bool) error {
 	return nil
 }
 
-func (s *mockStore) MigrateSector(ctx context.Context, root types.Hash256, hostKey types.PublicKey) (bool, error) {
+func (s *mockStore) MigrateSector(root types.Hash256, hostKey types.PublicKey) (bool, error) {
 	_, ok := s.migratedSectors[hostKey]
 	if !ok {
 		s.migratedSectors[hostKey] = make(map[types.Hash256]struct{})
@@ -199,7 +199,7 @@ func (s *mockStore) MigrateSector(ctx context.Context, root types.Hash256, hostK
 	return false, nil
 }
 
-func (s *mockStore) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, slabs ...SlabPinParams) ([]SlabID, error) {
+func (s *mockStore) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, slabs ...SlabPinParams) ([]SlabID, error) {
 	var digests []SlabID
 	for _, slab := range slabs {
 		slabID, err := slab.Digest()
@@ -236,7 +236,7 @@ func (s *mockStore) PinSlabs(ctx context.Context, account proto.Account, nextInt
 	return digests, nil
 }
 
-func (s *mockStore) UnpinSlab(ctx context.Context, account proto.Account, slabID SlabID) error {
+func (s *mockStore) UnpinSlab(account proto.Account, slabID SlabID) error {
 	if _, ok := s.pinnedSlabs[account][slabID]; !ok {
 		return ErrSlabNotFound
 	}
@@ -244,15 +244,15 @@ func (s *mockStore) UnpinSlab(ctx context.Context, account proto.Account, slabID
 	return nil
 }
 
-func (s *mockStore) PinnedSlab(ctx context.Context, account proto.Account, slabID SlabID) (PinnedSlab, error) {
+func (s *mockStore) PinnedSlab(account proto.Account, slabID SlabID) (PinnedSlab, error) {
 	return PinnedSlab{}, nil
 }
 
-func (s *mockStore) SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]SlabID, error) {
+func (s *mockStore) SlabIDs(account proto.Account, offset, limit int) ([]SlabID, error) {
 	return nil, nil
 }
 
-func (s *mockStore) RecordIntegrityCheck(ctx context.Context, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
+func (s *mockStore) RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
 	if _, ok := s.failedChecks[hostKey]; !ok {
 		s.failedChecks[hostKey] = make(map[types.Hash256]int)
 	}
@@ -266,11 +266,11 @@ func (s *mockStore) RecordIntegrityCheck(ctx context.Context, success bool, next
 	return nil
 }
 
-func (s *mockStore) SectorsForIntegrityCheck(ctx context.Context, hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
+func (s *mockStore) SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
 	return slices.Clone(s.sectorsForCheck), nil
 }
 
-func (s *mockStore) Slab(ctx context.Context, slabID SlabID) (Slab, error) {
+func (s *mockStore) Slab(slabID SlabID) (Slab, error) {
 	for acc := range s.accounts {
 		if slab, ok := s.pinnedSlabs[acc][slabID]; ok {
 			return slab, nil
@@ -279,7 +279,7 @@ func (s *mockStore) Slab(ctx context.Context, slabID SlabID) (Slab, error) {
 	return Slab{}, ErrSlabNotFound
 }
 
-func (s *mockStore) Slabs(ctx context.Context, accountID proto.Account, slabIDs []SlabID) ([]Slab, error) {
+func (s *mockStore) Slabs(accountID proto.Account, slabIDs []SlabID) ([]Slab, error) {
 	var slabs []Slab
 	for _, slab := range s.pinnedSlabs[accountID] {
 		slabs = append(slabs, slab)
@@ -287,7 +287,7 @@ func (s *mockStore) Slabs(ctx context.Context, accountID proto.Account, slabIDs 
 	return slabs, nil
 }
 
-func (s *mockStore) UnhealthySlabs(ctx context.Context, limit int) (result []SlabID, _ error) {
+func (s *mockStore) UnhealthySlabs(limit int) (result []SlabID, _ error) {
 	for acc := range s.accounts {
 		for _, slab := range s.pinnedSlabs[acc] {
 			for _, sector := range slab.Sectors {
@@ -313,23 +313,23 @@ func (s *mockStore) UnhealthySlabs(ctx context.Context, limit int) (result []Sla
 	return result, nil
 }
 
-func (s *mockStore) PruneSlabs(ctx context.Context, account proto.Account) error {
+func (s *mockStore) PruneSlabs(account proto.Account) error {
 	return nil
 }
 
-func (s *mockStore) Object(ctx context.Context, account proto.Account, key types.Hash256) (SealedObject, error) {
+func (s *mockStore) Object(account proto.Account, key types.Hash256) (SealedObject, error) {
 	return SealedObject{}, nil
 }
 
-func (s *mockStore) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
+func (s *mockStore) DeleteObject(account proto.Account, objectKey types.Hash256) error {
 	return nil
 }
 
-func (s *mockStore) SaveObject(ctx context.Context, account proto.Account, obj SealedObject) error {
+func (s *mockStore) SaveObject(account proto.Account, obj SealedObject) error {
 	return nil
 }
 
-func (s *mockStore) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error) {
+func (s *mockStore) ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error) {
 	return nil, nil
 }
 

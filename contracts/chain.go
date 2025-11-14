@@ -51,26 +51,26 @@ func (tx *updateTx) IsKnownContract(fcid types.FileContractID) (bool, error) {
 func (m *ContractManager) ProcessActions(ctx context.Context) error {
 	// reject all contracts that have been pending for more than 'contractRejectBuffer'
 	maxFormation := time.Now().Add(-m.contractRejectBuffer)
-	if err := m.store.RejectPendingContracts(ctx, maxFormation); err != nil {
+	if err := m.store.RejectPendingContracts(maxFormation); err != nil {
 		return fmt.Errorf("failed to reject pending contracts: %w", err)
 	}
 
 	// broadcast resolutions for expired contracts
 	// 'expiredContractBroadcastBuffer' blocks after their window end to give
 	// hosts a chance to do it themselves before we do it
-	if err := m.broadcastExpiredContracts(ctx); err != nil && !errors.Is(err, context.Canceled) {
+	if err := m.broadcastExpiredContracts(); err != nil && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("failed to broadcast expired contracts: %w", err)
 	}
 
 	// prune expired contracts 'expiredContractPruneBuffer' blocks after
 	// we begin broadcasting resolutions
-	if err := m.store.PruneExpiredContractElements(ctx, m.expiredContractBroadcastBuffer+m.expiredContractPruneBuffer); err != nil {
+	if err := m.store.PruneExpiredContractElements(m.expiredContractBroadcastBuffer + m.expiredContractPruneBuffer); err != nil {
 		return fmt.Errorf("failed to prune expired contracts: %w", err)
 	}
 
 	// prune expired contracts from contract_sectors_map
 	// 'expiredContractSectorsPruneBuffer' blocks after the contract expired
-	if err := m.store.PruneContractSectorsMap(ctx, m.expiredContractSectorsPruneBuffer); err != nil {
+	if err := m.store.PruneContractSectorsMap(m.expiredContractSectorsPruneBuffer); err != nil {
 		return fmt.Errorf("failed to prune expired contracts: %w", err)
 	}
 	return nil
@@ -200,8 +200,8 @@ func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2File
 	return nil
 }
 
-func (m *ContractManager) broadcastExpiredContracts(ctx context.Context) error {
-	expiredFCEs, err := m.store.ContractElementsForBroadcast(ctx, m.expiredContractBroadcastBuffer)
+func (m *ContractManager) broadcastExpiredContracts() error {
+	expiredFCEs, err := m.store.ContractElementsForBroadcast(m.expiredContractBroadcastBuffer)
 	if err != nil {
 		return fmt.Errorf("failed to get expired contracts for broadcast: %w", err)
 	}

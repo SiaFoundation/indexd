@@ -37,7 +37,8 @@ func (ci ConnectionInfo) String() string {
 	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s", ci.Host, ci.Port, ci.User, ci.Password, ci.Database, ci.SSLMode)
 }
 
-func (s *Store) transaction(ctx context.Context, fn func(context.Context, *txn) error) error {
+func (s *Store) transaction(fn func(context.Context, *txn) error) error {
+	ctx := context.Background()
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
@@ -86,12 +87,12 @@ func NewStore(ctx context.Context, ci ConnectionInfo, defaultMaintenanceSettings
 	version := getDBVersion(ctx, pool)
 	switch {
 	case version == 0:
-		if err := s.initNewDatabase(ctx, target, defaultMaintenanceSettings, defaultUsabilitySettings); err != nil {
+		if err := s.initNewDatabase(target, defaultMaintenanceSettings, defaultUsabilitySettings); err != nil {
 			return nil, fmt.Errorf("failed to initialize database: %w", err)
 		}
 	case version < target:
 		s.log.Info("database version is out of date;", zap.Int64("version", version), zap.Int64("target", target))
-		if err := s.upgradeDatabase(ctx, version, target); err != nil {
+		if err := s.upgradeDatabase(version, target); err != nil {
 			return nil, fmt.Errorf("failed to upgrade database: %w", err)
 		}
 	case version > target:

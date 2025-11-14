@@ -34,7 +34,7 @@ type mockStore struct {
 	good       map[types.FileContractID]bool
 }
 
-func (s *mockStore) ContractRevision(ctx context.Context, contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
+func (s *mockStore) ContractRevision(contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
 	if contractID == (types.FileContractID{4, 0, 4}) {
 		return rhp.ContractRevision{}, false, errors.New("revision not found")
 	}
@@ -45,7 +45,7 @@ func (s *mockStore) ContractRevision(ctx context.Context, contractID types.FileC
 	return rhp.ContractRevision{ID: contractID, Revision: rev}, s.renewed[contractID], nil
 }
 
-func (s *mockStore) UpdateContractRevision(ctx context.Context, contract rhp.ContractRevision, usage proto.Usage) error {
+func (s *mockStore) UpdateContractRevision(contract rhp.ContractRevision, usage proto.Usage) error {
 	if contract.ID == (types.FileContractID{5, 0, 0}) {
 		return errors.New("persist error")
 	}
@@ -54,7 +54,7 @@ func (s *mockStore) UpdateContractRevision(ctx context.Context, contract rhp.Con
 	return nil
 }
 
-func (s *mockStore) MarkContractBad(ctx context.Context, contractID types.FileContractID) error {
+func (s *mockStore) MarkContractBad(contractID types.FileContractID) error {
 	s.good[contractID] = false
 	return nil
 }
@@ -173,7 +173,7 @@ func TestWithRevision(t *testing.T) {
 	}
 
 	// assert withRevision updates the revision in the database after syncing it with the host
-	revision, _, _ := db.ContractRevision(t.Context(), types.FileContractID{8})
+	revision, _, _ := db.ContractRevision(types.FileContractID{8})
 	remaining := revision.Revision.RenterOutput
 	remaining.Value = remaining.Value.Div64(2)
 	c.latestRevisionFn = func(context.Context, rhp.TransportClient, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {

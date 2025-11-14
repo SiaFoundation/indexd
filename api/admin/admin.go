@@ -103,12 +103,12 @@ type (
 
 	// A Store is a persistent store for the indexer.
 	Store interface {
-		AccountStats(ctx context.Context) (AccountStatsResponse, error)
-		ContractsStats(ctx context.Context) (ContractsStatsResponse, error)
-		HostStats(ctx context.Context, offset, limit int) ([]hosts.HostStats, error)
-		SectorStats(ctx context.Context) (SectorsStatsResponse, error)
+		AccountStats() (AccountStatsResponse, error)
+		ContractsStats() (ContractsStatsResponse, error)
+		HostStats(offset, limit int) ([]hosts.HostStats, error)
+		SectorStats() (SectorsStatsResponse, error)
 
-		LastScannedIndex(context.Context) (types.ChainIndex, error)
+		LastScannedIndex() (types.ChainIndex, error)
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -503,7 +503,7 @@ func (a *admin) handlePOSTAlertsDismiss(jc jape.Context) {
 }
 
 func (a *admin) handleGETState(jc jape.Context) {
-	ci, err := a.store.LastScannedIndex(jc.Request.Context())
+	ci, err := a.store.LastScannedIndex()
 	if jc.Check("failed to get last scanned index", err) != nil {
 		return
 	}
@@ -925,7 +925,7 @@ func (a *admin) handlePOSTWalletSend(jc jape.Context) {
 }
 
 func (a *admin) handleGETStatsAccounts(jc jape.Context) {
-	stats, err := a.store.AccountStats(jc.Request.Context())
+	stats, err := a.store.AccountStats()
 	if jc.Check("failed to retrieve account stats", err) != nil {
 		return
 	}
@@ -933,7 +933,7 @@ func (a *admin) handleGETStatsAccounts(jc jape.Context) {
 }
 
 func (a *admin) handleGETStatsContracts(jc jape.Context) {
-	stats, err := a.store.ContractsStats(jc.Request.Context())
+	stats, err := a.store.ContractsStats()
 	if jc.Check("failed to retrieve contracts stats", err) != nil {
 		return
 	}
@@ -959,7 +959,7 @@ func (a *admin) handleGETStatsHosts(jc jape.Context) {
 }
 
 func (a *admin) handleGETStatsSectors(jc jape.Context) {
-	stats, err := a.store.SectorStats(jc.Request.Context())
+	stats, err := a.store.SectorStats()
 	if jc.Check("failed to retrieve sector stats", err) != nil {
 		return
 	}
