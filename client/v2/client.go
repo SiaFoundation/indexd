@@ -276,7 +276,7 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 }
 
 // AppendSectors appends sectors to the specified contract on the host.
-func (c *Client) AppendSectors(ctx context.Context, signer rhp.ContractSigner, cs consensus.State, hostPrices proto.HostPrices, revision rhp.ContractRevision, sectors []types.Hash256) (res rhp.RPCAppendSectorsResult, err error) {
+func (c *Client) AppendSectors(ctx context.Context, signer rhp.ContractSigner, cs consensus.State, revision rhp.ContractRevision, sectors []types.Hash256) (res rhp.RPCAppendSectorsResult, err error) {
 	done, err := c.tg.Add()
 	if err != nil {
 		return rhp.RPCAppendSectorsResult{}, err
@@ -284,7 +284,11 @@ func (c *Client) AppendSectors(ctx context.Context, signer rhp.ContractSigner, c
 	defer done()
 
 	err = c.rpcFn(ctx, revision.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		res, err = rhp.RPCAppendSectors(ctx, transport, signer, cs, hostPrices, revision, sectors)
+		prices, err := c.prices(revision.Revision.HostPublicKey, false)
+		if err != nil {
+			return fmt.Errorf("failed to get host prices: %w", err)
+		}
+		res, err = rhp.RPCAppendSectors(ctx, transport, signer, cs, prices, revision, sectors)
 		return err
 	})
 	return
