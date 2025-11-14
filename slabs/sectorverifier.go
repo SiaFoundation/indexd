@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/mux/v2"
+	"go.uber.org/zap"
 )
 
 const (
@@ -43,6 +44,7 @@ type (
 	SectorVerifier struct {
 		am             AccountManager
 		dialer         Dialer
+		log            *zap.Logger
 		serviceAccount types.PrivateKey
 	}
 
@@ -55,8 +57,8 @@ type (
 )
 
 // NewSectorVerifier creates a new SectorVerifier.
-func NewSectorVerifier(am AccountManager, dialer Dialer, serviceAccount types.PrivateKey) *SectorVerifier {
-	return &SectorVerifier{am: am, dialer: dialer, serviceAccount: serviceAccount}
+func NewSectorVerifier(am AccountManager, dialer Dialer, serviceAccount types.PrivateKey, log *zap.Logger) *SectorVerifier {
+	return &SectorVerifier{am: am, dialer: dialer, log: log.Named("verifier"), serviceAccount: serviceAccount}
 }
 
 // CheckBalance ensures the service account balance is sufficient to cover the
@@ -92,6 +94,8 @@ func (v *SectorVerifier) ResetBalance(ctx context.Context, host hosts.Host) erro
 // should handle any remaining results and then interrupt the integrity checks
 // for the host.
 func (v *SectorVerifier) VerifySectors(ctx context.Context, host hosts.Host, roots []types.Hash256) ([]CheckSectorsResult, error) {
+	logger := v.log.With(zap.Stringer("hostKey", host.PublicKey))
+
 	hc, err := v.dialer.DialHost(ctx, host.PublicKey, host.RHP4Addrs())
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to dial host %s: %w", errHostUnreachable, host.PublicKey, err)
@@ -141,6 +145,10 @@ func (v *SectorVerifier) VerifySectors(ctx context.Context, host hosts.Host, roo
 		} else if strings.Contains(err.Error(), proto.ErrSectorNotFound.Error()) {
 			results = append(results, SectorLost)
 		} else {
+			logger.Debug("failed to verify sector",
+				zap.Stringer("sector", root),
+				zap.Error(err),
+			)
 			results = append(results, SectorFailed)
 		}
 
