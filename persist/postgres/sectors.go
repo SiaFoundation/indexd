@@ -218,8 +218,8 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 	var digests []slabs.SlabID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		var accountID int64
-		var pinnedData, maxPinnedData uint64
-		err := tx.QueryRow(ctx, "UPDATE accounts SET last_used = NOW() WHERE public_key = $1 RETURNING id, pinned_data, max_pinned_data", sqlPublicKey(account)).Scan(&accountID, &pinnedData, &maxPinnedData)
+		var connectKeyID sql.NullInt64
+		err := tx.QueryRow(ctx, "SELECT id, connect_key_id FROM accounts WHERE public_key = $1", sqlPublicKey(account)).Scan(&accountID, &connectKeyID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrNotFound
 		} else if err != nil {
@@ -244,6 +244,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			return fmt.Errorf("failed to get good host rows: %w", err)
 		}
 
+		var newPinnedData uint64
 		for _, slab := range toPin {
 			if slab.MinShards <= 0 || uint(len(slab.Sectors)) < slab.MinShards {
 				return slabs.ErrMinShards
@@ -277,20 +278,10 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				return fmt.Errorf("failed to insert slab into account_slabs: %w", err)
 			}
 
-			// check if pinning the slab would exceed the account's storage limit
-			// and if not, update the account's pinned data NOTE: we perform this
-			// check here since we need to know if the slab is a new slab or whether
-			// it was just repinned.
+			// track amount of data from newly pinned slabs so we can check later
+			// that we didn't exceed account and connect key storage limits
 			if res.RowsAffected() > 0 {
-				newPinnedData := pinnedData + slab.Size()
-				if newPinnedData > maxPinnedData {
-					return accounts.ErrStorageLimitExceeded
-				}
-
-				_, err := tx.Exec(ctx, `UPDATE accounts SET last_used=NOW(), pinned_data = $1 WHERE id = $2`, newPinnedData, accountID)
-				if err != nil {
-					return fmt.Errorf("failed to update account's pinned data: %w", err)
-				}
+				newPinnedData += slab.Size()
 			}
 
 			// if the slab already existed, we don't need to insert the sectors
@@ -366,6 +357,29 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				}
 			}
 		}
+
+		// check whether adding the newly pinned data would exceed the account's
+		// storage limit and if not, update the account's pinned data
+		var pinnedData, maxPinnedData uint64
+		err = tx.QueryRow(ctx, `UPDATE accounts SET last_used=NOW(), pinned_data = pinned_data + $1 WHERE id = $2 RETURNING pinned_data, max_pinned_data`, newPinnedData, accountID).Scan(&pinnedData, &maxPinnedData)
+		if err != nil {
+			return fmt.Errorf("failed to update account's pinned data: %w", err)
+		} else if pinnedData > maxPinnedData {
+			return accounts.ErrAccountStorageLimitExceeded
+		}
+
+		// check whether adding the newly pinned data would exceed the connect
+		// key's storage limit and if not, update the connect key's pinned data
+		if connectKeyID.Valid {
+			var pinnedData, maxPinnedData uint64
+			err = tx.QueryRow(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data + $1 WHERE id = $2 RETURNING pinned_data, max_pinned_data`, newPinnedData, connectKeyID).Scan(&pinnedData, &maxPinnedData)
+			if err != nil {
+				return fmt.Errorf("failed to update connect key's pinned data: %w", err)
+			} else if pinnedData > maxPinnedData {
+				return accounts.ErrAppKeyStorageLimitExceeded
+			}
+		}
+
 		return nil
 	})
 	return digests, err
@@ -406,17 +420,25 @@ RETURNING a.slab_id;`, accountID, args)
 	}
 
 	// update the account's pinned data
-	_, err = tx.Exec(ctx, `
-			UPDATE accounts
-			SET pinned_data = pinned_data - (
-				SELECT COUNT(*) * $1
-				FROM slab_sectors
-				WHERE slab_id = ANY($2)
-			)
-			WHERE id = $3
-		`, proto.SectorSize, sIDs, accountID)
+	var delta uint64
+	if err := tx.QueryRow(ctx, `SELECT COUNT(*) * $1
+	FROM slab_sectors
+	WHERE slab_id = ANY($2)`, proto.SectorSize, sIDs).Scan(&delta); err != nil {
+		return fmt.Errorf("failed to get storage delta: %w", err)
+	}
+
+	var connectKeyID sql.NullInt64
+	err = tx.QueryRow(ctx, `UPDATE accounts
+SET pinned_data = pinned_data - $1
+WHERE id = $2
+RETURNING connect_key_id`, delta, accountID).Scan(&connectKeyID)
 	if err != nil {
 		return fmt.Errorf("failed to update account's pinned data: %w", err)
+	}
+	if connectKeyID.Valid {
+		if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data - $1 WHERE id = $2`, delta, connectKeyID); err != nil {
+			return fmt.Errorf("failed to update connect key pinned data: %w", err)
+		}
 	}
 
 	// ignore the slabs that are pinned by another account

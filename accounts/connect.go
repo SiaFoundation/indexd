@@ -13,11 +13,19 @@ var (
 	// ErrKeyExhausted is returned when an app connect key has
 	// no remaining uses.
 	ErrKeyExhausted = errors.New("key has no remaining uses")
+
 	// ErrKeyNotFound is returned when an app connect key is not found.
 	ErrKeyNotFound = errors.New("key not found")
+
 	// ErrKeyInUse is returned when deleting an app connect key with accounts
 	// associated to it.
 	ErrKeyInUse = errors.New("key in use")
+
+	// ErrAppKeyStorageLimitExceeded is returned when an operation fails due to
+	// the connect key exceeding its storage limit.    We use the term "account
+	// storage limit" here because from the user's perspective, the app connect
+	// key is their "account" which has all of their apps under it.
+	ErrAppKeyStorageLimitExceeded = errors.New("account storage limit exceeded")
 )
 
 type (
