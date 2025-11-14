@@ -169,7 +169,7 @@ func runUploadWorkers(ctx context.Context, client hostClient, accountKey types.P
 			c, _ := chacha20.NewUnauthenticatedCipher(job.encryptionKey[:], nonce)
 			c.XORKeyStream(job.sector, job.sector)
 
-			// try hosts until one works
+			// try hosts until one works or we run out of hosts
 			for host := range job.hosts.Iter() {
 				if ctx.Err() != nil {
 					return
@@ -185,6 +185,7 @@ func runUploadWorkers(ctx context.Context, client hostClient, accountKey types.P
 					return
 				}
 			}
+			job.shards <- shard{err: ErrNoMoreHosts}
 		}()
 	}
 }
