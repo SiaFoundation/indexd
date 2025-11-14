@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/mux/v2"
+	"go.uber.org/zap"
 )
 
 func (c *mockHostClient) Close() error {
@@ -57,7 +58,7 @@ func TestSectorVerifier(t *testing.T) {
 
 	// prepare verifier
 	dialer := newMockDialer([]hosts.Host{host})
-	verifier := NewSectorVerifier(am, dialer, sk)
+	verifier := NewSectorVerifier(am, dialer, sk, zap.NewNop())
 
 	// prepare helper to assert account balance
 	assertBalance := func(want types.Currency) {

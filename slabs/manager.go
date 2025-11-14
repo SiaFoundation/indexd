@@ -235,20 +235,20 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 		shardTimeout:       2 * time.Minute,
 		migrationBatchSize: runtime.NumCPU(),
 
-		chain:    chain,
-		am:       am,
-		cm:       cm,
-		dialer:   dialer,
-		hm:       hm,
-		store:    store,
-		verifier: NewSectorVerifier(am, dialer, integrityAccount),
-		alerter:  alerter,
-		tg:       threadgroup.New(),
-		log:      zap.NewNop(),
+		chain:   chain,
+		am:      am,
+		cm:      cm,
+		dialer:  dialer,
+		hm:      hm,
+		store:   store,
+		alerter: alerter,
+		tg:      threadgroup.New(),
+		log:     zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
+	m.verifier = NewSectorVerifier(am, dialer, integrityAccount, m.log)
 
 	err := m.initServiceAccounts(migrationAccount.PublicKey(), integrityAccount.PublicKey())
 	if err != nil {
