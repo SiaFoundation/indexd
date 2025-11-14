@@ -12,7 +12,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/internal/testutils"
-	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
 
@@ -130,7 +130,7 @@ func TestDownload(t *testing.T) {
 }
 
 func TestE2E(t *testing.T) {
-	log := zap.NewNop()
+	log := zaptest.NewLogger(t)
 	ms := testutils.MaintenanceSettings
 	ms.WantedContracts = 15
 	cluster := testutils.NewCluster(t, testutils.WithHosts(15), testutils.WithLogger(log.Named("cluster")), testutils.WithIndexer(testutils.WithMaintenanceSettings(ms)))
