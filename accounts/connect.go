@@ -39,13 +39,14 @@ type (
 		DateCreated   time.Time `json:"dateCreated"`
 		LastUpdated   time.Time `json:"lastUpdated"`
 		LastUsed      time.Time `json:"lastUsed"`
-		MaxPinnedData int64     `json:"maxPinnedData"`
+		PinnedData    uint64    `json:"pinnedData"`
+		MaxPinnedData uint64    `json:"maxPinnedData"`
 	}
 
 	// AddConnectKeyRequest is the request type for adding a new app connect key.
 	AddConnectKeyRequest struct {
 		Description   string `json:"description"`
-		MaxPinnedData int64  `json:"maxPinnedData,omitempty"`
+		MaxPinnedData uint64 `json:"maxPinnedData,omitempty"`
 		RemainingUses int    `json:"remainingUses"`
 	}
 
@@ -54,7 +55,7 @@ type (
 	UpdateAppConnectKey struct {
 		Key           string `json:"key"`
 		Description   string `json:"description"`
-		MaxPinnedData int64  `json:"maxPinnedData,omitempty"`
+		MaxPinnedData uint64 `json:"maxPinnedData,omitempty"`
 		RemainingUses int    `json:"remainingUses"`
 	}
 

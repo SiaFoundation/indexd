@@ -770,12 +770,11 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 
 	assertKeyPinnedData := func(pinned uint64) {
 		t.Helper()
-		var pinnedData uint64
-		err := store.pool.QueryRow(context.Background(), "SELECT pinned_data FROM app_connect_keys WHERE app_key = $1", key.Key).Scan(&pinnedData)
+		key, err := store.AppConnectKey(ctx, key.Key)
 		if err != nil {
 			t.Fatal(err)
-		} else if pinnedData != pinned {
-			t.Fatalf("expected %d pinned data for connect key, got %d", pinned, pinnedData)
+		} else if key.PinnedData != pinned {
+			t.Fatalf("expected %d pinned data for connect key, got %d", pinned, key.PinnedData)
 		}
 	}
 

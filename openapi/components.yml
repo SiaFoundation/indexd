@@ -426,9 +426,11 @@ components:
           description: Whether it is a service account or not.
         maxPinnedData:
           type: number
+          format: uint64
           description: Maximum amount of pinned data in bytes.
         pinnedData:
           type: number
+          format: uint64
           description: Current amount of pinned data in bytes.
         description:
           type: string
@@ -926,9 +928,13 @@ components:
           type: string
           format: date-time
           description: Last time this key was updated
+        pinnedData:
+          type: integer
+          format: uint64
+          description: Sum of all the pinned data of the accounts associated with this key
         maxPinnedData:
           type: integer
-          format: int64
+          format: uint64
           description: Maximum number of bytes that may be pinned at once with this key
 
     UpdateAppConnectKey:
@@ -942,7 +948,7 @@ components:
           description: App description
         maxPinnedData:
           type: integer
-          format: int64
+          format: uint64
           description: Maximum number of bytes that may be pinned at once with this key
         remainingUses:
           type: integer
@@ -956,7 +962,7 @@ components:
           description: App description
         maxPinnedData:
           type: integer
-          format: int64
+          format: uint64
           description: Maximum number of bytes that may be pinned at once with this key
         remainingUses:
           type: integer

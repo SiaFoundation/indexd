@@ -20,6 +20,7 @@ func scanConnectKey(s scanner) (key accounts.ConnectKey, err error) {
 		&key.DateCreated,
 		&key.LastUpdated,
 		&lastUsed,
+		&key.PinnedData,
 		&key.MaxPinnedData,
 	)
 	if lastUsed.Valid {
@@ -38,7 +39,7 @@ func (s *Store) AddAppConnectKey(meta accounts.UpdateAppConnectKey) (key account
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			INSERT INTO app_connect_keys (app_key, use_description, remaining_uses, max_pinned_data) VALUES ($1, $2, $3, $4)
-			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data;
+			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, pinned_data, max_pinned_data;
 		`, meta.Key, meta.Description, meta.RemainingUses, meta.MaxPinnedData))
 		return err
 	})
@@ -56,7 +57,7 @@ func (s *Store) UpdateAppConnectKey(meta accounts.UpdateAppConnectKey) (key acco
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			UPDATE app_connect_keys SET (use_description, remaining_uses, max_pinned_data) = ($2, $3, $4) WHERE app_key = $1
-			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data;
+			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, pinned_data, max_pinned_data;
 		`, meta.Key, meta.Description, meta.RemainingUses, meta.MaxPinnedData))
 		return err
 	})
@@ -83,7 +84,7 @@ func (s *Store) ValidAppConnectKey(key string) (bool, error) {
 func (s *Store) AppConnectKey(key string) (connectKey accounts.ConnectKey, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		connectKey, err = scanConnectKey(tx.QueryRow(ctx, `
-			SELECT app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data
+			SELECT app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, pinned_data, max_pinned_data
 			FROM app_connect_keys
 			WHERE app_key = $1`, key))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -98,7 +99,7 @@ func (s *Store) AppConnectKey(key string) (connectKey accounts.ConnectKey, err e
 func (s *Store) AppConnectKeys(offset, limit int) (keys []accounts.ConnectKey, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, max_pinned_data
+			SELECT app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, pinned_data, max_pinned_data
 			FROM app_connect_keys
 			ORDER BY created_at DESC
 			LIMIT $1 OFFSET $2
