@@ -56,7 +56,7 @@ func (h HostStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 }
 
 // PrometheusMetric implements the prometheus.Marshaller interface for the
-// sector stats response.
+// host scan stats response.
 func (s HostScanStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	return []prometheus.Metric{
 		{
