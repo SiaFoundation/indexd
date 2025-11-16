@@ -11,7 +11,6 @@ import (
 	"os"
 	"sync"
 
-	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
@@ -188,7 +187,10 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	return fn(ctx, transport)
 }
 
-func (c *Client) prices(ctx context.Context, hostKey types.PublicKey) (proto.HostPrices, error) {
+// Prices fetches the host prices from the specified host.
+//
+// If the prices are cached and valid, the cached prices are returned.
+func (c *Client) Prices(ctx context.Context, hostKey types.PublicKey) (proto.HostPrices, error) {
 	c.mu.Lock()
 	prices := c.cachedPrices[hostKey]
 	if prices.Validate(hostKey) == nil {
@@ -238,7 +240,7 @@ func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, h
 	defer done()
 
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(ctx, hostKey)
+		prices, err := c.Prices(ctx, hostKey)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -259,7 +261,7 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 	defer done()
 
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(ctx, hostKey)
+		prices, err := c.Prices(ctx, hostKey)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -270,25 +272,6 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 		}
 		data = buf.Bytes()
 		return nil
-	})
-	return
-}
-
-// AppendSectors appends sectors to the specified contract on the host.
-func (c *Client) AppendSectors(ctx context.Context, signer rhp.ContractSigner, cs consensus.State, revision rhp.ContractRevision, sectors []types.Hash256) (res rhp.RPCAppendSectorsResult, err error) {
-	done, err := c.tg.Add()
-	if err != nil {
-		return rhp.RPCAppendSectorsResult{}, err
-	}
-	defer done()
-
-	err = c.rpcFn(ctx, revision.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(ctx, revision.Revision.HostPublicKey)
-		if err != nil {
-			return fmt.Errorf("failed to get host prices: %w", err)
-		}
-		res, err = rhp.RPCAppendSectors(ctx, transport, signer, cs, prices, revision, sectors)
-		return err
 	})
 	return
 }
