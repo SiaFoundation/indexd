@@ -49,34 +49,37 @@ func TestHostClient(t *testing.T) {
 		t.Fatal("expected candidate")
 	}
 
-	root, err := client.WriteSector(context.Background(), accountKey, hostKey, data)
+	result, err := client.WriteSector(context.Background(), accountKey, hostKey, data)
 	if err != nil {
 		t.Fatal(err)
-	} else if root != expectedRoot {
+	} else if result.Root != expectedRoot {
 		t.Fatal("unexpected root")
 	}
 
 	// read the full sector back
-	readData, err := client.ReadSector(context.Background(), accountKey, hostKey, root, 0, proto.SectorSize)
+	buf := bytes.NewBuffer(nil)
+	_, err = client.ReadSector(context.Background(), accountKey, hostKey, result.Root, buf, 0, proto.SectorSize)
 	if err != nil {
 		t.Fatal(err)
-	} else if !bytes.Equal(readData, sector[:]) {
+	} else if !bytes.Equal(buf.Bytes(), sector[:]) {
 		t.Fatal("unexpected data")
 	}
 
 	// read the first 4096 bytes back
-	readData, err = client.ReadSector(context.Background(), accountKey, hostKey, root, 0, uint64(len(data)))
+	buf.Reset()
+	_, err = client.ReadSector(context.Background(), accountKey, hostKey, result.Root, buf, 0, uint64(len(data)))
 	if err != nil {
 		t.Fatal(err)
-	} else if !bytes.Equal(readData, data) {
+	} else if !bytes.Equal(buf.Bytes(), data) {
 		t.Fatal("unexpected data")
 	}
 
 	// read an offset of the sector back
-	readData, err = client.ReadSector(context.Background(), accountKey, hostKey, root, 1024, 256)
+	buf.Reset()
+	_, err = client.ReadSector(context.Background(), accountKey, hostKey, result.Root, buf, 1024, 256)
 	if err != nil {
 		t.Fatal(err)
-	} else if !bytes.Equal(readData, data[1024:][:256]) {
+	} else if !bytes.Equal(buf.Bytes(), data[1024:][:256]) {
 		t.Fatal("unexpected data")
 	}
 }
@@ -124,19 +127,20 @@ func TestHostClientParallel(t *testing.T) {
 
 			data := frand.Bytes(proto.SectorSize)
 
-			root, err := client.WriteSector(context.Background(), accountKey, hk, data)
+			result, err := client.WriteSector(context.Background(), accountKey, hk, data)
 			if err != nil {
 				errCh <- fmt.Errorf("failed to write sector: %w", err)
 				return
 			}
 
-			sector, err := client.ReadSector(context.Background(), accountKey, hk, root, 0, proto.SectorSize)
+			buf := bytes.NewBuffer(nil)
+			_, err = client.ReadSector(context.Background(), accountKey, hk, result.Root, buf, 0, proto.SectorSize)
 			if err != nil {
 				errCh <- fmt.Errorf("failed to read sector: %w", err)
 				return
 			}
 
-			if !bytes.Equal(data, sector) {
+			if !bytes.Equal(data, buf.Bytes()) {
 				errCh <- errors.New("data mismatch")
 				return
 			}

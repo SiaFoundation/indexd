@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
 
@@ -232,10 +233,10 @@ func (c *Client) HostSettings(ctx context.Context, hostKey types.PublicKey) (set
 // WriteSector writes a sector to the specified host.
 //
 // It returns the verified Merkle root of the written sector.
-func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (root types.Hash256, err error) {
+func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (result rhp.RPCWriteSectorResult, err error) {
 	done, err := c.tg.Add()
 	if err != nil {
-		return types.Hash256{}, err
+		return rhp.RPCWriteSectorResult{}, err
 	}
 	defer done()
 
@@ -245,18 +246,18 @@ func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, h
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
 		token := proto.NewAccountToken(accountKey, hostKey)
-		result, err := rhp.RPCWriteSector(ctx, transport, prices, token, bytes.NewReader(data), uint64(len(data)))
-		root = result.Root
+		result, err = rhp.RPCWriteSector(ctx, transport, prices, token, bytes.NewReader(data), uint64(len(data)))
 		return err
 	})
 	return
 }
 
-// ReadSector reads a sector from the specified host.
-func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, offset, length uint64) (data []byte, err error) {
+// ReadSector writes the data of a sector from the specified host into w.
+// If an error is returned, the contents of w must be discarded.
+func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (result rhp.RPCReadSectorResult, err error) {
 	done, err := c.tg.Add()
 	if err != nil {
-		return nil, err
+		return rhp.RPCReadSectorResult{}, err
 	}
 	defer done()
 
@@ -266,12 +267,8 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
 		token := proto.NewAccountToken(accountKey, hostKey)
-		buf := bytes.NewBuffer(make([]byte, 0, length))
-		if _, err = rhp.RPCReadSector(ctx, transport, prices, token, buf, root, offset, length); err != nil {
-			return err
-		}
-		data = buf.Bytes()
-		return nil
+		result, err = rhp.RPCReadSector(ctx, transport, prices, token, w, root, offset, length)
+		return err
 	})
 	return
 }

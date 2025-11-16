@@ -14,6 +14,7 @@ import (
 	"github.com/klauspost/reedsolomon"
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/client/v2"
@@ -26,8 +27,8 @@ import (
 
 type (
 	hostClient interface {
-		WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (types.Hash256, error)
-		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, offset, length uint64) ([]byte, error)
+		WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (rhp.RPCWriteSectorResult, error)
+		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error)
 
 		Candidates() (*client.Candidates, error)
 		Prioritize(hosts []types.PublicKey) []types.PublicKey
@@ -124,11 +125,11 @@ top:
 				<-sema
 				wg.Done()
 			}()
-			data, err := downloadShard(ctx, s.hosts, s.appKey, sector.HostKey, sector.Root, timeout)
+			sectors[i] = make([]byte, 0, proto4.SectorSize)
+			err := downloadShard(ctx, s.hosts, s.appKey, sector.HostKey, bytes.NewBuffer(sectors[i]), sector.Root, timeout)
 			if err != nil {
 				return
 			}
-			sectors[i] = data
 			if v := successful.Add(1); v >= uint32(slab.MinShards) {
 				// got enough pieces to recover
 				cancel()
@@ -430,17 +431,19 @@ func stripedJoin(dst io.Writer, dataShards [][]byte, writeLen int) error {
 }
 
 // downloadShard reads a sector from a host
-func downloadShard(ctx context.Context, client hostClient, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, timeout time.Duration) ([]byte, error) {
+func downloadShard(ctx context.Context, client hostClient, accountKey types.PrivateKey, hostKey types.PublicKey, w io.Writer, root types.Hash256, timeout time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return client.ReadSector(ctx, accountKey, hostKey, root, 0, proto4.SectorSize)
+	_, err := client.ReadSector(ctx, accountKey, hostKey, root, w, 0, proto4.SectorSize)
+	return err
 }
 
 // uploadShard uploads a shard to a host
 func uploadShard(ctx context.Context, client hostClient, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte, timeout time.Duration) (types.Hash256, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return client.WriteSector(ctx, accountKey, hostKey, data)
+	result, err := client.WriteSector(ctx, accountKey, hostKey, data)
+	return result.Root, err
 }
 
 // readAtMost reads from the reader until the buffer is filled,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"io"
 	"maps"
 	"slices"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
@@ -70,14 +72,14 @@ func (m *mockHostDialer) delay(ctx context.Context, hostKey types.PublicKey) err
 }
 
 // WriteSector implements the [hostDialer] interface.
-func (m *mockHostDialer) WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (types.Hash256, error) {
+func (m *mockHostDialer) WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (rhp.RPCWriteSectorResult, error) {
 	if _, ok := m.hosts[hostKey]; !ok {
 		panic("host not found: " + hostKey.String()) // developer error
 	}
 
 	// simulate i/o
 	if err := m.delay(ctx, hostKey); err != nil {
-		return types.Hash256{}, err
+		return rhp.RPCWriteSectorResult{}, err
 	}
 
 	m.sectorsMu.Lock()
@@ -91,14 +93,14 @@ func (m *mockHostDialer) WriteSector(ctx context.Context, accountKey types.Priva
 		m.hostSectors[hostKey] = make(map[types.Hash256][]byte)
 	}
 	m.hostSectors[hostKey][root] = sector[:]
-	return root, nil
+	return rhp.RPCWriteSectorResult{Root: root}, nil
 }
 
 // ReadSector implements the [hostDialer] interface.
-func (m *mockHostDialer) ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, sectorRoot types.Hash256, offset, length uint64) ([]byte, error) {
+func (m *mockHostDialer) ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, sectorRoot types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error) {
 	// simulate timeout
 	if err := m.delay(ctx, hostKey); err != nil {
-		return nil, err
+		return rhp.RPCReadSectorResult{}, err
 	}
 
 	m.sectorsMu.Lock()
@@ -106,13 +108,14 @@ func (m *mockHostDialer) ReadSector(ctx context.Context, accountKey types.Privat
 
 	sectors, ok := m.hostSectors[hostKey]
 	if !ok {
-		return nil, errors.New("host not found")
+		return rhp.RPCReadSectorResult{}, errors.New("host not found")
 	}
-	data, ok := sectors[sectorRoot]
+	sector, ok := sectors[sectorRoot]
 	if !ok {
-		return nil, errors.New("sector not found")
+		return rhp.RPCReadSectorResult{}, errors.New("sector not found")
 	}
-	return slices.Clone(data[offset : offset+length]), nil
+	w.Write(sector[offset : offset+length])
+	return rhp.RPCReadSectorResult{}, nil
 }
 
 func (m *mockHostDialer) ResetSlowHosts() {
