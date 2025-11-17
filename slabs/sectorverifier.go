@@ -94,7 +94,7 @@ func (v *SectorVerifier) ResetBalance(ctx context.Context, host hosts.Host) erro
 // should handle any remaining results and then interrupt the integrity checks
 // for the host.
 func (v *SectorVerifier) VerifySectors(ctx context.Context, host hosts.Host, roots []types.Hash256) ([]CheckSectorsResult, error) {
-	logger := v.log.With(zap.Stringer("hostKey", host.PublicKey))
+	log := v.log.With(zap.Stringer("hostKey", host.PublicKey))
 
 	hc, err := v.dialer.DialHost(ctx, host.PublicKey, host.RHP4Addrs())
 	if err != nil {
@@ -145,7 +145,7 @@ func (v *SectorVerifier) VerifySectors(ctx context.Context, host hosts.Host, roo
 		} else if strings.Contains(err.Error(), proto.ErrSectorNotFound.Error()) {
 			results = append(results, SectorLost)
 		} else {
-			logger.Debug("failed to verify sector",
+			log.Debug("failed to verify sector",
 				zap.Stringer("sector", root),
 				zap.Error(err),
 			)
