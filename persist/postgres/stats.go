@@ -54,13 +54,12 @@ func incrementNumSectorsFailed(ctx context.Context, tx *txn, delta uint64) error
 	return err
 }
 
-func incrementNumScans(ctx context.Context, tx *txn, delta uint64) error {
-	_, err := tx.Exec(ctx, "UPDATE stats SET num_scans = num_scans + $1", delta)
-	return err
-}
-
-func incrementNumFailedScans(ctx context.Context, tx *txn, delta uint64) error {
-	_, err := tx.Exec(ctx, "UPDATE stats SET num_scans_failed = num_scans_failed + $1", delta)
+func incrementNumScans(ctx context.Context, tx *txn, success bool) error {
+	var failed int64
+	if !success {
+		failed = 1
+	}
+	_, err := tx.Exec(ctx, "UPDATE stats SET num_scans = num_scans + 1, num_scans_failed = num_scans_failed + $1", failed)
 	return err
 }
 
