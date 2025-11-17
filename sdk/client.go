@@ -125,11 +125,12 @@ top:
 				<-sema
 				wg.Done()
 			}()
-			sectors[i] = make([]byte, 0, proto4.SectorSize)
-			err := downloadShard(ctx, s.hosts, s.appKey, sector.HostKey, bytes.NewBuffer(sectors[i]), sector.Root, timeout)
+			buf := bytes.NewBuffer(make([]byte, 0, proto4.SectorSize))
+			err := downloadShard(ctx, s.hosts, s.appKey, sector.HostKey, buf, sector.Root, timeout)
 			if err != nil {
 				return
 			}
+			sectors[i] = buf.Bytes()
 			if v := successful.Add(1); v >= uint32(slab.MinShards) {
 				// got enough pieces to recover
 				cancel()

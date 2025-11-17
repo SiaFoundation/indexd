@@ -114,7 +114,9 @@ func (m *mockHostDialer) ReadSector(ctx context.Context, accountKey types.Privat
 	if !ok {
 		return rhp.RPCReadSectorResult{}, errors.New("sector not found")
 	}
-	w.Write(sector[offset : offset+length])
+	if _, err := w.Write(sector[offset : offset+length]); err != nil {
+		return rhp.RPCReadSectorResult{}, err
+	}
 	return rhp.RPCReadSectorResult{}, nil
 }
 
