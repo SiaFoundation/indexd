@@ -134,10 +134,10 @@ func TestE2E(t *testing.T) {
 	ms := testutils.MaintenanceSettings
 	ms.WantedContracts = 15
 	cluster := testutils.NewCluster(t, testutils.WithHosts(15), testutils.WithLogger(log.Named("cluster")), testutils.WithIndexer(testutils.WithMaintenanceSettings(ms)))
-	cluster.WaitForContracts(t)
 
 	privateKey := types.GeneratePrivateKey()
 	cluster.Indexer.AddTestAccount(t, privateKey.PublicKey())
+	cluster.WaitForContracts(t)
 
 	client, err := NewSDK(cluster.Indexer.AppAPIAddr(), privateKey, WithLogger(log.Named("sdk")))
 	if err != nil {
