@@ -10,6 +10,8 @@ import (
 	"go.sia.tech/coreutils/rhp/v4"
 )
 
+// A ChainManager provides access to the current consensus state
+// and mempool.
 type ChainManager interface {
 	TipState() consensus.State
 	// V2TransactionSet returns the full transaction set and basis necessary
@@ -63,6 +65,7 @@ func (c *Client) FormContract(ctx context.Context, chain ChainManager, signer rh
 	return
 }
 
+// RefreshContract refreshes an existing contract with the specified host.
 func (c *Client) RefreshContract(ctx context.Context, chain ChainManager, signer rhp.FormContractSigner, params RefreshContractParams) (result rhp.RPCRefreshContractResult, err error) {
 	done, err := c.tg.Add()
 	if err != nil {
@@ -88,6 +91,7 @@ func (c *Client) RefreshContract(ctx context.Context, chain ChainManager, signer
 	return
 }
 
+// RenewContract renews an existing contract with the specified host.
 func (c *Client) RenewContract(ctx context.Context, chain ChainManager, signer rhp.FormContractSigner, params RenewContractParams) (result rhp.RPCRenewContractResult, err error) {
 	done, err := c.tg.Add()
 	if err != nil {
@@ -133,6 +137,7 @@ func (c *Client) LatestRevision(ctx context.Context, hostKey types.PublicKey, co
 	return
 }
 
+// SectorRoots fetches the sector roots from the contract on the host.
 func (c *Client) SectorRoots(ctx context.Context, signer rhp.ContractSigner, chain ChainManager, contract rhp.ContractRevision, offset, length uint64) (result rhp.RPCSectorRootsResult, err error) {
 	done, err := c.tg.Add()
 	if err != nil {
