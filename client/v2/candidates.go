@@ -146,6 +146,14 @@ type Provider struct {
 	metrics map[types.PublicKey]*hostMetric
 }
 
+func (p *Provider) sortHosts(hosts []types.PublicKey) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	sort.SliceStable(hosts, func(i, j int) bool {
+		return p.cmpMetrics(hosts[i], hosts[j]) < 0
+	})
+}
+
 func (p *Provider) cmpMetrics(a, b types.PublicKey) int {
 	am, aok := p.metrics[a]
 	bm, bok := p.metrics[b]
@@ -223,12 +231,6 @@ func (p *Provider) Candidates() (*Candidates, error) {
 	return &Candidates{
 		hosts: hostKeys,
 	}, nil
-}
-
-func (p *Provider) sortHosts(hosts []types.PublicKey) {
-	sort.SliceStable(hosts, func(i, j int) bool {
-		return p.cmpMetrics(hosts[i], hosts[j]) < 0
-	})
 }
 
 // Prioritize reorders the given slice of hosts in place based

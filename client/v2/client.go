@@ -222,7 +222,7 @@ func (c *Client) HostSettings(ctx context.Context, hostKey types.PublicKey) (set
 	if err != nil {
 		return proto.HostSettings{}, err
 	}
-	if settings.Prices.Validate(hostKey) != nil {
+	if settings.Prices.Validate(hostKey) == nil {
 		c.mu.Lock()
 		c.cachedPrices[hostKey] = settings.Prices
 		c.mu.Unlock()
