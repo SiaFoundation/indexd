@@ -869,6 +869,18 @@ components:
                   type: string
                 description: Reasons why the host was blocked, if any
 
+    HostScanStatsResponse:
+      type: object
+      properties:
+        scans:
+          type: integer
+          format: int64
+          description: Total number of host scans across all hosts
+        scansFailed:
+          type: integer
+          format: int64
+          description: Total number of failed host scans across all hosts
+
     SectorStatsResponse:
       type: object
       properties:
