@@ -7,6 +7,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 )
 
 // The following consts define the various states a contract can be in.
@@ -190,10 +191,12 @@ func (c Contract) GoodForAppend(prices proto.HostPrices, height uint64) error {
 // GoodForRefresh indicates whether a contract is likely to succeed refreshing.
 func (c Contract) GoodForRefresh(settings proto.HostSettings, fundTarget types.Currency, period uint64) error {
 	_, collateral := contractFunding(settings, c.Size, fundTarget, period)
-	// TODO: this logic is incorrect, but it matches the host. We need to fix both sides.
-	// The correct logic would be to check the new contract's total collateral is less than
-	// the host's max collateral. Not the existing total collateral after adding the new collateral.
-	totalCollateral := c.TotalCollateral.Add(collateral)
+	var totalCollateral types.Currency
+	if settings.ProtocolVersion.Cmp(rhp.ProtocolVersion502) >= 0 {
+		totalCollateral = c.UsedCollateral.Add(collateral)
+	} else {
+		totalCollateral = c.TotalCollateral.Add(collateral)
+	}
 	switch {
 	case !c.Good:
 		return fmt.Errorf("contract is not good")
