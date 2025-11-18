@@ -105,7 +105,7 @@ type (
 	Store interface {
 		AccountStats() (AccountStatsResponse, error)
 		ContractsStats() (ContractsStatsResponse, error)
-		HostScanStats() (HostScanStatsResponse, error)
+		ScanStats() (ScansStatsResponse, error)
 		HostStats(offset, limit int) ([]hosts.HostStats, error)
 		SectorStats() (SectorsStatsResponse, error)
 
@@ -245,11 +245,11 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"POST /wallet/send":      a.handlePOSTWalletSend,
 
 		// stats endpoints
-		"GET /stats/accounts":    a.handleGETStatsAccounts,
-		"GET /stats/contracts":   a.handleGETStatsContracts,
-		"GET /stats/hosts":       a.handleGETStatsHosts,
-		"GET /stats/hosts/scans": a.handleGETStatsHostsScans,
-		"GET /stats/sectors":     a.handleGETStatsSectors,
+		"GET /stats/accounts":  a.handleGETStatsAccounts,
+		"GET /stats/contracts": a.handleGETStatsContracts,
+		"GET /stats/hosts":     a.handleGETStatsHosts,
+		"GET /stats/scans":     a.handleGETStatsScans,
+		"GET /stats/sectors":   a.handleGETStatsSectors,
 	}
 
 	// debug endpoints
@@ -960,8 +960,8 @@ func (a *admin) handleGETStatsHosts(jc jape.Context) {
 	writeResponse(jc, HostStatsResponse(res))
 }
 
-func (a *admin) handleGETStatsHostsScans(jc jape.Context) {
-	stats, err := a.store.HostScanStats()
+func (a *admin) handleGETStatsScans(jc jape.Context) {
+	stats, err := a.store.ScanStats()
 	if jc.Check("failed to retrieve host scan stats", err) != nil {
 		return
 	}

@@ -98,8 +98,8 @@ func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 	return stats, err
 }
 
-// HostScanStats reports statistics about all hosts.
-func (s *Store) HostScanStats() (stats admin.HostScanStatsResponse, err error) {
+// ScanStats reports statistics about host scans for all hosts.
+func (s *Store) ScanStats() (stats admin.ScansStatsResponse, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		return tx.QueryRow(ctx, "SELECT num_scans, num_scans_failed FROM stats").Scan(&stats.Scans, &stats.ScansFailed)
 	})

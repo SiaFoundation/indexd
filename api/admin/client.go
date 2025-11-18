@@ -302,9 +302,9 @@ func (c *Client) StatsHosts(ctx context.Context, offset, limit int) (resp HostSt
 	return
 }
 
-// StatsHostsScans returns statistics about host scans for all hosts.
-func (c *Client) StatsHostsScans(ctx context.Context) (resp HostScanStatsResponse, err error) {
-	err = c.c.GET(ctx, "/stats/hosts/scans", &resp)
+// StatsScans returns statistics about host scans for all hosts.
+func (c *Client) StatsScans(ctx context.Context) (resp ScansStatsResponse, err error) {
+	err = c.c.GET(ctx, "/stats/scans", &resp)
 	return
 }
 
