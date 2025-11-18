@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
+	"slices"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -26,19 +28,26 @@ type (
 		UpdatedAt time.Time `json:"updatedAt"`
 	}
 
-	// A SharedSlab represents a slab of a shared object.
-	// It contains all the metadata needed to retrieve a slab.
-	SharedSlab struct {
-		PinnedSlab
+	// SlabSlice represents a slice of a slab that is part of an object.
+	SlabSlice struct {
+		SlabID SlabID `json:"slabID"`
 		Offset uint32 `json:"offset"`
 		Length uint32 `json:"length"`
 	}
 
-	// SharedObject provides all the metadata necessary to retrieve
-	// and decrypt an object.
+	// SharedObject provides all the metadata necessary to retrieve and decrypt
+	// an object.
 	SharedObject struct {
-		Slabs             []SharedSlab `json:"slabs"`
-		EncryptedMetadata []byte       `json:"encryptedMetadata"`
+		Slabs             []PinnedSlabSlice `json:"slabs"`
+		EncryptedMetadata []byte            `json:"encryptedMetadata"`
+	}
+
+	// A PinnedSlabSlice represents a slice of a slab that is part of an object.
+	// It contains all the metadata needed to retrieve a slab.
+	PinnedSlabSlice struct {
+		PinnedSlab
+		Offset uint32 `json:"offset"`
+		Length uint32 `json:"length"`
 	}
 
 	// ObjectEvent represents an event on an object, such as it being created,
@@ -66,14 +75,69 @@ type (
 		After time.Time
 		Key   types.Hash256
 	}
-
-	// SlabSlice represents a slice of a slab that is part of an object.
-	SlabSlice struct {
-		SlabID SlabID `json:"slabID"`
-		Offset uint32 `json:"offset"`
-		Length uint32 `json:"length"`
-	}
 )
+
+// Size returns the total size of the object in bytes.
+func (o *SharedObject) Size() uint64 {
+	var size uint64
+	for _, ss := range o.Slabs {
+		size += uint64(ss.Length)
+	}
+	return size
+}
+
+// SlabsForRange returns the slabs that cover the given range of the object.
+func (o *SharedObject) SlabsForRange(offset, length uint64) []PinnedSlabSlice {
+	// declare a helper to cast a uint64 to uint32 with overflow detection. This
+	// could should never produce an overflow.
+	cast32 := func(in uint64) uint32 {
+		if in > math.MaxUint32 {
+			panic("slabsForDownload: overflow detected")
+		}
+		return uint32(in)
+	}
+
+	slabs := slices.Clone(o.Slabs)
+	if len(slabs) == 0 {
+		return nil
+	} else if offset+length > o.Size() {
+		return nil
+	}
+
+	firstOffset := offset
+	for i, ss := range slabs {
+		if firstOffset < uint64(ss.Length) {
+			slabs = slabs[i:]
+			break
+		}
+		firstOffset -= uint64(ss.Length)
+	}
+	slabs[0].Offset += cast32(firstOffset)
+	slabs[0].Length -= cast32(firstOffset)
+
+	lastLength := length
+	for i, ss := range slabs {
+		if lastLength <= uint64(ss.Length) {
+			slabs = slabs[:i+1]
+			break
+		}
+		lastLength -= uint64(ss.Length)
+	}
+	slabs[len(slabs)-1].Length = cast32(lastLength)
+	return slabs
+}
+
+// SectorRegion returns the offset and length of the sector region that must be
+// downloaded in order to recover the data referenced by the slice.
+func (ss PinnedSlabSlice) SectorRegion() (offset, length uint64) {
+	minChunkSize := proto.LeafSize * uint32(ss.MinShards)
+	start := (ss.Offset / minChunkSize) * proto.LeafSize
+	end := ((ss.Offset + ss.Length) / minChunkSize) * proto.LeafSize
+	if (ss.Offset+ss.Length)%minChunkSize != 0 {
+		end += proto.LeafSize
+	}
+	return uint64(start), uint64(end - start)
+}
 
 // metadataLimit represents the maximum size of an objects metadata we will
 // store.

@@ -618,7 +618,7 @@ func TestSharedObjects(t *testing.T) {
 	slab2ID := slab2sID[0]
 
 	expectedSharedObj := slabs.SharedObject{
-		Slabs: []slabs.SharedSlab{
+		Slabs: []slabs.PinnedSlabSlice{
 			{
 				PinnedSlab: slabs.PinnedSlab{
 					ID:            slab1ID,

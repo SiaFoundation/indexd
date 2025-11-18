@@ -5,6 +5,7 @@ import (
 	"crypto/cipher"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"time"
 
@@ -69,9 +70,60 @@ func (o *Object) Seal(appKey types.PrivateKey) slabs.SealedObject {
 	return so
 }
 
+// Size returns the total size of the object in bytes.
+func (o *Object) Size() uint64 {
+	var size uint64
+	for _, ss := range o.slabs {
+		size += uint64(ss.Length)
+	}
+	return size
+}
+
 // Slabs returns a copy of the object's slabs.
 func (o *Object) Slabs() []slabs.SlabSlice {
 	return slices.Clone(o.slabs)
+}
+
+// SlabsForRange returns the slabs that cover the given range of data within the
+// object.
+func (o *Object) SlabsForRange(offset, length uint64) []slabs.SlabSlice {
+	// declare a helper to cast a uint64 to uint32 with overflow detection. This
+	// could should never produce an overflow.
+	cast32 := func(in uint64) uint32 {
+		if in > math.MaxUint32 {
+			panic("slabsForDownload: overflow detected")
+		}
+		return uint32(in)
+	}
+
+	slabs := slices.Clone(o.slabs)
+	if len(slabs) == 0 {
+		return nil
+	} else if offset+length > o.Size() {
+		return nil
+	}
+
+	firstOffset := offset
+	for i, ss := range slabs {
+		if firstOffset < uint64(ss.Length) {
+			slabs = slabs[i:]
+			break
+		}
+		firstOffset -= uint64(ss.Length)
+	}
+	slabs[0].Offset += cast32(firstOffset)
+	slabs[0].Length -= cast32(firstOffset)
+
+	lastLength := length
+	for i, ss := range slabs {
+		if lastLength <= uint64(ss.Length) {
+			slabs = slabs[:i+1]
+			break
+		}
+		lastLength -= uint64(ss.Length)
+	}
+	slabs[len(slabs)-1].Length = cast32(lastLength)
+	return slabs
 }
 
 // Metadata returns a copy of the object's metadata.

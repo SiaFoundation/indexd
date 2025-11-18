@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/internal/testutils"
 	"go.uber.org/zap/zaptest"
@@ -93,16 +94,60 @@ func TestDownload(t *testing.T) {
 	s := initSDK(appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
-	data := frand.Bytes(4096)
+	dataSize := uint64(proto.SectorSize) * 10 * 2 // 2 slabs
+	data := frand.Bytes(int(dataSize))
+
 	obj, err := s.Upload(context.Background(), bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("failed to upload: %v", err)
 	}
 
-	buf := bytes.NewBuffer(nil)
-	if err = s.Download(context.Background(), buf, obj); err != nil {
-		t.Fatalf("failed to download: %v", err)
+	err = s.client.SaveObject(t.Context(), obj.Seal(appKey))
+	if err != nil {
+		t.Fatalf("failed to save object to mock client: %v", err)
 	}
+
+	sharedURL, err := s.CreateSharedObjectURL(t.Context(), obj.ID(), time.Now().Add(time.Hour))
+	if err != nil {
+		t.Fatalf("failed to create shared object URL: %v", err)
+	}
+
+	t.Run("full", func(t *testing.T) {
+		buf := bytes.NewBuffer(nil)
+		if err = s.Download(context.Background(), buf, obj); err != nil {
+			t.Fatalf("failed to download: %v", err)
+		} else if !bytes.Equal(buf.Bytes(), data) {
+			t.Fatal("data mismatch")
+		}
+
+		buf.Reset()
+		if err := s.DownloadSharedObject(t.Context(), buf, sharedURL); err != nil {
+			t.Fatalf("failed to download shared object: %v", err)
+		} else if !bytes.Equal(buf.Bytes(), data) {
+			t.Fatal("data mismatch")
+		}
+	})
+
+	t.Run("ranges", func(t *testing.T) {
+		for range 10 {
+			randomOffset := frand.Uint64n(dataSize - 1)
+			randomLength := frand.Uint64n(dataSize - randomOffset + 1)
+
+			buf := bytes.NewBuffer(nil)
+			if err = s.Download(context.Background(), buf, obj, WithDownloadRange(randomOffset, randomLength)); err != nil {
+				t.Fatalf("failed to download: %v", err)
+			} else if !bytes.Equal(buf.Bytes(), data[randomOffset:randomOffset+randomLength]) {
+				t.Fatal("data mismatch")
+			}
+
+			buf.Reset()
+			if err := s.DownloadSharedObject(t.Context(), buf, sharedURL, WithDownloadRange(randomOffset, randomLength)); err != nil {
+				t.Fatalf("failed to download shared object: %v", err)
+			} else if !bytes.Equal(buf.Bytes(), data[randomOffset:randomOffset+randomLength]) {
+				t.Fatal("data mismatch")
+			}
+		}
+	})
 
 	t.Run("timeout", func(t *testing.T) {
 		dialer.ResetSlowHosts()

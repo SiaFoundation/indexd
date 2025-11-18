@@ -35,9 +35,9 @@ func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error
 			return fmt.Errorf("failed to query slabs: %w", err)
 		}
 		batch := &pgx.Batch{}
-		var objectSlabs []slabs.SharedSlab
+		var objectSlabs []slabs.PinnedSlabSlice
 		for rows.Next() {
-			var slab slabs.SharedSlab
+			var slab slabs.PinnedSlabSlice
 			var slabDBID int64
 			err := rows.Scan(&slabDBID, (*sqlHash256)(&slab.ID), (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Offset, &slab.Length)
 			if err != nil {
