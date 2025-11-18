@@ -129,13 +129,13 @@ func TestDownload(t *testing.T) {
 	})
 
 	t.Run("ranges", func(t *testing.T) {
-		randomOffsetLength := func() (uint64, uint64) {
+		randomOffsetLength := func() [2]uint64 {
 			offset := frand.Uint64n(dataSize - 1)
 			length := frand.Uint64n(dataSize - offset + 1)
-			return offset, length
+			return [2]uint64{offset, length}
 		}
 
-		cases := []struct{ Offset, Length uint64 }{
+		cases := [][2]uint64{
 			{0, proto.SectorSize},
 			{proto.SectorSize, proto.SectorSize},
 			{proto.LeafSize, proto.LeafSize},
@@ -144,22 +144,21 @@ func TestDownload(t *testing.T) {
 			{dataSize, 0},
 		}
 		for range 10 {
-			off, len := randomOffsetLength()
-			cases = append(cases, struct{ Offset, Length uint64 }{off, len})
+			cases = append(cases, randomOffsetLength())
 		}
 
 		for _, c := range cases {
 			buf := bytes.NewBuffer(nil)
-			if err = s.Download(context.Background(), buf, obj, WithDownloadRange(c.Offset, c.Length)); err != nil {
+			if err = s.Download(context.Background(), buf, obj, WithDownloadRange(c[0], c[1])); err != nil {
 				t.Fatalf("failed to download: %v", err)
-			} else if !bytes.Equal(buf.Bytes(), data[c.Offset:c.Offset+c.Length]) {
+			} else if !bytes.Equal(buf.Bytes(), data[c[0]:c[0]+c[1]]) {
 				t.Fatal("data mismatch")
 			}
 
 			buf.Reset()
-			if err := s.DownloadSharedObject(t.Context(), buf, sharedURL, WithDownloadRange(c.Offset, c.Length)); err != nil {
+			if err := s.DownloadSharedObject(t.Context(), buf, sharedURL, WithDownloadRange(c[0], c[1])); err != nil {
 				t.Fatalf("failed to download shared object: %v", err)
-			} else if !bytes.Equal(buf.Bytes(), data[c.Offset:c.Offset+c.Length]) {
+			} else if !bytes.Equal(buf.Bytes(), data[c[0]:c[0]+c[1]]) {
 				t.Fatal("data mismatch")
 			}
 		}
