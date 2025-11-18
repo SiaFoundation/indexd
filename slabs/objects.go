@@ -89,7 +89,7 @@ func (o *SharedObject) Size() uint64 {
 // SlabsForRange returns the slabs that cover the given range of the object.
 func (o *SharedObject) SlabsForRange(offset, length uint64) []PinnedSlabSlice {
 	// declare a helper to cast a uint64 to uint32 with overflow detection. This
-	// could should never produce an overflow.
+	// should never produce an overflow.
 	cast32 := func(in uint64) uint32 {
 		if in > math.MaxUint32 {
 			panic("slabsForDownload: overflow detected")

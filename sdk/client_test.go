@@ -129,23 +129,46 @@ func TestDownload(t *testing.T) {
 	})
 
 	t.Run("ranges", func(t *testing.T) {
-		for range 10 {
-			randomOffset := frand.Uint64n(dataSize - 1)
-			randomLength := frand.Uint64n(dataSize - randomOffset + 1)
+		randomOffsetLength := func() (uint64, uint64) {
+			offset := frand.Uint64n(dataSize - 1)
+			length := frand.Uint64n(dataSize - offset + 1)
+			return offset, length
+		}
 
+		cases := []struct{ Offset, Length uint64 }{
+			{0, proto.SectorSize},
+			{proto.SectorSize, proto.SectorSize},
+			{proto.LeafSize, proto.LeafSize},
+			{dataSize - proto.SectorSize, proto.SectorSize},
+			{dataSize - proto.LeafSize, proto.LeafSize},
+			{dataSize, 0},
+		}
+		for range 10 {
+			off, len := randomOffsetLength()
+			cases = append(cases, struct{ Offset, Length uint64 }{off, len})
+		}
+
+		for _, c := range cases {
 			buf := bytes.NewBuffer(nil)
-			if err = s.Download(context.Background(), buf, obj, WithDownloadRange(randomOffset, randomLength)); err != nil {
+			if err = s.Download(context.Background(), buf, obj, WithDownloadRange(c.Offset, c.Length)); err != nil {
 				t.Fatalf("failed to download: %v", err)
-			} else if !bytes.Equal(buf.Bytes(), data[randomOffset:randomOffset+randomLength]) {
+			} else if !bytes.Equal(buf.Bytes(), data[c.Offset:c.Offset+c.Length]) {
 				t.Fatal("data mismatch")
 			}
 
 			buf.Reset()
-			if err := s.DownloadSharedObject(t.Context(), buf, sharedURL, WithDownloadRange(randomOffset, randomLength)); err != nil {
+			if err := s.DownloadSharedObject(t.Context(), buf, sharedURL, WithDownloadRange(c.Offset, c.Length)); err != nil {
 				t.Fatalf("failed to download shared object: %v", err)
-			} else if !bytes.Equal(buf.Bytes(), data[randomOffset:randomOffset+randomLength]) {
+			} else if !bytes.Equal(buf.Bytes(), data[c.Offset:c.Offset+c.Length]) {
 				t.Fatal("data mismatch")
 			}
+		}
+
+		// assert that out-of-bounds ranges fail
+		if err := s.Download(context.Background(), nil, obj, WithDownloadRange(dataSize, 1)); err == nil {
+			t.Fatal("expected error for out-of-bounds range, got nil")
+		} else if err := s.DownloadSharedObject(t.Context(), nil, sharedURL, WithDownloadRange(dataSize, 1)); err == nil {
+			t.Fatal("expected error for out-of-bounds range, got nil")
 		}
 	})
 
