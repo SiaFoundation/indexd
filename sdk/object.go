@@ -93,6 +93,19 @@ func (o *Object) UpdateMetadata(meta json.RawMessage) {
 	o.metadata = slices.Clone(meta)
 }
 
+// NewObject creates a new Object with the given master key, slabs, and
+// metadata.
+func NewObject(slabs []slabs.SlabSlice, meta json.RawMessage) Object {
+	now := time.Now()
+	return Object{
+		masterKey: types.GeneratePrivateKey(),
+		slabs:     slabs,
+		metadata:  meta,
+		createdAt: now,
+		updatedAt: now,
+	}
+}
+
 // Object retrieves the object with the given key.
 func (s *SDK) Object(ctx context.Context, objectKey types.Hash256) (Object, error) {
 	lo, err := s.client.Object(ctx, s.appKey, objectKey)
