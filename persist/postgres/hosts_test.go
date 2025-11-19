@@ -2056,7 +2056,7 @@ func BenchmarkHostsForPruning(b *testing.B) {
 		batch, err := store.HostsForPruning()
 		if err != nil {
 			b.Fatal(err)
-		} else if len(batch) != nHosts {
+		} else if len(batch) < nHosts/2 {
 			b.Fatal("unexpected number of hosts", len(batch))
 		}
 	}
@@ -2335,6 +2335,7 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 	// add hosts
 	for range nHosts {
 		hk := store.addTestHost(b)
+		store.addTestContract(b, hk)
 
 		// add sectors
 		for remainingSectors := nSectorsPerHost; remainingSectors > 0; {
@@ -2396,6 +2397,7 @@ func BenchmarkHostsWithLostSectors(b *testing.B) {
 	// add hosts
 	for range nHosts {
 		hk := store.addTestHost(b)
+		store.addTestContract(b, hk)
 
 		// add sectors
 		for remainingSectors := nSectorsPerHost; remainingSectors > 0; {

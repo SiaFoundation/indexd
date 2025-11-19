@@ -434,7 +434,7 @@ func BenchmarkPruneSlabs(b *testing.B) {
 			objectKey := sqlHash256(frand.Entropy256())
 			if j%2 == 0 {
 				objectID++
-				batch.Queue(`INSERT INTO objects(object_key, account_id) VALUES ($1, $2)`, objectKey, accountID)
+				batch.Queue(`INSERT INTO objects(object_key, account_id, encrypted_master_key, signature) VALUES ($1, $2, $3, $4)`, objectKey, accountID, frand.Bytes(72), frand.Bytes(64))
 			}
 			for k := range slabsPerObject {
 				slabID++

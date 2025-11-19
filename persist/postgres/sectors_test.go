@@ -1572,7 +1572,7 @@ func TestUnpinnedSectors(t *testing.T) {
 // results are expressed in time per operation as well as equivalent
 // upload/download throughput.
 func BenchmarkSlabs(b *testing.B) {
-	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
+	store := initPostgres(b, zap.NewNop())
 	account := proto.Account{1}
 
 	store.addTestAccount(b, types.PublicKey(account))
@@ -1828,6 +1828,7 @@ func BenchmarkSectorsForIntegrityCheck(b *testing.B) {
 
 	// add a host
 	hk := store.addTestHost(b)
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -2105,7 +2106,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 				HostKey: hk,
 			}
 		}
-		slabIDs, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+		pinnedIDs, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
 			MinShards:     1,
 			EncryptionKey: frand.Entropy256(),
 			Sectors:       sectors,
@@ -2113,7 +2114,7 @@ func BenchmarkUnpinSlab(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		slabIDs[i] = slabIDs[0]
+		slabIDs[i] = pinnedIDs[0]
 	}
 
 	var iter int
@@ -2144,6 +2145,7 @@ func BenchmarkRecordIntegrityChecks(b *testing.B) {
 
 	// add a host
 	hk := store.addTestHost(b)
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -2206,6 +2208,7 @@ func BenchmarkMarkFailingSectorsLost(b *testing.B) {
 
 	// add a host
 	hk := store.addTestHost(b)
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (
@@ -2268,6 +2271,7 @@ func BenchmarkMarkSectorsUnpinnable(b *testing.B) {
 
 	// add a host
 	hk := store.addTestHost(b)
+	store.addTestContract(b, hk)
 
 	// prepare base db
 	const (

@@ -593,11 +593,13 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
 	// prune is a helper function to delete all rows from a table
-	prune := func(table string) {
+	prune := func(table ...string) {
 		b.Helper()
 
-		if _, err := store.pool.Exec(b.Context(), fmt.Sprintf(`DELETE FROM %s;`, table)); err != nil {
-			b.Fatal(err)
+		for _, t := range table {
+			if _, err := store.pool.Exec(b.Context(), fmt.Sprintf(`DELETE FROM %s;`, t)); err != nil {
+				b.Fatal(err)
+			}
 		}
 	}
 
@@ -624,7 +626,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 	threshold := time.Now().Add(-time.Hour)
 	for _, numAccounts := range []int{10_000, 100_000, 1_000_000} {
 		// prepare accounts
-		prune("accounts")
+		prune("account_slabs", "accounts")
 		if err := store.transaction(func(ctx context.Context, tx *txn) error {
 			batch := &pgx.Batch{}
 			for range numAccounts {
@@ -695,7 +697,7 @@ func BenchmarkUpdateHostAccounts(b *testing.B) {
 	)
 
 	// prepare database
-	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
+	store := initPostgres(b, zap.NewNop())
 	for range numAccounts {
 		_, err := store.pool.Exec(b.Context(), `INSERT INTO accounts (public_key, max_pinned_data) VALUES ($1, 1000000);`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
 		if err != nil {
@@ -848,7 +850,7 @@ func BenchmarkServiceAccounts(b *testing.B) {
 	)
 
 	// prepare database
-	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
+	store := initPostgres(b, zap.NewNop())
 	for range numAccounts {
 		_, err := store.pool.Exec(b.Context(), `INSERT INTO accounts (public_key, max_pinned_data) VALUES ($1, 1000000);`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
 		if err != nil {
@@ -909,12 +911,10 @@ func BenchmarkServiceAccounts(b *testing.B) {
 // BenchmarkActiveAccounts benchmarks the ActiveAccounts function on the store.
 func BenchmarkActiveAccounts(b *testing.B) {
 	// define parameters
-	const (
-		numAccounts = 100000
-	)
+	const numAccounts = 100000
 
 	// prepare database
-	store := initPostgres(b, zaptest.NewLogger(b).Named("postgres"))
+	store := initPostgres(b, zap.NewNop())
 
 	batch := &pgx.Batch{}
 	for range numAccounts {
