@@ -150,34 +150,7 @@ func (s *SDK) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256
 	return s.client.CreateSharedObjectURL(ctx, s.appKey, obj.ID(), obj.masterKey, validUntil)
 }
 
-func masterKeyCipher(appKey types.PrivateKey, objectID types.Hash256) cipher.AEAD {
-	key := keys.Derive(appKey, objectID[:], []byte("master"), 32)
-	cipher, _ := chacha20poly1305.NewX(key)
-	return cipher
-}
-
-func metadataCipher(masterKey []byte, objectID types.Hash256) cipher.AEAD {
-	key := keys.Derive(masterKey, objectID[:], []byte("metadata"), 32)
-	cipher, _ := chacha20poly1305.NewX(key)
-	return cipher
-}
-
-func unlockEncryptedMetadata(objectID types.Hash256, masterKey []byte, encryptedMeta []byte) (json.RawMessage, error) {
-	if len(encryptedMeta) == 0 {
-		return nil, nil
-	}
-	metadataCipher := metadataCipher(masterKey, objectID)
-	if len(encryptedMeta) < metadataCipher.NonceSize() {
-		return nil, fmt.Errorf("encrypted metadata too short")
-	}
-	nonce := encryptedMeta[:metadataCipher.NonceSize()]
-	metadata, err := metadataCipher.Open(nil, nonce, encryptedMeta[metadataCipher.NonceSize():], nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to unlock metadata: %w", err)
-	}
-	return metadata, nil
-}
-
+// ObjectFromSealedObject unlocks a SealedObject using the given app key.
 func ObjectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Object, error) {
 	obj := Object{
 		slabs:     slices.Clone(so.Slabs),
@@ -206,4 +179,32 @@ func ObjectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Obj
 		return Object{}, fmt.Errorf("failed to unlock metadata: %w", err)
 	}
 	return obj, nil
+}
+
+func masterKeyCipher(appKey types.PrivateKey, objectID types.Hash256) cipher.AEAD {
+	key := keys.Derive(appKey, objectID[:], []byte("master"), 32)
+	cipher, _ := chacha20poly1305.NewX(key)
+	return cipher
+}
+
+func metadataCipher(masterKey []byte, objectID types.Hash256) cipher.AEAD {
+	key := keys.Derive(masterKey, objectID[:], []byte("metadata"), 32)
+	cipher, _ := chacha20poly1305.NewX(key)
+	return cipher
+}
+
+func unlockEncryptedMetadata(objectID types.Hash256, masterKey []byte, encryptedMeta []byte) (json.RawMessage, error) {
+	if len(encryptedMeta) == 0 {
+		return nil, nil
+	}
+	metadataCipher := metadataCipher(masterKey, objectID)
+	if len(encryptedMeta) < metadataCipher.NonceSize() {
+		return nil, fmt.Errorf("encrypted metadata too short")
+	}
+	nonce := encryptedMeta[:metadataCipher.NonceSize()]
+	metadata, err := metadataCipher.Open(nil, nonce, encryptedMeta[metadataCipher.NonceSize():], nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to unlock metadata: %w", err)
+	}
+	return metadata, nil
 }
