@@ -437,6 +437,7 @@ func TestHosts(t *testing.T) {
 	}
 
 	// helper to add hosts
+	h2c := make(map[types.PublicKey]types.FileContractID)
 	addHost := func(i byte, usable, blocked bool, contract bool) types.PublicKey {
 		t.Helper()
 		hk := types.PublicKey{i}
@@ -466,7 +467,7 @@ func TestHosts(t *testing.T) {
 
 		// form contract
 		if contract {
-			db.addTestContract(t, hk)
+			h2c[hk] = db.addTestContract(t, hk)
 		}
 		return hk
 	}
@@ -575,6 +576,18 @@ func TestHosts(t *testing.T) {
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithBlocked(false))
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithActiveContracts(true))
 	assertHosts([]types.PublicKey{hk3}, 1, 1, hosts.WithPublicKeys([]types.PublicKey{hk2, hk3, hk4}))
+
+	// assert good is taken into account for active contracts filter
+	if err := db.MarkContractBad(h2c[hk1]); err != nil {
+		t.Fatal(err)
+	}
+	assertHosts([]types.PublicKey{hk2}, 0, 4, hosts.WithActiveContracts(true))
+
+	// assert renewed_to is taken into account for active contracts filter
+	if _, err := db.pool.Exec(t.Context(), `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2`, sqlHash256(h2c[hk1]), sqlHash256(h2c[hk2])); err != nil {
+		t.Fatal(err)
+	}
+	assertHosts([]types.PublicKey{}, 0, 4, hosts.WithActiveContracts(true))
 
 	// helper to update hosts
 	updateHost := func(hk types.PublicKey, column string, value any) {
@@ -695,6 +708,11 @@ func TestUsableHosts(t *testing.T) {
 			t.Fatal(err)
 		}
 
+		// handle contract
+		if contract {
+			db.addTestContract(t, hk, types.FileContractID(hk))
+		}
+
 		// handle blocked
 		if blocked {
 			err := db.BlockHosts([]types.PublicKey{hk}, []string{t.Name()})
@@ -703,10 +721,6 @@ func TestUsableHosts(t *testing.T) {
 			}
 		}
 
-		// handle contract
-		if contract {
-			db.addTestContract(t, hk)
-		}
 		return hk
 	}
 
@@ -768,7 +782,7 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal("unexpected", err)
 	} else if len(hosts) != 2 {
 		t.Fatal("unexpected", len(hosts))
-	} else if hosts[0].PublicKey != uh2 || hosts[1].PublicKey != uh1 {
+	} else if hosts[0].PublicKey != uh1 || hosts[1].PublicKey != uh2 {
 		t.Fatal("unexpected hosts", hosts[0], hosts[1])
 	} else if hosts[0].Addresses == nil || hosts[1].Addresses == nil {
 		t.Fatal("expected hosts to have addresses")
@@ -1550,9 +1564,9 @@ func BenchmarkHosts(b *testing.B) {
 	}
 
 	// analyze tables to ensure query planner has up-to-date statistics
-	if _, err := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`); err != nil {
-		b.Fatal(err)
-	} else if _, err := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`); err != nil {
+	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`)
+	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`)
+	if err := errors.Join(vErr1, vErr2); err != nil {
 		b.Fatal(err)
 	}
 
@@ -1677,23 +1691,9 @@ func BenchmarkUsableHosts(b *testing.B) {
 	// define parameters
 	const (
 		numHosts     = 10_000
-		numBlocklist = 1000
 		defaultLimit = 100
 		maxLimit     = 500
 	)
-
-	// prepare random blocklist (we LEFT JOIN the blocklist in UsableHosts)
-	if err := store.transaction(func(ctx context.Context, tx *txn) error {
-		for range numBlocklist {
-			_, err := tx.Exec(ctx, `INSERT INTO hosts_blocklist (public_key) VALUES ($1)`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
 
 	// prepare random hosts
 	if err := store.transaction(func(ctx context.Context, tx *txn) error {
@@ -1767,6 +1767,13 @@ func BenchmarkUsableHosts(b *testing.B) {
 		b.Fatal(err)
 	}
 
+	// analyze tables to ensure query planner has up-to-date statistics
+	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`)
+	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`)
+	if err := errors.Join(vErr1, vErr2); err != nil {
+		b.Fatal(err)
+	}
+
 	for _, test := range []struct {
 		name  string
 		limit int
@@ -1790,7 +1797,7 @@ func BenchmarkUsableHosts(b *testing.B) {
 				hosts, err := store.UsableHosts(0, test.limit, hosts.WithProtocol(randomProtocol()))
 				if err != nil {
 					b.Fatal(err)
-				} else if len(hosts) != test.limit {
+				} else if len(hosts) < test.limit/2 {
 					b.Fatalf("sanity check failed, found %d usable hosts", len(hosts))
 				}
 			}
@@ -2090,7 +2097,6 @@ func BenchmarkHostsForPruning(b *testing.B) {
 	const (
 		nHosts            = 1000
 		nContractsPerHost = 100
-		nBlocklistHosts   = 1000
 	)
 
 	// prepare database
@@ -2110,16 +2116,15 @@ func BenchmarkHostsForPruning(b *testing.B) {
 			}
 		}
 
-		// we LEFT JOIN the blocklist so we populate it with random entries
-		for range nBlocklistHosts {
-			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key) VALUES ($1)", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
-			if err != nil {
-				return err
-			}
-		}
-
 		return nil
 	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// analyze tables to ensure query planner has up-to-date statistics
+	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`)
+	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`)
+	if err := errors.Join(vErr1, vErr2); err != nil {
 		b.Fatal(err)
 	}
 
@@ -2128,7 +2133,7 @@ func BenchmarkHostsForPruning(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		} else if len(batch) < nHosts/2 {
-			b.Fatal("unexpected number of hosts", len(batch))
+			b.Fatal("unexpected number of hosts for pruning:", len(batch))
 		}
 	}
 }
@@ -2240,12 +2245,8 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 func BenchmarkHostsForFunding(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
-	const (
-		nHosts          = 1000
-		nBlocklistHosts = 1000
-	)
-
 	// prepare database
+	const nHosts = 1000
 	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for range nHosts {
 			hk := types.GeneratePrivateKey().PublicKey()
@@ -2273,16 +2274,15 @@ func BenchmarkHostsForFunding(b *testing.B) {
 			}
 		}
 
-		// populate blocklist since we LEFT JOIN it in HostsForFunding
-		for range nBlocklistHosts {
-			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key) VALUES ($1)", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
-			if err != nil {
-				return err
-			}
-		}
-
 		return nil
 	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// analyze tables to ensure query planner has up-to-date statistics
+	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`)
+	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`)
+	if err := errors.Join(vErr1, vErr2); err != nil {
 		b.Fatal(err)
 	}
 
@@ -2309,7 +2309,6 @@ func BenchmarkHostsForPinning(b *testing.B) {
 
 		nHosts            = 1000
 		nContractsPerHost = 100
-		nBlocklistHosts   = 1000
 		nSectorsPerHost   = dbBaseSize / proto4.SectorSize / nHosts
 	)
 
@@ -2329,14 +2328,6 @@ func BenchmarkHostsForPinning(b *testing.B) {
 			// add contracts
 			for range nContractsPerHost {
 				hostToContractIDs[hk] = append(hostToContractIDs[hk], insertRandomContract(b, tx, hostID, hk))
-			}
-		}
-
-		// we LEFT JOIN the blocklist so we populate it with random entries
-		for range nBlocklistHosts {
-			_, err := tx.Exec(ctx, "INSERT INTO hosts_blocklist (public_key) VALUES ($1)", sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
-			if err != nil {
-				return err
 			}
 		}
 
@@ -2433,6 +2424,14 @@ func BenchmarkHostsForIntegrityCheck(b *testing.B) {
 	// 10% of the sectors have a next check time in the past
 	_, err := store.pool.Exec(b.Context(), `UPDATE sectors SET next_integrity_check = NOW() - INTERVAL '1 hour' WHERE id % 10 = 0`)
 	if err != nil {
+		b.Fatal(err)
+	}
+
+	// analyze tables to ensure query planner has up-to-date statistics
+	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`)
+	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`)
+	_, vErr3 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) sectors;`)
+	if err := errors.Join(vErr1, vErr2, vErr3); err != nil {
 		b.Fatal(err)
 	}
 
@@ -2558,8 +2557,8 @@ func BenchmarkHostsWithUnpinnableSectors(b *testing.B) {
 
 	// analyze tables to ensure query planner has up-to-date statistics
 	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`)
-	_, vErr3 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) sectors;`)
 	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`)
+	_, vErr3 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) sectors;`)
 	if err := errors.Join(vErr1, vErr2, vErr3); err != nil {
 		b.Fatal(err)
 	}

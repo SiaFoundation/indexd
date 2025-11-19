@@ -237,7 +237,7 @@ INNER JOIN hosts h ON c.host_id = h.id
 WHERE
 	-- good filter
 	(($1::boolean IS NULL) OR ($1::boolean = c.good)) AND
-	-- active filter
+	-- revisable filter
 	(
 		$2::boolean IS NULL OR
 		($2::boolean = TRUE AND c.state IN (0,1) AND c.renewed_to IS NULL) OR

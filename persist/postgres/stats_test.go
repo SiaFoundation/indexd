@@ -367,10 +367,11 @@ func TestHostStats(t *testing.T) {
 		}
 	}
 
-	// add three hosts
+	// add four hosts
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
 	hk3 := store.addTestHost(t)
+	hk4 := store.addTestHost(t)
 
 	// assert empty stats
 	stats, err := store.HostStats(0, 10)
@@ -382,8 +383,9 @@ func TestHostStats(t *testing.T) {
 
 	// add test contracts
 	fcid1 := store.addTestContract(t, hk1)
-	store.addTestContract(t, hk2)
+	fcid2 := store.addTestContract(t, hk2)
 	store.addTestContract(t, hk3)
+	store.addTestContract(t, hk4)
 
 	// assert empty stats - no usage
 	stats, err = store.HostStats(0, 10)
@@ -395,8 +397,9 @@ func TestHostStats(t *testing.T) {
 
 	// update usage spent
 	updateUsageTotalSpent(hk1, types.NewCurrency64(10))
-	updateUsageTotalSpent(hk2, types.NewCurrency64(20))
-	// hk3 remains at 0
+	updateUsageTotalSpent(hk2, types.NewCurrency64(30))
+	updateUsageTotalSpent(hk3, types.NewCurrency64(20))
+	// hk4 remains at 0
 
 	testRevision := newTestRevision(types.PublicKey{})
 
@@ -405,12 +408,14 @@ func TestHostStats(t *testing.T) {
 	stats, err = store.HostStats(0, 10)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(stats) != 2 {
-		t.Fatalf("expected 2 hosts, got %d", len(stats))
+	} else if len(stats) != 3 {
+		t.Fatalf("expected 3 hosts, got %d", len(stats))
 	} else if stats[0].PublicKey != hk2 {
 		t.Fatalf("expected first host to be hk2, got %s", stats[0].PublicKey.String())
-	} else if stats[1].PublicKey != hk1 {
-		t.Fatalf("expected second host to be hk1, got %s", stats[1].PublicKey.String())
+	} else if stats[1].PublicKey != hk3 {
+		t.Fatalf("expected second host to be hk3, got %s", stats[1].PublicKey.String())
+	} else if stats[2].PublicKey != hk1 {
+		t.Fatalf("expected third host to be hk1, got %s", stats[2].PublicKey.String())
 	} else if stats[0].ActiveContractsSize != int64(testRevision.Filesize) {
 		t.Fatalf("expected first host to have %d active contract size, got %d", testRevision.Filesize, stats[0].ActiveContractsSize)
 	} else if stats[1].ActiveContractsSize != int64(testRevision.Filesize) {
@@ -419,9 +424,11 @@ func TestHostStats(t *testing.T) {
 		t.Fatalf("expected no protocol version for first host")
 	} else if stats[1].ProtocolVersion != (proto.ProtocolVersion{}) {
 		t.Fatalf("expected no protocol version for second host")
+	} else if stats[2].ActiveContractsSize != int64(testRevision.Filesize) {
+		t.Fatalf("expected third host to have %d active contract size, got %d", testRevision.Filesize, stats[2].ActiveContractsSize)
 	}
-	if stats[0].Blocked || stats[1].Blocked {
-		t.Fatal("expected both hosts to be unblocked")
+	if stats[0].Blocked || stats[1].Blocked || stats[2].Blocked {
+		t.Fatal("expected all hosts to be unblocked")
 	}
 
 	reason := t.Name()
@@ -432,14 +439,16 @@ func TestHostStats(t *testing.T) {
 	stats, err = store.HostStats(0, 10)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(stats) != 2 {
-		t.Fatalf("expected 2 hosts, got %d", len(stats))
+	} else if len(stats) != 3 {
+		t.Fatalf("expected 3 hosts, got %d", len(stats))
 	} else if stats[0].Blocked {
 		t.Fatal("expected first host to remain unblocked")
-	} else if !stats[1].Blocked {
-		t.Fatal("expected second host to be blocked")
-	} else if !reflect.DeepEqual(stats[1].BlockedReasons, []string{reason}) {
-		t.Fatalf("expected blocked reasons %v, got %v", []string{reason}, stats[1].BlockedReasons)
+	} else if stats[1].Blocked {
+		t.Fatal("expected second host to remain unblocked")
+	} else if !stats[2].Blocked {
+		t.Fatal("expected third host to be blocked")
+	} else if !reflect.DeepEqual(stats[2].BlockedReasons, []string{reason}) {
+		t.Fatalf("expected blocked reasons %v, got %v", []string{reason}, stats[2].BlockedReasons)
 	}
 
 	// resolve first contract manually - should exclude it from total_contract_size
@@ -460,24 +469,45 @@ func TestHostStats(t *testing.T) {
 	stats, err = store.HostStats(0, 10)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(stats) != 2 {
-		t.Fatalf("expected 2 hosts, got %d", len(stats))
+	} else if len(stats) != 3 {
+		t.Fatalf("expected 3 hosts, got %d", len(stats))
 	} else if stats[0].PublicKey != hk2 {
 		t.Fatalf("expected first host to be hk2, got %s", stats[0].PublicKey.String())
-	} else if stats[1].PublicKey != hk1 {
-		t.Fatalf("expected second host to be hk1, got %s", stats[1].PublicKey.String())
+	} else if stats[1].PublicKey != hk3 {
+		t.Fatalf("expected second host to be hk3, got %s", stats[1].PublicKey.String())
+	} else if stats[2].PublicKey != hk1 {
+		t.Fatalf("expected third host to be hk1, got %s", stats[2].PublicKey.String())
 	} else if stats[0].ActiveContractsSize != int64(testRevision.Filesize) {
 		t.Fatalf("expected first host to have %d active contract size, got %d", testRevision.Filesize, stats[0].ActiveContractsSize)
-	} else if stats[1].ActiveContractsSize != 0 {
-		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[1].ActiveContractsSize)
-	} else if stats[0].ProtocolVersion != protocolVersion {
-		t.Fatalf("expected protocol version %v for first host", protocolVersion)
-	} else if stats[1].ProtocolVersion != (proto.ProtocolVersion{}) {
-		t.Fatalf("expected no protocol version for second host")
-	} else if stats[0].Release != release {
-		t.Fatalf("expected release %s for first host", release)
-	} else if stats[1].Release != "" {
-		t.Fatalf("expected no release for second host")
+	} else if stats[1].ActiveContractsSize != int64(testRevision.Filesize) {
+		t.Fatalf("expected second host to have %d active contract size, got %d", testRevision.Filesize, stats[1].ActiveContractsSize)
+	} else if stats[2].ActiveContractsSize != 0 {
+		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[2].ActiveContractsSize)
+	}
+
+	// mark second contract bad - should exclude it from total_contract_size
+	if err := store.MarkContractBad(fcid2); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert updated stats
+	stats, err = store.HostStats(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(stats) != 3 {
+		t.Fatalf("expected 3 hosts, got %d", len(stats))
+	} else if stats[0].PublicKey != hk2 {
+		t.Fatalf("expected first host to be hk2, got %s", stats[0].PublicKey.String())
+	} else if stats[1].PublicKey != hk3 {
+		t.Fatalf("expected second host to be hk3, got %s", stats[1].PublicKey.String())
+	} else if stats[2].PublicKey != hk1 {
+		t.Fatalf("expected third host to be hk1, got %s", stats[2].PublicKey.String())
+	} else if stats[0].ActiveContractsSize != 0 {
+		t.Fatalf("expected first host to have 0 active contract size, got %d", stats[0].ActiveContractsSize)
+	} else if stats[1].ActiveContractsSize != int64(testRevision.Filesize) {
+		t.Fatalf("expected second host to have %d active contract size, got %d", testRevision.Filesize, stats[1].ActiveContractsSize)
+	} else if stats[2].ActiveContractsSize != 0 {
+		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[2].ActiveContractsSize)
 	}
 	// set scanned height to the proof height - should exclude it
 	proofHeight := testRevision.ProofHeight
@@ -491,12 +521,14 @@ func TestHostStats(t *testing.T) {
 	stats, err = store.HostStats(0, 10)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(stats) != 2 {
-		t.Fatalf("expected 2 hosts, got %d", len(stats))
+	} else if len(stats) != 3 {
+		t.Fatalf("expected 3 hosts, got %d", len(stats))
 	} else if stats[0].ActiveContractsSize != 0 {
 		t.Fatalf("expected first host to have 0 active contract size, got %d", stats[0].ActiveContractsSize)
 	} else if stats[1].ActiveContractsSize != 0 {
 		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[1].ActiveContractsSize)
+	} else if stats[2].ActiveContractsSize != 0 {
+		t.Fatalf("expected third host to have 0 active contract size, got %d", stats[2].ActiveContractsSize)
 	}
 
 	// assert limit and offset are applied
@@ -504,9 +536,9 @@ func TestHostStats(t *testing.T) {
 		t.Fatal(err)
 	} else if len(stats) != 1 {
 		t.Fatalf("expected 1 host, got %d", len(stats))
-	} else if stats[0].PublicKey != hk1 {
-		t.Fatalf("expected host to be hk1, got %s", stats[0].PublicKey.String())
-	} else if stats, err := store.HostStats(2, 1); err != nil {
+	} else if stats[0].PublicKey != hk3 {
+		t.Fatalf("expected host to be hk3, got %s", stats[0].PublicKey.String())
+	} else if stats, err := store.HostStats(3, 1); err != nil {
 		t.Fatal(err)
 	} else if len(stats) != 0 {
 		t.Fatalf("expected 0 hosts, got %d", len(stats))

@@ -152,8 +152,9 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 			SELECT SUM(size) AS total_contracts_size
 			FROM contracts
 			WHERE host_id = h.id
-				AND (state = 0 OR state = 1)
+				AND state IN (0,1)
 				AND renewed_to IS NULL
+				AND good
 				AND proof_height > (SELECT scanned_height FROM globals)
 			) cs ON TRUE
 			ORDER BY h.usage_total_spent DESC;
