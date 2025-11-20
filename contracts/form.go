@@ -279,7 +279,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			delete(hostsWithoutContracts, host.PublicKey) // only form one contract per host
 			return true
 		case existingHost && errors.Is(err, wallet.ErrNotEnoughFunds):
-			log.Debug("not enough funds to form contract with existing host")
+			log.Debug("not enough funds to form contract with existing host", zap.Stringer("target", accountFundTarget), zap.Error(err))
 			return true // ignore not enough funds errors for existing hosts since it is our fault
 		default:
 			log.Warn("failed to form contract", zap.Error(err))
