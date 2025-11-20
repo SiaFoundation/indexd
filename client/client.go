@@ -36,9 +36,17 @@ var (
 	// by the host.
 	ErrContractNotRevisable = errors.New("contract is not revisable")
 
+	// ErrContractMaxSize is returned when we try to revise a contract that has
+	// reached its maximum size.
+	ErrContractMaxSize = errors.New("contract has reached maximum size")
+
 	// ErrContractOutOfFunds is returned when we try to perform an action on a
 	// contract that has no funds left to cover the action.
 	ErrContractOutOfFunds = errors.New("contract is out of funds")
+
+	// ErrContractOutOfCollateral is returned when we try to perform an action on a
+	// contract that has no collateral left to cover the action.
+	ErrContractOutOfCollateral = errors.New("contract is out of collateral")
 
 	// ErrContractRenewed is returned when we try to revise a contract that has
 	// already been renewed.
@@ -149,8 +157,17 @@ func (c *HostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPri
 
 		// ensure the maximum contract size is not exceeded
 		maxAppendSectors = min(maxAppendSectors, maxRemainingSectors)
+
 		if maxAppendSectors == 0 {
-			return rhp.ContractRevision{}, proto.Usage{}, ErrContractOutOfFunds
+			switch {
+			case maxSectorsByAllowance == 0:
+				return rhp.ContractRevision{}, proto.Usage{}, ErrContractOutOfFunds
+			case maxSectorsByCollateral == 0:
+				return rhp.ContractRevision{}, proto.Usage{}, ErrContractOutOfCollateral
+			case maxRemainingSectors == 0:
+				return rhp.ContractRevision{}, proto.Usage{}, ErrContractMaxSize
+			}
+			return rhp.ContractRevision{}, proto.Usage{}, errors.New("maxAppendSectors is zero for unknown reason") // unreachable
 		}
 
 		// only attempt to append up to the calculated maximum number of sectors
