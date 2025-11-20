@@ -127,18 +127,6 @@ func (o *SharedObject) SlabsForRange(offset, length uint64) []PinnedSlabSlice {
 	return slabs
 }
 
-// SectorRegion returns the offset and length of the sector region that must be
-// downloaded in order to recover the data referenced by the slice.
-func (ss PinnedSlabSlice) SectorRegion() (offset, length uint64) {
-	minChunkSize := proto.LeafSize * uint32(ss.MinShards)
-	start := (ss.Offset / minChunkSize) * proto.LeafSize
-	end := ((ss.Offset + ss.Length) / minChunkSize) * proto.LeafSize
-	if (ss.Offset+ss.Length)%minChunkSize != 0 {
-		end += proto.LeafSize
-	}
-	return uint64(start), uint64(end - start)
-}
-
 // metadataLimit represents the maximum size of an objects metadata we will
 // store.
 const metadataLimit = 1024

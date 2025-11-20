@@ -104,7 +104,7 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.PinnedSlabSlice, maxI
 
 	// calculate offset and length that's required from each sector to recover
 	// the data referenced by the slab slice
-	offset, length := slab.SectorRegion()
+	offset, length := sectorRegion(slab)
 
 	// prioritize hosts
 	slabHosts = s.hosts.Prioritize(slabHosts)
@@ -268,34 +268,44 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 		return errors.New("requested range exceeds object size")
 	}
 
-	// determine which slabs are required for the requested range
-	required := obj.SlabsForRange(do.offset, do.length)
-	if len(required) == 0 {
-		return errors.New("no slabs that cover the requested range")
-	}
-
 	// decrypt stream using the object's master key
 	if len(obj.masterKey) != 32 {
 		return fmt.Errorf("invalid master key length: %d", len(obj.masterKey))
 	}
 	w = decrypt((*[32]byte)(obj.masterKey), w, uint64(do.offset))
 
-	var curr int
+	var i int
+	offset := do.offset
+	length := do.length
+	for i = range obj.slabs {
+		slabLength := uint64(obj.slabs[i].Length)
+		if offset < slabLength {
+			break
+		}
+		offset -= slabLength
+	}
+
 	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.PinnedSlabSlice, error) {
-		if curr >= len(required) {
+		if i >= len(obj.slabs) || length == 0 {
 			return slabs.PinnedSlabSlice{}, nil
 		}
-		slab := required[curr]
-		curr++
 
+		slab := obj.slabs[i]
 		pinned, err := s.client.Slab(ctx, slab.SlabID)
 		if err != nil {
-			return slabs.PinnedSlabSlice{}, fmt.Errorf("failed to get slab %d metadata: %w", curr, err)
+			return slabs.PinnedSlabSlice{}, fmt.Errorf("failed to get slab %d metadata: %w", i, err)
 		}
+		i++
+
+		slabOffset := slab.Offset + uint32(offset) // cannot overflow, offset < slabLength
+		slabLength := min(uint64(slab.Length)-offset, length)
+		offset = 0
+		length -= slabLength
+
 		return slabs.PinnedSlabSlice{
 			PinnedSlab: pinned,
-			Offset:     slab.Offset,
-			Length:     slab.Length,
+			Offset:     slabOffset,
+			Length:     uint32(slabLength),
 		}, nil
 	})
 }
@@ -324,23 +334,37 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 		return errors.New("requested range exceeds object size")
 	}
 
-	// determine which slabs are required for the requested range
-	required := obj.SlabsForRange(do.offset, do.length)
-	if len(required) == 0 {
-		return errors.New("no slabs that cover the requested range")
-	}
-
 	// decrypt stream using the object's master key
 	w = decrypt((*[32]byte)(encryptionKey), w, uint64(do.offset))
 
-	var curr int
+	var i int
+	offset := do.offset
+	length := do.length
+	for i = range obj.Slabs {
+		slabLength := uint64(obj.Slabs[i].Length)
+		if offset < slabLength {
+			break
+		}
+		offset -= slabLength
+	}
+
 	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.PinnedSlabSlice, error) {
-		if curr >= len(required) {
+		if i >= len(obj.Slabs) || length == 0 {
 			return slabs.PinnedSlabSlice{}, nil
 		}
-		slab := required[curr]
-		curr++
-		return slab, nil
+		slab := obj.Slabs[i]
+		i++
+
+		slabOffset := slab.Offset + uint32(offset) // cannot overflow, offset < slabLength
+		slabLength := min(uint64(slab.Length)-offset, length)
+		offset = 0
+		length -= slabLength
+
+		return slabs.PinnedSlabSlice{
+			PinnedSlab: slab.PinnedSlab,
+			Offset:     slabOffset,
+			Length:     uint32(slabLength),
+		}, nil
 	})
 }
 
@@ -479,6 +503,18 @@ func stripedJoin(dst io.Writer, dataShards [][]byte, skip, writeLen int) error {
 		}
 	}
 	return nil
+}
+
+// sectorRegion returns the offset and length of the sector region that must be
+// downloaded in order to recover the data referenced by the slice.
+func sectorRegion(ss slabs.PinnedSlabSlice) (offset, length uint64) {
+	minChunkSize := proto4.LeafSize * uint32(ss.MinShards)
+	start := (ss.Offset / minChunkSize) * proto4.LeafSize
+	end := ((ss.Offset + ss.Length) / minChunkSize) * proto4.LeafSize
+	if (ss.Offset+ss.Length)%minChunkSize != 0 {
+		end += proto4.LeafSize
+	}
+	return uint64(start), uint64(end - start)
 }
 
 // downloadShard reads a sector from a host
