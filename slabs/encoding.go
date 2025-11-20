@@ -60,6 +60,21 @@ func (s *SlabSlice) DecodeFrom(d *types.Decoder) {
 }
 
 // EncodeTo implements types.EncoderTo.
+func (ps PinnedSlabSlice) EncodeTo(e *types.Encoder) {
+	ps.PinnedSlab.EncodeTo(e)
+	e.WriteUint64(uint64(ps.Offset)<<32 | uint64(ps.Length))
+}
+
+// DecodeFrom implements types.DecoderFrom.
+func (ps *PinnedSlabSlice) DecodeFrom(d *types.Decoder) {
+	ps.PinnedSlab.DecodeFrom(d)
+
+	combined := d.ReadUint64()
+	ps.Offset = uint32(combined >> 32)
+	ps.Length = uint32(combined)
+}
+
+// EncodeTo implements types.EncoderTo.
 func (so SealedObject) EncodeTo(e *types.Encoder) {
 	e.WriteBytes(so.EncryptedMasterKey)
 	types.EncodeSlice(e, so.Slabs)
