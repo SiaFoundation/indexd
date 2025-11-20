@@ -131,6 +131,17 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 		})
 	}
 
+	if h.Blocked && len(h.BlockedReasons) == 0 {
+		metrics = append(metrics, prometheus.Metric{
+			Name: "indexd_host_blocked_reason",
+			Labels: map[string]any{
+				"public_key": h.PublicKey.String(),
+				"reason":     "Unknown",
+			},
+			Value: 1,
+		})
+	}
+
 	return metrics
 }
 
