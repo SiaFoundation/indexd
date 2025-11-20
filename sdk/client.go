@@ -305,9 +305,12 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 		length -= slabLength
 
 		return slabs.PinnedSlabSlice{
-			PinnedSlab: pinned,
-			Offset:     slabOffset,
-			Length:     uint32(slabLength),
+			ID:            slab.SlabID,
+			EncryptionKey: pinned.EncryptionKey,
+			MinShards:     pinned.MinShards,
+			Sectors:       pinned.Sectors,
+			Offset:        slabOffset,
+			Length:        uint32(slabLength),
 		}, nil
 	})
 }
@@ -365,9 +368,12 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 		length -= slabLength
 
 		return slabs.PinnedSlabSlice{
-			PinnedSlab: slab.PinnedSlab,
-			Offset:     slabOffset,
-			Length:     uint32(slabLength),
+			ID:            slab.ID,
+			EncryptionKey: slab.EncryptionKey,
+			MinShards:     slab.MinShards,
+			Sectors:       slab.Sectors,
+			Offset:        slabOffset,
+			Length:        uint32(slabLength),
 		}, nil
 	})
 }

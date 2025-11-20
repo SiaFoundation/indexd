@@ -251,10 +251,14 @@ func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (sl
 
 	var objSlabs []slabs.PinnedSlabSlice
 	for _, slab := range obj.Slabs {
+		pinnedSlab := mc.pinned[slab.SlabID]
 		objSlabs = append(objSlabs, slabs.PinnedSlabSlice{
-			PinnedSlab: mc.pinned[slab.SlabID],
-			Offset:     slab.Offset,
-			Length:     slab.Length,
+			ID:            slab.SlabID,
+			EncryptionKey: pinnedSlab.EncryptionKey,
+			MinShards:     pinnedSlab.MinShards,
+			Sectors:       pinnedSlab.Sectors,
+			Offset:        slab.Offset,
+			Length:        slab.Length,
 		})
 	}
 

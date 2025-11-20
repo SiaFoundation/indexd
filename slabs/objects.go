@@ -43,9 +43,12 @@ type (
 	// A PinnedSlabSlice represents a slice of a slab that is part of an object.
 	// It contains all the metadata needed to retrieve a slab.
 	PinnedSlabSlice struct {
-		PinnedSlab
-		Offset uint32 `json:"offset"`
-		Length uint32 `json:"length"`
+		ID            SlabID         `json:"id"`
+		EncryptionKey [32]byte       `json:"encryptionKey"`
+		MinShards     uint           `json:"minShards"`
+		Sectors       []PinnedSector `json:"sectors"`
+		Offset        uint32         `json:"offset"`
+		Length        uint32         `json:"length"`
 	}
 
 	// ObjectEvent represents an event on an object, such as it being created,

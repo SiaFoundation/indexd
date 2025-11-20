@@ -620,40 +620,36 @@ func TestSharedObjects(t *testing.T) {
 	expectedSharedObj := slabs.SharedObject{
 		Slabs: []slabs.PinnedSlabSlice{
 			{
-				PinnedSlab: slabs.PinnedSlab{
-					ID:            slab1ID,
-					EncryptionKey: slab1Params.EncryptionKey,
-					MinShards:     slab1Params.MinShards,
-					Sectors: func() []slabs.PinnedSector {
-						so := make([]slabs.PinnedSector, len(slab1Params.Sectors))
-						for i := range slab1Params.Sectors {
-							so[i] = slabs.PinnedSector{
-								Root:    slab1Params.Sectors[i].Root,
-								HostKey: slab1Params.Sectors[i].HostKey,
-							}
+				ID:            slab1ID,
+				EncryptionKey: slab1Params.EncryptionKey,
+				MinShards:     slab1Params.MinShards,
+				Sectors: func() []slabs.PinnedSector {
+					so := make([]slabs.PinnedSector, len(slab1Params.Sectors))
+					for i := range slab1Params.Sectors {
+						so[i] = slabs.PinnedSector{
+							Root:    slab1Params.Sectors[i].Root,
+							HostKey: slab1Params.Sectors[i].HostKey,
 						}
-						return so
-					}(),
-				},
+					}
+					return so
+				}(),
 				Offset: 0,
 				Length: 256,
 			},
 			{
-				PinnedSlab: slabs.PinnedSlab{
-					ID:            slab2ID,
-					EncryptionKey: slab2Params.EncryptionKey,
-					MinShards:     slab2Params.MinShards,
-					Sectors: func() []slabs.PinnedSector {
-						so := make([]slabs.PinnedSector, len(slab2Params.Sectors))
-						for i := range slab2Params.Sectors {
-							so[i] = slabs.PinnedSector{
-								Root:    slab2Params.Sectors[i].Root,
-								HostKey: slab2Params.Sectors[i].HostKey,
-							}
+				ID:            slab2ID,
+				EncryptionKey: slab2Params.EncryptionKey,
+				MinShards:     slab2Params.MinShards,
+				Sectors: func() []slabs.PinnedSector {
+					so := make([]slabs.PinnedSector, len(slab2Params.Sectors))
+					for i := range slab2Params.Sectors {
+						so[i] = slabs.PinnedSector{
+							Root:    slab2Params.Sectors[i].Root,
+							HostKey: slab2Params.Sectors[i].HostKey,
 						}
-						return so
-					}(),
-				},
+					}
+					return so
+				}(),
 				Offset: 0,
 				Length: 256,
 			},

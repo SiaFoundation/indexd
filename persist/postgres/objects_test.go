@@ -370,14 +370,12 @@ func TestSharedObjects(t *testing.T) {
 		}
 
 		so := slabs.PinnedSlabSlice{
-			PinnedSlab: slabs.PinnedSlab{
-				ID:            slabIDs[0],
-				EncryptionKey: s.EncryptionKey,
-				MinShards:     s.MinShards,
-				Sectors:       make([]slabs.PinnedSector, len(s.Sectors)),
-			},
-			Offset: uint32(frand.Uint64n(math.MaxInt32)),
-			Length: uint32(frand.Uint64n(math.MaxInt32)),
+			ID:            slabIDs[0],
+			EncryptionKey: s.EncryptionKey,
+			MinShards:     s.MinShards,
+			Sectors:       make([]slabs.PinnedSector, len(s.Sectors)),
+			Offset:        uint32(frand.Uint64n(math.MaxInt32)),
+			Length:        uint32(frand.Uint64n(math.MaxInt32)),
 		}
 		for i := range s.Sectors {
 			so.Sectors[i] = slabs.PinnedSector{
