@@ -274,6 +274,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 	}
 	w = decrypt((*[32]byte)(obj.masterKey), w, uint64(do.offset))
 
+	// find starting slab
 	var i int
 	offset := do.offset
 	length := do.length
@@ -297,6 +298,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 		}
 		i++
 
+		// update offset and length for the slab slice
 		slabOffset := slab.Offset + uint32(offset) // cannot overflow, offset < slabLength
 		slabLength := min(uint64(slab.Length)-offset, length)
 		offset = 0
@@ -337,6 +339,7 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 	// decrypt stream using the object's master key
 	w = decrypt((*[32]byte)(encryptionKey), w, uint64(do.offset))
 
+	// find starting slab
 	var i int
 	offset := do.offset
 	length := do.length
@@ -355,6 +358,7 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 		slab := obj.Slabs[i]
 		i++
 
+		// update offset and length for the slab slice
 		slabOffset := slab.Offset + uint32(offset) // cannot overflow, offset < slabLength
 		slabLength := min(uint64(slab.Length)-offset, length)
 		offset = 0
