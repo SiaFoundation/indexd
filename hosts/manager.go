@@ -69,6 +69,8 @@ type (
 		PublicKey           types.PublicKey `json:"publicKey"`
 		LostSectors         int64           `json:"lostSectors"`
 		TotalUsage          types.Currency  `json:"totalUsage"`
+		Scans               int64           `json:"scans"`
+		ScansFailed         int64           `json:"scansFailed"`
 		Blocked             bool            `json:"blocked"`
 		BlockedReasons      []string        `json:"blockedReasons"`
 	}

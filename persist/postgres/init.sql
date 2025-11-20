@@ -41,6 +41,9 @@ CREATE TABLE hosts (
     location POINT NOT NULL DEFAULT POINT(0.0, 0.0),
     lost_sectors INTEGER NOT NULL DEFAULT 0,
 
+    scans INTEGER NOT NULL DEFAULT 0 CHECK (scans >= 0),
+    scans_failed INTEGER NOT NULL DEFAULT 0 CHECK (scans_failed >= 0),
+
     usage_account_funding NUMERIC(50,0) NOT NULL DEFAULT 0,
     usage_total_spent NUMERIC(50,0) NOT NULL DEFAULT 0,
 

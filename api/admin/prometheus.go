@@ -89,6 +89,16 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 			Value:  float64(h.TotalUsage.Siacoins()),
 		},
 		{
+			Name:   "indexd_host_scans",
+			Labels: labels,
+			Value:  float64(h.Scans),
+		},
+		{
+			Name:   "indexd_host_scans_failed",
+			Labels: labels,
+			Value:  float64(h.ScansFailed),
+		},
+		{
 			Name:   "indexd_host_lost_sectors",
 			Labels: labels,
 			Value:  float64(h.LostSectors),

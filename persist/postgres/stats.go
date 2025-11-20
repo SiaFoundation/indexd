@@ -122,6 +122,8 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 					h.lost_sectors,
 					h.usage_account_funding,
 					h.usage_total_spent,
+					h.scans,
+					h.scans_failed,
 					hb.public_key IS NOT NULL AS blocked,
 					COALESCE(hb.reasons, ARRAY[]::TEXT[]) AS blocked_reasons
 				FROM hosts h
@@ -137,6 +139,8 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 				COALESCE(cs.total_contracts_size, 0) AS total_contracts_size,
 				h.usage_account_funding,
 				h.usage_total_spent,
+				h.scans,
+				h.scans_failed,
 				h.blocked,
 				h.blocked_reasons
 			FROM selected_hosts h
@@ -163,6 +167,8 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 				&hs.ActiveContractsSize,
 				(*sqlCurrency)(&hs.AccountUsage),
 				(*sqlCurrency)(&hs.TotalUsage),
+				&hs.Scans,
+				&hs.ScansFailed,
 				&hs.Blocked,
 				&hs.BlockedReasons,
 			); err != nil {

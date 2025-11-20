@@ -497,7 +497,19 @@ func TestHostScanStats(t *testing.T) {
 	// add two hosts
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
+	store.addTestContract(t, hk1)
+	store.addTestContract(t, hk2)
 	hs := newTestHostSettings(hk1)
+
+	updateUsageTotalSpent := func(hk types.PublicKey, spent types.Currency) {
+		t.Helper()
+		if _, err := store.pool.Exec(t.Context(), "UPDATE hosts SET usage_total_spent = $1 WHERE public_key = $2", sqlCurrency(spent), sqlPublicKey(hk)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// set this so hosts show up in HostStats
+	updateUsageTotalSpent(hk1, types.Siacoins(1))
+	updateUsageTotalSpent(hk2, types.Siacoins(1))
 
 	assertStats := func(expectedScans, expectedFailed int64) {
 		t.Helper()
@@ -511,33 +523,67 @@ func TestHostScanStats(t *testing.T) {
 			t.Fatalf("expected %d scans, got %d", expectedFailed, stats.Failed)
 		}
 	}
+	assertHost := func(hk types.PublicKey, expectedScans, expectedFailed int64) {
+		t.Helper()
+
+		hosts, err := store.HostStats(0, 500)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, host := range hosts {
+			if host.PublicKey != hk {
+				continue
+			}
+
+			if expectedScans != host.Scans {
+				t.Fatalf("expected %d scans, got %d", expectedScans, host.Scans)
+			} else if expectedFailed != host.ScansFailed {
+				t.Fatalf("expected %d scans, got %d", expectedFailed, host.ScansFailed)
+			}
+			return
+		}
+		t.Fatal("host missing from HostStats", hosts)
+	}
 	assertStats(0, 0)
+	assertHost(hk1, 0, 0)
+	assertHost(hk2, 0, 0)
 
 	// add successful scan
 	if err := store.UpdateHost(hk1, hs, geoip.Location{}, true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	assertStats(1, 0)
+	assertHost(hk1, 1, 0)
+	assertHost(hk2, 0, 0)
 
 	// add failed scan
 	if err := store.UpdateHost(hk1, hs, geoip.Location{}, false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	assertStats(2, 1)
+	assertHost(hk1, 2, 1)
+	assertHost(hk2, 0, 0)
 
 	// add another successful scan
 	if err := store.UpdateHost(hk2, hs, geoip.Location{}, true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	assertStats(3, 1)
+	assertHost(hk1, 2, 1)
+	assertHost(hk2, 1, 0)
 
 	// scans where host doesn't exist shouldn't affect stats
 	if err := store.UpdateHost(types.GeneratePrivateKey().PublicKey(), hs, geoip.Location{}, true, time.Now()); !errors.Is(err, hosts.ErrNotFound) {
 		t.Fatalf("expected error %v, got %v", hosts.ErrNotFound, err)
 	}
 	assertStats(3, 1)
+	assertHost(hk1, 2, 1)
+	assertHost(hk2, 1, 0)
+
 	if err := store.UpdateHost(types.GeneratePrivateKey().PublicKey(), hs, geoip.Location{}, false, time.Now()); !errors.Is(err, hosts.ErrNotFound) {
 		t.Fatalf("expected error %v, got %v", hosts.ErrNotFound, err)
 	}
 	assertStats(3, 1)
+	assertHost(hk1, 2, 1)
+	assertHost(hk2, 1, 0)
 }

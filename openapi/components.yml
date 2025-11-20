@@ -857,6 +857,14 @@ components:
             allOf:
               - $ref: "#/components/schemas/Currency"
               - description: Total amount spent on this host
+          scans:
+            type: integer
+            format: int64
+            description: Number of times this host has been scanned
+          scansFailed:
+            type: integer
+            format: int64
+            description: Number of times this host has been unsuccessfully scanned
           blocked:
             type: boolean
             description: Whether the host is currently blocked

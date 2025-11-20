@@ -450,6 +450,8 @@ UPDATE hosts
 SET
  	recent_uptime = recent_uptime * decay_factor,
 	consecutive_failed_scans = consecutive_failed_scans + 1,
+	scans = scans + 1,
+	scans_failed = scans_failed + 1,
 	last_failed_scan = NOW(),
 	next_scan = $3
 FROM computed
@@ -487,6 +489,7 @@ UPDATE hosts
 SET
 	recent_uptime = 1 * (1 - decay_factor) + recent_uptime * decay_factor,
 	consecutive_failed_scans = 0,
+	scans = scans + 1,
 	last_successful_scan = NOW(),
 	next_scan = $3,
 

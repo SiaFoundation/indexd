@@ -512,4 +512,12 @@ ALTER TABLE stats ADD COLUMN num_scans_failed BIGINT NOT NULL DEFAULT 0 CHECK (n
 `)
 		return err
 	},
+	// add host scan stats to hosts
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE hosts ADD COLUMN scans INTEGER NOT NULL DEFAULT 0 CHECK (scans >= 0);
+ALTER TABLE hosts ADD COLUMN scans_failed INTEGER NOT NULL DEFAULT 0 CHECK (scans_failed >= 0);
+`)
+		return err
+	},
 }
