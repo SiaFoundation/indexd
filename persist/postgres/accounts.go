@@ -107,7 +107,7 @@ func (s *Store) HasAccount(ak types.PublicKey) (bool, error) {
 }
 
 func activeAccounts(ctx context.Context, tx *txn, threshold time.Time) (count uint64, err error) {
-	err = tx.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE deleted IS FALSE AND last_used >= $1;`, threshold).Scan(&count)
+	err = tx.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE last_used >= $1;`, threshold).Scan(&count)
 	return
 }
 
@@ -122,18 +122,33 @@ func (s *Store) ActiveAccounts(threshold time.Time) (count uint64, err error) {
 }
 
 // DeleteAccount deletes the account in the database with given account key.
-func (s *Store) DeleteAccount(ak types.PublicKey) error {
+func (s *Store) DeleteAccount(ak types.PublicKey, soft bool) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		var serviceAccount bool
-		err := tx.QueryRow(ctx, `UPDATE accounts set deleted = TRUE, connect_key_id = NULL WHERE public_key = $1 RETURNING service_account`, sqlPublicKey(ak)).Scan(&serviceAccount)
-		if errors.Is(err, sql.ErrNoRows) {
-			return accounts.ErrNotFound
-		} else if err != nil {
-			return fmt.Errorf("failed to delete account: %w", err)
-		} else if serviceAccount {
-			return accounts.ErrServiceAccount
-		} else if err := incrementNumAccounts(ctx, tx, -1); err != nil {
-			return fmt.Errorf("failed to decrement registered accounts: %w", err)
+		if soft {
+			var serviceAccount bool
+			err := tx.QueryRow(ctx, `UPDATE accounts set deleted = TRUE WHERE public_key = $1 RETURNING service_account`, sqlPublicKey(ak)).Scan(&serviceAccount)
+			if errors.Is(err, sql.ErrNoRows) {
+				return accounts.ErrNotFound
+			} else if err != nil {
+				return fmt.Errorf("failed to delete account: %w", err)
+			} else if serviceAccount {
+				return accounts.ErrServiceAccount
+			}
+		} else {
+			var serviceAccount bool
+			var connectKeyID sql.NullInt64
+			err := tx.QueryRow(ctx, `DELETE FROM accounts WHERE public_key = $1 RETURNING service_account, connect_key_id`, sqlPublicKey(ak)).Scan(&serviceAccount, &connectKeyID)
+			if errors.Is(err, sql.ErrNoRows) {
+				return accounts.ErrNotFound
+			} else if err != nil {
+				return fmt.Errorf("failed to delete account: %w", err)
+			} else if serviceAccount {
+				return accounts.ErrServiceAccount
+			} else if err := incrementNumAccounts(ctx, tx, -1); err != nil {
+				return fmt.Errorf("failed to decrement registered accounts: %w", err)
+			} else if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET remaining_uses = remaining_uses + 1 WHERE id = $1`, connectKeyID); err != nil {
+				return fmt.Errorf("failed to increment connect key remaining_uses: %w", err)
+			}
 		}
 		return nil
 	})
@@ -155,6 +170,40 @@ func (s *Store) UpdateAccount(oldAK, newAK types.PublicKey) error {
 		}
 		return nil
 	})
+}
+
+// AccountsForPruning returns up to `limit` soft deleted accounts that have not
+// been entirely deleted yet.
+func (s *Store) AccountsForPruning(limit int) ([]proto.Account, error) {
+	if limit < 0 {
+		return nil, errors.New("limit can not be negative")
+	} else if limit == 0 {
+		return nil, nil
+	}
+
+	accs := make([]proto.Account, 0, limit)
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `SELECT public_key FROM accounts WHERE deleted IS TRUE LIMIT $1`, limit)
+		if err != nil {
+			return fmt.Errorf("falied to query deleted accounts: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var ak types.PublicKey
+			if err := rows.Scan((*sqlPublicKey)(&ak)); err != nil {
+				return fmt.Errorf("failed to scan public key: %w", err)
+			}
+			accs = append(accs, proto.Account(ak))
+		}
+
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return accs, nil
 }
 
 // HostAccountsForFunding returns up to `limit` active (after the `threshold`

@@ -342,7 +342,7 @@ func TestAccountStatsRegistered(t *testing.T) {
 	}
 
 	for i := range accs {
-		if err := store.DeleteAccount(accs[i]); err != nil {
+		if err := store.DeleteAccount(accs[i], false); err != nil {
 			t.Fatal(err)
 		}
 

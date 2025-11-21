@@ -122,7 +122,7 @@ func TestAppConnectKeys(t *testing.T) {
 	}
 
 	// delete account
-	if err := store.DeleteAccount(acc); err != nil {
+	if err := store.DeleteAccount(acc, false); err != nil {
 		t.Fatal(err)
 	}
 

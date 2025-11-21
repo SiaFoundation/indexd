@@ -222,7 +222,7 @@ func TestDeleteAccount(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	pk := types.GeneratePrivateKey().PublicKey()
-	err := store.DeleteAccount(pk)
+	err := store.DeleteAccount(pk, false)
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected [accounts.ErrNotFound]")
 	}
@@ -243,7 +243,7 @@ func TestDeleteAccount(t *testing.T) {
 		t.Fatal("unexpected accounts", accs)
 	}
 
-	err = store.DeleteAccount(pk)
+	err = store.DeleteAccount(pk, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestDeleteAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = store.DeleteAccount(pk2)
+	err = store.DeleteAccount(pk2, false)
 	if !errors.Is(err, accounts.ErrServiceAccount) {
 		t.Fatal(err)
 	}
