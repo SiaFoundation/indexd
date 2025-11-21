@@ -396,12 +396,6 @@ func (s *SDK) Close() error {
 
 type slabIterFn func() (slabs.PinnedSlabSlice, error)
 
-// PinObject pins the given object to the indexer. This usually only needs to be
-// caleld if the upload was done with the WithSkipSave option.
-func (s *SDK) PinObject(ctx context.Context, obj Object) error {
-	return s.client.SaveObject(ctx, obj.Seal(s.appKey))
-}
-
 // SealObject seals the object for storage in the indexer. A sealed object can
 // be safely stored and shared without granting access to the underlying
 // metadata or object data.
