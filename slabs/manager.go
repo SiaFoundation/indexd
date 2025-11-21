@@ -363,18 +363,18 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 			}(host)
 		}
 		wg.Wait()
-	}
 
-	hks, err := m.store.HostsWithLostSectors()
-	if err != nil {
-		return fmt.Errorf("failed to get hosts with lost sectors: %w", err)
-	}
-	if len(hks) > 0 {
-		if err := m.alerter.RegisterAlert(newLostSectorsAlert(hks)); err != nil {
-			return fmt.Errorf("failed to register lost sector alert: %w", err)
+		hks, err := m.store.HostsWithLostSectors()
+		if err != nil {
+			return fmt.Errorf("failed to get hosts with lost sectors: %w", err)
 		}
-	} else {
-		m.alerter.DismissAlerts(alertLostSectorsID)
+		if len(hks) > 0 {
+			if err := m.alerter.RegisterAlert(newLostSectorsAlert(hks)); err != nil {
+				return fmt.Errorf("failed to register lost sector alert: %w", err)
+			}
+		} else {
+			m.alerter.DismissAlerts(alertLostSectorsID)
+		}
 	}
 
 	logger.Debug("finished integrity checks", zap.Duration("elapsed", time.Since(start)))
