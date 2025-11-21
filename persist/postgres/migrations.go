@@ -520,7 +520,7 @@ ALTER TABLE hosts ADD COLUMN scans_failed INTEGER NOT NULL DEFAULT 0 CHECK (scan
 `)
 		return err
 	},
-	// add host scan stats to hosts
+	// add soft deletion support to accounts
 	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
 		_, err := tx.Exec(ctx, `
 ALTER TABLE accounts ADD COLUMN deleted BOOLEAN NOT NULL DEFAULT FALSE;
