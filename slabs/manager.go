@@ -425,7 +425,7 @@ func (m *SlabManager) pruneDeletedAccounts(ctx context.Context) error {
 	const objBatchSize = 128
 
 	var accExhausted bool
-	for !accExhausted {
+	for !accExhausted && ctx.Err() == nil {
 		batch, err := m.store.AccountsForPruning(accBatchSize)
 		if err != nil {
 			return fmt.Errorf("failed to get accounts for pruning: %w", err)
@@ -436,7 +436,7 @@ func (m *SlabManager) pruneDeletedAccounts(ctx context.Context) error {
 		for _, acc := range batch {
 			var cursor Cursor
 			var objExhausted bool
-			for !objExhausted {
+			for !objExhausted && ctx.Err() == nil {
 				// delete objBatchSize objects associated with this account
 				// at a time
 				objs, err := m.store.ListObjects(acc, cursor, objBatchSize)
