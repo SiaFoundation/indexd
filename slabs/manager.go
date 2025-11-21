@@ -463,7 +463,7 @@ func (m *SlabManager) pruneDeletedAccounts(ctx context.Context) error {
 				}
 			}
 
-			// remove all slabs and sectors associated with the objects we jsut
+			// remove all slabs and sectors associated with the objects we just
 			// deleted
 			if err := m.store.PruneSlabs(acc); err != nil {
 				return fmt.Errorf("failed to prune slabs: %w", err)
