@@ -81,7 +81,7 @@ ORDER BY ss.slab_index ASC`, slabDBID).Query(func(rows pgx.Rows) error {
 // Object retrieves the object with the given key for the given account.
 func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.SealedObject, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		accountID, err := accountID(ctx, tx, account)
+		accountID, err := accountID(ctx, tx, account, true)
 		if err != nil {
 			return err
 		}
@@ -123,7 +123,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 // the given 'after' time.
 func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		accountID, err := accountID(ctx, tx, account)
+		accountID, err := accountID(ctx, tx, account, true)
 		if err != nil {
 			return err
 		}
@@ -253,7 +253,7 @@ func deleteObjects(ctx context.Context, tx *txn, accountID int64, objectKeys []t
 // DeleteObjects deletes the objects with the given keys for the account.
 func (s *Store) DeleteObjects(account proto.Account, objectKeys []types.Hash256) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		accountID, err := accountID(ctx, tx, account)
+		accountID, err := accountID(ctx, tx, account, true)
 		if err != nil {
 			return err
 		}
@@ -265,7 +265,7 @@ func (s *Store) DeleteObjects(account proto.Account, objectKeys []types.Hash256)
 // DeleteObject deletes the object with the given key for the given account.
 func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		accountID, err := accountID(ctx, tx, account)
+		accountID, err := accountID(ctx, tx, account, true)
 		if err != nil {
 			return err
 		}
@@ -287,7 +287,7 @@ func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) err
 // the given key exists for an account, it is overwritten.
 func (s *Store) SaveObject(account proto.Account, obj slabs.SealedObject) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		accountID, err := accountID(ctx, tx, account)
+		accountID, err := accountID(ctx, tx, account, false)
 		if err != nil {
 			return err
 		}
@@ -350,13 +350,16 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 	})
 }
 
-func accountID(ctx context.Context, tx *txn, account proto.Account) (int64, error) {
+func accountID(ctx context.Context, tx *txn, account proto.Account, deletedOK bool) (int64, error) {
 	var accountID int64
-	err := tx.QueryRow(ctx, "SELECT id FROM accounts WHERE accounts.public_key = $1", sqlPublicKey(account)).Scan(&accountID)
+	var deleted bool
+	err := tx.QueryRow(ctx, "SELECT id, deleted FROM accounts WHERE accounts.public_key = $1", sqlPublicKey(account)).Scan(&accountID, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, accounts.ErrNotFound
 	} else if err != nil {
 		return 0, fmt.Errorf("failed to get account id: %w", err)
+	} else if !deletedOK && deleted {
+		return 0, accounts.ErrNotFound
 	}
 	return accountID, nil
 }

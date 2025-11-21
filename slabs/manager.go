@@ -469,7 +469,8 @@ func (m *SlabManager) pruneDeletedAccounts(ctx context.Context) error {
 				return fmt.Errorf("failed to prune slabs: %w", err)
 			}
 
-			// now we can delete the account because nothing is attached to it
+			// now we can hard delete the account because nothing is attached
+			// to it
 			if err := m.store.DeleteAccount(types.PublicKey(acc), false); err != nil {
 				return fmt.Errorf("failed to hard delete account: %w", err)
 			}

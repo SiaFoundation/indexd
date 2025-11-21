@@ -500,7 +500,7 @@ RETURNING connect_key_id`, delta, accountID).Scan(&connectKeyID)
 // sectors of the slab will also be removed in that case.
 func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, err := accountID(ctx, tx, account)
+		id, err := accountID(ctx, tx, account, true)
 		if err != nil {
 			return fmt.Errorf("failed to get account ID: %w", err)
 		}
