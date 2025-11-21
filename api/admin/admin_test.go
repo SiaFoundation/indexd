@@ -200,7 +200,7 @@ func TestAccountsAPI(t *testing.T) {
 	}
 
 	for _, acc := range accs {
-		err = admin.DeleteAccount(context.Background(), acc)
+		err = admin.DeleteAccount(context.Background(), acc, false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1048,7 +1048,7 @@ func TestAccountStatsAPI(t *testing.T) {
 		t.Fatalf("expected 2 registered accounts, got %d", stats.Registered)
 	}
 
-	if err := indexer.Store().DeleteAccount(account1); err != nil {
+	if err := indexer.Store().DeleteAccount(account1, false); err != nil {
 		t.Fatal(err)
 	}
 

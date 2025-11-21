@@ -117,11 +117,14 @@ type (
 		Slabs(account proto.Account, slabIDs []SlabID) ([]Slab, error)
 		SlabIDs(account proto.Account, offset, limit int) ([]SlabID, error)
 		UnhealthySlabs(limit int) ([]SlabID, error)
+		AccountsForPruning(limit int) ([]proto.Account, error)
+		DeleteAccount(ak types.PublicKey, soft bool) error
 		PruneSlabs(account proto.Account) error
 
 		// Object methods
 		Object(account proto.Account, key types.Hash256) (SealedObject, error)
 		DeleteObject(account proto.Account, objectKey types.Hash256) error
+		DeleteObjects(account proto.Account, objectKeys []types.Hash256) error
 		SaveObject(account proto.Account, obj SealedObject) error
 		ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
 		SharedObject(key types.Hash256) (SharedObject, error)
@@ -314,6 +317,7 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 
 	launch("integrity checks", m.performIntegrityChecks)
 	launch("slab migrations", m.performSlabMigrations)
+	launch("prune deleted accounts", m.pruneDeletedAccounts)
 	wg.Wait()
 }
 
@@ -407,5 +411,71 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	}
 
 	log.Debug("finished slab migrations", zap.Duration("elapsed", time.Since(start)))
+	return nil
+}
+
+func (m *SlabManager) pruneDeletedAccounts(ctx context.Context) error {
+	start := time.Now()
+	log := m.log.Named("accounts")
+	log.Debug("pruning deleted accounts")
+
+	// how many deleted accounts to retrieve at once
+	const accBatchSize = 20
+	// how many objects to delete at once
+	const objBatchSize = 128
+
+	var accExhausted bool
+	for !accExhausted {
+		batch, err := m.store.AccountsForPruning(accBatchSize)
+		if err != nil {
+			return fmt.Errorf("failed to get accounts for pruning: %w", err)
+		} else if len(batch) < accBatchSize {
+			accExhausted = true
+		}
+
+		for _, acc := range batch {
+			var cursor Cursor
+			var objExhausted bool
+			for !objExhausted {
+				// delete objBatchSize objects associated with this account
+				// at a time
+				objs, err := m.store.ListObjects(acc, cursor, objBatchSize)
+				if err != nil {
+					return fmt.Errorf("failed to get objects on account: %w", err)
+				} else if len(objs) < objBatchSize {
+					objExhausted = true
+				}
+
+				objectKeys := make([]types.Hash256, 0, len(objs))
+				for _, obj := range objs {
+					cursor.Key = obj.Key
+
+					// don't need to pass it to DeleteObjects if it was already
+					// deleted
+					if obj.Deleted {
+						continue
+					}
+					objectKeys = append(objectKeys, obj.Key)
+				}
+
+				if err := m.store.DeleteObjects(acc, objectKeys); err != nil {
+					return fmt.Errorf("failed to delete objects: %w", err)
+				}
+			}
+
+			// remove all slabs and sectors associated with the objects we jsut
+			// deleted
+			if err := m.store.PruneSlabs(acc); err != nil {
+				return fmt.Errorf("failed to prune slabs: %w", err)
+			}
+
+			// now we can delete the account because nothing is attached to it
+			if err := m.store.DeleteAccount(types.PublicKey(acc), false); err != nil {
+				return fmt.Errorf("failed to hard delete account: %w", err)
+			}
+		}
+	}
+
+	log.Debug("finished pruning deleted accounts", zap.Duration("elapsed", time.Since(start)))
 	return nil
 }
