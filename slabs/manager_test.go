@@ -98,7 +98,11 @@ func (s *mockStore) DeleteAccount(ak types.PublicKey, soft bool) error {
 }
 
 func (s *mockStore) AccountsForPruning(limit int) ([]proto.Account, error) {
-	return slices.Collect(maps.Keys(s.deletedAccounts)), nil
+	accounts := slices.Collect(maps.Keys(s.deletedAccounts))
+	if len(accounts) > limit {
+		accounts = accounts[:limit]
+	}
+	return accounts, nil
 }
 
 func (s *mockStore) Contracts(offset, limit int, opts ...contracts.ContractQueryOpt) ([]contracts.Contract, error) {
