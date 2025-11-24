@@ -197,7 +197,7 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 func (c *Client) Prices(ctx context.Context, hostKey types.PublicKey) (proto.HostPrices, error) {
 	c.mu.Lock()
 	prices := c.cachedPrices[hostKey]
-	if prices.Validate(hostKey) == nil {
+	if prices.Validate(hostKey) == nil && time.Until(prices.ValidUntil) > 30*time.Second {
 		c.mu.Unlock()
 		return prices, nil
 	}

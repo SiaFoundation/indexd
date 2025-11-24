@@ -30,7 +30,7 @@ func TestHostManager(t *testing.T) {
 	defer db.Close()
 
 	// create host manager
-	mgr, err := hosts.NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mock.Locator{}, db, hosts.WithAnnouncementMaxAge(time.Minute))
+	mgr, err := hosts.NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mock.Locator{}, nil, db, hosts.WithAnnouncementMaxAge(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestScanTimeout(t *testing.T) {
 		}
 
 		// create host manager
-		mgr, err := hosts.NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mock.Locator{}, db, hosts.WithScanner(scanner))
+		mgr, err := hosts.NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mock.Locator{}, nil, db, hosts.WithScanner(scanner))
 		if err != nil {
 			t.Fatal(err)
 		}

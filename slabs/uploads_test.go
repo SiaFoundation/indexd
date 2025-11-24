@@ -2,7 +2,6 @@ package slabs
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -16,28 +15,28 @@ import (
 )
 
 func TestUploadShards(t *testing.T) {
+	log := zap.NewNop()
 	// prepare dependencies
 	store := newMockStore()
 	chain := newMockChainManager()
 	am := newMockAccountManager(store)
 	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
+	client := newMockHostClient()
 
 	// prepare hosts
-	h1 := newTestHost(types.PublicKey{1})
-	h2 := newTestHost(types.PublicKey{2})
-	h3 := newTestHost(types.PublicKey{3})
-	h4 := newTestHost(types.PublicKey{4})
-
-	// prepare dialer
-	allHosts := []hosts.Host{h1, h2, h3, h4}
-	dialer := newMockDialer(allHosts)
-
-	// assert hosts have non-zero write costs
-	for _, host := range allHosts {
-		if host.Settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost().IsZero() {
-			t.Fatal("host has zero write cost")
+	hostKeys := make([]types.PrivateKey, 4)
+	hosts := make([]hosts.Host, 0, len(hostKeys))
+	availableHosts := make([]types.PublicKey, 0, len(hostKeys))
+	for i := range hostKeys {
+		sk := types.GeneratePrivateKey()
+		h := client.addTestHost(sk)
+		hostKeys[i] = sk
+		if h.Settings.Prices.StoragePrice.IsZero() {
+			t.Fatal("host has zero storage price")
 		}
+		hosts = append(hosts, h)
+		availableHosts = append(availableHosts, sk.PublicKey())
 	}
 
 	// prepare shards
@@ -56,39 +55,74 @@ func TestUploadShards(t *testing.T) {
 
 	// create manager
 	alerter := alerts.NewManager()
-	sm, err := newSlabManager(chain, am, nil, hm, store, dialer, alerter, account, types.GeneratePrivateKey())
+	sm, err := newSlabManager(chain, am, nil, hm, store, client, alerter, account, types.GeneratePrivateKey())
 	if err != nil {
 		t.Fatal(err)
 	}
 	sm.shardTimeout = 50 * time.Millisecond
 
-	pool := newConnPool(sm.dialer, zap.NewNop())
-	defer pool.Close()
-
 	// set balance to 1SC
-	for _, h := range allHosts {
-		err = am.UpdateServiceAccountBalance(context.Background(), h.PublicKey, sm.migrationAccount, types.Siacoins(1))
+	for _, hostKey := range availableHosts {
+		err = am.UpdateServiceAccountBalance(context.Background(), hostKey, sm.migrationAccount, types.Siacoins(1))
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// assert passing in no hosts returns an error
-	_, err = sm.uploadShards(context.Background(), slab, shards, nil, pool, zap.NewNop())
-	if !errors.Is(err, errNotEnoughHosts) {
-		t.Fatalf("expected [errNotEnoughHosts] got %v", err)
+	assertSectors := func(t *testing.T, potentialSectors []types.Hash256, n int, unexpected []types.Hash256) {
+		t.Helper()
+
+		var uploaded int
+		potentialMap := make(map[types.Hash256]struct{}, len(potentialSectors))
+		for _, root := range potentialSectors {
+			potentialMap[root] = struct{}{}
+		}
+		unexpectedMap := make(map[types.Hash256]struct{}, len(unexpected))
+		for _, root := range unexpected {
+			unexpectedMap[root] = struct{}{}
+		}
+
+		// check that enough candidate sectors were uploaded to at most one host
+		// then reset the mock host storage for the next test
+		client.mu.Lock()
+		for _, stored := range client.hostSectors {
+			for root := range stored {
+				if _, ok := unexpectedMap[root]; ok {
+					client.mu.Unlock()
+					t.Fatalf("unexpected sector found: %v", root)
+				} else if _, ok := potentialMap[root]; ok {
+					uploaded++
+					delete(potentialMap, root)
+				}
+			}
+		}
+		client.mu.Unlock()
+		if uploaded != n {
+			t.Fatalf("expected %d uploaded sectors, got %d", n, uploaded)
+		}
+		client.resetStorage()
 	}
+
+	// assert passing in no hosts returns no error and no uploads
+	uploaded, err := sm.uploadShards(context.Background(), slab, shards, nil, zap.NewNop())
+	if err != nil {
+		t.Fatal(err)
+	} else if uploaded != 0 {
+		t.Fatalf("expected 0 uploads, got %d", uploaded)
+	}
+	assertSectors(t, nil, 0, nil)
 
 	// assert passing in enough hosts uploads all shards
-	uploaded, err := sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2, h3}, pool, zap.NewNop())
+	uploaded, err = sm.uploadShards(context.Background(), slab, shards, availableHosts[:3], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	} else if len(uploaded) != 3 {
-		t.Fatalf("expected 3 uploaded shards, got %d", len(uploaded))
+	} else if uploaded != 3 {
+		t.Fatalf("expected 3 uploaded shards, got %d", uploaded)
 	}
+	assertSectors(t, []types.Hash256{root1, root2, root3}, 3, nil)
 
 	// asserts hosts are debited for the upload
-	for _, h := range []hosts.Host{h1, h2, h3} {
+	for _, h := range hosts[:3] {
 		balance, err := sm.am.ServiceAccountBalance(context.Background(), h.PublicKey, sm.migrationAccount)
 		if err != nil {
 			t.Fatal(err)
@@ -97,58 +131,36 @@ func TestUploadShards(t *testing.T) {
 		}
 	}
 
-	// assert passing in too few hosts returns the uploaded shards alongside an error
-	_, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2}, pool, zap.NewNop())
-	if !errors.Is(err, errNotEnoughHosts) {
-		t.Fatalf("expected [errNotEnoughHosts] got %v", err)
+	// assert passing in too few hosts returns the uploaded shards and no error
+	uploaded, err = sm.uploadShards(context.Background(), slab, shards, availableHosts[:2], log)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	} else if uploaded != 2 {
+		t.Fatalf("expected 2 uploaded shards, got %d", uploaded)
 	}
+	assertSectors(t, []types.Hash256{root1, root2, root3}, 2, nil) // all are possible, but only 2 should be succeed
 
 	// assert hosts are tried until one succeeds
-	dialer.clients[h1.PublicKey].delay = time.Second
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, allHosts, pool, zap.NewNop())
+	client.slowHosts[hosts[0].PublicKey] = time.Second
+	uploaded, err = sm.uploadShards(context.Background(), slab, shards, availableHosts, log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	} else if len(uploaded) != 3 {
-		t.Fatalf("expected 3 uploaded shards, got %d", len(uploaded))
+	} else if uploaded != 3 {
+		t.Fatalf("expected 3 uploaded shards, got %d", uploaded)
 	}
+	assertSectors(t, []types.Hash256{root1, root2, root3}, 3, nil)
 
-	// assert the upload fails upon a root mismatch
+	// assert migrations are not successful if sector roots
+	// do not match
 	corrupted := Slab{Sectors: slices.Clone(slab.Sectors)}
-	corrupted.Sectors[1].Root = types.Hash256{}
-	_, err = sm.uploadShards(context.Background(), corrupted, shards, allHosts, pool, zap.NewNop())
-	if !errors.Is(err, errRootMismatch) {
-		t.Fatalf("expected [errRootMismatch] got %v", err)
-	}
-
-	// reset clients
-	for _, client := range dialer.clients {
-		client.sectors = make(map[types.Hash256][proto.SectorSize]byte)
-		client.delay = 0
-	}
-
-	// assert uploaded shards are stored on the hosts
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, []hosts.Host{h1, h2, h3}, pool, zap.NewNop())
+	corrupted.Sectors[1].Root = frand.Entropy256()
+	uploaded, err = sm.uploadShards(context.Background(), corrupted, shards, availableHosts, log)
 	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	} else if len(uploaded) != 3 {
-		t.Fatalf("expected 3 uploaded shards, got %d", len(uploaded))
+		t.Fatal(err)
+	} else if uploaded >= 3 {
+		t.Fatalf("expected fewer uploaded shards, got %d", uploaded)
 	}
-	seen := map[types.Hash256]struct{}{
-		root1: {},
-		root2: {},
-		root3: {},
-	}
-	for _, upload := range uploaded {
-		if len(dialer.clients[upload.HostKey].sectors) != 1 {
-			t.Fatal("unexpected number of uploaded sectors", len(dialer.clients[upload.HostKey].sectors))
-		} else if _, ok := dialer.clients[upload.HostKey].sectors[upload.Root]; !ok {
-			t.Fatal("expected sector to be uploaded", upload.Root)
-		}
-		delete(seen, upload.Root)
-	}
-	if len(seen) != 0 {
-		t.Fatalf("expected all sectors to be uploaded, but %v were not", seen)
-	}
+	assertSectors(t, []types.Hash256{root2, root3}, 2, []types.Hash256{corrupted.Sectors[1].Root})
 }
 
 func newTestHost(hk types.PublicKey) hosts.Host {

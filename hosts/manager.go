@@ -44,6 +44,14 @@ var (
 )
 
 type (
+	// A HostClient provides methods to interact with a host over RHP4.
+	HostClient interface {
+		// Prices returns a valid price table for the host with the given public key.
+		// The prices returned may be cached, but must be valid for at least a short
+		// period of time.
+		Prices(ctx context.Context, hostKey types.PublicKey) (proto4.HostPrices, error)
+	}
+
 	// HostManager manages the host announcements.
 	HostManager struct {
 		announcementMaxAge time.Duration
@@ -51,6 +59,7 @@ type (
 		scanInterval       time.Duration
 
 		onlineChecker OnlineChecker
+		hosts         HostClient
 		resolver      Resolver
 		scanner       Scanner
 		locator       Locator
@@ -112,7 +121,8 @@ type (
 		UnblockHost(hk types.PublicKey) error
 
 		PruneHosts(lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
-		UpdateHost(hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error
+		UpdateHostPrices(hostKey types.PublicKey, prices proto4.HostPrices) error
+		UpdateHostScan(hostKey types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error
 
 		UsabilitySettings() (UsabilitySettings, error)
 		UpdateUsabilitySettings(us UsabilitySettings) error
@@ -187,7 +197,7 @@ func (hm *HostManager) UnblockHost(ctx context.Context, hk types.PublicKey) erro
 }
 
 // NewManager creates a new host manager.
-func NewManager(syncer Syncer, locator Locator, store Store, opts ...Option) (*HostManager, error) {
+func NewManager(syncer Syncer, locator Locator, client HostClient, store Store, opts ...Option) (*HostManager, error) {
 	m := &HostManager{
 		announcementMaxAge: time.Hour * 24 * 365,
 		scanFrequency:      time.Hour,
@@ -198,6 +208,7 @@ func NewManager(syncer Syncer, locator Locator, store Store, opts ...Option) (*H
 		scanner:       &scanner{},
 		locator:       locator,
 		store:         store,
+		hosts:         client,
 
 		triggerHostScanningChan: make(chan struct{}, 1),
 
@@ -276,6 +287,36 @@ func (m *HostManager) UpdateUsabilitySettings(ctx context.Context, us UsabilityS
 	return m.store.UpdateUsabilitySettings(us)
 }
 
+// Usable refreshes the host's prices and checks whether the host is still usable.
+// If the host is bad, it returns (false, nil).
+//
+// This method is more efficient than [HostManager.ScannedHost] as it does not
+// require the host to be reachable on all announced addresses.
+func (m *HostManager) Usable(ctx context.Context, hostKey types.PublicKey) (bool, error) {
+	// fetch host
+	host, err := m.store.Host(hostKey)
+	if err != nil {
+		return false, fmt.Errorf("failed to get host, %w", err)
+	} else if host.Blocked {
+		// only check blocked, as usability may change after updating prices
+		return false, nil
+	}
+
+	prices, err := m.hosts.Prices(ctx, hostKey)
+	if err != nil {
+		return false, fmt.Errorf("failed to fetch host prices, %w", err)
+	} else if err := prices.Validate(hostKey); err != nil {
+		return false, nil // host somehow returned bad prices
+	}
+
+	err = m.store.UpdateHostPrices(hostKey, prices)
+	if err != nil {
+		return false, fmt.Errorf("failed to update host prices, %w", err)
+	}
+	host, err = m.store.Host(hostKey)
+	return host.IsGood(), err
+}
+
 // WithScannedHost calls the given function with the Host with the given host
 // key. If the call fails due to the host's price table being outdated, it will
 // scan the host and try again. If the host is bad, it returns ErrBadHost.
@@ -315,6 +356,13 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 
 // ScanHost scans the host with given host key and returns it with updated
 // settings and checks.
+//
+// It will dial every address the host has announced and only return the host if it
+// was reachable on all addresses. If the host is unreachable, it returns an
+// error. If the host is bad, it returns ErrBadHost.
+//
+// This should be used sparingly as it performs significantly more network I/O than
+// necessary.
 func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, error) {
 	logger := m.log.With(zap.Stringer("hk", hk))
 
@@ -354,7 +402,7 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 		scanExponentialBackoffMaxHours,
 	)
 
-	err = m.store.UpdateHost(hk, settings, loc, success, nextScan)
+	err = m.store.UpdateHostScan(hk, settings, loc, success, nextScan)
 	if err != nil {
 		return Host{}, fmt.Errorf("failed to update host, %w", err)
 	}

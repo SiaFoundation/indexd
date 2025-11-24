@@ -11,12 +11,10 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
-	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
@@ -45,8 +43,8 @@ type (
 		am      AccountManager
 		cm      ContractManager
 		hm      HostManager
+		hosts   HostClient
 
-		dialer   Dialer
 		store    Store
 		verifier *SectorVerifier
 
@@ -74,25 +72,20 @@ type (
 		TriggerAccountRefill(ctx context.Context, hostKey types.PublicKey, account proto.Account) error
 	}
 
-	// A Dialer is an interface for writing and reading sectors to/from hosts.
-	Dialer interface {
-		DialHost(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress) (HostClient, error)
-	}
-
-	// HostClient defines the dependencies required to upload and download
-	// sectors to and from hosts, as well as verify sectors.
+	// A HostClient defines the minimal interface for interacting with hosts that
+	// the SlabManager requires.
 	HostClient interface {
-		io.Closer
-		ReadSector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, w io.Writer, root types.Hash256, offset, length uint64) (rhp.RPCReadSectorResult, error)
-		Settings(context.Context) (proto.HostSettings, error)
-		WriteSector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, data io.Reader, length uint64) (rhp.RPCWriteSectorResult, error)
-		VerifySector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, root types.Hash256) (rhp.RPCVerifySectorResult, error)
+		Prices(context.Context, types.PublicKey) (proto.HostPrices, error)
+		WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (rhp.RPCWriteSectorResult, error)
+		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error)
+
+		Prioritize([]types.PublicKey) []types.PublicKey
 	}
 
 	// HostManager defines the minimal interface of HostManager functionality
 	// the SlabManager requires.
 	HostManager interface {
-		WithScannedHost(ctx context.Context, hk types.PublicKey, fn func(h hosts.Host) error) error
+		Usable(ctx context.Context, hostKey types.PublicKey) (bool, error)
 	}
 
 	// Store defines an interface to store and update slab related information
@@ -187,22 +180,9 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
-type wrapper struct {
-	d *client.Dialer
-}
-
-// DialHost dials the host and returns a HostClient.
-func (w *wrapper) DialHost(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress) (HostClient, error) {
-	client, err := w.d.DialHost(ctx, hostKey, addrs)
-	if err != nil {
-		return nil, err
-	}
-	return client, nil
-}
-
 // NewManager creates a new slab manager.
-func NewManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, dialer *client.Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
-	sm, err := newSlabManager(chain, am, cm, hm, store, &wrapper{d: dialer}, alerter, migrationAccount, integrityAccount, opts...)
+func NewManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+	sm, err := newSlabManager(chain, am, cm, hm, store, hosts, alerter, migrationAccount, integrityAccount, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -220,7 +200,7 @@ func NewManager(chain ChainManager, am AccountManager, cm ContractManager, hm Ho
 	return sm, nil
 }
 
-func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, dialer Dialer, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
 	m := &SlabManager{
 		healthCheckInterval: 10 * time.Minute,
 
@@ -238,7 +218,7 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 		chain:   chain,
 		am:      am,
 		cm:      cm,
-		dialer:  dialer,
+		hosts:   hosts,
 		hm:      hm,
 		store:   store,
 		alerter: alerter,
@@ -248,7 +228,7 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 	for _, opt := range opts {
 		opt(m)
 	}
-	m.verifier = NewSectorVerifier(am, dialer, integrityAccount, m.log)
+	m.verifier = NewSectorVerifier(am, hosts, integrityAccount, m.log)
 
 	err := m.initServiceAccounts(migrationAccount.PublicKey(), integrityAccount.PublicKey())
 	if err != nil {
@@ -386,9 +366,6 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	log := m.log.Named("migrations")
 	log.Debug("starting slab migrations")
 
-	pool := newConnPool(m.dialer, log)
-	defer pool.Close()
-
 	var exhausted bool
 	for !exhausted {
 		batch, err := m.store.UnhealthySlabs(m.migrationBatchSize)
@@ -398,7 +375,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 			exhausted = true
 		}
 
-		err = m.migrateSlabs(ctx, batch, pool, log)
+		err = m.migrateSlabs(ctx, batch, log)
 		if errors.Is(err, context.Canceled) {
 			break
 		} else if err != nil {

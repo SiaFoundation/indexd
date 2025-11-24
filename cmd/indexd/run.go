@@ -27,6 +27,7 @@ import (
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/client"
+	client2 "go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/config"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/explorer"
@@ -124,7 +125,9 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		return fmt.Errorf("failed to create MaxMind locator: %w", err)
 	}
 
-	hm, err := hosts.NewManager(s, locator, store, hosts.WithLogger(log.Named("hosts")))
+	client2 := client2.New(client2.NewProvider(hosts.NewHostStore(store)))
+
+	hm, err := hosts.NewManager(s, locator, client2, store, hosts.WithLogger(log.Named("hosts")))
 	if err != nil {
 		return fmt.Errorf("failed to create host manager: %w", err)
 	}
@@ -142,7 +145,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	defer contracts.Close()
 
 	alerter := alerts.NewManager()
-	slabs, err := slabs.NewManager(cm, am, contracts, hm, store, dialer, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), slabs.WithLogger(log.Named("slabs")))
+	slabs, err := slabs.NewManager(cm, am, contracts, hm, store, client2, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), slabs.WithLogger(log.Named("slabs")))
 	if err != nil {
 		return fmt.Errorf("failed to create slabs manager: %w", err)
 	}

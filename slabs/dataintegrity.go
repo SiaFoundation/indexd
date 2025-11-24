@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/mux/v2"
 	"go.uber.org/zap"
 )
@@ -27,13 +26,19 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, hostKey
 		interrupt = len(toCheck) < batchSize
 
 		// perform integrity checks
-		var results []CheckSectorsResult
+		results := make([]CheckSectorsResult, 0, len(toCheck))
 		for len(results) < len(toCheck) {
-			var batch []CheckSectorsResult
-			err = m.hm.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
-				batch, err = m.verifier.VerifySectors(ctx, host, toCheck[len(results):])
-				return err
-			})
+			usable, err := m.hm.Usable(ctx, hostKey)
+			if err != nil {
+				logger.Error("failed to check if host is usable", zap.Error(err))
+				return
+			} else if !usable {
+				logger.Debug("host is no longer usable, interrupting integrity checks")
+				interrupt = true
+				break
+			}
+
+			batch, err := m.verifier.VerifySectors(ctx, hostKey, toCheck[len(results):])
 			if errors.Is(err, context.Canceled) || errors.Is(err, mux.ErrClosedStream) || errors.Is(err, errInsufficientServiceAccountBalance) || errors.Is(err, errHostUnreachable) {
 				logger.Debug("integrity checks got interrupted", zap.Error(err))
 				if errors.Is(err, errInsufficientServiceAccountBalance) {

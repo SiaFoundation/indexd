@@ -5,7 +5,6 @@ import (
 	"math"
 	"reflect"
 	"testing"
-	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -18,17 +17,9 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	oneSC := types.Siacoins(1)
 
 	// prepare host
-	hk := types.PublicKey{1}
-	host := hosts.Host{
-		PublicKey: hk,
-		Settings: proto.HostSettings{
-			Prices: proto.HostPrices{
-				EgressPrice: types.Siacoins(1).Div64(proto.SectorSize), // 1SC per sector
-				ValidUntil:  time.Now().Add(time.Hour),
-			},
-		},
-	}
-	dialer := newMockDialer([]hosts.Host{host})
+	client := newMockHostClient()
+	hostKey := types.GeneratePrivateKey()
+	host := client.addTestHost(hostKey)
 
 	// prepare managers
 	store := newMockStore()
@@ -44,7 +35,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	acc := proto.Account(sk.PublicKey())
 
 	// prepare slab manager
-	sm, err := newSlabManager(chain, am, cm, hm, store, dialer, nil, sk, sk)
+	sm, err := newSlabManager(chain, am, cm, hm, store, client, nil, sk, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,38 +43,62 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	// prepare helper to reset balance to 3SC to avoid running out of funds
 	resetBalance := func() {
 		t.Helper()
-		err = am.UpdateServiceAccountBalance(context.Background(), hk, acc, oneSC.Mul64(3))
+		err = am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, oneSC.Mul64(3))
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// prepare roots
-	r1 := types.Hash256{1} // good
-	r2 := types.Hash256{2} // lost
-	r3 := types.Hash256{3} // bad
-	dialer.clients[host.PublicKey].integrity[r1] = nil
-	dialer.clients[host.PublicKey].integrity[r2] = proto.ErrSectorNotFound
-	dialer.clients[host.PublicKey].integrity[r3] = proto.ErrNotEnoughFunds
-	store.sectorsForCheck = []types.Hash256{r1, r2, r3}
+	// prepare sectors
+	roots := make([]types.Hash256, 3)
+	for i := range roots {
+		root, err := client.WriteSector(context.Background(), types.GeneratePrivateKey(), host.PublicKey, []byte{byte(i + 1)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		roots[i] = root.Root
+	}
+	store.sectorsForCheck = roots
+
+	assertLostAndFailed := func(failed, lost []types.Hash256) {
+		t.Helper()
+
+		lostMap := make(map[types.Hash256]struct{})
+		for _, r := range lost {
+			lostMap[r] = struct{}{}
+		}
+		failedMap := make(map[types.Hash256]struct{})
+		for _, r := range failed {
+			failedMap[r] = struct{}{}
+		}
+		if len(store.lostSectors[host.PublicKey]) != len(lost) {
+			t.Fatalf("expected %d lost sectors, got %d", len(lost), len(store.lostSectors[host.PublicKey]))
+		}
+		for r := range store.lostSectors[host.PublicKey] {
+			if _, exists := lostMap[r]; !exists {
+				t.Fatalf("unexpected lost sector %v", r)
+			}
+			delete(lostMap, r)
+		}
+		if len(store.failedChecks[host.PublicKey]) != len(failed) {
+			t.Fatalf("expected %d failed checks, got %d", len(failed), len(store.failedChecks[host.PublicKey]))
+		}
+		for r, n := range store.failedChecks[host.PublicKey] {
+			if _, exists := failedMap[r]; n == 0 && exists {
+				t.Fatalf("unexpected successful check for %v", r)
+			} else if !exists && n > 0 {
+				t.Fatalf("unexpected failed check for %v", r)
+			}
+			delete(failedMap, r)
+		}
+	}
 
 	// perform the checks once
 	resetBalance()
+	client.integrityErrors[roots[1]] = proto.ErrSectorNotFound // simulate lost sector
+	client.integrityErrors[roots[2]] = proto.ErrNotEnoughFunds // simulate bad sector
 	sm.performIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
-
-	// the lost sector should be marked as lost
-	if len(store.lostSectors[host.PublicKey]) != 1 {
-		t.Fatalf("expected 1 lost sector, got %d", len(store.lostSectors))
-	} else if _, exists := store.lostSectors[host.PublicKey][r2]; !exists {
-		t.Fatalf("expected lost sector %v, got %v", r2, store.lostSectors)
-	}
-
-	// the failed sector should be marked as failed
-	if len(store.failedChecks) != 1 {
-		t.Fatalf("expected 1 failed checks, got %d", len(store.failedChecks))
-	} else if n, exists := store.failedChecks[host.PublicKey][r3]; !exists || n != 1 {
-		t.Fatalf("expected failed check %v, got %v", r3, store.failedChecks[host.PublicKey])
-	}
+	assertLostAndFailed(roots[1:3], roots[1:2])
 
 	// perform the checks a few more time to reach the maximum number of failed
 	// checks before a bad sector gets removed
@@ -91,88 +106,17 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 		resetBalance()
 		sm.performIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	}
-
-	// the failed sector should be marked as failed 5 times
-	if len(store.failedChecks) != 1 {
-		t.Fatalf("expected 1 failed checks, got %d", len(store.failedChecks))
-	} else if n, exists := store.failedChecks[host.PublicKey][r3]; !exists || n != 5 {
-		t.Fatalf("expected failed check %v, got %v", r3, store.failedChecks[host.PublicKey])
-	}
-
-	// should have 2 lost sectors now
-	if len(store.lostSectors[host.PublicKey]) != 2 {
-		t.Fatalf("expected 2 lost sectors, got %d", len(store.lostSectors))
-	} else if _, exists := store.lostSectors[host.PublicKey][r2]; !exists {
-		t.Fatalf("expected lost sector %v, got %v", r2, store.lostSectors)
-	} else if _, exists := store.lostSectors[host.PublicKey][r3]; !exists {
-		t.Fatalf("expected lost sector %v, got %v", r3, store.lostSectors)
-	}
+	assertLostAndFailed(roots[1:3], roots[1:3])
 
 	// empty the service account to trigger a "not enough funds" error which
 	// causes triggering a refill.
 	if cm.triggeredRefills[acc] != 0 {
 		t.Fatalf("expected 0 triggered refill, got %d", cm.triggeredRefills[acc])
 	}
-	_ = am.UpdateServiceAccountBalance(context.Background(), hk, acc, types.ZeroCurrency)
+	_ = am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, types.ZeroCurrency)
 	sm.performIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	if cm.triggeredRefills[acc] != 1 {
 		t.Fatalf("expected 1 triggered refill, got %d", cm.triggeredRefills[acc])
-	}
-}
-
-func TestPerformIntegrityChecksForHostExpiredPrices(t *testing.T) {
-	// prepare host
-	hk := types.PublicKey{1}
-	host := hosts.Host{
-		PublicKey: hk,
-		Settings: proto.HostSettings{
-			Prices: proto.HostPrices{
-				EgressPrice: types.Siacoins(1).Div64(proto.SectorSize), // 1SC per sector
-				ValidUntil:  time.Time{},                               // prices are initially expired
-			},
-		},
-	}
-	dialer := newMockDialer([]hosts.Host{host})
-
-	// prepare managers
-	store := newMockStore()
-	chain := newMockChainManager()
-	am := newMockAccountManager(store)
-	cm := newMockContractManager()
-	hm := newMockHostManager()
-	hm.refreshPrices = true // refresh prices after first scan
-	host.Usability = hosts.GoodUsability
-	hm.hosts[host.PublicKey] = host // make host scannable to get valid prices
-
-	// prepare account
-	sk := types.GeneratePrivateKey()
-	acc := proto.Account(sk.PublicKey())
-
-	// prepare slab manager
-	sm, err := newSlabManager(chain, am, cm, hm, store, dialer, nil, sk, sk)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// prepare 2 roots for checking
-	r1 := types.Hash256{1}
-	r2 := types.Hash256{2}
-	dialer.clients[host.PublicKey].integrity[r1] = nil
-	dialer.clients[host.PublicKey].integrity[r2] = nil
-	store.sectorsForCheck = []types.Hash256{r1, r2}
-
-	// fund service account
-	err = am.UpdateServiceAccountBalance(context.Background(), hk, acc, types.MaxCurrency)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// perform the checks once
-	sm.performIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
-
-	// no checks should have failed
-	if store.failedChecks[host.PublicKey][r1] != 0 || store.failedChecks[host.PublicKey][r2] != 0 {
-		t.Fatal("expected 0 failed checks")
 	}
 }
 

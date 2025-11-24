@@ -204,11 +204,11 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// set h1 to US
-	if err := indexer.Store().UpdateHost(hosts[0].PublicKey, hosts[0].Settings, locationUS, true, hosts[0].LastSuccessfulScan); err != nil {
+	if err := indexer.Store().UpdateHostScan(hosts[0].PublicKey, hosts[0].Settings, locationUS, true, hosts[0].LastSuccessfulScan); err != nil {
 		t.Fatal(err)
 	}
 	// set h2 to AU
-	if err := indexer.Store().UpdateHost(hosts[1].PublicKey, hosts[1].Settings, locationAU, true, hosts[1].LastSuccessfulScan); err != nil {
+	if err := indexer.Store().UpdateHostScan(hosts[1].PublicKey, hosts[1].Settings, locationAU, true, hosts[1].LastSuccessfulScan); err != nil {
 		t.Fatal(err)
 	}
 

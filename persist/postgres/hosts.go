@@ -425,8 +425,36 @@ func (s *Store) PruneHosts(minLastSuccessfulScan time.Time, minConsecutiveFailed
 	return n, nil
 }
 
-// UpdateHost updates a host in the database, the given parameters are the result of scanning the host.
-func (s *Store) UpdateHost(hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
+// UpdateHostPrices updates a host in the database with the given prices to check
+// for gouging.
+func (s *Store) UpdateHostPrices(hk types.PublicKey, prices proto4.HostPrices) error {
+	const query = `UPDATE hosts SET
+settings_contract_price = $1,
+settings_collateral = $2,
+settings_storage_price = $3,
+settings_ingress_price = $4,
+settings_egress_price = $5,
+settings_free_sector_price = $6,
+settings_tip_height = $7,
+settings_valid_until = $8,
+settings_signature = $9`
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, query,
+			sqlCurrency(prices.ContractPrice),
+			sqlCurrency(prices.Collateral),
+			sqlCurrency(prices.StoragePrice),
+			sqlCurrency(prices.IngressPrice),
+			sqlCurrency(prices.EgressPrice),
+			sqlCurrency(prices.FreeSectorPrice),
+			prices.TipHeight,
+			prices.ValidUntil,
+			sqlSignature(prices.Signature))
+		return err
+	})
+}
+
+// UpdateHostScan updates a host in the database, the given parameters are the result of scanning the host.
+func (s *Store) UpdateHostScan(hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		if !scanSucceeded {
 			if res, err := tx.Exec(ctx, `

@@ -100,7 +100,7 @@ func (ts TestStore) AddTestHost(t testing.TB, host hosts.Host) {
 		t.Fatal(err)
 	}
 
-	if err := ts.UpdateHost(host.PublicKey, host.Settings, geoip.Location{}, true, time.Now()); err != nil {
+	if err := ts.UpdateHostScan(host.PublicKey, host.Settings, geoip.Location{}, true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 }

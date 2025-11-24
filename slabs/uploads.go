@@ -1,32 +1,23 @@
 package slabs
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"io"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/client/v2"
 	"go.uber.org/zap"
 )
 
-var (
-	errNotEnoughHosts = errors.New("not enough hosts")
-	errRootMismatch   = errors.New("sector root of shard doesn't match expected root")
-)
-
-type (
-	// Shard represents a sector present on a host.
-	Shard struct {
-		Root    types.Hash256
-		HostKey types.PublicKey
-	}
-)
+// Shard represents a sector present on a host.
+type Shard struct {
+	Root    types.Hash256
+	HostKey types.PublicKey
+}
 
 // uploadShards uploads the shards to the given hosts. If not all shards were
 // migrated, an error is returned but any finished shards will still be returned
@@ -34,7 +25,7 @@ type (
 // the given hosts must all be good and be sufficiently spaced apart. Note that
 // the shards returned are not necessarily in the same order as the input
 // shards.
-func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, candidates []hosts.Host, pool *connPool, logger *zap.Logger) ([]Shard, error) {
+func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) (int, error) {
 	if len(slab.Sectors) != len(shards) {
 		panic(fmt.Sprintf("slab %s has %d sectors but %d shards", slab.ID, len(slab.Sectors), len(shards))) // developer error
 	}
@@ -42,104 +33,89 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	var uploadMu sync.Mutex
-	var uploadErr error
-	var uploaded []Shard
+	// prioritize available candidates based on latest reliability and performance
+	candidates := client.NewCandidates(m.hosts.Prioritize(available))
 
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, 10)
-	defer close(sema)
-
-loop:
-	for i, shard := range shards {
-		if shard == nil {
+	var migrated int32
+top:
+	for i := range shards {
+		if shards[i] == nil {
 			continue
 		}
 
 		select {
 		case <-ctx.Done():
-			break loop
+			break top
 		case sema <- struct{}{}:
-		}
-
-		wg.Add(1)
-		go func(ctx context.Context, shard []byte, shardIndex int, shardRoot types.Hash256) {
-			defer func() {
-				<-sema
-				wg.Done()
-			}()
-
-			for ctx.Err() == nil {
-				// grab next candidate
-				uploadMu.Lock()
-				if len(candidates) == 0 {
-					uploadErr = errNotEnoughHosts
-					uploadMu.Unlock()
-					// NOTE: we don't cancel ongoing uploads here because they
-					// are being migrated to good hosts and will improve the
-					// health of the slab
-					return
-				}
-				host := candidates[0]
-				candidates = candidates[1:]
-				uploadMu.Unlock()
-
-				// upload the shard
-				start := time.Now()
-				usage, root, err := m.uploadShard(ctx, host, bytes.NewReader(shard), pool)
-				if err != nil {
-					logger.Debug("failed to upload shard",
-						zap.Bool("timeout", time.Since(start) > m.shardTimeout),
-						zap.Stringer("hostKey", host.PublicKey),
-						zap.Error(err),
-					)
-					continue
-				} else if root != shardRoot {
-					uploadMu.Lock()
-					uploadErr = fmt.Errorf("failed to upload shard %d: %w", shardIndex, errRootMismatch)
-					uploadMu.Unlock()
-					cancel()
-					return
-				}
-
-				// debit service account
-				err = m.am.DebitServiceAccount(context.Background(), host.PublicKey, m.migrationAccount, usage.RenterCost())
-				if err != nil {
-					logger.Debug("failed to debit service account for sector write", zap.Error(err))
-				}
-
-				// set shard
-				uploadMu.Lock()
-				uploaded = append(uploaded, Shard{
-					Root:    root,
-					HostKey: host.PublicKey,
-				})
-				uploadMu.Unlock()
-
-				break
+			if candidates.Available() == 0 {
+				log.Debug("no more candidates for migration")
+				break top
 			}
-		}(ctx, shard, i, slab.Sectors[i].Root)
-	}
+			shard := shards[i]
+			shardRoot := slab.Sectors[i].Root
+			log := log.With(zap.Stringer("sectorRoot", shardRoot))
+			wg.Go(func() {
+				defer func() {
+					<-sema
+				}()
+				for hostKey := range candidates.Iter() {
+					if ctx.Err() != nil {
+						// context already cancelled
+						return
+					}
 
-	wg.Wait()
+					usable, err := m.hm.Usable(ctx, hostKey)
+					if err != nil {
+						log.Debug("failed to check if host is usable", zap.Stringer("hostKey", hostKey), zap.Error(err))
+						return
+					} else if !usable {
+						log.Debug("host is no longer usable, skipping", zap.Stringer("hostKey", hostKey))
+						continue
+					}
 
-	if uploadErr == nil {
-		uploadErr = ctx.Err()
-	}
-	if uploadErr != nil {
-		uploadErr = fmt.Errorf("uploaded %d out of %d shards: %w", len(uploaded), len(shards), uploadErr)
-	}
+					log := log.With(zap.Stringer("hostKey", hostKey))
+					// upload the shard
+					start := time.Now()
+					result, err := m.uploadShard(ctx, hostKey, shard)
+					if err != nil {
+						log.Debug("failed to upload shard", zap.Duration("elapsed", time.Since(start)), zap.Error(err))
+						continue
+					} else if result.Root != shardRoot {
+						// note: since the RHP verifies that the root returned by the host
+						// matches the data, this will only happen if the roots pinned
+						// by the client were incorrect.
+						//
+						// since there is no way to verify, log and stop migration
+						cancel()
+						log.Error("shard root mismatch after upload, user data corrupt", zap.Stringer("expected", shardRoot), zap.Stringer("actual", result.Root))
+						return
+					}
 
-	return uploaded, uploadErr
+					// debit service account
+					err = m.am.DebitServiceAccount(context.Background(), hostKey, m.migrationAccount, result.Usage.RenterCost())
+					if err != nil {
+						log.Debug("failed to debit service account for sector write", zap.Error(err))
+					}
+
+					if _, err := m.store.MigrateSector(shardRoot, hostKey); err != nil {
+						log.Error("failed to record migrated sector", zap.Error(err))
+					}
+
+					atomic.AddInt32(&migrated, 1)
+					return
+				}
+			})
+		}
+	}
+	wg.Wait() // wait for all inflight uploads to finish
+	return int(atomic.LoadInt32(&migrated)), nil
 }
 
-func (m *SlabManager) uploadShard(ctx context.Context, h hosts.Host, shard io.Reader, pool *connPool) (proto.Usage, types.Hash256, error) {
+func (m *SlabManager) uploadShard(ctx context.Context, hostKey types.PublicKey, shard []byte) (rhp.RPCWriteSectorResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, m.shardTimeout)
 	defer cancel()
 
-	return pool.uploadShard(ctx, h, m.migrationToken(h), shard)
-}
-
-func (m *SlabManager) migrationToken(h hosts.Host) proto.AccountToken {
-	return proto.NewAccountToken(m.migrationAccountKey, h.PublicKey)
+	return m.hosts.WriteSector(ctx, m.migrationAccountKey, hostKey, shard)
 }

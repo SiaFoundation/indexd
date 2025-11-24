@@ -4,19 +4,32 @@ import (
 	"context"
 	"errors"
 	"io"
+	"math"
 	"slices"
 	"sync"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"lukechampine.com/frand"
 )
+
+var goodSettings = proto.HostSettings{
+	AcceptingContracts: true,
+	RemainingStorage:   math.MaxUint32,
+	Prices: proto.HostPrices{
+		ContractPrice: types.Siacoins(1),
+		Collateral:    types.NewCurrency64(1),
+		StoragePrice:  types.NewCurrency64(1),
+		EgressPrice:   types.NewCurrency64(1),
+	},
+	MaxContractDuration: 90 * 144,
+	MaxCollateral:       types.Siacoins(1000),
+}
 
 type mockChainManager struct {
 	mu  sync.Mutex
@@ -46,6 +59,7 @@ func newMockChainManager() *mockChainManager {
 }
 
 type mockStore struct {
+	mu              sync.Mutex
 	accounts        map[proto.Account]struct{}
 	contracts       map[types.PublicKey]contracts.Contract
 	failedChecks    map[types.PublicKey]map[types.Hash256]int
@@ -75,16 +89,22 @@ func (s *mockStore) SharedObject(key types.Hash256) (SharedObject, error) {
 }
 
 func (s *mockStore) AddAccount(account types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.accounts[proto.Account(account)] = struct{}{}
 	return nil
 }
 
 func (s *mockStore) AddServiceAccount(account types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.accounts[proto.Account(account)] = struct{}{}
 	return nil
 }
 
 func (s *mockStore) Contracts(offset, limit int, opts ...contracts.ContractQueryOpt) ([]contracts.Contract, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	opt := contracts.ContractQueryOpts{}
 	for _, o := range opts {
 		o(&opt)
@@ -104,6 +124,8 @@ func (s *mockStore) Contracts(offset, limit int, opts ...contracts.ContractQuery
 }
 
 func (s *mockStore) FailingSectors(hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var roots []types.Hash256
 	for root, failures := range s.failedChecks[hostKey] {
 		if failures >= minChecks {
@@ -114,6 +136,8 @@ func (s *mockStore) FailingSectors(hostKey types.PublicKey, minChecks, limit int
 }
 
 func (s *mockStore) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	opt := hosts.DefaultHostsQueryOpts
 	for _, o := range queryOpts {
 		o(&opt)
@@ -134,10 +158,14 @@ func (s *mockStore) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([
 }
 
 func (s *mockStore) HostsForIntegrityChecks(maxLastCheck time.Time, limit int) (result []types.PublicKey, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return nil, nil
 }
 
 func (s *mockStore) HostsWithLostSectors() (hks []types.PublicKey, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for hk, lostSectors := range s.lostSectors {
 		if len(lostSectors) > 0 {
 			hks = append(hks, hk)
@@ -147,10 +175,14 @@ func (s *mockStore) HostsWithLostSectors() (hks []types.PublicKey, err error) {
 }
 
 func (s *mockStore) MaintenanceSettings() (contracts.MaintenanceSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return contracts.DefaultMaintenanceSettings, nil
 }
 
 func (s *mockStore) MarkFailingSectorsLost(hostKey types.PublicKey, maxFailedIntegrityChecks uint) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for root, failures := range s.failedChecks[hostKey] {
 		if failures >= int(maxFailedIntegrityChecks) {
 			s.lostSectors[hostKey][root] = struct{}{}
@@ -160,6 +192,8 @@ func (s *mockStore) MarkFailingSectorsLost(hostKey types.PublicKey, maxFailedInt
 }
 
 func (s *mockStore) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, ok := s.lostSectors[hostKey]; !ok {
 		s.lostSectors[hostKey] = make(map[types.Hash256]struct{})
 	}
@@ -174,6 +208,8 @@ func (s *mockStore) MarkSlabRepaired(slabID SlabID, success bool) error {
 }
 
 func (s *mockStore) MigrateSector(root types.Hash256, hostKey types.PublicKey) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	_, ok := s.migratedSectors[hostKey]
 	if !ok {
 		s.migratedSectors[hostKey] = make(map[types.Hash256]struct{})
@@ -200,6 +236,8 @@ func (s *mockStore) MigrateSector(root types.Hash256, hostKey types.PublicKey) (
 }
 
 func (s *mockStore) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, slabs ...SlabPinParams) ([]SlabID, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var digests []SlabID
 	for _, slab := range slabs {
 		slabID, err := slab.Digest()
@@ -237,6 +275,8 @@ func (s *mockStore) PinSlabs(account proto.Account, nextIntegrityCheck time.Time
 }
 
 func (s *mockStore) UnpinSlab(account proto.Account, slabID SlabID) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, ok := s.pinnedSlabs[account][slabID]; !ok {
 		return ErrSlabNotFound
 	}
@@ -253,6 +293,8 @@ func (s *mockStore) SlabIDs(account proto.Account, offset, limit int) ([]SlabID,
 }
 
 func (s *mockStore) RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if _, ok := s.failedChecks[hostKey]; !ok {
 		s.failedChecks[hostKey] = make(map[types.Hash256]int)
 	}
@@ -267,10 +309,14 @@ func (s *mockStore) RecordIntegrityCheck(success bool, nextCheck time.Time, host
 }
 
 func (s *mockStore) SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return slices.Clone(s.sectorsForCheck), nil
 }
 
 func (s *mockStore) Slab(slabID SlabID) (Slab, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for acc := range s.accounts {
 		if slab, ok := s.pinnedSlabs[acc][slabID]; ok {
 			return slab, nil
@@ -280,6 +326,8 @@ func (s *mockStore) Slab(slabID SlabID) (Slab, error) {
 }
 
 func (s *mockStore) Slabs(accountID proto.Account, slabIDs []SlabID) ([]Slab, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var slabs []Slab
 	for _, slab := range s.pinnedSlabs[accountID] {
 		slabs = append(slabs, slab)
@@ -288,6 +336,8 @@ func (s *mockStore) Slabs(accountID proto.Account, slabIDs []SlabID) ([]Slab, er
 }
 
 func (s *mockStore) UnhealthySlabs(limit int) (result []SlabID, _ error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for acc := range s.accounts {
 		for _, slab := range s.pinnedSlabs[acc] {
 			for _, sector := range slab.Sectors {
@@ -411,19 +461,31 @@ func (m *mockContractManager) TriggerAccountRefill(ctx context.Context, hostKey 
 }
 
 type mockhostManager struct {
-	hosts map[types.PublicKey]hosts.Host
+	mu       sync.Mutex
+	hosts    map[types.PublicKey]hosts.Host
+	unusable map[types.PublicKey]struct{}
 
 	refreshPrices bool // reset prices.ValidUntil after each call to WithScannedHost
 }
 
 func newMockHostManager() *mockhostManager {
 	return &mockhostManager{
-		hosts: make(map[types.PublicKey]hosts.Host),
+		hosts:    make(map[types.PublicKey]hosts.Host),
+		unusable: make(map[types.PublicKey]struct{}),
 	}
 }
 
+func (mock *mockhostManager) Usable(ctx context.Context, hk types.PublicKey) (bool, error) {
+	mock.mu.Lock()
+	defer mock.mu.Unlock()
+	_, ok := mock.unusable[hk]
+	return !ok, nil
+}
+
 func (mock *mockhostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, fn func(h hosts.Host) error) error {
+	mock.mu.Lock()
 	host, ok := mock.hosts[hk]
+	mock.mu.Unlock()
 	if !ok {
 		return hosts.ErrNotFound
 	} else if !host.IsGood() {
@@ -437,76 +499,130 @@ func (mock *mockhostManager) WithScannedHost(ctx context.Context, hk types.Publi
 	return err
 }
 
-type mockDialer struct {
-	clients map[types.PublicKey]*mockHostClient
-}
-
-func newMockDialer(hosts []hosts.Host) *mockDialer {
-	clients := make(map[types.PublicKey]*mockHostClient, len(hosts))
-	for _, host := range hosts {
-		clients[host.PublicKey] = &mockHostClient{
-			sectors:   make(map[types.Hash256][proto.SectorSize]byte),
-			integrity: make(map[types.Hash256]error),
-			settings:  host.Settings,
-		}
-	}
-	return &mockDialer{clients: clients}
-}
-
-func (d *mockDialer) DialHost(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress) (HostClient, error) {
-	if client, ok := d.clients[hostKey]; ok {
-		return client, nil
-	}
-	return nil, errors.New("failed to dial host")
-}
-
+// A mockHostClient is a mock implementation of hosts.HostClient for testing.
 type mockHostClient struct {
-	delay     time.Duration
-	sectors   map[types.Hash256][proto.SectorSize]byte
-	integrity map[types.Hash256]error
-	settings  proto.HostSettings
+	mu              sync.Mutex
+	hostSectors     map[types.PublicKey]map[types.Hash256][proto.SectorSize]byte
+	slowHosts       map[types.PublicKey]time.Duration
+	integrityErrors map[types.Hash256]error
+	hostKeys        map[types.PublicKey]types.PrivateKey
+	hostSettings    map[types.PublicKey]proto.HostSettings
+	unusable        map[types.PublicKey]struct{}
 }
 
-func (c *mockHostClient) ReadSector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, w io.Writer, root types.Hash256, offset, length uint64) (rhp.RPCReadSectorResult, error) {
-	select {
-	case <-time.After(c.delay):
-	case <-ctx.Done():
-		return rhp.RPCReadSectorResult{}, ctx.Err()
-	}
-
-	sector, ok := c.sectors[root]
-	if !ok {
-		return rhp.RPCReadSectorResult{}, proto.ErrSectorNotFound
-	}
-	_, err := w.Write(sector[:])
-	if err != nil {
-		return rhp.RPCReadSectorResult{}, err
-	}
-	return rhp.RPCReadSectorResult{
-		Usage: c.settings.Prices.RPCReadSectorCost(proto.SectorSize),
-	}, nil
+func (m *mockHostClient) resetStorage() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hostSectors = make(map[types.PublicKey]map[types.Hash256][proto.SectorSize]byte)
 }
 
-func (c *mockHostClient) WriteSector(ctx context.Context, prices proto.HostPrices, token proto.AccountToken, data io.Reader, length uint64) (rhp.RPCWriteSectorResult, error) {
-	select {
-	case <-time.After(c.delay):
-	case <-ctx.Done():
-		return rhp.RPCWriteSectorResult{}, ctx.Err()
+func (m *mockHostClient) addTestHost(sk types.PrivateKey) hosts.Host {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	h := newTestHost(sk.PublicKey())
+	m.hostSettings[sk.PublicKey()] = h.Settings
+	m.hostKeys[sk.PublicKey()] = sk
+	return h
+}
+
+// Prices is a mock implementation that returns the preset host settings.
+func (m *mockHostClient) Prices(_ context.Context, hostKey types.PublicKey) (proto.HostPrices, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	prices := m.hostSettings[hostKey].Prices
+	prices.ValidUntil = time.Now().Add(1 * time.Hour)
+	prices.Signature = m.hostKeys[hostKey].SignHash(prices.SigHash())
+	return prices, nil
+}
+
+// WriteSector is a mock implementation that writes a sector to the mock host.
+func (m *mockHostClient) WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (rhp.RPCWriteSectorResult, error) {
+	m.mu.Lock()
+	delay := m.slowHosts[hostKey]
+	m.mu.Unlock()
+	if delay > 0 {
+		select {
+		case <-ctx.Done():
+			return rhp.RPCWriteSectorResult{}, ctx.Err()
+		case <-time.After(delay):
+		}
 	}
 
 	var sector [proto.SectorSize]byte
-	_, err := io.ReadFull(data, sector[:])
-	if err != nil {
-		return rhp.RPCWriteSectorResult{}, err
-	}
+	copy(sector[:], data)
 	root := proto.SectorRoot(&sector)
-	c.sectors[root] = sector
+
+	usage := m.hostSettings[hostKey].Prices.RPCWriteSectorCost(uint64(len(data)))
+	m.mu.Lock()
+	if _, ok := m.hostSectors[hostKey]; !ok {
+		m.hostSectors[hostKey] = make(map[types.Hash256][proto.SectorSize]byte)
+	}
+	m.hostSectors[hostKey][root] = sector
+	m.mu.Unlock()
 	return rhp.RPCWriteSectorResult{
 		Root:  root,
-		Usage: c.settings.Prices.RPCWriteSectorCost(proto.SectorSize),
+		Usage: usage,
 	}, nil
 }
 
-func (c *mockHostClient) Settings(context.Context) (proto.HostSettings, error) {
-	return c.settings, nil
+// ReadSector is a mock implementation that reads a sector from the mock host.
+func (m *mockHostClient) ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error) {
+	m.mu.Lock()
+	sector, ok := m.hostSectors[hostKey][root]
+	if !ok {
+		m.mu.Unlock()
+		return rhp.RPCReadSectorResult{}, proto.ErrSectorNotFound
+	}
+	if err, ok := m.integrityErrors[root]; ok {
+		m.mu.Unlock()
+		return rhp.RPCReadSectorResult{}, err
+	}
+	delay := m.slowHosts[hostKey]
+	m.mu.Unlock()
+
+	if delay > 0 {
+		select {
+		case <-ctx.Done():
+			return rhp.RPCReadSectorResult{}, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
+
+	_, err := w.Write(sector[offset : offset+length])
+	if err != nil {
+		return rhp.RPCReadSectorResult{}, err
+	}
+	usage := m.hostSettings[hostKey].Prices.RPCReadSectorCost(length)
+	return rhp.RPCReadSectorResult{
+		Usage: usage,
+	}, nil
+}
+
+// Prioritize is a mock implementation that returns the hosts with
+// unusable hosts filtered out.
+func (m *mockHostClient) Prioritize(hosts []types.PublicKey) []types.PublicKey {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	hosts = slices.Clone(hosts)
+	filtered := hosts[:0]
+	for _, hk := range hosts {
+		if _, ok := m.unusable[hk]; !ok {
+			filtered = append(filtered, hk)
+		}
+	}
+
+	return filtered
+}
+
+func newMockHostClient() *mockHostClient {
+	return &mockHostClient{
+		hostSectors:     make(map[types.PublicKey]map[types.Hash256][proto.SectorSize]byte),
+		slowHosts:       make(map[types.PublicKey]time.Duration),
+		integrityErrors: make(map[types.Hash256]error),
+		hostKeys:        make(map[types.PublicKey]types.PrivateKey),
+		hostSettings:    make(map[types.PublicKey]proto.HostSettings),
+		unusable:        make(map[types.PublicKey]struct{}),
+	}
 }
