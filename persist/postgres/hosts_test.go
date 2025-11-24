@@ -1421,6 +1421,65 @@ func TestUpdateHost(t *testing.T) {
 	}
 }
 
+func TestUpdateHostPrices(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	if err := db.UpdateUsabilitySettings(hosts.UsabilitySettings{
+		MaxEgressPrice:     types.Siacoins(10),
+		MaxIngressPrice:    types.Siacoins(10),
+		MaxStoragePrice:    types.Siacoins(10),
+		MinCollateral:      types.ZeroCurrency,
+		MinProtocolVersion: rhp.ProtocolVersion400,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateMaintenanceSettings(contracts.MaintenanceSettings{
+		Period:          2,
+		RenewWindow:     1,
+		WantedContracts: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add a host
+	hostKey := types.GeneratePrivateKey().PublicKey()
+	db.addTestHost(t, hostKey)
+
+	// generate host settings with prices below the gouging thresholds
+	settings := newTestHostSettings(hostKey)
+	settings.Prices.ValidUntil = time.Now().Add(24 * time.Hour)
+	settings.Prices.EgressPrice = types.Siacoins(5).Div64(1e12)              // 5 SC / TB
+	settings.Prices.IngressPrice = types.Siacoins(5).Div64(1e12)             // 5 SC / TB / month
+	settings.Prices.StoragePrice = types.Siacoins(5).Div64(1e12).Div64(4320) // 5 SC / TB / month
+	settings.Prices.Collateral = types.Siacoins(10).Div64(1e12).Div64(4320)  // 10 SC / TB / mo
+	settings.MaxCollateral = types.Siacoins(100)
+
+	// add a successful scan with non-gouging prices
+	if err := db.UpdateHostScan(hostKey, settings, geoip.Location{}, true, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	// check that the host is usable
+	host, err := db.Host(hostKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if !host.IsGood() {
+		t.Fatal("expected host to be good")
+	}
+
+	// update host settings with gouging prices
+	settings.Prices.EgressPrice = types.Siacoins(15)
+	if err := db.UpdateHostPrices(hostKey, settings.Prices); err != nil {
+		t.Fatal(err)
+	} else if host, err := db.Host(hostKey); err != nil {
+		t.Fatal(err)
+	} else if host.IsGood() {
+		t.Fatal("expected host to be not good due to egress price gouging")
+	}
+}
+
 // BenchmarkHosts is a set of benchmarks that verify the performance of the host
 // methods in the store that use common table expressions.
 //

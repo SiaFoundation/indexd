@@ -19,12 +19,9 @@ type Shard struct {
 	HostKey types.PublicKey
 }
 
-// uploadShards uploads the shards to the given hosts. If not all shards were
-// migrated, an error is returned but any finished shards will still be returned
-// and should be tracked in the database. The given shards must not be nil and
-// the given hosts must all be good and be sufficiently spaced apart. Note that
-// the shards returned are not necessarily in the same order as the input
-// shards.
+// uploadShards uploads the shards to the given hosts. If any shards were migrated,
+// no error is returned. The given shards must not be nil and
+// the given hosts must all be good and be sufficiently spaced apart.
 func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) (int, error) {
 	if len(slab.Sectors) != len(shards) {
 		panic(fmt.Sprintf("slab %s has %d sectors but %d shards", slab.ID, len(slab.Sectors), len(shards))) // developer error
@@ -110,7 +107,10 @@ top:
 		}
 	}
 	wg.Wait() // wait for all inflight uploads to finish
-	return int(atomic.LoadInt32(&migrated)), nil
+	if migrated == 0 {
+		return 0, fmt.Errorf("no shards were uploaded during migration")
+	}
+	return int(migrated), nil
 }
 
 func (m *SlabManager) uploadShard(ctx context.Context, hostKey types.PublicKey, shard []byte) (rhp.RPCWriteSectorResult, error) {
