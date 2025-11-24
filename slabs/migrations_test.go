@@ -343,9 +343,10 @@ func NewTestShards(t *testing.T, dataShards, parityShards int) ([32]byte, [][]by
 
 	shards := make([][]byte, dataShards+parityShards)
 	for i := range shards {
-		shards[i] = make([]byte, proto.SectorSize)
 		if i < dataShards {
 			shards[i] = frand.Bytes(proto.SectorSize)
+		} else {
+			shards[i] = make([]byte, proto.SectorSize)
 		}
 	}
 

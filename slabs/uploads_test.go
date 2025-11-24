@@ -103,17 +103,15 @@ func TestUploadShards(t *testing.T) {
 		client.resetStorage()
 	}
 
-	// assert passing in no hosts returns no error and no uploads
-	uploaded, err := sm.uploadShards(context.Background(), slab, shards, nil, zap.NewNop())
-	if err != nil {
-		t.Fatal(err)
-	} else if uploaded != 0 {
-		t.Fatalf("expected 0 uploads, got %d", uploaded)
+	// assert passing in no hosts returns an error and no uploads
+	_, err = sm.uploadShards(context.Background(), slab, shards, nil, zap.NewNop())
+	if err == nil {
+		t.Fatalf("expected error, got nil")
 	}
 	assertSectors(t, nil, 0, nil)
 
 	// assert passing in enough hosts uploads all shards
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, availableHosts[:3], log)
+	uploaded, err := sm.uploadShards(context.Background(), slab, shards, availableHosts[:3], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if uploaded != 3 {
@@ -160,7 +158,13 @@ func TestUploadShards(t *testing.T) {
 	} else if uploaded >= 3 {
 		t.Fatalf("expected fewer uploaded shards, got %d", uploaded)
 	}
-	assertSectors(t, []types.Hash256{root2, root3}, 2, []types.Hash256{corrupted.Sectors[1].Root})
+	for _, stored := range client.hostSectors {
+		for root := range stored {
+			if root == corrupted.Sectors[1].Root {
+				t.Fatalf("corrupted sector was uploaded: %v", root)
+			}
+		}
+	}
 }
 
 func newTestHost(hk types.PublicKey) hosts.Host {

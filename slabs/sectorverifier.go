@@ -143,7 +143,7 @@ func (v *SectorVerifier) VerifySectors(ctx context.Context, hostKey types.Public
 
 		// if the host returned an insufficient balance error, reset the account
 		if errors.Is(err, proto.ErrNotEnoughFunds) {
-			resetOnce.Do(func() { err = v.ResetBalance(ctx, hostKey) })
+			resetOnce.Do(func() { v.ResetBalance(ctx, hostKey) })
 
 			// NOTE: when this happens we don't interrupt on purpose and
 			// continue as if our internal balance was ok. So if we still

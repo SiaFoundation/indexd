@@ -49,32 +49,27 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, log *z
 
 	var wg sync.WaitGroup
 	for _, slabID := range slabIDs {
-		wg.Add(1)
-		go func(slabID SlabID, log *zap.Logger) {
-			defer wg.Done()
-			err := m.migrateSlab(ctx, slabID, allHosts, goodContracts, log)
-			if err := m.store.MarkSlabRepaired(slabID, err == nil); err != nil {
-				log.Error("failed to mark slab repaired", zap.Error(err))
-			}
-		}(slabID, log.With(zap.Stringer("slab", slabID)))
+		wg.Go(func() {
+			m.migrateSlab(ctx, slabID, allHosts, goodContracts, log.With(zap.Stringer("slab", slabID)))
+		})
 	}
 	wg.Wait()
 	return nil
 }
 
-func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, goodContracts []contracts.Contract, log *zap.Logger) error {
+func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, goodContracts []contracts.Contract, log *zap.Logger) {
 	slab, err := m.store.Slab(slabID)
 	if err != nil {
 		log.Error("failed to fetch slab", zap.Error(err))
-		return err
+		return
 	}
 	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, goodContracts, m.chain.Tip().Height, m.minHostDistanceKm)
 	if len(indices) == 0 {
 		log.Debug("tried to migrate slab but no indices require migration")
-		return nil
+		return
 	} else if len(uploadCandidates) == 0 {
 		log.Warn("tried to migrate slab but no hosts are available for migration")
-		return nil
+		return
 	}
 	log = log.With(zap.Int("toMigrate", len(indices)), zap.Int("uploadCandidates", len(uploadCandidates)))
 
@@ -85,7 +80,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	shards, err := m.downloadShards(ctx, slab, log.Named("recover"))
 	if err != nil {
 		log.Error("failed to download slab", zap.Error(err))
-		return err
+		return
 	}
 	log = log.With(zap.Duration("downloadElapsed", time.Since(downloadStart)))
 
@@ -142,10 +137,14 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	log = log.With(zap.Duration("uploadElapsed", time.Since(uploadStart)), zap.Int("toMigrate", len(indices)), zap.Int("migrated", migrated))
 	if err != nil {
 		log.Warn("failed to upload migrated shards", zap.Error(err))
+	} else if migrated < len(indices) {
+		log.Debug("migrated some but not all shards", zap.Int("toMigrate", len(indices)), zap.Int("migrated", migrated))
 	} else {
+		if err := m.store.MarkSlabRepaired(slabID, true); err != nil {
+			log.Error("failed to mark slab repaired", zap.Error(err))
+		}
 		log.Debug("successfully migrated all shards")
 	}
-	return nil
 }
 
 // sectorsToMigrate filters the sectors of a slab and returns the indices of the
