@@ -207,7 +207,7 @@ WHERE
 	-- blocked host filter
 	AND (($4::boolean IS NULL) OR ($4::boolean = hosts.blocked))
 	-- active contracts filter
-	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good)))
+	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1))))
 	-- public key filter
 	AND ((CARDINALITY($6::bytea[]) = 0) OR (public_key = ANY($6)))
 	%s -- orderClause
@@ -669,7 +669,7 @@ WHERE
 	settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb AND
 	-- country filter
 	($3::text IS NULL OR country_code = $3::text) AND
-	-- active contracts
+	-- active and good contracts
 	EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good) AND
 	-- protocol filter
 	($4::smallint IS NULL OR EXISTS (SELECT 1 FROM host_addresses WHERE host_id = hosts.id AND protocol = $4::smallint)) `

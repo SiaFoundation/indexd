@@ -330,7 +330,8 @@ func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
 	for offset := 0; ; offset += batchSize {
 		hosts, err := cm.hosts.Hosts(ctx, offset, batchSize,
 			hosts.WithUsable(false),
-			hosts.WithBlocked(false))
+			hosts.WithBlocked(false),
+			hosts.WithActiveContracts(true))
 		if err != nil {
 			return fmt.Errorf("failed to fetch hosts to block: %w", err)
 		}

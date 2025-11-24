@@ -160,10 +160,10 @@ func (cm *ContractManager) performWalletMaintenance(ctx context.Context, log *za
 		return fmt.Errorf("failed to fetch maintenance settings: %w", err)
 	}
 
-	// estimate the number of UTXOs needed per block based on the number of
-	// hosts we might form a contract with since each contract potentially
-	// requires maintenance (renewal, funding, etc).
-	hosts, err := cm.hosts.Hosts(ctx, 0, maxUTXOs, hosts.WithBlocked(false), hosts.WithUsable(true))
+	// estimate the number of UTXOs needed per block based
+	// on the number of hosts we have a contract with since
+	// each contract potentially requires maintenance (renewal, funding, etc).
+	hosts, err := cm.hosts.Hosts(ctx, 0, maxUTXOs, hosts.WithActiveContracts(true), hosts.WithUsable(true))
 	if err != nil {
 		return fmt.Errorf("failed to fetch active contracts: %w", err)
 	}

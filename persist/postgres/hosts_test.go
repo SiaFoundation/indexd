@@ -437,7 +437,6 @@ func TestHosts(t *testing.T) {
 	}
 
 	// helper to add hosts
-	h2c := make(map[types.PublicKey]types.FileContractID)
 	addHost := func(i byte, usable, blocked bool, contract bool) types.PublicKey {
 		t.Helper()
 		hk := types.PublicKey{i}
@@ -467,7 +466,7 @@ func TestHosts(t *testing.T) {
 
 		// form contract
 		if contract {
-			h2c[hk] = db.addTestContract(t, hk)
+			db.addTestContract(t, hk)
 		}
 		return hk
 	}
@@ -576,18 +575,6 @@ func TestHosts(t *testing.T) {
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithBlocked(false))
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithActiveContracts(true))
 	assertHosts([]types.PublicKey{hk3}, 1, 1, hosts.WithPublicKeys([]types.PublicKey{hk2, hk3, hk4}))
-
-	// assert good is taken into account for active contracts filter
-	if err := db.MarkContractBad(h2c[hk1]); err != nil {
-		t.Fatal(err)
-	}
-	assertHosts([]types.PublicKey{hk2}, 0, 4, hosts.WithActiveContracts(true))
-
-	// assert renewed_to is taken into account for active contracts filter
-	if _, err := db.pool.Exec(t.Context(), `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2`, sqlHash256(h2c[hk1]), sqlHash256(h2c[hk2])); err != nil {
-		t.Fatal(err)
-	}
-	assertHosts([]types.PublicKey{}, 0, 4, hosts.WithActiveContracts(true))
 
 	// helper to update hosts
 	updateHost := func(hk types.PublicKey, column string, value any) {
