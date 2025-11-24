@@ -357,7 +357,7 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 func accountID(ctx context.Context, tx *txn, account proto.Account, deletedOK bool) (int64, error) {
 	var accountID int64
 	var deleted bool
-	err := tx.QueryRow(ctx, "SELECT id, deleted FROM accounts WHERE accounts.public_key = $1", sqlPublicKey(account)).Scan(&accountID, &deleted)
+	err := tx.QueryRow(ctx, "SELECT id, deleted_at IS NOT NULL FROM accounts WHERE accounts.public_key = $1", sqlPublicKey(account)).Scan(&accountID, &deleted)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, accounts.ErrNotFound
 	} else if err != nil {
