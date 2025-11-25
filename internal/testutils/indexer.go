@@ -165,7 +165,10 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 
 	signer := contracts.NewFormContractSigner(wm, walletKey)
 	dialer := client.NewDialer(c.cm, signer, store, log, client.WithRevisionSubmissionBuffer(1))
-	am := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithLogger(log.Named("accounts")))
+	am, err := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithPruneAccountsInterval(100*time.Millisecond), accounts.WithLogger(log.Named("accounts")))
+	if err != nil {
+		t.Fatalf("failed to create accounts manager: %v", err)
+	}
 
 	contracts, err := contracts.NewManager(walletKey, am, c.cm, store, dialer, hm, s, wm, cfg.contractOpts...)
 	if err != nil {

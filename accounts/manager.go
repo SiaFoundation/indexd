@@ -10,6 +10,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -67,7 +68,7 @@ type (
 		AppConnectKey(key string) (ConnectKey, error)
 		AppConnectKeys(offset, limit int) ([]ConnectKey, error)
 
-		PruneAccount(limit int64) error
+		PruneAccount(limit int) error
 		ActiveAccounts(threshold time.Time) (uint64, error)
 		Account(types.PublicKey) (Account, error)
 		Accounts(offset, limit int, opts ...QueryAccountsOpt) ([]Account, error)
@@ -82,9 +83,13 @@ type (
 
 	// AccountManager manages accounts.
 	AccountManager struct {
+		pruneAccountsInterval time.Duration
+
 		store  Store
 		funder AccountFunder
-		log    *zap.Logger
+
+		tg  *threadgroup.ThreadGroup
+		log *zap.Logger
 
 		serviceAccountsMu sync.Mutex
 		serviceAccounts   map[proto.Account]struct{}
@@ -101,8 +106,16 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
+// WithPruneAccountsInterval sets the interval for pruning accounts.
+func WithPruneAccountsInterval(interval time.Duration) Option {
+	return func(m *AccountManager) {
+		m.pruneAccountsInterval = interval
+	}
+}
+
 // Close closes the AccountManager.
 func (m *AccountManager) Close() error {
+	m.tg.Stop()
 	return nil
 }
 
@@ -250,17 +263,30 @@ func HostFundTarget(host hosts.Host) types.Currency {
 }
 
 // NewManager creates a new AccountManager.
-func NewManager(store Store, funder AccountFunder, opts ...Option) *AccountManager {
+func NewManager(store Store, funder AccountFunder, opts ...Option) (*AccountManager, error) {
 	m := &AccountManager{
-		serviceAccounts: make(map[proto.Account]struct{}),
-		store:           store,
-		funder:          funder,
-		log:             zap.NewNop(),
+		pruneAccountsInterval: 10 * time.Minute,
+		serviceAccounts:       make(map[proto.Account]struct{}),
+		store:                 store,
+		funder:                funder,
+		tg:                    threadgroup.New(),
+		log:                   zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
-	return m
+
+	ctx, cancel, err := m.tg.AddContext(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		defer cancel()
+		m.maintenanceLoop(ctx)
+	}()
+
+	return m, nil
 }
 
 // maintenanceLoop performs any background tasks that the accounts manager
@@ -268,7 +294,7 @@ func NewManager(store Store, funder AccountFunder, opts ...Option) *AccountManag
 func (m *AccountManager) maintenanceLoop(ctx context.Context) {
 	var wg sync.WaitGroup
 	launch := func(descr string, task func(context.Context) error) {
-		healthTicker := time.NewTicker(time.Minute)
+		healthTicker := time.NewTicker(m.pruneAccountsInterval)
 
 		wg.Add(1)
 		go func() {

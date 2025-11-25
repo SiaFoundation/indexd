@@ -132,7 +132,10 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 
 	signer := contracts.NewFormContractSigner(wm, walletKey)
 	dialer := client.NewDialer(cm, signer, store, log)
-	am := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithLogger(log.Named("accounts")))
+	am, err := accounts.NewManager(store, accounts.NewFunder(dialer), accounts.WithLogger(log.Named("accounts")))
+	if err != nil {
+		return fmt.Errorf("failed to create accounts manager: %w", err)
+	}
 	defer am.Close()
 
 	contracts, err := contracts.NewManager(walletKey, am, cm, store, dialer, hm, s, wm, contracts.WithLogger(log.Named("contracts")))
