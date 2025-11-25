@@ -263,8 +263,8 @@ func NewManager(store Store, funder AccountFunder, opts ...Option) *AccountManag
 	return m
 }
 
-// maintenanceLoop performs any background tasks that the slab manager needs to
-// perform on accounts
+// maintenanceLoop performs any background tasks that the accounts manager
+// needs to perform on accounts
 func (m *AccountManager) maintenanceLoop(ctx context.Context) {
 	var wg sync.WaitGroup
 	launch := func(descr string, task func(context.Context) error) {
