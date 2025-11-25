@@ -94,7 +94,8 @@ func TestDownload(t *testing.T) {
 	s := initSDK(appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
-	dataSize := uint64(proto.SectorSize) * 10 * 2 // 2 slabs
+	slabSize := uint64(proto.SectorSize) * 10
+	dataSize := slabSize * 3 // 3 slabs
 	data := frand.Bytes(int(dataSize))
 
 	obj, err := s.Upload(context.Background(), bytes.NewReader(data))
@@ -139,6 +140,9 @@ func TestDownload(t *testing.T) {
 			{0, proto.SectorSize},
 			{proto.SectorSize, proto.SectorSize},
 			{proto.LeafSize, proto.LeafSize},
+			{proto.LeafSize + 1, proto.LeafSize / 2},            // within a leaf
+			{proto.LeafSize + proto.LeafSize/2, proto.LeafSize}, // across leaves
+			{slabSize / 2, 2 * slabSize},                        // across slabs
 			{dataSize - proto.SectorSize, proto.SectorSize},
 			{dataSize - proto.LeafSize, proto.LeafSize},
 			{dataSize, 0},

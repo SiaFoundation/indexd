@@ -81,6 +81,10 @@ var (
 	// ErrNoMoreHosts is returned when there are no more hosts
 	// available to attempt to upload a shard
 	ErrNoMoreHosts = errors.New("no more hosts available")
+
+	// ErrInvalidRange is returned when an invalid range is specified for
+	// download
+	ErrInvalidRange = errors.New("invalid range")
 )
 
 type sectorDownload struct {
@@ -253,19 +257,20 @@ top:
 // Download downloads object metadata
 func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...DownloadOption) error {
 	// parse options
+	maxLength := obj.Size()
 	do := downloadOption{
 		hostTimeout: 4 * time.Second, // ~10 Mbps
 		maxInflight: 10,
 		offset:      0,
-		length:      obj.Size(),
+		length:      maxLength,
 	}
 	for _, opt := range opts {
 		opt(&do)
 	}
 
 	// validate range
-	if do.offset+do.length > obj.Size() {
-		return errors.New("requested range exceeds object size")
+	if totalLength := do.offset + do.length; totalLength > maxLength {
+		return fmt.Errorf("%w; range %d-%d exceeds object size %d", ErrInvalidRange, do.offset, totalLength, maxLength)
 	}
 
 	// decrypt stream using the object's master key
@@ -324,19 +329,20 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 	}
 
 	// parse options
+	maxLength := obj.Size()
 	do := downloadOption{
 		hostTimeout: 4 * time.Second, // ~10 Mbps
 		maxInflight: 10,
 		offset:      0,
-		length:      obj.Size(),
+		length:      maxLength,
 	}
 	for _, opt := range opts {
 		opt(&do)
 	}
 
 	// validate range
-	if do.offset+do.length > obj.Size() {
-		return errors.New("requested range exceeds object size")
+	if totalLength := do.offset + do.length; totalLength > maxLength {
+		return fmt.Errorf("%w; range %d-%d exceeds object size %d", ErrInvalidRange, do.offset, totalLength, maxLength)
 	}
 
 	// decrypt stream using the object's master key
