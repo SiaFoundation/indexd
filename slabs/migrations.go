@@ -137,13 +137,18 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	log = log.With(zap.Duration("uploadElapsed", time.Since(uploadStart)), zap.Int("toMigrate", len(indices)), zap.Int("migrated", migrated))
 	if err != nil {
 		log.Warn("failed to upload migrated shards", zap.Error(err))
-	} else if migrated < len(indices) {
-		log.Debug("migrated some but not all shards", zap.Int("toMigrate", len(indices)), zap.Int("migrated", migrated))
+	}
+
+	repaired := migrated == len(indices)
+	log = log.With(zap.Bool("repaired", repaired), zap.Int("migrated", migrated), zap.Int("toMigrate", len(indices)))
+	if err := m.store.MarkSlabRepaired(slabID, repaired); err != nil {
+		log.Error("failed to mark slab repaired", zap.Error(err))
+	}
+
+	if migrated < len(indices) {
+		log.Debug("slab partially repaired")
 	} else {
-		if err := m.store.MarkSlabRepaired(slabID, true); err != nil {
-			log.Error("failed to mark slab repaired", zap.Error(err))
-		}
-		log.Debug("successfully migrated all shards")
+		log.Debug("slab successfully repaired")
 	}
 }
 
