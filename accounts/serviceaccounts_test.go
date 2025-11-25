@@ -31,7 +31,10 @@ func TestServiceAccounts(t *testing.T) {
 	s.AddTestServiceAccount(t, host.PublicKey, account2)
 
 	f := &mockFunder{}
-	am := accounts.NewManager(s, f)
+	am, err := accounts.NewManager(s, f)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer am.Close()
 
 	// helper to assert balance
@@ -45,7 +48,7 @@ func TestServiceAccounts(t *testing.T) {
 	}
 
 	// try to user account before registering it
-	err := am.ResetAccountBalance(context.Background(), host.PublicKey, account1)
+	err = am.ResetAccountBalance(context.Background(), host.PublicKey, account1)
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected ErrNotFound")
 	}

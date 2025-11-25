@@ -114,7 +114,10 @@ func TestAccountManager(t *testing.T) {
 	s := newTestStore(t)
 	f := &mockFunder{}
 
-	am := accounts.NewManager(s, f)
+	am, err := accounts.NewManager(s, f)
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer am.Close()
 
 	hs := proto.HostSettings{
@@ -133,7 +136,7 @@ func TestAccountManager(t *testing.T) {
 	}
 
 	contractIDs := []types.FileContractID{{1}}
-	err := am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
+	err = am.FundAccounts(context.Background(), host, contractIDs, false, zap.NewNop())
 	if !errors.Is(err, hosts.ErrNotFound) {
 		t.Fatal("expected host not found error")
 	}
