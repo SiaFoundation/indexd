@@ -156,10 +156,10 @@ func (s *Store) UpdateAccount(oldAK, newAK types.PublicKey) error {
 }
 
 // PruneAccount deletes up to `limit` objects from an account that has been
-// marked as soft deleted.  If there are no objects remaining on the account,
-// its slabs and sectors will be pruned with PruneSlabs and then account will
-// be hard deleted. accounts.ErrNotFound is returend if there is no account to
-// delete.
+// marked as soft deleted.  It will then prune the deleted objects' associated
+// slabs and sectors.  If there are no objects left on the account to delete,
+// it will be hard deleted.  If there are no pending soft deleted accounts,
+// accounts.ErrNotFound is returned.
 func (s *Store) PruneAccount(limit int) error {
 	if limit < 0 {
 		return errors.New("limit can not be negative")
