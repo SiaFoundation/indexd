@@ -1469,7 +1469,19 @@ func TestUpdateHostPrices(t *testing.T) {
 		t.Fatal("expected host to be good")
 	}
 
+	// try to update the prices to a lower valid until time which should fail
+	// and the host should continue to be good
+	settings.Prices.ValidUntil = time.Now().Add(30 * time.Second)
+	if err := db.UpdateHostPrices(hostKey, settings.Prices); err != nil {
+		t.Fatal(err)
+	} else if host, err := db.Host(hostKey); err != nil {
+		t.Fatal(err)
+	} else if !host.IsGood() {
+		t.Fatal("expected host to be good")
+	}
+
 	// update host settings with gouging prices
+	settings.Prices.ValidUntil = time.Now().Add(24 * time.Hour)
 	settings.Prices.EgressPrice = types.Siacoins(15)
 	if err := db.UpdateHostPrices(hostKey, settings.Prices); err != nil {
 		t.Fatal(err)
@@ -1692,7 +1704,7 @@ func BenchmarkUsableHosts(b *testing.B) {
 			var hostID int64
 			err := tx.QueryRow(b.Context(), `
 				INSERT INTO hosts (
-					public_key, 
+					public_key,
 					last_announcement,
 					last_successful_scan,
 					settings_protocol_version,
@@ -1742,7 +1754,7 @@ func BenchmarkUsableHosts(b *testing.B) {
 
 			// add host addresses (50% QUIC)
 			if _, err := tx.Exec(ctx, `
-				INSERT INTO host_addresses (host_id, net_address, protocol) 
+				INSERT INTO host_addresses (host_id, net_address, protocol)
 				VALUES ($1, $2, $3)`, hostID, "foo.com", sqlNetworkProtocol(randomProtocol())); err != nil {
 				return fmt.Errorf("failed to insert host address: %w", err)
 			}
@@ -2241,8 +2253,8 @@ func BenchmarkHostsForFunding(b *testing.B) {
 			// add host
 			var hostID int64
 			if err := tx.QueryRow(ctx, `
-				INSERT INTO hosts (public_key, last_announcement) 
-				VALUES ($1, NOW()) 
+				INSERT INTO hosts (public_key, last_announcement)
+				VALUES ($1, NOW())
 				RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID); err != nil {
 				return err
 			}
