@@ -119,11 +119,18 @@ top:
 			}
 			if err != nil || dialCtx.Err() != nil {
 				// failed to connect or already connected elsewhere
+				if err == nil {
+					_ = transport.Close()
+				}
 				return
 			}
 			dialCancel()
 			t.mu.Lock()
-			t.tc = transport
+			if t.tc == nil {
+				t.tc = transport
+			} else {
+				_ = transport.Close()
+			}
 			t.mu.Unlock()
 		}(addr)
 	}
