@@ -17,7 +17,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/mux/v2"
@@ -112,8 +111,8 @@ top:
 			switch addr.Protocol {
 			case siamux.Protocol:
 				transport, err = siamux.Dial(dialCtx, addr.Address, hostKey)
-			case quic.Protocol:
-				transport, err = quic.Dial(dialCtx, addr.Address, hostKey)
+				//			case quic.Protocol:
+				//				transport, err = quic.Dial(dialCtx, addr.Address, hostKey)
 			default:
 				return
 			}
