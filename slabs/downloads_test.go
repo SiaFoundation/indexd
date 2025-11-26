@@ -6,6 +6,7 @@ import (
 	"errors"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -106,20 +107,22 @@ func TestDownloadShards(t *testing.T) {
 
 	// assert that if the first host times out, the download still succeeds
 	t.Run("success with delay", func(t *testing.T) {
-		sm.shardTimeout = 100 * time.Millisecond
-		client.slowHosts[hosts[0].PublicKey] = 200 * time.Millisecond
-		t.Cleanup(func() {
-			sm.shardTimeout = 30 * time.Second
-			client.slowHosts = make(map[types.PublicKey]time.Duration)
+		synctest.Test(t, func(t *testing.T) {
+			sm.shardTimeout = 2 * time.Second
+			client.slowHosts[hosts[0].PublicKey] = 30 * time.Minute
+			t.Cleanup(func() {
+				sm.shardTimeout = 30 * time.Second
+				client.slowHosts = make(map[types.PublicKey]time.Duration)
+			})
+			sectors, err := sm.downloadShards(context.Background(), slab, zap.NewNop())
+			if err != nil {
+				t.Fatal(err)
+			} else if slab.Sectors[1].Root != proto.SectorRoot((*[proto.SectorSize]byte)(sectors[1])) || slab.Sectors[2].Root != proto.SectorRoot((*[proto.SectorSize]byte)(sectors[2])) {
+				t.Fatal("downloaded sectors do not match expected data")
+			} else if len(sectors[0]) != 0 {
+				t.Fatal("expected first sector to be missing due to timeout")
+			}
 		})
-		sectors, err := sm.downloadShards(context.Background(), slab, zap.NewNop())
-		if err != nil {
-			t.Fatal(err)
-		} else if slab.Sectors[1].Root != proto.SectorRoot((*[proto.SectorSize]byte)(sectors[1])) || slab.Sectors[2].Root != proto.SectorRoot((*[proto.SectorSize]byte)(sectors[2])) {
-			t.Fatal("downloaded sectors do not match expected data")
-		} else if len(sectors[0]) != 0 {
-			t.Fatal("expected first sector to be missing due to timeout")
-		}
 	})
 
 	// assert that a host losing a sector will mark the sector as lost
