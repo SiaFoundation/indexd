@@ -438,7 +438,7 @@ settings_free_sector_price = $6,
 settings_tip_height = $7,
 settings_valid_until = $8,
 settings_signature = $9
-WHERE public_key = $10`
+WHERE public_key = $10 AND settings_valid_until < $8`
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, query,
 			sqlCurrency(prices.ContractPrice),
