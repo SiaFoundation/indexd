@@ -267,6 +267,7 @@ func TestPerformContractFormation(t *testing.T) {
 	maintenanceSettings := MaintenanceSettings{
 		Enabled:         true,
 		Period:          100,
+		RenewWindow:     10,
 		WantedContracts: 4,
 	}
 

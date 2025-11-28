@@ -414,6 +414,47 @@ func (cm *ContractManager) MaintenanceSettings(ctx context.Context) (Maintenance
 	return cm.store.MaintenanceSettings()
 }
 
+// ContractsForAppend returns all contracts that are good for appending data.
+// These contracts are revisable, not in their renew window, good and have not
+// reached their maximum size.
+func (cm *ContractManager) ContractsForAppend() (good []Contract, err error) {
+	settings, err := cm.store.MaintenanceSettings()
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch maintenance settings: %w", err)
+	}
+
+	hostsMap := make(map[types.PublicKey]proto.HostPrices)
+
+	const batchSize = 50
+	for offset := 0; ; offset += batchSize {
+		batch, err := cm.store.Contracts(offset, batchSize, WithRevisable(true), WithGood(true))
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch contracts: %w", err)
+		} else if len(batch) == 0 {
+			break
+		}
+
+		height := cm.chain.TipState().Index.Height
+
+		for _, c := range batch {
+			hostPrices, ok := hostsMap[c.HostKey]
+			if !ok {
+				host, err := cm.hosts.Host(context.Background(), c.HostKey)
+				if err != nil {
+					return nil, fmt.Errorf("failed to fetch host %s: %w", c.HostKey.String(), err)
+				}
+				hostPrices = host.Settings.Prices
+				hostsMap[c.HostKey] = hostPrices
+			}
+
+			if c.GoodForAppend(hostPrices, settings.RenewWindow, height) == nil {
+				good = append(good, c)
+			}
+		}
+	}
+	return
+}
+
 // TriggerAccountRefill triggers a refill for the given account by marking it
 // for funding and then triggering the account funding process.
 func (cm *ContractManager) TriggerAccountRefill(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {

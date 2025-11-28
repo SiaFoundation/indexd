@@ -28,7 +28,9 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, hostKey
 		// perform integrity checks
 		results := make([]CheckSectorsResult, 0, len(toCheck))
 		for len(results) < len(toCheck) {
-			usable, err := m.hm.Usable(ctx, hostKey)
+			usableCtx, usableCancel := context.WithTimeout(ctx, time.Minute)
+			usable, err := m.hm.Usable(usableCtx, hostKey)
+			usableCancel()
 			if err != nil {
 				logger.Error("failed to check if host is usable", zap.Error(err))
 				return
