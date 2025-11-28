@@ -70,6 +70,7 @@ type (
 	// manager.
 	ContractManager interface {
 		TriggerAccountRefill(ctx context.Context, hostKey types.PublicKey, account proto.Account) error
+		ContractsForAppend() ([]contracts.Contract, error)
 	}
 
 	// A HostClient defines the minimal interface for interacting with hosts that
@@ -92,7 +93,6 @@ type (
 	// in the database.
 	Store interface {
 		AddServiceAccount(ak types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error
-		Contracts(offset, limit int, queryOpts ...contracts.ContractQueryOpt) ([]contracts.Contract, error)
 		Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		HostsForIntegrityChecks(maxLastCheck time.Time, limit int) ([]types.PublicKey, error)
 		HostsWithLostSectors() ([]types.PublicKey, error)

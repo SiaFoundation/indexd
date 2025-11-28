@@ -89,8 +89,8 @@ top:
 
 					if _, err := m.store.MigrateSector(shardRoot, hostKey); err != nil {
 						log.Error("failed to record migrated sector", zap.Error(err))
+						return
 					}
-
 					atomic.AddInt32(&migrated, 1)
 					return
 				}

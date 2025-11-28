@@ -21,20 +21,13 @@ func (m *SlabManager) migrateSlabs(ctx context.Context, slabIDs []SlabID, log *z
 	}
 
 	// fetch all available contracts
-	var goodContracts []contracts.Contract
-	const batchSize = 50
-	for offset := 0; ; offset += batchSize {
-		batch, err := m.store.Contracts(offset, batchSize, contracts.WithRevisable(true), contracts.WithGood(true))
-		if err != nil {
-			return fmt.Errorf("failed to fetch contracts: %w", err)
-		}
-		goodContracts = append(goodContracts, batch...)
-		if len(batch) < batchSize {
-			break
-		}
+	goodContracts, err := m.cm.ContractsForAppend()
+	if err != nil {
+		return fmt.Errorf("failed to fetch contracts: %w", err)
 	}
 
 	// fetch all available hosts with contracts
+	const batchSize = 500
 	var allHosts []hosts.Host
 	for offset := 0; ; offset += batchSize {
 		batch, err := m.store.Hosts(offset, batchSize, hosts.WithBlocked(false), hosts.WithActiveContracts(true))
@@ -63,7 +56,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 		log.Error("failed to fetch slab", zap.Error(err))
 		return
 	}
-	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, goodContracts, m.chain.Tip().Height, m.minHostDistanceKm)
+	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, goodContracts, m.minHostDistanceKm)
 	if len(indices) == 0 {
 		log.Debug("tried to migrate slab but no indices require migration")
 		return
@@ -156,7 +149,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 // sectors that require migration together with hosts that can be used to
 // migrate bad sectors to. These hosts are guaranteed to be at least
 // minHostDistance apart from each other and are returned in random order.
-func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, height uint64, minHostDistanceKm float64) ([]int, []types.PublicKey) {
+func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, minHostDistanceKm float64) ([]int, []types.PublicKey) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range allHosts {
@@ -168,8 +161,7 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 	// prepare a map of good contracts
 	goodContractMap := make(map[types.FileContractID]contracts.Contract)
 	for _, contract := range goodContracts {
-		host, ok := hostsMap[contract.HostKey]
-		if ok && contract.GoodForAppend(host.Settings.Prices, height) == nil {
+		if _, ok := hostsMap[contract.HostKey]; ok {
 			goodContractMap[contract.ID] = contract
 		}
 	}

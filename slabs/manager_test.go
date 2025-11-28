@@ -446,6 +446,8 @@ func (m *mockAccountManager) DebitServiceAccount(ctx context.Context, hostKey ty
 }
 
 type mockContractManager struct {
+	mu               sync.Mutex
+	contracts        []contracts.Contract
 	triggeredRefills map[proto.Account]int
 }
 
@@ -456,8 +458,16 @@ func newMockContractManager() *mockContractManager {
 }
 
 func (m *mockContractManager) TriggerAccountRefill(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.triggeredRefills[account]++
 	return nil
+}
+
+func (m *mockContractManager) ContractsForAppend() ([]contracts.Contract, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.contracts), nil
 }
 
 type mockhostManager struct {

@@ -21,6 +21,7 @@ func TestMigrateSlab(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	// prepare dependencies
 	db := newMockStore()
+	contracts := newMockContractManager()
 	chain := newMockChainManager()
 	am := newMockAccountManager(db)
 	hm := newMockHostManager()
@@ -49,6 +50,8 @@ func TestMigrateSlab(t *testing.T) {
 		if i == 1 {
 			// bad contract
 			c.Good = false
+		} else {
+			contracts.contracts = append(contracts.contracts, c)
 		}
 		db.contracts[h.PublicKey] = c
 	}
@@ -84,7 +87,7 @@ func TestMigrateSlab(t *testing.T) {
 	msk := types.GeneratePrivateKey()
 	ssk := types.GeneratePrivateKey()
 	alerter := alerts.NewManager()
-	mgr, err := newSlabManager(chain, am, nil, hm, db, client, alerter, msk, ssk, WithLogger(log.Named("slabs")))
+	mgr, err := newSlabManager(chain, am, contracts, hm, db, client, alerter, msk, ssk, WithLogger(log.Named("slabs")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,6 +153,7 @@ func TestMigrateSlab(t *testing.T) {
 	client.hostSettings[h5.PublicKey] = h5.Settings
 	c := newTestContract(h5.PublicKey)
 	db.contracts[h5.PublicKey] = c
+	contracts.contracts = append(contracts.contracts, c)
 
 	// migrate the slab again
 	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate"))
@@ -197,7 +201,7 @@ func TestSectorsToMigrate(t *testing.T) {
 			ProofHeight:      200,
 			ExpirationHeight: 300,
 		}
-		if err := c.GoodForAppend(goodSettings.Prices, 0); (err == nil) != goodForUpload {
+		if err := c.GoodForAppend(goodSettings.Prices, 0, 0); (err == nil) != goodForUpload {
 			// sanity check
 			t.Fatalf("contract %d: expected goodForUpload %v, got %v (%s)", contractIndex, goodForUpload, err == nil, err)
 		}
@@ -259,7 +263,7 @@ func TestSectorsToMigrate(t *testing.T) {
 	// helper to assert result of contractsForRepair
 	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
-		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 100, 10)
+		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 10)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {
