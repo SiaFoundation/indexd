@@ -887,7 +887,7 @@ func TestPruneAccount(t *testing.T) {
 		t.Helper()
 
 		var got int
-		err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM objects WHERE account_id = $1`, expected).Scan(&got)
+		err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM objects WHERE account_id = (SELECT id FROM accounts WHERE public_key = $1)`, sqlPublicKey(acc)).Scan(&got)
 		if err != nil {
 			t.Fatal(err)
 		}
