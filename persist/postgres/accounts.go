@@ -166,24 +166,6 @@ func (s *Store) PruneAccounts(limit int) error {
 	}
 
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		getAccountSlabs := func(accountID int64, limit int) ([]int64, error) {
-			rows, err := tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE account_id = $1 ORDER BY slab_id LIMIT $2`, accountID, limit)
-			if err != nil {
-				return nil, fmt.Errorf("failed to get account slabs: %w", err)
-			}
-			defer rows.Close()
-
-			var slabIDs []int64
-			for rows.Next() {
-				var slabID int64
-				if err := rows.Scan(&slabID); err != nil {
-					return nil, fmt.Errorf("failed to get slab ID: %w", err)
-				}
-				slabIDs = append(slabIDs, slabID)
-			}
-			return slabIDs, rows.Err()
-		}
-
 		var accountID int64
 		err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE deleted_at IS NOT NULL ORDER by deleted_at LIMIT 1`).Scan(&accountID)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -221,10 +203,24 @@ RETURNING object_key`, accountID, limit)
 			return nil
 		}
 
-		slabIDs, err := getAccountSlabs(accountID, limit)
+		rows, err = tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE account_id = $1 ORDER BY slab_id LIMIT $2`, accountID, limit)
 		if err != nil {
-			return fmt.Errorf("failed to get slabs to unpin: %w", err)
+			return fmt.Errorf("failed to get account slabs: %w", err)
 		}
+		defer rows.Close()
+
+		var slabIDs []int64
+		for rows.Next() {
+			var slabID int64
+			if err := rows.Scan(&slabID); err != nil {
+				return fmt.Errorf("failed to get slab ID: %w", err)
+			}
+			slabIDs = append(slabIDs, slabID)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to get account slabs: %w", err)
+		}
+
 		if err := s.unpinSlabs(ctx, tx, accountID, slabIDs); err != nil {
 			return fmt.Errorf("failed to unpin slabs: %w", err)
 		}
