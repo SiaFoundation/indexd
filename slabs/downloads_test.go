@@ -14,9 +14,11 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 )
 
 func TestDownloadShards(t *testing.T) {
+	log := zaptest.NewLogger(t)
 	store := newMockStore()
 	chain := newMockChainManager()
 	am := newMockAccountManager(store)
@@ -49,7 +51,7 @@ func TestDownloadShards(t *testing.T) {
 	}
 
 	account := types.GeneratePrivateKey()
-	sm, err := newSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey())
+	sm, err := newSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), WithLogger(log.Named("slabs")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +130,7 @@ func TestDownloadShards(t *testing.T) {
 	// assert that a host losing a sector will mark the sector as lost
 	t.Run("mark sector lost", func(t *testing.T) {
 		client.hostSectors[hosts[0].PublicKey] = make(map[types.Hash256][proto.SectorSize]byte) // remove sector from host 1
-		_, err := sm.downloadShards(context.Background(), slab, zap.NewNop())
+		_, err := sm.downloadShards(context.Background(), slab, log)
 		if err != nil {
 			// download should still complete successfully
 			t.Fatal(err)

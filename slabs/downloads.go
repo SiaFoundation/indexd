@@ -50,64 +50,105 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, slab.MinShards)
 
-outer:
-	for _, hostKey := range candidates {
+	// helper to download a shard from a host
+	downloadShard := func(ctx context.Context, hostKey types.PublicKey, sector slabDownload, log *zap.Logger) error {
+		defer func() {
+			<-sema
+		}()
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		prices, err := m.hosts.Prices(ctx, hostKey)
+		if err != nil {
+			return fmt.Errorf("failed to fetch host prices: %w", err)
+		}
+
+		// debit the service account for the read since the host may charge for it
+		// even if it is cancelled quickly. This is best effort, it's fine to
+		// log the error and continue on failure.
+		cost := prices.RPCReadSectorCost(proto.SectorSize).RenterCost()
+		if err = m.am.DebitServiceAccount(context.Background(), hostKey, m.migrationAccount, cost); err != nil {
+			log.Warn("failed to debit service account for read sector", zap.Error(err))
+		}
+
+		start := time.Now()
+		buf := bytes.NewBuffer(make([]byte, 0, proto.SectorSize))
+		if _, err := m.downloadShard(ctx, hostKey, buf, sector.root); err != nil {
+			if isErrLostSector(err) {
+				log.Debug("host reports sector lost", zap.Duration("elapsed", time.Since(start)))
+				if err := m.store.MarkSectorsLost(hostKey, []types.Hash256{sector.root}); err != nil {
+					log.Error("failed to mark sector as lost", zap.Error(err))
+				}
+			} else if !errors.Is(err, mux.ErrClosedStream) && !errors.Is(err, ctx.Err()) {
+				log.Debug("failed to download shard", zap.Duration("elapsed", time.Since(start)), zap.Error(err))
+			}
+			return err
+		}
+
+		shards[sector.index] = buf.Bytes()
+		if n := downloaded.Add(1); n >= uint32(slab.MinShards) {
+			cancel()
+		}
+		return nil
+	}
+
+	// start initial shards
+	failedCh := make(chan struct{}, slab.MinShards)
+	initial := min(len(candidates), int(slab.MinShards))
+	log.Debug("starting initial shard downloads", zap.Int("count", initial), zap.Int("required", int(slab.MinShards)), zap.Int("totalCandidates", len(candidates)))
+initialLoop:
+	for _, hostKey := range candidates[:initial] {
 		select {
 		case <-ctx.Done():
-			// context cancelled, either due to timeout or enough shards downloaded
-			break outer
+			break initialLoop
 		case sema <- struct{}{}:
 		}
 
 		sector := slabHosts[hostKey]
 		log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("sectorRoot", sector.root))
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-
-			if ctx.Err() != nil {
-				// context already cancelled
-				return
-			}
-
-			prices, err := m.hosts.Prices(ctx, hostKey)
-			if err != nil {
-				log.Debug("failed to fetch host prices", zap.Error(err))
-				// only release the semaphore if the download failed so that another shard can be started
-				<-sema
-				return
-			}
-
-			// debit the service account for the read since the host may charge for it
-			// even if it is cancelled quickly. This is best effort, it's fine to
-			// log the error and continue on failure.
-			cost := prices.RPCReadSectorCost(proto.SectorSize).RenterCost()
-			if err = m.am.DebitServiceAccount(context.Background(), hostKey, m.migrationAccount, cost); err != nil {
-				log.Debug("failed to debit service account for sector read", zap.Error(err))
-			}
-
-			start := time.Now()
-			buf := bytes.NewBuffer(make([]byte, 0, proto.SectorSize))
-			if _, err := m.downloadShard(ctx, hostKey, buf, sector.root); err != nil {
-				if isErrLostSector(err) {
-					log.Debug("host reports sector lost", zap.Duration("elapsed", time.Since(start)))
-					if err := m.store.MarkSectorsLost(hostKey, []types.Hash256{sector.root}); err != nil {
-						log.Error("failed to mark sector as lost", zap.Error(err))
-					}
-				} else if !errors.Is(err, mux.ErrClosedStream) && !errors.Is(err, ctx.Err()) {
-					log.Debug("failed to download shard", zap.Duration("elapsed", time.Since(start)), zap.Error(err))
+		wg.Go(func() {
+			if err := downloadShard(ctx, hostKey, slabHosts[hostKey], log); err != nil {
+				log.Debug("shard download failed", zap.Error(err))
+				// non-blocking send to indicate a failure
+				select {
+				case failedCh <- struct{}{}:
+				default:
 				}
-				// only release the semaphore if the download failed so that another shard can be started
-				<-sema
-				return
 			}
+		})
+	}
 
-			shards[sector.index] = buf.Bytes()
-			if n := downloaded.Add(1); n >= uint32(slab.MinShards) {
-				cancel()
-			}
-		}()
+	t := time.NewTicker(m.shardTimeout / 2)
+	defer t.Stop()
+raceLoop:
+	for i := initial; downloaded.Load() < uint32(slab.MinShards) && i < len(candidates); i++ {
+		hostKey := candidates[i]
+		select {
+		case <-ctx.Done():
+			break raceLoop
+		case <-failedCh:
+			// a download has failed
+		case <-t.C:
+			// hedge against slow shards
+			log.Debug("racing slow shards", zap.Uint32("downloaded", downloaded.Load()), zap.Uint32("required", uint32(slab.MinShards)))
+		}
+
+		// wait for an available slot
+		select {
+		case sema <- struct{}{}:
+			sector := slabHosts[hostKey]
+			log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("sectorRoot", sector.root))
+			wg.Go(func() {
+				if err := downloadShard(ctx, hostKey, slabHosts[hostKey], log); err != nil {
+					log.Debug("shard download failed", zap.Error(err))
+					failedCh <- struct{}{}
+				}
+			})
+		case <-ctx.Done():
+			break raceLoop
+		}
 	}
 
 	wg.Wait()
