@@ -106,7 +106,7 @@ func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, host 
 // provided. If the host refuses to pin a sector, it will be marked as lost.
 func (cm *ContractManager) pinSectors(ctx context.Context, client HostClient, hostKey types.PublicKey, hostPrices proto.HostPrices, contractIDs []types.FileContractID, sectors []types.Hash256, log *zap.Logger) error {
 	// NOTE: this is necessary to avoid looping forever
-	// if [AppendSectors] returns an error for all contracts.
+	// when [AppendSectors] returns an error for all contracts.
 	var success bool
 	for _, contractID := range contractIDs {
 		if len(sectors) == 0 {
@@ -119,9 +119,11 @@ func (cm *ContractManager) pinSectors(ctx context.Context, client HostClient, ho
 		if err != nil {
 			log.Debug("failed to pin sectors", zap.Error(err))
 			continue
-		} else if len(res.Sectors) > 0 {
-			success = true
 		}
+		// if the RPC returned, regardless of how many sectors were pinned,
+		// consider it a success as we made progress towards pinning unpinned
+		// sectors.
+		success = true
 
 		// Only the sectors that were attempted should be marked
 		// as missing. So sectors that were not part of the append
