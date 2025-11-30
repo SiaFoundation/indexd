@@ -339,17 +339,12 @@ func (s *mockStore) UnhealthySlabs(limit int) (result []SlabID, _ error) {
 					break
 				}
 
-				if sector.ContractID == nil || sector.HostKey == nil {
+				// a slab is unhealthy if any of its sectors are not pinned
+				// or are pinned to a bad contract
+				if sector.HostKey == nil {
 					result = append(result, slab.ID)
-					break
-				}
-				if sector.HostKey != nil {
-					hk := *sector.HostKey
-					contract, ok := s.contracts[hk]
-					if ok && !contract.Good {
-						result = append(result, slab.ID)
-						break
-					}
+				} else if contract, ok := s.contracts[*sector.HostKey]; ok && !contract.Good {
+					result = append(result, slab.ID)
 				}
 			}
 		}
