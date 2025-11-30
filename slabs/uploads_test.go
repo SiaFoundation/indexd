@@ -11,11 +11,12 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
 
 func TestUploadShards(t *testing.T) {
-	log := zap.NewNop()
+	log := zaptest.NewLogger(t)
 	// prepare dependencies
 	store := newMockStore()
 	chain := newMockChainManager()

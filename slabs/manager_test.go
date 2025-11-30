@@ -2,7 +2,6 @@ package slabs
 
 import (
 	"context"
-	"errors"
 	"io"
 	"math"
 	"slices"
@@ -216,17 +215,12 @@ func (s *mockStore) MigrateSector(root types.Hash256, hostKey types.PublicKey) (
 	}
 	s.migratedSectors[hostKey][root] = struct{}{}
 
-	contract, ok := s.contracts[hostKey]
-	if !ok {
-		return false, errors.New("host contract not found")
-	}
-
 	for acc := range s.accounts {
 		for slabID, slab := range s.pinnedSlabs[acc] {
 			for i, sector := range slab.Sectors {
 				if sector.Root == root {
 					s.pinnedSlabs[acc][slabID].Sectors[i].HostKey = &hostKey
-					s.pinnedSlabs[acc][slabID].Sectors[i].ContractID = &contract.ID
+					s.pinnedSlabs[acc][slabID].Sectors[i].ContractID = nil
 					return true, nil
 				}
 			}
