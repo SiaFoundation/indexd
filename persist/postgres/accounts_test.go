@@ -1095,7 +1095,7 @@ func BenchmarkPruneAccounts(b *testing.B) {
 	)
 
 	store := initPostgres(b, zap.NewNop())
-	reset := func() {
+	reset := func(b *testing.B) {
 		_, err := store.pool.Exec(b.Context(), `
 DELETE FROM object_slabs;
 DELETE FROM objects;
@@ -1148,17 +1148,14 @@ ALTER SEQUENCE accounts_id_seq RESTART WITH 1;
 			b.Fatal(err)
 		}
 
-		for _, table := range []string{"object_slabs", "account_slabs", "objects", "slabs", "accounts"} {
-			_, err := store.pool.Exec(b.Context(), fmt.Sprintf(`VACUUM (ANALYZE) %s`, table))
-			if err != nil {
-				b.Fatal(err)
-			}
+		if _, err := store.pool.Exec(b.Context(), `VACUUM FULL ANALYZE;`); err != nil {
+			b.Fatal(err)
 		}
 	}
 
 	for _, limit := range []int{100, 250, 500} {
 		b.Run(fmt.Sprint(limit), func(b *testing.B) {
-			reset()
+			reset(b)
 			for b.Loop() {
 				if err := store.PruneAccounts(limit); errors.Is(err, accounts.ErrNotFound) {
 					b.Logf("pruning error: %v", err)
