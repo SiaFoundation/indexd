@@ -29,8 +29,9 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 				continue // contract is bad
 			}
 
+			log := log.With(zap.Stringer("contractID", contract.ID), zap.Stringer("host", contract.HostKey))
 			if err := cm.renewContract(ctx, contract, newProofHeight, period, log); err != nil {
-				log.Error("failed to renew contract", zap.Stringer("contractID", contract.ID), zap.Error(err))
+				log.Error("failed to renew contract", zap.Error(err))
 			}
 		}
 
@@ -43,8 +44,6 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 }
 
 func (cm *ContractManager) renewContract(ctx context.Context, contract Contract, proofHeight, period uint64, log *zap.Logger) error {
-	log = log.With(zap.Stringer("hostKey", contract.HostKey), zap.Stringer("contractID", contract.ID))
-
 	return cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
 		// calculate funding target
 		minAllowance, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
