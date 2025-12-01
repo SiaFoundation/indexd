@@ -73,15 +73,16 @@ type (
 
 	// HostStats contains various statistics about a single host.
 	HostStats struct {
-		AccountUsage        types.Currency  `json:"accountUsage"`
-		ActiveContractsSize int64           `json:"activeContractsSize"`
-		PublicKey           types.PublicKey `json:"publicKey"`
-		LostSectors         int64           `json:"lostSectors"`
-		TotalUsage          types.Currency  `json:"totalUsage"`
-		Scans               int64           `json:"scans"`
-		ScansFailed         int64           `json:"scansFailed"`
-		Blocked             bool            `json:"blocked"`
-		BlockedReasons      []string        `json:"blockedReasons"`
+		AccountUsage        types.Currency         `json:"accountUsage"`
+		ActiveContractsSize int64                  `json:"activeContractsSize"`
+		PublicKey           types.PublicKey        `json:"publicKey"`
+		LostSectors         int64                  `json:"lostSectors"`
+		TotalUsage          types.Currency         `json:"totalUsage"`
+		ProtocolVersion     proto4.ProtocolVersion `json:"protocolVersion"`
+		Scans               int64                  `json:"scans"`
+		ScansFailed         int64                  `json:"scansFailed"`
+		Blocked             bool                   `json:"blocked"`
+		BlockedReasons      []string               `json:"blockedReasons"`
 	}
 
 	// OnlineChecker defines an interface to check whether the indexer is online. It's

@@ -9,6 +9,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
@@ -412,6 +413,10 @@ func TestHostStats(t *testing.T) {
 		t.Fatalf("expected first host to have %d active contract size, got %d", testRevision.Filesize, stats[0].ActiveContractsSize)
 	} else if stats[1].ActiveContractsSize != int64(testRevision.Filesize) {
 		t.Fatalf("expected second host to have %d active contract size, got %d", testRevision.Filesize, stats[1].ActiveContractsSize)
+	} else if stats[0].ProtocolVersion != (proto.ProtocolVersion{}) {
+		t.Fatalf("expected no protocol version for first host")
+	} else if stats[1].ProtocolVersion != (proto.ProtocolVersion{}) {
+		t.Fatalf("expected no protocol version for first host")
 	}
 	if stats[0].Blocked || stats[1].Blocked {
 		t.Fatal("expected both hosts to be unblocked")
@@ -441,6 +446,12 @@ func TestHostStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// set protocol version for hk2
+	_, err = store.pool.Exec(t.Context(), "UPDATE hosts SET settings_protocol_version = $1 WHERE public_key = $2", sqlProtocolVersion(rhp.ProtocolVersion502), sqlPublicKey(hk2))
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// assert updated stats
 	stats, err = store.HostStats(0, 10)
 	if err != nil {
@@ -455,8 +466,11 @@ func TestHostStats(t *testing.T) {
 		t.Fatalf("expected first host to have %d active contract size, got %d", testRevision.Filesize, stats[0].ActiveContractsSize)
 	} else if stats[1].ActiveContractsSize != 0 {
 		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[1].ActiveContractsSize)
+	} else if stats[0].ProtocolVersion != rhp.ProtocolVersion502 {
+		t.Fatalf("expected protocol version %v for first host", rhp.ProtocolVersion502)
+	} else if stats[1].ProtocolVersion != (proto.ProtocolVersion{}) {
+		t.Fatalf("expected no protocol version for first host")
 	}
-
 	// set scanned height to the proof height - should exclude it
 	proofHeight := testRevision.ProofHeight
 	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
