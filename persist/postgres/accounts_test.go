@@ -841,7 +841,7 @@ func TestPruneAccount(t *testing.T) {
 				t.Fatal(err)
 			}
 			ss = append(ss, slabs.SlabSlice{
-				SlabID: ids[0],
+				ID:     ids[0],
 				Offset: 10,
 				Length: 120,
 			})

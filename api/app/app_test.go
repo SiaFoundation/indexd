@@ -357,12 +357,12 @@ func TestApplicationAPI(t *testing.T) {
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			{
-				SlabID: slab1.ID,
+				ID:     slab1.ID,
 				Offset: 0,
 				Length: 256,
 			},
 			{
-				SlabID: slab2.ID,
+				ID:     slab2.ID,
 				Offset: 0,
 				Length: 256,
 			},
@@ -443,7 +443,7 @@ func TestApplicationAPI(t *testing.T) {
 	badObj := slabs.SealedObject{
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{{
-			SlabID: slabID,
+			ID:     slabID,
 			Offset: 0,
 			Length: 256,
 		}},
@@ -672,7 +672,7 @@ func TestSharedObjects(t *testing.T) {
 	slab2ID := slab2sID[0]
 
 	expectedSharedObj := slabs.SharedObject{
-		Slabs: []slabs.PinnedSlabSlice{
+		Slabs: []slabs.SlabSlice{
 			{
 				ID:            slab1ID,
 				EncryptionKey: slab1Params.EncryptionKey,
@@ -716,12 +716,12 @@ func TestSharedObjects(t *testing.T) {
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			{
-				SlabID: slab1ID,
+				ID:     slab1ID,
 				Offset: 0,
 				Length: 256,
 			},
 			{
-				SlabID: slab2ID,
+				ID:     slab2ID,
 				Offset: 0,
 				Length: 256,
 			},

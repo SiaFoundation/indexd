@@ -46,13 +46,13 @@ func (ps *PinnedSlab) DecodeFrom(d *types.Decoder) {
 
 // EncodeTo implements types.EncoderTo.
 func (s SlabSlice) EncodeTo(e *types.Encoder) {
-	e.Write(s.SlabID[:])
+	e.Write(s.ID[:])
 	e.WriteUint64(uint64(s.Offset)<<32 | uint64(s.Length))
 }
 
 // DecodeFrom implements types.DecoderFrom.
 func (s *SlabSlice) DecodeFrom(d *types.Decoder) {
-	d.Read(s.SlabID[:])
+	d.Read(s.ID[:])
 
 	combined := d.ReadUint64()
 	s.Offset = uint32(combined >> 32)

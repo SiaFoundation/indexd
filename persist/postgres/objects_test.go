@@ -113,7 +113,7 @@ func TestObjects(t *testing.T) {
 				t.Fatal(err)
 			}
 			ss = append(ss, slabs.SlabSlice{
-				SlabID:        ids[0],
+				ID:            ids[0],
 				EncryptionKey: p.EncryptionKey,
 				MinShards:     p.MinShards,
 				Offset:        10,
@@ -274,12 +274,12 @@ func TestListObjectsRegression(t *testing.T) {
 		}
 		return []slabs.SlabSlice{
 			{
-				SlabID: slabID,
+				ID:     slabID,
 				Offset: 10,
 				Length: 100,
 			},
 			{
-				SlabID: slabID,
+				ID:     slabID,
 				Offset: 110,
 				Length: 200,
 			},
@@ -335,7 +335,7 @@ func TestSharedObjects(t *testing.T) {
 		store.addTestContract(t, hostKeys[i])
 	}
 
-	pinRandomSlab := func(t *testing.T) slabs.PinnedSlabSlice {
+	pinRandomSlab := func(t *testing.T) slabs.SlabSlice {
 		t.Helper()
 
 		s := slabs.SlabPinParams{
@@ -357,7 +357,7 @@ func TestSharedObjects(t *testing.T) {
 			t.Fatalf("expected slab ID %v, got %v", id, slabIDs[0])
 		}
 
-		so := slabs.PinnedSlabSlice{
+		so := slabs.SlabSlice{
 			ID:            slabIDs[0],
 			EncryptionKey: s.EncryptionKey,
 			MinShards:     s.MinShards,
@@ -376,7 +376,7 @@ func TestSharedObjects(t *testing.T) {
 
 	// add an object with multiple slabs
 	expectedSharedObj := slabs.SharedObject{
-		Slabs:             []slabs.PinnedSlabSlice{pinRandomSlab(t), pinRandomSlab(t), pinRandomSlab(t)},
+		Slabs:             []slabs.SlabSlice{pinRandomSlab(t), pinRandomSlab(t), pinRandomSlab(t)},
 		EncryptedMetadata: []byte("hello world"),
 	}
 	obj := slabs.SealedObject{
@@ -386,7 +386,7 @@ func TestSharedObjects(t *testing.T) {
 	}
 	for i, slab := range expectedSharedObj.Slabs {
 		obj.Slabs[i] = slabs.SlabSlice{
-			SlabID: slab.ID,
+			ID:     slab.ID,
 			Offset: slab.Offset,
 			Length: slab.Length,
 		}
@@ -467,13 +467,13 @@ func BenchmarkSaveObject(b *testing.B) {
 		}
 
 		obj.Slabs = append(obj.Slabs, slabs.SlabSlice{
-			SlabID: id,
+			ID:     id,
 			Offset: 0,
 			Length: 256,
 		})
 		for i := 0; i < 20 && i < len(objs); i++ {
 			obj.Slabs = append(obj.Slabs, slabs.SlabSlice{
-				SlabID: objs[i].Slabs[0].SlabID,
+				ID:     objs[i].Slabs[0].ID,
 				Offset: 0,
 				Length: 256,
 			})

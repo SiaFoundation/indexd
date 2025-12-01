@@ -28,7 +28,7 @@ type (
 
 	// SlabSlice represents a slice of a slab that is part of an object.
 	SlabSlice struct {
-		SlabID        SlabID         `json:"slabID"`
+		ID            SlabID         `json:"id"`
 		EncryptionKey [32]byte       `json:"encryptionKey"`
 		MinShards     uint           `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
@@ -39,19 +39,8 @@ type (
 	// SharedObject provides all the metadata necessary to retrieve and decrypt
 	// an object.
 	SharedObject struct {
-		Slabs             []PinnedSlabSlice `json:"slabs"`
-		EncryptedMetadata []byte            `json:"encryptedMetadata"`
-	}
-
-	// A PinnedSlabSlice represents a slice of a slab that is part of an object.
-	// It contains all the metadata needed to retrieve a slab.
-	PinnedSlabSlice struct {
-		ID            SlabID         `json:"id"`
-		EncryptionKey [32]byte       `json:"encryptionKey"`
-		MinShards     uint           `json:"minShards"`
-		Sectors       []PinnedSector `json:"sectors"`
-		Offset        uint32         `json:"offset"`
-		Length        uint32         `json:"length"`
+		Slabs             []SlabSlice `json:"slabs"`
+		EncryptedMetadata []byte      `json:"encryptedMetadata"`
 	}
 
 	// ObjectEvent represents an event on an object, such as it being created,

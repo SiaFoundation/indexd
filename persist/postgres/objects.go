@@ -35,9 +35,9 @@ func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error
 			return fmt.Errorf("failed to query slabs: %w", err)
 		}
 		batch := &pgx.Batch{}
-		var objectSlabs []slabs.PinnedSlabSlice
+		var objectSlabs []slabs.SlabSlice
 		for rows.Next() {
-			var slab slabs.PinnedSlabSlice
+			var slab slabs.SlabSlice
 			var slabDBID int64
 			err := rows.Scan(&slabDBID, (*sqlHash256)(&slab.ID), (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Offset, &slab.Length)
 			if err != nil {
@@ -109,7 +109,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 
 		for rows.Next() {
 			var slab slabs.SlabSlice
-			err := rows.Scan((*sqlHash256)(&slab.SlabID), &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
+			err := rows.Scan((*sqlHash256)(&slab.ID), &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
 			if err != nil {
 				return fmt.Errorf("failed to scan slab: %w", err)
 			}
@@ -128,7 +128,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 				LEFT JOIN hosts h ON h.id = s.host_id
 				WHERE slabs.digest = $1
 				ORDER BY ss.slab_index ASC
-			`, sqlHash256(slab.SlabID))
+			`, sqlHash256(slab.ID))
 			if err != nil {
 				return fmt.Errorf("failed to query slab sectors: %w", err)
 			}
@@ -232,7 +232,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 
 			for rows.Next() {
 				var slab slabs.SlabSlice
-				err := rows.Scan((*sqlHash256)(&slab.SlabID), &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
+				err := rows.Scan((*sqlHash256)(&slab.ID), &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
 				if err != nil {
 					rows.Close()
 					return fmt.Errorf("failed to scan slab: %w", err)
@@ -253,7 +253,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 					LEFT JOIN hosts h ON h.id = s.host_id
 					WHERE slabs.digest = $1
 					ORDER BY ss.slab_index ASC
-				`, sqlHash256(slab.SlabID))
+				`, sqlHash256(slab.ID))
 				if err != nil {
 					return fmt.Errorf("failed to query slab sectors: %w", err)
 				}
@@ -350,11 +350,11 @@ func (s *Store) SaveObject(account proto.Account, obj slabs.SealedObject) error 
 		args := make([]any, 0, len(obj.Slabs))
 		seen := make(map[slabs.SlabID]struct{})
 		for _, slab := range obj.Slabs {
-			if _, ok := seen[slab.SlabID]; ok {
+			if _, ok := seen[slab.ID]; ok {
 				continue
 			}
-			seen[slab.SlabID] = struct{}{}
-			args = append(args, sqlHash256(slab.SlabID))
+			seen[slab.ID] = struct{}{}
+			args = append(args, sqlHash256(slab.ID))
 		}
 
 		var count int
@@ -376,7 +376,7 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 			batch.Queue(`
 				INSERT INTO object_slabs (object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, $3, $4, $5)
 			`,
-				objectID, sqlHash256(slab.SlabID), i, slab.Offset, slab.Length)
+				objectID, sqlHash256(slab.ID), i, slab.Offset, slab.Length)
 		}
 		res := tx.SendBatch(ctx, batch)
 		if err := res.Close(); err != nil {

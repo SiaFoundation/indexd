@@ -91,7 +91,7 @@ type sectorDownload struct {
 	sector slabs.PinnedSector
 }
 
-func (s *SDK) downloadSlab(ctx context.Context, slab slabs.PinnedSlabSlice, maxInflight int, timeout time.Duration) ([][]byte, error) {
+func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInflight int, timeout time.Duration) ([][]byte, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -243,7 +243,7 @@ top:
 				return Object{}, fmt.Errorf("pinned slab %d id %s does not match expected id %s", slabIndex, slabID.String(), expectedSlabID.String())
 			}
 			obj.slabs = append(obj.slabs, slabs.SlabSlice{
-				SlabID: slabID,
+				ID:     slabID,
 				Offset: 0,
 				Length: slab.length,
 			})
@@ -290,15 +290,15 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 		offset -= slabLength
 	}
 
-	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.PinnedSlabSlice, error) {
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SlabSlice, error) {
 		if i >= len(obj.slabs) || length == 0 {
-			return slabs.PinnedSlabSlice{}, nil
+			return slabs.SlabSlice{}, nil
 		}
 
 		slab := obj.slabs[i]
-		pinned, err := s.client.Slab(ctx, s.appKey, slab.SlabID)
+		pinned, err := s.client.Slab(ctx, s.appKey, slab.ID)
 		if err != nil {
-			return slabs.PinnedSlabSlice{}, fmt.Errorf("failed to get slab %d metadata: %w", i, err)
+			return slabs.SlabSlice{}, fmt.Errorf("failed to get slab %d metadata: %w", i, err)
 		}
 		i++
 
@@ -308,8 +308,8 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 		offset = 0
 		length -= slabLength
 
-		return slabs.PinnedSlabSlice{
-			ID:            slab.SlabID,
+		return slabs.SlabSlice{
+			ID:            slab.ID,
 			EncryptionKey: pinned.EncryptionKey,
 			MinShards:     pinned.MinShards,
 			Sectors:       pinned.Sectors,
@@ -359,9 +359,9 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 		offset -= slabLength
 	}
 
-	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.PinnedSlabSlice, error) {
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SlabSlice, error) {
 		if i >= len(obj.Slabs) || length == 0 {
-			return slabs.PinnedSlabSlice{}, nil
+			return slabs.SlabSlice{}, nil
 		}
 		slab := obj.Slabs[i]
 		i++
@@ -372,7 +372,7 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 		offset = 0
 		length -= slabLength
 
-		return slabs.PinnedSlabSlice{
+		return slabs.SlabSlice{
 			ID:            slab.ID,
 			EncryptionKey: slab.EncryptionKey,
 			MinShards:     slab.MinShards,
@@ -388,7 +388,7 @@ func (s *SDK) Close() error {
 	return s.hosts.Close()
 }
 
-type slabIterFn func() (slabs.PinnedSlabSlice, error)
+type slabIterFn func() (slabs.SlabSlice, error)
 
 func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, next slabIterFn) error {
 	type work struct {
@@ -522,7 +522,7 @@ func stripedJoin(dst io.Writer, dataShards [][]byte, skip, writeLen int) error {
 
 // sectorRegion returns the offset and length of the sector region that must be
 // downloaded in order to recover the data referenced by the slice.
-func sectorRegion(ss slabs.PinnedSlabSlice) (offset, length uint64) {
+func sectorRegion(ss slabs.SlabSlice) (offset, length uint64) {
 	minChunkSize := proto4.LeafSize * uint32(ss.MinShards)
 	start := (ss.Offset / minChunkSize) * proto4.LeafSize
 	end := ((ss.Offset + ss.Length) / minChunkSize) * proto4.LeafSize

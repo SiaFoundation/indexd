@@ -13,8 +13,8 @@ func TestSealedObjectRoundtrip(t *testing.T) {
 	appKey := types.GeneratePrivateKey()
 
 	ss := []slabs.SlabSlice{
-		{SlabID: slabs.SlabID(frand.Entropy256()), Offset: 10, Length: 5000},
-		{SlabID: slabs.SlabID(frand.Entropy256()), Offset: 32, Length: 4096},
+		{ID: slabs.SlabID(frand.Entropy256()), Offset: 10, Length: 5000},
+		{ID: slabs.SlabID(frand.Entropy256()), Offset: 32, Length: 4096},
 	}
 	masterKey := frand.Bytes(32)
 	obj := Object{

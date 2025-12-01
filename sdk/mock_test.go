@@ -249,11 +249,11 @@ func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (sl
 		return slabs.SharedObject{}, nil, errors.New("object not found")
 	}
 
-	var objSlabs []slabs.PinnedSlabSlice
+	var objSlabs []slabs.SlabSlice
 	for _, slab := range obj.Slabs {
-		pinnedSlab := mc.pinned[slab.SlabID]
-		objSlabs = append(objSlabs, slabs.PinnedSlabSlice{
-			ID:            slab.SlabID,
+		pinnedSlab := mc.pinned[slab.ID]
+		objSlabs = append(objSlabs, slabs.SlabSlice{
+			ID:            slab.ID,
 			EncryptionKey: pinnedSlab.EncryptionKey,
 			MinShards:     pinnedSlab.MinShards,
 			Sectors:       pinnedSlab.Sectors,

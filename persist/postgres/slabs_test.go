@@ -138,8 +138,8 @@ func TestMarkSlabRepaired(t *testing.T) {
 		var consecutiveFailedRepairs int
 		var nextRepairAttempt time.Time
 		if err := store.pool.QueryRow(t.Context(), `
-			SELECT consecutive_failed_repairs, next_repair_attempt 
-			FROM slabs 
+			SELECT consecutive_failed_repairs, next_repair_attempt
+			FROM slabs
 			WHERE digest = $1`, sqlHash256(slabIDs[0])).Scan(&consecutiveFailedRepairs, &nextRepairAttempt); err != nil {
 			t.Fatal(err)
 		} else if consecutiveFailedRepairs != expectedRepairs {
@@ -316,12 +316,12 @@ func TestSlabPruning(t *testing.T) {
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			{
-				SlabID: slab1ID,
+				ID:     slab1ID,
 				Offset: 10,
 				Length: 100,
 			},
 			{
-				SlabID: slab1ID,
+				ID:     slab1ID,
 				Offset: 110,
 				Length: 200,
 			},
@@ -344,12 +344,12 @@ func TestSlabPruning(t *testing.T) {
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			{
-				SlabID: slab2ID,
+				ID:     slab2ID,
 				Offset: 10,
 				Length: 100,
 			},
 			{
-				SlabID: slab2ID,
+				ID:     slab2ID,
 				Offset: 110,
 				Length: 200,
 			},
