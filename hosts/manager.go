@@ -79,6 +79,7 @@ type (
 		LostSectors         int64                  `json:"lostSectors"`
 		TotalUsage          types.Currency         `json:"totalUsage"`
 		ProtocolVersion     proto4.ProtocolVersion `json:"protocolVersion"`
+		Release             string                 `json:"release"`
 		Scans               int64                  `json:"scans"`
 		ScansFailed         int64                  `json:"scansFailed"`
 		Blocked             bool                   `json:"blocked"`

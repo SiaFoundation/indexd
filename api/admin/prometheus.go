@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"strconv"
+	"strings"
 	"time"
 
 	"go.sia.tech/indexd/internal/prometheus"
@@ -77,6 +79,14 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 		"public_key": h.PublicKey.String(),
 	}
 
+	// "hostd v2.4.1" -> "2.4.1" -> "241" -> 241
+	release := strings.ReplaceAll(strings.TrimPrefix(h.Release, "hostd v"), ".", "")
+	releaseNum, err := strconv.Atoi(release)
+	if err != nil {
+		// -1 is release number for hosts whose release strings we cannot parse
+		releaseNum = -1
+	}
+
 	metrics := []prometheus.Metric{
 		{
 			Name:   "indexd_host_account_usage",
@@ -92,6 +102,11 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 			Name:   "indexd_host_protocol_version",
 			Labels: labels,
 			Value:  float64(100*int(h.ProtocolVersion[0]) + 10*int(h.ProtocolVersion[1]) + 1*int(h.ProtocolVersion[2])),
+		},
+		{
+			Name:   "indexd_host_release",
+			Labels: labels,
+			Value:  float64(releaseNum),
 		},
 		{
 			Name:   "indexd_host_scans",
