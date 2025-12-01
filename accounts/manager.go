@@ -327,7 +327,7 @@ func (m *AccountManager) performPruneAccounts() error {
 		if err := m.store.PruneAccounts(objectBatchSize); errors.Is(err, ErrNotFound) {
 			break
 		} else if err != nil {
-			return fmt.Errorf("failed to prune account: %w", err)
+			return fmt.Errorf("failed to prune accounts: %w", err)
 		}
 	}
 
