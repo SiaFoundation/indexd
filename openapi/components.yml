@@ -326,6 +326,17 @@ components:
       properties:
         slabID:
           $ref: "#/components/schemas/SlabID"
+        encryptionKey:
+          $ref: "#/components/schemas/EncryptionKey"
+        minShards:
+          type: integer
+          format: uint64
+          description: Minimum number of shards required to reconstruct the slab
+        sectors:
+          type: array
+          description: The list of pinned sectors composing the slab
+          items:
+            $ref: "#/components/schemas/PinnedSector"
         offset:
           type: integer
           format: uint32
