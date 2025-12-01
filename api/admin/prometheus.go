@@ -101,7 +101,7 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 		{
 			Name:   "indexd_host_protocol_version",
 			Labels: labels,
-			Value:  float64(100*int(h.ProtocolVersion[0]) + 10*int(h.ProtocolVersion[1]) + 1*int(h.ProtocolVersion[2])),
+			Value:  float64(10000*int(h.ProtocolVersion[0]) + 100*int(h.ProtocolVersion[1]) + int(h.ProtocolVersion[2])),
 		},
 		{
 			Name:   "indexd_host_release",
