@@ -677,12 +677,12 @@ func TestSharedObjects(t *testing.T) {
 				ID:            slab1ID,
 				EncryptionKey: slab1Params.EncryptionKey,
 				MinShards:     slab1Params.MinShards,
-				Sectors: func() []slabs.PinnedSector {
-					so := make([]slabs.PinnedSector, len(slab1Params.Sectors))
+				Sectors: func() []slabs.TrackedSector {
+					so := make([]slabs.TrackedSector, len(slab1Params.Sectors))
 					for i := range slab1Params.Sectors {
-						so[i] = slabs.PinnedSector{
+						so[i] = slabs.TrackedSector{
 							Root:    slab1Params.Sectors[i].Root,
-							HostKey: slab1Params.Sectors[i].HostKey,
+							HostKey: &slab1Params.Sectors[i].HostKey,
 						}
 					}
 					return so
@@ -694,12 +694,12 @@ func TestSharedObjects(t *testing.T) {
 				ID:            slab2ID,
 				EncryptionKey: slab2Params.EncryptionKey,
 				MinShards:     slab2Params.MinShards,
-				Sectors: func() []slabs.PinnedSector {
-					so := make([]slabs.PinnedSector, len(slab2Params.Sectors))
+				Sectors: func() []slabs.TrackedSector {
+					so := make([]slabs.TrackedSector, len(slab2Params.Sectors))
 					for i := range slab2Params.Sectors {
-						so[i] = slabs.PinnedSector{
+						so[i] = slabs.TrackedSector{
 							Root:    slab2Params.Sectors[i].Root,
-							HostKey: slab2Params.Sectors[i].HostKey,
+							HostKey: &slab2Params.Sectors[i].HostKey,
 						}
 					}
 					return so

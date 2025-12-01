@@ -88,7 +88,7 @@ var (
 
 type sectorDownload struct {
 	index  int
-	sector slabs.PinnedSector
+	sector slabs.TrackedSector
 }
 
 func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInflight int, timeout time.Duration) ([][]byte, error) {
@@ -98,11 +98,17 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 	slabSectors := make(map[types.PublicKey]sectorDownload)
 	slabHosts := make([]types.PublicKey, 0, len(slab.Sectors))
 	for i, sector := range slab.Sectors {
-		slabSectors[sector.HostKey] = sectorDownload{
+		if sector.HostKey == nil {
+			continue // ignore sectors without host
+		}
+		slabSectors[*sector.HostKey] = sectorDownload{
 			index:  i,
 			sector: sector,
 		}
-		slabHosts = append(slabHosts, sector.HostKey)
+		slabHosts = append(slabHosts, *sector.HostKey)
+	}
+	if len(slabHosts) < int(slab.MinShards) {
+		return nil, fmt.Errorf("slab has %d sectors with hosts, minimum required: %d: %w", len(slabHosts), slab.MinShards, ErrNotEnoughShards)
 	}
 
 	// calculate offset and length that's required from each sector to recover
@@ -129,13 +135,13 @@ top:
 		if !ok {
 			panic("missing slab for host") // developer error
 		}
-		go func(ctx context.Context, sector slabs.PinnedSector, i int) {
+		go func(ctx context.Context, sector slabs.TrackedSector, i int) {
 			defer func() {
 				<-sema
 				wg.Done()
 			}()
 			buf := bytes.NewBuffer(make([]byte, 0, length))
-			err := downloadShard(ctx, s.hosts, s.appKey, sector.HostKey, buf, sector.Root, offset, length, timeout)
+			err := downloadShard(ctx, s.hosts, s.appKey, *sector.HostKey, buf, sector.Root, offset, length, timeout)
 			if err != nil {
 				return
 			}
@@ -312,7 +318,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 			ID:            slab.ID,
 			EncryptionKey: pinned.EncryptionKey,
 			MinShards:     pinned.MinShards,
-			Sectors:       pinned.Sectors,
+			Sectors:       slabs.PinnedSectorsToTracked(pinned.Sectors),
 			Offset:        slabOffset,
 			Length:        uint32(slabLength),
 		}, nil

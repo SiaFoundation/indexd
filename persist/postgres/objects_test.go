@@ -10,6 +10,7 @@ import (
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
+	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
@@ -27,6 +28,105 @@ func (s *Store) pinRandomObject(t testing.TB, acc proto.Account, ss []slabs.Slab
 		t.Fatal(err)
 	}
 	return obj
+}
+
+func TestObject(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	acc := proto4.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	fcid := store.addTestContract(t, hk)
+
+	params := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{
+				Root:    frand.Entropy256(),
+				HostKey: hk,
+			},
+			{
+				Root:    frand.Entropy256(),
+				HostKey: hk,
+			},
+			{
+				Root:    frand.Entropy256(),
+				HostKey: hk,
+			},
+		},
+	}
+
+	slabIDs, err := store.PinSlabs(acc, time.Time{}, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// pin sector 1, keep sector 2 the way it is and mark sector 3 as lost
+	if err := store.PinSectors(fcid, []types.Hash256{params.Sectors[0].Root}); err != nil {
+		t.Fatal(err)
+	} else if err := store.MarkSectorsLost(hk, []types.Hash256{params.Sectors[2].Root}); err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC().Round(time.Second)
+	expected := slabs.SealedObject{
+		EncryptedMasterKey: frand.Bytes(72),
+		EncryptedMetadata:  frand.Bytes(50),
+		Signature:          types.Signature(frand.Bytes(64)),
+		CreatedAt:          now,
+		UpdatedAt:          now,
+		Slabs: []slabs.SlabSlice{
+			{
+				ID:            slabIDs[0],
+				EncryptionKey: params.EncryptionKey,
+				MinShards:     params.MinShards,
+				Offset:        0,
+				Length:        100,
+				Sectors:       slabs.PinnedSectorsToTracked(params.Sectors),
+			},
+		},
+	}
+	err = store.SaveObject(acc, expected)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expected.CreatedAt = time.Time{}
+	expected.UpdatedAt = time.Time{}
+	expected.Slabs[0].Sectors[2].HostKey = nil
+
+	got, err := store.Object(acc, expected.ID())
+	if err != nil {
+		t.Fatal(err)
+	} else if got.CreatedAt.IsZero() || got.UpdatedAt.IsZero() {
+		t.Fatalf("expected non-zero timestamps, got %v and %v", got.CreatedAt, got.UpdatedAt)
+	}
+
+	got.CreatedAt = time.Time{}
+	got.UpdatedAt = time.Time{}
+	if !reflect.DeepEqual(expected, got) {
+		t.Fatal("objects not equal", expected, got)
+	}
+
+	expectedShared := slabs.SharedObject{
+		EncryptedMetadata: expected.EncryptedMetadata,
+		Slabs: []slabs.SlabSlice{
+			{
+				ID:            slabIDs[0],
+				EncryptionKey: params.EncryptionKey,
+				MinShards:     params.MinShards,
+				Offset:        0,
+				Length:        100,
+				Sectors:       slabs.PinnedSectorsToTracked(params.Sectors),
+			},
+		},
+	}
+	gotShared, err := store.SharedObject(expected.ID())
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(expectedShared, gotShared) {
+		t.Fatal("shared objects not equal", expectedShared, gotShared)
+	}
 }
 
 func TestObjects(t *testing.T) {
@@ -118,7 +218,7 @@ func TestObjects(t *testing.T) {
 				MinShards:     p.MinShards,
 				Offset:        10,
 				Length:        120,
-				Sectors:       p.Sectors,
+				Sectors:       slabs.PinnedSectorsToTracked(p.Sectors),
 			})
 		}
 		return ss
@@ -361,14 +461,14 @@ func TestSharedObjects(t *testing.T) {
 			ID:            slabIDs[0],
 			EncryptionKey: s.EncryptionKey,
 			MinShards:     s.MinShards,
-			Sectors:       make([]slabs.PinnedSector, len(s.Sectors)),
+			Sectors:       make([]slabs.TrackedSector, len(s.Sectors)),
 			Offset:        uint32(frand.Uint64n(math.MaxInt32)),
 			Length:        uint32(frand.Uint64n(math.MaxInt32)),
 		}
 		for i := range s.Sectors {
-			so.Sectors[i] = slabs.PinnedSector{
+			so.Sectors[i] = slabs.TrackedSector{
 				Root:    s.Sectors[i].Root,
-				HostKey: s.Sectors[i].HostKey,
+				HostKey: &s.Sectors[i].HostKey,
 			}
 		}
 		return so
@@ -411,7 +511,7 @@ func TestSharedObjects(t *testing.T) {
 				for i := range slab.Sectors {
 					sps[i] = slabs.PinnedSector{
 						Root:    slab.Sectors[i].Root,
-						HostKey: slab.Sectors[i].HostKey,
+						HostKey: *slab.Sectors[i].HostKey,
 					}
 				}
 				return sps

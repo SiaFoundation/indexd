@@ -72,6 +72,12 @@ type (
 		HostKey types.PublicKey `json:"hostKey"`
 	}
 
+	// TrackedSector is a sector that is being tracked by the indexer.
+	TrackedSector struct {
+		Root    types.Hash256    `json:"root"`
+		HostKey *types.PublicKey `json:"hostKey"`
+	}
+
 	// SlabPinParams is the input to PinSlabs
 	SlabPinParams struct {
 		EncryptionKey [32]byte       `json:"encryptionKey"`
@@ -87,6 +93,24 @@ type (
 		Sectors       []PinnedSector `json:"sectors"`
 	}
 )
+
+// ToTracked converts a PinnedSector to a TrackedSector.
+func (s PinnedSector) ToTracked() TrackedSector {
+	return TrackedSector{
+		Root:    s.Root,
+		HostKey: &s.HostKey,
+	}
+}
+
+// PinnedSectorsToTracked converts a slice of PinnedSectors to a slice of
+// TrackedSectors.
+func PinnedSectorsToTracked(sectors []PinnedSector) []TrackedSector {
+	var out []TrackedSector
+	for _, s := range sectors {
+		out = append(out, s.ToTracked())
+	}
+	return out
+}
 
 // String implements the Stringer interface for SlabID.
 func (s SlabID) String() string {
