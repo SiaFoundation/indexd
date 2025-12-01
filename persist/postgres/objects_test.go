@@ -92,12 +92,12 @@ func TestObjects(t *testing.T) {
 			s[i] = slabs.SlabPinParams{
 				EncryptionKey: frand.Entropy256(),
 				MinShards:     1,
-				Sectors: []slabs.PinnedSector{
-					{
-						Root:    frand.Entropy256(),
-						HostKey: hk,
-					},
-				},
+			}
+			for range 10 {
+				s[i].Sectors = append(s[i].Sectors, slabs.PinnedSector{
+					Root:    types.Hash256(frand.Entropy256()),
+					HostKey: hk,
+				})
 			}
 		}
 		return s
@@ -113,9 +113,12 @@ func TestObjects(t *testing.T) {
 				t.Fatal(err)
 			}
 			ss = append(ss, slabs.SlabSlice{
-				SlabID: ids[0],
-				Offset: 10,
-				Length: 120,
+				SlabID:        ids[0],
+				EncryptionKey: p.EncryptionKey,
+				MinShards:     p.MinShards,
+				Offset:        10,
+				Length:        120,
+				Sectors:       p.Sectors,
 			})
 		}
 		return ss

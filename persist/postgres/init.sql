@@ -316,7 +316,7 @@ CREATE UNIQUE INDEX objects_account_id_object_key_idx ON objects(account_id, obj
 CREATE TABLE object_slabs (
     object_id BIGINT REFERENCES objects(id) ON DELETE CASCADE,
     slab_digest BYTEA REFERENCES slabs(digest) ON DELETE CASCADE,
-    slab_index INTEGER NOT NULL, -- index within corresponding slab to retrieve slabs in right order
+    slab_index INTEGER NOT NULL, -- index within corresponding object to retrieve slabs in right order
     slab_offset INTEGER NOT NULL, -- offset within slab
     slab_length INTEGER NOT NULL, -- length of object data within slab
     PRIMARY KEY (object_id, slab_digest, slab_index)

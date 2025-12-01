@@ -28,9 +28,12 @@ type (
 
 	// SlabSlice represents a slice of a slab that is part of an object.
 	SlabSlice struct {
-		SlabID SlabID `json:"slabID"`
-		Offset uint32 `json:"offset"`
-		Length uint32 `json:"length"`
+		SlabID        SlabID         `json:"slabID"`
+		EncryptionKey [32]byte       `json:"encryptionKey"`
+		MinShards     uint           `json:"minShards"`
+		Sectors       []PinnedSector `json:"sectors"`
+		Offset        uint32         `json:"offset"`
+		Length        uint32         `json:"length"`
 	}
 
 	// SharedObject provides all the metadata necessary to retrieve and decrypt

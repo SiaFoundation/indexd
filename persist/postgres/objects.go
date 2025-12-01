@@ -96,8 +96,9 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT slab_digest, slab_offset, slab_length
+			SELECT slab_digest, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
 			FROM object_slabs
+			JOIN slabs ON slabs.digest = object_slabs.slab_digest
 			WHERE object_id = $1
 			ORDER BY slab_index ASC
 		`, objID)
@@ -108,13 +109,50 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 
 		for rows.Next() {
 			var slab slabs.SlabSlice
-			err := rows.Scan((*sqlHash256)(&slab.SlabID), &slab.Offset, &slab.Length)
+			err := rows.Scan((*sqlHash256)(&slab.SlabID), &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
 			if err != nil {
 				return fmt.Errorf("failed to scan slab: %w", err)
 			}
 			obj.Slabs = append(obj.Slabs, slab)
 		}
-		return rows.Err()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		for i, slab := range obj.Slabs {
+			rows, err := tx.Query(ctx, `
+				SELECT s.sector_root, h.public_key
+				FROM slabs
+				JOIN slab_sectors ss ON ss.slab_id = slabs.id
+				JOIN sectors s ON s.id = ss.sector_id
+				LEFT JOIN hosts h ON h.id = s.host_id
+				WHERE slabs.digest = $1
+				ORDER BY ss.slab_index ASC
+			`, sqlHash256(slab.SlabID))
+			if err != nil {
+				return fmt.Errorf("failed to query slab sectors: %w", err)
+			}
+
+			for rows.Next() {
+				var sector slabs.PinnedSector
+				var hostKey sql.Null[sqlPublicKey]
+				err = rows.Scan((*sqlHash256)(&sector.Root), &hostKey)
+				if err != nil {
+					return fmt.Errorf("failed to scan slab sector: %w", err)
+				}
+				if hostKey.Valid {
+					sector.HostKey = types.PublicKey(hostKey.V)
+				}
+				obj.Slabs[i].Sectors = append(obj.Slabs[i].Sectors, sector)
+			}
+
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return err
+			}
+			rows.Close()
+		}
+		return nil
 	})
 	return obj, err
 }
@@ -182,24 +220,61 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			}
 
 			rows, err = tx.Query(ctx, `
-				SELECT slab_digest, slab_offset, slab_length
+				SELECT slab_digest, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
 				FROM object_slabs
+				JOIN slabs ON slabs.digest = object_slabs.slab_digest
 				WHERE object_id = $1
 				ORDER BY slab_index ASC
 			`, objectIDs[events[i].Key])
 			if err != nil {
 				return fmt.Errorf("failed to query slabs: %w", err)
 			}
+
 			for rows.Next() {
 				var slab slabs.SlabSlice
-				err := rows.Scan((*sqlHash256)(&slab.SlabID), &slab.Offset, &slab.Length)
+				err := rows.Scan((*sqlHash256)(&slab.SlabID), &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
 				if err != nil {
+					rows.Close()
 					return fmt.Errorf("failed to scan slab: %w", err)
 				}
 				events[i].Object.Slabs = append(events[i].Object.Slabs, slab)
 			}
 			if err := rows.Err(); err != nil {
 				return err
+			}
+			rows.Close()
+
+			for j, slab := range events[i].Object.Slabs {
+				rows, err := tx.Query(ctx, `
+					SELECT s.sector_root, h.public_key
+					FROM slabs
+					JOIN slab_sectors ss ON ss.slab_id = slabs.id
+					JOIN sectors s ON s.id = ss.sector_id
+					LEFT JOIN hosts h ON h.id = s.host_id
+					WHERE slabs.digest = $1
+					ORDER BY ss.slab_index ASC
+				`, sqlHash256(slab.SlabID))
+				if err != nil {
+					return fmt.Errorf("failed to query slab sectors: %w", err)
+				}
+
+				for rows.Next() {
+					var sector slabs.PinnedSector
+					var hostKey sql.Null[sqlPublicKey]
+					err = rows.Scan((*sqlHash256)(&sector.Root), &hostKey)
+					if err != nil {
+						rows.Close()
+						return fmt.Errorf("failed to scan slab sector: %w", err)
+					}
+					if hostKey.Valid {
+						sector.HostKey = types.PublicKey(hostKey.V)
+					}
+					events[i].Object.Slabs[j].Sectors = append(events[i].Object.Slabs[j].Sectors, sector)
+				}
+				rows.Close()
+				if err := rows.Err(); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
