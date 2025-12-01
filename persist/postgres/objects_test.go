@@ -9,28 +9,32 @@ import (
 	"testing"
 	"time"
 
-	proto4 "go.sia.tech/core/rhp/v4"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
 
-func (s *Store) testRandomObject(ss []slabs.SlabSlice) slabs.SealedObject {
-	return slabs.SealedObject{
+func (s *Store) pinRandomObject(t testing.TB, acc proto.Account, ss []slabs.SlabSlice) slabs.SealedObject {
+	obj := slabs.SealedObject{
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs:              ss,
 		EncryptedMetadata:  []byte("hello world"),
 		Signature:          (types.Signature)(frand.Bytes(64)),
 	}
+	if err := s.SaveObject(acc, obj); err != nil {
+		t.Fatal(err)
+	}
+	return obj
 }
 
 func TestObjects(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
 	// create 2 accounts
-	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
-	for _, acc := range []proto4.Account{acc1, acc2} {
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	for _, acc := range []proto.Account{acc1, acc2} {
 		store.addTestAccount(t, types.PublicKey(acc))
 	}
 
@@ -45,14 +49,14 @@ func TestObjects(t *testing.T) {
 			HostKey: hk,
 		}},
 	}
-	for _, acc := range []proto4.Account{acc1, acc2} {
+	for _, acc := range []proto.Account{acc1, acc2} {
 		_, err := store.PinSlabs(acc, time.Time{}, slab)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	assertObjects := func(acc proto4.Account, expectedDeleted, expectedExist int) []slabs.ObjectEvent {
+	assertObjects := func(acc proto.Account, expectedDeleted, expectedExist int) []slabs.ObjectEvent {
 		t.Helper()
 		objects, err := store.ListObjects(acc, slabs.Cursor{}, 10)
 		if err != nil {
@@ -99,7 +103,7 @@ func TestObjects(t *testing.T) {
 		return s
 	}
 
-	pinSlabs := func(acc proto4.Account, params []slabs.SlabPinParams) []slabs.SlabSlice {
+	pinSlabs := func(acc proto.Account, params []slabs.SlabPinParams) []slabs.SlabSlice {
 		t.Helper()
 
 		var ss []slabs.SlabSlice
@@ -120,11 +124,8 @@ func TestObjects(t *testing.T) {
 	obj1Slabs := randomSlabs(3)
 	pinSlabs(acc1, obj1Slabs)
 	pinSlabs(acc2, obj1Slabs)
-	obj1Acc1 := store.testRandomObject(pinSlabs(acc1, obj1Slabs))
+	obj1Acc1 := store.pinRandomObject(t, acc1, pinSlabs(acc1, obj1Slabs))
 
-	if err := store.SaveObject(acc1, obj1Acc1); err != nil {
-		t.Fatal(err)
-	}
 	// pin the same object for acc2 with different master key and sig to satisfy unique constraint
 	obj1Acc2 := obj1Acc1
 	obj1Acc2.EncryptedMasterKey = frand.Bytes(72)
@@ -173,10 +174,7 @@ func TestObjects(t *testing.T) {
 	assertObj(obj1Acc2, objs[0])
 
 	// add another object to acc2
-	obj2 := store.testRandomObject(pinSlabs(acc2, randomSlabs(2)))
-	if err := store.SaveObject(acc2, obj2); err != nil {
-		t.Fatal(err)
-	}
+	obj2 := store.pinRandomObject(t, acc2, pinSlabs(acc2, randomSlabs(2)))
 
 	// listing the objects should return obj1 first since it was updated first
 	assertObjects(acc1, 1, 0)
@@ -238,10 +236,7 @@ func TestObjects(t *testing.T) {
 	}
 
 	// assert listing objects for accounts that include a deleted object works
-	obj2Acc1 := store.testRandomObject(pinSlabs(acc1, randomSlabs(3)))
-	if err := store.SaveObject(acc1, obj2Acc1); err != nil {
-		t.Fatal(err)
-	}
+	store.pinRandomObject(t, acc1, pinSlabs(acc1, randomSlabs(3)))
 	assertObjects(acc1, 1, 1)
 }
 
@@ -251,7 +246,7 @@ func TestListObjectsRegression(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
 	// create account
-	acc := proto4.Account{1}
+	acc := proto.Account{1}
 	store.addTestAccount(t, types.PublicKey(acc))
 
 	hk := store.addTestHost(t)
@@ -291,11 +286,8 @@ func TestListObjectsRegression(t *testing.T) {
 	// add multiple objects
 	var objectIDs []types.Hash256
 	for range 3 {
-		obj := store.testRandomObject(randomSlabs())
+		obj := store.pinRandomObject(t, acc, randomSlabs())
 		objectIDs = append(objectIDs, obj.ID())
-		if err := store.SaveObject(acc, obj); err != nil {
-			t.Fatal(err)
-		}
 	}
 	// list objects returns objects in updated_at ASC then lexicographical order of ID
 	sort.Slice(objectIDs, func(i, j int) bool {
@@ -329,8 +321,8 @@ func TestSharedObjects(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
 	// create 2 accounts
-	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
-	for _, acc := range []proto4.Account{acc1, acc2} {
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	for _, acc := range []proto.Account{acc1, acc2} {
 		store.addTestAccount(t, types.PublicKey(acc))
 	}
 
@@ -433,8 +425,8 @@ func BenchmarkSaveObject(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
 	// create 2 accounts
-	acc1, acc2 := proto4.Account{1}, proto4.Account{2}
-	for _, acc := range []proto4.Account{acc1, acc2} {
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	for _, acc := range []proto.Account{acc1, acc2} {
 		store.addTestAccount(b, types.PublicKey(acc))
 	}
 

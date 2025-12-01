@@ -849,10 +849,7 @@ func TestPruneAccount(t *testing.T) {
 	obj1Slabs := randomSlabs(3)
 	pinSlabs(acc1, obj1Slabs)
 	pinSlabs(acc2, obj1Slabs)
-	obj1Acc1 := store.testRandomObject(pinSlabs(acc1, obj1Slabs))
-	if err := store.SaveObject(acc1, obj1Acc1); err != nil {
-		t.Fatal(err)
-	}
+	obj1Acc1 := store.pinRandomObject(t, acc1, pinSlabs(acc1, obj1Slabs))
 
 	obj1Acc2 := obj1Acc1
 	obj1Acc2.EncryptedMasterKey = frand.Bytes(72)
@@ -864,10 +861,7 @@ func TestPruneAccount(t *testing.T) {
 	obj2Slabs := randomSlabs(3)
 	pinSlabs(acc1, obj2Slabs)
 	pinSlabs(acc2, obj2Slabs)
-	obj2Acc1 := store.testRandomObject(pinSlabs(acc1, obj2Slabs))
-	if err := store.SaveObject(acc1, obj2Acc1); err != nil {
-		t.Fatal(err)
-	}
+	obj2Acc1 := store.pinRandomObject(t, acc1, pinSlabs(acc1, obj2Slabs))
 
 	obj2Acc2 := obj2Acc1
 	obj2Acc2.EncryptedMasterKey = frand.Bytes(72)
