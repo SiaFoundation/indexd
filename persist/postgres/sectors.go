@@ -385,38 +385,12 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 	return digests, err
 }
 
-func (s *Store) unpinSlabs(ctx context.Context, tx *txn, accountID int64, slabIDs []slabs.SlabID) error {
-	var args []sqlHash256
-	for _, slabID := range slabIDs {
-		args = append(args, sqlHash256(slabID))
-	}
-
+func (s *Store) unpinSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64) error {
 	// delete the association between the account and the slab
-	rows, err := tx.Query(ctx, `DELETE FROM account_slabs a
-USING slabs s
-WHERE a.account_id = $1
-  AND a.slab_id = s.id
-  AND s.digest = ANY($2)
-RETURNING a.slab_id;`, accountID, args)
+	_, err := tx.Exec(ctx, `DELETE FROM account_slabs a
+WHERE a.account_id = $1 AND a.slab_id = ANY($2);`, accountID, sIDs)
 	if err != nil {
-		return fmt.Errorf("failed to unpin slab: %w", err)
-	}
-	defer rows.Close()
-
-	var sIDs []int64
-	for rows.Next() {
-		var sID int64
-		if err := rows.Scan(&sID); err != nil {
-			return fmt.Errorf("failed to scan slab ID: %w", err)
-		}
-
-		sIDs = append(sIDs, sID)
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("failed to get slab IDs: %w", err)
-	}
-	if len(sIDs) == 0 {
-		return nil
+		return fmt.Errorf("failed to delete account slabs: %w", err)
 	}
 
 	// update the account's pinned data
@@ -442,7 +416,7 @@ RETURNING connect_key_id`, delta, accountID).Scan(&connectKeyID)
 	}
 
 	// ignore the slabs that are pinned by another account
-	rows, err = tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE slab_id = ANY($1)`, sIDs)
+	rows, err := tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE slab_id = ANY($1)`, sIDs)
 	if err != nil {
 		return fmt.Errorf("failed to check if slab was pinned: %w", err)
 	}
@@ -500,20 +474,20 @@ RETURNING connect_key_id`, delta, accountID).Scan(&connectKeyID)
 // sectors of the slab will also be removed in that case.
 func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, err := accountID(ctx, tx, account)
+		id, _, err := accountID(ctx, tx, account)
 		if err != nil {
 			return fmt.Errorf("failed to get account ID: %w", err)
 		}
 
-		var exists bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM account_slabs WHERE account_id = $1 and slab_id = (SELECT id FROM slabs WHERE digest = $2))`, id, sqlHash256(slabID)).Scan(&exists)
-		if err != nil {
-			return fmt.Errorf("failed to check if slab exists: %w", err)
-		} else if !exists {
+		var sID int64
+		err = tx.QueryRow(ctx, `SELECT slab_id FROM account_slabs WHERE account_id = $1 and slab_id = (SELECT id FROM slabs WHERE digest = $2)`, id, sqlHash256(slabID)).Scan(&sID)
+		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrSlabNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to check if slab exists: %w", err)
 		}
 
-		if err := s.unpinSlabs(ctx, tx, id, []slabs.SlabID{slabID}); err != nil {
+		if err := s.unpinSlabs(ctx, tx, id, []int64{sID}); err != nil {
 			return fmt.Errorf("failed to unpin slab: %w", err)
 		}
 		return nil

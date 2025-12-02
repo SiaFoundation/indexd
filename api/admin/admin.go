@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"go.sia.tech/core/consensus"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
@@ -92,7 +93,7 @@ type (
 	Accounts interface {
 		Account(ctx context.Context, ak types.PublicKey) (accounts.Account, error)
 		Accounts(ctx context.Context, offset, limit int, opts ...accounts.QueryAccountsOpt) ([]accounts.Account, error)
-		DeleteAccount(ctx context.Context, ak types.PublicKey) error
+		DeleteAccount(ctx context.Context, acc proto.Account) error
 
 		AddAppConnectKey(context.Context, accounts.UpdateAppConnectKey) (accounts.ConnectKey, error)
 		UpdateAppConnectKey(context.Context, accounts.UpdateAppConnectKey) (accounts.ConnectKey, error)
@@ -442,7 +443,7 @@ func (a *admin) handleGETAccounts(jc jape.Context) {
 }
 
 func (a *admin) handleDELETEAccount(jc jape.Context) {
-	var ak types.PublicKey
+	var ak proto.Account
 	if jc.DecodeParam("accountkey", &ak) != nil {
 		return
 	}

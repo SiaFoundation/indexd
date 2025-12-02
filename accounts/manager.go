@@ -2,6 +2,7 @@ package accounts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -9,6 +10,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -66,11 +68,12 @@ type (
 		AppConnectKey(key string) (ConnectKey, error)
 		AppConnectKeys(offset, limit int) ([]ConnectKey, error)
 
+		PruneAccounts(limit int) error
 		ActiveAccounts(threshold time.Time) (uint64, error)
 		Account(types.PublicKey) (Account, error)
 		Accounts(offset, limit int, opts ...QueryAccountsOpt) ([]Account, error)
 		HasAccount(types.PublicKey) (bool, error)
-		DeleteAccount(ak types.PublicKey) error
+		DeleteAccount(acc proto.Account) error
 	}
 
 	// AccountFunder defines an interface to fund accounts.
@@ -80,9 +83,13 @@ type (
 
 	// AccountManager manages accounts.
 	AccountManager struct {
+		pruneAccountsInterval time.Duration
+
 		store  Store
 		funder AccountFunder
-		log    *zap.Logger
+
+		tg  *threadgroup.ThreadGroup
+		log *zap.Logger
 
 		serviceAccountsMu sync.Mutex
 		serviceAccounts   map[proto.Account]struct{}
@@ -99,8 +106,16 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
+// WithPruneAccountsInterval sets the interval for pruning accounts.
+func WithPruneAccountsInterval(interval time.Duration) Option {
+	return func(m *AccountManager) {
+		m.pruneAccountsInterval = interval
+	}
+}
+
 // Close closes the AccountManager.
 func (m *AccountManager) Close() error {
+	m.tg.Stop()
 	return nil
 }
 
@@ -190,9 +205,11 @@ func (m *AccountManager) Accounts(ctx context.Context, offset, limit int, opts .
 	return m.store.Accounts(offset, limit, opts...)
 }
 
-// DeleteAccount deletes the account for the given public key.
-func (m *AccountManager) DeleteAccount(ctx context.Context, ak types.PublicKey) error {
-	return m.store.DeleteAccount(ak)
+// DeleteAccount soft deletes the account with the given public key.
+// Objects/slabs/sectors associated with the account will be cleaned up by the
+// account manager.
+func (m *AccountManager) DeleteAccount(ctx context.Context, acc proto.Account) error {
+	return m.store.DeleteAccount(acc)
 }
 
 // ContractFundTarget calculates the fund target for a contract on the given
@@ -246,15 +263,64 @@ func HostFundTarget(host hosts.Host) types.Currency {
 }
 
 // NewManager creates a new AccountManager.
-func NewManager(store Store, funder AccountFunder, opts ...Option) *AccountManager {
+func NewManager(store Store, funder AccountFunder, opts ...Option) (*AccountManager, error) {
 	m := &AccountManager{
-		serviceAccounts: make(map[proto.Account]struct{}),
-		store:           store,
-		funder:          funder,
-		log:             zap.NewNop(),
+		pruneAccountsInterval: 10 * time.Minute,
+		serviceAccounts:       make(map[proto.Account]struct{}),
+		store:                 store,
+		funder:                funder,
+		tg:                    threadgroup.New(),
+		log:                   zap.NewNop(),
 	}
 	for _, opt := range opts {
 		opt(m)
 	}
-	return m
+
+	ctx, cancel, err := m.tg.AddContext(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		defer cancel()
+		m.maintenanceLoop(ctx)
+	}()
+
+	return m, nil
+}
+
+// maintenanceLoop performs any background tasks that the accounts manager
+// needs to perform on accounts
+func (m *AccountManager) maintenanceLoop(ctx context.Context) {
+	healthTicker := time.NewTicker(m.pruneAccountsInterval)
+	defer healthTicker.Stop()
+
+	for {
+		select {
+		case <-healthTicker.C:
+		case <-ctx.Done():
+			return
+		}
+		if err := m.performPruneAccounts(); err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			m.log.Error("maintenance failed", zap.String("task", "prune accounts"), zap.Error(err))
+		}
+	}
+}
+
+func (m *AccountManager) performPruneAccounts() error {
+	start := time.Now()
+	log := m.log.Named("prune")
+	log.Debug("starting account pruning")
+
+	const objectBatchSize = 100
+	for {
+		if err := m.store.PruneAccounts(objectBatchSize); errors.Is(err, ErrNotFound) {
+			break
+		} else if err != nil {
+			return fmt.Errorf("failed to prune accounts: %w", err)
+		}
+	}
+
+	log.Debug("finished pruning accounts", zap.Duration("elapsed", time.Since(start)))
+	return nil
 }

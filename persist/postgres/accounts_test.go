@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -222,7 +223,7 @@ func TestDeleteAccount(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	pk := types.GeneratePrivateKey().PublicKey()
-	err := store.DeleteAccount(pk)
+	err := store.DeleteAccount(proto.Account(pk))
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected [accounts.ErrNotFound]")
 	}
@@ -243,8 +244,11 @@ func TestDeleteAccount(t *testing.T) {
 		t.Fatal("unexpected accounts", accs)
 	}
 
-	err = store.DeleteAccount(pk)
+	err = store.DeleteAccount(proto.Account(pk))
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PruneAccounts(1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -267,7 +271,7 @@ func TestDeleteAccount(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = store.DeleteAccount(pk2)
+	err = store.DeleteAccount(proto.Account(pk2))
 	if !errors.Is(err, accounts.ErrServiceAccount) {
 		t.Fatal(err)
 	}
@@ -793,6 +797,141 @@ func TestServiceAccounts(t *testing.T) {
 	assertBalance(types.ZeroCurrency)
 }
 
+func TestPruneAccount(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// setup
+	acc1 := proto.Account(types.GeneratePrivateKey().PublicKey())
+	acc2 := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc1))
+	store.addTestAccount(t, types.PublicKey(acc2))
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// add objects for both accounts
+	randomSlabs := func(n int) []slabs.SlabPinParams {
+		s := make([]slabs.SlabPinParams, n)
+		for i := range s {
+			s[i] = slabs.SlabPinParams{
+				EncryptionKey: frand.Entropy256(),
+				MinShards:     1,
+				Sectors: []slabs.PinnedSector{
+					{
+						Root:    frand.Entropy256(),
+						HostKey: hk,
+					},
+				},
+			}
+		}
+		return s
+	}
+
+	pinSlabs := func(acc proto.Account, params []slabs.SlabPinParams) []slabs.SlabSlice {
+		t.Helper()
+
+		var ss []slabs.SlabSlice
+		for _, p := range params {
+			ids, err := store.PinSlabs(acc, time.Time{}, p)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ss = append(ss, slabs.SlabSlice{
+				SlabID: ids[0],
+				Offset: 10,
+				Length: 120,
+			})
+		}
+		return ss
+	}
+
+	// pin two objects to each account
+	obj1Slabs := randomSlabs(3)
+	pinSlabs(acc1, obj1Slabs)
+	pinSlabs(acc2, obj1Slabs)
+	obj1Acc1 := store.pinRandomObject(t, acc1, pinSlabs(acc1, obj1Slabs))
+
+	obj1Acc2 := obj1Acc1
+	obj1Acc2.EncryptedMasterKey = frand.Bytes(72)
+	obj1Acc2.Signature = (types.Signature)(frand.Bytes(64))
+	if err := store.SaveObject(acc2, obj1Acc2); err != nil {
+		t.Fatal(err)
+	}
+
+	obj2Slabs := randomSlabs(3)
+	pinSlabs(acc1, obj2Slabs)
+	pinSlabs(acc2, obj2Slabs)
+	obj2Acc1 := store.pinRandomObject(t, acc1, pinSlabs(acc1, obj2Slabs))
+
+	obj2Acc2 := obj2Acc1
+	obj2Acc2.EncryptedMasterKey = frand.Bytes(72)
+	obj2Acc2.Signature = (types.Signature)(frand.Bytes(64))
+	if err := store.SaveObject(acc2, obj2Acc2); err != nil {
+		t.Fatal(err)
+	}
+
+	assertObjects := func(acc proto.Account, expected int) {
+		t.Helper()
+
+		var got int
+		err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM objects WHERE account_id = (SELECT id FROM accounts WHERE public_key = $1)`, sqlPublicKey(acc)).Scan(&got)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if expected != got {
+			t.Fatalf("expected %d objects, got %d", expected, got)
+		}
+	}
+
+	assertObjects(acc1, 2)
+	assertObjects(acc2, 2)
+
+	if err := store.DeleteAccount(acc1); err != nil {
+		t.Fatal(err)
+	}
+
+	assertObjects(acc1, 2)
+	assertObjects(acc2, 2)
+
+	// should delete 1 object on acc1
+	if err := store.PruneAccounts(1); err != nil {
+		t.Fatal(err)
+	}
+
+	assertObjects(acc1, 1)
+	assertObjects(acc2, 2)
+
+	// should delete last object on acc1
+	if err := store.PruneAccounts(1); err != nil {
+		t.Fatal(err)
+	}
+
+	// delete all the slabs (6) and and thus delete acc1
+	if err := store.PruneAccounts(10); err != nil {
+		t.Fatal(err)
+	}
+
+	// acc1 should be deleted now so calling again will result in error
+	if err := store.PruneAccounts(1); !errors.Is(err, accounts.ErrNotFound) {
+		t.Fatalf("expected %v, got %v", accounts.ErrNotFound, err)
+	}
+	assertObjects(acc2, 2)
+
+	if err := store.DeleteAccount(acc2); err != nil {
+		t.Fatal(err)
+	}
+
+	// this should delete all 2 of acc2's objects and acc2 at once
+	if err := store.PruneAccounts(10); err != nil {
+		t.Fatal(err)
+	}
+
+	// acc2 should be deleted now so calling again will result in error
+	if err := store.PruneAccounts(1); !errors.Is(err, accounts.ErrNotFound) {
+		t.Fatalf("expected %v, got %v", accounts.ErrNotFound, err)
+	}
+}
+
 func TestActiveAccounts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
@@ -930,5 +1069,67 @@ func BenchmarkActiveAccounts(b *testing.B) {
 		if _, err := store.ActiveAccounts(threshold); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+func BenchmarkPruneAccounts(b *testing.B) {
+	const (
+		numAccounts       = 1000
+		objectsPerAccount = 500
+		slabsPerObject    = 5
+	)
+
+	store := initPostgres(b, zap.NewNop())
+
+	batch := &pgx.Batch{}
+	accountID, objectID, slabID := 0, 0, 0
+	for range numAccounts {
+		ak := types.GeneratePrivateKey().PublicKey()
+
+		batch.Queue(`INSERT INTO accounts(public_key, max_pinned_data) VALUES ($1, 1000000);`, sqlPublicKey(ak))
+		accountID++
+
+		for range objectsPerAccount {
+			var encryptionKey [32]byte
+			frand.Read(encryptionKey[:])
+
+			batch.Queue(`INSERT INTO objects(object_key, account_id, encrypted_master_key, signature) VALUES ($1, $2, $3, $4)`, sqlHash256(frand.Entropy256()), accountID, frand.Bytes(72), frand.Bytes(64))
+			objectID++
+			for k := range slabsPerObject {
+				slabDigest := sqlHash256(frand.Entropy256())
+
+				batch.Queue(`INSERT INTO slabs(digest, encryption_key, min_shards) VALUES ($1, $2, 1);`, slabDigest, sqlHash256(encryptionKey))
+				slabID++
+
+				batch.Queue(`INSERT INTO account_slabs(account_id, slab_id) VALUES ($1, $2)`, accountID, slabID)
+				batch.Queue(`INSERT INTO object_slabs(object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, $3, 0, 0)`, objectID, slabDigest, k)
+			}
+		}
+
+		// delete 1/10 accounts
+		if accountID%10 == 0 {
+			batch.Queue("UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1", sqlPublicKey(ak))
+		}
+	}
+	batch.Queue(`UPDATE stats SET num_slabs = $1`, numAccounts*objectsPerAccount*slabsPerObject)
+	batch.Queue(`UPDATE stats SET num_accounts_registered = $1`, numAccounts)
+	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
+		b.Fatal(err)
+	}
+
+	if _, err := store.pool.Exec(b.Context(), `VACUUM FULL ANALYZE;`); err != nil {
+		b.Fatal(err)
+	}
+
+	for _, limit := range []int{100, 250, 500} {
+		b.Run(fmt.Sprint(limit), func(b *testing.B) {
+			for b.Loop() {
+				if err := store.PruneAccounts(limit); errors.Is(err, accounts.ErrNotFound) {
+					b.Logf("pruning error: %v", err)
+				} else if err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
 	}
 }
