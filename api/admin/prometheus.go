@@ -78,7 +78,6 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 	if release == "" {
 		release = "unknown"
 	}
-	protocolVersion := string(h.ProtocolVersion[0]) + "." + string(h.ProtocolVersion[1]) + "." + string(h.ProtocolVersion[2])
 
 	labels := map[string]any{
 		"public_key":       h.PublicKey.String(),
