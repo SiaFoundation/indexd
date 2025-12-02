@@ -2312,6 +2312,23 @@ func BenchmarkMarkSectorsUnpinnable(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
+		// recalculate sector stats
+		if _, err := store.pool.Exec(b.Context(), `
+		WITH counts AS (
+			SELECT
+				COUNT(*) FILTER (WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NOT NULL)::bigint AS pinned,
+				COUNT(*) FILTER (WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NULL)::bigint     AS unpinned,
+				COUNT(*) FILTER (WHERE host_id IS NULL     AND contract_sectors_map_id IS NULL)::bigint     AS unpinnable
+			FROM sectors
+		)
+		UPDATE stats s
+		SET
+			num_pinned_sectors     = counts.pinned,
+			num_unpinned_sectors   = counts.unpinned,
+			num_unpinnable_sectors = counts.unpinnable
+		FROM counts`); err != nil {
+			b.Fatal(err)
+		}
 	}
 
 	// 1/10 = 10%, 1/100 = 1%, 1/1000 = 0.1%
