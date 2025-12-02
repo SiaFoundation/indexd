@@ -82,7 +82,7 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 
 	labels := map[string]any{
 		"public_key":       h.PublicKey.String(),
-		"protcool_version": protocolVersion,
+		"protcool_version": h.ProtocolVersion.String(),
 		"release":          release,
 	}
 
