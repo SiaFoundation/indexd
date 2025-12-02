@@ -104,7 +104,9 @@ func TestApplicationAPI(t *testing.T) {
 	cluster := testutils.NewCluster(t, testutils.WithHosts(10), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
-	time.Sleep(time.Second)
+
+	// wait for contracts to be formed
+	cluster.WaitForContracts(t)
 
 	// assert hosts are registered
 	hosts, err := adminClient.Hosts(ctx)
@@ -173,7 +175,6 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert hosts returns all usable hosts
-	time.Sleep(time.Second) // allow some time to form contracts
 	usableHosts, err := client.Hosts(context.Background())
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
