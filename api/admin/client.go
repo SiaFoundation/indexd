@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
@@ -70,8 +71,8 @@ func (c *Client) Account(ctx context.Context, ak types.PublicKey) (account accou
 }
 
 // DeleteAccount removes the account with the given public key.
-func (c *Client) DeleteAccount(ctx context.Context, ak types.PublicKey) (err error) {
-	err = c.c.DELETE(ctx, fmt.Sprintf("/account/%s", ak))
+func (c *Client) DeleteAccount(ctx context.Context, acc proto.Account) (err error) {
+	err = c.c.DELETE(ctx, fmt.Sprintf("/account/%s", acc))
 	return
 }
 

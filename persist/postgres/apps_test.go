@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.uber.org/zap/zaptest"
@@ -122,7 +123,9 @@ func TestAppConnectKeys(t *testing.T) {
 	}
 
 	// delete account
-	if err := store.DeleteAccount(acc); err != nil {
+	if err := store.DeleteAccount(proto.Account(acc)); err != nil {
+		t.Fatal(err)
+	} else if err := store.PruneAccounts(1); err != nil {
 		t.Fatal(err)
 	}
 

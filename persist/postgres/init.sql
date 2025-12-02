@@ -22,9 +22,11 @@ CREATE TABLE accounts (
     description TEXT NOT NULL DEFAULT '',
     logo_url TEXT NOT NULL DEFAULT '',
     service_url TEXT NOT NULL DEFAULT '',
-    last_used TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    last_used TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMP WITH TIME ZONE
 );
 CREATE INDEX accounts_last_used_idx ON accounts(last_used);
+CREATE INDEX accounts_deleted_at_idx ON accounts(deleted_at);
 CREATE INDEX accounts_connect_key_id_idx ON accounts(connect_key_id);
 
 CREATE TABLE hosts (

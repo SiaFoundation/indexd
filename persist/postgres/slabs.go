@@ -152,7 +152,7 @@ func (s *Store) PruneSlabs(account proto.Account) error {
 	var id int64
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		var err error
-		id, err = accountID(ctx, tx, account)
+		id, _, err = accountID(ctx, tx, account)
 		if err != nil {
 			return fmt.Errorf("failed to get account ID: %w", err)
 		}
@@ -162,8 +162,8 @@ func (s *Store) PruneSlabs(account proto.Account) error {
 		return err
 	}
 
-	getSlabs := func(ctx context.Context, tx *txn, limit int64) ([]slabs.SlabID, error) {
-		rows, err := tx.Query(ctx, `SELECT s.digest
+	getSlabs := func(ctx context.Context, tx *txn, limit int64) ([]int64, error) {
+		rows, err := tx.Query(ctx, `SELECT s.id
 FROM slabs s
 JOIN account_slabs a ON s.id = a.slab_id
 WHERE a.account_id = $1
@@ -181,10 +181,10 @@ LIMIT $2
 		}
 		defer rows.Close()
 
-		var slabIDs []slabs.SlabID
+		var slabIDs []int64
 		for rows.Next() {
-			var slabID slabs.SlabID
-			if err := rows.Scan((*sqlHash256)(&slabID)); err != nil {
+			var slabID int64
+			if err := rows.Scan(&slabID); err != nil {
 				return nil, fmt.Errorf("failed to scan slab ID: %w", err)
 			}
 			slabIDs = append(slabIDs, slabID)

@@ -47,7 +47,8 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 			SELECT a.public_key, ak.app_key, a.service_account, a.max_pinned_data, a.pinned_data, a.description, a.logo_url, a.service_url, a.last_used
 			FROM accounts a
 			LEFT JOIN app_connect_keys ak ON ak.id = a.connect_key_id
-			WHERE ($1::boolean IS NULL OR service_account = $1::boolean) AND
+			WHERE a.deleted_at IS NULL AND
+			($1::boolean IS NULL OR service_account = $1::boolean) AND
 			($2::integer IS NULL OR connect_key_id = $2::integer)
 			LIMIT $3 OFFSET $4
 		`, queryOpts.ServiceAccount, connectKeyID, limit, offset)
@@ -121,18 +122,16 @@ func (s *Store) ActiveAccounts(threshold time.Time) (count uint64, err error) {
 }
 
 // DeleteAccount deletes the account in the database with given account key.
-func (s *Store) DeleteAccount(ak types.PublicKey) error {
+func (s *Store) DeleteAccount(acc proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		var serviceAccount bool
-		err := tx.QueryRow(ctx, `DELETE FROM accounts WHERE public_key = $1 RETURNING service_account`, sqlPublicKey(ak)).Scan(&serviceAccount)
+		err := tx.QueryRow(ctx, `UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1 RETURNING service_account`, sqlPublicKey(acc)).Scan(&serviceAccount)
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to delete account: %w", err)
 		} else if serviceAccount {
 			return accounts.ErrServiceAccount
-		} else if err := incrementNumAccounts(ctx, tx, -1); err != nil {
-			return fmt.Errorf("failed to decrement registered accounts: %w", err)
 		}
 		return nil
 	})
@@ -152,6 +151,96 @@ func (s *Store) UpdateAccount(oldAK, newAK types.PublicKey) error {
 		} else if res.RowsAffected() != 1 {
 			return accounts.ErrNotFound
 		}
+		return nil
+	})
+}
+
+// PruneAccounts deletes up to `limit` combined slabs and objects from an
+// account that has been soft deleted.  If there are no objects left on the
+// account to delete, it will prune the associated slabs and sectors.  If there
+// are no slabs left it will hard delete the account.  If there are no pending
+// soft deleted accounts, accounts.ErrNotFound is returned
+func (s *Store) PruneAccounts(limit int) error {
+	if limit < 0 {
+		return errors.New("limit can not be negative")
+	}
+
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		var accountID int64
+
+		err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE deleted_at IS NOT NULL ORDER by deleted_at LIMIT 1`).Scan(&accountID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return accounts.ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to find an account to delete: %w", err)
+		}
+
+		rows, err := tx.Query(ctx, `DELETE FROM objects o
+USING (
+	SELECT id
+	FROM objects
+	WHERE account_id = $1
+	ORDER BY id
+	LIMIT $2
+) d
+WHERE o.id = d.id
+RETURNING o.object_key;`, accountID, limit)
+		if err != nil {
+			return fmt.Errorf("failed to delete objects: %w", err)
+		}
+
+		var objKeys []sqlHash256
+		for rows.Next() {
+			var objKey sqlHash256
+			if err := rows.Scan(&objKey); err != nil {
+				return fmt.Errorf("failed to scan object key: %w", err)
+			}
+			objKeys = append(objKeys, objKey)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to get rows: %w", err)
+		}
+
+		limit -= len(objKeys)
+		if limit == 0 {
+			return nil
+		}
+
+		rows, err = tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE account_id = $1 ORDER BY slab_id LIMIT $2`, accountID, limit)
+		if err != nil {
+			return fmt.Errorf("failed to get account slabs: %w", err)
+		}
+		defer rows.Close()
+
+		var slabIDs []int64
+		for rows.Next() {
+			var slabID int64
+			if err := rows.Scan(&slabID); err != nil {
+				return fmt.Errorf("failed to get slab ID: %w", err)
+			}
+			slabIDs = append(slabIDs, slabID)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("failed to get account slabs: %w", err)
+		}
+
+		if err := s.unpinSlabs(ctx, tx, accountID, slabIDs); err != nil {
+			return fmt.Errorf("failed to unpin slabs: %w", err)
+		}
+
+		if len(slabIDs) < limit {
+			// no slabs left, we can delete the account
+			_, err = tx.Exec(ctx, `DELETE FROM accounts WHERE id = $1`, accountID)
+			if err != nil {
+				return fmt.Errorf("failed to delete account: %w", err)
+			}
+
+			err = incrementNumAccounts(ctx, tx, -1)
+			if err != nil {
+				return fmt.Errorf("failed to decrement account count: %w", err)
+			}
+		}
+
 		return nil
 	})
 }
@@ -357,7 +446,7 @@ func newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey,
 SELECT a.public_key
 FROM accounts a
 LEFT JOIN account_hosts ah ON a.id = ah.account_id AND ah.host_id = $1
-WHERE ah.account_id IS NULL AND (a.last_used >= $2 OR a.service_account = TRUE)
+WHERE ah.account_id IS NULL AND a.deleted_at IS NULL AND (a.last_used >= $2 OR a.service_account = TRUE)
 LIMIT $3;`, hostID, threshold, limit)
 	if err != nil {
 		return nil, err
@@ -385,7 +474,7 @@ func existingHostAccountsForFunding(ctx context.Context, tx *txn, hk types.Publi
 SELECT public_key, consecutive_failed_funds, next_fund
 FROM account_hosts ha
 INNER JOIN accounts a ON a.id = ha.account_id
-WHERE ha.host_id = $1 AND ha.next_fund <= NOW() AND (a.last_used >= $2 OR a.service_account = TRUE)
+WHERE ha.host_id = $1 AND ha.next_fund <= NOW() AND a.deleted_at IS NULL AND (a.last_used >= $2 OR a.service_account = TRUE)
 ORDER BY next_fund ASC
 LIMIT $3`, hostID, threshold, limit)
 	if err != nil {
