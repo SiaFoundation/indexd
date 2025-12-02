@@ -48,18 +48,20 @@ func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error
 
 			batch.Queue(`SELECT s.sector_root, h.public_key FROM sectors s
 INNER JOIN slab_sectors ss ON (ss.sector_id = s.id)
-INNER JOIN hosts h ON (h.id = s.host_id)
+LEFT JOIN hosts h ON (h.id = s.host_id)
 WHERE ss.slab_id = $1
 ORDER BY ss.slab_index ASC`, slabDBID).Query(func(rows pgx.Rows) error {
 				defer rows.Close()
 				for rows.Next() {
 					var sector slabs.TrackedSector
-					var hostKey types.PublicKey
-					err := rows.Scan((*sqlHash256)(&sector.Root), (*sqlHash256)(&hostKey))
+					var hostKey sql.Null[sqlPublicKey]
+					err := rows.Scan((*sqlHash256)(&sector.Root), &hostKey)
 					if err != nil {
 						return fmt.Errorf("failed to scan sector: %w", err)
 					}
-					sector.HostKey = &hostKey
+					if hostKey.Valid {
+						sector.HostKey = (*types.PublicKey)(&hostKey.V)
+					}
 					objectSlabs[i].Sectors = append(objectSlabs[i].Sectors, sector)
 				}
 				return rows.Err()

@@ -110,16 +110,7 @@ func TestObject(t *testing.T) {
 
 	expectedShared := slabs.SharedObject{
 		EncryptedMetadata: expected.EncryptedMetadata,
-		Slabs: []slabs.SlabSlice{
-			{
-				ID:            slabIDs[0],
-				EncryptionKey: params.EncryptionKey,
-				MinShards:     params.MinShards,
-				Offset:        0,
-				Length:        100,
-				Sectors:       slabs.PinnedSectorsToTracked(params.Sectors),
-			},
-		},
+		Slabs:             expected.Slabs,
 	}
 	gotShared, err := store.SharedObject(expected.ID())
 	if err != nil {
