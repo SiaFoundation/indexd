@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"strconv"
 	"strings"
 	"time"
 
@@ -75,16 +74,16 @@ func (s ScansStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 // PrometheusMetric implements the prometheus.Marshaller interface for a single
 // host's stats.
 func (h HostStats) PrometheusMetric() []prometheus.Metric {
-	labels := map[string]any{
-		"public_key": h.PublicKey.String(),
+	release := strings.TrimSpace(h.Release)
+	if release == "" {
+		release = "unknown"
 	}
+	protocolVersion := string(h.ProtocolVersion[0]) + "." + string(h.ProtocolVersion[1]) + "." + string(h.ProtocolVersion[2])
 
-	// "hostd v2.4.1" -> "2.4.1" -> "241" -> 241
-	release := strings.ReplaceAll(strings.TrimPrefix(h.Release, "hostd v"), ".", "")
-	releaseNum, err := strconv.Atoi(release)
-	if err != nil {
-		// -1 is release number for hosts whose release strings we cannot parse
-		releaseNum = -1
+	labels := map[string]any{
+		"public_key":       h.PublicKey.String(),
+		"protcool_version": protocolVersion,
+		"release":          release,
 	}
 
 	metrics := []prometheus.Metric{
@@ -97,16 +96,6 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 			Name:   "indexd_host_total_usage",
 			Labels: labels,
 			Value:  float64(h.TotalUsage.Siacoins()),
-		},
-		{
-			Name:   "indexd_host_protocol_version",
-			Labels: labels,
-			Value:  float64(10000*int(h.ProtocolVersion[0]) + 100*int(h.ProtocolVersion[1]) + int(h.ProtocolVersion[2])),
-		},
-		{
-			Name:   "indexd_host_release",
-			Labels: labels,
-			Value:  float64(releaseNum),
 		},
 		{
 			Name:   "indexd_host_scans",
