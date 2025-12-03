@@ -87,16 +87,12 @@ func (s *mockStore) SharedObject(key types.Hash256) (SharedObject, error) {
 	panic("not implemented")
 }
 
-func (s *mockStore) AddAccount(account types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *mockStore) AddAccount(account types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
 	s.accounts[proto.Account(account)] = struct{}{}
 	return nil
 }
 
-func (s *mockStore) AddServiceAccount(account types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *mockStore) AddServiceAccount(account types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
 	s.accounts[proto.Account(account)] = struct{}{}
 	return nil
 }

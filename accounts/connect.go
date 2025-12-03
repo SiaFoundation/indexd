@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/keys"
 )
 
 var (
@@ -59,11 +60,12 @@ type (
 		RemainingUses int    `json:"remainingUses"`
 	}
 
-	// AccountMeta contains additional metadata associated with an account.
-	AccountMeta struct {
-		Description string
-		LogoURL     string
-		ServiceURL  string
+	// AppMeta contains additional metadata associated with an account.
+	AppMeta struct {
+		ID          types.Hash256 `json:"id"`
+		Description string        `json:"description"`
+		LogoURL     string        `json:"logoURL"`
+		ServiceURL  string        `json:"serviceURL"`
 	}
 )
 
@@ -94,11 +96,11 @@ func (m *AccountManager) AppConnectKeys(ctx context.Context, offset, limit int) 
 	return m.store.AppConnectKeys(offset, limit)
 }
 
-// UseAppConnectKey uses an existing app connect key to add an account. If the key is exhausted, it
+// RegisterAppKey uses an existing app connect key to add an account. If the key is exhausted, it
 // returns [ErrKeyExhausted]. If the key is not found, it returns [ErrKeyNotFound].
-func (m *AccountManager) UseAppConnectKey(ctx context.Context, key string, pk types.PublicKey, meta AccountMeta) error {
-	if err := m.store.UseAppConnectKey(key, pk, meta); err != nil {
-		return fmt.Errorf("failed to use app connect key: %w", err)
+func (m *AccountManager) RegisterAppKey(key string, pk types.PublicKey, meta AppMeta) error {
+	if err := m.store.RegisterAppKey(key, pk, meta); err != nil {
+		return fmt.Errorf("failed to register app connect key: %w", err)
 	}
 	return nil
 }
@@ -107,4 +109,14 @@ func (m *AccountManager) UseAppConnectKey(ctx context.Context, key string, pk ty
 // returns [ErrKeyNotFound].
 func (m *AccountManager) ValidAppConnectKey(ctx context.Context, key string) (bool, error) {
 	return m.store.ValidAppConnectKey(key)
+}
+
+// AppSecret derives a unique application secret using a stored user secret
+// associated with the given connect key and the provided app ID.
+func (m *AccountManager) AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error) {
+	secret, err := m.store.AppConnectKeyUserSecret(connectKey)
+	if err != nil {
+		return types.Hash256{}, err
+	}
+	return types.Hash256(keys.Derive(secret[:], appID[:], []byte("server app secret"), 32)), nil
 }

@@ -1,13 +1,13 @@
 package accounts_test
 
 import (
-	"bytes"
 	"context"
 	"testing"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
@@ -22,21 +22,22 @@ func TestAccountFunding(t *testing.T) {
 	indexer := cluster.Indexer
 
 	// create an app
-	app := cluster.App(t)
+	app, sk := cluster.App(t)
 
 	// assert we have one usable host
 	time.Sleep(time.Second)
-	hosts, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true))
+	available, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true))
 	if err != nil {
 		t.Fatal(err)
-	} else if len(hosts) != 1 {
-		t.Fatalf("expected 1 host, got %d", len(hosts))
+	} else if len(available) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(available))
 	}
 
 	// convenience variables
-	hk := hosts[0].PublicKey
-	hp := hosts[0].Settings.Prices
-	hc := indexer.HostClient(t, hk)
+	hk := available[0].PublicKey
+
+	client := client.New(client.NewProvider(hosts.NewHostStore(indexer.Store())))
+	defer client.Close()
 
 	// assert we have at least one active contract
 	contracts, err := indexer.Contracts().Contracts(context.Background(), 0, 10, contracts.WithRevisable(true), contracts.WithGood(true))
@@ -51,13 +52,18 @@ func TestAccountFunding(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// fetch account
-	acc, err := app.Account(t.Context())
+	acc, err := app.Account(t.Context(), sk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	hp, err := client.Prices(t.Context(), hk)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert the account is funded
-	balance, err := hc.AccountBalance(context.Background(), acc.AccountKey)
+	balance, err := client.AccountBalance(t.Context(), hk, acc.AccountKey)
 	if err != nil {
 		t.Fatal(err)
 	} else if balance.IsZero() {
@@ -67,13 +73,13 @@ func TestAccountFunding(t *testing.T) {
 	// spend some money
 	var sector [proto.SectorSize]byte
 	frand.Read(sector[:])
-	_, err = hc.WriteSector(context.Background(), hp, app.AccountToken(hk), bytes.NewReader(sector[:]), proto.SectorSize)
+	_, err = client.WriteSector(t.Context(), sk, hk, sector[:])
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert it was spent
-	updated, err := hc.AccountBalance(context.Background(), acc.AccountKey)
+	updated, err := client.AccountBalance(t.Context(), hk, acc.AccountKey)
 	if err != nil {
 		t.Fatal(err)
 	} else if !updated.Add(hp.RPCWriteSectorCost(proto.SectorSize).RenterCost()).Equals(balance) {
@@ -88,7 +94,7 @@ func TestAccountFunding(t *testing.T) {
 
 	// assert it was refilled
 	time.Sleep(time.Second)
-	updated, err = hc.AccountBalance(context.Background(), acc.AccountKey)
+	updated, err = client.AccountBalance(t.Context(), hk, acc.AccountKey)
 	if err != nil {
 		t.Fatal(err)
 	} else if !updated.Equals(balance) {

@@ -77,7 +77,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 	store.revisions = append(store.revisions, rhp.ContractRevision{ID: types.FileContractID{4}, Revision: rev})
 
 	// assert revision was broadcasted and contract was marked as such
-	if err := contracts.performBroadcastContractRevisions(zap.NewNop()); err != nil {
+	if err := contracts.performBroadcastContractRevisions(t.Context(), zap.NewNop()); err != nil {
 		t.Fatal(err)
 	} else if len(walletMock.broadcasted) != 1 {
 		t.Fatal("expected 1 broadcasted contract, got", len(walletMock.broadcasted))

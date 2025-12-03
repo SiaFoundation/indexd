@@ -293,7 +293,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 
 		Admin: admin.NewClient(adminAPIAddr, password),
 		App: func(appKey types.PrivateKey) *app.Client {
-			return app.NewClient(appAPIAddr, appKey)
+			return app.NewClient(appAPIAddr)
 		},
 
 		cm:        c.cm,

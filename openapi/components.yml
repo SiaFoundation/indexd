@@ -784,6 +784,10 @@ components:
           type: string
           format: uri
           description: URL to poll for connection request status
+        registerURL:
+          type: string
+          format: uri
+          description: URL to complete registration after approval using a signed request
         expiration:
           type: string
           format: date-time
@@ -795,6 +799,10 @@ components:
         approved:
           type: boolean
           description: The status of an application connection request.
+        userSecret:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: Secret required to derive the application key. Only returned when the request is approved.
 
     AccountStatsResponse:
       type: object

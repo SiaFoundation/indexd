@@ -16,7 +16,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/api"
-	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
@@ -37,18 +36,18 @@ type (
 
 	// An appClient is an interface for the application API of the indexer.
 	appClient interface {
-		Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error)
+		Hosts(context.Context, types.PrivateKey, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error)
 
-		CreateSharedObjectURL(ctx context.Context, objectID types.Hash256, encryptionKey []byte, validUntil time.Time) (string, error)
+		CreateSharedObjectURL(ctx context.Context, appKey types.PrivateKey, objectID types.Hash256, encryptionKey []byte, validUntil time.Time) (string, error)
 		SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, []byte, error)
 
-		ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
-		Object(ctx context.Context, key types.Hash256) (slabs.SealedObject, error)
-		SaveObject(ctx context.Context, obj slabs.SealedObject) error
+		ListObjects(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
+		Object(ctx context.Context, appKey types.PrivateKey, key types.Hash256) (slabs.SealedObject, error)
+		SaveObject(ctx context.Context, appKey types.PrivateKey, obj slabs.SealedObject) error
 
-		Slab(context.Context, slabs.SlabID) (slabs.PinnedSlab, error)
-		PinSlabs(context.Context, ...slabs.SlabPinParams) ([]slabs.SlabID, error)
-		UnpinSlab(context.Context, slabs.SlabID) error
+		Slab(context.Context, types.PrivateKey, slabs.SlabID) (slabs.PinnedSlab, error)
+		PinSlabs(context.Context, types.PrivateKey, ...slabs.SlabPinParams) ([]slabs.SlabID, error)
+		UnpinSlab(context.Context, types.PrivateKey, slabs.SlabID) error
 	}
 
 	downloadOption struct {
@@ -234,7 +233,7 @@ top:
 				return Object{}, fmt.Errorf("failed to compute slab id for slab %d: %w", slabIndex, err)
 			}
 
-			slabIDs, err := s.client.PinSlabs(ctx, params)
+			slabIDs, err := s.client.PinSlabs(ctx, s.appKey, params)
 			if err != nil {
 				return Object{}, fmt.Errorf("failed to pin slab %d: %w", slabIndex, err)
 			}
@@ -251,7 +250,7 @@ top:
 		}
 	}
 	// pin the object
-	return obj, s.client.SaveObject(ctx, obj.Seal(s.appKey))
+	return obj, s.client.SaveObject(ctx, s.appKey, obj.Seal(s.appKey))
 }
 
 // Download downloads object metadata
@@ -297,7 +296,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 		}
 
 		slab := obj.slabs[i]
-		pinned, err := s.client.Slab(ctx, slab.SlabID)
+		pinned, err := s.client.Slab(ctx, s.appKey, slab.SlabID)
 		if err != nil {
 			return slabs.PinnedSlabSlice{}, fmt.Errorf("failed to get slab %d metadata: %w", i, err)
 		}
@@ -646,14 +645,4 @@ func initSDK(appKey types.PrivateKey, app appClient, hosts hostClient, opts ...O
 		opt(sdk)
 	}
 	return sdk
-}
-
-// NewSDK creates a new indexd client with the given app key and base URL.
-func NewSDK(baseURL string, appKey types.PrivateKey, opts ...Option) (*SDK, error) {
-	app := app.NewClient(baseURL, appKey)
-	hostStore, err := newCachedHostStore(app)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create host store: %w", err)
-	}
-	return initSDK(appKey, app, client.New(client.NewProvider(hostStore)), opts...), nil
 }

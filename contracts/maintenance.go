@@ -87,7 +87,7 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 	}
 
 	// rebroadcast revisions for all good contracts
-	if err := cm.performBroadcastContractRevisions(log); err != nil {
+	if err := cm.performBroadcastContractRevisions(ctx, log); err != nil {
 		return fmt.Errorf("failed to broadcast contract revisions: %w", err)
 	}
 

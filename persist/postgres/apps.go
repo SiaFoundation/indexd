@@ -8,6 +8,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
+	"lukechampine.com/frand"
 )
 
 func scanConnectKey(s scanner) (key accounts.ConnectKey, err error) {
@@ -37,10 +38,11 @@ func (s *Store) AddAppConnectKey(meta accounts.UpdateAppConnectKey) (key account
 		return accounts.ConnectKey{}, fmt.Errorf("max pinned data must be greater than 0")
 	}
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		userSecret := frand.Bytes(32)
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
-			INSERT INTO app_connect_keys (app_key, use_description, remaining_uses, max_pinned_data) VALUES ($1, $2, $3, $4)
+			INSERT INTO app_connect_keys (app_key, user_secret, use_description, remaining_uses, max_pinned_data) VALUES ($1, $2, $3, $4, $5)
 			RETURNING app_key, use_description, remaining_uses, total_uses, created_at, updated_at, last_used, pinned_data, max_pinned_data;
-		`, meta.Key, meta.Description, meta.RemainingUses, meta.MaxPinnedData))
+		`, meta.Key, userSecret, meta.Description, meta.RemainingUses, meta.MaxPinnedData))
 		return err
 	})
 	return
@@ -146,9 +148,23 @@ func (s *Store) DeleteAppConnectKey(connectKey string) error {
 	})
 }
 
-// UseAppConnectKey decrements the remaining uses of a connect key
-// and adds the app account.
-func (s *Store) UseAppConnectKey(connectKey string, appKey types.PublicKey, meta accounts.AccountMeta) error {
+// AppConnectKeyUserSecret retrieves the user secret associated with a connect key.
+func (s *Store) AppConnectKeyUserSecret(connectKey string) (secret types.Hash256, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		return tx.QueryRow(ctx, `
+			SELECT user_secret FROM app_connect_keys WHERE app_key = $1
+		`, connectKey).Scan((*sqlHash256)(&secret))
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return types.Hash256{}, accounts.ErrKeyNotFound
+	}
+	return
+}
+
+// RegisterAppKey decrements the remaining uses of a connect key
+// and adds the app account. It returns the user secret associated
+// with the connect key. This secret must never be exposed to the user.
+func (s *Store) RegisterAppKey(connectKey string, appKey types.PublicKey, meta accounts.AppMeta) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		var uses int
 		var storageLimit uint64
@@ -165,13 +181,8 @@ func (s *Store) UseAppConnectKey(connectKey string, appKey types.PublicKey, meta
 			return accounts.ErrKeyExhausted
 		}
 
-		if err := addAccount(ctx, tx, &connectKey, appKey, false, accounts.AccountMeta{
-			Description: meta.Description,
-			LogoURL:     meta.LogoURL,
-			ServiceURL:  meta.ServiceURL,
-		},
-			accounts.WithMaxPinnedData(storageLimit),
-		); err != nil {
+		err = addAccount(ctx, tx, &connectKey, appKey, false, meta, accounts.WithMaxPinnedData(storageLimit))
+		if err != nil {
 			return fmt.Errorf("failed to add app account: %w", err)
 		}
 		return nil

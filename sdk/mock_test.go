@@ -160,7 +160,7 @@ type mockAppClient struct {
 }
 
 // PinSlab implements the [AppClient] interface.
-func (mc *mockAppClient) PinSlabs(_ context.Context, toPin ...slabs.SlabPinParams) (digests []slabs.SlabID, err error) {
+func (mc *mockAppClient) PinSlabs(_ context.Context, _ types.PrivateKey, toPin ...slabs.SlabPinParams) (digests []slabs.SlabID, err error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 
@@ -189,7 +189,7 @@ func (mc *mockAppClient) PinSlabs(_ context.Context, toPin ...slabs.SlabPinParam
 }
 
 // UnpinSlab implements the [AppClient] interface.
-func (mc *mockAppClient) UnpinSlab(_ context.Context, id slabs.SlabID) error {
+func (mc *mockAppClient) UnpinSlab(_ context.Context, _ types.PrivateKey, id slabs.SlabID) error {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	delete(mc.pinned, id)
@@ -197,7 +197,7 @@ func (mc *mockAppClient) UnpinSlab(_ context.Context, id slabs.SlabID) error {
 }
 
 // Slab implements the [AppClient] interface.
-func (mc *mockAppClient) Slab(_ context.Context, id slabs.SlabID) (slabs.PinnedSlab, error) {
+func (mc *mockAppClient) Slab(_ context.Context, _ types.PrivateKey, id slabs.SlabID) (slabs.PinnedSlab, error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	slab, ok := mc.pinned[id]
@@ -208,15 +208,15 @@ func (mc *mockAppClient) Slab(_ context.Context, id slabs.SlabID) (slabs.PinnedS
 }
 
 // Hosts implements the [AppClient] interface.
-func (mc *mockAppClient) Hosts(context.Context, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error) {
+func (mc *mockAppClient) Hosts(context.Context, types.PrivateKey, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error) {
 	return nil, nil
 }
 
-func (mc *mockAppClient) Object(ctx context.Context, objectKey types.Hash256) (slabs.SealedObject, error) {
+func (mc *mockAppClient) Object(ctx context.Context, _ types.PrivateKey, objectKey types.Hash256) (slabs.SealedObject, error) {
 	return mc.objects[objectKey], nil
 }
 
-func (mc *mockAppClient) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error) {
+func (mc *mockAppClient) ListObjects(ctx context.Context, _ types.PrivateKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error) {
 	var objs []slabs.ObjectEvent
 	for _, obj := range mc.objects {
 		objs = append(objs, slabs.ObjectEvent{
@@ -266,7 +266,7 @@ func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (sl
 }
 
 // SaveObject implements the [AppClient] interface.
-func (mc *mockAppClient) SaveObject(ctx context.Context, obj slabs.SealedObject) (err error) {
+func (mc *mockAppClient) SaveObject(ctx context.Context, _ types.PrivateKey, obj slabs.SealedObject) (err error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	mc.objects[obj.ID()] = obj
@@ -274,7 +274,7 @@ func (mc *mockAppClient) SaveObject(ctx context.Context, obj slabs.SealedObject)
 }
 
 // CreateSharedObjectURL implements the [AppClient] interface.
-func (mc *mockAppClient) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, encryptionKey []byte, validUntil time.Time) (string, error) {
+func (mc *mockAppClient) CreateSharedObjectURL(ctx context.Context, _ types.PrivateKey, objectKey types.Hash256, encryptionKey []byte, validUntil time.Time) (string, error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 

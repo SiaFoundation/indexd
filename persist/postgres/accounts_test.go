@@ -23,7 +23,7 @@ import (
 
 func (s *Store) addTestAccount(t testing.TB, ak types.PublicKey, opts ...accounts.AddAccountOption) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		if err := addAccount(ctx, tx, nil, ak, false, accounts.AccountMeta{}, opts...); err != nil {
+		if err := addAccount(ctx, tx, nil, ak, false, accounts.AppMeta{}, opts...); err != nil {
 			return fmt.Errorf("failed to add account: %w", err)
 		}
 		return nil
@@ -52,7 +52,7 @@ func TestAccounts(t *testing.T) {
 	store.addTestAccount(t, pk1)
 
 	pk2 := types.GeneratePrivateKey().PublicKey()
-	err := store.AddServiceAccount(pk2, accounts.AccountMeta{})
+	err := store.AddServiceAccount(pk2, accounts.AppMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,11 +110,11 @@ func TestAccounts(t *testing.T) {
 	}
 
 	pk4 := types.GeneratePrivateKey().PublicKey()
-	if err := store.UseAppConnectKey(connectKey, pk4, accounts.AccountMeta{}); err != nil {
+	if err := store.RegisterAppKey(connectKey, pk4, accounts.AppMeta{}); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
 	pk5 := types.GeneratePrivateKey().PublicKey()
-	if err := store.UseAppConnectKey(connectKey, pk5, accounts.AccountMeta{}); err != nil {
+	if err := store.RegisterAppKey(connectKey, pk5, accounts.AppMeta{}); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
 
@@ -136,7 +136,7 @@ func TestAccounts(t *testing.T) {
 func TestAccount(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 	pk := types.GeneratePrivateKey().PublicKey()
-	if err := store.AddServiceAccount(pk, accounts.AccountMeta{}); err != nil {
+	if err := store.AddServiceAccount(pk, accounts.AppMeta{}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -155,9 +155,11 @@ func TestAccount(t *testing.T) {
 func TestAddAccount(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	test := func(t *testing.T, addAccount func(types.PublicKey, accounts.AccountMeta, ...accounts.AddAccountOption) (bool, error)) {
+	test := func(t *testing.T, addAccount func(types.PublicKey, accounts.AppMeta, ...accounts.AddAccountOption) (bool, error)) {
 		pk := types.GeneratePrivateKey().PublicKey()
-		serviceAccount, err := addAccount(pk, accounts.AccountMeta{
+		appID := frand.Entropy256()
+		serviceAccount, err := addAccount(pk, accounts.AppMeta{
+			ID:          appID,
 			Description: "description",
 			LogoURL:     "logoURL",
 			ServiceURL:  "serviceURL",
@@ -167,7 +169,7 @@ func TestAddAccount(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, err = addAccount(pk, accounts.AccountMeta{})
+		_, err = addAccount(pk, accounts.AppMeta{})
 		if !errors.Is(err, accounts.ErrExists) {
 			t.Fatal("expected ErrExists, got", err)
 		}
@@ -182,19 +184,21 @@ func TestAddAccount(t *testing.T) {
 			t.Fatal(err)
 		} else if acc.ServiceAccount != serviceAccount {
 			t.Fatalf("expected service account %t, got %t", serviceAccount, acc.ServiceAccount)
-		} else if acc.Description != "description" {
-			t.Fatalf("expected description %q, got %q", "description", acc.Description)
-		} else if acc.LogoURL != "logoURL" {
-			t.Fatalf("expected logo URL %q, got %q", "logoURL", acc.LogoURL)
-		} else if acc.ServiceURL != "serviceURL" {
-			t.Fatalf("expected service URL %q, got %q", "serviceURL", acc.ServiceURL)
+		} else if acc.App.ID != appID {
+			t.Fatalf("expected app ID %s, got %s", appID, acc.App.ID)
+		} else if acc.App.Description != "description" {
+			t.Fatalf("expected description %q, got %q", "description", acc.App.Description)
+		} else if acc.App.LogoURL != "logoURL" {
+			t.Fatalf("expected logo URL %q, got %q", "logoURL", acc.App.LogoURL)
+		} else if acc.App.ServiceURL != "serviceURL" {
+			t.Fatalf("expected service URL %q, got %q", "serviceURL", acc.App.ServiceURL)
 		} else if acc.MaxPinnedData != 1000 {
 			t.Fatalf("expected max pinned data %d, got %d", 1000, acc.MaxPinnedData)
 		}
 	}
 
 	t.Run("user account", func(t *testing.T) {
-		test(t, func(pk types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) (bool, error) {
+		test(t, func(pk types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) (bool, error) {
 			err := store.transaction(func(ctx context.Context, tx *txn) error {
 				if err := addAccount(ctx, tx, nil, pk, false, meta, opts...); err != nil {
 					return fmt.Errorf("failed to add account: %w", err)
@@ -210,7 +214,7 @@ func TestAddAccount(t *testing.T) {
 	})
 
 	t.Run("service account", func(t *testing.T) {
-		test(t, func(pk types.PublicKey, meta accounts.AccountMeta, opts ...accounts.AddAccountOption) (bool, error) {
+		test(t, func(pk types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) (bool, error) {
 			if err := store.AddServiceAccount(pk, meta, opts...); err != nil {
 				return true, err
 			}
@@ -267,7 +271,7 @@ func TestDeleteAccount(t *testing.T) {
 	} else if len(accs) != 0 {
 		t.Fatal("unexpected accounts", accs)
 	}
-	err = store.AddServiceAccount(pk2, accounts.AccountMeta{})
+	err = store.AddServiceAccount(pk2, accounts.AppMeta{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +529,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	sa1 := types.GeneratePrivateKey().PublicKey()
 	sa2 := types.GeneratePrivateKey().PublicKey()
 	for _, sa := range []types.PublicKey{sa1, sa2} {
-		if err := store.AddServiceAccount(sa, accounts.AccountMeta{}); err != nil {
+		if err := store.AddServiceAccount(sa, accounts.AppMeta{}); err != nil {
 			t.Fatal(err)
 		}
 	}

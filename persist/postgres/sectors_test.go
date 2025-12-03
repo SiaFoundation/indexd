@@ -804,11 +804,11 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 	// these accounts will have the same MaxPinnedData as the connect key
 	// which is the size of 2 sectors
 	acc1 := proto.Account(types.GeneratePrivateKey().PublicKey())
-	if err := store.UseAppConnectKey(connectKey, types.PublicKey(acc1), accounts.AccountMeta{}); err != nil {
+	if err := store.RegisterAppKey(connectKey, types.PublicKey(acc1), accounts.AppMeta{}); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
 	acc2 := proto.Account(types.GeneratePrivateKey().PublicKey())
-	if err := store.UseAppConnectKey(connectKey, types.PublicKey(acc2), accounts.AccountMeta{}); err != nil {
+	if err := store.RegisterAppKey(connectKey, types.PublicKey(acc2), accounts.AppMeta{}); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
 	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)

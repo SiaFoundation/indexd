@@ -198,6 +198,15 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	return err
 }
 
+// AccountBalance fetches the account balance from the specified host.
+func (c *Client) AccountBalance(ctx context.Context, hostKey types.PublicKey, accountKey proto.Account) (balance types.Currency, err error) {
+	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
+		balance, err = rhp.RPCAccountBalance(ctx, transport, accountKey)
+		return err
+	})
+	return
+}
+
 // Prices fetches the host prices from the specified host.
 //
 // If the prices are cached and valid, the cached prices are returned.

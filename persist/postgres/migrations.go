@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 var migrations = []func(context.Context, *txn, *zap.Logger) error{
@@ -524,8 +525,47 @@ ALTER TABLE hosts ADD COLUMN scans_failed INTEGER NOT NULL DEFAULT 0 CHECK (scan
 	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
 		_, err := tx.Exec(ctx, `
 ALTER TABLE accounts ADD COLUMN deleted_at TIMESTAMP WITH TIME ZONE;
-CREATE INDEX accounts_deleted_at_idx ON accounts(deleted_at);
-`)
+CREATE INDEX accounts_deleted_at_idx ON accounts(deleted_at);`)
+		return err
+	},
+	// add app_id and user_secret to app_connect_keys
+	func(ctx context.Context, tx *txn, l *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE accounts ADD COLUMN app_id BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(app_id) = 32); -- app identifier
+ALTER TABLE app_connect_keys ADD COLUMN user_secret BYTEA CHECK (LENGTH(user_secret) = 32); -- secret key to authenticate the app
+		`)
+		if err != nil {
+			return fmt.Errorf("failed to add app_id and user_secret columns: %w", err)
+		}
+		rows, err := tx.Query(ctx, `SELECT id FROM app_connect_keys;`)
+		if err != nil {
+			return fmt.Errorf("failed to query account ids: %w", err)
+		}
+		defer rows.Close()
+		var connectKeyIDs []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				return fmt.Errorf("failed to scan account id: %w", err)
+			}
+			connectKeyIDs = append(connectKeyIDs, id)
+		}
+		if err := rows.Err(); err != nil {
+			return fmt.Errorf("error iterating account ids: %w", err)
+		}
+		rows.Close()
+
+		for _, id := range connectKeyIDs {
+			userSecret := frand.Bytes(32)
+			_, err := tx.Exec(ctx, `UPDATE app_connect_keys SET user_secret = $1 WHERE id = $2;`, userSecret, id)
+			if err != nil {
+				return fmt.Errorf("failed to update user_secret for app_connect_key id %d: %w", id, err)
+			}
+		}
+
+		_, err = tx.Exec(ctx, `
+ALTER TABLE app_connect_keys ALTER COLUMN user_secret SET NOT NULL;
+ALTER TABLE app_connect_keys ADD CONSTRAINT app_connect_keys_user_secret_key UNIQUE (user_secret);`)
 		return err
 	},
 }

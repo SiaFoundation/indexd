@@ -37,8 +37,12 @@ func (s *mockAccounts) ValidAppConnectKey(context.Context, string) (bool, error)
 	return true, nil
 }
 
-func (s *mockAccounts) UseAppConnectKey(ctx context.Context, connectKey string, appKey types.PublicKey, meta accounts.AccountMeta) error {
+func (s *mockAccounts) RegisterAppKey(connectKey string, appKey types.PublicKey, meta accounts.AppMeta) error {
 	return nil
+}
+
+func (s *mockAccounts) AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error) {
+	return frand.Entropy256(), nil
 }
 
 func TestAuth(t *testing.T) {

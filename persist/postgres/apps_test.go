@@ -45,24 +45,24 @@ func TestAppConnectKeys(t *testing.T) {
 			t.Fatalf("expected %d pinned data for account %v, got %d", pinned, acc, account.PinnedData)
 		} else if account.MaxPinnedData != maxPinned {
 			t.Fatalf("expected max pinned data to be 10, got %d", account.MaxPinnedData)
-		} else if account.Description != desc {
-			t.Fatalf("expected description to be %q, got %q", desc, account.Description)
-		} else if account.LogoURL != logo {
-			t.Fatalf("expected logo to be %q, got %q", logo, account.LogoURL)
-		} else if account.ServiceURL != service {
-			t.Fatalf("expected service url to be %q, got %q", service, account.ServiceURL)
+		} else if account.App.Description != desc {
+			t.Fatalf("expected description to be %q, got %q", desc, account.App.Description)
+		} else if account.App.LogoURL != logo {
+			t.Fatalf("expected logo to be %q, got %q", logo, account.App.LogoURL)
+		} else if account.App.ServiceURL != service {
+			t.Fatalf("expected service url to be %q, got %q", service, account.App.ServiceURL)
 		} else if *account.ConnectKey != connectKey {
 			t.Fatalf("expected connect key to be %q, got %q", connectKey, *account.ConnectKey)
 		}
 	}
 
 	acc := types.GeneratePrivateKey().PublicKey()
-	meta := accounts.AccountMeta{
+	meta := accounts.AppMeta{
 		Description: "desc",
 		LogoURL:     "logo",
 		ServiceURL:  "service",
 	}
-	if err := store.UseAppConnectKey(connectKey, acc, meta); err != nil {
+	if err := store.RegisterAppKey(connectKey, acc, meta); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
 	assertAccount(acc, 0, 10, "desc", "logo", "service")
@@ -80,7 +80,7 @@ func TestAppConnectKeys(t *testing.T) {
 	}
 
 	// try again on an exhausted key
-	if err := store.UseAppConnectKey(connectKey, types.GeneratePrivateKey().PublicKey(), meta); !errors.Is(err, accounts.ErrKeyExhausted) {
+	if err := store.RegisterAppKey(connectKey, types.GeneratePrivateKey().PublicKey(), meta); !errors.Is(err, accounts.ErrKeyExhausted) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyExhausted, err)
 	}
 

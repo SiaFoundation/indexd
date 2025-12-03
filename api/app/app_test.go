@@ -68,6 +68,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	}
 
 	connectResp, err := client.RequestAppConnection(ctx, app.RegisterAppRequest{
+		AppID:       frand.Entropy256(),
 		Name:        "Test App",
 		Description: "A test application",
 		LogoURL:     "foo",
@@ -78,7 +79,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	}
 
 	// check the app is not authenticated yet
-	if ok, err := client.CheckAppAuth(ctx); err != nil {
+	if ok, err := client.CheckAppAuth(ctx, sk); err != nil {
 		t.Fatal(err)
 	} else if ok {
 		t.Fatal("expected app to not be authenticated yet")
@@ -87,8 +88,13 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	// approve the app
 	respondToAppConnection(t, connectResp.ResponseURL, key.Key, true)
 
+	// register the app key
+	if err = client.RegisterApp(ctx, connectResp.RegisterURL, sk); err != nil {
+		t.Fatal("failed to register app:", err)
+	}
+
 	// check the app is now authenticated
-	if ok, err := client.CheckAppAuth(ctx); err != nil {
+	if ok, err := client.CheckAppAuth(ctx, sk); err != nil {
 		t.Fatal(err)
 	} else if !ok {
 		t.Fatal("expected app to be authenticated")
@@ -155,27 +161,28 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// pin the slab
-	slabIDs, err := client.PinSlabs(context.Background(), params())
+	slabIDs, err := client.PinSlabs(context.Background(), sk, params())
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
 	slabID := slabIDs[0]
 
 	// unpin the slab
-	if err := client.UnpinSlab(context.Background(), slabID); err != nil {
+	if err := client.UnpinSlab(context.Background(), sk, slabID); err != nil {
 		t.Fatal("failed to unpin slab:", err)
 	}
 
 	// assert minimum redundancy is enforced
 	p := params()
 	p.Sectors = p.Sectors[:2]
-	_, err = client.PinSlabs(context.Background(), p)
+	_, err = client.PinSlabs(context.Background(), sk, p)
 	if err == nil || !strings.Contains(err.Error(), "not enough redundancy") {
 		t.Fatal("expected redundancy error, got:", err)
 	}
 
 	// assert hosts returns all usable hosts
-	usableHosts, err := client.Hosts(context.Background())
+	time.Sleep(time.Second) // allow some time to form contracts
+	usableHosts, err := client.Hosts(context.Background(), sk)
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 10 {
@@ -214,7 +221,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert filtering for quic only returns h1
-	usableHosts, err = client.Hosts(ctx, api.WithProtocol(quic.Protocol))
+	usableHosts, err = client.Hosts(ctx, sk, api.WithProtocol(quic.Protocol))
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 1 {
@@ -224,7 +231,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// filtering for US should only return h1
-	usableHosts, err = client.Hosts(ctx, api.WithCountry(locationUS.CountryCode))
+	usableHosts, err = client.Hosts(ctx, sk, api.WithCountry(locationUS.CountryCode))
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 1 {
@@ -240,7 +247,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// filtering for AU should only return h2
-	usableHosts, err = client.Hosts(ctx, api.WithCountry(locationAU.CountryCode))
+	usableHosts, err = client.Hosts(ctx, sk, api.WithCountry(locationAU.CountryCode))
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 1 {
@@ -262,7 +269,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert host is no longer returned
-	usableHosts, err = client.Hosts(context.Background())
+	usableHosts, err = client.Hosts(context.Background(), sk)
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
 	} else if len(usableHosts) != 9 {
@@ -270,11 +277,11 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert limit and offset are applied
-	if usableHosts, err := client.Hosts(context.Background(), api.WithLimit(1)); err != nil {
+	if usableHosts, err := client.Hosts(context.Background(), sk, api.WithLimit(1)); err != nil {
 		t.Fatal("failed to get hosts with limit:", err)
 	} else if len(usableHosts) != 1 {
 		t.Fatal("expected 1 usable host, got", len(usableHosts))
-	} else if usableHosts, err := client.Hosts(context.Background(), api.WithOffset(9), api.WithLimit(1)); err != nil {
+	} else if usableHosts, err := client.Hosts(context.Background(), sk, api.WithOffset(9), api.WithLimit(1)); err != nil {
 		t.Fatal("failed to get hosts with limit:", err)
 	} else if len(usableHosts) != 0 {
 		t.Fatal("expected 0 usable hosts, got", len(usableHosts))
@@ -283,20 +290,20 @@ func TestApplicationAPI(t *testing.T) {
 	// pin 2 slabs
 	slab1Params := params()
 	slab2Params := params()
-	slabIDs1, err := client.PinSlabs(context.Background(), slab1Params)
+	slabIDs1, err := client.PinSlabs(context.Background(), sk, slab1Params)
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
 	slabID1 := slabIDs1[0]
 
-	slabIDs2, err := client.PinSlabs(context.Background(), slab2Params)
+	slabIDs2, err := client.PinSlabs(context.Background(), sk, slab2Params)
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
 	slabID2 := slabIDs2[0]
 
 	// assert slab IDs are returned
-	slabsIDs, err := client.SlabIDs(context.Background())
+	slabsIDs, err := client.SlabIDs(context.Background(), sk)
 	if err != nil {
 		t.Fatal("failed to fetch slabs:", err)
 	} else if len(slabsIDs) != 2 {
@@ -306,7 +313,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert offset and limit are passed
-	slabsIDs, err = client.SlabIDs(context.Background(), api.WithOffset(1), api.WithLimit(1))
+	slabsIDs, err = client.SlabIDs(context.Background(), sk, api.WithOffset(1), api.WithLimit(1))
 	if err != nil {
 		t.Fatal("failed to fetch slabs with offset and limit:", err)
 	} else if len(slabsIDs) != 1 {
@@ -316,7 +323,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert slab is returned
-	slab1, err := client.Slab(context.Background(), slabID1)
+	slab1, err := client.Slab(context.Background(), sk, slabID1)
 	if err != nil {
 		t.Fatal("failed to fetch slab:", err)
 	} else if slab1.EncryptionKey != slab1Params.EncryptionKey {
@@ -328,7 +335,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert slab is returned
-	slab2, err := client.Slab(context.Background(), slabID2)
+	slab2, err := client.Slab(context.Background(), sk, slabID2)
 	if err != nil {
 		t.Fatal("failed to fetch slab:", err)
 	} else if slab2.EncryptionKey != slab2Params.EncryptionKey {
@@ -339,7 +346,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("unexpected sector roots in slab")
 	}
 
-	objs, err := client.ListObjects(context.Background(), slabs.Cursor{}, 100)
+	objs, err := client.ListObjects(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
@@ -364,17 +371,17 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// try to save the object with an invalid signature
-	if err := client.SaveObject(context.Background(), obj); err == nil || !strings.Contains(err.Error(), slabs.ErrInvalidObjectSignature.Error()) {
+	if err := client.SaveObject(context.Background(), sk, obj); err == nil || !strings.Contains(err.Error(), slabs.ErrInvalidObjectSignature.Error()) {
 		t.Fatalf("expected %v, got %v", slabs.ErrInvalidObjectSignature, err)
 	}
 
 	// sign and save the object
 	obj.Signature = sk.SignHash(obj.SigHash())
-	if err := client.SaveObject(context.Background(), obj); err != nil {
+	if err := client.SaveObject(context.Background(), sk, obj); err != nil {
 		t.Fatal(err)
 	}
 
-	objs, err = client.ListObjects(context.Background(), slabs.Cursor{}, 100)
+	objs, err = client.ListObjects(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 {
@@ -382,7 +389,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 	obj1 := *objs[0].Object
 
-	if objs, err := client.ListObjects(context.Background(), slabs.Cursor{
+	if objs, err := client.ListObjects(context.Background(), sk, slabs.Cursor{
 		After: obj1.UpdatedAt,
 		Key:   obj1.ID(),
 	}, 100); err != nil {
@@ -391,27 +398,27 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatalf("expected 0 objects, got %d", len(objs))
 	}
 
-	obj, err = client.Object(context.Background(), obj1.ID())
+	obj, err = client.Object(context.Background(), sk, obj1.ID())
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(obj, *objs[0].Object) {
 		t.Fatal("objects not equal")
 	}
 
-	if err := client.DeleteObject(context.Background(), obj1.ID()); err != nil {
+	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = client.Object(context.Background(), obj1.ID())
+	_, err = client.Object(context.Background(), sk, obj1.ID())
 	if err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
 		t.Fatal("expected object to be not found, got", err)
 	}
 
-	if err := client.DeleteObject(context.Background(), obj1.ID()); err == nil || err.Error() != slabs.ErrObjectNotFound.Error() {
+	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err == nil || err.Error() != slabs.ErrObjectNotFound.Error() {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
 	}
 
-	objs, err = client.ListObjects(context.Background(), slabs.Cursor{}, 100)
+	objs, err = client.ListObjects(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 {
@@ -426,7 +433,7 @@ func TestApplicationAPI(t *testing.T) {
 	sk2, _ := newAccount(t, cluster)
 	client2 := indexer.App(sk2)
 
-	slabIDs, err = client2.PinSlabs(context.Background(), params())
+	slabIDs, err = client2.PinSlabs(context.Background(), sk2, params())
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
@@ -442,12 +449,14 @@ func TestApplicationAPI(t *testing.T) {
 		}},
 	}
 	badObj.Signature = sk.SignHash(badObj.SigHash())
-	if err := client.SaveObject(context.Background(), badObj); err == nil || err.Error() != slabs.ErrObjectUnpinnedSlab.Error() {
+	if err := client.SaveObject(context.Background(), sk, badObj); err == nil || err.Error() != slabs.ErrObjectUnpinnedSlab.Error() {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectUnpinnedSlab, err)
 	}
 }
 
 func TestAppConnect(t *testing.T) {
+	appID := frand.Entropy256()
+
 	ctx := t.Context()
 	// create cluster with three hosts
 	logger := zap.NewNop()
@@ -457,7 +466,7 @@ func TestAppConnect(t *testing.T) {
 
 	connectKey, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
 		Description:   "hello world",
-		RemainingUses: 1,
+		RemainingUses: 2,
 	})
 	if err != nil {
 		t.Fatal("failed to add app connect key:", err)
@@ -466,7 +475,7 @@ func TestAppConnect(t *testing.T) {
 	sk := types.GeneratePrivateKey()
 	appClient := indexer.App(sk)
 
-	connected, err := appClient.CheckAppAuth(ctx)
+	connected, err := appClient.CheckAppAuth(ctx, sk)
 	if err != nil {
 		t.Fatal("failed to check app auth:", err)
 	} else if connected {
@@ -474,6 +483,7 @@ func TestAppConnect(t *testing.T) {
 	}
 
 	resp, err := appClient.RequestAppConnection(ctx, app.RegisterAppRequest{
+		AppID:       appID,
 		Name:        "test-app",
 		Description: "A test app",
 		ServiceURL:  "http://test-app.com",
@@ -482,22 +492,32 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("failed to request app connection:", err)
 	}
 
-	if ok, err := appClient.CheckRequestStatus(ctx, resp.StatusURL); err != nil {
+	if status, err := appClient.RequestStatus(ctx, resp.StatusURL); err != nil {
 		t.Fatal("failed to check request status:", err)
-	} else if ok {
+	} else if status.Approved {
 		t.Fatal("expected request to not be approved")
+	} else if status.UserSecret != (types.Hash256{}) {
+		t.Fatal("expected empty user secret")
+	}
+
+	if err := appClient.RegisterApp(ctx, resp.RegisterURL, sk); err == nil {
+		t.Fatal("expected registration to fail for unapproved request")
 	}
 
 	// reject the request
 	respondToAppConnection(t, resp.ResponseURL, connectKey.Key, false)
 
-	if _, err := appClient.CheckRequestStatus(ctx, resp.StatusURL); !errors.Is(err, app.ErrUserRejected) {
-		t.Fatalf("expected request to be rejected, got: %v", err)
+	if err := appClient.RegisterApp(ctx, resp.RegisterURL, sk); err == nil {
+		t.Fatal("expected registration to fail for rejected request")
+	}
+
+	if status, err := appClient.RequestStatus(ctx, resp.StatusURL); !errors.Is(err, app.ErrUserRejected) {
+		t.Fatalf("expected request to be rejected, got: %v %v", err, status)
 	}
 
 	// try again
-
 	resp, err = appClient.RequestAppConnection(ctx, app.RegisterAppRequest{
+		AppID:       appID,
 		Name:        "test-app",
 		Description: "A test app",
 		ServiceURL:  "http://test-app.com",
@@ -508,10 +528,17 @@ func TestAppConnect(t *testing.T) {
 
 	respondToAppConnection(t, resp.ResponseURL, connectKey.Key, true)
 
-	if ok, err := appClient.CheckRequestStatus(ctx, resp.StatusURL); err != nil {
+	status, err := appClient.RequestStatus(ctx, resp.StatusURL)
+	if err != nil {
 		t.Fatal("failed to check request status:", err)
-	} else if !ok {
+	} else if !status.Approved {
 		t.Fatal("expected request to be approved")
+	} else if status.UserSecret == (types.Hash256{}) {
+		t.Fatal("expected non-empty user secret")
+	}
+
+	if err := appClient.RegisterApp(ctx, resp.RegisterURL, sk); err != nil {
+		t.Fatal("failed to register app:", err)
 	}
 
 	// assert the account was created correctly
@@ -520,21 +547,43 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal(err)
 	} else if account.AccountKey != proto.Account(sk.PublicKey()) {
 		t.Fatal("account key mismatch")
-	} else if account.Description != "A test app" {
-		t.Fatal("description mismatch", account.Description)
-	} else if account.LogoURL != "" {
-		t.Fatal("expected empty logo url", account.LogoURL)
-	} else if account.ServiceURL != "http://test-app.com" {
-		t.Fatal("service url mismatch", account.ServiceURL)
+	} else if account.App.ID != appID {
+		t.Fatal("app id mismatch", account.App.ID)
+	} else if account.App.Description != "A test app" {
+		t.Fatal("description mismatch", account.App.Description)
+	} else if account.App.LogoURL != "" {
+		t.Fatal("expected empty logo url", account.App.LogoURL)
+	} else if account.App.ServiceURL != "http://test-app.com" {
+		t.Fatal("service url mismatch", account.App.ServiceURL)
 	} else if account.PinnedData != 0 {
 		t.Fatal("expected 0 pinned data, got", account.PinnedData)
 	}
 
-	appAccount, err := appClient.Account(context.Background())
+	appAccount, err := appClient.Account(context.Background(), sk)
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(account, appAccount) {
 		t.Fatalf("account mismatch: expected %+v, got %+v", account, appAccount)
+	}
+
+	// authenticate again to ensure the same user secret is returned
+	resp, err = appClient.RequestAppConnection(ctx, app.RegisterAppRequest{
+		AppID:       appID,
+		Name:        "test-app",
+		Description: "A test app",
+		ServiceURL:  "http://test-app.com",
+	})
+	if err != nil {
+		t.Fatal("failed to request app connection:", err)
+	}
+	respondToAppConnection(t, resp.ResponseURL, connectKey.Key, true)
+
+	if secondStatus, err := appClient.RequestStatus(ctx, resp.StatusURL); err != nil {
+		t.Fatal("failed to check request status:", err)
+	} else if !secondStatus.Approved {
+		t.Fatal("expected request to be approved")
+	} else if status.UserSecret != secondStatus.UserSecret {
+		t.Fatal("expected same user secret")
 	}
 }
 
@@ -571,6 +620,7 @@ func TestSharedObjects(t *testing.T) {
 		}
 
 		connectResp, err := client.RequestAppConnection(ctx, app.RegisterAppRequest{
+			AppID:       frand.Entropy256(),
 			Name:        "Test App",
 			Description: "A test application",
 			LogoURL:     "foo",
@@ -581,11 +631,14 @@ func TestSharedObjects(t *testing.T) {
 		}
 
 		respondToAppConnection(t, connectResp.ResponseURL, key.Key, true)
+		if err = client.RegisterApp(ctx, connectResp.RegisterURL, sk); err != nil {
+			t.Fatal("failed to register app:", err)
+		}
 		return client, sk
 	}
 
 	client1, sk1 := prepareAcccount(t)
-	client2, _ := prepareAcccount(t)
+	client2, sk2 := prepareAcccount(t)
 
 	// helper to generate slab pin parameters
 	randomSlab := func() slabs.SlabPinParams {
@@ -605,14 +658,14 @@ func TestSharedObjects(t *testing.T) {
 	}
 	// generate and pin a slab
 	slab1Params := randomSlab()
-	slab1sID, err := client1.PinSlabs(ctx, slab1Params)
+	slab1sID, err := client1.PinSlabs(ctx, sk1, slab1Params)
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
 	slab1ID := slab1sID[0]
 
 	slab2Params := randomSlab()
-	slab2sID, err := client1.PinSlabs(ctx, slab2Params)
+	slab2sID, err := client1.PinSlabs(ctx, sk1, slab2Params)
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
@@ -675,12 +728,12 @@ func TestSharedObjects(t *testing.T) {
 		},
 	}
 	obj.Signature = sk1.SignHash(obj.SigHash())
-	if err := client1.SaveObject(ctx, obj); err != nil {
+	if err := client1.SaveObject(ctx, sk1, obj); err != nil {
 		t.Fatal(err)
 	}
 
 	// populate the object's created and updated fields
-	obj, err = client1.Object(ctx, obj.ID())
+	obj, err = client1.Object(ctx, sk1, obj.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -689,7 +742,7 @@ func TestSharedObjects(t *testing.T) {
 	encryptionKey := frand.Bytes(32)
 
 	// create a shared URL for the object
-	shareURL, err := client1.CreateSharedObjectURL(ctx, obj.ID(), encryptionKey, time.Now().Add(2*time.Second))
+	shareURL, err := client1.CreateSharedObjectURL(ctx, sk1, obj.ID(), encryptionKey, time.Now().Add(2*time.Second))
 	if err != nil {
 		t.Fatal("failed to create shared object URL:", err)
 	}
@@ -705,7 +758,7 @@ func TestSharedObjects(t *testing.T) {
 	}
 
 	// make sure client2 has no objects
-	if objs, err := client2.ListObjects(ctx, slabs.Cursor{}, 100); err != nil {
+	if objs, err := client2.ListObjects(ctx, sk2, slabs.Cursor{}, 100); err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
 		t.Fatalf("expected 0 objects, got %d", len(objs))

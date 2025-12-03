@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,12 +9,15 @@ import (
 	"go.uber.org/zap"
 )
 
-func (cm *ContractManager) performBroadcastContractRevisions(log *zap.Logger) error {
+func (cm *ContractManager) performBroadcastContractRevisions(ctx context.Context, log *zap.Logger) error {
 	broadcastLog := log.Named("broadcast")
 	minBroadcast := time.Now().Add(-cm.revisionBroadcastInterval)
 
 	var exhausted bool
 	for !exhausted {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
 		contracts, err := cm.store.ContractsForBroadcasting(minBroadcast, 10)
 		if err != nil {
 			return fmt.Errorf("failed to fetch contracts for broadcasting: %w", err)
@@ -22,6 +26,9 @@ func (cm *ContractManager) performBroadcastContractRevisions(log *zap.Logger) er
 		}
 
 		for _, contractID := range contracts {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
 			err := cm.broadcastContractRevision(contractID, log)
 			if err != nil {
 				broadcastLog.Error("failed to broadcast contract revision", zap.Error(err))

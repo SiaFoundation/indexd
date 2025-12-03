@@ -15,6 +15,7 @@ import (
 
 type cachedHostStore struct {
 	tg     *threadgroup.ThreadGroup
+	appKey types.PrivateKey
 	client *app.Client
 
 	mu    sync.Mutex
@@ -73,7 +74,7 @@ func (chs *cachedHostStore) Usable(hostKey types.PublicKey) (bool, error) {
 }
 
 func (chs *cachedHostStore) updateHosts(ctx context.Context) error {
-	hostInfos, err := chs.client.Hosts(ctx)
+	hostInfos, err := chs.client.Hosts(ctx, chs.appKey)
 	if err != nil {
 		return err
 	}
@@ -88,9 +89,10 @@ func (chs *cachedHostStore) updateHosts(ctx context.Context) error {
 	return nil
 }
 
-func newCachedHostStore(client *app.Client) (*cachedHostStore, error) {
+func newCachedHostStore(client *app.Client, appKey types.PrivateKey) (*cachedHostStore, error) {
 	chs := &cachedHostStore{
 		tg:     threadgroup.New(),
+		appKey: appKey,
 		client: client,
 		hosts:  make(map[types.PublicKey]hosts.HostInfo),
 	}

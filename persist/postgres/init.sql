@@ -1,5 +1,6 @@
 CREATE TABLE app_connect_keys (
     id SERIAL PRIMARY KEY,
+    user_secret BYTEA UNIQUE NOT NULL CHECK (LENGTH(user_secret) = 32),
     app_key TEXT UNIQUE NOT NULL,
     use_description TEXT NOT NULL,
     remaining_uses INTEGER NOT NULL,
@@ -19,6 +20,7 @@ CREATE TABLE accounts (
     pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0), -- total pinned data in bytes
     max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0), -- max pinned data in bytes
     service_account BOOLEAN NOT NULL DEFAULT FALSE, -- true if this is a service account
+    app_id BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(app_id) = 32), -- app identifier
     description TEXT NOT NULL DEFAULT '',
     logo_url TEXT NOT NULL DEFAULT '',
     service_url TEXT NOT NULL DEFAULT '',

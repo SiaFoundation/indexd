@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
@@ -30,9 +29,16 @@ const (
 type Client struct {
 	baseURL string
 
-	// the following fields are used to sign requests
-	appkey   types.PrivateKey
 	validity time.Duration
+}
+
+// helper to parse URL and panic on error
+func mustParseURL(base, path string) *url.URL {
+	u, err := url.Parse(base + path)
+	if err != nil {
+		panic(err)
+	}
+	return u
 }
 
 // sign signs the request with the appropriate headers and returns the signed URL
@@ -98,7 +104,7 @@ func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, a
 	return r.Body, nil
 }
 
-func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route string, request any) (io.ReadCloser, error) {
+func (c *Client) signedRequestCustom(ctx context.Context, appKey types.PrivateKey, accept, method, route string, request any) (io.ReadCloser, error) {
 	var requestBuf []byte
 	if request != nil {
 		var err error
@@ -107,15 +113,15 @@ func (c *Client) signedRequestCustom(ctx context.Context, accept, method, route 
 			return nil, fmt.Errorf("failed to marshal request data: %w", err)
 		}
 	}
-	u, body, err := sign(c.appkey, time.Now().Add(c.validity), method, fmt.Sprintf("%s%s", c.baseURL, route), requestBuf)
+	u, body, err := sign(appKey, time.Now().Add(c.validity), method, fmt.Sprintf("%s%s", c.baseURL, route), requestBuf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign request: %w", err)
 	}
 	return doRequest(ctx, method, u, body, accept)
 }
 
-func (c *Client) signedRequestJSON(ctx context.Context, method, route string, data, resp any) error {
-	body, err := c.signedRequestCustom(ctx, applicationJSON, method, route, data)
+func (c *Client) signedRequestJSON(ctx context.Context, appKey types.PrivateKey, method, route string, data, resp any) error {
+	body, err := c.signedRequestCustom(ctx, appKey, applicationJSON, method, route, data)
 	if err != nil {
 		return err
 	}
@@ -128,8 +134,8 @@ func (c *Client) signedRequestJSON(ctx context.Context, method, route string, da
 	return json.NewDecoder(body).Decode(resp)
 }
 
-func (c *Client) signedRequestBinary(ctx context.Context, method, route string, data any, resp types.DecoderFrom) error {
-	body, err := c.signedRequestCustom(ctx, applicationOctetStream, method, route, data)
+func (c *Client) signedRequestBinary(ctx context.Context, appKey types.PrivateKey, method, route string, data any, resp types.DecoderFrom) error {
+	body, err := c.signedRequestCustom(ctx, appKey, applicationOctetStream, method, route, data)
 	if err != nil {
 		return err
 	}
@@ -141,98 +147,93 @@ func (c *Client) signedRequestBinary(ctx context.Context, method, route string, 
 	return d.Err()
 }
 
-// AccountToken generates an account token for the given host.
-func (c *Client) AccountToken(host types.PublicKey) proto.AccountToken {
-	return proto.NewAccountToken(c.appkey, host)
-}
-
 // Hosts returns all usable hosts.
-func (c *Client) Hosts(ctx context.Context, opts ...api.URLQueryParameterOption) (hosts []hosts.HostInfo, err error) {
+func (c *Client) Hosts(ctx context.Context, appKey types.PrivateKey, opts ...api.URLQueryParameterOption) (hosts []hosts.HostInfo, err error) {
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
 	}
 
-	err = c.signedRequestJSON(ctx, http.MethodGet, "/hosts?"+values.Encode(), nil, &hosts)
+	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, "/hosts?"+values.Encode(), nil, &hosts)
 	return
 }
 
 // PinSlabs pins slabs to the indexer.
-func (c *Client) PinSlabs(ctx context.Context, params ...slabs.SlabPinParams) (slabIDs []slabs.SlabID, err error) {
-	err = c.signedRequestJSON(ctx, http.MethodPost, "/slabs", params, &slabIDs)
+func (c *Client) PinSlabs(ctx context.Context, appKey types.PrivateKey, params ...slabs.SlabPinParams) (slabIDs []slabs.SlabID, err error) {
+	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/slabs", params, &slabIDs)
 	return
 }
 
 // UnpinSlab unpins a slab from the indexer.
-func (c *Client) UnpinSlab(ctx context.Context, slabID slabs.SlabID) error {
-	return c.signedRequestJSON(ctx, http.MethodDelete, fmt.Sprintf("/slabs/%s", slabID), nil, nil)
+func (c *Client) UnpinSlab(ctx context.Context, appKey types.PrivateKey, slabID slabs.SlabID) error {
+	return c.signedRequestJSON(ctx, appKey, http.MethodDelete, fmt.Sprintf("/slabs/%s", slabID), nil, nil)
 }
 
 // Slab retrieves a slab from the indexer by its ID.
-func (c *Client) Slab(ctx context.Context, slabID slabs.SlabID) (s slabs.PinnedSlab, err error) {
-	err = c.signedRequestBinary(ctx, http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil, &s)
+func (c *Client) Slab(ctx context.Context, appKey types.PrivateKey, slabID slabs.SlabID) (s slabs.PinnedSlab, err error) {
+	err = c.signedRequestBinary(ctx, appKey, http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil, &s)
 	return
 }
 
 // PruneSlabs prunes all pinned slabs of a user not currently connected to an
 // object.
-func (c *Client) PruneSlabs(ctx context.Context) error {
-	return c.signedRequestJSON(ctx, http.MethodPost, "/slabs/prune", nil, nil)
+func (c *Client) PruneSlabs(ctx context.Context, appKey types.PrivateKey) error {
+	return c.signedRequestJSON(ctx, appKey, http.MethodPost, "/slabs/prune", nil, nil)
 }
 
 // SlabIDs fetches the digests of slabs associated with the account. It supports
 // pagination through the provided options.
-func (c *Client) SlabIDs(ctx context.Context, opts ...api.URLQueryParameterOption) (resp []slabs.SlabID, err error) {
+func (c *Client) SlabIDs(ctx context.Context, appKey types.PrivateKey, opts ...api.URLQueryParameterOption) (resp []slabs.SlabID, err error) {
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
 	}
 
-	err = c.signedRequestJSON(ctx, http.MethodGet, "/slabs?"+values.Encode(), nil, &resp)
+	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, "/slabs?"+values.Encode(), nil, &resp)
 	return
 }
 
 // Object retrieves the object with the given key for the given account.
-func (c *Client) Object(ctx context.Context, objectID types.Hash256) (resp slabs.SealedObject, err error) {
-	err = c.signedRequestJSON(ctx, http.MethodGet, fmt.Sprintf("/objects/%s", objectID), nil, &resp)
+func (c *Client) Object(ctx context.Context, appKey types.PrivateKey, objectID types.Hash256) (resp slabs.SealedObject, err error) {
+	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, fmt.Sprintf("/objects/%s", objectID), nil, &resp)
 	return
 }
 
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
-func (c *Client) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEvent, err error) {
+func (c *Client) ListObjects(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEvent, err error) {
 	values := url.Values{}
 	values.Set("limit", fmt.Sprintf("%d", limit))
 	values.Set("after", cursor.After.Format(time.RFC3339Nano))
 	values.Set("key", cursor.Key.String())
 
-	err = c.signedRequestJSON(ctx, http.MethodGet, "/objects?"+values.Encode(), nil, &resp)
+	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, "/objects?"+values.Encode(), nil, &resp)
 	return
 }
 
 // SaveObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (c *Client) SaveObject(ctx context.Context, obj slabs.SealedObject) (err error) {
-	err = c.signedRequestJSON(ctx, http.MethodPost, "/objects", obj, nil)
+func (c *Client) SaveObject(ctx context.Context, appKey types.PrivateKey, obj slabs.SealedObject) (err error) {
+	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/objects", obj, nil)
 	return
 }
 
 // DeleteObject deletes the object with the given key for the given account.
-func (c *Client) DeleteObject(ctx context.Context, key types.Hash256) (err error) {
-	err = c.signedRequestJSON(ctx, http.MethodDelete, fmt.Sprintf("/objects/%s", key), nil, nil)
+func (c *Client) DeleteObject(ctx context.Context, appKey types.PrivateKey, key types.Hash256) (err error) {
+	err = c.signedRequestJSON(ctx, appKey, http.MethodDelete, fmt.Sprintf("/objects/%s", key), nil, nil)
 	return
 }
 
 // Account retrieves the account of the current user.
-func (c *Client) Account(ctx context.Context) (resp accounts.Account, err error) {
-	err = c.signedRequestJSON(ctx, http.MethodGet, "/account", nil, &resp)
+func (c *Client) Account(ctx context.Context, appKey types.PrivateKey) (resp accounts.Account, err error) {
+	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, "/account", nil, &resp)
 	return
 }
 
 // CreateSharedObjectURL generates a signed URL for accessing the object with the given
 // key. The URL is valid until the specified validUntil time.
-func (c *Client) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256, masterKey []byte, validUntil time.Time) (string, error) {
-	u, _, err := sign(c.appkey, validUntil, http.MethodGet, fmt.Sprintf("%s/objects/%s/shared", c.baseURL, objectKey), nil)
+func (c *Client) CreateSharedObjectURL(ctx context.Context, appKey types.PrivateKey, objectKey types.Hash256, masterKey []byte, validUntil time.Time) (string, error) {
+	u, _, err := sign(appKey, validUntil, http.MethodGet, fmt.Sprintf("%s/objects/%s/shared", c.baseURL, objectKey), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign request: %w", err)
 	}
@@ -279,47 +280,69 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 
 // RequestAppConnection requests an application connection to the indexer.
 func (c *Client) RequestAppConnection(ctx context.Context, request RegisterAppRequest) (resp RegisterAppResponse, err error) {
-	err = c.signedRequestJSON(ctx, http.MethodPost, "/auth/connect", request, &resp)
+	requestBuf, err := json.Marshal(request)
+	if err != nil {
+		return RegisterAppResponse{}, fmt.Errorf("failed to marshal request data: %w", err)
+	}
+	body, err := doRequest(ctx, http.MethodPost, mustParseURL(c.baseURL, "/auth/connect"), bytes.NewReader(requestBuf), applicationJSON)
+	if err != nil {
+		return RegisterAppResponse{}, err
+	}
+	defer io.Copy(io.Discard, body)
+	defer body.Close()
+	err = json.NewDecoder(body).Decode(&resp)
 	return
 }
 
-// CheckRequestStatus checks if an auth request has been approved.
+// RequestStatus checks if an auth request has been approved.
 // If the auth request is still pending, it returns false.
-func (c *Client) CheckRequestStatus(ctx context.Context, statusURL string) (bool, error) {
-	requestURL, body, err := sign(c.appkey, time.Now().Add(c.validity), http.MethodGet, statusURL, nil)
+func (c *Client) RequestStatus(ctx context.Context, statusURL string) (status AuthConnectStatusResponse, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
 	if err != nil {
-		return false, fmt.Errorf("failed to sign request: %w", err)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL.String(), body)
-	if err != nil {
-		return false, fmt.Errorf("failed to create request: %w", err)
+		return AuthConnectStatusResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("failed to check app auth: %w", err)
+		return AuthConnectStatusResponse{}, fmt.Errorf("failed to check app auth: %w", err)
 	}
 	defer resp.Body.Close()
 
 	switch resp.StatusCode {
 	case http.StatusNotFound:
-		return false, ErrUserRejected
+		return AuthConnectStatusResponse{}, ErrUserRejected
 	case http.StatusOK:
-		var connectResp AuthConnectStatusResponse
-		err = json.NewDecoder(resp.Body).Decode(&connectResp)
-		return connectResp.Approved, err
+		err = json.NewDecoder(resp.Body).Decode(&status)
+		return
 	default:
 		buf, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		if err != nil {
-			return false, fmt.Errorf("failed to read response error: %w", err)
+			return AuthConnectStatusResponse{}, fmt.Errorf("failed to read response error: %w", err)
 		}
-		return false, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, buf)
+		return AuthConnectStatusResponse{}, fmt.Errorf("unexpected status code %d: %s", resp.StatusCode, buf)
 	}
+}
+
+// RegisterApp registers the application with the indexer using the provided
+// app key and registration URL.
+func (c *Client) RegisterApp(ctx context.Context, registerURL string, appKey types.PrivateKey) error {
+	u, err := url.Parse(registerURL)
+	if err != nil {
+		return fmt.Errorf("failed to parse register URL: %w", err)
+	}
+
+	u, body, err := sign(appKey, time.Now().Add(c.validity), http.MethodPost, u.String(), nil)
+	if err != nil {
+		return fmt.Errorf("failed to sign request: %w", err)
+	}
+
+	_, err = doRequest(ctx, http.MethodPost, u, body, applicationJSON)
+	return err
 }
 
 // CheckAppAuth checks if the application is authenticated with the indexer.
 // It returns true if authenticated, false if not, and an error if the request fails.
-func (c *Client) CheckAppAuth(ctx context.Context) (bool, error) {
-	u, body, err := sign(c.appkey, time.Now().Add(c.validity), http.MethodGet, fmt.Sprintf("%s/auth/check", c.baseURL), nil)
+func (c *Client) CheckAppAuth(ctx context.Context, appKey types.PrivateKey) (bool, error) {
+	u, body, err := sign(appKey, time.Now().Add(c.validity), http.MethodGet, fmt.Sprintf("%s/auth/check", c.baseURL), nil)
 	if err != nil {
 		return false, fmt.Errorf("failed to sign request: %w", err)
 	}
@@ -362,11 +385,9 @@ func WithValidity(validity time.Duration) ClientOption {
 // NewClient creates a new AppClient that can be used to interact with the
 // application API of the indexer. The address should be the full URL to the
 // application API, including the scheme (e.g., "http://indexer.sia.tech").
-func NewClient(address string, appKey types.PrivateKey, opts ...ClientOption) *Client {
+func NewClient(address string, opts ...ClientOption) *Client {
 	c := &Client{
-		baseURL: address,
-
-		appkey:   appKey,
+		baseURL:  address,
 		validity: defaultValidity,
 	}
 

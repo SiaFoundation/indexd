@@ -61,7 +61,8 @@ type (
 		ServiceAccountBalance(hostKey types.PublicKey, account proto.Account) (types.Currency, error)
 
 		ValidAppConnectKey(string) (bool, error)
-		UseAppConnectKey(string, types.PublicKey, AccountMeta) error
+		AppConnectKeyUserSecret(string) (secret types.Hash256, err error)
+		RegisterAppKey(string, types.PublicKey, AppMeta) error
 		AddAppConnectKey(UpdateAppConnectKey) (ConnectKey, error)
 		UpdateAppConnectKey(UpdateAppConnectKey) (ConnectKey, error)
 		DeleteAppConnectKey(string) error

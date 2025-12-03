@@ -473,10 +473,14 @@ paths:
             schema:
               type: object
               required:
+                - appID
                 - name
                 - description
                 - serviceURL
               properties:
+                appID:
+                  $ref: "#/components/schemas/Hash256"
+                  description: Unique, stable identifier for the application.
                 name:
                   type: string
                   description: Application name
@@ -494,7 +498,7 @@ paths:
                 callbackURL:
                   type: string
                   format: uri
-                  description: URL of the application callback
+                  description: Optional URL the indexer can redirect to after approval
       responses:
         "200":
           description: Application connection request accepted
@@ -503,7 +507,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegisterAppResponse"
         "400":
-          description: Invalid request (missing required fields or signature)
+          description: Invalid request (missing required fields)
         "409":
           description: Application already connected
 
@@ -517,16 +521,20 @@ paths:
               "context"
               "go.sia.tech/indexd/app"
               "go.sia.tech/core/types"
+              "lukechampine.com/frand"
             )
 
+            var appID = frand.Entropy256() // app ID should be constant for your application, not random
+
             func main() {
-              var appKey types.PrivateKey
-              client, err := app.NewClient("http://localhost:9982", appKey)
-              connectResp, err := client.RequestAppConnection(ctx, app.RegisterAppRequest{
+              client := app.NewClient("http://localhost:9982")
+              connectResp, err := client.RequestAppConnection(context.Background(), app.RegisterAppRequest{
+                AppID:       appID,
                 Name:        "Test App",
                 Description: "A test application",
-                LogoURL:     "foo",
-                ServiceURL:  "bar",
+                LogoURL:     "https://example.com/logo.png",
+                ServiceURL:  "https://example.com",
+                CallbackURL: "https://example.com/connected",
               })
               ...
             }
@@ -559,8 +567,8 @@ paths:
 
             func main() {
               var appKey types.PrivateKey
-              client, err := app.NewClient("http://localhost:9982", appKey)
-              ok, err := client.CheckAppAuth(ctx)
+              client := app.NewClient("http://localhost:9982")
+              ok, err := client.CheckAppAuth(context.Background(), appKey)
               ...
             }
 
@@ -606,14 +614,14 @@ paths:
                   type: boolean
                   description: Whether to approve the application connection request or not.
       responses:
-        "200":
+        "204":
           description: Request processed successfully
         "401":
           description: Invalid connect key
         "403":
           description: Connect key exhausted
         "404":
-          description: Unknown request ID
+          description: Request invalid or expired
 
   /auth/connect/{requestID}/status:
     get:
@@ -634,8 +642,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthConnectStatusResponse"
-        "400":
-          description: Invalid app key
+        "404":
+          description: Request invalid or expired
+
+  /auth/connect/{requestID}/register:
+    post:
+      tags:
+        - auth
+      summary: Finalize application registration after approval
+      description: >
+        Registers the application's public key using a signed request derived from the user secret returned by the status endpoint.
+        This endpoint must be called after the user has approved the request.
+      operationId: authRegister
+      parameters:
+        - name: requestID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Application registered successfully
+        "401":
+          description: Invalid signature or connect key
+        "403":
+          description: Connect key exhausted or request not approved
         "404":
           description: Unknown request ID
         "410":

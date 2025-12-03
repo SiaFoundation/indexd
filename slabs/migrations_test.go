@@ -28,7 +28,7 @@ func TestMigrateSlab(t *testing.T) {
 
 	// prepare account
 	a1 := types.PublicKey{1}
-	db.AddAccount(a1, accounts.AccountMeta{})
+	db.AddAccount(a1, accounts.AppMeta{})
 
 	client := newMockHostClient()
 

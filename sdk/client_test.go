@@ -103,7 +103,7 @@ func TestDownload(t *testing.T) {
 		t.Fatalf("failed to upload: %v", err)
 	}
 
-	err = s.client.SaveObject(t.Context(), obj.Seal(appKey))
+	err = s.client.SaveObject(t.Context(), appKey, obj.Seal(appKey))
 	if err != nil {
 		t.Fatalf("failed to save object to mock client: %v", err)
 	}
@@ -210,7 +210,8 @@ func TestE2E(t *testing.T) {
 	cluster.Indexer.AddTestAccount(t, privateKey.PublicKey())
 	cluster.WaitForContracts(t)
 
-	client, err := NewSDK(cluster.Indexer.AppAPIAddr(), privateKey, WithLogger(log.Named("sdk")))
+	b := NewBuilder(cluster.Indexer.AppAPIAddr(), AppMetadata{})
+	client, err := b.SDK(&AppKey{privateKey}, WithLogger(log.Named("sdk")))
 	if err != nil {
 		t.Fatal(err)
 	}

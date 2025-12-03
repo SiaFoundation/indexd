@@ -56,7 +56,8 @@ type (
 	// Accounts defines the account management interface for the application API.
 	Accounts interface {
 		ValidAppConnectKey(context.Context, string) (bool, error)
-		UseAppConnectKey(context.Context, string, types.PublicKey, accounts.AccountMeta) error
+		RegisterAppKey(string, types.PublicKey, accounts.AppMeta) error
+		AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error)
 
 		HasAccount(context.Context, types.PublicKey) (bool, error)
 		Account(context.Context, types.PublicKey) (accounts.Account, error)
@@ -68,25 +69,30 @@ type (
 	}
 
 	authReq struct {
-		Request     RegisterAppRequest
-		ResponseURL string
-		AppKey      types.PublicKey
-		Expiration  time.Time
+		Request    RegisterAppRequest
+		Expiration time.Time
+
+		// set when the user approves the request
+		Approved   bool
+		UserSecret types.Hash256
+		ConnectKey string // ties the request to the app connect key used
 	}
 
 	// A RegisterAppRequest is the request body for registering a new application.
 	RegisterAppRequest struct {
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		LogoURL     string `json:"logoURL"`
-		ServiceURL  string `json:"serviceURL"`
-		CallbackURL string `json:"callbackURL"`
+		AppID       types.Hash256 `json:"appID"`
+		Name        string        `json:"name"`
+		Description string        `json:"description"`
+		LogoURL     string        `json:"logoURL"`
+		ServiceURL  string        `json:"serviceURL"`
+		CallbackURL string        `json:"callbackURL"`
 	}
 
 	// AuthConnectStatusResponse is the response body for checking the status of an
 	// application connection request.
 	AuthConnectStatusResponse struct {
-		Approved bool `json:"approved"`
+		Approved   bool          `json:"approved"`
+		UserSecret types.Hash256 `json:"userSecret,omitempty"`
 	}
 
 	// RegisterAppResponse is the response body for registering a new application.
@@ -95,6 +101,7 @@ type (
 	RegisterAppResponse struct {
 		ResponseURL string    `json:"responseURL"`
 		StatusURL   string    `json:"statusURL"`
+		RegisterURL string    `json:"registerURL"`
 		Expiration  time.Time `json:"expiration"`
 	}
 
@@ -392,28 +399,17 @@ func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(nil)
 }
 
-func (a *app) handleAuthRegister(jc jape.Context) {
-	// check whether the request is properly signed
-	pk, ok := validateURLSignature(jc, a.hostname, jc.Request.URL.Path)
-	if !ok {
-		return
-	}
-
-	// check if the account is already connected
-	if known, err := a.accounts.HasAccount(jc.Request.Context(), pk); err != nil {
-		jc.Error(ErrInternalError, http.StatusInternalServerError)
-		return
-	} else if known {
-		jc.Error(ErrAlreadyConnected, http.StatusConflict)
-		return
-	}
-
+// 1. app requests connection by POSTing to /auth/connect
+func (a *app) handleAuthRequest(jc jape.Context) {
 	var req RegisterAppRequest
 	if err := jc.Decode(&req); err != nil {
 		return
 	}
 
 	switch {
+	case req.AppID == types.Hash256{}:
+		jc.Error(errors.New("app ID is required"), http.StatusBadRequest)
+		return
 	case req.Name == "":
 		jc.Error(errors.New("name is required"), http.StatusBadRequest)
 		return
@@ -431,7 +427,6 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 	a.mu.Lock()
 	a.authRequests[requestID] = authReq{
 		Request:    req,
-		AppKey:     pk,
 		Expiration: expiration,
 	}
 	a.mu.Unlock()
@@ -443,6 +438,7 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 	jc.Encode(RegisterAppResponse{
 		ResponseURL: fmt.Sprintf("%s/auth/connect/%s", a.advertiseURL, requestID),
 		StatusURL:   fmt.Sprintf("%s/auth/connect/%s/status", a.advertiseURL, requestID),
+		RegisterURL: fmt.Sprintf("%s/auth/connect/%s/register", a.advertiseURL, requestID),
 		Expiration:  expiration,
 	})
 }
@@ -451,41 +447,9 @@ func (a *app) handleGETAuthCheck(jc jape.Context, _ types.PublicKey) {
 	jc.Encode(nil) // if we reached this point, account is already authenticated
 }
 
-func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
-	pk, ok := validateURLSignature(jc, a.hostname, jc.Request.URL.Path)
-	if !ok {
-		return
-	}
-
-	if ok, err := a.accounts.HasAccount(jc.Request.Context(), pk); err != nil {
-		jc.Error(ErrInternalError, http.StatusInternalServerError)
-		return
-	} else if ok {
-		jc.Encode(AuthConnectStatusResponse{
-			Approved: true,
-		})
-		return
-	}
-
-	var requestID string
-	jc.DecodeParam("requestID", &requestID)
-
-	a.mu.Lock()
-	authReq, ok := a.authRequests[requestID]
-	a.mu.Unlock()
-	switch {
-	case !ok:
-		jc.Error(fmt.Errorf("unknown request ID %q", requestID), http.StatusNotFound)
-	case authReq.AppKey != pk:
-		jc.Error(fmt.Errorf("invalid app key"), http.StatusBadRequest)
-	case time.Now().After(authReq.Expiration):
-		jc.Error(fmt.Errorf("request expired"), http.StatusGone)
-	default:
-		jc.Encode(AuthConnectStatusResponse{
-			Approved: false,
-		})
-	}
-}
+// 2. user is redirected to /auth/connect/:requestID to approve or reject the connection.
+// Serves a UI for the user to approve or reject the connection.
+// Approval requires the user to enter an app connect key.
 func (a *app) handleGETAuthConnectUI(jc jape.Context) {
 	var requestID string
 	jc.DecodeParam("requestID", &requestID)
@@ -505,10 +469,9 @@ func (a *app) handleGETAuthConnectUI(jc jape.Context) {
 	}
 }
 
+// 3. web UI sends approval/rejection
+// If approved, a shared secret is generated.
 func (a *app) handlePOSTAuthConnect(jc jape.Context) {
-	_, connectKey, _ := jc.Request.BasicAuth()
-	ctx := jc.Request.Context()
-
 	if jc.Request.Host != a.hostname {
 		jc.Error(fmt.Errorf("invalid hostname %q", jc.Request.Host), http.StatusBadRequest)
 		return
@@ -520,34 +483,108 @@ func (a *app) handlePOSTAuthConnect(jc jape.Context) {
 		return
 	}
 
-	a.mu.Lock()
-	req, ok := a.authRequests[requestID]
-	a.mu.Unlock()
-	if !ok {
-		jc.Error(fmt.Errorf("unknown request ID %q", requestID), http.StatusNotFound)
-		return
-	}
-
 	var approveReq ApproveAppRequest
 	if err := jc.Decode(&approveReq); err != nil {
 		jc.Error(err, http.StatusBadRequest)
 		return
 	}
 
-	a.mu.Lock()
-	delete(a.authRequests, requestID)
-	a.mu.Unlock()
+	_, connectKey, ok := jc.Request.BasicAuth()
+	if !ok || connectKey == "" {
+		jc.Error(fmt.Errorf("missing basic auth password"), http.StatusBadRequest)
+		return
+	}
 
 	if !approveReq.Approve {
-		// request is rejected, nothing to do
+		// user rejected the request
+		a.mu.Lock()
+		delete(a.authRequests, requestID)
+		a.mu.Unlock()
 		jc.Encode(nil)
 		return
 	}
 
-	err := a.accounts.UseAppConnectKey(ctx, connectKey, req.AppKey, accounts.AccountMeta{
-		Description: req.Request.Description,
-		LogoURL:     req.Request.LogoURL,
-		ServiceURL:  req.Request.ServiceURL,
+	// get the auth request
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	authReq, ok := a.authRequests[requestID]
+	if !ok || time.Now().After(authReq.Expiration) {
+		jc.Error(fmt.Errorf("request invalid or expired"), http.StatusNotFound)
+		return
+	} else if authReq.Approved {
+		return
+	}
+
+	// derive shared secret
+	sharedSecret, err := a.accounts.AppSecret(connectKey, authReq.Request.AppID)
+	if err != nil {
+		jc.Error(fmt.Errorf("failed to derive app secret: %w", err), http.StatusInternalServerError)
+		return
+	}
+
+	// update the auth request with the shared secret and approval status
+	authReq.UserSecret = sharedSecret
+	authReq.Approved = approveReq.Approve
+	authReq.ConnectKey = connectKey
+	a.authRequests[requestID] = authReq
+	jc.Encode(nil)
+}
+
+// 4. app polls /auth/connect/:requestID/status to check if the user approved or rejected the connection.
+// If the user approves, the app receives a shared secret.
+func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
+	var requestID string
+	jc.DecodeParam("requestID", &requestID)
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	authReq, ok := a.authRequests[requestID]
+	if !ok || time.Now().After(authReq.Expiration) {
+		jc.Error(fmt.Errorf("request invalid or expired"), http.StatusNotFound)
+		return
+	}
+	jc.Encode(AuthConnectStatusResponse{
+		Approved:   authReq.Approved,
+		UserSecret: authReq.UserSecret,
+	})
+}
+
+// 5. app registers the public key with indexd using a request signed
+// with the derived private key
+func (a *app) handleAuthRegister(jc jape.Context) {
+	var requestID string
+	if err := jc.DecodeParam("requestID", &requestID); err != nil {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	}
+
+	a.mu.Lock()
+	authReq, ok := a.authRequests[requestID]
+	a.mu.Unlock()
+	if !ok {
+		jc.Error(fmt.Errorf("unknown request ID %q", requestID), http.StatusNotFound)
+		return
+	} else if time.Now().After(authReq.Expiration) {
+		jc.Error(fmt.Errorf("request expired"), http.StatusGone)
+		return
+	} else if !authReq.Approved {
+		jc.Error(ErrUserRejected, http.StatusForbidden)
+		return
+	} else if authReq.UserSecret == (types.Hash256{}) {
+		panic("user secret is empty for approved request") // should never happen
+	}
+
+	// check whether the request is properly signed
+	appKey, ok := validateURLSignature(jc, a.hostname, jc.Request.URL.Path)
+	if !ok {
+		return
+	}
+
+	err := a.accounts.RegisterAppKey(authReq.ConnectKey, appKey, accounts.AppMeta{
+		ID:          authReq.Request.AppID,
+		Description: authReq.Request.Description,
+		LogoURL:     authReq.Request.LogoURL,
+		ServiceURL:  authReq.Request.ServiceURL,
 	})
 	switch {
 	case errors.Is(err, accounts.ErrExists):
@@ -654,11 +691,22 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 	return jape.Mux(map[string]jape.Handler{
 		"GET /account": wrapCORS(wrapSignedAuth(a.handleGETAccount)),
 
-		"POST /auth/connect":                  a.handleAuthRegister, // register request
-		"GET /auth/connect/:requestID":        a.handleGETAuthConnectUI,
-		"POST /auth/connect/:requestID":       wrapBasicAuth(a.handlePOSTAuthConnect), // accept/reject
+		// auth is a multi-step process designed to protect privacy while allowing arbitrary apps to connect:
+		// 1. app requests connection by POSTing to /auth/connect
+		"POST /auth/connect": a.handleAuthRequest,
+		// 2. user is redirected to /auth/connect/:requestID to approve or reject the connection.
+		// Approval requires the user to enter their indexd credentials.
+		"GET /auth/connect/:requestID": a.handleGETAuthConnectUI,
+		// 3. web UI sends approval/rejection by POSTing to /auth/connect/:requestID
+		"POST /auth/connect/:requestID": wrapBasicAuth(a.handlePOSTAuthConnect), // accept/reject
+		// 4. app polls /auth/connect/:requestID/status to check if the user approved or rejected the connection.
+		// If the user approves, the app receives a shared secret.
 		"GET /auth/connect/:requestID/status": wrapCORS(a.handleGETAuthConnectStatus),
-		"GET /auth/check":                     wrapCORS(wrapSignedAuth(a.handleGETAuthCheck)),
+		// 5. once approved, the app derives an ed25519 keypair using `HKDF(user's mnemonic, its app ID, user secret)`
+		// app registers the public key with indexd using a request signed with the derived private key
+		"POST /auth/connect/:requestID/register": wrapCORS(a.handleAuthRegister),
+		// basic auth endpoint to check if an app key is already approved
+		"GET /auth/check": wrapCORS(wrapSignedAuth(a.handleGETAuthCheck)),
 
 		"GET /hosts": wrapCORS(wrapSignedAuth(a.handleGETHosts)),
 

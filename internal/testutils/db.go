@@ -123,7 +123,7 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 		t.Fatal(err)
 	}
 
-	if err := ts.UseAppConnectKey(connectKey, ak, accounts.AccountMeta{}); err != nil {
+	if err := ts.RegisterAppKey(connectKey, ak, accounts.AppMeta{}); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -132,7 +132,7 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 func (s TestStore) AddTestServiceAccount(t testing.TB, hk types.PublicKey, ak proto.Account) {
 	t.Helper()
 
-	if err := s.Store.AddServiceAccount(types.PublicKey(ak), accounts.AccountMeta{}); err != nil {
+	if err := s.Store.AddServiceAccount(types.PublicKey(ak), accounts.AppMeta{}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Store.UpdateServiceAccountBalance(hk, ak, types.ZeroCurrency); err != nil {
