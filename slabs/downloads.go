@@ -37,12 +37,15 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 	slabHosts := make(map[types.PublicKey]slabDownload)
 	candidates := make([]types.PublicKey, 0, len(slab.Sectors))
 	for i, sector := range slab.Sectors {
-		if sector.HostKey != nil {
-			candidates = append(candidates, *sector.HostKey)
-			slabHosts[*sector.HostKey] = slabDownload{
-				root:  sector.Root,
-				index: i,
-			}
+		if sector.HostKey == nil {
+			continue
+		} else if _, exists := slabHosts[*sector.HostKey]; exists {
+			continue // prevent duplicates
+		}
+		candidates = append(candidates, *sector.HostKey)
+		slabHosts[*sector.HostKey] = slabDownload{
+			root:  sector.Root,
+			index: i,
 		}
 	}
 	candidates = m.hosts.Prioritize(candidates)

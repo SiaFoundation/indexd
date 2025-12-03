@@ -279,3 +279,24 @@ func TestProviderCandidates(t *testing.T) {
 		seen[pk] = true
 	}
 }
+
+func TestDuplicateCandidates(t *testing.T) {
+	hosts := []types.PublicKey{
+		types.GeneratePrivateKey().PublicKey(),
+		types.GeneratePrivateKey().PublicKey(),
+		types.GeneratePrivateKey().PublicKey(),
+	}
+	duplicates := append(slices.Clone(hosts), hosts[1], hosts[2], hosts[0], hosts[1])
+
+	candidates := NewCandidates(duplicates)
+	seen := make(map[types.PublicKey]struct{})
+	for pk := range candidates.Iter() {
+		if _, ok := seen[pk]; ok {
+			t.Fatalf("duplicate candidate host: %s", pk.String())
+		}
+		seen[pk] = struct{}{}
+	}
+	if len(seen) != len(hosts) {
+		t.Fatalf("expected %d unique candidates, got %d", len(hosts), len(seen))
+	}
+}

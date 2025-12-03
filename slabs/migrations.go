@@ -160,8 +160,10 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 
 	// prepare a map of good contracts
 	goodContractMap := make(map[types.FileContractID]contracts.Contract)
+	hasGoodContract := make(map[types.PublicKey]struct{})
 	for _, contract := range goodContracts {
 		if _, ok := hostsMap[contract.HostKey]; ok {
+			hasGoodContract[contract.HostKey] = struct{}{}
 			goodContractMap[contract.ID] = contract
 		}
 	}
@@ -191,6 +193,8 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 			toMigrate = append(toMigrate, i)
 			continue
 		}
+		// prevent duplicate hosts
+		delete(hostsMap, *sector.HostKey)
 
 		if sector.ContractID != nil {
 			if _, ok := goodContractMap[*sector.ContractID]; !ok {
@@ -203,18 +207,14 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contract
 
 		// sector will not be migrated. Remove it from the hosts map
 		// and add it to the spaced set.
-		delete(hostsMap, *sector.HostKey)
 		set.Add(host.Info())
 	}
-
-	// return all hosts with contracts that are good, currently not in use and
-	// are sufficiently far apart
 	var candidates []types.PublicKey
-	for _, contract := range goodContractMap {
-		if host, ok := hostsMap[contract.HostKey]; ok && set.Add(host.Info()) {
+	for _, host := range hostsMap {
+		// must have a good contract and be sufficiently far apart
+		if _, ok := hasGoodContract[host.PublicKey]; ok && set.Add(host.Info()) {
 			candidates = append(candidates, host.PublicKey)
 		}
 	}
-
 	return toMigrate, candidates
 }

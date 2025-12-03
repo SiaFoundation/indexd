@@ -30,6 +30,15 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	// defensive programming to ensure shards are
+	// never uploaded to the same host twice.
+	var used sync.Map
+	for _, sector := range slab.Sectors {
+		if sector.HostKey != nil {
+			used.Store(*sector.HostKey, struct{}{})
+		}
+	}
+
 	// prioritize available candidates based on latest reliability and performance
 	candidates := client.NewCandidates(m.hosts.Prioritize(available))
 
@@ -79,6 +88,8 @@ top:
 						cancel()
 						log.Error("shard root mismatch after upload, user data corrupt", zap.Stringer("expected", shardRoot), zap.Stringer("actual", result.Root))
 						return
+					} else if _, existed := used.Swap(hostKey, struct{}{}); existed {
+						log.Panic("host already used for another shard", zap.Stringer("hostKey", hostKey)) // developer error
 					}
 
 					// debit service account

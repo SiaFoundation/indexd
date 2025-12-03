@@ -133,8 +133,16 @@ func (c *Candidates) Retry(host types.PublicKey) {
 
 // NewCandidates creates a new Candidates with the provided hosts.
 func NewCandidates(hosts []types.PublicKey) *Candidates {
+	seen := make(map[types.PublicKey]struct{})
+	uniqueHosts := make([]types.PublicKey, 0, len(hosts))
+	for _, host := range hosts {
+		if _, ok := seen[host]; !ok {
+			seen[host] = struct{}{}
+			uniqueHosts = append(uniqueHosts, host)
+		}
+	}
 	return &Candidates{
-		hosts: hosts,
+		hosts: uniqueHosts,
 	}
 }
 
