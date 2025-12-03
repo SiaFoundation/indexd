@@ -10,7 +10,6 @@ import (
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
-	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
@@ -32,7 +31,7 @@ func (s *Store) pinRandomObject(t testing.TB, acc proto.Account, ss []slabs.Slab
 
 func TestObject(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
-	acc := proto4.Account{1}
+	acc := proto.Account{1}
 	store.addTestAccount(t, types.PublicKey(acc))
 	hk := store.addTestHost(t)
 	fcid := store.addTestContract(t, hk)
