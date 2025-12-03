@@ -123,8 +123,9 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 			return err
 		}
 
+		batch := &pgx.Batch{}
 		for i, slab := range obj.Slabs {
-			rows, err := tx.Query(ctx, `
+			batch.Queue(`
 				SELECT s.sector_root, h.public_key
 				FROM slabs
 				JOIN slab_sectors ss ON ss.slab_id = slabs.id
@@ -132,29 +133,26 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 				LEFT JOIN hosts h ON h.id = s.host_id
 				WHERE slabs.digest = $1
 				ORDER BY ss.slab_index ASC
-			`, sqlHash256(slab.ID))
-			if err != nil {
-				return fmt.Errorf("failed to query slab sectors: %w", err)
-			}
+			`, sqlHash256(slab.ID)).Query(func(rows pgx.Rows) error {
+				defer rows.Close()
 
-			for rows.Next() {
-				var sector slabs.TrackedSector
-				var hostKey sql.Null[sqlPublicKey]
-				err = rows.Scan((*sqlHash256)(&sector.Root), &hostKey)
-				if err != nil {
-					return fmt.Errorf("failed to scan slab sector: %w", err)
+				for rows.Next() {
+					var sector slabs.TrackedSector
+					var hostKey sql.Null[sqlPublicKey]
+					err = rows.Scan((*sqlHash256)(&sector.Root), &hostKey)
+					if err != nil {
+						return fmt.Errorf("failed to scan slab sector: %w", err)
+					}
+					if hostKey.Valid {
+						sector.HostKey = (*types.PublicKey)(&hostKey.V)
+					}
+					obj.Slabs[i].Sectors = append(obj.Slabs[i].Sectors, sector)
 				}
-				if hostKey.Valid {
-					sector.HostKey = (*types.PublicKey)(&hostKey.V)
-				}
-				obj.Slabs[i].Sectors = append(obj.Slabs[i].Sectors, sector)
-			}
-
-			if err := rows.Err(); err != nil {
-				rows.Close()
-				return err
-			}
-			rows.Close()
+				return rows.Err()
+			})
+		}
+		if err := tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
+			return fmt.Errorf("failed to query slab sectors: %w", err)
 		}
 		return nil
 	})
@@ -248,8 +246,9 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			}
 			rows.Close()
 
+			batch := &pgx.Batch{}
 			for j, slab := range events[i].Object.Slabs {
-				rows, err := tx.Query(ctx, `
+				batch.Queue(`
 					SELECT s.sector_root, h.public_key
 					FROM slabs
 					JOIN slab_sectors ss ON ss.slab_id = slabs.id
@@ -257,28 +256,27 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 					LEFT JOIN hosts h ON h.id = s.host_id
 					WHERE slabs.digest = $1
 					ORDER BY ss.slab_index ASC
-				`, sqlHash256(slab.ID))
-				if err != nil {
-					return fmt.Errorf("failed to query slab sectors: %w", err)
-				}
+				`, sqlHash256(slab.ID)).Query(func(rows pgx.Rows) error {
+					defer rows.Close()
 
-				for rows.Next() {
-					var sector slabs.TrackedSector
-					var hostKey sql.Null[sqlPublicKey]
-					err = rows.Scan((*sqlHash256)(&sector.Root), &hostKey)
-					if err != nil {
-						rows.Close()
-						return fmt.Errorf("failed to scan slab sector: %w", err)
+					for rows.Next() {
+						var sector slabs.TrackedSector
+						var hostKey sql.Null[sqlPublicKey]
+						err = rows.Scan((*sqlHash256)(&sector.Root), &hostKey)
+						if err != nil {
+							rows.Close()
+							return fmt.Errorf("failed to scan slab sector: %w", err)
+						}
+						if hostKey.Valid {
+							sector.HostKey = (*types.PublicKey)(&hostKey.V)
+						}
+						events[i].Object.Slabs[j].Sectors = append(events[i].Object.Slabs[j].Sectors, sector)
 					}
-					if hostKey.Valid {
-						sector.HostKey = (*types.PublicKey)(&hostKey.V)
-					}
-					events[i].Object.Slabs[j].Sectors = append(events[i].Object.Slabs[j].Sectors, sector)
-				}
-				rows.Close()
-				if err := rows.Err(); err != nil {
-					return err
-				}
+					return rows.Err()
+				})
+			}
+			if err := tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
+				return fmt.Errorf("failed to query slab sectors: %w", err)
 			}
 		}
 		return nil
