@@ -243,6 +243,18 @@ components:
             - $ref: "#/components/schemas/PublicKey"
             - description: The public key of the host storing the sector
 
+    TrackedSector:
+      type: object
+      properties:
+        root:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The Merkle root of the sector
+        hostKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The public key of the host storing the sector if any
+
     ObjectEvent:
       type: object
       properties:
@@ -298,9 +310,9 @@ components:
           description: Minimum number of shards required to reconstruct the slab
         sectors:
           type: array
-          description: The list of pinned sectors composing the slab
+          description: The list of sectors composing the slab
           items:
-            $ref: "#/components/schemas/PinnedSector"
+            $ref: "#/components/schemas/TrackedSector"
         offset:
           type: integer
           format: uint32

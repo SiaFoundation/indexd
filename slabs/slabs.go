@@ -105,7 +105,7 @@ func (s PinnedSector) ToTracked() TrackedSector {
 // PinnedSectorsToTracked converts a slice of PinnedSectors to a slice of
 // TrackedSectors.
 func PinnedSectorsToTracked(sectors []PinnedSector) []TrackedSector {
-	var out []TrackedSector
+	out := make([]TrackedSector, 0, len(sectors))
 	for _, s := range sectors {
 		out = append(out, s.ToTracked())
 	}
