@@ -14,7 +14,6 @@ import (
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 )
@@ -208,11 +207,11 @@ WHERE
 	-- blocked host filter
 	AND (($4::boolean IS NULL) OR ($4::boolean = hosts.blocked))
 	-- active contracts filter
-	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state >= $6 AND state <= $7)))
+	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1))))
 	-- public key filter
-	AND ((CARDINALITY($8::bytea[]) = 0) OR (public_key = ANY($8)))
+	AND ((CARDINALITY($6::bytea[]) = 0) OR (public_key = ANY($6)))
 	%s -- orderClause
-	LIMIT $1 OFFSET $2`, orderClause), limit, offset, opts.Usable, opts.Blocked, opts.ActiveContracts, contracts.ContractStatePending, contracts.ContractStateActive, hks)
+	LIMIT $1 OFFSET $2`, orderClause), limit, offset, opts.Usable, opts.Blocked, opts.ActiveContracts, hks)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts: %w", err)
 		}
@@ -341,7 +340,7 @@ func (s *Store) HostsWithUnpinnableSectors() ([]types.PublicKey, error) {
 			) AND NOT EXISTS (
 				SELECT 1
 				FROM contracts
-				WHERE host_id = hosts.id AND renewed_to IS NULL AND good AND state IN (0, 1)
+				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good
 			)
 		`)
 		if err != nil {
@@ -644,8 +643,7 @@ WITH globals AS (
 		settings_signature,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
 	FROM hosts
-	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
-	WHERE hb.public_key IS NULL AND last_successful_scan IS NOT NULL -- not blocked and has settings
+	WHERE last_successful_scan IS NOT NULL -- has settings
 )
 SELECT
 	hosts.id,
@@ -671,8 +669,8 @@ WHERE
 	settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb AND
 	-- country filter
 	($3::text IS NULL OR country_code = $3::text) AND
-	-- active contracts
-	EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state <= 1) AND
+	-- active and good contracts
+	EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good) AND
 	-- protocol filter
 	($4::smallint IS NULL OR EXISTS (SELECT 1 FROM host_addresses WHERE host_id = hosts.id AND protocol = $4::smallint)) `
 		args := []any{limit, offset, queryOpts.CountryCode, (*sqlNetworkProtocol)(queryOpts.Protocol)}
@@ -877,12 +875,12 @@ func (s *Store) HostsForFunding() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT h.public_key
-			FROM hosts h
+			SELECT public_key
+			FROM hosts
 			WHERE EXISTS (
 				SELECT 1
-				FROM contracts c
-				WHERE c.host_id = h.id AND c.state IN (0, 1) AND c.good AND c.renewed_to IS NULL
+				FROM contracts
+				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good
 			)`)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts for funding: %w", err)
@@ -910,21 +908,18 @@ func (s *Store) HostsForPinning() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT h.public_key
-			FROM hosts h
-			WHERE
-				EXISTS (
-					SELECT 1
-					FROM sectors
-					WHERE sectors.host_id = h.id AND contract_sectors_map_id IS NULL
-				) AND
-				EXISTS (
-					SELECT 1
-					FROM contracts
-					WHERE contracts.host_id = h.id AND contracts.state <= $1 AND contracts.good = TRUE
-				) AND
-				NOT EXISTS (SELECT 1 FROM hosts_blocklist hb WHERE hb.public_key = h.public_key)
-				 `, contracts.ContractStateActive)
+			SELECT public_key
+			FROM hosts
+			WHERE EXISTS (
+				SELECT 1
+				FROM sectors
+				WHERE host_id = hosts.id AND contract_sectors_map_id IS NULL
+			)
+			AND	EXISTS (
+				SELECT 1
+				FROM contracts
+				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good
+			)`)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts for pinning: %w", err)
 		}
@@ -950,19 +945,13 @@ func (s *Store) HostsForPruning() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT h.public_key
-			FROM hosts h
-			WHERE
-				EXISTS (
-					SELECT 1
-					FROM contracts
-					WHERE contracts.host_id = h.id AND contracts.state <= $1 AND contracts.good = TRUE AND contracts.next_prune < NOW()
-				) AND
-				NOT EXISTS (
-					SELECT 1
-					FROM hosts_blocklist hb
-					WHERE hb.public_key = h.public_key
-				)`, contracts.ContractStateActive)
+			SELECT public_key
+			FROM hosts
+			WHERE EXISTS (
+				SELECT 1
+				FROM contracts
+				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good AND next_prune < NOW()
+			)`)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts for pruning: %w", err)
 		}

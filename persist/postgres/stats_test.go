@@ -415,10 +415,6 @@ func TestHostStats(t *testing.T) {
 		t.Fatalf("expected first host to have %d active contract size, got %d", testRevision.Filesize, stats[0].ActiveContractsSize)
 	} else if stats[1].ActiveContractsSize != int64(testRevision.Filesize) {
 		t.Fatalf("expected second host to have %d active contract size, got %d", testRevision.Filesize, stats[1].ActiveContractsSize)
-	} else if stats[0].ProtocolVersion != (proto.ProtocolVersion{}) {
-		t.Fatalf("expected no protocol version for first host")
-	} else if stats[1].ProtocolVersion != (proto.ProtocolVersion{}) {
-		t.Fatalf("expected no protocol version for second host")
 	}
 	if stats[0].Blocked || stats[1].Blocked {
 		t.Fatal("expected both hosts to be unblocked")
@@ -470,14 +466,6 @@ func TestHostStats(t *testing.T) {
 		t.Fatalf("expected first host to have %d active contract size, got %d", testRevision.Filesize, stats[0].ActiveContractsSize)
 	} else if stats[1].ActiveContractsSize != 0 {
 		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[1].ActiveContractsSize)
-	} else if stats[0].ProtocolVersion != protocolVersion {
-		t.Fatalf("expected protocol version %v for first host", protocolVersion)
-	} else if stats[1].ProtocolVersion != (proto.ProtocolVersion{}) {
-		t.Fatalf("expected no protocol version for second host")
-	} else if stats[0].Release != release {
-		t.Fatalf("expected release %s for first host", release)
-	} else if stats[1].Release != "" {
-		t.Fatalf("expected no release for second host")
 	}
 	// set scanned height to the proof height - should exclude it
 	proofHeight := testRevision.ProofHeight

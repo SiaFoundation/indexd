@@ -568,4 +568,10 @@ ALTER TABLE app_connect_keys ALTER COLUMN user_secret SET NOT NULL;
 ALTER TABLE app_connect_keys ADD CONSTRAINT app_connect_keys_user_secret_key UNIQUE (user_secret);`)
 		return err
 	},
+	// add index to speed up hosts for pruning query
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+CREATE INDEX contracts_next_prune_host_id_idx ON contracts (next_prune, host_id) WHERE state IN (0,1) AND renewed_to IS NULL AND good;`)
+		return err
+	},
 }

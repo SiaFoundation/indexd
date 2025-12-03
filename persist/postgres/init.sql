@@ -260,6 +260,9 @@ CREATE INDEX contracts_host_id_remaining_allowance_active_idx ON contracts (host
 -- contracts for pruning
 CREATE INDEX contracts_size_contract_id_idx ON contracts (host_id, size DESC, contract_id) INCLUDE(next_prune) WHERE state IN (0,1) AND renewed_to IS NULL AND good AND remaining_allowance > 0;
 
+-- hosts for pruning
+CREATE INDEX contracts_next_prune_host_id_idx ON contracts (next_prune, host_id) WHERE state IN (0,1) AND renewed_to IS NULL AND good;
+
 -- rejecting contracts
 CREATE INDEX contracts_formation_pending_idx ON contracts(formation) WHERE state = 0;
 
