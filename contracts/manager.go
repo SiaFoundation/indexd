@@ -290,7 +290,7 @@ func (cm *ContractManager) waitUntilSynced(ctx context.Context, log *zap.Logger)
 			log.Debug("failed to get block for last scanned index", zap.Stringer("indexID", ci.ID))
 			return false, fmt.Errorf("failed to get block for last scanned index %v", ci.ID)
 		}
-		log.Debug("checking if wallet is synced", zap.Uint64("scannedHeight", ci.Height), zap.Uint64("blockHeight", block.V2.Height), zap.Time("blockTime", block.Timestamp))
+		log.Debug("checking if wallet is synced", zap.Uint64("scannedHeight", ci.Height), zap.Time("blockTime", block.Timestamp))
 		return time.Since(block.Timestamp) < 3*time.Hour, nil
 	}
 

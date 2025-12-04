@@ -324,7 +324,7 @@
       passwordInput.addEventListener("input", () => setPasswordError(""));
 
       async function respondToRequest(approve) {
-        const response = await fetch("{{.ResponseURL}}", {
+        const response = await fetch(window.location.href, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
