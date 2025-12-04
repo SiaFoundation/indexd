@@ -16,15 +16,18 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 )
 
-// resolver is the default implementation of Resolver.
+// resolver is the default implementation of Resolver.  It will attempt to
+// lookup a hostname with the `main` resolver first.  If that fails for a
+// non context related reason, then it will try the `fallback` resolver.
 type resolver struct {
 	main     *net.Resolver
 	fallback *net.Resolver
 }
 
+// LookupIPAddr implements [Resolver].
 func (r *resolver) LookupIPAddr(ctx context.Context, host string) ([]net.IPAddr, error) {
 	addrs, err := r.main.LookupIPAddr(ctx, host)
-	if errors.Is(err, context.Canceled) {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil, err
 	} else if err != nil {
 		// try fallback if main fails
