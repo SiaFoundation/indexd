@@ -2,8 +2,11 @@ package slabs
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -29,7 +32,7 @@ type (
 	// SlabSlice represents a slice of a slab that is part of an object.
 	SlabSlice struct {
 		ID            SlabID          `json:"id"`
-		EncryptionKey [32]byte        `json:"encryptionKey"`
+		EncryptionKey EncryptionKey   `json:"encryptionKey"`
 		MinShards     uint            `json:"minShards"`
 		Sectors       []TrackedSector `json:"sectors"`
 		Offset        uint32          `json:"offset"`
@@ -149,4 +152,24 @@ func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cu
 // SharedObject retrieves the shared object with the given key for the given account.
 func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error) {
 	return m.store.SharedObject(key)
+}
+
+// EncryptionKey is a helper type for JSON marshalling of 32-byte encryption
+// keys as base64 strings.
+type EncryptionKey [32]byte
+
+func (k *EncryptionKey) MarshalJSON() ([]byte, error) {
+	return json.Marshal(base64.StdEncoding.EncodeToString(k[:]))
+}
+
+func (k *EncryptionKey) UnmarshalJSON(b []byte) error {
+	s := strings.Trim(string(b), `"`)
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return err
+	} else if len(decoded) != 32 {
+		return fmt.Errorf("invalid encryption key length: expected 32, got %d", len(decoded))
+	}
+	copy(k[:], decoded)
+	return nil
 }
