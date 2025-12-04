@@ -88,7 +88,7 @@ var (
 
 type sectorDownload struct {
 	index  int
-	sector slabs.TrackedSector
+	sector slabs.PinnedSector
 }
 
 func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInflight int, timeout time.Duration) ([][]byte, error) {
@@ -102,8 +102,11 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 			continue // ignore sectors without host
 		}
 		slabSectors[*sector.HostKey] = sectorDownload{
-			index:  i,
-			sector: sector,
+			index: i,
+			sector: slabs.PinnedSector{
+				Root:    sector.Root,
+				HostKey: *sector.HostKey,
+			},
 		}
 		slabHosts = append(slabHosts, *sector.HostKey)
 	}
@@ -135,13 +138,13 @@ top:
 		if !ok {
 			panic("missing slab for host") // developer error
 		}
-		go func(ctx context.Context, sector slabs.TrackedSector, i int) {
+		go func(ctx context.Context, sector slabs.PinnedSector, i int) {
 			defer func() {
 				<-sema
 				wg.Done()
 			}()
 			buf := bytes.NewBuffer(make([]byte, 0, length))
-			err := downloadShard(ctx, s.hosts, s.appKey, *sector.HostKey, buf, sector.Root, offset, length, timeout)
+			err := downloadShard(ctx, s.hosts, s.appKey, sector.HostKey, buf, sector.Root, offset, length, timeout)
 			if err != nil {
 				return
 			}
