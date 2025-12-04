@@ -158,10 +158,12 @@ func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (Shar
 // keys as base64 strings.
 type EncryptionKey [32]byte
 
+// MarshalJSON implements the json.Marshaler interface using base64 encoding.
 func (k *EncryptionKey) MarshalJSON() ([]byte, error) {
 	return json.Marshal(base64.StdEncoding.EncodeToString(k[:]))
 }
 
+// UnmarshalJSON implements the json.Unmarshaler interface using base64 decoding.
 func (k *EncryptionKey) UnmarshalJSON(b []byte) error {
 	s := strings.Trim(string(b), `"`)
 	decoded, err := base64.StdEncoding.DecodeString(s)
