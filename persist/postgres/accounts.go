@@ -26,8 +26,7 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 	}
 
 	queryOpts := accounts.QueryAccountsOptions{
-		ServiceAccount: nil, // default to all accounts
-		ConnectKey:     nil, // default to all accounts
+		ConnectKey: nil, // default to all accounts
 	}
 	for _, opt := range opts {
 		opt(&queryOpts)
@@ -44,14 +43,13 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT a.public_key, ak.app_key, a.service_account, a.max_pinned_data, a.pinned_data, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
+			SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
 			FROM accounts a
 			LEFT JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 			WHERE a.deleted_at IS NULL AND
-			($1::boolean IS NULL OR service_account = $1::boolean) AND
 			($2::integer IS NULL OR connect_key_id = $2::integer)
 			LIMIT $3 OFFSET $4
-		`, queryOpts.ServiceAccount, connectKeyID, limit, offset)
+		`, connectKeyID, limit, offset)
 		if err != nil {
 			return fmt.Errorf("failed to query accounts: %w", err)
 		}
@@ -77,21 +75,13 @@ func (s *Store) Account(ak types.PublicKey) (accounts.Account, error) {
 	var account accounts.Account
 	account.AccountKey = proto.Account(ak) // no need to fetch key
 	err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
-		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.service_account, a.max_pinned_data, a.pinned_data, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
+		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
 FROM accounts a
 LEFT JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 WHERE public_key = $1`, sqlPublicKey(ak)))
 		return err
 	})
 	return account, err
-}
-
-// AddServiceAccount adds a new service account in the database with given
-// account key.
-func (s *Store) AddServiceAccount(ak types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
-	return s.transaction(func(ctx context.Context, tx *txn) error {
-		return addAccount(ctx, tx, nil, ak, true, meta, opts...)
-	})
 }
 
 // HasAccount checks if the account with the given public key exists in the
@@ -124,14 +114,11 @@ func (s *Store) ActiveAccounts(threshold time.Time) (count uint64, err error) {
 // DeleteAccount deletes the account in the database with given account key.
 func (s *Store) DeleteAccount(acc proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		var serviceAccount bool
-		err := tx.QueryRow(ctx, `UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1 RETURNING service_account`, sqlPublicKey(acc)).Scan(&serviceAccount)
+		_, err := tx.Exec(ctx, `UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1`, sqlPublicKey(acc))
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to delete account: %w", err)
-		} else if serviceAccount {
-			return accounts.ErrServiceAccount
 		}
 		return nil
 	})
@@ -363,7 +350,7 @@ func (s *Store) DebitServiceAccount(hostKey types.PublicKey, account proto.Accou
 		resp, err := tx.Exec(ctx, `
 			UPDATE service_accounts
 			SET balance = GREATEST(balance - $1, 0)
-			WHERE account_id = (SELECT id FROM accounts WHERE public_key = $2)
+			WHERE account_id = $2
 			AND host_id = (SELECT id FROM hosts WHERE public_key = $3)
 		`, sqlCurrency(amount), sqlPublicKey(account), sqlPublicKey(hostKey))
 		if err != nil {
@@ -381,7 +368,7 @@ func (s *Store) UpdateServiceAccountBalance(hostKey types.PublicKey, account pro
 		_, err := tx.Exec(ctx, `
 			INSERT INTO service_accounts (account_id, host_id, balance)
 			VALUES (
-				(SELECT id FROM accounts WHERE public_key = $1),
+				$1,
 				(SELECT id FROM hosts WHERE public_key = $2),
 				$3
 			)
@@ -398,9 +385,8 @@ func (s *Store) ServiceAccountBalance(hostKey types.PublicKey, account proto.Acc
 		err := tx.QueryRow(ctx, `
 			SELECT balance
 			FROM service_accounts
-			INNER JOIN accounts ON accounts.id = service_accounts.account_id
 			INNER JOIN hosts ON hosts.id = service_accounts.host_id
-			WHERE accounts.public_key = $1 AND hosts.public_key = $2
+			WHERE service_accounts.public_key = $1 AND hosts.public_key = $2
 		`, sqlPublicKey(account), sqlPublicKey(hostKey)).Scan((*sqlCurrency)(&balance))
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrNotFound
@@ -410,7 +396,7 @@ func (s *Store) ServiceAccountBalance(hostKey types.PublicKey, account proto.Acc
 	return balance, err
 }
 
-func addAccount(ctx context.Context, tx *txn, connectKey *string, account types.PublicKey, serviceAccount bool, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
+func addAccount(ctx context.Context, tx *txn, connectKey *string, account types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
 	aao := accounts.AddAccountOptions{
 		MaxPinnedData: math.MaxInt64, // no limit by default
 	}
@@ -427,7 +413,7 @@ func addAccount(ctx context.Context, tx *txn, connectKey *string, account types.
 		}
 	}
 
-	res, err := tx.Exec(ctx, `INSERT INTO accounts (public_key, connect_key_id, service_account, max_pinned_data, app_id, description, logo_url, service_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING`, sqlPublicKey(account), connectKeyID, serviceAccount, aao.MaxPinnedData, sqlHash256(meta.ID), meta.Description, meta.LogoURL, meta.ServiceURL)
+	res, err := tx.Exec(ctx, `INSERT INTO accounts (public_key, connect_key_id, max_pinned_data, app_id, description, logo_url, service_url) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`, sqlPublicKey(account), connectKeyID, aao.MaxPinnedData, sqlHash256(meta.ID), meta.Description, meta.LogoURL, meta.ServiceURL)
 	if err != nil {
 		return fmt.Errorf("failed to add account: %w", err)
 	} else if res.RowsAffected() == 0 {
@@ -446,7 +432,7 @@ func newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey,
 SELECT a.public_key
 FROM accounts a
 LEFT JOIN account_hosts ah ON a.id = ah.account_id AND ah.host_id = $1
-WHERE ah.account_id IS NULL AND a.deleted_at IS NULL AND (a.last_used >= $2 OR a.service_account = TRUE)
+WHERE ah.account_id IS NULL AND a.deleted_at IS NULL AND (a.last_used >= $2)
 LIMIT $3;`, hostID, threshold, limit)
 	if err != nil {
 		return nil, err
@@ -474,7 +460,7 @@ func existingHostAccountsForFunding(ctx context.Context, tx *txn, hk types.Publi
 SELECT public_key, consecutive_failed_funds, next_fund
 FROM account_hosts ha
 INNER JOIN accounts a ON a.id = ha.account_id
-WHERE ha.host_id = $1 AND ha.next_fund <= NOW() AND a.deleted_at IS NULL AND (a.last_used >= $2 OR a.service_account = TRUE)
+WHERE ha.host_id = $1 AND ha.next_fund <= NOW() AND a.deleted_at IS NULL AND (a.last_used >= $2)
 ORDER BY next_fund ASC
 LIMIT $3`, hostID, threshold, limit)
 	if err != nil {
@@ -498,7 +484,7 @@ LIMIT $3`, hostID, threshold, limit)
 
 func scanAccount(s scanner) (account accounts.Account, err error) {
 	var connectKey sql.NullString
-	err = s.Scan((*sqlPublicKey)(&account.AccountKey), &connectKey, &account.ServiceAccount, &account.MaxPinnedData, &account.PinnedData, (*sqlHash256)(&account.App.ID), &account.App.Description, &account.App.LogoURL, &account.App.ServiceURL, &account.LastUsed)
+	err = s.Scan((*sqlPublicKey)(&account.AccountKey), &connectKey, &account.MaxPinnedData, &account.PinnedData, (*sqlHash256)(&account.App.ID), &account.App.Description, &account.App.LogoURL, &account.App.ServiceURL, &account.LastUsed)
 	if connectKey.Valid {
 		account.ConnectKey = &connectKey.String
 	}

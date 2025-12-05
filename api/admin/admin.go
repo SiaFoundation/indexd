@@ -420,13 +420,6 @@ func (a *admin) handleGETAccounts(jc jape.Context) {
 		return
 	}
 	var opts []accounts.QueryAccountsOpt
-	if jc.Request.FormValue("serviceaccount") != "" {
-		var serviceAccount bool
-		if jc.DecodeForm("serviceaccount", &serviceAccount) != nil {
-			return
-		}
-		opts = append(opts, accounts.WithServiceAccount(serviceAccount))
-	}
 	if connectKey := jc.Request.FormValue("connectkey"); connectKey != "" {
 		opts = append(opts, accounts.WithConnectKey(connectKey))
 	}

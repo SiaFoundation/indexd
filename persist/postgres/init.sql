@@ -19,7 +19,6 @@ CREATE TABLE accounts (
 
     pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0), -- total pinned data in bytes
     max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0), -- max pinned data in bytes
-    service_account BOOLEAN NOT NULL DEFAULT FALSE, -- true if this is a service account
     app_id BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(app_id) = 32), -- app identifier
     description TEXT NOT NULL DEFAULT '',
     logo_url TEXT NOT NULL DEFAULT '',
@@ -91,10 +90,10 @@ CREATE TABLE account_hosts (
 CREATE INDEX account_hosts_host_id_next_fund_idx ON account_hosts (host_id, next_fund);
 
 CREATE TABLE service_accounts (
-    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    public_key BLOB NOT NULL ON DELETE CASCADE,
     host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
     balance NUMERIC(50,0) NOT NULL DEFAULT 0 CHECK (balance >= 0),
-    CONSTRAINT service_accounts_pk PRIMARY KEY (account_id, host_id)
+    CONSTRAINT service_accounts_pk PRIMARY KEY (public_key, host_id)
 );
 
 CREATE TABLE hosts_blocklist (

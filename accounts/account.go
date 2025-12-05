@@ -58,14 +58,6 @@ type (
 	QueryAccountsOpt func(o *QueryAccountsOptions)
 )
 
-// WithServiceAccount sets the service account filter for querying accounts.
-// Defaults to all accounts.
-func WithServiceAccount(serviceAccount bool) QueryAccountsOpt {
-	return func(opt *QueryAccountsOptions) {
-		opt.ServiceAccount = &serviceAccount
-	}
-}
-
 // WithConnectKey filters the accounts by the connect key they are associated
 // with.
 func WithConnectKey(connectKey string) QueryAccountsOpt {
