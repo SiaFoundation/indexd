@@ -109,7 +109,7 @@ func (s *SDK) Object(ctx context.Context, objectKey types.Hash256) (Object, erro
 	if err != nil {
 		return Object{}, fmt.Errorf("failed to get locked object: %w", err)
 	}
-	return ObjectFromSealedObject(lo, s.appKey)
+	return objectFromSealedObject(lo, s.appKey)
 }
 
 // ListObjects lists objects, starting from the given cursor, up to the given limit.
@@ -123,7 +123,7 @@ func (s *SDK) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) (
 		if lo.Deleted {
 			continue
 		}
-		obj, err := ObjectFromSealedObject(*lo.Object, s.appKey)
+		obj, err := objectFromSealedObject(*lo.Object, s.appKey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unlock object: %w", err)
 		}
@@ -145,37 +145,6 @@ func (s *SDK) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256
 		return "", fmt.Errorf("failed to get object: %w", err)
 	}
 	return s.client.CreateSharedObjectURL(ctx, s.appKey, obj.ID(), obj.masterKey, validUntil)
-}
-
-// ObjectFromSealedObject unlocks a SealedObject using the given app key.
-func ObjectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Object, error) {
-	obj := Object{
-		slabs:     slices.Clone(so.Slabs),
-		createdAt: so.CreatedAt,
-		updatedAt: so.UpdatedAt,
-	}
-	objectID := obj.ID()
-	if so.ID() != objectID {
-		return Object{}, fmt.Errorf("object ID mismatch")
-	} else if !appKey.PublicKey().VerifyHash(so.SigHash(), so.Signature) {
-		return Object{}, fmt.Errorf("invalid object signature")
-	}
-
-	keyCipher := masterKeyCipher(appKey, objectID)
-	if len(so.EncryptedMasterKey) < keyCipher.NonceSize() {
-		return Object{}, fmt.Errorf("encrypted master key too short")
-	}
-	nonce := so.EncryptedMasterKey[:keyCipher.NonceSize()]
-	var err error
-	obj.masterKey, err = keyCipher.Open(nil, nonce, so.EncryptedMasterKey[keyCipher.NonceSize():], nil)
-	if err != nil {
-		return Object{}, fmt.Errorf("failed to unlock master key: %w", err)
-	}
-	obj.metadata, err = unlockEncryptedMetadata(objectID, obj.masterKey, so.EncryptedMetadata)
-	if err != nil {
-		return Object{}, fmt.Errorf("failed to unlock metadata: %w", err)
-	}
-	return obj, nil
 }
 
 func masterKeyCipher(appKey types.PrivateKey, objectID types.Hash256) cipher.AEAD {
@@ -204,4 +173,35 @@ func unlockEncryptedMetadata(objectID types.Hash256, masterKey []byte, encrypted
 		return nil, fmt.Errorf("failed to unlock metadata: %w", err)
 	}
 	return metadata, nil
+}
+
+// objectFromSealedObject unlocks a SealedObject using the given app key.
+func objectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Object, error) {
+	obj := Object{
+		slabs:     slices.Clone(so.Slabs),
+		createdAt: so.CreatedAt,
+		updatedAt: so.UpdatedAt,
+	}
+	objectID := obj.ID()
+	if so.ID() != objectID {
+		return Object{}, fmt.Errorf("object ID mismatch")
+	} else if !appKey.PublicKey().VerifyHash(so.SigHash(), so.Signature) {
+		return Object{}, fmt.Errorf("invalid object signature")
+	}
+
+	keyCipher := masterKeyCipher(appKey, objectID)
+	if len(so.EncryptedMasterKey) < keyCipher.NonceSize() {
+		return Object{}, fmt.Errorf("encrypted master key too short")
+	}
+	nonce := so.EncryptedMasterKey[:keyCipher.NonceSize()]
+	var err error
+	obj.masterKey, err = keyCipher.Open(nil, nonce, so.EncryptedMasterKey[keyCipher.NonceSize():], nil)
+	if err != nil {
+		return Object{}, fmt.Errorf("failed to unlock master key: %w", err)
+	}
+	obj.metadata, err = unlockEncryptedMetadata(objectID, obj.masterKey, so.EncryptedMetadata)
+	if err != nil {
+		return Object{}, fmt.Errorf("failed to unlock metadata: %w", err)
+	}
+	return obj, nil
 }

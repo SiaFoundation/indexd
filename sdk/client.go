@@ -395,18 +395,6 @@ func (s *SDK) SaveObject(ctx context.Context, obj *Object) error {
 	return s.client.SaveObject(ctx, s.appKey, obj.Seal(s.appKey))
 }
 
-// SealObject seals the object for storage in the indexer. A sealed object can
-// be safely stored and shared without granting access to the underlying
-// metadata or object data.
-func (s *SDK) SealObject(obj Object) slabs.SealedObject {
-	return obj.Seal(s.appKey)
-}
-
-// OpenSealedObject opens a sealed object from the indexer.
-func (s *SDK) OpenSealedObject(so slabs.SealedObject) (Object, error) {
-	return ObjectFromSealedObject(so, s.appKey)
-}
-
 func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, next slabIterFn) error {
 	type work struct {
 		skip     int

@@ -35,7 +35,7 @@ func TestSealedObjectRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	obj2, err := ObjectFromSealedObject(decoded, appKey)
+	obj2, err := objectFromSealedObject(decoded, appKey)
 	if err != nil {
 		t.Fatal(err)
 	}
