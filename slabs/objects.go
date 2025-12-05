@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -31,7 +32,6 @@ type (
 
 	// SlabSlice represents a slice of a slab that is part of an object.
 	SlabSlice struct {
-		ID            SlabID         `json:"id"`
 		EncryptionKey EncryptionKey  `json:"encryptionKey"`
 		MinShards     uint           `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
@@ -174,4 +174,35 @@ func (k *EncryptionKey) UnmarshalJSON(b []byte) error {
 	}
 	copy(k[:], decoded)
 	return nil
+}
+
+// ToPinParams converts the SlabSlice to SlabPinParams.
+func (s SlabSlice) Pin() SlabPinParams {
+	return SlabPinParams{
+		EncryptionKey: s.EncryptionKey,
+		MinShards:     s.MinShards,
+		Sectors:       slices.Clone(s.Sectors),
+	}
+}
+
+// Slice creates a SlabSlice from the SlabPinParams.
+func (s SlabPinParams) Slice(offset, length uint32) SlabSlice {
+	return SlabSlice{
+		EncryptionKey: s.EncryptionKey,
+		MinShards:     s.MinShards,
+		Sectors:       slices.Clone(s.Sectors),
+		Offset:        offset,
+		Length:        length,
+	}
+}
+
+// Slice creates a SlabSlice from the PinnedSlab.
+func (s PinnedSlab) Slice(offset, length uint32) SlabSlice {
+	return SlabSlice{
+		EncryptionKey: s.EncryptionKey,
+		MinShards:     s.MinShards,
+		Sectors:       slices.Clone(s.Sectors),
+		Offset:        offset,
+		Length:        length,
+	}
 }

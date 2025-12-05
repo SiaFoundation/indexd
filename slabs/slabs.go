@@ -103,16 +103,26 @@ func (s *SlabID) UnmarshalText(b []byte) error {
 	return (*types.Hash256)(s).UnmarshalText(b)
 }
 
-// Digest creates a unique digest for the slab to be pinned by SlabPinParams. It
-// is important, that the same params always result in the same hash since we
-// deduplicate slabs using it. So if one user makes the mistake of pinning a
-// slab with a different encryption key, this shouldn't prevent other users from
-// pinning the same slab with the correct key.
+// Digest computes the digest for the slab pin params.
 func (s SlabPinParams) Digest() (SlabID, error) {
+	return slabDigest(s.MinShards, s.EncryptionKey, s.Sectors)
+}
+
+// Digest computes the digest for the slab slice.
+func (s SlabSlice) Digest() (SlabID, error) {
+	return slabDigest(s.MinShards, s.EncryptionKey, s.Sectors)
+}
+
+// slabDigest creates a unique digest for a slab. It is important, that the same
+// params always result in the same hash since we deduplicate slabs using it. So
+// if one user makes the mistake of pinning a slab with a different encryption
+// key, this shouldn't prevent other users from pinning the same slab with the
+// correct key.
+func slabDigest(minShards uint, ec [32]byte, sectors []PinnedSector) (SlabID, error) {
 	hasher := types.NewHasher()
-	hasher.E.WriteUint64(uint64(s.MinShards))
-	hasher.E.Write(s.EncryptionKey[:])
-	for _, sector := range s.Sectors {
+	hasher.E.WriteUint64(uint64(minShards))
+	hasher.E.Write(ec[:])
+	for _, sector := range sectors {
 		if _, err := hasher.E.Write(sector.Root[:]); err != nil {
 			return SlabID{}, fmt.Errorf("failed to write sector root to hasher: %w", err)
 		}

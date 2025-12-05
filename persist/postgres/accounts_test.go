@@ -836,15 +836,11 @@ func TestPruneAccount(t *testing.T) {
 
 		var ss []slabs.SlabSlice
 		for _, p := range params {
-			ids, err := store.PinSlabs(acc, time.Time{}, p)
+			_, err := store.PinSlabs(acc, time.Time{}, p)
 			if err != nil {
 				t.Fatal(err)
 			}
-			ss = append(ss, slabs.SlabSlice{
-				ID:     ids[0],
-				Offset: 10,
-				Length: 120,
-			})
+			ss = append(ss, p.Slice(10, 120))
 		}
 		return ss
 	}

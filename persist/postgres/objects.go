@@ -25,7 +25,7 @@ func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error
 			return fmt.Errorf("failed to query shared object: %w", err)
 		}
 
-		rows, err := tx.Query(ctx, `SELECT s.id, os.slab_digest, s.encryption_key, s.min_shards, os.slab_offset, os.slab_length
+		rows, err := tx.Query(ctx, `SELECT s.id, s.encryption_key, s.min_shards, os.slab_offset, os.slab_length
 		FROM object_slabs os
 		INNER JOIN slabs s ON (os.slab_digest = s.digest)
 		WHERE os.object_id = $1
@@ -39,7 +39,7 @@ func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error
 		for rows.Next() {
 			var slab slabs.SlabSlice
 			var slabDBID int64
-			err := rows.Scan(&slabDBID, (*sqlHash256)(&slab.ID), (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Offset, &slab.Length)
+			err := rows.Scan(&slabDBID, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Offset, &slab.Length)
 			if err != nil {
 				return fmt.Errorf("failed to scan slab: %w", err)
 			}
@@ -100,7 +100,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT slab_digest, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
+			SELECT slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
 			FROM object_slabs
 			JOIN slabs ON slabs.digest = object_slabs.slab_digest
 			WHERE object_id = $1
@@ -113,7 +113,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 
 		for rows.Next() {
 			var slab slabs.SlabSlice
-			err := rows.Scan((*sqlHash256)(&slab.ID), &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
+			err := rows.Scan(&slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
 			if err != nil {
 				return fmt.Errorf("failed to scan slab: %w", err)
 			}
@@ -194,7 +194,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			}
 
 			rows, err = tx.Query(ctx, `
-				SELECT slab_digest, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
+				SELECT slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
 				FROM object_slabs
 				JOIN slabs ON slabs.digest = object_slabs.slab_digest
 				WHERE object_id = $1
@@ -206,7 +206,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 
 			for rows.Next() {
 				var slab slabs.SlabSlice
-				err := rows.Scan((*sqlHash256)(&slab.ID), &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
+				err := rows.Scan(&slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
 				if err != nil {
 					rows.Close()
 					return fmt.Errorf("failed to scan slab: %w", err)
@@ -291,15 +291,21 @@ func (s *Store) SaveObject(account proto.Account, obj slabs.SealedObject) error 
 			return fmt.Errorf("failed to insert object event: %w", err)
 		}
 
+		slabIDs := make([]slabs.SlabID, 0, len(obj.Slabs))
+		for _, slab := range obj.Slabs {
+			slabID, err := slab.Digest()
+			if err != nil {
+				return fmt.Errorf("failed to get slab digest: %w", err)
+			}
+			slabIDs = append(slabIDs, slabID)
+		}
+
 		// check that this account has pinned these slabs
 		args := make([]any, 0, len(obj.Slabs))
 		seen := make(map[slabs.SlabID]struct{})
-		for _, slab := range obj.Slabs {
-			if _, ok := seen[slab.ID]; ok {
-				continue
-			}
-			seen[slab.ID] = struct{}{}
-			args = append(args, sqlHash256(slab.ID))
+		for i := range obj.Slabs {
+			seen[slabIDs[i]] = struct{}{}
+			args = append(args, sqlHash256(slabIDs[i]))
 		}
 
 		var count int
@@ -321,7 +327,7 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 			batch.Queue(`
 				INSERT INTO object_slabs (object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, $3, $4, $5)
 			`,
-				objectID, sqlHash256(slab.ID), i, slab.Offset, slab.Length)
+				objectID, sqlHash256(slabIDs[i]), i, slab.Offset, slab.Length)
 		}
 		res := tx.SendBatch(ctx, batch)
 		if err := res.Close(); err != nil {
@@ -346,6 +352,10 @@ func accountID(ctx context.Context, tx *txn, account proto.Account) (int64, bool
 func decorateSectors(ctx context.Context, tx *txn, so *slabs.SealedObject) error {
 	batch := &pgx.Batch{}
 	for j, slab := range so.Slabs {
+		slabID, err := slab.Digest()
+		if err != nil {
+			return fmt.Errorf("failed to get slab digest: %w", err)
+		}
 		batch.Queue(`
 			SELECT s.sector_root, h.public_key
 			FROM slabs
@@ -354,7 +364,7 @@ func decorateSectors(ctx context.Context, tx *txn, so *slabs.SealedObject) error
 			LEFT JOIN hosts h ON h.id = s.host_id
 			WHERE slabs.digest = $1
 			ORDER BY ss.slab_index ASC
-		`, sqlHash256(slab.ID)).Query(func(rows pgx.Rows) error {
+		`, sqlHash256(slabID)).Query(func(rows pgx.Rows) error {
 			defer rows.Close()
 
 			for rows.Next() {

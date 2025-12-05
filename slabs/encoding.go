@@ -46,14 +46,29 @@ func (ps *PinnedSlab) DecodeFrom(d *types.Decoder) {
 
 // EncodeTo implements types.EncoderTo.
 func (s SlabSlice) EncodeTo(e *types.Encoder) {
-	e.Write(s.ID[:])
+	e.Write(s.EncryptionKey[:])
+	e.WriteUint8(uint8(s.MinShards))
+	e.WriteUint64(uint64(len(s.Sectors)))
+	for _, sector := range s.Sectors {
+		sector.EncodeTo(e)
+	}
 	e.WriteUint64(uint64(s.Offset)<<32 | uint64(s.Length))
 }
 
 // DecodeFrom implements types.DecoderFrom.
 func (s *SlabSlice) DecodeFrom(d *types.Decoder) {
-	d.Read(s.ID[:])
-
+	d.Read(s.EncryptionKey[:])
+	s.MinShards = uint(d.ReadUint8())
+	n := d.ReadUint64()
+	if d.Err() != nil {
+		return
+	}
+	s.Sectors = make([]PinnedSector, 0, n)
+	for range n {
+		var sector PinnedSector
+		sector.DecodeFrom(d)
+		s.Sectors = append(s.Sectors, sector)
+	}
 	combined := d.ReadUint64()
 	s.Offset = uint32(combined >> 32)
 	s.Length = uint32(combined)

@@ -56,7 +56,7 @@ func TestObject(t *testing.T) {
 		},
 	}
 
-	slabIDs, err := store.PinSlabs(acc, time.Time{}, params)
+	_, err := store.PinSlabs(acc, time.Time{}, params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,17 +76,10 @@ func TestObject(t *testing.T) {
 		CreatedAt:          now,
 		UpdatedAt:          now,
 		Slabs: []slabs.SlabSlice{
-			{
-				ID:            slabIDs[0],
-				EncryptionKey: params.EncryptionKey,
-				MinShards:     params.MinShards,
-				Offset:        0,
-				Length:        100,
-				Sectors:       params.Sectors,
-			},
+			params.Slice(0, 100),
 		},
 	}
-	err = store.SaveObject(acc, expected)
+	err := store.SaveObject(acc, expected)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,18 +192,11 @@ func TestObjects(t *testing.T) {
 
 		var ss []slabs.SlabSlice
 		for _, p := range params {
-			ids, err := store.PinSlabs(acc, time.Time{}, p)
+			_, err := store.PinSlabs(acc, time.Time{}, p)
 			if err != nil {
 				t.Fatal(err)
 			}
-			ss = append(ss, slabs.SlabSlice{
-				ID:            ids[0],
-				EncryptionKey: p.EncryptionKey,
-				MinShards:     p.MinShards,
-				Offset:        10,
-				Length:        120,
-				Sectors:       p.Sectors,
-			})
+			ss = append(ss, p.Slice(10, 120))
 		}
 		return ss
 	}
@@ -359,21 +345,9 @@ func TestListObjectsRegression(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		slabID, err := slab.Digest()
-		if err != nil {
-			t.Fatal(err)
-		}
 		return []slabs.SlabSlice{
-			{
-				ID:     slabID,
-				Offset: 10,
-				Length: 100,
-			},
-			{
-				ID:     slabID,
-				Offset: 110,
-				Length: 200,
-			},
+			slab.Slice(10, 100),
+			slab.Slice(110, 200),
 		}
 	}
 
@@ -448,15 +422,7 @@ func TestSharedObjects(t *testing.T) {
 			t.Fatalf("expected slab ID %v, got %v", id, slabIDs[0])
 		}
 
-		so := slabs.SlabSlice{
-			ID:            slabIDs[0],
-			EncryptionKey: s.EncryptionKey,
-			MinShards:     s.MinShards,
-			Sectors:       slices.Clone(s.Sectors),
-			Offset:        uint32(frand.Uint64n(math.MaxInt32)),
-			Length:        uint32(frand.Uint64n(math.MaxInt32)),
-		}
-		return so
+		return s.Slice(uint32(frand.Uint64n(math.MaxInt32)), uint32(frand.Uint64n(math.MaxInt32)))
 	}
 
 	// add an object with multiple slabs
@@ -469,13 +435,7 @@ func TestSharedObjects(t *testing.T) {
 		Slabs:              make([]slabs.SlabSlice, len(expectedSharedObj.Slabs)),
 		EncryptedMetadata:  expectedSharedObj.EncryptedMetadata,
 	}
-	for i, slab := range expectedSharedObj.Slabs {
-		obj.Slabs[i] = slabs.SlabSlice{
-			ID:     slab.ID,
-			Offset: slab.Offset,
-			Length: slab.Length,
-		}
-	}
+	obj.Slabs = slices.Clone(expectedSharedObj.Slabs)
 	if err := store.SaveObject(acc1, obj); err != nil {
 		t.Fatal(err)
 	}
@@ -542,17 +502,11 @@ func BenchmarkSaveObject(b *testing.B) {
 			b.Fatalf("expected slab ID %v, got %v", id, slabID)
 		}
 
-		obj.Slabs = append(obj.Slabs, slabs.SlabSlice{
-			ID:     id,
-			Offset: 0,
-			Length: 256,
-		})
+		obj.Slabs = append(obj.Slabs, s.Slice(0, 256))
 		for i := 0; i < 20 && i < len(objs); i++ {
-			obj.Slabs = append(obj.Slabs, slabs.SlabSlice{
-				ID:     objs[i].Slabs[0].ID,
-				Offset: 0,
-				Length: 256,
-			})
+			slab := objs[i].Slabs[0]
+			slab.Offset, slab.Length = 0, 256
+			obj.Slabs = append(obj.Slabs, slab)
 		}
 		obj.EncryptedMetadata = frand.Bytes(1024)
 		obj.EncryptedMasterKey = frand.Bytes(72)

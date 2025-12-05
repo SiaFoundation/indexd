@@ -315,16 +315,8 @@ func TestSlabPruning(t *testing.T) {
 	obj1 := slabs.SealedObject{
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
-			{
-				ID:     slab1ID,
-				Offset: 10,
-				Length: 100,
-			},
-			{
-				ID:     slab1ID,
-				Offset: 110,
-				Length: 200,
-			},
+			slab1.Slice(10, 100),
+			slab1.Slice(110, 200),
 		},
 		Signature: types.Signature(frand.Bytes(64)),
 	}
@@ -343,16 +335,8 @@ func TestSlabPruning(t *testing.T) {
 	obj2 := slabs.SealedObject{
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
-			{
-				ID:     slab2ID,
-				Offset: 10,
-				Length: 100,
-			},
-			{
-				ID:     slab2ID,
-				Offset: 110,
-				Length: 200,
-			},
+			slab2.Slice(10, 100),
+			slab2.Slice(110, 200),
 		},
 	}
 

@@ -245,11 +245,7 @@ top:
 			if slabID != expectedSlabID {
 				return Object{}, fmt.Errorf("pinned slab %d id %s does not match expected id %s", slabIndex, slabID.String(), expectedSlabID.String())
 			}
-			obj.slabs = append(obj.slabs, slabs.SlabSlice{
-				ID:     slabID,
-				Offset: 0,
-				Length: slab.length,
-			})
+			obj.slabs = append(obj.slabs, params.Slice(0, slab.length))
 		}
 	}
 	// pin the object
@@ -299,7 +295,11 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 		}
 
 		slab := obj.slabs[i]
-		pinned, err := s.client.Slab(ctx, s.appKey, slab.ID)
+		slabID, err := slab.Digest()
+		if err != nil {
+			return slabs.SlabSlice{}, fmt.Errorf("failed to compute slab %d id: %w", i, err)
+		}
+		pinned, err := s.client.Slab(ctx, s.appKey, slabID)
 		if err != nil {
 			return slabs.SlabSlice{}, fmt.Errorf("failed to get slab %d metadata: %w", i, err)
 		}
@@ -312,7 +312,6 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 		length -= slabLength
 
 		return slabs.SlabSlice{
-			ID:            slab.ID,
 			EncryptionKey: pinned.EncryptionKey,
 			MinShards:     pinned.MinShards,
 			Sectors:       pinned.Sectors,
@@ -376,7 +375,6 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 		length -= slabLength
 
 		return slabs.SlabSlice{
-			ID:            slab.ID,
 			EncryptionKey: slab.EncryptionKey,
 			MinShards:     slab.MinShards,
 			Sectors:       slab.Sectors,
