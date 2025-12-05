@@ -59,8 +59,6 @@ func (m *mockResolverFallback) LookupIPAddr(ctx context.Context, host string) ([
 }
 
 func TestResolver(t *testing.T) {
-	ctx := context.Background()
-
 	mainAddr := []net.IPAddr{{IP: net.ParseIP("1.2.3.4")}}
 	fallbackAddr := []net.IPAddr{{IP: net.ParseIP("5.6.7.8")}}
 
@@ -99,7 +97,7 @@ func TestResolver(t *testing.T) {
 				fallback: tt.fallback,
 			}
 
-			got, err := r.LookupIPAddr(ctx, "example.com")
+			got, err := r.LookupIPAddr(t.Context(), "example.com")
 
 			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("got error %v, want %v", err, tt.wantErr)
