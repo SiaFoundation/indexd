@@ -79,7 +79,7 @@ func TestObject(t *testing.T) {
 			params.Slice(0, 100),
 		},
 	}
-	err := store.SaveObject(acc, expected)
+	err = store.SaveObject(acc, expected)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -277,48 +277,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 	}
 	w = decrypt((*[32]byte)(obj.masterKey), w, uint64(do.offset))
 
-	// find starting slab
-	var i int
-	offset := do.offset
-	length := do.length
-	for i = range obj.slabs {
-		slabLength := uint64(obj.slabs[i].Length)
-		if offset < slabLength {
-			break
-		}
-		offset -= slabLength
-	}
-
-	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SlabSlice, error) {
-		if i >= len(obj.slabs) || length == 0 {
-			return slabs.SlabSlice{}, nil
-		}
-
-		slab := obj.slabs[i]
-		slabID, err := slab.Digest()
-		if err != nil {
-			return slabs.SlabSlice{}, fmt.Errorf("failed to compute slab %d id: %w", i, err)
-		}
-		pinned, err := s.client.Slab(ctx, s.appKey, slabID)
-		if err != nil {
-			return slabs.SlabSlice{}, fmt.Errorf("failed to get slab %d metadata: %w", i, err)
-		}
-		i++
-
-		// update offset and length for the slab slice
-		slabOffset := slab.Offset + uint32(offset) // cannot overflow, offset < slabLength
-		slabLength := min(uint64(slab.Length)-offset, length)
-		offset = 0
-		length -= slabLength
-
-		return slabs.SlabSlice{
-			EncryptionKey: pinned.EncryptionKey,
-			MinShards:     pinned.MinShards,
-			Sectors:       pinned.Sectors,
-			Offset:        slabOffset,
-			Length:        uint32(slabLength),
-		}, nil
-	})
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, slabsForDownload(obj.slabs, do))
 }
 
 // DownloadSharedObject downloads a shared object from a shared URL
@@ -349,39 +308,7 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 	// decrypt stream using the object's master key
 	w = decrypt((*[32]byte)(encryptionKey), w, uint64(do.offset))
 
-	// find starting slab
-	var i int
-	offset := do.offset
-	length := do.length
-	for i = range obj.Slabs {
-		slabLength := uint64(obj.Slabs[i].Length)
-		if offset < slabLength {
-			break
-		}
-		offset -= slabLength
-	}
-
-	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, func() (slabs.SlabSlice, error) {
-		if i >= len(obj.Slabs) || length == 0 {
-			return slabs.SlabSlice{}, nil
-		}
-		slab := obj.Slabs[i]
-		i++
-
-		// update offset and length for the slab slice
-		slabOffset := slab.Offset + uint32(offset) // cannot overflow, offset < slabLength
-		slabLength := min(uint64(slab.Length)-offset, length)
-		offset = 0
-		length -= slabLength
-
-		return slabs.SlabSlice{
-			EncryptionKey: slab.EncryptionKey,
-			MinShards:     slab.MinShards,
-			Sectors:       slab.Sectors,
-			Offset:        slabOffset,
-			Length:        uint32(slabLength),
-		}, nil
-	})
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, slabsForDownload(obj.Slabs, do))
 }
 
 // Close closes the SDK and releases all resources.
@@ -389,9 +316,9 @@ func (s *SDK) Close() error {
 	return s.hosts.Close()
 }
 
-type slabIterFn func() (slabs.SlabSlice, error)
+type slabIterFn func() slabs.SlabSlice
 
-func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, next slabIterFn) error {
+func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, ss []slabs.SlabSlice) error {
 	type work struct {
 		skip     int
 		writeLen int
@@ -408,14 +335,9 @@ func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, h
 	}
 
 	go func() {
-		for {
-			slab, err := next()
-			if err != nil {
-				sendErr(fmt.Errorf("failed to get next slab: %w", err))
-				return
-			} else if slab.Length == 0 {
-				break
-			}
+		for len(ss) > 0 {
+			var slab slabs.SlabSlice
+			slab, ss = ss[0], ss[1:]
 
 			shards, err := s.downloadSlab(ctx, slab, maxInflight, hostTimeout)
 			if err != nil {
@@ -567,6 +489,35 @@ func readAtMost(r io.Reader, buf []byte) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+func slabsForDownload(objSlabs []slabs.SlabSlice, do downloadOption) (slabs []slabs.SlabSlice) {
+	// find starting slab
+	var i int
+	offset := do.offset
+	length := do.length
+	for i = range objSlabs {
+		slabLength := uint64(objSlabs[i].Length)
+		if offset < slabLength {
+			break
+		}
+		offset -= slabLength
+	}
+
+	for ; i < len(objSlabs) && length > 0; i++ {
+		slab := objSlabs[i]
+
+		// update offset and length for the slab slice
+		slabOffset := slab.Offset + uint32(offset) // cannot overflow, offset < slabLength
+		slabLength := min(uint64(slab.Length)-offset, length)
+		offset = 0
+		length -= slabLength
+
+		slab.Offset = slabOffset
+		slab.Length = uint32(slabLength)
+		slabs = append(slabs, slab)
+	}
+	return
 }
 
 // WithRedundancy sets the number of data and parity shards for the upload.
