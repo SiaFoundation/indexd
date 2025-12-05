@@ -98,17 +98,11 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 	slabSectors := make(map[types.PublicKey]sectorDownload)
 	slabHosts := make([]types.PublicKey, 0, len(slab.Sectors))
 	for i, sector := range slab.Sectors {
-		if sector.HostKey == nil {
-			continue // ignore sectors without host
+		slabSectors[sector.HostKey] = sectorDownload{
+			index:  i,
+			sector: sector,
 		}
-		slabSectors[*sector.HostKey] = sectorDownload{
-			index: i,
-			sector: slabs.PinnedSector{
-				Root:    sector.Root,
-				HostKey: *sector.HostKey,
-			},
-		}
-		slabHosts = append(slabHosts, *sector.HostKey)
+		slabHosts = append(slabHosts, sector.HostKey)
 	}
 	if len(slabHosts) < int(slab.MinShards) {
 		return nil, fmt.Errorf("slab has %d sectors with hosts, minimum required: %d: %w", len(slabHosts), slab.MinShards, ErrNotEnoughShards)
@@ -321,7 +315,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 			ID:            slab.ID,
 			EncryptionKey: pinned.EncryptionKey,
 			MinShards:     pinned.MinShards,
-			Sectors:       slabs.PinnedSectorsToTracked(pinned.Sectors),
+			Sectors:       pinned.Sectors,
 			Offset:        slabOffset,
 			Length:        uint32(slabLength),
 		}, nil

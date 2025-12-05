@@ -53,14 +53,14 @@ WHERE ss.slab_id = $1
 ORDER BY ss.slab_index ASC`, slabDBID).Query(func(rows pgx.Rows) error {
 				defer rows.Close()
 				for rows.Next() {
-					var sector slabs.TrackedSector
+					var sector slabs.PinnedSector
 					var hostKey sql.Null[sqlPublicKey]
 					err := rows.Scan((*sqlHash256)(&sector.Root), &hostKey)
 					if err != nil {
 						return fmt.Errorf("failed to scan sector: %w", err)
 					}
 					if hostKey.Valid {
-						sector.HostKey = (*types.PublicKey)(&hostKey.V)
+						sector.HostKey = (types.PublicKey)(hostKey.V)
 					}
 					objectSlabs[i].Sectors = append(objectSlabs[i].Sectors, sector)
 				}
@@ -358,7 +358,7 @@ func decorateSectors(ctx context.Context, tx *txn, so *slabs.SealedObject) error
 			defer rows.Close()
 
 			for rows.Next() {
-				var sector slabs.TrackedSector
+				var sector slabs.PinnedSector
 				var hostKey sql.Null[sqlPublicKey]
 				err := rows.Scan((*sqlHash256)(&sector.Root), &hostKey)
 				if err != nil {
@@ -366,7 +366,7 @@ func decorateSectors(ctx context.Context, tx *txn, so *slabs.SealedObject) error
 					return fmt.Errorf("failed to scan slab sector: %w", err)
 				}
 				if hostKey.Valid {
-					sector.HostKey = (*types.PublicKey)(&hostKey.V)
+					sector.HostKey = (types.PublicKey)(hostKey.V)
 				}
 				so.Slabs[j].Sectors = append(so.Slabs[j].Sectors, sector)
 			}

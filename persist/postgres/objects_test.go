@@ -5,6 +5,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -81,7 +82,7 @@ func TestObject(t *testing.T) {
 				MinShards:     params.MinShards,
 				Offset:        0,
 				Length:        100,
-				Sectors:       slabs.PinnedSectorsToTracked(params.Sectors),
+				Sectors:       params.Sectors,
 			},
 		},
 	}
@@ -92,7 +93,7 @@ func TestObject(t *testing.T) {
 
 	expected.CreatedAt = time.Time{}
 	expected.UpdatedAt = time.Time{}
-	expected.Slabs[0].Sectors[2].HostKey = nil
+	expected.Slabs[0].Sectors[2].HostKey = types.PublicKey{}
 
 	got, err := store.Object(acc, expected.ID())
 	if err != nil {
@@ -208,7 +209,7 @@ func TestObjects(t *testing.T) {
 				MinShards:     p.MinShards,
 				Offset:        10,
 				Length:        120,
-				Sectors:       slabs.PinnedSectorsToTracked(p.Sectors),
+				Sectors:       p.Sectors,
 			})
 		}
 		return ss
@@ -451,15 +452,9 @@ func TestSharedObjects(t *testing.T) {
 			ID:            slabIDs[0],
 			EncryptionKey: s.EncryptionKey,
 			MinShards:     s.MinShards,
-			Sectors:       make([]slabs.TrackedSector, len(s.Sectors)),
+			Sectors:       slices.Clone(s.Sectors),
 			Offset:        uint32(frand.Uint64n(math.MaxInt32)),
 			Length:        uint32(frand.Uint64n(math.MaxInt32)),
-		}
-		for i := range s.Sectors {
-			so.Sectors[i] = slabs.TrackedSector{
-				Root:    s.Sectors[i].Root,
-				HostKey: &s.Sectors[i].HostKey,
-			}
 		}
 		return so
 	}
@@ -495,17 +490,8 @@ func TestSharedObjects(t *testing.T) {
 	// pin the slabs to the second account
 	for _, slab := range expectedSharedObj.Slabs {
 		_, err := store.PinSlabs(acc2, time.Time{}, slabs.SlabPinParams{
-			MinShards: slab.MinShards,
-			Sectors: func() []slabs.PinnedSector {
-				sps := make([]slabs.PinnedSector, len(slab.Sectors))
-				for i := range slab.Sectors {
-					sps[i] = slabs.PinnedSector{
-						Root:    slab.Sectors[i].Root,
-						HostKey: *slab.Sectors[i].HostKey,
-					}
-				}
-				return sps
-			}(),
+			MinShards:     slab.MinShards,
+			Sectors:       slab.Sectors,
 			EncryptionKey: slab.EncryptionKey,
 		})
 		if err != nil {

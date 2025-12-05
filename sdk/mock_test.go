@@ -256,7 +256,7 @@ func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (sl
 			ID:            slab.ID,
 			EncryptionKey: pinnedSlab.EncryptionKey,
 			MinShards:     pinnedSlab.MinShards,
-			Sectors:       slabs.PinnedSectorsToTracked(pinnedSlab.Sectors),
+			Sectors:       pinnedSlab.Sectors,
 			Offset:        slab.Offset,
 			Length:        slab.Length,
 		})

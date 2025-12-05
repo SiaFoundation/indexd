@@ -677,35 +677,17 @@ func TestSharedObjects(t *testing.T) {
 				ID:            slab1ID,
 				EncryptionKey: slab1Params.EncryptionKey,
 				MinShards:     slab1Params.MinShards,
-				Sectors: func() []slabs.TrackedSector {
-					so := make([]slabs.TrackedSector, len(slab1Params.Sectors))
-					for i := range slab1Params.Sectors {
-						so[i] = slabs.TrackedSector{
-							Root:    slab1Params.Sectors[i].Root,
-							HostKey: &slab1Params.Sectors[i].HostKey,
-						}
-					}
-					return so
-				}(),
-				Offset: 0,
-				Length: 256,
+				Sectors:       slab1Params.Sectors,
+				Offset:        0,
+				Length:        256,
 			},
 			{
 				ID:            slab2ID,
 				EncryptionKey: slab2Params.EncryptionKey,
 				MinShards:     slab2Params.MinShards,
-				Sectors: func() []slabs.TrackedSector {
-					so := make([]slabs.TrackedSector, len(slab2Params.Sectors))
-					for i := range slab2Params.Sectors {
-						so[i] = slabs.TrackedSector{
-							Root:    slab2Params.Sectors[i].Root,
-							HostKey: &slab2Params.Sectors[i].HostKey,
-						}
-					}
-					return so
-				}(),
-				Offset: 0,
-				Length: 256,
+				Sectors:       slab2Params.Sectors,
+				Offset:        0,
+				Length:        256,
 			},
 		},
 		EncryptedMetadata: nil,
