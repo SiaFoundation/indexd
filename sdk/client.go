@@ -316,8 +316,6 @@ func (s *SDK) Close() error {
 	return s.hosts.Close()
 }
 
-type slabIterFn func() slabs.SlabSlice
-
 func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, ss []slabs.SlabSlice) error {
 	type work struct {
 		skip     int

@@ -38,5 +38,4 @@ func TestEncodeSlabSlice(t *testing.T) {
 	} else if !reflect.DeepEqual(s, s2) {
 		t.Fatalf("decoded slab slice does not match original: got %+v, want %+v", s2, s)
 	}
-
 }

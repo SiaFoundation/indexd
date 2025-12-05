@@ -176,7 +176,7 @@ func (k *EncryptionKey) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// ToPinParams converts the SlabSlice to SlabPinParams.
+// Pin converts the SlabSlice to SlabPinParams.
 func (s SlabSlice) Pin() SlabPinParams {
 	return SlabPinParams{
 		EncryptionKey: s.EncryptionKey,
