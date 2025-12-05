@@ -100,7 +100,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
+			SELECT slabs.id, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
 			FROM object_slabs
 			JOIN slabs ON slabs.digest = object_slabs.slab_digest
 			WHERE object_id = $1
@@ -111,19 +111,22 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 		}
 		defer rows.Close()
 
+		var slabIDs []int64
 		for rows.Next() {
 			var slab slabs.SlabSlice
-			err := rows.Scan(&slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
+			var slabID int64
+			err := rows.Scan(&slabID, &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
 			if err != nil {
 				return fmt.Errorf("failed to scan slab: %w", err)
 			}
 			obj.Slabs = append(obj.Slabs, slab)
+			slabIDs = append(slabIDs, slabID)
 		}
 		if err := rows.Err(); err != nil {
 			return err
 		}
 
-		if err := decorateSectors(ctx, tx, &obj); err != nil {
+		if err := decorateSectors(ctx, tx, &obj, slabIDs); err != nil {
 			return fmt.Errorf("failed to decorate sectors of slab: %w", err)
 		}
 		return nil
@@ -194,7 +197,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			}
 
 			rows, err = tx.Query(ctx, `
-				SELECT slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
+				SELECT slabs.id, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
 				FROM object_slabs
 				JOIN slabs ON slabs.digest = object_slabs.slab_digest
 				WHERE object_id = $1
@@ -204,21 +207,24 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 				return fmt.Errorf("failed to query slabs: %w", err)
 			}
 
+			var slabIDs []int64
 			for rows.Next() {
 				var slab slabs.SlabSlice
-				err := rows.Scan(&slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
+				var slabID int64
+				err := rows.Scan(&slabID, &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
 				if err != nil {
 					rows.Close()
 					return fmt.Errorf("failed to scan slab: %w", err)
 				}
 				events[i].Object.Slabs = append(events[i].Object.Slabs, slab)
+				slabIDs = append(slabIDs, slabID)
 			}
 			if err := rows.Err(); err != nil {
 				return err
 			}
 			rows.Close()
 
-			if err := decorateSectors(ctx, tx, events[i].Object); err != nil {
+			if err := decorateSectors(ctx, tx, events[i].Object, slabIDs); err != nil {
 				return fmt.Errorf("failed to decorate sectors of slab: %w", err)
 			}
 		}
@@ -349,22 +355,21 @@ func accountID(ctx context.Context, tx *txn, account proto.Account) (int64, bool
 	return accountID, deleted, nil
 }
 
-func decorateSectors(ctx context.Context, tx *txn, so *slabs.SealedObject) error {
+func decorateSectors(ctx context.Context, tx *txn, so *slabs.SealedObject, slabIDs []int64) error {
+	if len(so.Slabs) != len(slabIDs) {
+		return fmt.Errorf("mismatched slab count (developer error): have %d, want %d", len(so.Slabs), len(slabIDs))
+	}
 	batch := &pgx.Batch{}
-	for j, slab := range so.Slabs {
-		slabID, err := slab.Digest()
-		if err != nil {
-			return fmt.Errorf("failed to get slab digest: %w", err)
-		}
+	for i := range so.Slabs {
 		batch.Queue(`
 			SELECT s.sector_root, h.public_key
 			FROM slabs
 			JOIN slab_sectors ss ON ss.slab_id = slabs.id
 			JOIN sectors s ON s.id = ss.sector_id
 			LEFT JOIN hosts h ON h.id = s.host_id
-			WHERE slabs.digest = $1
+			WHERE slabs.id = $1
 			ORDER BY ss.slab_index ASC
-		`, sqlHash256(slabID)).Query(func(rows pgx.Rows) error {
+		`, slabIDs[i]).Query(func(rows pgx.Rows) error {
 			defer rows.Close()
 
 			for rows.Next() {
@@ -378,7 +383,7 @@ func decorateSectors(ctx context.Context, tx *txn, so *slabs.SealedObject) error
 				if hostKey.Valid {
 					sector.HostKey = (types.PublicKey)(hostKey.V)
 				}
-				so.Slabs[j].Sectors = append(so.Slabs[j].Sectors, sector)
+				so.Slabs[i].Sectors = append(so.Slabs[i].Sectors, sector)
 			}
 			return rows.Err()
 		})
