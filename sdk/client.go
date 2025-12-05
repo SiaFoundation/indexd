@@ -240,10 +240,7 @@ top:
 				}
 			}
 
-			expectedSlabID, err := params.Digest()
-			if err != nil {
-				return Object{}, fmt.Errorf("failed to compute slab id for slab %d: %w", slabIndex, err)
-			}
+			expectedSlabID := params.Digest()
 
 			slabIDs, err := s.client.PinSlabs(ctx, s.appKey, params)
 			if err != nil {

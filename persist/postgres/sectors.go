@@ -250,11 +250,8 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				return slabs.ErrMinShards
 			}
 
-			digest, err := slab.Digest()
-			if err != nil {
-				return fmt.Errorf("failed to calculate slab digest: %w", err)
-			}
-			digests = append(digests, digest)
+			digest := slab.Digest()
+			digests = append(digests, slab.Digest())
 
 			// insert slab
 			var slabID int64

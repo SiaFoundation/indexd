@@ -104,12 +104,12 @@ func (s *SlabID) UnmarshalText(b []byte) error {
 }
 
 // Digest computes the digest for the slab pin params.
-func (s SlabPinParams) Digest() (SlabID, error) {
+func (s SlabPinParams) Digest() SlabID {
 	return slabDigest(s.MinShards, s.EncryptionKey, s.Sectors)
 }
 
 // Digest computes the digest for the slab slice.
-func (s SlabSlice) Digest() (SlabID, error) {
+func (s SlabSlice) Digest() SlabID {
 	return slabDigest(s.MinShards, s.EncryptionKey, s.Sectors)
 }
 
@@ -118,16 +118,14 @@ func (s SlabSlice) Digest() (SlabID, error) {
 // if one user makes the mistake of pinning a slab with a different encryption
 // key, this shouldn't prevent other users from pinning the same slab with the
 // correct key.
-func slabDigest(minShards uint, ec [32]byte, sectors []PinnedSector) (SlabID, error) {
+func slabDigest(minShards uint, ec [32]byte, sectors []PinnedSector) SlabID {
 	hasher := types.NewHasher()
 	hasher.E.WriteUint64(uint64(minShards))
 	hasher.E.Write(ec[:])
 	for _, sector := range sectors {
-		if _, err := hasher.E.Write(sector.Root[:]); err != nil {
-			return SlabID{}, fmt.Errorf("failed to write sector root to hasher: %w", err)
-		}
+		hasher.E.Write(sector.Root[:])
 	}
-	return SlabID(hasher.Sum()), nil
+	return SlabID(hasher.Sum())
 }
 
 // Size returns the size of the slab in bytes including redundancy.

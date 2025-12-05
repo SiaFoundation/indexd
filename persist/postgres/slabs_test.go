@@ -63,12 +63,8 @@ func TestSlab(t *testing.T) {
 	}
 
 	// assert it matches the expected slab
-	expectedID, err := params.Digest()
-	if err != nil {
-		t.Fatal(err)
-	}
 	expected := slabs.Slab{
-		ID:            expectedID,
+		ID:            params.Digest(),
 		EncryptionKey: params.EncryptionKey,
 		MinShards:     params.MinShards,
 		Sectors:       expectedSectors,
@@ -215,12 +211,8 @@ func TestPinnedSlab(t *testing.T) {
 			HostKey: host,
 		})
 	}
-	digest, err := pinned.Digest()
-	if err != nil {
-		t.Fatal(err)
-	}
 	expected := slabs.PinnedSlab{
-		ID:            digest,
+		ID:            pinned.Digest(),
 		EncryptionKey: pinned.EncryptionKey,
 		MinShards:     pinned.MinShards,
 		Sectors:       make([]slabs.PinnedSector, len(pinned.Sectors)),
@@ -311,7 +303,7 @@ func TestSlabPruning(t *testing.T) {
 	}
 
 	// add objects for both accounts
-	slab1ID, _ := slab1.Digest()
+	slab1ID := slab1.Digest()
 	obj1 := slabs.SealedObject{
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
@@ -331,7 +323,7 @@ func TestSlabPruning(t *testing.T) {
 	}
 
 	// pin this object to first account only
-	slab2ID, _ := slab2.Digest()
+	slab2ID := slab2.Digest()
 	obj2 := slabs.SealedObject{
 		EncryptedMasterKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{

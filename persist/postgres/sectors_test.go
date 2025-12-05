@@ -531,11 +531,7 @@ func TestPinSlabs(t *testing.T) {
 				},
 			},
 		}
-		slabID, err := slab.Digest()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return slabID, slab
+		return slab.Digest(), slab
 	}
 
 	assertUnpinnedSectors := func(expected uint64) {
@@ -794,11 +790,7 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 				},
 			},
 		}
-		slabID, err := slab.Digest()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return slabID, slab
+		return slab.Digest(), slab
 	}
 
 	// these accounts will have the same MaxPinnedData as the connect key
@@ -896,11 +888,7 @@ func TestPinSlabsBadHost(t *testing.T) {
 				HostKey: hk,
 			})
 		}
-		slabID, err := slab.Digest()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return slabID, slab
+		return slab.Digest(), slab
 	}
 	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
 
@@ -937,11 +925,7 @@ func TestPinSlabsConflict(t *testing.T) {
 				HostKey: hk,
 			}},
 		}
-		slabID, err := slab.Digest()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return slabID, slab
+		return slab.Digest(), slab
 	}
 
 	slabID, slab := newSlab()
@@ -1032,9 +1016,9 @@ func TestUnpinSlab(t *testing.T) {
 			},
 		})
 	}
-	slab1, _ := params[0].Digest()
-	slab2, _ := params[1].Digest()
-	slab3, _ := params[2].Digest()
+	slab1 := params[0].Digest()
+	slab2 := params[1].Digest()
+	slab3 := params[2].Digest()
 
 	// add an account with 2 slabs, 2 sectors each
 	acc1 := proto.Account{1}

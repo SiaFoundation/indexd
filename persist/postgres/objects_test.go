@@ -416,9 +416,7 @@ func TestSharedObjects(t *testing.T) {
 		slabIDs, err := store.PinSlabs(acc1, time.Time{}, s)
 		if err != nil {
 			t.Fatal(err)
-		} else if id, err := s.Digest(); err != nil {
-			t.Fatal(err)
-		} else if id != slabIDs[0] {
+		} else if id := s.Digest(); id != slabIDs[0] {
 			t.Fatalf("expected slab ID %v, got %v", id, slabIDs[0])
 		}
 
@@ -495,10 +493,7 @@ func BenchmarkSaveObject(b *testing.B) {
 		}
 		slabID := slabIDs[0]
 
-		id, err := s.Digest()
-		if err != nil {
-			b.Fatal(err)
-		} else if id != slabID {
+		if id := s.Digest(); id != slabID {
 			b.Fatalf("expected slab ID %v, got %v", id, slabID)
 		}
 

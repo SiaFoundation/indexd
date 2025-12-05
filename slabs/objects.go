@@ -102,9 +102,16 @@ var (
 
 // ID returns the object's ID, which is a hash of its slabs.
 func (so *SealedObject) ID() types.Hash256 {
+	return ObjectID(so.Slabs)
+}
+
+// ObjectID returns the object's ID, which is a hash of its slabs.
+func ObjectID(slabs []SlabSlice) types.Hash256 {
 	h := types.NewHasher()
-	for _, slab := range so.Slabs {
-		slab.EncodeTo(h.E)
+	for _, slab := range slabs {
+		slabID := slab.Digest()
+		h.E.Write(slabID[:])
+		h.E.WriteUint64(uint64(slab.Offset)<<32 | uint64(slab.Length))
 	}
 	return h.Sum()
 }
