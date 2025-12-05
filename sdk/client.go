@@ -389,8 +389,7 @@ func (s *SDK) Close() error {
 
 type slabIterFn func() (slabs.PinnedSlabSlice, error)
 
-// SaveObject saves the given object to the indexer. This usually only needs to
-// be caleld if the upload was done with the WithSkipSave option.
+// SaveObject saves the given object to the indexer.
 func (s *SDK) SaveObject(ctx context.Context, obj *Object) error {
 	return s.client.SaveObject(ctx, s.appKey, obj.Seal(s.appKey))
 }
