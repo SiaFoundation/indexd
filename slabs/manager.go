@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/threadgroup"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
@@ -92,7 +91,6 @@ type (
 	// Store defines an interface to store and update slab related information
 	// in the database.
 	Store interface {
-		AddServiceAccount(ak types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error
 		Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
 		HostsForIntegrityChecks(maxLastCheck time.Time, limit int) ([]types.PublicKey, error)
 		HostsWithLostSectors() ([]types.PublicKey, error)
@@ -252,16 +250,6 @@ func (m *SlabManager) initServiceAccounts(migrationAccount, integrityAccount typ
 		{"slab migrations", migrationAccount},
 		{"data integrity checks", integrityAccount},
 	} {
-		// ensure account is added to the store
-		err := m.store.AddServiceAccount(acc.key, accounts.AppMeta{
-			Description: acc.description,
-			LogoURL:     "", // service accounts don't need a logo
-			ServiceURL:  "", // service accounts don't need a service URL
-		})
-		if err != nil && !errors.Is(err, accounts.ErrExists) {
-			return fmt.Errorf("failed to add service account: %w", err)
-		}
-
 		// ensure account is registered with the AccountManager
 		m.am.RegisterServiceAccount(proto.Account(acc.key))
 	}

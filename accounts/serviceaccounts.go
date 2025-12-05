@@ -2,6 +2,8 @@ package accounts
 
 import (
 	"context"
+	"maps"
+	"slices"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -51,6 +53,12 @@ func (m *AccountManager) serviceAccountExists(account proto.Account) bool {
 	defer m.serviceAccountsMu.Unlock()
 	_, exists := m.serviceAccounts[account]
 	return exists
+}
+
+func (m *AccountManager) serviceAccs() []proto.Account {
+	m.serviceAccountsMu.Lock()
+	defer m.serviceAccountsMu.Unlock()
+	return slices.Collect(maps.Keys(m.serviceAccounts))
 }
 
 // UpdateServiceAccounts updates the balance of all accounts registered as

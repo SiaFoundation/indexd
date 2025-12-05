@@ -188,6 +188,21 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 		}
 	}
 
+	// get all service accounts
+	var serviceAccounts []HostAccount
+	for _, serviceAccount := range m.serviceAccs() {
+		serviceAccounts = append(serviceAccounts, HostAccount{
+			AccountKey: serviceAccount,
+			HostKey:    host.PublicKey,
+		})
+	}
+
+	// fund them
+	_, _, err := m.funder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
+	if err != nil {
+		return fmt.Errorf("failed to fund service accounts: %w", err)
+	}
+
 	return nil
 }
 
