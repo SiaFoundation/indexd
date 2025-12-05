@@ -230,10 +230,7 @@ func (s *mockStore) PinSlabs(account proto.Account, nextIntegrityCheck time.Time
 	defer s.mu.Unlock()
 	var digests []SlabID
 	for _, slab := range slabs {
-		slabID, err := slab.Digest()
-		if err != nil {
-			return nil, err
-		}
+		slabID := slab.Digest()
 		digests = append(digests, slabID)
 
 		sectors := make([]Sector, 0, len(slab.Sectors))

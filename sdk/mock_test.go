@@ -165,10 +165,7 @@ func (mc *mockAppClient) PinSlabs(_ context.Context, _ types.PrivateKey, toPin .
 	defer mc.mu.Unlock()
 
 	for _, s := range toPin {
-		id, err := s.Digest()
-		if err != nil {
-			return nil, err
-		}
+		id := s.Digest()
 		digests = append(digests, id)
 
 		ps := slabs.PinnedSlab{
@@ -251,11 +248,7 @@ func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (sl
 
 	var objSlabs []slabs.SlabSlice
 	for _, slab := range obj.Slabs {
-		slabID, err := slab.Digest()
-		if err != nil {
-			return slabs.SharedObject{}, nil, err
-		}
-		pinnedSlab := mc.pinned[slabID]
+		pinnedSlab := mc.pinned[slab.Digest()]
 		objSlabs = append(objSlabs, slabs.SlabSlice{
 			EncryptionKey: pinnedSlab.EncryptionKey,
 			MinShards:     pinnedSlab.MinShards,

@@ -299,11 +299,7 @@ func (s *Store) SaveObject(account proto.Account, obj slabs.SealedObject) error 
 
 		slabIDs := make([]slabs.SlabID, 0, len(obj.Slabs))
 		for _, slab := range obj.Slabs {
-			slabID, err := slab.Digest()
-			if err != nil {
-				return fmt.Errorf("failed to get slab digest: %w", err)
-			}
-			slabIDs = append(slabIDs, slabID)
+			slabIDs = append(slabIDs, slab.Digest())
 		}
 
 		// check that this account has pinned these slabs

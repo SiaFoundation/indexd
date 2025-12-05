@@ -30,11 +30,7 @@ type Object struct {
 
 // ID returns the object's ID, which is a hash of its slabs.
 func (o *Object) ID() types.Hash256 {
-	h := types.NewHasher()
-	for _, slab := range o.slabs {
-		slab.EncodeTo(h.E)
-	}
-	return h.Sum()
+	return slabs.ObjectID(o.slabs)
 }
 
 // CreatedAt returns the time the object was created.

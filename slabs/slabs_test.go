@@ -79,10 +79,8 @@ func TestSlabPinParamsDigest(t *testing.T) {
 		}
 	}
 	expectedID := SlabID(hasher.Sum())
-	slabID, err := params.Digest()
-	if err != nil {
-		t.Fatal(err)
-	} else if slabID != expectedID {
+	slabID := params.Digest()
+	if slabID != expectedID {
 		t.Fatalf("expected %v, got %v", expectedID, slabID)
 	}
 }
