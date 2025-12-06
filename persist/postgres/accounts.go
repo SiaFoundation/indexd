@@ -47,8 +47,8 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 			FROM accounts a
 			LEFT JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 			WHERE a.deleted_at IS NULL AND
-			($2::integer IS NULL OR connect_key_id = $2::integer)
-			LIMIT $3 OFFSET $4
+			($1::integer IS NULL OR connect_key_id = $1::integer)
+			LIMIT $2 OFFSET $3
 		`, connectKeyID, limit, offset)
 		if err != nil {
 			return fmt.Errorf("failed to query accounts: %w", err)
@@ -114,11 +114,11 @@ func (s *Store) ActiveAccounts(threshold time.Time) (count uint64, err error) {
 // DeleteAccount deletes the account in the database with given account key.
 func (s *Store) DeleteAccount(acc proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1`, sqlPublicKey(acc))
-		if errors.Is(err, sql.ErrNoRows) {
-			return accounts.ErrNotFound
-		} else if err != nil {
+		result, err := tx.Exec(ctx, `UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1`, sqlPublicKey(acc))
+		if err != nil {
 			return fmt.Errorf("failed to delete account: %w", err)
+		} else if result.RowsAffected() != 1 {
+			return accounts.ErrNotFound
 		}
 		return nil
 	})
@@ -350,7 +350,7 @@ func (s *Store) DebitServiceAccount(hostKey types.PublicKey, account proto.Accou
 		resp, err := tx.Exec(ctx, `
 			UPDATE service_accounts
 			SET balance = GREATEST(balance - $1, 0)
-			WHERE account_id = $2
+			WHERE public_key = $2
 			AND host_id = (SELECT id FROM hosts WHERE public_key = $3)
 		`, sqlCurrency(amount), sqlPublicKey(account), sqlPublicKey(hostKey))
 		if err != nil {
@@ -366,13 +366,13 @@ func (s *Store) DebitServiceAccount(hostKey types.PublicKey, account proto.Accou
 func (s *Store) UpdateServiceAccountBalance(hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
-			INSERT INTO service_accounts (account_id, host_id, balance)
+			INSERT INTO service_accounts (public_key, host_id, balance)
 			VALUES (
 				$1,
 				(SELECT id FROM hosts WHERE public_key = $2),
 				$3
 			)
-			ON CONFLICT (account_id, host_id) DO UPDATE SET balance = EXCLUDED.balance
+			ON CONFLICT (public_key, host_id) DO UPDATE SET balance = EXCLUDED.balance
 		`, sqlPublicKey(account), sqlPublicKey(hostKey), sqlCurrency(balance))
 		return err
 	})

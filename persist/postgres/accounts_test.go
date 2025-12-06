@@ -52,18 +52,8 @@ func TestAccounts(t *testing.T) {
 	pk3 := types.GeneratePrivateKey().PublicKey()
 	store.addTestAccount(t, pk3, accounts.WithMaxPinnedData(100))
 
-	// fetch all
-	accs, err := store.Accounts(0, 10)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(accs) != 3 {
-		t.Fatal("unexpected accounts", accs)
-	}
-	assertAccount(t, accs[0], pk1, math.MaxInt64, false)
-	assertAccount(t, accs[2], pk3, 100, false)
-
 	// fetch only user accounts
-	accs, err = store.Accounts(0, 10)
+	accs, err := store.Accounts(0, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 2 {

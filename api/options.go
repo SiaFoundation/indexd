@@ -50,13 +50,6 @@ func WithLimit(limit int) URLQueryParameterOption {
 	}
 }
 
-// WithServiceAccount sets the 'serviceaccount' parameter.
-func WithServiceAccount(serviceAccount bool) URLQueryParameterOption {
-	return func(q url.Values) {
-		q.Set("serviceaccount", fmt.Sprint(serviceAccount))
-	}
-}
-
 // WithConnectKey sets the 'connectkey' parameter.
 func WithConnectKey(connectKey string) URLQueryParameterOption {
 	return func(q url.Values) {

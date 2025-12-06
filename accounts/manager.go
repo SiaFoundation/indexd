@@ -197,10 +197,12 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 		})
 	}
 
-	// fund them
-	_, _, err := m.funder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
-	if err != nil {
-		return fmt.Errorf("failed to fund service accounts: %w", err)
+	if len(serviceAccounts) > 0 {
+		// fund them
+		_, _, err := m.funder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
+		if err != nil {
+			return fmt.Errorf("failed to fund service accounts: %w", err)
+		}
 	}
 
 	return nil
