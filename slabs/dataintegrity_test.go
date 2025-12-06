@@ -35,15 +35,12 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	acc := proto.Account(sk.PublicKey())
 
 	// prepare slab manager
-	sm, err := newSlabManager(chain, am, cm, hm, store, client, nil, sk, sk)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sm:= newSlabManager(chain, am, cm, hm, store, client, nil, sk, sk)
 
 	// prepare helper to reset balance to 3SC to avoid running out of funds
 	resetBalance := func() {
 		t.Helper()
-		err = am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, oneSC.Mul64(3))
+		err := am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, oneSC.Mul64(3))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -123,10 +120,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 func TestIntegrityChecksAlert(t *testing.T) {
 	store := newMockStore()
 	alerter := alerts.NewManager()
-	sm, err := newSlabManager(newMockChainManager(), newMockAccountManager(store), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
-	if err != nil {
-		t.Fatal(err)
-	}
+	sm:= newSlabManager(newMockChainManager(), newMockAccountManager(store), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
 
 	// assert there are no alerts
 	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
