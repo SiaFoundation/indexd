@@ -228,11 +228,7 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 	}
 	m.verifier = NewSectorVerifier(am, hosts, integrityAccount, m.log)
 
-	err := m.initServiceAccounts(migrationAccount.PublicKey(), integrityAccount.PublicKey())
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize service accounts: %w", err)
-	}
-
+	m.initServiceAccounts(migrationAccount.PublicKey(), integrityAccount.PublicKey())
 	return m, nil
 }
 
@@ -242,7 +238,7 @@ func (m *SlabManager) Close() error {
 	return nil
 }
 
-func (m *SlabManager) initServiceAccounts(migrationAccount, integrityAccount types.PublicKey) error {
+func (m *SlabManager) initServiceAccounts(migrationAccount, integrityAccount types.PublicKey) {
 	for _, acc := range []struct {
 		description string
 		key         types.PublicKey
@@ -253,7 +249,7 @@ func (m *SlabManager) initServiceAccounts(migrationAccount, integrityAccount typ
 		// ensure account is registered with the AccountManager
 		m.am.RegisterServiceAccount(proto.Account(acc.key))
 	}
-	return nil
+	return
 }
 
 // maintenanceLoop performs any background tasks that the slab manager needs to

@@ -36,7 +36,7 @@ func (s *Store) addTestAccount(t testing.TB, ak types.PublicKey, opts ...account
 func TestAccounts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	assertAccount := func(t *testing.T, acc accounts.Account, expectedKey types.PublicKey, maxData uint64, isService bool) {
+	assertAccount := func(t *testing.T, acc accounts.Account, expectedKey types.PublicKey, maxData uint64) {
 		t.Helper()
 		switch {
 		case types.PublicKey(acc.AccountKey) != expectedKey:
@@ -59,8 +59,8 @@ func TestAccounts(t *testing.T) {
 	} else if len(accs) != 2 {
 		t.Fatal("unexpected accounts", accs)
 	}
-	assertAccount(t, accs[0], pk1, math.MaxInt64, false)
-	assertAccount(t, accs[1], pk3, 100, false)
+	assertAccount(t, accs[0], pk1, math.MaxInt64)
+	assertAccount(t, accs[1], pk3, 100)
 
 	// add accounts associated with connect key
 	const connectKey = "foobar"
@@ -87,8 +87,8 @@ func TestAccounts(t *testing.T) {
 	} else if len(accs) != 2 {
 		t.Fatal("unexpected accounts", accs)
 	}
-	assertAccount(t, accs[0], pk4, 100, false)
-	assertAccount(t, accs[1], pk5, 100, false)
+	assertAccount(t, accs[0], pk4, 100)
+	assertAccount(t, accs[1], pk5, 100)
 
 	_, err = store.Accounts(0, 10, accounts.WithConnectKey("invalidkey"))
 	if !errors.Is(err, accounts.ErrKeyNotFound) {
