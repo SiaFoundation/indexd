@@ -87,10 +87,7 @@ func TestMigrateSlab(t *testing.T) {
 	msk := types.GeneratePrivateKey()
 	ssk := types.GeneratePrivateKey()
 	alerter := alerts.NewManager()
-	mgr, err := newSlabManager(chain, am, contracts, hm, db, client, alerter, msk, ssk, WithLogger(log.Named("slabs")))
-	if err != nil {
-		t.Fatal(err)
-	}
+	mgr:= newSlabManager(chain, am, contracts, hm, db, client, alerter, msk, ssk, WithLogger(log.Named("slabs")))
 
 	// assert it's unhealthy
 	unhealthSlabIDs, err := db.UnhealthySlabs(1)
