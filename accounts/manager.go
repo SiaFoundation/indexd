@@ -176,11 +176,6 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 			return fmt.Errorf("failed to update accounts: %w", err)
 		}
 
-		// update service accounts
-		if err := m.UpdateServiceAccounts(ctx, accounts[:funded], fundTarget); err != nil {
-			m.log.Warn("failed to update service account balance", zap.Error(err))
-		}
-
 		contractIDs = contractIDs[drained:]
 		if len(contractIDs) == 0 {
 			log.Debug("not all accounts could be funded, no more contracts available")
@@ -202,6 +197,11 @@ func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, cont
 		_, _, err := m.funder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
 		if err != nil {
 			return fmt.Errorf("failed to fund service accounts: %w", err)
+		}
+
+		// update service account balances
+		if err := m.UpdateServiceAccounts(ctx, serviceAccounts, fundTarget); err != nil {
+			m.log.Warn("failed to update service account balances", zap.Error(err))
 		}
 	}
 
