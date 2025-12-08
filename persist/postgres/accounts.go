@@ -340,60 +340,6 @@ DO UPDATE SET
 	})
 }
 
-// DebitServiceAccount withdraws from a service account. The balance of the
-// account can't underflow, instead it will be set to 0 if the amount withdrawn
-// exceeds the stored balance.
-func (s *Store) DebitServiceAccount(hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
-	return s.transaction(func(ctx context.Context, tx *txn) error {
-		resp, err := tx.Exec(ctx, `
-			UPDATE service_accounts
-			SET balance = GREATEST(balance - $1, 0)
-			WHERE public_key = $2
-			AND host_id = (SELECT id FROM hosts WHERE public_key = $3)
-		`, sqlCurrency(amount), sqlPublicKey(account), sqlPublicKey(hostKey))
-		if err != nil {
-			return err
-		} else if resp.RowsAffected() == 0 {
-			return accounts.ErrNotFound
-		}
-		return nil
-	})
-}
-
-// UpdateServiceAccountBalance updates the balance of a service account.
-func (s *Store) UpdateServiceAccountBalance(hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
-	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
-			INSERT INTO service_accounts (public_key, host_id, balance)
-			VALUES (
-				$1,
-				(SELECT id FROM hosts WHERE public_key = $2),
-				$3
-			)
-			ON CONFLICT (public_key, host_id) DO UPDATE SET balance = EXCLUDED.balance
-		`, sqlPublicKey(account), sqlPublicKey(hostKey), sqlCurrency(balance))
-		return err
-	})
-}
-
-// ServiceAccountBalance returns the balance of a service account.
-func (s *Store) ServiceAccountBalance(hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
-	var balance types.Currency
-	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		err := tx.QueryRow(ctx, `
-			SELECT balance
-			FROM service_accounts
-			INNER JOIN hosts ON hosts.id = service_accounts.host_id
-			WHERE service_accounts.public_key = $1 AND hosts.public_key = $2
-		`, sqlPublicKey(account), sqlPublicKey(hostKey)).Scan((*sqlCurrency)(&balance))
-		if errors.Is(err, sql.ErrNoRows) {
-			return accounts.ErrNotFound
-		}
-		return err
-	})
-	return balance, err
-}
-
 func addAccount(ctx context.Context, tx *txn, connectKey *string, account types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
 	aao := accounts.AddAccountOptions{
 		MaxPinnedData: math.MaxInt64, // no limit by default

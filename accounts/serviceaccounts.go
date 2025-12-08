@@ -16,7 +16,7 @@ func (m *AccountManager) RegisterServiceAccount(account proto.Account) {
 	if _, exists := m.serviceAccounts[account]; exists {
 		panic("service account already registered") // developer error
 	}
-	m.serviceAccounts[account] = struct{}{}
+	m.serviceAccounts[account] = make(map[types.PublicKey]types.Currency)
 }
 
 // ResetAccountBalance resets the account balance of a service account to 0.
@@ -26,7 +26,8 @@ func (m *AccountManager) ResetAccountBalance(ctx context.Context, hostKey types.
 	if !m.serviceAccountExists(account) {
 		return ErrNotFound
 	}
-	return m.store.UpdateServiceAccountBalance(hostKey, account, types.ZeroCurrency)
+	m.serviceAccounts[account][hostKey] = types.ZeroCurrency
+	return nil
 }
 
 // ServiceAccountBalance returns the balance of a locked service account.
@@ -34,7 +35,7 @@ func (m *AccountManager) ServiceAccountBalance(ctx context.Context, hostKey type
 	if !m.serviceAccountExists(account) {
 		return types.ZeroCurrency, ErrNotFound
 	}
-	return m.store.ServiceAccountBalance(hostKey, account)
+	return m.serviceAccounts[account][hostKey], nil
 }
 
 // DebitServiceAccount withdraws from a service account. This should be used
@@ -43,7 +44,13 @@ func (m *AccountManager) DebitServiceAccount(ctx context.Context, hostKey types.
 	if !m.serviceAccountExists(account) {
 		return ErrNotFound
 	}
-	return m.store.DebitServiceAccount(hostKey, account, amount)
+
+	val, underflow := m.serviceAccounts[account][hostKey].SubWithUnderflow(amount)
+	if underflow {
+		val = types.ZeroCurrency
+	}
+	m.serviceAccounts[account][hostKey] = val
+	return nil
 }
 
 func (m *AccountManager) serviceAccountExists(account proto.Account) bool {
@@ -71,20 +78,14 @@ func (m *AccountManager) hostAccs(hk types.PublicKey) []HostAccount {
 // service accounts to 'balance'.
 func (m *AccountManager) UpdateServiceAccounts(ctx context.Context, accounts []HostAccount, balance types.Currency) error {
 	m.serviceAccountsMu.Lock()
-	var toUpdate []HostAccount
 	for _, account := range accounts {
 		_, ok := m.serviceAccounts[account.AccountKey]
 		if !ok {
 			continue
 		}
-		toUpdate = append(toUpdate, account)
+		m.serviceAccounts[account.AccountKey][account.HostKey] = balance
 	}
 	m.serviceAccountsMu.Unlock()
 
-	for _, account := range toUpdate {
-		if err := m.store.UpdateServiceAccountBalance(account.HostKey, account.AccountKey, balance); err != nil {
-			return err
-		}
-	}
 	return nil
 }
