@@ -585,15 +585,9 @@ SET public_key = a.public_key
 FROM accounts a
 WHERE sa.account_id = a.id;
 
-ALTER TABLE service_accounts ALTER COLUMN public_key SET NOT NULL;
-
-ALTER TABLE service_accounts DROP CONSTRAINT service_accounts_pk;
-
-ALTER TABLE service_accounts DROP COLUMN account_id;
-
-ALTER TABLE service_accounts ADD CONSTRAINT service_accounts_pk PRIMARY KEY (public_key, host_id);
-
 ALTER TABLE accounts DROP COLUMN service_account;
+
+DROP TABLE service_accounts;
 `)
 		return err
 	},

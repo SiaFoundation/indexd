@@ -89,13 +89,6 @@ CREATE TABLE account_hosts (
 );
 CREATE INDEX account_hosts_host_id_next_fund_idx ON account_hosts (host_id, next_fund);
 
-CREATE TABLE service_accounts (
-    public_key BYTEA NOT NULL CHECK (LENGTH(public_key) = 32),
-    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
-    balance NUMERIC(50,0) NOT NULL DEFAULT 0 CHECK (balance >= 0),
-    CONSTRAINT service_accounts_pk PRIMARY KEY (public_key, host_id)
-);
-
 CREATE TABLE hosts_blocklist (
     public_key BYTEA PRIMARY KEY CHECK (LENGTH(public_key) = 32),
     added TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),

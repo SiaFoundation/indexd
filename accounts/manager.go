@@ -56,10 +56,6 @@ type (
 		ScheduleAccountsForFunding(hostKey types.PublicKey) error
 		UpdateHostAccounts(accounts []HostAccount) error
 
-		DebitServiceAccount(hostKey types.PublicKey, account proto.Account, amount types.Currency) error
-		UpdateServiceAccountBalance(hostKey types.PublicKey, account proto.Account, balance types.Currency) error
-		ServiceAccountBalance(hostKey types.PublicKey, account proto.Account) (types.Currency, error)
-
 		ValidAppConnectKey(string) (bool, error)
 		AppConnectKeyUserSecret(string) (secret types.Hash256, err error)
 		RegisterAppKey(string, types.PublicKey, AppMeta) error
@@ -93,7 +89,7 @@ type (
 		log *zap.Logger
 
 		serviceAccountsMu sync.Mutex
-		serviceAccounts   map[proto.Account]struct{}
+		serviceAccounts   map[proto.Account]map[types.PublicKey]types.Currency
 	}
 )
 
@@ -276,7 +272,7 @@ func HostFundTarget(host hosts.Host) types.Currency {
 func NewManager(store Store, funder AccountFunder, opts ...Option) (*AccountManager, error) {
 	m := &AccountManager{
 		pruneAccountsInterval: 10 * time.Minute,
-		serviceAccounts:       make(map[proto.Account]struct{}),
+		serviceAccounts:       make(map[proto.Account]map[types.PublicKey]types.Currency),
 		store:                 store,
 		funder:                funder,
 		tg:                    threadgroup.New(),

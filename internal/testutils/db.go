@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
@@ -124,15 +123,6 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 	}
 
 	if err := ts.RegisterAppKey(connectKey, ak, accounts.AppMeta{}); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// AddTestServiceAccount adds a service account to the database for testing.
-func (s TestStore) AddTestServiceAccount(t testing.TB, hk types.PublicKey, ak proto.Account) {
-	t.Helper()
-
-	if err := s.Store.UpdateServiceAccountBalance(hk, ak, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 }
