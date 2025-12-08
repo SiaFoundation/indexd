@@ -166,7 +166,7 @@ func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (Shar
 type EncryptionKey [32]byte
 
 // MarshalJSON implements the json.Marshaler interface using base64 encoding.
-func (k *EncryptionKey) MarshalJSON() ([]byte, error) {
+func (k EncryptionKey) MarshalJSON() ([]byte, error) {
 	return json.Marshal(base64.StdEncoding.EncodeToString(k[:]))
 }
 
