@@ -59,11 +59,11 @@ type (
 	// Slab is a group of sectors that is encrypted, erasure-coded and uploaded
 	// to hosts.
 	Slab struct {
-		ID            SlabID    `json:"id"`
-		EncryptionKey [32]byte  `json:"encryptionKey"`
-		MinShards     uint      `json:"minShards"`
-		Sectors       []Sector  `json:"sectors"`
-		PinnedAt      time.Time `json:"pinnedAt"`
+		ID            SlabID        `json:"id"`
+		EncryptionKey EncryptionKey `json:"encryptionKey"`
+		MinShards     uint          `json:"minShards"`
+		Sectors       []Sector      `json:"sectors"`
+		PinnedAt      time.Time     `json:"pinnedAt"`
 	}
 
 	// A PinnedSector is a sector that has been pinned to a host.
@@ -74,7 +74,7 @@ type (
 
 	// SlabPinParams is the input to PinSlabs
 	SlabPinParams struct {
-		EncryptionKey [32]byte       `json:"encryptionKey"`
+		EncryptionKey EncryptionKey  `json:"encryptionKey"`
 		MinShards     uint           `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
 	}
@@ -82,7 +82,7 @@ type (
 	// A PinnedSlab is a slab that has been pinned to hosts.
 	PinnedSlab struct {
 		ID            SlabID         `json:"id"`
-		EncryptionKey [32]byte       `json:"encryptionKey"`
+		EncryptionKey EncryptionKey  `json:"encryptionKey"`
 		MinShards     uint           `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
 	}
