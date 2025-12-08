@@ -17,10 +17,6 @@ var (
 	// account not being found.
 	ErrNotFound = errors.New("account not found")
 
-	// ErrServiceAccount is returned by operations that fail due to an account
-	// being a service account.
-	ErrServiceAccount = errors.New("account is a service account")
-
 	// ErrAccountStorageLimitExceeded is returned when an operation fails due
 	// to the account exceeding its storage limit.  We use the term "app
 	// storage limit" here because from the user's perspective, they will have
@@ -50,8 +46,7 @@ func WithMaxPinnedData(maxPinnedData uint64) AddAccountOption {
 type (
 	// QueryAccountsOptions holds options for querying accounts.
 	QueryAccountsOptions struct {
-		ServiceAccount *bool
-		ConnectKey     *string
+		ConnectKey *string
 	}
 
 	// QueryAccountsOpt is a functional option for querying accounts.
@@ -69,13 +64,12 @@ func WithConnectKey(connectKey string) QueryAccountsOpt {
 type (
 	// Account represents an account in the indexer.
 	Account struct {
-		AccountKey     proto.Account `json:"accountKey"`
-		ConnectKey     *string       `json:"connectKey,omitempty"`
-		ServiceAccount bool          `json:"serviceAccount"`
-		MaxPinnedData  uint64        `json:"maxPinnedData"`
-		PinnedData     uint64        `json:"pinnedData"`
-		App            AppMeta       `json:"app,omitempty"`
-		LastUsed       time.Time     `json:"lastUsed"`
+		AccountKey    proto.Account `json:"accountKey"`
+		ConnectKey    *string       `json:"connectKey,omitempty"`
+		MaxPinnedData uint64        `json:"maxPinnedData"`
+		PinnedData    uint64        `json:"pinnedData"`
+		App           AppMeta       `json:"app,omitempty"`
+		LastUsed      time.Time     `json:"lastUsed"`
 	}
 
 	// HostAccount represents an ephemeral account on a host.

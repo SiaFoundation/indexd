@@ -25,9 +25,7 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 		return nil, nil
 	}
 
-	queryOpts := accounts.QueryAccountsOptions{
-		ConnectKey: nil, // default to all accounts
-	}
+	var queryOpts accounts.QueryAccountsOptions
 	for _, opt := range opts {
 		opt(&queryOpts)
 	}

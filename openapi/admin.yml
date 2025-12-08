@@ -242,11 +242,6 @@ paths:
             type: integer
             minimum: 0
             default: 0
-        - name: serviceaccount
-          in: query
-          description: If true, only service accounts will be returned.  If false, service accounts will not be returned.
-          schema:
-            type: boolean
         - name: connectkey
           in: query
           description: If specified, only accounts associated with the specified connect key will be returned.
