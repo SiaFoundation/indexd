@@ -574,4 +574,24 @@ ALTER TABLE app_connect_keys ADD CONSTRAINT app_connect_keys_user_secret_key UNI
 CREATE INDEX contracts_next_prune_host_id_idx ON contracts (next_prune, host_id) WHERE state IN (0,1) AND renewed_to IS NULL AND good;`)
 		return err
 	},
+	// add metadata key to objects
+	func(ctx context.Context, tx *txn, l *zap.Logger) error {
+		// rename encrypted_master_key column to encrypted_data_key
+		_, err := tx.Exec(ctx, `
+-- rename constraints of existing colums
+ALTER TABLE objects RENAME CONSTRAINT objects_encrypted_master_key_key TO objects_encrypted_data_key_key;
+ALTER TABLE objects RENAME CONSTRAINT objects_signature_key TO objects_data_signature_key;
+ALTER TABLE objects RENAME CONSTRAINT objects_encrypted_master_key_check TO objects_encrypted_data_key_check;
+ALTER TABLE objects RENAME CONSTRAINT objects_signature_check TO objects_data_signature_check;
+
+-- rename existing columns
+ALTER TABLE objects RENAME encrypted_master_key TO encrypted_data_key;
+ALTER TABLE objects RENAME signature TO data_signature;
+
+-- add new columns
+ALTER TABLE objects ADD COLUMN encrypted_meta_key BYTEA UNIQUE CHECK(LENGTH(encrypted_meta_key) = 72);
+ALTER TABLE objects ADD meta_signature BYTEA UNIQUE CHECK(LENGTH(meta_signature) = 64);
+`)
+		return err
+	},
 }

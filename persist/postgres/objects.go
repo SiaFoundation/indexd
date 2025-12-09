@@ -280,13 +280,21 @@ func (s *Store) SaveObject(account proto.Account, obj slabs.SealedObject) error 
 		}
 
 		var objectID int64
+		var metaKey sql.Null[[]byte]
+		var metaSig sql.Null[sqlSignature]
 		err = tx.QueryRow(ctx, `
 			INSERT INTO objects (object_key, account_id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature) VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, updated_at) = (EXCLUDED.encrypted_data_key, EXCLUDED.encrypted_meta_key, EXCLUDED.encrypted_metadata, EXCLUDED.data_signature, EXCLUDED.meta_signature, NOW())
 			RETURNING id`,
-			sqlHash256(obj.ID()), accountID, obj.EncryptedDataKey, obj.EncryptedMetadataKey, obj.EncryptedMetadata, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature)).Scan(&objectID)
+			sqlHash256(obj.ID()), accountID, obj.EncryptedDataKey, metaKey, obj.EncryptedMetadata, sqlSignature(obj.DataSignature), metaSig).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
+		}
+		if metaKey.Valid {
+			obj.EncryptedMetadataKey = metaKey.V
+		}
+		if metaSig.Valid {
+			obj.MetadataSignature = types.Signature(metaSig.V)
 		}
 
 		_, err = tx.Exec(ctx, `
