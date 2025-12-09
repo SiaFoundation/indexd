@@ -305,18 +305,22 @@ func TestSlabPruning(t *testing.T) {
 	// add objects for both accounts
 	slab1ID := slab1.Digest()
 	obj1 := slabs.SealedObject{
-		EncryptedMasterKey: frand.Bytes(72),
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			slab1.Slice(10, 100),
 			slab1.Slice(110, 200),
 		},
-		Signature: types.Signature(frand.Bytes(64)),
+		DataSignature:     types.Signature(frand.Bytes(64)),
+		MetadataSignature: types.Signature(frand.Bytes(64)),
 	}
 	obj1Key := obj1.ID()
 	for _, acc := range []proto.Account{acc1, acc2} {
 		// note: unique key and signature are required per object. It does not change the object ID
-		obj1.EncryptedMasterKey = frand.Bytes(72)
-		obj1.Signature = types.Signature(frand.Bytes(64))
+		obj1.EncryptedDataKey = frand.Bytes(72)
+		obj1.DataSignature = types.Signature(frand.Bytes(64))
+		obj1.EncryptedMetadataKey = frand.Bytes(72)
+		obj1.MetadataSignature = types.Signature(frand.Bytes(64))
 		if err := store.SaveObject(acc, obj1); err != nil {
 			t.Fatal(err)
 		}
@@ -325,7 +329,8 @@ func TestSlabPruning(t *testing.T) {
 	// pin this object to first account only
 	slab2ID := slab2.Digest()
 	obj2 := slabs.SealedObject{
-		EncryptedMasterKey: frand.Bytes(72),
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			slab2.Slice(10, 100),
 			slab2.Slice(110, 200),

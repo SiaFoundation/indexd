@@ -188,8 +188,8 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 		return Object{}, err
 	}
 
-	obj := Object{masterKey: frand.Bytes(32)}
-	r = encrypt((*[32]byte)(obj.masterKey), r, 0)
+	obj := Object{dataKey: frand.Bytes(32), metaDataKey: frand.Bytes(32)}
+	r = encrypt((*[32]byte)(obj.dataKey), r, 0)
 
 	// create erasure coder
 	enc, err := reedsolomon.New(int(uo.dataShards), int(uo.parityShards))
@@ -278,10 +278,10 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 	}
 
 	// decrypt stream using the object's master key
-	if len(obj.masterKey) != 32 {
-		return fmt.Errorf("invalid master key length: %d", len(obj.masterKey))
+	if len(obj.dataKey) != 32 {
+		return fmt.Errorf("invalid master key length: %d", len(obj.dataKey))
 	}
-	w = decrypt((*[32]byte)(obj.masterKey), w, uint64(do.offset))
+	w = decrypt((*[32]byte)(obj.dataKey), w, uint64(do.offset))
 
 	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, slabsForDownload(obj.slabs, do))
 }
