@@ -54,7 +54,7 @@ func (o *Object) Seal(appKey types.PrivateKey) slabs.SealedObject {
 	}
 	encryptedDataKey := seal(dataKeyCipher(appKey, objectID), o.dataKey)
 	encryptedMetaKey := seal(metadataKeyCipher(appKey, objectID), o.metaDataKey)
-	encryptedMetadata := seal(metadataCipher(appKey, objectID), o.metadata)
+	encryptedMetadata := seal(metadataCipher(o.metaDataKey, objectID), o.metadata)
 
 	so := slabs.SealedObject{
 		EncryptedDataKey:     encryptedDataKey,
@@ -184,12 +184,12 @@ func objectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Obj
 	}
 
 	decryptKey := func(keyCipher cipher.AEAD, encryptedKey []byte) ([]byte, error) {
-		if len(so.EncryptedDataKey) < keyCipher.NonceSize() {
+		if len(encryptedKey) < keyCipher.NonceSize() {
 			return nil, fmt.Errorf("encrypted key is too short")
 		}
-		nonce := so.EncryptedDataKey[:keyCipher.NonceSize()]
+		nonce := encryptedKey[:keyCipher.NonceSize()]
 		var err error
-		key, err := keyCipher.Open(nil, nonce, so.EncryptedDataKey[keyCipher.NonceSize():], nil)
+		key, err := keyCipher.Open(nil, nonce, encryptedKey[keyCipher.NonceSize():], nil)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unlock key: %w", err)
 		}
@@ -200,9 +200,9 @@ func objectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Obj
 	if err != nil {
 		return Object{}, fmt.Errorf("failed to unlock data key: %w", err)
 	}
-	obj.metaDataKey, err = decryptKey(metadataKeyCipher(appKey, objectID), so.EncryptedDataKey)
+	obj.metaDataKey, err = decryptKey(metadataKeyCipher(appKey, objectID), so.EncryptedMetadataKey)
 	if err != nil {
-		return Object{}, fmt.Errorf("failed to unlock data key: %w", err)
+		return Object{}, fmt.Errorf("failed to unlock metadata key: %w", err)
 	}
 	obj.metadata, err = unlockEncryptedMetadata(objectID, obj.metaDataKey, so.EncryptedMetadata)
 	if err != nil {
