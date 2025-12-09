@@ -174,7 +174,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 
 			var obj slabs.SealedObject
 			var objID int64
-			err := tx.QueryRow(ctx, `SELECT id,encrypted_data_key, encrypted_meta_key, encrypted_metadata, signature, created_at, updated_at
+			err := tx.QueryRow(ctx, `SELECT id,encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at
 				FROM objects
 				WHERE account_id = $1 AND object_key = $2`,
 				accountID,
@@ -281,8 +281,8 @@ func (s *Store) SaveObject(account proto.Account, obj slabs.SealedObject) error 
 
 		var objectID int64
 		err = tx.QueryRow(ctx, `
-			INSERT INTO objects (object_key, account_id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature) VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, updated_at) = (EXCLUDED.encrypted_master_key, EXCLUDED.encrypted_metadata, EXCLUDED.signature, NOW())
+			INSERT INTO objects (object_key, account_id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature) VALUES ($1, $2, $3, $4, $5, $6, $7)
+			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, updated_at) = (EXCLUDED.encrypted_data_key, EXCLUDED.encrypted_meta_key, EXCLUDED.encrypted_metadata, EXCLUDED.data_signature, EXCLUDED.meta_signature, NOW())
 			RETURNING id`,
 			sqlHash256(obj.ID()), accountID, obj.EncryptedDataKey, obj.EncryptedMetadataKey, obj.EncryptedMetadata, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature)).Scan(&objectID)
 		if err != nil {

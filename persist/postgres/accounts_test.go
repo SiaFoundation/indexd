@@ -1097,7 +1097,7 @@ func BenchmarkPruneAccounts(b *testing.B) {
 			var encryptionKey [32]byte
 			frand.Read(encryptionKey[:])
 
-			batch.Queue(`INSERT INTO objects(object_key, account_id, encrypted_master_key, signature) VALUES ($1, $2, $3, $4)`, sqlHash256(frand.Entropy256()), accountID, frand.Bytes(72), frand.Bytes(64))
+			batch.Queue(`INSERT INTO objects(object_key, account_id, encrypted_data_key, encrypted_meta_key, signature) VALUES ($1, $2, $3, $4)`, sqlHash256(frand.Entropy256()), accountID, frand.Bytes(72), frand.Bytes(72), frand.Bytes(64))
 			objectID++
 			for k := range slabsPerObject {
 				slabDigest := sqlHash256(frand.Entropy256())
