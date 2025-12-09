@@ -27,11 +27,11 @@ type (
 		// encryption key when sharing the object which does not include the metadata.
 		DataSignature types.Signature `json:"dataSignature"`
 
-		EncryptedMetadataKey []byte `json:"encryptedMetadataKey"`
-		EncryptedMetadata    []byte `json:"encryptedMetadata"`
+		EncryptedMetadataKey []byte `json:"encryptedMetadataKey,omitempty"`
+		EncryptedMetadata    []byte `json:"encryptedMetadata,omitempty"`
 		// MetadataSignature is a signature of the blake2b(object ID, metadata key, and encrypted_metadata)
 		// to attest that the object has not been tampered with.
-		MetadataSignature types.Signature `json:"metadataSignature"`
+		MetadataSignature types.Signature `json:"metadataSignature,omitempty"`
 
 		CreatedAt time.Time `json:"createdAt"`
 		UpdatedAt time.Time `json:"updatedAt"`
