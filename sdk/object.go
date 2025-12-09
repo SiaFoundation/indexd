@@ -21,11 +21,12 @@ import (
 //
 // It has no public fields to prevent accidental leakage of unencrypted data.
 type Object struct {
-	masterKey []byte
-	slabs     []slabs.SlabSlice
-	metadata  json.RawMessage
-	createdAt time.Time
-	updatedAt time.Time
+	dataKey     []byte
+	metaDataKey []byte
+	slabs       []slabs.SlabSlice
+	metadata    json.RawMessage
+	createdAt   time.Time
+	updatedAt   time.Time
 }
 
 // ID returns the object's ID, which is a hash of its slabs.
@@ -46,22 +47,24 @@ func (o *Object) UpdatedAt() time.Time {
 // Seal returns a SealedObject that can be safely serialized and shared.
 func (o *Object) Seal(appKey types.PrivateKey) slabs.SealedObject {
 	objectID := o.ID()
-	keyCipher := masterKeyCipher(appKey, objectID)
-	nonce := frand.Bytes(keyCipher.NonceSize())
-	encryptedMasterKey := keyCipher.Seal(nonce, nonce, o.masterKey, nil)
 
-	metaCipher := metadataCipher(o.masterKey, objectID)
-	nonce = frand.Bytes(metaCipher.NonceSize())
-	encryptedMeta := metaCipher.Seal(nonce, nonce, o.metadata, nil)
+	seal := func(keyCipher cipher.AEAD, plaintext []byte) []byte {
+		nonce := frand.Bytes(keyCipher.NonceSize())
+		return keyCipher.Seal(nonce, nonce, plaintext, nil)
+	}
+	encryptedDataKey := seal(dataKeyCipher(appKey, objectID), o.dataKey)
+	encryptedMetaKey := seal(metadataKeyCipher(appKey, objectID), o.metaDataKey)
+	encryptedMetadata := seal(metadataCipher(appKey, objectID), o.metadata)
 
 	so := slabs.SealedObject{
-		EncryptedMasterKey: encryptedMasterKey,
-		Slabs:              o.slabs,
-		EncryptedMetadata:  encryptedMeta,
-		CreatedAt:          o.createdAt,
-		UpdatedAt:          o.updatedAt,
+		EncryptedDataKey:     encryptedDataKey,
+		Slabs:                o.slabs,
+		EncryptedMetadataKey: encryptedMetaKey,
+		EncryptedMetadata:    encryptedMetadata,
+		CreatedAt:            o.createdAt,
+		UpdatedAt:            o.updatedAt,
 	}
-	so.Signature = appKey.SignHash(so.SigHash())
+	so.Sign(appKey)
 	return so
 }
 
@@ -130,17 +133,23 @@ func (s *SDK) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256
 	if err != nil {
 		return "", fmt.Errorf("failed to get object: %w", err)
 	}
-	return s.client.CreateSharedObjectURL(ctx, s.appKey, obj.ID(), obj.masterKey, validUntil)
+	return s.client.CreateSharedObjectURL(ctx, s.appKey, obj.ID(), obj.dataKey, validUntil)
 }
 
-func masterKeyCipher(appKey types.PrivateKey, objectID types.Hash256) cipher.AEAD {
-	key := keys.Derive(appKey, objectID[:], []byte("master"), 32)
+func dataKeyCipher(appKey types.PrivateKey, objectID types.Hash256) cipher.AEAD {
+	key := keys.Derive(appKey, objectID[:], []byte("dataKey"), 32)
 	cipher, _ := chacha20poly1305.NewX(key)
 	return cipher
 }
 
-func metadataCipher(masterKey []byte, objectID types.Hash256) cipher.AEAD {
-	key := keys.Derive(masterKey, objectID[:], []byte("metadata"), 32)
+func metadataKeyCipher(appKey types.PrivateKey, objectID types.Hash256) cipher.AEAD {
+	key := keys.Derive(appKey, objectID[:], []byte("metadataKey"), 32)
+	cipher, _ := chacha20poly1305.NewX(key)
+	return cipher
+}
+
+func metadataCipher(appKey types.PrivateKey, objectID types.Hash256) cipher.AEAD {
+	key := keys.Derive(appKey, objectID[:], []byte("metadata"), 32)
 	cipher, _ := chacha20poly1305.NewX(key)
 	return cipher
 }
@@ -170,21 +179,32 @@ func objectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Obj
 	objectID := obj.ID()
 	if so.ID() != objectID {
 		return Object{}, fmt.Errorf("object ID mismatch")
-	} else if !appKey.PublicKey().VerifyHash(so.SigHash(), so.Signature) {
-		return Object{}, fmt.Errorf("invalid object signature")
+	} else if err := so.VerifySignatures(appKey.PublicKey()); err != nil {
+		return Object{}, err
 	}
 
-	keyCipher := masterKeyCipher(appKey, objectID)
-	if len(so.EncryptedMasterKey) < keyCipher.NonceSize() {
-		return Object{}, fmt.Errorf("encrypted master key too short")
+	decryptKey := func(keyCipher cipher.AEAD, encryptedKey []byte) ([]byte, error) {
+		if len(so.EncryptedDataKey) < keyCipher.NonceSize() {
+			return nil, fmt.Errorf("encrypted key is too short")
+		}
+		nonce := so.EncryptedDataKey[:keyCipher.NonceSize()]
+		var err error
+		key, err := keyCipher.Open(nil, nonce, so.EncryptedDataKey[keyCipher.NonceSize():], nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to unlock key: %w", err)
+		}
+		return key, nil
 	}
-	nonce := so.EncryptedMasterKey[:keyCipher.NonceSize()]
 	var err error
-	obj.masterKey, err = keyCipher.Open(nil, nonce, so.EncryptedMasterKey[keyCipher.NonceSize():], nil)
+	obj.dataKey, err = decryptKey(dataKeyCipher(appKey, objectID), so.EncryptedDataKey)
 	if err != nil {
-		return Object{}, fmt.Errorf("failed to unlock master key: %w", err)
+		return Object{}, fmt.Errorf("failed to unlock data key: %w", err)
 	}
-	obj.metadata, err = unlockEncryptedMetadata(objectID, obj.masterKey, so.EncryptedMetadata)
+	obj.metaDataKey, err = decryptKey(metadataKeyCipher(appKey, objectID), so.EncryptedDataKey)
+	if err != nil {
+		return Object{}, fmt.Errorf("failed to unlock data key: %w", err)
+	}
+	obj.metadata, err = unlockEncryptedMetadata(objectID, obj.metaDataKey, so.EncryptedMetadata)
 	if err != nil {
 		return Object{}, fmt.Errorf("failed to unlock metadata: %w", err)
 	}

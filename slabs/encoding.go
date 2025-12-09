@@ -64,20 +64,24 @@ func (s *SlabSlice) DecodeFrom(d *types.Decoder) {
 
 // EncodeTo implements types.EncoderTo.
 func (so SealedObject) EncodeTo(e *types.Encoder) {
-	e.WriteBytes(so.EncryptedMasterKey)
+	e.WriteBytes(so.EncryptedDataKey)
 	types.EncodeSlice(e, so.Slabs)
+	so.DataSignature.EncodeTo(e)
+	e.WriteBytes(so.EncryptedMetadataKey)
 	e.WriteBytes(so.EncryptedMetadata)
-	so.Signature.EncodeTo(e)
+	so.MetadataSignature.EncodeTo(e)
 	e.WriteTime(so.CreatedAt)
 	e.WriteTime(so.UpdatedAt)
 }
 
 // DecodeFrom implements types.DecoderFrom.
 func (so *SealedObject) DecodeFrom(d *types.Decoder) {
-	so.EncryptedMasterKey = d.ReadBytes()
+	so.EncryptedDataKey = d.ReadBytes()
 	types.DecodeSlice(d, &so.Slabs)
+	so.DataSignature.DecodeFrom(d)
+	so.EncryptedMetadataKey = d.ReadBytes()
 	so.EncryptedMetadata = d.ReadBytes()
-	so.Signature.DecodeFrom(d)
+	so.MetadataSignature.DecodeFrom(d)
 	so.CreatedAt = d.ReadTime()
 	so.UpdatedAt = d.ReadTime()
 }

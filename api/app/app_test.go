@@ -354,7 +354,8 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	obj := slabs.SealedObject{
-		EncryptedMasterKey: frand.Bytes(72),
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			slab1.Slice(0, 256),
 			slab2.Slice(0, 256),
@@ -368,7 +369,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// sign and save the object
-	obj.Signature = sk.SignHash(obj.SigHash())
+	obj.Sign(sk)
 	if err := client.SaveObject(context.Background(), sk, obj); err != nil {
 		t.Fatal(err)
 	}
@@ -434,10 +435,11 @@ func TestApplicationAPI(t *testing.T) {
 
 	// Try to save an object referencing that slab on first account
 	badObj := slabs.SealedObject{
-		EncryptedMasterKey: frand.Bytes(72),
-		Slabs:              []slabs.SlabSlice{p2.Slice(0, 256)},
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		Slabs:                []slabs.SlabSlice{p2.Slice(0, 256)},
 	}
-	badObj.Signature = sk.SignHash(badObj.SigHash())
+	badObj.Sign(sk)
 	if err := client.SaveObject(context.Background(), sk, badObj); err == nil || err.Error() != slabs.ErrObjectUnpinnedSlab.Error() {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectUnpinnedSlab, err)
 	}
@@ -668,13 +670,14 @@ func TestSharedObjects(t *testing.T) {
 
 	// add the object to the db
 	obj := slabs.SealedObject{
-		EncryptedMasterKey: frand.Bytes(72),
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
 			slab1Params.Slice(0, 256),
 			slab2Params.Slice(0, 256),
 		},
 	}
-	obj.Signature = sk1.SignHash(obj.SigHash())
+	obj.Sign(sk1)
 	if err := client1.SaveObject(ctx, sk1, obj); err != nil {
 		t.Fatal(err)
 	}
