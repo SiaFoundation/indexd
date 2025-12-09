@@ -189,19 +189,28 @@ components:
           allOf:
             - $ref: "#/components/schemas/Hash256"
             - description: The object's unique ID
-        encryptedMasterKey:
+        encryptedDataKey:
           type: string
           format: byte
-          description: The encrypted master key used to encrypt and decrypt the object's data and metadata
+          description: The encrypted data key used to encrypt and decrypt the object's data
         slabs:
           type: array
           items:
             $ref: "#/components/schemas/SlabSlice"
           description: The list of slabs that make up the object
+        dataSignature:
+          $ref: "#/components/schemas/Signature"
+          description: The signature of the object's data
+        encryptedMetadataKey:
+          type: string
+          format: byte
+          description: The encrypted metadata key used to encrypt and decrypt the object's metadata
         encryptedMetadata:
           type: string
           format: byte
           description: Optional metadata stored on the object
+        metadataSignature:
+          $ref: "#/components/schemas/Signature"
         createdAt:
           type: string
           format: date-time
