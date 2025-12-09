@@ -54,7 +54,7 @@ func (o *Object) Seal(appKey types.PrivateKey) slabs.SealedObject {
 	}
 	encryptedDataKey := seal(dataKeyCipher(appKey, objectID), o.dataKey)
 	encryptedMetaKey := seal(metadataKeyCipher(appKey, objectID), o.metaDataKey)
-	encryptedMetadata := seal(metadataCipher(o.metaDataKey, objectID), o.metadata)
+	encryptedMetadata := seal(metadataCipher(o.metaDataKey), o.metadata)
 
 	so := slabs.SealedObject{
 		EncryptedDataKey:     encryptedDataKey,
@@ -136,29 +136,31 @@ func (s *SDK) CreateSharedObjectURL(ctx context.Context, objectKey types.Hash256
 	return s.client.CreateSharedObjectURL(ctx, s.appKey, obj.ID(), obj.dataKey, validUntil)
 }
 
+// dataKeyCipher derives the data key cipher from the app key and object ID.
 func dataKeyCipher(appKey types.PrivateKey, objectID types.Hash256) cipher.AEAD {
 	key := keys.Derive(appKey, objectID[:], []byte("dataKey"), 32)
 	cipher, _ := chacha20poly1305.NewX(key)
 	return cipher
 }
 
+// metadataKeyCipher derives the metadata key cipher from the app key and object ID.
 func metadataKeyCipher(appKey types.PrivateKey, objectID types.Hash256) cipher.AEAD {
 	key := keys.Derive(appKey, objectID[:], []byte("metadataKey"), 32)
 	cipher, _ := chacha20poly1305.NewX(key)
 	return cipher
 }
 
-func metadataCipher(appKey types.PrivateKey, objectID types.Hash256) cipher.AEAD {
-	key := keys.Derive(appKey, objectID[:], []byte("metadata"), 32)
-	cipher, _ := chacha20poly1305.NewX(key)
+// metadataCipher returns the cipher used to encrypt/decrypt metadata.
+func metadataCipher(metadataKey []byte) cipher.AEAD {
+	cipher, _ := chacha20poly1305.NewX(metadataKey)
 	return cipher
 }
 
-func unlockEncryptedMetadata(objectID types.Hash256, masterKey []byte, encryptedMeta []byte) (json.RawMessage, error) {
+func unlockEncryptedMetadata(metadataKey, encryptedMeta []byte) (json.RawMessage, error) {
 	if len(encryptedMeta) == 0 {
 		return nil, nil
 	}
-	metadataCipher := metadataCipher(masterKey, objectID)
+	metadataCipher := metadataCipher(metadataKey)
 	if len(encryptedMeta) < metadataCipher.NonceSize() {
 		return nil, fmt.Errorf("encrypted metadata too short")
 	}
@@ -204,7 +206,7 @@ func objectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Obj
 	if err != nil {
 		return Object{}, fmt.Errorf("failed to unlock metadata key: %w", err)
 	}
-	obj.metadata, err = unlockEncryptedMetadata(objectID, obj.metaDataKey, so.EncryptedMetadata)
+	obj.metadata, err = unlockEncryptedMetadata(obj.metaDataKey, so.EncryptedMetadata)
 	if err != nil {
 		return Object{}, fmt.Errorf("failed to unlock metadata: %w", err)
 	}
