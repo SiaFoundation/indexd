@@ -577,14 +577,6 @@ CREATE INDEX contracts_next_prune_host_id_idx ON contracts (next_prune, host_id)
 	// remove service accounts
 	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
 		_, err := tx.Exec(ctx, `
-ALTER TABLE service_accounts ADD COLUMN public_key BYTEA;
-
-ALTER TABLE service_accounts ADD CONSTRAINT service_accounts_public_key_length CHECK (LENGTH(public_key) = 32);
-UPDATE service_accounts sa
-SET public_key = a.public_key
-FROM accounts a
-WHERE sa.account_id = a.id;
-
 ALTER TABLE accounts DROP COLUMN service_account;
 
 DROP TABLE service_accounts;

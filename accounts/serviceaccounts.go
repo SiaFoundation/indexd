@@ -13,6 +13,7 @@ import (
 func (m *AccountManager) RegisterServiceAccount(account proto.Account) {
 	m.serviceAccountsMu.Lock()
 	defer m.serviceAccountsMu.Unlock()
+
 	if _, exists := m.serviceAccounts[account]; exists {
 		panic("service account already registered") // developer error
 	}
@@ -23,7 +24,10 @@ func (m *AccountManager) RegisterServiceAccount(account proto.Account) {
 // This should only be called when a host reports that an RPC failed due to
 // insufficient balance.
 func (m *AccountManager) ResetAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
-	if !m.serviceAccountExists(account) {
+	m.serviceAccountsMu.Lock()
+	defer m.serviceAccountsMu.Unlock()
+
+	if _, exists := m.serviceAccounts[account]; !exists {
 		return ErrNotFound
 	}
 	m.serviceAccounts[account][hostKey] = types.ZeroCurrency
@@ -32,7 +36,10 @@ func (m *AccountManager) ResetAccountBalance(ctx context.Context, hostKey types.
 
 // ServiceAccountBalance returns the balance of a locked service account.
 func (m *AccountManager) ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
-	if !m.serviceAccountExists(account) {
+	m.serviceAccountsMu.Lock()
+	defer m.serviceAccountsMu.Unlock()
+
+	if _, exists := m.serviceAccounts[account]; !exists {
 		return types.ZeroCurrency, ErrNotFound
 	}
 	return m.serviceAccounts[account][hostKey], nil
@@ -41,7 +48,10 @@ func (m *AccountManager) ServiceAccountBalance(ctx context.Context, hostKey type
 // DebitServiceAccount withdraws from a service account. This should be used
 // after successfully withdrawing from an account.
 func (m *AccountManager) DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
-	if !m.serviceAccountExists(account) {
+	m.serviceAccountsMu.Lock()
+	defer m.serviceAccountsMu.Unlock()
+
+	if _, exists := m.serviceAccounts[account]; !exists {
 		return ErrNotFound
 	}
 
@@ -51,13 +61,6 @@ func (m *AccountManager) DebitServiceAccount(ctx context.Context, hostKey types.
 	}
 	m.serviceAccounts[account][hostKey] = val
 	return nil
-}
-
-func (m *AccountManager) serviceAccountExists(account proto.Account) bool {
-	m.serviceAccountsMu.Lock()
-	defer m.serviceAccountsMu.Unlock()
-	_, exists := m.serviceAccounts[account]
-	return exists
 }
 
 func (m *AccountManager) hostAccs(hk types.PublicKey) []HostAccount {
