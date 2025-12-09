@@ -270,7 +270,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 
 	// decrypt stream using the object's master key
 	if len(obj.dataKey) != 32 {
-		return fmt.Errorf("invalid master key length: %d", len(obj.dataKey))
+		return fmt.Errorf("invalid data key length: %d", len(obj.dataKey))
 	}
 	w = decrypt((*[32]byte)(obj.dataKey), w, uint64(do.offset))
 

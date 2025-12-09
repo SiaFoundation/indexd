@@ -184,7 +184,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			var objID int64
 			var metaKey sql.Null[[]byte]
 			var metaSig sql.Null[sqlSignature]
-			err := tx.QueryRow(ctx, `SELECT id,encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at
+			err := tx.QueryRow(ctx, `SELECT id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at
 				FROM objects
 				WHERE account_id = $1 AND object_key = $2`,
 				accountID,
