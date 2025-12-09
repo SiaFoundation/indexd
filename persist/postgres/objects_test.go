@@ -19,10 +19,12 @@ import (
 
 func (s *Store) pinRandomObject(t testing.TB, acc proto.Account, ss []slabs.SlabSlice) slabs.SealedObject {
 	obj := slabs.SealedObject{
-		EncryptedMasterKey: frand.Bytes(72),
-		Slabs:              ss,
-		EncryptedMetadata:  []byte("hello world"),
-		Signature:          (types.Signature)(frand.Bytes(64)),
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		Slabs:                ss,
+		EncryptedMetadata:    []byte("hello world"),
+		DataSignature:        (types.Signature)(frand.Bytes(64)),
+		MetadataSignature:    (types.Signature)(frand.Bytes(64)),
 	}
 	if err := s.SaveObject(acc, obj); err != nil {
 		t.Fatal(err)
@@ -70,11 +72,13 @@ func TestObject(t *testing.T) {
 
 	now := time.Now().UTC().Round(time.Second)
 	expected := slabs.SealedObject{
-		EncryptedMasterKey: frand.Bytes(72),
-		EncryptedMetadata:  frand.Bytes(50),
-		Signature:          types.Signature(frand.Bytes(64)),
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		EncryptedMetadata:    frand.Bytes(50),
+		DataSignature:        types.Signature(frand.Bytes(64)),
+		MetadataSignature:    types.Signature(frand.Bytes(64)),
+		CreatedAt:            now,
+		UpdatedAt:            now,
 		Slabs: []slabs.SlabSlice{
 			params.Slice(0, 100),
 		},
@@ -208,8 +212,10 @@ func TestObjects(t *testing.T) {
 
 	// pin the same object for acc2 with different master key and sig to satisfy unique constraint
 	obj1Acc2 := obj1Acc1
-	obj1Acc2.EncryptedMasterKey = frand.Bytes(72)
-	obj1Acc2.Signature = (types.Signature)(frand.Bytes(64))
+	obj1Acc2.EncryptedDataKey = frand.Bytes(72)
+	obj1Acc2.DataSignature = (types.Signature)(frand.Bytes(64))
+	obj1Acc2.EncryptedMetadataKey = frand.Bytes(72)
+	obj1Acc2.MetadataSignature = (types.Signature)(frand.Bytes(64))
 	if err := store.SaveObject(acc2, obj1Acc2); err != nil {
 		t.Fatal(err)
 	}
@@ -429,9 +435,10 @@ func TestSharedObjects(t *testing.T) {
 		EncryptedMetadata: []byte("hello world"),
 	}
 	obj := slabs.SealedObject{
-		EncryptedMasterKey: frand.Bytes(72),
-		Slabs:              make([]slabs.SlabSlice, len(expectedSharedObj.Slabs)),
-		EncryptedMetadata:  expectedSharedObj.EncryptedMetadata,
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		Slabs:                make([]slabs.SlabSlice, len(expectedSharedObj.Slabs)),
+		EncryptedMetadata:    expectedSharedObj.EncryptedMetadata,
 	}
 	obj.Slabs = slices.Clone(expectedSharedObj.Slabs)
 	if err := store.SaveObject(acc1, obj); err != nil {
@@ -504,8 +511,10 @@ func BenchmarkSaveObject(b *testing.B) {
 			obj.Slabs = append(obj.Slabs, slab)
 		}
 		obj.EncryptedMetadata = frand.Bytes(1024)
-		obj.EncryptedMasterKey = frand.Bytes(72)
-		obj.Signature = types.Signature(frand.Bytes(64))
+		obj.EncryptedDataKey = frand.Bytes(72)
+		obj.DataSignature = types.Signature(frand.Bytes(64))
+		obj.EncryptedMetadataKey = frand.Bytes(72)
+		obj.MetadataSignature = types.Signature(frand.Bytes(64))
 
 		return
 	}

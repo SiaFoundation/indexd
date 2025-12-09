@@ -14,7 +14,8 @@ import (
 // are computed.
 func TestObjectID(t *testing.T) {
 	so := slabs.SealedObject{
-		EncryptedMasterKey: []byte{1, 2, 3},
+		EncryptedDataKey:     []byte{1, 2, 3},
+		EncryptedMetadataKey: []byte{3, 2, 1},
 		Slabs: []slabs.SlabSlice{
 			{
 				EncryptionKey: [32]byte{4, 5, 6},
@@ -30,7 +31,8 @@ func TestObjectID(t *testing.T) {
 			},
 		},
 		EncryptedMetadata: []byte{19, 20, 21},
-		Signature:         types.Signature{22, 23, 24},
+		DataSignature:     types.Signature{22, 23, 24},
+		MetadataSignature: types.Signature{24, 23, 22},
 		CreatedAt:         time.Unix(25, 26),
 		UpdatedAt:         time.Unix(27, 28),
 	}
@@ -46,11 +48,13 @@ func TestSealedObjectRoundtrip(t *testing.T) {
 		{Offset: 10, Length: 5000, EncryptionKey: frand.Entropy256(), Sectors: []slabs.PinnedSector{}},
 		{Offset: 32, Length: 4096, EncryptionKey: frand.Entropy256(), Sectors: []slabs.PinnedSector{}},
 	}
-	masterKey := frand.Bytes(32)
+	dataKey := frand.Bytes(32)
+	metaKey := frand.Bytes(32)
 	obj := Object{
-		masterKey: masterKey,
-		slabs:     ss,
-		metadata:  frand.Bytes(128),
+		dataKey:     metaKey,
+		metaDataKey: dataKey,
+		slabs:       ss,
+		metadata:    frand.Bytes(128),
 	}
 
 	locked := obj.Seal(appKey)
