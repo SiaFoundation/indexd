@@ -48,11 +48,9 @@ func TestSealedObjectRoundtrip(t *testing.T) {
 		{Offset: 10, Length: 5000, EncryptionKey: frand.Entropy256(), Sectors: []slabs.PinnedSector{}},
 		{Offset: 32, Length: 4096, EncryptionKey: frand.Entropy256(), Sectors: []slabs.PinnedSector{}},
 	}
-	dataKey := frand.Bytes(32)
-	metaKey := frand.Bytes(32)
 	obj := Object{
-		dataKey:     metaKey,
-		metaDataKey: dataKey,
+		dataKey:     frand.Bytes(32),
+		metaDataKey: frand.Bytes(32),
 		slabs:       ss,
 		metadata:    frand.Bytes(128),
 	}
