@@ -434,7 +434,7 @@ FROM objects o;
 			-- add reasons column and migrate data
 			ALTER TABLE hosts_blocklist ADD COLUMN reasons TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];
 			UPDATE hosts_blocklist SET reasons = ARRAY[reason];
-			
+
 			-- drop old column and create index
 			DROP INDEX hosts_blocklist_reason_idx;
 			ALTER TABLE hosts_blocklist DROP COLUMN reason;
@@ -590,7 +590,7 @@ ALTER TABLE objects RENAME signature TO data_signature;
 
 -- add new columns
 ALTER TABLE objects ADD COLUMN encrypted_meta_key BYTEA UNIQUE CHECK(LENGTH(encrypted_meta_key) = 72);
-ALTER TABLE objects ADD meta_signature BYTEA UNIQUE CHECK(LENGTH(meta_signature) = 64);
+ALTER TABLE objects ADD meta_signature BYTEA UNIQUE NOT NULL CHECK(LENGTH(meta_signature) = 64);
 `)
 		return err
 	},
