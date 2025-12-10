@@ -188,7 +188,7 @@ func (s *SDK) Upload(ctx context.Context, r io.Reader, opts ...UploadOption) (Ob
 		return Object{}, err
 	}
 
-	obj := Object{dataKey: frand.Bytes(32), metaDataKey: frand.Bytes(32)}
+	obj := Object{dataKey: frand.Bytes(32)}
 	r = encrypt((*[32]byte)(obj.dataKey), r, 0)
 
 	// create erasure coder

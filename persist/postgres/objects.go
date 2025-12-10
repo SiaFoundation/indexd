@@ -92,9 +92,8 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 
 		var objID int64
 		var metaKey sql.Null[[]byte]
-		var metaSig sql.Null[sqlSignature]
 		err = tx.QueryRow(ctx, `SELECT id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at FROM objects WHERE account_id = $1 AND object_key = $2
-		`, accountID, sqlHash256(key)).Scan(&objID, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), &metaSig, &obj.CreatedAt, &obj.UpdatedAt)
+		`, accountID, sqlHash256(key)).Scan(&objID, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrObjectNotFound
 		} else if err != nil {
@@ -102,9 +101,6 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 		}
 		if metaKey.Valid {
 			obj.EncryptedMetadataKey = metaKey.V
-		}
-		if metaSig.Valid {
-			obj.MetadataSignature = types.Signature(metaSig.V)
 		}
 
 		rows, err := tx.Query(ctx, `
@@ -183,21 +179,17 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			var obj slabs.SealedObject
 			var objID int64
 			var metaKey sql.Null[[]byte]
-			var metaSig sql.Null[sqlSignature]
 			err := tx.QueryRow(ctx, `SELECT id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at
 				FROM objects
 				WHERE account_id = $1 AND object_key = $2`,
 				accountID,
 				sqlHash256(events[i].Key),
-			).Scan(&objID, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), &metaSig, &obj.CreatedAt, &obj.UpdatedAt)
+			).Scan(&objID, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt)
 			if err != nil {
 				return fmt.Errorf("failed to query objects: %w", err)
 			}
 			if metaKey.Valid {
 				obj.EncryptedMetadataKey = metaKey.V
-			}
-			if metaSig.Valid {
-				obj.MetadataSignature = types.Signature(metaSig.V)
 			}
 			events[i].Object = &obj
 			objectIDs[events[i].Key] = objID

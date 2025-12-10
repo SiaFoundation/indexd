@@ -53,8 +53,15 @@ func (o *Object) Seal(appKey types.PrivateKey) slabs.SealedObject {
 		return keyCipher.Seal(nonce, nonce, plaintext, nil)
 	}
 	encryptedDataKey := seal(dataKeyCipher(appKey, objectID), o.dataKey)
-	encryptedMetaKey := seal(metadataKeyCipher(appKey, objectID), o.metaDataKey)
-	encryptedMetadata := seal(metadataCipher(o.metaDataKey), o.metadata)
+
+	var encryptedMetaKey, encryptedMetadata []byte
+	if len(o.metadata) > 0 {
+		if o.metaDataKey == nil {
+			o.metaDataKey = frand.Bytes(32)
+		}
+		encryptedMetaKey = seal(metadataKeyCipher(appKey, objectID), o.metaDataKey)
+		encryptedMetadata = seal(metadataCipher(o.metaDataKey), o.metadata)
+	}
 
 	so := slabs.SealedObject{
 		EncryptedDataKey:     encryptedDataKey,
@@ -87,7 +94,8 @@ func (o *Object) Metadata() json.RawMessage {
 	return slices.Clone(o.metadata)
 }
 
-// UpdateMetadata updates the object's metadata.
+// UpdateMetadata updates the object's metadata and generates a new metadata key
+// if necessary.
 func (o *Object) UpdateMetadata(meta json.RawMessage) {
 	o.metadata = slices.Clone(meta)
 }
@@ -202,13 +210,15 @@ func objectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Obj
 	if err != nil {
 		return Object{}, fmt.Errorf("failed to unlock data key: %w", err)
 	}
-	obj.metaDataKey, err = decryptKey(metadataKeyCipher(appKey, objectID), so.EncryptedMetadataKey)
-	if err != nil {
-		return Object{}, fmt.Errorf("failed to unlock metadata key: %w", err)
-	}
-	obj.metadata, err = unlockEncryptedMetadata(obj.metaDataKey, so.EncryptedMetadata)
-	if err != nil {
-		return Object{}, fmt.Errorf("failed to unlock metadata: %w", err)
+	if len(so.EncryptedMetadata) > 0 {
+		obj.metaDataKey, err = decryptKey(metadataKeyCipher(appKey, objectID), so.EncryptedMetadataKey)
+		if err != nil {
+			return Object{}, fmt.Errorf("failed to unlock metadata key: %w", err)
+		}
+		obj.metadata, err = unlockEncryptedMetadata(obj.metaDataKey, so.EncryptedMetadata)
+		if err != nil {
+			return Object{}, fmt.Errorf("failed to unlock metadata: %w", err)
+		}
 	}
 	return obj, nil
 }
