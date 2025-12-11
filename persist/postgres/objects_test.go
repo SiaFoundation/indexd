@@ -106,8 +106,7 @@ func TestObject(t *testing.T) {
 	}
 
 	expectedShared := slabs.SharedObject{
-		EncryptedMetadata: expected.EncryptedMetadata,
-		Slabs:             expected.Slabs,
+		Slabs: expected.Slabs,
 	}
 	gotShared, err := store.SharedObject(expected.ID())
 	if err != nil {
@@ -431,14 +430,13 @@ func TestSharedObjects(t *testing.T) {
 
 	// add an object with multiple slabs
 	expectedSharedObj := slabs.SharedObject{
-		Slabs:             []slabs.SlabSlice{pinRandomSlab(t), pinRandomSlab(t), pinRandomSlab(t)},
-		EncryptedMetadata: []byte("hello world"),
+		Slabs: []slabs.SlabSlice{pinRandomSlab(t), pinRandomSlab(t), pinRandomSlab(t)},
 	}
 	obj := slabs.SealedObject{
 		EncryptedDataKey:     frand.Bytes(72),
 		EncryptedMetadataKey: frand.Bytes(72),
 		Slabs:                make([]slabs.SlabSlice, len(expectedSharedObj.Slabs)),
-		EncryptedMetadata:    expectedSharedObj.EncryptedMetadata,
+		EncryptedMetadata:    []byte("hello world"),
 	}
 	obj.Slabs = slices.Clone(expectedSharedObj.Slabs)
 	if err := store.SaveObject(acc1, obj); err != nil {
