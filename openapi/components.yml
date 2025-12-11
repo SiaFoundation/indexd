@@ -234,10 +234,6 @@ components:
           description: The list of slabs that make up the shared object
           items:
             $ref: "#/components/schemas/SlabSlice"
-        encryptedMetadata:
-          type: string
-          format: byte
-          description: Optional metadata stored on the object
 
     # A sector pinned to a host.
     PinnedSector:

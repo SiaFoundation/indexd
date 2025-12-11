@@ -665,7 +665,6 @@ func TestSharedObjects(t *testing.T) {
 			slab1Params.Slice(0, 256),
 			slab2Params.Slice(0, 256),
 		},
-		EncryptedMetadata: nil,
 	}
 
 	// add the object to the db

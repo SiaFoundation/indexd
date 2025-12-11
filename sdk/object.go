@@ -21,12 +21,11 @@ import (
 //
 // It has no public fields to prevent accidental leakage of unencrypted data.
 type Object struct {
-	dataKey     []byte
-	metaDataKey []byte
-	slabs       []slabs.SlabSlice
-	metadata    json.RawMessage
-	createdAt   time.Time
-	updatedAt   time.Time
+	dataKey   []byte
+	slabs     []slabs.SlabSlice
+	metadata  json.RawMessage
+	createdAt time.Time
+	updatedAt time.Time
 }
 
 // ID returns the object's ID, which is a hash of its slabs.
@@ -56,11 +55,9 @@ func (o *Object) Seal(appKey types.PrivateKey) slabs.SealedObject {
 
 	var encryptedMetaKey, encryptedMetadata []byte
 	if len(o.metadata) > 0 {
-		if o.metaDataKey == nil {
-			o.metaDataKey = frand.Bytes(32)
-		}
-		encryptedMetaKey = seal(metadataKeyCipher(appKey, objectID), o.metaDataKey)
-		encryptedMetadata = seal(metadataCipher(o.metaDataKey), o.metadata)
+		metaDataKey := frand.Bytes(32)
+		encryptedMetaKey = seal(metadataKeyCipher(appKey, objectID), metaDataKey)
+		encryptedMetadata = seal(metadataCipher(metaDataKey), o.metadata)
 	}
 
 	so := slabs.SealedObject{
@@ -210,11 +207,11 @@ func objectFromSealedObject(so slabs.SealedObject, appKey types.PrivateKey) (Obj
 		return Object{}, fmt.Errorf("failed to unlock data key: %w", err)
 	}
 	if len(so.EncryptedMetadata) > 0 {
-		obj.metaDataKey, err = decryptKey(metadataKeyCipher(appKey, objectID), so.EncryptedMetadataKey)
+		metaDataKey, err := decryptKey(metadataKeyCipher(appKey, objectID), so.EncryptedMetadataKey)
 		if err != nil {
 			return Object{}, fmt.Errorf("failed to unlock metadata key: %w", err)
 		}
-		obj.metadata, err = unlockEncryptedMetadata(obj.metaDataKey, so.EncryptedMetadata)
+		obj.metadata, err = unlockEncryptedMetadata(metaDataKey, so.EncryptedMetadata)
 		if err != nil {
 			return Object{}, fmt.Errorf("failed to unlock metadata: %w", err)
 		}

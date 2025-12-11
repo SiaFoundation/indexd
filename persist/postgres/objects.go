@@ -17,8 +17,8 @@ import (
 func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		var objID int64
-		err := tx.QueryRow(ctx, `SELECT id, encrypted_metadata FROM objects WHERE object_key = $1
-		`, sqlHash256(key)).Scan(&objID, &obj.EncryptedMetadata)
+		err := tx.QueryRow(ctx, `SELECT id FROM objects WHERE object_key = $1
+		`, sqlHash256(key)).Scan(&objID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrObjectNotFound
 		} else if err != nil {
