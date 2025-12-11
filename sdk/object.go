@@ -94,8 +94,7 @@ func (o *Object) Metadata() json.RawMessage {
 	return slices.Clone(o.metadata)
 }
 
-// UpdateMetadata updates the object's metadata and generates a new metadata key
-// if necessary.
+// UpdateMetadata updates the object's metadata.
 func (o *Object) UpdateMetadata(meta json.RawMessage) {
 	o.metadata = slices.Clone(meta)
 }
