@@ -609,7 +609,7 @@ ALTER TABLE objects ADD COLUMN meta_signature BYTEA UNIQUE CHECK(LENGTH(meta_sig
 			SET meta_signature = data_signature;
 		`)
 		if err != nil {
-			return fmt.Errorf("failed to initialize encrypted_meta_key for existing objects: %w", err)
+			return fmt.Errorf("failed to copy data_signature to meta_signature for existing objects: %w", err)
 		}
 		// add not null constraint
 		_, err = tx.Exec(ctx, "ALTER TABLE objects ALTER COLUMN meta_signature SET NOT NULL;")
