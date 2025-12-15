@@ -121,6 +121,7 @@ type (
 		BlockHosts(hostKeys []types.PublicKey, reasons []string) error
 		BlockedHosts(offset, limit int) ([]types.PublicKey, error)
 		UnblockHost(hk types.PublicKey) error
+		ResetLostSectors(hk types.PublicKey) error
 
 		PruneHosts(lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
 		UpdateHostPrices(hostKey types.PublicKey, prices proto4.HostPrices) error
@@ -196,6 +197,11 @@ func (hm *HostManager) BlockedHosts(ctx context.Context, offset, limit int) ([]t
 // UnblockHost unblocks the given host
 func (hm *HostManager) UnblockHost(ctx context.Context, hk types.PublicKey) error {
 	return hm.store.UnblockHost(hk)
+}
+
+// ResetLostSectors resets the lost sectors count for the given host
+func (hm *HostManager) ResetLostSectors(ctx context.Context, hk types.PublicKey) error {
+	return hm.store.ResetLostSectors(hk)
 }
 
 // NewManager creates a new host manager.

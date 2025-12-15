@@ -70,6 +70,7 @@ type (
 		BlockHosts(ctx context.Context, hks []types.PublicKey, reasons []string) error
 		BlockedHosts(ctx context.Context, offset, limit int) ([]types.PublicKey, error)
 		UnblockHost(ctx context.Context, hk types.PublicKey) error
+		ResetLostSectors(ctx context.Context, hk types.PublicKey) error
 
 		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)
 		UpdateUsabilitySettings(ctx context.Context, us hosts.UsabilitySettings) error
@@ -208,8 +209,9 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /explorer/exchange-rate/siacoin/:currency": a.handleGETExplorerSiacoinExchangeRate,
 
 		// host endpoints
-		"GET    /host/:hostkey":      a.handleGETHost,
-		"POST   /host/:hostkey/scan": a.handlePOSTHostScan,
+		"GET    /host/:hostkey":             a.handleGETHost,
+		"POST   /host/:hostkey/scan":        a.handlePOSTHostScan,
+		"DELETE /host/:hostkey/lostsectors": a.handleDELETEHostLostSectors,
 
 		// hosts endpoints
 		"GET    /hosts":                    a.handleGETHosts,
@@ -678,6 +680,21 @@ func (a *admin) handlePOSTHostScan(jc jape.Context) {
 		return
 	}
 	jc.Encode(host)
+}
+
+func (a *admin) handleDELETEHostLostSectors(jc jape.Context) {
+	var hk types.PublicKey
+	if jc.DecodeParam("hostkey", &hk) != nil {
+		return
+	}
+	err := a.hosts.ResetLostSectors(jc.Request.Context(), hk)
+	if errors.Is(err, hosts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to reset lost sectors", err) != nil {
+		return
+	}
+	jc.Encode(nil)
 }
 
 func (a *admin) handleGETHosts(jc jape.Context) {

@@ -971,6 +971,19 @@ func (s *Store) HostsForPruning() ([]types.PublicKey, error) {
 	return hosts, nil
 }
 
+// ResetLostSectors resets the lost sectors count for the given host.
+func (s *Store) ResetLostSectors(hk types.PublicKey) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		res, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = 0 WHERE public_key = $1`, sqlPublicKey(hk))
+		if err != nil {
+			return fmt.Errorf("failed to reset lost sectors: %w", err)
+		} else if res.RowsAffected() == 0 {
+			return fmt.Errorf("host %q: %w", hk, hosts.ErrNotFound)
+		}
+		return nil
+	})
+}
+
 // HostsWithLostSectors returns a list of host keys that have contracts with
 // lost sectors.
 func (s *Store) HostsWithLostSectors() ([]types.PublicKey, error) {

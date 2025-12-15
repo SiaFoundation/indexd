@@ -162,6 +162,12 @@ func (c *Client) ScanHost(ctx context.Context, hostKey types.PublicKey) (resp ho
 	return
 }
 
+// ResetHostLostSectors resets the lost sectors count for the given host.
+func (c *Client) ResetHostLostSectors(ctx context.Context, hostKey types.PublicKey) (err error) {
+	err = c.c.DELETE(ctx, fmt.Sprintf("/host/%s/lostsectors", hostKey))
+	return
+}
+
 // Hosts returns all hosts known to the indexer.
 func (c *Client) Hosts(ctx context.Context, opts ...HostQueryParameterOption) (hosts []hosts.Host, err error) {
 	values := url.Values{}
