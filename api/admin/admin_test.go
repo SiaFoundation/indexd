@@ -959,6 +959,47 @@ func TestHostsStatsAPI(t *testing.T) {
 	} else if stats.Failed != 0 {
 		t.Fatalf("expected 0 failed scans, got %d", stats.Failed)
 	}
+
+	hk1 := cluster.Hosts[0].PublicKey()
+
+	// create account and pin a sector
+	account := types.GeneratePrivateKey()
+	cluster.Indexer.Store().AddTestAccount(t, account.PublicKey())
+	root := frand.Entropy256()
+	_, err = cluster.Indexer.Store().PinSlabs(proto.Account(account.PublicKey()), time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root, HostKey: hk1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// mark the sector as lost
+	if err := cluster.Indexer.Store().MarkSectorsLost(hk1, []types.Hash256{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify host has lost sectors
+	host, err := admin.Host(t.Context(), hk1)
+	if err != nil {
+		t.Fatal(err)
+	} else if host.LostSectors != 1 {
+		t.Fatalf("expected 1 lost sector, got %d", host.LostSectors)
+	}
+
+	// reset lost sectors
+	if err := admin.ResetHostLostSectors(t.Context(), hk1); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify host no longer has lost sectors
+	host, err = admin.Host(t.Context(), hk1)
+	if err != nil {
+		t.Fatal(err)
+	} else if host.LostSectors != 0 {
+		t.Fatalf("expected 0 lost sectors after reset, got %d", host.LostSectors)
+	}
 }
 
 func TestSectorStatsAPI(t *testing.T) {
