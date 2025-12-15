@@ -996,6 +996,98 @@ func TestHostsWithLostSectors(t *testing.T) {
 	assertHosts([]types.PublicKey{hk1, hk2})
 }
 
+func TestResetLostSectors(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// add account
+	account := proto4.Account{1}
+	db.addTestAccount(t, types.PublicKey(account))
+
+	// add two hosts
+	hk1 := db.addTestHost(t)
+	hk2 := db.addTestHost(t)
+
+	// add a contract for each host
+	db.addTestContract(t, hk1)
+	db.addTestContract(t, hk2)
+
+	// pin a slab that adds sectors to each host
+	root1 := frand.Entropy256()
+	root2 := frand.Entropy256()
+	_, err := db.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{Root: root1, HostKey: hk1},
+			{Root: root2, HostKey: hk2},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// mark sectors as lost
+	if err := db.MarkSectorsLost(hk1, []types.Hash256{root1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.MarkSectorsLost(hk2, []types.Hash256{root2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify both hosts have lost sectors
+	h1, err := db.Host(hk1)
+	if err != nil {
+		t.Fatal(err)
+	} else if h1.LostSectors != 1 {
+		t.Fatalf("expected 1 lost sector for hk1, got %d", h1.LostSectors)
+	}
+
+	h2, err := db.Host(hk2)
+	if err != nil {
+		t.Fatal(err)
+	} else if h2.LostSectors != 1 {
+		t.Fatalf("expected 1 lost sector for hk2, got %d", h2.LostSectors)
+	}
+
+	// reset lost sectors for hk1
+	if err := db.ResetLostSectors(hk1); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify hk1 has 0 lost sectors
+	h1, err = db.Host(hk1)
+	if err != nil {
+		t.Fatal(err)
+	} else if h1.LostSectors != 0 {
+		t.Fatalf("expected 0 lost sectors for hk1 after reset, got %d", h1.LostSectors)
+	}
+
+	// verify hk2 still has 1 lost sector (unchanged)
+	h2, err = db.Host(hk2)
+	if err != nil {
+		t.Fatal(err)
+	} else if h2.LostSectors != 1 {
+		t.Fatalf("expected 1 lost sector for hk2, got %d", h2.LostSectors)
+	}
+
+	// verify only hk2 is returned by HostsWithLostSectors
+	hostsWithLost, err := db.HostsWithLostSectors()
+	if err != nil {
+		t.Fatal(err)
+	} else if len(hostsWithLost) != 1 {
+		t.Fatalf("expected 1 host with lost sectors, got %d", len(hostsWithLost))
+	} else if hostsWithLost[0] != hk2 {
+		t.Fatalf("expected hk2, got %v", hostsWithLost[0])
+	}
+
+	// test resetting a non-existent host returns ErrNotFound
+	if err := db.ResetLostSectors(types.PublicKey{99}); !errors.Is(err, hosts.ErrNotFound) {
+		t.Fatalf("expected hosts.ErrNotFound, got %v", err)
+	}
+}
+
 func TestHostsWithUnpinnableSectors(t *testing.T) {
 	// create database
 	log := zaptest.NewLogger(t)
