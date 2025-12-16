@@ -1034,6 +1034,24 @@ paths:
             })
             await admin.hostsBlocklistDelete("ed25519:host-public-key")
 
+  /hosts/{hostkey}/lostsectors/reset:
+    post:
+      tags:
+        - hosts
+      summary: Reset the lost sectors count of a host
+      operationId: hostLostSectorsReset
+      parameters:
+        - name: hostkey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Lost sectors count reset successfully
+        "404":
+          description: Host does not exist
+
   /settings/contracts:
     get:
       tags:
