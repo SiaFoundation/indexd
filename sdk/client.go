@@ -122,18 +122,19 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 	}
 	var wg sync.WaitGroup
 	defer wg.Wait()
-	responseCh := make(chan *result, maxInflight)
+	responseCh := make(chan *result, len(slabSectors))
 	sema := make(chan struct{}, maxInflight)
 	tryDownloadSector := func(ctx context.Context, d sectorDownload) {
 		select {
 		case <-ctx.Done():
 			return
 		case sema <- struct{}{}:
+			// limit number of concurrent requests
 		}
 		wg.Go(func() {
-			defer func() { <-sema }()
 			buf := bytes.NewBuffer(make([]byte, 0, length))
 			err := downloadShard(ctx, s.hosts, s.appKey, d.sector.HostKey, buf, d.sector.Root, offset, length, timeout)
+			<-sema
 			select {
 			case <-ctx.Done():
 				return
@@ -143,12 +144,11 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 	}
 
 	// launch minShards downloads right away
-	for _ = range slab.MinShards {
+	for range slab.MinShards {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case sema <- struct{}{}:
-			// limit number of concurrent requests
+		default:
 		}
 		tryDownloadSector(ctx, slabSectors[slabHosts[0]])
 		slabHosts = slabHosts[1:]
@@ -188,7 +188,7 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 			}
 		case <-timer.C:
 			// if the semaphore has capacity, launch more downloads
-			if len(sema) < cap(sema) && len(slabHosts) > 0 && len(slabHosts) > 0 {
+			if len(sema) < cap(sema) && len(slabHosts) > 0 {
 				tryDownloadSector(ctx, slabSectors[slabHosts[0]])
 				slabHosts = slabHosts[1:]
 			}
