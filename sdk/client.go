@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/klauspost/reedsolomon"
@@ -115,46 +114,87 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 	// prioritize hosts
 	slabHosts = s.hosts.Prioritize(slabHosts)
 
-	var successful atomic.Uint32
+	// helper to launch download
+	type result struct {
+		index int
+		buf   []byte
+		err   error
+	}
 	var wg sync.WaitGroup
-	sectors := make([][]byte, len(slab.Sectors))
+	defer wg.Wait()
+	responseCh := make(chan *result, maxInflight)
 	sema := make(chan struct{}, maxInflight)
-top:
-	for _, hostKey := range slabHosts {
+	tryDownloadSector := func(ctx context.Context, d sectorDownload) {
 		select {
 		case <-ctx.Done():
-			break top
+			return
+		case sema <- struct{}{}:
+		}
+		wg.Go(func() {
+			defer func() { <-sema }()
+			buf := bytes.NewBuffer(make([]byte, 0, length))
+			err := downloadShard(ctx, s.hosts, s.appKey, d.sector.HostKey, buf, d.sector.Root, offset, length, timeout)
+			select {
+			case <-ctx.Done():
+				return
+			case responseCh <- &result{index: d.index, buf: buf.Bytes(), err: err}:
+			}
+		})
+	}
+
+	// launch minShards downloads right away
+	for _ = range slab.MinShards {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		case sema <- struct{}{}:
 			// limit number of concurrent requests
 		}
-		wg.Add(1)
-		sector, ok := slabSectors[hostKey]
-		if !ok {
-			panic("missing slab for host") // developer error
-		}
-		go func(ctx context.Context, sector slabs.PinnedSector, i int) {
-			defer func() {
-				<-sema
-				wg.Done()
-			}()
-			buf := bytes.NewBuffer(make([]byte, 0, length))
-			err := downloadShard(ctx, s.hosts, s.appKey, sector.HostKey, buf, sector.Root, offset, length, timeout)
-			if err != nil {
-				return
-			}
-			sectors[i] = buf.Bytes()
-			if v := successful.Add(1); v >= uint32(slab.MinShards) {
-				// got enough pieces to recover
-				cancel()
-			}
-		}(ctx, sector.sector, sector.index)
+		tryDownloadSector(ctx, slabSectors[slabHosts[0]])
+		slabHosts = slabHosts[1:]
 	}
 
-	wg.Wait()
-	if n := successful.Load(); n < uint32(slab.MinShards) {
-		return nil, fmt.Errorf("retrieved %d sectors, minimum required: %d: %w", n, slab.MinShards, ErrNotEnoughShards)
+	// launch more downloads as results come in or periodically if there is
+	// still capacity in the semaphore
+	var successful int
+	shards := make([][]byte, len(slab.Sectors))
+	timer := time.NewTimer(time.Second)
+	for {
+		select {
+		case res := <-responseCh:
+			if res.err == nil {
+				// successful download
+				shards[res.index] = res.buf
+				successful++
+				if successful >= int(slab.MinShards) {
+					// enough shards downloaded
+					cancel()
+					return shards, nil
+				}
+			} else {
+				// failed download
+				rem := max(0, int(slab.MinShards)-successful)
+				if rem == 0 {
+					return shards, nil // sanity check
+				} else if len(sema) <= rem && len(slabHosts) > 0 {
+					// only spawn additional download tasks if there are not
+					// enough to satisfy the required number of shards. The
+					// sleep arm will handle slow hosts.
+					tryDownloadSector(ctx, slabSectors[slabHosts[0]])
+					slabHosts = slabHosts[1:]
+				} else if len(sema) == 0 && successful < int(slab.MinShards) {
+					return nil, ErrNotEnoughShards
+				}
+			}
+		case <-timer.C:
+			// if the semaphore has capacity, launch more downloads
+			if len(sema) < cap(sema) && len(slabHosts) > 0 && len(slabHosts) > 0 {
+				tryDownloadSector(ctx, slabSectors[slabHosts[0]])
+				slabHosts = slabHosts[1:]
+			}
+		}
+		timer.Reset(time.Second)
 	}
-	return sectors, nil
 }
 
 // AppKey returns the app key used by the SDK.
