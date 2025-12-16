@@ -209,9 +209,9 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /explorer/exchange-rate/siacoin/:currency": a.handleGETExplorerSiacoinExchangeRate,
 
 		// host endpoints
-		"GET    /host/:hostkey":             a.handleGETHost,
-		"POST   /host/:hostkey/scan":        a.handlePOSTHostScan,
-		"DELETE /host/:hostkey/lostsectors": a.handleDELETEHostLostSectors,
+		"GET    /host/:hostkey":                   a.handleGETHost,
+		"POST   /host/:hostkey/scan":              a.handlePOSTHostScan,
+		"POST   /host/:hostkey/lostsectors/reset": a.handlePOSTHostLostSectorsReset,
 
 		// hosts endpoints
 		"GET    /hosts":                    a.handleGETHosts,
@@ -682,7 +682,7 @@ func (a *admin) handlePOSTHostScan(jc jape.Context) {
 	jc.Encode(host)
 }
 
-func (a *admin) handleDELETEHostLostSectors(jc jape.Context) {
+func (a *admin) handlePOSTHostLostSectorsReset(jc jape.Context) {
 	var hk types.PublicKey
 	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
