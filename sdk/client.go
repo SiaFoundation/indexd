@@ -169,7 +169,6 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 				successful++
 				if successful >= int(slab.MinShards) {
 					// enough shards downloaded
-					cancel()
 					return shards, nil
 				}
 			} else {
@@ -177,14 +176,15 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 				rem := max(0, int(slab.MinShards)-successful)
 				if rem == 0 {
 					return shards, nil // sanity check
+				} else if len(sema)+len(slabHosts) < rem {
+					// not enough hosts left to satisfy min shards
+					return nil, ErrNotEnoughShards
 				} else if len(sema) <= rem && len(slabHosts) > 0 {
 					// only spawn additional download tasks if there are not
 					// enough to satisfy the required number of shards. The
 					// sleep arm will handle slow hosts.
 					tryDownloadSector(ctx, slabSectors[slabHosts[0]])
 					slabHosts = slabHosts[1:]
-				} else if len(sema) == 0 && successful < int(slab.MinShards) {
-					return nil, ErrNotEnoughShards
 				}
 			}
 		case <-timer.C:
