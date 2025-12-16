@@ -159,6 +159,7 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 	var successful int
 	shards := make([][]byte, len(slab.Sectors))
 	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
 	for {
 		select {
 		case res := <-responseCh:
