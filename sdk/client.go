@@ -193,6 +193,9 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 				tryDownloadSector(ctx, slabSectors[slabHosts[0]])
 				slabHosts = slabHosts[1:]
 			}
+		case <-ctx.Done():
+			// download got interrupted before it could finish
+			return nil, ctx.Err()
 		}
 		timer.Reset(time.Second)
 	}
