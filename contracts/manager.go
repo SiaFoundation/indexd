@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/client"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
@@ -41,11 +42,20 @@ var (
 )
 
 type (
-	// AccountManager defines an interface that allows funding accounts on the
-	// host using a given set of contracts.
+	// AccountFunder defines an interface to fund accounts.
+	AccountFunder interface {
+		FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accounts []accounts.HostAccount, target types.Currency, log *zap.Logger) (int, int, error)
+	}
+
+	// AccountManager defines an interface that allows fetching and updating
+	// account information.
 	AccountManager interface {
-		ContractFundTarget(ctx context.Context, host hosts.Host, minAllowance types.Currency) (types.Currency, error)
-		FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, force bool, log *zap.Logger) error
+		AccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]accounts.HostAccount, error)
+		ActiveAccounts(threshold time.Time) (uint64, error)
+		ScheduleAccountsForFunding(hostKey types.PublicKey) error
+		ServiceAccounts(hk types.PublicKey) []accounts.HostAccount
+		UpdateHostAccounts(accounts []accounts.HostAccount) error
+		UpdateServiceAccounts(ctx context.Context, accounts []accounts.HostAccount, balance types.Currency) error
 	}
 
 	// ChainManager is the minimal interface of ChainManager functionality the
@@ -190,12 +200,13 @@ type (
 
 	// ContractManager manages the contracts throughout their lifecycle.
 	ContractManager struct {
-		accounts AccountManager
-		chain    ChainManager
-		hosts    HostManager
-		syncer   Syncer
-		wallet   Wallet
-		store    Store
+		accounts      AccountManager
+		accountFunder AccountFunder
+		chain         ChainManager
+		hosts         HostManager
+		syncer        Syncer
+		wallet        Wallet
+		store         Store
 
 		dialer    Dialer
 		renterKey types.PublicKey
@@ -476,11 +487,12 @@ func (cm *ContractManager) Close() error {
 	return nil
 }
 
-func newContractManager(renterKey types.PublicKey, accounts AccountManager, chain ChainManager, store Store, dialer Dialer, hosts HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, accounts AccountManager, accountFunder AccountFunder, chain ChainManager, store Store, dialer Dialer, hosts HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
-		accounts: accounts,
-		chain:    chain,
-		hosts:    hosts,
+		accounts:      accounts,
+		accountFunder: accountFunder,
+		chain:         chain,
+		hosts:         hosts,
 
 		syncer: syncer,
 		wallet: wallet,
@@ -518,8 +530,8 @@ func newContractManager(renterKey types.PublicKey, accounts AccountManager, chai
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PrivateKey, accountManager AccountManager, chainManager ChainManager, store Store, dialer *client.Dialer, hm HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	cm := newContractManager(renterKey.PublicKey(), accountManager, chainManager, store, &wrapper{d: dialer}, hm, syncer, wallet, opts...)
+func NewManager(renterKey types.PrivateKey, accountManager AccountManager, accountFunder AccountFunder, chainManager ChainManager, store Store, dialer *client.Dialer, hm HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	cm := newContractManager(renterKey.PublicKey(), accountManager, accountFunder, chainManager, store, &wrapper{d: dialer}, hm, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {

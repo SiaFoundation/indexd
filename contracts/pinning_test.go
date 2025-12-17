@@ -240,7 +240,7 @@ func TestPerformSectorPinningOnHost(t *testing.T) {
 	hm.settings[hk2] = h2.Settings
 
 	// prepare contract manager
-	cm := newContractManager(types.PublicKey{}, nil, nil, store, dialer, hm, nil, nil)
+	cm := newContractManager(types.PublicKey{}, nil, nil, nil, store, dialer, hm, nil, nil)
 	assertSectorsContract := func(hostKey types.PublicKey, roots []types.Hash256, contractID *types.FileContractID) {
 		t.Helper()
 
@@ -358,7 +358,7 @@ func TestPerformSectorPinningOnHostOverflow(t *testing.T) {
 	hm.settings[hk1] = h1.Settings
 
 	// prepare contract manager
-	cm := newContractManager(types.PublicKey{}, nil, nil, store, dialer, hm, nil, nil)
+	cm := newContractManager(types.PublicKey{}, nil, nil, nil, store, dialer, hm, nil, nil)
 	assertSectorsContract := func(hostKey types.PublicKey, roots []types.Hash256, contractID *types.FileContractID) {
 		t.Helper()
 

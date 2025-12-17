@@ -252,7 +252,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			}
 			delete(hostsWithoutContracts, contract.HostKey) // host has at least one contract
 
-			accountFundTarget, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
+			accountFundTarget, err := cm.ContractFundTarget(ctx, host, minAllowance)
 			if err != nil {
 				return fmt.Errorf("failed to get fund target: %w", err)
 			}
@@ -283,7 +283,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	// and log the result. It returns true if the formation was successful. It is not
 	// thread-safe.
 	formContract := func(ctx context.Context, host hosts.Host, existingHost bool, log *zap.Logger) bool {
-		accountFundTarget, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
+		accountFundTarget, err := cm.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
 			log.Warn("failed to get fund target", zap.Error(err))
 			return false
@@ -312,7 +312,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		if host.PublicKey != contract.HostKey {
 			log.Panic("host key does not match contract host key") // sanity check
 		}
-		accountFundTarget, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
+		accountFundTarget, err := cm.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
 			log.Warn("failed to get fund target", zap.Error(err))
 			return false

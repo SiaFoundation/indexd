@@ -46,7 +46,7 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 func (cm *ContractManager) renewContract(ctx context.Context, contract Contract, proofHeight, period uint64, log *zap.Logger) error {
 	return cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
 		// calculate funding target
-		minAllowance, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
+		minAllowance, err := cm.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
 			return fmt.Errorf("failed to get fund target: %w", err)
 		}

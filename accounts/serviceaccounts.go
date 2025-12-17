@@ -63,20 +63,6 @@ func (m *AccountManager) DebitServiceAccount(ctx context.Context, hostKey types.
 	return nil
 }
 
-func (m *AccountManager) hostAccs(hk types.PublicKey) []HostAccount {
-	m.serviceAccountsMu.Lock()
-	defer m.serviceAccountsMu.Unlock()
-
-	result := make([]HostAccount, 0, len(m.serviceAccounts))
-	for serviceAccount := range m.serviceAccounts {
-		result = append(result, HostAccount{
-			AccountKey: serviceAccount,
-			HostKey:    hk,
-		})
-	}
-	return result
-}
-
 // UpdateServiceAccounts updates the balance of all accounts registered as
 // service accounts to 'balance'.
 func (m *AccountManager) UpdateServiceAccounts(ctx context.Context, accounts []HostAccount, balance types.Currency) error {

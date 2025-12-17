@@ -52,7 +52,7 @@ func TestWalletMaintenance(t *testing.T) {
 	}
 	defer hm.Close()
 
-	contracts, err := contracts.NewManager(sk, nil, cm, store, nil, hm, s, w, contracts.WithLogger(log.Named("contracts")), contracts.WithSyncPollInterval(250*time.Millisecond))
+	contracts, err := contracts.NewManager(sk, nil, nil, cm, store, nil, hm, s, w, contracts.WithLogger(log.Named("contracts")), contracts.WithSyncPollInterval(250*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}

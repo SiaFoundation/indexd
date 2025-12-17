@@ -42,7 +42,7 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 			}
 
 			if err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
-				return cm.accounts.FundAccounts(ctx, host, contractIDs, force, log)
+				return cm.FundAccounts(ctx, host, contractIDs, force, log)
 			}); err != nil {
 				log.Debug("failed to fund accounts", zap.Error(err))
 			}
