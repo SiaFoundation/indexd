@@ -254,9 +254,7 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 	launch := func(descr string, task func(context.Context) error) {
 		healthTicker := time.NewTicker(m.healthCheckInterval)
 
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			defer healthTicker.Stop()
 			for {
 				select {
@@ -268,8 +266,11 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 					m.log.Error("maintenance failed", zap.String("task", descr), zap.Error(err))
 				}
 			}
-		}()
+		})
 	}
+
+	// register lost sectors alerts on startup
+	m.registerLostSectorsAlert()
 
 	launch("integrity checks", m.performIntegrityChecks)
 	launch("slab migrations", m.performSlabMigrations)
@@ -323,18 +324,7 @@ func (m *SlabManager) performIntegrityChecks(ctx context.Context) error {
 		}
 		wg.Wait()
 	}
-
-	hks, err := m.store.HostsWithLostSectors()
-	if err != nil {
-		return fmt.Errorf("failed to get hosts with lost sectors: %w", err)
-	}
-	if len(hks) > 0 {
-		if err := m.alerter.RegisterAlert(newLostSectorsAlert(hks)); err != nil {
-			return fmt.Errorf("failed to register lost sector alert: %w", err)
-		}
-	} else {
-		m.alerter.DismissAlerts(alertLostSectorsID)
-	}
+	m.registerLostSectorsAlert()
 
 	logger.Debug("finished integrity checks", zap.Duration("elapsed", time.Since(start)))
 	return nil
@@ -364,4 +354,20 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 
 	log.Debug("finished slab migrations", zap.Duration("elapsed", time.Since(start)))
 	return nil
+}
+
+func (m *SlabManager) registerLostSectorsAlert() {
+	hks, err := m.store.HostsWithLostSectors()
+	if err != nil {
+		m.log.Error("failed to get hosts with lost sectors", zap.Error(err))
+		return
+	}
+	if len(hks) > 0 {
+		if err := m.alerter.RegisterAlert(newLostSectorsAlert(hks)); err != nil {
+			m.log.Error("failed to register lost sector alert", zap.Error(err))
+			return
+		}
+	} else {
+		m.alerter.DismissAlerts(alertLostSectorsID)
+	}
 }
