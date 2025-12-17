@@ -795,10 +795,11 @@ func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migr
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		var hostID sql.NullInt64
 		var contractMapID sql.NullInt64
+		var sectorID int64
 		err := tx.QueryRow(ctx, `
-			SELECT host_id, contract_sectors_map_id
+			SELECT id, host_id, contract_sectors_map_id
 			FROM sectors
-			WHERE sector_root = $1`, sqlHash256(root)).Scan(&hostID, &contractMapID)
+			WHERE sector_root = $1`, sqlHash256(root)).Scan(&sectorID, &hostID, &contractMapID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // not migrated
 		}
@@ -813,6 +814,23 @@ func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migr
 			return err
 		} else if resp.RowsAffected() == 0 {
 			return nil
+		}
+
+		// update affected objects
+		_, err = tx.Exec(ctx, `
+			UPDATE object_events
+			SET updated_at = NOW()
+			WHERE (account_id, object_key) IN (
+				SELECT DISTINCT o.account_id, o.object_key
+				FROM slab_sectors
+				INNER JOIN slabs ON slab_sectors.slab_id = slabs.id
+				INNER JOIN object_slabs ON object_slabs.slab_digest = slabs.digest
+				INNER JOIN objects o ON object_slabs.object_id = o.id
+				WHERE slab_sectors.sector_id = $1
+			)
+		`, sectorID)
+		if err != nil {
+			return fmt.Errorf("failed to update affected object events: %w", err)
 		}
 
 		migrated = true
