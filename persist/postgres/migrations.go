@@ -615,4 +615,9 @@ ALTER TABLE objects ADD COLUMN meta_signature BYTEA UNIQUE CHECK(LENGTH(meta_sig
 		_, err = tx.Exec(ctx, "ALTER TABLE objects ALTER COLUMN meta_signature SET NOT NULL;")
 		return err
 	},
+	// add stuck_since column to hosts for tracking hosts with failing contract operations
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE hosts ADD COLUMN stuck_since TIMESTAMP WITH TIME ZONE;`)
+		return err
+	},
 }

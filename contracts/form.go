@@ -96,7 +96,7 @@ type candidateContract struct {
 }
 
 func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKey, period uint64, fundTarget types.Currency, log *zap.Logger) error {
-	return cm.hosts.WithScannedHost(ctx, host, func(host hosts.Host) error {
+	err := cm.hosts.WithScannedHost(ctx, host, func(host hosts.Host) error {
 		if !host.IsGood() {
 			return errors.New("host is not good")
 		}
@@ -140,10 +140,20 @@ func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKe
 			zap.Stringer("collateral", contract.Revision.RemainingCollateral()))
 		return nil
 	})
+	if err != nil {
+		if setErr := cm.store.SetHostStuck(host); setErr != nil {
+			log.Error("failed to mark host stuck", zap.Error(setErr))
+		}
+		return err
+	}
+	if err := cm.store.ClearHostStuck(host); err != nil {
+		log.Error("failed to clear host stuck", zap.Error(err))
+	}
+	return nil
 }
 
 func (cm *ContractManager) refreshContract(ctx context.Context, contract Contract, height uint64, fundTarget types.Currency, log *zap.Logger) error {
-	return cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
+	err := cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
 		if !host.IsGood() {
 			return errors.New("host is not good")
 		}
@@ -186,6 +196,16 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 			zap.Stringer("collateral", renewed.Revision.RemainingCollateral()))
 		return nil
 	})
+	if err != nil {
+		if setErr := cm.store.SetHostStuck(contract.HostKey); setErr != nil {
+			log.Error("failed to mark host stuck", zap.Error(setErr))
+		}
+		return err
+	}
+	if err := cm.store.ClearHostStuck(contract.HostKey); err != nil {
+		log.Error("failed to clear host stuck", zap.Error(err))
+	}
+	return nil
 }
 
 // performContractFormation ensures that the renter has enough good contracts to

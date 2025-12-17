@@ -55,6 +55,7 @@ type (
 	ScansStatsResponse struct {
 		Total  int64 `json:"total"`
 		Failed int64 `json:"failed"`
+		Stuck  int64 `json:"stuck"`
 	}
 
 	// AccountStatsResponse is the response body for the [GET] /stats/accounts.

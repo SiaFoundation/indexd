@@ -127,7 +127,8 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 
 	client2 := client2.New(client2.NewProvider(hosts.NewHostStore(store)))
 
-	hm, err := hosts.NewManager(s, locator, client2, store, hosts.WithLogger(log.Named("hosts")))
+	alerter := alerts.NewManager()
+	hm, err := hosts.NewManager(s, locator, client2, store, alerter, hosts.WithLogger(log.Named("hosts")))
 	if err != nil {
 		return fmt.Errorf("failed to create host manager: %w", err)
 	}
@@ -147,7 +148,6 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer contracts.Close()
 
-	alerter := alerts.NewManager()
 	slabs, err := slabs.NewManager(cm, am, contracts, hm, store, client2, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), slabs.WithLogger(log.Named("slabs")))
 	if err != nil {
 		return fmt.Errorf("failed to create slabs manager: %w", err)

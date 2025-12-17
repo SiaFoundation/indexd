@@ -44,7 +44,7 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 }
 
 func (cm *ContractManager) renewContract(ctx context.Context, contract Contract, proofHeight, period uint64, log *zap.Logger) error {
-	return cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
+	err := cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
 		// calculate funding target
 		minAllowance, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
@@ -95,4 +95,14 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 			zap.Stringer("newRemainingCollateral", renewed.Revision.RemainingCollateral()))
 		return nil
 	})
+	if err != nil {
+		if setErr := cm.store.SetHostStuck(contract.HostKey); setErr != nil {
+			log.Error("failed to mark host stuck", zap.Error(setErr))
+		}
+		return err
+	}
+	if err := cm.store.ClearHostStuck(contract.HostKey); err != nil {
+		log.Error("failed to clear host stuck", zap.Error(err))
+	}
+	return nil
 }

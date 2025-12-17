@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
@@ -46,7 +47,7 @@ func TestWalletMaintenance(t *testing.T) {
 	}
 	defer w.Close()
 
-	hm, err := hosts.NewManager(s, nil, nil, store, hosts.WithLogger(log.Named("hosts")))
+	hm, err := hosts.NewManager(s, nil, nil, store, alerts.NewManager(), hosts.WithLogger(log.Named("hosts")))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
+	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
@@ -30,7 +31,7 @@ func TestHostManager(t *testing.T) {
 	defer db.Close()
 
 	// create host manager
-	mgr, err := hosts.NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mock.Locator{}, nil, db, hosts.WithAnnouncementMaxAge(time.Minute))
+	mgr, err := hosts.NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mock.Locator{}, nil, db, alerts.NewManager(), hosts.WithAnnouncementMaxAge(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +156,7 @@ func TestScanTimeout(t *testing.T) {
 		}
 
 		// create host manager
-		mgr, err := hosts.NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mock.Locator{}, nil, db, hosts.WithScanner(scanner))
+		mgr, err := hosts.NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mock.Locator{}, nil, db, alerts.NewManager(), hosts.WithScanner(scanner))
 		if err != nil {
 			t.Fatal(err)
 		}

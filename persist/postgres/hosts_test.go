@@ -1088,6 +1088,141 @@ func TestResetLostSectors(t *testing.T) {
 	}
 }
 
+func TestStuckHosts(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// add two hosts
+	hk1 := db.addTestHost(t)
+	hk2 := db.addTestHost(t)
+	hk3 := db.addTestHost(t) // host without contracts
+
+	// add contracts for hk1 and hk2 (required for stuck hosts to be returned)
+	db.addTestContract(t, hk1)
+	db.addTestContract(t, hk2)
+
+	assertStuckHosts := func(expected []types.PublicKey) {
+		t.Helper()
+		hks, err := db.StuckHosts()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(hks) != len(expected) {
+			t.Fatalf("expected %d stuck hosts, got %d", len(expected), len(hks))
+		}
+		for _, exp := range expected {
+			found := false
+			for _, hk := range hks {
+				if hk == exp {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Fatalf("expected host %v to be stuck", exp)
+			}
+		}
+	}
+
+	assertNumStuckHosts := func(expected int64) {
+		t.Helper()
+		stats, err := db.ScanStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stats.Stuck != expected {
+			t.Fatalf("expected %d stuck hosts, got %d", expected, stats.Stuck)
+		}
+	}
+
+	// initially no hosts should be stuck
+	assertStuckHosts(nil)
+	assertNumStuckHosts(0)
+
+	// set hk1 as stuck
+	if err := db.SetHostStuck(hk1); err != nil {
+		t.Fatal(err)
+	}
+
+	// hk1 should still not be stuck yet (less than 24 hours)
+	assertStuckHosts(nil)
+	assertNumStuckHosts(0)
+
+	// manually set stuck_since to 25 hours ago for hk1 to simulate the 24h threshold
+	_, err := db.pool.Exec(t.Context(), `UPDATE hosts SET stuck_since = NOW() - INTERVAL '25 hours' WHERE public_key = $1`, sqlPublicKey(hk1))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// now hk1 should be stuck
+	assertStuckHosts([]types.PublicKey{hk1})
+	assertNumStuckHosts(1)
+
+	// set hk2 as stuck (but recent, so not returned yet)
+	if err := db.SetHostStuck(hk2); err != nil {
+		t.Fatal(err)
+	}
+
+	// still only hk1 should be stuck
+	assertStuckHosts([]types.PublicKey{hk1})
+	assertNumStuckHosts(1)
+
+	// manually set stuck_since to 25 hours ago for hk2
+	_, err = db.pool.Exec(t.Context(), `UPDATE hosts SET stuck_since = NOW() - INTERVAL '25 hours' WHERE public_key = $1`, sqlPublicKey(hk2))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// now both hk1 and hk2 should be stuck
+	assertStuckHosts([]types.PublicKey{hk1, hk2})
+	assertNumStuckHosts(2)
+
+	// set hk3 as stuck (host without contracts, should not be returned)
+	if err := db.SetHostStuck(hk3); err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.pool.Exec(t.Context(), `UPDATE hosts SET stuck_since = NOW() - INTERVAL '25 hours' WHERE public_key = $1`, sqlPublicKey(hk3))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// hk3 should not be returned because it has no active contracts
+	assertStuckHosts([]types.PublicKey{hk1, hk2})
+	assertNumStuckHosts(2)
+
+	// clear hk1's stuck status
+	if err := db.ClearHostStuck(hk1); err != nil {
+		t.Fatal(err)
+	}
+
+	// now only hk2 should be stuck
+	assertStuckHosts([]types.PublicKey{hk2})
+	assertNumStuckHosts(1)
+
+	// check we don't update stuck_since if already set
+	var stuckSince time.Time
+	err = db.pool.QueryRow(t.Context(), `SELECT stuck_since FROM hosts WHERE public_key = $1`, sqlPublicKey(hk2)).Scan(&stuckSince)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// call SetHostStuck again
+	if err := db.SetHostStuck(hk2); err != nil {
+		t.Fatal(err)
+	}
+
+	// stuck_since should not have changed
+	var stuckSinceAfter time.Time
+	err = db.pool.QueryRow(t.Context(), `SELECT stuck_since FROM hosts WHERE public_key = $1`, sqlPublicKey(hk2)).Scan(&stuckSinceAfter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !stuckSince.Equal(stuckSinceAfter) {
+		t.Fatalf("expected stuck_since to remain %v, got %v", stuckSince, stuckSinceAfter)
+	}
+}
+
 func TestHostsWithUnpinnableSectors(t *testing.T) {
 	// create database
 	log := zaptest.NewLogger(t)

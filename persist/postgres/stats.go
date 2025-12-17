@@ -101,7 +101,25 @@ func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 // ScanStats reports statistics about host scans for all hosts.
 func (s *Store) ScanStats() (stats admin.ScansStatsResponse, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, "SELECT num_scans, num_scans_failed FROM stats").Scan(&stats.Total, &stats.Failed)
+		if err := tx.QueryRow(ctx, "SELECT num_scans, num_scans_failed FROM stats").Scan(&stats.Total, &stats.Failed); err != nil {
+			return fmt.Errorf("failed to get scan counts: %w", err)
+		}
+		// count stuck hosts
+		err := tx.QueryRow(ctx, `
+			SELECT COUNT(DISTINCT h.id)
+			FROM hosts h
+			WHERE h.stuck_since IS NOT NULL
+				AND h.stuck_since < NOW() - INTERVAL '24 hours'
+				AND EXISTS (
+					SELECT 1 FROM contracts c
+					WHERE c.host_id = h.id
+						AND c.state IN (0, 1)
+						AND c.renewed_to IS NULL
+				)`).Scan(&stats.Stuck)
+		if err != nil {
+			return fmt.Errorf("failed to get stuck hosts: %w", err)
+		}
+		return nil
 	})
 	return
 }

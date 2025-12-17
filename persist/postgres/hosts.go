@@ -1012,6 +1012,66 @@ func (s *Store) HostsWithLostSectors() ([]types.PublicKey, error) {
 	return hks, nil
 }
 
+// SetHostStuck sets the stuck_since timestamp to now if it is currently NULL.
+// This is called when a contract operation (form, renew, refresh) fails for a host.
+func (s *Store) SetHostStuck(hk types.PublicKey) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE hosts
+			SET stuck_since = COALESCE(stuck_since, NOW())
+			WHERE public_key = $1`, sqlPublicKey(hk))
+		return err
+	})
+}
+
+// ClearHostStuck clears the stuck_since timestamp.
+// This is called when a contract operation (form, renew, refresh) succeeds for a host.
+func (s *Store) ClearHostStuck(hk types.PublicKey) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE hosts
+			SET stuck_since = NULL
+			WHERE public_key = $1`, sqlPublicKey(hk))
+		return err
+	})
+}
+
+// StuckHosts returns a list of host public keys that are considered stuck.
+// A host is stuck if stuck_since is more than 24 hours ago and the host has
+// any active contracts (good or bad).
+func (s *Store) StuckHosts() ([]types.PublicKey, error) {
+	var hks []types.PublicKey
+	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+			SELECT h.public_key
+			FROM hosts h
+			WHERE h.stuck_since IS NOT NULL
+				AND h.stuck_since < NOW() - INTERVAL '24 hours'
+				AND EXISTS (
+					SELECT 1 FROM contracts c
+					WHERE c.host_id = h.id
+						AND c.state IN (0, 1)
+						AND c.renewed_to IS NULL
+				)`)
+		if err != nil {
+			return fmt.Errorf("failed to query stuck hosts: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var hk sqlPublicKey
+			if err := rows.Scan(&hk); err != nil {
+				return err
+			}
+			hks = append(hks, types.PublicKey(hk))
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
+	}
+	return hks, nil
+}
+
 func buildHostOrderByClause(sorts []hosts.HostSortOpt) (string, error) {
 	if len(sorts) == 0 {
 		return "", nil

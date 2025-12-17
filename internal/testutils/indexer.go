@@ -161,7 +161,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 
 	client2 := client2.New(client2.NewProvider(hosts.NewHostStore(store)))
 
-	hm, err := hosts.NewManager(syncer, locator, client2, store, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(200*time.Millisecond), hosts.WithScanInterval(time.Second))
+	alerter := alerts.NewManager()
+
+	hm, err := hosts.NewManager(syncer, locator, client2, store, alerter, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(200*time.Millisecond), hosts.WithScanInterval(time.Second))
 	if err != nil {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
@@ -178,7 +180,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
 
-	slabs, err := slabs.NewManager(c.cm, am, contracts, hm, store, client2, alerts.NewManager(), keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), cfg.slabOpts...)
+	slabs, err := slabs.NewManager(c.cm, am, contracts, hm, store, client2, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), cfg.slabOpts...)
 	if err != nil {
 		t.Fatalf("failed to create slab manager: %v", err)
 	}
@@ -208,7 +210,6 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		admin.WithLogger(log.Named("api.admin")),
 		admin.WithExplorer(explorer),
 	}
-	alerter := alerts.NewManager()
 
 	password := hex.EncodeToString(frand.Bytes(16))
 	adminAPI := http.Server{

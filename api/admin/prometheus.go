@@ -68,6 +68,10 @@ func (s ScansStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 			Name:  "indexd_total_host_scans_failed",
 			Value: float64(s.Failed),
 		},
+		{
+			Name:  "indexd_total_hosts_stuck",
+			Value: float64(s.Stuck),
+		},
 	}
 }
 

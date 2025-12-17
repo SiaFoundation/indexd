@@ -43,6 +43,7 @@ CREATE TABLE hosts (
     country_code TEXT NOT NULL DEFAULT '',
     location POINT NOT NULL DEFAULT POINT(0.0, 0.0),
     lost_sectors INTEGER NOT NULL DEFAULT 0,
+    stuck_since TIMESTAMP WITH TIME ZONE,
 
     scans INTEGER NOT NULL DEFAULT 0 CHECK (scans >= 0),
     scans_failed INTEGER NOT NULL DEFAULT 0 CHECK (scans_failed >= 0),
