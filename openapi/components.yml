@@ -862,7 +862,7 @@ components:
               type: string
             description: Reasons why the host was blocked, if any
 
-    HostScanStatsResponse:
+    AllHostsStatsResponse:
       type: object
       properties:
         scans:
@@ -873,6 +873,10 @@ components:
           type: integer
           format: int64
           description: Total number of failed host scans across all hosts
+        stuck:
+          type: integer
+          format: int64
+          description: Number of hosts that are "stuck" where stuck is defined to be only having failed contract interactions (refresh/renew/form) on that host for at least 24 hours
 
     SectorStatsResponse:
       type: object

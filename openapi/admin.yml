@@ -1397,19 +1397,18 @@ paths:
               schema:
                 $ref: "#/components/schemas/HostsStatsResponse"
 
-  /stats/hosts/scans:
+  /stats/hosts/all:
     get:
       tags:
         - stats
-      summary: Get stats about host scans
-      operationId: getStatsHostsScans
+      summary: Get total stats about hosts and their scans
+      operationId: getStatsHostsAll
       responses:
         "200":
-          description: Stats about host scans on this instance
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/HostScanStatsResponse"
+                $ref: "#/components/schemas/AllHostsStatsResponse"
 
   /stats/sectors:
     get:
