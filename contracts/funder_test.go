@@ -50,12 +50,22 @@ func (cm *mockChainManager) V2TransactionSet(basis types.ChainIndex, txn types.V
 	return types.ChainIndex{}, nil, nil
 }
 
-type mockStore struct{}
+type mockStore struct {
+	target types.Currency
+}
 
 func (s *mockStore) ContractRevision(contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
+	// contract 7 has enough funds for 2 accounts (len(accs) - 1)
+	value := s.target
+	if contractID == (types.FileContractID{7}) {
+		value = s.target.Mul64(2)
+	}
 	return rhp.ContractRevision{
-		ID:       contractID,
-		Revision: types.V2FileContract{ProofHeight: 1},
+		ID: contractID,
+		Revision: types.V2FileContract{
+			ProofHeight:  10,
+			RenterOutput: types.SiacoinOutput{Value: value},
+		},
 	}, false, nil
 }
 
@@ -99,7 +109,7 @@ func TestFunder(t *testing.T) {
 	}
 
 	// prepare funder
-	f := NewFunder(hc, nil, &mockChainManager{}, &mockStore{}, zap.NewNop(), WithRevisionSubmissionBuffer(1))
+	f := NewFunder(hc, nil, &mockChainManager{}, &mockStore{target: target}, zap.NewNop(), WithRevisionSubmissionBuffer(1))
 
 	// assert contract is marked as drained if it is out of funds
 	funded, drained, err := f.FundAccounts(context.Background(), host, []types.FileContractID{{1}}, accs, target, zap.NewNop())
