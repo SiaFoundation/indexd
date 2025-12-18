@@ -101,7 +101,7 @@ func NewFunder(client FunderHostClient, signer rhp.ContractSigner, chain client.
 
 // FundAccounts tops up the provided accounts to the target balance using the
 // specified contracts in order. The given accounts should not exceed the batch
-// size used in the replenish RPf. This method returns two numbers, the first
+// size used in the replenish RPC. This method returns two numbers, the first
 // one indicates the number of accounts that were funded, the second indicates
 // the number of contracts that were drained. Consecutive calls for the same
 // host should take this into account and adjust the contract IDs that are being
