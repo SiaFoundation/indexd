@@ -96,7 +96,7 @@ type candidateContract struct {
 }
 
 func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKey, period uint64, fundTarget types.Currency, log *zap.Logger) error {
-	err := cm.hosts.WithScannedHost(ctx, host, func(host hosts.Host) error {
+	return cm.hosts.WithScannedHost(ctx, host, func(host hosts.Host) error {
 		if !host.IsGood() {
 			return errors.New("host is not good")
 		}
@@ -140,20 +140,10 @@ func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKe
 			zap.Stringer("collateral", contract.Revision.RemainingCollateral()))
 		return nil
 	})
-	if err != nil {
-		if setErr := cm.store.SetHostStuck(host); setErr != nil {
-			log.Error("failed to mark host stuck", zap.Error(setErr))
-		}
-		return err
-	}
-	if err := cm.store.ClearHostStuck(host); err != nil {
-		log.Error("failed to clear host stuck", zap.Error(err))
-	}
-	return nil
 }
 
 func (cm *ContractManager) refreshContract(ctx context.Context, contract Contract, height uint64, fundTarget types.Currency, log *zap.Logger) error {
-	err := cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
+	return cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
 		if !host.IsGood() {
 			return errors.New("host is not good")
 		}
@@ -196,16 +186,6 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 			zap.Stringer("collateral", renewed.Revision.RemainingCollateral()))
 		return nil
 	})
-	if err != nil {
-		if setErr := cm.store.SetHostStuck(contract.HostKey); setErr != nil {
-			log.Error("failed to mark host stuck", zap.Error(setErr))
-		}
-		return err
-	}
-	if err := cm.store.ClearHostStuck(contract.HostKey); err != nil {
-		log.Error("failed to clear host stuck", zap.Error(err))
-	}
-	return nil
 }
 
 // performContractFormation ensures that the renter has enough good contracts to
@@ -299,6 +279,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	}
 
 	var formed, refreshed uint32
+	// track hosts that fail contract operations
+	stuckHosts := make(map[types.PublicKey]struct{})
+
 	// formContract is a helper to form a contract with the given host
 	// and log the result. It returns true if the formation was successful. It is not
 	// thread-safe.
@@ -306,6 +289,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		accountFundTarget, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
 			log.Warn("failed to get fund target", zap.Error(err))
+			stuckHosts[host.PublicKey] = struct{}{}
 			return false
 		}
 
@@ -321,6 +305,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			return true // ignore not enough funds errors for existing hosts since it is our fault
 		default:
 			log.Warn("failed to form contract", zap.Error(err))
+			stuckHosts[host.PublicKey] = struct{}{}
 			return false
 		}
 	}
@@ -335,6 +320,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		accountFundTarget, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
 			log.Warn("failed to get fund target", zap.Error(err))
+			stuckHosts[host.PublicKey] = struct{}{}
 			return false
 		}
 		// fund target is multiplied by 2 to have buffer for less frequent refreshes
@@ -349,6 +335,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			return true // ignore not enough funds errors for existing hosts since it is our fault
 		default:
 			log.Warn("failed to refresh contract", zap.Error(err))
+			stuckHosts[host.PublicKey] = struct{}{}
 			return false
 		}
 	}
@@ -453,6 +440,15 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		if additional > 0 {
 			log.Debug("could not form enough additional contracts to reach target", zap.Int("remaining", additional))
 		}
+	}
+
+	// update stuck hosts status
+	stuckHostsList := make([]types.PublicKey, 0, len(stuckHosts))
+	for hk := range stuckHosts {
+		stuckHostsList = append(stuckHostsList, hk)
+	}
+	if err := cm.store.UpdateStuckHosts(stuckHostsList); err != nil {
+		log.Error("failed to update stuck hosts", zap.Error(err))
 	}
 
 	log.Debug("formation finished", zap.Uint32("formedContracts", formed), zap.Uint32("refreshedContracts", refreshed))

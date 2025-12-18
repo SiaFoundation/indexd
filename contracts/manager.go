@@ -132,8 +132,7 @@ type (
 		UpdateContractRevision(contract rhp.ContractRevision, usage proto.Usage) error
 		UpdateNextPrune(contractID types.FileContractID, nextPrune time.Time) error
 
-		SetHostStuck(hk types.PublicKey) error
-		ClearHostStuck(hk types.PublicKey) error
+		UpdateStuckHosts(hks []types.PublicKey) error
 
 		LastScannedIndex() (ci types.ChainIndex, err error)
 	}

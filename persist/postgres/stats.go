@@ -106,16 +106,10 @@ func (s *Store) HostsStats() (stats admin.HostsStatsResponse, err error) {
 		}
 		// count stuck hosts
 		err := tx.QueryRow(ctx, `
-			SELECT COUNT(DISTINCT h.id)
-			FROM hosts h
-			WHERE h.stuck_since IS NOT NULL
-				AND h.stuck_since < NOW() - INTERVAL '24 hours'
-				AND EXISTS (
-					SELECT 1 FROM contracts c
-					WHERE c.host_id = h.id
-						AND c.state IN (0, 1)
-						AND c.renewed_to IS NULL
-				)`).Scan(&stats.Stuck)
+			SELECT COUNT(*)
+			FROM hosts
+			WHERE stuck_since IS NOT NULL
+				AND stuck_since < NOW() - INTERVAL '24 hours'`).Scan(&stats.Stuck)
 		if err != nil {
 			return fmt.Errorf("failed to get stuck hosts: %w", err)
 		}

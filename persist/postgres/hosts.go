@@ -1012,47 +1012,52 @@ func (s *Store) HostsWithLostSectors() ([]types.PublicKey, error) {
 	return hks, nil
 }
 
-// SetHostStuck sets the stuck_since timestamp to now if it is currently NULL.
-// This is called when a contract operation (form, renew, refresh) fails for a host.
-func (s *Store) SetHostStuck(hk types.PublicKey) error {
+// UpdateStuckHosts updates the stuck_since timestamp for hosts based on the
+// provided set of currently-stuck hosts. Hosts in the set will be marked stuck
+// (preserving existing timestamps), and hosts not in the set will have their
+// stuck status cleared.
+func (s *Store) UpdateStuckHosts(hks []types.PublicKey) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
-			UPDATE hosts
-			SET stuck_since = COALESCE(stuck_since, NOW())
-			WHERE public_key = $1`, sqlPublicKey(hk))
-		return err
-	})
-}
+		sqlHks := make([]sqlPublicKey, len(hks))
+		for i, hk := range hks {
+			sqlHks[i] = sqlPublicKey(hk)
+		}
 
-// ClearHostStuck clears the stuck_since timestamp.
-// This is called when a contract operation (form, renew, refresh) succeeds for a host.
-func (s *Store) ClearHostStuck(hk types.PublicKey) error {
-	return s.transaction(func(ctx context.Context, tx *txn) error {
+		// clear stuck_since for all hosts not in the provided set
 		_, err := tx.Exec(ctx, `
 			UPDATE hosts
 			SET stuck_since = NULL
-			WHERE public_key = $1`, sqlPublicKey(hk))
-		return err
+			WHERE stuck_since IS NOT NULL
+				AND (CARDINALITY($1::bytea[]) = 0 OR public_key != ALL($1))`, sqlHks)
+		if err != nil {
+			return fmt.Errorf("failed to clear stuck hosts: %w", err)
+		}
+
+		// mark hosts in the set as stuck
+		if len(sqlHks) > 0 {
+			_, err = tx.Exec(ctx, `
+				UPDATE hosts
+				SET stuck_since = COALESCE(stuck_since, NOW())
+				WHERE public_key = ANY($1)`, sqlHks)
+			if err != nil {
+				return fmt.Errorf("failed to set stuck hosts: %w", err)
+			}
+		}
+
+		return nil
 	})
 }
 
 // StuckHosts returns a list of host public keys that are considered stuck.
-// A host is stuck if stuck_since is more than 24 hours ago and the host has
-// any active contracts (good or bad).
+// A host is stuck if stuck_since is more than 24 hours ago.
 func (s *Store) StuckHosts() ([]types.PublicKey, error) {
 	var hks []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT h.public_key
-			FROM hosts h
-			WHERE h.stuck_since IS NOT NULL
-				AND h.stuck_since < NOW() - INTERVAL '24 hours'
-				AND EXISTS (
-					SELECT 1 FROM contracts c
-					WHERE c.host_id = h.id
-						AND c.state IN (0, 1)
-						AND c.renewed_to IS NULL
-				)`)
+			SELECT public_key
+			FROM hosts
+			WHERE stuck_since IS NOT NULL
+				AND stuck_since < NOW() - INTERVAL '24 hours'`)
 		if err != nil {
 			return fmt.Errorf("failed to query stuck hosts: %w", err)
 		}

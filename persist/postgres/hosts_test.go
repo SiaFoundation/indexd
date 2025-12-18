@@ -1093,14 +1093,10 @@ func TestStuckHosts(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := initPostgres(t, log.Named("postgres"))
 
-	// add two hosts
+	// add three hosts
 	hk1 := db.addTestHost(t)
 	hk2 := db.addTestHost(t)
-	hk3 := db.addTestHost(t) // host without contracts
-
-	// add contracts for hk1 and hk2 (required for stuck hosts to be returned)
-	db.addTestContract(t, hk1)
-	db.addTestContract(t, hk2)
+	hk3 := db.addTestHost(t)
 
 	assertStuckHosts := func(expected []types.PublicKey) {
 		t.Helper()
@@ -1140,12 +1136,12 @@ func TestStuckHosts(t *testing.T) {
 	assertStuckHosts(nil)
 	assertNumStuckHosts(0)
 
-	// set hk1 as stuck
-	if err := db.SetHostStuck(hk1); err != nil {
+	// mark hk1 as stuck
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk1}); err != nil {
 		t.Fatal(err)
 	}
 
-	// hk1 should still not be stuck yet (less than 24 hours)
+	// hk1 should still not be returned as stuck yet (less than 24 hours)
 	assertStuckHosts(nil)
 	assertNumStuckHosts(0)
 
@@ -1159,12 +1155,12 @@ func TestStuckHosts(t *testing.T) {
 	assertStuckHosts([]types.PublicKey{hk1})
 	assertNumStuckHosts(1)
 
-	// set hk2 as stuck (but recent, so not returned yet)
-	if err := db.SetHostStuck(hk2); err != nil {
+	// mark hk2 as stuck too (but recent, so not returned yet)
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk1, hk2}); err != nil {
 		t.Fatal(err)
 	}
 
-	// still only hk1 should be stuck
+	// still only hk1 should be returned (hk2 is recent)
 	assertStuckHosts([]types.PublicKey{hk1})
 	assertNumStuckHosts(1)
 
@@ -1178,21 +1174,9 @@ func TestStuckHosts(t *testing.T) {
 	assertStuckHosts([]types.PublicKey{hk1, hk2})
 	assertNumStuckHosts(2)
 
-	// set hk3 as stuck (host without contracts, should not be returned)
-	if err := db.SetHostStuck(hk3); err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.pool.Exec(t.Context(), `UPDATE hosts SET stuck_since = NOW() - INTERVAL '25 hours' WHERE public_key = $1`, sqlPublicKey(hk3))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// hk3 should not be returned because it has no active contracts
-	assertStuckHosts([]types.PublicKey{hk1, hk2})
-	assertNumStuckHosts(2)
-
-	// clear hk1's stuck status
-	if err := db.ClearHostStuck(hk1); err != nil {
+	// test that UpdateStuckHosts clears hosts not in the list
+	// calling with only hk2 should clear hk1
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1200,15 +1184,15 @@ func TestStuckHosts(t *testing.T) {
 	assertStuckHosts([]types.PublicKey{hk2})
 	assertNumStuckHosts(1)
 
-	// check we don't update stuck_since if already set
+	// check UpdateStuckHosts preserves stuck_since if already set
 	var stuckSince time.Time
 	err = db.pool.QueryRow(t.Context(), `SELECT stuck_since FROM hosts WHERE public_key = $1`, sqlPublicKey(hk2)).Scan(&stuckSince)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// call SetHostStuck again
-	if err := db.SetHostStuck(hk2); err != nil {
+	// call UpdateStuckHosts again with same host
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1221,6 +1205,31 @@ func TestStuckHosts(t *testing.T) {
 	if !stuckSince.Equal(stuckSinceAfter) {
 		t.Fatalf("expected stuck_since to remain %v, got %v", stuckSince, stuckSinceAfter)
 	}
+
+	// test clearing all stuck hosts by passing empty slice
+	if err := db.UpdateStuckHosts(nil); err != nil {
+		t.Fatal(err)
+	}
+
+	// no hosts should be stuck anymore
+	assertStuckHosts(nil)
+	assertNumStuckHosts(0)
+
+	// test marking multiple hosts as stuck at once
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk1, hk2, hk3}); err != nil {
+		t.Fatal(err)
+	}
+
+	// manually set all to 25 hours ago
+	_, err = db.pool.Exec(t.Context(), `UPDATE hosts SET stuck_since = NOW() - INTERVAL '25 hours' WHERE public_key = ANY($1)`,
+		[]sqlPublicKey{sqlPublicKey(hk1), sqlPublicKey(hk2), sqlPublicKey(hk3)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// all three should be stuck
+	assertStuckHosts([]types.PublicKey{hk1, hk2, hk3})
+	assertNumStuckHosts(3)
 }
 
 func TestHostsWithUnpinnableSectors(t *testing.T) {
