@@ -139,6 +139,13 @@ type (
 		Longitude   float64            `json:"longitude"`
 	}
 
+	// StuckHost contains the public key of a stuck host and the time it
+	// became stuck.
+	StuckHost struct {
+		PublicKey  types.PublicKey `json:"publicKey"`
+		StuckSince time.Time       `json:"stuckSince"`
+	}
+
 	// Usability represents a series of host checks that can be used to
 	// determine whether the host is usable or not.
 	Usability struct {

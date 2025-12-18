@@ -1051,13 +1051,13 @@ func (s *Store) UpdateStuckHosts(hks []types.PublicKey) error {
 	})
 }
 
-// StuckHosts returns a list of host public keys that are considered stuck.
-// A host is stuck if stuck_since is more than 24 hours ago.
-func (s *Store) StuckHosts() ([]types.PublicKey, error) {
-	var hks []types.PublicKey
+// StuckHosts returns a list of stuck hosts with the timestamp they first
+// became stuck. A host is stuck if stuck_since is more than 24 hours ago.
+func (s *Store) StuckHosts() ([]hosts.StuckHost, error) {
+	var result []hosts.StuckHost
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT public_key
+			SELECT public_key, stuck_since
 			FROM hosts
 			WHERE stuck_since IS NOT NULL
 				AND stuck_since < NOW() - INTERVAL '24 hours'`)
@@ -1067,17 +1067,17 @@ func (s *Store) StuckHosts() ([]types.PublicKey, error) {
 		defer rows.Close()
 
 		for rows.Next() {
-			var hk sqlPublicKey
-			if err := rows.Scan(&hk); err != nil {
+			var sh hosts.StuckHost
+			if err := rows.Scan((*sqlPublicKey)(&sh.PublicKey), &sh.StuckSince); err != nil {
 				return err
 			}
-			hks = append(hks, types.PublicKey(hk))
+			result = append(result, sh)
 		}
 		return rows.Err()
 	}); err != nil {
 		return nil, err
 	}
-	return hks, nil
+	return result, nil
 }
 
 func buildHostOrderByClause(sorts []hosts.HostSortOpt) (string, error) {

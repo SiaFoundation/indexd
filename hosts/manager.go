@@ -126,7 +126,7 @@ type (
 		HostsForPinning() ([]types.PublicKey, error)
 		HostsForScanning() ([]types.PublicKey, error)
 		HostsWithUnpinnableSectors() ([]types.PublicKey, error)
-		StuckHosts() ([]types.PublicKey, error)
+		StuckHosts() ([]StuckHost, error)
 
 		BlockHosts(hostKeys []types.PublicKey, reasons []string) error
 		BlockedHosts(offset, limit int) ([]types.PublicKey, error)
@@ -581,27 +581,27 @@ loop:
 	m.log.Debug("host scans finished", zap.Int("hosts", len(hosts)), zap.Duration("duration", time.Since(start)))
 }
 
-func newStuckHostsAlert(hks []types.PublicKey) alerts.Alert {
+func newStuckHostsAlert(hosts []StuckHost) alerts.Alert {
 	return alerts.Alert{
 		ID:       alertStuckHostsID,
 		Severity: alerts.SeverityWarning,
 		Message:  "Host(s) are stuck",
 		Data: map[string]any{
-			"hostKeys": hks,
-			"hint":     "Contract operations (form/renew/refresh) have been failing for these hosts for more than 24 hours. Consider blocking these hosts through the blocklist feature.",
+			"hosts": hosts,
+			"hint":  "Contract operations (form/renew/refresh) have been failing for these hosts for more than 24 hours. Consider blocking these hosts through the blocklist feature.",
 		},
 		Timestamp: time.Now(),
 	}
 }
 
 func (m *HostManager) registerStuckHostsAlert() {
-	hks, err := m.store.StuckHosts()
+	stuckHosts, err := m.store.StuckHosts()
 	if err != nil {
 		m.log.Error("failed to get stuck hosts", zap.Error(err))
 		return
 	}
-	if len(hks) > 0 {
-		if err := m.alerter.RegisterAlert(newStuckHostsAlert(hks)); err != nil {
+	if len(stuckHosts) > 0 {
+		if err := m.alerter.RegisterAlert(newStuckHostsAlert(stuckHosts)); err != nil {
 			m.log.Error("failed to register stuck hosts alert", zap.Error(err))
 			return
 		}

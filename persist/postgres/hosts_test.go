@@ -1100,17 +1100,20 @@ func TestStuckHosts(t *testing.T) {
 
 	assertStuckHosts := func(expected []types.PublicKey) {
 		t.Helper()
-		hks, err := db.StuckHosts()
+		stuckHosts, err := db.StuckHosts()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(hks) != len(expected) {
-			t.Fatalf("expected %d stuck hosts, got %d", len(expected), len(hks))
+		if len(stuckHosts) != len(expected) {
+			t.Fatalf("expected %d stuck hosts, got %d", len(expected), len(stuckHosts))
 		}
 		for _, exp := range expected {
 			found := false
-			for _, hk := range hks {
-				if hk == exp {
+			for _, sh := range stuckHosts {
+				if sh.PublicKey == exp {
+					if sh.StuckSince.IsZero() {
+						t.Fatalf("stuck since time should not be zero for host %v", exp)
+					}
 					found = true
 					break
 				}
