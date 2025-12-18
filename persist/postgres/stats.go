@@ -139,7 +139,8 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 					h.scans,
 					h.scans_failed,
 					hb.public_key IS NOT NULL AS blocked,
-					COALESCE(hb.reasons, ARRAY[]::TEXT[]) AS blocked_reasons
+					COALESCE(hb.reasons, ARRAY[]::TEXT[]) AS blocked_reasons,
+					h.stuck_since IS NOT NULL AND h.stuck_since < NOW() - INTERVAL '24 hours' AS stuck
 				FROM hosts h
 				LEFT JOIN hosts_blocklist hb ON hb.public_key = h.public_key
 				WHERE h.usage_total_spent > 0
@@ -158,7 +159,8 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 				h.scans,
 				h.scans_failed,
 				h.blocked,
-				h.blocked_reasons
+				h.blocked_reasons,
+				h.stuck
 			FROM selected_hosts h
 			LEFT JOIN LATERAL (
 			SELECT SUM(size) AS total_contracts_size
@@ -189,6 +191,7 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 				&hs.ScansFailed,
 				&hs.Blocked,
 				&hs.BlockedReasons,
+				&hs.Stuck,
 			); err != nil {
 				return err
 			}
