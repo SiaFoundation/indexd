@@ -58,7 +58,7 @@ func (h HostStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 
 // PrometheusMetric implements the prometheus.Marshaller interface for the
 // host scan stats response.
-func (s AllHostsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
+func (s HostsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	return []prometheus.Metric{
 		{
 			Name:  "indexd_total_host_scans",

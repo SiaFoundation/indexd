@@ -310,7 +310,7 @@ func (c *Client) StatsHosts(ctx context.Context, offset, limit int) (resp HostSt
 }
 
 // StatsAllHosts returns statistics about all hosts.
-func (c *Client) StatsAllHosts(ctx context.Context) (resp AllHostsStatsResponse, err error) {
+func (c *Client) StatsAllHosts(ctx context.Context) (resp HostsStatsResponse, err error) {
 	err = c.c.GET(ctx, "/stats/hosts/all", &resp)
 	return
 }

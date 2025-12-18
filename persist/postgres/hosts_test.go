@@ -1127,7 +1127,7 @@ func TestStuckHosts(t *testing.T) {
 
 	assertNumStuckHosts := func(expected int64) {
 		t.Helper()
-		stats, err := db.ScanStats()
+		stats, err := db.HostsStats()
 		if err != nil {
 			t.Fatal(err)
 		}
