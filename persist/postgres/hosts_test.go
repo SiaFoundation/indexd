@@ -2854,6 +2854,61 @@ func BenchmarkHostStats(b *testing.B) {
 	}
 }
 
+func BenchmarkStuckHosts(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	const (
+		numHosts = 10_000
+	)
+
+	// prepare database
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
+		for i := range numHosts {
+			hk := types.GeneratePrivateKey().PublicKey()
+
+			// add host
+			var hostID int64
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO hosts (public_key, last_announcement)
+				VALUES ($1, NOW())
+				RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID); err != nil {
+				return err
+			}
+
+			// add contract
+			insertRandomContract(b, tx, hostID, hk)
+
+			// 10% of hosts are stuck (stuck_since > 24 hours ago)
+			if i%10 == 0 {
+				_, err := tx.Exec(ctx, `UPDATE hosts SET stuck_since = NOW() - INTERVAL '48 hours' WHERE id = $1`, hostID)
+				if err != nil {
+					return err
+				}
+			}
+		}
+
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// analyze tables to ensure query planner has up-to-date statistics
+	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) hosts;`)
+	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts;`)
+	if err := errors.Join(vErr1, vErr2); err != nil {
+		b.Fatal(err)
+	}
+
+	for b.Loop() {
+		hosts, err := store.StuckHosts()
+		if err != nil {
+			b.Fatal(err)
+		} else if len(hosts) == 0 {
+			b.Fatal("expected some hosts")
+		}
+	}
+}
+
 func (s *Store) addTestHost(t testing.TB, hks ...types.PublicKey) types.PublicKey {
 	t.Helper()
 
