@@ -876,7 +876,7 @@ components:
         stuck:
           type: integer
           format: int64
-          description: Number of hosts that are "stuck" where stuck is defined to be only having failed contract interactions (refresh/renew/form) on that host for at least 24 hours
+          description: Number of hosts where we have only had failed contract interactions (refresh/renew/form) on that host for at least 24 hours
 
     SectorStatsResponse:
       type: object
