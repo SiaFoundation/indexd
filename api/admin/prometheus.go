@@ -130,6 +130,16 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 				return 0
 			}(),
 		},
+		{
+			Name:   "indexd_host_stuck",
+			Labels: labels,
+			Value: func() float64 {
+				if h.Stuck {
+					return 1
+				}
+				return 0
+			}(),
+		},
 	}
 
 	for _, reason := range h.BlockedReasons {
