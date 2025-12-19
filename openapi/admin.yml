@@ -1397,7 +1397,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/HostsStatsResponse"
 
-  /stats/hosts/all:
+  /stats/scans:
     get:
       tags:
         - stats

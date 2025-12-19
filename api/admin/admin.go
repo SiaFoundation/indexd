@@ -251,7 +251,7 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /stats/accounts":  a.handleGETStatsAccounts,
 		"GET /stats/contracts": a.handleGETStatsContracts,
 		"GET /stats/hosts":     a.handleGETStatsHosts,
-		"GET /stats/hosts/all": a.handleGETStatsHostsAll,
+		"GET /stats/scans":     a.handleGETStatsScans,
 		"GET /stats/sectors":   a.handleGETStatsSectors,
 	}
 
@@ -971,7 +971,7 @@ func (a *admin) handleGETStatsHosts(jc jape.Context) {
 	writeResponse(jc, HostStatsResponse(res))
 }
 
-func (a *admin) handleGETStatsHostsAll(jc jape.Context) {
+func (a *admin) handleGETStatsScans(jc jape.Context) {
 	stats, err := a.store.HostsStats()
 	if jc.Check("failed to retrieve hosts stats", err) != nil {
 		return
