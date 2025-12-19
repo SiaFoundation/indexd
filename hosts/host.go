@@ -122,7 +122,6 @@ type (
 		Usability              Usability           `json:"usability"`
 		Blocked                bool                `json:"blocked"`
 		BlockedReasons         []string            `json:"blockedReasons"`
-		Stuck                  bool                `json:"stuck"`
 		LostSectors            uint64              `json:"lostSectors"`
 		AccountFunding         types.Currency      `json:"accountFunding"`
 		TotalSpent             types.Currency      `json:"totalSpent"`

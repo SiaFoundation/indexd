@@ -76,7 +76,7 @@ WITH globals AS (
 ), hosts AS (
 	SELECT
 		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, hb.reasons,
-		hosts.stuck_since IS NOT NULL AND hosts.stuck_since < NOW() - INTERVAL '24 hours' AS stuck, lost_sectors,
+		lost_sectors,
 		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime, usage_account_funding, usage_total_spent,
 		country_code, location,
 		settings_protocol_version, settings_release, settings_wallet_address,
@@ -160,7 +160,7 @@ WITH globals AS (
 ), hosts AS (
 	SELECT
 		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, hb.reasons,
-		hosts.stuck_since IS NOT NULL AND hosts.stuck_since < NOW() - INTERVAL '24 hours' AS stuck, lost_sectors,
+		lost_sectors,
 		last_failed_scan, last_successful_scan, next_scan, consecutive_failed_scans, recent_uptime, usage_account_funding, usage_total_spent,
 		country_code, location,
 		settings_protocol_version, settings_release, settings_wallet_address,
@@ -765,7 +765,6 @@ func scanHost(s scanner) (dbHost, error) {
 		&host.LastAnnouncement,
 		&host.Blocked,
 		&host.BlockedReasons,
-		&host.Stuck,
 		&host.LostSectors,
 		&lastFailedScan,
 		&lastSuccessfulScan,
