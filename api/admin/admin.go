@@ -107,7 +107,7 @@ type (
 	Store interface {
 		AccountStats() (AccountStatsResponse, error)
 		ContractsStats() (ContractsStatsResponse, error)
-		HostsStats() (HostsStatsResponse, error)
+		ScanStats() (ScansStatsResponse, error)
 		HostStats(offset, limit int) ([]hosts.HostStats, error)
 		SectorStats() (SectorsStatsResponse, error)
 
@@ -972,8 +972,8 @@ func (a *admin) handleGETStatsHosts(jc jape.Context) {
 }
 
 func (a *admin) handleGETStatsScans(jc jape.Context) {
-	stats, err := a.store.HostsStats()
-	if jc.Check("failed to retrieve hosts stats", err) != nil {
+	stats, err := a.store.ScanStats()
+	if jc.Check("failed to retrieve host scan stats", err) != nil {
 		return
 	}
 	writeResponse(jc, stats)
