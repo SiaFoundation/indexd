@@ -1434,14 +1434,14 @@ paths:
     get:
       tags:
         - stats
-      summary: Get total stats about hosts and their scans
-      operationId: getStatsHostsAll
+      summary: Get stats about host scans
+      operationId: getStatsHostsScans
       responses:
         "200":
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/AllHostsStatsResponse"
+                $ref: "#/components/schemas/ScansStatsResponse"
 
   /stats/sectors:
     get:

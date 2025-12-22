@@ -1124,20 +1124,8 @@ func TestStuckHosts(t *testing.T) {
 		}
 	}
 
-	assertNumStuckHosts := func(expected int64) {
-		t.Helper()
-		stats, err := db.HostsStats()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if stats.Stuck != expected {
-			t.Fatalf("expected %d stuck hosts, got %d", expected, stats.Stuck)
-		}
-	}
-
 	// initially no hosts should be stuck
 	assertStuckHosts(nil)
-	assertNumStuckHosts(0)
 
 	// mark hk1 as stuck
 	if err := db.UpdateStuckHosts([]types.PublicKey{hk1}); err != nil {
@@ -1146,7 +1134,6 @@ func TestStuckHosts(t *testing.T) {
 
 	// hk1 should still not be returned as stuck yet (less than 24 hours)
 	assertStuckHosts(nil)
-	assertNumStuckHosts(0)
 
 	// manually set stuck_since to 25 hours ago for hk1 to simulate the 24h threshold
 	_, err := db.pool.Exec(t.Context(), `UPDATE hosts SET stuck_since = NOW() - INTERVAL '25 hours' WHERE public_key = $1`, sqlPublicKey(hk1))
@@ -1156,7 +1143,6 @@ func TestStuckHosts(t *testing.T) {
 
 	// now hk1 should be stuck
 	assertStuckHosts([]types.PublicKey{hk1})
-	assertNumStuckHosts(1)
 
 	// mark hk2 as stuck too (but recent, so not returned yet)
 	if err := db.UpdateStuckHosts([]types.PublicKey{hk1, hk2}); err != nil {
@@ -1165,7 +1151,6 @@ func TestStuckHosts(t *testing.T) {
 
 	// still only hk1 should be returned (hk2 is recent)
 	assertStuckHosts([]types.PublicKey{hk1})
-	assertNumStuckHosts(1)
 
 	// manually set stuck_since to 25 hours ago for hk2
 	_, err = db.pool.Exec(t.Context(), `UPDATE hosts SET stuck_since = NOW() - INTERVAL '25 hours' WHERE public_key = $1`, sqlPublicKey(hk2))
@@ -1175,7 +1160,6 @@ func TestStuckHosts(t *testing.T) {
 
 	// now both hk1 and hk2 should be stuck
 	assertStuckHosts([]types.PublicKey{hk1, hk2})
-	assertNumStuckHosts(2)
 
 	// test that UpdateStuckHosts clears hosts not in the list
 	// calling with only hk2 should clear hk1
@@ -1185,7 +1169,6 @@ func TestStuckHosts(t *testing.T) {
 
 	// now only hk2 should be stuck
 	assertStuckHosts([]types.PublicKey{hk2})
-	assertNumStuckHosts(1)
 
 	// check UpdateStuckHosts preserves stuck_since if already set
 	var stuckSince time.Time
@@ -1216,7 +1199,6 @@ func TestStuckHosts(t *testing.T) {
 
 	// no hosts should be stuck anymore
 	assertStuckHosts(nil)
-	assertNumStuckHosts(0)
 
 	// test marking multiple hosts as stuck at once
 	if err := db.UpdateStuckHosts([]types.PublicKey{hk1, hk2, hk3}); err != nil {
@@ -1232,7 +1214,6 @@ func TestStuckHosts(t *testing.T) {
 
 	// all three should be stuck
 	assertStuckHosts([]types.PublicKey{hk1, hk2, hk3})
-	assertNumStuckHosts(3)
 }
 
 func TestHostsWithUnpinnableSectors(t *testing.T) {

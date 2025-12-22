@@ -524,7 +524,7 @@ func TestHostScanStats(t *testing.T) {
 	assertStats := func(expectedScans, expectedFailed int64) {
 		t.Helper()
 
-		stats, err := store.HostsStats()
+		stats, err := store.ScanStats()
 		if err != nil {
 			t.Fatal(err)
 		} else if expectedScans != stats.Total {
