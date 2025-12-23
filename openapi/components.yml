@@ -865,11 +865,11 @@ components:
     ScansStatsResponse:
       type: object
       properties:
-        scans:
+        total:
           type: integer
           format: int64
           description: Total number of host scans across all hosts
-        scansFailed:
+        failed:
           type: integer
           format: int64
           description: Total number of failed host scans across all hosts
