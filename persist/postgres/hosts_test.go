@@ -2881,9 +2881,11 @@ func BenchmarkStuckHosts(b *testing.B) {
 	)
 
 	// prepare database
+	var allHosts []types.PublicKey
 	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		for i := range numHosts {
 			hk := types.GeneratePrivateKey().PublicKey()
+			allHosts = append(allHosts, hk)
 
 			// add host
 			var hostID int64
@@ -2915,14 +2917,26 @@ func BenchmarkStuckHosts(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	for b.Loop() {
-		hosts, err := store.StuckHosts()
-		if err != nil {
-			b.Fatal(err)
-		} else if len(hosts) == 0 {
-			b.Fatal("expected some hosts")
+	b.Run("StuckHosts", func(b *testing.B) {
+		for b.Loop() {
+			hosts, err := store.StuckHosts()
+			if err != nil {
+				b.Fatal(err)
+			} else if len(hosts) == 0 {
+				b.Fatal("expected some hosts")
+			}
 		}
-	}
+	})
+
+	b.Run("UpdateStuckHosts", func(b *testing.B) {
+		// use 10% of hosts
+		stuckHosts := allHosts[:numHosts/10]
+		for b.Loop() {
+			if err := store.UpdateStuckHosts(stuckHosts); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
 }
 
 func (s *Store) addTestHost(t testing.TB, hks ...types.PublicKey) types.PublicKey {

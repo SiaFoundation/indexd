@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -281,6 +283,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	var formed, refreshed uint32
 	// track hosts that fail contract operations
 	stuckHosts := make(map[types.PublicKey]struct{})
+	unstuckHosts := make(map[types.PublicKey]struct{})
 
 	// formContract is a helper to form a contract with the given host
 	// and log the result. It returns true if the formation was successful. It is not
@@ -289,7 +292,6 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		accountFundTarget, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
 			log.Warn("failed to get fund target", zap.Error(err))
-			stuckHosts[host.PublicKey] = struct{}{}
 			return false
 		}
 
@@ -299,6 +301,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		case err == nil:
 			formed++
 			delete(hostsWithoutContracts, host.PublicKey) // only form one contract per host
+			unstuckHosts[host.PublicKey] = struct{}{}
 			return true
 		case existingHost && errors.Is(err, wallet.ErrNotEnoughFunds):
 			log.Debug("not enough funds to form contract with existing host", zap.Stringer("target", accountFundTarget), zap.Error(err))
@@ -320,7 +323,6 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		accountFundTarget, err := cm.accounts.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
 			log.Warn("failed to get fund target", zap.Error(err))
-			stuckHosts[host.PublicKey] = struct{}{}
 			return false
 		}
 		// fund target is multiplied by 2 to have buffer for less frequent refreshes
@@ -329,6 +331,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		case err == nil:
 			refreshed++
 			delete(hostsWithoutContracts, host.PublicKey) // sanity check
+			unstuckHosts[host.PublicKey] = struct{}{}
 			return true
 		case existingHost && errors.Is(err, wallet.ErrNotEnoughFunds):
 			log.Debug("not enough funds to refresh contract with existing host")
@@ -443,11 +446,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	}
 
 	// update stuck hosts status
-	stuckHostsList := make([]types.PublicKey, 0, len(stuckHosts))
-	for hk := range stuckHosts {
-		stuckHostsList = append(stuckHostsList, hk)
-	}
-	if err := cm.store.UpdateStuckHosts(stuckHostsList); err != nil {
+	if err := cm.store.UpdateStuckHosts(slices.Collect(maps.Keys(stuckHosts)), slices.Collect(maps.Keys(unstuckHosts))); err != nil {
 		log.Error("failed to update stuck hosts", zap.Error(err))
 	}
 
