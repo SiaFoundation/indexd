@@ -390,6 +390,103 @@ func TestListObjectsRegression(t *testing.T) {
 	}
 }
 
+func TestSaveObject(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	// create account
+	acc := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+
+	// add host and contract
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// pin a slab
+	slab := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	if _, err := store.PinSlabs(acc, time.Time{}, slab); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert saving an object with metadata
+	objWithMeta := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		EncryptedMetadata:    frand.Bytes(100),
+		Slabs:                []slabs.SlabSlice{slab.Slice(0, 100)},
+		DataSignature:        types.Signature(frand.Bytes(64)),
+		MetadataSignature:    types.Signature(frand.Bytes(64)),
+	}
+
+	if err := store.SaveObject(acc, objWithMeta); err != nil {
+		t.Fatalf("failed to save object with metadata: %v", err)
+	}
+
+	// assert we can retrieve it correctly
+	got, err := store.Object(acc, objWithMeta.ID())
+	if err != nil {
+		t.Fatalf("failed to get object: %v", err)
+	} else if len(got.EncryptedMetadataKey) != 72 {
+		t.Fatalf("unexpected key length, got %d bytes", len(got.EncryptedMetadataKey))
+	} else if !bytes.Equal(got.EncryptedMetadataKey, objWithMeta.EncryptedMetadataKey) {
+		t.Fatal("unexpected key")
+	} else if !bytes.Equal(got.EncryptedMetadata, objWithMeta.EncryptedMetadata) {
+		t.Fatal("unexpected metadata")
+	}
+
+	// assert saving an object without metadata
+	objNoMeta := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: nil,
+		EncryptedMetadata:    nil,
+		Slabs:                []slabs.SlabSlice{slab.Slice(100, 100)},
+		DataSignature:        types.Signature(frand.Bytes(64)),
+		MetadataSignature:    types.Signature(frand.Bytes(64)),
+	}
+
+	if err := store.SaveObject(acc, objNoMeta); err != nil {
+		t.Fatalf("failed to save object without metadata: %v", err)
+	}
+
+	got, err = store.Object(acc, objNoMeta.ID())
+	if err != nil {
+		t.Fatalf("failed to get object: %v", err)
+	} else if len(got.EncryptedMetadataKey) != 0 {
+		t.Fatalf("unexpected key length, got %d bytes", len(got.EncryptedMetadataKey))
+	} else if len(got.EncryptedMetadata) != 0 {
+		t.Fatalf("unexpected metadata length, got %d bytes", len(got.EncryptedMetadata))
+	}
+
+	// assert saving an object with empty metadata slice
+	objEmptyMeta := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: []byte{},
+		EncryptedMetadata:    []byte{},
+		Slabs:                []slabs.SlabSlice{slab.Slice(200, 100)},
+		DataSignature:        types.Signature(frand.Bytes(64)),
+		MetadataSignature:    types.Signature(frand.Bytes(64)),
+	}
+
+	if err := store.SaveObject(acc, objEmptyMeta); err != nil {
+		t.Fatalf("failed to save object with empty metadata slice: %v", err)
+	}
+
+	got, err = store.Object(acc, objEmptyMeta.ID())
+	if err != nil {
+		t.Fatalf("failed to get object: %v", err)
+	} else if len(got.EncryptedMetadataKey) != 0 {
+		t.Fatalf("unexpected key length, got %d bytes", len(got.EncryptedMetadataKey))
+	} else if len(got.EncryptedMetadata) != 0 {
+		t.Fatalf("unexpected metadata length, got %d bytes", len(got.EncryptedMetadata))
+	}
+}
+
 func TestSharedObjects(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 

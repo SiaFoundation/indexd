@@ -287,12 +287,22 @@ func (s *Store) SaveObject(account proto.Account, obj slabs.SealedObject) error 
 			return accounts.ErrNotFound
 		}
 
+		// ensure empty slices are passed as nil
+		var encryptedMetaKey []byte
+		if len(obj.EncryptedMetadataKey) > 0 {
+			encryptedMetaKey = obj.EncryptedMetadataKey
+		}
+		var encryptedMeta []byte
+		if len(obj.EncryptedMetadata) > 0 {
+			encryptedMeta = obj.EncryptedMetadata
+		}
+
 		var objectID int64
 		err = tx.QueryRow(ctx, `
 			INSERT INTO objects (object_key, account_id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature) VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, updated_at) = (EXCLUDED.encrypted_data_key, EXCLUDED.encrypted_meta_key, EXCLUDED.encrypted_metadata, EXCLUDED.data_signature, EXCLUDED.meta_signature, NOW())
 			RETURNING id`,
-			sqlHash256(obj.ID()), accountID, obj.EncryptedDataKey, obj.EncryptedMetadataKey, obj.EncryptedMetadata, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature)).Scan(&objectID)
+			sqlHash256(obj.ID()), accountID, obj.EncryptedDataKey, encryptedMetaKey, encryptedMeta, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature)).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
