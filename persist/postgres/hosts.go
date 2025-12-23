@@ -1014,30 +1014,18 @@ func (s *Store) HostsWithLostSectors() ([]types.PublicKey, error) {
 	return hks, nil
 }
 
-// UpdateStuckHosts updates the stuck_since timestamp for hosts based on the
-// provided set of currently-stuck hosts. Hosts in the set will be marked stuck
-// (preserving existing timestamps), and hosts not in the set will have their
-// stuck status cleared.
-func (s *Store) UpdateStuckHosts(hks []types.PublicKey) error {
+// UpdateStuckHosts updates the stuck_since timestamp for hosts. Hosts in the
+// stuck slice will be marked as stuck (preserving existing timestamps), and
+// hosts in the unstuck slice will have their stuck status cleared.
+func (s *Store) UpdateStuckHosts(stuck, unstuck []types.PublicKey) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		sqlHks := make([]sqlPublicKey, len(hks))
-		for i, hk := range hks {
-			sqlHks[i] = sqlPublicKey(hk)
-		}
-
-		// clear stuck_since for all hosts not in the provided set
-		_, err := tx.Exec(ctx, `
-			UPDATE hosts
-			SET stuck_since = NULL
-			WHERE stuck_since IS NOT NULL
-				AND (CARDINALITY($1::bytea[]) = 0 OR public_key != ALL($1))`, sqlHks)
-		if err != nil {
-			return fmt.Errorf("failed to clear stuck hosts: %w", err)
-		}
-
-		// mark hosts in the set as stuck
-		if len(sqlHks) > 0 {
-			_, err = tx.Exec(ctx, `
+		// mark hosts as stuck
+		if len(stuck) > 0 {
+			sqlHks := make([]sqlPublicKey, len(stuck))
+			for i, hk := range stuck {
+				sqlHks[i] = sqlPublicKey(hk)
+			}
+			_, err := tx.Exec(ctx, `
 				UPDATE hosts
 				SET stuck_since = COALESCE(stuck_since, NOW())
 				WHERE public_key = ANY($1)`, sqlHks)
@@ -1046,6 +1034,20 @@ func (s *Store) UpdateStuckHosts(hks []types.PublicKey) error {
 			}
 		}
 
+		// clear stuck_since for unstuck hosts
+		if len(unstuck) > 0 {
+			sqlHks := make([]sqlPublicKey, len(unstuck))
+			for i, hk := range unstuck {
+				sqlHks[i] = sqlPublicKey(hk)
+			}
+			_, err := tx.Exec(ctx, `
+				UPDATE hosts
+				SET stuck_since = NULL
+				WHERE public_key = ANY($1)`, sqlHks)
+			if err != nil {
+				return fmt.Errorf("failed to clear stuck hosts: %w", err)
+			}
+		}
 		return nil
 	})
 }
