@@ -2929,8 +2929,8 @@ func BenchmarkStuckHosts(b *testing.B) {
 
 	b.Run("UpdateStuckHosts", func(b *testing.B) {
 		// use 10% of hosts for stuck/unstuck
-		stuckHosts := allHosts[:numHosts/10]
-		unstuckHosts := allHosts[numHosts/10 : numHosts/5]
+		stuckHosts := allHosts[:numHosts/20]
+		unstuckHosts := allHosts[numHosts/20 : numHosts/10]
 		for b.Loop() {
 			if err := store.UpdateStuckHosts(stuckHosts, unstuckHosts); err != nil {
 				b.Fatal(err)
