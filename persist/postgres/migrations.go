@@ -621,7 +621,7 @@ ALTER TABLE objects ADD COLUMN meta_signature BYTEA UNIQUE CHECK(LENGTH(meta_sig
 ALTER TABLE hosts ADD COLUMN stuck_since TIMESTAMP WITH TIME ZONE;
 
 -- speed up querying for stuck hosts
-CREATE INDEX hosts_stuck_since_idx ON hosts(stuck_since);
+CREATE INDEX hosts_stuck_since_idx ON hosts(stuck_since) WHERE stuck_since IS NOT NULL;
 `)
 		return err
 	},
