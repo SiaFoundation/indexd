@@ -1019,21 +1019,6 @@ func (s *Store) HostsWithLostSectors() ([]types.PublicKey, error) {
 // hosts in the unstuck slice will have their stuck status cleared.
 func (s *Store) UpdateStuckHosts(stuck, unstuck []types.PublicKey) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		// mark hosts as stuck
-		if len(stuck) > 0 {
-			sqlHks := make([]sqlPublicKey, len(stuck))
-			for i, hk := range stuck {
-				sqlHks[i] = sqlPublicKey(hk)
-			}
-			_, err := tx.Exec(ctx, `
-				UPDATE hosts
-				SET stuck_since = COALESCE(stuck_since, NOW())
-				WHERE public_key = ANY($1)`, sqlHks)
-			if err != nil {
-				return fmt.Errorf("failed to set stuck hosts: %w", err)
-			}
-		}
-
 		// clear stuck_since for unstuck hosts
 		if len(unstuck) > 0 {
 			sqlHks := make([]sqlPublicKey, len(unstuck))
@@ -1046,6 +1031,21 @@ func (s *Store) UpdateStuckHosts(stuck, unstuck []types.PublicKey) error {
 				WHERE public_key = ANY($1)`, sqlHks)
 			if err != nil {
 				return fmt.Errorf("failed to clear stuck hosts: %w", err)
+			}
+		}
+
+		// mark hosts as stuck
+		if len(stuck) > 0 {
+			sqlHks := make([]sqlPublicKey, len(stuck))
+			for i, hk := range stuck {
+				sqlHks[i] = sqlPublicKey(hk)
+			}
+			_, err := tx.Exec(ctx, `
+				UPDATE hosts
+				SET stuck_since = COALESCE(stuck_since, NOW())
+				WHERE public_key = ANY($1)`, sqlHks)
+			if err != nil {
+				return fmt.Errorf("failed to set stuck hosts: %w", err)
 			}
 		}
 		return nil

@@ -72,7 +72,7 @@ CREATE TABLE hosts (
 CREATE INDEX hosts_next_scan_idx ON hosts(next_scan);
 
 -- speed up querying for stuck hosts
-CREATE INDEX hosts_stuck_since_idx ON hosts(stuck_since);
+CREATE INDEX hosts_stuck_since_idx ON hosts(stuck_since) WHERE stuck_since IS NOT NULL;
 
 CREATE INDEX hosts_last_integrity_check_idx ON hosts(last_integrity_check ASC);
 CREATE INDEX hosts_lost_sectors_idx ON hosts(lost_sectors);
