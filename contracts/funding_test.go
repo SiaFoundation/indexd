@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/testutils"
@@ -106,7 +107,7 @@ func TestFunding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hm, err := hosts.NewManager(nil, nil, nil, s, hosts.WithLogger(log.Named("hosts")))
+	hm, err := hosts.NewManager(nil, nil, nil, s, alerts.NewManager(), hosts.WithLogger(log.Named("hosts")))
 	if err != nil {
 		t.Fatal(err)
 	}
