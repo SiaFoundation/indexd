@@ -119,19 +119,15 @@ func (c *Client) RenewContract(ctx context.Context, chain ChainManager, signer r
 }
 
 // LatestRevision fetches the latest revision of the specified contract from the host.
-func (c *Client) LatestRevision(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID) (rev rhp.ContractRevision, err error) {
+func (c *Client) LatestRevision(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID) (resp proto.RPCLatestRevisionResponse, err error) {
 	done, err := c.tg.Add()
 	if err != nil {
-		return rhp.ContractRevision{}, err
+		return proto.RPCLatestRevisionResponse{}, err
 	}
 	defer done()
 
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		resp, err := rhp.RPCLatestRevision(ctx, transport, contractID)
-		rev = rhp.ContractRevision{
-			ID:       contractID,
-			Revision: resp.Contract,
-		}
+		resp, err = rhp.RPCLatestRevision(ctx, transport, contractID)
 		return err
 	})
 	return

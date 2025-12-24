@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sync"
 
+	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
@@ -21,15 +23,20 @@ import (
 // indexer.
 type Client struct {
 	c jape.Client
+
+	mu      sync.Mutex
+	network *consensus.Network
 }
 
 // NewClient returns a new client that can be used to interact with the admin
 // API of the indexer.
 func NewClient(addr, password string) *Client {
-	return &Client{jape.Client{
-		BaseURL:  addr,
-		Password: password,
-	}}
+	return &Client{
+		c: jape.Client{
+			BaseURL:  addr,
+			Password: password,
+		},
+	}
 }
 
 // AppConnectKeys retrieves a paginated list of application connection keys.
@@ -38,6 +45,32 @@ func (c *Client) AppConnectKeys(ctx context.Context, offset, limit int) (keys []
 	values.Set("offset", fmt.Sprintf("%d", offset))
 	values.Set("limit", fmt.Sprintf("%d", limit))
 	err = c.c.GET(ctx, "/apps/connect/keys?"+values.Encode(), &keys)
+	return
+}
+
+// ConsensusNetwork retrieves information about the consensus network.
+func (c *Client) ConsensusNetwork(ctx context.Context) (*consensus.Network, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.network == nil {
+		var network consensus.Network
+		if err := c.c.GET(ctx, "/consensus/network", &network); err != nil {
+			return nil, fmt.Errorf("failed to get consensus network: %w", err)
+		}
+		c.network = &network
+	}
+	return c.network, nil
+}
+
+// ConsensusState retrieves the current consensus state.
+func (c *Client) ConsensusState(ctx context.Context) (state consensus.State, err error) {
+	if err = c.c.GET(ctx, "/consensus/state", &state); err != nil {
+		return consensus.State{}, fmt.Errorf("failed to get consensus state: %w", err)
+	}
+	state.Network, err = c.ConsensusNetwork(ctx)
+	if err != nil {
+		return consensus.State{}, fmt.Errorf("failed to get consensus network: %w", err)
+	}
 	return
 }
 

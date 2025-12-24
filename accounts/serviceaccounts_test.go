@@ -20,7 +20,7 @@ func TestServiceAccounts(t *testing.T) {
 	host := hosts.Host{
 		PublicKey: types.GeneratePrivateKey().PublicKey(),
 		Addresses: []chain.NetAddress{{Protocol: siamux.Protocol, Address: "foo"}},
-		Usability: goodUsability,
+		Usability: hosts.GoodUsability,
 	}
 	s.AddTestHost(t, host)
 
@@ -28,8 +28,7 @@ func TestServiceAccounts(t *testing.T) {
 	account1 := proto.Account(types.GeneratePrivateKey().PublicKey())
 	account2 := proto.Account(types.GeneratePrivateKey().PublicKey())
 
-	f := &mockFunder{}
-	am, err := accounts.NewManager(s, f)
+	am, err := accounts.NewManager(s)
 	if err != nil {
 		t.Fatal(err)
 	}

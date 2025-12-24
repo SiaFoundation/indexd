@@ -26,6 +26,12 @@ const (
 	// repeatedly there is exponential backoff capped at
 	// AccountExpBackoffMaxMinutes minutes.
 	AccountExpBackoffMaxMinutes = 128
+	// AccountActivityThreshold is the threshold for determining whether an
+	// account has been active recently for the purposes of contract funding.
+	// An account is considered active if it has been used within the threshold
+	// period. We multiply the funding per contract by the number of active
+	// accounts.
+	AccountActivityThreshold = 24 * 7 * time.Hour
 )
 
 const (
@@ -37,21 +43,10 @@ const (
 	fundTargetBytes = uint64(16 << 30) // 16 GiB
 )
 
-var (
-
-	// accountActivityThreshold is the threshold for determining whether an
-	// account has been active recently for the purposes of contract funding.
-	// An account is considered active if it has been used within the threshold
-	// period.  We multiply the funding per contract by the number of active
-	// accounts.
-	accountActivityThreshold = 24 * 7 * time.Hour
-)
-
 type (
 	// Store defines an interface to fetch accounts that need to be funded and
 	// update them after funding.
 	Store interface {
-		Host(hostKey types.PublicKey) (hosts.Host, error)
 		HostAccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]HostAccount, error)
 		ScheduleAccountsForFunding(hostKey types.PublicKey) error
 		UpdateHostAccounts(accounts []HostAccount) error
@@ -73,17 +68,11 @@ type (
 		DeleteAccount(acc proto.Account) error
 	}
 
-	// AccountFunder defines an interface to fund accounts.
-	AccountFunder interface {
-		FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accounts []HostAccount, target types.Currency, log *zap.Logger) (int, int, error)
-	}
-
 	// AccountManager manages accounts.
 	AccountManager struct {
 		pruneAccountsInterval time.Duration
 
-		store  Store
-		funder AccountFunder
+		store Store
 
 		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
@@ -116,86 +105,6 @@ func (m *AccountManager) Close() error {
 	return nil
 }
 
-// FundAccounts attempts to fund all accounts for the given host key. It does so
-// using the provided contract IDs, which are used in the order they're given.
-func (m *AccountManager) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, force bool, log *zap.Logger) error {
-	// sanity check input
-	if len(contractIDs) == 0 {
-		log.Debug("no contracts provided")
-		return nil
-	} else if host.Blocked {
-		log.Debug("host is blocked")
-		return nil
-	} else if !host.Usability.Usable() {
-		log.Debug("host is not usable")
-		return nil
-	}
-
-	// if we want to force a refill on all accounts, we need to manually set the
-	// next fund time, we do this to avoid having to fetch (and update) all
-	// accounts at once
-	if force {
-		if err := m.store.ScheduleAccountsForFunding(host.PublicKey); err != nil {
-			return fmt.Errorf("failed to schedule accounts for funding: %w", err)
-		}
-	}
-
-	// calculate the fund target for this host
-	fundTarget := HostFundTarget(host)
-	if fundTarget.IsZero() {
-		log.Warn("fund target is zero, skipping funding")
-		return nil
-	}
-
-	var exhausted bool
-	for !exhausted {
-		accounts, err := m.store.HostAccountsForFunding(host.PublicKey, time.Now().Add(-accountActivityThreshold), AccountFundBatch)
-		if err != nil {
-			return fmt.Errorf("failed to fetch accounts for funding: %w", err)
-		} else if len(accounts) < AccountFundBatch {
-			exhausted = true
-		}
-		if len(accounts) == 0 {
-			break
-		}
-
-		// fund accounts
-		funded, drained, err := m.funder.FundAccounts(ctx, host, contractIDs, accounts, fundTarget, log)
-		if err != nil {
-			return fmt.Errorf("failed to fund accounts: %w", err)
-		}
-
-		// update funded accounts
-		UpdateFundedAccounts(accounts, funded)
-		err = m.store.UpdateHostAccounts(accounts)
-		if err != nil {
-			return fmt.Errorf("failed to update accounts: %w", err)
-		}
-
-		contractIDs = contractIDs[drained:]
-		if len(contractIDs) == 0 {
-			log.Debug("not all accounts could be funded, no more contracts available")
-			break
-		}
-	}
-
-	serviceAccounts := m.hostAccs(host.PublicKey)
-	if len(serviceAccounts) > 0 {
-		// fund them
-		funded, _, err := m.funder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
-		if err != nil {
-			return fmt.Errorf("failed to fund service accounts: %w", err)
-		}
-
-		// update service account balances
-		if err := m.UpdateServiceAccounts(ctx, serviceAccounts[:funded], fundTarget); err != nil {
-			m.log.Warn("failed to update service account balances", zap.Error(err))
-		}
-	}
-
-	return nil
-}
-
 // HasAccount checks if the account exists.
 func (m *AccountManager) HasAccount(ctx context.Context, pk types.PublicKey) (bool, error) {
 	return m.store.HasAccount(pk)
@@ -218,29 +127,39 @@ func (m *AccountManager) DeleteAccount(ctx context.Context, acc proto.Account) e
 	return m.store.DeleteAccount(acc)
 }
 
-// ContractFundTarget calculates the fund target for a contract on the given
-// host. We scale the fund target by the number of active accounts, if there are
-// any.
-func (am *AccountManager) ContractFundTarget(ctx context.Context, host hosts.Host, minAllowance types.Currency) (types.Currency, error) {
-	// fetch number of active accounts
-	n, err := am.store.ActiveAccounts(time.Now().Add(-accountActivityThreshold))
-	if err != nil {
-		return types.ZeroCurrency, err
-	} else if n == 0 {
-		n = 1
+// AccountsForFunding returns accounts that need funding for a given host.
+func (m *AccountManager) AccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]HostAccount, error) {
+	return m.store.HostAccountsForFunding(hk, threshold, limit)
+}
+
+// ActiveAccounts returns the number of active accounts.
+func (m *AccountManager) ActiveAccounts(threshold time.Time) (uint64, error) {
+	return m.store.ActiveAccounts(threshold)
+}
+
+// ScheduleAccountsForFunding schedules all accounts for a given host to be funded.
+func (m *AccountManager) ScheduleAccountsForFunding(hostKey types.PublicKey) error {
+	return m.store.ScheduleAccountsForFunding(hostKey)
+}
+
+// UpdateHostAccounts updates the given host accounts.
+func (m *AccountManager) UpdateHostAccounts(accounts []HostAccount) error {
+	return m.store.UpdateHostAccounts(accounts)
+}
+
+// ServiceAccounts returns all registered service accounts for a given host.
+func (m *AccountManager) ServiceAccounts(hk types.PublicKey) []HostAccount {
+	m.serviceAccountsMu.Lock()
+	defer m.serviceAccountsMu.Unlock()
+
+	result := make([]HostAccount, 0, len(m.serviceAccounts))
+	for serviceAccount := range m.serviceAccounts {
+		result = append(result, HostAccount{
+			AccountKey: serviceAccount,
+			HostKey:    hk,
+		})
 	}
-
-	// calculate the target and scale by number of active accounts and double
-	// it to have a buffer so contracts are not refreshed immediately
-	// after one funding round.
-	target := HostFundTarget(host).Mul64(n)
-
-	// ensure target is at least minAllowance
-	if target.Cmp(minAllowance) < 0 {
-		target = minAllowance
-	}
-
-	return target, nil
+	return result
 }
 
 // UpdateFundedAccounts marks in-place the first `n` accounts as having a
@@ -269,12 +188,11 @@ func HostFundTarget(host hosts.Host) types.Currency {
 }
 
 // NewManager creates a new AccountManager.
-func NewManager(store Store, funder AccountFunder, opts ...Option) (*AccountManager, error) {
+func NewManager(store Store, opts ...Option) (*AccountManager, error) {
 	m := &AccountManager{
 		pruneAccountsInterval: 10 * time.Minute,
 		serviceAccounts:       make(map[proto.Account]map[types.PublicKey]types.Currency),
 		store:                 store,
-		funder:                funder,
 		tg:                    threadgroup.New(),
 		log:                   zap.NewNop(),
 	}

@@ -189,6 +189,9 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 	routes := map[string]jape.Handler{
 		"GET /state": a.handleGETState,
 
+		"GET /consensus/state":   a.handleGETConsensusState,
+		"GET /consensus/network": a.handleGETConsensusNetwork,
+
 		// accounts endpoints
 		"GET    /accounts":            a.handleGETAccounts,
 		"GET    /account/:accountkey": a.handleGETAccount,
@@ -270,6 +273,14 @@ func (a *admin) checkServerError(jc jape.Context, context string, err error) boo
 		a.log.Warn(context, zap.Error(err))
 	}
 	return err == nil
+}
+
+func (a *admin) handleGETConsensusState(jc jape.Context) {
+	jc.Encode(a.chain.TipState())
+}
+
+func (a *admin) handleGETConsensusNetwork(jc jape.Context) {
+	jc.Encode(a.chain.TipState().Network)
 }
 
 func (a *admin) handleGETPProf(jc jape.Context) {

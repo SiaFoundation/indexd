@@ -27,6 +27,9 @@ tags:
   - name: misc
     description: Access general indexer state, recommended transaction fee or exchange rate information.
 
+  - name: consensus
+    description: Retrieve consensus state and network parameters for the connected chain.
+
   - name: settings
     description: Configure contract maintenance, host selection criteria, and price pinning behavior.
 
@@ -105,6 +108,36 @@ paths:
               password: "your-admin-password"
             })
             const state = await admin.state()
+
+  /consensus/state:
+    get:
+      tags:
+        - consensus
+      summary: Get the current consensus state
+      description: Returns the chain state at the current tip (excluding network parameters).
+      operationId: getConsensusState
+      responses:
+        "200":
+          description: The current consensus state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsensusState"
+
+  /consensus/network:
+    get:
+      tags:
+        - consensus
+      summary: Get the consensus network parameters
+      description: Returns the fixed parameters for the connected chain.
+      operationId: getConsensusNetwork
+      responses:
+        "200":
+          description: The consensus network parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConsensusNetwork"
 
   /apps/connect/keys:
     get:
@@ -1705,8 +1738,12 @@ components:
 
     Hash256:
       $ref: "./components.yml#/components/schemas/Hash256"
+    BlockID:
+      $ref: "./components.yml#/components/schemas/BlockID"
     Address:
       $ref: "./components.yml#/components/schemas/Address"
+    ChainIndex:
+      $ref: "./components.yml#/components/schemas/ChainIndex"
     Currency:
       $ref: "./components.yml#/components/schemas/Currency"
     Event:
@@ -1766,3 +1803,162 @@ components:
       $ref: "./components.yml#/components/schemas/AuthConnectStatusResponse"
     RegisterAppResponse:
       $ref: "./components.yml#/components/schemas/RegisterAppResponse"
+
+    #############################
+    #
+    # Consensus types
+    #
+    #############################
+
+    Work:
+      type: string
+      pattern: "^\\d+$"
+      description: The expected number of hashes required to produce a block header.
+      example: "12345678901234567890"
+
+    ElementAccumulator:
+      type: object
+      description: A compact Merkle accumulator representing consensus elements.
+      properties:
+        numLeaves:
+          type: integer
+          format: uint64
+          description: The number of leaves tracked by the accumulator.
+        trees:
+          type: array
+          description: The populated Merkle roots for each set bit in numLeaves.
+          items:
+            $ref: "#/components/schemas/Hash256"
+
+    ConsensusState:
+      type: object
+      description: The consensus state at the current tip.
+      properties:
+        index:
+          $ref: "#/components/schemas/ChainIndex"
+        prevTimestamps:
+          type: array
+          description: The previous block timestamps, newest to oldest.
+          items:
+            type: string
+            format: date-time
+        depth:
+          $ref: "#/components/schemas/BlockID"
+        childTarget:
+          $ref: "#/components/schemas/BlockID"
+        siafundTaxRevenue:
+          $ref: "#/components/schemas/Currency"
+        oakTime:
+          type: string
+          description: The rolling block time, encoded as a duration string.
+          example: "10m"
+        oakTarget:
+          $ref: "#/components/schemas/BlockID"
+        foundationSubsidyAddress:
+          $ref: "#/components/schemas/Address"
+        foundationManagementAddress:
+          $ref: "#/components/schemas/Address"
+        totalWork:
+          $ref: "#/components/schemas/Work"
+        difficulty:
+          $ref: "#/components/schemas/Work"
+        oakWork:
+          $ref: "#/components/schemas/Work"
+        elements:
+          $ref: "#/components/schemas/ElementAccumulator"
+        attestations:
+          type: integer
+          format: uint64
+          description: The number of attestations in the current accumulator.
+
+    ConsensusNetwork:
+      type: object
+      description: The fixed network parameters for the current chain.
+      properties:
+        name:
+          type: string
+          description: The network name.
+        initialCoinbase:
+          $ref: "#/components/schemas/Currency"
+        minimumCoinbase:
+          $ref: "#/components/schemas/Currency"
+        initialTarget:
+          $ref: "#/components/schemas/BlockID"
+        blockInterval:
+          type: string
+          description: The target block interval, encoded as a duration string.
+          example: "10m"
+        maturityDelay:
+          type: integer
+          format: uint64
+        hardforkDevAddr:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+            oldAddress:
+              $ref: "#/components/schemas/Address"
+            newAddress:
+              $ref: "#/components/schemas/Address"
+        hardforkTax:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+        hardforkStorageProof:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+        hardforkOak:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+            fixHeight:
+              type: integer
+              format: uint64
+            genesisTimestamp:
+              type: string
+              format: date-time
+        hardforkASIC:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+            oakTime:
+              type: string
+              description: The target block interval used during ASIC hardfork, encoded as a duration string.
+              example: "10m"
+            oakTarget:
+              $ref: "#/components/schemas/BlockID"
+            nonceFactor:
+              type: integer
+              format: uint64
+        hardforkFoundation:
+          type: object
+          properties:
+            height:
+              type: integer
+              format: uint64
+            primaryAddress:
+              $ref: "#/components/schemas/Address"
+            failsafeAddress:
+              $ref: "#/components/schemas/Address"
+        hardforkV2:
+          type: object
+          properties:
+            allowHeight:
+              type: integer
+              format: uint64
+            requireHeight:
+              type: integer
+              format: uint64
+            finalCutHeight:
+              type: integer
+              format: uint64

@@ -33,6 +33,21 @@ import (
 	"lukechampine.com/frand"
 )
 
+func TestConsensusState(t *testing.T) {
+	c := testutils.NewConsensusNode(t, zap.NewNop())
+	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
+
+	state, err := adminClient.ConsensusState(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if state.Network == nil {
+		t.Fatal("expected network to be set")
+	}
+}
+
 func TestAppConnectKeys(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())

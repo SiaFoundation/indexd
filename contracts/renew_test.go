@@ -92,7 +92,7 @@ func TestPerformContractRenewals(t *testing.T) {
 	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, cmMock, store, dialer, hm, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, nil, cmMock, store, dialer, hm, syncerMock, wallet)
 
 	assertRenewal := func(renewedFrom types.FileContractID, proofHeight uint64, call renewContractCall) {
 		t.Helper()
@@ -221,7 +221,7 @@ func TestRenewalAllowance(t *testing.T) {
 	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, cmMock, store, dialer, hm, syncerMock, wallet)
+	contracts := newContractManager(renterKey, amMock, nil, cmMock, store, dialer, hm, syncerMock, wallet)
 
 	assertRenewal := func(allowance types.Currency, call renewContractCall) {
 		t.Helper()
@@ -238,7 +238,7 @@ func TestRenewalAllowance(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	allowance, err := amMock.ContractFundTarget(context.Background(), good, minAllowance)
+	allowance, err := contracts.ContractFundTarget(context.Background(), good, minAllowance)
 	if err != nil {
 		t.Fatal(err)
 	}

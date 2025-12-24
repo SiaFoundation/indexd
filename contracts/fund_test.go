@@ -9,6 +9,7 @@ import (
 
 	"go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -21,25 +22,52 @@ type fundAccountsCall struct {
 type accountsManagerMock struct {
 	mu             sync.Mutex
 	activeAccounts uint64
-	calls          []fundAccountsCall
+	accountsToFund []accounts.HostAccount
 }
 
-func (am *accountsManagerMock) ContractFundTarget(ctx context.Context, host hosts.Host, minAllowance types.Currency) (types.Currency, error) {
-	target := types.Siacoins(1).Mul64(am.activeAccounts)
-	if minAllowance.Cmp(target) == 1 {
-		target = minAllowance
-	}
-	return target, nil
-}
-
-func (am *accountsManagerMock) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, _ bool, log *zap.Logger) error {
+func (am *accountsManagerMock) AccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	am.calls = append(am.calls, fundAccountsCall{
+	cpy := make([]accounts.HostAccount, len(am.accountsToFund))
+	copy(cpy, am.accountsToFund)
+	return cpy, nil
+}
+
+func (am *accountsManagerMock) ActiveAccounts(threshold time.Time) (uint64, error) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	return am.activeAccounts, nil
+}
+
+func (am *accountsManagerMock) ScheduleAccountsForFunding(hostKey types.PublicKey) error {
+	return nil
+}
+
+func (am *accountsManagerMock) ServiceAccounts(hk types.PublicKey) []accounts.HostAccount {
+	return nil
+}
+
+func (am *accountsManagerMock) UpdateHostAccounts(accs []accounts.HostAccount) error {
+	return nil
+}
+
+func (am *accountsManagerMock) UpdateServiceAccounts(ctx context.Context, accs []accounts.HostAccount, balance types.Currency) error {
+	return nil
+}
+
+type accountFunderMock struct {
+	mu    sync.Mutex
+	calls []fundAccountsCall
+}
+
+func (f *accountFunderMock) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accs []accounts.HostAccount, target types.Currency, log *zap.Logger) (funded int, drained int, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, fundAccountsCall{
 		host:        host,
 		contractIDs: contractIDs,
 	})
-	return nil
+	return len(accs), 0, nil
 }
 
 func (s *storeMock) ContractsForBroadcasting(minBroadcast time.Time, limit int) ([]types.FileContractID, error) {
@@ -105,10 +133,13 @@ func (s *storeMock) HostsForFunding() ([]types.PublicKey, error) {
 }
 
 func TestPerformAccountFunding(t *testing.T) {
-	amMock := &accountsManagerMock{}
+	amMock := &accountsManagerMock{
+		accountsToFund: []accounts.HostAccount{{AccountKey: [32]byte{1}}},
+	}
+	funderMock := &accountFunderMock{}
 	store := newStoreMock()
 	hmMock := &hostManagerMock{settings: make(map[types.PublicKey]rhp.HostSettings), store: store}
-	cm := newContractManager(types.PublicKey{}, amMock, nil, store, nil, hmMock, nil, nil)
+	cm := newContractManager(types.PublicKey{}, amMock, funderMock, nil, store, nil, hmMock, nil, nil)
 
 	// fund accounts
 	err := cm.performAccountFunding(context.Background(), false, zap.NewNop())
@@ -117,7 +148,7 @@ func TestPerformAccountFunding(t *testing.T) {
 	}
 
 	// assert there were no calls, as there are no contracts
-	if len(amMock.calls) != 0 {
+	if len(funderMock.calls) != 0 {
 		t.Fatal("unexpected")
 	}
 
@@ -181,11 +212,11 @@ func TestPerformAccountFunding(t *testing.T) {
 	}
 
 	// assert there were two calls, one for each usable host
-	if len(amMock.calls) != 2 {
+	if len(funderMock.calls) != 2 {
 		t.Fatal("unexpected")
 	}
-	call1 := amMock.calls[0]
-	call2 := amMock.calls[1]
+	call1 := funderMock.calls[0]
+	call2 := funderMock.calls[1]
 	if call1.host.PublicKey != hk1 {
 		call1, call2 = call2, call1
 	}
