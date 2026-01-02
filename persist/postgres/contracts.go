@@ -625,6 +625,14 @@ func (tx *updateTx) ContractElements() ([]types.V2FileContractElement, error) {
 	return fces, rows.Err()
 }
 
+func (tx *updateTx) DeleteContractElements(contractIDs ...types.FileContractID) error {
+	batch := &pgx.Batch{}
+	for _, contractID := range contractIDs {
+		batch.Queue(`DELETE FROM contract_elements WHERE contract_id = $1`, sqlHash256(contractID))
+	}
+	return tx.tx.SendBatch(tx.ctx, batch).Close()
+}
+
 func (tx *updateTx) IsKnownContract(contractID types.FileContractID) (bool, error) {
 	var exists bool
 	err := tx.tx.QueryRow(tx.ctx, `SELECT EXISTS (SELECT 1 FROM contracts WHERE contract_id = $1)`, sqlHash256(contractID)).
