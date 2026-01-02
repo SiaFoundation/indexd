@@ -19,6 +19,7 @@ type (
 	UpdateTx interface {
 		ContractElements() ([]types.V2FileContractElement, error)
 		IsKnownContract(contractID types.FileContractID) (bool, error)
+		DeleteContractElements(contractIDs ...types.FileContractID) error
 		UpdateContractElements(fces ...types.V2FileContractElement) error
 		UpdateContractState(contractID types.FileContractID, state ContractState) error
 		UpdateContractRenewedTo(contractID types.FileContractID, renewedTo *types.FileContractID) error
@@ -100,104 +101,123 @@ func (m *ContractManager) UpdateChainState(tx UpdateTx, reverted []chain.RevertU
 	return nil
 }
 
-func (m *ContractManager) applyChainUpdate(tx *updateTx, cau chain.ApplyUpdate) error {
-	for _, diff := range cau.V2FileContractElementDiffs() {
+func (m *ContractManager) applyV2ContractDiffs(tx *updateTx, diffs []consensus.V2FileContractElementDiff) error {
+	var updated []types.V2FileContractElement
+	var resolved []types.FileContractID
+	for _, diff := range diffs {
 		if known, err := tx.IsKnownContract(diff.V2FileContractElement.ID); err != nil {
 			return fmt.Errorf("failed to determine whether contract is known: %w", err)
 		} else if !known {
 			continue // ignore unknown contracts
 		}
-		if err := m.applyContractDiff(tx, diff); err != nil {
-			return fmt.Errorf("failed to apply contract diff: %w", err)
+
+		switch {
+		case diff.Created:
+			if err := tx.UpdateContractState(diff.V2FileContractElement.ID, ContractStateActive); err != nil {
+				return fmt.Errorf("failed to update contract state for %v: %w", diff.V2FileContractElement.ID, err)
+			}
+			updated = append(updated, diff.V2FileContractElement)
+		case diff.Resolution != nil:
+			if err := tx.UpdateContractState(diff.V2FileContractElement.ID, ContractStateResolved); err != nil {
+				return fmt.Errorf("failed to update contract state for %v: %w", diff.V2FileContractElement.ID, err)
+			} else if _, ok := diff.Resolution.(*types.V2FileContractRenewal); ok {
+				// update renewed to for renewals
+				renewedTo := diff.V2FileContractElement.ID.V2RenewalID()
+				if err := tx.UpdateContractRenewedTo(diff.V2FileContractElement.ID, &renewedTo); err != nil {
+					return fmt.Errorf("failed to update renewed to for %v: %w", diff.V2FileContractElement.ID, err)
+				}
+			}
+			// contract was resolved, this element is no longer needed
+			resolved = append(resolved, diff.V2FileContractElement.ID)
+		default:
+			fce := diff.V2FileContractElement
+			if rev, ok := diff.V2RevisionElement(); ok {
+				fce = rev
+			}
+			updated = append(updated, fce)
 		}
+	}
+
+	if len(updated) > 0 {
+		// update created and revised contract elements
+		if err := tx.UpdateContractElements(updated...); err != nil {
+			return fmt.Errorf("failed to update modified contract elements: %w", err)
+		}
+	}
+
+	if len(resolved) > 0 {
+		// delete resolved contract elements
+		if err := tx.DeleteContractElements(resolved...); err != nil {
+			return fmt.Errorf("failed to delete resolved contract elements: %w", err)
+		}
+	}
+	return nil
+}
+
+func (m *ContractManager) applyChainUpdate(tx *updateTx, cau chain.ApplyUpdate) error {
+	if err := m.applyV2ContractDiffs(tx, cau.V2FileContractElementDiffs()); err != nil {
+		return fmt.Errorf("failed to apply contract diffs: %w", err)
 	}
 
 	// update state element proofs
 	return updateContractElementProofs(tx, cau)
 }
 
-func (m *ContractManager) applyContractDiff(tx *updateTx, diff consensus.V2FileContractElementDiff) error {
-	// update contract state
-	if diff.Resolution != nil || diff.Created {
-		var state ContractState
-		switch {
-		case diff.Resolution != nil:
-			state = ContractStateResolved
-			if _, ok := diff.Resolution.(*types.V2FileContractRenewal); ok {
-				renewedTo := diff.V2FileContractElement.ID.V2RenewalID()
-				if err := tx.UpdateContractRenewedTo(diff.V2FileContractElement.ID, &renewedTo); err != nil {
-					return fmt.Errorf("failed to update renewed to for %v: %w", diff.V2FileContractElement.ID, err)
-				}
-			}
-		case diff.Created:
-			state = ContractStateActive
-		default:
-			panic("unknown state") // unreachable
-		}
-		if err := tx.UpdateContractState(diff.V2FileContractElement.ID, state); err != nil {
-			return fmt.Errorf("failed to update contract state for %v: %w", diff.V2FileContractElement.ID, err)
-		}
-		m.log.Info("contract state changed", zap.Stringer("contractID", diff.V2FileContractElement.ID),
-			zap.Stringer("state", state))
-	}
-
-	// update contract elements
-	fce := diff.V2FileContractElement
-	if rev, ok := diff.V2RevisionElement(); ok {
-		fce = rev
-	}
-	if err := tx.UpdateContractElements(fce); err != nil {
-		return fmt.Errorf("failed to update contract element: %w", err)
-	}
-
-	return nil
-}
-
-func (m *ContractManager) revertChainUpdate(tx *updateTx, cru chain.RevertUpdate) error {
-	for _, diff := range cru.V2FileContractElementDiffs() {
+func (m *ContractManager) revertV2ContractDiffs(tx *updateTx, diffs []consensus.V2FileContractElementDiff) error {
+	var reverted []types.FileContractID
+	var updated []types.V2FileContractElement
+	for _, diff := range diffs {
 		if known, err := tx.IsKnownContract(diff.V2FileContractElement.ID); err != nil {
 			return fmt.Errorf("failed to determine whether contract is known: %w", err)
 		} else if !known {
 			continue // ignore unknown contracts
 		}
-		if err := m.revertContractDiff(tx, diff); err != nil {
-			return fmt.Errorf("failed to revert contract diff: %w", err)
-		}
-	}
-	return updateContractElementProofs(tx, cru)
-}
 
-func (m *ContractManager) revertContractDiff(tx *updateTx, diff consensus.V2FileContractElementDiff) error {
-	// update contract state
-	if diff.Resolution != nil || diff.Created {
-		var state ContractState
 		switch {
 		case diff.Created:
-			state = ContractStatePending
+			// contract no longer exists
+			reverted = append(reverted, diff.V2FileContractElement.ID)
+			if err := tx.UpdateContractState(diff.V2FileContractElement.ID, ContractStatePending); err != nil {
+				return fmt.Errorf("failed to update contract state for %v: %w", diff.V2FileContractElement.ID, err)
+			}
 		case diff.Resolution != nil:
-			state = ContractStateActive
-			if _, ok := diff.Resolution.(*types.V2FileContractRenewal); ok {
+			// contract is now active again
+			updated = append(updated, diff.V2FileContractElement)
+			if err := tx.UpdateContractState(diff.V2FileContractElement.ID, ContractStateActive); err != nil {
+				return fmt.Errorf("failed to update contract state for %v: %w", diff.V2FileContractElement.ID, err)
+			} else if _, ok := diff.Resolution.(*types.V2FileContractRenewal); ok {
+				// clear renewed to for renewals
 				if err := tx.UpdateContractRenewedTo(diff.V2FileContractElement.ID, nil); err != nil {
 					return fmt.Errorf("failed to null renewed to for %v: %w", diff.V2FileContractElement.ID, err)
 				}
 			}
 		default:
-			panic("unknown state") // unreachable
+			updated = append(updated, diff.V2FileContractElement)
 		}
-		if err := tx.UpdateContractState(diff.V2FileContractElement.ID, state); err != nil {
-			return fmt.Errorf("failed to update contract state for %v: %w", diff.V2FileContractElement.ID, err)
-		}
-		m.log.Info("contract state changed", zap.Stringer("contractID", diff.V2FileContractElement.ID),
-			zap.Stringer("state", state))
 	}
 
-	// update contract elements
-	fce := diff.V2FileContractElement
-	if err := tx.UpdateContractElements(fce); err != nil {
-		return fmt.Errorf("failed to update contract element: %w", err)
+	if len(reverted) > 0 {
+		// remove reverted contract elements
+		if err := tx.DeleteContractElements(reverted...); err != nil {
+			return fmt.Errorf("failed to revert deleted contract elements: %w", err)
+		}
 	}
 
+	if len(updated) > 0 {
+		// revert updated contract elements
+		if err := tx.UpdateContractElements(updated...); err != nil {
+			return fmt.Errorf("failed to revert updated contract elements: %w", err)
+		}
+	}
 	return nil
+}
+
+func (m *ContractManager) revertChainUpdate(tx *updateTx, cru chain.RevertUpdate) error {
+	if err := m.revertV2ContractDiffs(tx, cru.V2FileContractElementDiffs()); err != nil {
+		return fmt.Errorf("failed to revert contract diffs: %w", err)
+	}
+	// update state element proofs
+	return updateContractElementProofs(tx, cru)
 }
 
 func (m *ContractManager) broadcastExpiredContracts() error {
