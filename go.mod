@@ -6,15 +6,15 @@ toolchain go1.25.5
 
 require (
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
-	github.com/jackc/pgx/v5 v5.7.6
+	github.com/jackc/pgx/v5 v5.8.0
 	github.com/klauspost/reedsolomon v1.12.6
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.19.0
-	go.sia.tech/coreutils v0.19.0
+	go.sia.tech/coreutils v0.20.0
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/mux v1.4.0
-	go.sia.tech/web/indexd v0.11.0
+	go.sia.tech/web/indexd v0.12.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.1
 	golang.org/x/crypto v0.46.0

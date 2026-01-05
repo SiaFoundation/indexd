@@ -483,6 +483,13 @@ func (tx *mockUpdateTx) RenewedTo(contractID types.FileContractID) *types.FileCo
 	return renewedTo
 }
 
+func (tx *mockUpdateTx) DeleteContractElements(contractIDs ...types.FileContractID) error {
+	for _, contractID := range contractIDs {
+		delete(tx.contracts, contractID)
+	}
+	return nil
+}
+
 func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileContractElement, ContractState) {
 	fce, ok := tx.contracts[contractID]
 	if !ok {
@@ -495,8 +502,16 @@ func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileC
 	return fce, state
 }
 
+func (tx *mockUpdateTx) ContractState(contractID types.FileContractID) ContractState {
+	state, ok := tx.state[contractID]
+	if !ok {
+		panic("contract state not found")
+	}
+	return state
+}
+
 func (tx *mockUpdateTx) IsKnownContract(contractID types.FileContractID) (bool, error) {
-	_, ok := tx.contracts[contractID]
+	_, ok := tx.state[contractID]
 	return ok, nil
 }
 
@@ -517,7 +532,8 @@ func (tx *mockUpdateTx) UpdateContractElementProofs(updater wallet.ProofUpdater)
 }
 
 func (tx *mockUpdateTx) UpdateContractState(contractID types.FileContractID, state ContractState) error {
-	if _, ok := tx.contracts[contractID]; !ok {
+	// checking state, not contract since resolved elements are removed from the map
+	if _, ok := tx.state[contractID]; !ok {
 		return errors.New("contract not found")
 	}
 	tx.state[contractID] = state
@@ -525,7 +541,8 @@ func (tx *mockUpdateTx) UpdateContractState(contractID types.FileContractID, sta
 }
 
 func (tx *mockUpdateTx) UpdateContractRenewedTo(contractID types.FileContractID, renewedTo *types.FileContractID) error {
-	if _, ok := tx.contracts[contractID]; !ok {
+	// checking state, not contract since resolved elements are removed from the map
+	if _, ok := tx.state[contractID]; !ok {
 		return errors.New("contract not found")
 	}
 	tx.renewedTo[contractID] = renewedTo
@@ -650,16 +667,24 @@ func TestApplyRevertDiff(t *testing.T) {
 	// helper to apply/revert diff
 	applyDiff := func(diff consensus.V2FileContractElementDiff) {
 		t.Helper()
-		err := contracts.applyContractDiff(updateTx, diff)
+		err := contracts.applyV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	revertDiff := func(diff consensus.V2FileContractElementDiff) {
 		t.Helper()
-		err := contracts.revertContractDiff(updateTx, diff)
+		err := contracts.revertV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
 		if err != nil {
 			t.Fatal(err)
+		}
+	}
+
+	assertContractState := func(state ContractState) {
+		t.Helper()
+		storedState := mock.ContractState(contractID)
+		if storedState != state {
+			t.Fatalf("expected state %v, got %v", state, storedState)
 		}
 	}
 
@@ -700,7 +725,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		V2FileContractElement: fce,
 		Resolution:            &types.V2StorageProof{},
 	})
-	assertContract(ContractStateResolved)
+	assertContractState(ContractStateResolved)
 
 	// revert resolution
 	fce.V2FileContract.RevisionNumber--
@@ -724,7 +749,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		Created:               true,
 		V2FileContractElement: fce,
 	})
-	assertContract(ContractStatePending)
+	assertContractState(ContractStatePending)
 }
 
 func TestUpdateContractElementProofs(t *testing.T) {
@@ -840,30 +865,38 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 	// helper to apply/revert diff
 	applyDiff := func(diff consensus.V2FileContractElementDiff) {
 		t.Helper()
-		err := contracts.applyContractDiff(updateTx, diff)
+		err := contracts.applyV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	revertDiff := func(diff consensus.V2FileContractElementDiff) {
 		t.Helper()
-		err := contracts.revertContractDiff(updateTx, diff)
+		err := contracts.revertV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	assertContract := func(fce types.V2FileContractElement, state ContractState, renewedTo *types.FileContractID) {
+	assertContractState := func(contractID types.FileContractID, state ContractState, renewedTo *types.FileContractID) {
 		t.Helper()
-		storedFCE, storedState := mock.Contract(fce.ID)
-		storedRenewedTo := mock.RenewedTo(fce.ID)
+		storedState := mock.ContractState(contractID)
 		if storedState != state {
 			t.Fatalf("expected state %v, got %v", state, storedState)
-		} else if !reflect.DeepEqual(storedFCE, fce) {
-			t.Fatalf("expected contract %v, got %v", fce, storedFCE)
-		} else if !reflect.DeepEqual(storedRenewedTo, renewedTo) {
-			t.Fatalf("expected renewed to %v, got %v", storedRenewedTo, renewedTo)
 		}
+		storedRenewedTo := mock.RenewedTo(contractID)
+		if !reflect.DeepEqual(storedRenewedTo, renewedTo) {
+			t.Fatalf("expected renewed to %v, got %v", renewedTo, storedRenewedTo)
+		}
+	}
+
+	assertContract := func(fce types.V2FileContractElement, state ContractState, renewedTo *types.FileContractID) {
+		t.Helper()
+		storedFCE, _ := mock.Contract(fce.ID)
+		if !reflect.DeepEqual(storedFCE, fce) {
+			t.Fatalf("expected contract %v, got %v", fce, storedFCE)
+		}
+		assertContractState(fce.ID, state, renewedTo)
 	}
 
 	// initial state
@@ -887,6 +920,7 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 		V2FileContractElement: fce,
 		Resolution:            &types.V2FileContractRenewal{},
 	})
+	assertContractState(fce.ID, ContractStateResolved, &newFCE.ID)
 
 	mock.AddContract(newFCE)
 	assertContract(newFCE, ContractStatePending, nil)
@@ -896,7 +930,7 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 		V2FileContractElement: newFCE,
 	})
 
-	assertContract(fce, ContractStateResolved, &newFCE.ID)
+	assertContractState(fce.ID, ContractStateResolved, &newFCE.ID)
 	assertContract(newFCE, ContractStateActive, nil)
 
 	// revert resolution
@@ -910,7 +944,7 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 		V2FileContractElement: newFCE,
 	})
 	assertContract(fce, ContractStateActive, nil)
-	assertContract(newFCE, ContractStatePending, nil)
+	assertContractState(newFCE.ID, ContractStatePending, nil)
 
 	applyDiff(consensus.V2FileContractElementDiff{
 		V2FileContractElement: fce,
@@ -921,6 +955,6 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 		V2FileContractElement: newFCE,
 	})
 
-	assertContract(fce, ContractStateResolved, &newFCE.ID)
+	assertContractState(fce.ID, ContractStateResolved, &newFCE.ID)
 	assertContract(newFCE, ContractStateActive, nil)
 }
