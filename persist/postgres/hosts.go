@@ -1015,31 +1015,18 @@ func (s *Store) HostsWithLostSectors() ([]types.PublicKey, error) {
 }
 
 // UpdateStuckHosts updates the stuck_since timestamp for hosts. Hosts in the
-// stuck slice will be marked as stuck (preserving existing timestamps), and
-// hosts in the unstuck slice will have their stuck status cleared.
-func (s *Store) UpdateStuckHosts(stuck, unstuck []types.PublicKey) error {
+// stuck slice will be marked as stuck (preserving existing timestamps). All
+// other hosts that are currently marked as stuck will have their stuck status
+// cleared.
+func (s *Store) UpdateStuckHosts(stuck []types.PublicKey) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		// clear stuck_since for unstuck hosts
-		if len(unstuck) > 0 {
-			sqlHks := make([]sqlPublicKey, len(unstuck))
-			for i, hk := range unstuck {
-				sqlHks[i] = sqlPublicKey(hk)
-			}
-			_, err := tx.Exec(ctx, `
-				UPDATE hosts
-				SET stuck_since = NULL
-				WHERE public_key = ANY($1)`, sqlHks)
-			if err != nil {
-				return fmt.Errorf("failed to clear stuck hosts: %w", err)
-			}
+		sqlHks := make([]sqlPublicKey, len(stuck))
+		for i, hk := range stuck {
+			sqlHks[i] = sqlPublicKey(hk)
 		}
 
 		// mark hosts as stuck
 		if len(stuck) > 0 {
-			sqlHks := make([]sqlPublicKey, len(stuck))
-			for i, hk := range stuck {
-				sqlHks[i] = sqlPublicKey(hk)
-			}
 			_, err := tx.Exec(ctx, `
 				UPDATE hosts
 				SET stuck_since = COALESCE(stuck_since, NOW())
@@ -1047,6 +1034,16 @@ func (s *Store) UpdateStuckHosts(stuck, unstuck []types.PublicKey) error {
 			if err != nil {
 				return fmt.Errorf("failed to set stuck hosts: %w", err)
 			}
+		}
+
+		// clear stuck_since for hosts not in the stuck list
+		_, err := tx.Exec(ctx, `
+			UPDATE hosts
+			SET stuck_since = NULL
+			WHERE stuck_since IS NOT NULL
+				AND public_key != ALL($1)`, sqlHks)
+		if err != nil {
+			return fmt.Errorf("failed to clear stuck hosts: %w", err)
 		}
 		return nil
 	})

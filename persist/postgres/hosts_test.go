@@ -1154,7 +1154,7 @@ func TestStuckHosts(t *testing.T) {
 	assertStuckHosts(nil)
 
 	// mark hk1 as stuck
-	if err := db.UpdateStuckHosts([]types.PublicKey{hk1}, nil); err != nil {
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk1}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1170,8 +1170,8 @@ func TestStuckHosts(t *testing.T) {
 	// now hk1 should be stuck
 	assertStuckHosts([]types.PublicKey{hk1})
 
-	// mark hk2 as stuck too (but recent, so not returned yet)
-	if err := db.UpdateStuckHosts([]types.PublicKey{hk2}, nil); err != nil {
+	// mark hk2 as stuck too (but recent, so not returned yet), keeping hk1 stuck
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk1, hk2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1187,8 +1187,8 @@ func TestStuckHosts(t *testing.T) {
 	// now both hk1 and hk2 should be stuck
 	assertStuckHosts([]types.PublicKey{hk1, hk2})
 
-	// test that UpdateStuckHosts clears hosts in the unstuck list
-	if err := db.UpdateStuckHosts(nil, []types.PublicKey{hk1}); err != nil {
+	// test that UpdateStuckHosts implicitly clears hosts not in the list
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1203,7 +1203,7 @@ func TestStuckHosts(t *testing.T) {
 	}
 
 	// call UpdateStuckHosts again with same host
-	if err := db.UpdateStuckHosts([]types.PublicKey{hk2}, nil); err != nil {
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk2}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1217,8 +1217,8 @@ func TestStuckHosts(t *testing.T) {
 		t.Fatalf("expected stuck_since to remain %v, got %v", stuckSince, stuckSinceAfter)
 	}
 
-	// test clearing stuck host
-	if err := db.UpdateStuckHosts(nil, []types.PublicKey{hk2}); err != nil {
+	// test clearing all stuck hosts by passing empty list
+	if err := db.UpdateStuckHosts(nil); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1226,7 +1226,7 @@ func TestStuckHosts(t *testing.T) {
 	assertStuckHosts(nil)
 
 	// test marking multiple hosts as stuck at once
-	if err := db.UpdateStuckHosts([]types.PublicKey{hk1, hk2, hk3}, nil); err != nil {
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk1, hk2, hk3}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -2928,11 +2928,10 @@ func BenchmarkStuckHosts(b *testing.B) {
 	})
 
 	b.Run("UpdateStuckHosts", func(b *testing.B) {
-		// use 10% of hosts for stuck/unstuck
-		stuckHosts := allHosts[:numHosts/20]
-		unstuckHosts := allHosts[numHosts/20 : numHosts/10]
+		// use 10% of hosts for stuck
+		stuckHosts := allHosts[:numHosts/10]
 		for b.Loop() {
-			if err := store.UpdateStuckHosts(stuckHosts, unstuckHosts); err != nil {
+			if err := store.UpdateStuckHosts(stuckHosts); err != nil {
 				b.Fatal(err)
 			}
 		}

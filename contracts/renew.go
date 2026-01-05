@@ -3,12 +3,9 @@ package contracts
 import (
 	"context"
 	"fmt"
-	"maps"
-	"slices"
 	"time"
 
 	"go.sia.tech/core/rhp/v4"
-	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -17,10 +14,6 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 	bh := cm.chain.TipState().Index.Height
 	minProofHeight := bh + renewWindow
 	newProofHeight := bh + period + renewWindow
-
-	// track hosts that fail/succeed contract operations
-	stuckHosts := make(map[types.PublicKey]struct{})
-	unstuckHosts := make(map[types.PublicKey]struct{})
 
 	batchSize := 50
 	for offset := 0; ; offset += batchSize {
@@ -39,19 +32,12 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 			log := log.With(zap.Stringer("contractID", contract.ID), zap.Stringer("host", contract.HostKey))
 			if err := cm.renewContract(ctx, contract, newProofHeight, period, log); err != nil {
 				log.Error("failed to renew contract", zap.Error(err))
-				stuckHosts[contract.HostKey] = struct{}{}
-			} else {
-				unstuckHosts[contract.HostKey] = struct{}{}
 			}
 		}
 
 		if len(contracts) < batchSize {
 			break
 		}
-	}
-
-	if err := cm.store.UpdateStuckHosts(slices.Collect(maps.Keys(stuckHosts)), slices.Collect(maps.Keys(unstuckHosts))); err != nil {
-		log.Error("failed to update stuck hosts", zap.Error(err))
 	}
 
 	return nil

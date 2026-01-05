@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -281,9 +279,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	}
 
 	var formed, refreshed uint32
-	// track hosts that fail contract operations
-	stuckHosts := make(map[types.PublicKey]struct{})
-	unstuckHosts := make(map[types.PublicKey]struct{})
+	// track hosts that have failed/successful contract operations
+	hasStuckContract := make(map[types.PublicKey]struct{})
+	hasGoodContract := make(map[types.PublicKey]struct{})
 
 	// formContract is a helper to form a contract with the given host
 	// and log the result. It returns true if the formation was successful. It is not
@@ -301,14 +299,14 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		case err == nil:
 			formed++
 			delete(hostsWithoutContracts, host.PublicKey) // only form one contract per host
-			unstuckHosts[host.PublicKey] = struct{}{}
+			hasGoodContract[host.PublicKey] = struct{}{}
 			return true
 		case existingHost && errors.Is(err, wallet.ErrNotEnoughFunds):
 			log.Debug("not enough funds to form contract with existing host", zap.Stringer("target", accountFundTarget), zap.Error(err))
 			return true // ignore not enough funds errors for existing hosts since it is our fault
 		default:
 			log.Warn("failed to form contract", zap.Error(err))
-			stuckHosts[host.PublicKey] = struct{}{}
+			hasStuckContract[host.PublicKey] = struct{}{}
 			return false
 		}
 	}
@@ -331,14 +329,14 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		case err == nil:
 			refreshed++
 			delete(hostsWithoutContracts, host.PublicKey) // sanity check
-			unstuckHosts[host.PublicKey] = struct{}{}
+			hasGoodContract[host.PublicKey] = struct{}{}
 			return true
 		case existingHost && errors.Is(err, wallet.ErrNotEnoughFunds):
 			log.Debug("not enough funds to refresh contract with existing host")
 			return true // ignore not enough funds errors for existing hosts since it is our fault
 		default:
 			log.Warn("failed to refresh contract", zap.Error(err))
-			stuckHosts[host.PublicKey] = struct{}{}
+			hasStuckContract[host.PublicKey] = struct{}{}
 			return false
 		}
 	}
@@ -350,6 +348,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		if cc.goodForAppend == nil && cc.goodForFunding == nil {
 			// contract is good
 			goodContracts++
+			hasGoodContract[hostKey] = struct{}{}
 			continue
 		} else if cc.goodForRefresh == nil {
 			// contract can be refreshed to become good
@@ -445,8 +444,15 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		}
 	}
 
-	// update stuck hosts status
-	if err := cm.store.UpdateStuckHosts(slices.Collect(maps.Keys(stuckHosts)), slices.Collect(maps.Keys(unstuckHosts))); err != nil {
+	// update stuck hosts status - a host is stuck if it has a stuck contract
+	// but no good contract
+	var stuckHosts []types.PublicKey
+	for hk := range hasStuckContract {
+		if _, ok := hasGoodContract[hk]; !ok {
+			stuckHosts = append(stuckHosts, hk)
+		}
+	}
+	if err := cm.store.UpdateStuckHosts(stuckHosts); err != nil {
 		log.Error("failed to update stuck hosts", zap.Error(err))
 	}
 
