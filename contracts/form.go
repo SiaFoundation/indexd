@@ -446,10 +446,20 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		}
 	}
 
+	// all hosts that could be considered stuck
+	candidates := slices.Collect(maps.Keys(hasStuckContract))
+	previouslyStuck, err := cm.store.StuckHosts()
+	if err != nil {
+		return fmt.Errorf("failed to get previously stuck hosts: %w", err)
+	}
+	for _, host := range previouslyStuck {
+		candidates = append(candidates, host.PublicKey)
+	}
+
 	// update stuck hosts status - a host is stuck if it has a stuck contract
 	// but no good contract
 	var stuckHosts []types.PublicKey
-	for hk := range hasStuckContract {
+	for _, hk := range candidates {
 		if _, ok := hasGoodContract[hk]; !ok {
 			stuckHosts = append(stuckHosts, hk)
 		}
