@@ -417,10 +417,6 @@ func (s *storeMock) UsabilitySettings() (hosts.UsabilitySettings, error) {
 	return hosts.DefaultUsabilitySettings, nil
 }
 
-func (s *storeMock) StuckHosts() ([]hosts.StuckHost, error) {
-	return nil, nil
-}
-
 func (s *storeMock) UpdateStuckHosts(stuck []types.PublicKey) error {
 	return nil
 }
