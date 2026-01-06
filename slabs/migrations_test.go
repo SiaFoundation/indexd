@@ -1,4 +1,4 @@
-package slabs
+package slabs_test
 
 import (
 	"context"
@@ -8,10 +8,10 @@ import (
 	"github.com/klauspost/reedsolomon"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
@@ -19,47 +19,39 @@ import (
 
 func TestMigrateSlab(t *testing.T) {
 	log := zaptest.NewLogger(t)
-	// prepare dependencies
-	db := newMockStore()
-	contracts := newMockContractManager()
+	db := newMockStore(t)
+	contractsMgr := newMockContractManager()
 	chain := newMockChainManager()
-	am := newMockAccountManager(db)
+	am := newMockAccountManager()
 	hm := newMockHostManager()
 
-	// prepare account
 	a1 := types.PublicKey{1}
-	db.AddAccount(a1, accounts.AppMeta{})
+	db.AddTestAccount(t, a1)
 
 	client := newMockHostClient()
 
-	hosts := make([]hosts.Host, 4)
-	for i := range hosts {
+	// create 4 hosts for initial slab sectors
+	hostsList := make([]hosts.Host, 4)
+	for i := range hostsList {
 		sk := types.GeneratePrivateKey()
 		h := client.addTestHost(sk)
 		h.Settings.Prices.EgressPrice = types.Siacoins(uint32(i + 1))
 		if i == 2 {
-			// same location as host 0
-			h.Longitude = hosts[0].Longitude
-			h.Latitude = hosts[0].Latitude
+			h.Longitude = hostsList[0].Longitude
+			h.Latitude = hostsList[0].Latitude
 		}
-		db.hosts[h.PublicKey] = h
+		db.AddTestHost(t, h)
 		client.hostSettings[h.PublicKey] = h.Settings
-		hosts[i] = h
-		// prepare a contract for each host
-		c := newTestContract(h.PublicKey)
-		if i == 1 {
-			// bad contract
-			c.Good = false
-		} else {
-			contracts.contracts = append(contracts.contracts, c)
+		hostsList[i] = h
+		db.addTestContract(t, h.PublicKey)
+		if i != 1 { // host 1's contract not in manager (makes it "bad")
+			contractsMgr.contracts = append(contractsMgr.contracts, newTestContract(h.PublicKey))
 		}
-		db.contracts[h.PublicKey] = c
 	}
 
-	// prepare shards
 	encryptionKey, shards, roots := NewTestShards(t, 2, 2)
 	for i, sector := range shards[:3] {
-		result, err := client.WriteSector(t.Context(), types.GeneratePrivateKey(), hosts[i].PublicKey, sector)
+		result, err := client.WriteSector(t.Context(), types.GeneratePrivateKey(), hostsList[i].PublicKey, sector)
 		if err != nil {
 			t.Fatal(err)
 		} else if result.Root != roots[i] {
@@ -67,15 +59,14 @@ func TestMigrateSlab(t *testing.T) {
 		}
 	}
 
-	// pin a slab
-	slabIDs, err := db.PinSlabs(proto.Account(a1), time.Time{}, SlabPinParams{
+	slabIDs, err := db.PinSlabs(proto.Account(a1), time.Now().Add(time.Hour), slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
 		MinShards:     2,
-		Sectors: []PinnedSector{
-			{Root: roots[0], HostKey: hosts[0].PublicKey},
-			{Root: roots[1], HostKey: hosts[1].PublicKey}, // migrate
-			{Root: roots[2], HostKey: hosts[2].PublicKey},
-			{Root: roots[3], HostKey: types.PublicKey{}}, // lost
+		Sectors: []slabs.PinnedSector{
+			{Root: roots[0], HostKey: hostsList[0].PublicKey},
+			{Root: roots[1], HostKey: hostsList[1].PublicKey},
+			{Root: roots[2], HostKey: hostsList[2].PublicKey},
+			{Root: roots[3], HostKey: hostsList[3].PublicKey},
 		},
 	})
 	if err != nil {
@@ -83,13 +74,35 @@ func TestMigrateSlab(t *testing.T) {
 	}
 	slabID := slabIDs[0]
 
-	// prepare slab manager
+	for i := range roots {
+		db.PinSectorToContract(t, roots[i], types.FileContractID(hostsList[i].PublicKey))
+	}
+
+	// mark sector 3 as lost (makes host 3 available for migration)
+	if err := db.MarkSectorsLost(hostsList[3].PublicKey, []types.Hash256{roots[3]}); err != nil {
+		t.Fatal(err)
+	}
+	// mark contract 1 as bad in DB (makes sector 1 need migration)
+	if _, err := db.Exec(context.Background(), "UPDATE contracts SET good = FALSE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)", hostsList[1].PublicKey[:]); err != nil {
+		t.Fatal(err)
+	}
+
 	msk := types.GeneratePrivateKey()
 	ssk := types.GeneratePrivateKey()
 	alerter := alerts.NewManager()
-	mgr := newSlabManager(chain, am, contracts, hm, db, client, alerter, msk, ssk, WithLogger(log.Named("slabs")))
+	mgr := slabs.NewTestSlabManager(chain, am, contractsMgr, hm, db, client, alerter, msk, ssk, slabs.WithLogger(log.Named("slabs")), slabs.WithMinHostDistance(0))
 
-	// assert it's unhealthy
+	for _, h := range hostsList {
+		am.UpdateServiceAccountBalance(context.Background(), h.PublicKey, mgr.MigrationAccount(), types.Siacoins(10))
+	}
+
+	resetNextRepair := func() {
+		if _, err := db.Exec(context.Background(), "UPDATE slabs SET next_repair_attempt = NOW() - INTERVAL '1 minute'"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	resetNextRepair()
+
 	unhealthSlabIDs, err := db.UnhealthySlabs(1)
 	if err != nil {
 		t.Fatal(err)
@@ -99,29 +112,22 @@ func TestMigrateSlab(t *testing.T) {
 		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabIDs[0])
 	}
 
-	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate"))
-	if err != nil {
+	if err := mgr.MigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
 		t.Fatal(err)
 	}
 
 	assertMigrated := func(host types.PublicKey, potential []types.Hash256, n int) {
 		t.Helper()
-
 		potentialMap := make(map[types.Hash256]struct{}, len(potential))
 		for _, root := range potential {
 			potentialMap[root] = struct{}{}
 		}
-
-		migrated, ok := db.migratedSectors[host]
-		if !ok {
-			t.Fatalf("expected migrated sectors for host %v", host)
-		}
+		migrated := db.MigratedSectors(t, host)
 		var count int
 		for root := range migrated {
 			if _, ok := potentialMap[root]; !ok {
 				t.Fatalf("unexpected migrated sector %v for host %v", root, host)
 			}
-			delete(potentialMap, root)
 			count++
 		}
 		if count != n {
@@ -130,7 +136,9 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	// assert we migrated one of the two unhealthy sectors to hosts[3]
-	assertMigrated(hosts[3].PublicKey, []types.Hash256{roots[1], roots[3]}, 1)
+	assertMigrated(hostsList[3].PublicKey, []types.Hash256{roots[1], roots[3]}, 1)
+
+	resetNextRepair()
 
 	// assert the slab is still unhealthy
 	unhealthSlabIDs, err = db.UnhealthySlabs(1)
@@ -146,15 +154,14 @@ func TestMigrateSlab(t *testing.T) {
 	sk := types.GeneratePrivateKey()
 	h5 := client.addTestHost(sk)
 	h5.Settings.Prices.EgressPrice = types.Siacoins(5)
-	db.hosts[h5.PublicKey] = h5
+	db.AddTestHost(t, h5)
 	client.hostSettings[h5.PublicKey] = h5.Settings
-	c := newTestContract(h5.PublicKey)
-	db.contracts[h5.PublicKey] = c
-	contracts.contracts = append(contracts.contracts, c)
+	db.addTestContract(t, h5.PublicKey)
+	contractsMgr.contracts = append(contractsMgr.contracts, newTestContract(h5.PublicKey))
+	am.UpdateServiceAccountBalance(context.Background(), h5.PublicKey, mgr.MigrationAccount(), types.Siacoins(10))
 
 	// migrate the slab again
-	err = mgr.migrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate"))
-	if err != nil {
+	if err := mgr.MigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
 		t.Fatal(err)
 	}
 	assertMigrated(h5.PublicKey, []types.Hash256{roots[1], roots[3]}, 1)
@@ -223,8 +230,8 @@ func TestSectorsToMigrate(t *testing.T) {
 
 	// prepare a slab that has one good sector and multiple bad sectors for
 	// various reasons
-	slab := Slab{
-		Sectors: []Sector{
+	slab := slabs.Slab{
+		Sectors: []slabs.Sector{
 			// good sector -> don't migrate
 			{
 				Root:       types.Hash256{1},
@@ -260,7 +267,7 @@ func TestSectorsToMigrate(t *testing.T) {
 	// helper to assert result of contractsForRepair
 	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
-		toRepair, toUse := sectorsToMigrate(slab, availableHosts, availableContracts, 10)
+		toRepair, toUse := slabs.SectorsToMigrate(slab, availableHosts, availableContracts, 10)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {

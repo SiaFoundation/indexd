@@ -1,4 +1,4 @@
-package slabs
+package slabs_test
 
 import (
 	"context"
@@ -8,8 +8,11 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
@@ -18,9 +21,9 @@ import (
 func TestUploadShards(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	// prepare dependencies
-	store := newMockStore()
+	store := newMockStore(t)
 	chain := newMockChainManager()
-	am := newMockAccountManager(store)
+	am := newMockAccountManager()
 	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
 	client := newMockHostClient()
@@ -46,8 +49,8 @@ func TestUploadShards(t *testing.T) {
 	root3, sector3 := newTestSector()
 	shards := [][]byte{sector1[:], sector2[:], sector3[:]}
 
-	slab := Slab{
-		Sectors: []Sector{
+	slab := slabs.Slab{
+		Sectors: []slabs.Sector{
 			{Root: root1},
 			{Root: root2},
 			{Root: root3},
@@ -56,12 +59,12 @@ func TestUploadShards(t *testing.T) {
 
 	// create manager
 	alerter := alerts.NewManager()
-	sm := newSlabManager(chain, am, nil, hm, store, client, alerter, account, types.GeneratePrivateKey())
-	sm.shardTimeout = 50 * time.Millisecond
+	sm := slabs.NewTestSlabManager(chain, am, nil, hm, store, client, alerter, account, types.GeneratePrivateKey())
+	sm.SetShardTimeout(50 * time.Millisecond)
 
 	// set balance to 1SC
 	for _, hostKey := range availableHosts {
-		err := am.UpdateServiceAccountBalance(context.Background(), hostKey, sm.migrationAccount, types.Siacoins(1))
+		err := am.UpdateServiceAccountBalance(context.Background(), hostKey, sm.MigrationAccount(), types.Siacoins(1))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -102,14 +105,14 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// assert passing in no hosts returns an error and no uploads
-	_, err := sm.uploadShards(context.Background(), slab, shards, nil, zap.NewNop())
+	_, err := sm.UploadShards(context.Background(), slab, shards, nil, zap.NewNop())
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
 	assertSectors(t, nil, 0, nil)
 
 	// assert passing in enough hosts uploads all shards
-	uploaded, err := sm.uploadShards(context.Background(), slab, shards, availableHosts[:3], log)
+	uploaded, err := sm.UploadShards(context.Background(), slab, shards, availableHosts[:3], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if uploaded != 3 {
@@ -119,7 +122,7 @@ func TestUploadShards(t *testing.T) {
 
 	// asserts hosts are debited for the upload
 	for _, h := range hosts[:3] {
-		balance, err := sm.am.ServiceAccountBalance(context.Background(), h.PublicKey, sm.migrationAccount)
+		balance, err := am.ServiceAccountBalance(context.Background(), h.PublicKey, sm.MigrationAccount())
 		if err != nil {
 			t.Fatal(err)
 		} else if !balance.Equals(types.Siacoins(1).Sub(h.Settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost())) {
@@ -128,7 +131,7 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// assert passing in too few hosts returns the uploaded shards and no error
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, availableHosts[:2], log)
+	uploaded, err = sm.UploadShards(context.Background(), slab, shards, availableHosts[:2], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if uploaded != 2 {
@@ -138,7 +141,7 @@ func TestUploadShards(t *testing.T) {
 
 	// assert hosts are tried until one succeeds
 	client.slowHosts[hosts[0].PublicKey] = time.Second
-	uploaded, err = sm.uploadShards(context.Background(), slab, shards, availableHosts, log)
+	uploaded, err = sm.UploadShards(context.Background(), slab, shards, availableHosts, log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if uploaded != 3 {
@@ -148,9 +151,9 @@ func TestUploadShards(t *testing.T) {
 
 	// assert migrations are not successful if sector roots
 	// do not match
-	corrupted := Slab{Sectors: slices.Clone(slab.Sectors)}
+	corrupted := slabs.Slab{Sectors: slices.Clone(slab.Sectors)}
 	corrupted.Sectors[1].Root = frand.Entropy256()
-	uploaded, err = sm.uploadShards(context.Background(), corrupted, shards, availableHosts, log)
+	uploaded, err = sm.UploadShards(context.Background(), corrupted, shards, availableHosts, log)
 	if err != nil {
 		t.Fatal(err)
 	} else if uploaded >= 3 {
@@ -175,6 +178,7 @@ func newTestHost(hk types.PublicKey) hosts.Host {
 		CountryCode: countries[frand.Intn(len(countries))],
 		Latitude:    frand.Float64()*180 - 90,
 		Longitude:   frand.Float64()*360 - 180,
+		Addresses:   []chain.NetAddress{{Protocol: siamux.Protocol, Address: "foo"}},
 	}
 }
 

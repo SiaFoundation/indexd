@@ -1,4 +1,4 @@
-package slabs
+package slabs_test
 
 import (
 	"fmt"
@@ -6,16 +6,17 @@ import (
 	"testing"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/slabs"
 	"lukechampine.com/frand"
 )
 
 func TestSlabPinParamsValidate(t *testing.T) {
-	params := SlabPinParams{
+	params := slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     1,
-		Sectors: func() (s []PinnedSector) {
+		Sectors: func() (s []slabs.PinnedSector) {
 			for range 30 {
-				s = append(s, PinnedSector{
+				s = append(s, slabs.PinnedSector{
 					Root:    frand.Entropy256(),
 					HostKey: frand.Entropy256(),
 				})
@@ -47,7 +48,7 @@ func TestSlabPinParamsValidate(t *testing.T) {
 	}
 
 	// assert exceeding max total shards is illegal
-	params.Sectors = make([]PinnedSector, maxTotalShards+1)
+	params.Sectors = make([]slabs.PinnedSector, slabs.MaxTotalShards+1)
 	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "exceeds maximum") {
 		t.Fatal("unexpected", err)
 	}
@@ -55,10 +56,10 @@ func TestSlabPinParamsValidate(t *testing.T) {
 
 // TestSlabPinParamsDigest is a unit test for the SlabPinParams.Digest method.
 func TestSlabPinParamsDigest(t *testing.T) {
-	params := SlabPinParams{
+	params := slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     10,
-		Sectors: []PinnedSector{
+		Sectors: []slabs.PinnedSector{
 			{
 				Root:    frand.Entropy256(),
 				HostKey: frand.Entropy256(),
@@ -78,7 +79,7 @@ func TestSlabPinParamsDigest(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	expectedID := SlabID(hasher.Sum())
+	expectedID := slabs.SlabID(hasher.Sum())
 	slabID := params.Digest()
 	if slabID != expectedID {
 		t.Fatalf("expected %v, got %v", expectedID, slabID)
@@ -139,7 +140,7 @@ func TestValidateECParams(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(fmt.Sprintf("%d-of-%d", test.minShards, test.totalShards), func(t *testing.T) {
-			err := ValidateECParams(test.minShards, test.totalShards)
+			err := slabs.ValidateECParams(test.minShards, test.totalShards)
 			if (err == nil) != test.ok {
 				t.Fatalf("expected %v, got %v", test.ok, err == nil)
 			}

@@ -83,6 +83,15 @@ func (ts TestStore) Query(ctx context.Context, query string, args ...any) (pgx.R
 	return ts.pool.Query(ctx, query, args...)
 }
 
+// QueryRow executes a query that is expected to return at most one row.
+// QueryRow always returns a non-nil value. Errors are deferred until
+// Row's Scan method is called. If the query selects no rows, the *Row's
+// Scan will return ErrNoRows. Otherwise, the *Row's Scan scans the
+// first selected row and discards the rest.
+func (ts TestStore) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	return ts.pool.QueryRow(ctx, query, args...)
+}
+
 // Exec executes a query without returning any rows. The args are for
 // any placeholder parameters in the query.
 func (ts TestStore) Exec(ctx context.Context, query string, args ...any) (pgconn.CommandTag, error) {

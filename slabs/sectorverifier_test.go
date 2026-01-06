@@ -1,4 +1,4 @@
-package slabs
+package slabs_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/mux/v2"
 	"go.uber.org/zap/zaptest"
 )
@@ -17,8 +18,8 @@ func TestSectorVerifier(t *testing.T) {
 	oneSC := types.Siacoins(1)
 
 	// prepare manager
-	store := newMockStore()
-	am := newMockAccountManager(store)
+	_ = newMockStore(t)
+	am := newMockAccountManager()
 
 	// prepare account
 	sk := types.GeneratePrivateKey()
@@ -46,7 +47,7 @@ func TestSectorVerifier(t *testing.T) {
 	}
 
 	// prepare verifier
-	verifier := NewSectorVerifier(am, client, sk, log)
+	verifier := slabs.NewSectorVerifier(am, client, sk, log)
 
 	// prepare helper to assert account balance
 	assertBalance := func(want types.Currency) {
@@ -60,7 +61,7 @@ func TestSectorVerifier(t *testing.T) {
 	}
 
 	// prepare helper to assert verify sector results
-	assertResults := func(roots []types.Hash256, want []CheckSectorsResult, expectedErr error) {
+	assertResults := func(roots []types.Hash256, want []slabs.CheckSectorsResult, expectedErr error) {
 		t.Helper()
 		got, err := verifier.VerifySectors(context.Background(), hostKey.PublicKey(), roots)
 		if err != nil && expectedErr == nil {
@@ -85,7 +86,7 @@ func TestSectorVerifier(t *testing.T) {
 
 	// assert [errInsufficientServiceAccountBalance] is returned
 	_, err := verifier.VerifySectors(context.Background(), hostKey.PublicKey(), roots[:1])
-	if !errors.Is(err, errInsufficientServiceAccountBalance) {
+	if !errors.Is(err, slabs.ErrInsufficientServiceAccountBalance) {
 		t.Fatal("unexpected err", err)
 	}
 
@@ -96,14 +97,14 @@ func TestSectorVerifier(t *testing.T) {
 	// account balance
 	client.integrityErrors[roots[0]] = proto.ErrSectorNotFound // lost
 	client.integrityErrors[roots[1]] = nil                     // good
-	assertResults(roots[:2], []CheckSectorsResult{SectorLost, SectorSuccess}, nil)
+	assertResults(roots[:2], []slabs.CheckSectorsResult{slabs.SectorLost, slabs.SectorSuccess}, nil)
 	assertBalance(oneSC.Mul64(8))
 
 	// case 2: running out of funds unexpectedly (malicious host) should reset the balance but
 	// should continue to verify sectors
 	client.integrityErrors[roots[0]] = proto.ErrNotEnoughFunds // unexpected OOF
 	client.integrityErrors[roots[1]] = nil                     // good
-	assertResults(roots[:2], []CheckSectorsResult{SectorFailed, SectorSuccess}, nil)
+	assertResults(roots[:2], []slabs.CheckSectorsResult{slabs.SectorFailed, slabs.SectorSuccess}, nil)
 	assertBalance(types.ZeroCurrency)
 
 	// case 3: running out of funds expectedly
@@ -111,17 +112,17 @@ func TestSectorVerifier(t *testing.T) {
 	client.integrityErrors[roots[0]] = nil // good
 	client.integrityErrors[roots[1]] = nil // good
 	client.integrityErrors[roots[2]] = nil // good
-	assertResults(roots, []CheckSectorsResult{SectorSuccess, SectorSuccess}, errInsufficientServiceAccountBalance)
+	assertResults(roots, []slabs.CheckSectorsResult{slabs.SectorSuccess, slabs.SectorSuccess}, slabs.ErrInsufficientServiceAccountBalance)
 
 	// case 4: interruption via context
 	updateBalance(types.Siacoins(10))
 	client.integrityErrors[roots[0]] = nil              // good sector
 	client.integrityErrors[roots[1]] = context.Canceled // verification interrupted
-	assertResults(roots[:2], []CheckSectorsResult{SectorSuccess}, context.Canceled)
+	assertResults(roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, context.Canceled)
 
 	// case 5: interruption via gracefully closed stream
 	updateBalance(types.Siacoins(10))
 	client.integrityErrors[roots[0]] = nil                 // good sector
 	client.integrityErrors[roots[1]] = mux.ErrClosedStream // verification interrupted
-	assertResults(roots[:2], []CheckSectorsResult{SectorSuccess}, mux.ErrClosedStream)
+	assertResults(roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, mux.ErrClosedStream)
 }

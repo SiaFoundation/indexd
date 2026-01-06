@@ -1,15 +1,17 @@
-package slabs
+package slabs_test
 
 import (
 	"context"
 	"math"
 	"reflect"
 	"testing"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 )
 
@@ -22,9 +24,9 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	host := client.addTestHost(hostKey)
 
 	// prepare managers
-	store := newMockStore()
+	store := newMockStore(t)
 	chain := newMockChainManager()
-	am := newMockAccountManager(store)
+	am := newMockAccountManager()
 	cm := newMockContractManager()
 	hm := newMockHostManager()
 	host.Usability = hosts.GoodUsability
@@ -35,7 +37,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	acc := proto.Account(sk.PublicKey())
 
 	// prepare slab manager
-	sm := newSlabManager(chain, am, cm, hm, store, client, nil, sk, sk)
+	sm := slabs.NewTestSlabManager(chain, am, cm, hm, store, client, nil, sk, sk, slabs.WithIntegrityCheckIntervals(time.Millisecond, time.Millisecond))
 
 	// prepare helper to reset balance to 3SC to avoid running out of funds
 	resetBalance := func() {
@@ -55,11 +57,12 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 		}
 		roots[i] = root.Root
 	}
-	store.sectorsForCheck = roots
+	store.SetSectorsForCheck(t, host.PublicKey, roots)
 
 	assertLostAndFailed := func(failed, lost []types.Hash256) {
 		t.Helper()
 
+		lostSectors := store.LostSectors(t, host.PublicKey)
 		lostMap := make(map[types.Hash256]struct{})
 		for _, r := range lost {
 			lostMap[r] = struct{}{}
@@ -68,19 +71,20 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 		for _, r := range failed {
 			failedMap[r] = struct{}{}
 		}
-		if len(store.lostSectors[host.PublicKey]) != len(lost) {
-			t.Fatalf("expected %d lost sectors, got %d", len(lost), len(store.lostSectors[host.PublicKey]))
+		if len(lostSectors) != len(lost) {
+			t.Errorf("expected %d lost sectors, got %d", len(lost), len(lostSectors))
 		}
-		for r := range store.lostSectors[host.PublicKey] {
+		for r := range lostSectors {
 			if _, exists := lostMap[r]; !exists {
 				t.Fatalf("unexpected lost sector %v", r)
 			}
 			delete(lostMap, r)
 		}
-		if len(store.failedChecks[host.PublicKey]) != len(failed) {
-			t.Fatalf("expected %d failed checks, got %d", len(failed), len(store.failedChecks[host.PublicKey]))
+		failedChecks := store.FailedChecks(t, host.PublicKey)
+		if len(failedChecks) != len(failed) {
+			t.Fatalf("expected %d failed checks, got %d", len(failed), len(failedChecks))
 		}
-		for r, n := range store.failedChecks[host.PublicKey] {
+		for r, n := range failedChecks {
 			if _, exists := failedMap[r]; n == 0 && exists {
 				t.Fatalf("unexpected successful check for %v", r)
 			} else if !exists && n > 0 {
@@ -94,16 +98,16 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	resetBalance()
 	client.integrityErrors[roots[1]] = proto.ErrSectorNotFound // simulate lost sector
 	client.integrityErrors[roots[2]] = proto.ErrNotEnoughFunds // simulate bad sector
-	sm.performIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
-	assertLostAndFailed(roots[1:3], roots[1:2])
+	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
+	assertLostAndFailed(roots[2:3], roots[1:2])
 
 	// perform the checks a few more time to reach the maximum number of failed
 	// checks before a bad sector gets removed
-	for i := uint(1); i < sm.maxFailedIntegrityChecks; i++ {
+	for i := uint(1); i < sm.MaxFailedIntegrityChecks(); i++ {
 		resetBalance()
-		sm.performIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
+		sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	}
-	assertLostAndFailed(roots[1:3], roots[1:3])
+	assertLostAndFailed(nil, roots[1:3])
 
 	// empty the service account to trigger a "not enough funds" error which
 	// causes triggering a refill.
@@ -111,16 +115,16 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 		t.Fatalf("expected 0 triggered refill, got %d", cm.triggeredRefills[acc])
 	}
 	_ = am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, types.ZeroCurrency)
-	sm.performIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
+	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	if cm.triggeredRefills[acc] != 1 {
 		t.Fatalf("expected 1 triggered refill, got %d", cm.triggeredRefills[acc])
 	}
 }
 
 func TestIntegrityChecksAlert(t *testing.T) {
-	store := newMockStore()
+	store := newMockStore(t)
 	alerter := alerts.NewManager()
-	sm := newSlabManager(newMockChainManager(), newMockAccountManager(store), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
+	sm := slabs.NewTestSlabManager(newMockChainManager(), newMockAccountManager(), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
 
 	// assert there are no alerts
 	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
@@ -131,12 +135,14 @@ func TestIntegrityChecksAlert(t *testing.T) {
 
 	// mock a lost sector
 	hk := types.PublicKey{1}
-	store.hosts[hk] = hosts.Host{PublicKey: hk}
-	store.lostSectors[hk] = make(map[types.Hash256]struct{})
-	store.lostSectors[hk][types.Hash256{1}] = struct{}{}
+	store.AddTestHost(t, hosts.Host{PublicKey: hk})
+	_, err := store.Exec(context.Background(), "UPDATE hosts SET lost_sectors = 1 WHERE public_key = $1", hk[:])
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// perform integrity checks
-	sm.performIntegrityChecks(context.Background())
+	sm.PerformIntegrityChecks(context.Background())
 
 	// assert alert was generated
 	var got alerts.Alert
@@ -148,17 +154,20 @@ func TestIntegrityChecksAlert(t *testing.T) {
 		got = alerts[0]
 	}
 
-	expected := newLostSectorsAlert([]types.PublicKey{hk})
+	expected := slabs.NewLostSectorsAlert([]types.PublicKey{hk})
 	got.Timestamp = expected.Timestamp // ignore timestamp
 	if !reflect.DeepEqual(expected, got) {
 		t.Fatal("unexpected alert", expected, got)
 	}
 
 	// remove lostSectors
-	delete(store.lostSectors, hk)
+	_, err = store.Exec(context.Background(), "UPDATE hosts SET lost_sectors = 0 WHERE public_key = $1", hk[:])
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// perform integrity checks
-	sm.performIntegrityChecks(context.Background())
+	sm.PerformIntegrityChecks(context.Background())
 
 	// alert should be dismissed
 	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {

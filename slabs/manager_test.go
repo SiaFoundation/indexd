@@ -1,30 +1,54 @@
-package slabs
+package slabs_test
 
 import (
 	"context"
+	"database/sql/driver"
+	"fmt"
 	"io"
 	"math"
 	"slices"
 	"sync"
+	"testing"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/internal/testutils"
+	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
+
+type sqlHash256 types.Hash256
+
+func (h *sqlHash256) Scan(src any) error {
+	switch src := src.(type) {
+	case []byte:
+		if len(src) != len(sqlHash256{}) {
+			return fmt.Errorf("failed to scan source into Hash256 due to invalid number of bytes %v != %v: %v", len(src), len(sqlHash256{}), src)
+		}
+		copy(h[:], src)
+		return nil
+	default:
+		return fmt.Errorf("cannot scan %T to Hash256", src)
+	}
+}
+
+func (h sqlHash256) Value() (driver.Value, error) {
+	return h[:], nil
+}
 
 var goodSettings = proto.HostSettings{
 	AcceptingContracts: true,
 	RemainingStorage:   math.MaxUint32,
 	Prices: proto.HostPrices{
 		ContractPrice: types.Siacoins(1),
-		Collateral:    types.NewCurrency64(1),
+		Collateral:    types.NewCurrency64(10),
 		StoragePrice:  types.NewCurrency64(1),
 		EgressPrice:   types.NewCurrency64(1),
+		ValidUntil:    time.Now().Add(100 * 24 * time.Hour),
 	},
 	MaxContractDuration: 90 * 144,
 	MaxCollateral:       types.Siacoins(1000),
@@ -57,331 +81,182 @@ func newMockChainManager() *mockChainManager {
 	}
 }
 
-type mockStore struct {
-	mu              sync.Mutex
-	accounts        map[proto.Account]struct{}
-	contracts       map[types.PublicKey]contracts.Contract
-	failedChecks    map[types.PublicKey]map[types.Hash256]int
-	hosts           map[types.PublicKey]hosts.Host
-	lostSectors     map[types.PublicKey]map[types.Hash256]struct{}
-	migratedSectors map[types.PublicKey]map[types.Hash256]struct{}
-	pinnedSlabs     map[proto.Account]map[SlabID]Slab
-	sectorsForCheck []types.Hash256
-	serviceAccounts map[proto.Account]map[types.PublicKey]types.Currency
+type testStore struct {
+	testutils.TestStore
 }
 
-func newMockStore() *mockStore {
-	return &mockStore{
-		accounts:        make(map[proto.Account]struct{}),
-		contracts:       make(map[types.PublicKey]contracts.Contract),
-		failedChecks:    make(map[types.PublicKey]map[types.Hash256]int),
-		hosts:           make(map[types.PublicKey]hosts.Host),
-		lostSectors:     make(map[types.PublicKey]map[types.Hash256]struct{}),
-		migratedSectors: make(map[types.PublicKey]map[types.Hash256]struct{}),
-		pinnedSlabs:     make(map[proto.Account]map[SlabID]Slab),
-		serviceAccounts: make(map[proto.Account]map[types.PublicKey]types.Currency),
+func newMockStore(t testing.TB) *testStore {
+	store := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
+	// override global settings to ensure hosts are always usable
+	if err := store.UpdateUsabilitySettings(hosts.UsabilitySettings{
+		MaxEgressPrice:     types.MaxCurrency,
+		MaxIngressPrice:    types.MaxCurrency,
+		MaxStoragePrice:    types.MaxCurrency,
+		MinCollateral:      types.ZeroCurrency,
+		MinProtocolVersion: [3]byte{0, 0, 0},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateMaintenanceSettings(contracts.MaintenanceSettings{
+		Period:          2,
+		RenewWindow:     1,
+		WantedContracts: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return &testStore{
+		TestStore: store,
 	}
 }
 
-func (s *mockStore) SharedObject(key types.Hash256) (SharedObject, error) {
-	panic("not implemented")
-}
-
-func (s *mockStore) AddAccount(account types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
-	s.accounts[proto.Account(account)] = struct{}{}
-	return nil
-}
-
-func (s *mockStore) AddServiceAccount(account types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
-	s.accounts[proto.Account(account)] = struct{}{}
-	return nil
-}
-
-func (s *mockStore) Contracts(offset, limit int, opts ...contracts.ContractQueryOpt) ([]contracts.Contract, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	opt := contracts.ContractQueryOpts{}
-	for _, o := range opts {
-		o(&opt)
-	}
-
-	var contracts []contracts.Contract
-	for _, c := range s.contracts {
-		if opt.Good != nil {
-			if *opt.Good != c.Good {
-				continue
-			}
-		}
-		// NOTE: currently ignores revisable filter
-		contracts = append(contracts, c)
-	}
-	return contracts, nil
-}
-
-func (s *mockStore) FailingSectors(hostKey types.PublicKey, minChecks, limit int) ([]types.Hash256, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var roots []types.Hash256
-	for root, failures := range s.failedChecks[hostKey] {
-		if failures >= minChecks {
-			roots = append(roots, root)
-		}
-	}
-	return roots, nil
-}
-
-func (s *mockStore) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	opt := hosts.DefaultHostsQueryOpts
-	for _, o := range queryOpts {
-		o(&opt)
-	}
-
-	var hosts []hosts.Host
-	for _, h := range s.hosts {
-		if opt.Usable != nil {
-			if *opt.Usable != h.Usability.Usable() {
-				continue
-			}
-		}
-		// NOTE: currently ignores blocked filter
-		hosts = append(hosts, h)
-	}
-
-	return hosts, nil
-}
-
-func (s *mockStore) HostsForIntegrityChecks(maxLastCheck time.Time, limit int) (result []types.PublicKey, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return nil, nil
-}
-
-func (s *mockStore) HostsWithLostSectors() (hks []types.PublicKey, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for hk, lostSectors := range s.lostSectors {
-		if len(lostSectors) > 0 {
-			hks = append(hks, hk)
-		}
-	}
-	return
-}
-
-func (s *mockStore) MaintenanceSettings() (contracts.MaintenanceSettings, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return contracts.DefaultMaintenanceSettings, nil
-}
-
-func (s *mockStore) MarkFailingSectorsLost(hostKey types.PublicKey, maxFailedIntegrityChecks uint) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for root, failures := range s.failedChecks[hostKey] {
-		if failures >= int(maxFailedIntegrityChecks) {
-			s.lostSectors[hostKey][root] = struct{}{}
-		}
-	}
-	return nil
-}
-
-func (s *mockStore) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.lostSectors[hostKey]; !ok {
-		s.lostSectors[hostKey] = make(map[types.Hash256]struct{})
-	}
+func (s *testStore) SetSectorsForCheck(t testing.TB, hk types.PublicKey, roots []types.Hash256) {
+	s.AddTestHost(t, hosts.Host{PublicKey: hk, Settings: goodSettings, Usability: hosts.GoodUsability})
 	for _, root := range roots {
-		s.lostSectors[hostKey][root] = struct{}{}
-	}
-	return nil
-}
-
-func (s *mockStore) MarkSlabRepaired(slabID SlabID, success bool) error {
-	return nil
-}
-
-func (s *mockStore) MigrateSector(root types.Hash256, hostKey types.PublicKey) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, ok := s.migratedSectors[hostKey]
-	if !ok {
-		s.migratedSectors[hostKey] = make(map[types.Hash256]struct{})
-	}
-	s.migratedSectors[hostKey][root] = struct{}{}
-
-	for acc := range s.accounts {
-		for slabID, slab := range s.pinnedSlabs[acc] {
-			for i, sector := range slab.Sectors {
-				if sector.Root == root {
-					s.pinnedSlabs[acc][slabID].Sectors[i].HostKey = &hostKey
-					s.pinnedSlabs[acc][slabID].Sectors[i].ContractID = nil
-					return true, nil
-				}
-			}
+		_, err := s.Exec(context.Background(), `
+            INSERT INTO sectors (sector_root, host_id, next_integrity_check, uploaded_at)
+            SELECT $1, id, $3, NOW()
+            FROM hosts WHERE public_key = $2
+            ON CONFLICT (sector_root) DO UPDATE SET next_integrity_check = $3
+        `, sqlHash256(root), hk[:], time.Now().Add(-24*time.Hour))
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
-	return false, nil
-}
 
-func (s *mockStore) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, slabs ...SlabPinParams) ([]SlabID, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var digests []SlabID
-	for _, slab := range slabs {
-		slabID := slab.Digest()
-		digests = append(digests, slabID)
-
-		sectors := make([]Sector, 0, len(slab.Sectors))
-		for _, ss := range slab.Sectors {
-			contract, ok := s.contracts[ss.HostKey]
-			if !ok {
-				sectors = append(sectors, Sector{Root: ss.Root})
-				continue
-			}
-			sectors = append(sectors, Sector{
-				Root:       ss.Root,
-				ContractID: &contract.ID,
-				HostKey:    &contract.HostKey,
-			})
-		}
-
-		_, ok := s.pinnedSlabs[account]
-		if !ok {
-			s.pinnedSlabs[account] = make(map[SlabID]Slab)
-		}
-		s.pinnedSlabs[account][slabID] = Slab{
-			ID:            slabID,
-			EncryptionKey: slab.EncryptionKey,
-			MinShards:     slab.MinShards,
-			Sectors:       sectors,
-		}
+	var count int
+	err := s.QueryRow(context.Background(), "SELECT COUNT(*) FROM sectors WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)", hk[:]).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return digests, nil
-}
 
-func (s *mockStore) UnpinSlab(account proto.Account, slabID SlabID) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.pinnedSlabs[account][slabID]; !ok {
-		return ErrSlabNotFound
+	if _, err := s.Exec(context.Background(), "UPDATE stats SET num_unpinned_sectors = num_unpinned_sectors + $1", len(roots)); err != nil {
+		t.Fatal(err)
 	}
-	delete(s.pinnedSlabs[account], slabID)
-	return nil
 }
 
-func (s *mockStore) PinnedSlab(account proto.Account, slabID SlabID) (PinnedSlab, error) {
-	return PinnedSlab{}, nil
-}
-
-func (s *mockStore) SlabIDs(account proto.Account, offset, limit int) ([]SlabID, error) {
-	return nil, nil
-}
-
-func (s *mockStore) RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.failedChecks[hostKey]; !ok {
-		s.failedChecks[hostKey] = make(map[types.Hash256]int)
+func (s *testStore) FailedChecks(t testing.TB, hk types.PublicKey) map[types.Hash256]int {
+	rows, err := s.Query(context.Background(), `
+        SELECT sector_root, consecutive_failed_checks
+        FROM sectors s
+        JOIN hosts h ON s.host_id = h.id
+        WHERE h.public_key = $1
+    `, hk[:])
+	if err != nil {
+		t.Fatal(err)
 	}
-	for _, root := range roots {
-		if success {
-			s.failedChecks[hostKey][root] = 0
-		} else {
-			s.failedChecks[hostKey][root]++
+	defer rows.Close()
+
+	result := make(map[types.Hash256]int)
+	for rows.Next() {
+		var root types.Hash256
+		var count int
+		if err := rows.Scan((*sqlHash256)(&root), &count); err != nil {
+			t.Fatal(err)
+		}
+		if count > 0 {
+			result[root] = count
 		}
 	}
-	return nil
+	return result
 }
 
-func (s *mockStore) SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Clone(s.sectorsForCheck), nil
-}
+func (s *testStore) LostSectors(t testing.TB, hk types.PublicKey) map[types.Hash256]struct{} {
+	rows, err := s.Query(context.Background(), `
+		SELECT sector_root FROM sectors WHERE host_id IS NULL AND contract_sectors_map_id IS NULL
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
 
-func (s *mockStore) Slab(slabID SlabID) (Slab, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for acc := range s.accounts {
-		if slab, ok := s.pinnedSlabs[acc][slabID]; ok {
-			return slab, nil
+	result := make(map[types.Hash256]struct{})
+	for rows.Next() {
+		var root types.Hash256
+		if err := rows.Scan((*sqlHash256)(&root)); err != nil {
+			t.Fatal(err)
 		}
+		result[root] = struct{}{}
 	}
-	return Slab{}, ErrSlabNotFound
+	return result
 }
 
-func (s *mockStore) Slabs(accountID proto.Account, slabIDs []SlabID) ([]Slab, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var slabs []Slab
-	for _, slab := range s.pinnedSlabs[accountID] {
-		slabs = append(slabs, slab)
+func (s *testStore) MigratedSectors(t testing.TB, hk types.PublicKey) map[types.Hash256]struct{} {
+	rows, err := s.Query(context.Background(), `
+        SELECT sector_root FROM sectors s
+        JOIN hosts h ON s.host_id = h.id
+        WHERE h.public_key = $1 AND s.num_migrated > 0
+    `, hk[:])
+	if err != nil {
+		t.Fatal(err)
 	}
-	return slabs, nil
-}
+	defer rows.Close()
 
-func (s *mockStore) UnhealthySlabs(limit int) (result []SlabID, _ error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for acc := range s.accounts {
-		for _, slab := range s.pinnedSlabs[acc] {
-			for _, sector := range slab.Sectors {
-				if len(result) >= limit {
-					break
-				}
-
-				// a slab is unhealthy if any of its sectors are not pinned
-				// or are pinned to a bad contract
-				if sector.HostKey == nil {
-					result = append(result, slab.ID)
-				} else if contract, ok := s.contracts[*sector.HostKey]; ok && !contract.Good {
-					result = append(result, slab.ID)
-				}
-			}
+	result := make(map[types.Hash256]struct{})
+	for rows.Next() {
+		var root types.Hash256
+		if err := rows.Scan((*sqlHash256)(&root)); err != nil {
+			t.Fatal(err)
 		}
+		result[root] = struct{}{}
 	}
-	return result, nil
+	return result
 }
 
-func (s *mockStore) PruneSlabs(account proto.Account) error {
-	return nil
+func (s *testStore) addTestContract(t testing.TB, hk types.PublicKey) types.FileContractID {
+	t.Helper()
+
+	fcid := types.FileContractID(hk)
+	rev := types.V2FileContract{
+		HostPublicKey:    hk,
+		Capacity:         math.MaxInt64,
+		Filesize:         0,
+		FileMerkleRoot:   types.Hash256{},
+		ProofHeight:      1000,
+		ExpirationHeight: 2000,
+		RevisionNumber:   1,
+		TotalCollateral:  types.Siacoins(100),
+	}
+	err := s.AddFormedContract(hk, fcid, rev, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fcid
 }
 
-func (s *mockStore) Object(account proto.Account, key types.Hash256) (SealedObject, error) {
-	return SealedObject{}, nil
-}
-
-func (s *mockStore) DeleteObject(account proto.Account, objectKey types.Hash256) error {
-	return nil
-}
-
-func (s *mockStore) SaveObject(account proto.Account, obj SealedObject) error {
-	return nil
-}
-
-func (s *mockStore) ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error) {
-	return nil, nil
+func (s *testStore) PinSectorToContract(t testing.TB, root types.Hash256, fcid types.FileContractID) {
+	t.Helper()
+	result, err := s.Exec(context.Background(), `
+        UPDATE sectors SET contract_sectors_map_id = (SELECT id FROM contract_sectors_map WHERE contract_id = $2)
+        WHERE sector_root = $1
+    `, root[:], fcid[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.RowsAffected() == 0 {
+		t.Fatalf("failed to pin sector %x to contract %s", root, fcid)
+	}
+	if _, err := s.Exec(context.Background(), "UPDATE stats SET num_pinned_sectors = num_pinned_sectors + 1, num_unpinned_sectors = num_unpinned_sectors - 1"); err != nil {
+		t.Fatal(err)
+	}
 }
 
 type mockAccountManager struct {
 	mu              sync.Mutex
-	serviceAccounts map[proto.Account]struct{}
-	store           *mockStore
+	serviceAccounts map[proto.Account]map[types.PublicKey]types.Currency
 }
 
-func newMockAccountManager(store *mockStore) *mockAccountManager {
+func newMockAccountManager() *mockAccountManager {
 	return &mockAccountManager{
-		serviceAccounts: make(map[proto.Account]struct{}),
-		store:           store,
+		serviceAccounts: make(map[proto.Account]map[types.PublicKey]types.Currency),
 	}
 }
 
 func (m *mockAccountManager) RegisterServiceAccount(account proto.Account) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.serviceAccounts[account] = struct{}{}
+	if _, ok := m.serviceAccounts[account]; !ok {
+		m.serviceAccounts[account] = make(map[types.PublicKey]types.Currency)
+	}
 }
 
 func (m *mockAccountManager) ResetAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
@@ -391,7 +266,7 @@ func (m *mockAccountManager) ResetAccountBalance(ctx context.Context, hostKey ty
 func (m *mockAccountManager) ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if hostAccounts, ok := m.store.serviceAccounts[account]; ok {
+	if hostAccounts, ok := m.serviceAccounts[account]; ok {
 		if balance, ok := hostAccounts[hostKey]; ok {
 			return balance, nil
 		}
@@ -403,10 +278,10 @@ func (m *mockAccountManager) ServiceAccountBalance(ctx context.Context, hostKey 
 func (m *mockAccountManager) UpdateServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	hostAccounts, ok := m.store.serviceAccounts[account]
+	hostAccounts, ok := m.serviceAccounts[account]
 	if !ok {
 		hostAccounts = make(map[types.PublicKey]types.Currency)
-		m.store.serviceAccounts[account] = hostAccounts
+		m.serviceAccounts[account] = hostAccounts
 	}
 	hostAccounts[hostKey] = balance
 	return nil
@@ -415,7 +290,7 @@ func (m *mockAccountManager) UpdateServiceAccountBalance(ctx context.Context, ho
 func (m *mockAccountManager) DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if hostAccounts, ok := m.store.serviceAccounts[account]; ok {
+	if hostAccounts, ok := m.serviceAccounts[account]; ok {
 		if balance, ok := hostAccounts[hostKey]; ok {
 			if balance.Cmp(amount) < 0 {
 				hostAccounts[hostKey] = types.ZeroCurrency
@@ -453,11 +328,10 @@ func (m *mockContractManager) ContractsForAppend() ([]contracts.Contract, error)
 }
 
 type mockhostManager struct {
-	mu       sync.Mutex
-	hosts    map[types.PublicKey]hosts.Host
-	unusable map[types.PublicKey]struct{}
-
-	refreshPrices bool // reset prices.ValidUntil after each call to WithScannedHost
+	mu            sync.Mutex
+	hosts         map[types.PublicKey]hosts.Host
+	unusable      map[types.PublicKey]struct{}
+	refreshPrices bool
 }
 
 func newMockHostManager() *mockhostManager {
