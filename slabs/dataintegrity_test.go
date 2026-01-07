@@ -57,12 +57,12 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 		}
 		roots[i] = root.Root
 	}
-	store.SetSectorsForCheck(t, host.PublicKey, roots)
+	store.setSectorsForCheck(t, host.PublicKey, roots)
 
 	assertLostAndFailed := func(failed, lost []types.Hash256) {
 		t.Helper()
 
-		lostSectors := store.LostSectors(t, host.PublicKey)
+		lostSectors := store.lostSectors(t)
 		lostMap := make(map[types.Hash256]struct{})
 		for _, r := range lost {
 			lostMap[r] = struct{}{}
@@ -80,7 +80,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 			}
 			delete(lostMap, r)
 		}
-		failedChecks := store.FailedChecks(t, host.PublicKey)
+		failedChecks := store.failedChecks(t, host.PublicKey)
 		if len(failedChecks) != len(failed) {
 			t.Fatalf("expected %d failed checks, got %d", len(failed), len(failedChecks))
 		}
@@ -98,14 +98,14 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	resetBalance()
 	client.integrityErrors[roots[1]] = proto.ErrSectorNotFound // simulate lost sector
 	client.integrityErrors[roots[2]] = proto.ErrNotEnoughFunds // simulate bad sector
-	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
+	sm.TestIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	assertLostAndFailed(roots[2:3], roots[1:2])
 
 	// perform the checks a few more time to reach the maximum number of failed
 	// checks before a bad sector gets removed
 	for i := uint(1); i < sm.MaxFailedIntegrityChecks(); i++ {
 		resetBalance()
-		sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
+		sm.TestIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	}
 	assertLostAndFailed(nil, roots[1:3])
 
@@ -115,7 +115,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 		t.Fatalf("expected 0 triggered refill, got %d", cm.triggeredRefills[acc])
 	}
 	_ = am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, types.ZeroCurrency)
-	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
+	sm.TestIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	if cm.triggeredRefills[acc] != 1 {
 		t.Fatalf("expected 1 triggered refill, got %d", cm.triggeredRefills[acc])
 	}
@@ -142,7 +142,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	}
 
 	// perform integrity checks
-	sm.PerformIntegrityChecks(context.Background())
+	sm.TestIntegrityChecks(context.Background())
 
 	// assert alert was generated
 	var got alerts.Alert
@@ -154,7 +154,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 		got = alerts[0]
 	}
 
-	expected := slabs.NewLostSectorsAlert([]types.PublicKey{hk})
+	expected := slabs.NewTestLostSectorsAlert([]types.PublicKey{hk})
 	got.Timestamp = expected.Timestamp // ignore timestamp
 	if !reflect.DeepEqual(expected, got) {
 		t.Fatal("unexpected alert", expected, got)
@@ -167,7 +167,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	}
 
 	// perform integrity checks
-	sm.PerformIntegrityChecks(context.Background())
+	sm.TestIntegrityChecks(context.Background())
 
 	// alert should be dismissed
 	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
