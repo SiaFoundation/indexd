@@ -11,7 +11,7 @@ require (
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.19.0
-	go.sia.tech/coreutils v0.20.0
+	go.sia.tech/coreutils v0.20.1
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/indexd v0.12.0
@@ -33,7 +33,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/oschwald/maxminddb-golang v1.13.0 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
-	github.com/quic-go/quic-go v0.57.1 // indirect
+	github.com/quic-go/quic-go v0.58.0 // indirect
 	github.com/quic-go/webtransport-go v0.9.0 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	go.etcd.io/bbolt v1.4.3 // indirect
