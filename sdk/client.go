@@ -47,6 +47,7 @@ type (
 		Slab(context.Context, types.PrivateKey, slabs.SlabID) (slabs.PinnedSlab, error)
 		PinSlabs(context.Context, types.PrivateKey, ...slabs.SlabPinParams) ([]slabs.SlabID, error)
 		UnpinSlab(context.Context, types.PrivateKey, slabs.SlabID) error
+		PruneSlabs(ctx context.Context, appKey types.PrivateKey) error
 	}
 
 	downloadOption struct {
@@ -208,6 +209,12 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 // the indexer.
 func (s *SDK) AppKey() types.PrivateKey {
 	return s.appKey
+}
+
+// PruneSlabs removes all slabs on the account that are not associated with
+// an object.
+func (s *SDK) PruneSlabs(ctx context.Context) error {
+	return s.client.PruneSlabs(ctx, s.appKey)
 }
 
 // Upload uploads the data to hosts and pins it to the indexer.

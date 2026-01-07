@@ -285,6 +285,26 @@ func (mc *mockAppClient) CreateSharedObjectURL(ctx context.Context, _ types.Priv
 	return hex.EncodeToString(key), nil
 }
 
+func (mc *mockAppClient) PruneSlabs(ctx context.Context, _ types.PrivateKey) error {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	used := make(map[slabs.SlabID]slabs.PinnedSlab)
+	for _, obj := range mc.objects {
+		for _, slab := range obj.Slabs {
+			digest := slab.Digest()
+			used[digest] = slabs.PinnedSlab{
+				ID:            digest,
+				EncryptionKey: slab.EncryptionKey,
+				MinShards:     slab.MinShards,
+				Sectors:       slab.Sectors,
+			}
+		}
+	}
+	mc.pinned = used
+	return nil
+}
+
 func newMockAppClient() *mockAppClient {
 	return &mockAppClient{
 		objects: make(map[types.Hash256]slabs.SealedObject),
