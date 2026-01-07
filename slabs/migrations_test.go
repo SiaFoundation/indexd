@@ -75,7 +75,7 @@ func TestMigrateSlab(t *testing.T) {
 	slabID := slabIDs[0]
 
 	for i := range roots {
-		db.PinSectorToContract(t, roots[i], types.FileContractID(hostsList[i].PublicKey))
+		db.pinSectorToContract(t, roots[i], types.FileContractID(hostsList[i].PublicKey))
 	}
 
 	// mark sector 3 as lost (makes host 3 available for migration)
@@ -113,7 +113,7 @@ func TestMigrateSlab(t *testing.T) {
 		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabIDs[0])
 	}
 
-	if err := mgr.MigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
+	if err := mgr.TestMigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,7 +123,7 @@ func TestMigrateSlab(t *testing.T) {
 		for _, root := range potential {
 			potentialMap[root] = struct{}{}
 		}
-		migrated := db.MigratedSectors(t, host)
+		migrated := db.migratedSectors(t, host)
 		var count int
 		for root := range migrated {
 			if _, ok := potentialMap[root]; !ok {
@@ -162,7 +162,7 @@ func TestMigrateSlab(t *testing.T) {
 	am.UpdateServiceAccountBalance(context.Background(), h5.PublicKey, mgr.MigrationAccount(), types.Siacoins(10))
 
 	// migrate the slab again
-	if err := mgr.MigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
+	if err := mgr.TestMigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
 		t.Fatal(err)
 	}
 	assertMigrated(h5.PublicKey, []types.Hash256{roots[1], roots[3]}, 1)
@@ -268,7 +268,7 @@ func TestSectorsToMigrate(t *testing.T) {
 	// helper to assert result of contractsForRepair
 	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
-		toRepair, toUse := slabs.SectorsToMigrate(slab, availableHosts, availableContracts, 10)
+		toRepair, toUse := slabs.SectorsToMigrateTest(slab, availableHosts, availableContracts, 10)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {

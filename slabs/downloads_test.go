@@ -73,7 +73,7 @@ func TestDownloadShards(t *testing.T) {
 			delete(client.unusable, hosts[0].PublicKey)
 			delete(client.unusable, hosts[1].PublicKey)
 		})
-		_, err := sm.DownloadShards(context.Background(), slab, zap.NewNop())
+		_, err := sm.TestDownloadShards(context.Background(), slab, zap.NewNop())
 		if !errors.Is(err, slabs.ErrNotEnoughShards) {
 			t.Fatal(err)
 		}
@@ -86,7 +86,7 @@ func TestDownloadShards(t *testing.T) {
 		unavailableSlab.Sectors = slices.Clone(unavailableSlab.Sectors)
 		unavailableSlab.Sectors[0].HostKey = nil
 		unavailableSlab.Sectors[1].HostKey = nil
-		_, err := sm.DownloadShards(context.Background(), unavailableSlab, zap.NewNop())
+		_, err := sm.TestDownloadShards(context.Background(), unavailableSlab, zap.NewNop())
 		if !errors.Is(err, slabs.ErrNotEnoughShards) {
 			t.Fatal(err)
 		}
@@ -94,7 +94,7 @@ func TestDownloadShards(t *testing.T) {
 
 	// assert that if all hosts are usable, we succeed and fetch exactly 'minShards' sectors
 	t.Run("success", func(t *testing.T) {
-		sectors, err := sm.DownloadShards(context.Background(), slab, zap.NewNop())
+		sectors, err := sm.TestDownloadShards(context.Background(), slab, zap.NewNop())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +125,7 @@ func TestDownloadShards(t *testing.T) {
 				sm.SetShardTimeout(30 * time.Second)
 				client.slowHosts = make(map[types.PublicKey]time.Duration)
 			})
-			sectors, err := sm.DownloadShards(context.Background(), slab, zap.NewNop())
+			sectors, err := sm.TestDownloadShards(context.Background(), slab, zap.NewNop())
 			if err != nil {
 				t.Fatal(err)
 			} else if slab.Sectors[1].Root != proto.SectorRoot((*[proto.SectorSize]byte)(sectors[1])) || slab.Sectors[2].Root != proto.SectorRoot((*[proto.SectorSize]byte)(sectors[2])) {
@@ -139,11 +139,11 @@ func TestDownloadShards(t *testing.T) {
 	// assert that a host losing a sector will mark the sector as lost
 	t.Run("mark sector lost", func(t *testing.T) {
 		client.hostSectors[hosts[0].PublicKey] = make(map[types.Hash256][proto.SectorSize]byte) // remove sector from host 1
-		_, err := sm.DownloadShards(context.Background(), slab, log)
+		_, err := sm.TestDownloadShards(context.Background(), slab, log)
 		if err != nil {
 			// download should still complete successfully
 			t.Fatal(err)
-		} else if sectors := store.LostSectors(t, hosts[0].PublicKey); len(sectors) == 0 {
+		} else if sectors := store.lostSectors(t); len(sectors) == 0 {
 			t.Fatalf("expected lost sector for host %v, got none", hosts[0].PublicKey)
 		} else if len(sectors) != 1 {
 			t.Fatalf("expected 1 lost sector for host %v, got %d %+v", hosts[0].PublicKey, len(sectors), sectors)

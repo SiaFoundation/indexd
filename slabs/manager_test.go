@@ -109,7 +109,7 @@ func newMockStore(t testing.TB) *testStore {
 	}
 }
 
-func (s *testStore) SetSectorsForCheck(t testing.TB, hk types.PublicKey, roots []types.Hash256) {
+func (s *testStore) setSectorsForCheck(t testing.TB, hk types.PublicKey, roots []types.Hash256) {
 	s.AddTestHost(t, hosts.Host{PublicKey: hk, Settings: goodSettings, Usability: hosts.GoodUsability})
 	for _, root := range roots {
 		_, err := s.Exec(context.Background(), `
@@ -134,7 +134,7 @@ func (s *testStore) SetSectorsForCheck(t testing.TB, hk types.PublicKey, roots [
 	}
 }
 
-func (s *testStore) FailedChecks(t testing.TB, hk types.PublicKey) map[types.Hash256]int {
+func (s *testStore) failedChecks(t testing.TB, hk types.PublicKey) map[types.Hash256]int {
 	rows, err := s.Query(context.Background(), `
         SELECT sector_root, consecutive_failed_checks
         FROM sectors s
@@ -160,7 +160,7 @@ func (s *testStore) FailedChecks(t testing.TB, hk types.PublicKey) map[types.Has
 	return result
 }
 
-func (s *testStore) LostSectors(t testing.TB, hk types.PublicKey) map[types.Hash256]struct{} {
+func (s *testStore) lostSectors(t testing.TB) map[types.Hash256]struct{} {
 	rows, err := s.Query(context.Background(), `
 		SELECT sector_root FROM sectors WHERE host_id IS NULL AND contract_sectors_map_id IS NULL
 	`)
@@ -180,7 +180,7 @@ func (s *testStore) LostSectors(t testing.TB, hk types.PublicKey) map[types.Hash
 	return result
 }
 
-func (s *testStore) MigratedSectors(t testing.TB, hk types.PublicKey) map[types.Hash256]struct{} {
+func (s *testStore) migratedSectors(t testing.TB, hk types.PublicKey) map[types.Hash256]struct{} {
 	rows, err := s.Query(context.Background(), `
         SELECT sector_root FROM sectors s
         JOIN hosts h ON s.host_id = h.id
@@ -202,10 +202,9 @@ func (s *testStore) MigratedSectors(t testing.TB, hk types.PublicKey) map[types.
 	return result
 }
 
-func (s *testStore) addTestContract(t testing.TB, hk types.PublicKey) types.FileContractID {
+func (s *testStore) addTestContract(t testing.TB, hk types.PublicKey) {
 	t.Helper()
 
-	fcid := types.FileContractID(hk)
 	rev := types.V2FileContract{
 		HostPublicKey:    hk,
 		Capacity:         math.MaxInt64,
@@ -216,14 +215,13 @@ func (s *testStore) addTestContract(t testing.TB, hk types.PublicKey) types.File
 		RevisionNumber:   1,
 		TotalCollateral:  types.Siacoins(100),
 	}
-	err := s.AddFormedContract(hk, fcid, rev, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
+	err := s.AddFormedContract(hk, types.FileContractID(hk), rev, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return fcid
 }
 
-func (s *testStore) PinSectorToContract(t testing.TB, root types.Hash256, fcid types.FileContractID) {
+func (s *testStore) pinSectorToContract(t testing.TB, root types.Hash256, fcid types.FileContractID) {
 	t.Helper()
 	result, err := s.Exec(context.Background(), `
         UPDATE sectors SET contract_sectors_map_id = (SELECT id FROM contract_sectors_map WHERE contract_id = $2)
