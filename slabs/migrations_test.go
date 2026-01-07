@@ -103,6 +103,7 @@ func TestMigrateSlab(t *testing.T) {
 	}
 	resetNextRepair()
 
+	// assert it's unhealthy
 	unhealthSlabIDs, err := db.UnhealthySlabs(1)
 	if err != nil {
 		t.Fatal(err)
