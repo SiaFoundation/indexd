@@ -30,7 +30,6 @@ CREATE TABLE hosts (
     last_announcement TIMESTAMP WITH TIME ZONE NOT NULL,
     next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     lost_sectors INTEGER NOT NULL DEFAULT 0,
-	unpinned_sectors INTEGER NOT NULL DEFAULT 0 CHECK (unpinned_sectors >= 0),
 
     settings_protocol_version BYTEA NOT NULL DEFAULT '\x000000'::bytea CHECK (LENGTH(settings_protocol_version) = 3),
     settings_release TEXT NOT NULL DEFAULT '',
