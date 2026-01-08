@@ -652,3 +652,89 @@ func TestContractFunding(t *testing.T) {
 		})
 	}
 }
+
+func TestShouldReplaceContract(t *testing.T) {
+	contract := func(append, funding, refresh bool) (cc candidateContract) {
+		t.Helper()
+		if !append {
+			cc.goodForAppend = fmt.Errorf("not good for append")
+		}
+		if !funding {
+			cc.goodForFunding = fmt.Errorf("not good for funding")
+		}
+		if !refresh {
+			cc.goodForRefresh = fmt.Errorf("not good for refresh")
+		}
+		return cc
+	}
+
+	tests := []struct {
+		name      string
+		current   candidateContract
+		candidate candidateContract
+		should    bool
+	}{
+		{
+			name:      "current good for upload and funding",
+			current:   contract(true, true, false),
+			candidate: contract(true, true, true),
+			should:    false,
+		},
+		{
+			name:      "candidate good for upload and funding",
+			current:   contract(true, false, false),
+			candidate: contract(true, true, false),
+			should:    true,
+		},
+		{
+			name:      "current refreshed > not refreshed",
+			current:   contract(true, false, true),
+			candidate: contract(true, false, false),
+			should:    false,
+		},
+		{
+			name:      "candidate refreshed > not refreshed",
+			current:   contract(true, false, false),
+			candidate: contract(true, false, true),
+			should:    true,
+		},
+		{
+			name:      "current append > not append",
+			current:   contract(true, true, false),
+			candidate: contract(false, true, false),
+			should:    false,
+		},
+		{
+			name:      "candidate append > not append",
+			current:   contract(false, true, false),
+			candidate: contract(true, true, false),
+			should:    true,
+		},
+		{
+			name:      "current funding > not funding",
+			current:   contract(false, true, false),
+			candidate: contract(false, false, false),
+			should:    false,
+		},
+		{
+			name:      "candidate funding > not funding",
+			current:   contract(false, false, false),
+			candidate: contract(false, true, false),
+			should:    true,
+		},
+		{
+			name:      "both equally bad",
+			current:   contract(false, false, false),
+			candidate: contract(false, false, false),
+			should:    false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := shouldReplaceContract(test.current, test.candidate)
+			if result != test.should {
+				t.Fatalf("expected %v but got %v", test.should, result)
+			}
+		})
+	}
+}

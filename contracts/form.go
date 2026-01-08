@@ -212,30 +212,6 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 		}
 	}
 
-	// helper to determine if the candidate contract is better
-	// than the current best candidate for this host.
-	// The priority is to have a contract that is as good as possible
-	// for both uploading and funding. A contract that can be refreshed
-	// is preferred over one that cannot to prevent forming unnecessary
-	// extra contracts.
-	shouldReplaceContract := func(current, candidate candidateContract) bool {
-		switch {
-		case current.goodForAppend == nil && current.goodForFunding == nil:
-			// current contract is already good for both uploading and funding
-			return false
-		case current.goodForRefresh == nil && candidate.goodForRefresh != nil:
-			// current contract can be refreshed to become good, but candidate cannot
-			return false
-		case current.goodForAppend == nil && candidate.goodForAppend != nil:
-			// current contract is good for uploading, but candidate is not
-			return false
-		case current.goodForFunding == nil && candidate.goodForFunding != nil:
-			// current contract is good for funding, but candidate is not
-			return false
-		}
-		return true
-	}
-
 	// evaluate all existing contracts to see which hosts do not
 	// currently have a contract that is both good for uploading and
 	// funding and determine the best candidate for refreshing.
@@ -481,4 +457,39 @@ func contractFunding(settings proto.HostSettings, existingData uint64, minAllowa
 		collateral = minHostCollateral // ensure we have at least the minimum collateral
 	}
 	return
+}
+
+// Helper to determine if a candidate contract is better than the current best
+// candidate for this host. The priority is to have a contract that is as good
+// as possible for both uploading and funding. A contract that can be refreshed
+// is preferred over one that cannot to prevent forming unnecessary extra
+// contracts.
+func shouldReplaceContract(current, candidate candidateContract) bool {
+	switch {
+	case current.goodForAppend == nil && current.goodForFunding == nil:
+		// current contract is already good for both uploading and funding
+		return false
+	case candidate.goodForAppend == nil && candidate.goodForFunding == nil:
+		// candidate contract is good for both uploading and funding
+		return true
+	case current.goodForRefresh == nil && candidate.goodForRefresh != nil:
+		// current contract can be refreshed to become good, but candidate cannot
+		return false
+	case current.goodForRefresh != nil && candidate.goodForRefresh == nil:
+		// candidate contract can be refreshed to become good, but current cannot
+		return true
+	case current.goodForAppend == nil && candidate.goodForAppend != nil:
+		// current contract is good for uploading, but candidate is not
+		return false
+	case current.goodForAppend != nil && candidate.goodForAppend == nil:
+		// candidate contract is good for uploading, but current is not
+		return true
+	case current.goodForFunding == nil && candidate.goodForFunding != nil:
+		// current contract is good for funding, but candidate is not
+		return false
+	case current.goodForFunding != nil && candidate.goodForFunding == nil:
+		// candidate contract is good for funding, but current is not
+		return true
+	}
+	return false
 }
