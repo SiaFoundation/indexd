@@ -37,7 +37,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	acc := proto.Account(sk.PublicKey())
 
 	// prepare slab manager
-	sm := slabs.NewTestSlabManager(chain, am, cm, hm, store, client, nil, sk, sk, slabs.WithIntegrityCheckIntervals(time.Millisecond, time.Millisecond))
+	sm := slabs.NewSlabManager(chain, am, cm, hm, store, client, nil, sk, sk, slabs.WithIntegrityCheckIntervals(time.Millisecond, time.Millisecond))
 
 	// prepare helper to reset balance to 3SC to avoid running out of funds
 	resetBalance := func() {
@@ -98,14 +98,14 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	resetBalance()
 	client.integrityErrors[roots[1]] = proto.ErrSectorNotFound // simulate lost sector
 	client.integrityErrors[roots[2]] = proto.ErrNotEnoughFunds // simulate bad sector
-	sm.TestIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
+	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	assertLostAndFailed(roots[2:3], roots[1:2])
 
 	// perform the checks a few more time to reach the maximum number of failed
 	// checks before a bad sector gets removed
 	for i := uint(1); i < sm.MaxFailedIntegrityChecks(); i++ {
 		resetBalance()
-		sm.TestIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
+		sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	}
 	assertLostAndFailed(nil, roots[1:3])
 
@@ -115,7 +115,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 		t.Fatalf("expected 0 triggered refill, got %d", cm.triggeredRefills[acc])
 	}
 	_ = am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, types.ZeroCurrency)
-	sm.TestIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
+	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	if cm.triggeredRefills[acc] != 1 {
 		t.Fatalf("expected 1 triggered refill, got %d", cm.triggeredRefills[acc])
 	}
@@ -124,7 +124,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 func TestIntegrityChecksAlert(t *testing.T) {
 	store := newMockStore(t)
 	alerter := alerts.NewManager()
-	sm := slabs.NewTestSlabManager(newMockChainManager(), newMockAccountManager(), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
+	sm := slabs.NewSlabManager(newMockChainManager(), newMockAccountManager(), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
 
 	// assert there are no alerts
 	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
@@ -142,7 +142,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	}
 
 	// perform integrity checks
-	sm.TestIntegrityChecks(context.Background())
+	sm.PerformIntegrityChecks(context.Background())
 
 	// assert alert was generated
 	var got alerts.Alert
@@ -154,7 +154,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 		got = alerts[0]
 	}
 
-	expected := slabs.NewTestLostSectorsAlert([]types.PublicKey{hk})
+	expected := slabs.NewLostSectorsAlert([]types.PublicKey{hk})
 	got.Timestamp = expected.Timestamp // ignore timestamp
 	if !reflect.DeepEqual(expected, got) {
 		t.Fatal("unexpected alert", expected, got)
@@ -167,7 +167,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	}
 
 	// perform integrity checks
-	sm.TestIntegrityChecks(context.Background())
+	sm.PerformIntegrityChecks(context.Background())
 
 	// alert should be dismissed
 	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {

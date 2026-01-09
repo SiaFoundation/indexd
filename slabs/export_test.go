@@ -17,35 +17,43 @@ const MaxTotalShards = maxTotalShards
 var ErrNotEnoughShards = errNotEnoughShards
 var ErrInsufficientServiceAccountBalance = errInsufficientServiceAccountBalance
 
-func (m *SlabManager) TestUploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) (int, error) {
+//nolint:revive
+func (m *SlabManager) UploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) (int, error) {
 	return m.uploadShards(ctx, slab, shards, available, log)
 }
 
-func (m *SlabManager) TestDownloadShards(ctx context.Context, slab Slab, log *zap.Logger) ([][]byte, error) {
+//nolint:revive
+func (m *SlabManager) DownloadShards(ctx context.Context, slab Slab, log *zap.Logger) ([][]byte, error) {
 	return m.downloadShards(ctx, slab, log)
 }
 
-func (m *SlabManager) TestMigrateSlabs(ctx context.Context, slabIDs []SlabID, log *zap.Logger) error {
+//nolint:revive
+func (m *SlabManager) MigrateSlabs(ctx context.Context, slabIDs []SlabID, log *zap.Logger) error {
 	return m.migrateSlabs(ctx, slabIDs, log)
 }
 
-func (m *SlabManager) TestIntegrityChecksForHost(ctx context.Context, hostKey types.PublicKey, logger *zap.Logger) {
+//nolint:revive
+func (m *SlabManager) PerformIntegrityChecksForHost(ctx context.Context, hostKey types.PublicKey, logger *zap.Logger) {
 	m.performIntegrityChecksForHost(ctx, hostKey, logger)
 }
 
-func (m *SlabManager) TestIntegrityChecks(ctx context.Context) error {
+//nolint:revive
+func (m *SlabManager) PerformIntegrityChecks(ctx context.Context) error {
 	return m.performIntegrityChecks(ctx)
 }
 
-func SectorsToMigrateTest(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, minHostDistanceKm float64) ([]int, []types.PublicKey) {
+//nolint:revive
+func SectorsToMigrate(slab Slab, allHosts []hosts.Host, goodContracts []contracts.Contract, minHostDistanceKm float64) ([]int, []types.PublicKey) {
 	return sectorsToMigrate(slab, allHosts, goodContracts, minHostDistanceKm)
 }
 
-func NewTestSlabManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) *SlabManager {
+//nolint:revive
+func NewSlabManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) *SlabManager {
 	return newSlabManager(chain, am, cm, hm, store, hosts, alerter, migrationAccount, integrityAccount, opts...)
 }
 
-func NewTestLostSectorsAlert(hks []types.PublicKey) alerts.Alert {
+//nolint:revive
+func NewLostSectorsAlert(hks []types.PublicKey) alerts.Alert {
 	return newLostSectorsAlert(hks)
 }
 

@@ -59,7 +59,7 @@ func TestUploadShards(t *testing.T) {
 
 	// create manager
 	alerter := alerts.NewManager()
-	sm := slabs.NewTestSlabManager(chain, am, nil, hm, store, client, alerter, account, types.GeneratePrivateKey())
+	sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerter, account, types.GeneratePrivateKey())
 	sm.SetShardTimeout(50 * time.Millisecond)
 
 	// set balance to 1SC
@@ -105,14 +105,14 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// assert passing in no hosts returns an error and no uploads
-	_, err := sm.TestUploadShards(context.Background(), slab, shards, nil, zap.NewNop())
+	_, err := sm.UploadShards(context.Background(), slab, shards, nil, zap.NewNop())
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
 	assertSectors(t, nil, 0, nil)
 
 	// assert passing in enough hosts uploads all shards
-	uploaded, err := sm.TestUploadShards(context.Background(), slab, shards, availableHosts[:3], log)
+	uploaded, err := sm.UploadShards(context.Background(), slab, shards, availableHosts[:3], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if uploaded != 3 {
@@ -131,7 +131,7 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// assert passing in too few hosts returns the uploaded shards and no error
-	uploaded, err = sm.TestUploadShards(context.Background(), slab, shards, availableHosts[:2], log)
+	uploaded, err = sm.UploadShards(context.Background(), slab, shards, availableHosts[:2], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if uploaded != 2 {
@@ -141,7 +141,7 @@ func TestUploadShards(t *testing.T) {
 
 	// assert hosts are tried until one succeeds
 	client.slowHosts[hosts[0].PublicKey] = time.Second
-	uploaded, err = sm.TestUploadShards(context.Background(), slab, shards, availableHosts, log)
+	uploaded, err = sm.UploadShards(context.Background(), slab, shards, availableHosts, log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if uploaded != 3 {
@@ -153,7 +153,7 @@ func TestUploadShards(t *testing.T) {
 	// do not match
 	corrupted := slabs.Slab{Sectors: slices.Clone(slab.Sectors)}
 	corrupted.Sectors[1].Root = frand.Entropy256()
-	uploaded, err = sm.TestUploadShards(context.Background(), corrupted, shards, availableHosts, log)
+	uploaded, err = sm.UploadShards(context.Background(), corrupted, shards, availableHosts, log)
 	if err != nil {
 		t.Fatal(err)
 	} else if uploaded >= 3 {

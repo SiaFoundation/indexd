@@ -90,7 +90,7 @@ func TestMigrateSlab(t *testing.T) {
 	msk := types.GeneratePrivateKey()
 	ssk := types.GeneratePrivateKey()
 	alerter := alerts.NewManager()
-	mgr := slabs.NewTestSlabManager(chain, am, contractsMgr, hm, db, client, alerter, msk, ssk, slabs.WithLogger(log.Named("slabs")), slabs.WithMinHostDistance(0))
+	mgr := slabs.NewSlabManager(chain, am, contractsMgr, hm, db, client, alerter, msk, ssk, slabs.WithLogger(log.Named("slabs")), slabs.WithMinHostDistance(0))
 
 	for _, h := range hostsList {
 		am.UpdateServiceAccountBalance(context.Background(), h.PublicKey, mgr.MigrationAccount(), types.Siacoins(10))
@@ -113,7 +113,7 @@ func TestMigrateSlab(t *testing.T) {
 		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabIDs[0])
 	}
 
-	if err := mgr.TestMigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
+	if err := mgr.MigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -162,7 +162,7 @@ func TestMigrateSlab(t *testing.T) {
 	am.UpdateServiceAccountBalance(context.Background(), h5.PublicKey, mgr.MigrationAccount(), types.Siacoins(10))
 
 	// migrate the slab again
-	if err := mgr.TestMigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
+	if err := mgr.MigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
 		t.Fatal(err)
 	}
 	assertMigrated(h5.PublicKey, []types.Hash256{roots[1], roots[3]}, 1)
@@ -268,7 +268,7 @@ func TestSectorsToMigrate(t *testing.T) {
 	// helper to assert result of contractsForRepair
 	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
-		toRepair, toUse := slabs.SectorsToMigrateTest(slab, availableHosts, availableContracts, 10)
+		toRepair, toUse := slabs.SectorsToMigrate(slab, availableHosts, availableContracts, 10)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {
