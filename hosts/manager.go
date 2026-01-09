@@ -85,6 +85,7 @@ type (
 		ActiveContractsSize int64                  `json:"activeContractsSize"`
 		PublicKey           types.PublicKey        `json:"publicKey"`
 		LostSectors         int64                  `json:"lostSectors"`
+		UnpinnedSectors     int64                  `json:"unpinnedSectors"`
 		TotalUsage          types.Currency         `json:"totalUsage"`
 		ProtocolVersion     proto4.ProtocolVersion `json:"protocolVersion"`
 		Release             string                 `json:"release"`

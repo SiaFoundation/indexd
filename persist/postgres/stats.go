@@ -120,6 +120,7 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 					h.id,
 					h.public_key,
 					h.lost_sectors,
+					h.unpinned_sectors,
 					h.usage_account_funding,
 					h.usage_total_spent,
 					h.settings_protocol_version,
@@ -139,6 +140,7 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 			SELECT
 				h.public_key,
 				h.lost_sectors,
+				h.unpinned_sectors,
 				COALESCE(cs.total_contracts_size, 0) AS total_contracts_size,
 				h.usage_account_funding,
 				h.usage_total_spent,
@@ -170,6 +172,7 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 			if err := rows.Scan(
 				(*sqlPublicKey)(&hs.PublicKey),
 				&hs.LostSectors,
+				&hs.UnpinnedSectors,
 				&hs.ActiveContractsSize,
 				(*sqlCurrency)(&hs.AccountUsage),
 				(*sqlCurrency)(&hs.TotalUsage),

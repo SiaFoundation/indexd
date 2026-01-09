@@ -112,6 +112,11 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 			Value:  float64(h.LostSectors),
 		},
 		{
+			Name:   "indexd_host_unpinned_sectors",
+			Labels: labels,
+			Value:  float64(h.UnpinnedSectors),
+		},
+		{
 			Name:   "indexd_host_active_contracts_size",
 			Labels: labels,
 			Value:  float64(h.ActiveContractsSize),

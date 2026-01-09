@@ -845,6 +845,10 @@ components:
             type: integer
             format: int64
             description: Total number of sectors lost on this host
+          unpinnedSectors:
+            type: integer
+            format: int64
+            description: Total number of unpinned sectors on this host
           totalUsage:
             allOf:
               - $ref: "#/components/schemas/Currency"
