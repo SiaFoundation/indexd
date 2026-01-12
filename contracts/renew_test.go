@@ -1,4 +1,4 @@
-package contracts
+package contracts_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -26,8 +27,11 @@ func (c *hostClientMock) RenewContract(ctx context.Context, settings proto.HostS
 		Contract: rhp.ContractRevision{
 			ID: frand.Entropy256(),
 			Revision: types.V2FileContract{
+				HostPublicKey:    c.hostKey,
 				ExpirationHeight: params.ProofHeight + proto.ProofWindow,
 				ProofHeight:      params.ProofHeight,
+				TotalCollateral:  params.Collateral,
+				RenterOutput:     types.SiacoinOutput{Value: params.Allowance},
 			},
 		},
 		RenewalSet: rhp.TransactionSet{
@@ -51,54 +55,55 @@ func TestPerformContractRenewals(t *testing.T) {
 		renewWindow = 10
 	)
 
-	// helper to create a good host
-	goodHost := func(i int) hosts.Host {
-		return hosts.Host{
-			PublicKey: types.PublicKey{byte(i)},
-			Settings:  badSettings, // will be updated by scan to good settings
-			Usability: hosts.GoodUsability,
-		}
-	}
-
-	store := &storeMock{}
-	hm := newHostManagerMock(store)
+	store := newContractTestStore(t)
+	hmMock := newHostManagerMock(store)
 
 	// prepare hosts
 
 	// first one is good with a good contract and a bad one
 	good := goodHost(1)
-	hm.settings[good.PublicKey] = goodSettings
-	store.addTestContract(t, good.PublicKey, true, types.FileContractID{1})  // will renew
-	store.addTestContract(t, good.PublicKey, false, types.FileContractID{2}) // won't renew
+	store.addTestHost(t, good)
+	hmMock.settings[good.PublicKey] = goodSettings
 
 	// second one is bad since it's not accepting contracts with a good contract
 	bad := goodHost(2)
-	hm.settings[bad.PublicKey] = badSettings
-	store.addTestContract(t, bad.PublicKey, true, types.FileContractID{3}) // won't renew
+	bad.Settings = badSettings
+	bad.Usability = hosts.Usability{} // mark as not usable
+	store.addTestHost(t, bad)
+	hmMock.settings[bad.PublicKey] = badSettings
 
-	// update contracts
-	blockHeight := cmMock.state.Index.Height
-	for i := range store.contracts {
-		store.contracts[i].ProofHeight = blockHeight + renewWindow + 1
-		store.contracts[i].ExpirationHeight = 9999
-	}
+	// add contracts
+	blockHeight := cmMock.TipState().Index.Height
+	fcid1 := store.addTestContract(t, good.PublicKey, true, types.FileContractID{1})  // will renew
+	fcid2 := store.addTestContract(t, good.PublicKey, false, types.FileContractID{2}) // won't renew
+	fcid3 := store.addTestContract(t, bad.PublicKey, true, types.FileContractID{3})   // won't renew
 
-	// populate store
-	store.hosts = map[types.PublicKey]hosts.Host{
-		good.PublicKey: good,
-		bad.PublicKey:  bad,
-	}
+	// update contracts with proof height within renew window
+	store.setContractProofHeight(t, fcid1, blockHeight+renewWindow+1)
+	store.setContractExpirationHeight(t, fcid1, 9999)
+	store.setContractProofHeight(t, fcid2, blockHeight+renewWindow+1)
+	store.setContractExpirationHeight(t, fcid2, 9999)
+	store.setContractProofHeight(t, fcid3, blockHeight+renewWindow+1)
+	store.setContractExpirationHeight(t, fcid3, 9999)
 
 	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, nil, cmMock, store, dialer, hm, syncerMock, wallet)
+	contracts := contracts.NewTestContractManager(renterKey, amMock, nil, cmMock, store, dialer, hmMock, syncerMock, wallet)
 
 	assertRenewal := func(renewedFrom types.FileContractID, proofHeight uint64, call renewContractCall) {
 		t.Helper()
-		if call.settings != goodSettings {
-			t.Fatalf("expected settings %v+, got %v+", goodSettings, call.settings)
-		} else if call.params.ContractID != renewedFrom {
+		// compare settings except ValidUntil (timezone may differ after db round-trip)
+		expected := goodSettings
+		got := call.settings
+		if !expected.Prices.ValidUntil.Equal(got.Prices.ValidUntil) {
+			t.Fatalf("expected ValidUntil %v, got %v", expected.Prices.ValidUntil, got.Prices.ValidUntil)
+		}
+		expected.Prices.ValidUntil = got.Prices.ValidUntil // normalize for struct comparison
+		if expected != got {
+			t.Fatalf("expected settings %v+, got %v+", expected, got)
+		}
+		if call.params.ContractID != renewedFrom {
 			t.Fatalf("expected renewedFrom %v, got %v", renewedFrom, call.params.ContractID)
 		} else if call.params.ProofHeight != proofHeight {
 			t.Fatalf("expected proof height %v, got %v", proofHeight, call.params.ProofHeight)
@@ -106,7 +111,7 @@ func TestPerformContractRenewals(t *testing.T) {
 	}
 
 	// perform renewals when no contract is ready for it
-	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
+	if err := contracts.PerformContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
 	} else if len(dialer.HostClient(good.PublicKey).renewCalls) != 0 {
 		t.Fatal("expected good host to not be dialed")
@@ -114,10 +119,12 @@ func TestPerformContractRenewals(t *testing.T) {
 		t.Fatal("expected bad host to not be dialed")
 	}
 
+	cmMock.mu.Lock()
 	cmMock.state.Index.Height++
 	blockHeight = cmMock.state.Index.Height
+	cmMock.mu.Unlock()
 
-	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
+	if err := contracts.PerformContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
 	} else if len(dialer.HostClient(good.PublicKey).renewCalls) != 1 {
 		t.Fatalf("expected one renewal, got %v", len(dialer.HostClient(good.PublicKey).renewCalls))
@@ -127,10 +134,13 @@ func TestPerformContractRenewals(t *testing.T) {
 	assertRenewal(types.FileContractID{1}, blockHeight+period+renewWindow, dialer.HostClient(good.PublicKey).renewCalls[0])
 
 	// assert renewal made it into the store
-	if len(store.contracts) != 4 {
-		t.Fatalf("expected 4 contracts, got %v", len(store.contracts))
+	allContracts, err := store.Contracts(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(allContracts) != 4 {
+		t.Fatalf("expected 4 contracts, got %v", len(allContracts))
 	}
-	for _, c := range store.contracts {
+	for _, c := range allContracts {
 		switch c.ID {
 		case types.FileContractID{1}:
 			if c.RenewedTo == (types.FileContractID{}) {
@@ -154,7 +164,7 @@ func TestPerformContractRenewals(t *testing.T) {
 	}
 
 	// assert consecutive calls don't keep renewing the same contract
-	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
+	if err := contracts.PerformContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
 	} else if len(dialer.HostClient(good.PublicKey).renewCalls) != 1 {
 		t.Fatalf("expected one renewal, got %v", len(dialer.HostClient(good.PublicKey).renewCalls))
@@ -167,61 +177,36 @@ func TestRenewalAllowance(t *testing.T) {
 	amMock := &accountsManagerMock{}
 	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
-	badSettings := proto.HostSettings{}
 
 	const (
 		period      = 50
 		renewWindow = 10
 	)
 
-	// helper to create a good host
-	goodHost := func(i int) hosts.Host {
-		return hosts.Host{
-			PublicKey: types.PublicKey{byte(i)},
-			Settings:  badSettings, // will be updated by scan to good settings
-			Usability: hosts.GoodUsability,
-		}
-	}
-
-	store := &storeMock{}
-	hm := newHostManagerMock(store)
-
-	blockHeight := cmMock.state.Index.Height
-	formContract := func(contractID types.FileContractID, hostKey types.PublicKey, good bool) {
-		t.Helper()
-		revision := newTestRevision(hostKey)
-		revision.ProofHeight = blockHeight + renewWindow + 1
-		revision.ExpirationHeight = 9999
-		err := store.AddFormedContract(hostKey, contractID, revision, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), proto.Usage{})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !good {
-			for i := range store.contracts {
-				if store.contracts[i].ID == contractID {
-					store.contracts[i].Good = false
-				}
-			}
-		}
-	}
+	store := newContractTestStore(t)
+	hmMock := newHostManagerMock(store)
 
 	// prepare hosts
-
-	// first one is good with a good contract and a bad one
 	good := goodHost(1)
-	hm.settings[good.PublicKey] = goodSettings
-	formContract(types.FileContractID{1}, good.PublicKey, true)  // will renew
-	formContract(types.FileContractID{2}, good.PublicKey, false) // won't renew
+	store.addTestHost(t, good)
+	hmMock.settings[good.PublicKey] = goodSettings
 
-	// populate store
-	store.hosts = map[types.PublicKey]hosts.Host{
-		good.PublicKey: good,
-	}
+	blockHeight := cmMock.TipState().Index.Height
+
+	// add contracts
+	fcid1 := store.addTestContract(t, good.PublicKey, true, types.FileContractID{1})  // will renew
+	fcid2 := store.addTestContract(t, good.PublicKey, false, types.FileContractID{2}) // won't renew
+
+	// update contracts with proof height within renew window
+	store.setContractProofHeight(t, fcid1, blockHeight+renewWindow+1)
+	store.setContractExpirationHeight(t, fcid1, 9999)
+	store.setContractProofHeight(t, fcid2, blockHeight+renewWindow+1)
+	store.setContractExpirationHeight(t, fcid2, 9999)
 
 	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, nil, cmMock, store, dialer, hm, syncerMock, wallet)
+	cm := contracts.NewTestContractManager(renterKey, amMock, nil, cmMock, store, dialer, hmMock, syncerMock, wallet)
 
 	assertRenewal := func(allowance types.Currency, call renewContractCall) {
 		t.Helper()
@@ -230,15 +215,16 @@ func TestRenewalAllowance(t *testing.T) {
 		}
 	}
 
+	cmMock.mu.Lock()
 	cmMock.state.Index.Height++
-	blockHeight = cmMock.state.Index.Height
+	cmMock.mu.Unlock()
 
-	store.activeAccounts = 1000
-	if err := contracts.performContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
+	store.setActiveAccountsCount(t, 1000)
+	if err := cm.PerformContractRenewals(context.Background(), period, renewWindow, zap.NewNop()); err != nil {
 		t.Fatal(err)
 	}
 
-	allowance, err := contracts.ContractFundTarget(context.Background(), good, minAllowance)
+	allowance, err := cm.ContractFundTarget(context.Background(), good, contracts.MinAllowance)
 	if err != nil {
 		t.Fatal(err)
 	}

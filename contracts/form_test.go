@@ -1,4 +1,4 @@
-package contracts
+package contracts_test
 
 import (
 	"context"
@@ -7,32 +7,54 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
 
 var (
-	// goodSettings are a minimal settings instance leading to a host to be
-	// considered good
 	goodSettings = proto.HostSettings{
+		ProtocolVersion:    rhp.ProtocolVersion501,
 		AcceptingContracts: true,
-		RemainingStorage:   minRemainingStorage,
+		RemainingStorage:   contracts.MinRemainingStorage,
 		Prices: proto.HostPrices{
 			ContractPrice: types.Siacoins(1),
-			Collateral:    types.NewCurrency64(1),
-			StoragePrice:  types.NewCurrency64(1),
+			// 100 SC / TB / month - satisfies min collateral and >= 2 * storage_price
+			Collateral:   types.Siacoins(100).Div64(1e12).Div64(4320),
+			StoragePrice: types.Siacoins(50).Div64(1e12).Div64(4320), // 50 SC / TB / month
+			ValidUntil:   time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 		MaxContractDuration: 90 * 144,
 		MaxCollateral:       types.Siacoins(1000),
 	}
 )
+
+func goodHost(i int) hosts.Host {
+	countries := []string{"US", "DE", "FR", "CN", "JP", "IN", "BR", "RU", "GB", "IT", "ES", "CA", "AU"}
+	return hosts.Host{
+		PublicKey:   types.PublicKey{byte(i)},
+		CountryCode: countries[i%len(countries)],
+		Latitude:    float64(i) * 10,
+		Longitude:   float64(i) * 10,
+		Addresses: []chain.NetAddress{
+			{
+				Protocol: siamux.Protocol,
+				Address:  "host.com",
+			},
+		},
+		Settings:  goodSettings,
+		Usability: hosts.GoodUsability,
+	}
+}
 
 type formContractCall struct {
 	settings proto.HostSettings
@@ -54,17 +76,17 @@ func (d *dialerMock) HostClient(hostKey types.PublicKey) *hostClientMock {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if _, ok := d.clients[hostKey]; !ok {
-		d.clients[hostKey] = newHostClientMock()
+		d.clients[hostKey] = newHostClientMock(hostKey)
 	}
 	return d.clients[hostKey]
 }
 
-func (d *dialerMock) DialHost(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress) (HostClient, error) {
+func (d *dialerMock) DialHost(ctx context.Context, hostKey types.PublicKey, addrs []chain.NetAddress) (contracts.HostClient, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	if _, ok := d.clients[hostKey]; !ok {
-		d.clients[hostKey] = newHostClientMock()
+		d.clients[hostKey] = newHostClientMock(hostKey)
 	}
 	return d.clients[hostKey], nil
 }
@@ -83,6 +105,7 @@ func (d *dialerMock) TotalFormations() int {
 type hostClientMock struct {
 	mu        sync.Mutex
 	failsRPCs bool
+	hostKey   types.PublicKey
 
 	formedContracts map[types.FileContractID]types.V2FileContract
 
@@ -98,8 +121,9 @@ type hostClientMock struct {
 	missingSectors     map[types.Hash256]struct{}
 }
 
-func newHostClientMock() *hostClientMock {
+func newHostClientMock(hostKey types.PublicKey) *hostClientMock {
 	return &hostClientMock{
+		hostKey:         hostKey,
 		sectorRoots:     make(map[types.FileContractID][]types.Hash256),
 		missingSectors:  make(map[types.Hash256]struct{}),
 		formedContracts: make(map[types.FileContractID]types.V2FileContract),
@@ -176,6 +200,7 @@ func (c *hostClientMock) FormContract(ctx context.Context, settings proto.HostSe
 	revision := rhp.ContractRevision{
 		ID: frand.Entropy256(),
 		Revision: types.V2FileContract{
+			HostPublicKey:    c.hostKey,
 			ExpirationHeight: params.ProofHeight + proto.ProofWindow,
 			ProofHeight:      params.ProofHeight,
 			TotalCollateral:  params.Collateral,
@@ -195,14 +220,14 @@ func (c *hostClientMock) FormContract(ctx context.Context, settings proto.HostSe
 }
 
 type hostManagerMock struct {
+	store    testStore
 	settings map[types.PublicKey]proto.HostSettings
-	store    *storeMock
 }
 
-func newHostManagerMock(store *storeMock) *hostManagerMock {
+func newHostManagerMock(store testStore) *hostManagerMock {
 	return &hostManagerMock{
-		settings: make(map[types.PublicKey]proto.HostSettings),
 		store:    store,
+		settings: make(map[types.PublicKey]proto.HostSettings),
 	}
 }
 
@@ -213,7 +238,7 @@ func (s *hostManagerMock) WithScannedHost(ctx context.Context, hk types.PublicKe
 	settings, ok := s.settings[hk]
 	if !ok {
 		return hosts.ErrNotFound
-	} else if err := s.store.UpdateHostSettings(hk, settings); err != nil {
+	} else if err := s.store.UpdateHostScan(hk, settings, geoip.Location{}, true, time.Now()); err != nil {
 		return err
 	}
 	h, err := s.store.Host(hk)
@@ -259,12 +284,13 @@ func (s *hostManagerMock) UsabilitySettings(ctx context.Context) (hosts.Usabilit
 
 func TestPerformContractFormation(t *testing.T) {
 	log := zaptest.NewLogger(t)
+	store := newContractTestStore(t)
 	amMock := &accountsManagerMock{}
 	cmMock := newChainManagerMock()
 	blockHeight := cmMock.TipState().Index.Height
 	syncerMock := &syncerMock{}
 
-	maintenanceSettings := MaintenanceSettings{
+	maintenanceSettings := contracts.MaintenanceSettings{
 		Enabled:         true,
 		Period:          100,
 		RenewWindow:     10,
@@ -294,7 +320,6 @@ func TestPerformContractFormation(t *testing.T) {
 		}
 	}
 
-	store := &storeMock{}
 	hm := newHostManagerMock(store)
 
 	// prepare hosts
@@ -303,47 +328,42 @@ func TestPerformContractFormation(t *testing.T) {
 		h := goodHost(i + 1)
 		good = append(good, h)
 		hm.settings[h.PublicKey] = goodSettings
+		store.addTestHost(t, h)
 	}
 
 	var bad []hosts.Host
 	badUsability := goodHost(7)
 	badUsability.Usability.AcceptingContracts = false
 	hm.settings[badUsability.PublicKey] = goodSettings
+	store.addTestHost(t, badUsability)
 	bad = append(bad, badUsability)
 
 	badOutOfStorage := goodHost(8)
 	badOutOfStorage.Settings = oosSettings
 	hm.settings[badOutOfStorage.PublicKey] = oosSettings
+	store.addTestHost(t, badOutOfStorage)
 	bad = append(bad, badOutOfStorage)
 
 	badPriceLeeway := goodHost(9)
 	badPriceLeeway.Settings.Prices.StoragePrice = hosts.DefaultUsabilitySettings.MaxStoragePrice
 	hm.settings[badPriceLeeway.PublicKey] = badPriceLeeway.Settings
+	store.addTestHost(t, badPriceLeeway)
 	bad = append(bad, badPriceLeeway)
-
-	// populate store
-	store.hosts = make(map[types.PublicKey]hosts.Host)
-	for _, good := range good {
-		store.hosts[good.PublicKey] = good
-	}
-	for _, bad := range bad {
-		store.hosts[bad.PublicKey] = bad
-	}
 
 	dialer := newDialerMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
-	contracts := newContractManager(renterKey, amMock, nil, cmMock, store, dialer, hm, syncerMock, wallet)
+	cm := contracts.NewTestContractManager(renterKey, amMock, nil, cmMock, store, dialer, hm, syncerMock, wallet)
 
-	assertGoodContracts := func(good, formations, refreshes int) {
+	assertGoodContracts := func(goodCount, formations, refreshes int) {
 		t.Helper()
 
 		// fetch good contracts from the store
-		contracts, err := store.Contracts(0, 100, WithGood(true))
+		storedContracts, err := store.Contracts(0, 100, contracts.WithGood(true))
 		if err != nil {
 			t.Fatal(err)
-		} else if len(contracts) != good {
-			t.Fatalf("expected %v contracts, got %v", good, len(contracts))
+		} else if len(storedContracts) != goodCount {
+			t.Fatalf("expected %v contracts, got %v", goodCount, len(storedContracts))
 		}
 
 		// assert that none of the contracts are with bad hosts
@@ -351,7 +371,7 @@ func TestPerformContractFormation(t *testing.T) {
 		for _, b := range bad {
 			badHostsMap[b.PublicKey] = struct{}{}
 		}
-		for _, contract := range contracts {
+		for _, contract := range storedContracts {
 			if _, isBad := badHostsMap[contract.HostKey]; isBad {
 				t.Fatalf("expected only good hosts, but found contract with bad host %v", contract.HostKey)
 			}
@@ -392,7 +412,7 @@ func TestPerformContractFormation(t *testing.T) {
 	}
 
 	// perform formations, should not be able to form enough contracts yet
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(3, 3, 0)
@@ -402,27 +422,31 @@ func TestPerformContractFormation(t *testing.T) {
 	duplicateLocationHost := goodHost(4)
 	duplicateLocationHost.Latitude = good[0].Latitude
 	duplicateLocationHost.Longitude = good[0].Longitude
-	store.hosts[duplicateLocationHost.PublicKey] = duplicateLocationHost
+	store.addTestHost(t, duplicateLocationHost)
 	hm.settings[duplicateLocationHost.PublicKey] = duplicateLocationHost.Settings
 
 	// perform formations again, should be no-op with no good hosts
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(3, 3, 0)
 
 	// add a new good host
 	newGoodHost := goodHost(5)
-	store.hosts[newGoodHost.PublicKey] = newGoodHost
+	store.addTestHost(t, newGoodHost)
 	hm.settings[newGoodHost.PublicKey] = newGoodHost.Settings
 	good = append(good, newGoodHost)
 
-	reviseHostContract := func(hostKey types.PublicKey, fn func(c *Contract)) {
+	reviseHostContract := func(hostKey types.PublicKey, fn func(c contracts.Contract)) {
 		t.Helper()
 
-		for i := range store.contracts {
-			if store.contracts[i].HostKey == hostKey {
-				fn(&store.contracts[i])
+		storedContracts, err := store.Contracts(0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range storedContracts {
+			if c.HostKey == hostKey {
+				fn(c)
 				return
 			}
 		}
@@ -430,47 +454,47 @@ func TestPerformContractFormation(t *testing.T) {
 	}
 
 	// perform formations again, this time it should form a new contract
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(4, 4, 0)
 
 	// perform formations again, this time it's a no-op
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(4, 4, 0)
 
 	// revise one of the contracts so that it is empty
-	reviseHostContract(good[0].PublicKey, func(c *Contract) {
-		c.RemainingAllowance = types.ZeroCurrency
+	reviseHostContract(good[0].PublicKey, func(c contracts.Contract) {
+		store.setContractRemainingAllowance(t, c.ID, types.ZeroCurrency)
 	})
 
 	// perform formations again, should refresh the contract
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(5, 4, 1)
 
 	// perform formations again, this time it's a no-op
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(5, 4, 1)
 
 	// mark another contract as full
-	reviseHostContract(good[2].PublicKey, func(c *Contract) {
-		c.Size = maxContractSize
+	reviseHostContract(good[2].PublicKey, func(c contracts.Contract) {
+		store.setContractSize(t, c.ID, contracts.MaxContractSize)
 	})
 
 	// perform formations again, should form a new contract
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(6, 5, 1)
 
 	// perform formations again, this time it's a no-op
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(6, 5, 1)
@@ -478,22 +502,22 @@ func TestPerformContractFormation(t *testing.T) {
 	// mark one of the good hosts as bad
 	good[1].Settings.AcceptingContracts = false
 	good[1].Usability.AcceptingContracts = false
-	store.hosts[good[1].PublicKey] = good[1]
+	store.addTestHost(t, good[1]) // update host
 	hm.settings[good[1].PublicKey] = good[1].Settings
 
 	// perform formations again, should be no-op with no good hosts
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(6, 5, 1)
 
 	// add a new good host
 	newGoodHost = goodHost(10)
-	store.hosts[newGoodHost.PublicKey] = newGoodHost
+	store.addTestHost(t, newGoodHost)
 	hm.settings[newGoodHost.PublicKey] = newGoodHost.Settings
 
 	// perform formations again, should form a new contract
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(7, 6, 1)
@@ -505,18 +529,18 @@ func TestPerformContractFormation(t *testing.T) {
 
 	// perform formations again, should have one less good contract but
 	// otherwise be a no-op
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(6, 6, 1)
 
 	// add another new good host
 	newGoodHost = goodHost(11)
-	store.hosts[newGoodHost.PublicKey] = newGoodHost
+	store.addTestHost(t, newGoodHost)
 	hm.settings[newGoodHost.PublicKey] = newGoodHost.Settings
 
 	// perform formations again, should form a new contract
-	if err := contracts.performContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
+	if err := cm.PerformContractFormation(context.Background(), maintenanceSettings, blockHeight, log); err != nil {
 		t.Fatal(err)
 	}
 	assertGoodContracts(7, 7, 1)
@@ -567,7 +591,7 @@ func TestContractFunding(t *testing.T) {
 			initialDataSize: 0,
 			minAllowance:    types.Siacoins(1),
 			calc: func(settings proto.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
-				return types.Siacoins(1), minHostCollateral // clamped to min
+				return types.Siacoins(1), contracts.MinHostCollateral // clamped to min
 			},
 		},
 		{
@@ -578,16 +602,16 @@ func TestContractFunding(t *testing.T) {
 				settings.Prices.Collateral = types.Siacoins(1) // want to test that only allowance is clamped to the min
 			},
 			calc: func(settings proto.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
-				_, expectedCollateral = calcCost(settings, minContractGrowthRate/proto.SectorSize) // value should be minimum growth rate
-				return types.Siacoins(10), expectedCollateral                                      // clamped to min allowance
+				_, expectedCollateral = calcCost(settings, contracts.MinContractGrowthRate/proto.SectorSize) // value should be minimum growth rate
+				return types.Siacoins(10), expectedCollateral                                                // clamped to min allowance
 			},
 		},
 		{
 			name:            "clamped to min collateral",
 			initialDataSize: 0,
 			calc: func(settings proto.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
-				expectedAllowance, _ = calcCost(settings, minContractGrowthRate/proto.SectorSize) // value should be minimum growth rate
-				return expectedAllowance, minHostCollateral                                       // clamped to min collateral
+				expectedAllowance, _ = calcCost(settings, contracts.MinContractGrowthRate/proto.SectorSize) // value should be minimum growth rate
+				return expectedAllowance, contracts.MinHostCollateral                                       // clamped to min collateral
 			},
 		},
 		{
@@ -597,7 +621,7 @@ func TestContractFunding(t *testing.T) {
 				settings.Prices.Collateral = types.Siacoins(1) // need to raise prices to be above minHostCollateral
 			},
 			calc: func(settings proto.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
-				return calcCost(settings, minContractGrowthRate/proto.SectorSize) // value should still be minimum growth rate
+				return calcCost(settings, contracts.MinContractGrowthRate/proto.SectorSize) // value should still be minimum growth rate
 			},
 		},
 		{
@@ -617,7 +641,7 @@ func TestContractFunding(t *testing.T) {
 				settings.Prices.Collateral = types.Siacoins(1) // need to raise prices to be above minHostCollateral
 			},
 			calc: func(settings proto.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
-				return calcCost(settings, maxContractGrowthRate/proto.SectorSize) // clamped to max
+				return calcCost(settings, contracts.MaxContractGrowthRate/proto.SectorSize) // clamped to max
 			},
 		},
 		{
@@ -628,8 +652,8 @@ func TestContractFunding(t *testing.T) {
 				settings.MaxCollateral = types.Siacoins(10)    // want to test that collateral is clamped to the host's max
 			},
 			calc: func(settings proto.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
-				expectedAllowance, _ = calcCost(settings, maxContractGrowthRate/proto.SectorSize) // clamped to max
-				expectedCollateral = types.Siacoins(10)                                           // clamped to the host's max collateral)
+				expectedAllowance, _ = calcCost(settings, contracts.MaxContractGrowthRate/proto.SectorSize) // clamped to max
+				expectedCollateral = types.Siacoins(10)                                                     // clamped to the host's max collateral)
 				return
 			},
 		},
@@ -642,7 +666,7 @@ func TestContractFunding(t *testing.T) {
 				test.modSettings(&settings)
 			}
 			expectedAllowance, expectedCollateral := test.calc(settings)
-			allowance, collateral := contractFunding(settings, test.initialDataSize, test.minAllowance, 1)
+			allowance, collateral := contracts.ContractFunding(settings, test.initialDataSize, test.minAllowance, 1)
 			if !allowance.Equals(expectedAllowance) {
 				t.Errorf("expected allowance %v but got %v", expectedAllowance, allowance)
 			}
@@ -654,24 +678,25 @@ func TestContractFunding(t *testing.T) {
 }
 
 func TestShouldReplaceContract(t *testing.T) {
-	contract := func(gfa, gff, gfr bool) (cc candidateContract) {
+	contract := func(gfa, gff, gfr bool) contracts.CandidateContract {
 		t.Helper()
+		var goodForAppend, goodForFunding, goodForRefresh error
 		if !gfa {
-			cc.goodForAppend = fmt.Errorf("not good for append")
+			goodForAppend = fmt.Errorf("not good for append")
 		}
 		if !gff {
-			cc.goodForFunding = fmt.Errorf("not good for funding")
+			goodForFunding = fmt.Errorf("not good for funding")
 		}
 		if !gfr {
-			cc.goodForRefresh = fmt.Errorf("not good for refresh")
+			goodForRefresh = fmt.Errorf("not good for refresh")
 		}
-		return cc
+		return contracts.NewCandidateContract(goodForAppend, goodForFunding, goodForRefresh)
 	}
 
 	tests := []struct {
 		name      string
-		current   candidateContract
-		candidate candidateContract
+		current   contracts.CandidateContract
+		candidate contracts.CandidateContract
 		should    bool
 	}{
 		{
@@ -737,7 +762,7 @@ func TestShouldReplaceContract(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result := shouldReplaceContract(test.current, test.candidate)
+			result := contracts.ShouldReplaceContract(test.current, test.candidate)
 			if result != test.should {
 				t.Fatalf("expected %v but got %v", test.should, result)
 			}
@@ -745,7 +770,7 @@ func TestShouldReplaceContract(t *testing.T) {
 	}
 
 	// run exhaustive combinations for important cases
-	enumerate := func(gfa, gff, gfr []bool) (candidates []candidateContract) {
+	enumerate := func(gfa, gff, gfr []bool) (candidates []contracts.CandidateContract) {
 		t.Helper()
 		for _, gfa := range gfa {
 			for _, gff := range gff {
@@ -757,12 +782,12 @@ func TestShouldReplaceContract(t *testing.T) {
 		return
 	}
 
-	assertShouldReplace := func(current []candidateContract, candidates []candidateContract, shouldReplace bool) {
+	assertShouldReplace := func(current []contracts.CandidateContract, candidates []contracts.CandidateContract, shouldReplace bool) {
 		t.Helper()
 		for _, current := range current {
 			for _, candidate := range candidates {
-				if replaces := shouldReplaceContract(current, candidate); replaces != shouldReplace {
-					t.Fatalf("expected replace=%v for candidate gfa=%v, gff=%v, gfr=%v, got %v", shouldReplace, candidate.goodForAppend == nil, candidate.goodForFunding == nil, candidate.goodForRefresh == nil, replaces)
+				if replaces := contracts.ShouldReplaceContract(current, candidate); replaces != shouldReplace {
+					t.Fatalf("expected replace=%v for candidate gfa=%v, gff=%v, gfr=%v, got %v", shouldReplace, candidate.GoodForAppend() == nil, candidate.GoodForFunding() == nil, candidate.GoodForRefresh() == nil, replaces)
 				}
 			}
 		}
@@ -774,8 +799,8 @@ func TestShouldReplaceContract(t *testing.T) {
 	assertShouldReplace(goodContracts, anyContracts, false)
 
 	// a contract that is not good should be replaced by any good contract
-	badContracts := slices.DeleteFunc(slices.Clone(anyContracts), func(c candidateContract) bool {
-		return c.goodForAppend == nil && c.goodForFunding == nil
+	badContracts := slices.DeleteFunc(slices.Clone(anyContracts), func(c contracts.CandidateContract) bool {
+		return c.GoodForAppend() == nil && c.GoodForFunding() == nil
 	})
 	assertShouldReplace(badContracts, goodContracts, true)
 
