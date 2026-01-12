@@ -1,25 +1,83 @@
-package contracts
+package contracts_test
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
-	"maps"
+	"fmt"
 	"reflect"
-	"strings"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
-	"slices"
-
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/internal/testutils"
+	"go.sia.tech/indexd/subscriber"
+	"go.uber.org/zap/zaptest"
 )
+
+type sqlCurrency types.Currency
+
+func (c sqlCurrency) Value() (driver.Value, error) {
+	return types.Currency(c).ExactString(), nil
+}
+
+func (c *sqlCurrency) Scan(src any) error {
+	switch src := src.(type) {
+	case string:
+		return (*types.Currency)(c).UnmarshalText([]byte(src))
+	case []byte:
+		return (*types.Currency)(c).UnmarshalText(src)
+	default:
+		return fmt.Errorf("cannot scan %T to Currency", src)
+	}
+}
+
+type sqlHash256 types.Hash256
+
+func (h *sqlHash256) Scan(src any) error {
+	switch src := src.(type) {
+	case []byte:
+		if len(src) != len(sqlHash256{}) {
+			return fmt.Errorf("failed to scan source into Hash256 due to invalid number of bytes %v != %v: %v", len(src), len(sqlHash256{}), src)
+		}
+		copy(h[:], src)
+		return nil
+	default:
+		return fmt.Errorf("cannot scan %T to Hash256", src)
+	}
+}
+
+func (h sqlHash256) Value() (driver.Value, error) {
+	return h[:], nil
+}
+
+type sqlPublicKey types.PublicKey
+
+func (pk sqlPublicKey) Value() (driver.Value, error) {
+	return pk[:], nil
+}
+
+func (pk *sqlPublicKey) Scan(src any) error {
+	switch src := src.(type) {
+	case []byte:
+		if len(src) != len(sqlPublicKey{}) {
+			return fmt.Errorf("failed to scan source into PublicKey due to invalid number of bytes %v != %v: %v", len(src), len(sqlPublicKey{}), src)
+		}
+		copy(pk[:], src)
+		return nil
+	default:
+		return fmt.Errorf("cannot scan %T to PublicKey", src)
+	}
+}
 
 type mockProofUpdater struct {
 	updateFn func(*types.StateElement)
@@ -29,426 +87,296 @@ func (u *mockProofUpdater) UpdateElementProof(stateElement *types.StateElement) 
 	u.updateFn(stateElement)
 }
 
-type storeMock struct {
-	mu                        sync.Mutex
-	contracts                 []Contract
-	revisions                 []rhp.ContractRevision
-	toBroadcast               []types.V2FileContractElement
-	pruneCalls                int
-	pruneContractSectorsCalls int
-	rejectCalls               int
-	activeAccounts            uint64
-	settings                  MaintenanceSettings
-	hosts                     map[types.PublicKey]hosts.Host
-	sectors                   map[types.PublicKey][]sector
+type testStore struct {
+	testutils.TestStore
 }
 
-type sector struct {
-	root       types.Hash256
-	contractID *types.FileContractID
-}
-
-func newStoreMock() *storeMock {
-	return &storeMock{
-		hosts:          make(map[types.PublicKey]hosts.Host),
-		sectors:        make(map[types.PublicKey][]sector),
-		activeAccounts: 1,
-	}
-}
-
-func (s *storeMock) ActiveAccounts(threshold time.Time) (uint64, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.activeAccounts, nil
-}
-
-func (s *storeMock) AddFormedContract(hostKey types.PublicKey, contractID types.FileContractID, revision types.V2FileContract, contractPrice, allowance, minerFee types.Currency, _ proto.Usage) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.contracts = append(s.contracts, Contract{
-		ID:      contractID,
-		HostKey: hostKey,
-
-		Formation:        time.Now(),
-		ProofHeight:      revision.ProofHeight,
-		ExpirationHeight: revision.ExpirationHeight,
-		State:            ContractStatePending,
-
-		RemainingAllowance: allowance,
-		TotalCollateral:    revision.TotalCollateral,
-
-		ContractPrice:    contractPrice,
-		InitialAllowance: allowance,
-		MinerFee:         minerFee,
-
-		Good: true,
+func newTestStore(t testing.TB) testStore {
+	s := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
+	t.Cleanup(func() {
+		s.Close()
 	})
-	s.revisions = append(s.revisions, rhp.ContractRevision{ID: contractID, Revision: revision})
-	return nil
+	return testStore{s}
 }
 
-func (s *storeMock) AddRenewedContract(renewedFrom, renewedTo types.FileContractID, revision types.V2FileContract, contractPrice, minerFee types.Currency, _ proto.Usage) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	var source *Contract
-	for i := range s.contracts {
-		if s.contracts[i].ID == renewedFrom {
-			s.contracts[i].RenewedTo = renewedTo
-			source = &s.contracts[i]
-			break
-		}
-	}
-	if source == nil {
-		return ErrNotFound
-	}
-	s.contracts = append(s.contracts, Contract{
-		ID:      renewedTo,
-		HostKey: source.HostKey,
-
-		Capacity:    source.Size,
-		Size:        source.Size,
-		RenewedFrom: source.ID,
-
-		Formation:        time.Now(),
-		ProofHeight:      revision.ProofHeight,
-		ExpirationHeight: revision.ExpirationHeight,
-		State:            ContractStatePending,
-
-		RemainingAllowance: revision.RenterOutput.Value,
-		UsedCollateral:     revision.RiskedCollateral(),
-		TotalCollateral:    revision.TotalCollateral,
-
-		ContractPrice:    contractPrice,
-		InitialAllowance: revision.RenterOutput.Value,
-		MinerFee:         minerFee,
-
-		Good: true,
-	})
-	s.revisions = append(s.revisions, rhp.ContractRevision{ID: renewedTo, Revision: revision})
-	return nil
-}
-
-func (s *storeMock) BlockHosts(hostKeys []types.PublicKey, reasons []string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, hostKey := range hostKeys {
-		host, ok := s.hosts[hostKey]
-		if !ok {
-			return hosts.ErrNotFound
-		}
-		if !host.Blocked {
-			host.Blocked = true
-			host.BlockedReasons = reasons
-			s.hosts[hostKey] = host
-		}
-
-		for i := range s.contracts {
-			if s.contracts[i].HostKey == hostKey {
-				s.contracts[i].Good = false
-			}
-		}
-	}
-
-	return nil
-}
-
-func (s *storeMock) ContractRevision(contractID types.FileContractID) (rhp.ContractRevision, bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	var renewed bool
-	for i, c := range s.contracts {
-		if c.ID == contractID {
-			renewed = c.RenewedTo != (types.FileContractID{})
-			return s.revisions[i], renewed, nil
-		}
-	}
-	return rhp.ContractRevision{}, false, errors.New("contract not found")
-}
-
-func (s *storeMock) ContractElement(contractID types.FileContractID) (types.V2FileContractElement, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, c := range s.contracts {
-		if c.ID == contractID {
-			return types.V2FileContractElement{
-				ID: contractID,
-				StateElement: types.StateElement{
-					LeafIndex:   1,
-					MerkleProof: []types.Hash256{{1}},
-				},
-				V2FileContract: types.V2FileContract{
-					HostPublicKey: c.HostKey,
-					Capacity:      c.Capacity,
-					Filesize:      c.Size,
-				},
-			}, nil
-		}
-	}
-	return types.V2FileContractElement{}, ErrNotFound
-}
-
-func (s *storeMock) ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return slices.Clone(s.toBroadcast), nil
-}
-
-func (s *storeMock) Contract(contractID types.FileContractID) (Contract, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, c := range s.contracts {
-		if c.ID == contractID {
-			return c, nil
-		}
-	}
-	return Contract{}, ErrNotFound
-}
-
-func (s *storeMock) Contracts(offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var opts ContractQueryOpts
-	for _, opt := range queryOpts {
-		opt(&opts)
-	}
-
-	filtered := make([]Contract, 0, len(s.contracts))
-	for _, c := range s.contracts {
-		if opts.Revisable != nil {
-			isRevisable := (c.State == ContractStatePending || c.State == ContractStateActive) && c.RenewedTo == (types.FileContractID{})
-			if isRevisable != *opts.Revisable {
-				continue
-			}
-		}
-		if opts.Good != nil {
-			if c.Good != *opts.Good {
-				continue
-			}
-		}
-		filtered = append(filtered, c)
-	}
-
-	if offset > len(filtered) {
-		return nil, nil
-	}
-	filtered = filtered[offset:]
-
-	if limit > 0 && limit < len(filtered) {
-		filtered = filtered[:limit]
-	}
-
-	return filtered, nil
-}
-
-func (s *storeMock) Host(hostKey types.PublicKey) (hosts.Host, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	host, ok := s.hosts[hostKey]
-	if !ok {
-		return hosts.Host{}, hosts.ErrNotFound
-	}
-	return host, nil
-}
-
-func (s *storeMock) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	copied := slices.Collect(maps.Values(s.hosts))
-	slices.SortFunc(copied, func(a, b hosts.Host) int {
-		// sort by public key to make order in testing deterministic
-		return strings.Compare(a.PublicKey.String(), b.PublicKey.String())
-	})
-	opts := hosts.DefaultHostsQueryOpts
-	for _, opt := range queryOpts {
-		opt(&opts)
-	}
-	filter := copied[:0]
-	for _, h := range copied {
-		keep := true
-		if opts.Usable != nil {
-			keep = h.Usability.Usable() == *opts.Usable
-		}
-		if opts.Blocked != nil {
-			keep = keep && h.Blocked == *opts.Blocked
-		}
-		if opts.ActiveContracts != nil {
-			keep = keep && *opts.ActiveContracts == slices.ContainsFunc(s.contracts, func(contract Contract) bool {
-				return contract.HostKey == h.PublicKey
-			})
-		}
-		if keep {
-			filter = append(filter, h)
-		}
-	}
-	return filter, nil
-}
-
-func (s *storeMock) HostsWithUnpinnableSectors() (hks []types.PublicKey, _ error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for _, host := range s.hosts {
-		hasContract := slices.ContainsFunc(s.contracts, func(c Contract) bool {
-			return c.HostKey == host.PublicKey
-		})
-		_, hasSector := s.sectors[host.PublicKey]
-		if !hasContract && hasSector {
-			hks = append(hks, host.PublicKey)
-		}
-	}
-	return hks, nil
-}
-
-func (s *storeMock) LastScannedIndex() (ci types.ChainIndex, err error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return types.ChainIndex{}, nil
-}
-
-func (s *storeMock) MaintenanceSettings() (MaintenanceSettings, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.settings, nil
-}
-
-func (s *storeMock) UpdateMaintenanceSettings(ms MaintenanceSettings) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.settings = ms
-	return nil
-}
-
-func (s *storeMock) MarkUnrenewableContractsBad(minProofHeight uint64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.contracts {
-		if s.contracts[i].ProofHeight <= minProofHeight {
-			s.contracts[i].Good = false
-		}
-	}
-	return nil
-}
-
-func (s *storeMock) MarkSectorsUnpinnable(threshold time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return nil
-}
-
-func (s *storeMock) MarkBroadcastAttempt(contractID types.FileContractID) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i := range s.contracts {
-		if s.contracts[i].ID == contractID {
-			s.contracts[i].LastBroadcastAttempt = time.Now()
-		}
-	}
-	return nil
-}
-
-func (s *storeMock) RejectPendingContracts(t time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if t.IsZero() {
-		panic("invalid time")
-	}
-	s.rejectCalls++
-	return nil
-}
-
-func (s *storeMock) PruneExpiredContractElements(maxBlocksSinceExpiry uint64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if maxBlocksSinceExpiry == 0 {
-		panic("invalid maxBlocksSinceExpiry")
-	}
-	s.pruneCalls++
-	return nil
-}
-
-func (s *storeMock) PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if maxBlocksSinceExpiry == 0 {
-		panic("invalid maxBlocksSinceExpiry")
-	}
-	s.pruneContractSectorsCalls++
-	return nil
-}
-
-func (s *storeMock) ScheduleAccountForFunding(hostKey types.PublicKey, account proto.Account) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return nil
-}
-
-func (s *storeMock) UpdateHostSettings(hostKey types.PublicKey, settings proto.HostSettings) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	h, ok := s.hosts[hostKey]
-	if !ok {
-		return hosts.ErrNotFound
-	}
-	h.Settings = settings
-	h.Usability.AcceptingContracts = settings.AcceptingContracts
-	s.hosts[hostKey] = h
-	return nil
-}
-
-func (s *storeMock) UpdateContractRevision(contract rhp.ContractRevision, _ proto.Usage) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for i, c := range s.contracts {
-		if c.ID == contract.ID {
-			s.revisions[i] = contract
-			return nil
-		}
-	}
-	return errors.New("contract not found")
-}
-
-func (s *storeMock) UsabilitySettings() (hosts.UsabilitySettings, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return hosts.DefaultUsabilitySettings, nil
-}
-
-func (s *storeMock) UpdateStuckHosts(stuck []types.PublicKey) error {
-	return nil
-}
-
-func (s *storeMock) addTestContract(t *testing.T, hk types.PublicKey, good bool, fcids ...types.FileContractID) types.FileContractID {
+// addTestHost adds a host to the database for testing with optional location.
+func (ts testStore) addTestHost(t testing.TB, host hosts.Host) {
 	t.Helper()
 
-	var fcid types.FileContractID
-	switch len(fcids) {
-	case 0:
-		fcid = types.FileContractID(hk)
-	case 1:
-		fcid = fcids[0]
-	default:
-		panic("developer error")
+	if err := ts.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(host.PublicKey, host.Addresses, time.Now())
+	}); err != nil {
+		t.Fatal(err)
 	}
 
+	loc := geoip.Location{
+		CountryCode: host.CountryCode,
+		Latitude:    host.Latitude,
+		Longitude:   host.Longitude,
+	}
+	if err := ts.UpdateHostScan(host.PublicKey, host.Settings, loc, host.Usability.Usable(), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// addTestContract adds a contract to the database for testing and returns its ID.
+func (ts testStore) addTestContract(t testing.TB, hk types.PublicKey, good bool, fcid types.FileContractID) types.FileContractID {
+	t.Helper()
+
 	revision := newTestRevision(hk)
-	err := s.AddFormedContract(hk, fcid, revision, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), proto.Usage{})
+	err := ts.AddFormedContract(hk, fcid, revision, types.Siacoins(1), types.Siacoins(2), types.Siacoins(3), proto.Usage{})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	s.contracts[len(s.contracts)-1].Good = good
+	if !good {
+		_, err := ts.Exec(t.Context(), `UPDATE contracts SET good = false WHERE contract_id = $1`, sqlHash256(fcid))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	return fcid
+}
+
+// setContractGood updates the good status of a contract.
+func (ts testStore) setContractGood(t testing.TB, fcid types.FileContractID, good bool) {
+	t.Helper()
+
+	_, err := ts.Exec(t.Context(), `UPDATE contracts SET good = $1 WHERE contract_id = $2`, good, sqlHash256(fcid))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setContractSize updates the size of a contract.
+func (ts testStore) setContractSize(t testing.TB, fcid types.FileContractID, size uint64) {
+	t.Helper()
+
+	// also update capacity to ensure capacity >= size constraint is satisfied
+	_, err := ts.Exec(t.Context(), `UPDATE contracts SET size = $1, capacity = GREATEST(capacity, $1) WHERE contract_id = $2`, size, sqlHash256(fcid))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setContractCapacity updates the capacity of a contract.
+func (ts testStore) setContractCapacity(t testing.TB, fcid types.FileContractID, capacity uint64) {
+	t.Helper()
+
+	_, err := ts.Exec(t.Context(), `UPDATE contracts SET capacity = $1 WHERE contract_id = $2`, capacity, sqlHash256(fcid))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setContractRemainingAllowance updates the remaining allowance of a contract.
+func (ts testStore) setContractRemainingAllowance(t testing.TB, fcid types.FileContractID, allowance types.Currency) {
+	t.Helper()
+
+	_, err := ts.Exec(t.Context(), `UPDATE contracts SET remaining_allowance = $1 WHERE contract_id = $2`, sqlCurrency(allowance), sqlHash256(fcid))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setContractProofHeight updates the proof height of a contract.
+func (ts testStore) setContractProofHeight(t testing.TB, fcid types.FileContractID, height uint64) {
+	t.Helper()
+
+	_, err := ts.Exec(t.Context(), `UPDATE contracts SET proof_height = $1 WHERE contract_id = $2`, height, sqlHash256(fcid))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setContractExpirationHeight updates the expiration height of a contract.
+func (ts testStore) setContractExpirationHeight(t testing.TB, fcid types.FileContractID, height uint64) {
+	t.Helper()
+
+	_, err := ts.Exec(t.Context(), `UPDATE contracts SET expiration_height = $1 WHERE contract_id = $2`, height, sqlHash256(fcid))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setContractState updates the state of a contract.
+func (ts testStore) setContractState(t testing.TB, fcid types.FileContractID, state contracts.ContractState) {
+	t.Helper()
+
+	_, err := ts.Exec(t.Context(), `UPDATE contracts SET state = $1 WHERE contract_id = $2`, state, sqlHash256(fcid))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setContractRenewedTo updates the renewed_to field of a contract.
+func (ts testStore) setContractRenewedTo(t testing.TB, fcid, renewedTo types.FileContractID) {
+	t.Helper()
+
+	_, err := ts.Exec(t.Context(), `UPDATE contracts SET renewed_to = $1 WHERE contract_id = $2`, sqlHash256(renewedTo), sqlHash256(fcid))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setContractLastBroadcastAttempt updates the last broadcast attempt of a contract.
+func (ts testStore) setContractLastBroadcastAttempt(t testing.TB, fcid types.FileContractID, lastAttempt time.Time) {
+	t.Helper()
+
+	_, err := ts.Exec(t.Context(), `UPDATE contracts SET last_broadcast_attempt = $1 WHERE contract_id = $2`, lastAttempt, sqlHash256(fcid))
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// addContractElement adds a contract element for a contract. This is needed for broadcasting.
+func (ts testStore) addContractElement(t testing.TB, fcid types.FileContractID, fce types.V2FileContractElement) {
+	t.Helper()
+
+	if err := ts.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.UpdateContractElements(fce)
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setRevisionFilesize sets the filesize in the raw revision of a contract.
+func (ts testStore) setRevisionFilesize(t testing.TB, fcid types.FileContractID, filesize uint64) {
+	t.Helper()
+
+	// fetch the current revision
+	rev, _, err := ts.ContractRevision(fcid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// get current remaining allowance to preserve it
+	var allowance types.Currency
+	if err := ts.QueryRow(t.Context(), `SELECT remaining_allowance FROM contracts WHERE contract_id = $1`, sqlHash256(fcid)).Scan((*sqlCurrency)(&allowance)); err != nil {
+		t.Fatal(err)
+	}
+	rev.Revision.RenterOutput.Value = allowance
+
+	// update filesize and capacity
+	rev.Revision.Filesize = filesize
+	if rev.Revision.Capacity < filesize {
+		rev.Revision.Capacity = filesize
+	}
+	rev.Revision.RevisionNumber++
+
+	// save back
+	if err := ts.UpdateContractRevision(rev, proto.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// addUnpinnedSectors adds unpinned sectors to the database.
+func (ts testStore) addUnpinnedSectors(t testing.TB, hk types.PublicKey, roots []types.Hash256) {
+	t.Helper()
+
+	var inserted int64
+	for _, root := range roots {
+		// add sector to the sectors table associated with the host
+		res, err := ts.Exec(t.Context(), `
+			INSERT INTO sectors (sector_root, host_id, next_integrity_check)
+			SELECT $1, h.id, NOW() + INTERVAL '1 day'
+			FROM hosts h WHERE h.public_key = $2
+			ON CONFLICT (sector_root) DO NOTHING
+		`, sqlHash256(root), sqlPublicKey(hk))
+		if err != nil {
+			t.Fatal(err)
+		}
+		inserted += res.RowsAffected()
+	}
+
+	// update stats for newly inserted sectors
+	if inserted > 0 {
+		_, err := ts.Exec(t.Context(), `UPDATE stats SET num_unpinned_sectors = num_unpinned_sectors + $1`, inserted)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// getSectorContractID returns the contract ID that a sector is pinned to, or nil if unpinned.
+func (ts testStore) getSectorContractID(t testing.TB, root types.Hash256) *types.FileContractID {
+	t.Helper()
+
+	var fcid types.FileContractID
+	err := ts.QueryRow(t.Context(), `
+		SELECT csm.contract_id
+		FROM sectors s
+		INNER JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
+		WHERE s.sector_root = $1
+	`, sqlHash256(root)).Scan((*sqlHash256)(&fcid))
+	if err != nil {
+		return nil // not pinned or not found
+	}
+	return &fcid
+}
+
+// addPinnedSectors adds sectors to a host and pins them to a specific contract.
+func (ts testStore) addPinnedSectors(t testing.TB, hk types.PublicKey, fcid types.FileContractID, roots []types.Hash256) {
+	t.Helper()
+
+	// first add as unpinned
+	ts.addUnpinnedSectors(t, hk, roots)
+
+	// then pin to the contract
+	if err := ts.PinSectors(fcid, roots); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// scheduleContractsForPruningHelper marks all contracts as ready for pruning (test helper).
+func (ts testStore) scheduleContractsForPruningHelper(t testing.TB) {
+	t.Helper()
+
+	// set next_prune to past so ContractsForPruning (next_prune < NOW()) returns them
+	_, err := ts.Exec(t.Context(), `UPDATE contracts SET next_prune = NOW() - INTERVAL '1 hour' WHERE good = TRUE AND state IN (0, 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setContractNextPrune sets the next prune time for a contract.
+func (ts testStore) setContractNextPrune(t testing.TB, fcid types.FileContractID, nextPrune time.Time) {
+	t.Helper()
+
+	if err := ts.UpdateNextPrune(fcid, nextPrune); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// setActiveAccountsCount inserts dummy accounts to simulate having n active accounts.
+func (ts testStore) setActiveAccountsCount(t testing.TB, n uint64) {
+	t.Helper()
+
+	// first clear existing accounts
+	_, err := ts.Exec(t.Context(), `DELETE FROM accounts`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// insert n dummy accounts
+	for i := uint64(0); i < n; i++ {
+		pk := types.PublicKey{byte(i % 256), byte(i / 256)}
+		_, err := ts.Exec(t.Context(), `
+			INSERT INTO accounts (public_key, last_used, pinned_data, max_pinned_data)
+			VALUES ($1, NOW(), 0, 0)
+		`, sqlPublicKey(pk))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 // mockUpdateTx is a mocked implementation of UpdateTx which allows for unit
 // testing the contract manager's chain updates without a full database.
 type mockUpdateTx struct {
 	contracts map[types.FileContractID]types.V2FileContractElement
-	state     map[types.FileContractID]ContractState
+	state     map[types.FileContractID]contracts.ContractState
 	renewedTo map[types.FileContractID]*types.FileContractID
 }
 
@@ -456,14 +384,14 @@ type mockUpdateTx struct {
 func newMockUpdateTx() *mockUpdateTx {
 	return &mockUpdateTx{
 		contracts: make(map[types.FileContractID]types.V2FileContractElement),
-		state:     make(map[types.FileContractID]ContractState),
+		state:     make(map[types.FileContractID]contracts.ContractState),
 		renewedTo: make(map[types.FileContractID]*types.FileContractID),
 	}
 }
 
 func (tx *mockUpdateTx) AddContract(fce types.V2FileContractElement) {
 	tx.contracts[fce.ID] = fce
-	tx.state[fce.ID] = ContractStatePending
+	tx.state[fce.ID] = contracts.ContractStatePending
 	tx.renewedTo[fce.ID] = nil
 }
 
@@ -490,7 +418,7 @@ func (tx *mockUpdateTx) DeleteContractElements(contractIDs ...types.FileContract
 	return nil
 }
 
-func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileContractElement, ContractState) {
+func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileContractElement, contracts.ContractState) {
 	fce, ok := tx.contracts[contractID]
 	if !ok {
 		panic("contract not found")
@@ -502,7 +430,7 @@ func (tx *mockUpdateTx) Contract(contractID types.FileContractID) (types.V2FileC
 	return fce, state
 }
 
-func (tx *mockUpdateTx) ContractState(contractID types.FileContractID) ContractState {
+func (tx *mockUpdateTx) ContractState(contractID types.FileContractID) contracts.ContractState {
 	state, ok := tx.state[contractID]
 	if !ok {
 		panic("contract state not found")
@@ -531,7 +459,7 @@ func (tx *mockUpdateTx) UpdateContractElementProofs(updater wallet.ProofUpdater)
 	return nil
 }
 
-func (tx *mockUpdateTx) UpdateContractState(contractID types.FileContractID, state ContractState) error {
+func (tx *mockUpdateTx) UpdateContractState(contractID types.FileContractID, state contracts.ContractState) error {
 	// checking state, not contract since resolved elements are removed from the map
 	if _, ok := tx.state[contractID]; !ok {
 		return errors.New("contract not found")
@@ -640,7 +568,7 @@ func (w *walletMock) ReleaseInputs(txns []types.Transaction, v2txns []types.V2Tr
 func (w *walletMock) SignV2Inputs(txn *types.V2Transaction, toSign []int)                  {}
 
 func TestApplyRevertDiff(t *testing.T) {
-	contracts := newContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil, nil)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// create a contract
 	contractID := types.FileContractID{1, 2, 3}
@@ -659,28 +587,25 @@ func TestApplyRevertDiff(t *testing.T) {
 	// mock the update tx
 	mock := newMockUpdateTx()
 	mock.AddContract(fce)
-	updateTx := &updateTx{
-		UpdateTx:       mock,
-		knownContracts: make(map[types.FileContractID]bool),
-	}
+	updateTx := contracts.NewTestUpdateTx(mock)
 
 	// helper to apply/revert diff
 	applyDiff := func(diff consensus.V2FileContractElementDiff) {
 		t.Helper()
-		err := contracts.applyV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
+		err := cm.ApplyV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	revertDiff := func(diff consensus.V2FileContractElementDiff) {
 		t.Helper()
-		err := contracts.revertV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
+		err := cm.RevertV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	assertContractState := func(state ContractState) {
+	assertContractState := func(state contracts.ContractState) {
 		t.Helper()
 		storedState := mock.ContractState(contractID)
 		if storedState != state {
@@ -688,7 +613,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		}
 	}
 
-	assertContract := func(state ContractState) {
+	assertContract := func(state contracts.ContractState) {
 		t.Helper()
 		storedFCE, storedState := mock.Contract(contractID)
 		if storedState != state {
@@ -699,7 +624,7 @@ func TestApplyRevertDiff(t *testing.T) {
 	}
 
 	// initial state
-	assertContract(ContractStatePending)
+	assertContract(contracts.ContractStatePending)
 
 	// confirm the contract
 	fce.V2FileContract.RevisionNumber++
@@ -707,7 +632,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		Created:               true,
 		V2FileContractElement: fce,
 	})
-	assertContract(ContractStateActive)
+	assertContract(contracts.ContractStateActive)
 
 	// revise contract
 	revision := fce.V2FileContract
@@ -717,7 +642,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		Revision:              &revision,
 	})
 	fce.V2FileContract.RevisionNumber = revision.RevisionNumber
-	assertContract(ContractStateActive)
+	assertContract(contracts.ContractStateActive)
 
 	// resolve contract
 	fce.V2FileContract.RevisionNumber++
@@ -725,7 +650,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		V2FileContractElement: fce,
 		Resolution:            &types.V2StorageProof{},
 	})
-	assertContractState(ContractStateResolved)
+	assertContractState(contracts.ContractStateResolved)
 
 	// revert resolution
 	fce.V2FileContract.RevisionNumber--
@@ -733,7 +658,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		V2FileContractElement: fce,
 		Resolution:            &types.V2StorageProof{},
 	})
-	assertContract(ContractStateActive)
+	assertContract(contracts.ContractStateActive)
 
 	// revert revision
 	fce.V2FileContract.RevisionNumber--
@@ -741,7 +666,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		V2FileContractElement: fce,
 		Revision:              &revision,
 	})
-	assertContract(ContractStateActive)
+	assertContract(contracts.ContractStateActive)
 
 	// revert contract
 	fce.V2FileContract.RevisionNumber--
@@ -749,7 +674,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		Created:               true,
 		V2FileContractElement: fce,
 	})
-	assertContractState(ContractStatePending)
+	assertContractState(contracts.ContractStatePending)
 }
 
 func TestUpdateContractElementProofs(t *testing.T) {
@@ -768,10 +693,7 @@ func TestUpdateContractElementProofs(t *testing.T) {
 	// mock the update tx and add a contract
 	mock := newMockUpdateTx()
 	mock.AddContract(contract)
-	updateTx := &updateTx{
-		UpdateTx:       mock,
-		knownContracts: make(map[types.FileContractID]bool),
-	}
+	updateTx := contracts.NewTestUpdateTx(mock)
 
 	// check initial contract
 	if fce, _ := mock.Contract(contract.ID); !reflect.DeepEqual(fce, contract) {
@@ -781,7 +703,7 @@ func TestUpdateContractElementProofs(t *testing.T) {
 	// update proof on contract
 	contract2 := contract
 	contract2.StateElement.MerkleProof = []types.Hash256{{2}}
-	updateContractElementProofs(updateTx, &mockProofUpdater{updateFn: func(stateElement *types.StateElement) {
+	contracts.UpdateContractElementProofs(updateTx, &mockProofUpdater{updateFn: func(stateElement *types.StateElement) {
 		stateElement.MerkleProof = contract2.StateElement.MerkleProof
 	}})
 	if fce, _ := mock.Contract(contract2.ID); !reflect.DeepEqual(fce, contract2) {
@@ -790,12 +712,12 @@ func TestUpdateContractElementProofs(t *testing.T) {
 }
 
 func TestProcessActions(t *testing.T) {
+	store := newTestStore(t)
 	amMock := &accountsManagerMock{}
 	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
 	walletMock := &walletMock{}
-	store := &storeMock{}
-	contracts := newContractManager(types.PublicKey{}, amMock, nil, cmMock, store, nil, nil, syncerMock, walletMock)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, nil, cmMock, store, nil, nil, syncerMock, walletMock)
 
 	contract := types.V2FileContractElement{
 		ID: types.FileContractID{1},
@@ -808,37 +730,57 @@ func TestProcessActions(t *testing.T) {
 	// broadcasted transactions in the mocked syncer, the number of resolutions
 	// in the latest broadcasted transactions and the contract elements in the
 	// store.
-	assert := func(broadcastedTxns, resolutions, pruneCalls, pruneContractSectorsCalls, rejectCalls int) {
+	assert := func(broadcastedTxns, resolutions int) {
 		t.Helper()
 		if sets := walletMock.BroadcastedSets(); len(sets) != broadcastedTxns {
 			t.Fatalf("expected %v broadcasted contracts, got %v", broadcastedTxns, len(sets))
 		} else if broadcastedTxns > 0 && len(sets[broadcastedTxns-1].FileContractResolutions) != resolutions {
 			t.Fatalf("expected %v contract resolution in broadcast, got %v", resolutions, len(sets[0].FileContracts))
-		} else if store.pruneCalls != pruneCalls {
-			t.Fatalf("expected %v calls to PruneExpiredContractElements, got %v", pruneCalls, store.pruneCalls)
-		} else if store.pruneContractSectorsCalls != pruneContractSectorsCalls {
-			t.Fatalf("expected %v calls to PruneExpiredContractElements, got %v", pruneContractSectorsCalls, store.pruneContractSectorsCalls)
-		} else if store.rejectCalls != rejectCalls {
-			t.Fatalf("expected %v calls to RejectPendingContracts, got %v", rejectCalls, store.rejectCalls)
 		}
 	}
 
 	// broadcast when no contract should be broadcasted
-	if err := contracts.ProcessActions(context.Background()); err != nil {
+	if err := cm.ProcessActions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assert(0, 0, 1, 1, 1)
+	assert(0, 0)
+
+	// add a host
+	hk := types.PublicKey{1, 2, 3}
+	store.addTestHost(t, hosts.Host{PublicKey: hk})
+
+	// add a contract
+	store.addTestContract(t, hk, true, contract.ID)
+
+	// set expiration height to match contract element
+	store.setContractExpirationHeight(t, contract.ID, contract.V2FileContract.ExpirationHeight)
+
+	// add contract element and set state to active
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return errors.Join(
+			tx.UpdateContractElements(contract),
+			tx.UpdateContractState(contract.ID, contracts.ContractStateActive),
+		)
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// set height past expiration + broadcast buffer (default 144)
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(types.ChainIndex{Height: contract.V2FileContract.ExpirationHeight + 144})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// broadcast with 1 contract to broadcast
-	store.toBroadcast = []types.V2FileContractElement{contract}
-	if err := contracts.ProcessActions(context.Background()); err != nil {
+	if err := cm.ProcessActions(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	assert(1, 1, 2, 2, 2)
+	assert(1, 1)
 }
 
 func TestApplyRevertRenewedTo(t *testing.T) {
-	contracts := newContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil, nil)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil, nil)
 
 	// create a contract
 	contractID := types.FileContractID{1, 2, 3}
@@ -857,28 +799,25 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 	// mock the update tx
 	mock := newMockUpdateTx()
 	mock.AddContract(fce)
-	updateTx := &updateTx{
-		UpdateTx:       mock,
-		knownContracts: make(map[types.FileContractID]bool),
-	}
+	updateTx := contracts.NewTestUpdateTx(mock)
 
 	// helper to apply/revert diff
 	applyDiff := func(diff consensus.V2FileContractElementDiff) {
 		t.Helper()
-		err := contracts.applyV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
+		err := cm.ApplyV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 	revertDiff := func(diff consensus.V2FileContractElementDiff) {
 		t.Helper()
-		err := contracts.revertV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
+		err := cm.RevertV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff})
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	assertContractState := func(contractID types.FileContractID, state ContractState, renewedTo *types.FileContractID) {
+	assertContractState := func(contractID types.FileContractID, state contracts.ContractState, renewedTo *types.FileContractID) {
 		t.Helper()
 		storedState := mock.ContractState(contractID)
 		if storedState != state {
@@ -890,7 +829,7 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 		}
 	}
 
-	assertContract := func(fce types.V2FileContractElement, state ContractState, renewedTo *types.FileContractID) {
+	assertContract := func(fce types.V2FileContractElement, state contracts.ContractState, renewedTo *types.FileContractID) {
 		t.Helper()
 		storedFCE, _ := mock.Contract(fce.ID)
 		if !reflect.DeepEqual(storedFCE, fce) {
@@ -900,7 +839,7 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 	}
 
 	// initial state
-	assertContract(fce, ContractStatePending, nil)
+	assertContract(fce, contracts.ContractStatePending, nil)
 
 	// confirm the contract
 	fce.V2FileContract.RevisionNumber++
@@ -908,7 +847,7 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 		Created:               true,
 		V2FileContractElement: fce,
 	})
-	assertContract(fce, ContractStateActive, nil)
+	assertContract(fce, contracts.ContractStateActive, nil)
 
 	// resolve contract
 	fce.V2FileContract.RevisionNumber++
@@ -920,18 +859,18 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 		V2FileContractElement: fce,
 		Resolution:            &types.V2FileContractRenewal{},
 	})
-	assertContractState(fce.ID, ContractStateResolved, &newFCE.ID)
+	assertContractState(fce.ID, contracts.ContractStateResolved, &newFCE.ID)
 
 	mock.AddContract(newFCE)
-	assertContract(newFCE, ContractStatePending, nil)
+	assertContract(newFCE, contracts.ContractStatePending, nil)
 
 	applyDiff(consensus.V2FileContractElementDiff{
 		Created:               true,
 		V2FileContractElement: newFCE,
 	})
 
-	assertContractState(fce.ID, ContractStateResolved, &newFCE.ID)
-	assertContract(newFCE, ContractStateActive, nil)
+	assertContractState(fce.ID, contracts.ContractStateResolved, &newFCE.ID)
+	assertContract(newFCE, contracts.ContractStateActive, nil)
 
 	// revert resolution
 	fce.V2FileContract.RevisionNumber--
@@ -943,8 +882,8 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 		Created:               true,
 		V2FileContractElement: newFCE,
 	})
-	assertContract(fce, ContractStateActive, nil)
-	assertContractState(newFCE.ID, ContractStatePending, nil)
+	assertContract(fce, contracts.ContractStateActive, nil)
+	assertContractState(newFCE.ID, contracts.ContractStatePending, nil)
 
 	applyDiff(consensus.V2FileContractElementDiff{
 		V2FileContractElement: fce,
@@ -955,6 +894,6 @@ func TestApplyRevertRenewedTo(t *testing.T) {
 		V2FileContractElement: newFCE,
 	})
 
-	assertContractState(fce.ID, ContractStateResolved, &newFCE.ID)
-	assertContract(newFCE, ContractStateActive, nil)
+	assertContractState(fce.ID, contracts.ContractStateResolved, &newFCE.ID)
+	assertContract(newFCE, contracts.ContractStateActive, nil)
 }

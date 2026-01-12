@@ -46,18 +46,18 @@ func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, contract
 	return len(accs), 1, nil
 }
 
-type testStore struct {
+type fundingTestStore struct {
 	testutils.TestStore
 }
 
-func (s testStore) resetNextFund(t testing.TB) {
+func (s fundingTestStore) resetNextFund(t testing.TB) {
 	t.Helper()
 	if _, err := s.Exec(t.Context(), `UPDATE account_hosts SET next_fund = NOW()`); err != nil {
 		t.Fatal(err)
 	}
 }
 
-func (s testStore) hostAccounts(t testing.TB) (result []accounts.HostAccount) {
+func (s fundingTestStore) hostAccounts(t testing.TB) (result []accounts.HostAccount) {
 	t.Helper()
 
 	rows, err := s.Query(t.Context(), `SELECT next_fund FROM account_hosts`)
@@ -79,20 +79,20 @@ func (s testStore) hostAccounts(t testing.TB) (result []accounts.HostAccount) {
 	return
 }
 
-func newTestStore(t testing.TB) testStore {
+func newFundingTestStore(t testing.TB) fundingTestStore {
 	s := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
 	t.Cleanup(func() {
 		s.Close()
 	})
 
-	return testStore{s}
+	return fundingTestStore{s}
 }
 
 // TestFunding is a unit test that covers the functionality of the
 // FundAccounts method on the contracts manager.
 func TestFunding(t *testing.T) {
 	log := zaptest.NewLogger(t)
-	s := newTestStore(t)
+	s := newFundingTestStore(t)
 	f := &mockFunder{}
 
 	am, err := accounts.NewManager(s, accounts.WithLogger(log))

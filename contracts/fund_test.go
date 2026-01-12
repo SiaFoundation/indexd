@@ -1,15 +1,14 @@
-package contracts
+package contracts_test
 
 import (
 	"context"
-	"sort"
 	"sync"
 	"testing"
 	"time"
 
-	"go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -55,6 +54,12 @@ func (am *accountsManagerMock) UpdateServiceAccounts(ctx context.Context, accs [
 	return nil
 }
 
+func (am *accountsManagerMock) SetActiveAccounts(n uint64) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	am.activeAccounts = n
+}
+
 type accountFunderMock struct {
 	mu    sync.Mutex
 	calls []fundAccountsCall
@@ -70,79 +75,17 @@ func (f *accountFunderMock) FundAccounts(ctx context.Context, host hosts.Host, c
 	return len(accs), 0, nil
 }
 
-func (s *storeMock) ContractsForBroadcasting(minBroadcast time.Time, limit int) ([]types.FileContractID, error) {
-	var contracts []Contract
-	for _, c := range s.contracts {
-		if c.RenewedTo == (types.FileContractID{}) &&
-			(c.State == ContractStatePending || c.State == ContractStateActive) &&
-			c.LastBroadcastAttempt.Before(minBroadcast) {
-			contracts = append(contracts, c)
-		}
-	}
-	sort.Slice(contracts, func(i, j int) bool {
-		return contracts[i].LastBroadcastAttempt.Before(contracts[j].LastBroadcastAttempt)
-	})
-
-	out := make([]types.FileContractID, len(contracts))
-	for i, c := range contracts {
-		out[i] = c.ID
-	}
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
-}
-
-func (s *storeMock) ContractsForFunding(hk types.PublicKey, limit int) ([]types.FileContractID, error) {
-	var contracts []Contract
-	for _, c := range s.contracts {
-		if c.HostKey == hk && !c.RemainingAllowance.IsZero() {
-			contracts = append(contracts, c)
-		}
-	}
-	sort.Slice(contracts, func(i, j int) bool {
-		return contracts[i].RemainingAllowance.Cmp(contracts[j].RemainingAllowance) > 0
-	})
-
-	out := make([]types.FileContractID, len(contracts))
-	for i, c := range contracts {
-		out[i] = c.ID
-	}
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
-}
-
-func (s *storeMock) HostsForFunding() ([]types.PublicKey, error) {
-	hasContract := make(map[types.PublicKey]struct{})
-	for _, c := range s.contracts {
-		hasContract[c.HostKey] = struct{}{}
-	}
-
-	var hks []types.PublicKey
-	for hk, host := range s.hosts {
-		if host.Usability == hosts.GoodUsability && !host.Blocked {
-			if _, ok := hasContract[hk]; ok {
-				hks = append(hks, hk)
-			}
-		}
-	}
-
-	return hks, nil
-}
-
 func TestPerformAccountFunding(t *testing.T) {
 	amMock := &accountsManagerMock{
 		accountsToFund: []accounts.HostAccount{{AccountKey: [32]byte{1}}},
 	}
 	funderMock := &accountFunderMock{}
-	store := newStoreMock()
-	hmMock := &hostManagerMock{settings: make(map[types.PublicKey]rhp.HostSettings), store: store}
-	cm := newContractManager(types.PublicKey{}, amMock, funderMock, nil, store, nil, hmMock, nil, nil)
+	store := newTestStore(t)
+	hmMock := newHostManagerMock(store)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, funderMock, nil, store, nil, hmMock, nil, nil)
 
 	// fund accounts
-	err := cm.performAccountFunding(context.Background(), false, zap.NewNop())
+	err := cm.PerformAccountFunding(context.Background(), false, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,66 +97,72 @@ func TestPerformAccountFunding(t *testing.T) {
 
 	// add h1 with two contracts, c2 has more allowance
 	hk1 := types.PublicKey{1}
-	store.hosts[hk1] = hosts.Host{
+	h1 := hosts.Host{
 		PublicKey: hk1,
 		Usability: hosts.GoodUsability,
+		Settings:  goodSettings,
 	}
-	store.contracts = append(store.contracts, Contract{
-		ID:                 types.FileContractID{1},
-		HostKey:            hk1,
-		RemainingAllowance: types.Siacoins(1),
-	})
-	store.contracts = append(store.contracts, Contract{
-		ID:                 types.FileContractID{2},
-		HostKey:            hk1,
-		RemainingAllowance: types.Siacoins(2),
-	})
+	store.addTestHost(t, h1)
+	hmMock.settings[hk1] = goodSettings
+
+	c1 := store.addTestContract(t, hk1, true, types.FileContractID{1})
+	c2 := store.addTestContract(t, hk1, true, types.FileContractID{2})
+	store.setContractRemainingAllowance(t, c1, types.Siacoins(1))
+	store.setContractRemainingAllowance(t, c2, types.Siacoins(2))
 
 	// add h2 with one contract
 	hk2 := types.PublicKey{2}
-	store.hosts[hk2] = hosts.Host{
+	h2 := hosts.Host{
 		PublicKey: hk2,
 		Usability: hosts.GoodUsability,
+		Settings:  goodSettings,
 	}
-	store.contracts = append(store.contracts, Contract{
-		ID:                 types.FileContractID{3},
-		HostKey:            hk2,
-		RemainingAllowance: types.Siacoins(1),
-	})
+	store.addTestHost(t, h2)
+	hmMock.settings[hk2] = goodSettings
+
+	c3 := store.addTestContract(t, hk2, true, types.FileContractID{3})
+	store.setContractRemainingAllowance(t, c3, types.Siacoins(1))
 
 	// add h3, which is unusable
 	hk3 := types.PublicKey{3}
-	store.hosts[hk3] = hosts.Host{PublicKey: hk3}
-	store.contracts = append(store.contracts, Contract{
-		ID:                 types.FileContractID{4},
-		HostKey:            hk3,
-		RemainingAllowance: types.Siacoins(1),
-	})
+	h3 := hosts.Host{
+		PublicKey: hk3,
+		Usability: hosts.Usability{}, // not usable
+		Settings:  goodSettings,
+	}
+	store.addTestHost(t, h3)
+	// intentionally not setting hmMock.settings[hk3] so the host fails the scan
+
+	c4 := store.addTestContract(t, hk3, true, types.FileContractID{4})
+	store.setContractRemainingAllowance(t, c4, types.Siacoins(1))
 
 	// add h4, which is blocked
 	hk4 := types.PublicKey{4}
-	store.hosts[hk4] = hosts.Host{PublicKey: hk4, Blocked: true}
-	store.contracts = append(store.contracts, Contract{
-		ID:                 types.FileContractID{5},
-		HostKey:            hk4,
-		RemainingAllowance: types.Siacoins(1),
-	})
-
-	// give all hosts good settings
-	hmMock.settings[hk1] = goodSettings
-	hmMock.settings[hk2] = goodSettings
-	hmMock.settings[hk3] = goodSettings
+	h4 := hosts.Host{
+		PublicKey: hk4,
+		Usability: hosts.GoodUsability,
+		Settings:  goodSettings,
+	}
+	store.addTestHost(t, h4)
 	hmMock.settings[hk4] = goodSettings
 
+	// block h4
+	if err := store.BlockHosts([]types.PublicKey{hk4}, []string{"test"}); err != nil {
+		t.Fatal(err)
+	}
+
+	c5 := store.addTestContract(t, hk4, true, types.FileContractID{5})
+	store.setContractRemainingAllowance(t, c5, types.Siacoins(1))
+
 	// fund accounts
-	err = cm.performAccountFunding(context.Background(), false, zap.NewNop())
+	err = cm.PerformAccountFunding(context.Background(), false, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// assert there were two calls, one for each usable host
 	if len(funderMock.calls) != 2 {
-		t.Fatal("unexpected")
+		t.Fatalf("expected 2 calls, got %v", len(funderMock.calls))
 	}
 	call1 := funderMock.calls[0]
 	call2 := funderMock.calls[1]

@@ -1,12 +1,9 @@
-package contracts
+package contracts_test
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"slices"
-	"sort"
 	"testing"
 	"time"
 
@@ -15,6 +12,7 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -30,72 +28,6 @@ type freeSectorsCall struct {
 	hostPrices proto.HostPrices
 	contractID types.FileContractID
 	indices    []uint64
-}
-
-func (s *storeMock) ContractsForPruning(hk types.PublicKey) ([]types.FileContractID, error) {
-	var contracts []Contract
-	for _, c := range s.contracts {
-		if c.HostKey == hk && !c.RemainingAllowance.IsZero() && time.Now().After(c.NextPrune) {
-			contracts = append(contracts, c)
-		}
-	}
-	sort.Slice(contracts, func(i, j int) bool {
-		return contracts[i].Size > contracts[j].Size
-	})
-
-	out := make([]types.FileContractID, len(contracts))
-	for i, c := range contracts {
-		out[i] = c.ID
-	}
-	return out, nil
-}
-
-func (s *storeMock) HostsForPruning() ([]types.PublicKey, error) {
-	hasContract := make(map[types.PublicKey]struct{})
-	for _, c := range s.contracts {
-		hasContract[c.HostKey] = struct{}{}
-	}
-
-	var hosts []types.PublicKey
-	for hk := range s.hosts {
-		if _, ok := hasContract[hk]; ok {
-			hosts = append(hosts, hk)
-		}
-	}
-
-	return hosts, nil
-}
-
-func (s *storeMock) UpdateNextPrune(contractID types.FileContractID, nextPrune time.Time) error {
-	for i, c := range s.contracts {
-		if c.ID == contractID {
-			s.contracts[i].NextPrune = nextPrune
-			return nil
-		}
-	}
-	return ErrNotFound
-}
-
-func (s *storeMock) PrunableContractRoots(contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error) {
-	lookup := make(map[types.Hash256]struct{}, len(roots))
-	for _, root := range roots {
-		lookup[root] = struct{}{}
-	}
-	for _, sectors := range s.sectors {
-		for _, sector := range sectors {
-			if sector.contractID != nil && *sector.contractID == contractID {
-				delete(lookup, sector.root)
-			}
-		}
-	}
-	return slices.Collect(maps.Keys(lookup)), nil
-}
-
-func (s *storeMock) ScheduleContractsForPruning() error {
-	for i := range s.contracts {
-		s.contracts[i].NextPrune = time.Now()
-	}
-	return nil
 }
 
 func (c *hostClientMock) SectorRoots(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, offset, length uint64) (rhp.RPCSectorRootsResult, error) {
@@ -134,7 +66,8 @@ func (c *hostClientMock) FreeSectors(ctx context.Context, hostPrices proto.HostP
 }
 
 func TestPerformContractPruningOnHost(t *testing.T) {
-	store := newStoreMock()
+	store := newTestStore(t)
+	hmMock := newHostManagerMock(store)
 
 	// h1 is good
 	hk1 := types.PublicKey{1}
@@ -146,7 +79,8 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	}
 	h1.Settings.Prices.StoragePrice = types.NewCurrency64(123)
 	h1.Settings.Prices.TipHeight = 111
-	store.hosts[hk1] = h1
+	store.addTestHost(t, h1)
+	hmMock.settings[hk1] = h1.Settings
 
 	// h2 is good
 	hk2 := types.PublicKey{2}
@@ -158,7 +92,8 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	}
 	h2.Settings.Prices.StoragePrice = types.NewCurrency64(456)
 	h2.Settings.Prices.TipHeight = 222
-	store.hosts[hk2] = h2
+	store.addTestHost(t, h2)
+	hmMock.settings[hk2] = h2.Settings
 
 	// h3 is bad
 	badSettings := goodSettings
@@ -166,9 +101,12 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	hk3 := types.PublicKey{3}
 	h3 := hosts.Host{
 		PublicKey: hk3,
+		Addresses: []chain.NetAddress{{Protocol: siamux.Protocol, Address: "host3.com"}},
 		Settings:  badSettings,
+		Usability: hosts.Usability{}, // not usable
 	}
-	store.hosts[hk3] = h3
+	store.addTestHost(t, h3)
+	hmMock.settings[hk3] = h3.Settings
 
 	// h4 is good, but upon rescan it's bad
 	hk4 := types.PublicKey{4}
@@ -178,7 +116,8 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 		Settings:  goodSettings,
 		Usability: hosts.GoodUsability,
 	}
-	store.hosts[hk4] = h4
+	store.addTestHost(t, h4)
+	hmMock.settings[hk4] = badSettings // bad settings on rescan
 
 	// h5 is good
 	hk5 := types.PublicKey{5}
@@ -188,7 +127,8 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 		Settings:  goodSettings,
 		Usability: hosts.GoodUsability,
 	}
-	store.hosts[hk5] = h5
+	store.addTestHost(t, h5)
+	hmMock.settings[hk5] = h5.Settings
 
 	// add two contracts for h1, one for h2 and one for h5 to give it all
 	// chances of succeeding, but it won't
@@ -196,6 +136,12 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	fcid2 := store.addTestContract(t, hk1, true, types.FileContractID{2})
 	fcid3 := store.addTestContract(t, hk2, true, types.FileContractID{3})
 	fcid4 := store.addTestContract(t, hk5, true, types.FileContractID{4})
+
+	// set remaining allowance for all contracts
+	store.setContractRemainingAllowance(t, fcid1, types.Siacoins(1))
+	store.setContractRemainingAllowance(t, fcid2, types.Siacoins(1))
+	store.setContractRemainingAllowance(t, fcid3, types.Siacoins(1))
+	store.setContractRemainingAllowance(t, fcid4, types.Siacoins(1))
 
 	// prepare roots
 	r1 := types.Hash256{1}
@@ -209,15 +155,21 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	r9 := types.Hash256{9}
 	r10 := types.Hash256{10}
 
-	store.sectors[hk1] = []sector{{root: r1, contractID: &fcid1}, {root: r2, contractID: &fcid1}, {root: r4, contractID: &fcid2}, {root: r7, contractID: &fcid2}, {root: r8, contractID: &fcid2}} // r3, r5, r6 dropped
-	store.sectors[hk2] = []sector{{root: r9, contractID: &fcid3}}                                                                                                                                 // none dropped
-	store.sectors[hk5] = []sector{{root: r10, contractID: &fcid4}}                                                                                                                                // none dropped
+	// pin sectors to contracts in the database
+	// r1, r2 pinned to fcid1 (host has r1, r2, r3 - so r3 is prunable)
+	store.addPinnedSectors(t, hk1, fcid1, []types.Hash256{r1, r2})
+	// r4, r7, r8 pinned to fcid2 (host has r4, r5, r6, r7, r8 - so r5, r6 are prunable)
+	store.addPinnedSectors(t, hk1, fcid2, []types.Hash256{r4, r7, r8})
+	// r9 pinned to fcid3 (host has r9 - nothing prunable)
+	store.addPinnedSectors(t, hk2, fcid3, []types.Hash256{r9})
+	// r10 pinned to fcid4 (host has r10, but RPCs fail)
+	store.addPinnedSectors(t, hk5, fcid4, []types.Hash256{r10})
 
 	// prepare dialer
-	h1Mock := newHostClientMock()
-	h2Mock := newHostClientMock()
-	h4Mock := newHostClientMock()
-	h5Mock := newHostClientMock()
+	h1Mock := newHostClientMock(hk1)
+	h2Mock := newHostClientMock(hk2)
+	h4Mock := newHostClientMock(hk4)
+	h5Mock := newHostClientMock(hk5)
 	h5Mock.failsRPCs = true
 
 	dialer := newDialerMock()
@@ -232,37 +184,24 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	h2Mock.sectorRoots[fcid3] = []types.Hash256{r9}
 	h5Mock.sectorRoots[fcid4] = []types.Hash256{r10}
 
-	// set contract sizes
-	for i, c := range store.contracts {
-		switch c.ID {
-		case fcid1:
-			store.contracts[i].Size = proto.SectorSize * uint64(len(h1Mock.sectorRoots[fcid1]))
-			store.revisions[i].Revision.Filesize = store.contracts[i].Size
-		case fcid2:
-			store.contracts[i].Size = proto.SectorSize * uint64(len(h1Mock.sectorRoots[fcid2]))
-			store.revisions[i].Revision.Filesize = store.contracts[i].Size
-		case fcid3:
-			store.contracts[i].Size = proto.SectorSize * uint64(len(h2Mock.sectorRoots[fcid3]))
-			store.revisions[i].Revision.Filesize = store.contracts[i].Size
-		case fcid4:
-			store.contracts[i].Size = proto.SectorSize * uint64(len(h5Mock.sectorRoots[fcid4]))
-			store.revisions[i].Revision.Filesize = store.contracts[i].Size
-		}
-	}
+	// set contract sizes and revision filesizes
+	store.setContractSize(t, fcid1, proto.SectorSize*uint64(len(h1Mock.sectorRoots[fcid1])))
+	store.setRevisionFilesize(t, fcid1, proto.SectorSize*uint64(len(h1Mock.sectorRoots[fcid1])))
+	store.setContractSize(t, fcid2, proto.SectorSize*uint64(len(h1Mock.sectorRoots[fcid2])))
+	store.setRevisionFilesize(t, fcid2, proto.SectorSize*uint64(len(h1Mock.sectorRoots[fcid2])))
+	store.setContractSize(t, fcid3, proto.SectorSize*uint64(len(h2Mock.sectorRoots[fcid3])))
+	store.setRevisionFilesize(t, fcid3, proto.SectorSize*uint64(len(h2Mock.sectorRoots[fcid3])))
+	store.setContractSize(t, fcid4, proto.SectorSize*uint64(len(h5Mock.sectorRoots[fcid4])))
+	store.setRevisionFilesize(t, fcid4, proto.SectorSize*uint64(len(h5Mock.sectorRoots[fcid4])))
 
-	// prepare hm
-	hm := newHostManagerMock(store)
-	hm.settings[hk1] = h1.Settings
-	hm.settings[hk2] = h2.Settings
-	hm.settings[hk3] = h3.Settings
-	hm.settings[hk4] = h3.Settings // h4 is bad, same as h3
-	hm.settings[hk5] = h5.Settings
+	// schedule contracts for pruning
+	store.scheduleContractsForPruningHelper(t)
 
 	// prepare contract manager
-	cm := newContractManager(types.PublicKey{}, nil, nil, nil, store, dialer, hm, nil, nil)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, store, dialer, hmMock, nil, nil)
 
 	// prune contracts on h1
-	err := cm.performContractPruningOnHost(context.Background(), h1, zap.NewNop())
+	err := cm.PerformContractPruningOnHost(context.Background(), h1, zap.NewNop())
 	if err != nil {
 		t.Fatalf("failed to perform contract pruning: %v", err)
 	}
@@ -295,7 +234,7 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	}
 
 	// prune contracts on h2
-	err = cm.performContractPruningOnHost(context.Background(), h2, zap.NewNop())
+	err = cm.PerformContractPruningOnHost(context.Background(), h2, zap.NewNop())
 	if err != nil {
 		t.Fatalf("failed to perform contract pruning: %v", err)
 	}
@@ -323,8 +262,8 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	}
 
 	performPruning := func(hostKey types.PublicKey) error {
-		return cm.hosts.WithScannedHost(context.Background(), hostKey, func(h hosts.Host) error {
-			return cm.performContractPruningOnHost(context.Background(), h, zap.NewNop())
+		return hmMock.WithScannedHost(context.Background(), hostKey, func(h hosts.Host) error {
+			return cm.PerformContractPruningOnHost(context.Background(), h, zap.NewNop())
 		})
 	}
 
@@ -346,16 +285,16 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 		t.Fatalf("failed to perform contract pruning: %v", err)
 	}
 
-	contracts, err := store.Contracts(0, 10)
+	allContracts, err := store.Contracts(0, 10)
 	if err != nil {
 		t.Fatalf("failed to fetch contracts: %v", err)
-	} else if len(contracts) != 4 {
-		t.Fatalf("expected 4 contracts, got %d", len(contracts))
+	} else if len(allContracts) != 4 {
+		t.Fatalf("expected 4 contracts, got %d", len(allContracts))
 	}
 
-	success := time.Now().Add(pruneIntervalSuccess)
-	failure := time.Now().Add(pruneIntervalFailure)
-	for _, c := range contracts {
+	success := time.Now().Add(contracts.PruneIntervalSuccess)
+	failure := time.Now().Add(contracts.PruneIntervalFailure)
+	for _, c := range allContracts {
 		switch c.ID {
 		case fcid1, fcid2, fcid3:
 			if !(c.NextPrune.After(success.Add(-time.Minute)) && c.NextPrune.Before(success.Add(time.Minute))) {

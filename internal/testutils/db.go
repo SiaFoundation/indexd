@@ -89,6 +89,11 @@ func (ts TestStore) Exec(ctx context.Context, query string, args ...any) (pgconn
 	return ts.pool.Exec(ctx, query, args...)
 }
 
+// QueryRow executes a query that is expected to return at most one row.
+func (ts TestStore) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
+	return ts.pool.QueryRow(ctx, query, args...)
+}
+
 // AddTestHost adds a host to the database for testing.
 func (ts TestStore) AddTestHost(t testing.TB, host hosts.Host) {
 	t.Helper()
