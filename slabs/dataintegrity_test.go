@@ -114,7 +114,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	if cm.triggeredRefills[acc] != 0 {
 		t.Fatalf("expected 0 triggered refill, got %d", cm.triggeredRefills[acc])
 	}
-	_ = am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, types.ZeroCurrency)
+	am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, types.ZeroCurrency)
 	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	if cm.triggeredRefills[acc] != 1 {
 		t.Fatalf("expected 1 triggered refill, got %d", cm.triggeredRefills[acc])

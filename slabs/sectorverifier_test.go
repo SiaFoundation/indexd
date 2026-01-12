@@ -18,7 +18,6 @@ func TestSectorVerifier(t *testing.T) {
 	oneSC := types.Siacoins(1)
 
 	// prepare manager
-	_ = newMockStore(t)
 	am := newMockAccountManager()
 
 	// prepare account
