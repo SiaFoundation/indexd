@@ -123,12 +123,6 @@ func (s *testStore) setSectorsForCheck(t testing.TB, hk types.PublicKey, roots [
 		}
 	}
 
-	var count int
-	err := s.QueryRow(context.Background(), "SELECT COUNT(*) FROM sectors WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)", hk[:]).Scan(&count)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	if _, err := s.Exec(context.Background(), "UPDATE stats SET num_unpinned_sectors = num_unpinned_sectors + $1", len(roots)); err != nil {
 		t.Fatal(err)
 	}
