@@ -114,7 +114,9 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	if cm.triggeredRefills[acc] != 0 {
 		t.Fatalf("expected 0 triggered refill, got %d", cm.triggeredRefills[acc])
 	}
-	am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, types.ZeroCurrency)
+	if err := am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, types.ZeroCurrency); err != nil {
+		t.Fatal(err)
+	}
 	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	if cm.triggeredRefills[acc] != 1 {
 		t.Fatalf("expected 1 triggered refill, got %d", cm.triggeredRefills[acc])
@@ -142,7 +144,9 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	}
 
 	// perform integrity checks
-	sm.PerformIntegrityChecks(context.Background())
+	if err := sm.PerformIntegrityChecks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	// assert alert was generated
 	var got alerts.Alert
@@ -167,7 +171,9 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	}
 
 	// perform integrity checks
-	sm.PerformIntegrityChecks(context.Background())
+	if err := sm.PerformIntegrityChecks(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 
 	// alert should be dismissed
 	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {

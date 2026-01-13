@@ -93,7 +93,9 @@ func TestMigrateSlab(t *testing.T) {
 	mgr := slabs.NewSlabManager(chain, am, contractsMgr, hm, db, client, alerter, msk, ssk, slabs.WithLogger(log.Named("slabs")), slabs.WithMinHostDistance(0))
 
 	for _, h := range hostsList {
-		am.UpdateServiceAccountBalance(context.Background(), h.PublicKey, mgr.MigrationAccount(), types.Siacoins(10))
+		if err := am.UpdateServiceAccountBalance(context.Background(), h.PublicKey, mgr.MigrationAccount(), types.Siacoins(10)); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	resetNextRepair := func() {
@@ -159,7 +161,9 @@ func TestMigrateSlab(t *testing.T) {
 	client.hostSettings[h5.PublicKey] = h5.Settings
 	db.addTestContract(t, h5.PublicKey)
 	contractsMgr.contracts = append(contractsMgr.contracts, newTestContract(h5.PublicKey))
-	am.UpdateServiceAccountBalance(context.Background(), h5.PublicKey, mgr.MigrationAccount(), types.Siacoins(10))
+	if err := am.UpdateServiceAccountBalance(context.Background(), h5.PublicKey, mgr.MigrationAccount(), types.Siacoins(10)); err != nil {
+		t.Fatal(err)
+	}
 
 	// migrate the slab again
 	if err := mgr.MigrateSlabs(context.Background(), unhealthSlabIDs, log.Named("migrate")); err != nil {
