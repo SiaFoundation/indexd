@@ -867,29 +867,13 @@ func TestUsableHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// set uh2 to be stuck for 23 hours - should still have GoodForUpload=true
-	if _, err := db.pool.Exec(t.Context(), `UPDATE hosts SET stuck_since = NOW() - INTERVAL '23 hours' WHERE public_key = $1`, sqlPublicKey(uh2)); err != nil {
-		t.Fatal(err)
-	}
-
-	// verify uh2 still has GoodForUpload=true
-	usableHosts, err := db.UsableHosts(0, 100)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, h := range usableHosts {
-		if h.PublicKey == uh2 && !h.GoodForUpload {
-			t.Fatal("expected host stuck for 23 hours to still be good for upload")
-		}
-	}
-
-	// set uh2 to be stuck for 25 hours - should have GoodForUpload=false
-	if _, err := db.pool.Exec(t.Context(), `UPDATE hosts SET stuck_since = NOW() - INTERVAL '25 hours' WHERE public_key = $1`, sqlPublicKey(uh2)); err != nil {
+	// set uh2 to be stuck - any stuck hosts are not good for upload
+	if _, err := db.pool.Exec(t.Context(), `UPDATE hosts SET stuck_since = NOW() - INTERVAL '1 hours' WHERE public_key = $1`, sqlPublicKey(uh2)); err != nil {
 		t.Fatal(err)
 	}
 
 	// verify GoodForUpload is false for both hosts
-	usableHosts, err = db.UsableHosts(0, 100)
+	usableHosts, err := db.UsableHosts(0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}

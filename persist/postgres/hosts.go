@@ -86,7 +86,7 @@ WITH globals AS (
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until, settings_signature,
 		last_successful_scan IS NOT NULL as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
-		((stuck_since IS NULL OR stuck_since >= NOW() - INTERVAL '24 hours') AND settings_remaining_storage >= $2) AS good_for_upload
+		(stuck_since IS NULL AND settings_remaining_storage >= $2) AS good_for_upload
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 	WHERE hosts.public_key = $1
@@ -171,7 +171,7 @@ WITH globals AS (
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until, settings_signature,
 		last_successful_scan IS NOT NULL as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
-		((stuck_since IS NULL OR stuck_since >= NOW() - INTERVAL '24 hours') AND settings_remaining_storage >= $7) AS good_for_upload
+		(stuck_since IS NULL AND settings_remaining_storage >= $7) AS good_for_upload
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 ) SELECT
@@ -647,7 +647,7 @@ WITH globals AS (
 		settings_valid_until,
 		settings_signature,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
-		((stuck_since IS NULL OR stuck_since >= NOW() - INTERVAL '24 hours') AND settings_remaining_storage >= $5) AS good_for_upload
+		(stuck_since IS NULL AND settings_remaining_storage >= $5) AS good_for_upload
 	FROM hosts
 	WHERE last_successful_scan IS NOT NULL -- has settings
 )
