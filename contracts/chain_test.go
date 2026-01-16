@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
@@ -317,6 +318,37 @@ func (ts testStore) addPinnedSectors(t testing.TB, hk types.PublicKey, fcid type
 	if err := ts.PinSectors(fcid, roots); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// resetNextFund resets the next_fund timestamp for all account hosts.
+func (ts testStore) resetNextFund(t testing.TB) {
+	t.Helper()
+	if _, err := ts.Exec(t.Context(), `UPDATE account_hosts SET next_fund = NOW()`); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// hostAccounts returns all host accounts with their next_fund timestamps.
+func (ts testStore) hostAccounts(t testing.TB) (result []accounts.HostAccount) {
+	t.Helper()
+
+	rows, err := ts.Query(t.Context(), `SELECT next_fund FROM account_hosts`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var account accounts.HostAccount
+		if err := rows.Scan(&account.NextFund); err != nil {
+			t.Fatal(err)
+		}
+		result = append(result, account)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return
 }
 
 // scheduleContractsForPruningHelper marks all contracts as ready for pruning (test helper).
