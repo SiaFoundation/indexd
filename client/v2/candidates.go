@@ -241,6 +241,25 @@ func (p *Provider) Candidates() (*Candidates, error) {
 	}, nil
 }
 
+// UploadCandidates returns host candidates that are good for uploading,
+// ordered by their historical performance.
+func (p *Provider) UploadCandidates() (*Candidates, error) {
+	hosts, err := p.store.UsableHosts()
+	if err != nil {
+		return nil, err
+	}
+	hostKeys := make([]types.PublicKey, 0, len(hosts))
+	for _, host := range hosts {
+		if host.GoodForUpload {
+			hostKeys = append(hostKeys, host.PublicKey)
+		}
+	}
+	p.sortHosts(hostKeys)
+	return &Candidates{
+		hosts: hostKeys,
+	}, nil
+}
+
 // Prioritize reorders the given slice of hosts in place based
 // on their historical performance. The reordered slice is returned with
 // unusable hosts removed.

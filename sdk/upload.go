@@ -80,7 +80,7 @@ func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Rea
 		// prepare upload candidates, every shard upload holds a reference
 		// to the upload candidates to ensure every shard is uploaded to a
 		// unique host
-		candidates, err := s.hosts.Candidates()
+		candidates, err := s.hosts.UploadCandidates()
 		if err != nil {
 			sendErr(fmt.Errorf("failed to get upload candidates for slab %d: %w", i, err))
 			return

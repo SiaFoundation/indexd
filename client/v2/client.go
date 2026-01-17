@@ -310,6 +310,12 @@ func (c *Client) Candidates() (*Candidates, error) {
 	return c.hosts.Candidates()
 }
 
+// UploadCandidates returns host candidates that are good for uploading,
+// ordered by their historical performance.
+func (c *Client) UploadCandidates() (*Candidates, error) {
+	return c.hosts.UploadCandidates()
+}
+
 // Prioritize reorders the given hosts based on their historical performance.
 // The reordered slice is returned with unusable hosts removed.
 func (c *Client) Prioritize(hosts []types.PublicKey) []types.PublicKey {

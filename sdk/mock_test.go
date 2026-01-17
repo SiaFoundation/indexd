@@ -39,6 +39,11 @@ func (m *mockHostDialer) Candidates() (*client.Candidates, error) {
 	return client.NewCandidates(slices.Collect(maps.Keys(m.hosts))), nil
 }
 
+// UploadCandidates implements the [hostDialer] interface.
+func (m *mockHostDialer) UploadCandidates() (*client.Candidates, error) {
+	return client.NewCandidates(slices.Collect(maps.Keys(m.hosts))), nil
+}
+
 // Prioritize implements the [hostDialer] interface.
 func (m *mockHostDialer) Prioritize(hosts []types.PublicKey) []types.PublicKey {
 	return hosts

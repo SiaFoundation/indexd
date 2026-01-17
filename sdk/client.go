@@ -29,6 +29,7 @@ type (
 		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error)
 
 		Candidates() (*client.Candidates, error)
+		UploadCandidates() (*client.Candidates, error)
 		Prioritize(hosts []types.PublicKey) []types.PublicKey
 		Close() error
 	}
