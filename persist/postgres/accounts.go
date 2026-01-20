@@ -225,7 +225,7 @@ RETURNING o.object_key;`, accountID, limit)
 			if connectKeyID.Valid {
 				_, err = tx.Exec(ctx, `UPDATE app_connect_keys SET remaining_uses = remaining_uses + 1 WHERE id = $1`, connectKeyID.Int64)
 				if err != nil {
-					return fmt.Errorf("failed to increment connect key use: %w", err)
+					return fmt.Errorf("failed to increment connect key remaining uses: %w", err)
 				}
 			}
 
