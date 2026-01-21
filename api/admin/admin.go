@@ -783,7 +783,9 @@ func (a *admin) handlePUTHostsBlocklist(jc jape.Context) {
 	if jc.Decode(&hosts) != nil {
 		return
 	}
-	jc.Check("failed to add host keys to blocklist", a.hosts.BlockHosts(jc.Request.Context(), hosts.HostKeys, hosts.Reasons))
+	if jc.Check("failed to add host keys to blocklist", a.hosts.BlockHosts(jc.Request.Context(), hosts.HostKeys, hosts.Reasons)) != nil {
+		return
+	}
 	jc.Encode(nil)
 }
 
@@ -792,7 +794,9 @@ func (a *admin) handleDELETEHostsBlocklist(jc jape.Context) {
 	if jc.DecodeParam("hostkey", &hk) != nil {
 		return
 	}
-	jc.Check("failed to unblock host", a.hosts.UnblockHost(jc.Request.Context(), hk))
+	if jc.Check("failed to unblock host", a.hosts.UnblockHost(jc.Request.Context(), hk)) != nil {
+		return
+	}
 	jc.Encode(nil)
 }
 
@@ -809,7 +813,9 @@ func (a *admin) handlePUTSettingsContracts(jc jape.Context) {
 	if jc.Decode(&ms) != nil {
 		return
 	}
-	jc.Check("failed to update contract settings", a.contracts.UpdateMaintenanceSettings(jc.Request.Context(), ms))
+	if jc.Check("failed to update contract settings", a.contracts.UpdateMaintenanceSettings(jc.Request.Context(), ms)) != nil {
+		return
+	}
 	jc.Encode(nil)
 }
 
@@ -826,7 +832,9 @@ func (a *admin) handlePUTSettingsHosts(jc jape.Context) {
 	if jc.Decode(&s) != nil {
 		return
 	}
-	jc.Check("failed to update host settings", a.hosts.UpdateUsabilitySettings(jc.Request.Context(), s))
+	if jc.Check("failed to update host settings", a.hosts.UpdateUsabilitySettings(jc.Request.Context(), s)) != nil {
+		return
+	}
 	jc.Encode(nil)
 }
 
@@ -847,7 +855,9 @@ func (a *admin) handlePUTSettingsPricePinning(jc jape.Context) {
 		return
 	}
 
-	jc.Check("failed to update price pinning settings", a.pins.UpdatePinnedSettings(jc.Request.Context(), s))
+	if jc.Check("failed to update price pinning settings", a.pins.UpdatePinnedSettings(jc.Request.Context(), s)) != nil {
+		return
+	}
 	jc.Encode(nil)
 }
 

@@ -163,8 +163,7 @@ func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 	var opts []hosts.UsableHostQueryOpt
 
 	var protocol string
-	if err := jc.DecodeForm("protocol", &protocol); err != nil {
-		jc.Error(err, http.StatusBadRequest)
+	if jc.DecodeForm("protocol", &protocol) != nil {
 		return
 	} else if protocol != "" && protocol != string(siamux.Protocol) && protocol != string(quic.Protocol) {
 		jc.Error(fmt.Errorf("invalid protocol %q", protocol), http.StatusBadRequest)
@@ -174,16 +173,14 @@ func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 	}
 
 	var countryCode string
-	if err := jc.DecodeForm("country", &countryCode); err != nil {
-		jc.Error(err, http.StatusBadRequest)
+	if jc.DecodeForm("country", &countryCode) != nil {
 		return
 	} else if countryCode != "" {
 		opts = append(opts, hosts.WithCountry(countryCode))
 	}
 
 	var locationStr string
-	if err := jc.DecodeForm("location", &locationStr); err != nil {
-		jc.Error(err, http.StatusBadRequest)
+	if jc.DecodeForm("location", &locationStr) != nil {
 		return
 	} else if locationStr != "" {
 		var lat, lng float64
@@ -301,8 +298,7 @@ func (a *app) handleDELETEObjects(jc jape.Context, pk types.PublicKey) {
 
 func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	var params []slabs.SlabPinParams
-	if err := jc.Decode(&params); err != nil {
-		jc.Error(err, http.StatusBadRequest)
+	if jc.Decode(&params) != nil {
 		return
 	}
 	for _, param := range params {
@@ -348,8 +344,7 @@ func encodeBinary(jc jape.Context, resp types.EncoderTo) {
 
 func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 	var slabID slabs.SlabID
-	if err := jc.DecodeParam("slabid", &slabID); err != nil {
-		jc.Error(err, http.StatusBadRequest)
+	if jc.DecodeParam("slabid", &slabID) != nil {
 		return
 	}
 
@@ -478,14 +473,12 @@ func (a *app) handlePOSTAuthConnect(jc jape.Context) {
 	}
 
 	var requestID string
-	if err := jc.DecodeParam("requestID", &requestID); err != nil {
-		jc.Error(err, http.StatusBadRequest)
+	if jc.DecodeParam("requestID", &requestID) != nil {
 		return
 	}
 
 	var approveReq ApproveAppRequest
-	if err := jc.Decode(&approveReq); err != nil {
-		jc.Error(err, http.StatusBadRequest)
+	if jc.Decode(&approveReq) != nil {
 		return
 	}
 
@@ -553,8 +546,7 @@ func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
 // with the derived private key
 func (a *app) handleAuthRegister(jc jape.Context) {
 	var requestID string
-	if err := jc.DecodeParam("requestID", &requestID); err != nil {
-		jc.Error(err, http.StatusBadRequest)
+	if jc.DecodeParam("requestID", &requestID) != nil {
 		return
 	}
 
