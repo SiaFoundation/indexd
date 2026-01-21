@@ -100,8 +100,8 @@ func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKe
 		if !host.IsGood() {
 			return errors.New("host is not good")
 		}
-		allowance, collateral := contractFunding(host.Settings, 0, fundTarget, period)
-		formationCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // note: broadcasting on the host-side can block for up to a minute by default
+		allowance, collateral := contractFunding(host.Settings, 0, fundTarget, period+proto.ProofWindow) // duration should be extended until expiration height
+		formationCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)                                  // note: broadcasting on the host-side can block for up to a minute by default
 		defer cancel()
 		hc, err := cm.dialer.DialHost(formationCtx, host.PublicKey, host.RHP4Addrs())
 		if err != nil {
@@ -142,7 +142,7 @@ func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKe
 	})
 }
 
-func (cm *ContractManager) refreshContract(ctx context.Context, contract Contract, height uint64, fundTarget types.Currency, log *zap.Logger) error {
+func (cm *ContractManager) refreshContract(ctx context.Context, contract Contract, fundTarget types.Currency, log *zap.Logger) error {
 	return cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
 		if !host.IsGood() {
 			return errors.New("host is not good")
@@ -150,7 +150,11 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		refreshCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 		defer cancel()
 
-		duration := contract.ExpirationHeight - height
+		if contract.ProofHeight <= host.Settings.Prices.TipHeight {
+			return fmt.Errorf("contract is expired and cannot be refreshed")
+		}
+
+		duration := contract.ExpirationHeight - host.Settings.Prices.TipHeight
 		allowance, collateral := contractFunding(host.Settings, contract.Size, fundTarget, duration)
 		hc, err := cm.dialer.DialHost(refreshCtx, host.PublicKey, host.RHP4Addrs())
 		if err != nil {
@@ -237,7 +241,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			candidate := candidateContract{
 				host:           host,
 				contract:       contract,
-				goodForRefresh: contract.GoodForRefresh(host.Settings, accountFundTarget, settings.RenewWindow, height, settings.Period),
+				goodForRefresh: contract.GoodForRefresh(host.Settings, accountFundTarget, settings.RenewWindow, height),
 				goodForFunding: contract.GoodForAccountFunding(accountFundTarget),
 				goodForAppend:  contract.GoodForAppend(host.Settings.Prices, settings.RenewWindow, height),
 			}
@@ -300,7 +304,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			return false
 		}
 		// fund target is multiplied by 2 to have buffer for less frequent refreshes
-		err = cm.refreshContract(ctx, contract, cm.chain.TipState().Index.Height, accountFundTarget.Mul64(2), log)
+		err = cm.refreshContract(ctx, contract, accountFundTarget.Mul64(2), log)
 		switch {
 		case err == nil:
 			refreshed++

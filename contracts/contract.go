@@ -195,8 +195,13 @@ func (c Contract) GoodForAppend(prices proto.HostPrices, renewWindow, height uin
 }
 
 // GoodForRefresh indicates whether a contract is likely to succeed refreshing.
-func (c Contract) GoodForRefresh(settings proto.HostSettings, fundTarget types.Currency, renewWindow, height, period uint64) error {
-	_, collateral := contractFunding(settings, c.Size, fundTarget, period)
+func (c Contract) GoodForRefresh(settings proto.HostSettings, fundTarget types.Currency, renewWindow, height uint64) error {
+	if c.inRenewWindow(renewWindow, height) {
+		return fmt.Errorf("contract is in renew window")
+	}
+
+	duration := c.ExpirationHeight - height
+	_, collateral := contractFunding(settings, c.Size, fundTarget, duration)
 	var totalCollateral types.Currency
 	if settings.ProtocolVersion.Cmp(rhp.ProtocolVersion502) >= 0 {
 		totalCollateral = c.UsedCollateral.Add(collateral)
@@ -210,8 +215,6 @@ func (c Contract) GoodForRefresh(settings proto.HostSettings, fundTarget types.C
 		return fmt.Errorf("contract has reached maximum size")
 	case c.ProofHeight <= height:
 		return fmt.Errorf("contract is not revisable")
-	case c.inRenewWindow(renewWindow, height):
-		return fmt.Errorf("contract is in renew window")
 	case totalCollateral.Cmp(settings.MaxCollateral) > 0:
 		return fmt.Errorf("host's max collateral %s is less than estimated collateral %s for refresh", settings.MaxCollateral, totalCollateral)
 	default:

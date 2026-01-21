@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"go.sia.tech/core/rhp/v4"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -30,7 +30,7 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 			}
 
 			log := log.With(zap.Stringer("contractID", contract.ID), zap.Stringer("host", contract.HostKey))
-			if err := cm.renewContract(ctx, contract, newProofHeight, period, log); err != nil {
+			if err := cm.renewContract(ctx, contract, newProofHeight, log); err != nil {
 				log.Error("failed to renew contract", zap.Error(err))
 			}
 		}
@@ -43,16 +43,21 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 	return nil
 }
 
-func (cm *ContractManager) renewContract(ctx context.Context, contract Contract, proofHeight, period uint64, log *zap.Logger) error {
+func (cm *ContractManager) renewContract(ctx context.Context, contract Contract, proofHeight uint64, log *zap.Logger) error {
 	return cm.hosts.WithScannedHost(ctx, contract.HostKey, func(host hosts.Host) error {
 		// calculate funding target
 		minAllowance, err := cm.ContractFundTarget(ctx, host, minAllowance)
 		if err != nil {
 			return fmt.Errorf("failed to get fund target: %w", err)
 		}
+		settings := host.Settings
+		if settings.Prices.TipHeight > proofHeight {
+			return fmt.Errorf("cannot renew contract with proof height %d before tip height %d", proofHeight, settings.Prices.TipHeight)
+		}
+		duration := proofHeight + proto.ProofWindow - settings.Prices.TipHeight
 
 		// allowance is doubled to allow for two account funding cycles before next refresh
-		allowance, collateral := contractFunding(host.Settings, contract.Size, minAllowance.Mul64(2), period)
+		allowance, collateral := contractFunding(settings, contract.Size, minAllowance.Mul64(2), duration)
 		renewCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
 
@@ -63,7 +68,7 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		}
 		defer hc.Close()
 
-		res, err := hc.RenewContract(renewCtx, host.Settings, rhp.RPCRenewContractParams{
+		res, err := hc.RenewContract(renewCtx, settings, proto.RPCRenewContractParams{
 			Allowance:   allowance,
 			Collateral:  collateral,
 			ContractID:  contract.ID,
