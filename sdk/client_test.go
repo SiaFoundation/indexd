@@ -12,7 +12,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/internal/testutils"
+	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )

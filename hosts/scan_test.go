@@ -11,7 +11,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
-	"go.sia.tech/indexd/internal/testutils/mock"
+	"go.sia.tech/indexd/testutils/mock"
 	"go.uber.org/zap"
 )
 

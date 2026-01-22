@@ -8,7 +8,7 @@ import (
 
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
-	"go.sia.tech/indexd/internal/testutils"
+	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap/zaptest"
 )
 

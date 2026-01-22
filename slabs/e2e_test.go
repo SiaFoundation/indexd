@@ -9,8 +9,8 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap"
 )
 

@@ -16,7 +16,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/internal/testutils"
+	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )

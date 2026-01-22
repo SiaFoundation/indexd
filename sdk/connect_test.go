@@ -8,9 +8,9 @@ import (
 
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api/app"
-	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/sdk"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap/zaptest"
 )
 

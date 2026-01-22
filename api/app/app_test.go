@@ -19,9 +19,9 @@ import (
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/geoip"
-	"go.sia.tech/indexd/internal/testutils"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/subscriber"
+	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
