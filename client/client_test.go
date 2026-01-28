@@ -145,7 +145,7 @@ func TestWithRevision(t *testing.T) {
 	}
 
 	// assert withRevision persists the revision if no error occurs and we don't need to sync the revision
-	update := uint64(frand.Uint64n(math.MaxInt32))
+	update := frand.Uint64n(math.MaxInt32)
 	err = c.WithRevision(context.Background(), fcid4, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		contract.Revision.RevisionNumber = update
 		return contract, proto.Usage{}, nil
