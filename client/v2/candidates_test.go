@@ -1,9 +1,7 @@
-package client
+package client_test
 
 import (
-	"encoding/hex"
 	"errors"
-	"maps"
 	"math"
 	"slices"
 	"sync"
@@ -11,15 +9,21 @@ import (
 	"testing/synctest"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/indexd/client/v2"
+	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/testutils"
+	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
 
 func TestRPCAverage(t *testing.T) {
-	var ra rpcAverage
+	var ra client.RPCAverage
 
 	if ra.Value() != 0 {
 		t.Fatal("initial value should be zero")
@@ -38,7 +42,7 @@ func TestRPCAverage(t *testing.T) {
 }
 
 func TestFailureRate(t *testing.T) {
-	var fr failureRate
+	var fr client.FailureRate
 
 	if fr.Value() != 0 {
 		t.Fatal("initial value should be zero")
@@ -62,7 +66,7 @@ func TestFailureRateTimeDecay(t *testing.T) {
 		totalDecayMinutes    = 10
 	)
 	synctest.Test(t, func(t *testing.T) {
-		var fr failureRate
+		var fr client.FailureRate
 
 		fr.AddSample(false)
 		expected := 1.0
@@ -73,7 +77,7 @@ func TestFailureRateTimeDecay(t *testing.T) {
 		time.Sleep(totalDecayMinutes * time.Minute)
 		synctest.Wait()
 
-		decayFactor := math.Pow(1.0-emaAlpha, totalDecayMinutes/minutesBetweenDecays)
+		decayFactor := math.Pow(1.0-client.EMAAlpha, totalDecayMinutes/minutesBetweenDecays)
 		expected *= decayFactor
 		if v := fr.Value(); v != expected {
 			t.Fatalf("expected %f, got %f", expected, v)
@@ -81,51 +85,77 @@ func TestFailureRateTimeDecay(t *testing.T) {
 	})
 }
 
-type mockHostStore struct {
-	mu          sync.Mutex
-	usableHosts map[types.PublicKey]hosts.HostInfo
+const (
+	oneTB          = 1 << 40
+	blocksPerMonth = 144 * 30
+)
+
+type testStore struct {
+	testutils.TestStore
 }
 
-func (ms *mockHostStore) UsableHosts() ([]hosts.HostInfo, error) {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
+func newTestStore(t testing.TB) testStore {
+	s := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
+	t.Cleanup(func() {
+		s.Close()
+	})
 
-	return slices.Collect(maps.Values(ms.usableHosts)), nil
+	return testStore{s}
 }
-func (ms *mockHostStore) Addresses(pk types.PublicKey) ([]chain.NetAddress, error) {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
 
-	host, ok := ms.usableHosts[pk]
-	if !ok {
-		return nil, errors.New("unknown host")
+// addUsableHost adds a host considered usable by UsableHosts
+func (s *testStore) addUsableHost(t testing.TB, pk types.PublicKey, goodForUpload bool) {
+	t.Helper()
+
+	s.AddTestHost(t, hosts.Host{
+		PublicKey: pk,
+		Addresses: []chain.NetAddress{
+			{Protocol: siamux.Protocol, Address: "[::]:4848"},
+		},
+	})
+
+	settings := proto.HostSettings{
+		ProtocolVersion:     [3]uint8{5, 0, 2},
+		AcceptingContracts:  true,
+		MaxCollateral:       types.Siacoins(10000),
+		MaxContractDuration: 10000,
+		TotalStorage:        2 * oneTB,
+		RemainingStorage:    oneTB,
+		Prices: proto.HostPrices{
+			TipHeight:    0,
+			ValidUntil:   time.Now().Add(time.Hour),
+			Collateral:   types.Siacoins(1000).Div64(oneTB).Div64(blocksPerMonth),
+			StoragePrice: types.Siacoins(100).Div64(oneTB).Div64(blocksPerMonth),
+		},
 	}
-	return host.Addresses, nil
-}
-func (ms *mockHostStore) Usable(pk types.PublicKey) (bool, error) {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
+	if !goodForUpload {
+		settings.RemainingStorage = 0
+	}
 
-	_, ok := ms.usableHosts[pk]
-	return ok, nil
+	if err := s.UpdateHostScan(pk, settings, geoip.Location{}, true, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	fcid := types.FileContractID(frand.Entropy256())
+	rev := types.V2FileContract{
+		HostPublicKey: pk,
+		Capacity:      settings.TotalStorage,
+	}
+	if err := s.AddFormedContract(pk, fcid, rev, types.ZeroCurrency, types.Siacoins(100), types.ZeroCurrency, proto.Usage{}); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestProviderPriority(t *testing.T) {
-	store := &mockHostStore{
-		usableHosts: make(map[types.PublicKey]hosts.HostInfo),
-	}
+	s := newTestStore(t)
+	store := hosts.NewHostStore(s.Store)
 	usable := make([]types.PublicKey, 0, 10)
 	for range cap(usable) {
 		pk := types.GeneratePrivateKey().PublicKey()
-		store.usableHosts[pk] = hosts.HostInfo{
-			PublicKey: pk,
-			Addresses: []chain.NetAddress{
-				{Protocol: siamux.Protocol, Address: hex.EncodeToString(frand.Bytes(32))},
-			},
-		}
+		s.addUsableHost(t, pk, true)
 		usable = append(usable, pk)
 	}
-	provider := NewProvider(store)
+	provider := client.NewProvider(store)
 
 	// not in any order, just ensure all hosts are returned
 	sorted := provider.Prioritize(slices.Clone(usable))
@@ -184,23 +214,17 @@ func TestProviderPriority(t *testing.T) {
 }
 
 func TestProviderCandidates(t *testing.T) {
-	store := &mockHostStore{
-		usableHosts: make(map[types.PublicKey]hosts.HostInfo),
-	}
+	s := newTestStore(t)
+	store := hosts.NewHostStore(s.Store)
 	usable := make([]types.PublicKey, 0, 10)
 	for range cap(usable) {
 		pk := types.GeneratePrivateKey().PublicKey()
-		store.usableHosts[pk] = hosts.HostInfo{
-			PublicKey: pk,
-			Addresses: []chain.NetAddress{
-				{Protocol: siamux.Protocol, Address: hex.EncodeToString(frand.Bytes(32))},
-			},
-		}
+		s.addUsableHost(t, pk, true)
 		usable = append(usable, pk)
 	}
-	provider := NewProvider(store)
+	provider := client.NewProvider(store)
 
-	assertCandidates := func(candidates *Candidates, hosts []types.PublicKey) {
+	assertCandidates := func(candidates *client.Candidates, hosts []types.PublicKey) {
 		if candidates.Available() != len(hosts) {
 			t.Fatalf("expected %d candidates, got %d", len(hosts), candidates.Available())
 		}
@@ -281,18 +305,17 @@ func TestProviderCandidates(t *testing.T) {
 }
 
 func TestUploadCandidates(t *testing.T) {
+	s := newTestStore(t)
+	store := hosts.NewHostStore(s.Store)
 	host1 := types.GeneratePrivateKey().PublicKey()
 	host2 := types.GeneratePrivateKey().PublicKey()
 	host3 := types.GeneratePrivateKey().PublicKey()
 
-	store := &mockHostStore{
-		usableHosts: map[types.PublicKey]hosts.HostInfo{
-			host1: {PublicKey: host1, GoodForUpload: true},
-			host2: {PublicKey: host2, GoodForUpload: true},
-			host3: {PublicKey: host3, GoodForUpload: false},
-		},
-	}
-	provider := NewProvider(store)
+	s.addUsableHost(t, host1, true)
+	s.addUsableHost(t, host2, true)
+	s.addUsableHost(t, host3, false)
+
+	provider := client.NewProvider(store)
 
 	candidates, err := provider.Candidates()
 	if err != nil {
@@ -322,7 +345,7 @@ func TestDuplicateCandidates(t *testing.T) {
 	}
 	duplicates := append(slices.Clone(hosts), hosts[1], hosts[2], hosts[0], hosts[1])
 
-	candidates := NewCandidates(duplicates)
+	candidates := client.NewCandidates(duplicates)
 	seen := make(map[types.PublicKey]struct{})
 	for pk := range candidates.Iter() {
 		if _, ok := seen[pk]; ok {
