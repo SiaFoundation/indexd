@@ -22,7 +22,12 @@ var (
 	PruneIntervalFailure                 = pruneIntervalFailure
 )
 
-var ShouldReplaceContract = shouldReplaceContract
+var (
+	ShouldReplaceContract  = shouldReplaceContract
+	NewTestContractManager = newContractManager
+
+	ContractFunding = contractFunding
+)
 
 type CandidateContract = candidateContract
 
@@ -40,10 +45,6 @@ func (cc CandidateContract) GoodForFunding() error { return cc.goodForFunding }
 
 func (cc CandidateContract) GoodForRefresh() error { return cc.goodForRefresh }
 
-var NewTestContractManager = newContractManager
-
-var ContractFunding = contractFunding
-
 type TestUpdateTx struct {
 	updateTx *updateTx
 }
@@ -57,16 +58,16 @@ func NewTestUpdateTx(tx UpdateTx) *TestUpdateTx {
 	}
 }
 
+func UpdateContractElementProofs(tx *TestUpdateTx, updater wallet.ProofUpdater) error {
+	return updateContractElementProofs(tx.updateTx, updater)
+}
+
 func (cm *ContractManager) ApplyV2ContractDiffs(tx *TestUpdateTx, diffs []consensus.V2FileContractElementDiff) error {
 	return cm.applyV2ContractDiffs(tx.updateTx, diffs)
 }
 
 func (cm *ContractManager) RevertV2ContractDiffs(tx *TestUpdateTx, diffs []consensus.V2FileContractElementDiff) error {
 	return cm.revertV2ContractDiffs(tx.updateTx, diffs)
-}
-
-func UpdateContractElementProofs(tx *TestUpdateTx, updater wallet.ProofUpdater) error {
-	return updateContractElementProofs(tx.updateTx, updater)
 }
 
 func (cm *ContractManager) PerformContractFormation(ctx context.Context, ms MaintenanceSettings, blockHeight uint64, log *zap.Logger) error {
