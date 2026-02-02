@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -79,6 +80,10 @@ func incrementHostsUnpinnedSectors(ctx context.Context, tx *txn, deltas []unpinn
 	if len(deltas) == 0 {
 		return nil
 	}
+	// sort by hostID to ensure consistent lock ordering and prevent deadlocks
+	slices.SortFunc(deltas, func(a, b unpinnedDelta) int {
+		return int(a.hostID - b.hostID)
+	})
 	batch := &pgx.Batch{}
 	for _, delta := range deltas {
 		batch.Queue(`UPDATE hosts SET unpinned_sectors = unpinned_sectors + $1 WHERE id = $2`, delta.delta, delta.hostID)
