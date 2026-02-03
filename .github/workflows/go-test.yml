@@ -24,7 +24,7 @@ jobs:
           skip-cache: true
       - name: Validate OpenAPI spec
         run: |
-          npm install --global swagger-spec-validator
+          npm install --global swagger-spec-validator@5.0.0
           swagger-spec-validator openapi/*.yml
   test:
     name: Test
