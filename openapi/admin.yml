@@ -1452,7 +1452,7 @@ paths:
       tags:
         - stats
       summary: Get stats about host scans
-      operationId: getStatsHostsScans
+      operationId: getStatsScans
       responses:
         "200":
           description: Stats about host scans on this instance
