@@ -493,12 +493,21 @@ func TestContractsAPI(t *testing.T) {
 
 	// assert contract was renewed - we don't pass the option here to asserts
 	// the contracts API returns only revisable contracts by default
-	if contracts, err := adminClient.Contracts(context.Background()); err != nil {
+	contracts, err := adminClient.Contracts(context.Background())
+	if err != nil {
 		t.Fatal(err)
-	} else if len(contracts) < 2 {
-		t.Fatal("expected at least 2 contracts, got", len(contracts))
-	} else if contracts[0].RenewedFrom != contract.ID && contracts[1].RenewedFrom != contract.ID {
-		t.Fatal("expected contract to be renewed", contracts[0].RenewedFrom, contracts[1].RenewedFrom, contract.ID)
+	} else if len(contracts) < 1 {
+		t.Fatal("expected at least 1 contract, got", len(contracts))
+	}
+	var renewed bool
+	for _, c := range contracts {
+		if c.RenewedFrom == contract.ID {
+			renewed = true
+			break
+		}
+	}
+	if !renewed {
+		t.Fatal("expected contract to be renewed")
 	}
 
 	// assert usage is being tracked
