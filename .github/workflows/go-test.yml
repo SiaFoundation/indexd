@@ -22,6 +22,10 @@ jobs:
       - uses: golangci/golangci-lint-action@v7
         with:
           skip-cache: true
+      - name: Validate OpenAPI spec
+        run: |
+          npm install --global swagger-spec-validator
+          swagger-spec-validator openapi/*.yml
   test:
     name: Test
     runs-on: ubuntu-latest
