@@ -348,19 +348,19 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				} else if err := incrementHostsUnpinnedSectors(ctx, tx, unpinnedDeltas); err != nil {
 					return fmt.Errorf("failed to update hosts unpinned sectors: %w", err)
 				}
+			}
 
-				// insert slab sectors into join table
-				batch = &pgx.Batch{}
-				for i, sectorID := range sectorIDs {
-					batch.Queue(`
+			// insert slab sectors into join table
+			batch = &pgx.Batch{}
+			for i, sectorID := range sectorIDs {
+				batch.Queue(`
 				INSERT INTO slab_sectors (slab_id, slab_index, sector_id)
 				VALUES ($1, $2, $3)
 				ON CONFLICT (slab_id, slab_index) DO NOTHING
 			`, slabID, i, sectorID)
-				}
-				if err = tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
-					return fmt.Errorf("failed to insert slab sectors: %w", err)
-				}
+			}
+			if err = tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
+				return fmt.Errorf("failed to insert slab sectors: %w", err)
 			}
 		}
 

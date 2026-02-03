@@ -495,8 +495,8 @@ func TestContractsAPI(t *testing.T) {
 	// the contracts API returns only revisable contracts by default
 	if contracts, err := adminClient.Contracts(context.Background()); err != nil {
 		t.Fatal(err)
-	} else if len(contracts) < 1 {
-		t.Fatal("expected at least 1 contract, got", len(contracts))
+	} else if len(contracts) < 2 {
+		t.Fatal("expected at least 2 contracts, got", len(contracts))
 	} else if contracts[0].RenewedFrom != contract.ID && contracts[1].RenewedFrom != contract.ID {
 		t.Fatal("expected contract to be renewed", contracts[0].RenewedFrom, contracts[1].RenewedFrom, contract.ID)
 	}
