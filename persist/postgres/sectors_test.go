@@ -785,6 +785,94 @@ func TestPinSlabs(t *testing.T) {
 	assertUnpinnedSectors(4)
 }
 
+// TestPinSlabsSameSectorDifferentEncryptionKey tests that pinning a slab with
+// sectors that already exist (from another slab) correctly creates the
+// slab_sectors entries.
+func TestPinSlabsSameSectorDifferentEncryptionKey(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	// add two hosts with contracts
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
+	store.addTestContract(t, hk1)
+	store.addTestContract(t, hk2)
+
+	// create two sector roots that will be shared between slabs
+	sectorRoot1 := frand.Entropy256()
+	sectorRoot2 := frand.Entropy256()
+
+	// pin first slab with these sectors
+	slab1 := slabs.SlabPinParams{
+		EncryptionKey: slabs.EncryptionKey{1}, // unique encryption key
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{Root: sectorRoot1, HostKey: hk1},
+			{Root: sectorRoot2, HostKey: hk2},
+		},
+	}
+
+	nextCheck := time.Now().Add(time.Hour)
+	slab1IDs, err := store.PinSlabs(account, nextCheck, slab1)
+	if err != nil {
+		t.Fatal("failed to pin slab1:", err)
+	}
+
+	// verify slab1 can be fetched with all sectors
+	fetched1, err := store.Slabs(account, slab1IDs)
+	if err != nil {
+		t.Fatal("failed to fetch slab1:", err)
+	} else if len(fetched1) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(fetched1))
+	} else if len(fetched1[0].Sectors) != 2 {
+		t.Fatalf("expected 2 sectors in slab1, got %d", len(fetched1[0].Sectors))
+	}
+
+	// pin second slab with the SAME sector roots but different encryption key
+	// this creates a different slab (different digest) but reuses existing sectors
+	slab2 := slabs.SlabPinParams{
+		EncryptionKey: slabs.EncryptionKey{2}, // different encryption key = different slab
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{Root: sectorRoot1, HostKey: hk1},
+			{Root: sectorRoot2, HostKey: hk2},
+		},
+	}
+
+	slab2IDs, err := store.PinSlabs(account, nextCheck, slab2)
+	if err != nil {
+		t.Fatal("failed to pin slab2:", err)
+	}
+
+	// verify slab2 is a different slab than slab1
+	if slab2IDs[0] == slab1IDs[0] {
+		t.Fatal("expected slab2 to have different ID than slab1")
+	}
+
+	// verify slab2 can be fetched with all sectors
+	// this is the regression test - if slab_sectors entries weren't created,
+	// this will fail with 0 sectors
+	fetched2, err := store.Slabs(account, slab2IDs)
+	if err != nil {
+		t.Fatal("failed to fetch slab2:", err)
+	} else if len(fetched2) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(fetched2))
+	} else if len(fetched2[0].Sectors) != 2 {
+		t.Fatalf("expected 2 sectors in slab2, got %d", len(fetched2[0].Sectors))
+	}
+
+	// verify the sectors have correct roots
+	if fetched2[0].Sectors[0].Root != sectorRoot1 {
+		t.Fatalf("expected sector root %x, got %x", sectorRoot1, fetched2[0].Sectors[0].Root)
+	}
+	if fetched2[0].Sectors[1].Root != sectorRoot2 {
+		t.Fatalf("expected sector root %x, got %x", sectorRoot2, fetched2[0].Sectors[1].Root)
+	}
+}
+
 func TestPinSlabsStorageLimit(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
