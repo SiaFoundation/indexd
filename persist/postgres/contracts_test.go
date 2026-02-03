@@ -1539,9 +1539,25 @@ func TestDeleteContract(t *testing.T) {
 		t.Fatalf("expected 0 unpinned sectors, got %d", statsBefore.Unpinned)
 	}
 
+	// get the uploaded_at timestamp before deleting
+	var uploadedAtBefore time.Time
+	err = store.pool.QueryRow(t.Context(), `SELECT MAX(uploaded_at) FROM sectors`).Scan(&uploadedAtBefore)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// delete the contract
 	if err := store.DeleteContract(fcid); err != nil {
 		t.Fatalf("failed to delete contract: %v", err)
+	}
+
+	// verify uploaded_at was updated for all sectors
+	var uploadedAtAfter time.Time
+	err = store.pool.QueryRow(t.Context(), `SELECT MIN(uploaded_at) FROM sectors`).Scan(&uploadedAtAfter)
+	if err != nil {
+		t.Fatal(err)
+	} else if !uploadedAtAfter.After(uploadedAtBefore) {
+		t.Fatalf("expected uploaded_at to be updated, got %v <= %v", uploadedAtAfter, uploadedAtBefore)
 	}
 
 	// verify contract is marked bad
