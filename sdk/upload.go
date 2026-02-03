@@ -105,7 +105,7 @@ func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Rea
 		for i := range shards {
 			shards[i] = make([]byte, proto4.SectorSize)
 		}
-		stripedSplit(buffer, shards[:dataShards])
+		stripedSplit(buffer[:n], shards[:dataShards])
 
 		// generate a random encryption key
 		encryptionKey := frand.Entropy256()
