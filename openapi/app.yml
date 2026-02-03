@@ -154,7 +154,8 @@ paths:
                 encryptedMasterKey:
                   type: string
                   format: byte
-                  length: 72
+                  minLength: 72
+                  maxLength: 72
                   description: The encrypted master key used to encrypt the object's shards (base64-encoded in JSON)
                 slabs:
                   type: array
