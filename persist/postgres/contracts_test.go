@@ -1539,9 +1539,13 @@ func TestDeleteContract(t *testing.T) {
 		t.Fatalf("expected 0 unpinned sectors, got %d", statsBefore.Unpinned)
 	}
 
-	// get the uploaded_at timestamp before deleting
+	// get uploaded_at before deleting
+	sqlRoots := make([]sqlHash256, len(params.Sectors))
+	for i, s := range params.Sectors {
+		sqlRoots[i] = sqlHash256(s.Root)
+	}
 	var uploadedAtBefore time.Time
-	err = store.pool.QueryRow(t.Context(), `SELECT MAX(uploaded_at) FROM sectors`).Scan(&uploadedAtBefore)
+	err = store.pool.QueryRow(t.Context(), `SELECT MAX(uploaded_at) FROM sectors WHERE sector_root = ANY($1)`, sqlRoots).Scan(&uploadedAtBefore)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1551,9 +1555,9 @@ func TestDeleteContract(t *testing.T) {
 		t.Fatalf("failed to delete contract: %v", err)
 	}
 
-	// verify uploaded_at was updated for all sectors
+	// verify uploaded_at was updated for all affected sectors
 	var uploadedAtAfter time.Time
-	err = store.pool.QueryRow(t.Context(), `SELECT MIN(uploaded_at) FROM sectors`).Scan(&uploadedAtAfter)
+	err = store.pool.QueryRow(t.Context(), `SELECT MIN(uploaded_at) FROM sectors WHERE sector_root = ANY($1)`, sqlRoots).Scan(&uploadedAtAfter)
 	if err != nil {
 		t.Fatal(err)
 	} else if !uploadedAtAfter.After(uploadedAtBefore) {
