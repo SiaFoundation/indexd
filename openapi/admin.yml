@@ -1455,6 +1455,7 @@ paths:
       operationId: getStatsHostsScans
       responses:
         "200":
+          description: Stats about host scans on this instance
           content:
             application/json:
               schema:
@@ -1812,8 +1813,8 @@ components:
       $ref: "./components.yml#/components/schemas/ContractsStatsResponse"
     HostsStatsResponse:
       $ref: "./components.yml#/components/schemas/HostsStatsResponse"
-    HostScanStatsResponse:
-      $ref: "./components.yml#/components/schemas/HostScanStatsResponse"
+    ScansStatsResponse:
+      $ref: "./components.yml#/components/schemas/ScansStatsResponse"
     SectorStatsResponse:
       $ref: "./components.yml#/components/schemas/SectorStatsResponse"
     AuthConnectStatusResponse:
