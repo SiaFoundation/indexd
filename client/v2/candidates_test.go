@@ -25,22 +25,41 @@ const (
 	blocksPerMonth = 144 * 30
 )
 
-type testStore struct {
-	testutils.TestStore
+var goodSettings = proto.HostSettings{
+	ProtocolVersion:     [3]uint8{5, 0, 2},
+	AcceptingContracts:  true,
+	MaxCollateral:       types.Siacoins(10000),
+	MaxContractDuration: 10000,
+	TotalStorage:        2 * oneTB,
+	RemainingStorage:    oneTB,
+	Prices: proto.HostPrices{
+		TipHeight:    0,
+		ValidUntil:   time.Now().Add(time.Hour),
+		Collateral:   types.Siacoins(1000).Div64(oneTB).Div64(blocksPerMonth),
+		StoragePrice: types.Siacoins(100).Div64(oneTB).Div64(blocksPerMonth),
+	},
 }
 
-func newTestStore(t testing.TB) testStore {
+type testStore struct {
+	testutils.TestStore
+	hosts int
+}
+
+func newTestStore(t testing.TB) *testStore {
 	s := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
 	t.Cleanup(func() {
 		s.Close()
 	})
 
-	return testStore{s}
+	return &testStore{TestStore: s}
 }
 
 // addUsableHost adds a host considered usable by UsableHosts
-func (s *testStore) addUsableHost(t testing.TB, pk types.PublicKey, goodForUpload bool) {
+func (s *testStore) addUsableHost(t testing.TB) types.PublicKey {
 	t.Helper()
+
+	s.hosts++
+	pk := types.PublicKey{byte(s.hosts)}
 
 	s.AddTestHost(t, hosts.Host{
 		PublicKey: pk,
@@ -49,36 +68,19 @@ func (s *testStore) addUsableHost(t testing.TB, pk types.PublicKey, goodForUploa
 		},
 	})
 
-	settings := proto.HostSettings{
-		ProtocolVersion:     [3]uint8{5, 0, 2},
-		AcceptingContracts:  true,
-		MaxCollateral:       types.Siacoins(10000),
-		MaxContractDuration: 10000,
-		TotalStorage:        2 * oneTB,
-		RemainingStorage:    oneTB,
-		Prices: proto.HostPrices{
-			TipHeight:    0,
-			ValidUntil:   time.Now().Add(time.Hour),
-			Collateral:   types.Siacoins(1000).Div64(oneTB).Div64(blocksPerMonth),
-			StoragePrice: types.Siacoins(100).Div64(oneTB).Div64(blocksPerMonth),
-		},
-	}
-	if !goodForUpload {
-		settings.RemainingStorage = 0
-	}
-
-	if err := s.UpdateHostScan(pk, settings, geoip.Location{}, true, time.Now().Add(time.Hour)); err != nil {
+	if err := s.UpdateHostScan(pk, goodSettings, geoip.Location{}, true, time.Now().Add(time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 
 	fcid := types.FileContractID(frand.Entropy256())
 	rev := types.V2FileContract{
 		HostPublicKey: pk,
-		Capacity:      settings.TotalStorage,
+		Capacity:      goodSettings.TotalStorage,
 	}
 	if err := s.AddFormedContract(pk, fcid, rev, types.ZeroCurrency, types.Siacoins(100), types.ZeroCurrency, proto.Usage{}); err != nil {
 		t.Fatal(err)
 	}
+	return pk
 }
 
 func TestProviderPriority(t *testing.T) {
@@ -86,9 +88,7 @@ func TestProviderPriority(t *testing.T) {
 	store := hosts.NewHostStore(s.Store)
 	usable := make([]types.PublicKey, 0, 10)
 	for range cap(usable) {
-		pk := types.GeneratePrivateKey().PublicKey()
-		s.addUsableHost(t, pk, true)
-		usable = append(usable, pk)
+		usable = append(usable, s.addUsableHost(t))
 	}
 	provider := client.NewProvider(store)
 
@@ -153,9 +153,7 @@ func TestProviderCandidates(t *testing.T) {
 	store := hosts.NewHostStore(s.Store)
 	usable := make([]types.PublicKey, 0, 10)
 	for range cap(usable) {
-		pk := types.GeneratePrivateKey().PublicKey()
-		s.addUsableHost(t, pk, true)
-		usable = append(usable, pk)
+		usable = append(usable, s.addUsableHost(t))
 	}
 	provider := client.NewProvider(store)
 
@@ -242,13 +240,16 @@ func TestProviderCandidates(t *testing.T) {
 func TestUploadCandidates(t *testing.T) {
 	s := newTestStore(t)
 	store := hosts.NewHostStore(s.Store)
-	host1 := types.GeneratePrivateKey().PublicKey()
-	host2 := types.GeneratePrivateKey().PublicKey()
-	host3 := types.GeneratePrivateKey().PublicKey()
+	host1 := s.addUsableHost(t)
+	host2 := s.addUsableHost(t)
+	host3 := s.addUsableHost(t)
 
-	s.addUsableHost(t, host1, true)
-	s.addUsableHost(t, host2, true)
-	s.addUsableHost(t, host3, false)
+	// mark host3 as not good for upload
+	badSettings := goodSettings
+	badSettings.RemainingStorage = 0
+	if err := s.UpdateHostScan(host3, badSettings, geoip.Location{}, true, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
 
 	provider := client.NewProvider(store)
 
