@@ -84,3 +84,67 @@ if err != nil {
 The `metadata` returned from the `Upload` function contains information about
 the uploaded file required to download it later. Applications need to store
 this information in a database or some other persistent storage.
+
+## Packed Uploads
+
+When uploading many small objects, using `UploadPacked` can be more efficient
+than uploading each object separately. Packed uploads combine multiple objects
+into shared slabs, reducing overhead and improving upload efficiency.
+
+```go
+// create a packed upload
+packed, err := client.UploadPacked(ctx)
+if err != nil {
+	log.Fatal("failed to create packed upload")
+}
+
+// add multiple objects
+for _, data := range smallObjects {
+	if _, err := packed.Add(ctx, bytes.NewReader(data)); err != nil {
+		log.Fatal("failed to add object")
+	}
+}
+
+// finalize to get the resulting objects
+objects, err := packed.Finalize(ctx)
+if err != nil {
+	log.Fatal("failed to finalize packed upload")
+}
+
+// each object can be downloaded individually
+for i, obj := range objects {
+	var buf bytes.Buffer
+	if err := client.Download(ctx, &buf, obj); err != nil {
+		log.Fatal("failed to download object", i)
+	}
+}
+```
+
+### Optimizing Packed Uploads
+
+To minimize padding and maximize efficiency, use `Remaining()` to check how
+much space is left in the current slab before it spills over to a new one:
+
+```go
+packed, _ := client.UploadPacked(ctx)
+
+// prioritize objects that fit in the remaining space
+for _, obj := range sortBySize(objects) {
+	if int64(len(obj)) <= packed.Remaining() {
+		packed.Add(ctx, bytes.NewReader(obj))
+	}
+}
+
+// add remaining objects
+for _, obj := range remainingObjects {
+	packed.Add(ctx, bytes.NewReader(obj))
+}
+
+objects, _ := packed.Finalize(ctx)
+```
+
+### Limitations
+
+- `PackedUpload` is not thread-safe; do not call `Add` concurrently
+- Empty objects are not supported and will return `ErrEmptyObject`
+- Once `Finalize` is called, subsequent `Add` calls return `ErrUploadFinalized`
