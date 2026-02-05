@@ -645,17 +645,17 @@ func TestSharedObjects(t *testing.T) {
 			// prepare sector data
 			var sector [proto.SectorSize]byte
 			frand.Read(sector[:])
-			root := proto.SectorRoot(&sector)
 
 			// upload sector
 			hk := h.PublicKey
-			if _, err = client.WriteSector(t.Context(), sk1, hk, sector[:]); err != nil {
+			if result, err := client.WriteSector(ctx, sk1, hk, sector[:]); err != nil {
 				t.Fatal(err)
+			} else {
+				sectors = append(sectors, slabs.PinnedSector{
+					Root:    result.Root,
+					HostKey: hk,
+				})
 			}
-			sectors = append(sectors, slabs.PinnedSector{
-				Root:    root,
-				HostKey: hk,
-			})
 		}
 		return slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
