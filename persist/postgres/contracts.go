@@ -733,6 +733,14 @@ func (s *Store) DeleteContract(contractID types.FileContractID) error {
 			if err := incrementNumUnpinnedSectors(ctx, tx, pinned); err != nil {
 				return fmt.Errorf("failed to update unpinned sectors stat: %w", err)
 			}
+
+			// update the host's unpinned sectors count
+			var hostID int64
+			if err := tx.QueryRow(ctx, `SELECT host_id FROM contracts WHERE contract_id = $1`, sqlHash256(contractID)).Scan(&hostID); err != nil {
+				return fmt.Errorf("failed to get host ID for contract: %w", err)
+			} else if err := incrementHostUnpinnedSectors(ctx, tx, hostID, pinned); err != nil {
+				return fmt.Errorf("failed to update host unpinned sectors: %w", err)
+			}
 		}
 
 		// mark the contract as bad

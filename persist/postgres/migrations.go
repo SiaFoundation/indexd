@@ -644,4 +644,16 @@ CREATE INDEX hosts_stuck_since_idx ON hosts(stuck_since) WHERE stuck_since IS NO
 		`)
 		return err
 	},
+	// reset unpinned sector counts on hosts
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE hosts h
+			SET unpinned_sectors = COALESCE((
+				SELECT COUNT(*)
+				FROM sectors s
+				WHERE s.host_id = h.id AND s.contract_sectors_map_id IS NULL
+			), 0);
+		`)
+		return err
+	},
 }
