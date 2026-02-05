@@ -939,6 +939,9 @@ func TestContractsStatsAPI(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		} else if stats.Contracts != 0 {
+			if stats.ActiveHosts != 1 {
+				t.Fatalf("expected 1 active host, got %d", stats.ActiveHosts)
+			}
 			return // done
 		}
 	}

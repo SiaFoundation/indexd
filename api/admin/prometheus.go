@@ -35,6 +35,10 @@ func (s ContractsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric)
 			Value: float64(s.BadContracts),
 		},
 		{
+			Name:  "indexd_contracts_active_hosts",
+			Value: float64(s.ActiveHosts),
+		},
+		{
 			Name:  "indexd_contracts_renewing",
 			Value: float64(s.Renewing),
 		},

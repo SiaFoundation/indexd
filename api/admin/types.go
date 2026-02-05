@@ -21,6 +21,7 @@ type (
 	ContractsStatsResponse struct {
 		Contracts    uint64 `json:"contracts"`
 		BadContracts uint64 `json:"badContracts"`
+		ActiveHosts  uint64 `json:"activeHosts"`
 		Renewing     uint64 `json:"renewing"`
 
 		TotalCapacity uint64 `json:"totalCapacity"`

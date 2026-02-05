@@ -78,9 +78,30 @@ func (s *Store) ContractsStats() (resp admin.ContractsStatsResponse, _ error) {
 			return err
 		}
 
+		var activeHosts uint64
+		err = tx.QueryRow(ctx, `
+			WITH globals AS (
+				SELECT scanned_height FROM global_settings
+			)
+			SELECT COUNT(DISTINCT c.host_id)
+			FROM contracts c
+			INNER JOIN hosts h ON c.host_id = h.id
+			CROSS JOIN globals
+			WHERE
+				c.good = TRUE AND
+				c.state IN (0,1) AND
+				c.renewed_to IS NULL AND
+				c.proof_height > globals.scanned_height AND
+				(h.stuck_since IS NULL OR h.stuck_since > NOW() - INTERVAL '24 hours')
+		`).Scan(&activeHosts)
+		if err != nil {
+			return err
+		}
+
 		resp = admin.ContractsStatsResponse{
 			Contracts:    numContracts,
 			BadContracts: numContracts - numGood,
+			ActiveHosts:  activeHosts,
 			Renewing:     numRenewing,
 
 			TotalCapacity: totalCapacity,
