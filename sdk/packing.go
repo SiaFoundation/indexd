@@ -11,6 +11,7 @@ import (
 
 	"github.com/klauspost/reedsolomon"
 	proto4 "go.sia.tech/core/rhp/v4"
+	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/slabs"
 	"lukechampine.com/frand"
 )
@@ -18,6 +19,8 @@ import (
 var (
 	// ErrEmptyObject is returned when trying to add an empty object.
 	ErrEmptyObject = errors.New("empty object")
+	// ErrUploadClosed is returned when trying to add an object to a closed upload.
+	ErrUploadClosed = errors.New("upload is closed")
 	// ErrUploadFinalized is returned when trying to add an object to an
 	// already finalized upload.
 	ErrUploadFinalized = errors.New("upload already finalized")
@@ -33,6 +36,7 @@ type (
 		parityShards uint8
 
 		// upload state
+		reader  *io.PipeReader
 		writer  *io.PipeWriter
 		objects []packedObject
 
@@ -40,7 +44,8 @@ type (
 		result        packedResult
 		resultAvailCh chan struct{}
 		once          sync.Once
-		cancel        context.CancelFunc
+
+		tg *threadgroup.ThreadGroup
 	}
 
 	packedObject struct {
@@ -75,9 +80,29 @@ func (u *PackedUpload) Add(ctx context.Context, r io.Reader) (int64, error) {
 	dataKey := frand.Entropy256()
 	r = encrypt(&dataKey, r, 0)
 
+	// spawn goroutine to interrupt io.Copy if context is cancelled
+	done := make(chan struct{})
+	defer close(done)
+	addCtx, cancel, err := u.tg.AddContext(ctx)
+	if err != nil {
+		return 0, err
+	}
+	go func() {
+		defer cancel()
+		select {
+		case <-done:
+		case <-addCtx.Done():
+			u.reader.CloseWithError(context.Cause(addCtx))
+		}
+	}()
+
 	// pipe data into writer
 	n, err := io.Copy(u.writer, r)
 	if err != nil {
+		// overwrite the error on cancellation to provide more context
+		if ctx.Err() != nil {
+			err = context.Cause(addCtx)
+		}
 		// stream is corrupted, finish with error
 		u.finish(nil, err)
 		return 0, fmt.Errorf("failed to add object: %w", err)
@@ -93,6 +118,16 @@ func (u *PackedUpload) Add(ctx context.Context, r io.Reader) (int64, error) {
 		packedAt: time.Now(),
 	})
 	return n, nil
+}
+
+// Close closes the packed upload and releases any resources. The caller must
+// always call Close to ensure proper cleanup.
+func (u *PackedUpload) Close() error {
+	_ = u.reader.Close()
+	_ = u.writer.Close()
+	u.tg.Stop()
+	u.finish(nil, ErrUploadClosed)
+	return nil
 }
 
 // Finalize finalizes the upload and returns the resulting objects. This will
@@ -116,10 +151,14 @@ func (u *PackedUpload) Finalize(ctx context.Context) ([]Object, error) {
 	}
 
 	// build objects
-	objects := make([]Object, len(u.objects))
 	slabSize := u.slabSize()
+	objects := make([]Object, len(u.objects))
 	for i, o := range u.objects {
+		// sanity check slab range to avoid panics
 		slabsStart, slabsEnd := o.slabRange(slabSize)
+		if slabsEnd > int64(len(u.result.slabs)) {
+			return nil, fmt.Errorf("packed upload incomplete: object %d references slab %d but only %d slabs uploaded", i, slabsEnd-1, len(u.result.slabs))
+		}
 
 		// create object with relevant slabs
 		objects[i] = Object{
@@ -168,9 +207,6 @@ func (u *PackedUpload) Remaining() int64 {
 func (u *PackedUpload) finish(slabs []slabs.SlabSlice, err error) {
 	_ = u.writer.Close()
 	u.once.Do(func() {
-		if u.cancel != nil {
-			u.cancel()
-		}
 		u.result = packedResult{slabs: slabs, err: err}
 		close(u.resultAvailCh)
 	})
@@ -217,21 +253,27 @@ func (s *SDK) UploadPacked(ctx context.Context, opts ...UploadOption) (*PackedUp
 
 	// create packed upload
 	reader, writer := io.Pipe()
-	ctx, cancel := context.WithCancel(ctx)
 	u := &PackedUpload{
 		dataShards:   uo.dataShards,
 		parityShards: uo.parityShards,
 
+		reader: reader,
 		writer: writer,
 
 		resultAvailCh: make(chan struct{}),
-		cancel:        cancel,
+		tg:            threadgroup.New(),
+	}
+
+	// register with threadgroup to ensure proper cleanup of goroutines on Close
+	bgCtx, bgCancel, err := u.tg.AddContext(ctx)
+	if err != nil {
+		return nil, err
 	}
 
 	// upload slabs in background
 	slabCh := make(chan slabUpload, concurrentSlabUploads)
 	go func() {
-		s.uploadSlabs(ctx, slabCh, reader, enc, int(u.dataShards), int(u.parityShards), uo.maxInflight, uo.hostTimeout)
+		s.uploadSlabs(bgCtx, slabCh, reader, enc, int(u.dataShards), int(u.parityShards), uo.maxInflight, uo.hostTimeout)
 		close(slabCh)
 	}()
 
@@ -239,6 +281,8 @@ func (s *SDK) UploadPacked(ctx context.Context, opts ...UploadOption) (*PackedUp
 	// deadlock in PackedUpload.Add since it writes to an unbuffered io.Pipe and
 	// uploadSlabs reads from that pipe
 	go func() {
+		defer bgCancel()
+
 		var uploaded []slabs.SlabSlice
 		var uploadErr error
 
@@ -256,8 +300,8 @@ func (s *SDK) UploadPacked(ctx context.Context, opts ...UploadOption) (*PackedUp
 			sectors := make([]slabs.PinnedSector, totalShards)
 			for n := totalShards; n > 0; n-- {
 				select {
-				case <-ctx.Done():
-					uploadErr = ctx.Err()
+				case <-bgCtx.Done():
+					uploadErr = bgCtx.Err()
 					break outer
 				case shard := <-slab.uploadsCh:
 					if shard.err != nil {
@@ -282,8 +326,8 @@ func (s *SDK) UploadPacked(ctx context.Context, opts ...UploadOption) (*PackedUp
 		}
 
 		// ensure context is taken into account
-		if uploadErr == nil && ctx.Err() != nil {
-			uploadErr = ctx.Err()
+		if uploadErr == nil && bgCtx.Err() != nil {
+			uploadErr = bgCtx.Err()
 		}
 
 		u.finish(uploaded, uploadErr)

@@ -97,6 +97,7 @@ packed, err := client.UploadPacked(ctx)
 if err != nil {
 	log.Fatal("failed to create packed upload")
 }
+defer packed.Close()
 
 // add multiple objects
 for _, data := range smallObjects {
@@ -115,32 +116,59 @@ if err != nil {
 for i, obj := range objects {
 	var buf bytes.Buffer
 	if err := client.Download(ctx, &buf, obj); err != nil {
-		log.Fatal("failed to download object", i)
+		log.Fatalf("failed to download object %d", i)
 	}
 }
 ```
 
 ### Optimizing Packed Uploads
 
-To minimize padding and maximize efficiency, use `Remaining()` to check how
-much space is left in the current slab before it spills over to a new one:
+Use `Remaining()` and `Length()` to monitor efficiency and decide when to
+finalize. This is useful when you have a stream of objects and want to avoid
+excessive padding:
 
 ```go
-packed, _ := client.UploadPacked(ctx)
+const paddingTarget = 0.05
 
-// prioritize objects that fit in the remaining space
-for _, obj := range sortBySize(objects) {
-	if int64(len(obj)) <= packed.Remaining() {
-		packed.Add(ctx, bytes.NewReader(obj))
+var uploads [][]byte
+for len(uploads) > 0 {
+	err := func() error {
+		packed, err := client.UploadPacked(ctx)
+		if err != nil {
+			return err
+		}
+		defer packed.Close()
+
+		for len(uploads) > 0 {
+			_, err := packed.Add(ctx, bytes.NewReader(uploads[0]))
+			if err != nil {
+				return err
+			}
+			uploads = uploads[1:]
+
+			if packed.Length() == 0 {
+				continue
+			}
+
+			padding := float64(packed.Remaining()) / float64(packed.Length())
+			if padding <= paddingTarget {
+				break
+			}
+		}
+
+		objects, err := packed.Finalize(ctx)
+		if err != nil {
+			return err
+		}
+
+		// pin objects
+
+		return nil
+	}()
+	if err != nil {
+		log.Fatal(err)
 	}
 }
-
-// add remaining objects
-for _, obj := range remainingObjects {
-	packed.Add(ctx, bytes.NewReader(obj))
-}
-
-objects, _ := packed.Finalize(ctx)
 ```
 
 ### Limitations

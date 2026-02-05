@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"go.sia.tech/core/types"
 	"lukechampine.com/frand"
@@ -22,6 +23,7 @@ func TestUploadPacked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
+	defer u.Close()
 
 	// assert remaining length
 	remaining := u.Remaining()
@@ -47,7 +49,7 @@ func TestUploadPacked(t *testing.T) {
 		total += len(data)
 	}
 
-	// assert total - and remaining length
+	// assert total and remaining length
 	if u.Length() != int64(total) {
 		t.Fatalf("expected total length %d, got %d", total, u.Length())
 	} else if rem := u.Remaining(); rem != u.slabSize()-int64(total) {
@@ -98,6 +100,7 @@ func TestUploadPacked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
+	defer u.Close()
 
 	// add objects that span multiple slabs
 	dataL := frand.Bytes(int(u.slabSize()) + 1024)
@@ -150,6 +153,7 @@ func TestUploadPacked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
+	defer u.Close()
 
 	// now add objects in reverse order
 	if _, err := u.Add(context.Background(), bytes.NewReader(dataS)); err != nil {
@@ -202,6 +206,7 @@ func TestUploadPacked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
+	defer u.Close()
 
 	// finalize it and assert Add returns ErrUploadFinalized
 	if _, err := u.Add(t.Context(), bytes.NewReader(data1)); err != nil {
@@ -211,4 +216,62 @@ func TestUploadPacked(t *testing.T) {
 	} else if _, err := u.Add(t.Context(), bytes.NewReader(data1)); !errors.Is(err, ErrUploadFinalized) {
 		t.Fatalf("expected ErrUploadFinalized, got %v", err)
 	}
+
+	// create a new packed upload
+	u, err = s.UploadPacked(t.Context())
+	if err != nil {
+		t.Fatalf("failed to create packed upload: %v", err)
+	}
+	defer u.Close()
+
+	// add data in goroutine
+	ctx, cancel := context.WithCancelCause(t.Context())
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := u.Add(ctx, frand.Reader)
+		errCh <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // ensure Add reads some data
+
+	// cancel the context
+	cause := errors.New(t.Name())
+	cancel(cause)
+
+	// assert Add returned the context error
+	select {
+	case err := <-errCh:
+		if !errors.Is(err, cause) {
+			t.Fatalf("expected error %v, got %v", cause, err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Add did not return after context cancellation")
+	}
+
+	// create a new packed upload
+	u, err = s.UploadPacked(t.Context())
+	if err != nil {
+		t.Fatalf("failed to create packed upload: %v", err)
+	}
+	defer u.Close()
+
+	// assert immediate finalize without adding data works
+	objects, err = u.Finalize(t.Context())
+	if err != nil {
+		t.Fatalf("failed to finalize: %v", err)
+	} else if len(objects) != 0 {
+		t.Fatalf("expected 0 objects, got %d", len(objects))
+	}
+
+	// create a new packed upload
+	u, err = s.UploadPacked(t.Context())
+	if err != nil {
+		t.Fatalf("failed to create packed upload: %v", err)
+	}
+
+	// add something to kickoff the upload process
+	go func() { u.Add(t.Context(), frand.Reader) }()
+
+	// close the upload - the race detector will catch any resource leaks here
+	// should there be any
+	u.Close()
 }
