@@ -20,10 +20,11 @@ import (
 type appendSectorCall struct {
 	hostPrices proto.HostPrices
 	contractID types.FileContractID
+	maxSize    uint64
 	sectors    []types.Hash256
 }
 
-func (c *hostClientMock) AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, int, error) {
+func (c *hostClientMock) AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256, maxSize uint64) (rhp.RPCAppendSectorsResult, int, error) {
 	if c.failsRPCs {
 		return rhp.RPCAppendSectorsResult{}, 0, fmt.Errorf("mocked error")
 	}
@@ -31,6 +32,7 @@ func (c *hostClientMock) AppendSectors(ctx context.Context, hostPrices proto.Hos
 	c.appendSectorCalls = append(c.appendSectorCalls, appendSectorCall{
 		hostPrices: hostPrices,
 		contractID: contractID,
+		maxSize:    maxSize,
 		sectors:    slices.Clone(sectors),
 	})
 

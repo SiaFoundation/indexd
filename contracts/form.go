@@ -241,9 +241,9 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 			candidate := candidateContract{
 				host:           host,
 				contract:       contract,
-				goodForRefresh: contract.GoodForRefresh(host.Settings, accountFundTarget, settings.RenewWindow, height),
+				goodForRefresh: contract.GoodForRefresh(host.Settings, accountFundTarget, settings.RenewWindow, height, settings.Period),
 				goodForFunding: contract.GoodForAccountFunding(accountFundTarget),
-				goodForAppend:  contract.GoodForAppend(host.Settings.Prices, settings.RenewWindow, height),
+				goodForAppend:  contract.GoodForAppend(host.Settings, settings.RenewWindow, height, settings.Period),
 			}
 
 			// determine which contract to use for maintenance with this host.

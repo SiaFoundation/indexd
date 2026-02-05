@@ -75,8 +75,14 @@ func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, host 
 	}
 	defer client.Close()
 
+	ms, err := cm.store.MaintenanceSettings()
+	if err != nil {
+		return fmt.Errorf("failed to fetch maintenance settings for sector pinning: %w", err)
+	}
+	maxRenewableSize := maxRenewableContractSize(host.Settings, ms.Period)
+
 	// fetch contract ids
-	contractIDs, err := cm.store.ContractsForPinning(host.PublicKey, maxContractSize)
+	contractIDs, err := cm.store.ContractsForPinning(host.PublicKey, maxRenewableSize)
 	if err != nil {
 		return fmt.Errorf("failed to fetch contracts for pinning: %w", err)
 	} else if len(contractIDs) == 0 {
@@ -92,7 +98,7 @@ func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, host 
 			exhausted = true
 		}
 
-		if err := cm.pinSectors(ctx, client, host.PublicKey, host.Settings.Prices, contractIDs, roots, log); err != nil {
+		if err := cm.pinSectors(ctx, client, host.PublicKey, host.Settings.Prices, contractIDs, roots, maxRenewableSize, log); err != nil {
 			return fmt.Errorf("failed to pin sectors: %w", err)
 		}
 	}
@@ -104,7 +110,7 @@ func (cm *ContractManager) performSectorPinningOnHost(ctx context.Context, host 
 // attempt to pin all sectors, but may not be able to if the contracts run out of
 // space. It will try to pin sectors using the contracts in the order they are
 // provided. If the host refuses to pin a sector, it will be marked as lost.
-func (cm *ContractManager) pinSectors(ctx context.Context, client HostClient, hostKey types.PublicKey, hostPrices proto.HostPrices, contractIDs []types.FileContractID, sectors []types.Hash256, log *zap.Logger) error {
+func (cm *ContractManager) pinSectors(ctx context.Context, client HostClient, hostKey types.PublicKey, hostPrices proto.HostPrices, contractIDs []types.FileContractID, sectors []types.Hash256, maxSize uint64, log *zap.Logger) error {
 	// NOTE: this is necessary to avoid looping forever
 	// when [AppendSectors] returns an error for all contracts.
 	var success bool
@@ -115,7 +121,7 @@ func (cm *ContractManager) pinSectors(ctx context.Context, client HostClient, ho
 		log := log.With(zap.Stringer("contractID", contractID))
 
 		// try to pin sectors to the contract
-		res, attempted, err := client.AppendSectors(ctx, hostPrices, contractID, sectors)
+		res, attempted, err := client.AppendSectors(ctx, hostPrices, contractID, sectors, maxSize)
 		if err != nil {
 			log.Debug("failed to pin sectors", zap.Error(err))
 			continue

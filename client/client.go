@@ -122,7 +122,7 @@ func (c *HostClient) AccountBalance(ctx context.Context, account proto.Account) 
 // The integer returned does not indicate the number of sectors that were
 // appended, but rather the number of sectors that were attempted. Check the
 // result for the actual number of sectors that were appended.
-func (c *HostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256) (res rhp.RPCAppendSectorsResult, attempted int, err error) {
+func (c *HostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPrices, contractID types.FileContractID, sectors []types.Hash256, maxSize uint64) (res rhp.RPCAppendSectorsResult, attempted int, err error) {
 	// sanity check
 	if len(sectors) > proto.MaxSectorBatchSize {
 		return rhp.RPCAppendSectorsResult{}, 0, fmt.Errorf("too many sectors, %d > %d", len(sectors), proto.MaxSectorBatchSize) // developer error
@@ -130,14 +130,14 @@ func (c *HostClient) AppendSectors(ctx context.Context, hostPrices proto.HostPri
 
 	// append sectors
 	err = c.withRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
-		if contract.Revision.Filesize >= maxContractSize {
-			return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("contract is too large, %d > %d", contract.Revision.Filesize, maxContractSize)
+		if contract.Revision.Filesize >= maxSize {
+			return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("contract is too large, %d > %d", contract.Revision.Filesize, maxSize)
 		} else if contract.Revision.ExpirationHeight <= hostPrices.TipHeight {
 			return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("contract has expired at height %d, current height is %d", contract.Revision.ExpirationHeight, hostPrices.TipHeight)
 		}
 		// calculate the maximum number of sectors we can append based on the
 		// contract's remaining capacity and collateral
-		maxRemainingSectors := (maxContractSize - contract.Revision.Filesize) / proto.SectorSize
+		maxRemainingSectors := (maxSize - contract.Revision.Filesize) / proto.SectorSize
 		maxAppendSectors := (contract.Revision.Capacity - contract.Revision.Filesize) / proto.SectorSize
 		duration := contract.Revision.ExpirationHeight - hostPrices.TipHeight
 		appendSectorCost := hostPrices.RPCAppendSectorsCost(1, duration)

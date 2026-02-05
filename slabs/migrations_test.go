@@ -210,7 +210,7 @@ func TestSectorsToMigrate(t *testing.T) {
 			ProofHeight:      200,
 			ExpirationHeight: 300,
 		}
-		if err := c.GoodForAppend(goodSettings.Prices, 0, 0); (err == nil) != goodForUpload {
+		if err := c.GoodForAppend(goodSettings, 0, 0, 100); (err == nil) != goodForUpload {
 			// sanity check
 			t.Fatalf("contract %d: expected goodForUpload %v, got %v (%s)", contractIndex, goodForUpload, err == nil, err)
 		}
