@@ -63,6 +63,14 @@ func (s *Store) UpdateAppConnectKey(meta accounts.UpdateAppConnectKey) (key acco
 		return accounts.ConnectKey{}, fmt.Errorf("quota is required")
 	}
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		// verify quota exists
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM quotas WHERE name = $1)`, meta.Quota).Scan(&exists); err != nil {
+			return fmt.Errorf("failed to check quota: %w", err)
+		} else if !exists {
+			return accounts.ErrQuotaNotFound
+		}
+
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			UPDATE app_connect_keys ack SET (use_description, quota_name) = ($2, $3) WHERE app_key = $1
 			RETURNING app_key, use_description, created_at, updated_at, last_used, pinned_data,
