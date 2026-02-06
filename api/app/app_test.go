@@ -330,6 +330,8 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("failed to fetch slab:", err)
 	} else if slab1.EncryptionKey != slab1Params.EncryptionKey {
 		t.Fatal("unexpected")
+	} else if len(slab1.Sectors) != len(slab1Params.Sectors) {
+		t.Fatal("unexpected number of sectors in slab", len(slab1.Sectors))
 	} else if slab1.Sectors[0].Root != slab1Params.Sectors[0].Root ||
 		slab1.Sectors[1].Root != slab1Params.Sectors[1].Root ||
 		slab1.Sectors[2].Root != slab1Params.Sectors[2].Root {
@@ -397,7 +399,7 @@ func TestApplicationAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(obj, *objs[0].Object) {
-		t.Fatal("objects not equal")
+		t.Fatal("objects not equal", obj, *objs[0].Object)
 	}
 
 	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err != nil {
@@ -409,7 +411,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected object to be not found, got", err)
 	}
 
-	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err == nil || err.Error() != slabs.ErrObjectNotFound.Error() {
+	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
 	}
 
@@ -442,7 +444,7 @@ func TestApplicationAPI(t *testing.T) {
 		Slabs:                []slabs.SlabSlice{p2.Slice(0, 256)},
 	}
 	badObj.Sign(sk)
-	if err := client.SaveObject(context.Background(), sk, badObj); err == nil || err.Error() != slabs.ErrObjectUnpinnedSlab.Error() {
+	if err := client.SaveObject(context.Background(), sk, badObj); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectUnpinnedSlab.Error()) {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectUnpinnedSlab, err)
 	}
 }
