@@ -3,14 +3,25 @@ package postgres
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
+	"math"
+	"math/rand"
+	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
+)
+
+const (
+	factor           = 1.8              // factor ^ retryAttempts = backoff time in milliseconds
+	maxBackoff       = 15 * time.Second // max backoff time
+	maxRetryAttempts = 30               // max number of retry attempts
 )
 
 type (
@@ -37,18 +48,68 @@ func (ci ConnectionInfo) String() string {
 	return fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s", ci.Host, ci.Port, ci.User, ci.Password, ci.Database, ci.SSLMode)
 }
 
+// transaction executes a function within a database transaction. If the
+// function returns an error, the transaction is rolled back. Otherwise, the
+// transaction is committed. If the transaction fails due to a serialization
+// or deadlock error, it is retried up to maxRetryAttempts times before returning.
 func (s *Store) transaction(fn func(context.Context, *txn) error) error {
+	var err error
+	txnID := hex.EncodeToString(frand.Bytes(4))
+	log := s.log.Named("transaction").With(zap.String("id", txnID))
+	start := time.Now()
+	attempt := 1
+	for ; attempt < maxRetryAttempts; attempt++ {
+		attemptStart := time.Now()
+		log := log.With(zap.Int("attempt", attempt))
+		err = s.doTransaction(log, fn)
+		if err == nil {
+			// no error, break out of the loop
+			return nil
+		}
+
+		// return immediately if the error is not retryable
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) {
+			if !(pgErr.Code == "40001" || // serialization_failure
+				pgErr.Code == "40P01" || // deadlock_detected
+				pgErr.Code == "55P03") { // lock_not_available
+				break
+			}
+		} else {
+			break // we never want to retry non-pg errors, as they may be context cancellations or other unexpected errors
+		}
+
+		// exponential backoff
+		sleep := min(time.Duration(math.Pow(factor, float64(attempt)))*time.Millisecond, maxBackoff)
+		log.Debug("retryable database error", zap.Duration("elapsed", time.Since(attemptStart)), zap.Duration("totalElapsed", time.Since(start)), zap.Duration("retry", sleep), zap.Error(err))
+		time.Sleep(sleep + time.Duration(rand.Int63n(int64(sleep/2))))
+	}
+	return fmt.Errorf("transaction failed (attempt %d): %w", attempt, err)
+}
+
+// doTransaction is a helper function to execute a function within a transaction.
+// If fn returns an error, the transaction is rolled back. Otherwise, the
+// transaction is committed.
+func (s *Store) doTransaction(log *zap.Logger, fn func(context.Context, *txn) error) error {
 	ctx := context.Background()
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	start := time.Now()
+	defer func() {
+		err := tx.Rollback(ctx)
+		if err != nil && !errors.Is(err, pgx.ErrTxClosed) {
+			log.Error("failed to rollback transaction", zap.Error(err))
+		}
+		if time.Since(start) > longTxnDuration {
+			log.Debug("long transaction", zap.Duration("elapsed", time.Since(start)), zap.Stack("stack"), zap.Bool("failed", err != nil))
+		}
+	}()
 
-	log := s.log.Named("transaction").With(zap.String("id", hex.EncodeToString(frand.Bytes(4))))
 	if err := fn(ctx, &txn{tx, log}); err != nil {
 		return err
-	} else if err := tx.Commit(ctx); err != nil {
+	} else if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 	return nil
