@@ -926,7 +926,7 @@ func TestWalletAPI(t *testing.T) {
 }
 
 func TestContractsStatsAPI(t *testing.T) {
-	// create cluster with three hosts
+	// create cluster with one host
 	cluster := testutils.NewCluster(t, testutils.WithHosts(1))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
@@ -939,9 +939,6 @@ func TestContractsStatsAPI(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		} else if stats.Contracts != 0 {
-			if stats.ActiveHosts != 1 {
-				t.Fatalf("expected 1 active host, got %d", stats.ActiveHosts)
-			}
 			return // done
 		}
 	}
@@ -978,13 +975,15 @@ func TestHostsStatsAPI(t *testing.T) {
 		t.Fatalf("expected 0 hosts, got %d", len(res))
 	}
 
-	stats, err := admin.StatsScans(t.Context())
+	allStats, err := admin.StatsHostsAll(t.Context())
 	if err != nil {
 		t.Fatal(err)
-	} else if stats.Total != 4 {
-		t.Fatalf("expected 4 scans, got %d", stats.Total)
-	} else if stats.Failed != 0 {
-		t.Fatalf("expected 0 failed scans, got %d", stats.Failed)
+	} else if allStats.TotalScans != 4 {
+		t.Fatalf("expected 4 scans, got %d", allStats.TotalScans)
+	} else if allStats.FailedScans != 0 {
+		t.Fatalf("expected 0 failed scans, got %d", allStats.FailedScans)
+	} else if allStats.ActiveHosts != 2 {
+		t.Fatalf("expected 2 active hosts, got %d", allStats.ActiveHosts)
 	}
 
 	hk1 := cluster.Hosts[0].PublicKey()

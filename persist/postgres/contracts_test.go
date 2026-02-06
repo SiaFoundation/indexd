@@ -1789,16 +1789,6 @@ func TestContractsStats(t *testing.T) {
 		}
 	}
 
-	assertStats := func(expected admin.ContractsStatsResponse) {
-		t.Helper()
-		stats, err := store.ContractsStats()
-		if err != nil {
-			t.Fatal(err)
-		} else if !reflect.DeepEqual(stats, expected) {
-			t.Fatalf("mismatch:\n%+v\n%+v", expected, stats)
-		}
-	}
-
 	// set scanned height to 100 and renew window to 20
 	res, err := store.pool.Exec(t.Context(), "UPDATE global_settings SET scanned_height = $1, contracts_renew_window = $2",
 		80, 20)
@@ -1826,55 +1816,17 @@ func TestContractsStats(t *testing.T) {
 	expected := admin.ContractsStatsResponse{
 		Contracts:     4,     // all but fcid5
 		BadContracts:  2,     // fcid2, fcid3
-		ActiveHosts:   1,     // hk
 		Renewing:      1,     // fcid4
 		TotalCapacity: 20000, // (2000 + 4000 + 6000 + 8000) = 20000
 		TotalSize:     16000, // (1000 + 3000 + 5000 + 7000) = 16000
 	}
 
-	assertStats(expected)
-
-	// add another host and a good contract
-	hk2 := types.PublicKey{2}
-	fcid7 := types.FileContractID{7}
-	store.addTestHost(t, hk2)
-	store.addTestContract(t, hk2, fcid7)
-	updateContract(fcid7, true, 1000, 2000, 200)
-
-	// hk and hk2 are not stuck
-	expected = admin.ContractsStatsResponse{
-		Contracts:     expected.Contracts + 1,
-		BadContracts:  expected.BadContracts,
-		ActiveHosts:   2,
-		Renewing:      expected.Renewing,
-		TotalCapacity: expected.TotalCapacity + 2000,
-		TotalSize:     expected.TotalSize + 1000,
-	}
-
-	assertStats(expected)
-
-	// mark hk2 as stuck
-	if _, err := store.pool.Exec(
-		t.Context(),
-		`UPDATE hosts
-		 SET stuck_since = NOW() - INTERVAL '25 hours'
-		 WHERE public_key = $1`,
-		sqlPublicKey(hk2),
-	); err != nil {
+	stats, err := store.ContractsStats()
+	if err != nil {
 		t.Fatal(err)
+	} else if !reflect.DeepEqual(stats, expected) {
+		t.Fatalf("mismatch: \n%+v\n%+v", expected, stats)
 	}
-
-	// now only hk should be active
-	expected = admin.ContractsStatsResponse{
-		Contracts:     expected.Contracts,
-		BadContracts:  expected.BadContracts,
-		ActiveHosts:   1,
-		Renewing:      expected.Renewing,
-		TotalCapacity: expected.TotalCapacity,
-		TotalSize:     expected.TotalSize,
-	}
-
-	assertStats(expected)
 
 	// renew fcid4
 	fcid6 := types.FileContractID{6}
@@ -1887,7 +1839,12 @@ func TestContractsStats(t *testing.T) {
 	updateContract(fcid6, true, 7000, 8000, 100)
 
 	// assert stats stay the same
-	assertStats(expected)
+	stats, err = store.ContractsStats()
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(stats, expected) {
+		t.Fatalf("mismatch: \n%+v\n%+v", expected, stats)
+	}
 }
 
 // BenchmarkContracts is a benchmark to ensure the performance of

@@ -106,8 +106,8 @@ type (
 	// A Store is a persistent store for the indexer.
 	Store interface {
 		AccountStats() (AccountStatsResponse, error)
+		AllHostsStats() (AllHostsStatsResponse, error)
 		ContractsStats() (ContractsStatsResponse, error)
-		ScanStats() (ScansStatsResponse, error)
 		HostStats(offset, limit int) ([]hosts.HostStats, error)
 		SectorStats() (SectorsStatsResponse, error)
 
@@ -256,7 +256,7 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /stats/accounts":  a.handleGETStatsAccounts,
 		"GET /stats/contracts": a.handleGETStatsContracts,
 		"GET /stats/hosts":     a.handleGETStatsHosts,
-		"GET /stats/scans":     a.handleGETStatsScans,
+		"GET /stats/hosts/all": a.handleGETStatsHostsAll,
 		"GET /stats/sectors":   a.handleGETStatsSectors,
 	}
 
@@ -1011,9 +1011,9 @@ func (a *admin) handleGETStatsHosts(jc jape.Context) {
 	writeResponse(jc, HostStatsResponse(res))
 }
 
-func (a *admin) handleGETStatsScans(jc jape.Context) {
-	stats, err := a.store.ScanStats()
-	if jc.Check("failed to retrieve host scan stats", err) != nil {
+func (a *admin) handleGETStatsHostsAll(jc jape.Context) {
+	stats, err := a.store.AllHostsStats()
+	if jc.Check("failed to retrieve all hosts stats", err) != nil {
 		return
 	}
 	writeResponse(jc, stats)
