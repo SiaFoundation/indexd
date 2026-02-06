@@ -58,7 +58,7 @@ func (s *Store) transaction(fn func(context.Context, *txn) error) error {
 	log := s.log.Named("transaction").With(zap.String("id", txnID))
 	start := time.Now()
 	attempt := 1
-	for ; attempt < maxRetryAttempts; attempt++ {
+	for ; attempt <= maxRetryAttempts; attempt++ {
 		attemptStart := time.Now()
 		log := log.With(zap.Int("attempt", attempt))
 		err = s.doTransaction(log, fn)
@@ -98,9 +98,9 @@ func (s *Store) doTransaction(log *zap.Logger, fn func(context.Context, *txn) er
 	}
 	start := time.Now()
 	defer func() {
-		err := tx.Rollback(ctx)
-		if err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-			log.Error("failed to rollback transaction", zap.Error(err))
+		rollbackErr := tx.Rollback(ctx)
+		if rollbackErr != nil && !errors.Is(rollbackErr, pgx.ErrTxClosed) {
+			log.Error("failed to rollback transaction", zap.Error(rollbackErr))
 		}
 		if time.Since(start) > longTxnDuration {
 			log.Debug("long transaction", zap.Duration("elapsed", time.Since(start)), zap.Stack("stack"), zap.Bool("failed", err != nil))
