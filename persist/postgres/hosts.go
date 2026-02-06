@@ -1065,8 +1065,7 @@ func (s *Store) StuckHosts() ([]hosts.StuckHost, error) {
 		rows, err := tx.Query(ctx, `
 			SELECT public_key, stuck_since, unpinned_sectors
 			FROM hosts
-			WHERE stuck_since IS NOT NULL
-				AND stuck_since < NOW() - INTERVAL '24 hours'`)
+			WHERE stuck_since IS NOT NULL`)
 		if err != nil {
 			return fmt.Errorf("failed to query stuck hosts: %w", err)
 		}

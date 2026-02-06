@@ -92,7 +92,7 @@ func (s *Store) ContractsStats() (resp admin.ContractsStatsResponse, _ error) {
 				c.state IN (0,1) AND
 				c.renewed_to IS NULL AND
 				c.proof_height > globals.scanned_height AND
-				(h.stuck_since IS NULL OR h.stuck_since > NOW() - INTERVAL '24 hours')
+				h.stuck_since IS NULL
 		`).Scan(&activeHosts)
 		if err != nil {
 			return err

@@ -215,7 +215,7 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 			); err != nil {
 				return err
 			}
-			if stuckSince.Valid && time.Since(stuckSince.Time) >= 24*time.Hour {
+			if stuckSince.Valid {
 				hs.StuckSince = &stuckSince.Time
 				hs.Stuck = true
 			}
