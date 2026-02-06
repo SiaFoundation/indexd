@@ -380,8 +380,8 @@ func (ts testStore) setActiveAccountsCount(t testing.TB, n uint64) {
 	// create a connect key for the dummy accounts
 	var connectKeyID int64
 	err = ts.QueryRow(t.Context(), `
-		INSERT INTO app_connect_keys (app_key, user_secret, use_description, remaining_uses, max_pinned_data)
-		VALUES ('test-connect-key', $1, 'test connect key', 0, 1000000000000)
+		INSERT INTO app_connect_keys (app_key, user_secret, use_description, quota_name)
+		VALUES ('test-connect-key', $1, 'test connect key', 'default')
 		ON CONFLICT (app_key) DO UPDATE SET app_key = EXCLUDED.app_key
 		RETURNING id
 	`, frand.Bytes(32)).Scan(&connectKeyID)

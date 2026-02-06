@@ -63,20 +63,17 @@ func TestAppConnectKeys(t *testing.T) {
 	var generated []accounts.ConnectKey
 	for i := range 100 {
 		description := fmt.Sprintf("key %d", i)
-		uses := frand.Intn(1000) + 1
 		created, err := adminClient.AddAppConnectKey(context.Background(), accounts.AddConnectKeyRequest{
-			Description:   description,
-			RemainingUses: uses,
+			Description: description,
+			Quota:       "default",
 		})
 		switch {
 		case err != nil:
 			t.Fatal(err)
 		case len(created.Key) != 64:
 			t.Fatalf("expected key to be %d, got %d", 64, len(created.Key))
-		case created.RemainingUses != uses:
-			t.Fatal("expected remaining uses to match")
-		case created.TotalUses != 0:
-			t.Fatal("expected total uses to be 0")
+		case created.RemainingUses != created.Quota.TotalUses:
+			t.Fatal("expected remaining uses to match quota total uses")
 		case !created.LastUsed.IsZero():
 			t.Fatal("expected last used to be zero")
 		case created.DateCreated.IsZero():
@@ -121,13 +118,11 @@ func TestAppConnectKeys(t *testing.T) {
 
 	key := generated[0]
 	key.Description = "foobar"
-	key.MaxPinnedData = 32
 
 	err = adminClient.UpdateAppConnectKey(context.Background(), accounts.UpdateAppConnectKey{
-		Key:           key.Key,
-		Description:   key.Description,
-		RemainingUses: key.RemainingUses,
-		MaxPinnedData: key.MaxPinnedData,
+		Key:         key.Key,
+		Description: key.Description,
+		Quota:       key.Quota.Key,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +131,10 @@ func TestAppConnectKeys(t *testing.T) {
 	keys, err = adminClient.AppConnectKeys(context.Background(), 0, 10)
 	if err != nil {
 		t.Fatal(err)
-	} else if !reflect.DeepEqual(keys[0], key) {
+	}
+	// update expected key's LastUpdated since it changed
+	key.LastUpdated = keys[0].LastUpdated
+	if !reflect.DeepEqual(keys[0], key) {
 		t.Fatal("unexpected key", keys[0], key)
 	}
 

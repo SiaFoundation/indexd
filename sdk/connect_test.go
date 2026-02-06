@@ -47,9 +47,8 @@ func TestConnect(t *testing.T) {
 	cluster := testutils.NewCluster(t, testutils.WithHosts(15), testutils.WithLogger(log.Named("cluster")), testutils.WithIndexer(testutils.WithMaintenanceSettings(ms)))
 
 	connectKey, err := cluster.Indexer.Admin.AddAppConnectKey(t.Context(), accounts.AddConnectKeyRequest{
-		Description:   "test",
-		MaxPinnedData: 1 << 40,
-		RemainingUses: 10,
+		Description: "test",
+		Quota:       "default",
 	})
 	if err != nil {
 		t.Fatal("failed to add app connect key:", err)

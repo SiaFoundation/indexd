@@ -349,17 +349,20 @@ func (a *admin) handlePOSTAppConnectKeys(jc jape.Context) {
 	if jc.Decode(&req) != nil {
 		return
 	}
-	if req.MaxPinnedData == 0 {
-		req.MaxPinnedData = 1e12 // default to 1TB
+	if req.Quota == "" {
+		jc.Error(errors.New("quota is required"), http.StatusBadRequest)
+		return
 	}
 
 	created, err := a.accounts.AddAppConnectKey(jc.Request.Context(), accounts.UpdateAppConnectKey{
-		Key:           hex.EncodeToString(frand.Bytes(32)),
-		Description:   req.Description,
-		MaxPinnedData: req.MaxPinnedData,
-		RemainingUses: req.RemainingUses,
+		Key:         hex.EncodeToString(frand.Bytes(32)),
+		Description: req.Description,
+		Quota:       req.Quota,
 	})
-	if jc.Check("failed to update app connect key", err) != nil {
+	if errors.Is(err, accounts.ErrQuotaNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to add app connect key", err) != nil {
 		return
 	}
 	jc.Encode(created)
