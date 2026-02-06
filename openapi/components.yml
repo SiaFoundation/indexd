@@ -400,16 +400,13 @@ components:
     Account:
       type: object
       properties:
-        publicKey:
+        accountKey:
           allOf:
             - $ref: "#/components/schemas/PublicKey"
             - description: Public key of the account
         connectKey:
           type: string
-          description: The connect key associated with the account. Omitted for service accounts.
-        serviceAccount:
-          type: boolean
-          description: Whether it is a service account or not.
+          description: The connect key associated with the account.
         maxPinnedData:
           type: number
           format: uint64
@@ -418,6 +415,20 @@ components:
           type: number
           format: uint64
           description: Current amount of pinned data in bytes.
+        app:
+          $ref: "#/components/schemas/AppMeta"
+        lastUsed:
+          type: string
+          format: date-time
+          description: The last time the account was used. Updated when pinning a slab or retrieving a slab.
+
+    AppMeta:
+      type: object
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The app's unique identifier
         description:
           type: string
           description: Description of the app
@@ -429,10 +440,6 @@ components:
           type: string
           format: uri
           description: The homepage of the app
-        lastUsed:
-          type: string
-          format: date-time
-          description: The last time the account was used. Updated when pinning a slab or retrieving a slab.
 
     Contract:
       type: object
@@ -958,6 +965,10 @@ components:
           type: string
           format: date-time
           description: Last time this key was updated
+        lastUsed:
+          type: string
+          format: date-time
+          description: Last time this key was used to register an account
         pinnedData:
           type: integer
           format: uint64
