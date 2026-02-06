@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -646,7 +647,36 @@ CREATE INDEX hosts_stuck_since_idx ON hosts(stuck_since) WHERE stuck_since IS NO
 	},
 	// make connect_key_id NOT NULL
 	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
-		_, err := tx.Exec(ctx, `ALTER TABLE accounts ALTER COLUMN connect_key_id SET NOT NULL`)
+		// fetch the count and total pinned data of accounts without connect key
+		var count, pinnedData int
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*), COALESCE(SUM(pinned_data), 0) FROM accounts WHERE connect_key_id IS NULL`).Scan(&count, &pinnedData); err != nil {
+			return fmt.Errorf("failed to count accounts without connect key: %w", err)
+		}
+
+		// create the connect key to be associated with orphaned accounts
+		var connectKeyID int
+		err := tx.QueryRow(ctx, `
+				INSERT INTO app_connect_keys (user_secret, app_key, use_description, remaining_uses, total_uses, pinned_data, max_pinned_data)
+				VALUES ($1, $2, $3, $4, $5, $6, $7)
+				RETURNING id
+			`, frand.Bytes(32), hex.EncodeToString(frand.Bytes(32)), "Accounts without Connect Key", 0, count, pinnedData, pinnedData).Scan(&connectKeyID)
+		if err != nil {
+			return fmt.Errorf("failed to create connect key for orphaned accounts: %w", err)
+		}
+
+		// associate all orphaned accounts with the new connect key
+		if _, err := tx.Exec(ctx, `UPDATE accounts SET connect_key_id = $1 WHERE connect_key_id IS NULL`, connectKeyID); err != nil {
+			return fmt.Errorf("failed to associate orphaned accounts: %w", err)
+		}
+
+		// if no accounts were orphaned, delete the unused connect key
+		if count == 0 {
+			if _, err := tx.Exec(ctx, `DELETE FROM app_connect_keys WHERE id = $1`, connectKeyID); err != nil {
+				return fmt.Errorf("failed to delete unused connect key: %w", err)
+			}
+		}
+
+		_, err = tx.Exec(ctx, `ALTER TABLE accounts ALTER COLUMN connect_key_id SET NOT NULL`)
 		return err
 	},
 }
