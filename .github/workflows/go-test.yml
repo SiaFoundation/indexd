@@ -61,4 +61,4 @@ jobs:
       - name: Test
         uses: n8maninger/action-golang-test@v2
         with:
-          args: -race;-failfast
+          args: -race;-failfast;-bench=.;-benchtime=1x
