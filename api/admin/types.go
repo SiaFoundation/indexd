@@ -17,11 +17,17 @@ type (
 		BuildTime time.Time `json:"buildTime"`
 	}
 
+	// AllHostsStatsResponse is the response body for the [GET] /stats/hosts/all
+	AllHostsStatsResponse struct {
+		ActiveHosts uint64 `json:"activeHosts"`
+		TotalScans  int64  `json:"totalScans"`
+		FailedScans int64  `json:"failedScans"`
+	}
+
 	// ContractsStatsResponse is the response body for the [GET] /stats/contracts
 	ContractsStatsResponse struct {
 		Contracts    uint64 `json:"contracts"`
 		BadContracts uint64 `json:"badContracts"`
-		ActiveHosts  uint64 `json:"activeHosts"`
 		Renewing     uint64 `json:"renewing"`
 
 		TotalCapacity uint64 `json:"totalCapacity"`
@@ -50,12 +56,6 @@ type (
 		Lost        int64 `json:"lost"`
 		Checked     int64 `json:"checked"`
 		CheckFailed int64 `json:"checkFailed"`
-	}
-
-	// ScansStatsResponse is the response body for [GET] /stats/scans.
-	ScansStatsResponse struct {
-		Total  int64 `json:"total"`
-		Failed int64 `json:"failed"`
 	}
 
 	// AccountStatsResponse is the response body for the [GET] /stats/accounts.

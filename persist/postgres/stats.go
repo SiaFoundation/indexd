@@ -126,10 +126,31 @@ func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 	return stats, err
 }
 
-// ScanStats reports statistics about host scans for all hosts.
-func (s *Store) ScanStats() (stats admin.ScansStatsResponse, err error) {
+// AllHostsStats reports aggregated statistics about all hosts, including the
+// number of active hosts and scan counts.
+func (s *Store) AllHostsStats() (stats admin.AllHostsStatsResponse, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, "SELECT num_scans, num_scans_failed FROM stats").Scan(&stats.Total, &stats.Failed)
+		if err := tx.QueryRow(ctx, "SELECT num_scans, num_scans_failed FROM stats").Scan(&stats.TotalScans, &stats.FailedScans); err != nil {
+			return fmt.Errorf("failed to get scan stats: %w", err)
+		}
+		if err := tx.QueryRow(ctx, `
+			WITH globals AS (
+				SELECT scanned_height FROM global_settings
+			)
+			SELECT COUNT(DISTINCT c.host_id)
+			FROM contracts c
+			INNER JOIN hosts h ON c.host_id = h.id
+			CROSS JOIN globals
+			WHERE
+				c.good = TRUE AND
+				c.state IN (0,1) AND
+				c.renewed_to IS NULL AND
+				c.proof_height > globals.scanned_height AND
+				h.stuck_since IS NULL
+		`).Scan(&stats.ActiveHosts); err != nil {
+			return fmt.Errorf("failed to get active hosts: %w", err)
+		}
+		return nil
 	})
 	return
 }
