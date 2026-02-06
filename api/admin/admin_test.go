@@ -184,7 +184,7 @@ func TestAccountsAPI(t *testing.T) {
 	}
 
 	// all the test accounts have the same connect key
-	accounts, err = admin.Accounts(context.Background(), api.WithConnectKey(*accounts[0].ConnectKey))
+	accounts, err = admin.Accounts(context.Background(), api.WithConnectKey(accounts[0].ConnectKey))
 	if err != nil {
 		t.Fatal(err)
 	}

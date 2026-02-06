@@ -644,4 +644,9 @@ CREATE INDEX hosts_stuck_since_idx ON hosts(stuck_since) WHERE stuck_since IS NO
 		`)
 		return err
 	},
+	// make connect_key_id NOT NULL
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE accounts ALTER COLUMN connect_key_id SET NOT NULL`)
+		return err
+	},
 }

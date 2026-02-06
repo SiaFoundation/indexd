@@ -181,7 +181,7 @@ func (s *Store) RegisterAppKey(connectKey string, appKey types.PublicKey, meta a
 			return accounts.ErrKeyExhausted
 		}
 
-		err = addAccount(ctx, tx, &connectKey, appKey, meta, accounts.WithMaxPinnedData(storageLimit))
+		err = addAccount(ctx, tx, connectKey, appKey, meta, accounts.WithMaxPinnedData(storageLimit))
 		if err != nil {
 			return fmt.Errorf("failed to add app account: %w", err)
 		}

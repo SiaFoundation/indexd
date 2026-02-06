@@ -23,6 +23,7 @@ import (
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap/zaptest"
+	"lukechampine.com/frand"
 )
 
 type sqlCurrency types.Currency
@@ -376,13 +377,25 @@ func (ts testStore) setActiveAccountsCount(t testing.TB, n uint64) {
 		t.Fatal(err)
 	}
 
+	// create a connect key for the dummy accounts
+	var connectKeyID int64
+	err = ts.QueryRow(t.Context(), `
+		INSERT INTO app_connect_keys (app_key, user_secret, use_description, remaining_uses, max_pinned_data)
+		VALUES ('test-connect-key', $1, 'test connect key', 0, 1000000000000)
+		ON CONFLICT (app_key) DO UPDATE SET app_key = EXCLUDED.app_key
+		RETURNING id
+	`, frand.Bytes(32)).Scan(&connectKeyID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// insert n dummy accounts
 	for i := uint64(0); i < n; i++ {
 		pk := types.PublicKey{byte(i % 256), byte(i / 256)}
 		_, err := ts.Exec(t.Context(), `
-			INSERT INTO accounts (public_key, last_used, pinned_data, max_pinned_data)
-			VALUES ($1, NOW(), 0, 0)
-		`, sqlPublicKey(pk))
+			INSERT INTO accounts (public_key, connect_key_id, last_used, pinned_data, max_pinned_data)
+			VALUES ($1, $2, NOW(), 0, 0)
+		`, sqlPublicKey(pk), connectKeyID)
 		if err != nil {
 			t.Fatal(err)
 		}

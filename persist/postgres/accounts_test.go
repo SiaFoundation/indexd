@@ -19,8 +19,19 @@ import (
 )
 
 func (s *Store) addTestAccount(t testing.TB, ak types.PublicKey, opts ...accounts.AddAccountOption) {
-	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		if err := addAccount(ctx, tx, nil, ak, accounts.AppMeta{}, opts...); err != nil {
+	connectKey := fmt.Sprintf("test-connect-key-%x", frand.Bytes(8))
+	_, err := s.AddAppConnectKey(accounts.UpdateAppConnectKey{
+		Key:           connectKey,
+		Description:   "test connect key",
+		MaxPinnedData: math.MaxInt64,
+		RemainingUses: 1,
+	})
+	if err != nil {
+		t.Fatalf("failed to add app connect key: %v", err)
+	}
+
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		if err := addAccount(ctx, tx, connectKey, ak, accounts.AppMeta{}, opts...); err != nil {
 			return fmt.Errorf("failed to add account: %w", err)
 		}
 		return nil
@@ -137,9 +148,19 @@ func TestAddAccount(t *testing.T) {
 	}
 
 	t.Run("user account", func(t *testing.T) {
+		connectKey := fmt.Sprintf("test-connect-key-%x", frand.Bytes(8))
+		_, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+			Key:           connectKey,
+			Description:   "test connect key",
+			MaxPinnedData: math.MaxInt64,
+			RemainingUses: 10,
+		})
+		if err != nil {
+			t.Fatal("failed to add app connect key:", err)
+		}
 		test(t, func(pk types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
 			return store.transaction(func(ctx context.Context, tx *txn) error {
-				if err := addAccount(ctx, tx, nil, pk, meta, opts...); err != nil {
+				if err := addAccount(ctx, tx, connectKey, pk, meta, opts...); err != nil {
 					return fmt.Errorf("failed to add account: %w", err)
 				}
 				return nil
@@ -513,16 +534,31 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 		b.Fatal(err)
 	}
 
+	// create a connect key for benchmark accounts
+	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+		Key:           "benchmark-connect-key",
+		Description:   "benchmark connect key",
+		MaxPinnedData: math.MaxInt64,
+		RemainingUses: math.MaxInt32,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
 	// run benchmark for different number of accounts
 	threshold := time.Now().Add(-time.Hour)
 	for _, numAccounts := range []int{10_000, 100_000, 1_000_000} {
 		// prepare accounts
 		prune("account_slabs", "accounts")
 		if err := store.transaction(func(ctx context.Context, tx *txn) error {
+			var connectKeyID int64
+			if err := tx.QueryRow(ctx, `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey.Key).Scan(&connectKeyID); err != nil {
+				return err
+			}
 			batch := &pgx.Batch{}
 			for range numAccounts {
 				pk := types.GeneratePrivateKey().PublicKey()
-				batch.Queue(`INSERT INTO accounts (public_key, max_pinned_data) VALUES ($1, 1000000);`, sqlPublicKey(pk))
+				batch.Queue(`INSERT INTO accounts (public_key, connect_key_id, max_pinned_data) VALUES ($1, $2, 1000000);`, sqlPublicKey(pk), connectKeyID)
 			}
 			return tx.SendBatch(ctx, batch).Close()
 		}); err != nil {
@@ -589,8 +625,25 @@ func BenchmarkUpdateHostAccounts(b *testing.B) {
 
 	// prepare database
 	store := initPostgres(b, zap.NewNop())
+
+	// create a connect key for benchmark accounts
+	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+		Key:           "benchmark-connect-key",
+		Description:   "benchmark connect key",
+		MaxPinnedData: math.MaxInt64,
+		RemainingUses: math.MaxInt32,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var connectKeyID int64
+	if err := store.pool.QueryRow(b.Context(), `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey.Key).Scan(&connectKeyID); err != nil {
+		b.Fatal(err)
+	}
+
 	for range numAccounts {
-		_, err := store.pool.Exec(b.Context(), `INSERT INTO accounts (public_key, max_pinned_data) VALUES ($1, 1000000);`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()))
+		_, err := store.pool.Exec(b.Context(), `INSERT INTO accounts (public_key, connect_key_id, max_pinned_data) VALUES ($1, $2, 1000000);`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()), connectKeyID)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -759,13 +812,30 @@ func TestPruneAccount(t *testing.T) {
 func TestActiveAccounts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
+	// create a connect key for test accounts
+	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+		Key:           "test-connect-key",
+		Description:   "test connect key",
+		MaxPinnedData: math.MaxInt64,
+		RemainingUses: 10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var connectKeyID int64
+	if err := store.pool.QueryRow(t.Context(), `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey.Key).Scan(&connectKeyID); err != nil {
+		t.Fatal(err)
+	}
+
 	now := time.Now()
 	insert := func(d time.Duration) {
 		lastUsed := now.Add(-d)
 		if _, err := store.pool.Exec(
 			t.Context(),
-			`INSERT INTO accounts (public_key, last_used, max_pinned_data) VALUES ($1, $2, 1000000);`,
+			`INSERT INTO accounts (public_key, connect_key_id, last_used, max_pinned_data) VALUES ($1, $2, $3, 1000000);`,
 			sqlPublicKey(types.GeneratePrivateKey().PublicKey()),
+			connectKeyID,
 			lastUsed,
 		); err != nil {
 			t.Fatal(err)
@@ -812,10 +882,26 @@ func BenchmarkActiveAccounts(b *testing.B) {
 	// prepare database
 	store := initPostgres(b, zap.NewNop())
 
+	// create a connect key for benchmark accounts
+	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+		Key:           "benchmark-connect-key",
+		Description:   "benchmark connect key",
+		MaxPinnedData: math.MaxInt64,
+		RemainingUses: math.MaxInt32,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var connectKeyID int64
+	if err := store.pool.QueryRow(b.Context(), `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey.Key).Scan(&connectKeyID); err != nil {
+		b.Fatal(err)
+	}
+
 	batch := &pgx.Batch{}
 	for range numAccounts {
 		lastUsed := time.Now().Add(-24 * 7 * time.Hour * time.Duration(frand.Intn(30)))
-		batch.Queue(`INSERT INTO accounts (public_key, last_used, max_pinned_data) VALUES ($1, $2, 1000000);`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()), lastUsed)
+		batch.Queue(`INSERT INTO accounts (public_key, connect_key_id, last_used, max_pinned_data) VALUES ($1, $2, $3, 1000000);`, sqlPublicKey(types.GeneratePrivateKey().PublicKey()), connectKeyID, lastUsed)
 	}
 	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
 		b.Fatal(err)
@@ -838,12 +924,28 @@ func BenchmarkPruneAccounts(b *testing.B) {
 
 	store := initPostgres(b, zap.NewNop())
 
+	// create a connect key for benchmark accounts
+	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+		Key:           "benchmark-connect-key",
+		Description:   "benchmark connect key",
+		MaxPinnedData: math.MaxInt64,
+		RemainingUses: math.MaxInt32,
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var connectKeyID int64
+	if err := store.pool.QueryRow(b.Context(), `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey.Key).Scan(&connectKeyID); err != nil {
+		b.Fatal(err)
+	}
+
 	batch := &pgx.Batch{}
 	accountID, objectID, slabID := 0, 0, 0
 	for range numAccounts {
 		ak := types.GeneratePrivateKey().PublicKey()
 
-		batch.Queue(`INSERT INTO accounts(public_key, max_pinned_data) VALUES ($1, 1000000);`, sqlPublicKey(ak))
+		batch.Queue(`INSERT INTO accounts(public_key, connect_key_id, max_pinned_data) VALUES ($1, $2, 1000000);`, sqlPublicKey(ak), connectKeyID)
 		accountID++
 
 		for range objectsPerAccount {

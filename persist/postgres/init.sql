@@ -15,7 +15,7 @@ CREATE TABLE app_connect_keys (
 CREATE TABLE accounts (
     id SERIAL PRIMARY KEY,
     public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32),
-    connect_key_id INTEGER REFERENCES app_connect_keys(id),
+    connect_key_id INTEGER NOT NULL REFERENCES app_connect_keys(id),
 
     pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0), -- total pinned data in bytes
     max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0), -- max pinned data in bytes

@@ -51,8 +51,8 @@ func TestAppConnectKeys(t *testing.T) {
 			t.Fatalf("expected logo to be %q, got %q", logo, account.App.LogoURL)
 		} else if account.App.ServiceURL != service {
 			t.Fatalf("expected service url to be %q, got %q", service, account.App.ServiceURL)
-		} else if *account.ConnectKey != connectKey {
-			t.Fatalf("expected connect key to be %q, got %q", connectKey, *account.ConnectKey)
+		} else if account.ConnectKey != connectKey {
+			t.Fatalf("expected connect key to be %q, got %q", connectKey, account.ConnectKey)
 		}
 	}
 

@@ -43,7 +43,7 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 		rows, err := tx.Query(ctx, `
 			SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
 			FROM accounts a
-			LEFT JOIN app_connect_keys ak ON ak.id = a.connect_key_id
+			INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 			WHERE a.deleted_at IS NULL AND
 			($1::integer IS NULL OR connect_key_id = $1::integer)
 			LIMIT $2 OFFSET $3
@@ -75,7 +75,7 @@ func (s *Store) Account(ak types.PublicKey) (accounts.Account, error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
 FROM accounts a
-LEFT JOIN app_connect_keys ak ON ak.id = a.connect_key_id
+INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 WHERE public_key = $1`, sqlPublicKey(ak)))
 		return err
 	})
@@ -112,7 +112,7 @@ func (s *Store) ActiveAccounts(threshold time.Time) (count uint64, err error) {
 // DeleteAccount deletes the account in the database with given account key.
 func (s *Store) DeleteAccount(acc proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		var connectKeyID sql.NullInt64
+		var connectKeyID int64
 		err := tx.QueryRow(ctx, `UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1 AND deleted_at IS NULL RETURNING connect_key_id`, sqlPublicKey(acc)).Scan(&connectKeyID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrNotFound
@@ -121,11 +121,9 @@ func (s *Store) DeleteAccount(acc proto.Account) error {
 		}
 
 		// increment remaining uses on the connect key since this account no longer counts
-		if connectKeyID.Valid {
-			_, err = tx.Exec(ctx, `UPDATE app_connect_keys SET remaining_uses = remaining_uses + 1 WHERE id = $1`, connectKeyID.Int64)
-			if err != nil {
-				return fmt.Errorf("failed to increment connect key remaining uses: %w", err)
-			}
+		_, err = tx.Exec(ctx, `UPDATE app_connect_keys SET remaining_uses = remaining_uses + 1 WHERE id = $1`, connectKeyID)
+		if err != nil {
+			return fmt.Errorf("failed to increment connect key remaining uses: %w", err)
 		}
 		return nil
 	})
@@ -349,7 +347,7 @@ DO UPDATE SET
 	})
 }
 
-func addAccount(ctx context.Context, tx *txn, connectKey *string, account types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
+func addAccount(ctx context.Context, tx *txn, connectKey string, account types.PublicKey, meta accounts.AppMeta, opts ...accounts.AddAccountOption) error {
 	aao := accounts.AddAccountOptions{
 		MaxPinnedData: math.MaxInt64, // no limit by default
 	}
@@ -357,13 +355,11 @@ func addAccount(ctx context.Context, tx *txn, connectKey *string, account types.
 		opt(&aao)
 	}
 
-	var connectKeyID sql.NullInt64
-	if connectKey != nil {
-		if err := tx.QueryRow(ctx, `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey).Scan(&connectKeyID); errors.Is(err, sql.ErrNoRows) {
-			return accounts.ErrKeyNotFound
-		} else if err != nil {
-			return fmt.Errorf("failed to get app connect key ID: %w", err)
-		}
+	var connectKeyID int64
+	if err := tx.QueryRow(ctx, `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey).Scan(&connectKeyID); errors.Is(err, sql.ErrNoRows) {
+		return accounts.ErrKeyNotFound
+	} else if err != nil {
+		return fmt.Errorf("failed to get app connect key ID: %w", err)
 	}
 
 	res, err := tx.Exec(ctx, `INSERT INTO accounts (public_key, connect_key_id, max_pinned_data, app_id, description, logo_url, service_url) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`, sqlPublicKey(account), connectKeyID, aao.MaxPinnedData, sqlHash256(meta.ID), meta.Description, meta.LogoURL, meta.ServiceURL)
@@ -436,10 +432,6 @@ LIMIT $3`, hostID, threshold, limit)
 }
 
 func scanAccount(s scanner) (account accounts.Account, err error) {
-	var connectKey sql.NullString
-	err = s.Scan((*sqlPublicKey)(&account.AccountKey), &connectKey, &account.MaxPinnedData, &account.PinnedData, (*sqlHash256)(&account.App.ID), &account.App.Description, &account.App.LogoURL, &account.App.ServiceURL, &account.LastUsed)
-	if connectKey.Valid {
-		account.ConnectKey = &connectKey.String
-	}
+	err = s.Scan((*sqlPublicKey)(&account.AccountKey), &account.ConnectKey, &account.MaxPinnedData, &account.PinnedData, (*sqlHash256)(&account.App.ID), &account.App.Description, &account.App.LogoURL, &account.App.ServiceURL, &account.LastUsed)
 	return
 }
