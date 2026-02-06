@@ -73,10 +73,10 @@ func (s *Store) transaction(fn func(context.Context, *txn) error) error {
 			if !(pgErr.Code == "40001" || // serialization_failure
 				pgErr.Code == "40P01" || // deadlock_detected
 				pgErr.Code == "55P03") { // lock_not_available
-				break
+				return err
 			}
 		} else {
-			break // we never want to retry non-pg errors, as they may be context cancellations or other unexpected errors
+			return err // we never want to retry non-pg errors, as they may be context cancellations or other unexpected errors
 		}
 
 		// exponential backoff
