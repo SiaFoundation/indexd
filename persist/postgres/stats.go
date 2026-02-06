@@ -149,7 +149,7 @@ func (s *Store) AllHostsStats() (stats admin.AllHostsStatsResponse, err error) {
 				c.renewed_to IS NULL AND
 				c.proof_height > globals.scanned_height AND
 				h.stuck_since IS NULL
-		`).Scan(&stats.ActiveHosts, &stats.GoodForUploadHosts); err != nil {
+		`).Scan(&stats.Active, &stats.GoodForUpload); err != nil {
 			return fmt.Errorf("failed to get active hosts: %w", err)
 		}
 		return nil

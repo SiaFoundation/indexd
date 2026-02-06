@@ -527,10 +527,10 @@ func TestAllHostsStats(t *testing.T) {
 		stats, err := store.AllHostsStats()
 		if err != nil {
 			t.Fatal(err)
-		} else if expectedActiveHosts != stats.ActiveHosts {
-			t.Fatalf("expected %d active hosts, got %d", expectedActiveHosts, stats.ActiveHosts)
-		} else if expectedGoodForUpload != stats.GoodForUploadHosts {
-			t.Fatalf("expected %d good for upload hosts, got %d", expectedGoodForUpload, stats.GoodForUploadHosts)
+		} else if expectedActiveHosts != stats.Active {
+			t.Fatalf("expected %d active hosts, got %d", expectedActiveHosts, stats.Active)
+		} else if expectedGoodForUpload != stats.GoodForUpload {
+			t.Fatalf("expected %d good for upload hosts, got %d", expectedGoodForUpload, stats.GoodForUpload)
 		} else if expectedScans != stats.TotalScans {
 			t.Fatalf("expected %d scans, got %d", expectedScans, stats.TotalScans)
 		} else if expectedFailed != stats.FailedScans {

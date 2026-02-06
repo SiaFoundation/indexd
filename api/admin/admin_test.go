@@ -982,8 +982,8 @@ func TestHostsStatsAPI(t *testing.T) {
 		t.Fatalf("expected 4 scans, got %d", allStats.TotalScans)
 	} else if allStats.FailedScans != 0 {
 		t.Fatalf("expected 0 failed scans, got %d", allStats.FailedScans)
-	} else if allStats.ActiveHosts != 2 {
-		t.Fatalf("expected 2 active hosts, got %d", allStats.ActiveHosts)
+	} else if allStats.Active != 2 {
+		t.Fatalf("expected 2 active hosts, got %d", allStats.Active)
 	}
 
 	hk1 := cluster.Hosts[0].PublicKey()
