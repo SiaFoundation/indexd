@@ -19,9 +19,10 @@ type (
 
 	// AllHostsStatsResponse is the response body for the [GET] /stats/hosts/all
 	AllHostsStatsResponse struct {
-		ActiveHosts uint64 `json:"activeHosts"`
-		TotalScans  int64  `json:"totalScans"`
-		FailedScans int64  `json:"failedScans"`
+		ActiveHosts        uint64 `json:"activeHosts"`
+		GoodForUploadHosts uint64 `json:"goodForUploadHosts"`
+		TotalScans         int64  `json:"totalScans"`
+		FailedScans        int64  `json:"failedScans"`
 	}
 
 	// ContractsStatsResponse is the response body for the [GET] /stats/contracts

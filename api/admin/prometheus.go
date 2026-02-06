@@ -31,6 +31,10 @@ func (s AllHostsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) 
 			Value: float64(s.ActiveHosts),
 		},
 		{
+			Name:  "indexd_hosts_good_for_upload",
+			Value: float64(s.GoodForUploadHosts),
+		},
+		{
 			Name:  "indexd_total_host_scans",
 			Value: float64(s.TotalScans),
 		},

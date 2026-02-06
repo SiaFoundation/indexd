@@ -521,7 +521,7 @@ func TestAllHostsStats(t *testing.T) {
 	updateUsageTotalSpent(hk1, types.Siacoins(1))
 	updateUsageTotalSpent(hk2, types.Siacoins(1))
 
-	assertStats := func(expectedActiveHosts uint64, expectedScans, expectedFailed int64) {
+	assertStats := func(expectedActiveHosts, expectedGoodForUpload uint64, expectedScans, expectedFailed int64) {
 		t.Helper()
 
 		stats, err := store.AllHostsStats()
@@ -529,6 +529,8 @@ func TestAllHostsStats(t *testing.T) {
 			t.Fatal(err)
 		} else if expectedActiveHosts != stats.ActiveHosts {
 			t.Fatalf("expected %d active hosts, got %d", expectedActiveHosts, stats.ActiveHosts)
+		} else if expectedGoodForUpload != stats.GoodForUploadHosts {
+			t.Fatalf("expected %d good for upload hosts, got %d", expectedGoodForUpload, stats.GoodForUploadHosts)
 		} else if expectedScans != stats.TotalScans {
 			t.Fatalf("expected %d scans, got %d", expectedScans, stats.TotalScans)
 		} else if expectedFailed != stats.FailedScans {
@@ -558,15 +560,16 @@ func TestAllHostsStats(t *testing.T) {
 	}
 
 	// both hosts have good contracts, so both should be active
-	assertStats(2, 0, 0)
+	// neither has been scanned yet so remaining_storage is 0 — none good for upload
+	assertStats(2, 0, 0, 0)
 	assertHost(hk1, 0, 0)
 	assertHost(hk2, 0, 0)
 
-	// add successful scan
+	// add successful scan - hk1 now has remaining_storage > 0
 	if err := store.UpdateHostScan(hk1, hs, geoip.Location{}, true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	assertStats(2, 1, 0)
+	assertStats(2, 1, 1, 0)
 	assertHost(hk1, 1, 0)
 	assertHost(hk2, 0, 0)
 
@@ -574,36 +577,36 @@ func TestAllHostsStats(t *testing.T) {
 	if err := store.UpdateHostScan(hk1, hs, geoip.Location{}, false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	assertStats(2, 2, 1)
+	assertStats(2, 1, 2, 1)
 	assertHost(hk1, 2, 1)
 	assertHost(hk2, 0, 0)
 
-	// add another successful scan
+	// add another successful scan - hk2 now also has remaining_storage > 0
 	if err := store.UpdateHostScan(hk2, hs, geoip.Location{}, true, time.Now()); err != nil {
 		t.Fatal(err)
 	}
-	assertStats(2, 3, 1)
+	assertStats(2, 2, 3, 1)
 	assertHost(hk1, 2, 1)
 	assertHost(hk2, 1, 0)
 
-	// mark hk2 as stuck - should reduce active hosts
+	// mark hk2 as stuck - should reduce both active and good for upload
 	if err := store.UpdateStuckHosts([]types.PublicKey{hk2}); err != nil {
 		t.Fatal(err)
 	}
-	assertStats(1, 3, 1)
+	assertStats(1, 1, 3, 1)
 
 	// scans where host doesn't exist shouldn't affect stats
 	if err := store.UpdateHostScan(types.GeneratePrivateKey().PublicKey(), hs, geoip.Location{}, true, time.Now()); !errors.Is(err, hosts.ErrNotFound) {
 		t.Fatalf("expected error %v, got %v", hosts.ErrNotFound, err)
 	}
-	assertStats(1, 3, 1)
+	assertStats(1, 1, 3, 1)
 	assertHost(hk1, 2, 1)
 	assertHost(hk2, 1, 0)
 
 	if err := store.UpdateHostScan(types.GeneratePrivateKey().PublicKey(), hs, geoip.Location{}, false, time.Now()); !errors.Is(err, hosts.ErrNotFound) {
 		t.Fatalf("expected error %v, got %v", hosts.ErrNotFound, err)
 	}
-	assertStats(1, 3, 1)
+	assertStats(1, 1, 3, 1)
 	assertHost(hk1, 2, 1)
 	assertHost(hk2, 1, 0)
 }

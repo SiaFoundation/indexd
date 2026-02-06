@@ -137,7 +137,9 @@ func (s *Store) AllHostsStats() (stats admin.AllHostsStatsResponse, err error) {
 			WITH globals AS (
 				SELECT scanned_height FROM global_settings
 			)
-			SELECT COUNT(DISTINCT c.host_id)
+			SELECT
+				COUNT(DISTINCT c.host_id),
+				COUNT(DISTINCT c.host_id) FILTER (WHERE h.settings_remaining_storage > 0)
 			FROM contracts c
 			INNER JOIN hosts h ON c.host_id = h.id
 			CROSS JOIN globals
@@ -147,7 +149,7 @@ func (s *Store) AllHostsStats() (stats admin.AllHostsStatsResponse, err error) {
 				c.renewed_to IS NULL AND
 				c.proof_height > globals.scanned_height AND
 				h.stuck_since IS NULL
-		`).Scan(&stats.ActiveHosts); err != nil {
+		`).Scan(&stats.ActiveHosts, &stats.GoodForUploadHosts); err != nil {
 			return fmt.Errorf("failed to get active hosts: %w", err)
 		}
 		return nil
