@@ -39,10 +39,11 @@ var (
 type (
 	// Quota represents a usage quota for connect keys.
 	Quota struct {
-		Key           string `json:"key"`
-		Description   string `json:"description"`
-		MaxPinnedData uint64 `json:"maxPinnedData"`
-		TotalUses     int    `json:"totalUses"`
+		Key             string `json:"key"`
+		Description     string `json:"description"`
+		MaxPinnedData   uint64 `json:"maxPinnedData"`
+		TotalUses       int    `json:"totalUses"`
+		FundTargetBytes uint64 `json:"fundTargetBytes"`
 	}
 
 	// A ConnectKey represents a key used to authenticate
@@ -82,9 +83,10 @@ type (
 
 	// PutQuotaRequest is the request type for creating or updating a quota.
 	PutQuotaRequest struct {
-		Description   string `json:"description"`
-		MaxPinnedData uint64 `json:"maxPinnedData"`
-		TotalUses     int    `json:"totalUses"`
+		Description     string `json:"description"`
+		MaxPinnedData   uint64 `json:"maxPinnedData"`
+		TotalUses       int    `json:"totalUses"`
+		FundTargetBytes uint64 `json:"fundTargetBytes"`
 	}
 )
 

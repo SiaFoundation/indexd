@@ -11,6 +11,16 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// serviceAccountFundTargetBytes is the default number of bytes used to
+	// calculate the fund target for a host's service account. We fund accounts
+	// to cover this amount of read and write usage. It roughly comes down to
+	// uploading and downloading to and from a host at ~1Gbps for a period of 2
+	// minutes. With 30 good hosts, this results in about 30Gbps of maximum
+	// theoretical throughput.
+	serviceAccountFundTargetBytes = uint64(16 << 30) // 16 GiB
+)
+
 // FundAccounts attempts to fund all accounts for the given host key. It does so
 // using the provided contract IDs, which are used in the order they're given.
 func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, force bool, log *zap.Logger) error {
@@ -35,47 +45,57 @@ func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, co
 		}
 	}
 
-	// calculate the fund target for this host
-	fundTarget := accounts.HostFundTarget(host)
-	if fundTarget.IsZero() {
-		log.Warn("fund target is zero, skipping funding")
-		return nil
+	quotas, err := cm.accounts.Quotas(ctx, 0, -1)
+	if err != nil {
+		return fmt.Errorf("failed to fetch quotas: %w", err)
 	}
 
-	var exhausted bool
-	for !exhausted {
-		accs, err := cm.accounts.AccountsForFunding(host.PublicKey, time.Now().Add(-accounts.AccountActivityThreshold), accounts.AccountFundBatch)
-		if err != nil {
-			return fmt.Errorf("failed to fetch accounts for funding: %w", err)
-		} else if len(accs) < accounts.AccountFundBatch {
-			exhausted = true
-		}
-		if len(accs) == 0 {
-			break
+	threshold := time.Now().Add(-accounts.AccountActivityThreshold)
+	for _, quota := range quotas {
+		fundTarget := accounts.HostFundTarget(host, quota.FundTargetBytes)
+		if fundTarget.IsZero() {
+			continue
 		}
 
-		// fund accounts
-		funded, drained, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, accs, fundTarget, log)
-		if err != nil {
-			return fmt.Errorf("failed to fund accounts: %w", err)
-		}
+		var exhausted bool
+		for !exhausted {
+			accs, err := cm.accounts.AccountsForFunding(host.PublicKey, threshold, accounts.AccountFundBatch, quota.Key)
+			if err != nil {
+				return fmt.Errorf("failed to fetch accounts for funding: %w", err)
+			} else if len(accs) < accounts.AccountFundBatch {
+				exhausted = true
+			}
+			if len(accs) == 0 {
+				break
+			}
 
-		// update funded accounts
-		accounts.UpdateFundedAccounts(accs, funded)
-		err = cm.accounts.UpdateHostAccounts(accs)
-		if err != nil {
-			return fmt.Errorf("failed to update accounts: %w", err)
-		}
+			// fund accounts
+			funded, drained, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, accs, fundTarget, log)
+			if err != nil {
+				return fmt.Errorf("failed to fund accounts: %w", err)
+			}
 
-		contractIDs = contractIDs[drained:]
+			// update funded accounts
+			accounts.UpdateFundedAccounts(accs, funded)
+			err = cm.accounts.UpdateHostAccounts(accs)
+			if err != nil {
+				return fmt.Errorf("failed to update accounts: %w", err)
+			}
+
+			contractIDs = contractIDs[drained:]
+			if len(contractIDs) == 0 {
+				log.Debug("not all accounts could be funded, no more contracts available")
+				break
+			}
+		}
 		if len(contractIDs) == 0 {
-			log.Debug("not all accounts could be funded, no more contracts available")
 			break
 		}
 	}
 
 	serviceAccounts := cm.accounts.ServiceAccounts(host.PublicKey)
 	if len(serviceAccounts) > 0 {
+		fundTarget := accounts.HostFundTarget(host, serviceAccountFundTargetBytes)
 		// fund them
 		funded, _, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
 		if err != nil {
@@ -92,21 +112,22 @@ func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, co
 }
 
 // ContractFundTarget calculates the fund target for a contract on the given
-// host. We scale the fund target by the number of active accounts, if there are
-// any.
+// host. We scale the fund target by the number of active accounts per quota.
 func (cm *ContractManager) ContractFundTarget(ctx context.Context, host hosts.Host, minAllowance types.Currency) (types.Currency, error) {
-	// fetch number of active accounts
-	n, err := cm.accounts.ActiveAccounts(time.Now().Add(-accounts.AccountActivityThreshold))
+	quotaInfos, err := cm.accounts.ActiveAccounts(time.Now().Add(-accounts.AccountActivityThreshold))
 	if err != nil {
 		return types.ZeroCurrency, err
-	} else if n == 0 {
-		n = 1
 	}
 
-	// calculate the target and scale by number of active accounts and double
-	// it to have a buffer so contracts are not refreshed immediately
-	// after one funding round.
-	target := accounts.HostFundTarget(host).Mul64(n)
+	var target types.Currency
+	for _, qi := range quotaInfos {
+		n := qi.ActiveAccounts
+		if n == 0 {
+			n = 1
+		}
+		t := accounts.HostFundTarget(host, qi.FundTargetBytes).Mul64(n)
+		target = target.Add(t)
+	}
 
 	// ensure target is at least minAllowance
 	if target.Cmp(minAllowance) < 0 {

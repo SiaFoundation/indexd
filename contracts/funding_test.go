@@ -170,7 +170,7 @@ func TestFunding(t *testing.T) {
 	}
 
 	// assert batches were applied correctly
-	target := accounts.HostFundTarget(host)
+	target := accounts.HostFundTarget(host, testFundTargetBytes)
 	if len(f.calls) != 2 {
 		t.Fatal("expected two calls to fund accounts")
 	} else if len(f.calls[0].accounts) != accounts.AccountFundBatch {

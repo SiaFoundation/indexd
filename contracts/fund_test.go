@@ -13,6 +13,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const testFundTargetBytes = uint64(1 << 30) // 1 GiB
+
 type fundAccountsCall struct {
 	host        hosts.Host
 	contractIDs []types.FileContractID
@@ -22,9 +24,11 @@ type accountsManagerMock struct {
 	mu             sync.Mutex
 	activeAccounts uint64
 	accountsToFund []accounts.HostAccount
+	quotas         []accounts.Quota
+	quotaFundInfos []accounts.QuotaFundInfo
 }
 
-func (am *accountsManagerMock) AccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
+func (am *accountsManagerMock) AccountsForFunding(hk types.PublicKey, threshold time.Time, limit int, quotaName string) ([]accounts.HostAccount, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	cpy := make([]accounts.HostAccount, len(am.accountsToFund))
@@ -32,10 +36,32 @@ func (am *accountsManagerMock) AccountsForFunding(hk types.PublicKey, threshold 
 	return cpy, nil
 }
 
-func (am *accountsManagerMock) ActiveAccounts(threshold time.Time) (uint64, error) {
+func (am *accountsManagerMock) ActiveAccounts(threshold time.Time) ([]accounts.QuotaFundInfo, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	return am.activeAccounts, nil
+	if len(am.quotaFundInfos) > 0 {
+		return am.quotaFundInfos, nil
+	}
+	if am.activeAccounts > 0 {
+		return []accounts.QuotaFundInfo{{
+			QuotaName:       "default",
+			FundTargetBytes: testFundTargetBytes,
+			ActiveAccounts:  am.activeAccounts,
+		}}, nil
+	}
+	return nil, nil
+}
+
+func (am *accountsManagerMock) Quotas(_ context.Context, offset, limit int) ([]accounts.Quota, error) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if len(am.quotas) > 0 {
+		return am.quotas, nil
+	}
+	return []accounts.Quota{{
+		Key:             "default",
+		FundTargetBytes: testFundTargetBytes,
+	}}, nil
 }
 
 func (am *accountsManagerMock) ScheduleAccountsForFunding(hostKey types.PublicKey) error {

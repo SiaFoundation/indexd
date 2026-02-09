@@ -710,12 +710,13 @@ CREATE TABLE quotas (
     name TEXT PRIMARY KEY CHECK (LENGTH(name) > 0 AND LENGTH(name) <= 32),
     description TEXT NOT NULL,
     max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0),
-    total_uses INTEGER NOT NULL CHECK (total_uses >= 0)
+    total_uses INTEGER NOT NULL CHECK (total_uses >= 0),
+    fund_target_bytes BIGINT NOT NULL DEFAULT 17179869184 CHECK (fund_target_bytes >= 0)
 );
 
--- insert default quota: 1TB max data, 5 total uses
-INSERT INTO quotas (name, description, max_pinned_data, total_uses)
-VALUES ('default', 'Default quota', 1000000000000, 5);
+-- insert default quota: 1TB max data, 5 total uses, 16 GiB fund target
+INSERT INTO quotas (name, description, max_pinned_data, total_uses, fund_target_bytes)
+VALUES ('default', 'Default quota', 1000000000000, 5, 17179869184);
 `)
 		if err != nil {
 			return fmt.Errorf("failed to create quotas table: %w", err)
@@ -743,5 +744,10 @@ ALTER TABLE app_connect_keys DROP COLUMN remaining_uses;
 		}
 
 		return nil
+	},
+	// add fund_target_bytes column to quotas table
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE quotas ADD COLUMN fund_target_bytes BIGINT NOT NULL DEFAULT 17179869184 CHECK (fund_target_bytes >= 0);`)
+		return err
 	},
 }

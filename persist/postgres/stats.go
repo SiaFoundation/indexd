@@ -117,7 +117,7 @@ func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 		}
 
 		const activeAccountThreshold = 7 * 24 * time.Hour
-		stats.Active, err = activeAccounts(ctx, tx, time.Now().Add(-activeAccountThreshold))
+		err = tx.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE last_used >= $1;`, time.Now().Add(-activeAccountThreshold)).Scan(&stats.Active)
 		if err != nil {
 			return fmt.Errorf("failed to get active accounts: %w", err)
 		}

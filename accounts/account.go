@@ -79,4 +79,12 @@ type (
 		ConsecutiveFailedFunds int
 		NextFund               time.Time
 	}
+
+	// QuotaFundInfo contains funding info for a quota including the number
+	// of active accounts.
+	QuotaFundInfo struct {
+		QuotaName       string
+		FundTargetBytes uint64
+		ActiveAccounts  uint64
+	}
 )
