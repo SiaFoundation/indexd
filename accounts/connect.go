@@ -131,7 +131,7 @@ func (m *AccountManager) ValidAppConnectKey(ctx context.Context, key string) (bo
 }
 
 // PutQuota creates or updates a quota.
-func (m *AccountManager) PutQuota(ctx context.Context, key string, req PutQuotaRequest) (Quota, error) {
+func (m *AccountManager) PutQuota(ctx context.Context, key string, req PutQuotaRequest) error {
 	return m.store.PutQuota(key, req)
 }
 

@@ -45,15 +45,12 @@ func (s *Store) AddAppConnectKey(meta accounts.UpdateAppConnectKey) (key account
 
 		userSecret := frand.Bytes(32)
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
-			INSERT INTO app_connect_keys ack (app_key, user_secret, use_description, quota_name)
+			INSERT INTO app_connect_keys (app_key, user_secret, use_description, quota_name)
 			VALUES ($1, $2, $3, $4)
 			RETURNING app_key, use_description, created_at, updated_at, last_used, pinned_data,
 				quota_name,
-				GREATEST(0, (SELECT total_uses FROM quotas WHERE name = quota_name) - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id))
+				(SELECT total_uses FROM quotas WHERE name = quota_name)
 		`, meta.Key, userSecret, meta.Description, meta.Quota))
-		if errors.Is(err, sql.ErrNoRows) {
-			return accounts.ErrKeyNotFound
-		}
 		return err
 	})
 	return
@@ -70,7 +67,7 @@ func (s *Store) UpdateAppConnectKey(meta accounts.UpdateAppConnectKey) (key acco
 			UPDATE app_connect_keys ack SET (use_description, quota_name) = ($2, $3) WHERE app_key = $1
 			RETURNING app_key, use_description, created_at, updated_at, last_used, pinned_data,
 				quota_name,
-				GREATEST(0, (SELECT total_uses FROM quotas WHERE name = quota_name) - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id))
+				GREATEST(0, (SELECT total_uses FROM quotas WHERE name = quota_name) - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id AND deleted_at IS NULL))
 		`, meta.Key, meta.Description, meta.Quota))
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrKeyNotFound
@@ -85,7 +82,7 @@ func (s *Store) ValidAppConnectKey(key string) (bool, error) {
 	var remainingUses int
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		return tx.QueryRow(ctx, `
-			SELECT GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id))
+			SELECT GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id AND deleted_at IS NULL))
 			FROM app_connect_keys ack
 			INNER JOIN quotas q ON q.name = ack.quota_name
 			WHERE ack.app_key = $1
@@ -105,7 +102,7 @@ func (s *Store) AppConnectKey(key string) (connectKey accounts.ConnectKey, err e
 		connectKey, err = scanConnectKey(tx.QueryRow(ctx, `
 			SELECT ack.app_key, ack.use_description, ack.created_at, ack.updated_at, ack.last_used, ack.pinned_data,
 				ack.quota_name,
-				GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id))
+				GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id AND deleted_at IS NULL))
 			FROM app_connect_keys ack
 			INNER JOIN quotas q ON q.name = ack.quota_name
 			WHERE ack.app_key = $1`, key))
@@ -123,9 +120,15 @@ func (s *Store) AppConnectKeys(offset, limit int) (keys []accounts.ConnectKey, e
 		rows, err := tx.Query(ctx, `
 			SELECT ack.app_key, ack.use_description, ack.created_at, ack.updated_at, ack.last_used, ack.pinned_data,
 				ack.quota_name,
-				GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id))
+				GREATEST(0, q.total_uses - COALESCE(ac.cnt, 0))
 			FROM app_connect_keys ack
 			INNER JOIN quotas q ON q.name = ack.quota_name
+			LEFT JOIN (
+				SELECT connect_key_id, COUNT(*) AS cnt
+				FROM accounts
+				WHERE deleted_at IS NULL
+				GROUP BY connect_key_id
+			) ac ON ac.connect_key_id = ack.id
 			ORDER BY ack.created_at DESC
 			LIMIT $1 OFFSET $2
 		`, limit, offset)
@@ -195,7 +198,7 @@ func (s *Store) RegisterAppKey(connectKey string, appKey types.PublicKey, meta a
 			UPDATE app_connect_keys ack SET last_used = NOW()
 			FROM quotas q
 			WHERE ack.app_key = $1 AND q.name = ack.quota_name
-			RETURNING GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts a WHERE a.connect_key_id = ack.id)), q.max_pinned_data
+			RETURNING GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts a WHERE a.connect_key_id = ack.id AND a.deleted_at IS NULL)), q.max_pinned_data
 		`, connectKey).Scan(&remainingUses, &storageLimit)
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrKeyNotFound

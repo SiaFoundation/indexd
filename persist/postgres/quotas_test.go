@@ -11,29 +11,26 @@ func TestQuotas(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// create a quota
-	created, err := store.PutQuota("test-quota", accounts.PutQuotaRequest{
+	if err := store.PutQuota("test-quota", accounts.PutQuotaRequest{
 		Description:   "Test quota",
 		MaxPinnedData: 1000,
 		TotalUses:     10,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal("failed to create quota:", err)
-	} else if created.Key != "test-quota" {
-		t.Fatalf("expected key to be 'test-quota', got %q", created.Key)
-	} else if created.Description != "Test quota" {
-		t.Fatalf("expected description to be 'Test quota', got %q", created.Description)
-	} else if created.MaxPinnedData != 1000 {
-		t.Fatalf("expected max pinned data to be 1000, got %d", created.MaxPinnedData)
-	} else if created.TotalUses != 10 {
-		t.Fatalf("expected total uses to be 10, got %d", created.TotalUses)
 	}
 
 	// get the quota
 	got, err := store.Quota("test-quota")
 	if err != nil {
 		t.Fatal("failed to get quota:", err)
-	} else if got != created {
-		t.Fatalf("expected quota %+v, got %+v", created, got)
+	} else if got.Key != "test-quota" {
+		t.Fatalf("expected key to be 'test-quota', got %q", got.Key)
+	} else if got.Description != "Test quota" {
+		t.Fatalf("expected description to be 'Test quota', got %q", got.Description)
+	} else if got.MaxPinnedData != 1000 {
+		t.Fatalf("expected max pinned data to be 1000, got %d", got.MaxPinnedData)
+	} else if got.TotalUses != 10 {
+		t.Fatalf("expected total uses to be 10, got %d", got.TotalUses)
 	}
 
 	// list quotas - should include default and test-quota
@@ -55,19 +52,24 @@ func TestQuotas(t *testing.T) {
 	}
 
 	// update the test quota
-	updated, err := store.PutQuota("test-quota", accounts.PutQuotaRequest{
+	if err := store.PutQuota("test-quota", accounts.PutQuotaRequest{
 		Description:   "Updated description",
 		MaxPinnedData: 2000,
 		TotalUses:     20,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatal("failed to update quota:", err)
-	} else if updated.Description != "Updated description" {
-		t.Fatalf("expected description to be 'Updated description', got %q", updated.Description)
-	} else if updated.MaxPinnedData != 2000 {
-		t.Fatalf("expected max pinned data to be 2000, got %d", updated.MaxPinnedData)
-	} else if updated.TotalUses != 20 {
-		t.Fatalf("expected total uses to be 20, got %d", updated.TotalUses)
+	}
+
+	// verify the update
+	got, err = store.Quota("test-quota")
+	if err != nil {
+		t.Fatal("failed to get updated quota:", err)
+	} else if got.Description != "Updated description" {
+		t.Fatalf("expected description to be 'Updated description', got %q", got.Description)
+	} else if got.MaxPinnedData != 2000 {
+		t.Fatalf("expected max pinned data to be 2000, got %d", got.MaxPinnedData)
+	} else if got.TotalUses != 20 {
+		t.Fatalf("expected total uses to be 20, got %d", got.TotalUses)
 	}
 
 	// delete the quota
@@ -90,7 +92,7 @@ func TestQuotaInUse(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// create a quota
-	_, err := store.PutQuota("in-use-quota", accounts.PutQuotaRequest{
+	err := store.PutQuota("in-use-quota", accounts.PutQuotaRequest{
 		Description:   "Quota that will be in use",
 		MaxPinnedData: 1000,
 		TotalUses:     10,

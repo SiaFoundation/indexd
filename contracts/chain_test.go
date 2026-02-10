@@ -390,7 +390,7 @@ func (ts testStore) setActiveAccountsCount(t testing.TB, n uint64) {
 	}
 
 	// insert n dummy accounts
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		pk := types.PublicKey{byte(i % 256), byte(i / 256)}
 		_, err := ts.Exec(t.Context(), `
 			INSERT INTO accounts (public_key, connect_key_id, last_used, pinned_data, max_pinned_data)

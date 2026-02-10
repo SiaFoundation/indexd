@@ -103,7 +103,7 @@ type (
 		AppConnectKey(ctx context.Context, key string) (accounts.ConnectKey, error)
 		AppConnectKeys(ctx context.Context, offset, limit int) ([]accounts.ConnectKey, error)
 
-		PutQuota(ctx context.Context, key string, req accounts.PutQuotaRequest) (accounts.Quota, error)
+		PutQuota(ctx context.Context, key string, req accounts.PutQuotaRequest) error
 		DeleteQuota(ctx context.Context, key string) error
 		Quota(ctx context.Context, key string) (accounts.Quota, error)
 		Quotas(ctx context.Context, offset, limit int) ([]accounts.Quota, error)
@@ -481,11 +481,9 @@ func (a *admin) handlePUTQuota(jc jape.Context) {
 		return
 	}
 
-	quota, err := a.accounts.PutQuota(jc.Request.Context(), key, req)
-	if jc.Check("failed to put quota", err) != nil {
+	if jc.Check("failed to put quota", a.accounts.PutQuota(jc.Request.Context(), key, req)) != nil {
 		return
 	}
-	jc.Encode(quota)
 }
 
 func (a *admin) handleDELETEQuota(jc jape.Context) {

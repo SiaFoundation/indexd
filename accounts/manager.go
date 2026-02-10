@@ -60,7 +60,7 @@ type (
 		AppConnectKey(key string) (ConnectKey, error)
 		AppConnectKeys(offset, limit int) ([]ConnectKey, error)
 
-		PutQuota(key string, req PutQuotaRequest) (Quota, error)
+		PutQuota(key string, req PutQuotaRequest) error
 		DeleteQuota(key string) error
 		Quota(key string) (Quota, error)
 		Quotas(offset, limit int) ([]Quota, error)

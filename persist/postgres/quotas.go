@@ -15,20 +15,18 @@ func scanQuota(s scanner) (quota accounts.Quota, err error) {
 }
 
 // PutQuota creates or updates a quota in the database.
-func (s *Store) PutQuota(key string, req accounts.PutQuotaRequest) (quota accounts.Quota, err error) {
-	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		quota, err = scanQuota(tx.QueryRow(ctx, `
+func (s *Store) PutQuota(key string, req accounts.PutQuotaRequest) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
 			INSERT INTO quotas (name, description, max_pinned_data, total_uses)
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (name) DO UPDATE SET
 				description = EXCLUDED.description,
 				max_pinned_data = EXCLUDED.max_pinned_data,
 				total_uses = EXCLUDED.total_uses
-			RETURNING name, description, max_pinned_data, total_uses
-		`, key, req.Description, req.MaxPinnedData, req.TotalUses))
+		`, key, req.Description, req.MaxPinnedData, req.TotalUses)
 		return err
 	})
-	return
 }
 
 // DeleteQuota deletes a quota from the database.

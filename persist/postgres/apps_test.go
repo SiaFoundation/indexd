@@ -14,7 +14,7 @@ import (
 // addTestQuota creates a test quota with the given parameters
 func (s *Store) addTestQuota(t testing.TB, name string, maxPinnedData uint64, totalUses int) {
 	t.Helper()
-	if _, err := s.PutQuota(name, accounts.PutQuotaRequest{
+	if err := s.PutQuota(name, accounts.PutQuotaRequest{
 		Description:   "test quota",
 		MaxPinnedData: maxPinnedData,
 		TotalUses:     totalUses,
@@ -118,7 +118,8 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatalf("expected updated app connect key's quota to be 'test-20-data', got %q", updated.Quota)
 	}
 
-	// key should still be invalid since remaining_uses is not updated by UpdateAppConnectKey
+	// key should still be invalid since UpdateAppConnectKey does not reset
+	// usage or make an exhausted key valid
 	if ok, err := store.ValidAppConnectKey(connectKey); err != nil {
 		t.Fatal("failed to validate app connect key:", err)
 	} else if ok {
@@ -138,20 +139,30 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyInUse, err)
 	}
 
-	// delete account
+	// soft-delete account
 	if err := store.DeleteAccount(proto.Account(acc)); err != nil {
-		t.Fatal(err)
-	} else if err := store.PruneAccounts(1); err != nil {
 		t.Fatal(err)
 	}
 
-	// verify that remaining uses was incremented after account deletion
+	// verify that soft-deleted accounts don't count towards the quota
 	key, err := store.AppConnectKey(connectKey)
 	if err != nil {
 		t.Fatal("failed to get app connect key:", err)
 	} else if key.RemainingUses != 1 {
-		// was 0 after RegisterAppKey, then +1 after prune
-		t.Fatalf("expected remaining uses to be 1 after account deletion, got %d", key.RemainingUses)
+		t.Fatalf("expected remaining uses to be 1 after soft deletion, got %d", key.RemainingUses)
+	}
+
+	// prune the soft-deleted account
+	if err := store.PruneAccounts(1); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify remaining uses is still 1 after hard deletion
+	key, err = store.AppConnectKey(connectKey)
+	if err != nil {
+		t.Fatal("failed to get app connect key:", err)
+	} else if key.RemainingUses != 1 {
+		t.Fatalf("expected remaining uses to be 1 after hard deletion, got %d", key.RemainingUses)
 	}
 
 	// try deleting key again now that it's not in use
