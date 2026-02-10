@@ -108,18 +108,18 @@ func (c *Client) Quotas(ctx context.Context, offset, limit int) (quotas []accoun
 
 // Quota retrieves a single quota by its key.
 func (c *Client) Quota(ctx context.Context, key string) (quota accounts.Quota, err error) {
-	err = c.c.GET(ctx, fmt.Sprintf("/quotas/%s", key), &quota)
+	err = c.c.GET(ctx, fmt.Sprintf("/quotas/%s", url.PathEscape(key)), &quota)
 	return
 }
 
 // PutQuota creates or updates a quota.
 func (c *Client) PutQuota(ctx context.Context, key string, req accounts.PutQuotaRequest) error {
-	return c.c.PUT(ctx, fmt.Sprintf("/quotas/%s", key), req)
+	return c.c.PUT(ctx, fmt.Sprintf("/quotas/%s", url.PathEscape(key)), req)
 }
 
 // DeleteQuota deletes a quota by its key.
 func (c *Client) DeleteQuota(ctx context.Context, key string) (err error) {
-	err = c.c.DELETE(ctx, fmt.Sprintf("/quotas/%s", key))
+	err = c.c.DELETE(ctx, fmt.Sprintf("/quotas/%s", url.PathEscape(key)))
 	return
 }
 
