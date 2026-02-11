@@ -23,8 +23,8 @@ func (s AccountStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 }
 
 // PrometheusMetric implements the prometheus.Marshaller interface for the
-// all hosts stats response.
-func (s AllHostsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
+// aggregated hosts stats response.
+func (s AggregatedHostStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	return []prometheus.Metric{
 		{
 			Name:  "indexd_hosts_active",

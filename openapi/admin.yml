@@ -1421,8 +1421,21 @@ paths:
     get:
       tags:
         - stats
-      summary: Get stats about hosts
+      summary: Get aggregated stats about all hosts
       operationId: getStatsHosts
+      responses:
+        "200":
+          description: Aggregated statistics about all hosts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AggregatedHostStatsResponse"
+
+  /stats/hosts/detailed:
+    get:
+      tags:
+        - stats
+      operationId: getStatsHostsDetailed
       parameters:
         - name: limit
           in: query
@@ -1813,6 +1826,8 @@ components:
       $ref: "./components.yml#/components/schemas/ContractsStatsResponse"
     HostsStatsResponse:
       $ref: "./components.yml#/components/schemas/HostsStatsResponse"
+    AggregatedHostStatsResponse:
+      $ref: "./components.yml#/components/schemas/AggregatedHostStatsResponse"
     ScansStatsResponse:
       $ref: "./components.yml#/components/schemas/ScansStatsResponse"
     SectorStatsResponse:
