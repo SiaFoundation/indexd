@@ -795,6 +795,8 @@ func (s *Store) PrunableContractRoots(contractID types.FileContractID, roots []t
 		`, sqlHash256(contractID)).Scan(&wantedHostID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
+		} else if err != nil {
+			return fmt.Errorf("failed to fetch contract host ID: %w", err)
 		}
 
 		rows, err := tx.Query(ctx, `
