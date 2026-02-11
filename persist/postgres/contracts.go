@@ -228,8 +228,10 @@ func (s *Store) Contracts(offset, limit int, queryOpts ...contracts.ContractQuer
 		return nil, err
 	}
 
-	var contracts []contracts.Contract
+	contracts := make([]contracts.Contract, 0, min(limit, 1000))
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
+		contracts = contracts[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 SELECT c.contract_id, c.formation, h.public_key, c.proof_height, c.expiration_height, c.renewed_from, c.renewed_to, c.revision_number, c.state, c.capacity, c.size, c.contract_price, c.initial_allowance, c.remaining_allowance, c.miner_fee, c.used_collateral, c.total_collateral, c.good, c.append_sector_spending, c.free_sector_spending, c.fund_account_spending, c.sector_roots_spending, c.next_prune, c.last_broadcast_attempt
 FROM contracts c
@@ -322,8 +324,10 @@ func buildContractOrderByClause(sorts []contracts.ContractSortOpt) (string, erro
 // on chain) since 'minBroadcast'. The contracts are sorted by the last
 // broadcast time.
 func (s *Store) ContractsForBroadcasting(minBroadcast time.Time, limit int) ([]types.FileContractID, error) {
-	var fcids []types.FileContractID
+	fcids := make([]types.FileContractID, 0, limit)
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		fcids = fcids[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			SELECT c.contract_id
 			FROM contracts c
@@ -352,8 +356,10 @@ func (s *Store) ContractsForBroadcasting(minBroadcast time.Time, limit int) ([]t
 // that are good for funding ephemeral accounts with. The contracts are sorted
 // by the remaining allowance in descending fashion.
 func (s *Store) ContractsForFunding(hk types.PublicKey, limit int) ([]types.FileContractID, error) {
-	var fcids []types.FileContractID
+	fcids := make([]types.FileContractID, 0, limit)
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		fcids = fcids[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 SELECT c.contract_id
 FROM contracts c
@@ -390,6 +396,8 @@ LIMIT $2
 func (s *Store) ContractsForPinning(hk types.PublicKey, maxContractSize uint64) ([]types.FileContractID, error) {
 	var fcids []types.FileContractID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		fcids = fcids[:0] // reuse same slice if transaction retries
+
 		// covered by index contracts_host_id_active_good_idx
 		rows, err := tx.Query(ctx, `
 SELECT c.contract_id
@@ -425,6 +433,8 @@ ORDER BY (c.capacity - c.size) DESC`, sqlPublicKey(hk), maxContractSize)
 func (s *Store) ContractsForPruning(hk types.PublicKey) ([]types.FileContractID, error) {
 	var fcids []types.FileContractID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		fcids = fcids[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 SELECT c.contract_id
 FROM contracts c
@@ -473,6 +483,8 @@ func (s *Store) ContractElement(contractID types.FileContractID) (types.V2FileCo
 func (s *Store) ContractElementsForBroadcast(maxBlocksSinceExpiry uint64) ([]types.V2FileContractElement, error) {
 	var fces []types.V2FileContractElement
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		fces = fces[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 WITH current_height AS (
 	SELECT scanned_height FROM global_settings
@@ -782,6 +794,8 @@ func (s *Store) PrunableContractRoots(contractID types.FileContractID, roots []t
 
 	prunable := make([]types.Hash256, 0, len(roots))
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		prunable = prunable[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			SELECT s.sector_root
 			FROM sectors s

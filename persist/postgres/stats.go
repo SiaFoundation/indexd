@@ -137,8 +137,10 @@ func (s *Store) ScanStats() (stats admin.ScansStatsResponse, err error) {
 // HostStats reports statistics about used hosts. We consider a host to be used
 // as soon as we spent any funds on it.
 func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
-	var stats []hosts.HostStats
+	stats := make([]hosts.HostStats, 0, limit)
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		stats = stats[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			WITH globals AS (
 				SELECT scanned_height FROM global_settings

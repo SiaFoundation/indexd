@@ -56,6 +56,8 @@ func (s *Store) MarkSlabRepaired(slabID slabs.SlabID, success bool) error {
 // Slab retrieves a slab from the database by its ID.
 func (s *Store) Slab(slabID slabs.SlabID) (slab slabs.Slab, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		slab.Sectors = slab.Sectors[:0] // reuse same slice if transaction retries
+
 		var dbID int64
 		err = tx.QueryRow(ctx, `SELECT s.id, s.encryption_key, s.min_shards, s.pinned_at FROM slabs s WHERE digest = $1`, sqlHash256(slabID)).Scan(
 			&dbID, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.PinnedAt)
@@ -105,6 +107,8 @@ func (s *Store) Slab(slabID slabs.SlabID) (slab slabs.Slab, err error) {
 func (s *Store) PinnedSlab(account proto.Account, slabID slabs.SlabID) (slab slabs.PinnedSlab, err error) {
 	slab.ID = slabID
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		slab.Sectors = slab.Sectors[:0] // reuse same slice if transaction retries
+
 		if _, err := tx.Exec(ctx, `UPDATE accounts SET last_used = NOW() WHERE public_key = $1`, sqlPublicKey(account)); err != nil {
 			return fmt.Errorf("failed to update last used: %w", err)
 		}
@@ -200,12 +204,15 @@ LIMIT $2
 	var exhausted bool
 	const batchSize = 100
 	for !exhausted {
+		var txExhausted bool
 		err := s.transaction(func(ctx context.Context, tx *txn) error {
+			txExhausted = false // reset if transaction retries
+
 			slabIDs, err := getSlabs(ctx, tx, batchSize)
 			if err != nil {
 				return fmt.Errorf("failed to get slabs to unpin: %w", err)
 			} else if len(slabIDs) < batchSize {
-				exhausted = true
+				txExhausted = true
 			}
 			if err := s.unpinSlabs(ctx, tx, id, slabIDs); err != nil {
 				return fmt.Errorf("failed to unpin slabs: %w", err)
@@ -215,6 +222,7 @@ LIMIT $2
 		if err != nil {
 			return err
 		}
+		exhausted = txExhausted
 	}
 
 	return nil

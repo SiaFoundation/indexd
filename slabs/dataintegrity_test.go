@@ -2,7 +2,6 @@ package slabs_test
 
 import (
 	"context"
-	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -129,7 +128,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	sm := slabs.NewSlabManager(newMockChainManager(), newMockAccountManager(), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
 
 	// assert there are no alerts
-	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
+	if alerts, err := alerter.Alerts(0, 1); err != nil {
 		t.Fatal(err)
 	} else if len(alerts) != 0 {
 		t.Fatalf("expected 0 alerts, got %d", len(alerts))
@@ -150,7 +149,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 
 	// assert alert was generated
 	var got alerts.Alert
-	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
+	if alerts, err := alerter.Alerts(0, 2); err != nil {
 		t.Fatal(err)
 	} else if len(alerts) != 1 {
 		t.Fatalf("expected 1 alert, got %d", len(alerts))
@@ -176,7 +175,7 @@ func TestIntegrityChecksAlert(t *testing.T) {
 	}
 
 	// alert should be dismissed
-	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
+	if alerts, err := alerter.Alerts(0, 1); err != nil {
 		t.Fatal(err)
 	} else if len(alerts) != 0 {
 		t.Fatalf("expected 0 alerts, got %d", len(alerts))

@@ -58,6 +58,8 @@ func (s *Store) AddBroadcastedSet(set wallet.BroadcastedSet) error {
 // BroadcastedSets returns recently broadcasted sets.
 func (s *Store) BroadcastedSets() (sets []wallet.BroadcastedSet, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		sets = sets[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `SELECT chain_index, transactions, broadcasted_at FROM wallet_broadcasted_sets ORDER BY broadcasted_at DESC`)
 		if err != nil {
 			return fmt.Errorf("failed to query broadcasted sets: %w", err)
@@ -100,6 +102,8 @@ func (s *Store) Tip() (ci types.ChainIndex, err error) {
 // including immature outputs.
 func (s *Store) UnspentSiacoinElements() (tip types.ChainIndex, sces []types.SiacoinElement, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		sces = sces[:0] // reuse same slice if transaction retries
+
 		err := tx.QueryRow(ctx, `SELECT scanned_height, scanned_block_id FROM global_settings`).Scan(&tip.Height, (*sqlHash256)(&tip.ID))
 		if err != nil {
 			return fmt.Errorf("failed to query last scanned index: %w", err)
@@ -149,8 +153,10 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 		return nil, nil
 	}
 
-	var events []wallet.Event
+	events := make([]wallet.Event, 0, limit)
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		events = events[:0] // reuse same slice if transaction retries
+
 		tip, err := getTip(ctx, tx)
 		if err != nil {
 			return fmt.Errorf("failed to get tip: %w", err)

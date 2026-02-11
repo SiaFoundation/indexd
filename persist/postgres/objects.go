@@ -85,6 +85,8 @@ ORDER BY ss.slab_index ASC`, slabDBID).Query(func(rows pgx.Rows) error {
 // Object retrieves the object with the given key for the given account.
 func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.SealedObject, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		obj = slabs.SealedObject{} // reset if transaction retries
+
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
 			return err
@@ -141,7 +143,10 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 // ListObjects lists objects for the given account that were updated after the
 // the given 'after' time.
 func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, _ error) {
+	events = make([]slabs.ObjectEvent, 0, limit)
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		events = events[:0] // reuse same slice if transaction retries
+
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
 			return err
