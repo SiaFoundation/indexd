@@ -106,7 +106,7 @@ type (
 	// A Store is a persistent store for the indexer.
 	Store interface {
 		AccountStats() (AccountStatsResponse, error)
-		AllHostsStats() (AllHostsStatsResponse, error)
+		AggregatedHostStats() (AggregatedHostStatsResponse, error)
 		ContractsStats() (ContractsStatsResponse, error)
 		HostStats(offset, limit int) ([]hosts.HostStats, error)
 		SectorStats() (SectorsStatsResponse, error)
@@ -253,11 +253,11 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"POST /wallet/send":      a.handlePOSTWalletSend,
 
 		// stats endpoints
-		"GET /stats/accounts":  a.handleGETStatsAccounts,
-		"GET /stats/contracts": a.handleGETStatsContracts,
-		"GET /stats/hosts":     a.handleGETStatsHosts,
-		"GET /stats/hosts/all": a.handleGETStatsHostsAll,
-		"GET /stats/sectors":   a.handleGETStatsSectors,
+		"GET /stats/accounts":       a.handleGETStatsAccounts,
+		"GET /stats/contracts":      a.handleGETStatsContracts,
+		"GET /stats/hosts":          a.handleGETStatsHostsAggregated,
+		"GET /stats/hosts/detailed": a.handleGETStatsHostsDetailed,
+		"GET /stats/sectors":        a.handleGETStatsSectors,
 	}
 
 	// debug endpoints
@@ -993,7 +993,7 @@ func (a *admin) handleGETStatsContracts(jc jape.Context) {
 	writeResponse(jc, stats)
 }
 
-func (a *admin) handleGETStatsHosts(jc jape.Context) {
+func (a *admin) handleGETStatsHostsDetailed(jc jape.Context) {
 	offset, limit, ok := api.ParseOffsetLimit(jc)
 	if !ok {
 		return
@@ -1011,9 +1011,9 @@ func (a *admin) handleGETStatsHosts(jc jape.Context) {
 	writeResponse(jc, HostStatsResponse(res))
 }
 
-func (a *admin) handleGETStatsHostsAll(jc jape.Context) {
-	stats, err := a.store.AllHostsStats()
-	if jc.Check("failed to retrieve all hosts stats", err) != nil {
+func (a *admin) handleGETStatsHostsAggregated(jc jape.Context) {
+	stats, err := a.store.AggregatedHostStats()
+	if jc.Check("failed to retrieve aggregated hosts stats", err) != nil {
 		return
 	}
 	writeResponse(jc, stats)

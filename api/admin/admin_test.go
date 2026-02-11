@@ -951,7 +951,7 @@ func TestHostsStatsAPI(t *testing.T) {
 	admin := cluster.Indexer.Admin
 	cluster.WaitForContracts(t)
 
-	res, err := admin.StatsHosts(t.Context(), 0, 10)
+	res, err := admin.StatsHostsDetailed(t.Context(), 0, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 2 {
@@ -961,21 +961,21 @@ func TestHostsStatsAPI(t *testing.T) {
 	}
 
 	// assert offset and limit are being applied
-	res, err = admin.StatsHosts(t.Context(), 1, 1)
+	res, err = admin.StatsHostsDetailed(t.Context(), 1, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 1 {
 		t.Fatalf("expected 1 host, got %d", len(res))
 	}
 
-	res, err = admin.StatsHosts(t.Context(), 2, 1)
+	res, err = admin.StatsHostsDetailed(t.Context(), 2, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(res) != 0 {
 		t.Fatalf("expected 0 hosts, got %d", len(res))
 	}
 
-	allStats, err := admin.StatsHostsAll(t.Context())
+	allStats, err := admin.StatsHosts(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	} else if allStats.TotalScans != 4 {

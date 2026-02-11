@@ -126,9 +126,9 @@ func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 	return stats, err
 }
 
-// AllHostsStats reports aggregated statistics about all hosts, including the
+// AggregatedHostStats reports aggregated statistics about all hosts, including the
 // number of active hosts and scan counts.
-func (s *Store) AllHostsStats() (stats admin.AllHostsStatsResponse, err error) {
+func (s *Store) AggregatedHostStats() (stats admin.AggregatedHostStatsResponse, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		if err := tx.QueryRow(ctx, "SELECT num_scans, num_scans_failed FROM stats").Scan(&stats.TotalScans, &stats.FailedScans); err != nil {
 			return fmt.Errorf("failed to get scan stats: %w", err)

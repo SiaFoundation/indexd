@@ -501,7 +501,7 @@ func TestHostStats(t *testing.T) {
 	}
 }
 
-func TestAllHostsStats(t *testing.T) {
+func TestAggregatedHostStats(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// add two hosts
@@ -524,7 +524,7 @@ func TestAllHostsStats(t *testing.T) {
 	assertStats := func(expectedActiveHosts, expectedGoodForUpload uint64, expectedScans, expectedFailed int64) {
 		t.Helper()
 
-		stats, err := store.AllHostsStats()
+		stats, err := store.AggregatedHostStats()
 		if err != nil {
 			t.Fatal(err)
 		} else if expectedActiveHosts != stats.Active {

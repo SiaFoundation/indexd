@@ -333,18 +333,18 @@ func (c *Client) StatsContracts(ctx context.Context) (resp ContractsStatsRespons
 	return
 }
 
-// StatsHosts returns statistics about the hosts managed by the indexer.
-func (c *Client) StatsHosts(ctx context.Context, offset, limit int) (resp HostStatsResponse, err error) {
-	values := url.Values{}
-	values.Set("offset", fmt.Sprintf("%d", offset))
-	values.Set("limit", fmt.Sprintf("%d", limit))
-	err = c.c.GET(ctx, "/stats/hosts?"+values.Encode(), &resp)
+// StatsHosts returns aggregated statistics about all hosts.
+func (c *Client) StatsHosts(ctx context.Context) (resp AggregatedHostStatsResponse, err error) {
+	err = c.c.GET(ctx, "/stats/hosts", &resp)
 	return
 }
 
-// StatsHostsAll returns aggregated statistics about all hosts.
-func (c *Client) StatsHostsAll(ctx context.Context) (resp AllHostsStatsResponse, err error) {
-	err = c.c.GET(ctx, "/stats/hosts/all", &resp)
+// StatsHostsDetailed returns statistics about the hosts managed by the indexer.
+func (c *Client) StatsHostsDetailed(ctx context.Context, offset, limit int) (resp HostStatsResponse, err error) {
+	values := url.Values{}
+	values.Set("offset", fmt.Sprintf("%d", offset))
+	values.Set("limit", fmt.Sprintf("%d", limit))
+	err = c.c.GET(ctx, "/stats/hosts/detailed?"+values.Encode(), &resp)
 	return
 }
 

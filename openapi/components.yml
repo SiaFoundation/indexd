@@ -898,17 +898,25 @@ components:
             nullable: true
             description: Timestamp when the host became stuck. Only present when stuck is true.
 
-    ScansStatsResponse:
+    AggregatedHostStatsResponse:
       type: object
       properties:
-        total:
+        active:
+          type: integer
+          format: uint64
+          description: Number of hosts that are not stuck and have a good contract
+        goodForUpload:
+          type: integer
+          format: uint64
+          description: Number of hosts that are good for uploading to (hosts that are not stuck and have nonzero remaining storage)
+        totalScans:
           type: integer
           format: int64
-          description: Total number of host scans across all hosts
-        failed:
+          description: Total number of host scans performed
+        failedScans:
           type: integer
           format: int64
-          description: Total number of failed host scans across all hosts
+          description: Total number of failed host scans
 
     SectorStatsResponse:
       type: object
