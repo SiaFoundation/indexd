@@ -3116,9 +3116,9 @@ func BenchmarkStuckHosts(b *testing.B) {
 				return err
 			}
 
-			// 10% of hosts are stuck (stuck_since > 24 hours ago)
+			// 10% of hosts are stuck
 			if i%10 == 0 {
-				_, err := tx.Exec(ctx, `UPDATE hosts SET stuck_since = NOW() - INTERVAL '48 hours' WHERE id = $1`, hostID)
+				_, err := tx.Exec(ctx, `UPDATE hosts SET stuck_since = NOW() WHERE id = $1`, hostID)
 				if err != nil {
 					return err
 				}

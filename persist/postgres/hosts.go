@@ -1058,7 +1058,7 @@ func (s *Store) UpdateStuckHosts(stuck []types.PublicKey) error {
 }
 
 // StuckHosts returns a list of stuck hosts with the timestamp they first
-// became stuck. A host is stuck if stuck_since is more than 24 hours ago.
+// became stuck. A host is considered stuck if stuck_since is non null.
 func (s *Store) StuckHosts() ([]hosts.StuckHost, error) {
 	var result []hosts.StuckHost
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {

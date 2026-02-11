@@ -884,7 +884,7 @@ components:
             description: Reasons why the host was blocked, if any
           stuck:
             type: boolean
-            description: Whether the host is currently stuck. A host is stuck when contract operations have been failing for more than 24 hours.
+            description: Whether the host is currently stuck. A host is considered stuck when the most recent contract operation has not succeeded.
           stuckSince:
             type: string
             format: date-time
