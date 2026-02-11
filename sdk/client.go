@@ -385,7 +385,7 @@ func (s *SDK) Close() error {
 
 // SaveObject saves the given object to the indexer.
 func (s *SDK) SaveObject(ctx context.Context, obj Object) error {
-	return s.client.SaveObject(ctx, s.appKey, obj.Seal(s.appKey))
+	return s.client.SaveObject(ctx, s.appKey, obj.Seal(s.appKey).SealedObject)
 }
 
 func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, ss []slabs.SlabSlice) error {

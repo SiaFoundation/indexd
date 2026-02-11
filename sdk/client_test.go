@@ -133,7 +133,7 @@ func TestDownload(t *testing.T) {
 		t.Fatalf("failed to upload: %v", err)
 	}
 
-	err = s.client.SaveObject(t.Context(), appKey, obj.Seal(appKey))
+	err = s.client.SaveObject(t.Context(), appKey, obj.Seal(appKey).SealedObject)
 	if err != nil {
 		t.Fatalf("failed to save object to mock client: %v", err)
 	}

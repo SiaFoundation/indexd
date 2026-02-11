@@ -15,6 +15,19 @@ import (
 	"lukechampine.com/frand"
 )
 
+// A SealedObject is an object that has been locked with an app key.
+// It can be safely serialized and shared, but cannot be used to access
+// the underlying data until it has been unlocked with the app key.
+type SealedObject struct {
+	slabs.SealedObject
+}
+
+// Open decrypts the SealedObject using the given app key and returns an
+// Object.
+func (so *SealedObject) Open(appKey types.PrivateKey) (Object, error) {
+	return objectFromSealedObject(so.SealedObject, appKey)
+}
+
 // An Object represents a collection of slabs that can be used to access
 // encrypted data. The master key is used to encrypt/decrypt the data and
 // metadata, and should be kept secret.
@@ -44,7 +57,7 @@ func (o *Object) UpdatedAt() time.Time {
 }
 
 // Seal returns a SealedObject that can be safely serialized and shared.
-func (o *Object) Seal(appKey types.PrivateKey) slabs.SealedObject {
+func (o *Object) Seal(appKey types.PrivateKey) SealedObject {
 	objectID := o.ID()
 
 	seal := func(keyCipher cipher.AEAD, plaintext []byte) []byte {
@@ -60,14 +73,14 @@ func (o *Object) Seal(appKey types.PrivateKey) slabs.SealedObject {
 		encryptedMetadata = seal(metadataCipher(metaDataKey), o.metadata)
 	}
 
-	so := slabs.SealedObject{
+	so := SealedObject{slabs.SealedObject{
 		EncryptedDataKey:     encryptedDataKey,
 		Slabs:                o.slabs,
 		EncryptedMetadataKey: encryptedMetaKey,
 		EncryptedMetadata:    encryptedMetadata,
 		CreatedAt:            o.createdAt,
 		UpdatedAt:            o.updatedAt,
-	}
+	}}
 	so.Sign(appKey)
 	return so
 }
@@ -112,7 +125,8 @@ func (s *SDK) Object(ctx context.Context, objectKey types.Hash256) (Object, erro
 	if err != nil {
 		return Object{}, fmt.Errorf("failed to get locked object: %w", err)
 	}
-	return objectFromSealedObject(lo, s.appKey)
+	so := SealedObject{lo}
+	return so.Open(s.appKey)
 }
 
 // ListObjects lists objects, starting from the given cursor, up to the given limit.
@@ -126,7 +140,8 @@ func (s *SDK) ListObjects(ctx context.Context, cursor slabs.Cursor, limit int) (
 		if lo.Deleted {
 			continue
 		}
-		obj, err := objectFromSealedObject(*lo.Object, s.appKey)
+		so := SealedObject{*lo.Object}
+		obj, err := so.Open(s.appKey)
 		if err != nil {
 			return nil, fmt.Errorf("failed to unlock object: %w", err)
 		}
