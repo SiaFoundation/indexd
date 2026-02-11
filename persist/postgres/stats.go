@@ -240,7 +240,6 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 			}
 			if stuckSince.Valid {
 				hs.StuckSince = &stuckSince.Time
-				hs.Stuck = true
 			}
 			stats = append(stats, hs)
 		}

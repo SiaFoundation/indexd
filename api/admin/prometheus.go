@@ -143,7 +143,7 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 			Name:   "indexd_host_stuck",
 			Labels: labels,
 			Value: func() float64 {
-				if h.Stuck {
+				if h.StuckSince != nil {
 					return 1
 				}
 				return 0

@@ -93,7 +93,6 @@ type (
 		ScansFailed         int64                  `json:"scansFailed"`
 		Blocked             bool                   `json:"blocked"`
 		BlockedReasons      []string               `json:"blockedReasons"`
-		Stuck               bool                   `json:"stuck"`
 		StuckSince          *time.Time             `json:"stuckSince,omitempty"`
 	}
 
