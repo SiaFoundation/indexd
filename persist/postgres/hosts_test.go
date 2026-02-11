@@ -1380,7 +1380,7 @@ func TestStuckHosts(t *testing.T) {
 
 		var count int
 		for _, h := range stats {
-			if h.Stuck {
+			if h.StuckSince != nil {
 				count++
 			}
 		}
