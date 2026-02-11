@@ -150,6 +150,10 @@ func (cm *ContractManager) pinSectors(ctx context.Context, client HostClient, ho
 		}
 
 		if err := cm.store.PinSectors(contractID, res.Sectors); err != nil {
+			// log unexpected database error
+			if !errors.Is(err, ErrNotFound) {
+				log.Error("failed to pin sectors", zap.Stringer("contractID", contractID), zap.Error(err))
+			}
 			return fmt.Errorf("failed to pin sectors: %w", err)
 		}
 

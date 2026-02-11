@@ -1539,6 +1539,15 @@ func TestDeleteContract(t *testing.T) {
 		t.Fatalf("expected 0 unpinned sectors, got %d", statsBefore.Unpinned)
 	}
 
+	// assert host has no unpinned sectors
+	var cnt int64
+	err = store.pool.QueryRow(t.Context(), `SELECT unpinned_sectors FROM hosts WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&cnt)
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 0 {
+		t.Fatalf("expected host to have 0 unpinned sectors, got %d", cnt)
+	}
+
 	// get uploaded_at before deleting
 	sqlRoots := make([]sqlHash256, len(params.Sectors))
 	for i, s := range params.Sectors {
@@ -1580,6 +1589,14 @@ func TestDeleteContract(t *testing.T) {
 		t.Fatalf("expected 0 pinned sectors after delete, got %d", statsAfter.Pinned)
 	} else if statsAfter.Unpinned != 3 {
 		t.Fatalf("expected 3 unpinned sectors after delete, got %d", statsAfter.Unpinned)
+	}
+
+	// assert host's unpinned sector count
+	err = store.pool.QueryRow(t.Context(), `SELECT unpinned_sectors FROM hosts WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&cnt)
+	if err != nil {
+		t.Fatal(err)
+	} else if cnt != 3 {
+		t.Fatalf("expected host to have 3 unpinned sectors after delete, got %d", cnt)
 	}
 
 	// verify sectors are still there but unpinned

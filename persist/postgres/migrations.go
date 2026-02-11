@@ -679,6 +679,29 @@ CREATE INDEX hosts_stuck_since_idx ON hosts(stuck_since) WHERE stuck_since IS NO
 		_, err = tx.Exec(ctx, `ALTER TABLE accounts ALTER COLUMN connect_key_id SET NOT NULL`)
 		return err
 	},
+	// reset unpinned sector counts on hosts
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE hosts h
+			SET unpinned_sectors = COALESCE(sub.cnt, 0)
+			FROM (
+				SELECT host_id, COUNT(*) as cnt
+				FROM sectors
+				WHERE contract_sectors_map_id IS NULL
+				GROUP BY host_id
+			) sub
+			WHERE h.id = sub.host_id;
+
+			UPDATE hosts
+			SET unpinned_sectors = 0
+			WHERE id NOT IN (
+				SELECT DISTINCT host_id
+				FROM sectors
+				WHERE contract_sectors_map_id IS NULL
+			);
+		`)
+		return err
+	},
 	// add quotas table and migrate app_connect_keys
 	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
 		// create quotas table
