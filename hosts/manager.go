@@ -94,6 +94,8 @@ type (
 		Blocked             bool                   `json:"blocked"`
 		BlockedReasons      []string               `json:"blockedReasons"`
 		StuckSince          *time.Time             `json:"stuckSince,omitempty"`
+		Usable              bool                   `json:"usable"`
+		GoodForUpload       bool                   `json:"goodForUpload"`
 	}
 
 	// OnlineChecker defines an interface to check whether the indexer is online. It's

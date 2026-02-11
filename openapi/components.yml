@@ -890,6 +890,12 @@ components:
             format: date-time
             nullable: true
             description: Timestamp when the host became stuck.
+          usable:
+            type: boolean
+            description: Whether the host is considered usable
+          goodForUpload:
+            type: boolean
+            description: Whether the host is usable, not stuck, and has remaining storage
 
     AggregatedHostStatsResponse:
       type: object

@@ -499,6 +499,65 @@ func TestHostStats(t *testing.T) {
 	} else if len(stats) != 0 {
 		t.Fatalf("expected 0 hosts, got %d", len(stats))
 	}
+
+	// neither host should be usable (no scans)
+	stats, err = store.HostStats(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if stats[0].Usable || stats[1].Usable {
+		t.Fatal("expected neither host to be usable")
+	} else if stats[0].GoodForUpload || stats[1].GoodForUpload {
+		t.Fatal("expected neither host to be good for upload")
+	}
+
+	// lower global settings so test host settings pass usability checks, reset
+	// scanned height so contracts are active, and scan hk2 so it has settings
+	// and a last_successful_scan that let it pass usability checks
+	if _, err := store.pool.Exec(t.Context(), `UPDATE global_settings SET
+		hosts_min_protocol_version = $1, contracts_period = $2,
+		contracts_renew_window = $3, hosts_min_collateral = $4`,
+		sqlProtocolVersion(rhp.ProtocolVersion400), 100, 50, sqlCurrency(types.ZeroCurrency)); err != nil {
+		t.Fatal(err)
+	} else if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.UpdateLastScannedIndex(types.ChainIndex{Height: 0})
+	}); err != nil {
+		t.Fatal(err)
+	} else if err := store.UpdateHostScan(hk2, newTestHostSettings(hk2), geoip.Location{}, true, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	// hk2 should be usable and good for upload; hk1 should not (resolved contract)
+	stats, err = store.HostStats(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if stats[0].PublicKey != hk2 {
+		t.Fatalf("expected stats[0] to be hk2, got %v", stats[0].PublicKey)
+	} else if !stats[0].Usable {
+		t.Fatal("expected hk2 to be usable")
+	} else if !stats[0].GoodForUpload {
+		t.Fatal("expected hk2 to be good for upload")
+	} else if stats[1].PublicKey != hk1 {
+		t.Fatalf("expected stats[1] to be hk1, got %v", stats[1].PublicKey)
+	} else if stats[1].Usable {
+		t.Fatal("expected hk1 to not be usable")
+	} else if stats[1].GoodForUpload {
+		t.Fatal("expected hk1 to not be good for upload")
+	}
+
+	// mark hk2 as stuck — still usable but not good for upload
+	if err := store.UpdateStuckHosts([]types.PublicKey{hk2}); err != nil {
+		t.Fatal(err)
+	}
+	stats, err = store.HostStats(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if stats[0].PublicKey != hk2 {
+		t.Fatalf("expected stats[0] to be hk2, got %v", stats[0].PublicKey)
+	} else if !stats[0].Usable {
+		t.Fatal("expected hk2 to still be usable when stuck")
+	} else if stats[0].GoodForUpload {
+		t.Fatal("expected hk2 to not be good for upload when stuck")
+	}
 }
 
 func TestAggregatedHostStats(t *testing.T) {

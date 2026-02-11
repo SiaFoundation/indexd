@@ -159,6 +159,26 @@ func (h HostStats) PrometheusMetric() []prometheus.Metric {
 				return 0
 			}(),
 		},
+		{
+			Name:   "indexd_host_usable",
+			Labels: labels,
+			Value: func() float64 {
+				if h.Usable {
+					return 1
+				}
+				return 0
+			}(),
+		},
+		{
+			Name:   "indexd_host_good_for_upload",
+			Labels: labels,
+			Value: func() float64 {
+				if h.GoodForUpload {
+					return 1
+				}
+				return 0
+			}(),
+		},
 	}
 
 	for _, reason := range h.BlockedReasons {
