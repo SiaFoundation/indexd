@@ -93,7 +93,7 @@ into shared slabs, reducing overhead and improving upload efficiency.
 
 ```go
 // create a packed upload
-packed, err := client.UploadPacked(ctx)
+packed, err := client.UploadPacked()
 if err != nil {
 	log.Fatal("failed to create packed upload")
 }
@@ -133,7 +133,7 @@ const paddingTarget = 0.05
 var uploads [][]byte
 for len(uploads) > 0 {
 	err := func() error {
-		packed, err := client.UploadPacked(ctx)
+		packed, err := client.UploadPacked()
 		if err != nil {
 			return err
 		}
