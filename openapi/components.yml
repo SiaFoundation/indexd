@@ -827,10 +827,6 @@ components:
           type: integer
           format: int64
           description: Total number of active, bad contracts managed by this instance
-        activeHosts:
-          type: integer
-          format: int64
-          description: Number of hosts with active contracts that are not stuck
         renewing:
           type: integer
           format: int64
