@@ -886,7 +886,7 @@ components:
             type: string
             format: date-time
             nullable: true
-            description: Timestamp when the host became stuck. Only present when stuck is true.
+            description: Timestamp when the host became stuck.
 
     AggregatedHostStatsResponse:
       type: object
