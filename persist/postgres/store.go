@@ -96,6 +96,8 @@ func (s *Store) doTransaction(log *zap.Logger, fn func(context.Context, *txn) er
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
+
+	failed := true
 	start := time.Now()
 	defer func() {
 		rollbackErr := tx.Rollback(ctx)
@@ -103,15 +105,17 @@ func (s *Store) doTransaction(log *zap.Logger, fn func(context.Context, *txn) er
 			log.Error("failed to rollback transaction", zap.Error(rollbackErr))
 		}
 		if time.Since(start) > longTxnDuration {
-			log.Debug("long transaction", zap.Duration("elapsed", time.Since(start)), zap.Stack("stack"), zap.Bool("failed", err != nil))
+			log.Debug("long transaction", zap.Duration("elapsed", time.Since(start)), zap.Stack("stack"), zap.Bool("failed", failed))
 		}
 	}()
 
 	if err := fn(ctx, &txn{tx, log}); err != nil {
 		return err
-	} else if err = tx.Commit(ctx); err != nil {
+	} else if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
+
+	failed = false
 	return nil
 }
 
