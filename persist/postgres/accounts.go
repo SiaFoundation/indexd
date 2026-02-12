@@ -46,6 +46,7 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 			INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 			WHERE a.deleted_at IS NULL AND
 			($1::integer IS NULL OR connect_key_id = $1::integer)
+			ORDER BY a.id
 			LIMIT $2 OFFSET $3
 		`, connectKeyID, limit, offset)
 		if err != nil {
@@ -112,18 +113,11 @@ func (s *Store) ActiveAccounts(threshold time.Time) (count uint64, err error) {
 // DeleteAccount deletes the account in the database with given account key.
 func (s *Store) DeleteAccount(acc proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		var connectKeyID int64
-		err := tx.QueryRow(ctx, `UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1 AND deleted_at IS NULL RETURNING connect_key_id`, sqlPublicKey(acc)).Scan(&connectKeyID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return accounts.ErrNotFound
-		} else if err != nil {
-			return fmt.Errorf("failed to delete account: %w", err)
-		}
-
-		// increment remaining uses on the connect key since this account no longer counts
-		_, err = tx.Exec(ctx, `UPDATE app_connect_keys SET remaining_uses = remaining_uses + 1 WHERE id = $1`, connectKeyID)
+		res, err := tx.Exec(ctx, `UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1 AND deleted_at IS NULL`, sqlPublicKey(acc))
 		if err != nil {
-			return fmt.Errorf("failed to increment connect key remaining uses: %w", err)
+			return fmt.Errorf("failed to delete account: %w", err)
+		} else if res.RowsAffected() == 0 {
+			return accounts.ErrNotFound
 		}
 		return nil
 	})

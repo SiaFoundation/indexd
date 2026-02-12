@@ -21,6 +21,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// TestQuotaName is the name of the quota used in tests.
+	TestQuotaName = "testing"
+)
+
 // TestStore represents a postgres database for testing with some helpers for
 // common actions in testing like adding accounts and running SQL queries.
 type TestStore struct {
@@ -119,10 +124,17 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 
 	const connectKey = "test"
 	if _, err := ts.ValidAppConnectKey(connectKey); errors.Is(err, accounts.ErrKeyNotFound) {
+		// create testing quota if it doesn't exist
+		if err := ts.PutQuota(TestQuotaName, accounts.PutQuotaRequest{
+			Description:   "Testing quota",
+			MaxPinnedData: uint64(1e12),
+			TotalUses:     10000,
+		}); err != nil {
+			t.Fatal(err)
+		}
 		_, err := ts.AddAppConnectKey(accounts.UpdateAppConnectKey{
-			Key:           connectKey,
-			MaxPinnedData: 1e10,
-			RemainingUses: 10000,
+			Key:   connectKey,
+			Quota: TestQuotaName,
 		})
 		if err != nil {
 			t.Fatal(err)

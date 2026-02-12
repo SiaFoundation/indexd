@@ -376,7 +376,11 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 
 		// check whether adding the newly pinned data would exceed the connect
 		// key's storage limit and if not, update the connect key's pinned data
-		err = tx.QueryRow(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data + $1 WHERE id = $2 RETURNING pinned_data, max_pinned_data`, newPinnedData, connectKeyID).Scan(&pinnedData, &maxPinnedData)
+		err = tx.QueryRow(ctx, `
+			UPDATE app_connect_keys ack SET pinned_data = pinned_data + $1
+			FROM quotas q
+			WHERE ack.id = $2 AND q.name = ack.quota_name
+			RETURNING ack.pinned_data, q.max_pinned_data`, newPinnedData, connectKeyID).Scan(&pinnedData, &maxPinnedData)
 		if err != nil {
 			return fmt.Errorf("failed to update connect key's pinned data: %w", err)
 		} else if pinnedData > maxPinnedData {

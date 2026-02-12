@@ -21,10 +21,9 @@ import (
 func (s *Store) addTestAccount(t testing.TB, ak types.PublicKey, opts ...accounts.AddAccountOption) {
 	connectKey := fmt.Sprintf("test-connect-key-%x", frand.Bytes(8))
 	_, err := s.AddAppConnectKey(accounts.UpdateAppConnectKey{
-		Key:           connectKey,
-		Description:   "test connect key",
-		MaxPinnedData: math.MaxInt64,
-		RemainingUses: 1,
+		Key:         connectKey,
+		Description: "test connect key",
+		Quota:       "default",
 	})
 	if err != nil {
 		t.Fatalf("failed to add app connect key: %v", err)
@@ -71,11 +70,14 @@ func TestAccounts(t *testing.T) {
 	assertAccount(t, accs[1], pk3, 100)
 
 	// add accounts associated with connect key
+	// create a test quota with specific limits
+	store.addTestQuota(t, "test-100", 100, 10)
+
 	const connectKey = "foobar"
 	if _, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
-		Key:           connectKey,
-		MaxPinnedData: 100,
-		RemainingUses: 10,
+		Key:         connectKey,
+		Description: "test connect key",
+		Quota:       "test-100",
 	}); err != nil {
 		t.Fatal("failed to add app connect key:", err)
 	}
@@ -150,10 +152,9 @@ func TestAddAccount(t *testing.T) {
 	t.Run("user account", func(t *testing.T) {
 		connectKey := fmt.Sprintf("test-connect-key-%x", frand.Bytes(8))
 		_, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
-			Key:           connectKey,
-			Description:   "test connect key",
-			MaxPinnedData: math.MaxInt64,
-			RemainingUses: 10,
+			Key:         connectKey,
+			Description: "test connect key",
+			Quota:       "default",
 		})
 		if err != nil {
 			t.Fatal("failed to add app connect key:", err)
@@ -536,10 +537,9 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 
 	// create a connect key for benchmark accounts
 	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
-		Key:           "benchmark-connect-key",
-		Description:   "benchmark connect key",
-		MaxPinnedData: math.MaxInt64,
-		RemainingUses: math.MaxInt32,
+		Key:         "benchmark-connect-key",
+		Description: "benchmark connect key",
+		Quota:       "default",
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -628,10 +628,9 @@ func BenchmarkUpdateHostAccounts(b *testing.B) {
 
 	// create a connect key for benchmark accounts
 	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
-		Key:           "benchmark-connect-key",
-		Description:   "benchmark connect key",
-		MaxPinnedData: math.MaxInt64,
-		RemainingUses: math.MaxInt32,
+		Key:         "benchmark-connect-key",
+		Description: "benchmark connect key",
+		Quota:       "default",
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -814,10 +813,9 @@ func TestActiveAccounts(t *testing.T) {
 
 	// create a connect key for test accounts
 	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
-		Key:           "test-connect-key",
-		Description:   "test connect key",
-		MaxPinnedData: math.MaxInt64,
-		RemainingUses: 10,
+		Key:         "test-connect-key",
+		Description: "test connect key",
+		Quota:       "default",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -884,10 +882,9 @@ func BenchmarkActiveAccounts(b *testing.B) {
 
 	// create a connect key for benchmark accounts
 	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
-		Key:           "benchmark-connect-key",
-		Description:   "benchmark connect key",
-		MaxPinnedData: math.MaxInt64,
-		RemainingUses: math.MaxInt32,
+		Key:         "benchmark-connect-key",
+		Description: "benchmark connect key",
+		Quota:       "default",
 	})
 	if err != nil {
 		b.Fatal(err)
@@ -926,10 +923,9 @@ func BenchmarkPruneAccounts(b *testing.B) {
 
 	// create a connect key for benchmark accounts
 	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
-		Key:           "benchmark-connect-key",
-		Description:   "benchmark connect key",
-		MaxPinnedData: math.MaxInt64,
-		RemainingUses: math.MaxInt32,
+		Key:         "benchmark-connect-key",
+		Description: "benchmark connect key",
+		Quota:       "default",
 	})
 	if err != nil {
 		b.Fatal(err)

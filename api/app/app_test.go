@@ -63,7 +63,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	client := indexer.App(sk)
 
 	key, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
-		RemainingUses: 1,
+		Quota: "default",
 	})
 	if err != nil {
 		t.Fatal("failed to add app connect key:", err)
@@ -137,10 +137,8 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected 1 key, got", len(keys))
 	case keys[0].Key != key.Key:
 		t.Fatal("expected key to match", keys[0].Key, key.Key)
-	case keys[0].RemainingUses != 0:
-		t.Fatal("expected remaining uses to be 0, got", keys[0].RemainingUses)
-	case keys[0].TotalUses != 1:
-		t.Fatal("expected total uses to be 1, got", keys[0].TotalUses)
+	case keys[0].RemainingUses != 4:
+		t.Fatalf("expected remaining uses to be 4, got %d", keys[0].RemainingUses)
 	case keys[0].LastUsed.IsZero():
 		t.Fatal("expected last used to be set, got", keys[0].LastUsed)
 	}
@@ -458,8 +456,8 @@ func TestAppConnect(t *testing.T) {
 	adminClient := indexer.Admin
 
 	connectKey, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
-		Description:   "hello world",
-		RemainingUses: 2,
+		Description: "hello world",
+		Quota:       "default",
 	})
 	if err != nil {
 		t.Fatal("failed to add app connect key:", err)
@@ -610,7 +608,7 @@ func TestSharedObjects(t *testing.T) {
 		client := indexer.App(sk)
 
 		key, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
-			RemainingUses: 1,
+			Quota: "default",
 		})
 		if err != nil {
 			t.Fatal("failed to add app connect key:", err)

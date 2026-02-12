@@ -691,15 +691,57 @@ CREATE INDEX hosts_stuck_since_idx ON hosts(stuck_since) WHERE stuck_since IS NO
 				GROUP BY host_id
 			) sub
 			WHERE h.id = sub.host_id;
-			
+
 			UPDATE hosts
 			SET unpinned_sectors = 0
 			WHERE id NOT IN (
-				SELECT DISTINCT host_id 
-				FROM sectors 
+				SELECT DISTINCT host_id
+				FROM sectors
 				WHERE contract_sectors_map_id IS NULL
 			);
 		`)
 		return err
+	},
+	// add quotas table and migrate app_connect_keys
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		// create quotas table
+		_, err := tx.Exec(ctx, `
+CREATE TABLE quotas (
+    name TEXT PRIMARY KEY CHECK (LENGTH(name) > 0 AND LENGTH(name) <= 32),
+    description TEXT NOT NULL,
+    max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0),
+    total_uses INTEGER NOT NULL CHECK (total_uses >= 0)
+);
+
+-- insert default quota: 1TB max data, 5 total uses
+INSERT INTO quotas (name, description, max_pinned_data, total_uses)
+VALUES ('default', 'Default quota', 1000000000000, 5);
+`)
+		if err != nil {
+			return fmt.Errorf("failed to create quotas table: %w", err)
+		}
+
+		// add quota_name column to app_connect_keys with default value
+		_, err = tx.Exec(ctx, `
+ALTER TABLE app_connect_keys ADD COLUMN quota_name TEXT REFERENCES quotas(name);
+UPDATE app_connect_keys SET quota_name = 'default';
+ALTER TABLE app_connect_keys ALTER COLUMN quota_name SET NOT NULL;
+CREATE INDEX app_connect_keys_quota_name_idx ON app_connect_keys(quota_name);
+`)
+		if err != nil {
+			return fmt.Errorf("failed to add quota_name column: %w", err)
+		}
+
+		// drop old columns
+		_, err = tx.Exec(ctx, `
+ALTER TABLE app_connect_keys DROP COLUMN max_pinned_data;
+ALTER TABLE app_connect_keys DROP COLUMN total_uses;
+ALTER TABLE app_connect_keys DROP COLUMN remaining_uses;
+`)
+		if err != nil {
+			return fmt.Errorf("failed to drop old columns: %w", err)
+		}
+
+		return nil
 	},
 }
