@@ -911,7 +911,7 @@ components:
         goodForUpload:
           type: integer
           format: uint64
-          description: Number of hosts that are good for uploading to (hosts that are not stuck and have nonzero remaining storage)
+          description: Number of hosts that are good for uploading to (hosts that are usable, not stuck and have remaining storage)
         totalScans:
           type: integer
           format: int64
