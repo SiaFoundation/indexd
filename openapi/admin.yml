@@ -1562,19 +1562,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/HostsStatsResponse"
 
-  /stats/scans:
-    get:
-      tags:
-        - stats
-      summary: Get stats about host scans
-      operationId: getStatsScans
-      responses:
-        "200":
-          description: Stats about host scans on this instance
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ScansStatsResponse"
 
   /stats/sectors:
     get:
@@ -1936,8 +1923,6 @@ components:
       $ref: "./components.yml#/components/schemas/HostsStatsResponse"
     AggregatedHostStatsResponse:
       $ref: "./components.yml#/components/schemas/AggregatedHostStatsResponse"
-    ScansStatsResponse:
-      $ref: "./components.yml#/components/schemas/ScansStatsResponse"
     SectorStatsResponse:
       $ref: "./components.yml#/components/schemas/SectorStatsResponse"
     AuthConnectStatusResponse:
