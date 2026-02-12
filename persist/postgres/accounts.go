@@ -254,7 +254,7 @@ func (s *Store) HostAccountsForFunding(hk types.PublicKey, threshold time.Time, 
 	accs := make([]accounts.HostAccount, 0, limit)
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		accs = accs[:0]    // reuse same slice if transaction retries
-		reamining := limit // reset per transaction attempt
+		remaining := limit // reset per transaction attempt
 
 		var hostID int64
 		err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&hostID)
@@ -264,16 +264,16 @@ func (s *Store) HostAccountsForFunding(hk types.PublicKey, threshold time.Time, 
 			return err
 		}
 
-		newAccs, err := newHostAccountsForFunding(ctx, tx, hk, hostID, threshold, reamining)
+		newAccs, err := newHostAccountsForFunding(ctx, tx, hk, hostID, threshold, remaining)
 		if err != nil {
 			return fmt.Errorf("failed to query new accounts for funding: %w", err)
-		} else if len(newAccs) >= reamining {
+		} else if len(newAccs) >= remaining {
 			accs = newAccs
 			return nil
 		}
 
-		reamining -= len(newAccs)
-		existingAccs, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, threshold, reamining)
+		remaining -= len(newAccs)
+		existingAccs, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, threshold, remaining)
 		if err != nil {
 			return fmt.Errorf("failed to query existing accounts for funding: %w", err)
 		}
