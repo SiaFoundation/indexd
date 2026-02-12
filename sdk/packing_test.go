@@ -19,7 +19,7 @@ func TestUploadPacked(t *testing.T) {
 	defer s.Close()
 
 	// create packed upload
-	u, err := s.UploadPacked(t.Context())
+	u, err := s.UploadPacked()
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestUploadPacked(t *testing.T) {
 	}
 
 	// create a new packed upload
-	u, err = s.UploadPacked(t.Context())
+	u, err = s.UploadPacked()
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestUploadPacked(t *testing.T) {
 	}
 
 	// create a new packed upload
-	u, err = s.UploadPacked(t.Context())
+	u, err = s.UploadPacked()
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestUploadPacked(t *testing.T) {
 	}
 
 	// create a new packed upload
-	u, err = s.UploadPacked(t.Context())
+	u, err = s.UploadPacked()
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
@@ -218,7 +218,7 @@ func TestUploadPacked(t *testing.T) {
 	}
 
 	// create a new packed upload
-	u, err = s.UploadPacked(t.Context())
+	u, err = s.UploadPacked()
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestUploadPacked(t *testing.T) {
 	}
 
 	// create a new packed upload
-	u, err = s.UploadPacked(t.Context())
+	u, err = s.UploadPacked()
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
@@ -263,7 +263,7 @@ func TestUploadPacked(t *testing.T) {
 	}
 
 	// create a new packed upload
-	u, err = s.UploadPacked(t.Context())
+	u, err = s.UploadPacked()
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}

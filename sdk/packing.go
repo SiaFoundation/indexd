@@ -228,7 +228,7 @@ func (u *PackedUpload) slabSize() int64 {
 // packed together for more efficient uploads. The returned PackedUpload can be
 // used to add objects and then finalized to get the resulting objects. A packed
 // upload is not thread-safe.
-func (s *SDK) UploadPacked(ctx context.Context, opts ...UploadOption) (*PackedUpload, error) {
+func (s *SDK) UploadPacked(opts ...UploadOption) (*PackedUpload, error) {
 	uo := uploadOption{
 		dataShards:   10,
 		parityShards: 20,
@@ -265,7 +265,7 @@ func (s *SDK) UploadPacked(ctx context.Context, opts ...UploadOption) (*PackedUp
 	}
 
 	// register with threadgroup to ensure proper cleanup of goroutines on Close
-	bgCtx, bgCancel, err := u.tg.AddContext(ctx)
+	ctx, cancel, err := u.tg.AddContext(context.Background())
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ func (s *SDK) UploadPacked(ctx context.Context, opts ...UploadOption) (*PackedUp
 	// upload slabs in background
 	slabCh := make(chan slabUpload, concurrentSlabUploads)
 	go func() {
-		s.uploadSlabs(bgCtx, slabCh, reader, enc, int(u.dataShards), int(u.parityShards), uo.maxInflight, uo.hostTimeout)
+		s.uploadSlabs(ctx, slabCh, reader, enc, int(u.dataShards), int(u.parityShards), uo.maxInflight, uo.hostTimeout)
 		close(slabCh)
 	}()
 
@@ -281,7 +281,7 @@ func (s *SDK) UploadPacked(ctx context.Context, opts ...UploadOption) (*PackedUp
 	// deadlock in PackedUpload.Add since it writes to an unbuffered io.Pipe and
 	// uploadSlabs reads from that pipe
 	go func() {
-		defer bgCancel()
+		defer cancel()
 
 		var uploaded []slabs.SlabSlice
 		var uploadErr error
@@ -300,8 +300,8 @@ func (s *SDK) UploadPacked(ctx context.Context, opts ...UploadOption) (*PackedUp
 			sectors := make([]slabs.PinnedSector, totalShards)
 			for n := totalShards; n > 0; n-- {
 				select {
-				case <-bgCtx.Done():
-					uploadErr = bgCtx.Err()
+				case <-ctx.Done():
+					uploadErr = ctx.Err()
 					break outer
 				case shard := <-slab.uploadsCh:
 					if shard.err != nil {
@@ -326,8 +326,8 @@ func (s *SDK) UploadPacked(ctx context.Context, opts ...UploadOption) (*PackedUp
 		}
 
 		// ensure context is taken into account
-		if uploadErr == nil && bgCtx.Err() != nil {
-			uploadErr = bgCtx.Err()
+		if uploadErr == nil && ctx.Err() != nil {
+			uploadErr = ctx.Err()
 		}
 
 		u.finish(uploaded, uploadErr)
