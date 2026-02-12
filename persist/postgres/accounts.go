@@ -18,7 +18,7 @@ import (
 )
 
 // Accounts returns a list of account keys.
-func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) ([]accounts.Account, error) {
+func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (accs []accounts.Account, err error) {
 	if err := validateOffsetLimit(offset, limit); err != nil {
 		return nil, err
 	} else if limit == 0 {
@@ -30,7 +30,6 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 		opt(&queryOpts)
 	}
 
-	accs := make([]accounts.Account, 0, limit)
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		accs = accs[:0] // reuse same slice if transaction retries
 
@@ -155,7 +154,7 @@ func (s *Store) PruneAccounts(limit int) error {
 	}
 
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		txLimit := limit // reset per transaction attempt
+		remaining := limit // reset per transaction attempt
 
 		var accountID int64
 		err := tx.QueryRow(ctx, `SELECT id FROM accounts WHERE deleted_at IS NOT NULL ORDER by deleted_at LIMIT 1`).Scan(&accountID)
@@ -174,7 +173,7 @@ USING (
 	LIMIT $2
 ) d
 WHERE o.id = d.id
-RETURNING o.object_key;`, accountID, txLimit)
+RETURNING o.object_key;`, accountID, remaining)
 		if err != nil {
 			return fmt.Errorf("failed to delete objects: %w", err)
 		}
@@ -191,12 +190,12 @@ RETURNING o.object_key;`, accountID, txLimit)
 			return fmt.Errorf("failed to get rows: %w", err)
 		}
 
-		txLimit -= len(objKeys)
-		if txLimit == 0 {
+		remaining -= len(objKeys)
+		if remaining == 0 {
 			return nil
 		}
 
-		rows, err = tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE account_id = $1 ORDER BY slab_id LIMIT $2`, accountID, txLimit)
+		rows, err = tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE account_id = $1 ORDER BY slab_id LIMIT $2`, accountID, remaining)
 		if err != nil {
 			return fmt.Errorf("failed to get account slabs: %w", err)
 		}
@@ -218,7 +217,7 @@ RETURNING o.object_key;`, accountID, txLimit)
 			return fmt.Errorf("failed to unpin slabs: %w", err)
 		}
 
-		if len(slabIDs) < txLimit {
+		if len(slabIDs) < remaining {
 			// no slabs left, we can delete the account
 			_, err = tx.Exec(ctx, `DELETE FROM accounts WHERE id = $1`, accountID)
 			if err != nil {
@@ -246,8 +245,8 @@ func (s *Store) HostAccountsForFunding(hk types.PublicKey, threshold time.Time, 
 
 	accs := make([]accounts.HostAccount, 0, limit)
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
-		accs = accs[:0]  // reuse same slice if transaction retries
-		txLimit := limit // reset per transaction attempt
+		accs = accs[:0]    // reuse same slice if transaction retries
+		reamining := limit // reset per transaction attempt
 
 		var hostID int64
 		err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&hostID)
@@ -257,16 +256,16 @@ func (s *Store) HostAccountsForFunding(hk types.PublicKey, threshold time.Time, 
 			return err
 		}
 
-		newAccs, err := newHostAccountsForFunding(ctx, tx, hk, hostID, threshold, txLimit)
+		newAccs, err := newHostAccountsForFunding(ctx, tx, hk, hostID, threshold, reamining)
 		if err != nil {
 			return fmt.Errorf("failed to query new accounts for funding: %w", err)
-		} else if len(newAccs) >= txLimit {
+		} else if len(newAccs) >= reamining {
 			accs = newAccs
 			return nil
 		}
 
-		txLimit -= len(newAccs)
-		existingAccs, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, threshold, txLimit)
+		reamining -= len(newAccs)
+		existingAccs, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, threshold, reamining)
 		if err != nil {
 			return fmt.Errorf("failed to query existing accounts for funding: %w", err)
 		}

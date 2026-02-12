@@ -56,7 +56,6 @@ func (s *Store) PeerInfo(addr string) (syncer.PeerInfo, error) {
 
 // Peers returns the set of known peers.
 func (s *Store) Peers() (infos []syncer.PeerInfo, err error) {
-	infos = make([]syncer.PeerInfo, 0)
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		infos = infos[:0] // reuse same slice if transaction retries
 

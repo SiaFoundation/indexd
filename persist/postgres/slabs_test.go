@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -343,15 +344,12 @@ func TestSlabPruning(t *testing.T) {
 	assertSlabs := func(acc proto.Account, expected ...slabs.SlabID) {
 		t.Helper()
 
-		got, err := store.SlabIDs(acc, 0, len(expected)+1)
+		got, err := store.SlabIDs(acc, 0, math.MaxInt64)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if expected == nil {
-			expected = []slabs.SlabID{}
-		}
 		if !reflect.DeepEqual(expected, got) {
-			t.Fatal("mismatched slab IDs", expected, got)
+			t.Fatal("mismatched slab IDs")
 		}
 	}
 

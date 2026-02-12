@@ -204,25 +204,20 @@ LIMIT $2
 	var exhausted bool
 	const batchSize = 100
 	for !exhausted {
-		var txExhausted bool
 		err := s.transaction(func(ctx context.Context, tx *txn) error {
-			txExhausted = false // reset if transaction retries
-
 			slabIDs, err := getSlabs(ctx, tx, batchSize)
 			if err != nil {
 				return fmt.Errorf("failed to get slabs to unpin: %w", err)
-			} else if len(slabIDs) < batchSize {
-				txExhausted = true
-			}
-			if err := s.unpinSlabs(ctx, tx, id, slabIDs); err != nil {
+			} else if err := s.unpinSlabs(ctx, tx, id, slabIDs); err != nil {
 				return fmt.Errorf("failed to unpin slabs: %w", err)
 			}
+
+			exhausted = true
 			return nil
 		})
 		if err != nil {
 			return err
 		}
-		exhausted = txExhausted
 	}
 
 	return nil

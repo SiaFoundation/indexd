@@ -228,7 +228,7 @@ func (s *Store) Contracts(offset, limit int, queryOpts ...contracts.ContractQuer
 		return nil, err
 	}
 
-	contracts := make([]contracts.Contract, 0, min(limit, 1000))
+	var contracts []contracts.Contract
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		contracts = contracts[:0] // reuse same slice if transaction retries
 
@@ -324,7 +324,7 @@ func buildContractOrderByClause(sorts []contracts.ContractSortOpt) (string, erro
 // on chain) since 'minBroadcast'. The contracts are sorted by the last
 // broadcast time.
 func (s *Store) ContractsForBroadcasting(minBroadcast time.Time, limit int) ([]types.FileContractID, error) {
-	fcids := make([]types.FileContractID, 0, limit)
+	var fcids []types.FileContractID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		fcids = fcids[:0] // reuse same slice if transaction retries
 
@@ -356,7 +356,7 @@ func (s *Store) ContractsForBroadcasting(minBroadcast time.Time, limit int) ([]t
 // that are good for funding ephemeral accounts with. The contracts are sorted
 // by the remaining allowance in descending fashion.
 func (s *Store) ContractsForFunding(hk types.PublicKey, limit int) ([]types.FileContractID, error) {
-	fcids := make([]types.FileContractID, 0, limit)
+	var fcids []types.FileContractID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		fcids = fcids[:0] // reuse same slice if transaction retries
 

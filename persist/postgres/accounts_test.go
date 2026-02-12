@@ -520,6 +520,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 	hosts := make([]types.PublicKey, 0, numHosts)
 	hostIDs := make(map[types.PublicKey]int64, numHosts)
 	if err := store.transaction(func(ctx context.Context, tx *txn) error {
+		hosts = hosts[:0] // reuse same slice if transaction retries
 		for range numHosts {
 			var hostID int64
 			hk := types.GeneratePrivateKey().PublicKey()

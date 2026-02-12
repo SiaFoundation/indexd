@@ -143,7 +143,7 @@ func (s *Store) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hos
 		return nil, err
 	}
 
-	hosts := make([]hosts.Host, 0, min(limit, 1000))
+	var hosts []hosts.Host
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
@@ -259,7 +259,7 @@ func (s *Store) BlockedHosts(offset, limit int) ([]types.PublicKey, error) {
 		return nil, nil
 	}
 
-	blocklist := make([]types.PublicKey, 0, limit)
+	var blocklist []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		blocklist = blocklist[:0] // reuse same slice if transaction retries
 
@@ -337,7 +337,7 @@ func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 // HostsWithUnpinnableSectors returns a list of host public keys for hosts that
 // don't have any contracts but unpinned sectors.
 func (s *Store) HostsWithUnpinnableSectors() ([]types.PublicKey, error) {
-	hosts := make([]types.PublicKey, 0)
+	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
@@ -395,7 +395,7 @@ func (s *Store) UnblockHost(hk types.PublicKey) error {
 
 // HostsForScanning returns a list of hosts where the next scan is due.
 func (s *Store) HostsForScanning() ([]types.PublicKey, error) {
-	hosts := make([]types.PublicKey, 0)
+	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
@@ -614,7 +614,7 @@ func (s *Store) UsableHosts(offset, limit int, opts ...hosts.UsableHostQueryOpt)
 		opt(&queryOpts)
 	}
 
-	usable := make([]hosts.HostInfo, 0, limit)
+	var usable []hosts.HostInfo
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		usable = usable[:0] // reuse same slice if transaction retries
 
@@ -846,7 +846,7 @@ func scanHost(s scanner) (dbHost, error) {
 // HostsForIntegrityChecks returns a list of hosts that have sectors
 // requiring integrity checks.
 func (s *Store) HostsForIntegrityChecks(maxLastCheck time.Time, limit int) ([]types.PublicKey, error) {
-	hosts := make([]types.PublicKey, 0, limit)
+	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
@@ -894,7 +894,7 @@ func (s *Store) HostsForIntegrityChecks(maxLastCheck time.Time, limit int) ([]ty
 // them. A host is eligible for funding if it is not blocked and has an active
 // contract.
 func (s *Store) HostsForFunding() ([]types.PublicKey, error) {
-	hosts := make([]types.PublicKey, 0)
+	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
@@ -929,7 +929,7 @@ func (s *Store) HostsForFunding() ([]types.PublicKey, error) {
 // pinning. A host is eligible for pinning if it is not blocked, has unpinned
 // sectors and has an active contract.
 func (s *Store) HostsForPinning() ([]types.PublicKey, error) {
-	hosts := make([]types.PublicKey, 0)
+	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
@@ -968,7 +968,7 @@ func (s *Store) HostsForPinning() ([]types.PublicKey, error) {
 // HostsForPruning returns a list of host keys that have contracts that need
 // pruning.
 func (s *Store) HostsForPruning() ([]types.PublicKey, error) {
-	hosts := make([]types.PublicKey, 0)
+	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
@@ -1015,7 +1015,7 @@ func (s *Store) ResetLostSectors(hk types.PublicKey) error {
 // HostsWithLostSectors returns a list of host keys that have contracts with
 // lost sectors.
 func (s *Store) HostsWithLostSectors() ([]types.PublicKey, error) {
-	hks := make([]types.PublicKey, 0)
+	var hks []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		hks = hks[:0] // reuse same slice if transaction retries
 
@@ -1080,7 +1080,7 @@ func (s *Store) UpdateStuckHosts(stuck []types.PublicKey) error {
 // StuckHosts returns a list of stuck hosts with the timestamp they first
 // became stuck.
 func (s *Store) StuckHosts() ([]hosts.StuckHost, error) {
-	result := make([]hosts.StuckHost, 0)
+	var result []hosts.StuckHost
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		result = result[:0] // reuse same slice if transaction retries
 

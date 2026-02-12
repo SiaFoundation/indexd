@@ -160,7 +160,7 @@ func (s *Store) AggregatedHostStats() (stats admin.AggregatedHostStatsResponse, 
 // HostStats reports statistics about used hosts. We consider a host to be used
 // as soon as we spent any funds on it.
 func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
-	stats := make([]hosts.HostStats, 0, limit)
+	var stats []hosts.HostStats
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		stats = stats[:0] // reuse same slice if transaction retries
 
