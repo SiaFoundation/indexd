@@ -121,7 +121,7 @@ func (s *Store) RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey 
 // SectorsForIntegrityCheck returns up to `limit` sectors that are due for an
 // integrity check.
 func (s *Store) SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
-	sectors := make([]types.Hash256, 0, limit)
+	var sectors []types.Hash256
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		sectors = sectors[:0] // reuse same slice if transaction retries
 
@@ -221,7 +221,7 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
 // with the provided account.
 func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
-	digests := make([]slabs.SlabID, 0, len(toPin))
+	var digests []slabs.SlabID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		digests = digests[:0] // reuse same slice if transaction retries
 
@@ -514,7 +514,7 @@ func (s *Store) SlabIDs(account proto.Account, offset, limit int) ([]slabs.SlabI
 		return nil, nil
 	}
 
-	ids := make([]slabs.SlabID, 0, limit)
+	var ids []slabs.SlabID
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
 		ids = ids[:0] // reuse same slice if transaction retries
 
@@ -780,7 +780,6 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 // health but simply return the slabs that have been waiting the longest for a
 // repair first.
 func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) {
-	unhealthy = make([]slabs.SlabID, 0, limit)
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		unhealthy = unhealthy[:0] // reuse same slice if transaction retries
 

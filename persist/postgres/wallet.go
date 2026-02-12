@@ -153,7 +153,7 @@ func (s *Store) WalletEvents(offset, limit int) ([]wallet.Event, error) {
 		return nil, nil
 	}
 
-	events := make([]wallet.Event, 0, limit)
+	var events []wallet.Event
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		events = events[:0] // reuse same slice if transaction retries
 

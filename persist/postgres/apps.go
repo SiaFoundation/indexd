@@ -98,9 +98,8 @@ func (s *Store) AppConnectKey(key string) (connectKey accounts.ConnectKey, err e
 }
 
 // AppConnectKeys retrieves a list of application connection keys from the database.
-func (s *Store) AppConnectKeys(offset, limit int) ([]accounts.ConnectKey, error) {
-	keys := make([]accounts.ConnectKey, 0, limit)
-	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+func (s *Store) AppConnectKeys(offset, limit int) (keys []accounts.ConnectKey, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		keys = keys[:0] // reuse same slice if transaction retries
 
 		rows, err := tx.Query(ctx, `
@@ -122,10 +121,8 @@ func (s *Store) AppConnectKeys(offset, limit int) ([]accounts.ConnectKey, error)
 			keys = append(keys, key)
 		}
 		return rows.Err()
-	}); err != nil {
-		return nil, err
-	}
-	return keys, nil
+	})
+	return
 }
 
 // DeleteAppConnectKey deletes an application connection key from the database.
