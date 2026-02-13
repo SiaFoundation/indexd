@@ -75,6 +75,7 @@ func (s *testStore) addUsableHost(t testing.TB) types.PublicKey {
 	fcid := types.FileContractID(frand.Entropy256())
 	rev := types.V2FileContract{
 		HostPublicKey: pk,
+		ProofHeight:   200,
 		Capacity:      goodSettings.TotalStorage,
 	}
 	if err := s.AddFormedContract(pk, fcid, rev, types.ZeroCurrency, types.Siacoins(100), types.ZeroCurrency, proto.Usage{}); err != nil {
