@@ -60,7 +60,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	indexer := cluster.Indexer
 
 	sk := types.GeneratePrivateKey()
-	client := indexer.App(sk)
+	client := indexer.App()
 
 	key, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
 		Quota: "default",
@@ -105,6 +105,36 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	return sk, key
 }
 
+// uploadRandomSlab uploads a slab with random data to the provided hosts and
+// returns the corresponding SlabPinParams.
+func uploadRandomSlab(t testing.TB, client *client.Client, sk types.PrivateKey, hosts []hosts.Host) slabs.SlabPinParams {
+	t.Helper()
+
+	// prepare sectors
+	var sectors []slabs.PinnedSector
+	for _, h := range hosts {
+		// prepare sector data
+		var sector [proto.SectorSize]byte
+		frand.Read(sector[:])
+
+		// upload sector
+		hk := h.PublicKey
+		if result, err := client.WriteSector(context.Background(), sk, hk, sector[:]); err != nil {
+			t.Fatal(err)
+		} else {
+			sectors = append(sectors, slabs.PinnedSector{
+				Root:    result.Root,
+				HostKey: hk,
+			})
+		}
+	}
+	return slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       sectors,
+	}
+}
+
 func TestApplicationAPI(t *testing.T) {
 	ctx := t.Context()
 	// create cluster with three hosts
@@ -112,6 +142,10 @@ func TestApplicationAPI(t *testing.T) {
 	cluster := testutils.NewCluster(t, testutils.WithHosts(10), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
+
+	// create host client
+	hc := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())))
+	defer hc.Close()
 
 	// wait for contracts to be formed
 	cluster.WaitForContracts(t)
@@ -126,7 +160,7 @@ func TestApplicationAPI(t *testing.T) {
 
 	// prepare account
 	sk, key := newAccount(t, cluster)
-	client := indexer.App(sk)
+	client := indexer.App()
 
 	// check that the key has been used
 	keys, err := adminClient.AppConnectKeys(ctx, 0, 1)
@@ -143,25 +177,8 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected last used to be set, got", keys[0].LastUsed)
 	}
 
-	// helper to generate slab pin parameters
-	params := func() slabs.SlabPinParams {
-		return slabs.SlabPinParams{
-			EncryptionKey: frand.Entropy256(),
-			MinShards:     1,
-			Sectors: func() (s []slabs.PinnedSector) {
-				for _, host := range hosts {
-					s = append(s, slabs.PinnedSector{
-						Root:    frand.Entropy256(),
-						HostKey: host.PublicKey,
-					})
-				}
-				return s
-			}(),
-		}
-	}
-
 	// pin the slab
-	slabIDs, err := client.PinSlabs(context.Background(), sk, params())
+	slabIDs, err := client.PinSlabs(context.Background(), sk, uploadRandomSlab(t, hc, sk, hosts))
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
@@ -173,7 +190,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// assert minimum redundancy is enforced
-	p := params()
+	p := uploadRandomSlab(t, hc, sk, hosts)
 	p.Sectors = p.Sectors[:2]
 	_, err = client.PinSlabs(context.Background(), sk, p)
 	if err == nil || !strings.Contains(err.Error(), "not enough redundancy") {
@@ -288,8 +305,8 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// pin 2 slabs
-	slab1Params := params()
-	slab2Params := params()
+	slab1Params := uploadRandomSlab(t, hc, sk, hosts)
+	slab2Params := uploadRandomSlab(t, hc, sk, hosts)
 	slabIDs1, err := client.PinSlabs(context.Background(), sk, slab1Params)
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
@@ -426,9 +443,9 @@ func TestApplicationAPI(t *testing.T) {
 	// ourselves.
 	// Pin a slab on a second account
 	sk2, _ := newAccount(t, cluster)
-	client2 := indexer.App(sk2)
+	client2 := indexer.App()
 
-	p2 := params()
+	p2 := uploadRandomSlab(t, hc, sk, hosts)
 	slabIDs, err = client2.PinSlabs(context.Background(), sk2, p2)
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
@@ -466,7 +483,7 @@ func TestAppConnect(t *testing.T) {
 	}
 
 	sk := types.GeneratePrivateKey()
-	appClient := indexer.App(sk)
+	appClient := indexer.App()
 
 	connected, err := appClient.CheckAppAuth(ctx, sk)
 	if err != nil {
@@ -605,74 +622,19 @@ func TestSharedObjects(t *testing.T) {
 	}
 
 	// prepare accounts
-	prepareAcccount := func(t *testing.T) (*app.Client, types.PrivateKey) {
-		sk := types.GeneratePrivateKey()
-		client := indexer.App(sk)
-
-		key, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
-			Quota: "default",
-		})
-		if err != nil {
-			t.Fatal("failed to add app connect key:", err)
-		}
-
-		connectResp, err := client.RequestAppConnection(ctx, app.RegisterAppRequest{
-			AppID:       frand.Entropy256(),
-			Name:        "Test App",
-			Description: "A test application",
-			LogoURL:     "foo",
-			ServiceURL:  "bar",
-		})
-		if err != nil {
-			t.Fatal("failed to request app connection:", err)
-		}
-
-		respondToAppConnection(t, connectResp.ResponseURL, key.Key, true)
-		if err = client.RegisterApp(ctx, connectResp.RegisterURL, sk); err != nil {
-			t.Fatal("failed to register app:", err)
-		}
-		return client, sk
-	}
-
-	client1, sk1 := prepareAcccount(t)
-	client2, sk2 := prepareAcccount(t)
-
-	// helper to generate slab pin parameters
-	randomSlab := func() slabs.SlabPinParams {
-		// prepare sectors
-		var sectors []slabs.PinnedSector
-		for _, h := range hosts {
-			// prepare sector data
-			var sector [proto.SectorSize]byte
-			frand.Read(sector[:])
-
-			// upload sector
-			hk := h.PublicKey
-			if result, err := client.WriteSector(ctx, sk1, hk, sector[:]); err != nil {
-				t.Fatal(err)
-			} else {
-				sectors = append(sectors, slabs.PinnedSector{
-					Root:    result.Root,
-					HostKey: hk,
-				})
-			}
-		}
-		return slabs.SlabPinParams{
-			EncryptionKey: frand.Entropy256(),
-			MinShards:     1,
-			Sectors:       sectors,
-		}
-	}
+	sk1, _ := newAccount(t, cluster)
+	sk2, _ := newAccount(t, cluster)
+	appClient := indexer.App()
 
 	// generate and pin a slab
-	slab1Params := randomSlab()
-	_, err = client1.PinSlabs(ctx, sk1, slab1Params)
+	slab1Params := uploadRandomSlab(t, client, sk1, hosts)
+	_, err = appClient.PinSlabs(ctx, sk1, slab1Params)
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
 
-	slab2Params := randomSlab()
-	_, err = client1.PinSlabs(ctx, sk1, slab2Params)
+	slab2Params := uploadRandomSlab(t, client, sk1, hosts)
+	_, err = appClient.PinSlabs(ctx, sk1, slab2Params)
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
@@ -694,12 +656,12 @@ func TestSharedObjects(t *testing.T) {
 		},
 	}
 	obj.Sign(sk1)
-	if err := client1.SaveObject(ctx, sk1, obj); err != nil {
+	if err := appClient.SaveObject(ctx, sk1, obj); err != nil {
 		t.Fatal(err)
 	}
 
 	// populate the object's created and updated fields
-	obj, err = client1.Object(ctx, sk1, obj.ID())
+	obj, err = appClient.Object(ctx, sk1, obj.ID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -708,13 +670,13 @@ func TestSharedObjects(t *testing.T) {
 	encryptionKey := frand.Bytes(32)
 
 	// create a shared URL for the object
-	shareURL, err := client1.CreateSharedObjectURL(ctx, sk1, obj.ID(), encryptionKey, time.Now().Add(2*time.Second))
+	shareURL, err := appClient.CreateSharedObjectURL(ctx, sk1, obj.ID(), encryptionKey, time.Now().Add(2*time.Second))
 	if err != nil {
 		t.Fatal("failed to create shared object URL:", err)
 	}
 
-	// try to retrieve the object with client2
-	sharedObj, key, err := client2.SharedObject(ctx, shareURL)
+	// try to retrieve the object with appClient
+	sharedObj, key, err := appClient.SharedObject(ctx, shareURL)
 	if err != nil {
 		t.Fatal("failed to retrieve shared object:", err)
 	} else if !bytes.Equal(key, encryptionKey) {
@@ -723,8 +685,8 @@ func TestSharedObjects(t *testing.T) {
 		t.Fatal("shared object mismatch")
 	}
 
-	// make sure client2 has no objects
-	if objs, err := client2.ListObjects(ctx, sk2, slabs.Cursor{}, 100); err != nil {
+	// make sure appClient has no objects
+	if objs, err := appClient.ListObjects(ctx, sk2, slabs.Cursor{}, 100); err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
 		t.Fatalf("expected 0 objects, got %d", len(objs))
@@ -732,7 +694,7 @@ func TestSharedObjects(t *testing.T) {
 
 	time.Sleep(time.Second * 2)
 	// try to retrieve the object again, should be expired
-	_, _, err = client1.SharedObject(ctx, shareURL)
+	_, _, err = appClient.SharedObject(ctx, shareURL)
 	if err == nil {
 		t.Fatal("expected error when creating shared URL with past expiry")
 	}
