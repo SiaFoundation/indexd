@@ -114,7 +114,7 @@ func (c *Cluster) App(t testing.TB) (*app.Client, types.PrivateKey) {
 	t.Helper()
 	sk := types.GeneratePrivateKey()
 	c.Indexer.Store().AddTestAccount(t, sk.PublicKey())
-	return c.Indexer.App(sk), sk
+	return c.Indexer.App(), sk
 }
 
 // AddHosts adds the given hosts to the cluster.
