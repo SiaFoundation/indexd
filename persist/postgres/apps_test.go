@@ -105,6 +105,15 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatal("expected app connect key to be invalid")
 	}
 
+	// try update to a non-existent quota
+	if _, err := store.UpdateAppConnectKey(accounts.UpdateAppConnectKey{
+		Key:         connectKey,
+		Description: "updated key",
+		Quota:       "i-dont-exist",
+	}); !errors.Is(err, accounts.ErrQuotaNotFound) {
+		t.Fatalf("expected err %q, got %q", accounts.ErrQuotaNotFound, err)
+	}
+
 	// update to a different quota with more data
 	if updated, err := store.UpdateAppConnectKey(accounts.UpdateAppConnectKey{
 		Key:         connectKey,

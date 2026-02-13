@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"lukechampine.com/frand"
@@ -35,14 +37,6 @@ func (s *Store) AddAppConnectKey(meta accounts.UpdateAppConnectKey) (key account
 		return accounts.ConnectKey{}, fmt.Errorf("quota is required")
 	}
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		// verify quota exists
-		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM quotas WHERE name = $1)`, meta.Quota).Scan(&exists); err != nil {
-			return fmt.Errorf("failed to check quota: %w", err)
-		} else if !exists {
-			return accounts.ErrQuotaNotFound
-		}
-
 		userSecret := frand.Bytes(32)
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			INSERT INTO app_connect_keys (app_key, user_secret, use_description, quota_name)
@@ -51,6 +45,10 @@ func (s *Store) AddAppConnectKey(meta accounts.UpdateAppConnectKey) (key account
 				quota_name,
 				(SELECT total_uses FROM quotas WHERE name = quota_name)
 		`, meta.Key, userSecret, meta.Description, meta.Quota))
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
+			return accounts.ErrQuotaNotFound
+		}
 		return err
 	})
 	return
@@ -71,6 +69,10 @@ func (s *Store) UpdateAppConnectKey(meta accounts.UpdateAppConnectKey) (key acco
 		`, meta.Key, meta.Description, meta.Quota))
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrKeyNotFound
+		}
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
+			return accounts.ErrQuotaNotFound
 		}
 		return err
 	})
