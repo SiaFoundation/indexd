@@ -217,9 +217,9 @@ func (c *Cluster) WaitForContracts(t *testing.T) {
 		formed = max(formed, len(seen))
 		t.Logf("formed contracts with %d/%d hosts", formed, len(required))
 
-		// ensure they are all confirmed
-		c.ConsensusNode.MineBlocks(t, types.VoidAddress, 1)
 		if len(seen) == len(required) {
+			// mine a block to confirm all pending contracts
+			c.ConsensusNode.MineBlocks(t, types.VoidAddress, 1)
 			time.Sleep(time.Second) // wait for indexing
 			return
 		}
