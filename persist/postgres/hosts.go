@@ -150,6 +150,7 @@ func (s *Store) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hos
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 WITH globals AS (
     SELECT
+		scanned_height,
 		contracts_period,
 		hosts_min_collateral,
 		hosts_max_storage_price,
@@ -212,7 +213,7 @@ WHERE
 	-- blocked host filter
 	AND (($4::boolean IS NULL) OR ($4::boolean = hosts.blocked))
 	-- active contracts filter
-	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1))))
+	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND proof_height > globals.scanned_height)))
 	-- public key filter
 	AND ((CARDINALITY($6::bytea[]) = 0) OR (public_key = ANY($6)))
 	%s -- orderClause
@@ -342,8 +343,12 @@ func (s *Store) HostsWithUnpinnableSectors() ([]types.PublicKey, error) {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
 		rows, err := tx.Query(ctx, `
+			WITH globals AS (
+				SELECT scanned_height FROM global_settings
+			)
 			SELECT public_key
 			FROM hosts
+			CROSS JOIN globals
 			WHERE EXISTS (
 				SELECT 1
 				FROM sectors
@@ -351,7 +356,7 @@ func (s *Store) HostsWithUnpinnableSectors() ([]types.PublicKey, error) {
 			) AND NOT EXISTS (
 				SELECT 1
 				FROM contracts
-				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good
+				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good AND proof_height > globals.scanned_height
 			)
 		`)
 		if err != nil {
@@ -621,6 +626,7 @@ func (s *Store) UsableHosts(offset, limit int, opts ...hosts.UsableHostQueryOpt)
 		baseQuery := `
 WITH globals AS (
     SELECT
+		scanned_height,
 		contracts_period,
 		hosts_min_collateral,
 		hosts_max_storage_price,
@@ -688,7 +694,7 @@ WHERE
 	-- country filter
 	($3::text IS NULL OR country_code = $3::text) AND
 	-- active and good contracts
-	EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good) AND
+	EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good AND proof_height > globals.scanned_height) AND
 	-- protocol filter
 	($4::smallint IS NULL OR EXISTS (SELECT 1 FROM host_addresses WHERE host_id = hosts.id AND protocol = $4::smallint)) `
 		args := []any{limit, offset, queryOpts.CountryCode, (*sqlNetworkProtocol)(queryOpts.Protocol)}
@@ -899,12 +905,16 @@ func (s *Store) HostsForFunding() ([]types.PublicKey, error) {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
 		rows, err := tx.Query(ctx, `
+			WITH globals AS (
+				SELECT scanned_height FROM global_settings
+			)
 			SELECT public_key
 			FROM hosts
+			CROSS JOIN globals
 			WHERE EXISTS (
 				SELECT 1
 				FROM contracts
-				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good
+				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good AND proof_height > globals.scanned_height
 			)`)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts for funding: %w", err)
@@ -934,8 +944,12 @@ func (s *Store) HostsForPinning() ([]types.PublicKey, error) {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
 		rows, err := tx.Query(ctx, `
+			WITH globals AS (
+				SELECT scanned_height FROM global_settings
+			)
 			SELECT public_key
 			FROM hosts
+			CROSS JOIN globals
 			WHERE EXISTS (
 				SELECT 1
 				FROM sectors
@@ -944,7 +958,7 @@ func (s *Store) HostsForPinning() ([]types.PublicKey, error) {
 			AND	EXISTS (
 				SELECT 1
 				FROM contracts
-				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good
+				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good AND proof_height > globals.scanned_height
 			)`)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts for pinning: %w", err)
@@ -973,12 +987,16 @@ func (s *Store) HostsForPruning() ([]types.PublicKey, error) {
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
 		rows, err := tx.Query(ctx, `
+			WITH globals AS (
+				SELECT scanned_height FROM global_settings
+			)
 			SELECT public_key
 			FROM hosts
+			CROSS JOIN globals
 			WHERE EXISTS (
 				SELECT 1
 				FROM contracts
-				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good AND next_prune < NOW()
+				WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND good AND next_prune < NOW() AND proof_height > globals.scanned_height
 			)`)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts for pruning: %w", err)

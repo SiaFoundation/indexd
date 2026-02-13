@@ -234,7 +234,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			return err
 		}
 
-		hostRows, err := tx.Query(ctx, `SELECT h.public_key FROM contracts c INNER JOIN hosts h ON c.host_id = h.id WHERE state IN (0,1) AND renewed_to IS NULL AND good`)
+		hostRows, err := tx.Query(ctx, `WITH globals AS (SELECT scanned_height FROM global_settings) SELECT h.public_key FROM contracts c INNER JOIN hosts h ON c.host_id = h.id CROSS JOIN globals WHERE state IN (0,1) AND renewed_to IS NULL AND good AND proof_height > globals.scanned_height`)
 		if err != nil {
 			return fmt.Errorf("failed to get good hosts: %w", err)
 		}
