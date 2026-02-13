@@ -48,6 +48,8 @@ func (s *Store) AddAppConnectKey(meta accounts.UpdateAppConnectKey) (key account
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
 			return accounts.ErrQuotaNotFound
+		} else if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+			return accounts.ErrKeyAlreadyExists
 		}
 		return err
 	})

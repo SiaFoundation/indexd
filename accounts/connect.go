@@ -11,6 +11,10 @@ import (
 )
 
 var (
+	//  ErrKeyAlreadyExists is returned when trying to add an app connect key
+	//  with an app key that already exists.
+	ErrKeyAlreadyExists = errors.New("key already exists")
+
 	// ErrKeyExhausted is returned when an app connect key has
 	// no remaining uses.
 	ErrKeyExhausted = errors.New("key has no remaining uses")
