@@ -211,8 +211,9 @@ LIMIT $2
 			} else if err := s.unpinSlabs(ctx, tx, id, slabIDs); err != nil {
 				return fmt.Errorf("failed to unpin slabs: %w", err)
 			}
-
-			exhausted = true
+			if len(slabIDs) < batchSize {
+				exhausted = true
+			}
 			return nil
 		})
 		if err != nil {
