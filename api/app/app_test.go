@@ -158,23 +158,30 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected 10 hosts, got", len(hosts))
 	}
 
-	// prepare account
+	// prepare accounts for the test
 	sk, key := newAccount(t, cluster)
+	sk2, key2 := newAccount(t, cluster)
+
 	client := indexer.App()
 
 	// check that the key has been used
-	keys, err := adminClient.AppConnectKeys(ctx, 0, 1)
-	switch {
-	case err != nil:
+	keys, err := adminClient.AppConnectKeys(ctx, 0, 2)
+	if err != nil {
 		t.Fatal(err)
-	case len(keys) != 1:
-		t.Fatal("expected 1 key, got", len(keys))
-	case keys[0].Key != key.Key:
-		t.Fatal("expected key to match", keys[0].Key, key.Key)
-	case keys[0].RemainingUses != 4:
-		t.Fatalf("expected remaining uses to be 4, got %d", keys[0].RemainingUses)
-	case keys[0].LastUsed.IsZero():
-		t.Fatal("expected last used to be set, got", keys[0].LastUsed)
+	} else if len(keys) != 2 {
+		t.Fatal("expected 2 keys, got", len(keys))
+	} else if keys[0] == keys[1] {
+		t.Fatal("expected different keys")
+	}
+	for _, k := range keys {
+		switch {
+		case k.Key != key.Key && k.Key != key2.Key:
+			t.Fatalf("unexpected key: %s", k.Key)
+		case k.RemainingUses != 4:
+			t.Fatalf("expected remaining uses to be 4, got %d", k.RemainingUses)
+		case k.LastUsed.IsZero():
+			t.Fatal("expected last used to be set, got", k.LastUsed)
+		}
 	}
 
 	// pin the slab
@@ -442,11 +449,8 @@ func TestApplicationAPI(t *testing.T) {
 	// We are not allowed to create objects using slabs that we have not pinned
 	// ourselves.
 	// Pin a slab on a second account
-	sk2, _ := newAccount(t, cluster)
-	client2 := indexer.App()
-
-	p2 := uploadRandomSlab(t, hc, sk, hosts)
-	slabIDs, err = client2.PinSlabs(context.Background(), sk2, p2)
+	p2 := uploadRandomSlab(t, hc, sk2, hosts)
+	slabIDs, err = client.PinSlabs(context.Background(), sk2, p2)
 	if err != nil {
 		t.Fatal("failed to pin slab:", err)
 	}
