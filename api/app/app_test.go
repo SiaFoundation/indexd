@@ -63,7 +63,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	client := indexer.App(sk)
 
 	key, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
-		RemainingUses: 1,
+		Quota: "default",
 	})
 	if err != nil {
 		t.Fatal("failed to add app connect key:", err)
@@ -137,10 +137,8 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected 1 key, got", len(keys))
 	case keys[0].Key != key.Key:
 		t.Fatal("expected key to match", keys[0].Key, key.Key)
-	case keys[0].RemainingUses != 0:
-		t.Fatal("expected remaining uses to be 0, got", keys[0].RemainingUses)
-	case keys[0].TotalUses != 1:
-		t.Fatal("expected total uses to be 1, got", keys[0].TotalUses)
+	case keys[0].RemainingUses != 4:
+		t.Fatalf("expected remaining uses to be 4, got %d", keys[0].RemainingUses)
 	case keys[0].LastUsed.IsZero():
 		t.Fatal("expected last used to be set, got", keys[0].LastUsed)
 	}
@@ -330,6 +328,8 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("failed to fetch slab:", err)
 	} else if slab1.EncryptionKey != slab1Params.EncryptionKey {
 		t.Fatal("unexpected")
+	} else if len(slab1.Sectors) != len(slab1Params.Sectors) {
+		t.Fatal("unexpected number of sectors in slab", len(slab1.Sectors))
 	} else if slab1.Sectors[0].Root != slab1Params.Sectors[0].Root ||
 		slab1.Sectors[1].Root != slab1Params.Sectors[1].Root ||
 		slab1.Sectors[2].Root != slab1Params.Sectors[2].Root {
@@ -397,7 +397,7 @@ func TestApplicationAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(obj, *objs[0].Object) {
-		t.Fatal("objects not equal")
+		t.Fatal("objects not equal", obj, *objs[0].Object)
 	}
 
 	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err != nil {
@@ -409,7 +409,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected object to be not found, got", err)
 	}
 
-	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err == nil || err.Error() != slabs.ErrObjectNotFound.Error() {
+	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
 	}
 
@@ -442,7 +442,7 @@ func TestApplicationAPI(t *testing.T) {
 		Slabs:                []slabs.SlabSlice{p2.Slice(0, 256)},
 	}
 	badObj.Sign(sk)
-	if err := client.SaveObject(context.Background(), sk, badObj); err == nil || err.Error() != slabs.ErrObjectUnpinnedSlab.Error() {
+	if err := client.SaveObject(context.Background(), sk, badObj); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectUnpinnedSlab.Error()) {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectUnpinnedSlab, err)
 	}
 }
@@ -458,8 +458,8 @@ func TestAppConnect(t *testing.T) {
 	adminClient := indexer.Admin
 
 	connectKey, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
-		Description:   "hello world",
-		RemainingUses: 2,
+		Description: "hello world",
+		Quota:       "default",
 	})
 	if err != nil {
 		t.Fatal("failed to add app connect key:", err)
@@ -610,7 +610,7 @@ func TestSharedObjects(t *testing.T) {
 		client := indexer.App(sk)
 
 		key, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
-			RemainingUses: 1,
+			Quota: "default",
 		})
 		if err != nil {
 			t.Fatal("failed to add app connect key:", err)

@@ -61,12 +61,12 @@ func TestSealedObjectRoundtrip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var decoded slabs.SealedObject
+	var decoded SealedObject
 	if err := decoded.UnmarshalSia(data); err != nil {
 		t.Fatal(err)
 	}
 
-	obj2, err := objectFromSealedObject(decoded, appKey)
+	obj2, err := decoded.Open(appKey)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -145,6 +145,8 @@ func (s *Store) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hos
 
 	var hosts []hosts.Host
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
+		hosts = hosts[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
 WITH globals AS (
     SELECT
@@ -259,6 +261,8 @@ func (s *Store) BlockedHosts(offset, limit int) ([]types.PublicKey, error) {
 
 	var blocklist []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		blocklist = blocklist[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `SELECT public_key FROM hosts_blocklist LIMIT $1 OFFSET $2`, limit, offset)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts blocklist: %w", err)
@@ -335,6 +339,8 @@ func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 func (s *Store) HostsWithUnpinnableSectors() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		hosts = hosts[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			SELECT public_key
 			FROM hosts
@@ -391,6 +397,8 @@ func (s *Store) UnblockHost(hk types.PublicKey) error {
 func (s *Store) HostsForScanning() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		hosts = hosts[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `SELECT public_key FROM hosts WHERE next_scan <= NOW() ORDER BY next_scan ASC`)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts for scanning: %w", err)
@@ -608,6 +616,8 @@ func (s *Store) UsableHosts(offset, limit int, opts ...hosts.UsableHostQueryOpt)
 
 	var usable []hosts.HostInfo
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
+		usable = usable[:0] // reuse same slice if transaction retries
+
 		baseQuery := `
 WITH globals AS (
     SELECT
@@ -838,6 +848,8 @@ func scanHost(s scanner) (dbHost, error) {
 func (s *Store) HostsForIntegrityChecks(maxLastCheck time.Time, limit int) ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		hosts = hosts[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			WITH to_check AS (
 				SELECT h.id
@@ -884,6 +896,8 @@ func (s *Store) HostsForIntegrityChecks(maxLastCheck time.Time, limit int) ([]ty
 func (s *Store) HostsForFunding() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		hosts = hosts[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			SELECT public_key
 			FROM hosts
@@ -917,6 +931,8 @@ func (s *Store) HostsForFunding() ([]types.PublicKey, error) {
 func (s *Store) HostsForPinning() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		hosts = hosts[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			SELECT public_key
 			FROM hosts
@@ -954,6 +970,8 @@ func (s *Store) HostsForPinning() ([]types.PublicKey, error) {
 func (s *Store) HostsForPruning() ([]types.PublicKey, error) {
 	var hosts []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		hosts = hosts[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			SELECT public_key
 			FROM hosts
@@ -999,6 +1017,8 @@ func (s *Store) ResetLostSectors(hk types.PublicKey) error {
 func (s *Store) HostsWithLostSectors() ([]types.PublicKey, error) {
 	var hks []types.PublicKey
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		hks = hks[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			SELECT public_key
 			FROM hosts
@@ -1062,6 +1082,8 @@ func (s *Store) UpdateStuckHosts(stuck []types.PublicKey) error {
 func (s *Store) StuckHosts() ([]hosts.StuckHost, error) {
 	var result []hosts.StuckHost
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		result = result[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			SELECT public_key, stuck_since, unpinned_sectors
 			FROM hosts

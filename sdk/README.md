@@ -84,3 +84,95 @@ if err != nil {
 The `metadata` returned from the `Upload` function contains information about
 the uploaded file required to download it later. Applications need to store
 this information in a database or some other persistent storage.
+
+## Packed Uploads
+
+When uploading many small objects, using `UploadPacked` can be more efficient
+than uploading each object separately. Packed uploads combine multiple objects
+into shared slabs, reducing overhead and improving upload efficiency.
+
+```go
+// create a packed upload
+packed, err := client.UploadPacked()
+if err != nil {
+	log.Fatal("failed to create packed upload")
+}
+defer packed.Close()
+
+// add multiple objects
+for _, data := range smallObjects {
+	if _, err := packed.Add(ctx, bytes.NewReader(data)); err != nil {
+		log.Fatal("failed to add object")
+	}
+}
+
+// finalize to get the resulting objects
+objects, err := packed.Finalize(ctx)
+if err != nil {
+	log.Fatal("failed to finalize packed upload")
+}
+
+// each object can be downloaded individually
+for i, obj := range objects {
+	var buf bytes.Buffer
+	if err := client.Download(ctx, &buf, obj); err != nil {
+		log.Fatalf("failed to download object %d", i)
+	}
+}
+```
+
+### Optimizing Packed Uploads
+
+Use `Remaining()` and `Length()` to monitor efficiency and decide when to
+finalize. This is useful when you have a stream of objects and want to avoid
+excessive padding:
+
+```go
+const paddingTarget = 0.05
+
+var uploads [][]byte
+for len(uploads) > 0 {
+	err := func() error {
+		packed, err := client.UploadPacked()
+		if err != nil {
+			return err
+		}
+		defer packed.Close()
+
+		for len(uploads) > 0 {
+			_, err := packed.Add(ctx, bytes.NewReader(uploads[0]))
+			if err != nil {
+				return err
+			}
+			uploads = uploads[1:]
+
+			if packed.Length() == 0 {
+				continue
+			}
+
+			padding := float64(packed.Remaining()) / float64(packed.Length())
+			if padding <= paddingTarget {
+				break
+			}
+		}
+
+		objects, err := packed.Finalize(ctx)
+		if err != nil {
+			return err
+		}
+
+		// pin objects
+
+		return nil
+	}()
+	if err != nil {
+		log.Fatal(err)
+	}
+}
+```
+
+### Limitations
+
+- `PackedUpload` is not thread-safe; do not call `Add` concurrently
+- Empty objects are not supported and will return `ErrEmptyObject`
+- Once `Finalize` is called, subsequent `Add` calls return `ErrUploadFinalized`

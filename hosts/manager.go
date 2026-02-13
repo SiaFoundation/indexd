@@ -591,7 +591,7 @@ func newStuckHostsAlert(hosts []StuckHost) alerts.Alert {
 		Message:  "Host(s) are stuck",
 		Data: map[string]any{
 			"hosts": hosts,
-			"hint":  "Contract operations (form/renew/refresh) have been failing for these hosts for more than 24 hours. Consider blocking these hosts through the blocklist feature.",
+			"hint":  "Contract operations (form/renew/refresh) have been failing for these hosts. Consider blocking these hosts through the blocklist feature.",
 		},
 		Timestamp: time.Now(),
 	}

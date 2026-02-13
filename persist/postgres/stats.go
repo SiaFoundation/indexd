@@ -162,6 +162,8 @@ func (s *Store) AggregatedHostStats() (stats admin.AggregatedHostStatsResponse, 
 func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 	var stats []hosts.HostStats
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		stats = stats[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			WITH globals AS (
 				SELECT

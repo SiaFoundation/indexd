@@ -1,16 +1,26 @@
+CREATE TABLE quotas (
+    name TEXT PRIMARY KEY CHECK (LENGTH(name) > 0 AND LENGTH(name) <= 32), -- unique, human-readable key
+    description TEXT NOT NULL,
+    max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0), -- max pinned data in bytes
+    total_uses INTEGER NOT NULL CHECK (total_uses >= 0)
+);
+
+-- insert default quota: 1TB max data, 5 total uses
+INSERT INTO quotas (name, description, max_pinned_data, total_uses)
+VALUES ('default', 'Default quota', 1000000000000, 5);
+
 CREATE TABLE app_connect_keys (
     id SERIAL PRIMARY KEY,
     user_secret BYTEA UNIQUE NOT NULL CHECK (LENGTH(user_secret) = 32),
     app_key TEXT UNIQUE NOT NULL,
     use_description TEXT NOT NULL,
-    remaining_uses INTEGER NOT NULL,
-    total_uses INTEGER NOT NULL DEFAULT 0,
+    quota_name TEXT NOT NULL REFERENCES quotas(name),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     last_used TIMESTAMP WITH TIME ZONE,
-    pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0), -- total pinned data in bytes
-    max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0)
+    pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0) -- total pinned data in bytes
 );
+CREATE INDEX app_connect_keys_quota_name_idx ON app_connect_keys(quota_name);
 
 CREATE TABLE accounts (
     id SERIAL PRIMARY KEY,

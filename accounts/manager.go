@@ -60,6 +60,11 @@ type (
 		AppConnectKey(key string) (ConnectKey, error)
 		AppConnectKeys(offset, limit int) ([]ConnectKey, error)
 
+		PutQuota(key string, req PutQuotaRequest) error
+		DeleteQuota(key string) error
+		Quota(key string) (Quota, error)
+		Quotas(offset, limit int) ([]Quota, error)
+
 		PruneAccounts(limit int) error
 		ActiveAccounts(threshold time.Time) (uint64, error)
 		Account(types.PublicKey) (Account, error)

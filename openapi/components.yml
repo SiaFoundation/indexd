@@ -827,10 +827,6 @@ components:
           type: integer
           format: int64
           description: Total number of active, bad contracts managed by this instance
-        activeHosts:
-          type: integer
-          format: int64
-          description: Number of hosts with active contracts that are not stuck
         renewing:
           type: integer
           format: int64
@@ -957,6 +953,44 @@ components:
           format: int64
           description: Number of sectors that have had failed integrity checks.
 
+    QuotaKey:
+      type: string
+      description: Unique identifier for a quota
+      pattern: "^[a-zA-Z0-9_-]{1,32}$"
+      minLength: 1
+      maxLength: 32
+
+    Quota:
+      type: object
+      properties:
+        key:
+          $ref: "#/components/schemas/QuotaKey"
+        description:
+          type: string
+          description: Human-readable description of the quota
+        maxPinnedData:
+          type: integer
+          format: uint64
+          description: Maximum number of bytes that may be pinned by accounts using this quota
+        totalUses:
+          type: integer
+          description: Total number of accounts that can be created using connect keys with this quota
+
+    PutQuotaRequest:
+      type: object
+      properties:
+        description:
+          type: string
+          description: Human-readable description of the quota
+        maxPinnedData:
+          type: integer
+          format: uint64
+          description: Maximum number of bytes that may be pinned by accounts using this quota
+        totalUses:
+          type: integer
+          minimum: 0
+          description: Total number of accounts that can be created using connect keys with this quota
+
     ConnectKey:
       type: object
       properties:
@@ -966,12 +1000,11 @@ components:
         description:
           type: string
           description: App description
-        totalUses:
-          type: integer
-          description: Total number of times this key has been used
+        quota:
+          $ref: "#/components/schemas/QuotaKey"
         remainingUses:
           type: integer
-          description: Remaining number of times this key can be used
+          description: Remaining number of times this key can be used to create accounts
         dateCreated:
           type: string
           format: date-time
@@ -988,13 +1021,11 @@ components:
           type: integer
           format: uint64
           description: Sum of all the pinned data of the accounts associated with this key
-        maxPinnedData:
-          type: integer
-          format: uint64
-          description: Maximum number of bytes that may be pinned at once with this key
 
     UpdateAppConnectKey:
       type: object
+      required:
+        - quota
       properties:
         key:
           type: string
@@ -1002,24 +1033,16 @@ components:
         description:
           type: string
           description: App description
-        maxPinnedData:
-          type: integer
-          format: uint64
-          description: Maximum number of bytes that may be pinned at once with this key
-        remainingUses:
-          type: integer
-          description: Remaining number of times this key can be used
+        quota:
+          $ref: "#/components/schemas/QuotaKey"
 
     AddConnectKeyRequest:
       type: object
+      required:
+        - quota
       properties:
         description:
           type: string
           description: App description
-        maxPinnedData:
-          type: integer
-          format: uint64
-          description: Maximum number of bytes that may be pinned at once with this key
-        remainingUses:
-          type: integer
-          description: Remaining number of times this key can be used
+        quota:
+          $ref: "#/components/schemas/QuotaKey"

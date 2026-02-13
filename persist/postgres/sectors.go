@@ -123,6 +123,8 @@ func (s *Store) RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey 
 func (s *Store) SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
 	var sectors []types.Hash256
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		sectors = sectors[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			WITH hid AS (
 				SELECT id FROM hosts WHERE public_key = $1
@@ -221,6 +223,8 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
 	var digests []slabs.SlabID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		digests = digests[:0] // reuse same slice if transaction retries
+
 		var accountID int64
 		var connectKeyID int64
 		err := tx.QueryRow(ctx, "SELECT id, connect_key_id FROM accounts WHERE public_key = $1", sqlPublicKey(account)).Scan(&accountID, &connectKeyID)
@@ -376,7 +380,11 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 
 		// check whether adding the newly pinned data would exceed the connect
 		// key's storage limit and if not, update the connect key's pinned data
-		err = tx.QueryRow(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data + $1 WHERE id = $2 RETURNING pinned_data, max_pinned_data`, newPinnedData, connectKeyID).Scan(&pinnedData, &maxPinnedData)
+		err = tx.QueryRow(ctx, `
+			UPDATE app_connect_keys ack SET pinned_data = pinned_data + $1
+			FROM quotas q
+			WHERE ack.id = $2 AND q.name = ack.quota_name
+			RETURNING ack.pinned_data, q.max_pinned_data`, newPinnedData, connectKeyID).Scan(&pinnedData, &maxPinnedData)
 		if err != nil {
 			return fmt.Errorf("failed to update connect key's pinned data: %w", err)
 		} else if pinnedData > maxPinnedData {
@@ -507,6 +515,8 @@ func (s *Store) SlabIDs(account proto.Account, offset, limit int) ([]slabs.SlabI
 
 	var ids []slabs.SlabID
 	if err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
+		ids = ids[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `SELECT digest
 			FROM slabs s
 			INNER JOIN account_slabs ac ON s.id = ac.slab_id
@@ -724,6 +734,8 @@ func (s *Store) MarkSectorsUnpinnable(threshold time.Time) error {
 func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
 	roots := make([]types.Hash256, 0, limit)
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		roots = roots[:0] // reuse same slice if transaction retries
+
 		rows, err := tx.Query(ctx, `
 			WITH hid AS (
 				SELECT id FROM hosts WHERE public_key = $1
@@ -768,6 +780,8 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 // repair first.
 func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		unhealthy = unhealthy[:0] // reuse same slice if transaction retries
+
 		const query = `SELECT s.id, s.digest
 			FROM slabs s
 			WHERE s.next_repair_attempt < NOW()

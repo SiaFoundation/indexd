@@ -882,11 +882,14 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 	store.addTestContract(t, hk1)
 	store.addTestContract(t, hk2)
 
+	// create a test quota with specific limits
+	store.addTestQuota(t, "storage-limit-test", 2*proto.SectorSize, 2)
+
 	const connectKey = "foobar"
 	key, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
-		Key:           connectKey,
-		MaxPinnedData: 2 * proto.SectorSize,
-		RemainingUses: 2,
+		Key:         connectKey,
+		Description: "test key",
+		Quota:       "storage-limit-test",
 	})
 	if err != nil {
 		t.Fatal("failed to add app connect key:", err)

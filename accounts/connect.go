@@ -22,6 +22,13 @@ var (
 	// associated to it.
 	ErrKeyInUse = errors.New("key in use")
 
+	// ErrQuotaNotFound is returned when a quota is not found.
+	ErrQuotaNotFound = errors.New("quota not found")
+
+	// ErrQuotaInUse is returned when deleting a quota with connect keys
+	// associated to it.
+	ErrQuotaInUse = errors.New("quota in use")
+
 	// ErrAppKeyStorageLimitExceeded is returned when an operation fails due to
 	// the connect key exceeding its storage limit.    We use the term "account
 	// storage limit" here because from the user's perspective, the app connect
@@ -30,34 +37,39 @@ var (
 )
 
 type (
+	// Quota represents a usage quota for connect keys.
+	Quota struct {
+		Key           string `json:"key"`
+		Description   string `json:"description"`
+		MaxPinnedData uint64 `json:"maxPinnedData"`
+		TotalUses     int    `json:"totalUses"`
+	}
+
 	// A ConnectKey represents a key used to authenticate
 	// when connecting a new application.
 	ConnectKey struct {
 		Key           string    `json:"key"`
 		Description   string    `json:"description"`
-		TotalUses     int       `json:"totalUses"`
+		Quota         string    `json:"quota"`
 		RemainingUses int       `json:"remainingUses"`
 		DateCreated   time.Time `json:"dateCreated"`
 		LastUpdated   time.Time `json:"lastUpdated"`
 		LastUsed      time.Time `json:"lastUsed"`
 		PinnedData    uint64    `json:"pinnedData"`
-		MaxPinnedData uint64    `json:"maxPinnedData"`
 	}
 
 	// AddConnectKeyRequest is the request type for adding a new app connect key.
 	AddConnectKeyRequest struct {
-		Description   string `json:"description"`
-		MaxPinnedData uint64 `json:"maxPinnedData,omitempty"`
-		RemainingUses int    `json:"remainingUses"`
+		Description string `json:"description"`
+		Quota       string `json:"quota"`
 	}
 
 	// UpdateAppConnectKey represents a request to add or update
 	// an app connect key.
 	UpdateAppConnectKey struct {
-		Key           string `json:"key"`
-		Description   string `json:"description"`
-		MaxPinnedData uint64 `json:"maxPinnedData,omitempty"`
-		RemainingUses int    `json:"remainingUses"`
+		Key         string `json:"key"`
+		Description string `json:"description"`
+		Quota       string `json:"quota"`
 	}
 
 	// AppMeta contains additional metadata associated with an account.
@@ -66,6 +78,13 @@ type (
 		Description string        `json:"description"`
 		LogoURL     string        `json:"logoURL"`
 		ServiceURL  string        `json:"serviceURL"`
+	}
+
+	// PutQuotaRequest is the request type for creating or updating a quota.
+	PutQuotaRequest struct {
+		Description   string `json:"description"`
+		MaxPinnedData uint64 `json:"maxPinnedData"`
+		TotalUses     int    `json:"totalUses"`
 	}
 )
 
@@ -109,6 +128,27 @@ func (m *AccountManager) RegisterAppKey(key string, pk types.PublicKey, meta App
 // returns [ErrKeyNotFound].
 func (m *AccountManager) ValidAppConnectKey(ctx context.Context, key string) (bool, error) {
 	return m.store.ValidAppConnectKey(key)
+}
+
+// PutQuota creates or updates a quota.
+func (m *AccountManager) PutQuota(ctx context.Context, key string, req PutQuotaRequest) error {
+	return m.store.PutQuota(key, req)
+}
+
+// DeleteQuota deletes an existing quota. If the quota does not exist, it returns [ErrQuotaNotFound].
+// If the quota is in use by connect keys, it returns [ErrQuotaInUse].
+func (m *AccountManager) DeleteQuota(ctx context.Context, key string) error {
+	return m.store.DeleteQuota(key)
+}
+
+// Quota returns the quota with the given key. If the quota does not exist, it returns [ErrQuotaNotFound].
+func (m *AccountManager) Quota(ctx context.Context, key string) (Quota, error) {
+	return m.store.Quota(key)
+}
+
+// Quotas returns a list of quotas.
+func (m *AccountManager) Quotas(ctx context.Context, offset, limit int) ([]Quota, error) {
+	return m.store.Quotas(offset, limit)
 }
 
 // AppSecret derives a unique application secret using a stored user secret
