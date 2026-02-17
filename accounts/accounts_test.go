@@ -22,7 +22,7 @@ func TestAccountFunding(t *testing.T) {
 	indexer := cluster.Indexer
 
 	// create an app
-	app, sk := cluster.App(t)
+	sk := cluster.AddAccount(t)
 
 	// assert we have one usable host
 	time.Sleep(time.Second)
@@ -52,7 +52,7 @@ func TestAccountFunding(t *testing.T) {
 	time.Sleep(time.Second)
 
 	// fetch account
-	acc, err := app.Account(t.Context(), sk)
+	acc, err := indexer.App.Account(t.Context(), sk)
 	if err != nil {
 		t.Fatal(err)
 	}

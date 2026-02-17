@@ -685,7 +685,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 
 		// auth is a multi-step process designed to protect privacy while allowing arbitrary apps to connect:
 		// 1. app requests connection by POSTing to /auth/connect
-		"POST /auth/connect": a.handleAuthRequest,
+		"POST /auth/connect": wrapCORS(a.handleAuthRequest),
 		// 2. user is redirected to /auth/connect/:requestID to approve or reject the connection.
 		// Approval requires the user to enter their indexd credentials.
 		"GET /auth/connect/:requestID": a.handleGETAuthConnectUI,

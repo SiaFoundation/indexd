@@ -20,8 +20,8 @@ func TestMigrations(t *testing.T) {
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(11))
 	indexer := cluster.Indexer
 
-	// create an app
-	app, sk := cluster.App(t)
+	// create an account
+	sk := cluster.AddAccount(t)
 
 	// create some more utxos
 	cluster.ConsensusNode.MineBlocks(t, indexer.WalletAddr(), 11)
@@ -40,7 +40,7 @@ func TestMigrations(t *testing.T) {
 	}
 
 	// pin the slab
-	slabIDs, err := app.PinSlabs(context.Background(), sk, slabs.SlabPinParams{
+	slabIDs, err := indexer.App.PinSlabs(context.Background(), sk, slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
 		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
@@ -98,7 +98,7 @@ func TestMigrations(t *testing.T) {
 
 	// assert sector was migrated
 	if err := retry(300, 100*time.Millisecond, func() error {
-		if pinned, err := app.Slab(context.Background(), sk, slabID); err != nil {
+		if pinned, err := indexer.App.Slab(context.Background(), sk, slabID); err != nil {
 			t.Fatal(err)
 		} else if len(pinned.Sectors) != 10 {
 			return fmt.Errorf("expected 10 pinned sectors, got %d", len(pinned.Sectors))
@@ -116,8 +116,8 @@ func TestUpdateLastUsed(t *testing.T) {
 	logger := zap.NewNop()
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10), testutils.WithIndexer())
 
-	// create an app
-	app, sk := cluster.App(t)
+	// create an account
+	sk := cluster.AddAccount(t)
 
 	// create some more utxos
 	indexer := cluster.Indexer
@@ -141,7 +141,7 @@ func TestUpdateLastUsed(t *testing.T) {
 
 	// last used time should be around account creation and thus should predate
 	// `now` timestamp
-	account, err := app.Account(context.Background(), sk)
+	account, err := indexer.App.Account(context.Background(), sk)
 	if err != nil {
 		t.Fatal(err)
 	} else if !account.LastUsed.Before(now) {
@@ -149,7 +149,7 @@ func TestUpdateLastUsed(t *testing.T) {
 	}
 
 	// pin the slab
-	slabIDs, err := app.PinSlabs(context.Background(), sk, slabs.SlabPinParams{
+	slabIDs, err := indexer.App.PinSlabs(context.Background(), sk, slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
 		MinShards:     1,
 		Sectors: func() (s []slabs.PinnedSector) {
@@ -166,7 +166,7 @@ func TestUpdateLastUsed(t *testing.T) {
 
 	// last used time should be time of PinSlab invocation and thus should be
 	// after `now` timestamp
-	account, err = app.Account(context.Background(), sk)
+	account, err = indexer.App.Account(context.Background(), sk)
 	if err != nil {
 		t.Fatal(err)
 	} else if !account.LastUsed.After(now) {
@@ -176,14 +176,14 @@ func TestUpdateLastUsed(t *testing.T) {
 
 	// assert sectors were pinned
 	time.Sleep(time.Second)
-	if _, err := app.Slab(context.Background(), sk, slabID); err != nil {
+	if _, err := indexer.App.Slab(context.Background(), sk, slabID); err != nil {
 		t.Fatal(err)
 	}
 
 	// last used time should be time of Slab invocation (which causes the server
 	// to call PinnedSlab) and thus should be after the timestamp from when
 	// PinSlab was invoked
-	account, err = app.Account(context.Background(), sk)
+	account, err = indexer.App.Account(context.Background(), sk)
 	if err != nil {
 		t.Fatal(err)
 	} else if !account.LastUsed.After(now) {
@@ -191,12 +191,12 @@ func TestUpdateLastUsed(t *testing.T) {
 	}
 	now = account.LastUsed
 
-	if err := app.UnpinSlab(context.Background(), sk, slabID); err != nil {
+	if err := indexer.App.UnpinSlab(context.Background(), sk, slabID); err != nil {
 		t.Fatal(err)
 	}
 
 	// last used time should not have changed as a result of UnpinSlab
-	account, err = app.Account(context.Background(), sk)
+	account, err = indexer.App.Account(context.Background(), sk)
 	if err != nil {
 		t.Fatal(err)
 	} else if !account.LastUsed.Equal(now) {

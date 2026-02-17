@@ -28,7 +28,8 @@ func TestMaxRenewableContractSize(t *testing.T) {
 				collateral := types.Siacoins(100).Div64(1e12).Div64(4320)
 				sectorCollateral := collateral.Mul64(proto.SectorSize).Mul64(period + proto.ProofWindow)
 				maxSectors := maxCollateral.Div(sectorCollateral).Big().Uint64()
-				return maxSectors * proto.SectorSize * 8 / 10 // 20% safety margin
+				maxSize := maxSectors * proto.SectorSize * 8 / 10      // 20% safety margin
+				return (maxSize / proto.SectorSize) * proto.SectorSize // round down
 			}(),
 		},
 		{
