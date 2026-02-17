@@ -164,11 +164,13 @@ func (cm *ContractManager) pruneContract(ctx context.Context, client HostClient,
 			continue
 		}
 
-		pruned += len(indices)
 		_, err = client.FreeSectors(ctx, hostPrices, contractID, indices)
 		if err != nil {
 			return pruned, fmt.Errorf("failed to prune contract sectors: %w", err)
 		}
+
+		pruned += len(indices)
+		contractSectors -= uint64(len(indices))
 	}
 
 	return pruned, nil

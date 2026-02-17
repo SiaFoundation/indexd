@@ -797,11 +797,28 @@ func (s *Store) PrunableContractRoots(contractID types.FileContractID, roots []t
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		prunable = prunable[:0] // reuse same slice if transaction retries
 
+		var wantedCSMID *int64
+		err := tx.QueryRow(ctx, `SELECT id FROM contract_sectors_map WHERE contract_id = $1`, sqlHash256(contractID)).Scan(&wantedCSMID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch contract sectors map ID: %w", err)
+		}
+
+		var wantedHostID int64
+		err = tx.QueryRow(ctx, `
+			SELECT host_id FROM contracts WHERE contract_id = $1
+		`, sqlHash256(contractID)).Scan(&wantedHostID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
+		} else if err != nil {
+			return fmt.Errorf("failed to fetch contract host ID: %w", err)
+		}
+
 		rows, err := tx.Query(ctx, `
 			SELECT s.sector_root
 			FROM sectors s
-			INNER JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
-			WHERE csm.contract_id = $1 AND s.sector_root = ANY($2)`, sqlHash256(contractID), sqlRoots)
+			WHERE s.sector_root = ANY($1)
+			AND (s.contract_sectors_map_id = $2 OR (s.host_id = $3 AND s.contract_sectors_map_id IS NULL))
+       `, sqlRoots, wantedCSMID, wantedHostID)
 		if err != nil {
 			return fmt.Errorf("failed to fetch prunable contract roots: %w", err)
 		}
