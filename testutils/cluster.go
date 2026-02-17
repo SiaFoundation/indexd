@@ -9,7 +9,6 @@ import (
 	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/testutil"
-	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/contracts"
 	"go.uber.org/zap"
 )
@@ -109,12 +108,10 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	return cluster
 }
 
-// App adds a new test account and returns an app client for it.
-func (c *Cluster) App(t testing.TB) (*app.Client, types.PrivateKey) {
-	t.Helper()
+func (c *Cluster) AddAccount(t testing.TB) types.PrivateKey {
 	sk := types.GeneratePrivateKey()
 	c.Indexer.Store().AddTestAccount(t, sk.PublicKey())
-	return c.Indexer.App(), sk
+	return sk
 }
 
 // AddHosts adds the given hosts to the cluster.

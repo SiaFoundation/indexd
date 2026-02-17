@@ -34,8 +34,8 @@ func TestContractPruning(t *testing.T) {
 	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(nHosts), testutils.WithIndexer(testutils.WithContractOptions(contracts.WithSectorRootsBatchSize(batchSize))))
 	indexer := cluster.Indexer
 
-	// create an app
-	app, sk := cluster.App(t)
+	// create an account
+	sk := cluster.AddAccount(t)
 
 	// wait for contracts
 	cluster.WaitForContracts(t)
@@ -83,7 +83,7 @@ func TestContractPruning(t *testing.T) {
 	}
 
 	// pin the slabs
-	slabIDs, err := app.PinSlabs(t.Context(), sk, pinParams...)
+	slabIDs, err := indexer.App.PinSlabs(t.Context(), sk, pinParams...)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ func TestContractPruning(t *testing.T) {
 	assertRoots()
 
 	// unpin the 3rd slab and trigger pruning
-	if err := app.UnpinSlab(t.Context(), sk, slabIDs[2]); err != nil {
+	if err := indexer.App.UnpinSlab(t.Context(), sk, slabIDs[2]); err != nil {
 		t.Fatal(err)
 	} else if err = indexer.Contracts().TriggerContractPruning(); err != nil {
 		t.Fatal(err)
@@ -196,7 +196,7 @@ func TestSectorPinning(t *testing.T) {
 	indexer := cluster.Indexer
 
 	// create an app
-	app, sk := cluster.App(t)
+	sk := cluster.AddAccount(t)
 
 	// wait for contracts to be formed
 	cluster.WaitForContracts(t)
@@ -229,14 +229,14 @@ func TestSectorPinning(t *testing.T) {
 	}
 
 	// pin the slab
-	slabIDs, err := app.PinSlabs(context.Background(), sk, params)
+	slabIDs, err := indexer.App.PinSlabs(context.Background(), sk, params)
 	if err != nil {
 		t.Fatal(err)
 	}
 	slabID := slabIDs[0]
 
 	// fetch account
-	acc, err := app.Account(t.Context(), sk)
+	acc, err := indexer.App.Account(t.Context(), sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestSectorPinning(t *testing.T) {
 	}
 
 	// unpin the slab
-	if err := app.UnpinSlab(context.Background(), sk, slabID); err != nil {
+	if err := indexer.App.UnpinSlab(context.Background(), sk, slabID); err != nil {
 		t.Fatal(err)
 	}
 

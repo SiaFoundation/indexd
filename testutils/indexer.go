@@ -55,7 +55,7 @@ type (
 		appApiAddr string
 
 		Admin *admin.Client
-		App   func() *app.Client
+		App   *app.Client
 
 		cm        *chain.Manager
 		dialer    *client.Dialer
@@ -294,9 +294,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		appApiAddr: appAPIAddr,
 
 		Admin: admin.NewClient(adminAPIAddr, password),
-		App: func() *app.Client {
-			return app.NewClient(appAPIAddr)
-		},
+		App:   app.NewClient(appAPIAddr),
 
 		cm:        c.cm,
 		accounts:  am,

@@ -60,7 +60,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	indexer := cluster.Indexer
 
 	sk := types.GeneratePrivateKey()
-	client := indexer.App()
+	client := indexer.App
 
 	key, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
 		Quota: "default",
@@ -162,7 +162,7 @@ func TestApplicationAPI(t *testing.T) {
 	sk, key := newAccount(t, cluster)
 	sk2, key2 := newAccount(t, cluster)
 
-	client := indexer.App()
+	client := indexer.App
 
 	// check that the key has been used
 	keys, err := adminClient.AppConnectKeys(ctx, 0, 2)
@@ -487,7 +487,7 @@ func TestAppConnect(t *testing.T) {
 	}
 
 	sk := types.GeneratePrivateKey()
-	appClient := indexer.App()
+	appClient := indexer.App
 
 	connected, err := appClient.CheckAppAuth(ctx, sk)
 	if err != nil {
@@ -628,7 +628,7 @@ func TestSharedObjects(t *testing.T) {
 	// prepare accounts
 	sk1, _ := newAccount(t, cluster)
 	sk2, _ := newAccount(t, cluster)
-	appClient := indexer.App()
+	appClient := indexer.App
 
 	// generate and pin a slab
 	slab1Params := uploadRandomSlab(t, client, sk1, hosts)
@@ -689,7 +689,7 @@ func TestSharedObjects(t *testing.T) {
 		t.Fatal("shared object mismatch")
 	}
 
-	// make sure appClient has no objects
+	// make sure appClient returns no objects
 	if objs, err := appClient.ListObjects(ctx, sk2, slabs.Cursor{}, 100); err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
