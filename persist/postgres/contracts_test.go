@@ -14,6 +14,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
@@ -2166,6 +2167,15 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 		nHosts   = 100
 		nSectors = oneTB / proto.SectorSize
 	)
+
+	// increase default quota to fit all sectors
+	if err := store.PutQuota("default", accounts.PutQuotaRequest{
+		Description:   "Default quota",
+		MaxPinnedData: oneTB,
+		TotalUses:     5,
+	}); err != nil {
+		b.Fatal(err)
+	}
 
 	// add account
 	account := proto.Account{1}
