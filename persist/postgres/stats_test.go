@@ -558,6 +558,21 @@ func TestHostStats(t *testing.T) {
 	} else if stats[0].GoodForUpload {
 		t.Fatal("expected hk2 to not be good for upload when stuck")
 	}
+
+	// block hk2 — should no longer be usable or good for upload
+	if err := store.BlockHosts([]types.PublicKey{hk2}, []string{"test"}); err != nil {
+		t.Fatal(err)
+	}
+	stats, err = store.HostStats(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if stats[0].PublicKey != hk2 {
+		t.Fatalf("expected stats[0] to be hk2, got %v", stats[0].PublicKey)
+	} else if stats[0].Usable {
+		t.Fatal("expected hk2 to not be usable when blocked")
+	} else if stats[0].GoodForUpload {
+		t.Fatal("expected hk2 to not be good for upload when blocked")
+	}
 }
 
 func TestAggregatedHostStats(t *testing.T) {

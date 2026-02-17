@@ -196,6 +196,7 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 					h.stuck_since,
 					h.settings_remaining_storage,
 					COALESCE(
+						hb.public_key IS NULL AND
 						h.last_successful_scan IS NOT NULL AND
 						h.recent_uptime >= 0.9 AND
 						h.settings_max_contract_duration >= g.contracts_period AND
