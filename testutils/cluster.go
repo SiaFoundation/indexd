@@ -108,6 +108,7 @@ func NewCluster(t testing.TB, opts ...ClusterOpt) *Cluster {
 	return cluster
 }
 
+// AddAccount adds a new account to the indexer and returns the private key.
 func (c *Cluster) AddAccount(t testing.TB) types.PrivateKey {
 	sk := types.GeneratePrivateKey()
 	c.Indexer.Store().AddTestAccount(t, sk.PublicKey())
