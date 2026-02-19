@@ -683,7 +683,21 @@ func (s *Store) PinSectors(contractID types.FileContractID, roots []types.Hash25
 // MarkSectorsUnpinnable sets the host ID for sectors that haven't been pinned
 // by the threshold time to NULL.
 func (s *Store) MarkSectorsUnpinnable(threshold time.Time) error {
+	const batchSize = 1000
+	for {
+		done, err := s.markSectorsUnpinnableBatch(threshold, batchSize)
+		if err != nil {
+			return err
+		} else if done {
+			return nil
+		}
+	}
+}
+
+func (s *Store) markSectorsUnpinnableBatch(threshold time.Time, limit uint64) (bool, error) {
+	var done bool
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		done = false // reset on retry
 		rows, err := tx.Query(ctx, `
 			WITH selected AS (
 				SELECT id, host_id
@@ -691,6 +705,7 @@ func (s *Store) MarkSectorsUnpinnable(threshold time.Time) error {
 				WHERE host_id IS NOT NULL
 					AND contract_sectors_map_id IS NULL
 					AND uploaded_at <= $1
+				LIMIT $2
 				FOR UPDATE
 			), updated AS (
 				UPDATE sectors s
@@ -699,7 +714,7 @@ func (s *Store) MarkSectorsUnpinnable(threshold time.Time) error {
 				WHERE s.id = selected.id
 				RETURNING selected.host_id
 			)
-			SELECT host_id, COUNT(*) FROM updated GROUP BY host_id`, threshold)
+			SELECT host_id, COUNT(*) FROM updated GROUP BY host_id`, threshold, limit)
 		if err != nil {
 			return fmt.Errorf("failed to prune unpinnable sectors: %w", err)
 		}
@@ -718,6 +733,7 @@ func (s *Store) MarkSectorsUnpinnable(threshold time.Time) error {
 		if err := rows.Err(); err != nil {
 			return err
 		} else if totalUnpinnable == 0 {
+			done = true
 			return nil
 		}
 
@@ -730,7 +746,7 @@ func (s *Store) MarkSectorsUnpinnable(threshold time.Time) error {
 		}
 		return nil
 	})
-	return err
+	return done, err
 }
 
 // UnpinnedSectors returns up to 'limit' sectors which have been uploaded to a host but
