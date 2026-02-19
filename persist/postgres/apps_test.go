@@ -211,7 +211,8 @@ func TestAppConnectKey(t *testing.T) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyAlreadyExists, err)
 	}
 
-	// assert ErrQuotaNotFound is returned when updating to unknown quota
+	// assert ErrQuotaNotFound is returned when adding a key with an unknown
+	// quota
 	if _, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
 		Key:         "bar baz",
 		Description: "test key",

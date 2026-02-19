@@ -46,10 +46,13 @@ func (s *Store) AddAppConnectKey(meta accounts.UpdateAppConnectKey) (key account
 				(SELECT total_uses FROM quotas WHERE name = quota_name)
 		`, meta.Key, userSecret, meta.Description, meta.Quota))
 		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.ForeignKeyViolation {
-			return accounts.ErrQuotaNotFound
-		} else if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
-			return accounts.ErrKeyAlreadyExists
+		if errors.As(err, &pgErr) {
+			switch pgErr.Code {
+			case pgerrcode.ForeignKeyViolation:
+				return accounts.ErrQuotaNotFound
+			case pgerrcode.UniqueViolation:
+				return accounts.ErrKeyAlreadyExists
+			}
 		}
 		return err
 	})
