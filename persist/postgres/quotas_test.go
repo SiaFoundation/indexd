@@ -121,7 +121,7 @@ func TestQuotaInUse(t *testing.T) {
 	}
 
 	// create a connect key using this quota
-	_, err = store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	_, err = store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "test-connect-key",
 		Description: "Test connect key",
 		Quota:       "in-use-quota",

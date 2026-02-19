@@ -54,8 +54,8 @@ type (
 		ValidAppConnectKey(string) (bool, error)
 		AppConnectKeyUserSecret(string) (secret types.Hash256, err error)
 		RegisterAppKey(string, types.PublicKey, AppMeta) error
-		AddAppConnectKey(UpdateAppConnectKey) (ConnectKey, error)
-		UpdateAppConnectKey(UpdateAppConnectKey) (ConnectKey, error)
+		AddAppConnectKey(AppConnectKeyRequest) (ConnectKey, error)
+		UpdateAppConnectKey(AppConnectKeyRequest) (ConnectKey, error)
 		DeleteAppConnectKey(string) error
 		AppConnectKey(key string) (ConnectKey, error)
 		AppConnectKeys(offset, limit int) ([]ConnectKey, error)

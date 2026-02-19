@@ -87,13 +87,14 @@ func (c *Client) DeleteAppConnectKey(ctx context.Context, key string) (err error
 }
 
 // AddAppConnectKey adds a new application connection key.
-func (c *Client) AddAppConnectKey(ctx context.Context, req accounts.AddConnectKeyRequest) (key accounts.ConnectKey, err error) {
+// If the key field in the request is empty, a random key will be generated.
+func (c *Client) AddAppConnectKey(ctx context.Context, req accounts.AppConnectKeyRequest) (key accounts.ConnectKey, err error) {
 	err = c.c.POST(ctx, "/apps/connect/keys", req, &key)
 	return
 }
 
 // UpdateAppConnectKey updates an existing application connection key.
-func (c *Client) UpdateAppConnectKey(ctx context.Context, req accounts.UpdateAppConnectKey) error {
+func (c *Client) UpdateAppConnectKey(ctx context.Context, req accounts.AppConnectKeyRequest) error {
 	return c.c.PUT(ctx, "/apps/connect/keys", req)
 }
 

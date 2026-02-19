@@ -63,7 +63,7 @@ func TestAppConnectKeys(t *testing.T) {
 	var generated []accounts.ConnectKey
 	for i := range 100 {
 		description := fmt.Sprintf("key %d", i)
-		created, err := adminClient.AddAppConnectKey(context.Background(), accounts.AddConnectKeyRequest{
+		created, err := adminClient.AddAppConnectKey(context.Background(), accounts.AppConnectKeyRequest{
 			Description: description,
 			Quota:       "default",
 		})
@@ -82,9 +82,6 @@ func TestAppConnectKeys(t *testing.T) {
 			t.Fatal("expected date created to be set")
 		case created.LastUpdated.IsZero():
 			t.Fatal("expected last updated to be set")
-		}
-		if err != nil {
-			t.Fatal(err)
 		}
 		generated = append(generated, created)
 	}
@@ -121,7 +118,7 @@ func TestAppConnectKeys(t *testing.T) {
 	key := generated[0]
 	key.Description = "foobar"
 
-	err = adminClient.UpdateAppConnectKey(context.Background(), accounts.UpdateAppConnectKey{
+	err = adminClient.UpdateAppConnectKey(context.Background(), accounts.AppConnectKeyRequest{
 		Key:         key.Key,
 		Description: key.Description,
 		Quota:       key.Quota,
@@ -267,7 +264,7 @@ func TestQuotasAPI(t *testing.T) {
 	}
 
 	// create a connect key using this quota
-	_, err = adminClient.AddAppConnectKey(context.Background(), accounts.AddConnectKeyRequest{
+	_, err = adminClient.AddAppConnectKey(context.Background(), accounts.AppConnectKeyRequest{
 		Description: "Test key",
 		Quota:       "in-use-quota",
 	})

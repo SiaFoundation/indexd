@@ -35,7 +35,7 @@ func TestAppConnectKeys(t *testing.T) {
 	store.addTestQuota(t, "test-20-data", 20, 1)
 
 	const connectKey = "foobar"
-	if key, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	if key, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         connectKey,
 		Description: "test key",
 		Quota:       "test-1-use",
@@ -106,7 +106,7 @@ func TestAppConnectKeys(t *testing.T) {
 	}
 
 	// update to a different quota with more data
-	if updated, err := store.UpdateAppConnectKey(accounts.UpdateAppConnectKey{
+	if updated, err := store.UpdateAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         connectKey,
 		Description: "updated key",
 		Quota:       "test-20-data",
@@ -185,7 +185,7 @@ func TestAppConnectKey(t *testing.T) {
 
 	store.addTestQuota(t, "test-quota", 10, 1)
 
-	key, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	key, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "foobar",
 		Description: "test key",
 		Quota:       "test-quota",
@@ -202,7 +202,7 @@ func TestAppConnectKey(t *testing.T) {
 	}
 
 	// assert ErrKeyAlreadyExists is returned when adding an existing key
-	_, err = store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	_, err = store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "foobar",
 		Description: "test key",
 		Quota:       "test-quota",
@@ -213,7 +213,7 @@ func TestAppConnectKey(t *testing.T) {
 
 	// assert ErrQuotaNotFound is returned when adding a key with an unknown
 	// quota
-	if _, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	if _, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "bar baz",
 		Description: "test key",
 		Quota:       "i-dont-exist",
@@ -228,7 +228,7 @@ func TestUpdateConnectKey(t *testing.T) {
 	store.addTestQuota(t, "test-quota", 10, 1)
 	store.addTestQuota(t, "updated-quota", 10, 1)
 
-	key, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	key, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "foobar",
 		Description: "test key",
 		Quota:       "test-quota",
@@ -237,7 +237,7 @@ func TestUpdateConnectKey(t *testing.T) {
 		t.Fatal("failed to add app connect key:", err)
 	}
 
-	updated, err := store.UpdateAppConnectKey(accounts.UpdateAppConnectKey{
+	updated, err := store.UpdateAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "foobar",
 		Description: "updated key",
 		Quota:       "updated-quota",
@@ -249,7 +249,7 @@ func TestUpdateConnectKey(t *testing.T) {
 	}
 
 	// assert ErrQuotaNotFound is returned when updating to unknown quota
-	if _, err := store.UpdateAppConnectKey(accounts.UpdateAppConnectKey{
+	if _, err := store.UpdateAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "foobar",
 		Description: "updated key",
 		Quota:       "i-dont-exist",
@@ -258,7 +258,7 @@ func TestUpdateConnectKey(t *testing.T) {
 	}
 
 	// assert ErrKeyNotFound is returned when updating a non-existent key
-	if _, err := store.UpdateAppConnectKey(accounts.UpdateAppConnectKey{
+	if _, err := store.UpdateAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "i-dont-exist",
 		Description: "updated key",
 		Quota:       "updated-quota",

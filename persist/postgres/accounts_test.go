@@ -20,7 +20,7 @@ import (
 
 func (s *Store) addTestAccount(t testing.TB, ak types.PublicKey, opts ...accounts.AddAccountOption) {
 	connectKey := fmt.Sprintf("test-connect-key-%x", frand.Bytes(8))
-	_, err := s.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	_, err := s.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         connectKey,
 		Description: "test connect key",
 		Quota:       "default",
@@ -74,7 +74,7 @@ func TestAccounts(t *testing.T) {
 	store.addTestQuota(t, "test-100", 100, 10)
 
 	const connectKey = "foobar"
-	if _, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	if _, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         connectKey,
 		Description: "test connect key",
 		Quota:       "test-100",
@@ -151,7 +151,7 @@ func TestAddAccount(t *testing.T) {
 
 	t.Run("user account", func(t *testing.T) {
 		connectKey := fmt.Sprintf("test-connect-key-%x", frand.Bytes(8))
-		_, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+		_, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 			Key:         connectKey,
 			Description: "test connect key",
 			Quota:       "default",
@@ -537,7 +537,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 	}
 
 	// create a connect key for benchmark accounts
-	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	connectKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "benchmark-connect-key",
 		Description: "benchmark connect key",
 		Quota:       "default",
@@ -628,7 +628,7 @@ func BenchmarkUpdateHostAccounts(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
 	// create a connect key for benchmark accounts
-	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	connectKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "benchmark-connect-key",
 		Description: "benchmark connect key",
 		Quota:       "default",
@@ -813,7 +813,7 @@ func TestActiveAccounts(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// create a connect key for test accounts
-	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	connectKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "test-connect-key",
 		Description: "test connect key",
 		Quota:       "default",
@@ -882,7 +882,7 @@ func BenchmarkActiveAccounts(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
 	// create a connect key for benchmark accounts
-	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	connectKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "benchmark-connect-key",
 		Description: "benchmark connect key",
 		Quota:       "default",
@@ -923,7 +923,7 @@ func BenchmarkPruneAccounts(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
 	// create a connect key for benchmark accounts
-	connectKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	connectKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "benchmark-connect-key",
 		Description: "benchmark connect key",
 		Quota:       "default",

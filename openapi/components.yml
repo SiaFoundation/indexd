@@ -1022,7 +1022,7 @@ components:
           format: uint64
           description: Sum of all the pinned data of the accounts associated with this key
 
-    UpdateAppConnectKey:
+    AppConnectKeyRequest:
       type: object
       required:
         - quota
@@ -1030,17 +1030,6 @@ components:
         key:
           type: string
           description: App key/ID
-        description:
-          type: string
-          description: App description
-        quota:
-          $ref: "#/components/schemas/QuotaKey"
-
-    AddConnectKeyRequest:
-      type: object
-      required:
-        - quota
-      properties:
         description:
           type: string
           description: App description

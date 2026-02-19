@@ -46,7 +46,7 @@ func TestConnect(t *testing.T) {
 	ms.WantedContracts = 15
 	cluster := testutils.NewCluster(t, testutils.WithHosts(15), testutils.WithLogger(log.Named("cluster")), testutils.WithIndexer(testutils.WithMaintenanceSettings(ms)))
 
-	connectKey, err := cluster.Indexer.Admin.AddAppConnectKey(t.Context(), accounts.AddConnectKeyRequest{
+	connectKey, err := cluster.Indexer.Admin.AddAppConnectKey(t.Context(), accounts.AppConnectKeyRequest{
 		Description: "test",
 		Quota:       "default",
 	})

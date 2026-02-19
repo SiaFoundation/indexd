@@ -32,10 +32,7 @@ func scanConnectKey(s scanner) (key accounts.ConnectKey, err error) {
 }
 
 // AddAppConnectKey adds or updates an application connection key in the database.
-func (s *Store) AddAppConnectKey(meta accounts.UpdateAppConnectKey) (key accounts.ConnectKey, err error) {
-	if meta.Quota == "" {
-		return accounts.ConnectKey{}, fmt.Errorf("quota is required")
-	}
+func (s *Store) AddAppConnectKey(meta accounts.AppConnectKeyRequest) (key accounts.ConnectKey, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		userSecret := frand.Bytes(32)
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
@@ -61,10 +58,7 @@ func (s *Store) AddAppConnectKey(meta accounts.UpdateAppConnectKey) (key account
 
 // UpdateAppConnectKey updates an existing application connection key in the database.
 // If the key does not exist, it returns [app.ErrKeyNotFound].
-func (s *Store) UpdateAppConnectKey(meta accounts.UpdateAppConnectKey) (key accounts.ConnectKey, err error) {
-	if meta.Quota == "" {
-		return accounts.ConnectKey{}, fmt.Errorf("quota is required")
-	}
+func (s *Store) UpdateAppConnectKey(meta accounts.AppConnectKeyRequest) (key accounts.ConnectKey, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			UPDATE app_connect_keys ack SET (use_description, quota_name) = ($2, $3) WHERE app_key = $1

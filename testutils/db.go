@@ -132,7 +132,7 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 		}); err != nil {
 			t.Fatal(err)
 		}
-		_, err := ts.AddAppConnectKey(accounts.UpdateAppConnectKey{
+		_, err := ts.AddAppConnectKey(accounts.AppConnectKeyRequest{
 			Key:   connectKey,
 			Quota: TestQuotaName,
 		})

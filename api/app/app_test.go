@@ -62,7 +62,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	sk := types.GeneratePrivateKey()
 	client := indexer.App
 
-	key, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
+	key, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AppConnectKeyRequest{
 		Quota: "default",
 	})
 	if err != nil {
@@ -478,7 +478,7 @@ func TestAppConnect(t *testing.T) {
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
 
-	connectKey, err := adminClient.AddAppConnectKey(ctx, accounts.AddConnectKeyRequest{
+	connectKey, err := adminClient.AddAppConnectKey(ctx, accounts.AppConnectKeyRequest{
 		Description: "hello world",
 		Quota:       "default",
 	})

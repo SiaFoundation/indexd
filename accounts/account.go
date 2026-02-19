@@ -17,6 +17,9 @@ var (
 	// account not being found.
 	ErrNotFound = errors.New("account not found")
 
+	// ErrNoQuota is returned when trying to create a connect key without a quota.
+	ErrNoQuota = errors.New("quota is required")
+
 	// ErrAccountStorageLimitExceeded is returned when an operation fails due
 	// to the account exceeding its storage limit.  We use the term "app
 	// storage limit" here because from the user's perspective, they will have

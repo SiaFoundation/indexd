@@ -177,6 +177,7 @@ paths:
       tags:
         - apps
       summary: Update an existing app connect key
+      description: Updates the description and quota of an existing app connect key. The key must already exist.
       operationId: updateAppConnectKey
       requestBody:
         required: true
@@ -185,8 +186,11 @@ paths:
             schema:
               type: object
               allOf:
-                - $ref: "#/components/schemas/UpdateAppConnectKey"
+                - $ref: "#/components/schemas/AppConnectKeyRequest"
                 - description: Update app connect key request
+                  required:
+                    - key
+                    - quota
       responses:
         "200":
           description: App connect key updated successfully
@@ -194,6 +198,7 @@ paths:
       tags:
         - apps
       summary: Create a new app connect key
+      description: Creates a new app connect key. If the key field is omitted, a random key will be generated.
       operationId: createAppConnectKey
       requestBody:
         required: true
@@ -202,8 +207,10 @@ paths:
             schema:
               type: object
               allOf:
-                - $ref: "#/components/schemas/AddConnectKeyRequest"
-                - description: Update app connect key request
+                - $ref: "#/components/schemas/AppConnectKeyRequest"
+                - description: Create app connect key request
+                - required:
+                  - quota
       responses:
         "200":
           description: App connect key created successfully
@@ -1907,10 +1914,8 @@ components:
       $ref: "./components.yml#/components/schemas/ConnectKey"
     AccountStatsResponse:
       $ref: "./components.yml#/components/schemas/AccountStatsResponse"
-    UpdateAppConnectKey:
-      $ref: "./components.yml#/components/schemas/UpdateAppConnectKey"
-    AddConnectKeyRequest:
-      $ref: "./components.yml#/components/schemas/AddConnectKeyRequest"
+    AppConnectKeyRequest:
+      $ref: "./components.yml#/components/schemas/AppConnectKeyRequest"
     QuotaKey:
       $ref: "./components.yml#/components/schemas/QuotaKey"
     Quota:

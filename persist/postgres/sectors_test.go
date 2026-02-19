@@ -283,9 +283,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 			}
 			roots = append(roots, root)
 		}
-		if err != nil {
-			t.Fatal(err)
-		} else if len(roots) != len(expectedRoots) {
+		if len(roots) != len(expectedRoots) {
 			t.Fatalf("expected %d failing sectors, got %d", len(expectedRoots), len(roots))
 		} else if len(roots) > 0 && !reflect.DeepEqual(roots, expectedRoots) {
 			t.Fatalf("expected failing sectors %v, got %v", expectedRoots, roots)
@@ -886,7 +884,7 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 	store.addTestQuota(t, "storage-limit-test", 2*proto.SectorSize, 2)
 
 	const connectKey = "foobar"
-	key, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	key, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         connectKey,
 		Description: "test key",
 		Quota:       "storage-limit-test",
@@ -1475,9 +1473,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// assert slab1 is unhealthy
 	unhealthy = assertUnhealthySlabs(1, 10)
-	if err != nil {
-		t.Fatal(err)
-	} else if unhealthy[0] != slabID1 {
+	if unhealthy[0] != slabID1 {
 		t.Fatalf("expected slab ID %v, got %v", slabID1, unhealthy[0])
 	}
 	resetNextRepairAttemptTime()
