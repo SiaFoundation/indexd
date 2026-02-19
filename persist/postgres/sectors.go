@@ -47,7 +47,8 @@ func (s *Store) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) 
 		rows, err := tx.Query(ctx, `
 			SELECT id, contract_sectors_map_id
 			FROM sectors
-			WHERE host_id = $1 AND sector_root = ANY($2)`, hostID, sqlRoots)
+			WHERE host_id = $1 AND sector_root = ANY($2)
+			FOR UPDATE`, hostID, sqlRoots)
 		if err != nil {
 			return fmt.Errorf("failed to query sectors: %w", err)
 		}
@@ -185,6 +186,7 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 			FROM sectors
 			WHERE host_id = $1 AND consecutive_failed_checks >= $2
 			LIMIT $3
+			FOR UPDATE
 		`, hostID, maxChecks, batchSize)
 		if err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
@@ -648,7 +650,8 @@ func (s *Store) PinSectors(contractID types.FileContractID, roots []types.Hash25
 		rows, err := tx.Query(ctx, `
 			SELECT id, contract_sectors_map_id
 			FROM sectors
-			WHERE sector_root = ANY($1) AND (contract_sectors_map_id IS NULL OR contract_sectors_map_id != $2)`, sqlRoots, contractMapID)
+			WHERE sector_root = ANY($1) AND (contract_sectors_map_id IS NULL OR contract_sectors_map_id != $2)
+			FOR UPDATE`, sqlRoots, contractMapID)
 		if err != nil {
 			return fmt.Errorf("failed to query sectors: %w", err)
 		}
@@ -688,6 +691,7 @@ func (s *Store) MarkSectorsUnpinnable(threshold time.Time) error {
 				WHERE host_id IS NOT NULL
 					AND contract_sectors_map_id IS NULL
 					AND uploaded_at <= $1
+				FOR UPDATE
 			), updated AS (
 				UPDATE sectors s
 				SET host_id = NULL, consecutive_failed_checks = 0
@@ -847,7 +851,8 @@ func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migr
 		err := tx.QueryRow(ctx, `
 			SELECT id, host_id, contract_sectors_map_id
 			FROM sectors
-			WHERE sector_root = $1`, sqlHash256(root)).Scan(&sectorID, &oldHostID, &contractMapID)
+			WHERE sector_root = $1
+			FOR UPDATE`, sqlHash256(root)).Scan(&sectorID, &oldHostID, &contractMapID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // not migrated
 		} else if err != nil {

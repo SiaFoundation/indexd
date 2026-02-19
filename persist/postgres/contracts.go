@@ -739,17 +739,10 @@ func (s *Store) DeleteContract(contractID types.FileContractID) error {
 			return fmt.Errorf("failed to get contract sectors map ID: %w", err)
 		}
 
-		// count the number of sectors pinned to this contract
-		var pinned, hostID int64
-		err = tx.QueryRow(ctx, `SELECT COUNT(*), any_value(host_id) FROM sectors WHERE contract_sectors_map_id = $1`, contractMapID).Scan(&pinned, &hostID)
-		if err != nil {
-			return fmt.Errorf("failed to count pinned sectors: %w", err)
-		}
-
 		// unpin all sectors by setting contract_sectors_map_id to NULL and
 		// updating uploaded_at to prevent MarkSectorsUnpinnable from immediately
 		// marking them as unpinnable
-		_, err = tx.Exec(ctx, `UPDATE sectors SET contract_sectors_map_id = NULL, uploaded_at = NOW() WHERE contract_sectors_map_id = $1`, contractMapID)
+		res, err := tx.Exec(ctx, `UPDATE sectors SET contract_sectors_map_id = NULL, uploaded_at = NOW() WHERE contract_sectors_map_id = $1`, contractMapID)
 		if err != nil {
 			return fmt.Errorf("failed to unpin sectors: %w", err)
 		}
@@ -761,7 +754,13 @@ func (s *Store) DeleteContract(contractID types.FileContractID) error {
 		}
 
 		// update stats
-		if pinned > 0 {
+		if pinned := res.RowsAffected(); pinned > 0 {
+			var hostID int64
+			err = tx.QueryRow(ctx, `SELECT host_id FROM contracts WHERE contract_id = $1`, sqlHash256(contractID)).Scan(&hostID)
+			if err != nil {
+				return fmt.Errorf("failed to get host ID: %w", err)
+			}
+
 			if err := incrementNumPinnedSectors(ctx, tx, -pinned); err != nil {
 				return fmt.Errorf("failed to update pinned sectors stat: %w", err)
 			} else if err := incrementNumUnpinnedSectors(ctx, tx, pinned); err != nil {
