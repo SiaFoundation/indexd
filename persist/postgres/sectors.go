@@ -851,7 +851,9 @@ func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migr
 		err := tx.QueryRow(ctx, `
 			SELECT id, host_id, contract_sectors_map_id
 			FROM sectors
-			WHERE sector_root = $1`, sqlHash256(root)).Scan(&sectorID, &oldHostID, &contractMapID)
+			WHERE sector_root = $1
+			FOR UPDATE
+		`, sqlHash256(root)).Scan(&sectorID, &oldHostID, &contractMapID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // not migrated
 		} else if err != nil {
