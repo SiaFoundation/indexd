@@ -63,6 +63,16 @@ func TestCORSOptions(t *testing.T) {
 		return resp
 	}
 
+	resp := doRequest(t, http.MethodOptions, "/non-existent")
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected status code %d, got %d", http.StatusNotFound, resp.StatusCode)
+	}
+	for key := range expectedCORSHeaders {
+		if resp.Header.Get(key) != "" {
+			t.Fatalf("expected header %s to be empty, got %s", key, resp.Header.Get(key))
+		}
+	}
+
 	for _, path := range enabledRoutes {
 		resp := doRequest(t, http.MethodOptions, path)
 		if resp.StatusCode != http.StatusNoContent {
