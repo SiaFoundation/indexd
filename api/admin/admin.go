@@ -361,7 +361,10 @@ func (a *admin) handlePOSTAppConnectKeys(jc jape.Context) {
 	}
 
 	created, err := a.accounts.AddAppConnectKey(jc.Request.Context(), req)
-	if errors.Is(err, accounts.ErrQuotaNotFound) {
+	if errors.Is(err, accounts.ErrKeyAlreadyExists) {
+		jc.Error(err, http.StatusConflict)
+		return
+	} else if errors.Is(err, accounts.ErrQuotaNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if errors.Is(err, accounts.ErrNoQuota) {

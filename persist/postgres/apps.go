@@ -38,10 +38,14 @@ func (s *Store) AddAppConnectKey(meta accounts.AppConnectKeyRequest) (key accoun
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			INSERT INTO app_connect_keys (app_key, user_secret, use_description, quota_name)
 			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (app_key) DO NOTHING
 			RETURNING app_key, use_description, created_at, updated_at, last_used, pinned_data,
 				quota_name,
 				(SELECT total_uses FROM quotas WHERE name = quota_name)
 		`, meta.Key, userSecret, meta.Description, meta.Quota))
+		if errors.Is(err, sql.ErrNoRows) {
+			return accounts.ErrKeyAlreadyExists
+		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) {
 			switch pgErr.Code {

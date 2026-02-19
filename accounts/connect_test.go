@@ -42,6 +42,15 @@ func TestConnectKeys(t *testing.T) {
 		t.Fatalf("expected quota to be 'default', got %q", key.Quota)
 	}
 
+	// add the same key
+	if _, err := am.AddAppConnectKey(t.Context(), accounts.AppConnectKeyRequest{
+		Key:         "hello-world",
+		Description: "test",
+		Quota:       "default",
+	}); !errors.Is(err, accounts.ErrKeyAlreadyExists) {
+		t.Fatalf("expected ErrKeyAlreadyExists, got %q", err)
+	}
+
 	// add random connect key
 	key2, err := am.AddAppConnectKey(t.Context(), accounts.AppConnectKeyRequest{
 		Description: "random key",

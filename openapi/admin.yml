@@ -194,6 +194,10 @@ paths:
       responses:
         "200":
           description: App connect key updated successfully
+        "400":
+          description: Quota is required
+        "404":
+          description: Connect key or quota not found
     post:
       tags:
         - apps
@@ -220,6 +224,12 @@ paths:
                 allOf:
                   - $ref: "#/components/schemas/ConnectKey"
                   - description: The newly created app connect key.
+        "400":
+          description: Quota is required
+        "404":
+          description: Quota not found
+        "409":
+          description: Connect key already exists
 
   /apps/connect/keys/{connectkey}:
     get:
