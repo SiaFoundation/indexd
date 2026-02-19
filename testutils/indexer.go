@@ -18,7 +18,7 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
-	client2 "go.sia.tech/indexd/client/v2"
+	client "go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
@@ -57,7 +57,7 @@ type (
 		App   *app.Client
 
 		cm        *chain.Manager
-		client    *client2.Client
+		client    *client.Client
 		signer    rhp.FormContractSigner
 		accounts  *accounts.AccountManager
 		contracts *contracts.ContractManager
@@ -159,11 +159,11 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	}
 	syncer := NewSyncer(t, c.genesis.ID(), c.cm)
 
-	client2 := client2.New(client2.NewProvider(hosts.NewHostStore(store)))
+	client := client.New(client.NewProvider(hosts.NewHostStore(store)))
 
 	alerter := alerts.NewManager()
 
-	hm, err := hosts.NewManager(syncer, locator, client2, store, alerter, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(200*time.Millisecond), hosts.WithScanInterval(time.Second))
+	hm, err := hosts.NewManager(syncer, locator, client, store, alerter, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(200*time.Millisecond), hosts.WithScanInterval(time.Second))
 	if err != nil {
 		t.Fatalf("failed to create host manager: %v", err)
 	}
@@ -174,14 +174,14 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to create accounts manager: %v", err)
 	}
 
-	rev := contracts.NewRevisionManager(client2, c.cm, store, 1, log.Named("revision"))
-	f := contracts.NewFunder(client2, rev, signer, c.cm, log.Named("funder"))
-	contracts, err := contracts.NewManager(walletKey, am, f, c.cm, store, client2, signer, rev, hm, s, wm, cfg.contractOpts...)
+	rev := contracts.NewRevisionManager(client, c.cm, store, 1, log.Named("revision"))
+	f := contracts.NewFunder(client, rev, signer, c.cm, log.Named("funder"))
+	contracts, err := contracts.NewManager(walletKey, am, f, c.cm, store, client, signer, rev, hm, s, wm, cfg.contractOpts...)
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
 
-	slabs, err := slabs.NewManager(c.cm, am, contracts, hm, store, client2, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), cfg.slabOpts...)
+	slabs, err := slabs.NewManager(c.cm, am, contracts, hm, store, client, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), cfg.slabOpts...)
 	if err != nil {
 		t.Fatalf("failed to create slab manager: %v", err)
 	}
@@ -297,7 +297,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		App:   app.NewClient(appAPIAddr),
 
 		cm:        c.cm,
-		client:    client2,
+		client:    client,
 		signer:    signer,
 		accounts:  am,
 		hosts:     hm,
@@ -320,7 +320,7 @@ func (idx *Indexer) AddTestAccount(t *testing.T, pk types.PublicKey) {
 }
 
 // Client returns the underlying client/v2 client.
-func (idx *Indexer) Client() *client2.Client {
+func (idx *Indexer) Client() *client.Client {
 	return idx.client
 }
 
