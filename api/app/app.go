@@ -699,7 +699,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		"DELETE /slabs/:slabid": wrapSignedAuth(a.handleDELETESlab),
 	}, map[string]jape.Handler{
 		// CORS is disabled on these routes because we don't want to encourage programmatic access. It can't be
-		// blocked entirely, but it's less convenient without CORs support.
+		// blocked entirely, but it's less convenient without CORS support.
 		"GET /auth/connect/:requestID":  a.handleGETAuthConnectUI,               // UI for accept/reject connection requests
 		"POST /auth/connect/:requestID": wrapBasicAuth(a.handlePOSTAuthConnect), // API for accept/reject connection requests
 	}), nil

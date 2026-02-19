@@ -31,22 +31,6 @@ func TestCORSOptions(t *testing.T) {
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	assertOptionsResponse := func(t *testing.T, path string, expected int) {
-		t.Helper()
-
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodOptions, ts.URL+path, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			t.Fatal(err)
-		} else if resp.StatusCode != expected {
-			t.Fatalf("expected status code %d, got %d", expected, resp.StatusCode)
-		}
-	}
-
 	enabledRoutes := []string{
 		"/auth/connect",
 		"/auth/connect/asdasd/status",
@@ -58,12 +42,52 @@ func TestCORSOptions(t *testing.T) {
 		"/auth/connect/asdasd", // both disabled routes have the same path but different methods.
 	}
 
+	expectedCORSHeaders := map[string]string{
+		"Access-Control-Allow-Origin":  "*",
+		"Access-Control-Allow-Methods": "GET, POST, DELETE",
+		"Access-Control-Allow-Headers": "*",
+	}
+
+	doRequest := func(t *testing.T, method, path string) *http.Response {
+		t.Helper()
+
+		req, err := http.NewRequestWithContext(t.Context(), method, ts.URL+path, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		return resp
+	}
+
 	for _, path := range enabledRoutes {
-		assertOptionsResponse(t, path, http.StatusNoContent)
+		resp := doRequest(t, http.MethodOptions, path)
+		if resp.StatusCode != http.StatusNoContent {
+			t.Fatalf("expected status code %d, got %d", http.StatusNoContent, resp.StatusCode)
+		}
+		for key, value := range expectedCORSHeaders {
+			if resp.Header.Get(key) != value {
+				t.Fatalf("expected header %s to be %s, got %s", key, value, resp.Header.Get(key))
+			}
+		}
 	}
 
 	for _, path := range disabledRoutes {
-		assertOptionsResponse(t, path, http.StatusMethodNotAllowed)
+		resp := doRequest(t, http.MethodOptions, path)
+		if resp.StatusCode != http.StatusOK {
+			// httprouter returns 200 OK for OPTIONS requests by default
+			// this is acceptable as long as the CORS headers are not present
+			t.Fatalf("expected status code %d, got %d", http.StatusOK, resp.StatusCode)
+		}
+
+		for key := range expectedCORSHeaders {
+			if resp.Header.Get(key) != "" {
+				t.Fatalf("expected header %s to be empty, got %s", key, resp.Header.Get(key))
+			}
+		}
 	}
 }
 
