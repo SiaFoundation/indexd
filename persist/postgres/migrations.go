@@ -769,7 +769,7 @@ ALTER TABLE app_connect_keys DROP COLUMN remaining_uses;
 			FROM (
 				SELECT host_id, COUNT(*) as cnt
 				FROM sectors
-				WHERE contract_sectors_map_id IS NULL
+				WHERE contract_sectors_map_id IS NULL AND host_id IS NOT NULL
 				GROUP BY host_id
 			) sub
 			WHERE h.id = sub.host_id;
@@ -779,7 +779,7 @@ ALTER TABLE app_connect_keys DROP COLUMN remaining_uses;
 			WHERE id NOT IN (
 				SELECT DISTINCT host_id
 				FROM sectors
-				WHERE contract_sectors_map_id IS NULL
+				WHERE contract_sectors_map_id IS NULL AND host_id IS NOT NULL
 			);
 		`)
 		return err
