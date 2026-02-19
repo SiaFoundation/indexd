@@ -29,6 +29,61 @@ const (
 	uptimeHalfLife = 60 * 60 * 24 * 7 * 12 // 3 months
 )
 
+const (
+	// sqlGlobalsCTE fetches settings from global_settings for use in host
+	// usability calculations.
+	sqlGlobalsCTE = `globals AS (
+	SELECT
+		scanned_height,
+		contracts_period,
+		hosts_min_collateral,
+		hosts_max_storage_price,
+		hosts_max_ingress_price,
+		hosts_max_egress_price,
+		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
+		250000::NUMERIC AS sectors_per_tb,
+		1E12::NUMERIC AS one_tb,
+		1E24::NUMERIC AS one_sc
+	FROM global_settings
+)`
+
+	// sqlUsabilityCheckColumns are the boolean expressions for each
+	// usability check, returned as individual SELECT columns. Assumes
+	// has_settings, settings_version, and globals.* are in scope.
+	sqlUsabilityCheckColumns = `
+	recent_uptime >= 0.9,
+	has_settings AND settings_max_contract_duration >= globals.contracts_period,
+	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
+	has_settings AND settings_version >= globals.host_min_version,
+	has_settings AND settings_valid_until >= last_successful_scan + INTERVAL '15 minutes',
+	has_settings AND settings_accepting_contracts,
+	has_settings AND settings_contract_price <= globals.one_sc,
+	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
+	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
+	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
+	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
+	has_settings AND settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb`
+
+	// sqlUsabilityFilter is the usability conditions AND'd together for
+	// use in WHERE clauses. Assumes has_settings, settings_version, and
+	// globals.* are in scope.
+	sqlUsabilityFilter = `
+	recent_uptime >= 0.9 AND
+	has_settings AND
+	settings_max_contract_duration >= globals.contracts_period AND
+	settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
+	settings_version >= globals.host_min_version AND
+	settings_valid_until >= last_successful_scan + INTERVAL '15 minutes' AND
+	settings_accepting_contracts AND
+	settings_contract_price <= globals.one_sc AND
+	settings_collateral >= globals.hosts_min_collateral AND
+	settings_collateral >= 2 * settings_storage_price AND
+	settings_storage_price <= globals.hosts_max_storage_price AND
+	settings_ingress_price <= globals.hosts_max_ingress_price AND
+	settings_egress_price <= globals.hosts_max_egress_price AND
+	settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb`
+)
+
 type dbHost struct {
 	id            int64
 	GoodForUpload bool // used by UsableHosts query
@@ -62,19 +117,7 @@ func (s *Store) Host(hk types.PublicKey) (hosts.Host, error) {
 	var host hosts.Host
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		dbHost, err := scanHost(tx.QueryRow(ctx, `
-WITH globals AS (
-	SELECT
-		contracts_period,
-		hosts_min_collateral,
-		hosts_max_storage_price,
-		hosts_max_ingress_price,
-		hosts_max_egress_price,
-		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
-		250000::NUMERIC AS sectors_per_tb,
-		1E12::NUMERIC AS one_tb,
-		1E24::NUMERIC AS one_sc
-	FROM global_settings
-), hosts AS (
+WITH `+sqlGlobalsCTE+`, hosts AS (
 	SELECT
 		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, hb.reasons,
 		lost_sectors, unpinned_sectors,
@@ -91,19 +134,7 @@ WITH globals AS (
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 	WHERE hosts.public_key = $1
 ) SELECT
-	hosts.*,
-	recent_uptime >= 0.9,
-	has_settings AND settings_max_contract_duration >= globals.contracts_period,
-	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
-	has_settings AND settings_version >= globals.host_min_version,
-	has_settings AND settings_valid_until >= last_successful_scan + INTERVAL '15 minutes',
-	has_settings AND settings_accepting_contracts,
-	has_settings AND settings_contract_price <= globals.one_sc,
-	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
-	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
-	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
-	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
-	has_settings AND settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb
+	hosts.*,`+sqlUsabilityCheckColumns+`
 FROM hosts CROSS JOIN globals;`, sqlPublicKey(hk)))
 		if errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("host %q: %w", hk, hosts.ErrNotFound)
@@ -148,20 +179,7 @@ func (s *Store) Hosts(offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hos
 		hosts = hosts[:0] // reuse same slice if transaction retries
 
 		rows, err := tx.Query(ctx, fmt.Sprintf(`
-WITH globals AS (
-    SELECT
-		scanned_height,
-		contracts_period,
-		hosts_min_collateral,
-		hosts_max_storage_price,
-		hosts_max_ingress_price,
-		hosts_max_egress_price,
-		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
-		250000::NUMERIC AS sectors_per_tb,
-		1E12::NUMERIC AS one_tb,
-		1E24::NUMERIC AS one_sc
-    FROM global_settings
-), hosts AS (
+WITH `+sqlGlobalsCTE+`, hosts AS (
 	SELECT
 		id, hosts.public_key, last_announcement, hb.public_key IS NOT NULL AS blocked, hb.reasons,
 		lost_sectors, unpinned_sectors,
@@ -177,37 +195,11 @@ WITH globals AS (
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 ) SELECT
- 	hosts.*,
-	recent_uptime >= 0.9,
-	has_settings AND settings_max_contract_duration >= globals.contracts_period,
-	has_settings AND settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period,
-	has_settings AND settings_version >= globals.host_min_version,
-	has_settings AND settings_valid_until >= last_successful_scan + INTERVAL '15 minutes',
-	has_settings AND settings_accepting_contracts,
-	has_settings AND settings_contract_price <= globals.one_sc,
-	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
-	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
-	has_settings AND settings_ingress_price <= globals.hosts_max_ingress_price,
-	has_settings AND settings_egress_price <= globals.hosts_max_egress_price,
-	has_settings AND settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb
+ 	hosts.*,`+sqlUsabilityCheckColumns+`
 FROM hosts CROSS JOIN globals
 WHERE
 	-- usable host filter
-	(($3::boolean IS NULL) OR ($3::boolean = (
-		recent_uptime >= 0.9 AND
-		has_settings AND
-		settings_max_contract_duration >= globals.contracts_period AND
-		settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
-		settings_version >= globals.host_min_version AND
-		settings_valid_until >= last_successful_scan + INTERVAL '15 minutes' AND
-		settings_accepting_contracts AND
-		settings_contract_price <= globals.one_sc AND
-		settings_collateral >= globals.hosts_min_collateral AND
-		settings_collateral >= 2 * settings_storage_price AND
-		settings_storage_price <= globals.hosts_max_storage_price AND
-		settings_ingress_price <= globals.hosts_max_ingress_price AND
-		settings_egress_price <= globals.hosts_max_egress_price AND
-		settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb
+	(($3::boolean IS NULL) OR ($3::boolean = (`+sqlUsabilityFilter+`
 		)
 	))
 	-- blocked host filter
@@ -624,20 +616,7 @@ func (s *Store) UsableHosts(offset, limit int, opts ...hosts.UsableHostQueryOpt)
 		usable = usable[:0] // reuse same slice if transaction retries
 
 		baseQuery := `
-WITH globals AS (
-    SELECT
-		scanned_height,
-		contracts_period,
-		hosts_min_collateral,
-		hosts_max_storage_price,
-		hosts_max_ingress_price,
-		hosts_max_egress_price,
-		(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
-		250000::NUMERIC AS sectors_per_tb,
-		1E12::NUMERIC AS one_tb,
-		1E24::NUMERIC AS one_sc
-    FROM global_settings
-), hosts AS (
+WITH ` + sqlGlobalsCTE + `, hosts AS (
 	SELECT
 		id,
 		hosts.public_key,
@@ -663,10 +642,11 @@ WITH globals AS (
 		settings_tip_height,
 		settings_valid_until,
 		settings_signature,
+		last_successful_scan IS NOT NULL AS has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
 		(stuck_since IS NULL AND settings_remaining_storage > 0) AS good_for_upload
 	FROM hosts
-	WHERE last_successful_scan IS NOT NULL -- has settings
+	WHERE last_successful_scan IS NOT NULL
 )
 SELECT
 	hosts.id,
@@ -676,21 +656,7 @@ SELECT
 	hosts.good_for_upload
 FROM hosts
 CROSS JOIN globals
-WHERE
-	-- usable
-	recent_uptime >= 0.9 AND
-	settings_max_contract_duration >= globals.contracts_period AND
-	settings_max_collateral >= settings_collateral * globals.one_tb * globals.contracts_period AND
-	settings_version >= globals.host_min_version AND
-	settings_valid_until >= last_successful_scan + INTERVAL '15 minutes' AND
-	settings_accepting_contracts AND
-	settings_contract_price <= globals.one_sc AND
-	settings_collateral >= globals.hosts_min_collateral AND
-	settings_collateral >= 2 * settings_storage_price AND
-	settings_storage_price <= globals.hosts_max_storage_price AND
-	settings_ingress_price <= globals.hosts_max_ingress_price AND
-	settings_egress_price <= globals.hosts_max_egress_price AND
-	settings_free_sector_price <= globals.one_sc / globals.sectors_per_tb AND
+WHERE` + sqlUsabilityFilter + ` AND
 	-- country filter
 	($3::text IS NULL OR country_code = $3::text) AND
 	-- active and good contracts

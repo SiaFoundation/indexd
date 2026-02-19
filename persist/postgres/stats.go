@@ -165,69 +165,58 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 		stats = stats[:0] // reuse same slice if transaction retries
 
 		rows, err := tx.Query(ctx, `
-			WITH globals AS (
-				SELECT
-					scanned_height,
-					contracts_period,
-					hosts_min_collateral,
-					hosts_max_storage_price,
-					hosts_max_ingress_price,
-					hosts_max_egress_price,
-					(get_byte(hosts_min_protocol_version, 0) << 16) + (get_byte(hosts_min_protocol_version, 1) << 8) + (get_byte(hosts_min_protocol_version, 2)) AS host_min_version,
-					250000::NUMERIC AS sectors_per_tb,
-					1E12::NUMERIC AS one_tb,
-					1E24::NUMERIC AS one_sc
-				FROM global_settings
-			),
+			WITH `+sqlGlobalsCTE+`,
 			selected_hosts AS (
 				SELECT
-					h.id,
-					h.public_key,
-					h.lost_sectors,
-					h.unpinned_sectors,
-					h.usage_account_funding,
-					h.usage_total_spent,
-					h.settings_protocol_version,
-					h.settings_release,
-					h.scans,
-					h.scans_failed,
-					hb.public_key IS NOT NULL AS blocked,
-					COALESCE(hb.reasons, ARRAY[]::TEXT[]) AS blocked_reasons,
-					h.stuck_since,
-					h.settings_remaining_storage,
-					COALESCE(
-						hb.public_key IS NULL AND
-						h.last_successful_scan IS NOT NULL AND
-						h.recent_uptime >= 0.9 AND
-						h.settings_max_contract_duration >= g.contracts_period AND
-						h.settings_max_collateral >= h.settings_collateral * g.one_tb * g.contracts_period AND
-						(get_byte(h.settings_protocol_version, 0) << 16) + (get_byte(h.settings_protocol_version, 1) << 8) + (get_byte(h.settings_protocol_version, 2)) >= g.host_min_version AND
-						h.settings_valid_until >= h.last_successful_scan + INTERVAL '15 minutes' AND
-						h.settings_accepting_contracts AND
-						h.settings_contract_price <= g.one_sc AND
-						h.settings_collateral >= g.hosts_min_collateral AND
-						h.settings_collateral >= 2 * h.settings_storage_price AND
-						h.settings_storage_price <= g.hosts_max_storage_price AND
-						h.settings_ingress_price <= g.hosts_max_ingress_price AND
-						h.settings_egress_price <= g.hosts_max_egress_price AND
-						h.settings_free_sector_price <= g.one_sc / g.sectors_per_tb AND
-						EXISTS (
-							SELECT 1
-							FROM contracts
-							WHERE host_id = h.id
-								AND state IN (0,1)
-								AND renewed_to IS NULL
-								AND good
-								AND proof_height > g.scanned_height
-						),
-					FALSE) AS usable
-				FROM hosts h
-				LEFT JOIN hosts_blocklist hb ON hb.public_key = h.public_key
-				CROSS JOIN globals g
-				WHERE h.usage_total_spent > 0
-				ORDER BY h.usage_total_spent DESC
-				OFFSET $1
-				LIMIT $2
+					sq.*,
+					COALESCE(NOT sq.blocked AND (`+sqlUsabilityFilter+`
+					) AND EXISTS (
+						SELECT 1
+						FROM contracts
+						WHERE host_id = sq.id
+							AND state IN (0,1)
+							AND renewed_to IS NULL
+							AND good
+							AND proof_height > globals.scanned_height
+					), FALSE) AS usable
+				FROM (
+					SELECT
+						h.id,
+						h.public_key,
+						h.lost_sectors,
+						h.unpinned_sectors,
+						h.usage_account_funding,
+						h.usage_total_spent,
+						h.settings_protocol_version,
+						h.settings_release,
+						h.scans,
+						h.scans_failed,
+						hb.public_key IS NOT NULL AS blocked,
+						COALESCE(hb.reasons, ARRAY[]::TEXT[]) AS blocked_reasons,
+						h.stuck_since,
+						h.settings_remaining_storage,
+						h.last_successful_scan IS NOT NULL AS has_settings,
+						(get_byte(h.settings_protocol_version, 0) << 16) + (get_byte(h.settings_protocol_version, 1) << 8) + (get_byte(h.settings_protocol_version, 2)) AS settings_version,
+						h.recent_uptime,
+						h.settings_max_contract_duration,
+						h.settings_max_collateral,
+						h.settings_collateral,
+						h.settings_valid_until,
+						h.last_successful_scan,
+						h.settings_accepting_contracts,
+						h.settings_contract_price,
+						h.settings_storage_price,
+						h.settings_ingress_price,
+						h.settings_egress_price,
+						h.settings_free_sector_price
+					FROM hosts h
+					LEFT JOIN hosts_blocklist hb ON hb.public_key = h.public_key
+					WHERE h.usage_total_spent > 0
+					ORDER BY h.usage_total_spent DESC
+					OFFSET $1
+					LIMIT $2
+				) sq
+				CROSS JOIN globals
 			)
 			SELECT
 				h.public_key,
