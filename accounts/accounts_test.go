@@ -51,13 +51,13 @@ func TestAccountFunding(t *testing.T) {
 	}
 
 	// create connect keys for each quota
-	if _, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	if _, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:   connectKey1,
 		Quota: quota1Name,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	if _, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:   connectKey2,
 		Quota: quota2Name,
 	}); err != nil {
