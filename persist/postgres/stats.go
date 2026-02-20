@@ -168,12 +168,12 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 			WITH `+sqlGlobalsCTE+`,
 			selected_hosts AS (
 				SELECT
-					sq.*,
-					COALESCE(NOT sq.blocked AND (`+sqlUsabilityFilter+`
+					host.*,
+					COALESCE(NOT host.blocked AND (`+sqlUsabilityFilter+`
 					) AND EXISTS (
 						SELECT 1
 						FROM contracts
-						WHERE host_id = sq.id
+						WHERE host_id = host.id
 							AND state IN (0,1)
 							AND renewed_to IS NULL
 							AND good
@@ -215,7 +215,7 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 					ORDER BY h.usage_total_spent DESC
 					OFFSET $1
 					LIMIT $2
-				) sq
+				) host
 				CROSS JOIN globals
 			)
 			SELECT
