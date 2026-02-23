@@ -784,4 +784,12 @@ ALTER TABLE app_connect_keys DROP COLUMN remaining_uses;
 		`)
 		return err
 	},
+	// add fund_target_bytes column to quotas table
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE quotas ADD COLUMN fund_target_bytes BIGINT NOT NULL DEFAULT 17179869184 CHECK (fund_target_bytes >= 0);
+ALTER TABLE quotas ALTER COLUMN fund_target_bytes DROP DEFAULT;
+`)
+		return err
+	},
 }

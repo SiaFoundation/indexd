@@ -285,7 +285,7 @@ func (s *hostManagerMock) UsabilitySettings(ctx context.Context) (hosts.Usabilit
 func TestPerformContractFormation(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	store := newTestStore(t)
-	amMock := &accountsManagerMock{}
+	amMock := newAccountsManagerMock()
 	cmMock := newChainManagerMock()
 	blockHeight := cmMock.TipState().Index.Height
 	syncerMock := &syncerMock{}

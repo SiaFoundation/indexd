@@ -483,9 +483,11 @@ func (a *admin) handlePUTQuota(jc jape.Context) {
 	var req accounts.PutQuotaRequest
 	if jc.Decode(&req) != nil {
 		return
-	}
-	if req.TotalUses < 0 {
+	} else if req.TotalUses < 0 {
 		jc.Error(errors.New("totalUses must be non-negative"), http.StatusBadRequest)
+		return
+	} else if req.FundTargetBytes == nil {
+		jc.Error(errors.New("fundTargetBytes is required"), http.StatusBadRequest)
 		return
 	}
 

@@ -2,6 +2,7 @@ package contracts_test
 
 import (
 	"context"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +14,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const testFundTargetBytes = uint64(1 << 30) // 1 GiB
+
 type fundAccountsCall struct {
 	host        hosts.Host
 	contractIDs []types.FileContractID
@@ -20,11 +23,19 @@ type fundAccountsCall struct {
 
 type accountsManagerMock struct {
 	mu             sync.Mutex
-	activeAccounts uint64
 	accountsToFund []accounts.HostAccount
+	quotaInfos     []accounts.QuotaFundInfo
 }
 
-func (am *accountsManagerMock) AccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
+func newAccountsManagerMock() *accountsManagerMock {
+	return &accountsManagerMock{
+		quotaInfos: []accounts.QuotaFundInfo{
+			{QuotaName: "default", FundTargetBytes: testFundTargetBytes},
+		},
+	}
+}
+
+func (am *accountsManagerMock) AccountsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	cpy := make([]accounts.HostAccount, len(am.accountsToFund))
@@ -32,10 +43,23 @@ func (am *accountsManagerMock) AccountsForFunding(hk types.PublicKey, threshold 
 	return cpy, nil
 }
 
-func (am *accountsManagerMock) ActiveAccounts(threshold time.Time) (uint64, error) {
+func (am *accountsManagerMock) AccountFundingInfo(threshold time.Time) ([]accounts.QuotaFundInfo, error) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	return am.activeAccounts, nil
+	return slices.Clone(am.quotaInfos), nil
+}
+
+func (am *accountsManagerMock) Quotas(_ context.Context, offset, limit int) ([]accounts.Quota, error) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	var quotas []accounts.Quota
+	for _, quotaInfo := range am.quotaInfos {
+		quotas = append(quotas, accounts.Quota{
+			Key:             quotaInfo.QuotaName,
+			FundTargetBytes: quotaInfo.FundTargetBytes,
+		})
+	}
+	return quotas, nil
 }
 
 func (am *accountsManagerMock) ScheduleAccountsForFunding(hostKey types.PublicKey) error {
@@ -54,12 +78,6 @@ func (am *accountsManagerMock) UpdateServiceAccounts(ctx context.Context, accs [
 	return nil
 }
 
-func (am *accountsManagerMock) SetActiveAccounts(n uint64) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	am.activeAccounts = n
-}
-
 type accountFunderMock struct {
 	mu    sync.Mutex
 	calls []fundAccountsCall
@@ -76,9 +94,8 @@ func (f *accountFunderMock) FundAccounts(ctx context.Context, host hosts.Host, c
 }
 
 func TestPerformAccountFunding(t *testing.T) {
-	amMock := &accountsManagerMock{
-		accountsToFund: []accounts.HostAccount{{AccountKey: [32]byte{1}}},
-	}
+	amMock := newAccountsManagerMock()
+	amMock.accountsToFund = []accounts.HostAccount{{AccountKey: [32]byte{1}}}
 	funderMock := &accountFunderMock{}
 	store := newTestStore(t)
 	hmMock := newHostManagerMock(store)

@@ -34,20 +34,11 @@ const (
 	AccountActivityThreshold = 24 * 7 * time.Hour
 )
 
-const (
-	// fundTargetBytes is the number of bytes used to calculate the fund target
-	// per host. We fund accounts to cover this amount of read and write usage.
-	// It roughly comes down to uploading and downloading to and from a host at
-	// ~1Gbps for a period of 2 minutes. With 30 good hosts, this results in about
-	// 30Gbps of maximum theoretical throughput.
-	fundTargetBytes = uint64(16 << 30) // 16 GiB
-)
-
 type (
 	// Store defines an interface to fetch accounts that need to be funded and
 	// update them after funding.
 	Store interface {
-		HostAccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]HostAccount, error)
+		HostAccountsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]HostAccount, error)
 		ScheduleAccountsForFunding(hostKey types.PublicKey) error
 		UpdateHostAccounts(accounts []HostAccount) error
 
@@ -66,7 +57,7 @@ type (
 		Quotas(offset, limit int) ([]Quota, error)
 
 		PruneAccounts(limit int) error
-		ActiveAccounts(threshold time.Time) (uint64, error)
+		AccountFundingInfo(threshold time.Time) ([]QuotaFundInfo, error)
 		Account(types.PublicKey) (Account, error)
 		Accounts(offset, limit int, opts ...QueryAccountsOpt) ([]Account, error)
 		HasAccount(types.PublicKey) (bool, error)
@@ -132,14 +123,15 @@ func (m *AccountManager) DeleteAccount(ctx context.Context, acc proto.Account) e
 	return m.store.DeleteAccount(acc)
 }
 
-// AccountsForFunding returns accounts that need funding for a given host.
-func (m *AccountManager) AccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]HostAccount, error) {
-	return m.store.HostAccountsForFunding(hk, threshold, limit)
+// AccountsForFunding returns accounts that need funding for a given host,
+// filtered by quota name.
+func (m *AccountManager) AccountsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]HostAccount, error) {
+	return m.store.HostAccountsForFunding(hk, quotaName, threshold, limit)
 }
 
-// ActiveAccounts returns the number of active accounts.
-func (m *AccountManager) ActiveAccounts(threshold time.Time) (uint64, error) {
-	return m.store.ActiveAccounts(threshold)
+// AccountFundingInfo returns funding info grouped by quota.
+func (m *AccountManager) AccountFundingInfo(threshold time.Time) ([]QuotaFundInfo, error) {
+	return m.store.AccountFundingInfo(threshold)
 }
 
 // ScheduleAccountsForFunding schedules all accounts for a given host to be funded.
@@ -185,10 +177,14 @@ func UpdateFundedAccounts(accounts []HostAccount, n int) {
 }
 
 // HostFundTarget calculates the fund target for the given host. We fund
-// accounts to cover 128GB of read and write usage.
-func HostFundTarget(host hosts.Host) types.Currency {
-	u1 := host.Settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost().Mul64(fundTargetBytes / proto.SectorSize).Div64(2)
-	u2 := host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(fundTargetBytes / proto.SectorSize).Div64(2)
+// accounts to cover the given amount of read and write usage.
+func HostFundTarget(host hosts.Host, fundTargetBytes uint64) types.Currency {
+	if fundTargetBytes == 0 {
+		return types.ZeroCurrency
+	}
+	sectors := (fundTargetBytes + proto.SectorSize - 1) / proto.SectorSize // ceil div for at least 1 sector if fundTargetBytes > 0
+	u1 := host.Settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost().Mul64(sectors).Div64(2)
+	u2 := host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(sectors).Div64(2)
 	return u1.Add(u2)
 }
 

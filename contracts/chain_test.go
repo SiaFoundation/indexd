@@ -743,7 +743,7 @@ func TestUpdateContractElementProofs(t *testing.T) {
 
 func TestProcessActions(t *testing.T) {
 	store := newTestStore(t)
-	amMock := &accountsManagerMock{}
+	amMock := newAccountsManagerMock()
 	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
 	walletMock := &walletMock{}

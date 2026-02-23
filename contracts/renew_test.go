@@ -45,7 +45,7 @@ func (c *hostClientMock) RenewContract(ctx context.Context, settings proto.HostS
 }
 
 func TestPerformContractRenewals(t *testing.T) {
-	amMock := &accountsManagerMock{}
+	amMock := newAccountsManagerMock()
 	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
 	badSettings := proto.HostSettings{}
@@ -167,7 +167,7 @@ func TestPerformContractRenewals(t *testing.T) {
 }
 
 func TestRenewalAllowance(t *testing.T) {
-	amMock := &accountsManagerMock{}
+	amMock := newAccountsManagerMock()
 	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
 

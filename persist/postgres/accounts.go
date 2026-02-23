@@ -97,21 +97,6 @@ func (s *Store) HasAccount(ak types.PublicKey) (bool, error) {
 	return exists, nil
 }
 
-func activeAccounts(ctx context.Context, tx *txn, threshold time.Time) (count uint64, err error) {
-	err = tx.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE last_used >= $1;`, threshold).Scan(&count)
-	return
-}
-
-// ActiveAccounts returns the number of accounts that have been used since the threshold
-// time.
-func (s *Store) ActiveAccounts(threshold time.Time) (count uint64, err error) {
-	err = s.transaction(func(ctx context.Context, tx *txn) (err error) {
-		count, err = activeAccounts(ctx, tx, threshold)
-		return
-	})
-	return
-}
-
 // DeleteAccount deletes the account in the database with given account key.
 func (s *Store) DeleteAccount(acc proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
@@ -235,8 +220,9 @@ RETURNING o.object_key;`, accountID, remaining)
 }
 
 // HostAccountsForFunding returns up to `limit` active (after the `threshold`
-// time) accounts for the given host key that are due for funding.
-func (s *Store) HostAccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
+// time) accounts for the given host key that are due for funding, filtered by
+// quota name.
+func (s *Store) HostAccountsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
 	if limit < 0 {
 		return nil, errors.New("limit can not be negative")
 	} else if limit == 0 {
@@ -256,7 +242,7 @@ func (s *Store) HostAccountsForFunding(hk types.PublicKey, threshold time.Time, 
 			return err
 		}
 
-		newAccs, err := newHostAccountsForFunding(ctx, tx, hk, hostID, threshold, remaining)
+		newAccs, err := newHostAccountsForFunding(ctx, tx, hk, hostID, quotaName, threshold, remaining)
 		if err != nil {
 			return fmt.Errorf("failed to query new accounts for funding: %w", err)
 		} else if len(newAccs) >= remaining {
@@ -265,7 +251,7 @@ func (s *Store) HostAccountsForFunding(hk types.PublicKey, threshold time.Time, 
 		}
 
 		remaining -= len(newAccs)
-		existingAccs, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, threshold, remaining)
+		existingAccs, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, quotaName, threshold, remaining)
 		if err != nil {
 			return fmt.Errorf("failed to query existing accounts for funding: %w", err)
 		}
@@ -374,15 +360,49 @@ func addAccount(ctx context.Context, tx *txn, connectKey string, account types.P
 	return nil
 }
 
-func newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
+// AccountFundingInfo returns funding info grouped by quota with
+// their fund target bytes.
+func (s *Store) AccountFundingInfo(threshold time.Time) ([]accounts.QuotaFundInfo, error) {
+	var infos []accounts.QuotaFundInfo
+	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		rows, err := tx.Query(ctx, `
+			SELECT q.name, q.fund_target_bytes, COUNT(*) as active_count
+			FROM accounts a
+			INNER JOIN app_connect_keys ack ON ack.id = a.connect_key_id
+			INNER JOIN quotas q ON q.name = ack.quota_name
+			WHERE a.last_used >= $1 AND a.deleted_at IS NULL
+			GROUP BY q.name, q.fund_target_bytes
+		`, threshold)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var info accounts.QuotaFundInfo
+			if err := rows.Scan(&info.QuotaName, &info.FundTargetBytes, &info.ActiveAccounts); err != nil {
+				return fmt.Errorf("failed to scan quota fund info: %w", err)
+			}
+			infos = append(infos, info)
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
+	}
+	return infos, nil
+}
+
+func newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, quotaName string, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
 	accs := make([]accounts.HostAccount, 0, limit)
 
 	rows, err := tx.Query(ctx, `
 SELECT a.public_key
 FROM accounts a
+INNER JOIN app_connect_keys ack ON ack.id = a.connect_key_id
 LEFT JOIN account_hosts ah ON a.id = ah.account_id AND ah.host_id = $1
 WHERE ah.account_id IS NULL AND a.deleted_at IS NULL AND (a.last_used >= $2)
-LIMIT $3;`, hostID, threshold, limit)
+AND ack.quota_name = $4
+LIMIT $3;`, hostID, threshold, limit, quotaName)
 	if err != nil {
 		return nil, err
 	}
@@ -402,16 +422,18 @@ LIMIT $3;`, hostID, threshold, limit)
 	return accs, nil
 }
 
-func existingHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
+func existingHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey, hostID int64, quotaName string, threshold time.Time, limit int) ([]accounts.HostAccount, error) {
 	accs := make([]accounts.HostAccount, 0, limit)
 
 	rows, err := tx.Query(ctx, `
-SELECT public_key, consecutive_failed_funds, next_fund
+SELECT a.public_key, ha.consecutive_failed_funds, ha.next_fund
 FROM account_hosts ha
 INNER JOIN accounts a ON a.id = ha.account_id
+INNER JOIN app_connect_keys ack ON ack.id = a.connect_key_id
 WHERE ha.host_id = $1 AND ha.next_fund <= NOW() AND a.deleted_at IS NULL AND (a.last_used >= $2)
-ORDER BY next_fund ASC
-LIMIT $3`, hostID, threshold, limit)
+AND ack.quota_name = $4
+ORDER BY ha.next_fund ASC
+LIMIT $3`, hostID, threshold, limit, quotaName)
 	if err != nil {
 		return nil, err
 	}

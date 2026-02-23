@@ -50,8 +50,9 @@ type (
 	// AccountManager defines an interface that allows fetching and updating
 	// account information.
 	AccountManager interface {
-		AccountsForFunding(hk types.PublicKey, threshold time.Time, limit int) ([]accounts.HostAccount, error)
-		ActiveAccounts(threshold time.Time) (uint64, error)
+		AccountsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]accounts.HostAccount, error)
+		AccountFundingInfo(threshold time.Time) ([]accounts.QuotaFundInfo, error)
+		Quotas(ctx context.Context, offset, limit int) ([]accounts.Quota, error)
 		ScheduleAccountsForFunding(hostKey types.PublicKey) error
 		ServiceAccounts(hk types.PublicKey) []accounts.HostAccount
 		UpdateHostAccounts(accounts []accounts.HostAccount) error
@@ -109,8 +110,6 @@ type (
 	// Store is the minimal interface of Store functionality the ContractManager
 	// requires.
 	Store interface {
-		ActiveAccounts(threshold time.Time) (uint64, error)
-
 		Contract(id types.FileContractID) (Contract, error)
 		Contracts(offset, limit int, queryOpts ...ContractQueryOpt) ([]Contract, error)
 

@@ -316,7 +316,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 
 	// assert there are no accounts to fund
 	threshold := time.Now().Add(-time.Hour)
-	accs, err := store.HostAccountsForFunding(hk1, threshold, 10)
+	accs, err := store.HostAccountsForFunding(hk1, "default", threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 0 {
@@ -328,7 +328,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	store.addTestAccount(t, ak1)
 
 	// assert there's now one account to fund
-	accs, err = store.HostAccountsForFunding(hk1, threshold, 10)
+	accs, err = store.HostAccountsForFunding(hk1, "default", threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
@@ -360,7 +360,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	}
 
 	// assert there are no accounts to fund
-	accs, err = store.HostAccountsForFunding(hk1, threshold, 10)
+	accs, err = store.HostAccountsForFunding(hk1, "default", threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 0 {
@@ -372,7 +372,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	store.addTestAccount(t, ak2)
 
 	// assert h1 has one account to fund
-	accs, err = store.HostAccountsForFunding(hk1, threshold, 10)
+	accs, err = store.HostAccountsForFunding(hk1, "default", threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
@@ -384,7 +384,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	}
 
 	// assert h2 has two accounts to fund
-	accs, err = store.HostAccountsForFunding(hk2, threshold, 10)
+	accs, err = store.HostAccountsForFunding(hk2, "default", threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 2 {
@@ -394,7 +394,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	}
 
 	// assert limit is applied
-	accs, err = store.HostAccountsForFunding(hk2, threshold, 1)
+	accs, err = store.HostAccountsForFunding(hk2, "default", threshold, 1)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
@@ -413,7 +413,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	}
 
 	// if we raise threshold neither account should be returned
-	accs, err = store.HostAccountsForFunding(hk1, threshold.Add(2*time.Hour), 10)
+	accs, err = store.HostAccountsForFunding(hk1, "default", threshold.Add(2*time.Hour), 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 0 {
@@ -421,7 +421,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	}
 
 	// assert both accounts are returned
-	accs, err = store.HostAccountsForFunding(hk1, threshold, 10)
+	accs, err = store.HostAccountsForFunding(hk1, "default", threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 2 {
@@ -440,7 +440,7 @@ func TestHostAccountsForFunding(t *testing.T) {
 	}
 
 	// only ak1 should be returned
-	accs, err = store.HostAccountsForFunding(hk1, threshold, 10)
+	accs, err = store.HostAccountsForFunding(hk1, "default", threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accs) != 1 {
@@ -460,7 +460,7 @@ func TestUpdateHostAccounts(t *testing.T) {
 
 	// fetch accounts for funding
 	threshold := time.Now().Add(-time.Hour)
-	accounts, err := store.HostAccountsForFunding(hk, threshold, 10)
+	accounts, err := store.HostAccountsForFunding(hk, "default", threshold, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(accounts) != 1 {
@@ -571,7 +571,7 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 		for _, hk := range hosts {
 			var accs []accounts.HostAccount
 			if err := store.transaction(func(ctx context.Context, tx *txn) (err error) {
-				accs, err = newHostAccountsForFunding(ctx, tx, hk, hostIDs[hk], threshold, batchSize)
+				accs, err = newHostAccountsForFunding(ctx, tx, hk, hostIDs[hk], "default", threshold, batchSize)
 				return
 			}); err != nil {
 				b.Fatal(err)
@@ -592,14 +592,14 @@ func BenchmarkHostAccountsForFunding(b *testing.B) {
 
 				if err := store.transaction(func(ctx context.Context, tx *txn) error {
 					// fetch accounts without account_host entry
-					if accounts, err := newHostAccountsForFunding(ctx, tx, hk, hostID, threshold, batchSize); err != nil {
+					if accounts, err := newHostAccountsForFunding(ctx, tx, hk, hostID, "default", threshold, batchSize); err != nil {
 						return err
 					} else if len(accounts) != batchSize {
 						return fmt.Errorf("expected %d new accounts, got %d", batchSize, len(accounts))
 					}
 
 					// fetch accounts with account_host entry
-					if accounts, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, threshold, batchSize); err != nil {
+					if accounts, err := existingHostAccountsForFunding(ctx, tx, hk, hostID, "default", threshold, batchSize); err != nil {
 						return err
 					} else if len(accounts) != batchSize {
 						return fmt.Errorf("expected %d new accounts, got %d", batchSize, len(accounts))
@@ -661,7 +661,7 @@ func BenchmarkUpdateHostAccounts(b *testing.B) {
 	b.ResetTimer()
 	for i := range b.N {
 		b.StopTimer()
-		accounts, err := store.HostAccountsForFunding(hosts[i%numHosts], threshold, batchSize)
+		accounts, err := store.HostAccountsForFunding(hosts[i%numHosts], "default", threshold, batchSize)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -809,7 +809,7 @@ func TestPruneAccount(t *testing.T) {
 	}
 }
 
-func TestActiveAccounts(t *testing.T) {
+func TestAccountFundingInfo(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	// create a connect key for test accounts
@@ -841,6 +841,14 @@ func TestActiveAccounts(t *testing.T) {
 		}
 	}
 
+	totalActive := func(infos []accounts.QuotaFundInfo) uint64 {
+		var total uint64
+		for _, info := range infos {
+			total += info.ActiveAccounts
+		}
+		return total
+	}
+
 	// only 3 accounts
 	const day = 24 * time.Hour
 	insert(1 * day)
@@ -848,12 +856,12 @@ func TestActiveAccounts(t *testing.T) {
 
 	assertActive := func(n uint64, threshold time.Time) {
 		t.Helper()
-		active, err := store.ActiveAccounts(threshold)
+		active, err := store.AccountFundingInfo(threshold)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if active != n {
-			t.Fatalf("expected %d active accounts, got %d", n, active)
+		if totalActive(active) != n {
+			t.Fatalf("expected %d active accounts, got %d", n, totalActive(active))
 		}
 	}
 
@@ -871,10 +879,109 @@ func TestActiveAccounts(t *testing.T) {
 	threshold = now.Add(-7 * day)
 	assertActive(2, threshold.Add(-time.Second))
 	assertActive(1, threshold.Add(time.Second))
+
+	// create a second quota with a different fund target
+	var premiumFundTarget = uint64(32 << 30) // 32 GiB
+	if err := store.PutQuota("premium", accounts.PutQuotaRequest{
+		Description:     "premium quota",
+		MaxPinnedData:   1000,
+		TotalUses:       10,
+		FundTargetBytes: &premiumFundTarget,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// create a connect key for the premium quota
+	premiumKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+		Key:         "premium-connect-key",
+		Description: "premium connect key",
+		Quota:       "premium",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var premiumKeyID int64
+	if err := store.pool.QueryRow(t.Context(), `SELECT id FROM app_connect_keys WHERE app_key = $1`, premiumKey.Key).Scan(&premiumKeyID); err != nil {
+		t.Fatal(err)
+	}
+
+	// insert accounts under the premium quota
+	insertPremium := func(d time.Duration) {
+		lastUsed := now.Add(-d)
+		if _, err := store.pool.Exec(
+			t.Context(),
+			`INSERT INTO accounts (public_key, connect_key_id, last_used, max_pinned_data) VALUES ($1, $2, $3, 1000000);`,
+			sqlPublicKey(types.GeneratePrivateKey().PublicKey()),
+			premiumKeyID,
+			lastUsed,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	insertPremium(1 * day)
+	insertPremium(3 * day)
+	insertPremium(10 * day) // older than 7 days, won't be active at 7-day threshold
+
+	// assert funding info includes both quotas
+	threshold = now.Add(-7 * day)
+	infos, err := store.AccountFundingInfo(threshold.Add(-time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(infos) != 2 {
+		t.Fatalf("expected 2 quota infos, got %d", len(infos))
+	}
+
+	// find each quota's info
+	var defaultInfo, premiumInfo accounts.QuotaFundInfo
+	for _, info := range infos {
+		switch info.QuotaName {
+		case "default":
+			defaultInfo = info
+		case "premium":
+			premiumInfo = info
+		default:
+			t.Fatalf("unexpected quota name: %s", info.QuotaName)
+		}
+	}
+
+	const defaultFundTarget = uint64(16 << 30) // 16 GiB, matches migration default
+	if defaultInfo.ActiveAccounts != 2 {
+		t.Fatalf("expected 2 default active accounts, got %d", defaultInfo.ActiveAccounts)
+	} else if defaultInfo.FundTargetBytes != defaultFundTarget {
+		t.Fatalf("expected default fund target %d, got %d", defaultFundTarget, defaultInfo.FundTargetBytes)
+	}
+
+	if premiumInfo.ActiveAccounts != 2 {
+		t.Fatalf("expected 2 premium active accounts, got %d", premiumInfo.ActiveAccounts)
+	} else if premiumInfo.FundTargetBytes != premiumFundTarget {
+		t.Fatalf("expected premium fund target %d, got %d", premiumFundTarget, premiumInfo.FundTargetBytes)
+	}
+
+	// at a tighter threshold, only 1 premium account should be active
+	infos, err = store.AccountFundingInfo(now.Add(-2 * day))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var found bool
+	for _, info := range infos {
+		if info.QuotaName == "premium" {
+			found = true
+			if info.ActiveAccounts != 1 {
+				t.Fatalf("expected 1 premium active account, got %d", info.ActiveAccounts)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected premium quota in funding info")
+	}
 }
 
-// BenchmarkActiveAccounts benchmarks the ActiveAccounts function on the store.
-func BenchmarkActiveAccounts(b *testing.B) {
+// BenchmarkAccountFundingInfo benchmarks the AccountFundingInfo function on the store.
+func BenchmarkAccountFundingInfo(b *testing.B) {
 	// define parameters
 	const numAccounts = 100000
 
@@ -907,7 +1014,7 @@ func BenchmarkActiveAccounts(b *testing.B) {
 
 	threshold := time.Now().Add(-24 * 7 * time.Hour)
 	for b.Loop() {
-		if _, err := store.ActiveAccounts(threshold); err != nil {
+		if _, err := store.AccountFundingInfo(threshold); err != nil {
 			b.Fatal(err)
 		}
 	}
