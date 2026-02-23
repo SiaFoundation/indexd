@@ -118,9 +118,9 @@ func (s *Store) AppStats(appID types.Hash256) (admin.AppStatsResponse, error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		return tx.QueryRow(ctx, `
 SELECT
-	COUNT(*) AS total,
-	COUNT(*) FILTER (WHERE last_used >= $2) AS active,
-	COALESCE(SUM(pinned_data), 0) AS pinned_data
+	COUNT(*),
+	COUNT(*) FILTER (WHERE last_used >= $2),
+	COALESCE(SUM(pinned_data), 0)
 FROM accounts
 WHERE app_id = $1 AND deleted_at IS NULL`,
 			sqlHash256(appID), time.Now().Add(-accounts.AccountActivityThreshold),
