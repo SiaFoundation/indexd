@@ -298,6 +298,62 @@ func TestQuotasAPI(t *testing.T) {
 	}
 }
 
+func TestRegisterAppKey(t *testing.T) {
+	c := testutils.NewConsensusNode(t, zap.NewNop())
+	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
+
+	// create a connect key
+	connectKey, err := adminClient.AddAppConnectKey(context.Background(), accounts.AppConnectKeyRequest{
+		Description: "test key",
+		Quota:       "default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// register an app key
+	appKey := types.GeneratePrivateKey().PublicKey()
+	err = adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
+		ConnectKey: connectKey.Key,
+		AppKey:     appKey,
+		Meta: accounts.AppMeta{
+			ID:          frand.Entropy256(),
+			Description: "test app",
+			ServiceURL:  "http://test-app.com",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// verify the account exists
+	acc, err := adminClient.Account(context.Background(), appKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if types.PublicKey(acc.AccountKey) != appKey {
+		t.Fatalf("expected account key %v, got %v", appKey, acc.AccountKey)
+	}
+
+	// registering the same key again is a no-op
+	err = adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
+		ConnectKey: connectKey.Key,
+		AppKey:     appKey,
+	})
+	if err != nil {
+		t.Fatal("expected duplicate registration to succeed, got", err)
+	}
+
+	// registering with unknown connect key should fail
+	err = adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
+		ConnectKey: "nonexistent",
+		AppKey:     types.GeneratePrivateKey().PublicKey(),
+	})
+	if err == nil || !strings.Contains(err.Error(), accounts.ErrKeyNotFound.Error()) {
+		t.Fatal("expected ErrKeyNotFound, got", err)
+	}
+}
+
 func TestAccountsAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
