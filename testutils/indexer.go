@@ -52,7 +52,9 @@ type (
 	// Indexer is a test utility combining an indexer, an http client for the
 	// indexer and useful helpers for testing.
 	Indexer struct {
-		appApiAddr string
+		AdminURL      string
+		AdminPassword string
+		AppURL        string
 
 		Admin *admin.Client
 		App   *app.Client
@@ -72,6 +74,7 @@ type (
 	IndexerOpt func(*indexerCfg)
 
 	indexerCfg struct {
+		advertiseURL        string
 		maintenanceSettings contracts.MaintenanceSettings
 		slabOpts            []slabs.Option
 		contractOpts        []contracts.ContractManagerOpt
@@ -93,6 +96,12 @@ func defaultIndexerCfg(log *zap.Logger) *indexerCfg {
 			slabs.WithHealthCheckInterval(500 * time.Millisecond),
 			slabs.WithMinHostDistance(0), // disable location checks in tests
 		},
+	}
+}
+
+func WithAdvertiseURL(url string) IndexerOpt {
+	return func(cfg *indexerCfg) {
+		cfg.advertiseURL = url
 	}
 }
 
@@ -119,7 +128,7 @@ func WithSlabOptions(opts ...slabs.Option) IndexerOpt {
 
 // AppAPIAddr returns the application API address of the indexer.
 func (i *Indexer) AppAPIAddr() string {
-	return i.appApiAddr
+	return i.AppURL
 }
 
 // Accounts returns the account manager for the indexer.
@@ -238,7 +247,10 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to listen on application address: %v", err)
 	}
 	appAPIAddr := fmt.Sprintf("http://%s", appListener.Addr().String())
-	appHandler, err := app.NewAPI(appAPIAddr, store, am, contracts, slabs, appAPIOpts...)
+	if cfg.advertiseURL == "" {
+		cfg.advertiseURL = appAPIAddr
+	}
+	appHandler, err := app.NewAPI(cfg.advertiseURL, store, am, contracts, slabs, appAPIOpts...)
 	if err != nil {
 		t.Fatalf("failed to create application API: %v", err)
 	}
@@ -291,7 +303,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	})
 
 	return &Indexer{
-		appApiAddr: appAPIAddr,
+		AdminURL:      adminAPIAddr,
+		AdminPassword: password,
+		AppURL:        appAPIAddr,
 
 		Admin: admin.NewClient(adminAPIAddr, password),
 		App:   app.NewClient(appAPIAddr),
