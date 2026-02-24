@@ -46,54 +46,60 @@ const (
 	queryParamValidUntil = "sv"
 )
 
-// validateURLSignature extracts the signed public key from the request
-// and verifies the signature and expiration. If successful, it returns the
-// public key and true, otherwise it writes an error to the context and returns
-// an empty public key and false.
-func validateURLSignature(jc jape.Context, hostname, path string) (types.PublicKey, bool) {
-	req := jc.Request
+// ValidateURLSignature extracts the signed public key from the request
+// and verifies the signature and expiration.
+//
+// NOTE: This function does not check if the account exists, it only validates
+// the signature and expiration. If you need to check for account existence, use
+// validateSignedURLAuth instead.
+func ValidateURLSignature(req *http.Request, hostname, path string) (types.PublicKey, error) {
 	defer req.Body.Close()
 
 	buf, err := io.ReadAll(io.LimitReader(req.Body, maxRequestSize))
 	if err != nil {
-		jc.Error(errors.New("failed to read request body"), http.StatusBadRequest)
-		return types.PublicKey{}, false
+		return types.PublicKey{}, fmt.Errorf("failed to read request body: %w", err)
 	}
 	req.Body = io.NopCloser(bytes.NewReader(buf))
 
 	// validate presence of required parameters
 	if !isSignedRequest(req) {
-		err := fmt.Errorf("missing required query parameters: %q, %q, %q", queryParamCredential, queryParamSignature, queryParamValidUntil)
-		jc.Error(err, http.StatusUnauthorized)
-		return types.PublicKey{}, false
+		return types.PublicKey{}, fmt.Errorf("missing required query parameters: %q, %q, %q", queryParamCredential, queryParamSignature, queryParamValidUntil)
 	}
 
 	// extract query string parameters
 	ts, err := parseValidUntil(req)
 	if err != nil {
-		jc.Error(err, http.StatusUnauthorized)
-		return types.PublicKey{}, false
+		return types.PublicKey{}, err
 	}
 	pk, err := parseCredential(req)
 	if err != nil {
-		jc.Error(err, http.StatusUnauthorized)
-		return types.PublicKey{}, false
+		return types.PublicKey{}, err
 	}
 	sig, err := parseSignature(req)
 	if err != nil {
-		jc.Error(err, http.StatusUnauthorized)
-		return types.PublicKey{}, false
+		return types.PublicKey{}, err
 	}
 
 	// check for expiration and verify the signature
 	if ts.Before(time.Now().UTC()) {
-		jc.Error(ErrSignatureExpired, http.StatusUnauthorized)
-		return types.PublicKey{}, false
+		return types.PublicKey{}, ErrSignatureExpired
 	} else if !pk.VerifyHash(requestHash(req.Method, hostname, path, ts, buf), sig) {
-		jc.Error(fmt.Errorf("failed to authenticate for %q host %q: %w", req.Method, filepath.Join(hostname, path), ErrSignatureInvalid), http.StatusUnauthorized)
+		return types.PublicKey{}, fmt.Errorf("failed to authenticate for %q host %q: %v", req.Method, filepath.Join(hostname, path), ErrSignatureInvalid)
+	}
+	return pk, nil
+}
+
+// validateURLSignature extracts the signed public key from the request and
+// verifies the signature and expiration. If successful, it returns the public
+// key and true, otherwise it writes an error to the context and returns an
+// empty public key and false.
+func validateURLSignature(jc jape.Context, hostname, path string) (types.PublicKey, bool) {
+	acc, err := ValidateURLSignature(jc.Request, hostname, path)
+	if err != nil {
+		jc.Error(err, http.StatusUnauthorized)
 		return types.PublicKey{}, false
 	}
-	return pk, true
+	return acc, true
 }
 
 // validateSignedURLAuth validates a signed URL by checking its required query
