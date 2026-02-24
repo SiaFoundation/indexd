@@ -353,6 +353,12 @@ func (c *Client) StatsAccounts(ctx context.Context) (resp AccountStatsResponse, 
 	return
 }
 
+// StatsApp returns statistics about a specific app.
+func (c *Client) StatsApp(ctx context.Context, id types.Hash256) (resp AppStatsResponse, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/stats/apps/%s", id), &resp)
+	return
+}
+
 // StatsContracts returns statistics about the contracts managed by the indexer.
 func (c *Client) StatsContracts(ctx context.Context) (resp ContractsStatsResponse, err error) {
 	err = c.c.GET(ctx, "/stats/contracts", &resp)
