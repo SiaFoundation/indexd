@@ -55,7 +55,7 @@ func TestConnect(t *testing.T) {
 	}
 
 	appID := sdk.GenerateAppID()
-	builder := sdk.NewBuilder(cluster.Indexer.AppAPIAddr(), sdk.AppMetadata{
+	builder := sdk.NewBuilder(cluster.Indexer.AppURL, sdk.AppMetadata{
 		ID:          appID,
 		Name:        "Test App",
 		Description: "An app for testing",
@@ -112,7 +112,7 @@ func TestConnect(t *testing.T) {
 
 	// go through the connection flow again to verify multiple connections generate
 	// the same app key
-	builder = sdk.NewBuilder(cluster.Indexer.AppAPIAddr(), sdk.AppMetadata{
+	builder = sdk.NewBuilder(cluster.Indexer.AppURL, sdk.AppMetadata{
 		ID:          appID,
 		Name:        "Test App",
 		Description: "An app for testing",

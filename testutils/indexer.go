@@ -126,11 +126,6 @@ func WithSlabOptions(opts ...slabs.Option) IndexerOpt {
 	}
 }
 
-// AppAPIAddr returns the application API address of the indexer.
-func (i *Indexer) AppAPIAddr() string {
-	return i.AppURL
-}
-
 // Accounts returns the account manager for the indexer.
 func (i *Indexer) Accounts() *accounts.AccountManager {
 	return i.accounts
