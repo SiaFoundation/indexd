@@ -84,7 +84,7 @@ func ValidateURLSignature(req *http.Request, hostname, path string) (types.Publi
 	if ts.Before(time.Now().UTC()) {
 		return types.PublicKey{}, ErrSignatureExpired
 	} else if !pk.VerifyHash(requestHash(req.Method, hostname, path, ts, buf), sig) {
-		return types.PublicKey{}, fmt.Errorf("failed to authenticate for %q host %q: %v", req.Method, filepath.Join(hostname, path), ErrSignatureInvalid)
+		return types.PublicKey{}, fmt.Errorf("failed to authenticate for %q host %q: %w", req.Method, filepath.Join(hostname, path), ErrSignatureInvalid)
 	}
 	return pk, nil
 }

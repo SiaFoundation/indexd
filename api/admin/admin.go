@@ -36,6 +36,12 @@ const (
 
 var startTime = time.Now()
 
+var (
+	// ErrInternalError is returned when a signed URL can not be authenticated
+	// because of an unexpected issue.
+	ErrInternalError = errors.New("internal error")
+)
+
 type (
 	// A ChainManager retrieves the current blockchain state
 	ChainManager interface {
@@ -439,20 +445,34 @@ func (a *admin) handlePOSTAppsRegister(jc jape.Context) {
 		return
 	}
 
-	err := a.accounts.RegisterAppKey(req.ConnectKey, req.AppKey, req.Meta)
-	if errors.Is(err, accounts.ErrKeyExhausted) {
-		jc.Error(err, http.StatusForbidden)
+	// basic validation of required fields
+	var zeroAppKey types.PublicKey
+	if req.ConnectKey == "" {
+		jc.Error(errors.New("connect key is required"), http.StatusBadRequest)
 		return
-	} else if errors.Is(err, accounts.ErrKeyNotFound) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if errors.Is(err, accounts.ErrExists) {
-		jc.Encode(nil)
-		return
-	} else if jc.Check("failed to register app key", err) != nil {
+	} else if req.AppKey == zeroAppKey {
+		jc.Error(errors.New("app key is required"), http.StatusBadRequest)
 		return
 	}
-	jc.Encode(nil)
+
+	err := a.accounts.RegisterAppKey(req.ConnectKey, req.AppKey, req.Meta)
+	switch {
+	case errors.Is(err, accounts.ErrExists):
+		jc.Encode(nil)
+	case errors.Is(err, accounts.ErrKeyExhausted):
+		jc.Error(accounts.ErrKeyExhausted, http.StatusForbidden)
+	case errors.Is(err, accounts.ErrKeyNotFound):
+		jc.Error(accounts.ErrKeyNotFound, http.StatusUnauthorized)
+	case err != nil:
+		a.log.Debug("failed to use app connect key", zap.Error(err))
+		jc.Error(ErrInternalError, http.StatusInternalServerError)
+	default:
+		if err := a.contracts.TriggerAccountFunding(false); err != nil {
+			// error is ignored since the account is already connected
+			a.log.Debug("failed to trigger account funding", zap.Error(err))
+		}
+		jc.Encode(nil)
+	}
 }
 
 func (a *admin) handleGETQuotas(jc jape.Context) {

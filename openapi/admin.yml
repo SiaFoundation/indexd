@@ -273,6 +273,31 @@ paths:
         "404":
           description: Connect key not found
 
+  /apps/register:
+    post:
+      tags:
+        - apps
+      summary: Register an app key with a connect key
+      description: Registers an app's public key using an existing connect key. This creates an account for the app and triggers account funding. If the account already exists, the request succeeds without creating a duplicate.
+      operationId: registerAppKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterAppKeyRequest"
+      responses:
+        "200":
+          description: App key registered successfully (or already exists)
+        "400":
+          description: Connect key or app key is missing
+        "401":
+          description: Connect key not found
+        "403":
+          description: Connect key has exhausted its allowed uses
+        "500":
+          description: Internal server error
+
   /quotas:
     get:
       tags:
@@ -1944,6 +1969,26 @@ components:
       $ref: "./components.yml#/components/schemas/AuthConnectStatusResponse"
     RegisterAppResponse:
       $ref: "./components.yml#/components/schemas/RegisterAppResponse"
+    RegisterAppKeyRequest:
+      type: object
+      required:
+        - connectKey
+        - appKey
+        - meta
+      properties:
+        connectKey:
+          type: string
+          description: The connect key to associate the app with
+        appKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The app's public key
+        meta:
+          allOf:
+            - $ref: "#/components/schemas/AppMeta"
+            - description: Metadata about the app
+    AppMeta:
+      $ref: "./components.yml#/components/schemas/AppMeta"
 
     #############################
     #
