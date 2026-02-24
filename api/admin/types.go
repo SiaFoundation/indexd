@@ -5,6 +5,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/hosts"
 )
 
@@ -88,6 +89,14 @@ type (
 		wallet.Balance
 
 		Address types.Address `json:"address"`
+	}
+
+	// RegisterAppKeyRequest is the request body for the [POST] /apps/register
+	// endpoint.
+	RegisterAppKeyRequest struct {
+		ConnectKey string           `json:"connectKey"`
+		AppKey     types.PublicKey  `json:"appKey"`
+		Meta       accounts.AppMeta `json:"meta"`
 	}
 
 	// WalletSendSiacoinsRequest is the request body for the [POST] /wallet/send

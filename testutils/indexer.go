@@ -99,6 +99,7 @@ func defaultIndexerCfg(log *zap.Logger) *indexerCfg {
 	}
 }
 
+// WithAdvertiseURL sets the advertise URL for the indexer.
 func WithAdvertiseURL(url string) IndexerOpt {
 	return func(cfg *indexerCfg) {
 		cfg.advertiseURL = url

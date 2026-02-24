@@ -100,6 +100,7 @@ type (
 		DeleteAppConnectKey(context.Context, string) error
 		AppConnectKey(ctx context.Context, key string) (accounts.ConnectKey, error)
 		AppConnectKeys(ctx context.Context, offset, limit int) ([]accounts.ConnectKey, error)
+		RegisterAppKey(string, types.PublicKey, accounts.AppMeta) error
 
 		PutQuota(ctx context.Context, key string, req accounts.PutQuotaRequest) error
 		DeleteQuota(ctx context.Context, key string) error
@@ -248,6 +249,7 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"PUT    /apps/connect/keys":      a.handlePUTAppConnectKeys,
 		"GET    /apps/connect/keys/:key": a.handleGETAppConnectKeysKey,
 		"DELETE /apps/connect/keys/:key": a.handleDELETEAppConnectKeys,
+		"POST   /apps/register":          a.handlePOSTAppsRegister,
 
 		// quota endpoints
 		"GET    /quotas":      a.handleGETQuotas,
@@ -426,6 +428,28 @@ func (a *admin) handleDELETEAppConnectKeys(jc jape.Context) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to delete app connect key", err) != nil {
+		return
+	}
+	jc.Encode(nil)
+}
+
+func (a *admin) handlePOSTAppsRegister(jc jape.Context) {
+	var req RegisterAppKeyRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	err := a.accounts.RegisterAppKey(req.ConnectKey, req.AppKey, req.Meta)
+	if errors.Is(err, accounts.ErrKeyExhausted) {
+		jc.Error(err, http.StatusForbidden)
+		return
+	} else if errors.Is(err, accounts.ErrKeyNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, accounts.ErrExists) {
+		jc.Encode(nil)
+		return
+	} else if jc.Check("failed to register app key", err) != nil {
 		return
 	}
 	jc.Encode(nil)

@@ -98,6 +98,11 @@ func (c *Client) UpdateAppConnectKey(ctx context.Context, req accounts.AppConnec
 	return c.c.PUT(ctx, "/apps/connect/keys", req)
 }
 
+// RegisterAppKey registers an app key with the given connect key.
+func (c *Client) RegisterAppKey(ctx context.Context, req RegisterAppKeyRequest) error {
+	return c.c.POST(ctx, "/apps/register", req, nil)
+}
+
 // Quotas retrieves a paginated list of quotas.
 func (c *Client) Quotas(ctx context.Context, offset, limit int) (quotas []accounts.Quota, err error) {
 	values := url.Values{}
