@@ -1261,7 +1261,7 @@ func TestAccountStatsAPI(t *testing.T) {
 	}
 
 	appID := types.Hash256{1}
-	connectKey, err := adminClient.AddAppConnectKey(t.Context(), accounts.AddConnectKeyRequest{
+	connectKey, err := adminClient.AddAppConnectKey(t.Context(), accounts.AppConnectKeyRequest{
 		Description: "app stats test key",
 		Quota:       "default",
 	})

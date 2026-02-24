@@ -138,7 +138,10 @@ func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 			return fmt.Errorf("failed to get number of registered accounts: %w", err)
 		}
 
-		stats.Active, err = activeAccounts(ctx, tx, time.Now().Add(-accounts.AccountActivityThreshold))
+		err = tx.QueryRow(ctx,
+			`SELECT COUNT(*) FROM accounts WHERE last_used >= $1 AND deleted_at IS NULL;`,
+			time.Now().Add(-accounts.AccountActivityThreshold),
+		).Scan(&stats.Active)
 		if err != nil {
 			return fmt.Errorf("failed to get active accounts: %w", err)
 		}

@@ -892,7 +892,7 @@ func TestAccountFundingInfo(t *testing.T) {
 	}
 
 	// create a connect key for the premium quota
-	premiumKey, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+	premiumKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 		Key:         "premium-connect-key",
 		Description: "premium connect key",
 		Quota:       "premium",

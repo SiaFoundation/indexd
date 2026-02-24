@@ -368,7 +368,7 @@ func TestAppStats(t *testing.T) {
 	addAccountWithApp := func(ak types.PublicKey, appID types.Hash256) {
 		t.Helper()
 		connectKey := fmt.Sprintf("test-connect-key-%x", frand.Bytes(8))
-		_, err := store.AddAppConnectKey(accounts.UpdateAppConnectKey{
+		_, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
 			Key:         connectKey,
 			Description: "test connect key",
 			Quota:       "default",
