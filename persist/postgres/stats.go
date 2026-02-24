@@ -126,6 +126,38 @@ func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 	return stats, err
 }
 
+// ConnectKeyStats reports statistics about connect keys, including the total
+// number of keys and the breakdown by quota.
+func (s *Store) ConnectKeyStats() (admin.ConnectKeyStatsResponse, error) {
+	var stats admin.ConnectKeyStatsResponse
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM app_connect_keys`).Scan(&stats.Total)
+		if err != nil {
+			return fmt.Errorf("failed to get total connect keys: %w", err)
+		}
+
+		rows, err := tx.Query(ctx, `
+			SELECT quota_name, COUNT(*)
+			FROM app_connect_keys
+			GROUP BY quota_name
+			ORDER BY quota_name`)
+		if err != nil {
+			return fmt.Errorf("failed to get connect key quota breakdown: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var qs admin.ConnectKeyQuotaStats
+			if err := rows.Scan(&qs.Quota, &qs.Total); err != nil {
+				return err
+			}
+			stats.Quotas = append(stats.Quotas, qs)
+		}
+		return rows.Err()
+	})
+	return stats, err
+}
+
 // AggregatedHostStats reports aggregated statistics about all hosts, including the
 // number of active hosts and scan counts.
 func (s *Store) AggregatedHostStats() (stats admin.AggregatedHostStatsResponse, err error) {

@@ -354,6 +354,13 @@ func (c *Client) StatsAccounts(ctx context.Context) (resp AccountStatsResponse, 
 	return
 }
 
+// StatsConnectKeys returns statistics about the connect keys registered on the
+// indexer.
+func (c *Client) StatsConnectKeys(ctx context.Context) (resp ConnectKeyStatsResponse, err error) {
+	err = c.c.GET(ctx, "/stats/connectkeys", &resp)
+	return
+}
+
 // StatsContracts returns statistics about the contracts managed by the indexer.
 func (c *Client) StatsContracts(ctx context.Context) (resp ContractsStatsResponse, err error) {
 	err = c.c.GET(ctx, "/stats/contracts", &resp)
