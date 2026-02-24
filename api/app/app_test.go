@@ -630,6 +630,8 @@ func TestSharedObjects(t *testing.T) {
 	sk2, _ := newAccount(t, cluster)
 	appClient := indexer.App
 
+	time.Sleep(time.Second) // allow some time for the accounts to be funded
+
 	// generate and pin a slab
 	slab1Params := uploadRandomSlab(t, client, sk1, hosts)
 	_, err = appClient.PinSlabs(ctx, sk1, slab1Params)
