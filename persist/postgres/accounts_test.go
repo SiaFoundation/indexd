@@ -947,7 +947,7 @@ func TestAccountFundingInfo(t *testing.T) {
 		}
 	}
 
-	const defaultFundTarget = uint64(16 << 30) // 16 GiB, matches migration default
+	const defaultFundTarget = uint64(16e9) // 16 GB, matches migration default
 	if defaultInfo.ActiveAccounts != 2 {
 		t.Fatalf("expected 2 default active accounts, got %d", defaultInfo.ActiveAccounts)
 	} else if defaultInfo.FundTargetBytes != defaultFundTarget {
