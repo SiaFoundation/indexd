@@ -179,6 +179,12 @@ func (c *Client) Contract(ctx context.Context, contractID types.FileContractID) 
 	return
 }
 
+// DeleteContract deletes the contract with the given ID.
+func (c *Client) DeleteContract(ctx context.Context, contractID types.FileContractID) (err error) {
+	err = c.c.DELETE(ctx, fmt.Sprintf("/contract/%s", contractID))
+	return
+}
+
 // Contracts returns all contracts known to the indexer, optionally filtered by
 // the given query options.
 func (c *Client) Contracts(ctx context.Context, opts ...ContractQueryParameterOption) (contracts []contracts.Contract, err error) {
