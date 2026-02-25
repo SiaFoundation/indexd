@@ -746,6 +746,22 @@ func TestContractsAPI(t *testing.T) {
 	} else if host.TotalSpent.Cmp(before.TotalSpent) <= 0 {
 		t.Fatal("expected host total spent to have increased", before.TotalSpent, host.TotalSpent)
 	}
+
+	// test deletion
+	contracts, err = adminClient.Contracts(context.Background(), admin.WithRevisable(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range contracts {
+		if err := adminClient.DeleteContract(context.Background(), c.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if remaining, err := adminClient.Contracts(context.Background(), admin.WithRevisable(false)); err != nil {
+		t.Fatal(err)
+	} else if len(remaining) != 0 {
+		t.Fatalf("expected 0 contracts after deletion, got %d", len(remaining))
+	}
 }
 
 func TestExplorerAPI(t *testing.T) {
