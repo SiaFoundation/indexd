@@ -11,7 +11,7 @@ require (
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.19.0
-	go.sia.tech/coreutils v0.21.1-0.20260218210936-16ee0158d195
+	go.sia.tech/coreutils v0.21.1-0.20260224193105-a855c3d2b0e4
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/indexd v0.14.0
