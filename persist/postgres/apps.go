@@ -90,23 +90,16 @@ func (s *Store) UpdateAppConnectKey(meta accounts.AppConnectKeyRequest) (key acc
 	return
 }
 
-// ValidAppConnectKey checks if an application connection key is valid.
-func (s *Store) ValidAppConnectKey(key string) (bool, error) {
-	var remainingUses int
-	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, `
-			SELECT GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id AND deleted_at IS NULL))
-			FROM app_connect_keys ack
-			INNER JOIN quotas q ON q.name = ack.quota_name
-			WHERE ack.app_key = $1
-		`, key).Scan(&remainingUses)
+// ValidAppConnectKey checks if an application connection key exists.
+func (s *Store) ValidAppConnectKey(key string) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		var id int64
+		err := tx.QueryRow(ctx, `SELECT id FROM app_connect_keys WHERE app_key = $1`, key).Scan(&id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return accounts.ErrKeyNotFound
+		}
+		return err
 	})
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, accounts.ErrKeyNotFound
-	} else if err != nil {
-		return false, err
-	}
-	return remainingUses > 0, nil
 }
 
 // AppConnectKey retrieves an application connection key from the database.
@@ -203,7 +196,6 @@ func (s *Store) AppConnectKeyUserSecret(connectKey string) (secret types.Hash256
 }
 
 // RegisterAppKey uses a connect key to register a new app account.
-// It returns the user secret associated with the connect key.
 // This secret must never be exposed to the user.
 func (s *Store) RegisterAppKey(connectKey string, appKey types.PublicKey, meta accounts.AppMeta) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
@@ -219,14 +211,17 @@ func (s *Store) RegisterAppKey(connectKey string, appKey types.PublicKey, meta a
 			return accounts.ErrKeyNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to update app connect key %q: %w", connectKey, err)
-		} else if remainingUses <= 0 {
-			// check remaining uses before adding the account
-			return accounts.ErrKeyExhausted
 		}
 
 		err = addAccount(ctx, tx, connectKey, appKey, meta, accounts.WithMaxPinnedData(storageLimit))
-		if err != nil {
+		if errors.Is(err, accounts.ErrExists) {
+			// account already registered — re-auth is always allowed regardless of remaining uses
+			return err
+		} else if err != nil {
 			return fmt.Errorf("failed to add app account: %w", err)
+		} else if remainingUses <= 0 {
+			// new account created — enforce quota
+			return accounts.ErrKeyExhausted
 		}
 		return nil
 	})

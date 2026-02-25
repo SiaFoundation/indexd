@@ -33,8 +33,8 @@ func (s *mockAccounts) Account(_ context.Context, ak types.PublicKey) (accounts.
 	return accounts.Account{}, nil
 }
 
-func (s *mockAccounts) ValidAppConnectKey(context.Context, string) (bool, error) {
-	return true, nil
+func (s *mockAccounts) ValidAppConnectKey(context.Context, string) error {
+	return nil
 }
 
 func (s *mockAccounts) RegisterAppKey(connectKey string, appKey types.PublicKey, meta accounts.AppMeta) error {

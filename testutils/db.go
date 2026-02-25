@@ -126,7 +126,7 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 	t.Helper()
 
 	const connectKey = "test"
-	if _, err := ts.ValidAppConnectKey(connectKey); errors.Is(err, accounts.ErrKeyNotFound) {
+	if err := ts.ValidAppConnectKey(connectKey); errors.Is(err, accounts.ErrKeyNotFound) {
 		// create testing quota if it doesn't exist
 		if err := ts.PutQuota(TestQuotaName, accounts.PutQuotaRequest{
 			Description:     "Testing quota",

@@ -28,7 +28,7 @@ func (s *Store) addTestQuota(t testing.TB, name string, maxPinnedData uint64, to
 func TestAppConnectKeys(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
-	if _, err := store.ValidAppConnectKey("foobar"); !errors.Is(err, accounts.ErrKeyNotFound) {
+	if err := store.ValidAppConnectKey("foobar"); !errors.Is(err, accounts.ErrKeyNotFound) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
 
@@ -47,10 +47,13 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatalf("unexpected app connect key: %+v", key)
 	}
 
-	if ok, err := store.ValidAppConnectKey(connectKey); err != nil {
+	if err := store.ValidAppConnectKey(connectKey); err != nil {
 		t.Fatal("failed to validate app connect key:", err)
-	} else if !ok {
-		t.Fatal("expected app connect key to be valid")
+	}
+	if key, err := store.AppConnectKey(connectKey); err != nil {
+		t.Fatal("failed to get app connect key:", err)
+	} else if key.RemainingUses == 0 {
+		t.Fatal("expected app connect key to have remaining uses")
 	}
 
 	assertAccount := func(acc types.PublicKey, pinned, maxPinned uint64, desc, logo, service string) {
@@ -96,15 +99,23 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatalf("expected app connect key's quota to be 'test-1-use', got %q", keys[0].Quota)
 	}
 
-	// try again on an exhausted key
+	// try again on an exhausted key with a new account
 	if err := store.RegisterAppKey(connectKey, types.GeneratePrivateKey().PublicKey(), meta); !errors.Is(err, accounts.ErrKeyExhausted) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyExhausted, err)
 	}
 
-	if ok, err := store.ValidAppConnectKey(connectKey); err != nil {
+	// re-registering the same account on an exhausted key should succeed
+	if err := store.RegisterAppKey(connectKey, acc, meta); !errors.Is(err, accounts.ErrExists) {
+		t.Fatalf("expected err %q for re-auth on exhausted key, got %q", accounts.ErrExists, err)
+	}
+
+	if err := store.ValidAppConnectKey(connectKey); err != nil {
 		t.Fatal("failed to validate app connect key:", err)
-	} else if ok {
-		t.Fatal("expected app connect key to be invalid")
+	}
+	if key, err := store.AppConnectKey(connectKey); err != nil {
+		t.Fatal("failed to get app connect key:", err)
+	} else if key.RemainingUses != 0 {
+		t.Fatal("expected app connect key to be exhausted")
 	}
 
 	// update to a different quota with more data
@@ -120,12 +131,15 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatalf("expected updated app connect key's quota to be 'test-20-data', got %q", updated.Quota)
 	}
 
-	// key should still be invalid since UpdateAppConnectKey does not reset
+	// key should still be exhausted since UpdateAppConnectKey does not reset
 	// usage or make an exhausted key valid
-	if ok, err := store.ValidAppConnectKey(connectKey); err != nil {
+	if err := store.ValidAppConnectKey(connectKey); err != nil {
 		t.Fatal("failed to validate app connect key:", err)
-	} else if ok {
-		t.Fatal("expected app connect key to be invalid")
+	}
+	if key, err := store.AppConnectKey(connectKey); err != nil {
+		t.Fatal("failed to get app connect key:", err)
+	} else if key.RemainingUses != 0 {
+		t.Fatal("expected app connect key to still be exhausted")
 	}
 
 	stats, err := store.AccountStats()
@@ -172,7 +186,7 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := store.ValidAppConnectKey(connectKey); !errors.Is(err, accounts.ErrKeyNotFound) {
+	if err := store.ValidAppConnectKey(connectKey); !errors.Is(err, accounts.ErrKeyNotFound) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
 	}
 

@@ -55,7 +55,7 @@ type (
 
 	// Accounts defines the account management interface for the application API.
 	Accounts interface {
-		ValidAppConnectKey(context.Context, string) (bool, error)
+		ValidAppConnectKey(context.Context, string) error
 		RegisterAppKey(string, types.PublicKey, accounts.AppMeta) error
 		AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error)
 
@@ -651,15 +651,11 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 				return
 			}
 
-			ok, err := am.ValidAppConnectKey(jc.Request.Context(), password)
-			if errors.Is(err, accounts.ErrKeyNotFound) {
+			if err := am.ValidAppConnectKey(jc.Request.Context(), password); errors.Is(err, accounts.ErrKeyNotFound) {
 				jc.Error(errors.New("invalid app connect key"), http.StatusUnauthorized)
 				return
 			} else if err != nil {
 				jc.Error(ErrInternalError, http.StatusInternalServerError)
-				return
-			} else if !ok {
-				jc.Error(errors.New("no more uses"), http.StatusForbidden)
 				return
 			}
 

@@ -42,7 +42,7 @@ type (
 		ScheduleAccountsForFunding(hostKey types.PublicKey) error
 		UpdateHostAccounts(accounts []HostAccount) error
 
-		ValidAppConnectKey(string) (bool, error)
+		ValidAppConnectKey(string) error
 		AppConnectKeyUserSecret(string) (secret types.Hash256, err error)
 		RegisterAppKey(string, types.PublicKey, AppMeta) error
 		AddAppConnectKey(AppConnectKeyRequest) (ConnectKey, error)

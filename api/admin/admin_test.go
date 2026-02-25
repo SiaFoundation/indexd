@@ -344,6 +344,38 @@ func TestRegisterAppKey(t *testing.T) {
 		t.Fatal("expected duplicate registration to succeed, got", err)
 	}
 
+	// create a 1-use quota and connect key, then verify re-auth works after the
+	// key is exhausted
+	oneUseTarget := testutils.TestQuotaFundTargetBytes
+	if err := adminClient.PutQuota(context.Background(), "one-use", accounts.PutQuotaRequest{
+		Description:     "One use quota",
+		MaxPinnedData:   1000,
+		TotalUses:       1,
+		FundTargetBytes: &oneUseTarget,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oneUseKey, err := adminClient.AddAppConnectKey(context.Background(), accounts.AppConnectKeyRequest{
+		Quota: "one-use",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	exhaustedAppKey := types.GeneratePrivateKey().PublicKey()
+	if err := adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
+		ConnectKey: oneUseKey.Key,
+		AppKey:     exhaustedAppKey,
+	}); err != nil {
+		t.Fatal("expected first registration on 1-use key to succeed, got", err)
+	}
+	// re-registering the same app key on the now-exhausted connect key should succeed
+	if err := adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
+		ConnectKey: oneUseKey.Key,
+		AppKey:     exhaustedAppKey,
+	}); err != nil {
+		t.Fatal("expected re-auth on exhausted key to succeed, got", err)
+	}
+
 	// registering with unknown connect key should fail
 	err = adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
 		ConnectKey: "nonexistent",

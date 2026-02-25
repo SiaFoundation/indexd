@@ -136,9 +136,9 @@ func (m *AccountManager) RegisterAppKey(key string, pk types.PublicKey, meta App
 	return nil
 }
 
-// ValidAppConnectKey checks if an app connect key is valid. If the key is not found, it
+// ValidAppConnectKey checks if an app connect key exists. If the key is not found, it
 // returns [ErrKeyNotFound].
-func (m *AccountManager) ValidAppConnectKey(ctx context.Context, key string) (bool, error) {
+func (m *AccountManager) ValidAppConnectKey(ctx context.Context, key string) error {
 	return m.store.ValidAppConnectKey(key)
 }
 
