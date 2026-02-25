@@ -446,11 +446,10 @@ func (a *admin) handlePOSTAppsRegister(jc jape.Context) {
 	}
 
 	// basic validation of required fields
-	var zeroAppKey types.PublicKey
 	if req.ConnectKey == "" {
 		jc.Error(errors.New("connect key is required"), http.StatusBadRequest)
 		return
-	} else if req.AppKey == zeroAppKey {
+	} else if req.AppKey == (types.PublicKey{}) {
 		jc.Error(errors.New("app key is required"), http.StatusBadRequest)
 		return
 	}
