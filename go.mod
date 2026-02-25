@@ -1,8 +1,6 @@
 module go.sia.tech/indexd
 
-go 1.25
-
-toolchain go1.25.5
+go 1.26.0
 
 require (
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
