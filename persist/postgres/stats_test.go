@@ -385,24 +385,22 @@ func TestAppStats(t *testing.T) {
 		}
 	}
 
-	findApp := func(appID types.Hash256) (admin.AppStats, bool) {
+	assertStats := func(appID types.Hash256, expectedAccounts, expectedActive, expectedPinnedData uint64) {
 		t.Helper()
 		all, err := store.AppStats(0, 100)
 		if err != nil {
 			t.Fatal(err)
 		}
+		var stats admin.AppStats
+		var found bool
 		for _, s := range all {
 			if s.AppID == appID {
-				return s, true
+				stats = s
+				found = true
+				break
 			}
 		}
-		return admin.AppStats{}, false
-	}
-
-	assertStats := func(appID types.Hash256, expectedAccounts, expectedActive, expectedPinnedData uint64) {
-		t.Helper()
-		stats, ok := findApp(appID)
-		if !ok {
+		if !found {
 			t.Fatalf("app %s not found in stats", appID)
 		}
 		if stats.Accounts != expectedAccounts {
