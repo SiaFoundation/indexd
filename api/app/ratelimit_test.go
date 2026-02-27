@@ -27,7 +27,7 @@ func TestIPRateLimiter(t *testing.T) {
 	}
 
 	// after the window expires, should be allowed again
-	time.Sleep(interval)
+	time.Sleep(interval + 10*time.Millisecond)
 	if !rl.allow("1.2.3.4") {
 		t.Fatal("request should be allowed after window expires")
 	}

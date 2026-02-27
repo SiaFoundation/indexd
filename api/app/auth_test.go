@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -43,6 +44,49 @@ func (s *mockAccounts) RegisterAppKey(connectKey string, appKey types.PublicKey,
 
 func (s *mockAccounts) AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error) {
 	return frand.Entropy256(), nil
+}
+
+func TestAuthConnectFieldLimits(t *testing.T) {
+	s := &mockAccounts{tokens: make(map[types.PublicKey]struct{})}
+	handler, err := NewAPI("http://localhost:9982", nil, s, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	client := NewClient(server.URL)
+
+	// valid request should succeed
+	valid := RegisterAppRequest{
+		AppID:       frand.Entropy256(),
+		Name:        "test-app",
+		Description: "A test app",
+		ServiceURL:  "http://test-app.com",
+	}
+	if _, err := client.RequestAppConnection(context.Background(), valid); err != nil {
+		t.Fatal("expected success, got", err)
+	}
+
+	tests := []struct {
+		name   string
+		modify func(*RegisterAppRequest)
+	}{
+		{"name too long", func(r *RegisterAppRequest) { r.Name = strings.Repeat("a", maxNameLen+1) }},
+		{"description too long", func(r *RegisterAppRequest) { r.Description = strings.Repeat("a", maxDescriptionLen+1) }},
+		{"logoURL too long", func(r *RegisterAppRequest) { r.LogoURL = strings.Repeat("a", maxURLLen+1) }},
+		{"serviceURL too long", func(r *RegisterAppRequest) { r.ServiceURL = strings.Repeat("a", maxURLLen+1) }},
+		{"callbackURL too long", func(r *RegisterAppRequest) { r.CallbackURL = strings.Repeat("a", maxURLLen+1) }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := valid
+			tt.modify(&req)
+			if _, err := client.RequestAppConnection(context.Background(), req); err == nil {
+				t.Fatal("expected error for oversized field")
+			}
+		})
+	}
 }
 
 func TestAuth(t *testing.T) {
