@@ -604,6 +604,27 @@ func TestHosts(t *testing.T) {
 	assertHosts([]types.PublicKey{hk2}, 1, 1, hosts.WithActiveContracts(true))
 	assertHosts([]types.PublicKey{hk3}, 1, 1, hosts.WithPublicKeys([]types.PublicKey{hk2, hk3, hk4}))
 
+	// mark hk1 and hk3 as stuck
+	if err := db.UpdateStuckHosts([]types.PublicKey{hk1, hk3}); err != nil {
+		t.Fatal(err)
+	}
+
+	// only stuck hosts
+	assertHosts([]types.PublicKey{hk1, hk3}, 0, 4, hosts.WithStuck(true))
+	// only non-stuck hosts
+	assertHosts([]types.PublicKey{hk2, hk4}, 0, 4, hosts.WithStuck(false))
+	// stuck + usable
+	assertHosts([]types.PublicKey{hk1, hk3}, 0, 4, hosts.WithStuck(true), hosts.WithUsable(true))
+	// stuck + blocked
+	assertHosts([]types.PublicKey{hk3}, 0, 4, hosts.WithStuck(true), hosts.WithBlocked(true))
+	// non-stuck + active contracts
+	assertHosts([]types.PublicKey{hk2}, 0, 4, hosts.WithStuck(false), hosts.WithActiveContracts(true))
+
+	// clear stuck hosts before sorting tests
+	if err := db.UpdateStuckHosts(nil); err != nil {
+		t.Fatal(err)
+	}
+
 	// helper to update hosts
 	updateHost := func(hk types.PublicKey, column string, value any) {
 		t.Helper()

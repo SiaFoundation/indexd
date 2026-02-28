@@ -129,7 +129,8 @@ WITH `+sqlGlobalsCTE+`, hosts AS (
 		settings_collateral, settings_storage_price, settings_ingress_price,
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until, settings_signature,
 		last_successful_scan IS NOT NULL as has_settings,
-		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
+		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
+		stuck_since IS NOT NULL as stuck
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 	WHERE hosts.public_key = $1
@@ -191,7 +192,8 @@ WITH `+sqlGlobalsCTE+`, hosts AS (
 		settings_collateral, settings_storage_price, settings_ingress_price,
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until, settings_signature,
 		last_successful_scan IS NOT NULL as has_settings,
-		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version
+		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
+		stuck_since IS NOT NULL as stuck
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
 ) SELECT
@@ -206,10 +208,12 @@ WHERE
 	AND (($4::boolean IS NULL) OR ($4::boolean = hosts.blocked))
 	-- active contracts filter
 	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND proof_height > globals.scanned_height)))
+	-- stuck filter
+	AND (($6::boolean IS NULL) OR ($6::boolean = hosts.stuck))
 	-- public key filter
-	AND ((CARDINALITY($6::bytea[]) = 0) OR (public_key = ANY($6)))
+	AND ((CARDINALITY($7::bytea[]) = 0) OR (public_key = ANY($7)))
 	%s -- orderClause
-	LIMIT $1 OFFSET $2`, orderClause), limit, offset, opts.Usable, opts.Blocked, opts.ActiveContracts, hks)
+	LIMIT $1 OFFSET $2`, orderClause), limit, offset, opts.Usable, opts.Blocked, opts.ActiveContracts, opts.Stuck, hks)
 		if err != nil {
 			return fmt.Errorf("failed to query hosts: %w", err)
 		}
@@ -782,8 +786,9 @@ func scanHost(s scanner) (dbHost, error) {
 		&host.Settings.Prices.TipHeight,
 		&validUntil,
 		(*sqlSignature)(&host.Settings.Prices.Signature),
-		&ignore,
-		&ignore,
+		&ignore, // has_settings
+		&ignore, // settings_version
+		&ignore, // stuck
 		&host.Usability.Uptime,
 		&host.Usability.MaxContractDuration,
 		&host.Usability.MaxCollateral,

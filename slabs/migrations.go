@@ -25,7 +25,11 @@ func (m *SlabManager) migrationCandidates() ([]hosts.Host, []contracts.Contract,
 	const batchSize = 500
 	var allHosts []hosts.Host
 	for offset := 0; ; offset += batchSize {
-		batch, err := m.store.Hosts(offset, batchSize, hosts.WithBlocked(false), hosts.WithActiveContracts(true))
+		batch, err := m.store.Hosts(offset, batchSize,
+			hosts.WithBlocked(false),
+			hosts.WithActiveContracts(true),
+			hosts.WithUsable(true),
+			hosts.WithStuck(false))
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to fetch hosts: %w", err)
 		}
