@@ -213,7 +213,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	appAPIOpts := []app.Option{
 		app.WithLogger(log.Named("api.application")),
 		// rate limit /auth/connect to 1 req/min with burst of 10, pruned after 10 minutes
-		app.WithRateLimiter(api.NewRateLimiter(time.Minute, 10, 10*time.Minute)),
+		app.WithRateLimiter(api.NewIPRateLimiter(time.Minute, 10, 10*time.Minute)),
 	}
 
 	advertiseURL := cfg.ApplicationAPI.AdvertiseURL

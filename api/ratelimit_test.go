@@ -7,7 +7,7 @@ import (
 
 func TestRateLimiter(t *testing.T) {
 	// 10 req/s with burst of 3
-	rl := NewRateLimiter(100*time.Millisecond, 3, time.Minute)
+	rl := NewIPRateLimiter(100*time.Millisecond, 3, time.Minute)
 
 	// first 3 requests should succeed (burst)
 	for i := 0; i < 3; i++ {

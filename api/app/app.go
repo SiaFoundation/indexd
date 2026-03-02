@@ -116,7 +116,7 @@ type (
 		contracts Contracts
 		slabs     Slabs
 		log       *zap.Logger
-		rl        *api.RateLimiter
+		rl        api.RateLimiter
 
 		hostname     string
 		advertiseURL string
@@ -156,7 +156,7 @@ func WithLogger(log *zap.Logger) Option {
 }
 
 // WithRateLimiter sets the rate limiter for the /auth/connect endpoint.
-func WithRateLimiter(rl *api.RateLimiter) Option {
+func WithRateLimiter(rl api.RateLimiter) Option {
 	return func(a *app) {
 		a.rl = rl
 	}

@@ -13,15 +13,20 @@ import (
 )
 
 type (
+	// A RateLimiter allows or denies a request for the given key.
+	RateLimiter interface {
+		Allow(key string) bool
+	}
+
 	limiterEntry struct {
 		limiter  *rate.Limiter
 		lastSeen time.Time
 	}
 
-	// A RateLimiter is a per-key rate limiter using token buckets. Each
-	// unique key gets its own bucket. Stale entries are pruned lazily on
-	// access.
-	RateLimiter struct {
+	// An IPRateLimiter is a per-key rate limiter using token buckets.
+	// Each unique key gets its own bucket. Stale entries are pruned
+	// lazily on access.
+	IPRateLimiter struct {
 		mu      sync.Mutex // protects entries
 		entries map[string]*limiterEntry
 		limit   rate.Limit
@@ -30,12 +35,12 @@ type (
 	}
 )
 
-// NewRateLimiter creates a new per-key rate limiter. every is the minimum
+// NewIPRateLimiter creates a new per-key rate limiter. every is the minimum
 // time between requests in steady state, burst is the maximum number of
 // requests allowed at once, and ttl is how long a bucket is retained
 // after its last request before being pruned.
-func NewRateLimiter(every time.Duration, burst int, ttl time.Duration) *RateLimiter {
-	return &RateLimiter{
+func NewIPRateLimiter(every time.Duration, burst int, ttl time.Duration) *IPRateLimiter {
+	return &IPRateLimiter{
 		entries: make(map[string]*limiterEntry),
 		limit:   rate.Every(every),
 		burst:   burst,
@@ -45,7 +50,7 @@ func NewRateLimiter(every time.Duration, burst int, ttl time.Duration) *RateLimi
 
 // prune removes entries that haven't been seen within the TTL. Must be
 // called with rl.mu held.
-func (rl *RateLimiter) prune(now time.Time) {
+func (rl *IPRateLimiter) prune(now time.Time) {
 	for key, e := range rl.entries {
 		if now.Sub(e.lastSeen) > rl.ttl {
 			delete(rl.entries, key)
@@ -55,7 +60,7 @@ func (rl *RateLimiter) prune(now time.Time) {
 
 // Allow returns true if the request for the given key is within the
 // rate limit.
-func (rl *RateLimiter) Allow(key string) bool {
+func (rl *IPRateLimiter) Allow(key string) bool {
 	now := time.Now()
 
 	rl.mu.Lock()
@@ -73,7 +78,7 @@ func (rl *RateLimiter) Allow(key string) bool {
 
 // WrapRateLimit returns a jape middleware that rate limits requests
 // based on client IP. If rl is nil the handler is returned unmodified.
-func WrapRateLimit(rl *RateLimiter, next jape.Handler) jape.Handler {
+func WrapRateLimit(rl RateLimiter, next jape.Handler) jape.Handler {
 	if rl == nil {
 		return next
 	}

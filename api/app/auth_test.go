@@ -48,7 +48,7 @@ func (s *mockAccounts) AppSecret(connectKey string, appID types.Hash256) (types.
 
 func TestAuthConnectRateLimit(t *testing.T) {
 	s := &mockAccounts{tokens: make(map[types.PublicKey]struct{})}
-	rl := api.NewRateLimiter(10*time.Millisecond, 2, time.Minute)
+	rl := api.NewIPRateLimiter(10*time.Millisecond, 2, time.Minute)
 	handler, err := NewAPI("http://localhost:9982", nil, s, nil, nil, WithRateLimiter(rl))
 	if err != nil {
 		t.Fatal(err)
