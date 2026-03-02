@@ -1,101 +1,62 @@
 package api
 
 import (
-	"errors"
 	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
-	"go.sia.tech/jape"
 	"golang.org/x/time/rate"
 )
 
-type (
-	// A RateLimiter allows or denies a request for the given key.
-	RateLimiter interface {
-		Allow(key string) bool
-	}
-
-	limiterEntry struct {
-		limiter  *rate.Limiter
-		lastSeen time.Time
-	}
-
-	// An IPRateLimiter is a per-key rate limiter using token buckets.
-	// Each unique key gets its own bucket. Stale entries are pruned
-	// lazily on access.
-	IPRateLimiter struct {
-		mu      sync.Mutex // protects entries
-		entries map[string]*limiterEntry
-		limit   rate.Limit
-		burst   int
-		ttl     time.Duration
-	}
-)
+// An IPRateLimiter is a per-key rate limiter using token buckets.
+// Each unique key gets its own bucket that is automatically pruned
+// after the TTL expires.
+type IPRateLimiter struct {
+	mu       sync.Mutex // protects limiters
+	limiters map[string]*rate.Limiter
+	limit    rate.Limit
+	burst    int
+	ttl      time.Duration
+}
 
 // NewIPRateLimiter creates a new per-key rate limiter. every is the minimum
 // time between requests in steady state, burst is the maximum number of
 // requests allowed at once, and ttl is how long a bucket is retained
-// after its last request before being pruned.
+// after creation before being pruned.
 func NewIPRateLimiter(every time.Duration, burst int, ttl time.Duration) *IPRateLimiter {
 	return &IPRateLimiter{
-		entries: make(map[string]*limiterEntry),
-		limit:   rate.Every(every),
-		burst:   burst,
-		ttl:     ttl,
-	}
-}
-
-// prune removes entries that haven't been seen within the TTL. Must be
-// called with rl.mu held.
-func (rl *IPRateLimiter) prune(now time.Time) {
-	for key, e := range rl.entries {
-		if now.Sub(e.lastSeen) > rl.ttl {
-			delete(rl.entries, key)
-		}
+		limiters: make(map[string]*rate.Limiter),
+		limit:    rate.Every(every),
+		burst:    burst,
+		ttl:      ttl,
 	}
 }
 
 // Allow returns true if the request for the given key is within the
 // rate limit.
 func (rl *IPRateLimiter) Allow(key string) bool {
-	now := time.Now()
-
 	rl.mu.Lock()
-	e, ok := rl.entries[key]
+	l, ok := rl.limiters[key]
 	if !ok {
-		rl.prune(now)
-		e = &limiterEntry{limiter: rate.NewLimiter(rl.limit, rl.burst)}
-		rl.entries[key] = e
+		l = rate.NewLimiter(rl.limit, rl.burst)
+		rl.limiters[key] = l
+		time.AfterFunc(rl.ttl, func() {
+			rl.mu.Lock()
+			delete(rl.limiters, key)
+			rl.mu.Unlock()
+		})
 	}
-	e.lastSeen = now
 	rl.mu.Unlock()
-
-	return e.limiter.Allow()
+	return l.Allow()
 }
 
-// WrapRateLimit returns a jape middleware that rate limits requests
-// based on client IP. If rl is nil the handler is returned unmodified.
-func WrapRateLimit(rl RateLimiter, next jape.Handler) jape.Handler {
-	if rl == nil {
-		return next
-	}
-	return func(jc jape.Context) {
-		if !rl.Allow(clientIP(jc.Request)) {
-			jc.Error(errors.New("too many requests"), http.StatusTooManyRequests)
-			return
-		}
-		next(jc)
-	}
-}
-
-// clientIP extracts the client IP from the request. It checks
+// ClientIP extracts the client IP from the request. It checks
 // X-Forwarded-For first (for reverse proxy deployments) and falls back
 // to RemoteAddr. IPv6 addresses are normalized to their /64 subnet to
 // prevent attackers from rotating addresses within a subnet.
-func clientIP(r *http.Request) string {
+func ClientIP(r *http.Request) string {
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		// use the first (leftmost) IP, which is the original client
 		if i := strings.IndexByte(xff, ','); i != -1 {

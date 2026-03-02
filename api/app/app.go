@@ -68,6 +68,11 @@ type (
 		TriggerAccountFunding(force bool) error
 	}
 
+	// A RateLimiter allows or denies a request for the given key.
+	RateLimiter interface {
+		Allow(key string) bool
+	}
+
 	authReq struct {
 		Request    RegisterAppRequest
 		Expiration time.Time
@@ -116,7 +121,7 @@ type (
 		contracts Contracts
 		slabs     Slabs
 		log       *zap.Logger
-		rl        api.RateLimiter
+		rl        RateLimiter
 
 		hostname     string
 		advertiseURL string
@@ -156,9 +161,24 @@ func WithLogger(log *zap.Logger) Option {
 }
 
 // WithRateLimiter sets the rate limiter for the /auth/connect endpoint.
-func WithRateLimiter(rl api.RateLimiter) Option {
+func WithRateLimiter(rl RateLimiter) Option {
 	return func(a *app) {
 		a.rl = rl
+	}
+}
+
+// WrapRateLimit returns a jape handler that rate limits requests by
+// client IP. If rl is nil the handler is returned unmodified.
+func WrapRateLimit(rl RateLimiter, next jape.Handler) jape.Handler {
+	if rl == nil {
+		return next
+	}
+	return func(jc jape.Context) {
+		if !rl.Allow(api.ClientIP(jc.Request)) {
+			jc.Error(errors.New("too many requests"), http.StatusTooManyRequests)
+			return
+		}
+		next(jc)
 	}
 }
 
@@ -683,7 +703,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		// If the user approves, the app receives a shared secret.
 		// 5. once approved, the app derives an ed25519 keypair using `HKDF(user's mnemonic, its app ID, user secret)`
 		// app registers the public key with indexd using a request signed with the derived private key
-		"POST /auth/connect":                     api.WrapRateLimit(a.rl, a.handleAuthRequest),
+		"POST /auth/connect":                     WrapRateLimit(a.rl, a.handleAuthRequest),
 		"GET /auth/connect/:requestID/status":    a.handleGETAuthConnectStatus,
 		"POST /auth/connect/:requestID/register": a.handleAuthRegister,
 		"GET /auth/check":                        wrapSignedAuth(a.handleGETAuthCheck),
