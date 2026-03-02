@@ -484,26 +484,21 @@ paths:
                   description: Unique, stable identifier for the application.
                 name:
                   type: string
-                  maxLength: 128
                   description: Application name
                 description:
                   type: string
-                  maxLength: 1024
                   description: Application description
                 logoURL:
                   type: string
                   format: uri
-                  maxLength: 2048
                   description: URL of the application logo
                 serviceURL:
                   type: string
                   format: uri
-                  maxLength: 2048
                   description: URL of the application service
                 callbackURL:
                   type: string
                   format: uri
-                  maxLength: 2048
                   description: Optional URL the indexer can redirect to after approval
       responses:
         "200":
@@ -513,7 +508,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/RegisterAppResponse"
         "400":
-          description: Invalid request (missing required fields or field exceeds maximum length)
+          description: Invalid request (missing required fields)
         "409":
           description: Application already connected
         "429":

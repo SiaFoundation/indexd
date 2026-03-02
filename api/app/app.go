@@ -120,8 +120,6 @@ type (
 		hostname     string
 		advertiseURL string
 
-		rateLimiter *ipRateLimiter
-
 		mu           sync.Mutex
 		authRequests map[string]authReq // maps request ID to auth request
 	}
@@ -147,11 +145,6 @@ const (
 
 	applicationJSON        = "application/json"
 	applicationOctetStream = "application/octet-stream"
-
-	// field size limits for RegisterAppRequest
-	maxNameLen        = 128
-	maxDescriptionLen = 1024
-	maxURLLen         = 2048
 )
 
 // WithLogger sets the logger for application API.
@@ -421,21 +414,6 @@ func (a *app) handleAuthRequest(jc jape.Context) {
 	case req.ServiceURL == "":
 		jc.Error(errors.New("service URL is required"), http.StatusBadRequest)
 		return
-	case len(req.Name) > maxNameLen:
-		jc.Error(fmt.Errorf("name exceeds maximum length of %d", maxNameLen), http.StatusBadRequest)
-		return
-	case len(req.Description) > maxDescriptionLen:
-		jc.Error(fmt.Errorf("description exceeds maximum length of %d", maxDescriptionLen), http.StatusBadRequest)
-		return
-	case len(req.LogoURL) > maxURLLen:
-		jc.Error(fmt.Errorf("logo URL exceeds maximum length of %d", maxURLLen), http.StatusBadRequest)
-		return
-	case len(req.ServiceURL) > maxURLLen:
-		jc.Error(fmt.Errorf("service URL exceeds maximum length of %d", maxURLLen), http.StatusBadRequest)
-		return
-	case len(req.CallbackURL) > maxURLLen:
-		jc.Error(fmt.Errorf("callback URL exceeds maximum length of %d", maxURLLen), http.StatusBadRequest)
-		return
 	}
 
 	requestID := hex.EncodeToString(frand.Bytes(16))
@@ -635,7 +613,7 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 // users, or rather their applications, to pin slabs to the indexer.
 // Authentication happens through presigned URLs that are signed with a private
 // key that corresponds to a previously registered public key.
-func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, slabs Slabs, opts ...Option) (http.Handler, error) {
+func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, slabs Slabs, rl *api.RateLimiter, opts ...Option) (http.Handler, error) {
 	u, err := url.Parse(advertiseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse advertise URL %q: %w", advertiseURL, err)
@@ -649,7 +627,6 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 
 		hostname:     u.Host,
 		advertiseURL: advertiseURL,
-		rateLimiter:  newIPRateLimiter(10, 5*time.Minute),
 		authRequests: make(map[string]authReq),
 	}
 	for _, opt := range opts {
@@ -698,13 +675,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		// If the user approves, the app receives a shared secret.
 		// 5. once approved, the app derives an ed25519 keypair using `HKDF(user's mnemonic, its app ID, user secret)`
 		// app registers the public key with indexd using a request signed with the derived private key
-		"POST /auth/connect": func(jc jape.Context) {
-			if !a.rateLimiter.allow(clientIP(jc.Request)) {
-				jc.Error(errors.New("too many requests"), http.StatusTooManyRequests)
-				return
-			}
-			a.handleAuthRequest(jc)
-		},
+		"POST /auth/connect":                     api.WrapRateLimit(rl, a.handleAuthRequest),
 		"GET /auth/connect/:requestID/status":    a.handleGETAuthConnectStatus,
 		"POST /auth/connect/:requestID/register": a.handleAuthRegister,
 		"GET /auth/check":                        wrapSignedAuth(a.handleGETAuthCheck),

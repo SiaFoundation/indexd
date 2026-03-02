@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
+	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
 	client "go.sia.tech/indexd/client/v2"
@@ -213,6 +214,9 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		app.WithLogger(log.Named("api.application")),
 	}
 
+	// rate limit /auth/connect to 1 req/min with burst of 10, pruned after 10 minutes
+	authConnectRL := api.NewRateLimiter(time.Minute, 10, 10*time.Minute)
+
 	advertiseURL := cfg.ApplicationAPI.AdvertiseURL
 	if advertiseURL == "" {
 		host, port, _ := net.SplitHostPort(appAPIListener.Addr().String())
@@ -223,7 +227,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		}
 	}
 
-	appHandler, err := app.NewAPI(advertiseURL, store, am, contracts, slabs, appAPIOpts...)
+	appHandler, err := app.NewAPI(advertiseURL, store, am, contracts, slabs, authConnectRL, appAPIOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create application API: %w", err)
 	}
