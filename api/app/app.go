@@ -116,6 +116,7 @@ type (
 		contracts Contracts
 		slabs     Slabs
 		log       *zap.Logger
+		rl        *api.RateLimiter
 
 		hostname     string
 		advertiseURL string
@@ -151,6 +152,13 @@ const (
 func WithLogger(log *zap.Logger) Option {
 	return func(api *app) {
 		api.log = log
+	}
+}
+
+// WithRateLimiter sets the rate limiter for the /auth/connect endpoint.
+func WithRateLimiter(rl *api.RateLimiter) Option {
+	return func(a *app) {
+		a.rl = rl
 	}
 }
 
@@ -613,7 +621,7 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 // users, or rather their applications, to pin slabs to the indexer.
 // Authentication happens through presigned URLs that are signed with a private
 // key that corresponds to a previously registered public key.
-func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, slabs Slabs, rl *api.RateLimiter, opts ...Option) (http.Handler, error) {
+func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, slabs Slabs, opts ...Option) (http.Handler, error) {
 	u, err := url.Parse(advertiseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse advertise URL %q: %w", advertiseURL, err)
@@ -675,7 +683,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		// If the user approves, the app receives a shared secret.
 		// 5. once approved, the app derives an ed25519 keypair using `HKDF(user's mnemonic, its app ID, user secret)`
 		// app registers the public key with indexd using a request signed with the derived private key
-		"POST /auth/connect":                     api.WrapRateLimit(rl, a.handleAuthRequest),
+		"POST /auth/connect":                     api.WrapRateLimit(a.rl, a.handleAuthRequest),
 		"GET /auth/connect/:requestID/status":    a.handleGETAuthConnectStatus,
 		"POST /auth/connect/:requestID/register": a.handleAuthRegister,
 		"GET /auth/check":                        wrapSignedAuth(a.handleGETAuthCheck),
