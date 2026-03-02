@@ -40,6 +40,7 @@ CREATE TABLE accounts (
 CREATE INDEX accounts_last_used_idx ON accounts(last_used);
 CREATE INDEX accounts_deleted_at_idx ON accounts(deleted_at);
 CREATE INDEX accounts_connect_key_id_idx ON accounts(connect_key_id);
+CREATE INDEX accounts_app_id_idx ON accounts(app_id) WHERE deleted_at IS NULL;
 
 CREATE TABLE hosts (
     id SERIAL PRIMARY KEY,

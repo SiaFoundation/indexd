@@ -816,6 +816,28 @@ components:
           format: uint64
           description: Number of accounts active in the last week.
 
+    AppStatsResponse:
+      type: array
+      items:
+        type: object
+        properties:
+          appID:
+            allOf:
+              - $ref: "#/components/schemas/Hash256"
+              - description: The app's ID
+          accounts:
+            type: integer
+            format: uint64
+            description: Total number of accounts belonging to this app
+          active:
+            type: integer
+            format: uint64
+            description: Number of accounts active in the last week
+          pinnedData:
+            type: integer
+            format: uint64
+            description: Total pinned data in bytes across all accounts in this app
+
     ContractsStatsResponse:
       type: object
       properties:

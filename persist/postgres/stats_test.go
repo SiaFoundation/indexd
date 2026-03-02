@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
@@ -355,6 +358,100 @@ func TestAccountStatsRegistered(t *testing.T) {
 			t.Fatalf("expected %d accounts, got %d", expected, stats.Registered)
 		}
 	}
+}
+
+func TestAppStats(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	appID1 := types.Hash256{1}
+	appID2 := types.Hash256{2}
+
+	addAccountWithApp := func(ak types.PublicKey, appID types.Hash256) {
+		t.Helper()
+		connectKey := fmt.Sprintf("test-connect-key-%x", frand.Bytes(8))
+		_, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
+			Key:         connectKey,
+			Description: "test connect key",
+			Quota:       "default",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = store.transaction(func(ctx context.Context, tx *txn) error {
+			return addAccount(ctx, tx, connectKey, ak, accounts.AppMeta{ID: appID})
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	assertStats := func(appID types.Hash256, expectedAccounts, expectedActive, expectedPinnedData uint64) {
+		t.Helper()
+		all, err := store.AppStats(0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var stats admin.AppStats
+		var found bool
+		for _, s := range all {
+			if s.AppID == appID {
+				stats = s
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("app %s not found in stats", appID)
+		}
+		if stats.Accounts != expectedAccounts {
+			t.Fatalf("expected %d accounts, got %d", expectedAccounts, stats.Accounts)
+		} else if stats.Active != expectedActive {
+			t.Fatalf("expected %d active, got %d", expectedActive, stats.Active)
+		} else if stats.PinnedData != expectedPinnedData {
+			t.Fatalf("expected %d pinned data, got %d", expectedPinnedData, stats.PinnedData)
+		}
+	}
+
+	// add accounts to app1
+	acc1 := types.GeneratePrivateKey().PublicKey()
+	acc2 := types.GeneratePrivateKey().PublicKey()
+	addAccountWithApp(acc1, appID1)
+	addAccountWithApp(acc2, appID1)
+
+	// add account to app2
+	acc3 := types.GeneratePrivateKey().PublicKey()
+	addAccountWithApp(acc3, appID2)
+
+	// all accounts are active (recently created)
+	assertStats(appID1, 2, 2, 0)
+	assertStats(appID2, 1, 1, 0)
+
+	// set pinned_data for some accounts
+	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET pinned_data = 100 WHERE public_key = $1`, sqlPublicKey(acc1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET pinned_data = 200 WHERE public_key = $1`, sqlPublicKey(acc2)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET pinned_data = 500 WHERE public_key = $1`, sqlPublicKey(acc3)); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(appID1, 2, 2, 300)
+	assertStats(appID2, 1, 1, 500)
+
+	// make acc1 inactive by setting last_used sufficiently before the inactivity threshold
+	inactiveTime := time.Now().Add(-accounts.AccountActivityThreshold - time.Hour)
+	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET last_used = $1 WHERE public_key = $2`, inactiveTime, sqlPublicKey(acc1)); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(appID1, 2, 1, 300)
+
+	// soft-delete acc2 — should be excluded entirely
+	if err := store.DeleteAccount(proto.Account(acc2)); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(appID1, 1, 0, 100) // only acc1 remains (inactive)
+	assertStats(appID2, 1, 1, 500) // app2 unaffected
 }
 
 func TestHostStats(t *testing.T) {

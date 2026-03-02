@@ -365,6 +365,15 @@ func (c *Client) StatsAccounts(ctx context.Context) (resp AccountStatsResponse, 
 	return
 }
 
+// StatsApps returns per-app statistics for all apps.
+func (c *Client) StatsApps(ctx context.Context, offset, limit int) (resp AppStatsResponse, err error) {
+	values := url.Values{}
+	values.Set("offset", fmt.Sprintf("%d", offset))
+	values.Set("limit", fmt.Sprintf("%d", limit))
+	err = c.c.GET(ctx, "/stats/apps?"+values.Encode(), &resp)
+	return
+}
+
 // StatsContracts returns statistics about the contracts managed by the indexer.
 func (c *Client) StatsContracts(ctx context.Context) (resp ContractsStatsResponse, err error) {
 	err = c.c.GET(ctx, "/stats/contracts", &resp)

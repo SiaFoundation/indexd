@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/hosts"
 )
@@ -107,6 +108,42 @@ func (s *Store) SectorStats() (admin.SectorsStatsResponse, error) {
 	return stats, err
 }
 
+// AppStats reports per-app statistics including total accounts, active
+// accounts, and total pinned data for all apps.
+func (s *Store) AppStats(offset, limit int) ([]admin.AppStats, error) {
+	var stats []admin.AppStats
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		stats = stats[:0] // reuse same slice if transaction retries
+		rows, err := tx.Query(ctx, `
+SELECT
+	app_id,
+	COUNT(*),
+	COUNT(*) FILTER (WHERE last_used >= $1),
+	COALESCE(SUM(pinned_data), 0)
+FROM accounts
+WHERE deleted_at IS NULL
+GROUP BY app_id
+ORDER BY COUNT(*) DESC
+OFFSET $2 LIMIT $3`,
+			time.Now().Add(-accounts.AccountActivityThreshold), offset, limit,
+		)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var as admin.AppStats
+			if err := rows.Scan((*sqlHash256)(&as.AppID), &as.Accounts, &as.Active, &as.PinnedData); err != nil {
+				return err
+			}
+			stats = append(stats, as)
+		}
+		return rows.Err()
+	})
+	return stats, err
+}
+
 // AccountStats reports statistics about the accounts stored in the database.
 func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 	var stats admin.AccountStatsResponse
@@ -116,8 +153,10 @@ func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 			return fmt.Errorf("failed to get number of registered accounts: %w", err)
 		}
 
-		const activeAccountThreshold = 7 * 24 * time.Hour
-		err = tx.QueryRow(ctx, `SELECT COUNT(*) FROM accounts WHERE last_used >= $1 AND deleted_at IS NULL;`, time.Now().Add(-activeAccountThreshold)).Scan(&stats.Active)
+		err = tx.QueryRow(ctx,
+			`SELECT COUNT(*) FROM accounts WHERE last_used >= $1 AND deleted_at IS NULL;`,
+			time.Now().Add(-accounts.AccountActivityThreshold),
+		).Scan(&stats.Active)
 		if err != nil {
 			return fmt.Errorf("failed to get active accounts: %w", err)
 		}
