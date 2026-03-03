@@ -151,6 +151,11 @@ const (
 
 	applicationJSON        = "application/json"
 	applicationOctetStream = "application/octet-stream"
+
+	// field size limits for RegisterAppRequest
+	maxNameLen        = 128
+	maxDescriptionLen = 1024
+	maxURLLen         = 2048
 )
 
 // WithLogger sets the logger for application API.
@@ -441,6 +446,21 @@ func (a *app) handleAuthRequest(jc jape.Context) {
 		return
 	case req.ServiceURL == "":
 		jc.Error(errors.New("service URL is required"), http.StatusBadRequest)
+		return
+	case len(req.Name) > maxNameLen:
+		jc.Error(fmt.Errorf("name exceeds maximum length of %d", maxNameLen), http.StatusBadRequest)
+		return
+	case len(req.Description) > maxDescriptionLen:
+		jc.Error(fmt.Errorf("description exceeds maximum length of %d", maxDescriptionLen), http.StatusBadRequest)
+		return
+	case len(req.LogoURL) > maxURLLen:
+		jc.Error(fmt.Errorf("logo URL exceeds maximum length of %d", maxURLLen), http.StatusBadRequest)
+		return
+	case len(req.ServiceURL) > maxURLLen:
+		jc.Error(fmt.Errorf("service URL exceeds maximum length of %d", maxURLLen), http.StatusBadRequest)
+		return
+	case len(req.CallbackURL) > maxURLLen:
+		jc.Error(fmt.Errorf("callback URL exceeds maximum length of %d", maxURLLen), http.StatusBadRequest)
 		return
 	}
 
