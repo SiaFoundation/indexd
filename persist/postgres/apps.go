@@ -200,20 +200,19 @@ func (s *Store) AppConnectKeyUserSecret(connectKey string) (secret types.Hash256
 func (s *Store) RegisterAppKey(connectKey string, appKey types.PublicKey, meta accounts.AppMeta) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		var remainingUses int
-		var storageLimit uint64
 		err := tx.QueryRow(ctx, `
 			UPDATE app_connect_keys ack SET last_used = NOW()
 			FROM quotas q
 			WHERE ack.app_key = $1 AND q.name = ack.quota_name
-			RETURNING GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts a WHERE a.connect_key_id = ack.id AND a.deleted_at IS NULL)), q.max_pinned_data
-		`, connectKey).Scan(&remainingUses, &storageLimit)
+			RETURNING GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts a WHERE a.connect_key_id = ack.id AND a.deleted_at IS NULL))
+		`, connectKey).Scan(&remainingUses)
 		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrKeyNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to update app connect key %q: %w", connectKey, err)
 		}
 
-		err = addAccount(ctx, tx, connectKey, appKey, meta, accounts.WithMaxPinnedData(storageLimit))
+		err = addAccount(ctx, tx, connectKey, appKey, meta)
 		if errors.Is(err, accounts.ErrExists) {
 			// account already registered — re-auth is always allowed regardless of remaining uses
 			return err
