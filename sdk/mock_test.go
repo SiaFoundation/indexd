@@ -290,6 +290,11 @@ func (mc *mockAppClient) CreateSharedObjectURL(ctx context.Context, _ types.Priv
 	return hex.EncodeToString(key), nil
 }
 
+func (mc *mockAppClient) DeleteObject(ctx context.Context, _ types.PrivateKey, key types.Hash256) error {
+	delete(mc.objects, key)
+	return nil
+}
+
 func (mc *mockAppClient) PruneSlabs(ctx context.Context, _ types.PrivateKey) error {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
