@@ -86,7 +86,7 @@ func defaultIndexerCfg(log *zap.Logger) *indexerCfg {
 		maintenanceSettings: MaintenanceSettings,
 		contractOpts: []contracts.ContractManagerOpt{
 			contracts.WithLogger(log.Named("contracts")),
-			contracts.WithMaintenanceFrequency(500 * time.Millisecond),
+			contracts.WithMaintenanceFrequency(100 * time.Millisecond),
 			contracts.WithMinHostDistance(0), // disable location checks in tests
 			contracts.WithSyncPollInterval(500 * time.Millisecond),
 			contracts.WithSectorRootsBatchSize(5), // small batch size for testing
