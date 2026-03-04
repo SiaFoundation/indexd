@@ -291,6 +291,12 @@ func (mc *mockAppClient) CreateSharedObjectURL(ctx context.Context, _ types.Priv
 }
 
 func (mc *mockAppClient) DeleteObject(ctx context.Context, _ types.PrivateKey, key types.Hash256) error {
+	mc.mu.Lock()
+	defer mc.mu.Unlock()
+
+	if _, ok := mc.objects[key]; !ok {
+		return slabs.ErrObjectNotFound
+	}
 	delete(mc.objects, key)
 	return nil
 }
