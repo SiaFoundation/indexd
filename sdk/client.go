@@ -44,7 +44,7 @@ type (
 		ListObjects(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
 		Object(ctx context.Context, appKey types.PrivateKey, key types.Hash256) (slabs.SealedObject, error)
 		SaveObject(ctx context.Context, appKey types.PrivateKey, obj slabs.SealedObject) error
-		DeleteObject(ctx context.Context, appKey types.PrivateKey, key types.Hash256) (err error)
+		DeleteObject(ctx context.Context, appKey types.PrivateKey, key types.Hash256) error
 
 		Slab(context.Context, types.PrivateKey, slabs.SlabID) (slabs.PinnedSlab, error)
 		PinSlabs(context.Context, types.PrivateKey, ...slabs.SlabPinParams) ([]slabs.SlabID, error)
