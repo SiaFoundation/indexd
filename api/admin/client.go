@@ -143,7 +143,7 @@ func (c *Client) DeleteAccount(ctx context.Context, acc proto.Account) (err erro
 
 // UpdateAccountMaxPinnedData updates the max pinned data limit for the given account.
 func (c *Client) UpdateAccountMaxPinnedData(ctx context.Context, ak types.PublicKey, maxPinnedData uint64) error {
-	return c.c.PUT(ctx, fmt.Sprintf("/account/%s/limit", ak), accounts.UpdateMaxPinnedDataRequest{MaxPinnedData: maxPinnedData})
+	return c.c.PATCH(ctx, fmt.Sprintf("/account/%s", ak), accounts.UpdateMaxPinnedDataRequest{MaxPinnedData: maxPinnedData}, nil)
 }
 
 // Accounts returns all accounts registered in the indexer.
@@ -367,6 +367,13 @@ func (c *Client) WalletSendSiacoins(ctx context.Context, address types.Address, 
 // indexer.
 func (c *Client) StatsAccounts(ctx context.Context) (resp AccountStatsResponse, err error) {
 	err = c.c.GET(ctx, "/stats/accounts", &resp)
+	return
+}
+
+// StatsConnectKeys returns statistics about the connect keys registered on the
+// indexer.
+func (c *Client) StatsConnectKeys(ctx context.Context) (resp ConnectKeyStatsResponse, err error) {
+	err = c.c.GET(ctx, "/stats/connectkeys", &resp)
 	return
 }
 

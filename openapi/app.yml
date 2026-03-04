@@ -511,6 +511,8 @@ paths:
           description: Invalid request (missing required fields)
         "409":
           description: Application already connected
+        "429":
+          description: Too many requests — per-IP rate limit exceeded
 
       x-codeSamples:
         - lang: Go

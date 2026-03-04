@@ -781,3 +781,81 @@ func TestAggregatedHostStats(t *testing.T) {
 	assertHost(hk1, 2, 1)
 	assertHost(hk2, 1, 0)
 }
+
+func TestConnectKeyStats(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// no connect keys yet
+	stats, err := store.ConnectKeyStats()
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.Total != 0 {
+		t.Fatalf("expected 0 total connect keys, got %d", stats.Total)
+	} else if len(stats.Quotas) != 0 {
+		t.Fatalf("expected 0 quotas, got %d", len(stats.Quotas))
+	}
+
+	// create a second quota
+	fundTarget := uint64(1 << 30)
+	if err := store.PutQuota("premium", accounts.PutQuotaRequest{
+		Description:     "Premium quota",
+		MaxPinnedData:   1e12,
+		TotalUses:       100,
+		FundTargetBytes: &fundTarget,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// add 3 keys on default, 2 on premium
+	for i := range 3 {
+		if _, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
+			Key:         fmt.Sprintf("default-key-%d", i),
+			Description: "default key",
+			Quota:       "default",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := range 2 {
+		if _, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
+			Key:         fmt.Sprintf("premium-key-%d", i),
+			Description: "premium key",
+			Quota:       "premium",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	stats, err = store.ConnectKeyStats()
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.Total != 5 {
+		t.Fatalf("expected 5 total connect keys, got %d", stats.Total)
+	} else if len(stats.Quotas) != 2 {
+		t.Fatalf("expected 2 quotas, got %d", len(stats.Quotas))
+	}
+
+	// quotas are ordered by name
+	if stats.Quotas[0].Quota != "default" || stats.Quotas[0].Total != 3 {
+		t.Fatalf("expected default quota with 3 keys, got %q with %d", stats.Quotas[0].Quota, stats.Quotas[0].Total)
+	}
+	if stats.Quotas[1].Quota != "premium" || stats.Quotas[1].Total != 2 {
+		t.Fatalf("expected premium quota with 2 keys, got %q with %d", stats.Quotas[1].Quota, stats.Quotas[1].Total)
+	}
+
+	// delete a key and verify stats update
+	if err := store.DeleteAppConnectKey("default-key-0"); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err = store.ConnectKeyStats()
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.Total != 4 {
+		t.Fatalf("expected 4 total connect keys, got %d", stats.Total)
+	} else if stats.Quotas[0].Quota != "default" || stats.Quotas[0].Total != 2 {
+		t.Fatalf("expected default quota with 2 keys, got %q with %d", stats.Quotas[0].Quota, stats.Quotas[0].Total)
+	} else if stats.Quotas[1].Quota != "premium" || stats.Quotas[1].Total != 2 {
+		t.Fatalf("expected premium quota with 2 keys, got %q with %d", stats.Quotas[1].Quota, stats.Quotas[1].Total)
+	}
+}

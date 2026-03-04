@@ -66,6 +66,19 @@ type (
 		Active     uint64 `json:"active"`
 	}
 
+	// ConnectKeyQuotaStats contains the number of connect keys associated with a
+	// particular quota.
+	ConnectKeyQuotaStats struct {
+		Quota string `json:"quota"`
+		Total uint64 `json:"total"`
+	}
+
+	// ConnectKeyStatsResponse is the response body for the [GET] /stats/connectkeys.
+	ConnectKeyStatsResponse struct {
+		Total  uint64                 `json:"total"`
+		Quotas []ConnectKeyQuotaStats `json:"quotas"`
+	}
+
 	// AppStatsResponse is the response body for the [GET] /stats/apps.
 	AppStatsResponse []AppStats
 

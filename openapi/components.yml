@@ -816,6 +816,29 @@ components:
           format: uint64
           description: Number of accounts active in the last week.
 
+    ConnectKeyQuotaStats:
+      type: object
+      properties:
+        quota:
+          $ref: "#/components/schemas/QuotaKey"
+        total:
+          type: integer
+          format: uint64
+          description: Number of connect keys associated with this quota
+
+    ConnectKeyStatsResponse:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: uint64
+          description: Total number of connect keys
+        quotas:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConnectKeyQuotaStats"
+          description: Breakdown of connect keys by quota
+
     AppStatsResponse:
       type: array
       items:

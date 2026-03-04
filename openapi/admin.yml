@@ -513,14 +513,12 @@ paths:
                 password: "your-admin-password"
               })
               await admin.accountDelete("ed25519:your-public-key")
-
-  /account/{accountkey}/limit:
-    put:
+    patch:
       tags:
         - accounts
-      summary: Update account max pinned data
-      description: Update the maximum amount of data that can be pinned by an account.
-      operationId: updateAccountMaxPinnedData
+      summary: Update account fields
+      description: Partially update an account. Currently only supports updating the maximum pinned data limit.
+      operationId: patchAccount
       parameters:
         - name: accountkey
           in: path
@@ -535,7 +533,7 @@ paths:
               $ref: "#/components/schemas/UpdateMaxPinnedDataRequest"
       responses:
         "200":
-          description: Max pinned data updated successfully
+          description: Account updated successfully
         "404":
           description: Account not found
 
@@ -1572,6 +1570,21 @@ paths:
               schema:
                 $ref: "#/components/schemas/AccountStatsResponse"
 
+  /stats/connectkeys:
+    get:
+      tags:
+        - stats
+      summary: Get stats about connect keys
+      description: Returns the total number of connect keys and a breakdown by quota
+      operationId: getStatsConnectKeys
+      responses:
+        "200":
+          description: Stats about connect keys on this instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConnectKeyStatsResponse"
+
   /stats/apps:
     get:
       tags:
@@ -2015,8 +2028,15 @@ components:
       $ref: "./components.yml#/components/schemas/Quota"
     PutQuotaRequest:
       $ref: "./components.yml#/components/schemas/PutQuotaRequest"
+<<<<<<< HEAD
     UpdateMaxPinnedDataRequest:
       $ref: "./components.yml#/components/schemas/UpdateMaxPinnedDataRequest"
+=======
+    ConnectKeyQuotaStats:
+      $ref: "./components.yml#/components/schemas/ConnectKeyQuotaStats"
+    ConnectKeyStatsResponse:
+      $ref: "./components.yml#/components/schemas/ConnectKeyStatsResponse"
+>>>>>>> origin/master
     ContractsStatsResponse:
       $ref: "./components.yml#/components/schemas/ContractsStatsResponse"
     HostsStatsResponse:

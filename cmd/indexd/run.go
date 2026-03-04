@@ -24,6 +24,7 @@ import (
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
+	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/api/app"
 	client "go.sia.tech/indexd/client/v2"
@@ -211,6 +212,8 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 
 	appAPIOpts := []app.Option{
 		app.WithLogger(log.Named("api.application")),
+		// rate limit /auth/connect to 1 req/min with burst of 10, pruned after 10 minutes
+		app.WithRateLimiter(api.NewIPRateLimiter(time.Minute, 10, 10*time.Minute)),
 	}
 
 	advertiseURL := cfg.ApplicationAPI.AdvertiseURL

@@ -23,6 +23,23 @@ func (s AccountStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 }
 
 // PrometheusMetric implements the prometheus.Marshaller interface for the
+// connect key stats response.
+func (s ConnectKeyStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
+	metrics = append(metrics, prometheus.Metric{
+		Name:  "indexd_connect_keys_total",
+		Value: float64(s.Total),
+	})
+	for _, q := range s.Quotas {
+		metrics = append(metrics, prometheus.Metric{
+			Name:   "indexd_connect_keys_quota",
+			Labels: map[string]any{"quota": q.Quota},
+			Value:  float64(q.Total),
+		})
+	}
+	return
+}
+
+// PrometheusMetric implements the prometheus.Marshaller interface for the
 // app stats response.
 func (s AppStatsResponse) PrometheusMetric() []prometheus.Metric {
 	return prometheus.Slice([]AppStats(s)).PrometheusMetric()

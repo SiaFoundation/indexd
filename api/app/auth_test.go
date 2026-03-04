@@ -14,6 +14,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/api"
 	"go.sia.tech/jape"
 	"lukechampine.com/frand"
 )
@@ -43,6 +44,38 @@ func (s *mockAccounts) RegisterAppKey(connectKey string, appKey types.PublicKey,
 
 func (s *mockAccounts) AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error) {
 	return frand.Entropy256(), nil
+}
+
+func TestAuthConnectRateLimit(t *testing.T) {
+	s := &mockAccounts{tokens: make(map[types.PublicKey]struct{})}
+	rl := api.NewIPRateLimiter(10*time.Millisecond, 2, time.Minute)
+	handler, err := NewAPI("http://localhost:9982", nil, s, nil, nil, WithRateLimiter(rl))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	req := RegisterAppRequest{
+		AppID:       frand.Entropy256(),
+		Name:        "test-app",
+		Description: "A test app",
+		ServiceURL:  "http://test-app.com",
+	}
+
+	// first 2 requests should succeed (burst)
+	for i := 0; i < 2; i++ {
+		if _, err := client.RequestAppConnection(context.Background(), req); err != nil {
+			t.Fatalf("request %d: expected success, got %v", i, err)
+		}
+	}
+
+	// 3rd request should be rate limited
+	_, err = client.RequestAppConnection(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected rate limit error")
+	}
 }
 
 func TestAuth(t *testing.T) {
