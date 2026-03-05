@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"net/url"
 	"os"
 	"reflect"
@@ -454,6 +455,63 @@ func TestAccountsAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if len(accounts) != 0 {
 		t.Fatal("unexpected accounts", len(accounts))
+	}
+}
+
+func TestUpdateAccountMaxPinnedData(t *testing.T) {
+	c := testutils.NewConsensusNode(t, zap.NewNop())
+	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
+
+	// create a connect key and register an account
+	connectKey, err := adminClient.AddAppConnectKey(context.Background(), accounts.AppConnectKeyRequest{
+		Description: "test key",
+		Quota:       "default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appKey := types.GeneratePrivateKey().PublicKey()
+	err = adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
+		ConnectKey: connectKey.Key,
+		AppKey:     appKey,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// verify default MaxPinnedData is math.MaxInt64
+	acc, err := adminClient.Account(context.Background(), appKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if acc.MaxPinnedData != math.MaxInt64 {
+		t.Fatalf("expected default max pinned data %d, got %d", math.MaxInt64, acc.MaxPinnedData)
+	}
+
+	// update the limit
+	newLimit := uint64(2 * proto.SectorSize)
+	err = adminClient.UpdateAccount(context.Background(), appKey, accounts.UpdateAccountRequest{
+		MaxPinnedData: &newLimit,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// verify the limit changed
+	acc, err = adminClient.Account(context.Background(), appKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if acc.MaxPinnedData != newLimit {
+		t.Fatalf("expected max pinned data %d, got %d", newLimit, acc.MaxPinnedData)
+	}
+
+	// verify 404 for non-existent account
+	nonExistent := types.GeneratePrivateKey().PublicKey()
+	err = adminClient.UpdateAccount(context.Background(), nonExistent, accounts.UpdateAccountRequest{
+		MaxPinnedData: new(uint64),
+	})
+	if err == nil || !strings.Contains(err.Error(), accounts.ErrNotFound.Error()) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
 }
 

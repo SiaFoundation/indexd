@@ -100,6 +100,7 @@ type (
 		Account(ctx context.Context, ak types.PublicKey) (accounts.Account, error)
 		Accounts(ctx context.Context, offset, limit int, opts ...accounts.QueryAccountsOpt) ([]accounts.Account, error)
 		DeleteAccount(ctx context.Context, acc proto.Account) error
+		UpdateAccount(ctx context.Context, ak types.PublicKey, updates accounts.UpdateAccountRequest) error
 
 		AddAppConnectKey(context.Context, accounts.AppConnectKeyRequest) (accounts.ConnectKey, error)
 		UpdateAppConnectKey(context.Context, accounts.AppConnectKeyRequest) (accounts.ConnectKey, error)
@@ -210,6 +211,7 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET    /accounts":            a.handleGETAccounts,
 		"GET    /account/:accountkey": a.handleGETAccount,
 		"DELETE /account/:accountkey": a.handleDELETEAccount,
+		"PATCH  /account/:accountkey": a.handlePATCHAccount,
 
 		// alerts endpoints
 		"GET    /alerts":         a.handleGETAlerts,
@@ -603,6 +605,24 @@ func (a *admin) handleDELETEAccount(jc jape.Context) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to delete account", err) != nil {
+		return
+	}
+}
+
+func (a *admin) handlePATCHAccount(jc jape.Context) {
+	var ak types.PublicKey
+	if jc.DecodeParam("accountkey", &ak) != nil {
+		return
+	}
+	var req accounts.UpdateAccountRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	err := a.accounts.UpdateAccount(jc.Request.Context(), ak, req)
+	if errors.Is(err, accounts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to update max pinned data", err) != nil {
 		return
 	}
 }

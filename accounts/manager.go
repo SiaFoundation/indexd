@@ -62,6 +62,7 @@ type (
 		Accounts(offset, limit int, opts ...QueryAccountsOpt) ([]Account, error)
 		HasAccount(types.PublicKey) (bool, error)
 		DeleteAccount(acc proto.Account) error
+		UpdateAccount(types.PublicKey, UpdateAccountRequest) error
 	}
 
 	// AccountManager manages accounts.
@@ -114,6 +115,11 @@ func (m *AccountManager) Account(ctx context.Context, pk types.PublicKey) (Accou
 // Accounts returns a list of accounts.
 func (m *AccountManager) Accounts(ctx context.Context, offset, limit int, opts ...QueryAccountsOpt) ([]Account, error) {
 	return m.store.Accounts(offset, limit, opts...)
+}
+
+// UpdateAccount updates the given account.
+func (m *AccountManager) UpdateAccount(ctx context.Context, ak types.PublicKey, updates UpdateAccountRequest) error {
+	return m.store.UpdateAccount(ak, updates)
 }
 
 // DeleteAccount soft deletes the account with the given public key.

@@ -141,6 +141,11 @@ func (c *Client) DeleteAccount(ctx context.Context, acc proto.Account) (err erro
 	return
 }
 
+// UpdateAccount updates the max pinned data limit for the given account.
+func (c *Client) UpdateAccount(ctx context.Context, ak types.PublicKey, updates accounts.UpdateAccountRequest) error {
+	return c.c.PATCH(ctx, fmt.Sprintf("/account/%s", ak), updates, nil)
+}
+
 // Accounts returns all accounts registered in the indexer.
 func (c *Client) Accounts(ctx context.Context, opts ...api.URLQueryParameterOption) (accounts []accounts.Account, err error) {
 	values := url.Values{}

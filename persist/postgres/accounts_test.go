@@ -97,8 +97,8 @@ func TestAccounts(t *testing.T) {
 	} else if len(accs) != 2 {
 		t.Fatal("unexpected accounts", accs)
 	}
-	assertAccount(t, accs[0], pk4, 100)
-	assertAccount(t, accs[1], pk5, 100)
+	assertAccount(t, accs[0], pk4, math.MaxInt64)
+	assertAccount(t, accs[1], pk5, math.MaxInt64)
 
 	_, err = store.Accounts(0, 10, accounts.WithConnectKey("invalidkey"))
 	if !errors.Is(err, accounts.ErrKeyNotFound) {
@@ -208,70 +208,6 @@ func TestDeleteAccount(t *testing.T) {
 		t.Fatal(err)
 	} else if len(accs) != 0 {
 		t.Fatal("unexpected accounts", accs)
-	}
-}
-
-func TestUpdateAccount(t *testing.T) {
-	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
-
-	// define helper to check the database id
-	dbID := func(ak types.PublicKey) (accID int64) {
-		t.Helper()
-		if err := store.transaction(func(ctx context.Context, tx *txn) error {
-			return tx.QueryRow(ctx, `SELECT id FROM accounts WHERE public_key = $1`, sqlPublicKey(ak)).Scan(&accID)
-		}); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-
-	// add an account
-	pk1 := types.GeneratePrivateKey().PublicKey()
-	store.addTestAccount(t, pk1)
-	db1 := dbID(pk1)
-
-	// add another account
-	pk2 := types.GeneratePrivateKey().PublicKey()
-	store.addTestAccount(t, pk2)
-
-	// assert updating to an existing account fails
-	err := store.UpdateAccount(pk1, pk2)
-	if !errors.Is(err, accounts.ErrExists) {
-		t.Fatal("expected [accounts.ErrExists], got", err)
-	}
-
-	// assert updating a non existing account fails
-	pk3 := types.GeneratePrivateKey().PublicKey()
-	err = store.UpdateAccount(types.GeneratePrivateKey().PublicKey(), pk3)
-	if !errors.Is(err, accounts.ErrNotFound) {
-		t.Fatal("expected [accounts.ErrNotFound], got", err)
-	}
-
-	// update the account key
-	err = store.UpdateAccount(pk1, pk3)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// check the old account key is gone
-	found, err := store.HasAccount(pk1)
-	if err != nil {
-		t.Fatal(err)
-	} else if found {
-		t.Fatal("expected account to not exist")
-	}
-
-	// check the new account key exists
-	found, err = store.HasAccount(pk3)
-	if err != nil {
-		t.Fatal(err)
-	} else if !found {
-		t.Fatal("expected account to exist")
-	}
-
-	// check db ids match
-	if dbID(pk3) != db1 {
-		t.Fatal("expected account id to have remained the same")
 	}
 }
 

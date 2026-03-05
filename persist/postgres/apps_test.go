@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 
@@ -85,7 +86,7 @@ func TestAppConnectKeys(t *testing.T) {
 	if err := store.RegisterAppKey(connectKey, acc, meta); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
-	assertAccount(acc, 0, 10, "desc", "logo", "service")
+	assertAccount(acc, 0, math.MaxInt64, "desc", "logo", "service")
 
 	// ensure the key's last used field was updated
 	keys, err := store.AppConnectKeys(0, 1)

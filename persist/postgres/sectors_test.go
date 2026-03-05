@@ -256,7 +256,7 @@ func TestRecordIntegrityCheck(t *testing.T) {
 		err := store.pool.QueryRow(t.Context(), "SELECT next_integrity_check, consecutive_failed_checks FROM sectors WHERE sector_root = $1", sqlHash256(root)).Scan(&nextCheck, &consecutiveFailures)
 		if err != nil {
 			t.Fatal(err)
-		} else if expectedNextCheck != nextCheck {
+		} else if !expectedNextCheck.Equal(nextCheck) {
 			t.Fatalf("expected next check %v, got %v", expectedNextCheck, nextCheck)
 		} else if consecutiveFailures != expectedConsecutiveFailures {
 			t.Fatalf("expected %d consecutive failures, got %d", expectedConsecutiveFailures, consecutiveFailures)
@@ -933,15 +933,25 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 		return slab.Digest(), slab
 	}
 
-	// these accounts will have the same MaxPinnedData as the connect key
-	// which is the size of 2 sectors
+	// register accounts then set per-account limit to 2 sectors
 	acc1 := proto.Account(types.GeneratePrivateKey().PublicKey())
 	if err := store.RegisterAppKey(connectKey, types.PublicKey(acc1), accounts.AppMeta{}); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
+	twoSectors := uint64(2 * proto.SectorSize)
+	if err := store.UpdateAccount(types.PublicKey(acc1), accounts.UpdateAccountRequest{
+		MaxPinnedData: &twoSectors,
+	}); err != nil {
+		t.Fatal("failed to update max pinned data:", err)
+	}
 	acc2 := proto.Account(types.GeneratePrivateKey().PublicKey())
 	if err := store.RegisterAppKey(connectKey, types.PublicKey(acc2), accounts.AppMeta{}); err != nil {
 		t.Fatal("failed to use app connect key:", err)
+	}
+	if err := store.UpdateAccount(types.PublicKey(acc2), accounts.UpdateAccountRequest{
+		MaxPinnedData: &twoSectors,
+	}); err != nil {
+		t.Fatal("failed to update max pinned data:", err)
 	}
 	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
 

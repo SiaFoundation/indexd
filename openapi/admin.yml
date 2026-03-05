@@ -214,7 +214,7 @@ paths:
                 - $ref: "#/components/schemas/AppConnectKeyRequest"
                 - description: Create app connect key request
                 - required:
-                  - quota
+                    - quota
       responses:
         "200":
           description: App connect key created successfully
@@ -513,6 +513,29 @@ paths:
                 password: "your-admin-password"
               })
               await admin.accountDelete("ed25519:your-public-key")
+    patch:
+      tags:
+        - accounts
+      summary: Update account fields
+      description: Partially update an account. Currently only supports updating the maximum pinned data limit.
+      operationId: patchAccount
+      parameters:
+        - name: accountkey
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAccountRequest"
+      responses:
+        "200":
+          description: Account updated successfully
+        "404":
+          description: Account not found
 
   /alerts:
     get:
@@ -1650,7 +1673,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/HostsStatsResponse"
 
-
   /stats/sectors:
     get:
       tags:
@@ -2005,6 +2027,8 @@ components:
       $ref: "./components.yml#/components/schemas/Quota"
     PutQuotaRequest:
       $ref: "./components.yml#/components/schemas/PutQuotaRequest"
+    UpdateAccountRequest:
+      $ref: "./components.yml#/components/schemas/UpdateAccountRequest"
     ConnectKeyQuotaStats:
       $ref: "./components.yml#/components/schemas/ConnectKeyQuotaStats"
     ConnectKeyStatsResponse:

@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jackc/pgerrcode"
-	"github.com/jackc/pgx/v5/pgconn"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
@@ -110,17 +108,15 @@ func (s *Store) DeleteAccount(acc proto.Account) error {
 	})
 }
 
-// UpdateAccount updates the account in the database with given old account key
-// to the new account key, allowing the user to rotate his account key.
-func (s *Store) UpdateAccount(oldAK, newAK types.PublicKey) error {
+// UpdateAccount updates the given account with any non-null fields provided.
+func (s *Store) UpdateAccount(ak types.PublicKey, updates accounts.UpdateAccountRequest) error {
+	if updates.MaxPinnedData == nil {
+		return nil // no changes
+	}
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		res, err := tx.Exec(ctx, `UPDATE accounts SET public_key = $1 WHERE public_key = $2`, sqlPublicKey(newAK), sqlPublicKey(oldAK))
+		res, err := tx.Exec(ctx, `UPDATE accounts SET max_pinned_data = $1 WHERE public_key = $2 AND deleted_at IS NULL`, *updates.MaxPinnedData, sqlPublicKey(ak))
 		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
-				return accounts.ErrExists
-			}
-			return fmt.Errorf("failed to update account: %w", err)
+			return fmt.Errorf("failed to update max pinned data: %w", err)
 		} else if res.RowsAffected() != 1 {
 			return accounts.ErrNotFound
 		}
