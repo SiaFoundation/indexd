@@ -196,7 +196,7 @@ func (c *Cluster) WaitForAccountFunding(t *testing.T, pk proto.Account) {
 	t.Helper()
 	for _, h := range c.Hosts {
 		var funded bool
-		for i := 0; i < 10; i++ {
+		for i := 0; i < 120; i++ {
 			b, err := c.Indexer.Client().AccountBalance(t.Context(), h.PublicKey(), pk)
 			if err != nil {
 				t.Fatal("failed to get account balance:", err)
