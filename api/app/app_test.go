@@ -186,6 +186,9 @@ func TestApplicationAPI(t *testing.T) {
 		}
 	}
 
+	// allow time for account funding to complete
+	time.Sleep(time.Second)
+
 	// pin the slab
 	slabIDs, err := client.PinSlabs(context.Background(), sk, uploadRandomSlab(t, hc, sk, hosts))
 	if err != nil {
