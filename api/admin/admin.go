@@ -207,8 +207,8 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /consensus/network": a.handleGETConsensusNetwork,
 
 		// accounts endpoints
-		"GET    /accounts":            a.handleGETAccounts,
-		"GET    /account/:accountkey": a.handleGETAccount,
+		"GET    /accounts":                  a.handleGETAccounts,
+		"GET    /account/:accountkey":       a.handleGETAccount,
 		"DELETE /account/:accountkey":       a.handleDELETEAccount,
 		"DELETE /account/:accountkey/prune": a.handleDELETEAccountPrune,
 		"PATCH  /account/:accountkey":       a.handlePATCHAccount,
@@ -587,7 +587,11 @@ func (a *admin) handleDELETEAccountPrune(jc jape.Context) {
 	if jc.DecodeParam("accountkey", &ak) != nil {
 		return
 	}
-	if jc.Check("failed to prune slabs", a.store.PruneSlabs(ak)) != nil {
+	if err := a.store.PruneSlabs(ak); errors.Is(err, accounts.ErrNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
 }

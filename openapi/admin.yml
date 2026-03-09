@@ -537,6 +537,27 @@ paths:
         "404":
           description: Account not found
 
+  /account/{accountkey}/prune:
+    delete:
+      tags:
+        - accounts
+      summary: Prune orphaned slabs
+      description: Prune all pinned slabs of the given account that are not currently referenced by any object.
+      operationId: pruneAccountSlabs
+      parameters:
+        - name: accountkey
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Slabs pruned successfully
+        "404":
+          description: Account not found
+        "500":
+          description: Internal server error
+
   /alerts:
     get:
       tags:
