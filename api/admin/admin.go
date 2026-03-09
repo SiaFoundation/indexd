@@ -594,6 +594,7 @@ func (a *admin) handleDELETEAccountPrune(jc jape.Context) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
+	jc.Encode(nil)
 }
 
 func (a *admin) handlePATCHAccount(jc jape.Context) {
