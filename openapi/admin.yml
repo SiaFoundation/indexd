@@ -551,7 +551,7 @@ paths:
           schema:
             type: string
       responses:
-        "200":
+        "204":
           description: Slabs pruned successfully
         "404":
           description: Account not found
