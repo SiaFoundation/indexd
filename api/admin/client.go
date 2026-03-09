@@ -146,6 +146,12 @@ func (c *Client) UpdateAccount(ctx context.Context, ak types.PublicKey, updates 
 	return c.c.PATCH(ctx, fmt.Sprintf("/account/%s", ak), updates, nil)
 }
 
+// PruneSlabs prunes all pinned slabs of the given account not currently
+// connected to an object.
+func (c *Client) PruneSlabs(ctx context.Context, ak types.PublicKey) error {
+	return c.c.DELETE(ctx, fmt.Sprintf("/account/%s/prune", ak))
+}
+
 // Accounts returns all accounts registered in the indexer.
 func (c *Client) Accounts(ctx context.Context, opts ...api.URLQueryParameterOption) (accounts []accounts.Account, err error) {
 	values := url.Values{}

@@ -127,6 +127,7 @@ type (
 
 		DeleteContract(contractID types.FileContractID) error
 		LastScannedIndex() (types.ChainIndex, error)
+		PruneSlabs(account proto.Account) error
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -210,8 +211,9 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		// accounts endpoints
 		"GET    /accounts":            a.handleGETAccounts,
 		"GET    /account/:accountkey": a.handleGETAccount,
-		"DELETE /account/:accountkey": a.handleDELETEAccount,
-		"PATCH  /account/:accountkey": a.handlePATCHAccount,
+		"DELETE /account/:accountkey":       a.handleDELETEAccount,
+		"DELETE /account/:accountkey/prune": a.handleDELETEAccountPrune,
+		"PATCH  /account/:accountkey":       a.handlePATCHAccount,
 
 		// alerts endpoints
 		"GET    /alerts":         a.handleGETAlerts,
@@ -605,6 +607,16 @@ func (a *admin) handleDELETEAccount(jc jape.Context) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to delete account", err) != nil {
+		return
+	}
+}
+
+func (a *admin) handleDELETEAccountPrune(jc jape.Context) {
+	var ak proto.Account
+	if jc.DecodeParam("accountkey", &ak) != nil {
+		return
+	}
+	if jc.Check("failed to prune slabs", a.store.PruneSlabs(ak)) != nil {
 		return
 	}
 }
