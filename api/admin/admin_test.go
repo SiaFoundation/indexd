@@ -1455,6 +1455,83 @@ func TestAccountStatsAPI(t *testing.T) {
 	}
 }
 
+func TestPruneSlabs(t *testing.T) {
+	cluster := testutils.NewCluster(t, testutils.WithHosts(1))
+	indexer := cluster.Indexer
+	adminClient := indexer.Admin
+	store := indexer.Store()
+
+	cluster.WaitForContracts(t)
+
+	hk := cluster.Hosts[0].PublicKey()
+
+	// create an account
+	account := types.GeneratePrivateKey().PublicKey()
+	store.AddTestAccount(t, account)
+	acc := proto.Account(account)
+
+	// pin two slabs
+	slab1 := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	slab2 := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	if _, err := store.PinSlabs(acc, time.Time{}, slab1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PinSlabs(acc, time.Time{}, slab2); err != nil {
+		t.Fatal(err)
+	}
+
+	// create an object that references only slab1
+	obj := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		Slabs: []slabs.SlabSlice{
+			slab1.Slice(0, 100),
+		},
+		DataSignature:     types.Signature(frand.Bytes(64)),
+		MetadataSignature: types.Signature(frand.Bytes(64)),
+	}
+	if err := store.SaveObject(acc, obj); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify both slabs exist
+	slabIDs, err := store.SlabIDs(acc, 0, math.MaxInt64)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(slabIDs) != 2 {
+		t.Fatalf("expected 2 slabs, got %d", len(slabIDs))
+	}
+
+	// prune slabs via admin API
+	if err := adminClient.PruneSlabs(context.Background(), account); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify only slab1 (referenced by object) remains
+	slabIDs, err = store.SlabIDs(acc, 0, math.MaxInt64)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(slabIDs) != 1 {
+		t.Fatalf("expected 1 slab after prune, got %d", len(slabIDs))
+	} else if slabIDs[0] != slab1.Digest() {
+		t.Fatal("expected slab1 to remain")
+	}
+}
+
 // newTestLogger creates a console logger used for testing.
 func newTestLogger(enable bool) *zap.Logger {
 	if !enable {
