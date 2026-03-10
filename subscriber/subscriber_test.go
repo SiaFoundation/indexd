@@ -49,7 +49,7 @@ func TestSyncBatching(t *testing.T) {
 	}
 	defer hm.Close()
 
-	cmm, err := contracts.NewManager(sk, nil, nil, cm, store, nil, nil, nil, hm, s, w, contracts.WithLogger(log.Named("contracts")), contracts.WithSyncPollInterval(250*time.Millisecond))
+	cmm, err := contracts.NewManager(sk, nil, nil, cm, store, nil, nil, nil, contracts.NewContractLocker(), hm, s, w, contracts.WithLogger(log.Named("contracts")), contracts.WithSyncPollInterval(250*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
