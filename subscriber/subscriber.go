@@ -123,14 +123,10 @@ func New(cm ChainManager, hm HostManager, contracts ContractManager, wm WalletMa
 			select {
 			case <-reorgCh:
 				err := s.Sync(ctx)
-				if err != nil {
-					if errors.Is(err, context.Canceled) {
-						s.log.Warn("sync cancelled", zap.Error(err))
-					} else if !errors.Is(err, threadgroup.ErrClosed) {
-						s.log.Panic("failed to sync database", zap.Error(err))
-					}
-					return
+				if err != nil && !errors.Is(err, threadgroup.ErrClosed) {
+					s.log.Panic("failed to sync database", zap.Error(err))
 				}
+				return
 			case <-ctx.Done():
 				return
 			}
@@ -145,12 +141,6 @@ func New(cm ChainManager, hm HostManager, contracts ContractManager, wm WalletMa
 // to manually call this since the Subscriber will do that itself but it can be
 // used to guarantee the subscriber is synced at a given point in time.
 func (s *Subscriber) Sync(ctx context.Context) error {
-	ctx, cancel, err := s.tg.AddContext(ctx)
-	if err != nil {
-		return err
-	}
-	defer cancel()
-
 	s.syncMu.Lock()
 	defer s.syncMu.Unlock()
 
