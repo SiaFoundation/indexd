@@ -126,7 +126,6 @@ func New(cm ChainManager, hm HostManager, contracts ContractManager, wm WalletMa
 				if err != nil && !errors.Is(err, threadgroup.ErrClosed) {
 					s.log.Panic("failed to sync database", zap.Error(err))
 				}
-				return
 			case <-ctx.Done():
 				return
 			}
