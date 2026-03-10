@@ -53,7 +53,10 @@ func TestWalletMaintenance(t *testing.T) {
 	}
 	defer hm.Close()
 
-	contracts, err := contracts.NewManager(sk, nil, nil, cm, store, nil, nil, nil, hm, s, w, contracts.WithLogger(log.Named("contracts")), contracts.WithSyncPollInterval(250*time.Millisecond))
+	contracts, err := contracts.NewManager(sk, nil, nil, cm, store, nil, nil, nil, contracts.NewContractLocker(), hm, s, w,
+		contracts.WithLogger(log.Named("contracts")),
+		contracts.WithSyncPollInterval(250*time.Millisecond),
+		contracts.WithMaintenanceFrequency(50*time.Millisecond))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -71,7 +74,6 @@ func TestWalletMaintenance(t *testing.T) {
 	if err := sub.Sync(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	contracts.TriggerMaintenance()
 	time.Sleep(time.Second) // wait for maintenance to run
 
 	events, err := w.UnconfirmedEvents()
@@ -94,8 +96,7 @@ func TestWalletMaintenance(t *testing.T) {
 		t.Fatalf("expected 100 UTXOs, got %d", len(utxos))
 	}
 
-	// trigger maintenance again and ensure no new split is created
-	contracts.TriggerMaintenance()
+	// wait for maintenance and ensure no new split is created
 	time.Sleep(time.Second)
 
 	events, err = w.UnconfirmedEvents()

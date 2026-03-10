@@ -23,6 +23,7 @@ type (
 	// Funder dials a host and replenish a set of ephemeral accounts.
 	Funder struct {
 		client FunderHostClient
+		locker *ContractLocker
 		signer rhp.ContractSigner
 		chain  ChainManager
 		rev    *RevisionManager
@@ -32,9 +33,10 @@ type (
 )
 
 // NewFunder creates a new Funder.
-func NewFunder(client FunderHostClient, rev *RevisionManager, signer rhp.ContractSigner, chain ChainManager, log *zap.Logger) *Funder {
+func NewFunder(client FunderHostClient, cl *ContractLocker, rev *RevisionManager, signer rhp.ContractSigner, chain ChainManager, log *zap.Logger) *Funder {
 	return &Funder{
 		client: client,
+		locker: cl,
 		signer: signer,
 		chain:  chain,
 		rev:    rev,
@@ -67,51 +69,63 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 
 	// iterate over contracts
 	for _, contractID := range contractIDs {
-		contractLog := log.With(zap.Stringer("contractID", contractID))
+		done, err := func() (bool, error) {
+			contractLog := log.With(zap.Stringer("contractID", contractID))
 
-		var res rhp.RPCReplenishAccountsResult
-		var err error
-		err = f.rev.WithRevision(ctx, contractID, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
-			if contract.Revision.RenterOutput.Value.Cmp(target) < 0 {
-				return rhp.ContractRevision{}, proto.Usage{}, ErrContractInsufficientFunds
+			lc, unlock := f.locker.TryLockContract(contractID)
+			if lc == nil {
+				contractLog.Debug("ignoring locked contract for funding")
+				return false, nil
 			}
+			defer unlock()
 
-			batchSize := int(max(1, min(contract.Revision.RenterOutput.Value.Div(target).Big().Uint64(), proto.MaxAccountBatchSize)))
-			maxEnd := min(len(accountKeys), funded+batchSize)
-			// execute replenish RPC
-			res, err = f.client.ReplenishAccounts(ctx, f.signer, f.chain, rhp.RPCReplenishAccountsParams{
-				Accounts: accountKeys[funded:maxEnd],
-				Target:   target,
-				Contract: contract,
+			var res rhp.RPCReplenishAccountsResult
+			var err error
+			err = f.rev.WithRevision(ctx, lc, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+				if contract.Revision.RenterOutput.Value.Cmp(target) < 0 {
+					return rhp.ContractRevision{}, proto.Usage{}, ErrContractInsufficientFunds
+				}
+
+				batchSize := int(max(1, min(contract.Revision.RenterOutput.Value.Div(target).Big().Uint64(), proto.MaxAccountBatchSize)))
+				maxEnd := min(len(accountKeys), funded+batchSize)
+				// execute replenish RPC
+				res, err = f.client.ReplenishAccounts(ctx, f.signer, f.chain, rhp.RPCReplenishAccountsParams{
+					Accounts: accountKeys[funded:maxEnd],
+					Target:   target,
+					Contract: contract,
+				})
+				if err != nil {
+					return rhp.ContractRevision{}, proto.Usage{}, err
+				}
+				funded = maxEnd
+				return rhp.ContractRevision{
+					ID:       contractID,
+					Revision: res.Revision,
+				}, res.Usage, nil
 			})
-			if err != nil {
-				return rhp.ContractRevision{}, proto.Usage{}, err
+			if errors.Is(err, ErrContractInsufficientFunds) {
+				contractLog.Debug("contract has insufficient funds", zap.Error(err))
+				drained++
+				return false, nil
+			} else if errors.Is(err, ErrContractNotRevisable) {
+				contractLog.Debug("contract is not revisable", zap.Error(err)) // sanity check
+				drained++
+				return false, nil
+			} else if err != nil {
+				contractLog.Debug("failed to replenish accounts", zap.Error(err))
+				return false, nil
+			} else if res.Revision.RemainingAllowance().Cmp(target) < 0 {
+				contractLog.Debug("contract was drained by replenish RPC",
+					zap.Stringer("remainingAllowance", res.Revision.RemainingAllowance()),
+					zap.Stringer("target", target))
+				drained++
 			}
-			funded = maxEnd
-			return rhp.ContractRevision{
-				ID:       contractID,
-				Revision: res.Revision,
-			}, res.Usage, nil
-		})
-		if errors.Is(err, ErrContractInsufficientFunds) {
-			contractLog.Debug("contract has insufficient funds", zap.Error(err))
-			drained++
-			continue
-		} else if errors.Is(err, ErrContractNotRevisable) {
-			contractLog.Debug("contract is not revisable", zap.Error(err)) // sanity check
-			drained++
-			continue
-		} else if err != nil {
-			contractLog.Debug("failed to replenish accounts", zap.Error(err))
-			continue
-		} else if res.Revision.RemainingAllowance().Cmp(target) < 0 {
-			contractLog.Debug("contract was drained by replenish RPC",
-				zap.Stringer("remainingAllowance", res.Revision.RemainingAllowance()),
-				zap.Stringer("target", target))
-			drained++
-		}
 
-		if funded == len(accountKeys) {
+			return funded == len(accountKeys), nil
+		}()
+		if err != nil {
+			return 0, 0, err
+		} else if done {
 			break
 		}
 	}

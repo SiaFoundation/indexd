@@ -142,11 +142,11 @@ func TestPerformContractPruningOnHost(t *testing.T) {
 	store.setRevisionFilesize(t, fcid4, proto.SectorSize*uint64(len(h5Mock.sectorRoots[fcid4])))
 
 	// schedule contracts for pruning
-	store.scheduleContractsForPruningHelper(t)
+	store.scheduleContractsForPruning(t)
 
 	// prepare contract manager
 	rev := contracts.NewRevisionManager(mock, cmMock, store, 1, zaptest.NewLogger(t))
-	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, mock, nil, rev, hmMock, nil, nil)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, mock, nil, rev, contracts.NewContractLocker(), hmMock, nil, nil)
 
 	// prune contracts on h1
 	err := cm.PerformContractPruningOnHost(context.Background(), h1, zap.NewNop())
@@ -296,14 +296,14 @@ func TestPruneContractBatchBoundary(t *testing.T) {
 
 	store.setContractSize(t, fcid, proto.SectorSize*7)
 	store.setRevisionFilesize(t, fcid, proto.SectorSize*7)
-	store.scheduleContractsForPruningHelper(t)
+	store.scheduleContractsForPruning(t)
 
 	// use batch size 3 so the contract spans multiple batches; after
 	// FreeSectors removes sectors in the first batch, subsequent batches must
 	// account for the reduced sector count to avoid requesting out-of-bounds
 	// ranges from the host
 	rev := contracts.NewRevisionManager(mock, cmMock, store, 1, zaptest.NewLogger(t))
-	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, mock, nil, rev, hmMock, nil, nil, contracts.WithSectorRootsBatchSize(3))
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, mock, nil, rev, contracts.NewContractLocker(), hmMock, nil, nil, contracts.WithSectorRootsBatchSize(3))
 
 	err := cm.PerformContractPruningOnHost(context.Background(), h, zap.NewNop())
 	if err != nil {

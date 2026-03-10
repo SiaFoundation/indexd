@@ -849,46 +849,6 @@ paths:
                 type: string
                 format: binary
 
-  /debug/trigger/{action}:
-    post:
-      tags:
-        - debug
-      summary: Trigger a specific debug action
-      description: >
-        Triggers a specific action such as contract maintenance or pruning.
-        This is useful for testing and debugging purposes. This route is only
-        available in debug mode.
-
-      operationId: triggerDebugAction
-      parameters:
-        - name: action
-          in: path
-          required: true
-          schema:
-            type: string
-            enum: [funding, maintenance, pruning, scanning]
-      responses:
-        "204":
-          description: Action triggered successfully
-        "400":
-          description: Invalid action specified
-      x-codeSamples:
-        - lang: Go
-          label: Go
-          source: |
-            package main
-
-            import (
-              "context"
-              admin "go.sia.tech/indexd/admin"
-            )
-
-            func main() {
-              c := admin.NewClient("http://localhost:9980", "your-admin-password")
-              err := c.TriggerAction(context.Background(), "maintenance")
-              // ...
-            }
-
   /explorer/exchange-rate/siacoin/{currency}:
     get:
       tags:

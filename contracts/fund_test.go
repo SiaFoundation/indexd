@@ -99,7 +99,7 @@ func TestPerformAccountFunding(t *testing.T) {
 	funderMock := &accountFunderMock{}
 	store := newTestStore(t)
 	hmMock := newHostManagerMock(store)
-	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, funderMock, nil, store, nil, nil, nil, hmMock, nil, nil)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, funderMock, nil, store, nil, nil, nil, contracts.NewContractLocker(), hmMock, nil, nil)
 
 	// fund accounts
 	err := cm.PerformAccountFunding(context.Background(), false, zap.NewNop())

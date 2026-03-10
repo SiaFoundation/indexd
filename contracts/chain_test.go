@@ -406,8 +406,8 @@ func (ts testStore) hostAccounts(t testing.TB) (result []accounts.HostAccount) {
 	return
 }
 
-// scheduleContractsForPruningHelper marks all contracts as ready for pruning (test helper).
-func (ts testStore) scheduleContractsForPruningHelper(t testing.TB) {
+// scheduleContractsForPruning marks all contracts as ready for pruning.
+func (ts testStore) scheduleContractsForPruning(t testing.TB) {
 	t.Helper()
 
 	// set next_prune to past so ContractsForPruning (next_prune < NOW()) returns them
@@ -648,7 +648,7 @@ func (w *walletMock) ReleaseInputs(txns []types.Transaction, v2txns []types.V2Tr
 func (w *walletMock) SignV2Inputs(txn *types.V2Transaction, toSign []int)                  {}
 
 func TestApplyRevertDiff(t *testing.T) {
-	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
 
 	// create a contract
 	contractID := types.FileContractID{1, 2, 3}
@@ -797,7 +797,7 @@ func TestProcessActions(t *testing.T) {
 	cmMock := newChainManagerMock()
 	syncerMock := &syncerMock{}
 	walletMock := &walletMock{}
-	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, nil, cmMock, store, nil, nil, nil, nil, syncerMock, walletMock)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, nil, cmMock, store, nil, nil, nil, contracts.NewContractLocker(), nil, syncerMock, walletMock)
 
 	contract := types.V2FileContractElement{
 		ID: types.FileContractID{1},
@@ -860,7 +860,7 @@ func TestProcessActions(t *testing.T) {
 }
 
 func TestApplyRevertRenewedTo(t *testing.T) {
-	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
 
 	// create a contract
 	contractID := types.FileContractID{1, 2, 3}

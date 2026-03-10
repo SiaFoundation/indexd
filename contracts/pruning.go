@@ -14,16 +14,8 @@ import (
 	"go.uber.org/zap"
 )
 
-func (cm *ContractManager) performContractPruning(ctx context.Context, force bool, log *zap.Logger) error {
+func (cm *ContractManager) performContractPruning(ctx context.Context, log *zap.Logger) error {
 	start := time.Now()
-
-	// if force is true, schedule all (active and good) contracts for pruning
-	if force {
-		err := cm.store.ScheduleContractsForPruning()
-		if err != nil {
-			return fmt.Errorf("failed to schedule contracts for pruning: %w", err)
-		}
-	}
 
 	// fetch hosts for pruning, a host is eligible for pruning if it is not
 	// blocked and has active contracts that haven't been pruned in the last 24
@@ -114,6 +106,11 @@ loop:
 func (cm *ContractManager) pruneContract(ctx context.Context, contractID types.FileContractID) (int, error) {
 	const dbRootsBatchSize = 10000
 
+	// lock contract first before doing anything else to avoid anything else
+	// modifying the contract while we loop over offsets and roots
+	lc, unlock := cm.cl.LockContract(contractID)
+	defer unlock()
+
 	contract, renewed, err := cm.store.ContractRevision(contractID)
 	if err != nil {
 		return 0, fmt.Errorf("failed to fetch contract revision: %w", err)
@@ -128,7 +125,7 @@ func (cm *ContractManager) pruneContract(ctx context.Context, contractID types.F
 		length := min(cm.sectorRootsBatchSize, contractSectors-offset)
 
 		var roots []types.Hash256
-		err = cm.rev.WithRevision(ctx, contractID, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		err = cm.rev.WithRevision(ctx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 			res, err := cm.client.SectorRoots(ctx, cm.signer, cm.chain, rev, offset, length)
 			if err != nil {
 				return rhp.ContractRevision{}, proto.Usage{}, err
@@ -165,7 +162,7 @@ func (cm *ContractManager) pruneContract(ctx context.Context, contractID types.F
 			continue
 		}
 
-		err = cm.rev.WithRevision(ctx, contractID, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		err = cm.rev.WithRevision(ctx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 			res, err := cm.client.FreeSectors(ctx, cm.signer, cm.chain, rev, indices)
 			if err != nil {
 				return rhp.ContractRevision{}, proto.Usage{}, err

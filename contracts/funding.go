@@ -93,7 +93,7 @@ OUTER:
 			}
 
 			// update funded accounts
-			accounts.UpdateFundedAccounts(accs, funded)
+			accounts.UpdateFundedAccounts(accs, funded, cm.maxAccountFundingBackoff)
 			err = cm.accounts.UpdateHostAccounts(accs)
 			if err != nil {
 				return fmt.Errorf("failed to update accounts: %w", err)

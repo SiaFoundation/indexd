@@ -57,7 +57,7 @@ func TestPerformContractRenewals(t *testing.T) {
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
 	rev := contracts.NewRevisionManager(mock, cmMock, store, 1, zaptest.NewLogger(t))
-	contractsMgr := contracts.NewTestContractManager(renterKey, amMock, nil, cmMock, store, mock, nil, rev, hmMock, syncerMock, wallet)
+	contractsMgr := contracts.NewTestContractManager(renterKey, amMock, nil, cmMock, store, mock, nil, rev, contracts.NewContractLocker(), hmMock, syncerMock, wallet)
 
 	assertRenewal := func(renewedFrom types.FileContractID, proofHeight uint64, call renewContractCall) {
 		t.Helper()
@@ -165,7 +165,7 @@ func TestRenewalAllowance(t *testing.T) {
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
 	rev := contracts.NewRevisionManager(mock, cmMock, store, 1, zaptest.NewLogger(t))
-	cm := contracts.NewTestContractManager(renterKey, amMock, nil, cmMock, store, mock, nil, rev, hmMock, syncerMock, wallet)
+	cm := contracts.NewTestContractManager(renterKey, amMock, nil, cmMock, store, mock, nil, rev, contracts.NewContractLocker(), hmMock, syncerMock, wallet)
 
 	assertRenewal := func(allowance types.Currency, call renewContractCall) {
 		t.Helper()

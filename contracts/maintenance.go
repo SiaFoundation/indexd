@@ -98,58 +98,80 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 // to perform on contracts
 func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 	log := cm.log.Named("maintenance")
-	t := time.NewTimer(cm.maintenanceFrequency)
-	defer t.Stop()
+	var wg sync.WaitGroup
+	defer wg.Wait()
 
-	for {
-		if !cm.waitUntilSynced(ctx, log) {
-			log.Debug("shutting down maintenance loop")
-			return
-		}
-
-		select {
-		case <-ctx.Done():
-			return
-		case force := <-cm.triggerFundingChan:
-			log.Debug("triggering account funding", zap.Bool("force", force))
-			if err := cm.performAccountFunding(ctx, force, log); err != nil {
-				log.Error("account funding failed", zap.Error(err))
+	// account funding loop
+	wg.Go(func() {
+		t := time.NewTicker(cm.maintenanceFrequency)
+		defer t.Stop()
+		for {
+			if !cm.waitUntilSynced(ctx, log) {
+				return
 			}
-			continue
-		case <-cm.triggerPruningChan:
-			log.Debug("triggering contract pruning")
-			if err := cm.performContractPruning(ctx, true, log); err != nil {
-				log.Error("contract pruning failed", zap.Error(err))
+			var force bool
+			select {
+			case <-ctx.Done():
+				return
+			case force = <-cm.triggerFundingChan:
+				log.Debug("triggering scheduled account funding", zap.Bool("force", force))
+			case <-t.C:
+				log.Debug("starting scheduled funding")
 			}
-			continue
-		case <-cm.triggerMaintenanceChan:
-			log.Debug("triggering maintenance")
-		case <-t.C:
-			log.Debug("starting scheduled maintenance")
+			fundingLog := log.Named("accounts")
+			logError(cm.performAccountFunding(ctx, force, fundingLog), fundingLog)
 		}
+	})
 
-		// this is done first so that fragmenting the wallet can be prioritized before
-		// being used for other maintenance tasks
-		walletLog := log.Named("wallet")
-		if err := cm.performWalletMaintenance(ctx, walletLog); err != nil {
-			log.Debug("maintenance failed", zap.Error(err)) // wallet maintenance is best-effort
+	// contract maintenance loop
+	wg.Go(func() {
+		t := time.NewTicker(cm.maintenanceFrequency)
+		defer t.Stop()
+		for {
+			if !cm.waitUntilSynced(ctx, log) {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				log.Debug("starting scheduled contract maintenance")
+			}
+			walletLog := log.Named("wallet")
+			if err := cm.performWalletMaintenance(ctx, walletLog); err != nil {
+				log.Debug("maintenance failed", zap.Error(err)) // wallet maintenance is best-effort
+			}
+			maintenanceLog := log.Named("contracts")
+			logError(cm.performContractMaintenance(ctx, maintenanceLog), maintenanceLog)
 		}
+	})
 
-		contractMaintenanceLog := log.Named("contracts")
-		logError(cm.performContractMaintenance(ctx, contractMaintenanceLog), contractMaintenanceLog)
-		fundingLog := log.Named("accounts")
-		logError(cm.performAccountFunding(ctx, false, fundingLog), fundingLog)
-		pruningLog := log.Named("pruning")
-		logError(cm.performContractPruning(ctx, false, pruningLog), pruningLog)
-		pinningLog := log.Named("pinning")
-		logError(cm.performSectorPinning(ctx, pinningLog), pinningLog)
+	// remaining maintenance loop
+	wg.Go(func() {
+		t := time.NewTicker(cm.maintenanceFrequency)
+		defer t.Stop()
+		for {
+			if !cm.waitUntilSynced(ctx, log) {
+				return
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				log.Debug("starting scheduled maintenance")
+			}
 
-		unpinnableLog := log.Named("unpinnable")
-		threshold := time.Now().Add(-unpinnableSectorThreshold)
-		logError(cm.store.MarkSectorsUnpinnable(threshold), unpinnableLog)
-		t.Reset(cm.maintenanceFrequency)
-		log.Debug("maintenance complete")
-	}
+			pruningLog := log.Named("pruning")
+			logError(cm.performContractPruning(ctx, pruningLog), pruningLog)
+			pinningLog := log.Named("pinning")
+			logError(cm.performSectorPinning(ctx, pinningLog), pinningLog)
+
+			unpinnableLog := log.Named("unpinnable")
+			threshold := time.Now().Add(-unpinnableSectorThreshold)
+			logError(cm.store.MarkSectorsUnpinnable(threshold), unpinnableLog)
+			log.Debug("maintenance complete")
+		}
+	})
 }
 
 func (cm *ContractManager) performWalletMaintenance(ctx context.Context, log *zap.Logger) error {

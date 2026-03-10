@@ -81,19 +81,25 @@ func TestWithRevision(t *testing.T) {
 	}
 
 	// assert ErrContractRenewed is returned for a renewed contract
-	err := rm.WithRevision(context.Background(), fcid1, noopFn)
+	lc := contracts.NewContractLocker()
+	lock := func(fcid types.FileContractID) *contracts.LockedContract {
+		lockedContract, unlock := lc.LockContract(fcid)
+		unlock() // immediately unlock since we don't need the lock for this test
+		return lockedContract
+	}
+	err := rm.WithRevision(context.Background(), lock(fcid1), noopFn)
 	if !errors.Is(err, contracts.ErrContractRenewed) {
 		t.Fatalf("expected ErrContractRenewed, got: %v", err)
 	}
 
 	// assert ErrContractNotRevisable is returned for a contract that can't be revised
-	err = rm.WithRevision(context.Background(), fcid2, noopFn)
+	err = rm.WithRevision(context.Background(), lock(fcid2), noopFn)
 	if !errors.Is(err, contracts.ErrContractNotRevisable) {
 		t.Fatalf("expected ErrContractNotRevisable, got: %v", err)
 	}
 
 	// assert withRevision errors out if the revision can't be found
-	err = rm.WithRevision(context.Background(), types.FileContractID{4, 0, 4}, noopFn)
+	err = rm.WithRevision(context.Background(), lock(types.FileContractID{4, 0, 4}), noopFn)
 	if err == nil || !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatalf("expected error for non-existent contract, got: %v", err)
 	}
@@ -103,7 +109,7 @@ func TestWithRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = rm.WithRevision(context.Background(), fcid3, func(rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+	err = rm.WithRevision(context.Background(), lock(fcid3), func(rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		return rhp.ContractRevision{ID: fcid3, Revision: rev3.Revision}, proto.Usage{}, nil
 	})
 	if err != nil {
@@ -120,7 +126,7 @@ func TestWithRevision(t *testing.T) {
 	// assert withRevision errors out if the revise function returns an unexpected error
 	addContract(fcid4)
 	errUnexpected := errors.New("unexpected error")
-	if err := rm.WithRevision(context.Background(), fcid4, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+	if err := rm.WithRevision(context.Background(), lock(fcid4), func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		return rhp.ContractRevision{}, proto.Usage{}, errUnexpected
 	}); err != errUnexpected {
 		t.Fatalf("expected unexpected error, got: %v", err)
@@ -128,7 +134,7 @@ func TestWithRevision(t *testing.T) {
 
 	// assert withRevision persists the revision if no error occurs and we don't need to sync the revision
 	update := frand.Uint64n(math.MaxInt32)
-	err = rm.WithRevision(context.Background(), fcid4, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+	err = rm.WithRevision(context.Background(), lock(fcid4), func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		contract.Revision.RevisionNumber = update
 		return contract, proto.Usage{}, nil
 	})
@@ -148,7 +154,7 @@ func TestWithRevision(t *testing.T) {
 	addContract(fcid5)
 	errStore := &persistErrorStore{testStore: store, errorContractID: fcid5}
 	rmErr := contracts.NewRevisionManager(latest, chain, errStore, revisionSubmissionBuffer, zaptest.NewLogger(t))
-	err = rmErr.WithRevision(context.Background(), fcid5, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+	err = rmErr.WithRevision(context.Background(), lock(fcid5), func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		contract.Revision.RevisionNumber = update
 		return contract, proto.Usage{}, nil
 	})
@@ -162,7 +168,7 @@ func TestWithRevision(t *testing.T) {
 		return proto.RPCLatestRevisionResponse{}, errors.New("latest revision not found")
 	}
 	addContract(types.FileContractID{6})
-	err = rm.WithRevision(context.Background(), types.FileContractID{6}, invalidSigFn)
+	err = rm.WithRevision(context.Background(), lock(types.FileContractID{6}), invalidSigFn)
 	if err == nil || !strings.Contains(err.Error(), "latest revision not found") {
 		t.Fatal("unexpected error", err)
 	}
@@ -181,7 +187,7 @@ func TestWithRevision(t *testing.T) {
 			Renewed:   false,
 		}, nil
 	}
-	err = rm.WithRevision(context.Background(), fcid7, invalidSigFn)
+	err = rm.WithRevision(context.Background(), lock(fcid7), invalidSigFn)
 	if err == nil || !strings.Contains(err.Error(), "local revision is newer than host revision") {
 		t.Fatal("unexpected error", err)
 	} else if contract, err := store.Contract(fcid7); err != nil {
@@ -205,7 +211,7 @@ func TestWithRevision(t *testing.T) {
 			Renewed:   false,
 		}, nil
 	}
-	err = rm.WithRevision(context.Background(), fcid8, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+	err = rm.WithRevision(context.Background(), lock(fcid8), func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		if contract.Revision.RevisionNumber != update {
 			return rhp.ContractRevision{}, proto.Usage{}, proto.ErrInvalidSignature
 		}
@@ -241,7 +247,7 @@ func TestWithRevision(t *testing.T) {
 	}
 	fcid9 := types.FileContractID{9}
 	addContract(fcid9)
-	err = rm.WithRevision(context.Background(), fcid9, invalidSigFn)
+	err = rm.WithRevision(context.Background(), lock(fcid9), invalidSigFn)
 	if !errors.Is(err, contracts.ErrContractRenewed) {
 		t.Fatalf("expected ErrContractRenewed, got: %v", err)
 	}
@@ -256,7 +262,7 @@ func TestWithRevision(t *testing.T) {
 	}
 	fcid10 := types.FileContractID{10}
 	addContract(fcid10)
-	err = rm.WithRevision(context.Background(), fcid10, invalidSigFn)
+	err = rm.WithRevision(context.Background(), lock(fcid10), invalidSigFn)
 	if !errors.Is(err, contracts.ErrContractNotRevisable) {
 		t.Fatalf("expected ErrContractNotRevisable, got: %v", err)
 	}
@@ -264,7 +270,7 @@ func TestWithRevision(t *testing.T) {
 	// assert withRevision doesn't persist the revision if the revise function renewed the contract
 	fcid11 := types.FileContractID{11}
 	addContract(fcid11)
-	err = rm.WithRevision(context.Background(), fcid11, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+	err = rm.WithRevision(context.Background(), lock(fcid11), func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		return contract, proto.Usage{}, nil
 	})
 	if err != nil {
@@ -285,7 +291,7 @@ func TestWithRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err = rm.WithRevision(context.Background(), types.FileContractID{12}, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+	err = rm.WithRevision(context.Background(), lock(types.FileContractID{12}), func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 		contract.Revision.RevisionNumber++
 		return contract, proto.Usage{RPC: types.NewCurrency64(1)}, nil
 	})

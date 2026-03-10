@@ -21,11 +21,6 @@ const (
 	AccountFundBatch = proto.MaxAccountBatchSize
 	// AccountFundInterval is how often we will fund host accounts.
 	AccountFundInterval = time.Hour
-	// AccountExpBackoffMaxMinutes represents the maximum interval there can be
-	// between two funding attempts for a host.  If a funding attempt fails,
-	// repeatedly there is exponential backoff capped at
-	// AccountExpBackoffMaxMinutes minutes.
-	AccountExpBackoffMaxMinutes = 128
 	// AccountActivityThreshold is the threshold for determining whether an
 	// account has been active recently for the purposes of contract funding.
 	// An account is considered active if it has been used within the threshold
@@ -168,7 +163,7 @@ func (m *AccountManager) ServiceAccounts(hk types.PublicKey) []HostAccount {
 // UpdateFundedAccounts marks in-place the first `n` accounts as having a
 // successful funding and applies the exponential backoff penalty to the
 // accounts after the first `n`.
-func UpdateFundedAccounts(accounts []HostAccount, n int) {
+func UpdateFundedAccounts(accounts []HostAccount, n int, maxBackoff time.Duration) {
 	if n > len(accounts) {
 		panic("illegal number of funded accounts") // developer error
 	}
@@ -178,7 +173,7 @@ func UpdateFundedAccounts(accounts []HostAccount, n int) {
 	}
 	for i := n; i < len(accounts); i++ {
 		accounts[i].ConsecutiveFailedFunds++
-		accounts[i].NextFund = time.Now().Add(time.Duration(min(math.Pow(2, float64(accounts[i].ConsecutiveFailedFunds)), AccountExpBackoffMaxMinutes)) * time.Minute)
+		accounts[i].NextFund = time.Now().Add(min(time.Duration(math.Pow(2, float64(accounts[i].ConsecutiveFailedFunds)))*time.Minute, maxBackoff))
 	}
 }
 

@@ -30,6 +30,7 @@ func newTestStore(t testing.TB) testStore {
 // and next fund time are updated correctly based on the number of funded
 // accounts.
 func TestUpdateFundedAccounts(t *testing.T) {
+	maxBackoff := 128 * time.Minute
 	tests := []struct {
 		name   string
 		accs   []accounts.HostAccount
@@ -80,12 +81,12 @@ func TestUpdateFundedAccounts(t *testing.T) {
 						t.Errorf("expected panic but function did not panic")
 					}
 				}()
-				accounts.UpdateFundedAccounts(tc.accs, tc.funded)
+				accounts.UpdateFundedAccounts(tc.accs, tc.funded, maxBackoff)
 				return
 			}
 
 			updated := slices.Clone(tc.accs)
-			accounts.UpdateFundedAccounts(updated, tc.funded)
+			accounts.UpdateFundedAccounts(updated, tc.funded, maxBackoff)
 
 			for i, acc := range updated {
 				// calculate expected values
@@ -96,7 +97,7 @@ func TestUpdateFundedAccounts(t *testing.T) {
 					wantNextFund = time.Now().Add(accounts.AccountFundInterval)
 				} else {
 					wantConsecFailures = tc.accs[i].ConsecutiveFailedFunds + 1
-					wantNextFund = time.Now().Add(time.Duration(min(math.Pow(2, float64(wantConsecFailures)), accounts.AccountExpBackoffMaxMinutes)) * time.Minute)
+					wantNextFund = time.Now().Add(min(time.Duration(math.Pow(2, float64(wantConsecFailures)))*time.Minute, maxBackoff))
 				}
 
 				// assert updates

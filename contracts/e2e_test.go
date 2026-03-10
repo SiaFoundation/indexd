@@ -173,10 +173,12 @@ func TestContractPruning(t *testing.T) {
 	time.Sleep(time.Second)
 	assertRoots()
 
-	// unpin the 3rd slab and trigger pruning
+	// unpin the 3rd slab
 	if err := indexer.App.UnpinSlab(t.Context(), sk, slabIDs[2]); err != nil {
 		t.Fatal(err)
-	} else if err = indexer.Contracts().TriggerContractPruning(); err != nil {
+	}
+	_, err = indexer.Store().Exec(t.Context(), "UPDATE contracts SET next_prune = NOW()")
+	if err != nil {
 		t.Fatal(err)
 	}
 

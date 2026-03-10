@@ -64,8 +64,11 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		renewCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
 
+		lc, unlock := cm.cl.LockContract(contract.ID)
+		defer unlock()
+
 		var res rhp.RPCRenewContractResult
-		err = cm.rev.WithRevision(renewCtx, contract.ID, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		err = cm.rev.WithRevision(renewCtx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 			cappedCollateral := collateral
 			estimatedRenewal, _ := proto.RenewContract(rev.Revision, settings.Prices, proto.RPCRenewContractParams{
 				Allowance:   allowance,

@@ -128,7 +128,6 @@ type (
 		PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error
 		RejectPendingContracts(maxFormation time.Time) error
 		ScheduleAccountForFunding(hostKey types.PublicKey, account proto.Account) error
-		ScheduleContractsForPruning() error
 		UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 		UpdateContractRevision(contract rhp.ContractRevision, usage proto.Usage) error
 		UpdateNextPrune(contractID types.FileContractID, nextPrune time.Time) error
@@ -196,6 +195,7 @@ type (
 		accounts      AccountManager
 		accountFunder AccountFunder
 		chain         ChainManager
+		cl            *ContractLocker
 		hosts         HostManager
 		syncer        Syncer
 		wallet        Wallet
@@ -206,9 +206,7 @@ type (
 		rev       *RevisionManager
 		renterKey types.PublicKey
 
-		triggerFundingChan     chan bool
-		triggerMaintenanceChan chan struct{}
-		triggerPruningChan     chan struct{}
+		triggerFundingChan chan bool
 
 		log *zap.Logger
 		tg  *threadgroup.ThreadGroup
@@ -218,6 +216,7 @@ type (
 		expiredContractPruneBuffer        uint64
 		expiredContractSectorsPruneBuffer uint64
 		maintenanceFrequency              time.Duration
+		maxAccountFundingBackoff          time.Duration
 		minHostDistanceKm                 float64
 		pruneIntervalSuccess              time.Duration
 		pruneIntervalFailure              time.Duration
@@ -242,12 +241,28 @@ func WithMaintenanceFrequency(frequency time.Duration) ContractManagerOpt {
 	}
 }
 
+// WithMaxAccountFundingBackoff sets the maximum backoff duration for account
+// funding retries. The default is 2 hours.
+func WithMaxAccountFundingBackoff(backoff time.Duration) ContractManagerOpt {
+	return func(cm *ContractManager) {
+		cm.maxAccountFundingBackoff = backoff
+	}
+}
+
 // WithMinHostDistance sets the minimum geographic separation required between
 // hosts for the contract manager. The default is 10km, when set to
 // 0, the distance check is disabled.
 func WithMinHostDistance(km float64) ContractManagerOpt {
 	return func(cm *ContractManager) {
 		cm.minHostDistanceKm = km
+	}
+}
+
+// WithPruneIntervalSuccess sets the interval for retrying contract pruning
+// after a successful prune. The default is 24 hours.
+func WithPruneIntervalSuccess(interval time.Duration) ContractManagerOpt {
+	return func(cm *ContractManager) {
+		cm.pruneIntervalSuccess = interval
 	}
 }
 
@@ -366,32 +381,6 @@ func (cm *ContractManager) TriggerAccountFunding(force bool) error {
 	return nil
 }
 
-// TriggerContractPruning triggers contract pruning for all active contracts
-// that are marked good.
-func (cm *ContractManager) TriggerContractPruning() error {
-	ctx, cancel, err := cm.tg.AddContext(context.Background())
-	if err != nil {
-		return err
-	}
-	go func() {
-		defer cancel()
-
-		select {
-		case <-ctx.Done():
-		case cm.triggerPruningChan <- struct{}{}:
-		}
-	}()
-	return nil
-}
-
-// TriggerMaintenance triggers the maintenance loop to run immediately.
-func (cm *ContractManager) TriggerMaintenance() {
-	select {
-	case cm.triggerMaintenanceChan <- struct{}{}:
-	default:
-	}
-}
-
 // Contract retrieves a contract by its ID.
 func (cm *ContractManager) Contract(ctx context.Context, id types.FileContractID) (Contract, error) {
 	return cm.store.Contract(id)
@@ -469,7 +458,7 @@ func (cm *ContractManager) Close() error {
 	return nil
 }
 
-func newContractManager(renterKey types.PublicKey, accounts AccountManager, accountFunder AccountFunder, chain ChainManager, store Store, client HostClient, signer rhp.FormContractSigner, rev *RevisionManager, hosts HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
+func newContractManager(renterKey types.PublicKey, accounts AccountManager, accountFunder AccountFunder, chain ChainManager, store Store, client HostClient, signer rhp.FormContractSigner, rev *RevisionManager, cl *ContractLocker, hosts HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) *ContractManager {
 	cm := &ContractManager{
 		accounts:      accounts,
 		accountFunder: accountFunder,
@@ -481,14 +470,13 @@ func newContractManager(renterKey types.PublicKey, accounts AccountManager, acco
 		store:  store,
 
 		client: client,
+		cl:     cl,
 		signer: signer,
 		rev:    rev,
 
 		renterKey: renterKey,
 
-		triggerFundingChan:     make(chan bool, 1),
-		triggerMaintenanceChan: make(chan struct{}, 1),
-		triggerPruningChan:     make(chan struct{}, 1),
+		triggerFundingChan: make(chan bool, 1),
 
 		log: zap.NewNop(),
 		tg:  threadgroup.New(),
@@ -498,6 +486,7 @@ func newContractManager(renterKey types.PublicKey, accounts AccountManager, acco
 		expiredContractPruneBuffer:        144,           // 144 blocks after broadcast
 		expiredContractSectorsPruneBuffer: 36,            // 36 blocks (~6 hours) after expiration
 		maintenanceFrequency:              2 * time.Minute,
+		maxAccountFundingBackoff:          2 * time.Hour,
 		minHostDistanceKm:                 10,                 // 10km
 		pruneIntervalSuccess:              24 * time.Hour,     // 1 day
 		pruneIntervalFailure:              3 * time.Hour,      // 3 hours
@@ -514,8 +503,8 @@ func newContractManager(renterKey types.PublicKey, accounts AccountManager, acco
 // NewManager creates a new contract manager. It is responsible for forming and
 // renewing contracts as well as any interactions with hosts that require
 // contracts.
-func NewManager(renterKey types.PrivateKey, accountManager AccountManager, accountFunder AccountFunder, chainManager ChainManager, store Store, client HostClient, signer rhp.FormContractSigner, rev *RevisionManager, hm HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
-	cm := newContractManager(renterKey.PublicKey(), accountManager, accountFunder, chainManager, store, client, signer, rev, hm, syncer, wallet, opts...)
+func NewManager(renterKey types.PrivateKey, accountManager AccountManager, accountFunder AccountFunder, chainManager ChainManager, store Store, client HostClient, signer rhp.FormContractSigner, rev *RevisionManager, cl *ContractLocker, hm HostManager, syncer Syncer, wallet Wallet, opts ...ContractManagerOpt) (*ContractManager, error) {
+	cm := newContractManager(renterKey.PublicKey(), accountManager, accountFunder, chainManager, store, client, signer, rev, cl, hm, syncer, wallet, opts...)
 
 	ctx, cancel, err := cm.tg.AddContext(context.Background())
 	if err != nil {

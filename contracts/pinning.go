@@ -118,111 +118,120 @@ func (cm *ContractManager) pinSectors(ctx context.Context, hostKey types.PublicK
 		if len(sectors) == 0 {
 			break
 		}
-		log := log.With(zap.Stringer("contractID", contractID))
 
-		prices, err := cm.client.Prices(ctx, hostKey)
-		if err != nil {
-			log.Debug("failed to get host prices", zap.Error(err))
-			continue
-		}
+		if err := func() error {
+			log := log.With(zap.Stringer("contractID", contractID))
 
-		var res rhp.RPCAppendSectorsResult
-		var attempted int
-		err = cm.rev.WithRevision(ctx, contractID, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
-			if contract.Revision.Filesize >= maxSize {
-				return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("contract is too large, %d > %d: %w", contract.Revision.Filesize, maxSize, ErrContractMaxSize)
-			}
+			lc, unlock := cm.cl.LockContract(contractID)
+			defer unlock()
 
-			// calculate the maximum number of sectors we can append based on the
-			// contract's remaining capacity and collateral
-			maxRemainingSectors := (maxSize - contract.Revision.Filesize) / proto.SectorSize
-			maxAppendSectors := (contract.Revision.Capacity - contract.Revision.Filesize) / proto.SectorSize
-
-			if contract.Revision.ExpirationHeight <= prices.TipHeight {
-				return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("contract has expired at height %d, current height is %d", contract.Revision.ExpirationHeight, prices.TipHeight)
-			}
-
-			duration := contract.Revision.ExpirationHeight - prices.TipHeight
-			appendSectorCost := prices.RPCAppendSectorsCost(1, duration)
-
-			sectorCollateralCost := appendSectorCost.RiskedCollateral
-			if sectorCollateralCost.IsZero() {
-				sectorCollateralCost = types.NewCurrency64(1) // avoid division by zero
-			}
-			sectorRenterCost := appendSectorCost.RenterCost()
-			if sectorRenterCost.IsZero() {
-				sectorRenterCost = types.NewCurrency64(1) // avoid division by zero
-			}
-
-			maxSectorsByCollateral := contract.Revision.RemainingCollateral().Div(sectorCollateralCost).Big().Uint64()
-			maxSectorsByAllowance := contract.Revision.RemainingAllowance().Div(sectorRenterCost).Big().Uint64()
-			maxAppendSectors += min(maxSectorsByAllowance, maxSectorsByCollateral)
-
-			// ensure the maximum contract size is not exceeded
-			maxAppendSectors = min(maxAppendSectors, maxRemainingSectors)
-
-			if maxAppendSectors == 0 {
-				switch {
-				case maxSectorsByAllowance == 0:
-					return rhp.ContractRevision{}, proto.Usage{}, ErrContractOutOfFunds
-				case maxSectorsByCollateral == 0:
-					return rhp.ContractRevision{}, proto.Usage{}, ErrContractOutOfCollateral
-				case maxRemainingSectors == 0:
-					return rhp.ContractRevision{}, proto.Usage{}, ErrContractMaxSize
-				}
-				return rhp.ContractRevision{}, proto.Usage{}, errors.New("maxAppendSectors is zero for unknown reason") // unreachable
-			}
-
-			// only attempt to append up to the calculated maximum number of sectors
-			attemptedSectors := sectors
-			if uint64(len(attemptedSectors)) > maxAppendSectors {
-				attemptedSectors = attemptedSectors[:maxAppendSectors]
-			}
-			res, err = cm.client.AppendSectors(ctx, cm.signer, cm.chain, contract, attemptedSectors)
+			prices, err := cm.client.Prices(ctx, hostKey)
 			if err != nil {
-				return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("failed to append sectors: %w", err)
+				log.Debug("failed to get host prices", zap.Error(err))
+				return nil
 			}
-			attempted = len(attemptedSectors)
-			contract.Revision = res.Revision
-			return contract, res.Usage, nil
-		})
-		if err != nil {
-			log.Debug("failed to pin sectors", zap.Error(err))
-			continue
-		}
-		// if the RPC returned, regardless of how many sectors were pinned,
-		// consider it a success as we made progress towards pinning unpinned
-		// sectors.
-		success = true
 
-		// Only the sectors that were attempted should be marked
-		// as missing. So sectors that were not part of the append
-		// call can be pinned to other contracts.
-		if len(res.Sectors) != attempted {
-			lookup := make(map[types.Hash256]struct{}, attempted)
-			for _, sector := range sectors[:attempted] {
-				lookup[sector] = struct{}{}
-			}
-			for _, sector := range res.Sectors {
-				delete(lookup, sector)
-			}
-			missing := slices.Collect(maps.Keys(lookup))
-			if err := cm.store.MarkSectorsLost(hostKey, missing); err != nil {
-				return fmt.Errorf("failed to mark sectors as lost: %w", err)
-			}
-			log = log.With(zap.Int("missing", len(missing)))
-		}
+			var res rhp.RPCAppendSectorsResult
+			var attempted int
+			err = cm.rev.WithRevision(ctx, lc, func(contract rhp.ContractRevision) (_ rhp.ContractRevision, _ proto.Usage, err error) {
+				if contract.Revision.Filesize >= maxSize {
+					return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("contract is too large, %d > %d: %w", contract.Revision.Filesize, maxSize, ErrContractMaxSize)
+				}
 
-		if err := cm.store.PinSectors(contractID, res.Sectors); err != nil {
-			// log unexpected database error
-			if !errors.Is(err, ErrNotFound) {
-				log.Error("failed to pin sectors", zap.Stringer("contractID", contractID), zap.Error(err))
-			}
-			return fmt.Errorf("failed to pin sectors: %w", err)
-		}
+				// calculate the maximum number of sectors we can append based on the
+				// contract's remaining capacity and collateral
+				maxRemainingSectors := (maxSize - contract.Revision.Filesize) / proto.SectorSize
+				maxAppendSectors := (contract.Revision.Capacity - contract.Revision.Filesize) / proto.SectorSize
 
-		sectors = sectors[attempted:] // pin the remaining sectors
-		log.Debug("pinned sectors", zap.Int("pinned", len(res.Sectors)), zap.Int("attempted", attempted))
+				if contract.Revision.ExpirationHeight <= prices.TipHeight {
+					return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("contract has expired at height %d, current height is %d", contract.Revision.ExpirationHeight, prices.TipHeight)
+				}
+
+				duration := contract.Revision.ExpirationHeight - prices.TipHeight
+				appendSectorCost := prices.RPCAppendSectorsCost(1, duration)
+
+				sectorCollateralCost := appendSectorCost.RiskedCollateral
+				if sectorCollateralCost.IsZero() {
+					sectorCollateralCost = types.NewCurrency64(1) // avoid division by zero
+				}
+				sectorRenterCost := appendSectorCost.RenterCost()
+				if sectorRenterCost.IsZero() {
+					sectorRenterCost = types.NewCurrency64(1) // avoid division by zero
+				}
+
+				maxSectorsByCollateral := contract.Revision.RemainingCollateral().Div(sectorCollateralCost).Big().Uint64()
+				maxSectorsByAllowance := contract.Revision.RemainingAllowance().Div(sectorRenterCost).Big().Uint64()
+				maxAppendSectors += min(maxSectorsByAllowance, maxSectorsByCollateral)
+
+				// ensure the maximum contract size is not exceeded
+				maxAppendSectors = min(maxAppendSectors, maxRemainingSectors)
+
+				if maxAppendSectors == 0 {
+					switch {
+					case maxSectorsByAllowance == 0:
+						return rhp.ContractRevision{}, proto.Usage{}, ErrContractOutOfFunds
+					case maxSectorsByCollateral == 0:
+						return rhp.ContractRevision{}, proto.Usage{}, ErrContractOutOfCollateral
+					case maxRemainingSectors == 0:
+						return rhp.ContractRevision{}, proto.Usage{}, ErrContractMaxSize
+					}
+					return rhp.ContractRevision{}, proto.Usage{}, errors.New("maxAppendSectors is zero for unknown reason") // unreachable
+				}
+
+				// only attempt to append up to the calculated maximum number of sectors
+				attemptedSectors := sectors
+				if uint64(len(attemptedSectors)) > maxAppendSectors {
+					attemptedSectors = attemptedSectors[:maxAppendSectors]
+				}
+				res, err = cm.client.AppendSectors(ctx, cm.signer, cm.chain, contract, attemptedSectors)
+				if err != nil {
+					return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("failed to append sectors: %w", err)
+				}
+				attempted = len(attemptedSectors)
+				contract.Revision = res.Revision
+				return contract, res.Usage, nil
+			})
+			if err != nil {
+				log.Debug("failed to pin sectors", zap.Error(err))
+				return nil
+			}
+			// if the RPC returned, regardless of how many sectors were pinned,
+			// consider it a success as we made progress towards pinning unpinned
+			// sectors.
+			success = true
+
+			// Only the sectors that were attempted should be marked
+			// as missing. So sectors that were not part of the append
+			// call can be pinned to other contracts.
+			if len(res.Sectors) != attempted {
+				lookup := make(map[types.Hash256]struct{}, attempted)
+				for _, sector := range sectors[:attempted] {
+					lookup[sector] = struct{}{}
+				}
+				for _, sector := range res.Sectors {
+					delete(lookup, sector)
+				}
+				missing := slices.Collect(maps.Keys(lookup))
+				if err := cm.store.MarkSectorsLost(hostKey, missing); err != nil {
+					return fmt.Errorf("failed to mark sectors as lost: %w", err)
+				}
+				log = log.With(zap.Int("missing", len(missing)))
+			}
+
+			if err := cm.store.PinSectors(contractID, res.Sectors); err != nil {
+				// log unexpected database error
+				if !errors.Is(err, ErrNotFound) {
+					log.Error("failed to pin sectors", zap.Stringer("contractID", contractID), zap.Error(err))
+				}
+				return fmt.Errorf("failed to pin sectors: %w", err)
+			}
+
+			sectors = sectors[attempted:] // pin the remaining sectors
+			log.Debug("pinned sectors", zap.Int("pinned", len(res.Sectors)), zap.Int("attempted", attempted))
+			return nil
+		}(); err != nil {
+			return err
+		}
 	}
 	if !success {
 		return errors.New("all contracts failed to pin sectors")

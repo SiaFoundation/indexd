@@ -155,13 +155,17 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		}
 
 		duration := contract.ExpirationHeight - host.Settings.Prices.TipHeight
-		allowance, collateral := contractFunding(host.Settings, contract.Size, fundTarget, duration)
+
+		lc, unlock := cm.cl.LockContract(contract.ID)
+		defer unlock()
 
 		var res rhp.RPCRefreshContractResult
-		err := cm.rev.WithRevision(refreshCtx, contract.ID, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		err := cm.rev.WithRevision(refreshCtx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 			if host.Settings.ProtocolVersion.Cmp(rhp.ProtocolVersion500) < 0 {
 				return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("host does not support contract refresh, protocol version %s < %s", host.Settings.ProtocolVersion, rhp.ProtocolVersion500)
 			}
+
+			allowance, collateral := contractFunding(host.Settings, rev.Revision.Filesize, fundTarget, duration)
 
 			cappedCollateral := collateral
 			var totalCollateral types.Currency

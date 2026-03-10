@@ -70,7 +70,7 @@ func TestFunding(t *testing.T) {
 	}
 	defer hm.Close()
 
-	cm, err := contracts.NewManager(types.GeneratePrivateKey(), am, f, chain.NewManager(dbstore, tipState), s, nil, nil, nil, hm, nil, nil, contracts.WithLogger(log.Named("contracts")))
+	cm, err := contracts.NewManager(types.GeneratePrivateKey(), am, f, chain.NewManager(dbstore, tipState), s, nil, nil, nil, contracts.NewContractLocker(), hm, nil, nil, contracts.WithLogger(log.Named("contracts")))
 	if err != nil {
 		t.Fatal(err)
 	}

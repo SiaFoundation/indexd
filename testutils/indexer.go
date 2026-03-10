@@ -86,10 +86,12 @@ func defaultIndexerCfg(log *zap.Logger) *indexerCfg {
 		maintenanceSettings: MaintenanceSettings,
 		contractOpts: []contracts.ContractManagerOpt{
 			contracts.WithLogger(log.Named("contracts")),
-			contracts.WithMaintenanceFrequency(500 * time.Millisecond),
+			contracts.WithMaintenanceFrequency(100 * time.Millisecond),
 			contracts.WithMinHostDistance(0), // disable location checks in tests
 			contracts.WithSyncPollInterval(500 * time.Millisecond),
-			contracts.WithSectorRootsBatchSize(5), // small batch size for testing
+			contracts.WithSectorRootsBatchSize(5),     // small batch size for testing
+			contracts.WithMaxAccountFundingBackoff(0), // retry immediately
+			contracts.WithPruneIntervalSuccess(500 * time.Millisecond),
 		},
 		slabOpts: []slabs.Option{
 			slabs.WithLogger(log.Named("slabs")),
@@ -180,8 +182,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	}
 
 	rev := contracts.NewRevisionManager(client, c.cm, store, 1, log.Named("revision"))
-	f := contracts.NewFunder(client, rev, signer, c.cm, log.Named("funder"))
-	contracts, err := contracts.NewManager(walletKey, am, f, c.cm, store, client, signer, rev, hm, s, wm, cfg.contractOpts...)
+	cl := contracts.NewContractLocker()
+	f := contracts.NewFunder(client, cl, rev, signer, c.cm, log.Named("funder"))
+	contracts, err := contracts.NewManager(walletKey, am, f, c.cm, store, client, signer, rev, cl, hm, s, wm, cfg.contractOpts...)
 	if err != nil {
 		t.Fatalf("failed to create contract manager: %v", err)
 	}

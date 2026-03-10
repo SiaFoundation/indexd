@@ -124,14 +124,17 @@ func (rm *RevisionManager) syncRevision(ctx context.Context, contractID types.Fi
 	return resp.Contract, resp.Renewed, nil
 }
 
-// WithRevision retrieves the current revision of the specified contract ID from
-// the database and executes the provided revise function with it. If the host
-// reports an invalid signature, suggesting the local revision is out of sync,
-// it will synchronize with the host and retry the function using the updated
-// revision. Therefore, the revise function must be idempotent.
-func (rm *RevisionManager) WithRevision(ctx context.Context, contractID types.FileContractID, reviseFn func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error)) error {
+// WithRevision retrieves the current revision of the specified locked contract
+// from the database and executes the provided revise function with it. If the
+// host reports an invalid signature, suggesting the local revision is out of
+// sync, it will synchronize with the host and retry the function using the
+// updated revision. Therefore, the revise function must be idempotent.
+func (rm *RevisionManager) WithRevision(ctx context.Context, lc *LockedContract,
+	reviseFn func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage,
+		error)) error {
 	cs := rm.chain.TipState()
 	bh := cs.Index.Height
+	contractID := lc.id
 
 	// fetch revision from database
 	contract, renewed, err := rm.store.ContractRevision(contractID)

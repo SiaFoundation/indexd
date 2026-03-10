@@ -54,8 +54,6 @@ type (
 	// to ensure the account is funded as soon as possible.
 	ContractManager interface {
 		TriggerAccountFunding(force bool) error
-		TriggerContractPruning() error
-		TriggerMaintenance()
 
 		MaintenanceSettings(ctx context.Context) (contracts.MaintenanceSettings, error)
 		UpdateMaintenanceSettings(ctx context.Context, ms contracts.MaintenanceSettings) error
@@ -287,7 +285,6 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 	// debug endpoints
 	if a.debug {
 		routes["GET /debug/pprof/:handler"] = a.handleGETPProf
-		routes["POST /debug/trigger/:action"] = a.handlePOSTTrigger
 	}
 
 	return jape.Mux(routes)
@@ -327,32 +324,6 @@ func (a *admin) handleGETPProf(jc jape.Context) {
 	default:
 		pprof.Index(jc.ResponseWriter, jc.Request)
 	}
-}
-
-func (a *admin) handlePOSTTrigger(jc jape.Context) {
-	var action string
-	if jc.DecodeParam("action", &action) != nil {
-		return
-	}
-
-	switch action {
-	case "funding":
-		err := a.contracts.TriggerAccountFunding(true)
-		if jc.Check("failed to trigger account funding", err) != nil {
-			return
-		}
-	case "maintenance":
-		a.contracts.TriggerMaintenance()
-	case "pruning":
-		a.contracts.TriggerContractPruning()
-	case "scanning":
-		a.hosts.TriggerHostScanning()
-	default:
-		jc.Error(fmt.Errorf("unknown action: %q, available actions are 'funding', 'maintenance', 'pruning' or 'scanning'", action), http.StatusBadRequest)
-		return
-	}
-
-	jc.Encode(nil)
 }
 
 func (a *admin) handleGETAppConnectKeys(jc jape.Context) {

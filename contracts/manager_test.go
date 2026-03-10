@@ -14,7 +14,7 @@ import (
 func TestBlockBadHosts(t *testing.T) {
 	store := newTestStore(t)
 	hmMock := newHostManagerMock(store)
-	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, store, nil, nil, nil, hmMock, nil, nil)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, store, nil, nil, nil, contracts.NewContractLocker(), hmMock, nil, nil)
 
 	goodHost := hosts.Host{PublicKey: types.PublicKey{1}, Usability: hosts.GoodUsability, Settings: goodSettings}
 	badHost := hosts.Host{PublicKey: types.PublicKey{2}, Usability: hosts.Usability{}, Settings: goodSettings}

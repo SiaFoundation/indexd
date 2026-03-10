@@ -18,7 +18,7 @@ func TestBroadcastContractRevisions(t *testing.T) {
 	walletMock := &walletMock{}
 	store := newTestStore(t)
 
-	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, nil, nil, nil, nil, syncerMock, walletMock)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, nil, nil, nil, contracts.NewContractLocker(), nil, syncerMock, walletMock)
 	cm.SetRevisionBroadcastInterval(time.Minute)
 
 	// add host

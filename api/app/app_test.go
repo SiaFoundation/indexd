@@ -26,6 +26,7 @@ import (
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
 
@@ -104,6 +105,8 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 		t.Fatal("expected app to be authenticated")
 	}
 
+	// wait for account to be funded
+	cluster.WaitForAccountFunding(t, proto.Account(sk.PublicKey()))
 	return sk, key
 }
 
@@ -140,7 +143,7 @@ func uploadRandomSlab(t testing.TB, client *client.Client, sk types.PrivateKey, 
 func TestApplicationAPI(t *testing.T) {
 	ctx := t.Context()
 	// create cluster with three hosts
-	logger := zap.NewNop()
+	logger := zaptest.NewLogger(t)
 	cluster := testutils.NewCluster(t, testutils.WithHosts(10), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/consensus"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/testutil"
 	"go.sia.tech/indexd/contracts"
@@ -187,6 +188,28 @@ func (c *Cluster) NewHosts(t testing.TB, n int) []*Host {
 		hosts = append(hosts, cn.NewHost(t, pk, c.log.Named("host-"+pk.PublicKey().String())))
 	}
 	return hosts
+}
+
+// WaitForAccountFunding waits until the given account is funded on every host
+// in the cluster.
+func (c *Cluster) WaitForAccountFunding(t *testing.T, pk proto.Account) {
+	t.Helper()
+	for _, h := range c.Hosts {
+		var funded bool
+		for i := 0; i < 120; i++ {
+			b, err := c.Indexer.Client().AccountBalance(t.Context(), h.PublicKey(), pk)
+			if err != nil {
+				t.Fatal("failed to get account balance:", err)
+			} else if !b.IsZero() {
+				funded = true
+				break
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+		if !funded {
+			t.Fatalf("account not funded on host %v", h.PublicKey())
+		}
+	}
 }
 
 // WaitForContracts waits until a contract is formed with every host in the cluster

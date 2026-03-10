@@ -91,7 +91,7 @@ func TestPerformSectorPinningOnHost(t *testing.T) {
 
 	// prepare contract manager
 	rev := contracts.NewRevisionManager(mock, cmMock, store, 1, zaptest.NewLogger(t))
-	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, mock, nil, rev, hmMock, nil, nil)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, mock, nil, rev, contracts.NewContractLocker(), hmMock, nil, nil)
 
 	assertSectorsContract := func(roots []types.Hash256, contractID *types.FileContractID) {
 		t.Helper()
@@ -203,7 +203,7 @@ func TestPerformSectorPinningOnHostOverflow(t *testing.T) {
 
 	// prepare contract manager
 	rev := contracts.NewRevisionManager(mock, cmMock, store, 1, zaptest.NewLogger(t))
-	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, mock, nil, rev, hmMock, nil, nil)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, mock, nil, rev, contracts.NewContractLocker(), hmMock, nil, nil)
 
 	assertSectorsContract := func(roots []types.Hash256, contractID *types.FileContractID) {
 		t.Helper()

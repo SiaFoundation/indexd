@@ -480,7 +480,7 @@ func TestPerformContractFormation(t *testing.T) {
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
 	rev := contracts.NewRevisionManager(mock, cmMock, store, 1, zaptest.NewLogger(t))
-	cm := contracts.NewTestContractManager(renterKey, amMock, nil, cmMock, store, mock, nil, rev, hm, syncerMock, wallet)
+	cm := contracts.NewTestContractManager(renterKey, amMock, nil, cmMock, store, mock, nil, rev, contracts.NewContractLocker(), hm, syncerMock, wallet)
 
 	assertGoodContracts := func(goodCount, formations, refreshes int) {
 		t.Helper()
