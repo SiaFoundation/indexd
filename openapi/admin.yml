@@ -537,8 +537,8 @@ paths:
         "404":
           description: Account not found
 
-  /account/{accountkey}/prune:
-    delete:
+  /account/{accountkey}/slabs/prune:
+    post:
       tags:
         - accounts
       summary: Prune orphaned slabs
