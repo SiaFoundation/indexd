@@ -209,11 +209,11 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /consensus/network": a.handleGETConsensusNetwork,
 
 		// accounts endpoints
-		"GET    /accounts":                  a.handleGETAccounts,
-		"GET    /account/:accountkey":       a.handleGETAccount,
-		"DELETE /account/:accountkey":       a.handleDELETEAccount,
-		"DELETE /account/:accountkey/prune": a.handleDELETEAccountPrune,
-		"PATCH  /account/:accountkey":       a.handlePATCHAccount,
+		"GET    /accounts":                        a.handleGETAccounts,
+		"GET    /account/:accountkey":             a.handleGETAccount,
+		"DELETE /account/:accountkey":             a.handleDELETEAccount,
+		"POST   /account/:accountkey/slabs/prune": a.handlePOSTAccountPrune,
+		"PATCH  /account/:accountkey":             a.handlePATCHAccount,
 
 		// alerts endpoints
 		"GET    /alerts":         a.handleGETAlerts,
@@ -611,7 +611,7 @@ func (a *admin) handleDELETEAccount(jc jape.Context) {
 	}
 }
 
-func (a *admin) handleDELETEAccountPrune(jc jape.Context) {
+func (a *admin) handlePOSTAccountPrune(jc jape.Context) {
 	var ak proto.Account
 	if jc.DecodeParam("accountkey", &ak) != nil {
 		return

@@ -149,7 +149,7 @@ func (c *Client) UpdateAccount(ctx context.Context, ak types.PublicKey, updates 
 // PruneSlabs prunes all pinned slabs of the given account not currently
 // connected to an object.
 func (c *Client) PruneSlabs(ctx context.Context, ak types.PublicKey) error {
-	return c.c.DELETE(ctx, fmt.Sprintf("/account/%s/prune", ak))
+	return c.c.POST(ctx, fmt.Sprintf("/account/%s/slabs/prune", ak), nil, nil)
 }
 
 // Accounts returns all accounts registered in the indexer.
