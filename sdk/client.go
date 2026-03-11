@@ -224,11 +224,11 @@ func (s *SDK) DeleteObject(ctx context.Context, key types.Hash256) error {
 	return s.client.DeleteObject(ctx, s.appKey, key)
 }
 
-// Upload uploads the data to hosts and pins it to the indexer.
+// Upload uploads the data to hosts.
 //
 // Appends the metadata of the slabs that were uploaded to the given object.
-// After uploading the object, the caller must call SaveObject to save the
-// object metadata to the indexer.
+// After uploading the object, the caller must call PinObject to pin the
+// slabs and save the object metadata to the indexer.
 func (s *SDK) Upload(ctx context.Context, obj *Object, r io.Reader, opts ...UploadOption) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -281,11 +281,7 @@ top:
 			}
 
 			totalShards := uo.dataShards + uo.parityShards
-			params := slabs.SlabPinParams{
-				EncryptionKey: slab.encryptionKey,
-				MinShards:     uint(uo.dataShards),
-				Sectors:       make([]slabs.PinnedSector, totalShards),
-			}
+			sectors := make([]slabs.PinnedSector, totalShards)
 
 			// collect all shards
 			for n := totalShards; n > 0; n-- {
@@ -296,25 +292,20 @@ top:
 					if shard.err != nil {
 						return fmt.Errorf("failed to upload slab: shard upload failed: %w", shard.err)
 					}
-					params.Sectors[shard.index] = slabs.PinnedSector{
+					sectors[shard.index] = slabs.PinnedSector{
 						HostKey: shard.host,
 						Root:    shard.root,
 					}
 				}
 			}
 
-			expectedSlabID := params.Digest()
-
-			slabIDs, err := s.client.PinSlabs(ctx, s.appKey, params)
-			if err != nil {
-				return fmt.Errorf("failed to pin slab %d: %w", slab.slabIndex, err)
-			}
-			slabID := slabIDs[0]
-
-			if slabID != expectedSlabID {
-				return fmt.Errorf("pinned slab %d id %s does not match expected id %s", slab.slabIndex, slabID.String(), expectedSlabID.String())
-			}
-			uploaded = append(uploaded, params.Slice(0, slab.length))
+			uploaded = append(uploaded, slabs.SlabSlice{
+				EncryptionKey: slab.encryptionKey,
+				MinShards:     uint(uo.dataShards),
+				Sectors:       sectors,
+				Offset:        0,
+				Length:        slab.length,
+			})
 			uploadedIndices = append(uploadedIndices, slab.slabIndex)
 		}
 	}
@@ -389,8 +380,29 @@ func (s *SDK) Close() error {
 	return s.hosts.Close()
 }
 
-// SaveObject saves the given object to the indexer.
-func (s *SDK) SaveObject(ctx context.Context, obj Object) error {
+// PinObject pins the object's slabs and saves the object metadata to the
+// indexer.
+func (s *SDK) PinObject(ctx context.Context, obj Object) error {
+	params := make([]slabs.SlabPinParams, len(obj.slabs))
+	for i, slab := range obj.slabs {
+		params[i] = slabs.SlabPinParams{
+			EncryptionKey: slab.EncryptionKey,
+			MinShards:     slab.MinShards,
+			Sectors:       slab.Sectors,
+		}
+	}
+
+	slabIDs, err := s.client.PinSlabs(ctx, s.appKey, params...)
+	if err != nil {
+		return fmt.Errorf("failed to pin slabs: %w", err)
+	}
+
+	for i, slab := range obj.slabs {
+		if expected := slab.Digest(); slabIDs[i] != expected {
+			return fmt.Errorf("slab %d: pinned id %s does not match expected id %s", i, slabIDs[i], expected)
+		}
+	}
+
 	return s.client.SaveObject(ctx, s.appKey, obj.Seal(s.appKey).SealedObject)
 }
 

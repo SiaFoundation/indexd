@@ -133,9 +133,9 @@ func TestDownload(t *testing.T) {
 		t.Fatalf("failed to upload: %v", err)
 	}
 
-	err = s.client.SaveObject(t.Context(), appKey, obj.Seal(appKey).SealedObject)
+	err = s.PinObject(t.Context(), obj)
 	if err != nil {
-		t.Fatalf("failed to save object to mock client: %v", err)
+		t.Fatalf("failed to pin object: %v", err)
 	}
 
 	sharedURL, err := s.CreateSharedObjectURL(t.Context(), obj.ID(), time.Now().Add(time.Hour))
@@ -246,6 +246,35 @@ func TestE2E(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	assertShareable := func(obj Object, data []byte) {
+		t.Helper()
+
+		// assert we can download the object
+		buf := bytes.NewBuffer(nil)
+		if err := client.PinObject(t.Context(), obj); err != nil {
+			t.Fatalf("failed to pin object: %v", err)
+		} else if _, err := client.Object(t.Context(), obj.ID()); err != nil {
+			t.Fatalf("failed to get object: %v", err)
+		} else if err := client.Download(t.Context(), buf, obj); err != nil {
+			t.Fatalf("failed to download: %v", err)
+		} else if !bytes.Equal(buf.Bytes(), data) {
+			t.Fatal("data mismatch")
+		}
+
+		// assert we can share the object
+		sharedURL, err := client.CreateSharedObjectURL(t.Context(), obj.ID(), time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatalf("failed to create shared object URL: %v", err)
+		}
+		buf.Reset()
+		if err := client.DownloadSharedObject(t.Context(), buf, sharedURL); err != nil {
+			t.Fatalf("failed to download shared object: %v", err)
+		} else if !bytes.Equal(buf.Bytes(), data) {
+			t.Fatal("data mismatch")
+		}
+	}
+
+	// regular object upload
 	data := frand.Bytes(4096)
 	obj := NewEmptyObject()
 	err = client.Upload(t.Context(), &obj, bytes.NewReader(data), WithRedundancy(2, 8))
@@ -253,20 +282,60 @@ func TestE2E(t *testing.T) {
 		t.Fatalf("failed to upload: %v", err)
 	} else if _, err := client.Object(t.Context(), obj.ID()); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
 		t.Fatal("object should not be pinned yet")
-	} else if err := client.SaveObject(t.Context(), obj); err != nil {
-		t.Fatal(err)
-	} else if _, err := client.Object(t.Context(), obj.ID()); err != nil {
-		t.Fatal(err)
+	}
+	assertShareable(obj, data)
+
+	// packed upload
+	packed, err := client.UploadPacked(WithRedundancy(2, 8))
+	if err != nil {
+		t.Fatalf("failed to create packed upload: %v", err)
+	}
+	defer packed.Close()
+
+	data1 := frand.Bytes(3000)
+	if _, err := packed.Add(t.Context(), bytes.NewReader(data1)); err != nil {
+		t.Fatalf("failed to add first object: %v", err)
+	}
+	data2 := frand.Bytes(5000)
+	if _, err := packed.Add(t.Context(), bytes.NewReader(data2)); err != nil {
+		t.Fatalf("failed to add second object: %v", err)
 	}
 
-	buf := bytes.NewBuffer(nil)
-	if err := client.Download(t.Context(), buf, obj); err != nil {
-		t.Fatalf("failed to download: %v", err)
-	} else if !bytes.Equal(buf.Bytes(), data) {
-		t.Log(data[:64])
-		t.Log(buf.Bytes()[:64])
-		t.Fatal("data mismatch")
+	objects, err := packed.Finalize(t.Context())
+	if err != nil {
+		t.Fatalf("failed to finalize packed upload: %v", err)
+	} else if len(objects) != 2 {
+		t.Fatalf("expected 2 objects, got %d", len(objects))
 	}
+
+	assertShareable(objects[0], data1)
+	assertShareable(objects[1], data2)
+
+	// packed upload spanning multiple slabs
+	packedL, err := client.UploadPacked(WithRedundancy(2, 8))
+	if err != nil {
+		t.Fatalf("failed to create multi-slab packed upload: %v", err)
+	}
+	defer packedL.Close()
+
+	data3 := frand.Bytes(5 * 1 << 20) // 5 MiB
+	if _, err := packedL.Add(t.Context(), bytes.NewReader(data3)); err != nil {
+		t.Fatalf("failed to add first large object: %v", err)
+	}
+	data4 := frand.Bytes(5 * 1 << 20) // 5 MiB
+	if _, err := packedL.Add(t.Context(), bytes.NewReader(data4)); err != nil {
+		t.Fatalf("failed to add second large object: %v", err)
+	}
+
+	objects2, err := packedL.Finalize(t.Context())
+	if err != nil {
+		t.Fatalf("failed to finalize multi-slab packed upload: %v", err)
+	} else if len(objects2) != 2 {
+		t.Fatalf("expected 2 objects, got %d", len(objects2))
+	}
+
+	assertShareable(objects2[0], data3)
+	assertShareable(objects2[1], data4)
 }
 
 func BenchmarkUpload(b *testing.B) {

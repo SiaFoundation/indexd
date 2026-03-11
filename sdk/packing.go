@@ -132,10 +132,9 @@ func (u *PackedUpload) Close() error {
 
 // Finalize finalizes the upload and returns the resulting objects. This will
 // wait for all slabs to be uploaded before returning. The resulting objects
-// will contain the metadata needed to download the objects.
-//
-// The caller must pin the resulting objects to the indexer when ready. Finalize
-// is idempotent and can be called multiple times.
+// will contain the metadata needed to download the objects. The caller must
+// call PinObject for each returned object to pin the slabs and save the
+// object metadata to the indexer.
 func (u *PackedUpload) Finalize(ctx context.Context) ([]Object, error) {
 	// close the writer to signal EOF to the uploader
 	_ = u.writer.Close()
