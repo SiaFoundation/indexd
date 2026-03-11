@@ -9,7 +9,7 @@ require (
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.19.0
-	go.sia.tech/coreutils v0.21.1
+	go.sia.tech/coreutils v0.21.2-0.20260311150752-49aa8693b89e
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/indexd v0.15.0
@@ -41,7 +41,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.49.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
+	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	golang.org/x/tools v0.41.0 // indirect
 )
