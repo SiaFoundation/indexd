@@ -581,8 +581,17 @@ func TestAppConnect(t *testing.T) {
 	appAccount, err := appClient.Account(context.Background(), sk)
 	if err != nil {
 		t.Fatal(err)
-	} else if !reflect.DeepEqual(account, appAccount) {
-		t.Fatalf("account mismatch: expected %+v, got %+v", account, appAccount)
+	}
+
+	expected := app.AccountResponse{
+		AccountKey:    account.AccountKey,
+		MaxPinnedData: account.MaxPinnedData,
+		PinnedData:    account.PinnedData,
+		App:           account.App,
+		LastUsed:      account.LastUsed,
+	}
+	if !reflect.DeepEqual(expected, appAccount) {
+		t.Fatalf("account mismatch: expected %+v, got %+v", expected, appAccount)
 	}
 
 	// authenticate again to ensure the same user secret is returned
