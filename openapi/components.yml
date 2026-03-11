@@ -422,6 +422,14 @@ components:
           format: date-time
           description: The last time the account was used. Updated when pinning a slab or retrieving a slab.
 
+    AppAccountResponse:
+      allOf:
+        - $ref: "#/components/schemas/Account"
+        - type: object
+          properties:
+            connectKey:
+              not: {}
+
     AppMeta:
       type: object
       properties:

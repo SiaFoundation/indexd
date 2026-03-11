@@ -31,7 +31,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Account"
+                $ref: "#/components/schemas/AppAccountResponse"
         "404":
           description: Account not found
 
@@ -692,6 +692,8 @@ components:
       $ref: "./components.yml#/components/schemas/HostInfo"
     Account:
       $ref: "./components.yml#/components/schemas/Account"
+    AppAccountResponse:
+      $ref: "./components.yml#/components/schemas/AppAccountResponse"
     SealedObject:
       $ref: "./components.yml#/components/schemas/SealedObject"
     ObjectEvent:
