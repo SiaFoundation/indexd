@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
@@ -225,7 +224,7 @@ func (c *Client) DeleteObject(ctx context.Context, appKey types.PrivateKey, key 
 }
 
 // Account retrieves the account of the current user.
-func (c *Client) Account(ctx context.Context, appKey types.PrivateKey) (resp accounts.Account, err error) {
+func (c *Client) Account(ctx context.Context, appKey types.PrivateKey) (resp AccountResponse, err error) {
 	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, "/account", nil, &resp)
 	return
 }
