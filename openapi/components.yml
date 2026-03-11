@@ -417,7 +417,7 @@ components:
           description: Current amount of pinned data in bytes.
         ready:
           type: boolean
-          description: Whether the account has completed enough successful host funding rounds to be used.
+          description: Whether the account is funded on enough hosts to be used
         app:
           $ref: "#/components/schemas/AppMeta"
         lastUsed:
