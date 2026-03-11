@@ -123,7 +123,7 @@ func New(cm ChainManager, hm HostManager, contracts ContractManager, wm WalletMa
 			select {
 			case <-reorgCh:
 				err := s.Sync(ctx)
-				if err != nil && !errors.Is(err, threadgroup.ErrClosed) {
+				if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, threadgroup.ErrClosed) {
 					s.log.Panic("failed to sync database", zap.Error(err))
 				}
 			case <-ctx.Done():
