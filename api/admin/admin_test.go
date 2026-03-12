@@ -1127,6 +1127,7 @@ func TestSettingsAPI(t *testing.T) {
 func TestWalletAPI(t *testing.T) {
 	// create indexer
 	c := testutils.NewConsensusNode(t, zap.NewNop())
+	// avoid contract/wallet maintenance making test non deterministic
 	indexer := testutils.NewIndexer(t, c, zap.NewNop(), testutils.WithContractOptions(contracts.WithMaintenanceFrequency(time.Hour)))
 	adminClient := indexer.Admin
 
