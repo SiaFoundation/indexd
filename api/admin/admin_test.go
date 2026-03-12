@@ -1127,7 +1127,7 @@ func TestSettingsAPI(t *testing.T) {
 func TestWalletAPI(t *testing.T) {
 	// create indexer
 	c := testutils.NewConsensusNode(t, zap.NewNop())
-	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	indexer := testutils.NewIndexer(t, c, zap.NewNop(), testutils.WithContractOptions(contracts.WithMaintenanceFrequency(time.Hour)))
 	adminClient := indexer.Admin
 
 	c.MineBlocks(t, indexer.WalletAddr(), 1)
