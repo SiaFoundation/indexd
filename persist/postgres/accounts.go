@@ -46,9 +46,13 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 			INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 			LEFT JOIN LATERAL (
 				SELECT COUNT(*) AS ready_hosts
-				FROM account_hosts ah
-				WHERE ah.account_id = a.id
-				  AND ah.consecutive_failed_funds = 0
+				FROM (
+					SELECT 1
+					FROM account_hosts ah
+					WHERE ah.account_id = a.id
+					  AND ah.consecutive_failed_funds = 0
+					LIMIT $4
+				) ready
 			) ahr ON TRUE
 			WHERE a.deleted_at IS NULL AND
 			($1::integer IS NULL OR connect_key_id = $1::integer)
@@ -85,9 +89,13 @@ FROM accounts a
 INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 LEFT JOIN LATERAL (
 	SELECT COUNT(*) AS ready_hosts
-	FROM account_hosts ah
-	WHERE ah.account_id = a.id
-	  AND ah.consecutive_failed_funds = 0
+	FROM (
+		SELECT 1
+		FROM account_hosts ah
+		WHERE ah.account_id = a.id
+		  AND ah.consecutive_failed_funds = 0
+		LIMIT $2
+	) ready
 ) ahr ON TRUE
 WHERE public_key = $1`, sqlPublicKey(ak), accounts.ReadyHostThreshold))
 		return err

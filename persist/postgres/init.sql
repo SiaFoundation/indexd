@@ -105,6 +105,7 @@ CREATE TABLE account_hosts (
     CONSTRAINT account_hosts_pk PRIMARY KEY (account_id, host_id)
 );
 CREATE INDEX account_hosts_host_id_next_fund_idx ON account_hosts (host_id, next_fund);
+CREATE INDEX account_hosts_account_id_consecutive_failed_funds_idx ON account_hosts (account_id, consecutive_failed_funds);
 
 CREATE TABLE hosts_blocklist (
     public_key BYTEA PRIMARY KEY CHECK (LENGTH(public_key) = 32),

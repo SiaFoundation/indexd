@@ -797,4 +797,9 @@ ALTER TABLE quotas ALTER COLUMN fund_target_bytes DROP DEFAULT;
 		_, err := tx.Exec(ctx, `CREATE INDEX accounts_app_id_idx ON accounts (app_id) WHERE deleted_at IS NULL;`)
 		return err
 	},
+	// add composite index on account_hosts for ready host count queries
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX account_hosts_account_id_consecutive_failed_funds_idx ON account_hosts (account_id, consecutive_failed_funds);`)
+		return err
+	},
 }
