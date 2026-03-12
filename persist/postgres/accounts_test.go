@@ -1084,3 +1084,82 @@ func BenchmarkPruneAccounts(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkAccountReady(b *testing.B) {
+	const (
+		numAccounts     = 10_000
+		hostsPerAccount = 100
+	)
+
+	store := initPostgres(b, zap.NewNop())
+
+	// create a connect key
+	connectKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
+		Key:         "benchmark-connect-key",
+		Description: "benchmark connect key",
+		Quota:       "default",
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var connectKeyID int64
+	if err := store.pool.QueryRow(b.Context(), `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey.Key).Scan(&connectKeyID); err != nil {
+		b.Fatal(err)
+	}
+
+	// insert accounts
+	accountKeys := make([]types.PublicKey, numAccounts)
+	batch := &pgx.Batch{}
+	for i := range numAccounts {
+		accountKeys[i] = types.GeneratePrivateKey().PublicKey()
+		batch.Queue(`INSERT INTO accounts (public_key, connect_key_id, max_pinned_data) VALUES ($1, $2, 1000000);`, sqlPublicKey(accountKeys[i]), connectKeyID)
+	}
+	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
+		b.Fatal(err)
+	}
+
+	// insert hosts
+	batch = &pgx.Batch{}
+	for range hostsPerAccount {
+		hk := types.GeneratePrivateKey().PublicKey()
+		batch.Queue(`INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW());`, sqlPublicKey(hk))
+	}
+	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
+		b.Fatal(err)
+	}
+
+	// insert account_hosts rows
+	batch = &pgx.Batch{}
+	for i := range numAccounts {
+		accountID := i + 1
+		for j := range hostsPerAccount {
+			hostID := j + 1
+			batch.Queue(`INSERT INTO account_hosts (account_id, host_id, consecutive_failed_funds) VALUES ($1, $2, $3);`, accountID, hostID, 0)
+		}
+	}
+	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
+		b.Fatal(err)
+	}
+
+	if _, err := store.pool.Exec(b.Context(), `VACUUM ANALYZE;`); err != nil {
+		b.Fatal(err)
+	}
+
+	b.Run("Account", func(b *testing.B) {
+		for b.Loop() {
+			ak := accountKeys[frand.Intn(numAccounts)]
+			if _, err := store.Account(ak); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+
+	b.Run("Accounts", func(b *testing.B) {
+		for b.Loop() {
+			if _, err := store.Accounts(frand.Intn(numAccounts), 100); err != nil {
+				b.Fatal(err)
+			}
+		}
+	})
+}
