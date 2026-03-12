@@ -652,13 +652,13 @@ func TestApplyRevertDiff(t *testing.T) {
 	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
 
 	// apply/revert diff helpers
-	applyDiff := func(updateTx *contracts.TestUpdateTx, diff consensus.V2FileContractElementDiff) {
+	applyDiff := func(t *testing.T, updateTx *contracts.TestUpdateTx, diff consensus.V2FileContractElementDiff) {
 		t.Helper()
 		if err := cm.ApplyV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	revertDiff := func(updateTx *contracts.TestUpdateTx, diff consensus.V2FileContractElementDiff) {
+	revertDiff := func(t *testing.T, updateTx *contracts.TestUpdateTx, diff consensus.V2FileContractElementDiff) {
 		t.Helper()
 		if err := cm.RevertV2ContractDiffs(updateTx, []consensus.V2FileContractElementDiff{diff}); err != nil {
 			t.Fatal(err)
@@ -703,7 +703,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// confirm the contract
 		fce.V2FileContract.RevisionNumber++
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			Created:               true,
 			V2FileContractElement: fce,
 		})
@@ -712,7 +712,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		// revise contract
 		revision := fce.V2FileContract
 		revision.RevisionNumber++
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Revision:              &revision,
 		})
@@ -721,7 +721,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// resolve contract via storage proof
 		fce.V2FileContract.RevisionNumber++
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Resolution:            &types.V2StorageProof{},
 		})
@@ -731,7 +731,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// revert resolution
 		fce.V2FileContract.RevisionNumber--
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Resolution:            &types.V2StorageProof{},
 		})
@@ -739,7 +739,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// revert revision
 		fce.V2FileContract.RevisionNumber--
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Revision:              &revision,
 		})
@@ -747,7 +747,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// revert contract creation
 		fce.V2FileContract.RevisionNumber--
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			Created:               true,
 			V2FileContractElement: fce,
 		})
@@ -778,14 +778,14 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// confirm the contract
 		fce.V2FileContract.RevisionNumber++
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			Created:               true,
 			V2FileContractElement: fce,
 		})
 		assertContract(contracts.ContractStateActive)
 
 		// expire contract
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Resolution:            &types.V2FileContractExpiration{},
 		})
@@ -794,7 +794,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		}
 
 		// revert expiration
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Resolution:            &types.V2FileContractExpiration{},
 		})
@@ -802,7 +802,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// revert contract creation
 		fce.V2FileContract.RevisionNumber--
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			Created:               true,
 			V2FileContractElement: fce,
 		})
@@ -836,7 +836,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// confirm the contract
 		fce.V2FileContract.RevisionNumber++
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			Created:               true,
 			V2FileContractElement: fce,
 		})
@@ -844,7 +844,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// renew contract
 		renewedTo := contractID.V2RenewalID()
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Resolution:            &types.V2FileContractRenewal{},
 		})
@@ -855,7 +855,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		}
 
 		// revert renewal
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Resolution:            &types.V2FileContractRenewal{},
 		})
@@ -863,7 +863,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// revert contract creation
 		fce.V2FileContract.RevisionNumber--
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			Created:               true,
 			V2FileContractElement: fce,
 		})
@@ -893,7 +893,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// confirm the contract
 		fce.V2FileContract.RevisionNumber++
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			Created:               true,
 			V2FileContractElement: fce,
 		})
@@ -902,7 +902,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		// apply revision and storage proof in the same diff
 		revision := fce.V2FileContract
 		revision.RevisionNumber++
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Revision:              &revision,
 			Resolution:            &types.V2StorageProof{},
@@ -912,7 +912,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		}
 
 		// revert
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Revision:              &revision,
 			Resolution:            &types.V2StorageProof{},
@@ -921,7 +921,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// revert contract creation
 		fce.V2FileContract.RevisionNumber--
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			Created:               true,
 			V2FileContractElement: fce,
 		})
@@ -952,7 +952,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// confirm the contract
 		fce.V2FileContract.RevisionNumber++
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			Created:               true,
 			V2FileContractElement: fce,
 		})
@@ -962,7 +962,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		revision := fce.V2FileContract
 		revision.RevisionNumber++
 		renewedTo := contractID.V2RenewalID()
-		applyDiff(tx, consensus.V2FileContractElementDiff{
+		applyDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Revision:              &revision,
 			Resolution:            &types.V2FileContractRenewal{},
@@ -974,7 +974,7 @@ func TestApplyRevertDiff(t *testing.T) {
 		}
 
 		// revert
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			V2FileContractElement: fce,
 			Revision:              &revision,
 			Resolution:            &types.V2FileContractRenewal{},
@@ -983,7 +983,7 @@ func TestApplyRevertDiff(t *testing.T) {
 
 		// revert contract creation
 		fce.V2FileContract.RevisionNumber--
-		revertDiff(tx, consensus.V2FileContractElementDiff{
+		revertDiff(t, tx, consensus.V2FileContractElementDiff{
 			Created:               true,
 			V2FileContractElement: fce,
 		})
