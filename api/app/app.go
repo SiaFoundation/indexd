@@ -608,20 +608,24 @@ func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
 
 	a.mu.Lock()
 	authReq, ok := a.authRequests[requestID]
-	a.mu.Unlock()
 	if !ok || time.Now().After(authReq.Expiration) {
+		a.mu.Unlock()
 		jc.Error(fmt.Errorf("request invalid or expired"), http.StatusNotFound)
 		return
 	} else if signerKey, ok := validateURLSignature(jc, a.hostname); !ok {
+		a.mu.Unlock()
 		return
 	} else if authReq.EphemeralKey != signerKey {
+		a.mu.Unlock()
 		jc.Error(fmt.Errorf("invalid request signature"), http.StatusUnauthorized)
 		return
 	}
-	jc.Encode(AuthConnectStatusResponse{
+	resp := AuthConnectStatusResponse{
 		Approved:   authReq.Approved,
 		UserSecret: authReq.UserSecret,
-	})
+	}
+	a.mu.Unlock()
+	jc.Encode(resp)
 }
 
 // 5. app registers the public key with indexd using a request signed
