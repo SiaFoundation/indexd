@@ -40,7 +40,8 @@ type (
 // A Builder helps connect an application to an indexer
 // and initialize an SDK instance.
 type Builder struct {
-	client *app.Client
+	ephemeralKey types.PrivateKey
+	client       *app.Client
 
 	request      app.RegisterAppRequest
 	registerResp *app.RegisterAppResponse
@@ -65,7 +66,7 @@ func (b *Builder) WaitForApproval(ctx context.Context) (bool, error) {
 		case <-ctx.Done():
 			return false, ctx.Err()
 		case <-time.After(time.Second):
-			if status, err := b.client.RequestStatus(ctx, b.registerResp.StatusURL); errors.Is(err, app.ErrUserRejected) {
+			if status, err := b.client.RequestStatus(ctx, b.ephemeralKey, b.registerResp.StatusURL); errors.Is(err, app.ErrUserRejected) {
 				return false, nil
 			} else if err != nil {
 				return false, fmt.Errorf("failed to check request status: %w", err)
@@ -91,7 +92,7 @@ func (b *Builder) Register(ctx context.Context, mnemonic string) (*SDK, error) {
 	appKey, err := deriveAppKey(mnemonic, b.request.AppID, b.sharedSecret)
 	if err != nil {
 		return nil, fmt.Errorf("failed to derive app key: %w", err)
-	} else if err := b.client.RegisterApp(ctx, b.registerResp.RegisterURL, appKey); err != nil {
+	} else if err := b.client.RegisterApp(ctx, b.registerResp.RegisterURL, b.ephemeralKey, appKey); err != nil {
 		return nil, fmt.Errorf("failed to register app key: %w", err)
 	}
 
@@ -106,7 +107,7 @@ func (b *Builder) Register(ctx context.Context, mnemonic string) (*SDK, error) {
 // It returns a response URL that the user must visit to approve the request.
 // The app should display the response URL to the user.
 func (b *Builder) RequestConnection(ctx context.Context) (string, error) {
-	resp, err := b.client.RequestAppConnection(ctx, b.request)
+	resp, err := b.client.RequestAppConnection(ctx, b.ephemeralKey, b.request)
 	if err != nil {
 		return "", fmt.Errorf("failed to request app connection: %w", err)
 	}
@@ -144,6 +145,7 @@ func deriveAppKey(mnemonic string, appID types.Hash256, sharedSecret types.Hash2
 // NewBuilder creates a new Builder for connecting applications to the indexer.
 func NewBuilder(indexerURL string, metadata AppMetadata) *Builder {
 	return &Builder{
+		ephemeralKey: types.GeneratePrivateKey(),
 		request: app.RegisterAppRequest{
 			AppID:       metadata.ID,
 			Name:        metadata.Name,

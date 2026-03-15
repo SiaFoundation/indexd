@@ -74,8 +74,10 @@ type (
 	}
 
 	authReq struct {
-		Request    RegisterAppRequest
-		Expiration time.Time
+		// EphemeralKey is the public key used to sign the initial connection request. It is used to authenticate future requests for the same connection request, so it must be unique for each connection request. It is not used for authentication after the app key is registered.
+		EphemeralKey types.PublicKey
+		Request      RegisterAppRequest
+		Expiration   time.Time
 
 		// set when the user approves the request
 		Approved   bool
@@ -124,6 +126,14 @@ type (
 		PinnedSize    uint64           `json:"pinnedSize"`
 		App           accounts.AppMeta `json:"app"`
 		LastUsed      time.Time        `json:"lastUsed"`
+	}
+
+	// RegisterAppKeyRequest is the request body for registering an application key after the user approves the connection request.
+	// The request must be signed with the app key to prove ownership of it.
+	RegisterAppKeyRequest struct {
+		AppKey types.PublicKey `json:"appKey"`
+		// Signature is a signature of the request ID signed with the app key to prove ownership
+		Signature types.Signature `json:"signature"`
 	}
 
 	app struct {
@@ -440,6 +450,13 @@ func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
 
 // 1. app requests connection by POSTing to /auth/connect
 func (a *app) handleAuthRequest(jc jape.Context) {
+	// the request is required to be signed with an ephemeral key to provide authentication
+	// for future steps.
+	ephemeralKey, ok := validateURLSignature(jc, a.hostname)
+	if !ok {
+		return
+	}
+
 	var req RegisterAppRequest
 	if err := jc.Decode(&req); err != nil {
 		return
@@ -480,8 +497,9 @@ func (a *app) handleAuthRequest(jc jape.Context) {
 
 	a.mu.Lock()
 	a.authRequests[requestID] = authReq{
-		Request:    req,
-		Expiration: expiration,
+		Request:      req,
+		Expiration:   expiration,
+		EphemeralKey: ephemeralKey,
 	}
 	a.mu.Unlock()
 	time.AfterFunc(time.Until(expiration), func() {
@@ -589,10 +607,15 @@ func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
 	jc.DecodeParam("requestID", &requestID)
 
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	authReq, ok := a.authRequests[requestID]
+	a.mu.Unlock()
 	if !ok || time.Now().After(authReq.Expiration) {
 		jc.Error(fmt.Errorf("request invalid or expired"), http.StatusNotFound)
+		return
+	} else if signerKey, ok := validateURLSignature(jc, a.hostname); !ok {
+		return
+	} else if authReq.EphemeralKey != signerKey {
+		jc.Error(fmt.Errorf("invalid request signature"), http.StatusUnauthorized)
 		return
 	}
 	jc.Encode(AuthConnectStatusResponse{
@@ -625,13 +648,26 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 		panic("user secret is empty for approved request") // should never happen
 	}
 
-	// check whether the request is properly signed
-	appKey, ok := validateURLSignature(jc, a.hostname, jc.Request.URL.Path)
+	// check whether the request is signed with the ephemeral key
+	ephemeralKey, ok := validateURLSignature(jc, a.hostname)
 	if !ok {
+		return
+	} else if authReq.EphemeralKey != ephemeralKey {
+		jc.Error(fmt.Errorf("invalid request signature"), http.StatusUnauthorized)
 		return
 	}
 
-	err := a.accounts.RegisterAppKey(authReq.ConnectKey, appKey, accounts.AppMeta{
+	var registerReq RegisterAppKeyRequest
+	if jc.Decode(&registerReq) != nil {
+		return
+	}
+	// verify ownership of the app key
+	if !registerReq.AppKey.VerifyHash(registerAppKeyHash(authReq.EphemeralKey, requestID), registerReq.Signature) {
+		jc.Error(fmt.Errorf("invalid signature"), http.StatusUnauthorized)
+		return
+	}
+
+	err := a.accounts.RegisterAppKey(authReq.ConnectKey, registerReq.AppKey, accounts.AppMeta{
 		ID:          authReq.Request.AppID,
 		Description: authReq.Request.Description,
 		LogoURL:     authReq.Request.LogoURL,
@@ -701,7 +737,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 
 	wrapSignedAuth := func(h authedHandler) jape.Handler {
 		return func(jc jape.Context) {
-			pk, ok := validateSignedURLAuth(jc, a.hostname, jc.Request.URL.Path, am)
+			pk, ok := validateSignedURLAuth(jc, a.hostname, am)
 			if !ok {
 				return
 			}

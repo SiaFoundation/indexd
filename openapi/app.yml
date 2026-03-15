@@ -466,6 +466,10 @@ paths:
       tags:
         - auth
       summary: Request application connection to the indexer
+      description: >
+        Initiates a connection request. The request must be signed with an ephemeral ed25519 key
+        using the signed URL scheme. The server binds the connection flow to that ephemeral key —
+        subsequent calls to the status and register endpoints must be signed with the same key.
       operationId: requestAppConnection
       requestBody:
         required: true
@@ -536,7 +540,8 @@ paths:
 
             func main() {
               client := app.NewClient("http://localhost:9982")
-              connectResp, err := client.RequestAppConnection(context.Background(), app.RegisterAppRequest{
+              ephemeralKey := types.GeneratePrivateKey()
+              connectResp, err := client.RequestAppConnection(context.Background(), ephemeralKey, app.RegisterAppRequest{
                 AppID:       appID,
                 Name:        "Test App",
                 Description: "A test application",
@@ -636,6 +641,10 @@ paths:
       tags:
         - auth
       summary: Check the status of a connection request
+      description: >
+        Returns whether the user has approved or rejected the connection request. Must be signed
+        with the same ephemeral key used in the initial `POST /auth/connect` request. If approved,
+        the response includes the `userSecret` used to derive the application key.
       operationId: authConnectStatus
       parameters:
         - name: requestID
@@ -650,6 +659,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AuthConnectStatusResponse"
+        "401":
+          description: Signed with a different ephemeral key than the one used to initiate the request
         "404":
           description: Request invalid or expired
 
@@ -659,8 +670,11 @@ paths:
         - auth
       summary: Finalize application registration after approval
       description: >
-        Registers the application's public key using a signed request derived from the user secret returned by the status endpoint.
-        This endpoint must be called after the user has approved the request.
+        Registers the application key. The request URL must be signed with the ephemeral key from
+        the initial connect request. The body contains the application public key and a
+        proof-of-possession signature: `appKey.Sign(hash("registerAppKey" + ephemeralPubKey + requestID))`.
+        This proves the caller both controls the ephemeral key and knows the private key of the app
+        key being registered.
       operationId: authRegister
       parameters:
         - name: requestID
@@ -668,11 +682,31 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - appKey
+                - signature
+              properties:
+                appKey:
+                  allOf:
+                    - $ref: "#/components/schemas/PublicKey"
+                    - description: The application public key to register
+                signature:
+                  type: string
+                  format: byte
+                  description: >
+                    ed25519 signature by `appKey` over `hash("registerAppKey" + ephemeralPubKey + requestID)`,
+                    proving ownership of the application key
       responses:
-        "200":
+        "204":
           description: Application registered successfully
         "401":
-          description: Invalid signature or connect key
+          description: Signed with a different ephemeral key than the one used to initiate the request, or invalid proof-of-possession signature
         "403":
           description: Connect key exhausted or request not approved
         "404":

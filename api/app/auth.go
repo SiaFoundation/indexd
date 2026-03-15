@@ -52,7 +52,7 @@ const (
 // NOTE: This function does not check if the account exists, it only validates
 // the signature and expiration. If you need to check for account existence, use
 // validateSignedURLAuth instead.
-func ValidateURLSignature(req *http.Request, hostname, path string) (types.PublicKey, error) {
+func ValidateURLSignature(req *http.Request, hostname string) (types.PublicKey, error) {
 	defer req.Body.Close()
 
 	buf, err := io.ReadAll(io.LimitReader(req.Body, maxRequestSize))
@@ -83,8 +83,8 @@ func ValidateURLSignature(req *http.Request, hostname, path string) (types.Publi
 	// check for expiration and verify the signature
 	if ts.Before(time.Now().UTC()) {
 		return types.PublicKey{}, ErrSignatureExpired
-	} else if !pk.VerifyHash(requestHash(req.Method, hostname, path, ts, buf), sig) {
-		return types.PublicKey{}, fmt.Errorf("failed to authenticate for %q host %q: %w", req.Method, filepath.Join(hostname, path), ErrSignatureInvalid)
+	} else if !pk.VerifyHash(requestHash(req.Method, hostname, req.URL.Path, ts, buf), sig) {
+		return types.PublicKey{}, fmt.Errorf("failed to authenticate for %q host %q: %w", req.Method, filepath.Join(hostname, req.URL.Path), ErrSignatureInvalid)
 	}
 	return pk, nil
 }
@@ -93,8 +93,8 @@ func ValidateURLSignature(req *http.Request, hostname, path string) (types.Publi
 // verifies the signature and expiration. If successful, it returns the public
 // key and true, otherwise it writes an error to the context and returns an
 // empty public key and false.
-func validateURLSignature(jc jape.Context, hostname, path string) (types.PublicKey, bool) {
-	acc, err := ValidateURLSignature(jc.Request, hostname, path)
+func validateURLSignature(jc jape.Context, hostname string) (types.PublicKey, bool) {
+	acc, err := ValidateURLSignature(jc.Request, hostname)
 	if err != nil {
 		jc.Error(err, http.StatusUnauthorized)
 		return types.PublicKey{}, false
@@ -106,10 +106,10 @@ func validateURLSignature(jc jape.Context, hostname, path string) (types.PublicK
 // parameters, verifying the signature and expiration, and confirming the
 // account exists. If any check fails, it writes an HTTP error and returns
 // false, otherwise it returns the public key and true.
-func validateSignedURLAuth(jc jape.Context, hostname, path string, store Accounts) (types.PublicKey, bool) {
+func validateSignedURLAuth(jc jape.Context, hostname string, store Accounts) (types.PublicKey, bool) {
 	req := jc.Request
 
-	pk, ok := validateURLSignature(jc, hostname, path)
+	pk, ok := validateURLSignature(jc, hostname)
 	if !ok {
 		return types.PublicKey{}, false
 	}
@@ -170,5 +170,13 @@ func requestHash(method string, hostname, path string, validUntil time.Time, bod
 	if body != nil {
 		h.E.Write(body)
 	}
+	return h.Sum()
+}
+
+func registerAppKeyHash(ephemeralKey types.PublicKey, requestID string) types.Hash256 {
+	h := types.NewHasher()
+	h.E.Write([]byte("registerAppKey"))
+	h.E.Write(ephemeralKey[:])
+	h.E.Write([]byte(requestID))
 	return h.Sum()
 }

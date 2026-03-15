@@ -31,15 +31,6 @@ type Client struct {
 	validity time.Duration
 }
 
-// helper to parse URL and panic on error
-func mustParseURL(base, path string) *url.URL {
-	u, err := url.Parse(base + path)
-	if err != nil {
-		panic(err)
-	}
-	return u
-}
-
 // sign signs the request with the appropriate headers and returns the signed URL
 // and request body.
 func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL string, requestBuf []byte) (*url.URL, io.Reader, error) {
@@ -278,25 +269,36 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 }
 
 // RequestAppConnection requests an application connection to the indexer.
-func (c *Client) RequestAppConnection(ctx context.Context, request RegisterAppRequest) (resp RegisterAppResponse, err error) {
+func (c *Client) RequestAppConnection(ctx context.Context, ephemeralKey types.PrivateKey, request RegisterAppRequest) (resp RegisterAppResponse, err error) {
 	requestBuf, err := json.Marshal(request)
 	if err != nil {
 		return RegisterAppResponse{}, fmt.Errorf("failed to marshal request data: %w", err)
 	}
-	body, err := doRequest(ctx, http.MethodPost, mustParseURL(c.baseURL, "/auth/connect"), bytes.NewReader(requestBuf), applicationJSON)
+
+	u, reqBody, err := sign(ephemeralKey, time.Now().Add(c.validity), http.MethodPost, fmt.Sprintf("%s/auth/connect", c.baseURL), requestBuf)
+	if err != nil {
+		return RegisterAppResponse{}, fmt.Errorf("failed to sign request: %w", err)
+	}
+
+	respBody, err := doRequest(ctx, http.MethodPost, u, reqBody, applicationJSON)
 	if err != nil {
 		return RegisterAppResponse{}, err
 	}
-	defer io.Copy(io.Discard, body)
-	defer body.Close()
-	err = json.NewDecoder(body).Decode(&resp)
+	defer io.Copy(io.Discard, respBody)
+	defer respBody.Close()
+	err = json.NewDecoder(respBody).Decode(&resp)
 	return
 }
 
 // RequestStatus checks if an auth request has been approved.
 // If the auth request is still pending, it returns false.
-func (c *Client) RequestStatus(ctx context.Context, statusURL string) (status AuthConnectStatusResponse, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
+func (c *Client) RequestStatus(ctx context.Context, ephemeralKey types.PrivateKey, statusURL string) (status AuthConnectStatusResponse, err error) {
+	u, _, err := sign(ephemeralKey, time.Now().Add(c.validity), http.MethodGet, statusURL, nil)
+	if err != nil {
+		return AuthConnectStatusResponse{}, fmt.Errorf("failed to sign request: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return AuthConnectStatusResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -323,13 +325,29 @@ func (c *Client) RequestStatus(ctx context.Context, statusURL string) (status Au
 
 // RegisterApp registers the application with the indexer using the provided
 // app key and registration URL.
-func (c *Client) RegisterApp(ctx context.Context, registerURL string, appKey types.PrivateKey) error {
+//
+// The request must be signed with the ephemeral key
+func (c *Client) RegisterApp(ctx context.Context, registerURL string, ephemeralKey, appKey types.PrivateKey) error {
 	u, err := url.Parse(registerURL)
 	if err != nil {
 		return fmt.Errorf("failed to parse register URL: %w", err)
 	}
+	// extract request ID from path
+	pathPieces := strings.Split(u.Path, "/")
+	if len(pathPieces) != 5 || pathPieces[4] != "register" {
+		return fmt.Errorf("invalid register URL path: %s", u.Path)
+	}
+	requestID := pathPieces[3]
 
-	u, body, err := sign(appKey, time.Now().Add(c.validity), http.MethodPost, u.String(), nil)
+	requestBuf, err := json.Marshal(RegisterAppKeyRequest{
+		AppKey:    appKey.PublicKey(),
+		Signature: appKey.SignHash(registerAppKeyHash(ephemeralKey.PublicKey(), requestID)),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to marshal request data: %w", err)
+	}
+
+	u, body, err := sign(ephemeralKey, time.Now().Add(c.validity), http.MethodPost, u.String(), requestBuf)
 	if err != nil {
 		return fmt.Errorf("failed to sign request: %w", err)
 	}

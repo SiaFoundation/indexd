@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -49,14 +50,23 @@ func (s *mockAccounts) AppSecret(connectKey string, appID types.Hash256) (types.
 
 func TestAuthConnectFieldLimits(t *testing.T) {
 	s := &mockAccounts{tokens: make(map[types.PublicKey]struct{})}
-	handler, err := NewAPI("http://localhost:9982", nil, s, nil, nil)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
-	defer server.Close()
+	defer l.Close()
 
-	client := NewClient(server.URL)
+	appAPIAddr := fmt.Sprintf("http://%s", l.Addr().String())
+	handler, err := NewAPI(appAPIAddr, nil, s, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: handler}
+	defer server.Close()
+	go server.Serve(l)
+
+	ephemeralKey := types.GeneratePrivateKey()
+	client := NewClient(appAPIAddr)
 
 	// valid request should succeed
 	valid := RegisterAppRequest{
@@ -65,7 +75,7 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 		Description: "A test app",
 		ServiceURL:  "http://test-app.com",
 	}
-	if _, err := client.RequestAppConnection(context.Background(), valid); err != nil {
+	if _, err := client.RequestAppConnection(context.Background(), ephemeralKey, valid); err != nil {
 		t.Fatal("expected success, got", err)
 	}
 
@@ -83,7 +93,7 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := valid
 			tt.modify(&req)
-			if _, err := client.RequestAppConnection(context.Background(), req); err == nil {
+			if _, err := client.RequestAppConnection(context.Background(), ephemeralKey, req); err == nil {
 				t.Fatal("expected error for oversized field")
 			}
 		})
@@ -93,14 +103,25 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 func TestAuthConnectRateLimit(t *testing.T) {
 	s := &mockAccounts{tokens: make(map[types.PublicKey]struct{})}
 	rl := api.NewIPRateLimiter(10*time.Millisecond, 2, time.Minute)
-	handler, err := NewAPI("http://localhost:9982", nil, s, nil, nil, WithRateLimiter(rl))
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
-	server := httptest.NewServer(handler)
-	defer server.Close()
+	defer l.Close()
 
-	client := NewClient(server.URL)
+	appAPIAddr := fmt.Sprintf("http://%s", l.Addr().String())
+	handler, err := NewAPI(appAPIAddr, nil, s, nil, nil, WithRateLimiter(rl))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: handler}
+	defer server.Close()
+	go server.Serve(l)
+
+	ephemeralKey := types.GeneratePrivateKey()
+
+	client := NewClient(appAPIAddr)
 	req := RegisterAppRequest{
 		AppID:       frand.Entropy256(),
 		Name:        "test-app",
@@ -109,14 +130,14 @@ func TestAuthConnectRateLimit(t *testing.T) {
 	}
 
 	// first 2 requests should succeed (burst)
-	for i := 0; i < 2; i++ {
-		if _, err := client.RequestAppConnection(context.Background(), req); err != nil {
+	for i := range 2 {
+		if _, err := client.RequestAppConnection(context.Background(), ephemeralKey, req); err != nil {
 			t.Fatalf("request %d: expected success, got %v", i, err)
 		}
 	}
 
 	// 3rd request should be rate limited
-	_, err = client.RequestAppConnection(context.Background(), req)
+	_, err = client.RequestAppConnection(context.Background(), ephemeralKey, req)
 	if err == nil {
 		t.Fatal("expected rate limit error")
 	}
@@ -128,8 +149,7 @@ func TestAuth(t *testing.T) {
 
 	h := func(jc jape.Context) {
 		hostname := jc.Request.Host
-		path := jc.Request.URL.Path
-		if _, ok := validateSignedURLAuth(jc, hostname, path, s); ok {
+		if _, ok := validateSignedURLAuth(jc, hostname, s); ok {
 			jc.ResponseWriter.WriteHeader(http.StatusOK)
 		}
 	}

@@ -72,7 +72,8 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 		t.Fatal("failed to add app connect key:", err)
 	}
 
-	connectResp, err := client.RequestAppConnection(ctx, app.RegisterAppRequest{
+	ephemeralKey := types.GeneratePrivateKey()
+	connectResp, err := client.RequestAppConnection(ctx, ephemeralKey, app.RegisterAppRequest{
 		AppID:       frand.Entropy256(),
 		Name:        "Test App",
 		Description: "A test application",
@@ -94,7 +95,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	respondToAppConnection(t, connectResp.ResponseURL, key.Key, true)
 
 	// register the app key
-	if err = client.RegisterApp(ctx, connectResp.RegisterURL, sk); err != nil {
+	if err = client.RegisterApp(ctx, connectResp.RegisterURL, ephemeralKey, sk); err != nil {
 		t.Fatal("failed to register app:", err)
 	}
 
@@ -473,6 +474,57 @@ func TestApplicationAPI(t *testing.T) {
 	}
 }
 
+func TestEphemeralKeyAuth(t *testing.T) {
+	ctx := t.Context()
+	cluster := testutils.NewCluster(t, testutils.WithHosts(3), testutils.WithLogger(zap.NewNop()))
+	indexer := cluster.Indexer
+
+	connectKey, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AppConnectKeyRequest{
+		Quota: "default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ephemeralKey := types.GeneratePrivateKey()
+	wrongKey := types.GeneratePrivateKey()
+	appKey := types.GeneratePrivateKey()
+	appClient := indexer.App
+
+	connectResp, err := appClient.RequestAppConnection(ctx, ephemeralKey, app.RegisterAppRequest{
+		AppID:       frand.Entropy256(),
+		Name:        "test",
+		Description: "test",
+		ServiceURL:  "http://example.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	respondToAppConnection(t, connectResp.ResponseURL, connectKey.Key, true)
+
+	if _, err := appClient.RequestStatus(ctx, wrongKey, connectResp.StatusURL); err == nil {
+		t.Fatal("expected error with wrong ephemeral key on status")
+	}
+
+	status, err := appClient.RequestStatus(ctx, ephemeralKey, connectResp.StatusURL)
+	if err != nil {
+		t.Fatal(err)
+	} else if !status.Approved {
+		t.Fatal("expected approved")
+	} else if status.UserSecret == (types.Hash256{}) {
+		t.Fatal("expected non-empty user secret")
+	}
+
+	if err := appClient.RegisterApp(ctx, connectResp.RegisterURL, wrongKey, appKey); err == nil {
+		t.Fatal("expected error with wrong ephemeral key on register")
+	}
+
+	if err := appClient.RegisterApp(ctx, connectResp.RegisterURL, ephemeralKey, appKey); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAppConnect(t *testing.T) {
 	appID := frand.Entropy256()
 
@@ -492,6 +544,7 @@ func TestAppConnect(t *testing.T) {
 	}
 
 	sk := types.GeneratePrivateKey()
+	ephemeralSK := types.GeneratePrivateKey()
 	appClient := indexer.App
 
 	connected, err := appClient.CheckAppAuth(ctx, sk)
@@ -501,7 +554,7 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("expected app to not be authenticated yet")
 	}
 
-	resp, err := appClient.RequestAppConnection(ctx, app.RegisterAppRequest{
+	resp, err := appClient.RequestAppConnection(ctx, ephemeralSK, app.RegisterAppRequest{
 		AppID:       appID,
 		Name:        "test-app",
 		Description: "A test app",
@@ -511,7 +564,7 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("failed to request app connection:", err)
 	}
 
-	if status, err := appClient.RequestStatus(ctx, resp.StatusURL); err != nil {
+	if status, err := appClient.RequestStatus(ctx, ephemeralSK, resp.StatusURL); err != nil {
 		t.Fatal("failed to check request status:", err)
 	} else if status.Approved {
 		t.Fatal("expected request to not be approved")
@@ -519,23 +572,23 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("expected empty user secret")
 	}
 
-	if err := appClient.RegisterApp(ctx, resp.RegisterURL, sk); err == nil {
+	if err := appClient.RegisterApp(ctx, resp.RegisterURL, ephemeralSK, sk); err == nil {
 		t.Fatal("expected registration to fail for unapproved request")
 	}
 
 	// reject the request
 	respondToAppConnection(t, resp.ResponseURL, connectKey.Key, false)
 
-	if err := appClient.RegisterApp(ctx, resp.RegisterURL, sk); err == nil {
+	if err := appClient.RegisterApp(ctx, resp.RegisterURL, ephemeralSK, sk); err == nil {
 		t.Fatal("expected registration to fail for rejected request")
 	}
 
-	if status, err := appClient.RequestStatus(ctx, resp.StatusURL); !errors.Is(err, app.ErrUserRejected) {
+	if status, err := appClient.RequestStatus(ctx, ephemeralSK, resp.StatusURL); !errors.Is(err, app.ErrUserRejected) {
 		t.Fatalf("expected request to be rejected, got: %v %v", err, status)
 	}
 
 	// try again
-	resp, err = appClient.RequestAppConnection(ctx, app.RegisterAppRequest{
+	resp, err = appClient.RequestAppConnection(ctx, ephemeralSK, app.RegisterAppRequest{
 		AppID:       appID,
 		Name:        "test-app",
 		Description: "A test app",
@@ -547,7 +600,7 @@ func TestAppConnect(t *testing.T) {
 
 	respondToAppConnection(t, resp.ResponseURL, connectKey.Key, true)
 
-	status, err := appClient.RequestStatus(ctx, resp.StatusURL)
+	status, err := appClient.RequestStatus(ctx, ephemeralSK, resp.StatusURL)
 	if err != nil {
 		t.Fatal("failed to check request status:", err)
 	} else if !status.Approved {
@@ -556,7 +609,7 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("expected non-empty user secret")
 	}
 
-	if err := appClient.RegisterApp(ctx, resp.RegisterURL, sk); err != nil {
+	if err := appClient.RegisterApp(ctx, resp.RegisterURL, ephemeralSK, sk); err != nil {
 		t.Fatal("failed to register app:", err)
 	}
 
@@ -596,7 +649,7 @@ func TestAppConnect(t *testing.T) {
 	}
 
 	// authenticate again to ensure the same user secret is returned
-	resp, err = appClient.RequestAppConnection(ctx, app.RegisterAppRequest{
+	resp, err = appClient.RequestAppConnection(ctx, ephemeralSK, app.RegisterAppRequest{
 		AppID:       appID,
 		Name:        "test-app",
 		Description: "A test app",
@@ -607,7 +660,7 @@ func TestAppConnect(t *testing.T) {
 	}
 	respondToAppConnection(t, resp.ResponseURL, connectKey.Key, true)
 
-	if secondStatus, err := appClient.RequestStatus(ctx, resp.StatusURL); err != nil {
+	if secondStatus, err := appClient.RequestStatus(ctx, ephemeralSK, resp.StatusURL); err != nil {
 		t.Fatal("failed to check request status:", err)
 	} else if !secondStatus.Approved {
 		t.Fatal("expected request to be approved")
@@ -632,6 +685,7 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	ephemeralKey := types.GeneratePrivateKey()
 	sk2 := types.GeneratePrivateKey()
 	appMeta := app.RegisterAppRequest{
 		AppID:       frand.Entropy256(),
@@ -640,22 +694,22 @@ func TestAppConnect(t *testing.T) {
 		ServiceURL:  "http://example.com",
 	}
 	// first connection — uses the single remaining use
-	resp, err = appClient.RequestAppConnection(ctx, appMeta)
+	resp, err = appClient.RequestAppConnection(ctx, ephemeralKey, appMeta)
 	if err != nil {
 		t.Fatal(err)
 	}
 	respondToAppConnection(t, resp.ResponseURL, oneUseKey.Key, true)
-	if err := appClient.RegisterApp(ctx, resp.RegisterURL, sk2); err != nil {
+	if err := appClient.RegisterApp(ctx, resp.RegisterURL, ephemeralKey, sk2); err != nil {
 		t.Fatal("expected first registration on 1-use key to succeed:", err)
 	}
 
 	// second connection with the same key — key is now exhausted, but re-auth should succeed
-	resp, err = appClient.RequestAppConnection(ctx, appMeta)
+	resp, err = appClient.RequestAppConnection(ctx, ephemeralKey, appMeta)
 	if err != nil {
 		t.Fatal(err)
 	}
 	respondToAppConnection(t, resp.ResponseURL, oneUseKey.Key, true)
-	if err := appClient.RegisterApp(ctx, resp.RegisterURL, sk2); err != nil {
+	if err := appClient.RegisterApp(ctx, resp.RegisterURL, ephemeralKey, sk2); err != nil {
 		t.Fatal("expected re-auth on exhausted key to succeed:", err)
 	}
 }
