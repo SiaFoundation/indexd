@@ -96,56 +96,83 @@ func (t *transport) dial(ctx context.Context, hostKey types.PublicKey, addresses
 
 	connectErrs := make([]error, len(addresses))
 
-top:
-	for i, addr := range addresses {
-		select {
-		case <-dialCtx.Done():
-			break top
-		case sema <- struct{}{}:
-		}
-		wg.Add(1)
-		go func(i int, addr chain.NetAddress) {
-			defer func() {
-				<-sema
-				wg.Done()
-			}()
-			var transport rhp.TransportClient
-			var err error
-			switch addr.Protocol {
-			case siamux.Protocol:
-				transport, err = siamux.Dial(dialCtx, addr.Address, hostKey)
-			case quic.Protocol:
-				transport, err = quic.Dial(dialCtx, addr.Address, hostKey)
-			default:
-				return
+	dialProtocol := func(proto chain.Protocol) (rhp.TransportClient, error) {
+		var attempts int
+	top:
+		for i, addr := range addresses {
+			if addr.Protocol != proto {
+				continue
 			}
-			connectErrs[i] = err
-			if err != nil || dialCtx.Err() != nil {
-				// failed to connect or already connected elsewhere
-				if err == nil {
+			select {
+			case <-dialCtx.Done():
+				break top
+			case sema <- struct{}{}:
+			}
+			attempts++
+			wg.Add(1)
+			go func(i int, addr chain.NetAddress) {
+				defer func() {
+					<-sema
+					wg.Done()
+				}()
+				var transport rhp.TransportClient
+				var err error
+				switch addr.Protocol {
+				case siamux.Protocol:
+					transport, err = siamux.Dial(dialCtx, addr.Address, hostKey)
+				case quic.Protocol:
+					transport, err = quic.Dial(dialCtx, addr.Address, hostKey)
+				default:
+					return
+				}
+				connectErrs[i] = err
+				if err != nil || dialCtx.Err() != nil {
+					// failed to connect or already connected elsewhere
+					if err == nil {
+						_ = transport.Close()
+					}
+					return
+				}
+				dialCancel()
+				t.mu.Lock()
+				if t.tc == nil {
+					t.tc = transport
+				} else {
 					_ = transport.Close()
 				}
-				return
-			}
-			dialCancel()
-			t.mu.Lock()
-			if t.tc == nil {
-				t.tc = transport
-			} else {
-				_ = transport.Close()
-			}
-			t.mu.Unlock()
-		}(i, addr)
+				t.mu.Unlock()
+			}(i, addr)
+		}
+		if attempts == 0 {
+			return nil, fmt.Errorf("no addresses for protocol %s", proto)
+		}
+		// wait for all dial attempts to finish
+		wg.Wait()
+		// cache the transport
+		t.mu.Lock()
+		defer t.mu.Unlock()
+		if t.tc == nil {
+			return nil, fmt.Errorf("failed to connect to host %s (%w)", hostKey.String(), errors.Join(connectErrs...))
+		}
+		return t.tc, nil
 	}
-	// wait for all dial attempts to finish
-	wg.Wait()
-	// cache the transport
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.tc == nil {
-		return nil, fmt.Errorf("failed to connect to host %s (%w)", hostKey.String(), errors.Join(connectErrs...))
+
+	// prefer siamux
+	tc, siamuxErr := dialProtocol(siamux.Protocol)
+	if siamuxErr == nil {
+		return tc, nil
+	} else if err := ctx.Err(); err != nil {
+		return nil, err // interrupted
 	}
-	return t.tc, nil
+
+	// fall back to quic if siamux fails or isn't available
+	tc, quicErr := dialProtocol(quic.Protocol)
+	if quicErr == nil {
+		return tc, nil
+	}
+
+	// combine errors from both dial attempts
+	return nil, fmt.Errorf("failed to connect to host %s: siamux error: '%w', quic error: '%w'", hostKey.String(), siamuxErr, quicErr)
 }
 
 // A Client is used to interact with Sia hosts over RHP4.
@@ -198,6 +225,7 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	if err == nil {
 		return nil
 	} else if c.shouldResetTransport(err) {
+		c.log.Debug("resetting transport due to transport related error", zap.Stringer("hostKey", hostKey), zap.Error(err))
 		c.resetTransport(hostKey)
 	}
 
@@ -368,11 +396,7 @@ func (c *Client) shouldResetTransport(err error) bool {
 		// transport.
 		return false
 	default:
-		if proto.ErrorCode(err) == proto.ErrorCodeTransport {
-			c.log.Debug("resetting transport due to transport related error", zap.Error(err))
-			return true
-		}
-		return false
+		return proto.ErrorCode(err) == proto.ErrorCodeTransport
 	}
 }
 
