@@ -119,7 +119,8 @@ SELECT
 	app_id,
 	COUNT(*),
 	COUNT(*) FILTER (WHERE last_used >= $1),
-	COALESCE(SUM(pinned_data), 0)
+	COALESCE(SUM(pinned_data), 0),
+	COALESCE(SUM(pinned_size), 0)
 FROM accounts
 WHERE deleted_at IS NULL
 GROUP BY app_id
@@ -134,7 +135,7 @@ OFFSET $2 LIMIT $3`,
 
 		for rows.Next() {
 			var as admin.AppStats
-			if err := rows.Scan((*sqlHash256)(&as.AppID), &as.Accounts, &as.Active, &as.PinnedData); err != nil {
+			if err := rows.Scan((*sqlHash256)(&as.AppID), &as.Accounts, &as.Active, &as.PinnedData, &as.PinnedSize); err != nil {
 				return err
 			}
 			stats = append(stats, as)
@@ -154,11 +155,11 @@ func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 		}
 
 		err = tx.QueryRow(ctx,
-			`SELECT COUNT(*) FROM accounts WHERE last_used >= $1 AND deleted_at IS NULL;`,
+			`SELECT COUNT(*) FILTER (WHERE last_used >= $1), COALESCE(SUM(pinned_data), 0), COALESCE(SUM(pinned_size), 0) FROM accounts WHERE deleted_at IS NULL;`,
 			time.Now().Add(-accounts.AccountActivityThreshold),
-		).Scan(&stats.Active)
+		).Scan(&stats.Active, &stats.PinnedData, &stats.PinnedSize)
 		if err != nil {
-			return fmt.Errorf("failed to get active accounts: %w", err)
+			return fmt.Errorf("failed to get account stats: %w", err)
 		}
 		return nil
 	})

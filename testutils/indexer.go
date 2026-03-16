@@ -42,7 +42,7 @@ var (
 		Enabled:         true,
 		Period:          144,
 		RenewWindow:     72,
-		WantedContracts: 12,
+		WantedContracts: 30,
 	}
 )
 

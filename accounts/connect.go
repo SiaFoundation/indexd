@@ -63,6 +63,7 @@ type (
 		LastUpdated   time.Time `json:"lastUpdated"`
 		LastUsed      time.Time `json:"lastUsed"`
 		PinnedData    uint64    `json:"pinnedData"`
+		PinnedSize    uint64    `json:"pinnedSize"`
 	}
 
 	// AppConnectKeyRequest represents a request to add or update

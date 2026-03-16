@@ -286,7 +286,7 @@ func TestE2E(t *testing.T) {
 	// regular object upload
 	data := frand.Bytes(4096)
 	obj := NewEmptyObject()
-	err = client.Upload(t.Context(), &obj, bytes.NewReader(data), WithRedundancy(2, 8))
+	err = client.Upload(t.Context(), &obj, bytes.NewReader(data), WithRedundancy(4, 11))
 	if err != nil {
 		t.Fatalf("failed to upload: %v", err)
 	} else if _, err := client.Object(t.Context(), obj.ID()); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
@@ -295,7 +295,7 @@ func TestE2E(t *testing.T) {
 	assertShareable(obj, data)
 
 	// packed upload
-	packed, err := client.UploadPacked(WithRedundancy(2, 8))
+	packed, err := client.UploadPacked(WithRedundancy(4, 11))
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
@@ -328,17 +328,17 @@ func TestE2E(t *testing.T) {
 	assertShareable(objects[1], data2)
 
 	// packed upload spanning multiple slabs
-	packedL, err := client.UploadPacked(WithRedundancy(2, 8))
+	packedL, err := client.UploadPacked(WithRedundancy(4, 11))
 	if err != nil {
 		t.Fatalf("failed to create multi-slab packed upload: %v", err)
 	}
 	defer packedL.Close()
 
-	data3 := frand.Bytes(5 * 1 << 20) // 5 MiB
+	data3 := frand.Bytes(9 * 1 << 20) // 9 MiB
 	if _, err := packedL.Add(t.Context(), bytes.NewReader(data3)); err != nil {
 		t.Fatalf("failed to add first large object: %v", err)
 	}
-	data4 := frand.Bytes(5 * 1 << 20) // 5 MiB
+	data4 := frand.Bytes(9 * 1 << 20) // 9 MiB
 	if _, err := packedL.Add(t.Context(), bytes.NewReader(data4)); err != nil {
 		t.Fatalf("failed to add second large object: %v", err)
 	}

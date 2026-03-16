@@ -552,11 +552,9 @@ func TestPinSlabs(t *testing.T) {
 		t.Fatal("expected ErrNotFound, got", err)
 	}
 
-	slabSize := uint64(2 * proto.SectorSize)
-
 	// add accounts - account1 can pin 2 slabs and account2 can pin 3 slabs
-	store.addTestAccount(t, types.PublicKey(account), accounts.WithMaxPinnedData(2*slabSize))
-	store.addTestAccount(t, types.PublicKey(account2), accounts.WithMaxPinnedData(3*slabSize))
+	store.addTestAccount(t, types.PublicKey(account), accounts.WithMaxPinnedData(2*proto.SectorSize))
+	store.addTestAccount(t, types.PublicKey(account2), accounts.WithMaxPinnedData(3*proto.SectorSize))
 
 	// add two hosts
 	hk1 := store.addTestHost(t)
@@ -594,18 +592,21 @@ func TestPinSlabs(t *testing.T) {
 		}
 	}
 
-	assertPinnedData := func(acc proto.Account, pinned uint64) {
+	assertPinnedData := func(acc proto.Account, expectedData, expectedSize uint64) {
 		t.Helper()
-		var pinnedData uint64
-		err := store.pool.QueryRow(t.Context(), "SELECT pinned_data FROM accounts WHERE public_key = $1", sqlPublicKey(acc)).Scan(&pinnedData)
+		var pinnedData, pinnedSize uint64
+		err := store.pool.QueryRow(t.Context(), "SELECT pinned_data, pinned_size FROM accounts WHERE public_key = $1", sqlPublicKey(acc)).Scan(&pinnedData, &pinnedSize)
 		if err != nil {
 			t.Fatal(err)
-		} else if pinnedData != pinned {
-			t.Fatalf("expected %d pinned data for account %v, got %d", pinned, acc, pinnedData)
+		} else if pinnedData != expectedData {
+			t.Fatalf("expected %d pinned data for account %v, got %d", expectedData, acc, pinnedData)
+		} else if pinnedSize != expectedSize {
+			t.Fatalf("expected %d pinned size for account %v, got %d", expectedSize, acc, pinnedSize)
 		}
 	}
-	assertPinnedData(account, 0)
-	assertPinnedData(account2, 0)
+	slabPinnedSize := uint64(2 * proto.SectorSize) // post-redundancy: len(Sectors) * SectorSize
+	assertPinnedData(account, 0, 0)
+	assertPinnedData(account2, 0, 0)
 	assertUnpinnedSectors(0)
 
 	// pin slabs
@@ -621,8 +622,8 @@ func TestPinSlabs(t *testing.T) {
 			t.Fatalf("expected slab ID %v, got %v", expectedIDs[i], slabIDs[0])
 		}
 	}
-	assertPinnedData(account, 2*slabSize)
-	assertPinnedData(account2, 0)
+	assertPinnedData(account, 2*proto.SectorSize, 2*slabPinnedSize)
+	assertPinnedData(account2, 0, 0)
 	assertUnpinnedSectors(4)
 
 	// check that pinning with too large MinShards fails
@@ -708,8 +709,8 @@ func TestPinSlabs(t *testing.T) {
 			}
 		}
 	}
-	assertPinnedData(account, 2*slabSize)
-	assertPinnedData(account2, 2*slabSize)
+	assertPinnedData(account, 2*proto.SectorSize, 2*slabPinnedSize)
+	assertPinnedData(account2, 2*proto.SectorSize, 2*slabPinnedSize)
 	assertUnpinnedSectors(4)
 
 	// fetch slabs for account 2
@@ -747,8 +748,8 @@ func TestPinSlabs(t *testing.T) {
 	} else if slabIDs[0] == expectedIDs[0] || slabIDs[0] == expectedIDs[1] {
 		t.Fatalf("expected new slab ID, got %v (%v)", slabIDs[0], expectedIDs)
 	}
-	assertPinnedData(account, 2*slabSize)
-	assertPinnedData(account2, 3*slabSize)
+	assertPinnedData(account, 2*proto.SectorSize, 2*slabPinnedSize)
+	assertPinnedData(account2, 3*proto.SectorSize, 3*slabPinnedSize)
 	assertUnpinnedSectors(4)
 
 	// assert we still have 3 slabs now, but still only have 4 sectors
@@ -778,8 +779,8 @@ func TestPinSlabs(t *testing.T) {
 	} else if !slabs[0].PinnedAt.After(pinnedAt) {
 		t.Fatal("expected pinnedAt to be updated")
 	}
-	assertPinnedData(account, 2*slabSize)
-	assertPinnedData(account2, 3*slabSize)
+	assertPinnedData(account, 2*proto.SectorSize, 2*slabPinnedSize)
+	assertPinnedData(account2, 3*proto.SectorSize, 3*slabPinnedSize)
 	assertUnpinnedSectors(4)
 }
 
@@ -880,8 +881,8 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 	store.addTestContract(t, hk1)
 	store.addTestContract(t, hk2)
 
-	// create a test quota with specific limits
-	store.addTestQuota(t, "storage-limit-test", 2*proto.SectorSize, 2)
+	// create a test quota with specific limits (pre-redundancy: MinShards(1) * SectorSize per slab)
+	store.addTestQuota(t, "storage-limit-test", 1*proto.SectorSize, 2)
 
 	const connectKey = "foobar"
 	key, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
@@ -893,26 +894,32 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 		t.Fatal("failed to add app connect key:", err)
 	}
 
-	assertPinnedData := func(acc proto.Account, pinned uint64) {
+	assertPinnedData := func(acc proto.Account, expectedData, expectedSize uint64) {
 		t.Helper()
-		var pinnedData uint64
-		err := store.pool.QueryRow(context.Background(), "SELECT pinned_data FROM accounts WHERE public_key = $1", sqlPublicKey(acc)).Scan(&pinnedData)
+		var pinnedData, pinnedSize uint64
+		err := store.pool.QueryRow(context.Background(), "SELECT pinned_data, pinned_size FROM accounts WHERE public_key = $1", sqlPublicKey(acc)).Scan(&pinnedData, &pinnedSize)
 		if err != nil {
 			t.Fatal(err)
-		} else if pinnedData != pinned {
-			t.Fatalf("expected %d pinned data for account %v, got %d", pinned, acc, pinnedData)
+		} else if pinnedData != expectedData {
+			t.Fatalf("expected %d pinned data for account %v, got %d", expectedData, acc, pinnedData)
+		} else if pinnedSize != expectedSize {
+			t.Fatalf("expected %d pinned size for account %v, got %d", expectedSize, acc, pinnedSize)
 		}
 	}
 
-	assertKeyPinnedData := func(pinned uint64) {
+	assertKeyPinnedData := func(expectedData, expectedSize uint64) {
 		t.Helper()
 		key, err := store.AppConnectKey(key.Key)
 		if err != nil {
 			t.Fatal(err)
-		} else if key.PinnedData != pinned {
-			t.Fatalf("expected %d pinned data for connect key, got %d", pinned, key.PinnedData)
+		} else if key.PinnedData != expectedData {
+			t.Fatalf("expected %d pinned data for connect key, got %d", expectedData, key.PinnedData)
+		} else if key.PinnedSize != expectedSize {
+			t.Fatalf("expected %d pinned size for connect key, got %d", expectedSize, key.PinnedSize)
 		}
 	}
+
+	slabPinnedSize := uint64(2 * proto.SectorSize) // post-redundancy: len(Sectors) * SectorSize
 
 	// helper to create slabs
 	newSlab := func(i byte) (slabs.SlabID, slabs.SlabPinParams) {
@@ -933,14 +940,14 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 		return slab.Digest(), slab
 	}
 
-	// register accounts then set per-account limit to 2 sectors
+	// register accounts then set per-account limit to 1 slab's worth of pre-redundancy data
 	acc1 := proto.Account(types.GeneratePrivateKey().PublicKey())
 	if err := store.RegisterAppKey(connectKey, types.PublicKey(acc1), accounts.AppMeta{}); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
-	twoSectors := uint64(2 * proto.SectorSize)
+	oneSlab := uint64(1 * proto.SectorSize) // pre-redundancy: MinShards(1) * SectorSize
 	if err := store.UpdateAccount(types.PublicKey(acc1), accounts.UpdateAccountRequest{
-		MaxPinnedData: &twoSectors,
+		MaxPinnedData: &oneSlab,
 	}); err != nil {
 		t.Fatal("failed to update max pinned data:", err)
 	}
@@ -949,16 +956,16 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 		t.Fatal("failed to use app connect key:", err)
 	}
 	if err := store.UpdateAccount(types.PublicKey(acc2), accounts.UpdateAccountRequest{
-		MaxPinnedData: &twoSectors,
+		MaxPinnedData: &oneSlab,
 	}); err != nil {
 		t.Fatal("failed to update max pinned data:", err)
 	}
 	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
 
 	// nothing pinned yet
-	assertPinnedData(acc1, 0)
-	assertPinnedData(acc2, 0)
-	assertKeyPinnedData(0)
+	assertPinnedData(acc1, 0, 0)
+	assertPinnedData(acc2, 0, 0)
+	assertKeyPinnedData(0, 0)
 
 	// pin 2 sectors to account 1
 	slab1ID, slab1 := newSlab(1)
@@ -966,9 +973,9 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedData(acc1, 2*proto.SectorSize)
-	assertPinnedData(acc2, 0)
-	assertKeyPinnedData(2 * proto.SectorSize)
+	assertPinnedData(acc1, 1*proto.SectorSize, slabPinnedSize)
+	assertPinnedData(acc2, 0, 0)
+	assertKeyPinnedData(1*proto.SectorSize, slabPinnedSize)
 
 	// pinning two more sectors to account 1 should cause account storage limit
 	// error
@@ -977,9 +984,9 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 	if !errors.Is(err, accounts.ErrAccountStorageLimitExceeded) {
 		t.Fatalf("expected error %v, got %v", accounts.ErrAccountStorageLimitExceeded, err)
 	}
-	assertPinnedData(acc1, 2*proto.SectorSize)
-	assertPinnedData(acc2, 0)
-	assertKeyPinnedData(2 * proto.SectorSize)
+	assertPinnedData(acc1, 1*proto.SectorSize, slabPinnedSize)
+	assertPinnedData(acc2, 0, 0)
+	assertKeyPinnedData(1*proto.SectorSize, slabPinnedSize)
 
 	// pinning two sectors to account 2 should cause connect key storage limit
 	// error because this account has not reached the per account limit but
@@ -989,17 +996,17 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 	if !errors.Is(err, accounts.ErrAppKeyStorageLimitExceeded) {
 		t.Fatalf("expected error %v, got %v", accounts.ErrAppKeyStorageLimitExceeded, err)
 	}
-	assertPinnedData(acc1, 2*proto.SectorSize)
-	assertPinnedData(acc2, 0)
-	assertKeyPinnedData(2 * proto.SectorSize)
+	assertPinnedData(acc1, 1*proto.SectorSize, slabPinnedSize)
+	assertPinnedData(acc2, 0, 0)
+	assertKeyPinnedData(1*proto.SectorSize, slabPinnedSize)
 
 	// unpin the only successfully pinned sectors
 	if err := store.UnpinSlab(acc1, slab1ID); err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedData(acc1, 0)
-	assertPinnedData(acc2, 0)
-	assertKeyPinnedData(0)
+	assertPinnedData(acc1, 0, 0)
+	assertPinnedData(acc2, 0, 0)
+	assertKeyPinnedData(0, 0)
 
 	// pin to account 2 - after unpinning we should not hit connect key storage
 	// limit
@@ -1007,9 +1014,9 @@ func TestPinSlabsStorageLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertPinnedData(acc1, 0)
-	assertPinnedData(acc2, 2*proto.SectorSize)
-	assertKeyPinnedData(2 * proto.SectorSize)
+	assertPinnedData(acc1, 0, 0)
+	assertPinnedData(acc2, 1*proto.SectorSize, slabPinnedSize)
+	assertKeyPinnedData(1*proto.SectorSize, slabPinnedSize)
 }
 
 func TestPinSlabsBadHost(t *testing.T) {
@@ -1138,14 +1145,16 @@ func TestUnpinSlab(t *testing.T) {
 		}
 	}
 
-	assertPinnedData := func(acc proto.Account, pinned uint64) {
+	assertPinnedData := func(acc proto.Account, expectedData, expectedSize uint64) {
 		t.Helper()
-		var pinnedData uint64
-		err := store.pool.QueryRow(t.Context(), "SELECT pinned_data FROM accounts WHERE public_key = $1", sqlPublicKey(acc)).Scan(&pinnedData)
+		var pinnedData, pinnedSize uint64
+		err := store.pool.QueryRow(t.Context(), "SELECT pinned_data, pinned_size FROM accounts WHERE public_key = $1", sqlPublicKey(acc)).Scan(&pinnedData, &pinnedSize)
 		if err != nil {
 			t.Fatal(err)
-		} else if pinnedData != pinned {
-			t.Fatalf("expected %d pinned data for account %v, got %d", pinned, acc, pinnedData)
+		} else if pinnedData != expectedData {
+			t.Fatalf("expected %d pinned data for account %v, got %d", expectedData, acc, pinnedData)
+		} else if pinnedSize != expectedSize {
+			t.Fatalf("expected %d pinned size for account %v, got %d", expectedSize, acc, pinnedSize)
 		}
 	}
 
@@ -1194,8 +1203,8 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 3)
 	assertCount("sectors", 6)
 	assertCount("account_slabs", 4)
-	assertPinnedData(acc1, 2*slabSize)
-	assertPinnedData(acc2, 2*slabSize)
+	assertPinnedData(acc1, 2*slabSize, 2*slabSize)
+	assertPinnedData(acc2, 2*slabSize, 2*slabSize)
 
 	// unpinning a slab that's not pinned to an account should return [slabs.ErrNotFound]
 	err := store.UnpinSlab(acc2, slab1)
@@ -1215,8 +1224,8 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 2)
 	assertCount("sectors", 4)
 	assertCount("account_slabs", 3)
-	assertPinnedData(acc1, slabSize)
-	assertPinnedData(acc2, 2*slabSize)
+	assertPinnedData(acc1, slabSize, slabSize)
+	assertPinnedData(acc2, 2*slabSize, 2*slabSize)
 
 	// unpin second slab
 	err = store.UnpinSlab(acc1, slab2)
@@ -1230,8 +1239,8 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 2)
 	assertCount("sectors", 4)
 	assertCount("account_slabs", 2)
-	assertPinnedData(acc1, 0)
-	assertPinnedData(acc2, 2*slabSize)
+	assertPinnedData(acc1, 0, 0)
+	assertPinnedData(acc2, 2*slabSize, 2*slabSize)
 
 	// unpin second slab on second account
 	err = store.UnpinSlab(acc2, slab2)
@@ -1245,8 +1254,8 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 1)
 	assertCount("sectors", 2)
 	assertCount("account_slabs", 1)
-	assertPinnedData(acc1, 0)
-	assertPinnedData(acc2, slabSize)
+	assertPinnedData(acc1, 0, 0)
+	assertPinnedData(acc2, slabSize, slabSize)
 
 	// unpin third slab on second account
 	err = store.UnpinSlab(acc2, slab3)
@@ -1260,8 +1269,8 @@ func TestUnpinSlab(t *testing.T) {
 	assertCount("slabs", 0)
 	assertCount("sectors", 0)
 	assertCount("account_slabs", 0)
-	assertPinnedData(acc1, 0)
-	assertPinnedData(acc2, 0)
+	assertPinnedData(acc1, 0, 0)
+	assertPinnedData(acc2, 0, 0)
 }
 
 func TestPinSectors(t *testing.T) {

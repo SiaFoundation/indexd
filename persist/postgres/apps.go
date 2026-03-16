@@ -22,6 +22,7 @@ func scanConnectKey(s scanner) (key accounts.ConnectKey, err error) {
 		&key.LastUpdated,
 		&lastUsed,
 		&key.PinnedData,
+		&key.PinnedSize,
 		&key.Quota,
 		&key.RemainingUses,
 	)
@@ -39,7 +40,7 @@ func (s *Store) AddAppConnectKey(meta accounts.AppConnectKeyRequest) (key accoun
 			INSERT INTO app_connect_keys (app_key, user_secret, use_description, quota_name)
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (app_key) DO NOTHING
-			RETURNING app_key, use_description, created_at, updated_at, last_used, pinned_data,
+			RETURNING app_key, use_description, created_at, updated_at, last_used, pinned_data, pinned_size,
 				quota_name,
 				(SELECT total_uses FROM quotas WHERE name = quota_name)
 		`, meta.Key, userSecret, meta.Description, meta.Quota))
@@ -74,7 +75,7 @@ func (s *Store) UpdateAppConnectKey(meta accounts.AppConnectKeyRequest) (key acc
 
 		key, err = scanConnectKey(tx.QueryRow(ctx, `
 			UPDATE app_connect_keys ack SET (use_description, quota_name) = ($2, $3) WHERE app_key = $1
-			RETURNING app_key, use_description, created_at, updated_at, last_used, pinned_data,
+			RETURNING app_key, use_description, created_at, updated_at, last_used, pinned_data, pinned_size,
 				quota_name,
 				GREATEST(0, (SELECT total_uses FROM quotas WHERE name = quota_name) - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id AND deleted_at IS NULL))
 		`, meta.Key, meta.Description, meta.Quota))
@@ -106,7 +107,7 @@ func (s *Store) ValidAppConnectKey(key string) error {
 func (s *Store) AppConnectKey(key string) (connectKey accounts.ConnectKey, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		connectKey, err = scanConnectKey(tx.QueryRow(ctx, `
-			SELECT ack.app_key, ack.use_description, ack.created_at, ack.updated_at, ack.last_used, ack.pinned_data,
+			SELECT ack.app_key, ack.use_description, ack.created_at, ack.updated_at, ack.last_used, ack.pinned_data, ack.pinned_size,
 				ack.quota_name,
 				GREATEST(0, q.total_uses - (SELECT COUNT(*) FROM accounts WHERE connect_key_id = ack.id AND deleted_at IS NULL))
 			FROM app_connect_keys ack
@@ -126,7 +127,7 @@ func (s *Store) AppConnectKeys(offset, limit int) (keys []accounts.ConnectKey, e
 		keys = keys[:0] // reuse same slice if transaction retries
 
 		rows, err := tx.Query(ctx, `
-			SELECT ack.app_key, ack.use_description, ack.created_at, ack.updated_at, ack.last_used, ack.pinned_data,
+			SELECT ack.app_key, ack.use_description, ack.created_at, ack.updated_at, ack.last_used, ack.pinned_data, ack.pinned_size,
 				ack.quota_name,
 				GREATEST(0, q.total_uses - COALESCE(ac.cnt, 0))
 			FROM app_connect_keys ack

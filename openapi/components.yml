@@ -414,7 +414,11 @@ components:
         pinnedData:
           type: number
           format: uint64
-          description: Current amount of pinned data in bytes.
+          description: Current amount of pinned data in bytes before redundancy.
+        pinnedSize:
+          type: number
+          format: uint64
+          description: Current amount of pinned data in bytes including redundancy.
         app:
           $ref: "#/components/schemas/AppMeta"
         lastUsed:
@@ -867,7 +871,11 @@ components:
           pinnedData:
             type: integer
             format: uint64
-            description: Total pinned data in bytes across all accounts in this app
+            description: Total pinned data in bytes before redundancy across all accounts in this app
+          pinnedSize:
+            type: integer
+            format: uint64
+            description: Total pinned data in bytes including redundancy across all accounts in this app
 
     ContractsStatsResponse:
       type: object
@@ -1090,7 +1098,11 @@ components:
         pinnedData:
           type: integer
           format: uint64
-          description: Sum of all the pinned data of the accounts associated with this key
+          description: Sum of all the pinned data before redundancy of the accounts associated with this key
+        pinnedSize:
+          type: integer
+          format: uint64
+          description: Sum of all the pinned data including redundancy of the accounts associated with this key
 
     AppConnectKeyRequest:
       type: object

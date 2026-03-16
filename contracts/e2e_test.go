@@ -21,7 +21,7 @@ import (
 
 func TestContractPruning(t *testing.T) {
 	const (
-		nHosts = 7
+		nHosts = 14
 		nSlabs = 4
 		// the batch size used to fetch sector roots during pruning has to be
 		// smaller than the slab we unpin, if it is not, the pruned index is in
@@ -65,7 +65,7 @@ func TestContractPruning(t *testing.T) {
 	for range nSlabs {
 		params := slabs.SlabPinParams{
 			EncryptionKey: frand.Entropy256(),
-			MinShards:     1,
+			MinShards:     4,
 		}
 		for i := range nHosts {
 			hk := available[i].PublicKey
@@ -196,7 +196,7 @@ func TestContractPruning(t *testing.T) {
 func TestSectorPinning(t *testing.T) {
 	// create cluster
 	logger := zaptest.NewLogger(t)
-	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(10))
+	cluster := testutils.NewCluster(t, testutils.WithLogger(logger), testutils.WithHosts(14))
 	indexer := cluster.Indexer
 
 	// create an app
@@ -205,18 +205,18 @@ func TestSectorPinning(t *testing.T) {
 	// wait for contracts to be formed
 	cluster.WaitForContracts(t)
 
-	// assert we have 10 usable hosts
-	available, err := indexer.Hosts().Hosts(context.Background(), 0, 10, hosts.WithUsable(true), hosts.WithActiveContracts(true))
+	// assert we have 14 usable hosts
+	available, err := indexer.Hosts().Hosts(context.Background(), 0, 14, hosts.WithUsable(true), hosts.WithActiveContracts(true))
 	if err != nil {
 		t.Fatal(err)
-	} else if len(available) != 10 {
-		t.Fatalf("expected 10 usable hosts, got %d", len(available))
+	} else if len(available) != 14 {
+		t.Fatalf("expected 14 usable hosts, got %d", len(available))
 	}
 
 	// prepare pin params
 	params := slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
-		MinShards:     1,
+		MinShards:     4,
 	}
 
 	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())))

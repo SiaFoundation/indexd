@@ -8,7 +8,7 @@ require (
 	github.com/klauspost/reedsolomon v1.13.3
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.19.0
+	go.sia.tech/core v0.19.1-0.20260313152606-1a17a74e466a
 	go.sia.tech/coreutils v0.21.2-0.20260311150752-49aa8693b89e
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/mux v1.4.0
@@ -39,9 +39,9 @@ require (
 	go.etcd.io/bbolt v1.4.3 // indirect
 	go.sia.tech/web v0.0.0-20240422221546-c1709d16b6ef // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.49.0 // indirect
+	golang.org/x/net v0.50.0 // indirect
 	golang.org/x/sync v0.19.0 // indirect
 	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
-	golang.org/x/tools v0.41.0 // indirect
+	golang.org/x/tools v0.42.0 // indirect
 )

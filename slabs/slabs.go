@@ -133,6 +133,12 @@ func (s SlabPinParams) Size() uint64 {
 	return uint64(len(s.Sectors)) * proto.SectorSize
 }
 
+// DataSize returns the size of the slab's data in bytes before redundancy
+// is applied.
+func (s SlabPinParams) DataSize() uint64 {
+	return uint64(s.MinShards) * proto.SectorSize
+}
+
 // Validate checks if the SlabPinParams are valid. It ensures that the
 // encryption key is set, the minimum number of shards is met, and that there
 // are no duplicate host keys or empty roots in the sectors.
@@ -206,6 +212,12 @@ func (m *SlabManager) PruneSlabs(ctx context.Context, account proto.Account) err
 // distribution to calculate the probability of having at least
 // `n` data shards available out of `m` total shards.
 func ValidateECParams(dataShards, totalShards int) error {
+	// range of acceptable redundancy is based on the fact that too low redundancy doesn't
+	// provide enough durability, while too high redundancy is not cost effective.
+	const (
+		minRedundancy = 1.5 // minimum acceptable redundancy
+		maxRedundancy = 4   // maximum acceptable redundancy
+	)
 	switch {
 	case totalShards > maxTotalShards:
 		return fmt.Errorf("total number of shards %d exceeds maximum of %d", totalShards, maxTotalShards)
@@ -215,6 +227,18 @@ func ValidateECParams(dataShards, totalShards int) error {
 		return errors.New("total shards cannot be zero")
 	case dataShards > totalShards:
 		return fmt.Errorf("data shards %d cannot be greater than total shards %d", dataShards, totalShards)
+	case dataShards > 255:
+		return fmt.Errorf("data shards %d exceeds maximum of 255", dataShards)
+	case totalShards-dataShards > 255:
+		return fmt.Errorf("parity shards %d exceeds maximum of 255", totalShards-dataShards)
+	}
+
+	// short-circuit if the redundancy is extremely low or high
+	redundancy := float64(totalShards) / float64(dataShards)
+	if redundancy < minRedundancy {
+		return fmt.Errorf("redundancy of %0.2f is too low", redundancy)
+	} else if redundancy > maxRedundancy {
+		return fmt.Errorf("redundancy of %0.2f is too high", redundancy)
 	}
 
 	const recoveryProbability = 0.75 // probability of being able to recover a single shard.

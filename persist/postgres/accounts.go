@@ -41,7 +41,7 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
+			SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.pinned_size, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
 			FROM accounts a
 			INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 			WHERE a.deleted_at IS NULL AND
@@ -74,7 +74,7 @@ func (s *Store) Account(ak types.PublicKey) (accounts.Account, error) {
 	var account accounts.Account
 	account.AccountKey = proto.Account(ak) // no need to fetch key
 	err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
-		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
+		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.pinned_size, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
 FROM accounts a
 INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 WHERE public_key = $1`, sqlPublicKey(ak)))
@@ -450,6 +450,6 @@ LIMIT $3`, hostID, threshold, limit, quotaName)
 }
 
 func scanAccount(s scanner) (account accounts.Account, err error) {
-	err = s.Scan((*sqlPublicKey)(&account.AccountKey), &account.ConnectKey, &account.MaxPinnedData, &account.PinnedData, (*sqlHash256)(&account.App.ID), &account.App.Description, &account.App.LogoURL, &account.App.ServiceURL, &account.LastUsed)
+	err = s.Scan((*sqlPublicKey)(&account.AccountKey), &account.ConnectKey, &account.MaxPinnedData, &account.PinnedData, &account.PinnedSize, (*sqlHash256)(&account.App.ID), &account.App.Description, &account.App.LogoURL, &account.App.ServiceURL, &account.LastUsed)
 	return
 }

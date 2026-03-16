@@ -19,7 +19,8 @@ CREATE TABLE app_connect_keys (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     last_used TIMESTAMP WITH TIME ZONE,
-    pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0) -- total pinned data in bytes
+    pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0), -- total pinned data in bytes before redundancy
+    pinned_size BIGINT NOT NULL DEFAULT 0 CHECK (pinned_size >= 0) -- total pinned data in bytes including redundancy
 );
 CREATE INDEX app_connect_keys_quota_name_idx ON app_connect_keys(quota_name);
 
@@ -28,7 +29,8 @@ CREATE TABLE accounts (
     public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32),
     connect_key_id INTEGER NOT NULL REFERENCES app_connect_keys(id),
 
-    pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0), -- total pinned data in bytes
+    pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0), -- total pinned data in bytes before redundancy
+    pinned_size BIGINT NOT NULL DEFAULT 0 CHECK (pinned_size >= 0), -- total pinned data in bytes including redundancy
     max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0), -- max pinned data in bytes
     app_id BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(app_id) = 32), -- app identifier
     description TEXT NOT NULL DEFAULT '',

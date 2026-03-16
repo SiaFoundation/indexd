@@ -19,6 +19,14 @@ func (s AccountStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 			Name:  "indexd_num_active_accounts",
 			Value: float64(s.Active),
 		},
+		{
+			Name:  "indexd_accounts_pinned_data_bytes",
+			Value: float64(s.PinnedData),
+		},
+		{
+			Name:  "indexd_accounts_pinned_size_bytes",
+			Value: float64(s.PinnedSize),
+		},
 	}
 }
 
@@ -66,6 +74,11 @@ func (s AppStats) PrometheusMetric() []prometheus.Metric {
 			Name:   "indexd_app_pinned_data_bytes",
 			Labels: labels,
 			Value:  float64(s.PinnedData),
+		},
+		{
+			Name:   "indexd_app_pinned_size_bytes",
+			Labels: labels,
+			Value:  float64(s.PinnedSize),
 		},
 	}
 }

@@ -254,7 +254,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			return fmt.Errorf("failed to get good host rows: %w", err)
 		}
 
-		var newPinnedData uint64
+		var newPinnedData, newPinnedSize uint64
 		for _, slab := range toPin {
 			if slab.MinShards <= 0 || uint(len(slab.Sectors)) < slab.MinShards {
 				return slabs.ErrMinShards
@@ -288,7 +288,8 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			// track amount of data from newly pinned slabs so we can check later
 			// that we didn't exceed account and connect key storage limits
 			if res.RowsAffected() > 0 {
-				newPinnedData += slab.Size()
+				newPinnedData += slab.DataSize()
+				newPinnedSize += slab.Size()
 			}
 
 			// if the slab already existed, we don't need to insert the sectors
@@ -373,7 +374,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 		// check whether adding the newly pinned data would exceed the account's
 		// storage limit and if not, update the account's pinned data
 		var pinnedData, maxPinnedData uint64
-		err = tx.QueryRow(ctx, `UPDATE accounts SET last_used=NOW(), pinned_data = pinned_data + $1 WHERE id = $2 RETURNING pinned_data, max_pinned_data`, newPinnedData, accountID).Scan(&pinnedData, &maxPinnedData)
+		err = tx.QueryRow(ctx, `UPDATE accounts SET last_used=NOW(), pinned_data = pinned_data + $1, pinned_size = pinned_size + $2 WHERE id = $3 RETURNING pinned_data, max_pinned_data`, newPinnedData, newPinnedSize, accountID).Scan(&pinnedData, &maxPinnedData)
 		if err != nil {
 			return fmt.Errorf("failed to update account's pinned data: %w", err)
 		} else if pinnedData > maxPinnedData {
@@ -383,10 +384,10 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 		// check whether adding the newly pinned data would exceed the connect
 		// key's storage limit and if not, update the connect key's pinned data
 		err = tx.QueryRow(ctx, `
-			UPDATE app_connect_keys ack SET pinned_data = pinned_data + $1
+			UPDATE app_connect_keys ack SET pinned_data = pinned_data + $1, pinned_size = pinned_size + $2
 			FROM quotas q
-			WHERE ack.id = $2 AND q.name = ack.quota_name
-			RETURNING ack.pinned_data, q.max_pinned_data`, newPinnedData, connectKeyID).Scan(&pinnedData, &maxPinnedData)
+			WHERE ack.id = $3 AND q.name = ack.quota_name
+			RETURNING ack.pinned_data, q.max_pinned_data`, newPinnedData, newPinnedSize, connectKeyID).Scan(&pinnedData, &maxPinnedData)
 		if err != nil {
 			return fmt.Errorf("failed to update connect key's pinned data: %w", err)
 		} else if pinnedData > maxPinnedData {
@@ -406,23 +407,24 @@ WHERE a.account_id = $1 AND a.slab_id = ANY($2);`, accountID, sIDs)
 		return fmt.Errorf("failed to delete account slabs: %w", err)
 	}
 
-	// update the account's pinned data
-	var delta uint64
-	if err := tx.QueryRow(ctx, `SELECT COUNT(*) * $1
-	FROM slab_sectors
-	WHERE slab_id = ANY($2)`, proto.SectorSize, sIDs).Scan(&delta); err != nil {
+	// update the account's pinned data and pinned size
+	var pinnedDataDelta, pinnedSizeDelta uint64
+	if err := tx.QueryRow(ctx, `SELECT
+		(SELECT COALESCE(SUM(min_shards::bigint), 0) * $1 FROM slabs WHERE id = ANY($2)),
+		(SELECT COUNT(*) * $1 FROM slab_sectors WHERE slab_id = ANY($2))`,
+		proto.SectorSize, sIDs).Scan(&pinnedDataDelta, &pinnedSizeDelta); err != nil {
 		return fmt.Errorf("failed to get storage delta: %w", err)
 	}
 
 	var connectKeyID int64
 	err = tx.QueryRow(ctx, `UPDATE accounts
-SET pinned_data = pinned_data - $1
-WHERE id = $2
-RETURNING connect_key_id`, delta, accountID).Scan(&connectKeyID)
+SET pinned_data = pinned_data - $1, pinned_size = pinned_size - $2
+WHERE id = $3
+RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&connectKeyID)
 	if err != nil {
 		return fmt.Errorf("failed to update account's pinned data: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data - $1 WHERE id = $2`, delta, connectKeyID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data - $1, pinned_size = pinned_size - $2 WHERE id = $3`, pinnedDataDelta, pinnedSizeDelta, connectKeyID); err != nil {
 		return fmt.Errorf("failed to update connect key pinned data: %w", err)
 	}
 

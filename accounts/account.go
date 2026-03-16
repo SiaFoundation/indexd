@@ -71,6 +71,7 @@ type (
 		ConnectKey    string        `json:"connectKey"`
 		MaxPinnedData uint64        `json:"maxPinnedData"`
 		PinnedData    uint64        `json:"pinnedData"`
+		PinnedSize    uint64        `json:"pinnedSize"`
 		App           AppMeta       `json:"app"`
 		LastUsed      time.Time     `json:"lastUsed"`
 	}

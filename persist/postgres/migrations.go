@@ -797,4 +797,38 @@ ALTER TABLE quotas ALTER COLUMN fund_target_bytes DROP DEFAULT;
 		_, err := tx.Exec(ctx, `CREATE INDEX accounts_app_id_idx ON accounts (app_id) WHERE deleted_at IS NULL;`)
 		return err
 	},
+	// add pinned_size column and backfill pinned_data with pre-redundancy values
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+-- add new columns
+ALTER TABLE accounts ADD COLUMN pinned_size BIGINT NOT NULL DEFAULT 0 CHECK (pinned_size >= 0);
+ALTER TABLE app_connect_keys ADD COLUMN pinned_size BIGINT NOT NULL DEFAULT 0 CHECK (pinned_size >= 0);
+
+-- pinned_data -> pinned_size
+UPDATE accounts SET pinned_size = pinned_data, pinned_data = 0;
+UPDATE app_connect_keys SET pinned_size = pinned_data, pinned_data = 0;
+
+-- backfill pinned_data with pre-redundancy values (sum of min_shards * sector_size per slab)
+UPDATE accounts a
+SET pinned_data = sub.total
+FROM (
+    SELECT as2.account_id, SUM(s.min_shards::bigint * 4194304) AS total
+    FROM account_slabs as2
+    INNER JOIN slabs s ON s.id = as2.slab_id
+    GROUP BY as2.account_id
+) sub
+WHERE a.id = sub.account_id;
+
+-- backfill app_connect_keys pinned_data from accounts
+UPDATE app_connect_keys ack
+SET pinned_data = COALESCE(sub.total, 0)
+FROM (
+    SELECT connect_key_id, SUM(pinned_data) AS total
+    FROM accounts
+    GROUP BY connect_key_id
+) sub
+WHERE ack.id = sub.connect_key_id;
+`)
+		return err
+	},
 }
