@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/testutils"
-	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
@@ -32,24 +31,21 @@ func (c *countWriter) Write(p []byte) (int, error) {
 }
 
 // newTestSDK creates an SDK with custom appClient and hostClient for testing.
-func newTestSDK(appKey types.PrivateKey, app appClient, hosts hostClient, opts ...Option) *SDK {
-	sdk := &SDK{
+func newTestSDK(tb testing.TB, appKey types.PrivateKey, app appClient, hosts hostClient) *SDK {
+	tb.Helper()
+	return &SDK{
 		appKey: appKey,
 
-		log:    zap.NewNop(), // no logging by default
+		log:    zaptest.NewLogger(tb),
 		hosts:  hosts,
 		client: app,
 	}
-	for _, opt := range opts {
-		opt(sdk)
-	}
-	return sdk
 }
 
 func TestRoundtripCount(t *testing.T) {
 	appKey := types.GeneratePrivateKey()
 	dialer := newMockDialer(50)
-	s := newTestSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(t, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
 	// 1 MB
@@ -79,7 +75,7 @@ func TestRoundtripCount(t *testing.T) {
 func TestUpload(t *testing.T) {
 	appKey := types.GeneratePrivateKey()
 	dialer := newMockDialer(50)
-	s := newTestSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(t, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 	data := frand.Bytes(4096)
 
@@ -112,7 +108,7 @@ func TestUpload(t *testing.T) {
 func TestResumableUpload(t *testing.T) {
 	appKey := types.GeneratePrivateKey()
 	dialer := newMockDialer(50)
-	s := newTestSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(t, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
 	obj := NewEmptyObject()
@@ -136,7 +132,7 @@ func TestResumableUpload(t *testing.T) {
 func TestDownload(t *testing.T) {
 	dialer := newMockDialer(30)
 	appKey := types.GeneratePrivateKey()
-	s := newTestSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(t, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
 	slabSize := uint64(proto.SectorSize) * 10
@@ -383,7 +379,7 @@ func BenchmarkUpload(b *testing.B) {
 			dialer.SetSlowHosts(slow, time.Second)       // slow, but not too slow
 			dialer.SetSlowHosts(timeout, 30*time.Second) // longer than the default timeout
 
-			s := newTestSDK(appKey, newMockAppClient(), dialer)
+			s := newTestSDK(b, appKey, newMockAppClient(), dialer)
 			defer s.Close()
 
 			r := bytes.NewReader(data)
@@ -417,7 +413,7 @@ func BenchmarkDownload(b *testing.B) {
 
 	appKey := types.GeneratePrivateKey()
 	dialer := newMockDialer(30)
-	s := newTestSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(b, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
 	data := frand.Bytes(benchmarkSize)
