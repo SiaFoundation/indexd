@@ -36,15 +36,15 @@ func TestContractLockerLockBlocks(t *testing.T) {
 	acquired := make(chan struct{})
 	go func() {
 		_, unlock2 := cl.LockContract(id)
-		close(acquired)
 		unlock2()
+		close(acquired)
 	}()
 
 	// the second lock should be blocked
 	select {
 	case <-acquired:
 		t.Fatal("second LockContract should block while first is held")
-	case <-time.After(50 * time.Millisecond):
+	case <-time.After(250 * time.Millisecond):
 	}
 
 	// unlock first, second should proceed
@@ -52,7 +52,7 @@ func TestContractLockerLockBlocks(t *testing.T) {
 
 	select {
 	case <-acquired:
-	case <-time.After(time.Second):
+	case <-time.After(250 * time.Millisecond):
 		t.Fatal("second LockContract should have acquired after first unlock")
 	}
 
