@@ -36,6 +36,7 @@ type (
 
 		numMigrationGoroutines int
 		shardTimeout           time.Duration
+		shardDownloadTicker    time.Duration
 
 		alerter AlertsManager
 		chain   ChainManager
@@ -207,6 +208,7 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 		migrationAccountKey: migrationAccount,
 
 		shardTimeout:           2 * time.Minute,
+		shardDownloadTicker:    5 * time.Second,
 		numMigrationGoroutines: runtime.NumCPU(),
 
 		chain:   chain,

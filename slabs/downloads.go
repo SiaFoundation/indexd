@@ -131,7 +131,7 @@ initialLoop:
 		})
 	}
 
-	t := time.NewTicker(m.shardTimeout / 4)
+	t := time.NewTicker(m.shardDownloadTicker)
 	defer t.Stop()
 raceLoop:
 	for i := int(slab.MinShards); downloaded.Load() < uint32(slab.MinShards) && i < len(candidates); i++ {
