@@ -57,7 +57,8 @@ func (s AppStatsResponse) PrometheusMetric() []prometheus.Metric {
 // app's stats.
 func (s AppStats) PrometheusMetric() []prometheus.Metric {
 	labels := map[string]any{
-		"app_id": s.AppID.String(),
+		"app_id":   s.AppID.String(),
+		"app_name": s.Name,
 	}
 	return []prometheus.Metric{
 		{

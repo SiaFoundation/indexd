@@ -87,6 +87,7 @@ type (
 	// AppStats contains per-app statistics.
 	AppStats struct {
 		AppID      types.Hash256 `json:"appID"`
+		Name       string        `json:"name"`
 		Accounts   uint64        `json:"accounts"`
 		Active     uint64        `json:"active"`
 		PinnedData uint64        `json:"pinnedData"`
