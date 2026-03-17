@@ -41,7 +41,7 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.pinned_size, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
+			SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.pinned_size, a.app_id, a.name, a.description, a.logo_url, a.service_url, a.last_used
 			FROM accounts a
 			INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 			WHERE a.deleted_at IS NULL AND
@@ -74,7 +74,7 @@ func (s *Store) Account(ak types.PublicKey) (accounts.Account, error) {
 	var account accounts.Account
 	account.AccountKey = proto.Account(ak) // no need to fetch key
 	err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
-		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.pinned_size, a.app_id, a.description, a.logo_url, a.service_url, a.last_used
+		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.pinned_size, a.app_id, a.name, a.description, a.logo_url, a.service_url, a.last_used
 FROM accounts a
 INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 WHERE public_key = $1`, sqlPublicKey(ak)))
@@ -344,7 +344,7 @@ func addAccount(ctx context.Context, tx *txn, connectKey string, account types.P
 		return fmt.Errorf("failed to get app connect key ID: %w", err)
 	}
 
-	res, err := tx.Exec(ctx, `INSERT INTO accounts (public_key, connect_key_id, max_pinned_data, app_id, description, logo_url, service_url) VALUES ($1, $2, $3, $4, $5, $6, $7) ON CONFLICT DO NOTHING`, sqlPublicKey(account), connectKeyID, aao.MaxPinnedData, sqlHash256(meta.ID), meta.Description, meta.LogoURL, meta.ServiceURL)
+	res, err := tx.Exec(ctx, `INSERT INTO accounts (public_key, connect_key_id, max_pinned_data, app_id, name, description, logo_url, service_url) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT DO NOTHING`, sqlPublicKey(account), connectKeyID, aao.MaxPinnedData, sqlHash256(meta.ID), meta.Name, meta.Description, meta.LogoURL, meta.ServiceURL)
 	if err != nil {
 		return fmt.Errorf("failed to add account: %w", err)
 	} else if res.RowsAffected() == 0 {
@@ -450,6 +450,6 @@ LIMIT $3`, hostID, threshold, limit, quotaName)
 }
 
 func scanAccount(s scanner) (account accounts.Account, err error) {
-	err = s.Scan((*sqlPublicKey)(&account.AccountKey), &account.ConnectKey, &account.MaxPinnedData, &account.PinnedData, &account.PinnedSize, (*sqlHash256)(&account.App.ID), &account.App.Description, &account.App.LogoURL, &account.App.ServiceURL, &account.LastUsed)
+	err = s.Scan((*sqlPublicKey)(&account.AccountKey), &account.ConnectKey, &account.MaxPinnedData, &account.PinnedData, &account.PinnedSize, (*sqlHash256)(&account.App.ID), &account.App.Name, &account.App.Description, &account.App.LogoURL, &account.App.ServiceURL, &account.LastUsed)
 	return
 }

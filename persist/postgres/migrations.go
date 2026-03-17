@@ -831,4 +831,9 @@ WHERE ack.id = sub.connect_key_id;
 `)
 		return err
 	},
+	// add name column to accounts
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT '';`)
+		return err
+	},
 }

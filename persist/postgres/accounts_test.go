@@ -114,6 +114,7 @@ func TestAddAccount(t *testing.T) {
 		appID := frand.Entropy256()
 		err := addAccount(pk, accounts.AppMeta{
 			ID:          appID,
+			Name:        "name",
 			Description: "description",
 			LogoURL:     "logoURL",
 			ServiceURL:  "serviceURL",
@@ -138,6 +139,8 @@ func TestAddAccount(t *testing.T) {
 			t.Fatal(err)
 		} else if acc.App.ID != appID {
 			t.Fatalf("expected app ID %s, got %s", appID, acc.App.ID)
+		} else if acc.App.Name != "name" {
+			t.Fatalf("expected name %q, got %q", "name", acc.App.Name)
 		} else if acc.App.Description != "description" {
 			t.Fatalf("expected description %q, got %q", "description", acc.App.Description)
 		} else if acc.App.LogoURL != "logoURL" {
