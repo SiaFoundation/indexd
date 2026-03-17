@@ -1633,7 +1633,7 @@ paths:
       parameters:
         - name: limit
           in: query
-          description: The maximum number of host stats to return
+          description: The maximum number of host stats to return. Ignored when response=prometheus.
           schema:
             type: integer
             minimum: 1
@@ -1641,11 +1641,18 @@ paths:
             default: 100
         - name: offset
           in: query
-          description: The number of host stats to skip
+          description: The number of host stats to skip. Ignored when response=prometheus.
           schema:
             type: integer
             minimum: 0
             default: 0
+        - name: response
+          in: query
+          description: When set to "prometheus", all hosts are returned in Prometheus text format, ignoring offset and limit.
+          schema:
+            type: string
+            enum:
+              - prometheus
       responses:
         "200":
           description: Stats about used hosts on this instance

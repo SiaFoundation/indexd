@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"net/url"
 	"os"
 	"reflect"
@@ -1259,6 +1261,29 @@ func TestHostsStatsAPI(t *testing.T) {
 		t.Fatal("expected 2 hosts", len(res))
 	} else if res[0].PublicKey == res[1].PublicKey {
 		t.Fatal("expected hosts to have different public keys")
+	}
+
+	// fetch prometheus response
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/stats/hosts/detailed?response=prometheus&limit=1", cluster.Indexer.AdminURL), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth("", cluster.Indexer.AdminPassword)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// assert prometheus output contains both hosts
+	for _, hs := range res {
+		if !strings.Contains(string(body), hs.PublicKey.String()) {
+			t.Fatalf("expected prometheus output to contain host %s", hs.PublicKey)
+		}
 	}
 
 	// assert offset and limit are being applied

@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"math"
 	"net/http"
 	"regexp"
 
@@ -1164,9 +1165,20 @@ func (a *admin) handleGETStatsContracts(jc jape.Context) {
 }
 
 func (a *admin) handleGETStatsHostsDetailed(jc jape.Context) {
-	offset, limit, ok := api.ParseOffsetLimit(jc)
-	if !ok {
+	var responseFormat string
+	if jc.Check("failed to decode form", jc.DecodeForm("response", &responseFormat)) != nil {
 		return
+	}
+
+	var offset, limit int
+	if responseFormat == "prometheus" {
+		limit = math.MaxInt
+	} else {
+		var ok bool
+		offset, limit, ok = api.ParseOffsetLimit(jc)
+		if !ok {
+			return
+		}
 	}
 
 	stats, err := a.hosts.Stats(jc.Request.Context(), offset, limit)
