@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -46,12 +47,32 @@ type Builder struct {
 	request      app.RegisterAppRequest
 	registerResp *app.RegisterAppResponse
 	sharedSecret types.Hash256
+
+	consumed *atomic.Bool
+}
+
+// consume marks the builder as consumed, preventing further use. It panics if the builder has already been consumed.
+func (b *Builder) consume() {
+	if !b.consumed.CompareAndSwap(false, true) {
+		panic("Builder can only be used once")
+	}
+}
+
+// checkConsumed panics if the builder has already been consumed.
+func (b *Builder) checkConsumed() {
+	if b.consumed.Load() {
+		panic("Builder can only be used once")
+	}
 }
 
 // WaitForApproval waits for the user to approve the app connection request.
 // The user must visit the response URL returned by [Builder.Connect] to approve
 // the request. It will block until the request is either approved or denied.
+//
+// Panics if the builder has already created an SDK instance.
 func (b *Builder) WaitForApproval(ctx context.Context) (bool, error) {
+	b.checkConsumed()
+
 	if b.registerResp == nil {
 		return false, fmt.Errorf("no connection request to wait for approval")
 	} else if time.Until(b.registerResp.Expiration) <= 0 {
@@ -84,7 +105,11 @@ func (b *Builder) WaitForApproval(ctx context.Context) (bool, error) {
 // This key should be stored securely by the application and never
 // shared with anyone else. It can be regenerated using the same app
 // ID, user account, and seed phrase.
+//
+// // Panics if the builder has already created an SDK instance.
 func (b *Builder) Register(ctx context.Context, mnemonic string) (*SDK, error) {
+	b.checkConsumed()
+
 	if b.sharedSecret == (types.Hash256{}) {
 		return nil, fmt.Errorf("app not connected")
 	}
@@ -106,7 +131,10 @@ func (b *Builder) Register(ctx context.Context, mnemonic string) (*SDK, error) {
 //
 // It returns a response URL that the user must visit to approve the request.
 // The app should display the response URL to the user.
+//
+// // Panics if the builder has already created an SDK instance.
 func (b *Builder) RequestConnection(ctx context.Context) (string, error) {
+	b.checkConsumed()
 	resp, err := b.client.RequestAppConnection(ctx, b.ephemeralKey, b.request)
 	if err != nil {
 		return "", fmt.Errorf("failed to request app connection: %w", err)
@@ -117,7 +145,11 @@ func (b *Builder) RequestConnection(ctx context.Context) (string, error) {
 
 // SDK creates a new SDK instance using the given application key. If the
 // key is not authorized, an error is returned.
+//
+// Panics if the builder has already created an SDK instance.
 func (b *Builder) SDK(appKey types.PrivateKey, opts ...Option) (*SDK, error) {
+	b.checkConsumed()
+
 	if ok, err := b.client.CheckAppAuth(context.Background(), appKey); err != nil {
 		return nil, fmt.Errorf("failed to check app auth: %w", err)
 	} else if !ok {
@@ -127,6 +159,7 @@ func (b *Builder) SDK(appKey types.PrivateKey, opts ...Option) (*SDK, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to create host store: %w", err)
 	}
+	b.consume()
 	return initSDK(appKey, b.client, client.New(client.NewProvider(hostStore)), opts...), nil
 }
 
@@ -143,6 +176,9 @@ func deriveAppKey(mnemonic string, appID types.Hash256, sharedSecret types.Hash2
 }
 
 // NewBuilder creates a new Builder for connecting applications to the indexer.
+//
+// A builder can only be used to create a single SDK instance. Attempting to
+// reuse a builder will result in a panic.
 func NewBuilder(indexerURL string, metadata AppMetadata) *Builder {
 	return &Builder{
 		ephemeralKey: types.GeneratePrivateKey(),
@@ -154,7 +190,8 @@ func NewBuilder(indexerURL string, metadata AppMetadata) *Builder {
 			ServiceURL:  metadata.ServiceURL,
 			CallbackURL: metadata.CallbackURL,
 		},
-		client: app.NewClient(indexerURL),
+		client:   app.NewClient(indexerURL),
+		consumed: &atomic.Bool{},
 	}
 }
 
