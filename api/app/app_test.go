@@ -135,7 +135,7 @@ func uploadRandomSlab(t testing.TB, client *client.Client, sk types.PrivateKey, 
 	}
 	return slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
-		MinShards:     1,
+		MinShards:     4,
 		Sectors:       sectors,
 	}
 }
@@ -144,7 +144,7 @@ func TestApplicationAPI(t *testing.T) {
 	ctx := t.Context()
 	// create cluster with three hosts
 	logger := zaptest.NewLogger(t)
-	cluster := testutils.NewCluster(t, testutils.WithHosts(10), testutils.WithLogger(logger))
+	cluster := testutils.NewCluster(t, testutils.WithHosts(14), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
 
@@ -159,8 +159,8 @@ func TestApplicationAPI(t *testing.T) {
 	hosts, err := adminClient.Hosts(ctx)
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
-	} else if len(hosts) != 10 {
-		t.Fatal("expected 10 hosts, got", len(hosts))
+	} else if len(hosts) != 14 {
+		t.Fatal("expected 14 hosts, got", len(hosts))
 	}
 
 	// prepare accounts for the test
@@ -203,9 +203,9 @@ func TestApplicationAPI(t *testing.T) {
 
 	// assert minimum redundancy is enforced
 	p := uploadRandomSlab(t, hc, sk, hosts)
-	p.Sectors = p.Sectors[:2]
+	p.Sectors = p.Sectors[:5]
 	_, err = client.PinSlabs(context.Background(), sk, p)
-	if err == nil || !strings.Contains(err.Error(), "not enough redundancy") {
+	if err == nil || !strings.Contains(err.Error(), "too low") {
 		t.Fatal("expected redundancy error, got:", err)
 	}
 
@@ -214,8 +214,8 @@ func TestApplicationAPI(t *testing.T) {
 	usableHosts, err := client.Hosts(context.Background(), sk)
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
-	} else if len(usableHosts) != 10 {
-		t.Fatal("expected 10 usable hosts, got", len(usableHosts))
+	} else if len(usableHosts) != 14 {
+		t.Fatal("expected 14 usable hosts, got", len(usableHosts))
 	}
 
 	// add quic to h1
@@ -301,8 +301,8 @@ func TestApplicationAPI(t *testing.T) {
 	usableHosts, err = client.Hosts(context.Background(), sk)
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
-	} else if len(usableHosts) != 9 {
-		t.Fatal("expected 9 usable hosts, got", len(usableHosts))
+	} else if len(usableHosts) != 13 {
+		t.Fatal("expected 13 usable hosts, got", len(usableHosts))
 	}
 
 	// assert limit and offset are applied
@@ -310,7 +310,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("failed to get hosts with limit:", err)
 	} else if len(usableHosts) != 1 {
 		t.Fatal("expected 1 usable host, got", len(usableHosts))
-	} else if usableHosts, err := client.Hosts(context.Background(), sk, api.WithOffset(9), api.WithLimit(1)); err != nil {
+	} else if usableHosts, err := client.Hosts(context.Background(), sk, api.WithOffset(13), api.WithLimit(1)); err != nil {
 		t.Fatal("failed to get hosts with limit:", err)
 	} else if len(usableHosts) != 0 {
 		t.Fatal("expected 0 usable hosts, got", len(usableHosts))
@@ -581,8 +581,18 @@ func TestAppConnect(t *testing.T) {
 	appAccount, err := appClient.Account(context.Background(), sk)
 	if err != nil {
 		t.Fatal(err)
-	} else if !reflect.DeepEqual(account, appAccount) {
-		t.Fatalf("account mismatch: expected %+v, got %+v", account, appAccount)
+	}
+
+	expected := app.AccountResponse{
+		AccountKey:    account.AccountKey,
+		MaxPinnedData: account.MaxPinnedData,
+		PinnedData:    account.PinnedData,
+		PinnedSize:    account.PinnedSize,
+		App:           account.App,
+		LastUsed:      account.LastUsed,
+	}
+	if !reflect.DeepEqual(expected, appAccount) {
+		t.Fatalf("account mismatch: expected %+v, got %+v", expected, appAccount)
 	}
 
 	// authenticate again to ensure the same user secret is returned
@@ -655,7 +665,7 @@ func TestSharedObjects(t *testing.T) {
 
 	// create cluster with three hosts
 	logger := zap.NewNop()
-	cluster := testutils.NewCluster(t, testutils.WithHosts(12), testutils.WithLogger(logger))
+	cluster := testutils.NewCluster(t, testutils.WithHosts(14), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
 
@@ -670,8 +680,8 @@ func TestSharedObjects(t *testing.T) {
 	hosts, err := adminClient.Hosts(ctx)
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
-	} else if len(hosts) != 12 {
-		t.Fatal("expected 12 hosts, got", len(hosts))
+	} else if len(hosts) != 14 {
+		t.Fatal("expected 14 hosts, got", len(hosts))
 	}
 
 	// prepare accounts

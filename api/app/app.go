@@ -115,6 +115,17 @@ type (
 		Approve bool `json:"approve"`
 	}
 
+	// AccountResponse is the response body for the [GET] /account endpoint.
+	// It is the same as accounts.Account without the connect key.
+	AccountResponse struct {
+		AccountKey    proto.Account    `json:"accountKey"`
+		MaxPinnedData uint64           `json:"maxPinnedData"`
+		PinnedData    uint64           `json:"pinnedData"`
+		PinnedSize    uint64           `json:"pinnedSize"`
+		App           accounts.AppMeta `json:"app"`
+		LastUsed      time.Time        `json:"lastUsed"`
+	}
+
 	app struct {
 		store     Store
 		accounts  Accounts
@@ -622,6 +633,7 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 
 	err := a.accounts.RegisterAppKey(authReq.ConnectKey, appKey, accounts.AppMeta{
 		ID:          authReq.Request.AppID,
+		Name:        authReq.Request.Name,
 		Description: authReq.Request.Description,
 		LogoURL:     authReq.Request.LogoURL,
 		ServiceURL:  authReq.Request.ServiceURL,
@@ -654,7 +666,14 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(account)
+	jc.Encode(AccountResponse{
+		AccountKey:    account.AccountKey,
+		MaxPinnedData: account.MaxPinnedData,
+		PinnedData:    account.PinnedData,
+		PinnedSize:    account.PinnedSize,
+		App:           account.App,
+		LastUsed:      account.LastUsed,
+	})
 }
 
 // NewAPI creates a new instance of the application API. This API is used by

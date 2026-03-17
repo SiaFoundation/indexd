@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
 	"lukechampine.com/frand"
@@ -13,7 +14,7 @@ import (
 func TestSlabPinParamsValidate(t *testing.T) {
 	params := slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
-		MinShards:     1,
+		MinShards:     10,
 		Sectors: func() (s []slabs.PinnedSector) {
 			for range 30 {
 				s = append(s, slabs.PinnedSector{
@@ -42,8 +43,8 @@ func TestSlabPinParamsValidate(t *testing.T) {
 	}
 
 	// assert insufficient redundancy is illegal
-	params.Sectors = params.Sectors[:1]
-	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "not enough redundancy") {
+	params.Sectors = params.Sectors[:10]
+	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "is too low") {
 		t.Fatal("unexpected", err)
 	}
 
@@ -86,6 +87,27 @@ func TestSlabPinParamsDigest(t *testing.T) {
 	}
 }
 
+func TestSlabPinParamsSize(t *testing.T) {
+	params := slabs.SlabPinParams{
+		MinShards: 10,
+		Sectors: func() (s []slabs.PinnedSector) {
+			for range 30 {
+				s = append(s, slabs.PinnedSector{
+					Root:    frand.Entropy256(),
+					HostKey: frand.Entropy256(),
+				})
+			}
+			return s
+		}(),
+	}
+
+	if params.DataSize() != 10*proto.SectorSize {
+		t.Fatalf("expected DataSize %d, got %d", 10*proto.SectorSize, params.DataSize())
+	} else if params.Size() != 30*proto.SectorSize {
+		t.Fatalf("expected Size %d, got %d", 30*proto.SectorSize, params.Size())
+	}
+}
+
 func TestValidateECParams(t *testing.T) {
 	tests := []struct {
 		minShards   int
@@ -125,11 +147,21 @@ func TestValidateECParams(t *testing.T) {
 		{
 			minShards:   1,
 			totalShards: 10,
-			ok:          true,
+			ok:          false, // 10x redundancy is too high
+		},
+		{
+			minShards:   60,
+			totalShards: 75,
+			ok:          false, // 1.25x redundancy is too low
 		},
 		{
 			minShards:   10,
 			totalShards: 30,
+			ok:          true,
+		},
+		{
+			minShards:   40,
+			totalShards: 80,
 			ok:          true,
 		},
 		{

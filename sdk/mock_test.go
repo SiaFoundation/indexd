@@ -14,6 +14,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
@@ -164,7 +165,12 @@ type mockAppClient struct {
 	objects map[types.Hash256]slabs.SealedObject
 }
 
-// PinSlab implements the [AppClient] interface.
+// Account implements the [appClient] interface.
+func (mc *mockAppClient) Account(_ context.Context, _ types.PrivateKey) (resp app.AccountResponse, err error) {
+	return app.AccountResponse{}, nil
+}
+
+// PinSlab implements the [appClient] interface.
 func (mc *mockAppClient) PinSlabs(_ context.Context, _ types.PrivateKey, toPin ...slabs.SlabPinParams) (digests []slabs.SlabID, err error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
@@ -190,7 +196,7 @@ func (mc *mockAppClient) PinSlabs(_ context.Context, _ types.PrivateKey, toPin .
 	return
 }
 
-// UnpinSlab implements the [AppClient] interface.
+// UnpinSlab implements the [appClient] interface.
 func (mc *mockAppClient) UnpinSlab(_ context.Context, _ types.PrivateKey, id slabs.SlabID) error {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
@@ -198,7 +204,7 @@ func (mc *mockAppClient) UnpinSlab(_ context.Context, _ types.PrivateKey, id sla
 	return nil
 }
 
-// Slab implements the [AppClient] interface.
+// Slab implements the [appClient] interface.
 func (mc *mockAppClient) Slab(_ context.Context, _ types.PrivateKey, id slabs.SlabID) (slabs.PinnedSlab, error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
@@ -209,7 +215,7 @@ func (mc *mockAppClient) Slab(_ context.Context, _ types.PrivateKey, id slabs.Sl
 	return slab, nil
 }
 
-// Hosts implements the [AppClient] interface.
+// Hosts implements the [appClient] interface.
 func (mc *mockAppClient) Hosts(context.Context, types.PrivateKey, ...api.URLQueryParameterOption) ([]hosts.HostInfo, error) {
 	return nil, nil
 }
@@ -231,7 +237,7 @@ func (mc *mockAppClient) ListObjects(ctx context.Context, _ types.PrivateKey, cu
 	return objs, nil
 }
 
-// SharedObject implements the [AppClient] interface.
+// SharedObject implements the [appClient] interface.
 func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (slabs.SharedObject, []byte, error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
@@ -266,7 +272,7 @@ func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (sl
 	return slabs.SharedObject{Slabs: objSlabs}, encryptionKey, nil
 }
 
-// SaveObject implements the [AppClient] interface.
+// SaveObject implements the [appClient] interface.
 func (mc *mockAppClient) SaveObject(ctx context.Context, _ types.PrivateKey, obj slabs.SealedObject) (err error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
@@ -274,7 +280,7 @@ func (mc *mockAppClient) SaveObject(ctx context.Context, _ types.PrivateKey, obj
 	return nil
 }
 
-// CreateSharedObjectURL implements the [AppClient] interface.
+// CreateSharedObjectURL implements the [appClient] interface.
 func (mc *mockAppClient) CreateSharedObjectURL(ctx context.Context, _ types.PrivateKey, objectKey types.Hash256, encryptionKey []byte, validUntil time.Time) (string, error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()

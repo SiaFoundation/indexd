@@ -1127,7 +1127,8 @@ func TestSettingsAPI(t *testing.T) {
 func TestWalletAPI(t *testing.T) {
 	// create indexer
 	c := testutils.NewConsensusNode(t, zap.NewNop())
-	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	// avoid contract/wallet maintenance making test non deterministic
+	indexer := testutils.NewIndexer(t, c, zap.NewNop(), testutils.WithContractOptions(contracts.WithMaintenanceFrequency(time.Hour)))
 	adminClient := indexer.Admin
 
 	c.MineBlocks(t, indexer.WalletAddr(), 1)
@@ -1329,9 +1330,9 @@ func TestHostsStatsAPI(t *testing.T) {
 }
 
 func TestSectorStatsAPI(t *testing.T) {
-	// create cluster with three hosts
+	// create cluster with 14 hosts - minimum needed for valid EC params (4-of-14 = 3.5x redundancy)
 	logger := newTestLogger(false)
-	cluster := testutils.NewCluster(t, testutils.WithHosts(10), testutils.WithLogger(logger))
+	cluster := testutils.NewCluster(t, testutils.WithHosts(14), testutils.WithLogger(logger))
 	indexer := cluster.Indexer
 	adminClient := indexer.Admin
 
@@ -1351,7 +1352,7 @@ func TestSectorStatsAPI(t *testing.T) {
 	indexer.Store().AddTestAccount(t, account.PublicKey())
 	slabIDs, err := indexer.App.PinSlabs(context.Background(), account, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{1},
-		MinShards:     1,
+		MinShards:     4,
 		Sectors: func() (s []slabs.PinnedSector) {
 			for _, h := range cluster.Hosts {
 				s = append(s, slabs.PinnedSector{Root: frand.Entropy256(), HostKey: h.PublicKey()})

@@ -414,7 +414,11 @@ components:
         pinnedData:
           type: number
           format: uint64
-          description: Current amount of pinned data in bytes.
+          description: Current amount of pinned data in bytes before redundancy.
+        pinnedSize:
+          type: number
+          format: uint64
+          description: Current amount of pinned data in bytes including redundancy.
         ready:
           type: boolean
           description: Whether the account is ready to be used. This only returns 'false' after an account is created. Once an account is ready it will remain ready. Getting ready can take up to a few minutes
@@ -425,6 +429,14 @@ components:
           format: date-time
           description: The last time the account was used. Updated when pinning a slab or retrieving a slab.
 
+    AppAccountResponse:
+      allOf:
+        - $ref: "#/components/schemas/Account"
+        - type: object
+          properties:
+            connectKey:
+              not: {}
+
     AppMeta:
       type: object
       properties:
@@ -432,6 +444,9 @@ components:
           allOf:
             - $ref: "#/components/schemas/Hash256"
             - description: The app's unique identifier
+        name:
+          type: string
+          description: Name of the app
         description:
           type: string
           description: Description of the app
@@ -851,6 +866,9 @@ components:
             allOf:
               - $ref: "#/components/schemas/Hash256"
               - description: The app's ID
+          name:
+            type: string
+            description: Name of the app
           accounts:
             type: integer
             format: uint64
@@ -862,7 +880,11 @@ components:
           pinnedData:
             type: integer
             format: uint64
-            description: Total pinned data in bytes across all accounts in this app
+            description: Total pinned data in bytes before redundancy across all accounts in this app
+          pinnedSize:
+            type: integer
+            format: uint64
+            description: Total pinned data in bytes including redundancy across all accounts in this app
 
     ContractsStatsResponse:
       type: object
@@ -1085,7 +1107,11 @@ components:
         pinnedData:
           type: integer
           format: uint64
-          description: Sum of all the pinned data of the accounts associated with this key
+          description: Sum of all the pinned data before redundancy of the accounts associated with this key
+        pinnedSize:
+          type: integer
+          format: uint64
+          description: Sum of all the pinned data including redundancy of the accounts associated with this key
 
     AppConnectKeyRequest:
       type: object

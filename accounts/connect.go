@@ -63,6 +63,7 @@ type (
 		LastUpdated   time.Time `json:"lastUpdated"`
 		LastUsed      time.Time `json:"lastUsed"`
 		PinnedData    uint64    `json:"pinnedData"`
+		PinnedSize    uint64    `json:"pinnedSize"`
 	}
 
 	// AppConnectKeyRequest represents a request to add or update
@@ -76,6 +77,7 @@ type (
 	// AppMeta contains additional metadata associated with an account.
 	AppMeta struct {
 		ID          types.Hash256 `json:"id"`
+		Name        string        `json:"name"`
 		Description string        `json:"description"`
 		LogoURL     string        `json:"logoURL"`
 		ServiceURL  string        `json:"serviceURL"`

@@ -57,7 +57,7 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatal("expected app connect key to have remaining uses")
 	}
 
-	assertAccount := func(acc types.PublicKey, pinned, maxPinned uint64, desc, logo, service string) {
+	assertAccount := func(acc types.PublicKey, pinned, maxPinned uint64, name, desc, logo, service string) {
 		t.Helper()
 		account, err := store.Account(types.PublicKey(acc))
 		if err != nil {
@@ -66,6 +66,8 @@ func TestAppConnectKeys(t *testing.T) {
 			t.Fatalf("expected %d pinned data for account %v, got %d", pinned, acc, account.PinnedData)
 		} else if account.MaxPinnedData != maxPinned {
 			t.Fatalf("expected max pinned data to be %d, got %d", maxPinned, account.MaxPinnedData)
+		} else if account.App.Name != name {
+			t.Fatalf("expected name to be %q, got %q", name, account.App.Name)
 		} else if account.App.Description != desc {
 			t.Fatalf("expected description to be %q, got %q", desc, account.App.Description)
 		} else if account.App.LogoURL != logo {
@@ -79,6 +81,7 @@ func TestAppConnectKeys(t *testing.T) {
 
 	acc := types.GeneratePrivateKey().PublicKey()
 	meta := accounts.AppMeta{
+		Name:        "myapp",
 		Description: "desc",
 		LogoURL:     "logo",
 		ServiceURL:  "service",
@@ -86,7 +89,7 @@ func TestAppConnectKeys(t *testing.T) {
 	if err := store.RegisterAppKey(connectKey, acc, meta); err != nil {
 		t.Fatal("failed to use app connect key:", err)
 	}
-	assertAccount(acc, 0, math.MaxInt64, "desc", "logo", "service")
+	assertAccount(acc, 0, math.MaxInt64, "myapp", "desc", "logo", "service")
 
 	// ensure the key's last used field was updated
 	keys, err := store.AppConnectKeys(0, 1)

@@ -64,6 +64,8 @@ type (
 	AccountStatsResponse struct {
 		Registered uint64 `json:"registered"`
 		Active     uint64 `json:"active"`
+		PinnedData uint64 `json:"pinnedData"`
+		PinnedSize uint64 `json:"pinnedSize"`
 	}
 
 	// ConnectKeyQuotaStats contains the number of connect keys associated with a
@@ -85,9 +87,11 @@ type (
 	// AppStats contains per-app statistics.
 	AppStats struct {
 		AppID      types.Hash256 `json:"appID"`
+		Name       string        `json:"name"`
 		Accounts   uint64        `json:"accounts"`
 		Active     uint64        `json:"active"`
 		PinnedData uint64        `json:"pinnedData"`
+		PinnedSize uint64        `json:"pinnedSize"`
 	}
 
 	// HostStatsResponse is the response body for the [GET] /stats/hosts/detailed.
