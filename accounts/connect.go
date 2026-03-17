@@ -77,6 +77,7 @@ type (
 	// AppMeta contains additional metadata associated with an account.
 	AppMeta struct {
 		ID          types.Hash256 `json:"id"`
+		Name        string        `json:"name"`
 		Description string        `json:"description"`
 		LogoURL     string        `json:"logoURL"`
 		ServiceURL  string        `json:"serviceURL"`

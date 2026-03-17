@@ -441,6 +441,9 @@ components:
           allOf:
             - $ref: "#/components/schemas/Hash256"
             - description: The app's unique identifier
+        name:
+          type: string
+          description: Name of the app
         description:
           type: string
           description: Description of the app

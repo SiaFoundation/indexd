@@ -633,6 +633,7 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 
 	err := a.accounts.RegisterAppKey(authReq.ConnectKey, appKey, accounts.AppMeta{
 		ID:          authReq.Request.AppID,
+		Name:        authReq.Request.Name,
 		Description: authReq.Request.Description,
 		LogoURL:     authReq.Request.LogoURL,
 		ServiceURL:  authReq.Request.ServiceURL,

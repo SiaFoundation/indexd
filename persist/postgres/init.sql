@@ -33,6 +33,7 @@ CREATE TABLE accounts (
     pinned_size BIGINT NOT NULL DEFAULT 0 CHECK (pinned_size >= 0), -- total pinned data in bytes including redundancy
     max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0), -- max pinned data in bytes
     app_id BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(app_id) = 32), -- app identifier
+    name TEXT NOT NULL DEFAULT '',
     description TEXT NOT NULL DEFAULT '',
     logo_url TEXT NOT NULL DEFAULT '',
     service_url TEXT NOT NULL DEFAULT '',
