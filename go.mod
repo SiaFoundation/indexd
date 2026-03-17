@@ -10,7 +10,7 @@ require (
 	github.com/quic-go/quic-go v0.59.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.19.1-0.20260313152606-1a17a74e466a
-	go.sia.tech/coreutils v0.21.2-0.20260313204039-b555900812a2
+	go.sia.tech/coreutils v0.21.2-0.20260316133547-75c35c07930d
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/mux v1.4.0
 	go.sia.tech/web/indexd v0.15.0
