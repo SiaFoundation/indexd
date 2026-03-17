@@ -19,6 +19,7 @@ import (
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/subscriber"
 	"go.uber.org/zap"
+	"lukechampine.com/frand"
 )
 
 const (
@@ -146,8 +147,7 @@ func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 	} else if err != nil {
 		t.Fatal(err)
 	}
-
-	if err := ts.RegisterAppKey(connectKey, ak, accounts.AppMeta{}); err != nil {
+	if err := ts.RegisterAppKey(connectKey, ak, accounts.AppMeta{ID: frand.Entropy256()}); err != nil {
 		t.Fatal(err)
 	}
 }

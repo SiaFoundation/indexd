@@ -1263,23 +1263,9 @@ func TestHostsStatsAPI(t *testing.T) {
 		t.Fatal("expected hosts to have different public keys")
 	}
 
-	// fetch prometheus response
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("%s/stats/hosts/detailed?response=prometheus&limit=1", cluster.Indexer.AdminURL), nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.SetBasicAuth("", cluster.Indexer.AdminPassword)
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert prometheus output contains both hosts
+	// assert prometheus response body contains both hosts, ignoring the limit
+	url := fmt.Sprintf("%s/stats/hosts/detailed?response=prometheus&limit=1", cluster.Indexer.AdminURL)
+	body := doRawRequest(t, url, cluster.Indexer.AdminPassword)
 	for _, hs := range res {
 		if !strings.Contains(string(body), hs.PublicKey.String()) {
 			t.Fatalf("expected prometheus output to contain host %s", hs.PublicKey)
@@ -1351,6 +1337,46 @@ func TestHostsStatsAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if host.LostSectors != 0 {
 		t.Fatalf("expected 0 lost sectors after reset, got %d", host.LostSectors)
+	}
+}
+
+func TestAppStatsAPI(t *testing.T) {
+	cluster := testutils.NewCluster(t, testutils.WithHosts(1))
+	adminClient := cluster.Indexer.Admin
+	cluster.WaitForContracts(t)
+
+	// create two apps
+	cluster.Indexer.Store().AddTestAccount(t, types.GeneratePrivateKey().PublicKey())
+	cluster.Indexer.Store().AddTestAccount(t, types.GeneratePrivateKey().PublicKey())
+
+	// assert both apps are returned
+	res, err := adminClient.StatsApps(t.Context(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res) != 2 {
+		t.Fatalf("expected 2 apps, got %d", len(res))
+	}
+
+	// assert prometheus response body contains both app IDs, ignoring the limit
+	url := fmt.Sprintf("%s/stats/apps?response=prometheus&limit=1", cluster.Indexer.AdminURL)
+	body := doRawRequest(t, url, cluster.Indexer.AdminPassword)
+	if !strings.Contains(string(body), res[0].AppID.String()) {
+		t.Fatalf("expected prometheus output to contain app %s", res[0].AppID)
+	}
+
+	// assert offset and limit are being applied
+	res, err = adminClient.StatsApps(t.Context(), 1, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res) != 1 {
+		t.Fatalf("expected 1 app, got %d", len(res))
+	}
+
+	res, err = adminClient.StatsApps(t.Context(), 2, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(res) != 0 {
+		t.Fatalf("expected 0 apps, got %d", len(res))
 	}
 }
 
@@ -1574,4 +1600,23 @@ func newTestLogger(enable bool) *zap.Logger {
 		zap.AddCaller(),
 		zap.AddStacktrace(zap.DebugLevel),
 	)
+}
+
+func doRawRequest(t *testing.T, url, password string) []byte {
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.SetBasicAuth("", password)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
 }
