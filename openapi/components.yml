@@ -863,6 +863,9 @@ components:
             allOf:
               - $ref: "#/components/schemas/Hash256"
               - description: The app's ID
+          name:
+            type: string
+            description: Name of the app
           accounts:
             type: integer
             format: uint64

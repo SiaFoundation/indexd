@@ -117,6 +117,7 @@ func (s *Store) AppStats(offset, limit int) ([]admin.AppStats, error) {
 		rows, err := tx.Query(ctx, `
 SELECT
 	app_id,
+	ANY_VALUE(name),
 	COUNT(*),
 	COUNT(*) FILTER (WHERE last_used >= $1),
 	COALESCE(SUM(pinned_data), 0),
@@ -135,7 +136,7 @@ OFFSET $2 LIMIT $3`,
 
 		for rows.Next() {
 			var as admin.AppStats
-			if err := rows.Scan((*sqlHash256)(&as.AppID), &as.Accounts, &as.Active, &as.PinnedData, &as.PinnedSize); err != nil {
+			if err := rows.Scan((*sqlHash256)(&as.AppID), &as.Name, &as.Accounts, &as.Active, &as.PinnedData, &as.PinnedSize); err != nil {
 				return err
 			}
 			stats = append(stats, as)
