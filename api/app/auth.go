@@ -55,31 +55,31 @@ func ValidateURLSignature(r *http.Request, w http.ResponseWriter, hostname strin
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return types.PublicKey{}, false
 	} else if err != nil {
-		http.Error(w, "failed to read request body", http.StatusBadRequest)
+		http.Error(w, "failed to read request body", http.StatusUnauthorized)
 		return types.PublicKey{}, false
 	}
 	r.Body = io.NopCloser(bytes.NewReader(buf))
 
 	// validate presence of required parameters
 	if !isSignedRequest(r) {
-		http.Error(w, fmt.Sprintf("missing required query parameters: %q, %q, %q", queryParamCredential, queryParamSignature, queryParamValidUntil), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("missing required query parameters: %q, %q, %q", queryParamCredential, queryParamSignature, queryParamValidUntil), http.StatusUnauthorized)
 		return types.PublicKey{}, false
 	}
 
 	// extract query string parameters
 	ts, err := parseValidUntil(r)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("invalid %q parameter: %v", queryParamValidUntil, err), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("invalid %q parameter: %v", queryParamValidUntil, err), http.StatusUnauthorized)
 		return types.PublicKey{}, false
 	}
 	pk, err := parseCredential(r)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("invalid %q parameter: %v", queryParamCredential, err), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("invalid %q parameter: %v", queryParamCredential, err), http.StatusUnauthorized)
 		return types.PublicKey{}, false
 	}
 	sig, err := parseSignature(r)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("invalid %q parameter: %v", queryParamSignature, err), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("invalid %q parameter: %v", queryParamSignature, err), http.StatusUnauthorized)
 		return types.PublicKey{}, false
 	}
 
