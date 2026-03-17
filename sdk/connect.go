@@ -106,7 +106,7 @@ func (b *Builder) WaitForApproval(ctx context.Context) (bool, error) {
 // shared with anyone else. It can be regenerated using the same app
 // ID, user account, and seed phrase.
 //
-// // Panics if the builder has already created an SDK instance.
+// Panics if the builder has already created an SDK instance.
 func (b *Builder) Register(ctx context.Context, mnemonic string) (*SDK, error) {
 	b.checkConsumed()
 
