@@ -122,6 +122,7 @@ type (
 	AccountResponse struct {
 		AccountKey    proto.Account    `json:"accountKey"`
 		MaxPinnedData uint64           `json:"maxPinnedData"`
+		Ready         bool             `json:"ready"`
 		PinnedData    uint64           `json:"pinnedData"`
 		PinnedSize    uint64           `json:"pinnedSize"`
 		App           accounts.AppMeta `json:"app"`
@@ -705,6 +706,7 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(AccountResponse{
 		AccountKey:    account.AccountKey,
 		MaxPinnedData: account.MaxPinnedData,
+		Ready:         account.Ready,
 		PinnedData:    account.PinnedData,
 		PinnedSize:    account.PinnedSize,
 		App:           account.App,
