@@ -1655,7 +1655,7 @@ paths:
             default: 0
         - name: response
           in: query
-          description: When set to "prometheus", all hosts are returned in Prometheus text format, ignoring offset and limit.
+          description: When set to "prometheus", returns statistics for all used hosts in Prometheus text format, ignoring offset and limit.
           schema:
             type: string
             enum:

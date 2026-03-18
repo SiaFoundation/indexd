@@ -1264,7 +1264,7 @@ func TestHostsStatsAPI(t *testing.T) {
 	}
 
 	// assert prometheus response body contains both hosts, ignoring the limit
-	url := fmt.Sprintf("%s/stats/hosts/detailed?response=prometheus&limit=1", cluster.Indexer.AdminURL)
+	url := fmt.Sprintf("%s/stats/hosts/detailed?response=prometheus&offset=1&limit=1", cluster.Indexer.AdminURL)
 	body := doRawRequest(t, url, cluster.Indexer.AdminPassword)
 	for _, hs := range res {
 		if !strings.Contains(string(body), hs.PublicKey.String()) {
@@ -1358,10 +1358,12 @@ func TestAppStatsAPI(t *testing.T) {
 	}
 
 	// assert prometheus response body contains both app IDs, ignoring the limit
-	url := fmt.Sprintf("%s/stats/apps?response=prometheus&limit=1", cluster.Indexer.AdminURL)
+	url := fmt.Sprintf("%s/stats/apps?response=prometheus&offset=1&limit=1", cluster.Indexer.AdminURL)
 	body := doRawRequest(t, url, cluster.Indexer.AdminPassword)
-	if !strings.Contains(string(body), res[0].AppID.String()) {
-		t.Fatalf("expected prometheus output to contain app %s", res[0].AppID)
+	for _, s := range res {
+		if !strings.Contains(string(body), s.AppID.String()) {
+			t.Fatalf("expected prometheus output to contain app %s", s.AppID)
+		}
 	}
 
 	// assert offset and limit are being applied
@@ -1617,6 +1619,9 @@ func doRawRequest(t *testing.T, url, password string) []byte {
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("unexpected status code: %d", resp.StatusCode)
 	}
 	return body
 }
