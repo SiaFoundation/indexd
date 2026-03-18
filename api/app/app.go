@@ -317,8 +317,8 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 }
 
 func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
-	var obj slabs.SealedObject
-	if jc.Decode(&obj) != nil {
+	obj, ok := decodeRequest[slabs.SealedObject](jc)
+	if !ok {
 		return
 	}
 
@@ -351,8 +351,8 @@ func (a *app) handleDELETEObjects(jc jape.Context, pk types.PublicKey) {
 }
 
 func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
-	var params []slabs.SlabPinParams
-	if jc.Decode(&params) != nil {
+	params, ok := decodeRequest[[]slabs.SlabPinParams](jc)
+	if !ok {
 		return
 	}
 	for _, param := range params {
@@ -457,8 +457,8 @@ func (a *app) handleAuthRequest(jc jape.Context) {
 		return
 	}
 
-	var req RegisterAppRequest
-	if err := jc.Decode(&req); err != nil {
+	req, ok := decodeRequest[RegisterAppRequest](jc)
+	if !ok {
 		return
 	}
 
@@ -554,8 +554,8 @@ func (a *app) handlePOSTAuthConnect(jc jape.Context) {
 		return
 	}
 
-	var approveReq ApproveAppRequest
-	if jc.Decode(&approveReq) != nil {
+	approveReq, ok := decodeRequest[ApproveAppRequest](jc)
+	if !ok {
 		return
 	}
 
@@ -657,8 +657,8 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 		return
 	}
 
-	var registerReq RegisterAppKeyRequest
-	if jc.Decode(&registerReq) != nil {
+	registerReq, ok := decodeRequest[RegisterAppKeyRequest](jc)
+	if !ok {
 		return
 	}
 	// verify ownership of the app key
@@ -710,6 +710,21 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 		App:           account.App,
 		LastUsed:      account.LastUsed,
 	})
+}
+
+// decodeRequest is a helper that also handles writing the error response when
+// decoding fails due to a requst body that is too large.
+func decodeRequest[T any](jc jape.Context) (T, bool) {
+	var req T
+	err := jc.Decode(&req)
+	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		http.Error(jc.ResponseWriter, "request body too large", http.StatusRequestEntityTooLarge)
+		return req, false
+	} else if err != nil {
+		http.Error(jc.ResponseWriter, "failed to read request body", http.StatusInternalServerError)
+		return req, false
+	}
+	return req, true
 }
 
 // NewAPI creates a new instance of the application API. This API is used by
@@ -766,7 +781,7 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		}
 	}
 
-	return corsMux(map[string]jape.Handler{
+	return maxBytesMiddleware(corsMux(map[string]jape.Handler{
 		"GET /account": wrapSignedAuth(a.handleGETAccount),
 
 		// auth is a multi-step process designed to protect privacy while allowing arbitrary apps to connect:
@@ -801,5 +816,5 @@ func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, 
 		// blocked entirely, but it's less convenient without CORS support.
 		"GET /auth/connect/:requestID":  a.handleGETAuthConnectUI,               // UI for accept/reject connection requests
 		"POST /auth/connect/:requestID": wrapBasicAuth(a.handlePOSTAuthConnect), // API for accept/reject connection requests
-	}), nil
+	})), nil
 }

@@ -38,6 +38,13 @@ const (
 	queryParamValidUntil = "sv"
 )
 
+func maxBytesMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestSize)
+		next.ServeHTTP(w, r)
+	})
+}
+
 // ValidateURLSignature extracts the signed public key from the request
 // and verifies the signature and expiration. The caller must check the boolean
 // return value before proceeding with the request. The response header is written
@@ -48,9 +55,8 @@ const (
 // the signature and expiration. If you need to check for account existence, use
 // validateSignedURLAuth instead.
 func ValidateURLSignature(r *http.Request, w http.ResponseWriter, hostname string) (types.PublicKey, bool) {
-	body := http.MaxBytesReader(w, r.Body, maxRequestSize)
-	buf, err := io.ReadAll(body)
-	body.Close()
+	buf, err := io.ReadAll(r.Body)
+	r.Body.Close()
 	if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 		http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
 		return types.PublicKey{}, false
