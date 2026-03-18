@@ -1605,6 +1605,8 @@ func newTestLogger(enable bool) *zap.Logger {
 }
 
 func doRawRequest(t *testing.T, url, password string) []byte {
+	t.Helper()
+
 	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
 	if err != nil {
 		t.Fatal(err)

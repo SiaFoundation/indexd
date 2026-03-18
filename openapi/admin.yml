@@ -1598,11 +1598,15 @@ paths:
               - prometheus
       responses:
         "200":
-          description: Per-app statistics
+          description: Per-app statistics. When response=prometheus, metrics are returned in Prometheus text exposition format.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/AppStatsResponse"
+            text/plain:
+              schema:
+                type: string
+                description: Prometheus metrics in text exposition format, returned when response=prometheus.
 
   /stats/contracts:
     get:
@@ -1667,6 +1671,9 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HostsStatsResponse"
+            text/plain:
+              schema:
+                type: string
 
   /stats/sectors:
     get:
