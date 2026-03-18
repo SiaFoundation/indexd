@@ -201,9 +201,9 @@ func (c *Client) ListObjects(ctx context.Context, appKey types.PrivateKey, curso
 	return
 }
 
-// SaveObject saves the given object for the given account. If an object with
+// PinObject pins the object to the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (c *Client) SaveObject(ctx context.Context, appKey types.PrivateKey, obj slabs.SealedObject) (err error) {
+func (c *Client) PinObject(ctx context.Context, appKey types.PrivateKey, obj slabs.SealedObject) (err error) {
 	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/objects", obj.PinRequest(), nil)
 	return
 }

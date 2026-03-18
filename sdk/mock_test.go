@@ -272,8 +272,8 @@ func (mc *mockAppClient) SharedObject(ctx context.Context, sharedURL string) (sl
 	return slabs.SharedObject{Slabs: objSlabs}, encryptionKey, nil
 }
 
-// SaveObject implements the [appClient] interface.
-func (mc *mockAppClient) SaveObject(ctx context.Context, _ types.PrivateKey, obj slabs.SealedObject) (err error) {
+// PinObject implements the [appClient] interface.
+func (mc *mockAppClient) PinObject(ctx context.Context, _ types.PrivateKey, obj slabs.SealedObject) (err error) {
 	mc.mu.Lock()
 	defer mc.mu.Unlock()
 	mc.objects[obj.ID()] = obj

@@ -141,36 +141,12 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required:
-                - key
-                - slabs
-                - meta
-              properties:
-                id:
-                  allOf:
-                    - $ref: "#/components/schemas/Hash256"
-                    - description: The object's unique ID
-                encryptedMasterKey:
-                  type: string
-                  format: byte
-                  minLength: 72
-                  maxLength: 72
-                  description: The encrypted master key used to encrypt the object's shards (base64-encoded in JSON)
-                slabs:
-                  type: array
-                  items:
-                    $ref: "#/components/schemas/SlabSlice"
-                  description: The list of slabs that make up the object
-                encryptedMetadata:
-                  type: string
-                  format: byte
-                  description: Optional metadata stored as a byte array (base64-encoded in JSON)
+              $ref: "#/components/schemas/PinObjectRequest"
       responses:
         "200":
           description: Object created or updated successfully
         "400":
-          description: Object has no slabs or metadata exceeds size limit
+          description: Object has no slabs, metadata exceeds size limit, or object contains unpinned slab
   /objects/{key}:
     get:
       tags:
@@ -740,5 +716,9 @@ components:
       $ref: "./components.yml#/components/schemas/SlabID"
     SlabSlice:
       $ref: "./components.yml#/components/schemas/SlabSlice"
+    PinObjectRequest:
+      $ref: "./components.yml#/components/schemas/PinObjectRequest"
+    ObjectSlab:
+      $ref: "./components.yml#/components/schemas/ObjectSlab"
     SharedObject:
       $ref: "./components.yml#/components/schemas/SharedObject"

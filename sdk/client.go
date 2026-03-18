@@ -46,7 +46,7 @@ type (
 
 		ListObjects(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
 		Object(ctx context.Context, appKey types.PrivateKey, key types.Hash256) (slabs.SealedObject, error)
-		SaveObject(ctx context.Context, appKey types.PrivateKey, obj slabs.SealedObject) error
+		PinObject(ctx context.Context, appKey types.PrivateKey, obj slabs.SealedObject) error
 		DeleteObject(ctx context.Context, appKey types.PrivateKey, key types.Hash256) error
 
 		Slab(context.Context, types.PrivateKey, slabs.SlabID) (slabs.PinnedSlab, error)
@@ -411,7 +411,7 @@ func (s *SDK) PinObject(ctx context.Context, obj Object) error {
 		}
 	}
 
-	return s.client.SaveObject(ctx, s.appKey, obj.Seal(s.appKey).SealedObject)
+	return s.client.PinObject(ctx, s.appKey, obj.Seal(s.appKey).SealedObject)
 }
 
 func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, ss []slabs.SlabSlice) error {
