@@ -1037,10 +1037,11 @@ func BenchmarkPruneAccounts(b *testing.B) {
 
 	batch := &pgx.Batch{}
 	accountID, objectID, slabID := 0, 0, 0
+	pinnedDataPerAccount := int64(objectsPerAccount*slabsPerObject) * int64(proto.SectorSize)
 	for range numAccounts {
 		ak := types.GeneratePrivateKey().PublicKey()
 
-		batch.Queue(`INSERT INTO accounts(public_key, connect_key_id, max_pinned_data) VALUES ($1, $2, 1000000);`, sqlPublicKey(ak), connectKeyID)
+		batch.Queue(`INSERT INTO accounts(public_key, connect_key_id, max_pinned_data, pinned_data) VALUES ($1, $2, 1000000, $3);`, sqlPublicKey(ak), connectKeyID, pinnedDataPerAccount)
 		accountID++
 
 		for range objectsPerAccount {
@@ -1065,12 +1066,6 @@ func BenchmarkPruneAccounts(b *testing.B) {
 			batch.Queue("UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1", sqlPublicKey(ak))
 		}
 	}
-	batch.Queue(`UPDATE accounts a SET pinned_data = (
-		SELECT COALESCE(SUM(s.min_shards::bigint), 0) * $1
-		FROM account_slabs as2
-		JOIN slabs s ON s.id = as2.slab_id
-		WHERE as2.account_id = a.id
-	)`, proto.SectorSize)
 	batch.Queue(`UPDATE app_connect_keys ack SET pinned_data = (
 		SELECT COALESCE(SUM(a.pinned_data), 0)
 		FROM accounts a
