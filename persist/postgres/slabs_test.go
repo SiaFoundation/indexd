@@ -321,7 +321,7 @@ func TestSlabPruning(t *testing.T) {
 		obj1.DataSignature = types.Signature(frand.Bytes(64))
 		obj1.EncryptedMetadataKey = frand.Bytes(72)
 		obj1.MetadataSignature = types.Signature(frand.Bytes(64))
-		if err := store.SaveObject(acc, obj1.PinRequest()); err != nil {
+		if err := store.PinObject(acc, obj1.PinRequest()); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -337,7 +337,7 @@ func TestSlabPruning(t *testing.T) {
 		},
 	}
 
-	if err := store.SaveObject(acc1, obj2.PinRequest()); err != nil {
+	if err := store.PinObject(acc1, obj2.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
 

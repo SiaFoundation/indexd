@@ -113,7 +113,7 @@ type (
 		// Object methods
 		Object(account proto.Account, key types.Hash256) (SealedObject, error)
 		DeleteObject(account proto.Account, objectKey types.Hash256) error
-		SaveObject(account proto.Account, obj PinObjectRequest) error
+		PinObject(account proto.Account, obj PinObjectRequest) error
 		ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
 		SharedObject(key types.Hash256) (SharedObject, error)
 	}

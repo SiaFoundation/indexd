@@ -720,7 +720,7 @@ func TestPruneAccount(t *testing.T) {
 	obj1Acc2.DataSignature = (types.Signature)(frand.Bytes(64))
 	obj1Acc2.EncryptedMetadataKey = frand.Bytes(72)
 	obj1Acc2.MetadataSignature = (types.Signature)(frand.Bytes(64))
-	if err := store.SaveObject(acc2, obj1Acc2.PinRequest()); err != nil {
+	if err := store.PinObject(acc2, obj1Acc2.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -734,7 +734,7 @@ func TestPruneAccount(t *testing.T) {
 	obj2Acc2.DataSignature = (types.Signature)(frand.Bytes(64))
 	obj2Acc2.EncryptedMetadataKey = frand.Bytes(72)
 	obj2Acc2.MetadataSignature = (types.Signature)(frand.Bytes(64))
-	if err := store.SaveObject(acc2, obj2Acc2.PinRequest()); err != nil {
+	if err := store.PinObject(acc2, obj2Acc2.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
 

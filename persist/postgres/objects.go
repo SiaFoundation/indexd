@@ -280,9 +280,9 @@ func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) err
 	})
 }
 
-// SaveObject saves the given object for the given account. If an object with
+// PinObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (s *Store) SaveObject(account proto.Account, obj slabs.PinObjectRequest) error {
+func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		accountID, deleted, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -306,7 +306,7 @@ func (s *Store) SaveObject(account proto.Account, obj slabs.PinObjectRequest) er
 			INSERT INTO objects (object_key, account_id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature) VALUES ($1, $2, $3, $4, $5, $6, $7)
 			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, updated_at) = (EXCLUDED.encrypted_data_key, EXCLUDED.encrypted_meta_key, EXCLUDED.encrypted_metadata, EXCLUDED.data_signature, EXCLUDED.meta_signature, NOW())
 			RETURNING id`,
-			sqlHash256(obj.ID()), accountID, obj.EncryptedDataKey, encryptedMetaKey, encryptedMeta, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature)).Scan(&objectID)
+			sqlHash256(obj.ID), accountID, obj.EncryptedDataKey, encryptedMetaKey, encryptedMeta, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature)).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
@@ -314,7 +314,7 @@ func (s *Store) SaveObject(account proto.Account, obj slabs.PinObjectRequest) er
 		_, err = tx.Exec(ctx, `
 			INSERT INTO object_events (object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)
 			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, NOW())`,
-			sqlHash256(obj.ID()), accountID)
+			sqlHash256(obj.ID), accountID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object event: %w", err)
 		}

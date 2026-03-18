@@ -279,11 +279,16 @@ components:
       type: object
       description: The request body for creating or updating an object. Slabs must already be pinned to the indexer.
       required:
+        - id
         - encryptedDataKey
         - slabs
         - dataSignature
         - metadataSignature
       properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The object's ID, computed as a hash of its slabs. The server validates this matches the computed value.
         encryptedDataKey:
           type: string
           format: byte

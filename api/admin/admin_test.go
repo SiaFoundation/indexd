@@ -1505,7 +1505,7 @@ func TestPruneSlabs(t *testing.T) {
 		DataSignature:     types.Signature(frand.Bytes(64)),
 		MetadataSignature: types.Signature(frand.Bytes(64)),
 	}
-	if err := store.SaveObject(acc, obj.PinRequest()); err != nil {
+	if err := store.PinObject(acc, obj.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
 

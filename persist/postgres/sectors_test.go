@@ -97,7 +97,7 @@ func TestMigrateSector(t *testing.T) {
 		}
 	}
 
-	err = store.SaveObject(account, so.PinRequest())
+	err = store.PinObject(account, so.PinRequest())
 	if err != nil {
 		t.Fatal(err)
 	}

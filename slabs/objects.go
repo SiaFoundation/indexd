@@ -88,8 +88,9 @@ type (
 
 	// A PinObjectRequest is the minimal fields for pinning an object to the indexer. It should be created using [SealedObject.PinRequest].
 	PinObjectRequest struct {
-		EncryptedDataKey []byte       `json:"encryptedDataKey"`
-		Slabs            []ObjectSlab `json:"slabs"`
+		ID               types.Hash256 `json:"id"`
+		EncryptedDataKey []byte        `json:"encryptedDataKey"`
+		Slabs            []ObjectSlab  `json:"slabs"`
 		// DataSignature is a signature of the blake2b(object ID, encrypted_data_key)
 		// to attest that the object data has not been tampered with. This attestation
 		// is separate from the metadata attestation to allow for validating the
@@ -105,23 +106,11 @@ type (
 	}
 )
 
-// ID returns the object's ID, which is a hash of its slabs. The
-// object ID is used to identify the object and retrieve it from
-// the indexer.
-func (pr *PinObjectRequest) ID() types.Hash256 {
-	h := types.NewHasher()
-	for _, slab := range pr.Slabs {
-		slab.ID.EncodeTo(h.E)
-		h.E.WriteUint64(uint64(slab.Offset)<<32 | uint64(slab.Length))
-	}
-	return h.Sum()
-}
-
 // DataSigHash returns the hash used for signing/verifying the data signature.
 // It covers the slabs through the object ID and the encrypted data key.
 func (pr *PinObjectRequest) DataSigHash() types.Hash256 {
 	h := types.NewHasher()
-	pr.ID().EncodeTo(h.E)
+	pr.ID.EncodeTo(h.E)
 	h.E.Write(pr.EncryptedDataKey)
 	return h.Sum()
 }
@@ -131,7 +120,7 @@ func (pr *PinObjectRequest) DataSigHash() types.Hash256 {
 // key, and the encrypted metadata.
 func (pr *PinObjectRequest) MetaSigHash() types.Hash256 {
 	h := types.NewHasher()
-	pr.ID().EncodeTo(h.E)
+	pr.ID.EncodeTo(h.E)
 	h.E.Write(pr.EncryptedMetadataKey)
 	h.E.Write(pr.EncryptedMetadata)
 	return h.Sum()
@@ -204,6 +193,7 @@ func (so *SealedObject) PinRequest() PinObjectRequest {
 		}
 	}
 	return PinObjectRequest{
+		ID:                   so.ID(),
 		EncryptedDataKey:     so.EncryptedDataKey,
 		Slabs:                os,
 		DataSignature:        so.DataSignature,
@@ -226,6 +216,17 @@ func ObjectID(slabs []SlabSlice) types.Hash256 {
 	for _, slab := range slabs {
 		slabID := slab.Digest()
 		h.E.Write(slabID[:])
+		h.E.WriteUint64(uint64(slab.Offset)<<32 | uint64(slab.Length))
+	}
+	return h.Sum()
+}
+
+// pinnedObjectID computes the object ID from its slabs. This can be compared
+// against the ID field to verify the client provided the correct ID.
+func pinnedObjectID(slabs []ObjectSlab) types.Hash256 {
+	h := types.NewHasher()
+	for _, slab := range slabs {
+		slab.ID.EncodeTo(h.E)
 		h.E.WriteUint64(uint64(slab.Offset)<<32 | uint64(slab.Length))
 	}
 	return h.Sum()
@@ -285,18 +286,19 @@ func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, o
 	return m.store.DeleteObject(account, objectKey)
 }
 
-// SaveObject saves the given object for the given account. If an object with
+// PinObject pin the given object for the given account. If an object with
 // the same ID already exists for the account, it is overwritten.
-func (m *SlabManager) SaveObject(ctx context.Context, account proto.Account, obj PinObjectRequest) error {
+func (m *SlabManager) PinObject(ctx context.Context, account proto.Account, obj PinObjectRequest) error {
 	if len(obj.Slabs) == 0 {
 		return ErrObjectMinimumSlabs
 	} else if len(obj.EncryptedMetadata) > metadataLimit {
 		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(obj.EncryptedMetadata))
+	} else if pinnedObjectID(obj.Slabs) != obj.ID {
+		return fmt.Errorf("%w: object ID does not match slabs", ErrInvalidObjectSignature)
 	} else if err := obj.VerifySignatures(types.PublicKey(account)); err != nil {
 		return err
 	}
-
-	return m.store.SaveObject(account, obj)
+	return m.store.PinObject(account, obj)
 }
 
 // ListObjects lists objects for the given account that were updated after the

@@ -26,7 +26,7 @@ func (s *Store) pinRandomObject(t testing.TB, acc proto.Account, ss []slabs.Slab
 		DataSignature:        (types.Signature)(frand.Bytes(64)),
 		MetadataSignature:    (types.Signature)(frand.Bytes(64)),
 	}
-	if err := s.SaveObject(acc, obj.PinRequest()); err != nil {
+	if err := s.PinObject(acc, obj.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
 	return obj
@@ -81,7 +81,7 @@ func TestObject(t *testing.T) {
 			params.Slice(0, 100),
 		},
 	}
-	err = store.SaveObject(acc, expected.PinRequest())
+	err = store.PinObject(acc, expected.PinRequest())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -211,7 +211,7 @@ func TestObjects(t *testing.T) {
 	obj1Acc2.DataSignature = (types.Signature)(frand.Bytes(64))
 	obj1Acc2.EncryptedMetadataKey = frand.Bytes(72)
 	obj1Acc2.MetadataSignature = (types.Signature)(frand.Bytes(64))
-	if err := store.SaveObject(acc2, obj1Acc2.PinRequest()); err != nil {
+	if err := store.PinObject(acc2, obj1Acc2.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -265,7 +265,7 @@ func TestObjects(t *testing.T) {
 
 	// save object 1 again to update its timestamp
 	obj1Acc2.EncryptedMetadata = []byte("updated meta")
-	if err := store.SaveObject(acc2, obj1Acc2.PinRequest()); err != nil {
+	if err := store.PinObject(acc2, obj1Acc2.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -420,7 +420,7 @@ func TestSaveObject(t *testing.T) {
 		MetadataSignature:    types.Signature(frand.Bytes(64)),
 	}
 
-	if err := store.SaveObject(acc, objWithMeta.PinRequest()); err != nil {
+	if err := store.PinObject(acc, objWithMeta.PinRequest()); err != nil {
 		t.Fatalf("failed to save object with metadata: %v", err)
 	}
 
@@ -446,7 +446,7 @@ func TestSaveObject(t *testing.T) {
 		MetadataSignature:    types.Signature(frand.Bytes(64)),
 	}
 
-	if err := store.SaveObject(acc, objNoMeta.PinRequest()); err != nil {
+	if err := store.PinObject(acc, objNoMeta.PinRequest()); err != nil {
 		t.Fatalf("failed to save object without metadata: %v", err)
 	}
 
@@ -469,7 +469,7 @@ func TestSaveObject(t *testing.T) {
 		MetadataSignature:    types.Signature(frand.Bytes(64)),
 	}
 
-	if err := store.SaveObject(acc, objEmptyMeta.PinRequest()); err != nil {
+	if err := store.PinObject(acc, objEmptyMeta.PinRequest()); err != nil {
 		t.Fatalf("failed to save object with empty metadata slice: %v", err)
 	}
 
@@ -532,7 +532,7 @@ func TestSharedObjects(t *testing.T) {
 		EncryptedMetadata:    []byte("hello world"),
 	}
 	obj.Slabs = slices.Clone(expectedSharedObj.Slabs)
-	if err := store.SaveObject(acc1, obj.PinRequest()); err != nil {
+	if err := store.PinObject(acc1, obj.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -612,7 +612,7 @@ func BenchmarkSaveObject(b *testing.B) {
 
 	for range 10000 {
 		obj := pinObject(b)
-		if err := store.SaveObject(acc1, obj.PinRequest()); err != nil {
+		if err := store.PinObject(acc1, obj.PinRequest()); err != nil {
 			b.Fatal(err)
 		}
 		objs = append(objs, obj)
@@ -621,7 +621,7 @@ func BenchmarkSaveObject(b *testing.B) {
 	obj := pinObject(b)
 	pinReq := obj.PinRequest()
 	for b.Loop() {
-		if err := store.SaveObject(acc1, pinReq); err != nil {
+		if err := store.PinObject(acc1, pinReq); err != nil {
 			b.Fatal(err)
 		}
 	}

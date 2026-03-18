@@ -43,8 +43,8 @@ func TestObjectEquivalency(t *testing.T) {
 	so.Sign(sk)
 
 	pr := so.PinRequest()
-	if pr.ID() != so.ID() {
-		t.Fatalf("unexpected ID: got %v, want %v", pr.ID(), so.ID())
+	if pr.ID != so.ID() {
+		t.Fatalf("unexpected ID: got %v, want %v", pr.ID, so.ID())
 	} else if pr.DataSigHash() != so.DataSigHash() {
 		t.Fatalf("unexpected data sig hash: got %v, want %v", pr.DataSigHash(), so.DataSigHash())
 	} else if pr.MetaSigHash() != so.MetaSigHash() {
