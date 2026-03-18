@@ -836,4 +836,9 @@ WHERE ack.id = sub.connect_key_id;
 		_, err := tx.Exec(ctx, `ALTER TABLE accounts ADD COLUMN name TEXT NOT NULL DEFAULT '';`)
 		return err
 	},
+	// add composite index on account_hosts for ready host count queries
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX account_hosts_account_id_consecutive_failed_funds_idx ON account_hosts (account_id, consecutive_failed_funds);`)
+		return err
+	},
 }

@@ -70,6 +70,7 @@ type (
 		AccountKey    proto.Account `json:"accountKey"`
 		ConnectKey    string        `json:"connectKey"`
 		MaxPinnedData uint64        `json:"maxPinnedData"`
+		Ready         bool          `json:"ready"`
 		PinnedData    uint64        `json:"pinnedData"`
 		PinnedSize    uint64        `json:"pinnedSize"`
 		App           AppMeta       `json:"app"`

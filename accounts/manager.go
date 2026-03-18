@@ -19,6 +19,9 @@ const (
 	// AccountFundBatch is the number of host accounts we will fund in one
 	// batch.  It is equivalent to the max batch size used in replenish RPC.
 	AccountFundBatch = proto.MaxAccountBatchSize
+	// ReadyHostThreshold is the number of successfully funded host accounts
+	// required before an account is considered ready for use.
+	ReadyHostThreshold = 30
 	// AccountFundInterval is how often we will fund host accounts.
 	AccountFundInterval = time.Hour
 	// AccountActivityThreshold is the threshold for determining whether an

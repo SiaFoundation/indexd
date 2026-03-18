@@ -419,6 +419,9 @@ components:
           type: number
           format: uint64
           description: Current amount of pinned data in bytes including redundancy.
+        ready:
+          type: boolean
+          description: Whether the account is ready to be used. This only returns 'false' after an account is created. Once an account is ready it will remain ready. Getting ready can take up to a few minutes
         app:
           $ref: "#/components/schemas/AppMeta"
         lastUsed:
