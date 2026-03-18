@@ -2169,10 +2169,12 @@ func BenchmarkPrunableContractRoots(b *testing.B) {
 	)
 
 	// increase default quota to fit all sectors
+	fundTarget := uint64(16 << 30)
 	if err := store.PutQuota("default", accounts.PutQuotaRequest{
-		Description:   "Default quota",
-		MaxPinnedData: oneTB,
-		TotalUses:     5,
+		Description:     "Default quota",
+		MaxPinnedData:   oneTB,
+		TotalUses:       5,
+		FundTargetBytes: &fundTarget,
 	}); err != nil {
 		b.Fatal(err)
 	}

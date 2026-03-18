@@ -1065,6 +1065,17 @@ func BenchmarkPruneAccounts(b *testing.B) {
 			batch.Queue("UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1", sqlPublicKey(ak))
 		}
 	}
+	batch.Queue(`UPDATE accounts a SET pinned_data = (
+		SELECT COALESCE(SUM(s.min_shards::bigint), 0) * $1
+		FROM account_slabs as2
+		JOIN slabs s ON s.id = as2.slab_id
+		WHERE as2.account_id = a.id
+	)`, proto.SectorSize)
+	batch.Queue(`UPDATE app_connect_keys ack SET pinned_data = (
+		SELECT COALESCE(SUM(a.pinned_data), 0)
+		FROM accounts a
+		WHERE a.connect_key_id = ack.id
+	)`)
 	batch.Queue(`UPDATE stats SET num_slabs = $1`, numAccounts*objectsPerAccount*slabsPerObject)
 	batch.Queue(`UPDATE stats SET num_accounts_registered = $1`, numAccounts)
 	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
