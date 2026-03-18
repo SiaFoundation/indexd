@@ -416,7 +416,7 @@ func BenchmarkPruneSlabs(b *testing.B) {
 	batch := &pgx.Batch{}
 	var accs []proto.Account
 	var slabID, objectID int64
-	pinnedPerAccount := int64(len(objectsPerAccount) * len(slabsPerObject)) * int64(proto.SectorSize)
+	pinnedPerAccount := int64(objectsPerAccount*slabsPerObject) * int64(proto.SectorSize)
 	for i := range numAccounts {
 		pk := types.GeneratePrivateKey().PublicKey()
 		accs = append(accs, proto.Account(pk))
