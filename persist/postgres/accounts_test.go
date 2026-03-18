@@ -1070,7 +1070,7 @@ func BenchmarkPruneAccounts(b *testing.B) {
 		SELECT COALESCE(SUM(a.pinned_data), 0)
 		FROM accounts a
 		WHERE a.connect_key_id = ack.id
-	)`)
+	) WHERE ack.id = $1`, connectKeyID)
 	batch.Queue(`UPDATE stats SET num_slabs = $1`, numAccounts*objectsPerAccount*slabsPerObject)
 	batch.Queue(`UPDATE stats SET num_accounts_registered = $1`, numAccounts)
 	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
