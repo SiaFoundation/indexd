@@ -290,7 +290,7 @@ paths:
         "200":
           description: App key registered successfully (or already exists)
         "400":
-          description: Connect key or app key is missing
+          description: Connect key, app key or app ID is missing
         "401":
           description: Connect key not found
         "403":

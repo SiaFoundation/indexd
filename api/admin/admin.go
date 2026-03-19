@@ -431,6 +431,9 @@ func (a *admin) handlePOSTAppsRegister(jc jape.Context) {
 	} else if req.AppKey == (types.PublicKey{}) {
 		jc.Error(errors.New("app key is required"), http.StatusBadRequest)
 		return
+	} else if req.Meta.ID == (types.Hash256{}) {
+		jc.Error(errors.New("app ID is required"), http.StatusBadRequest)
+		return
 	}
 
 	err := a.accounts.RegisterAppKey(req.ConnectKey, req.AppKey, req.Meta)
