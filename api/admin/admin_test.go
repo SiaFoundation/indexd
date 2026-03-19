@@ -313,16 +313,19 @@ func TestRegisterAppKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// build app metadata
+	meta := accounts.AppMeta{
+		ID:          frand.Entropy256(),
+		Description: "test app",
+		ServiceURL:  "http://test-app.com",
+	}
+
 	// register an app key
 	appKey := types.GeneratePrivateKey().PublicKey()
 	err = adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
 		ConnectKey: connectKey.Key,
 		AppKey:     appKey,
-		Meta: accounts.AppMeta{
-			ID:          frand.Entropy256(),
-			Description: "test app",
-			ServiceURL:  "http://test-app.com",
-		},
+		Meta:       meta,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -340,6 +343,7 @@ func TestRegisterAppKey(t *testing.T) {
 	err = adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
 		ConnectKey: connectKey.Key,
 		AppKey:     appKey,
+		Meta:       meta,
 	})
 	if err != nil {
 		t.Fatal("expected duplicate registration to succeed, got", err)
@@ -366,6 +370,7 @@ func TestRegisterAppKey(t *testing.T) {
 	if err := adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
 		ConnectKey: oneUseKey.Key,
 		AppKey:     exhaustedAppKey,
+		Meta:       meta,
 	}); err != nil {
 		t.Fatal("expected first registration on 1-use key to succeed, got", err)
 	}
@@ -373,6 +378,7 @@ func TestRegisterAppKey(t *testing.T) {
 	if err := adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
 		ConnectKey: oneUseKey.Key,
 		AppKey:     exhaustedAppKey,
+		Meta:       meta,
 	}); err != nil {
 		t.Fatal("expected re-auth on exhausted key to succeed, got", err)
 	}
@@ -381,6 +387,7 @@ func TestRegisterAppKey(t *testing.T) {
 	err = adminClient.RegisterAppKey(context.Background(), admin.RegisterAppKeyRequest{
 		ConnectKey: "nonexistent",
 		AppKey:     types.GeneratePrivateKey().PublicKey(),
+		Meta:       meta,
 	})
 	if err == nil || !strings.Contains(err.Error(), accounts.ErrKeyNotFound.Error()) {
 		t.Fatal("expected ErrKeyNotFound, got", err)

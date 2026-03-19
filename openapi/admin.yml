@@ -2041,9 +2041,12 @@ components:
             - $ref: "#/components/schemas/PublicKey"
             - description: The app's public key
         meta:
+          description: Metadata about the app
           allOf:
             - $ref: "#/components/schemas/AppMeta"
-            - description: Metadata about the app
+            - type: object
+              required:
+                - id
     AppMeta:
       $ref: "./components.yml#/components/schemas/AppMeta"
 
