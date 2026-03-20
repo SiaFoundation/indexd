@@ -18,6 +18,7 @@ func incrementStat(ctx context.Context, tx *txn, name string, delta int64) error
 	return err
 }
 
+
 func incrementNumAccounts(ctx context.Context, tx *txn, delta int64) error {
 	return incrementStat(ctx, tx, "num_accounts_registered", delta)
 }
@@ -111,38 +112,16 @@ func initStats(ctx context.Context, tx *txn) error {
 func (s *Store) SectorStats() (admin.SectorsStatsResponse, error) {
 	var stats admin.SectorsStatsResponse
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		rows, err := tx.Query(ctx, `SELECT stat_name, stat_value FROM stats WHERE stat_name = ANY($1)`,
-			[]string{"num_slabs", "num_migrated_sectors", "num_pinned_sectors", "num_unpinnable_sectors", "num_unpinned_sectors", "num_sectors_lost", "num_sectors_checked", "num_sectors_check_failed"})
-		if err != nil {
-			return err
-		}
-		defer rows.Close()
-		for rows.Next() {
-			var name string
-			var value int64
-			if err := rows.Scan(&name, &value); err != nil {
-				return err
-			}
-			switch name {
-			case "num_slabs":
-				stats.Slabs = value
-			case "num_migrated_sectors":
-				stats.Migrated = value
-			case "num_pinned_sectors":
-				stats.Pinned = value
-			case "num_unpinnable_sectors":
-				stats.Unpinnable = value
-			case "num_unpinned_sectors":
-				stats.Unpinned = value
-			case "num_sectors_lost":
-				stats.Lost = value
-			case "num_sectors_checked":
-				stats.Checked = value
-			case "num_sectors_check_failed":
-				stats.CheckFailed = value
-			}
-		}
-		return rows.Err()
+		return tx.QueryRow(ctx, `SELECT
+			(SELECT stat_value FROM stats WHERE stat_name = 'num_slabs'),
+			(SELECT stat_value FROM stats WHERE stat_name = 'num_migrated_sectors'),
+			(SELECT stat_value FROM stats WHERE stat_name = 'num_pinned_sectors'),
+			(SELECT stat_value FROM stats WHERE stat_name = 'num_unpinnable_sectors'),
+			(SELECT stat_value FROM stats WHERE stat_name = 'num_unpinned_sectors'),
+			(SELECT stat_value FROM stats WHERE stat_name = 'num_sectors_lost'),
+			(SELECT stat_value FROM stats WHERE stat_name = 'num_sectors_checked'),
+			(SELECT stat_value FROM stats WHERE stat_name = 'num_sectors_check_failed')`).
+			Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned, &stats.Lost, &stats.Checked, &stats.CheckFailed)
 	})
 	return stats, err
 }
@@ -237,10 +216,10 @@ func (s *Store) ConnectKeyStats() (stats admin.ConnectKeyStatsResponse, err erro
 // number of active hosts and scan counts.
 func (s *Store) AggregatedHostStats() (stats admin.AggregatedHostStatsResponse, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		if err := tx.QueryRow(ctx, "SELECT stat_value FROM stats WHERE stat_name = 'num_scans'").Scan(&stats.TotalScans); err != nil {
-			return fmt.Errorf("failed to get scan stats: %w", err)
-		}
-		if err := tx.QueryRow(ctx, "SELECT stat_value FROM stats WHERE stat_name = 'num_scans_failed'").Scan(&stats.FailedScans); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT
+			(SELECT stat_value FROM stats WHERE stat_name = 'num_scans'),
+			(SELECT stat_value FROM stats WHERE stat_name = 'num_scans_failed')`).
+			Scan(&stats.TotalScans, &stats.FailedScans); err != nil {
 			return fmt.Errorf("failed to get scan stats: %w", err)
 		}
 		if err := tx.QueryRow(ctx, `
