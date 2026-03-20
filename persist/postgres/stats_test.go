@@ -269,9 +269,10 @@ func TestIntegrityCheckStats(t *testing.T) {
 		var lost, checked, checkFailed int64
 		err := store.pool.QueryRow(context.Background(), `
 			SELECT
-				(SELECT stat_value FROM stats WHERE stat_name = 'num_sectors_lost'),
-				(SELECT stat_value FROM stats WHERE stat_name = 'num_sectors_checked'),
-				(SELECT stat_value FROM stats WHERE stat_name = 'num_sectors_check_failed')`,
+				(SELECT stat_value FROM stats WHERE stat_name = $1),
+				(SELECT stat_value FROM stats WHERE stat_name = $2),
+				(SELECT stat_value FROM stats WHERE stat_name = $3)`,
+			statSectorsLost, statSectorsChecked, statSectorsCheckFailed,
 		).Scan(&lost, &checked, &checkFailed)
 		if err != nil {
 			t.Fatal(err)
