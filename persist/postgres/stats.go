@@ -28,7 +28,12 @@ const (
 )
 
 func incrementStat(ctx context.Context, tx *txn, name string, delta int64) error {
-	_, err := tx.Exec(ctx, "UPDATE stats SET stat_value = stat_value + $1 WHERE stat_name = $2", delta, name)
+	result, err := tx.Exec(ctx, "UPDATE stats SET stat_value = stat_value + $1 WHERE stat_name = $2", delta, name)
+	if err != nil {
+		return err
+	} else if result.RowsAffected() == 0 {
+		return fmt.Errorf("stat %q does not exist", name)
+	}
 	return err
 }
 
