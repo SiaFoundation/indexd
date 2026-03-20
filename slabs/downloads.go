@@ -137,7 +137,7 @@ raceLoop:
 	for i := int(slab.MinShards); downloaded.Load() < uint32(slab.MinShards) && i < len(candidates); i++ {
 		hostKey := candidates[i]
 		select {
-		case <-ctx.Done():
+		case <-initialCtx.Done():
 			break raceLoop
 		case <-failedCh:
 			// a download has failed
@@ -161,7 +161,7 @@ raceLoop:
 					}
 				}
 			})
-		case <-ctx.Done():
+		case <-initialCtx.Done():
 			break raceLoop
 		}
 	}

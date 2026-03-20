@@ -249,6 +249,7 @@ func (c *Client) HostSettings(ctx context.Context, hostKey types.PublicKey) (set
 		return err
 	})
 	if err != nil {
+		c.hosts.AddFailedRPC(hostKey, err)
 		return proto.HostSettings{}, err
 	}
 	if settings.Prices.Validate(hostKey) == nil {
