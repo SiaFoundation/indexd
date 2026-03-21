@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -13,7 +12,6 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/mux/v2"
 	"go.uber.org/zap"
@@ -64,6 +62,8 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 		defer func() {
 			<-sema
 		}()
+		ctx, timeoutCancel := context.WithTimeout(ctx, m.shardTimeout)
+		defer timeoutCancel()
 
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -84,7 +84,7 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 
 		start := time.Now()
 		buf := bytes.NewBuffer(make([]byte, 0, proto.SectorSize))
-		if _, err := m.downloadShard(ctx, hostKey, buf, sector.root); err != nil {
+		if _, err := m.hosts.ReadSector(ctx, m.migrationAccountKey, hostKey, sector.root, buf, 0, proto.SectorSize); err != nil {
 			if isErrLostSector(err) {
 				log.Debug("host reports sector lost", zap.Duration("elapsed", time.Since(start)))
 				if err := m.store.MarkSectorsLost(hostKey, []types.Hash256{sector.root}); err != nil {
@@ -172,13 +172,6 @@ raceLoop:
 		return nil, fmt.Errorf("downloaded %d sectors, minimum required: %d: %w", downloaded.Load(), slab.MinShards, errNotEnoughShards)
 	}
 	return shards, nil
-}
-
-func (m *SlabManager) downloadShard(ctx context.Context, hostKey types.PublicKey, w io.Writer, root types.Hash256) (rhp.RPCReadSectorResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, m.shardTimeout)
-	defer cancel()
-
-	return m.hosts.ReadSector(ctx, m.migrationAccountKey, hostKey, root, w, 0, proto.SectorSize)
 }
 
 func isErrLostSector(err error) bool {
