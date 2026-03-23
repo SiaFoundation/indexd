@@ -1107,11 +1107,11 @@ func TestPinSlabsDuplicate(t *testing.T) {
 
 	assertNumSlabs := func(expected int64) {
 		t.Helper()
-		var got int64
-		if err := store.pool.QueryRow(t.Context(), "SELECT num_slabs FROM stats WHERE id = 0").Scan(&got); err != nil {
+		stats, err := store.SectorStats()
+		if err != nil {
 			t.Fatal(err)
-		} else if got != expected {
-			t.Fatalf("expected num_slabs = %d, got %d", expected, got)
+		} else if stats.Slabs != expected {
+			t.Fatalf("expected %d slabs, got %d", expected, stats.Slabs)
 		}
 	}
 
