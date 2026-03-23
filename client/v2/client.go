@@ -186,7 +186,14 @@ func (c *Client) hostTransport(ctx context.Context, hostKey types.PublicKey) (rh
 	return t.dial(ctx, hostKey, addresses)
 }
 
-func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx context.Context, transport rhp.TransportClient) error) error {
+func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx context.Context, transport rhp.TransportClient) error) (err error) {
+	defer func() {
+		// increment the failed RPC count for the host if the RPC failed
+		if err != nil {
+			c.hosts.AddFailedRPC(hostKey, err)
+		}
+	}()
+
 	transport, err := c.hostTransport(ctx, hostKey)
 	if err != nil {
 		return fmt.Errorf("failed to get transport: %w", err)
@@ -206,10 +213,6 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 		err = fmt.Errorf("%w: %w", err, context.Cause(ctx))
 	}
 
-	// increment the failed RPC count for the host if the RPC failed
-	if err != nil {
-		c.hosts.AddFailedRPC(hostKey, err)
-	}
 	return err
 }
 
