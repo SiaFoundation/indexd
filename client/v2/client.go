@@ -205,6 +205,11 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	if errors.Is(err, mux.ErrClosedStream) && context.Cause(ctx) != nil {
 		err = fmt.Errorf("%w: %w", err, context.Cause(ctx))
 	}
+
+	// increment the failed RPC count for the host if the RPC failed
+	if err != nil {
+		c.hosts.AddFailedRPC(hostKey, err)
+	}
 	return err
 }
 
@@ -220,43 +225,17 @@ func (c *Client) AccountBalance(ctx context.Context, hostKey types.PublicKey, ac
 // Prices fetches the host prices from the specified host.
 //
 // If the prices are cached and valid, the cached prices are returned.
-func (c *Client) Prices(ctx context.Context, hostKey types.PublicKey) (proto.HostPrices, error) {
-	c.mu.Lock()
-	prices := c.cachedPrices[hostKey]
-	if prices.Validate(hostKey) == nil && time.Until(prices.ValidUntil) > 30*time.Second {
-		c.mu.Unlock()
-		return prices, nil
-	}
-	c.mu.Unlock()
-
-	settings, err := c.HostSettings(ctx, hostKey)
-	if err != nil {
-		return proto.HostPrices{}, err
-	}
-	return settings.Prices, nil
-}
-
-// HostSettings fetches the host settings from the specified host.
-func (c *Client) HostSettings(ctx context.Context, hostKey types.PublicKey) (settings proto.HostSettings, err error) {
+func (c *Client) Prices(ctx context.Context, hostKey types.PublicKey) (prices proto.HostPrices, err error) {
 	done, err := c.tg.Add()
 	if err != nil {
-		return proto.HostSettings{}, err
+		return proto.HostPrices{}, err
 	}
 	defer done()
 
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		settings, err = rhp.RPCSettings(ctx, transport)
+		prices, err = c.prices(ctx, hostKey, transport)
 		return err
 	})
-	if err != nil {
-		c.hosts.AddFailedRPC(hostKey, err)
-		return proto.HostSettings{}, err
-	}
-	if settings.Prices.Validate(hostKey) == nil {
-		c.mu.Lock()
-		c.cachedPrices[hostKey] = settings.Prices
-		c.mu.Unlock()
-	}
 	return
 }
 
@@ -272,7 +251,7 @@ func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, h
 
 	start := time.Now()
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.Prices(ctx, hostKey)
+		prices, err := c.prices(ctx, hostKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -280,9 +259,7 @@ func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, h
 		result, err = rhp.RPCWriteSector(ctx, transport, prices, token, bytes.NewReader(data), uint64(len(data)))
 		return err
 	})
-	if err != nil {
-		c.hosts.AddFailedRPC(hostKey, err)
-	} else {
+	if err == nil {
 		c.hosts.AddWriteSample(hostKey, time.Since(start))
 	}
 	return
@@ -299,7 +276,7 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 
 	start := time.Now()
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.Prices(ctx, hostKey)
+		prices, err := c.prices(ctx, hostKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -311,9 +288,7 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 		// a ErrSectorNotFound error is neither a failed RPC nor do we want to
 		// record its latency since no data was served
 		return
-	} else if err != nil {
-		c.hosts.AddFailedRPC(hostKey, err)
-	} else {
+	} else if err == nil {
 		c.hosts.AddReadSample(hostKey, time.Since(start))
 	}
 	return
@@ -347,6 +322,30 @@ func (c *Client) Close() error {
 		transport.close()
 	}
 	return nil
+}
+
+// prices fetches the host prices using an existing transport connection.
+//
+// If the prices are cached and valid, the cached prices are returned.
+func (c *Client) prices(ctx context.Context, hostKey types.PublicKey, transport rhp.TransportClient) (proto.HostPrices, error) {
+	c.mu.Lock()
+	prices := c.cachedPrices[hostKey]
+	if prices.Validate(hostKey) == nil && time.Until(prices.ValidUntil) > 30*time.Second {
+		c.mu.Unlock()
+		return prices, nil
+	}
+	c.mu.Unlock()
+
+	settings, err := rhp.RPCSettings(ctx, transport)
+	if err != nil {
+		return proto.HostPrices{}, err
+	}
+	if settings.Prices.Validate(hostKey) == nil {
+		c.mu.Lock()
+		c.cachedPrices[hostKey] = settings.Prices
+		c.mu.Unlock()
+	}
+	return settings.Prices, nil
 }
 
 func shouldResetTransport(err error) bool {

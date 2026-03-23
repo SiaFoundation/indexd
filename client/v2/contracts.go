@@ -55,7 +55,7 @@ func (c *Client) FormContract(ctx context.Context, chain ChainManager, signer rh
 	defer done()
 
 	err = c.rpcFn(ctx, params.HostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.Prices(ctx, params.HostKey)
+		prices, err := c.prices(ctx, params.HostKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -81,7 +81,7 @@ func (c *Client) RefreshContract(ctx context.Context, chain ChainManager, signer
 	}
 
 	err = c.rpcFn(ctx, revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.Prices(ctx, revision.HostPublicKey)
+		prices, err := c.prices(ctx, revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -108,7 +108,7 @@ func (c *Client) RenewContract(ctx context.Context, chain ChainManager, signer r
 	}
 
 	err = c.rpcFn(ctx, revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.Prices(ctx, revision.HostPublicKey)
+		prices, err := c.prices(ctx, revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -142,7 +142,7 @@ func (c *Client) SectorRoots(ctx context.Context, signer rhp.ContractSigner, cha
 	defer done()
 
 	err = c.rpcFn(ctx, contract.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.Prices(ctx, contract.Revision.HostPublicKey)
+		prices, err := c.prices(ctx, contract.Revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -161,7 +161,7 @@ func (c *Client) FreeSectors(ctx context.Context, signer rhp.ContractSigner, cha
 	defer done()
 
 	err = c.rpcFn(ctx, contract.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.Prices(ctx, contract.Revision.HostPublicKey)
+		prices, err := c.prices(ctx, contract.Revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -180,7 +180,7 @@ func (c *Client) AppendSectors(ctx context.Context, signer rhp.ContractSigner, c
 	defer done()
 
 	err = c.rpcFn(ctx, revision.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.Prices(ctx, revision.Revision.HostPublicKey)
+		prices, err := c.prices(ctx, revision.Revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
