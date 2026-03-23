@@ -556,6 +556,164 @@ func TestSharedObjects(t *testing.T) {
 	}
 }
 
+func TestObjectsForSlab(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	// create 2 accounts
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	for _, acc := range []proto.Account{acc1, acc2} {
+		store.addTestAccount(t, types.PublicKey(acc))
+	}
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// create a shared slab pinned to both accounts
+	sharedSlab := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	for _, acc := range []proto.Account{acc1, acc2} {
+		if _, err := store.PinSlabs(acc, time.Time{}, sharedSlab); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// create a second slab only pinned to acc1
+	slab2 := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	if _, err := store.PinSlabs(acc1, time.Time{}, slab2); err != nil {
+		t.Fatal(err)
+	}
+
+	// create an object referencing the shared slab on each account
+	obj1 := store.pinRandomObject(t, acc1, []slabs.SlabSlice{sharedSlab.Slice(0, 100)})
+	obj2 := store.pinRandomObject(t, acc2, []slabs.SlabSlice{sharedSlab.Slice(0, 100)})
+
+	// create a second object on acc1 referencing only slab2
+	obj3 := store.pinRandomObject(t, acc1, []slabs.SlabSlice{slab2.Slice(0, 100)})
+
+	// ObjectsForSlab on the shared slab should return both objects
+	objects, err := store.ObjectsForSlab(sharedSlab.Digest())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(objects) != 2 {
+		t.Fatalf("expected 2 objects, got %d", len(objects))
+	}
+
+	// sort by account for deterministic comparison
+	sort.Slice(objects, func(i, j int) bool {
+		return bytes.Compare(objects[i].Account[:], objects[j].Account[:]) < 0
+	})
+	if objects[0].Account != acc1 || objects[0].ObjectID != obj1.ID() {
+		t.Fatalf("unexpected object: account %v, id %v", objects[0].Account, objects[0].ObjectID)
+	}
+	if objects[1].Account != acc2 || objects[1].ObjectID != obj2.ID() {
+		t.Fatalf("unexpected object: account %v, id %v", objects[1].Account, objects[1].ObjectID)
+	}
+
+	// assert ObjectsForSlab for slab2 returns the acc1 obj
+	objects, err = store.ObjectsForSlab(slab2.Digest())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(objects) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(objects))
+	} else if objects[0].Account != acc1 || objects[0].ObjectID != obj3.ID() {
+		t.Fatalf("unexpected object: account %v, id %v", objects[0].Account, objects[0].ObjectID)
+	}
+
+	// assert ObjectsForSlab for a non-existent slab returns no objects
+	objects, err = store.ObjectsForSlab(slabs.SlabID(frand.Entropy256()))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(objects) != 0 {
+		t.Fatalf("expected 0 objects, got %d", len(objects))
+	}
+}
+
+func TestAccountsForSlab(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	// create 2 accounts
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	for _, acc := range []proto.Account{acc1, acc2} {
+		store.addTestAccount(t, types.PublicKey(acc))
+	}
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// create a slab pinned to both accounts
+	sharedSlab := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	for _, acc := range []proto.Account{acc1, acc2} {
+		if _, err := store.PinSlabs(acc, time.Time{}, sharedSlab); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// create a second slab only pinned to acc1
+	slab2 := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	if _, err := store.PinSlabs(acc1, time.Time{}, slab2); err != nil {
+		t.Fatal(err)
+	}
+
+	// AccountsForSlab on the shared slab should return both accounts
+	accounts, err := store.AccountsForSlab(sharedSlab.Digest())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accounts) != 2 {
+		t.Fatalf("expected 2 accounts, got %d", len(accounts))
+	}
+	sort.Slice(accounts, func(i, j int) bool {
+		return bytes.Compare(accounts[i][:], accounts[j][:]) < 0
+	})
+	if accounts[0] != acc1 || accounts[1] != acc2 {
+		t.Fatalf("unexpected accounts: %v", accounts)
+	}
+
+	// AccountsForSlab on slab2 should return only acc1
+	accounts, err = store.AccountsForSlab(slab2.Digest())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accounts) != 1 {
+		t.Fatalf("expected 1 account, got %d", len(accounts))
+	} else if accounts[0] != acc1 {
+		t.Fatalf("unexpected account: %v", accounts[0])
+	}
+
+	// AccountsForSlab on a non-existent slab should return empty
+	accounts, err = store.AccountsForSlab(slabs.SlabID(frand.Entropy256()))
+	if err != nil {
+		t.Fatal(err)
+	} else if len(accounts) != 0 {
+		t.Fatalf("expected 0 accounts, got %d", len(accounts))
+	}
+}
+
 func BenchmarkSaveObject(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 

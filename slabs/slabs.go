@@ -86,6 +86,12 @@ type (
 		MinShards     uint           `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
 	}
+
+	// SlabObject identifies an object that references a slab.
+	SlabObject struct {
+		Account  proto.Account
+		ObjectID types.Hash256
+	}
 )
 
 // String implements the Stringer interface for SlabID.

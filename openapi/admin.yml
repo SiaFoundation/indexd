@@ -870,6 +870,36 @@ paths:
                 type: string
                 format: binary
 
+  /debug/slab/{slabid}:
+    delete:
+      tags:
+        - debug
+      summary: Delete all objects referencing a slab
+      description: >
+        Deletes all objects across all accounts that reference the given slab,
+        then prunes orphaned slabs for each affected account. This is useful
+        for cleaning up old slabs that can no longer be repaired. This route
+        is only available in debug mode.
+      operationId: deleteDebugSlab
+      parameters:
+        - name: slabid
+          in: path
+          required: true
+          schema:
+            type: string
+            description: The hex-encoded slab ID (256-bit hash)
+      responses:
+        "200":
+          description: >
+            Returns 200 even if the slab does not exist. If the slab exists
+            but has no referencing objects, any accounts that have the slab
+            pinned are still pruned and the slab itself may be deleted if
+            unused.
+        "400":
+          description: Invalid slab ID format
+        "500":
+          description: Internal server error
+
   /explorer/exchange-rate/siacoin/{currency}:
     get:
       tags:

@@ -26,6 +26,7 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/prometheus"
 	"go.sia.tech/indexd/pins"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 )
@@ -123,9 +124,13 @@ type (
 		HostStats(offset, limit int) ([]hosts.HostStats, error)
 		SectorStats() (SectorsStatsResponse, error)
 
+		AccountsForSlab(slabID slabs.SlabID) ([]proto.Account, error)
 		DeleteContract(contractID types.FileContractID) error
+		DeleteObject(account proto.Account, objectKey types.Hash256) error
 		LastScannedIndex() (types.ChainIndex, error)
+		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
 		PruneSlabs(account proto.Account) error
+		Slab(slabID slabs.SlabID) (slabs.Slab, error)
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -287,6 +292,7 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 	// debug endpoints
 	if a.debug {
 		routes["GET /debug/pprof/:handler"] = a.handleGETPProf
+		routes["DELETE /debug/slab/:slabid"] = a.handleDELETESlab
 	}
 
 	return jape.Mux(routes)
@@ -326,6 +332,62 @@ func (a *admin) handleGETPProf(jc jape.Context) {
 	default:
 		pprof.Index(jc.ResponseWriter, jc.Request)
 	}
+}
+
+func (a *admin) handleDELETESlab(jc jape.Context) {
+	var slabID slabs.SlabID
+	if jc.DecodeParam("slabid", &slabID) != nil {
+		return
+	}
+
+	// fetch all objects referencing the slab
+	objects, err := a.store.ObjectsForSlab(slabID)
+	if jc.Check("failed to get objects for slab", err) != nil {
+		return
+	}
+
+	// delete each object
+	seen := make(map[proto.Account]struct{})
+	for _, obj := range objects {
+		if err := a.store.DeleteObject(obj.Account, obj.ObjectID); err != nil {
+			jc.Check("failed to delete object", err)
+			return
+		}
+		seen[obj.Account] = struct{}{}
+	}
+
+	// prune orphaned slabs for each affected account
+	for acc := range seen {
+		if err := a.store.PruneSlabs(acc); err != nil {
+			jc.Check("failed to prune slabs", err)
+			return
+		}
+	}
+
+	// fetch all accounts referencing the slab
+	accounts, err := a.store.AccountsForSlab(slabID)
+	if jc.Check("failed to get accounts for slab", err) != nil {
+		return
+	}
+
+	// prune orphaned slabs for each affected account
+	for _, acc := range accounts {
+		if err := a.store.PruneSlabs(acc); err != nil {
+			jc.Check("failed to prune slabs", err)
+			return
+		}
+	}
+
+	// verify the slab was actually deleted
+	if _, err := a.store.Slab(slabID); err == nil {
+		jc.Error(errors.New("slab was not deleted"), http.StatusInternalServerError)
+		return
+	} else if !errors.Is(err, slabs.ErrSlabNotFound) {
+		jc.Check("failed to verify slab deletion", err)
+		return
+	}
+
+	jc.Encode(nil)
 }
 
 func (a *admin) handleGETAppConnectKeys(jc jape.Context) {

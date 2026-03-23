@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/pins"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/jape"
 )
 
@@ -360,6 +361,12 @@ func (c *Client) WalletSendSiacoins(ctx context.Context, address types.Address, 
 		UseUnconfirmed:   useUnconfirmed,
 	}, &id)
 	return
+}
+
+// DeleteSlab deletes all objects referencing the given slab, then prunes
+// orphaned slabs for each affected account. Only available in debug mode.
+func (c *Client) DeleteSlab(ctx context.Context, slabID slabs.SlabID) error {
+	return c.c.DELETE(ctx, fmt.Sprintf("/debug/slab/%s", slabID))
 }
 
 // StatsAccounts returns statistics about the accounts registered on the
