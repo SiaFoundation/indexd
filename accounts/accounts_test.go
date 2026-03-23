@@ -86,7 +86,7 @@ func TestAccountFunding(t *testing.T) {
 	host := available[0]
 	hk := host.PublicKey
 
-	c := client.New(client.NewProvider(hosts.NewHostStore(store)))
+	c := client.New(client.NewProvider(hosts.NewHostStore(store)), logger)
 	defer c.Close()
 
 	// assert we have at least one active contract

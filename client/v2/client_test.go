@@ -29,7 +29,7 @@ func TestHostClient(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	provider := client.NewProvider(hosts.NewHostStore(indexer.Store()))
-	client := client.New(provider)
+	client := client.New(provider, logger)
 	defer client.Close()
 
 	candidates, err := client.Candidates()
@@ -95,7 +95,7 @@ func TestHostClientParallel(t *testing.T) {
 	time.Sleep(2 * time.Second)
 
 	provider := client.NewProvider(hosts.NewHostStore(indexer.Store()))
-	client := client.New(provider)
+	client := client.New(provider, logger)
 	defer client.Close()
 
 	candidates, err := client.Candidates()

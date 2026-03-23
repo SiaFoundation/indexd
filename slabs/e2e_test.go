@@ -31,7 +31,7 @@ func TestMigrations(t *testing.T) {
 
 	// upload sectors to hosts (4 data + 10 parity = 14 total shards, valid 4-of-14 params)
 	encryptionKey, shards, roots := NewTestShards(t, 4, 10)
-	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())))
+	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())), logger)
 	defer client.Close()
 	for i := range shards {
 		if _, err := client.WriteSector(context.Background(), sk, cluster.Hosts[i].PublicKey(), shards[i]); err != nil {
@@ -120,7 +120,7 @@ func TestUpdateLastUsed(t *testing.T) {
 	// wait for contracts to be formed
 	cluster.WaitForContracts(t)
 
-	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())))
+	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())), logger)
 	defer client.Close()
 
 	// upload sectors to hosts

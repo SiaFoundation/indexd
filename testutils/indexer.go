@@ -166,7 +166,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	}
 	syncer := NewSyncer(t, c.genesis.ID(), c.cm)
 
-	client := client.New(client.NewProvider(hosts.NewHostStore(store)))
+	client := client.New(client.NewProvider(hosts.NewHostStore(store)), log.Named("client"))
 
 	alerter := alerts.NewManager()
 

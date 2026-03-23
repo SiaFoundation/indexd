@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/mux/v2"
+	"go.uber.org/zap"
 )
 
 type mockTransportClient struct{}
@@ -35,6 +36,7 @@ func TestRPCFnErrorDecoration(t *testing.T) {
 	customErr := errors.New("custom context error")
 
 	c := &Client{
+		log:          zap.NewNop(),
 		tg:           threadgroup.New(),
 		hosts:        NewProvider(mockStore{}),
 		cachedPrices: make(map[types.PublicKey]proto.HostPrices),

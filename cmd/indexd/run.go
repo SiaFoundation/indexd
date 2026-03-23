@@ -125,7 +125,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		return fmt.Errorf("failed to create MaxMind locator: %w", err)
 	}
 
-	client := client.New(client.NewProvider(hosts.NewHostStore(store)))
+	client := client.New(client.NewProvider(hosts.NewHostStore(store)), log.Named("client"))
 
 	alerter := alerts.NewManager()
 	hm, err := hosts.NewManager(s, locator, client, store, alerter, hosts.WithLogger(log.Named("hosts")))

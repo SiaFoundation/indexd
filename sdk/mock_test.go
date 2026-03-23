@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"sync"
+	"testing"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -18,6 +19,7 @@ import (
 	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
+	"go.uber.org/zap/zaptest"
 )
 
 type mockHostDialer struct {
@@ -331,5 +333,15 @@ func newMockAppClient() *mockAppClient {
 	return &mockAppClient{
 		objects: make(map[types.Hash256]slabs.SealedObject),
 		pinned:  make(map[slabs.SlabID]slabs.PinnedSlab),
+	}
+}
+
+// newTestSDK creates an SDK with a mock host client for testing.
+func newTestSDK(t testing.TB, appKey types.PrivateKey, app appClient, hosts hostClient) *SDK {
+	return &SDK{
+		appKey: appKey,
+		log:    zaptest.NewLogger(t),
+		hosts:  hosts,
+		client: app,
 	}
 }

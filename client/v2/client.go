@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/mux/v2"
+	"go.uber.org/zap"
 )
 
 type transport struct {
@@ -148,6 +149,7 @@ top:
 
 // A Client is used to interact with Sia hosts over RHP4.
 type Client struct {
+	log   *zap.Logger
 	tg    *threadgroup.ThreadGroup
 	hosts *Provider
 
@@ -194,6 +196,7 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	if err == nil {
 		return nil
 	} else if shouldResetTransport(err) {
+		c.log.Debug("resetting transport", zap.Stringer("host", hostKey), zap.Error(err))
 		c.resetTransport(hostKey)
 	}
 
@@ -364,8 +367,9 @@ func shouldResetTransport(err error) bool {
 }
 
 // New creates a new Client.
-func New(hosts *Provider) *Client {
+func New(hosts *Provider, log *zap.Logger) *Client {
 	return &Client{
+		log:          log,
 		tg:           threadgroup.New(),
 		hosts:        hosts,
 		cachedPrices: make(map[types.PublicKey]proto.HostPrices),
