@@ -270,8 +270,8 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			INSERT INTO slabs (digest, encryption_key, min_shards)
 			VALUES ($1, $2, $3)
 			ON CONFLICT (digest) DO UPDATE SET pinned_at = NOW()
-			RETURNING id
-			`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards).Scan(&slabID)
+			RETURNING id, (xmax <> 0)
+			`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards).Scan(&slabID, &existingSlab)
 			if err != nil {
 				return err
 			}
