@@ -338,6 +338,7 @@ func newMockAppClient() *mockAppClient {
 
 // newTestSDK creates an SDK with a mock host client for testing.
 func newTestSDK(t testing.TB, appKey types.PrivateKey, app appClient, hosts hostClient) *SDK {
+	t.Helper()
 	return &SDK{
 		appKey: appKey,
 		log:    zaptest.NewLogger(t),
