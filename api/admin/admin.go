@@ -347,19 +347,9 @@ func (a *admin) handleDELETESlab(jc jape.Context) {
 	}
 
 	// delete each object
-	seen := make(map[proto.Account]struct{})
 	for _, obj := range objects {
 		if err := a.store.DeleteObject(obj.Account, obj.ObjectID); err != nil {
 			jc.Check("failed to delete object", err)
-			return
-		}
-		seen[obj.Account] = struct{}{}
-	}
-
-	// prune orphaned slabs for each affected account
-	for acc := range seen {
-		if err := a.store.PruneSlabs(acc); err != nil {
-			jc.Check("failed to prune slabs", err)
 			return
 		}
 	}

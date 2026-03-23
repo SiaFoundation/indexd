@@ -1543,15 +1543,18 @@ func TestDeleteSlab(t *testing.T) {
 
 	hk := cluster.Hosts[0].PublicKey()
 
-	// create two accounts
+	// create three accounts
 	pk1 := types.GeneratePrivateKey().PublicKey()
 	pk2 := types.GeneratePrivateKey().PublicKey()
+	pk3 := types.GeneratePrivateKey().PublicKey()
 	store.AddTestAccount(t, pk1)
 	store.AddTestAccount(t, pk2)
+	store.AddTestAccount(t, pk3)
 	acc1 := proto.Account(pk1)
 	acc2 := proto.Account(pk2)
+	acc3 := proto.Account(pk3)
 
-	// create a shared slab pinned to both accounts
+	// create a shared slab pinned to all accounts
 	sharedSlab := slabs.SlabPinParams{
 		EncryptionKey: frand.Entropy256(),
 		MinShards:     1,
@@ -1560,7 +1563,7 @@ func TestDeleteSlab(t *testing.T) {
 			HostKey: hk,
 		}},
 	}
-	for _, acc := range []proto.Account{acc1, acc2} {
+	for _, acc := range []proto.Account{acc1, acc2, acc3} {
 		if _, err := store.PinSlabs(acc, time.Time{}, sharedSlab); err != nil {
 			t.Fatal(err)
 		}
@@ -1595,12 +1598,12 @@ func TestDeleteSlab(t *testing.T) {
 		return obj
 	}
 
-	// create objects: shared slab on both accounts, slab2 only on acc1
+	// create objects: shared slab on acc1 and acc2, slab2 only on acc1
 	pinObject(acc1, []slabs.SlabSlice{sharedSlab.Slice(0, 100)})
 	pinObject(acc2, []slabs.SlabSlice{sharedSlab.Slice(0, 100)})
 	unrelatedObj := pinObject(acc1, []slabs.SlabSlice{slab2.Slice(0, 100)})
 
-	// verify initial state: acc1 has 2 slabs, acc2 has 1
+	// verify initial state: acc1 has 2 slabs, acc2 and acc3 have 1
 	slabIDs, err := store.SlabIDs(acc1, 0, math.MaxInt64)
 	if err != nil {
 		t.Fatal(err)
@@ -1612,6 +1615,12 @@ func TestDeleteSlab(t *testing.T) {
 		t.Fatal(err)
 	} else if len(slabIDs) != 1 {
 		t.Fatalf("expected 1 slab for acc2, got %d", len(slabIDs))
+	}
+	slabIDs, err = store.SlabIDs(acc3, 0, math.MaxInt64)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(slabIDs) != 1 {
+		t.Fatalf("expected 1 slab for acc3, got %d", len(slabIDs))
 	}
 
 	// record stats before deletion
@@ -1650,6 +1659,12 @@ func TestDeleteSlab(t *testing.T) {
 		t.Fatal(err)
 	} else if len(slabIDs) != 0 {
 		t.Fatalf("expected 0 slabs for acc2, got %d", len(slabIDs))
+	}
+	slabIDs, err = store.SlabIDs(acc3, 0, math.MaxInt64)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(slabIDs) != 0 {
+		t.Fatalf("expected 0 slabs for acc3, got %d", len(slabIDs))
 	}
 
 	// verify the unrelated object on acc1 still exists
