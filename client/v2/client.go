@@ -368,9 +368,6 @@ func shouldResetTransport(err error) bool {
 
 // New creates a new Client.
 func New(hosts *Provider, log *zap.Logger) *Client {
-	if log == nil {
-		log = zap.NewNop()
-	}
 	return &Client{
 		log:          log,
 		tg:           threadgroup.New(),

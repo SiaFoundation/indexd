@@ -677,9 +677,7 @@ type Option func(*SDK)
 // anything.
 func WithLogger(log *zap.Logger) Option {
 	return func(s *SDK) {
-		if log != nil {
-			s.log = log
-		}
+		s.log = log
 	}
 }
 
