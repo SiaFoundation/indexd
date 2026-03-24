@@ -365,6 +365,9 @@ func (a *admin) handlePOSTPruneAccounts(jc jape.Context) {
 		}
 
 		for _, acc := range accs {
+			if err := jc.Request.Context().Err(); err != nil {
+				return
+			}
 			if err := a.store.PruneSlabs(acc.AccountKey); err != nil {
 				jc.Check("failed to prune slabs", err)
 				return
