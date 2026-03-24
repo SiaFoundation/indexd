@@ -841,4 +841,9 @@ WHERE ack.id = sub.connect_key_id;
 		_, err := tx.Exec(ctx, `CREATE INDEX account_hosts_account_id_consecutive_failed_funds_idx ON account_hosts (account_id, consecutive_failed_funds);`)
 		return err
 	},
+	// recompute num_slabs to fix incorrect counts
+	func(ctx context.Context, tx *txn, _ *zap.Logger) error {
+		_, err := tx.Exec(ctx, `UPDATE stats SET num_slabs = (SELECT COUNT(*) FROM slabs)`)
+		return err
+	},
 }
