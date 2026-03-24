@@ -1633,8 +1633,13 @@ func TestDeleteSlab(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// delete the shared slab via debug endpoint
+	// delete the shared slab's objects via debug endpoint
 	if err := adminClient.DeleteSlab(t.Context(), sharedSlab.Digest()); err != nil {
+		t.Fatal(err)
+	}
+
+	// prune all accounts to clean up orphaned slabs
+	if err := adminClient.PruneAccounts(t.Context()); err != nil {
 		t.Fatal(err)
 	}
 

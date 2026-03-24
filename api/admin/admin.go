@@ -124,13 +124,11 @@ type (
 		HostStats(offset, limit int) ([]hosts.HostStats, error)
 		SectorStats() (SectorsStatsResponse, error)
 
-		AccountsForSlab(slabID slabs.SlabID) ([]proto.Account, error)
 		DeleteContract(contractID types.FileContractID) error
 		DeleteObject(account proto.Account, objectKey types.Hash256) error
 		LastScannedIndex() (types.ChainIndex, error)
 		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
 		PruneSlabs(account proto.Account) error
-		Slab(slabID slabs.SlabID) (slabs.Slab, error)
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -293,6 +291,7 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 	if a.debug {
 		routes["GET /debug/pprof/:handler"] = a.handleGETPProf
 		routes["DELETE /debug/slab/:slabid"] = a.handleDELETESlab
+		routes["POST /debug/slabs/prune"] = a.handlePOSTPruneAccounts
 	}
 
 	return jape.Mux(routes)
@@ -354,29 +353,28 @@ func (a *admin) handleDELETESlab(jc jape.Context) {
 		}
 	}
 
-	// fetch all accounts referencing the slab
-	accounts, err := a.store.AccountsForSlab(slabID)
-	if jc.Check("failed to get accounts for slab", err) != nil {
-		return
-	}
+	jc.Encode(nil)
+}
 
-	// prune orphaned slabs for each affected account
-	for _, acc := range accounts {
-		if err := a.store.PruneSlabs(acc); err != nil {
-			jc.Check("failed to prune slabs", err)
+func (a *admin) handlePOSTPruneAccounts(jc jape.Context) {
+	const batchSize = 100
+	for offset := 0; ; offset += batchSize {
+		accs, err := a.accounts.Accounts(jc.Request.Context(), offset, batchSize)
+		if jc.Check("failed to get accounts", err) != nil {
 			return
 		}
-	}
 
-	// verify the slab was actually deleted
-	if _, err := a.store.Slab(slabID); err == nil {
-		jc.Error(errors.New("slab was not deleted"), http.StatusInternalServerError)
-		return
-	} else if !errors.Is(err, slabs.ErrSlabNotFound) {
-		jc.Check("failed to verify slab deletion", err)
-		return
-	}
+		for _, acc := range accs {
+			if err := a.store.PruneSlabs(acc.AccountKey); err != nil {
+				jc.Check("failed to prune slabs", err)
+				return
+			}
+		}
 
+		if len(accs) < batchSize {
+			break
+		}
+	}
 	jc.Encode(nil)
 }
 

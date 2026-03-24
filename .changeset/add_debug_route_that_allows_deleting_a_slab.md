@@ -2,4 +2,4 @@
 default: patch
 ---
 
-# Add debug route that allows deleting a slab.
+# Add debug routes for deleting a slab's objects and pruning orphaned slabs.

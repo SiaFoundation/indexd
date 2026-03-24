@@ -309,34 +309,6 @@ func (s *Store) ObjectsForSlab(slabID slabs.SlabID) (objects []slabs.SlabObject,
 	return objects, err
 }
 
-// AccountsForSlab returns all accounts that have the given slab pinned.
-func (s *Store) AccountsForSlab(slabID slabs.SlabID) (accounts []proto.Account, _ error) {
-	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		accounts = accounts[:0] // reuse same slice if transaction retries
-
-		rows, err := tx.Query(ctx, `
-			SELECT DISTINCT a.public_key
-			FROM accounts a
-			JOIN account_slabs as2 ON a.id = as2.account_id
-			JOIN slabs s ON s.id = as2.slab_id
-			WHERE s.digest = $1`, sqlHash256(slabID))
-		if err != nil {
-			return fmt.Errorf("failed to query accounts for slab: %w", err)
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var acc proto.Account
-			if err := rows.Scan((*sqlPublicKey)(&acc)); err != nil {
-				return fmt.Errorf("failed to scan account for slab: %w", err)
-			}
-			accounts = append(accounts, acc)
-		}
-		return rows.Err()
-	})
-	return accounts, err
-}
-
 // PinObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
 func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) error {

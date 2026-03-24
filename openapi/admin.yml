@@ -876,10 +876,10 @@ paths:
         - debug
       summary: Delete all objects referencing a slab
       description: >
-        Deletes all objects across all accounts that reference the given slab,
-        then prunes orphaned slabs for each affected account. This is useful
-        for cleaning up old slabs that can no longer be repaired. This route
-        is only available in debug mode.
+        Deletes all objects across all accounts that reference the given slab.
+        This is useful for cleaning up old slabs that can no longer be
+        repaired. Use /debug/slabs/prune afterwards to prune orphaned
+        slabs. This route is only available in debug mode.
       operationId: deleteDebugSlab
       parameters:
         - name: slabid
@@ -891,12 +891,26 @@ paths:
       responses:
         "200":
           description: >
-            Returns 200 even if the slab does not exist. If the slab exists
-            but has no referencing objects, any accounts that have the slab
-            pinned are still pruned and the slab itself may be deleted if
-            unused.
+            Returns 200 even if the slab does not exist or has no referencing
+            objects.
         "400":
           description: Invalid slab ID format
+        "500":
+          description: Internal server error
+
+  /debug/slabs/prune:
+    post:
+      tags:
+        - debug
+      summary: Prune orphaned slabs for all accounts
+      description: >
+        Iterates over all accounts and prunes orphaned slabs that are no
+        longer referenced by any object. This route is only available in
+        debug mode.
+      operationId: postDebugSlabsPrune
+      responses:
+        "200":
+          description: All accounts pruned successfully.
         "500":
           description: Internal server error
 

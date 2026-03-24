@@ -363,10 +363,16 @@ func (c *Client) WalletSendSiacoins(ctx context.Context, address types.Address, 
 	return
 }
 
-// DeleteSlab deletes all objects referencing the given slab, then prunes
-// orphaned slabs for each affected account. Only available in debug mode.
+// DeleteSlab deletes all objects referencing the given slab. Only available in
+// debug mode.
 func (c *Client) DeleteSlab(ctx context.Context, slabID slabs.SlabID) error {
 	return c.c.DELETE(ctx, fmt.Sprintf("/debug/slab/%s", slabID))
+}
+
+// PruneAccounts prunes orphaned slabs for all accounts. Only available in
+// debug mode.
+func (c *Client) PruneAccounts(ctx context.Context) error {
+	return c.c.POST(ctx, "/debug/slabs/prune", nil, nil)
 }
 
 // StatsAccounts returns statistics about the accounts registered on the
