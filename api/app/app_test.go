@@ -638,12 +638,13 @@ func TestAppConnect(t *testing.T) {
 	}
 
 	expected := app.AccountResponse{
-		AccountKey:    account.AccountKey,
-		MaxPinnedData: account.MaxPinnedData,
-		PinnedData:    account.PinnedData,
-		PinnedSize:    account.PinnedSize,
-		App:           account.App,
-		LastUsed:      account.LastUsed,
+		AccountKey:       account.AccountKey,
+		MaxPinnedData:    min(account.MaxPinnedData, account.QuotaMaxPinnedData),
+		RemainingStorage: account.RemainingStorage,
+		PinnedData:       account.PinnedData,
+		PinnedSize:       account.PinnedSize,
+		App:              account.App,
+		LastUsed:         account.LastUsed,
 	}
 	if !reflect.DeepEqual(expected, appAccount) {
 		t.Fatalf("account mismatch: expected %+v, got %+v", expected, appAccount)

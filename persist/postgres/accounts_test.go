@@ -158,6 +158,112 @@ func TestAccountReady(t *testing.T) {
 	assertReady(t, true)
 }
 
+func TestAccountRemainingStorage(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	const connectKey = "quota-aware-account"
+
+	// helper to set pinned_data for an account and the connect key
+	setUsage := func(t *testing.T, ak types.PublicKey, accountUsage, connectKeyUsage uint64) {
+		t.Helper()
+		if err := store.transaction(func(ctx context.Context, tx *txn) error {
+			if _, err := tx.Exec(ctx, `UPDATE accounts SET pinned_data = $2, pinned_size = $2 WHERE public_key = $1`, sqlPublicKey(ak), accountUsage); err != nil {
+				return err
+			} else if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET pinned_data = $2, pinned_size = $2 WHERE app_key = $1`, connectKey, connectKeyUsage); err != nil {
+				return err
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// helper that asserts account fields via both Account() and Accounts()
+	assertAccount := func(t *testing.T, ak types.PublicKey, maxPinned, quotaMaxPinned, pinned, connectKeyPinned, remaining uint64) {
+		t.Helper()
+
+		check := func(t *testing.T, acc accounts.Account) {
+			t.Helper()
+			switch {
+			case acc.MaxPinnedData != maxPinned:
+				t.Fatalf("expected max pinned data %d, got %d", maxPinned, acc.MaxPinnedData)
+			case acc.QuotaMaxPinnedData != quotaMaxPinned:
+				t.Fatalf("expected quota max pinned data %d, got %d", quotaMaxPinned, acc.QuotaMaxPinnedData)
+			case acc.PinnedData != pinned:
+				t.Fatalf("expected pinned data %d, got %d", pinned, acc.PinnedData)
+			case acc.ConnectKeyPinnedData != connectKeyPinned:
+				t.Fatalf("expected connect key pinned data %d, got %d", connectKeyPinned, acc.ConnectKeyPinnedData)
+			case acc.RemainingStorage != remaining:
+				t.Fatalf("expected remaining storage %d, got %d", remaining, acc.RemainingStorage)
+			}
+		}
+
+		acc, err := store.Account(ak)
+		if err != nil {
+			t.Fatal(err)
+		}
+		check(t, acc)
+
+		accs, err := store.Accounts(0, 100, accounts.WithConnectKey(connectKey))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, acc := range accs {
+			if types.PublicKey(acc.AccountKey) == ak {
+				check(t, acc)
+				return
+			}
+		}
+		t.Fatal("expected to find account in list")
+	}
+
+	store.addTestQuota(t, "test-quota", 1000, 10)
+	if _, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
+		Key:         connectKey,
+		Description: "test connect key",
+		Quota:       "test-quota",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	acc1 := types.GeneratePrivateKey().PublicKey()
+	acc2 := types.GeneratePrivateKey().PublicKey()
+	if err := store.RegisterAppKey(connectKey, acc1, accounts.AppMeta{}); err != nil {
+		t.Fatal(err)
+	} else if err := store.RegisterAppKey(connectKey, acc2, accounts.AppMeta{}); err != nil {
+		t.Fatal(err)
+	}
+
+	appLimit := uint64(500)
+	if err := store.UpdateAccount(acc1, accounts.UpdateAccountRequest{
+		MaxPinnedData: &appLimit,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// quota is the bottleneck: app has 100 left but quota only has 50
+	// remaining = min(500-400, 1000-950) = min(100, 50) = 50
+	setUsage(t, acc1, 400, 950)
+	assertAccount(t, acc1, 500, 1000, 400, 950, 50)
+
+	// app limit is the bottleneck: app has 50 left but quota has 500
+	// remaining = min(500-450, 1000-500) = min(50, 500) = 50
+	setUsage(t, acc1, 450, 500)
+	assertAccount(t, acc1, 500, 1000, 450, 500, 50)
+
+	// quota fully exhausted: remaining = min(500-400, 1000-1000) = min(100, 0) = 0
+	setUsage(t, acc1, 400, 1000)
+	assertAccount(t, acc1, 500, 1000, 400, 1000, 0)
+
+	// app limit fully exhausted: remaining = min(500-500, 1000-800) = min(0, 200) = 0
+	setUsage(t, acc1, 500, 800)
+	assertAccount(t, acc1, 500, 1000, 500, 800, 0)
+
+	// no usage: remaining = min(500-0, 1000-0) = 500
+	setUsage(t, acc1, 0, 0)
+	assertAccount(t, acc1, 500, 1000, 0, 0, 500)
+}
+
 func TestAddAccount(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
