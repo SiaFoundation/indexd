@@ -26,6 +26,7 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/prometheus"
 	"go.sia.tech/indexd/pins"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 )
@@ -124,7 +125,9 @@ type (
 		SectorStats() (SectorsStatsResponse, error)
 
 		DeleteContract(contractID types.FileContractID) error
+		DeleteObject(account proto.Account, objectKey types.Hash256) error
 		LastScannedIndex() (types.ChainIndex, error)
+		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
 		PruneSlabs(account proto.Account) error
 	}
 
@@ -287,6 +290,8 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 	// debug endpoints
 	if a.debug {
 		routes["GET /debug/pprof/:handler"] = a.handleGETPProf
+		routes["DELETE /debug/slab/:slabid"] = a.handleDELETESlab
+		routes["POST /debug/slabs/prune"] = a.handlePOSTPruneAccounts
 	}
 
 	return jape.Mux(routes)
@@ -326,6 +331,54 @@ func (a *admin) handleGETPProf(jc jape.Context) {
 	default:
 		pprof.Index(jc.ResponseWriter, jc.Request)
 	}
+}
+
+func (a *admin) handleDELETESlab(jc jape.Context) {
+	var slabID slabs.SlabID
+	if jc.DecodeParam("slabid", &slabID) != nil {
+		return
+	}
+
+	// fetch all objects referencing the slab
+	objects, err := a.store.ObjectsForSlab(slabID)
+	if jc.Check("failed to get objects for slab", err) != nil {
+		return
+	}
+
+	// delete each object
+	for _, obj := range objects {
+		if err := a.store.DeleteObject(obj.Account, obj.ObjectID); err != nil {
+			jc.Check("failed to delete object", err)
+			return
+		}
+	}
+
+	jc.Encode(nil)
+}
+
+func (a *admin) handlePOSTPruneAccounts(jc jape.Context) {
+	const batchSize = 100
+	for offset := 0; ; offset += batchSize {
+		accs, err := a.accounts.Accounts(jc.Request.Context(), offset, batchSize)
+		if jc.Check("failed to get accounts", err) != nil {
+			return
+		}
+
+		for _, acc := range accs {
+			if err := jc.Request.Context().Err(); err != nil {
+				return
+			}
+			if err := a.store.PruneSlabs(acc.AccountKey); err != nil {
+				jc.Check("failed to prune slabs", err)
+				return
+			}
+		}
+
+		if len(accs) < batchSize {
+			break
+		}
+	}
+	jc.Encode(nil)
 }
 
 func (a *admin) handleGETAppConnectKeys(jc jape.Context) {

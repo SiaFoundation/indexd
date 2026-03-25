@@ -1063,7 +1063,7 @@ func TestSettingsAPI(t *testing.T) {
 	cs.Enabled = frand.Uint64n(2) == 0
 	cs.Period = frand.Uint64n(100) + 2
 	cs.RenewWindow = cs.Period / 2
-	cs.WantedContracts = frand.Uint64n(1e3)
+	cs.WantedContracts = frand.Uint64n(1e3) + 1
 
 	err = adminClient.SettingsContractsUpdate(context.Background(), cs)
 	if err != nil {
@@ -1530,6 +1530,193 @@ func TestPruneSlabs(t *testing.T) {
 		t.Fatalf("expected 1 slab after prune, got %d", len(slabIDs))
 	} else if slabIDs[0] != slab1.Digest() {
 		t.Fatal("expected slab1 to remain")
+	}
+}
+
+func TestDeleteSlab(t *testing.T) {
+	cluster := testutils.NewCluster(t, testutils.WithHosts(1))
+	indexer := cluster.Indexer
+	adminClient := indexer.Admin
+	store := indexer.Store()
+
+	cluster.WaitForContracts(t)
+
+	hk := cluster.Hosts[0].PublicKey()
+
+	// create two accounts
+	pk1 := types.GeneratePrivateKey().PublicKey()
+	pk2 := types.GeneratePrivateKey().PublicKey()
+	store.AddTestAccount(t, pk1)
+	store.AddTestAccount(t, pk2)
+	acc1 := proto.Account(pk1)
+	acc2 := proto.Account(pk2)
+
+	// create a shared slab pinned to both accounts
+	sharedSlab := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	for _, acc := range []proto.Account{acc1, acc2} {
+		if _, err := store.PinSlabs(acc, time.Time{}, sharedSlab); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// create a second slab only pinned to acc1
+	slab2 := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	if _, err := store.PinSlabs(acc1, time.Time{}, slab2); err != nil {
+		t.Fatal(err)
+	}
+
+	// helper to create and pin an object
+	pinObject := func(acc proto.Account, ss []slabs.SlabSlice) slabs.SealedObject {
+		t.Helper()
+		obj := slabs.SealedObject{
+			EncryptedDataKey:     frand.Bytes(72),
+			EncryptedMetadataKey: frand.Bytes(72),
+			Slabs:                ss,
+			DataSignature:        types.Signature(frand.Bytes(64)),
+			MetadataSignature:    types.Signature(frand.Bytes(64)),
+		}
+		if err := store.PinObject(acc, obj.PinRequest()); err != nil {
+			t.Fatal(err)
+		}
+		return obj
+	}
+
+	// create objects: shared slab on acc1 and acc2, slab2 only on acc1
+	sharedObj1 := pinObject(acc1, []slabs.SlabSlice{sharedSlab.Slice(0, 100)})
+	sharedObj2 := pinObject(acc2, []slabs.SlabSlice{sharedSlab.Slice(0, 100)})
+	unrelatedObj := pinObject(acc1, []slabs.SlabSlice{slab2.Slice(0, 100)})
+
+	// delete the shared slab's objects via debug endpoint
+	if err := adminClient.DeleteSlab(t.Context(), sharedSlab.Digest()); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify objects referencing the shared slab are gone
+	if _, err := store.Object(acc1, sharedObj1.ID()); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+	if _, err := store.Object(acc2, sharedObj2.ID()); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+
+	// verify the unrelated object on acc1 still exists
+	if _, err := store.Object(acc1, unrelatedObj.ID()); err != nil {
+		t.Fatalf("expected unrelated object to still exist: %v", err)
+	}
+}
+
+func TestPruneAccounts(t *testing.T) {
+	cluster := testutils.NewCluster(t, testutils.WithHosts(1))
+	indexer := cluster.Indexer
+	adminClient := indexer.Admin
+	store := indexer.Store()
+
+	cluster.WaitForContracts(t)
+
+	hk := cluster.Hosts[0].PublicKey()
+
+	// create two accounts
+	pk1 := types.GeneratePrivateKey().PublicKey()
+	pk2 := types.GeneratePrivateKey().PublicKey()
+	store.AddTestAccount(t, pk1)
+	store.AddTestAccount(t, pk2)
+	acc1 := proto.Account(pk1)
+	acc2 := proto.Account(pk2)
+
+	// pin two slabs on acc1 and one on acc2
+	slab1 := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	slab2 := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	slab3 := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	if _, err := store.PinSlabs(acc1, time.Time{}, slab1, slab2); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PinSlabs(acc2, time.Time{}, slab3); err != nil {
+		t.Fatal(err)
+	}
+
+	// create objects referencing only slab1 and slab3, leaving slab2 orphaned
+	pinObject := func(acc proto.Account, ss []slabs.SlabSlice) {
+		t.Helper()
+		obj := slabs.SealedObject{
+			EncryptedDataKey:     frand.Bytes(72),
+			EncryptedMetadataKey: frand.Bytes(72),
+			Slabs:                ss,
+			DataSignature:        types.Signature(frand.Bytes(64)),
+			MetadataSignature:    types.Signature(frand.Bytes(64)),
+		}
+		if err := store.PinObject(acc, obj.PinRequest()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pinObject(acc1, []slabs.SlabSlice{slab1.Slice(0, 100)})
+	pinObject(acc2, []slabs.SlabSlice{slab3.Slice(0, 100)})
+
+	// verify initial state
+	slabIDs, err := store.SlabIDs(acc1, 0, math.MaxInt64)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(slabIDs) != 2 {
+		t.Fatalf("expected 2 slabs for acc1, got %d", len(slabIDs))
+	}
+
+	// prune all accounts
+	if err := adminClient.PruneAccounts(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify orphaned slab2 was pruned from acc1
+	slabIDs, err = store.SlabIDs(acc1, 0, math.MaxInt64)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(slabIDs) != 1 {
+		t.Fatalf("expected 1 slab for acc1, got %d", len(slabIDs))
+	} else if slabIDs[0] != slab1.Digest() {
+		t.Fatal("expected slab1 to remain")
+	}
+
+	// verify acc2's referenced slab is untouched
+	slabIDs, err = store.SlabIDs(acc2, 0, math.MaxInt64)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(slabIDs) != 1 {
+		t.Fatalf("expected 1 slab for acc2, got %d", len(slabIDs))
+	} else if slabIDs[0] != slab3.Digest() {
+		t.Fatal("expected slab3 to remain")
 	}
 }
 

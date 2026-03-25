@@ -12,6 +12,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -43,7 +44,7 @@ loop:
 
 		wg.Add(1)
 		go func(ctx context.Context, hostKey types.PublicKey, hostLog *zap.Logger) {
-			ctx, cancel := context.WithTimeout(ctx, pinTimeout)
+			ctx, cancel := context.WithTimeoutCause(ctx, pinTimeout, client.ErrAbortedRPC)
 			defer func() {
 				<-sema
 				wg.Done()

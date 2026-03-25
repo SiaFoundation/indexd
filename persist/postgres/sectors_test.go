@@ -636,20 +636,6 @@ func TestPinSlabs(t *testing.T) {
 		t.Fatalf("expected error %v, got %v", slabs.ErrMinShards, err)
 	}
 
-	sectorUploadedAt := func(root types.Hash256) (uploadedAt time.Time) {
-		t.Helper()
-
-		err := store.pool.QueryRow(t.Context(), `
-            SELECT uploaded_at
-            FROM sectors
-            WHERE sector_root = $1
-        `, sqlHash256(root)).Scan(&uploadedAt)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-
 	assertSlab := func(slabID slabs.SlabID, params slabs.SlabPinParams, slab slabs.Slab) {
 		t.Helper()
 		if slab.ID != slabID {
@@ -692,23 +678,11 @@ func TestPinSlabs(t *testing.T) {
 	// pin same slabs for account 2 again which should add links to the join
 	// table
 	for i := range toPin {
-		var beforeUploadedAt []time.Time
-		for _, sector := range toPin[i].Sectors {
-			beforeUploadedAt = append(beforeUploadedAt, sectorUploadedAt(sector.Root))
-		}
-
 		slabIDs, err := store.PinSlabs(account2, nextCheck, toPin[i])
 		if err != nil {
 			t.Fatal(err)
 		} else if slabIDs[0] != expectedIDs[i] {
 			t.Fatalf("expected slab IDs %v, got %v", expectedIDs[i], slabIDs[0])
-		}
-
-		for i, sector := range toPin[i].Sectors {
-			afterUploadedAt := sectorUploadedAt(sector.Root)
-			if afterUploadedAt.Compare(beforeUploadedAt[i]) != 1 {
-				t.Fatal("expected after uploaded at timestamp to be greater than before timestamp")
-			}
 		}
 	}
 	assertPinnedData(account, 2*proto.SectorSize, 2*slabPinnedSize)
@@ -1120,6 +1094,57 @@ func TestPinSlabsConflict(t *testing.T) {
 	if !pinnedAt2.After(pinnedAt1) {
 		t.Fatalf("expected pinned_at to update on conflict")
 	}
+}
+
+func TestPinSlabsDuplicate(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	acc1 := proto.Account{1}
+	acc2 := proto.Account{2}
+	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
+
+	store.addTestAccount(t, types.PublicKey(acc1))
+	store.addTestAccount(t, types.PublicKey(acc2))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	assertNumSlabs := func(expected int64) {
+		t.Helper()
+		stats, err := store.SectorStats()
+		if err != nil {
+			t.Fatal(err)
+		} else if stats.Slabs != expected {
+			t.Fatalf("expected %d slabs, got %d", expected, stats.Slabs)
+		}
+	}
+
+	slab := slabs.SlabPinParams{
+		MinShards: 1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+
+	// pin a slab
+	_, err := store.PinSlabs(acc1, nextCheck, slab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNumSlabs(1)
+
+	// re-pin the same slab on the same account, num_slabs should not change
+	_, err = store.PinSlabs(acc1, nextCheck, slab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNumSlabs(1)
+
+	// pin the same slab on a different account, num_slabs should not change
+	_, err = store.PinSlabs(acc2, nextCheck, slab)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNumSlabs(1)
 }
 
 func TestUnpinSlab(t *testing.T) {

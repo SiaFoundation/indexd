@@ -1037,10 +1037,11 @@ func BenchmarkPruneAccounts(b *testing.B) {
 
 	batch := &pgx.Batch{}
 	accountID, objectID, slabID := 0, 0, 0
+	pinnedDataPerAccount := int64(objectsPerAccount*slabsPerObject) * int64(proto.SectorSize)
 	for range numAccounts {
 		ak := types.GeneratePrivateKey().PublicKey()
 
-		batch.Queue(`INSERT INTO accounts(public_key, connect_key_id, max_pinned_data) VALUES ($1, $2, 1000000);`, sqlPublicKey(ak), connectKeyID)
+		batch.Queue(`INSERT INTO accounts(public_key, connect_key_id, max_pinned_data, pinned_data) VALUES ($1, $2, 1000000, $3);`, sqlPublicKey(ak), connectKeyID, pinnedDataPerAccount)
 		accountID++
 
 		for range objectsPerAccount {
@@ -1065,6 +1066,11 @@ func BenchmarkPruneAccounts(b *testing.B) {
 			batch.Queue("UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1", sqlPublicKey(ak))
 		}
 	}
+	batch.Queue(`UPDATE app_connect_keys ack SET pinned_data = (
+		SELECT COALESCE(SUM(a.pinned_data), 0)
+		FROM accounts a
+		WHERE a.connect_key_id = ack.id
+	) WHERE ack.id = $1`, connectKeyID)
 	batch.Queue(`UPDATE stats SET stat_value = $1 WHERE stat_name = $2`, numAccounts*objectsPerAccount*slabsPerObject, statSlabs)
 	batch.Queue(`UPDATE stats SET stat_value = $1 WHERE stat_name = $2`, numAccounts, statAccountsRegistered)
 	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {

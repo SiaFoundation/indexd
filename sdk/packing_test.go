@@ -15,7 +15,7 @@ func TestUploadPacked(t *testing.T) {
 	// create SDK
 	appKey := types.GeneratePrivateKey()
 	dialer := newMockDialer(50)
-	s := initSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(t, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
 	// create packed upload

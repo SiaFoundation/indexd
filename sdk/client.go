@@ -681,16 +681,16 @@ func WithLogger(log *zap.Logger) Option {
 	}
 }
 
-func initSDK(appKey types.PrivateKey, app appClient, hosts hostClient, opts ...Option) *SDK {
+func initSDK(appKey types.PrivateKey, app appClient, provider *client.Provider, opts ...Option) *SDK {
 	sdk := &SDK{
 		appKey: appKey,
 
 		log:    zap.NewNop(), // no logging by default
-		hosts:  hosts,
 		client: app,
 	}
 	for _, opt := range opts {
 		opt(sdk)
 	}
+	sdk.hosts = client.New(provider, sdk.log.Named("client"))
 	return sdk
 }

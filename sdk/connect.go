@@ -160,7 +160,7 @@ func (b *Builder) SDK(appKey types.PrivateKey, opts ...Option) (*SDK, error) {
 		return nil, fmt.Errorf("failed to create host store: %w", err)
 	}
 	b.consume()
-	return initSDK(appKey, b.client, client.New(client.NewProvider(hostStore)), opts...), nil
+	return initSDK(appKey, b.client, client.NewProvider(hostStore), opts...), nil
 }
 
 func deriveAppKey(mnemonic string, appID types.Hash256, sharedSecret types.Hash256) (types.PrivateKey, error) {

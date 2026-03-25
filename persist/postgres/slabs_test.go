@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -398,14 +399,29 @@ func BenchmarkPruneSlabs(b *testing.B) {
 
 	store := initPostgres(b, zap.NewNop())
 
+	connectKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
+		Key:         "benchmark-prune-slabs-key",
+		Description: "benchmark connect key",
+		Quota:       "default",
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	var connectKeyID int64
+	if err := store.pool.QueryRow(b.Context(), `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey.Key).Scan(&connectKeyID); err != nil {
+		b.Fatal(err)
+	}
+
 	batch := &pgx.Batch{}
 	var accs []proto.Account
 	var slabID, objectID int64
+	pinnedPerAccount := int64(objectsPerAccount*slabsPerObject) * int64(proto.SectorSize)
 	for i := range numAccounts {
 		pk := types.GeneratePrivateKey().PublicKey()
 		accs = append(accs, proto.Account(pk))
 
-		batch.Queue(`INSERT INTO accounts(public_key, max_pinned_data) VALUES ($1, 1000000);`, sqlPublicKey(pk))
+		batch.Queue(`INSERT INTO accounts(public_key, connect_key_id, max_pinned_data, pinned_data) VALUES ($1, $2, 1000000, $3);`, sqlPublicKey(pk), connectKeyID, pinnedPerAccount)
 		for j := range objectsPerAccount {
 			accountID := i + 1
 
@@ -429,6 +445,11 @@ func BenchmarkPruneSlabs(b *testing.B) {
 			}
 		}
 	}
+	batch.Queue(`UPDATE app_connect_keys ack SET pinned_data = (
+		SELECT COALESCE(SUM(a.pinned_data), 0)
+		FROM accounts a
+		WHERE a.connect_key_id = ack.id
+	)`)
 	batch.Queue(`UPDATE stats SET stat_value = $1 WHERE stat_name = $2`, slabID, statSlabs)
 	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
 		b.Fatal(err)

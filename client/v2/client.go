@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -18,6 +17,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/mux/v2"
+	"go.uber.org/zap"
 )
 
 type transport struct {
@@ -148,6 +148,7 @@ top:
 
 // A Client is used to interact with Sia hosts over RHP4.
 type Client struct {
+	log   *zap.Logger
 	tg    *threadgroup.ThreadGroup
 	hosts *Provider
 
@@ -184,7 +185,14 @@ func (c *Client) hostTransport(ctx context.Context, hostKey types.PublicKey) (rh
 	return t.dial(ctx, hostKey, addresses)
 }
 
-func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx context.Context, transport rhp.TransportClient) error) error {
+func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx context.Context, transport rhp.TransportClient) error) (err error) {
+	defer func() {
+		// increment the failed RPC count for the host if the RPC failed
+		if err != nil {
+			c.hosts.AddFailedRPC(hostKey, err)
+		}
+	}()
+
 	transport, err := c.hostTransport(ctx, hostKey)
 	if err != nil {
 		return fmt.Errorf("failed to get transport: %w", err)
@@ -194,6 +202,7 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	if err == nil {
 		return nil
 	} else if shouldResetTransport(err) {
+		c.log.Debug("resetting transport", zap.Stringer("host", hostKey), zap.Error(err))
 		c.resetTransport(hostKey)
 	}
 
@@ -202,6 +211,7 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	if errors.Is(err, mux.ErrClosedStream) && context.Cause(ctx) != nil {
 		err = fmt.Errorf("%w: %w", err, context.Cause(ctx))
 	}
+
 	return err
 }
 
@@ -217,42 +227,17 @@ func (c *Client) AccountBalance(ctx context.Context, hostKey types.PublicKey, ac
 // Prices fetches the host prices from the specified host.
 //
 // If the prices are cached and valid, the cached prices are returned.
-func (c *Client) Prices(ctx context.Context, hostKey types.PublicKey) (proto.HostPrices, error) {
-	c.mu.Lock()
-	prices := c.cachedPrices[hostKey]
-	if prices.Validate(hostKey) == nil && time.Until(prices.ValidUntil) > 30*time.Second {
-		c.mu.Unlock()
-		return prices, nil
-	}
-	c.mu.Unlock()
-
-	settings, err := c.HostSettings(ctx, hostKey)
-	if err != nil {
-		return proto.HostPrices{}, err
-	}
-	return settings.Prices, nil
-}
-
-// HostSettings fetches the host settings from the specified host.
-func (c *Client) HostSettings(ctx context.Context, hostKey types.PublicKey) (settings proto.HostSettings, err error) {
+func (c *Client) Prices(ctx context.Context, hostKey types.PublicKey) (prices proto.HostPrices, err error) {
 	done, err := c.tg.Add()
 	if err != nil {
-		return proto.HostSettings{}, err
+		return proto.HostPrices{}, err
 	}
 	defer done()
 
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		settings, err = rhp.RPCSettings(ctx, transport)
+		prices, err = c.prices(ctx, hostKey, transport)
 		return err
 	})
-	if err != nil {
-		return proto.HostSettings{}, err
-	}
-	if settings.Prices.Validate(hostKey) == nil {
-		c.mu.Lock()
-		c.cachedPrices[hostKey] = settings.Prices
-		c.mu.Unlock()
-	}
 	return
 }
 
@@ -268,7 +253,7 @@ func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, h
 
 	start := time.Now()
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.Prices(ctx, hostKey)
+		prices, err := c.prices(ctx, hostKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -276,9 +261,7 @@ func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, h
 		result, err = rhp.RPCWriteSector(ctx, transport, prices, token, bytes.NewReader(data), uint64(len(data)))
 		return err
 	})
-	if err != nil {
-		c.hosts.AddFailedRPC(hostKey, err)
-	} else {
+	if err == nil {
 		c.hosts.AddWriteSample(hostKey, time.Since(start))
 	}
 	return
@@ -295,7 +278,7 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 
 	start := time.Now()
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.Prices(ctx, hostKey)
+		prices, err := c.prices(ctx, hostKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
@@ -303,13 +286,7 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 		result, err = rhp.RPCReadSector(ctx, transport, prices, token, w, root, offset, length)
 		return err
 	})
-	if err != nil && strings.Contains(err.Error(), proto.ErrSectorNotFound.Error()) {
-		// a ErrSectorNotFound error is neither a failed RPC nor do we want to
-		// record its latency since no data was served
-		return
-	} else if err != nil {
-		c.hosts.AddFailedRPC(hostKey, err)
-	} else {
+	if err == nil {
 		c.hosts.AddReadSample(hostKey, time.Since(start))
 	}
 	return
@@ -345,6 +322,30 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// prices fetches the host prices using an existing transport connection.
+//
+// If the prices are cached and valid, the cached prices are returned.
+func (c *Client) prices(ctx context.Context, hostKey types.PublicKey, transport rhp.TransportClient) (proto.HostPrices, error) {
+	c.mu.Lock()
+	prices := c.cachedPrices[hostKey]
+	if prices.Validate(hostKey) == nil && time.Until(prices.ValidUntil) > 30*time.Second {
+		c.mu.Unlock()
+		return prices, nil
+	}
+	c.mu.Unlock()
+
+	settings, err := rhp.RPCSettings(ctx, transport)
+	if err != nil {
+		return proto.HostPrices{}, err
+	}
+	if settings.Prices.Validate(hostKey) == nil {
+		c.mu.Lock()
+		c.cachedPrices[hostKey] = settings.Prices
+		c.mu.Unlock()
+	}
+	return settings.Prices, nil
+}
+
 func shouldResetTransport(err error) bool {
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
@@ -364,8 +365,9 @@ func shouldResetTransport(err error) bool {
 }
 
 // New creates a new Client.
-func New(hosts *Provider) *Client {
+func New(hosts *Provider, log *zap.Logger) *Client {
 	return &Client{
+		log:          log,
 		tg:           threadgroup.New(),
 		hosts:        hosts,
 		cachedPrices: make(map[types.PublicKey]proto.HostPrices),

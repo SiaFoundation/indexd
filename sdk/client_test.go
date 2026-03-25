@@ -33,7 +33,7 @@ func (c *countWriter) Write(p []byte) (int, error) {
 func TestRoundtripCount(t *testing.T) {
 	appKey := types.GeneratePrivateKey()
 	dialer := newMockDialer(50)
-	s := initSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(t, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
 	// 1 MB
@@ -63,7 +63,7 @@ func TestRoundtripCount(t *testing.T) {
 func TestUpload(t *testing.T) {
 	appKey := types.GeneratePrivateKey()
 	dialer := newMockDialer(50)
-	s := initSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(t, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 	data := frand.Bytes(4096)
 
@@ -96,7 +96,7 @@ func TestUpload(t *testing.T) {
 func TestResumableUpload(t *testing.T) {
 	appKey := types.GeneratePrivateKey()
 	dialer := newMockDialer(50)
-	s := initSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(t, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
 	obj := NewEmptyObject()
@@ -120,7 +120,7 @@ func TestResumableUpload(t *testing.T) {
 func TestDownload(t *testing.T) {
 	dialer := newMockDialer(30)
 	appKey := types.GeneratePrivateKey()
-	s := initSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(t, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
 	slabSize := uint64(proto.SectorSize) * 10
@@ -367,7 +367,7 @@ func BenchmarkUpload(b *testing.B) {
 			dialer.SetSlowHosts(slow, time.Second)       // slow, but not too slow
 			dialer.SetSlowHosts(timeout, 30*time.Second) // longer than the default timeout
 
-			s := initSDK(appKey, newMockAppClient(), dialer)
+			s := newTestSDK(b, appKey, newMockAppClient(), dialer)
 			defer s.Close()
 
 			r := bytes.NewReader(data)
@@ -401,7 +401,7 @@ func BenchmarkDownload(b *testing.B) {
 
 	appKey := types.GeneratePrivateKey()
 	dialer := newMockDialer(30)
-	s := initSDK(appKey, newMockAppClient(), dialer)
+	s := newTestSDK(b, appKey, newMockAppClient(), dialer)
 	defer s.Close()
 
 	data := frand.Bytes(benchmarkSize)

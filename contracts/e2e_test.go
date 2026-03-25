@@ -57,7 +57,7 @@ func TestContractPruning(t *testing.T) {
 		return root, sector
 	}
 
-	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())))
+	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())), logger)
 	defer client.Close()
 
 	// prepare slabs
@@ -219,7 +219,7 @@ func TestSectorPinning(t *testing.T) {
 		MinShards:     4,
 	}
 
-	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())))
+	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())), logger)
 	defer client.Close()
 
 	// upload a random sector to each host

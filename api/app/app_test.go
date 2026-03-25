@@ -151,7 +151,7 @@ func TestApplicationAPI(t *testing.T) {
 	adminClient := indexer.Admin
 
 	// create host client
-	hc := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())))
+	hc := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())), logger)
 	defer hc.Close()
 
 	// wait for contracts to be formed
@@ -725,7 +725,7 @@ func TestSharedObjects(t *testing.T) {
 	adminClient := indexer.Admin
 
 	// create client
-	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())))
+	client := client.New(client.NewProvider(hosts.NewHostStore(cluster.Indexer.Store())), logger)
 	defer client.Close()
 
 	// wait for contracts to be formed

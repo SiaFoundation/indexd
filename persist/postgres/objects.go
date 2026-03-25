@@ -280,6 +280,35 @@ func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) err
 	})
 }
 
+// ObjectsForSlab returns all (account, object key) pairs for objects that
+// reference the given slab.
+func (s *Store) ObjectsForSlab(slabID slabs.SlabID) (objects []slabs.SlabObject, _ error) {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		objects = objects[:0] // reuse same slice if transaction retries
+
+		rows, err := tx.Query(ctx, `
+			SELECT DISTINCT a.public_key, o.object_key
+			FROM objects o
+			JOIN object_slabs os ON o.id = os.object_id
+			JOIN accounts a ON o.account_id = a.id
+			WHERE os.slab_digest = $1`, sqlHash256(slabID))
+		if err != nil {
+			return fmt.Errorf("failed to query objects for slab: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var obj slabs.SlabObject
+			if err := rows.Scan((*sqlPublicKey)(&obj.Account), (*sqlHash256)(&obj.ObjectID)); err != nil {
+				return fmt.Errorf("failed to scan object for slab: %w", err)
+			}
+			objects = append(objects, obj)
+		}
+		return rows.Err()
+	})
+	return objects, err
+}
+
 // PinObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
 func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) error {
