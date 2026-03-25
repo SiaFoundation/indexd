@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -287,11 +286,7 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 		result, err = rhp.RPCReadSector(ctx, transport, prices, token, w, root, offset, length)
 		return err
 	})
-	if err != nil && strings.Contains(err.Error(), proto.ErrSectorNotFound.Error()) {
-		// a ErrSectorNotFound error is neither a failed RPC nor do we want to
-		// record its latency since no data was served
-		return
-	} else if err == nil {
+	if err == nil {
 		c.hosts.AddReadSample(hostKey, time.Since(start))
 	}
 	return
