@@ -44,7 +44,8 @@ var migrations = []func(context.Context, *txn, *zap.Logger) error{
 		_, err := tx.Exec(ctx, `CREATE TABLE sectors_stats (
     id INTEGER PRIMARY KEY NOT NULL DEFAULT 0 CHECK (id = 0), -- enforce a single row
     num_slabs BIGINT NOT NULL DEFAULT 0 CHECK (num_slabs >= 0) -- total number of slabs
-);`)
+);
+INSERT INTO sectors_stats (id) VALUES (0);`)
 		return err
 	},
 	// adds the 'max_pinned_data' and 'pinned_data' columns
@@ -849,12 +850,12 @@ WHERE ack.id = sub.connect_key_id;
 		var numAccountsRegistered int64
 		var numScans, numScansFailed int64
 		err := tx.QueryRow(ctx, `SELECT
-			COALESCE(num_slabs, 0), COALESCE(num_migrated_sectors, 0), COALESCE(num_pinned_sectors, 0),
-			COALESCE(num_unpinnable_sectors, 0), COALESCE(num_unpinned_sectors, 0),
-			COALESCE(num_sectors_checked, 0), COALESCE(num_sectors_lost, 0), COALESCE(num_sectors_check_failed, 0),
-			COALESCE(num_accounts_registered, 0),
-			COALESCE(num_scans, 0), COALESCE(num_scans_failed, 0)
-		FROM (SELECT 1) AS dummy LEFT JOIN stats ON TRUE`).Scan(
+			num_slabs, num_migrated_sectors, num_pinned_sectors,
+			num_unpinnable_sectors, num_unpinned_sectors,
+			num_sectors_checked, num_sectors_lost, num_sectors_check_failed,
+			num_accounts_registered,
+			num_scans, num_scans_failed
+		FROM stats`).Scan(
 			&numSlabs, &numMigratedSectors, &numPinnedSectors, &numUnpinnableSectors, &numUnpinnedSectors,
 			&numSectorsChecked, &numSectorsLost, &numSectorsCheckFailed,
 			&numAccountsRegistered,
