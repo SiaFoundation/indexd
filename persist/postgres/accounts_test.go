@@ -227,10 +227,7 @@ func TestAccountRemainingStorage(t *testing.T) {
 	}
 
 	acc1 := types.GeneratePrivateKey().PublicKey()
-	acc2 := types.GeneratePrivateKey().PublicKey()
 	if err := store.RegisterAppKey(connectKey, acc1, accounts.AppMeta{}); err != nil {
-		t.Fatal(err)
-	} else if err := store.RegisterAppKey(connectKey, acc2, accounts.AppMeta{}); err != nil {
 		t.Fatal(err)
 	}
 
