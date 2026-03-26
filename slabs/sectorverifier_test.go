@@ -143,7 +143,7 @@ func TestSectorVerifier(t *testing.T) {
 	// case 8: verify timeout fires on a slow host
 	updateBalance(types.Siacoins(10))
 	client.integrityErrors = make(map[types.Hash256]error)
-	client.slowHosts[hostKey.PublicKey()] = 2 * time.Second
+	client.setSlowHost(hostKey.PublicKey(), 2*time.Second)
 	assertResults(roots[:1], nil, context.DeadlineExceeded)
 
 	// case 9: fast host completes within verify timeout

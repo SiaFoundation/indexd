@@ -153,7 +153,7 @@ func WithIntegrityCheckIntervals(success, failure time.Duration) Option {
 // parallel during integrity checks. This directly impacts the number of
 // concurrent ReadSector RPCs performed when verifying sector integrity.
 //
-// The default is runtime.NumCPU().
+// The default is 50.
 func WithNumIntegrityCheckGoroutines(n int) Option {
 	return func(m *SlabManager) {
 		if n <= 0 {
