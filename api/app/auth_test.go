@@ -21,6 +21,40 @@ import (
 	"lukechampine.com/frand"
 )
 
+func TestRemainingStorage(t *testing.T) {
+	tests := []struct {
+		name             string
+		maxPinned        uint64
+		pinned           uint64
+		quotaMaxPinned   uint64
+		connectKeyPinned uint64
+		expected         uint64
+	}{
+		{name: "no usage", maxPinned: 500, pinned: 0, quotaMaxPinned: 1000, connectKeyPinned: 0, expected: 500},
+		{name: "quota bottleneck", maxPinned: 500, pinned: 400, quotaMaxPinned: 1000, connectKeyPinned: 950, expected: 50},
+		{name: "app limit bottleneck", maxPinned: 500, pinned: 450, quotaMaxPinned: 1000, connectKeyPinned: 500, expected: 50},
+		{name: "quota exhausted", maxPinned: 500, pinned: 400, quotaMaxPinned: 1000, connectKeyPinned: 1000, expected: 0},
+		{name: "app limit exhausted", maxPinned: 500, pinned: 500, quotaMaxPinned: 1000, connectKeyPinned: 800, expected: 0},
+		{name: "both exhausted", maxPinned: 500, pinned: 500, quotaMaxPinned: 1000, connectKeyPinned: 1000, expected: 0},
+		{name: "equal limits partial usage", maxPinned: 1000, pinned: 300, quotaMaxPinned: 1000, connectKeyPinned: 600, expected: 400},
+		{name: "usage exceeds limits", maxPinned: 500, pinned: 600, quotaMaxPinned: 1000, connectKeyPinned: 1100, expected: 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := remainingStorage(accounts.Account{
+				MaxPinnedData:        tt.maxPinned,
+				PinnedData:           tt.pinned,
+				QuotaMaxPinnedData:   tt.quotaMaxPinned,
+				ConnectKeyPinnedData: tt.connectKeyPinned,
+			})
+			if got != tt.expected {
+				t.Fatalf("expected %d, got %d", tt.expected, got)
+			}
+		})
+	}
+}
+
 type mockAccounts struct{ tokens map[types.PublicKey]struct{} }
 
 func (s *mockAccounts) HasAccount(_ context.Context, ak types.PublicKey) (bool, error) {
