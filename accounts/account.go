@@ -72,7 +72,6 @@ type (
 		MaxPinnedData        uint64        `json:"maxPinnedData"`
 		QuotaMaxPinnedData   uint64        `json:"quotaMaxPinnedData"`
 		ConnectKeyPinnedData uint64        `json:"connectKeyPinnedData"`
-		RemainingStorage     uint64        `json:"remainingStorage"`
 		Ready                bool          `json:"ready"`
 		PinnedData           uint64        `json:"pinnedData"`
 		PinnedSize           uint64        `json:"pinnedSize"`

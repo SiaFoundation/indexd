@@ -480,10 +480,6 @@ components:
           type: number
           format: uint64
           description: Current amount of pinned data in bytes used across all apps sharing the same connect key, before redundancy.
-        remainingStorage:
-          type: number
-          format: uint64
-          description: Remaining amount of data in bytes that can still be pinned, after applying both the app account limit and current quota.
         pinnedData:
           type: number
           format: uint64
@@ -515,7 +511,9 @@ components:
             account, equal to the lower of the account's maxPinnedData and
             quotaMaxPinnedData.
         remainingStorage:
-          $ref: "#/components/schemas/Account/properties/remainingStorage"
+          type: number
+          format: uint64
+          description: Remaining amount of data in bytes that can still be pinned, after applying both the app account limit and current quota.
         pinnedData:
           $ref: "#/components/schemas/Account/properties/pinnedData"
         pinnedSize:

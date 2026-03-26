@@ -637,10 +637,12 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	appRemaining := account.MaxPinnedData - min(account.PinnedData, account.MaxPinnedData)
+	quotaRemaining := account.QuotaMaxPinnedData - min(account.ConnectKeyPinnedData, account.QuotaMaxPinnedData)
 	expected := app.AccountResponse{
 		AccountKey:       account.AccountKey,
 		MaxPinnedData:    min(account.MaxPinnedData, account.QuotaMaxPinnedData),
-		RemainingStorage: account.RemainingStorage,
+		RemainingStorage: min(appRemaining, quotaRemaining),
 		PinnedData:       account.PinnedData,
 		PinnedSize:       account.PinnedSize,
 		App:              account.App,

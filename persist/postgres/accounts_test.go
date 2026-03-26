@@ -179,7 +179,7 @@ func TestAccountRemainingStorage(t *testing.T) {
 	}
 
 	// helper that asserts account fields via both Account() and Accounts()
-	assertAccount := func(t *testing.T, ak types.PublicKey, maxPinned, quotaMaxPinned, pinned, connectKeyPinned, remaining uint64) {
+	assertAccount := func(t *testing.T, ak types.PublicKey, maxPinned, quotaMaxPinned, pinned, connectKeyPinned uint64) {
 		t.Helper()
 
 		check := func(t *testing.T, acc accounts.Account) {
@@ -193,8 +193,6 @@ func TestAccountRemainingStorage(t *testing.T) {
 				t.Fatalf("expected pinned data %d, got %d", pinned, acc.PinnedData)
 			case acc.ConnectKeyPinnedData != connectKeyPinned:
 				t.Fatalf("expected connect key pinned data %d, got %d", connectKeyPinned, acc.ConnectKeyPinnedData)
-			case acc.RemainingStorage != remaining:
-				t.Fatalf("expected remaining storage %d, got %d", remaining, acc.RemainingStorage)
 			}
 		}
 
@@ -239,26 +237,24 @@ func TestAccountRemainingStorage(t *testing.T) {
 	}
 
 	// quota is the bottleneck: app has 100 left but quota only has 50
-	// remaining = min(500-400, 1000-950) = min(100, 50) = 50
 	setUsage(t, acc1, 400, 950)
-	assertAccount(t, acc1, 500, 1000, 400, 950, 50)
+	assertAccount(t, acc1, 500, 1000, 400, 950)
 
 	// app limit is the bottleneck: app has 50 left but quota has 500
-	// remaining = min(500-450, 1000-500) = min(50, 500) = 50
 	setUsage(t, acc1, 450, 500)
-	assertAccount(t, acc1, 500, 1000, 450, 500, 50)
+	assertAccount(t, acc1, 500, 1000, 450, 500)
 
-	// quota fully exhausted: remaining = min(500-400, 1000-1000) = min(100, 0) = 0
+	// quota fully exhausted
 	setUsage(t, acc1, 400, 1000)
-	assertAccount(t, acc1, 500, 1000, 400, 1000, 0)
+	assertAccount(t, acc1, 500, 1000, 400, 1000)
 
-	// app limit fully exhausted: remaining = min(500-500, 1000-800) = min(0, 200) = 0
+	// app limit fully exhausted
 	setUsage(t, acc1, 500, 800)
-	assertAccount(t, acc1, 500, 1000, 500, 800, 0)
+	assertAccount(t, acc1, 500, 1000, 500, 800)
 
-	// no usage: remaining = min(500-0, 1000-0) = 500
+	// no usage
 	setUsage(t, acc1, 0, 0)
-	assertAccount(t, acc1, 500, 1000, 0, 0, 500)
+	assertAccount(t, acc1, 500, 1000, 0, 0)
 }
 
 func TestAddAccount(t *testing.T) {

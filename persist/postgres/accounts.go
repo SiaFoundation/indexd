@@ -488,13 +488,5 @@ func scanAccount(s scanner) (account accounts.Account, err error) {
 		&account.App.ServiceURL,
 		&account.LastUsed,
 	)
-	account.RemainingStorage = min(saturatingSub(account.MaxPinnedData, account.PinnedData), saturatingSub(account.QuotaMaxPinnedData, account.ConnectKeyPinnedData))
 	return
-}
-
-func saturatingSub(x, y uint64) uint64 {
-	if y >= x {
-		return 0
-	}
-	return x - y
 }

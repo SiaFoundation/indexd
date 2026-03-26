@@ -708,13 +708,20 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(AccountResponse{
 		AccountKey:       account.AccountKey,
 		MaxPinnedData:    min(account.MaxPinnedData, account.QuotaMaxPinnedData),
-		RemainingStorage: account.RemainingStorage,
+		RemainingStorage: remainingStorage(account),
 		Ready:            account.Ready,
 		PinnedData:       account.PinnedData,
 		PinnedSize:       account.PinnedSize,
 		App:              account.App,
 		LastUsed:         account.LastUsed,
 	})
+}
+
+// remainingStorage returns the remaining storage available for an account
+func remainingStorage(a accounts.Account) uint64 {
+	appRemaining := a.MaxPinnedData - min(a.PinnedData, a.MaxPinnedData)
+	quotaRemaining := a.QuotaMaxPinnedData - min(a.ConnectKeyPinnedData, a.QuotaMaxPinnedData)
+	return min(appRemaining, quotaRemaining)
 }
 
 // decodeRequest is a helper that also handles writing the error response when
