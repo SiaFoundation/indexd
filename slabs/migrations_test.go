@@ -372,13 +372,6 @@ func BenchmarkMigrateSlab(b *testing.B) {
 			encryptionKey, shardData, roots := NewTestShards(b, dataShards, parityShards)
 
 			// create slab hosts (one per sector)
-			//
-			// host ordering controls the overdrive behavior:
-			//   [0, nFailHosts)                         - fail immediately on read
-			//   [nFailHosts, nFailHosts+nBlockHosts)     - block on read
-			//   [nFailHosts+nBlockHosts, dataShards)     - good hosts (initial download, may be empty)
-			//   [dataShards, dataShards+badShards)        - bad contract hosts (need migration, still downloadable)
-			//   [dataShards+badShards, totalShards)       - good hosts (overdrive candidates)
 			slabHosts := make([]hosts.Host, totalShards)
 			for i := range slabHosts {
 				sk := types.GeneratePrivateKey()
@@ -388,6 +381,12 @@ func BenchmarkMigrateSlab(b *testing.B) {
 				slabHosts[i] = h
 				db.addTestContract(b, h.PublicKey)
 			}
+
+			// name subsets for clarity
+			badParityHosts := slabHosts[dataShards : dataShards+badShards]
+			badParityRoots := roots[dataShards : dataShards+badShards]
+			failHosts := slabHosts[:nFailHosts]
+			blockHosts := slabHosts[nFailHosts : nFailHosts+nBlockHosts]
 
 			// write encrypted shards to their respective mock hosts
 			for i, shard := range shardData {
@@ -422,27 +421,28 @@ func BenchmarkMigrateSlab(b *testing.B) {
 				db.pinSectorToContract(b, roots[i], types.FileContractID(slabHosts[i].PublicKey))
 			}
 
-			// all hosts get good contracts except bad-shard hosts
-			for i, h := range slabHosts {
-				isBad := i >= dataShards && i < dataShards+badShards
-				if !isBad {
-					contractsMgr.contracts = append(contractsMgr.contracts, newTestContract(h.PublicKey))
-				}
+			// all hosts get good contracts except parity hosts that need migration
+			for _, h := range slabHosts[:dataShards] {
+				contractsMgr.contracts = append(contractsMgr.contracts, newTestContract(h.PublicKey))
 			}
-			for i := dataShards; i < dataShards+badShards; i++ {
+			for _, h := range slabHosts[dataShards+badShards:] {
+				contractsMgr.contracts = append(contractsMgr.contracts, newTestContract(h.PublicKey))
+			}
+			for _, h := range badParityHosts {
 				if _, err := db.Exec(context.Background(),
 					"UPDATE contracts SET good = FALSE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)",
-					slabHosts[i].PublicKey[:]); err != nil {
+					h.PublicKey[:]); err != nil {
 					b.Fatal(err)
 				}
 			}
 
-			// configure failing and blocking hosts
-			for i := 0; i < nFailHosts; i++ {
-				client.failHosts[slabHosts[i].PublicKey] = errors.New("benchmark: host unavailable")
+			// configure failing and blocking hosts among the data shard
+			// hosts to exercise overdrive behavior during download
+			for _, h := range failHosts {
+				client.failHosts[h.PublicKey] = errors.New("benchmark: host unavailable")
 			}
-			for i := nFailHosts; i < nFailHosts+nBlockHosts; i++ {
-				client.slowHosts[slabHosts[i].PublicKey] = time.Hour
+			for _, h := range blockHosts {
+				client.slowHosts[h.PublicKey] = time.Hour
 			}
 
 			// create upload-candidate hosts (separate from slab hosts)
@@ -481,8 +481,8 @@ func BenchmarkMigrateSlab(b *testing.B) {
 			// reset restores DB state between benchmark iterations
 			reset := func() {
 				ctx := context.Background()
-				for i := dataShards; i < dataShards+badShards; i++ {
-					hk := slabHosts[i].PublicKey
+				for i, h := range badParityHosts {
+					hk := h.PublicKey
 					fcid := types.FileContractID(hk)
 					if _, err := db.Exec(ctx, `
 						UPDATE sectors
@@ -490,14 +490,14 @@ func BenchmarkMigrateSlab(b *testing.B) {
 							contract_sectors_map_id = (SELECT id FROM contract_sectors_map WHERE contract_id = $3),
 							num_migrated = 0
 						WHERE sector_root = $1`,
-						roots[i][:], hk[:], fcid[:]); err != nil {
+						badParityRoots[i][:], hk[:], fcid[:]); err != nil {
 						b.Fatal(err)
 					}
 				}
-				for i := dataShards; i < dataShards+badShards; i++ {
+				for _, h := range badParityHosts {
 					if _, err := db.Exec(ctx,
 						"UPDATE contracts SET good = FALSE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)",
-						slabHosts[i].PublicKey[:]); err != nil {
+						h.PublicKey[:]); err != nil {
 						b.Fatal(err)
 					}
 				}
