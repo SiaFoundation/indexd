@@ -1071,8 +1071,8 @@ func BenchmarkPruneAccounts(b *testing.B) {
 		FROM accounts a
 		WHERE a.connect_key_id = ack.id
 	) WHERE ack.id = $1`, connectKeyID)
-	batch.Queue(`UPDATE stats SET num_slabs = $1`, numAccounts*objectsPerAccount*slabsPerObject)
-	batch.Queue(`UPDATE stats SET num_accounts_registered = $1`, numAccounts)
+	batch.Queue(`UPDATE stats SET stat_value = $1 WHERE stat_name = $2`, numAccounts*objectsPerAccount*slabsPerObject, statSlabs)
+	batch.Queue(`UPDATE stats SET stat_value = $1 WHERE stat_name = $2`, numAccounts, statAccountsRegistered)
 	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
 		b.Fatal(err)
 	}

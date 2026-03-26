@@ -383,22 +383,8 @@ CREATE TABLE sectors (
 );
 
 CREATE TABLE stats (
-    id INTEGER PRIMARY KEY NOT NULL DEFAULT 0 CHECK (id = 0), -- enforce a single row
-    -- sector stats
-    num_slabs BIGINT NOT NULL DEFAULT 0 CHECK (num_slabs >= 0), -- total number of slabs
-    num_migrated_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_migrated_sectors >= 0), -- total number of migrated sectors
-    num_pinned_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_pinned_sectors >= 0), -- total number of pinned sectors
-    num_unpinnable_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinnable_sectors >= 0), -- total number of unpinnable sectors
-    num_unpinned_sectors BIGINT NOT NULL DEFAULT 0 CHECK (num_unpinned_sectors >= 0), -- total number of unpinned sectors
-
-    num_sectors_checked BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_checked >= 0),
-    num_sectors_lost BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_lost >= 0),
-    num_sectors_check_failed BIGINT NOT NULL DEFAULT 0 CHECK (num_sectors_check_failed >= 0),
-    -- account stats
-    num_accounts_registered BIGINT NOT NULL DEFAULT 0 CHECK (num_accounts_registered >= 0), -- number of accounts currently registered
-    -- host scan stats
-    num_scans BIGINT NOT NULL DEFAULT 0 CHECK (num_scans >= 0), -- total number of performed host scans
-    num_scans_failed BIGINT NOT NULL DEFAULT 0 CHECK (num_scans_failed >= 0) -- total number of failed host scans
+    stat_name TEXT PRIMARY KEY NOT NULL,
+    stat_value BIGINT NOT NULL DEFAULT 0 CHECK (stat_value >= 0)
 );
 
 -- quick lookup of sectors that failed the integrity checks too many times

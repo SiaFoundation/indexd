@@ -103,7 +103,7 @@ func TestBlockHosts(t *testing.T) {
 		t.Fatal(err)
 	}
 	// update num_unpinned_sectors stat to match inserted sector
-	_, err = store.pool.Exec(t.Context(), `UPDATE stats SET num_unpinned_sectors = num_unpinned_sectors + 1`)
+	_, err = store.pool.Exec(t.Context(), `UPDATE stats SET stat_value = stat_value + 1 WHERE stat_name = $1`, statUnpinnedSectors)
 	if err != nil {
 		t.Fatal(err)
 	}

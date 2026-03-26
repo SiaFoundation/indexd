@@ -161,7 +161,7 @@ func TestMigrateSector(t *testing.T) {
 		t.Helper()
 
 		var got int64
-		err = store.pool.QueryRow(t.Context(), `SELECT num_migrated_sectors FROM stats`).Scan(&got)
+		err = store.pool.QueryRow(t.Context(), `SELECT stat_value FROM stats WHERE stat_name = $1`, statMigratedSectors).Scan(&got)
 		if err != nil {
 			t.Fatal(err)
 		} else if got != expected {
@@ -305,9 +305,11 @@ func TestRecordIntegrityCheck(t *testing.T) {
 		t.Helper()
 		var pinned, unpinned, unpinnable int64
 		err := store.pool.QueryRow(t.Context(), `
-			SELECT num_pinned_sectors, num_unpinned_sectors, num_unpinnable_sectors
-			FROM stats
-			WHERE id = 0`,
+			SELECT
+				(SELECT stat_value FROM stats WHERE stat_name = $1),
+				(SELECT stat_value FROM stats WHERE stat_name = $2),
+				(SELECT stat_value FROM stats WHERE stat_name = $3)`,
+			statPinnedSectors, statUnpinnedSectors, statUnpinnableSectors,
 		).Scan(&pinned, &unpinned, &unpinnable)
 		if err != nil {
 			t.Fatal(err)
@@ -584,7 +586,7 @@ func TestPinSlabs(t *testing.T) {
 	assertUnpinnedSectors := func(expected uint64) {
 		t.Helper()
 		var got uint64
-		err := store.pool.QueryRow(t.Context(), "SELECT num_unpinned_sectors FROM stats WHERE id = 0").Scan(&got)
+		err := store.pool.QueryRow(t.Context(), "SELECT stat_value FROM stats WHERE stat_name = $1", statUnpinnedSectors).Scan(&got)
 		if err != nil {
 			t.Fatal(err)
 		} else if got != expected {
@@ -1531,12 +1533,11 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// recalculate sector stats
 	_, err = store.pool.Exec(t.Context(), `
-		UPDATE stats
-		SET num_pinned_sectors = (
+		UPDATE stats SET stat_value = (
 			SELECT COUNT(id)
 			FROM sectors
 			WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NOT NULL
-		)`)
+		) WHERE stat_name = $1`, statPinnedSectors)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1564,7 +1565,7 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 	assertUnpinnableSectors := func(expected uint64) {
 		t.Helper()
 		var got uint64
-		err := store.pool.QueryRow(t.Context(), "SELECT num_unpinnable_sectors FROM stats WHERE id = 0").Scan(&got)
+		err := store.pool.QueryRow(t.Context(), "SELECT stat_value FROM stats WHERE stat_name = $1", statUnpinnableSectors).Scan(&got)
 		if err != nil {
 			t.Fatal(err)
 		} else if got != expected {
@@ -1952,12 +1953,11 @@ func BenchmarkUnpinnedSectors(b *testing.B) {
 
 		// recalculate sector stats
 		_, err = store.pool.Exec(b.Context(), `
-			UPDATE stats
-			SET num_unpinned_sectors = (
+			UPDATE stats SET stat_value = (
 				SELECT COUNT(id)
 				FROM sectors
 				WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NULL
-			)`)
+			) WHERE stat_name = $1`, statUnpinnedSectors)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -2507,13 +2507,16 @@ func BenchmarkMarkSectorsUnpinnable(b *testing.B) {
 				COUNT(*) FILTER (WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NULL)::bigint     AS unpinned,
 				COUNT(*) FILTER (WHERE host_id IS NULL     AND contract_sectors_map_id IS NULL)::bigint     AS unpinnable
 			FROM sectors
+		),
+		updates(name, val) AS (
+			SELECT $1, pinned FROM counts
+			UNION ALL SELECT $2, unpinned FROM counts
+			UNION ALL SELECT $3, unpinnable FROM counts
 		)
 		UPDATE stats s
-		SET
-			num_pinned_sectors     = counts.pinned,
-			num_unpinned_sectors   = counts.unpinned,
-			num_unpinnable_sectors = counts.unpinnable
-		FROM counts`); err != nil {
+		SET stat_value = u.val
+		FROM updates u
+		WHERE s.stat_name = u.name`, statPinnedSectors, statUnpinnedSectors, statUnpinnableSectors); err != nil {
 			b.Fatal(err)
 		}
 		// recalculate host unpinned sectors
@@ -2598,9 +2601,11 @@ func TestMarkSectorsLost(t *testing.T) {
 		t.Helper()
 		var pinned, unpinned, unpinnable int64
 		err := store.pool.QueryRow(t.Context(), `
-			SELECT num_pinned_sectors, num_unpinned_sectors, num_unpinnable_sectors
-			FROM stats
-			WHERE id = 0`,
+			SELECT
+				(SELECT stat_value FROM stats WHERE stat_name = $1),
+				(SELECT stat_value FROM stats WHERE stat_name = $2),
+				(SELECT stat_value FROM stats WHERE stat_name = $3)`,
+			statPinnedSectors, statUnpinnedSectors, statUnpinnableSectors,
 		).Scan(&pinned, &unpinned, &unpinnable)
 		if err != nil {
 			t.Fatal(err)
@@ -2730,12 +2735,11 @@ func BenchmarkMarkSectorsLost(b *testing.B) {
 
 		// recalculate sector stats
 		_, err = store.pool.Exec(b.Context(), `
-		UPDATE stats
-		SET num_pinned_sectors = (
+		UPDATE stats SET stat_value = (
 			SELECT COUNT(id)
 			FROM sectors
 			WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NOT NULL
-		)`)
+		) WHERE stat_name = $1`, statPinnedSectors)
 		if err != nil {
 			b.Fatal(err)
 		}

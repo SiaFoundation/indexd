@@ -57,7 +57,7 @@ func TestDownloadShards(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.Exec(context.Background(), "UPDATE stats SET num_unpinned_sectors = num_unpinned_sectors + 1"); err != nil {
+		if _, err := store.Exec(context.Background(), "UPDATE stats SET stat_value = stat_value + 1 WHERE stat_name = 'num_unpinned_sectors'"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.Exec(context.Background(), "UPDATE hosts SET unpinned_sectors = unpinned_sectors + 1 WHERE public_key = $1", hosts[i].PublicKey[:]); err != nil {
