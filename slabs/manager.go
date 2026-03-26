@@ -191,6 +191,9 @@ func WithMinHostDistance(km float64) Option {
 // on a single host. The default is 3 minutes.
 func WithVerifyTimeout(d time.Duration) Option {
 	return func(m *SlabManager) {
+		if d <= 0 {
+			panic("verify timeout must be positive") // developer error
+		}
 		m.verifyTimeout = d
 	}
 }
