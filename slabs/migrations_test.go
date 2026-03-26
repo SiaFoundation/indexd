@@ -2,6 +2,8 @@ package slabs_test
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -12,6 +14,7 @@ import (
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
@@ -346,9 +349,207 @@ func newTestContract(hk types.PublicKey) contracts.Contract {
 	}
 }
 
+func BenchmarkMigrateSlab(b *testing.B) {
+	const (
+		dataShards   = 10
+		parityShards = 20
+		totalShards  = dataShards + parityShards
+		shardTimeout = 400 * time.Millisecond
+	)
+
+	benchMatrix := func(b *testing.B, badShards, nFailHosts, nBlockHosts int) {
+		b.Run(fmt.Sprintf("bad %d fail %d block %d", badShards, nFailHosts, nBlockHosts), func(b *testing.B) {
+			db := newMockStore(b)
+			chain := newMockChainManager()
+			am := newMockAccountManager()
+			hm := newMockHostManager()
+			client := newMockHostClient()
+			contractsMgr := newMockContractManager()
+
+			accountKey := types.PublicKey{1}
+			db.AddTestAccount(b, accountKey)
+
+			encryptionKey, shardData, roots := NewTestShards(b, dataShards, parityShards)
+
+			// create slab hosts (one per sector)
+			//
+			// host ordering controls the overdrive behavior:
+			//   [0, nFailHosts)                         - fail immediately on read
+			//   [nFailHosts, nFailHosts+nBlockHosts)     - block on read
+			//   [nFailHosts+nBlockHosts, dataShards)     - good hosts (initial download, may be empty)
+			//   [dataShards, dataShards+badShards)        - bad contract hosts (need migration, still downloadable)
+			//   [dataShards+badShards, totalShards)       - good hosts (overdrive candidates)
+			slabHosts := make([]hosts.Host, totalShards)
+			for i := range slabHosts {
+				sk := types.GeneratePrivateKey()
+				h := client.addTestHost(sk)
+				db.AddTestHost(b, h)
+				client.hostSettings[h.PublicKey] = h.Settings
+				slabHosts[i] = h
+				db.addTestContract(b, h.PublicKey)
+			}
+
+			// write encrypted shards to their respective mock hosts
+			for i, shard := range shardData {
+				result, err := client.WriteSector(context.Background(), types.GeneratePrivateKey(), slabHosts[i].PublicKey, shard)
+				if err != nil {
+					b.Fatal(err)
+				} else if result.Root != roots[i] {
+					b.Fatalf("root mismatch at index %d", i)
+				}
+			}
+
+			// pin the slab
+			pinnedSectors := make([]slabs.PinnedSector, totalShards)
+			for i := range pinnedSectors {
+				pinnedSectors[i] = slabs.PinnedSector{
+					Root:    roots[i],
+					HostKey: slabHosts[i].PublicKey,
+				}
+			}
+			slabIDs, err := db.PinSlabs(proto.Account(accountKey), time.Now().Add(time.Hour), slabs.SlabPinParams{
+				EncryptionKey: encryptionKey,
+				MinShards:     dataShards,
+				Sectors:       pinnedSectors,
+			})
+			if err != nil {
+				b.Fatal(err)
+			}
+			slabID := slabIDs[0]
+
+			// pin each sector to its host's contract
+			for i := range roots {
+				db.pinSectorToContract(b, roots[i], types.FileContractID(slabHosts[i].PublicKey))
+			}
+
+			// all hosts get good contracts except bad-shard hosts
+			for i, h := range slabHosts {
+				isBad := i >= dataShards && i < dataShards+badShards
+				if !isBad {
+					contractsMgr.contracts = append(contractsMgr.contracts, newTestContract(h.PublicKey))
+				}
+			}
+			for i := dataShards; i < dataShards+badShards; i++ {
+				if _, err := db.Exec(context.Background(),
+					"UPDATE contracts SET good = FALSE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)",
+					slabHosts[i].PublicKey[:]); err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			// configure failing and blocking hosts
+			for i := 0; i < nFailHosts; i++ {
+				client.failHosts[slabHosts[i].PublicKey] = errors.New("benchmark: host unavailable")
+			}
+			for i := nFailHosts; i < nFailHosts+nBlockHosts; i++ {
+				client.slowHosts[slabHosts[i].PublicKey] = time.Hour
+			}
+
+			// create upload-candidate hosts (separate from slab hosts)
+			uploadCandidateKeys := make([]types.PublicKey, parityShards)
+			for i := range uploadCandidateKeys {
+				sk := types.GeneratePrivateKey()
+				h := client.addTestHost(sk)
+				db.AddTestHost(b, h)
+				client.hostSettings[h.PublicKey] = h.Settings
+				db.addTestContract(b, h.PublicKey)
+				contractsMgr.contracts = append(contractsMgr.contracts, newTestContract(h.PublicKey))
+				uploadCandidateKeys[i] = h.PublicKey
+			}
+
+			// create slab manager
+			alerter := alerts.NewManager()
+			mgr := slabs.NewSlabManager(chain, am, contractsMgr, hm, db, client, alerter,
+				types.GeneratePrivateKey(), types.GeneratePrivateKey(),
+				slabs.WithLogger(zap.NewNop()),
+				slabs.WithMinHostDistance(0),
+			)
+			mgr.SetShardTimeout(shardTimeout)
+
+			// fund service accounts for migration operations
+			for _, h := range slabHosts {
+				if err := am.UpdateServiceAccountBalance(context.Background(), h.PublicKey, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
+					b.Fatal(err)
+				}
+			}
+			for _, hk := range uploadCandidateKeys {
+				if err := am.UpdateServiceAccountBalance(context.Background(), hk, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			// reset restores DB state between benchmark iterations
+			reset := func() {
+				ctx := context.Background()
+				for i := dataShards; i < dataShards+badShards; i++ {
+					hk := slabHosts[i].PublicKey
+					fcid := types.FileContractID(hk)
+					if _, err := db.Exec(ctx, `
+						UPDATE sectors
+						SET host_id = (SELECT id FROM hosts WHERE public_key = $2),
+							contract_sectors_map_id = (SELECT id FROM contract_sectors_map WHERE contract_id = $3),
+							num_migrated = 0
+						WHERE sector_root = $1`,
+						roots[i][:], hk[:], fcid[:]); err != nil {
+						b.Fatal(err)
+					}
+				}
+				for i := dataShards; i < dataShards+badShards; i++ {
+					if _, err := db.Exec(ctx,
+						"UPDATE contracts SET good = FALSE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)",
+						slabHosts[i].PublicKey[:]); err != nil {
+						b.Fatal(err)
+					}
+				}
+				// clear uploaded sectors from upload candidates
+				client.mu.Lock()
+				for _, hk := range uploadCandidateKeys {
+					delete(client.hostSectors, hk)
+				}
+				client.mu.Unlock()
+				// replenish service account balances
+				for _, h := range slabHosts {
+					if err := am.UpdateServiceAccountBalance(ctx, h.PublicKey, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
+						b.Fatal(err)
+					}
+				}
+				for _, hk := range uploadCandidateKeys {
+					if err := am.UpdateServiceAccountBalance(ctx, hk, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+
+			log := zap.NewNop()
+			b.ResetTimer()
+			for b.Loop() {
+				if err := mgr.MigrateSlabs(context.Background(), []slabs.SlabID{slabID}, log); err != nil {
+					b.Fatal(err)
+				}
+				b.StopTimer()
+				reset()
+				b.StartTimer()
+			}
+		})
+	}
+
+	// ideal: all hosts respond, only bad shards need migration
+	for _, bad := range []int{1, 5, 10, 20} {
+		benchMatrix(b, bad, 0, 0)
+	}
+	// failing: some good-shard hosts fail immediately
+	for _, bad := range []int{5, 10} {
+		benchMatrix(b, bad, bad, 0)
+	}
+	// blocking: some good-shard hosts block long enough to trigger overdrive
+	for _, bad := range []int{5, 10} {
+		benchMatrix(b, bad, 0, 5)
+	}
+}
+
 // NewTestShards returns a new set of test shards along with their encryption
 // key and roots.
-func NewTestShards(t *testing.T, dataShards, parityShards int) ([32]byte, [][]byte, []types.Hash256) {
+func NewTestShards(t testing.TB, dataShards, parityShards int) ([32]byte, [][]byte, []types.Hash256) {
 	enc, err := reedsolomon.New(dataShards, parityShards)
 	if err != nil {
 		t.Fatal(err)
