@@ -61,7 +61,7 @@ type (
 // maximum time allowed for verifying all sectors on a single host.
 func NewSectorVerifier(am AccountManager, hosts HostClient, serviceAccount types.PrivateKey, verifyTimeout time.Duration, log *zap.Logger) (*SectorVerifier, error) {
 	if verifyTimeout <= 0 {
-		return nil, errors.New("sector verifier host timeout must be positive")
+		return nil, errors.New("sector verification timeout must be positive")
 	}
 	return &SectorVerifier{am: am, hosts: hosts, log: log.Named("verifier"), serviceAccount: serviceAccount, verifyTimeout: verifyTimeout}, nil
 }

@@ -235,7 +235,7 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 
 		shardTimeout:                2 * time.Minute,
 		verifyTimeout:               3 * time.Minute,
-		numIntegrityCheckGoroutines: runtime.NumCPU(),
+		numIntegrityCheckGoroutines: 50,
 		numMigrationGoroutines:      runtime.NumCPU(),
 
 		chain:   chain,
