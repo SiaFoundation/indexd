@@ -158,7 +158,7 @@ func TestAccountReady(t *testing.T) {
 	assertReady(t, true)
 }
 
-func TestAccountRemainingStorage(t *testing.T) {
+func TestAccountQuotaFields(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	const connectKey = "quota-aware-account"
