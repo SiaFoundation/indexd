@@ -78,7 +78,7 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 		// even if it is cancelled quickly. This is best effort, it's fine to
 		// log the error and continue on failure.
 		cost := prices.RPCReadSectorCost(proto.SectorSize).RenterCost()
-		if err = m.am.DebitServiceAccount(context.Background(), hostKey, m.migrationAccount, cost); err != nil {
+		if err = m.am.DebitServiceAccount(hostKey, m.migrationAccount, cost); err != nil {
 			log.Warn("failed to debit service account for read sector", zap.Error(err))
 		}
 

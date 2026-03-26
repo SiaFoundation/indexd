@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/mux/v2"
 	"go.uber.org/zap"
 )
@@ -38,7 +39,9 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, hostKey
 				break
 			}
 
-			batch, err := m.verifier.VerifySectors(ctx, hostKey, toCheck[len(results):])
+			verifyCtx, cancel := context.WithTimeoutCause(ctx, m.verifyTimeout, client.ErrAbortedRPC)
+			batch, err := m.verifier.VerifySectors(verifyCtx, hostKey, toCheck[len(results):])
+			cancel()
 			results = append(results, batch...)
 			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, mux.ErrClosedStream) || errors.Is(err, errInsufficientServiceAccountBalance) || errors.Is(err, errHostUnreachable) {
 				logger.Debug("integrity checks got interrupted", zap.Error(err))

@@ -96,7 +96,7 @@ func TestMigrateSlab(t *testing.T) {
 	}
 
 	for _, h := range hostsList {
-		if err := am.UpdateServiceAccountBalance(context.Background(), h.PublicKey, mgr.MigrationAccount(), types.Siacoins(10)); err != nil {
+		if err := am.UpdateServiceAccountBalance(h.PublicKey, mgr.MigrationAccount(), types.Siacoins(10)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -164,7 +164,7 @@ func TestMigrateSlab(t *testing.T) {
 	client.hostSettings[h5.PublicKey] = h5.Settings
 	db.addTestContract(t, h5.PublicKey)
 	contractsMgr.contracts = append(contractsMgr.contracts, newTestContract(h5.PublicKey))
-	if err := am.UpdateServiceAccountBalance(context.Background(), h5.PublicKey, mgr.MigrationAccount(), types.Siacoins(10)); err != nil {
+	if err := am.UpdateServiceAccountBalance(h5.PublicKey, mgr.MigrationAccount(), types.Siacoins(10)); err != nil {
 		t.Fatal(err)
 	}
 

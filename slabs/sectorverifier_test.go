@@ -47,7 +47,7 @@ func TestSectorVerifier(t *testing.T) {
 	}
 
 	// prepare verifier
-	verifier, err := slabs.NewSectorVerifier(am, client, sk, 500*time.Millisecond, log)
+	verifier, err := slabs.NewSectorVerifier(am, client, sk, log)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestSectorVerifier(t *testing.T) {
 	// prepare helper to assert account balance
 	assertBalance := func(want types.Currency) {
 		t.Helper()
-		got, err := am.ServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc)
+		got, err := am.ServiceAccountBalance(hostKey.PublicKey(), acc)
 		if err != nil {
 			t.Fatal(err)
 		} else if !got.Equals(want) {
@@ -64,9 +64,9 @@ func TestSectorVerifier(t *testing.T) {
 	}
 
 	// prepare helper to assert verify sector results
-	assertResults := func(roots []types.Hash256, want []slabs.CheckSectorsResult, expectedErr error) {
+	assertResults := func(ctx context.Context, roots []types.Hash256, want []slabs.CheckSectorsResult, expectedErr error) {
 		t.Helper()
-		got, err := verifier.VerifySectors(context.Background(), hostKey.PublicKey(), roots)
+		got, err := verifier.VerifySectors(ctx, hostKey.PublicKey(), roots)
 		if err != nil && expectedErr == nil {
 			t.Fatal(err)
 		}
@@ -81,14 +81,14 @@ func TestSectorVerifier(t *testing.T) {
 	// prepare helper to update account balance
 	updateBalance := func(amount types.Currency) {
 		t.Helper()
-		err := am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, amount)
+		err := am.UpdateServiceAccountBalance(hostKey.PublicKey(), acc, amount)
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
 	// assert [errInsufficientServiceAccountBalance] is returned
-	_, err = verifier.VerifySectors(context.Background(), hostKey.PublicKey(), roots[:1])
+	_, err = verifier.VerifySectors(t.Context(), hostKey.PublicKey(), roots[:1])
 	if !errors.Is(err, slabs.ErrInsufficientServiceAccountBalance) {
 		t.Fatal("unexpected err", err)
 	}
@@ -100,14 +100,14 @@ func TestSectorVerifier(t *testing.T) {
 	// account balance
 	client.integrityErrors[roots[0]] = wrapRPCErr(proto.ErrSectorNotFound) // lost
 	client.integrityErrors[roots[1]] = nil                                 // good
-	assertResults(roots[:2], []slabs.CheckSectorsResult{slabs.SectorLost, slabs.SectorSuccess}, nil)
+	assertResults(t.Context(), roots[:2], []slabs.CheckSectorsResult{slabs.SectorLost, slabs.SectorSuccess}, nil)
 	assertBalance(oneSC.Mul64(8))
 
 	// case 2: running out of funds unexpectedly (malicious host) should reset the balance but
 	// should continue to verify sectors
 	client.integrityErrors[roots[0]] = wrapRPCErr(proto.ErrNotEnoughFunds) // unexpected OOF
 	client.integrityErrors[roots[1]] = nil                                 // good
-	assertResults(roots[:2], []slabs.CheckSectorsResult{slabs.SectorFailed, slabs.SectorSuccess}, nil)
+	assertResults(t.Context(), roots[:2], []slabs.CheckSectorsResult{slabs.SectorFailed, slabs.SectorSuccess}, nil)
 	assertBalance(types.ZeroCurrency)
 
 	// case 3: running out of funds expectedly
@@ -115,39 +115,43 @@ func TestSectorVerifier(t *testing.T) {
 	client.integrityErrors[roots[0]] = nil // good
 	client.integrityErrors[roots[1]] = nil // good
 	client.integrityErrors[roots[2]] = nil // good
-	assertResults(roots, []slabs.CheckSectorsResult{slabs.SectorSuccess, slabs.SectorSuccess}, slabs.ErrInsufficientServiceAccountBalance)
+	assertResults(t.Context(), roots, []slabs.CheckSectorsResult{slabs.SectorSuccess, slabs.SectorSuccess}, slabs.ErrInsufficientServiceAccountBalance)
 
 	// case 4: interruption via context
 	updateBalance(types.Siacoins(10))
 	client.integrityErrors[roots[0]] = nil              // good sector
 	client.integrityErrors[roots[1]] = context.Canceled // verification interrupted
-	assertResults(roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, context.Canceled)
+	assertResults(t.Context(), roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, context.Canceled)
 
 	// case 5: interruption via gracefully closed stream
 	updateBalance(types.Siacoins(10))
 	client.integrityErrors[roots[0]] = nil                 // good sector
 	client.integrityErrors[roots[1]] = mux.ErrClosedStream // verification interrupted
-	assertResults(roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, mux.ErrClosedStream)
+	assertResults(t.Context(), roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, mux.ErrClosedStream)
 
 	// case 6: interruption via deadline exceeded on second sector
 	updateBalance(types.Siacoins(10))
 	client.integrityErrors[roots[0]] = nil                      // good sector
 	client.integrityErrors[roots[1]] = context.DeadlineExceeded // deadline fires during ReadSector
-	assertResults(roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, context.DeadlineExceeded)
+	assertResults(t.Context(), roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, context.DeadlineExceeded)
 
 	// case 7: interruption via deadline exceeded on first sector
 	updateBalance(types.Siacoins(10))
 	client.integrityErrors[roots[0]] = context.DeadlineExceeded // deadline fires immediately
-	assertResults(roots[:1], nil, context.DeadlineExceeded)
+	assertResults(t.Context(), roots[:1], nil, context.DeadlineExceeded)
 
 	// case 8: verify timeout fires on a slow host
 	updateBalance(types.Siacoins(10))
 	client.integrityErrors = make(map[types.Hash256]error)
 	client.setSlowHost(hostKey.PublicKey(), 2*time.Second)
-	assertResults(roots[:1], nil, context.DeadlineExceeded)
+	ctx, cancel := context.WithTimeout(t.Context(), 500*time.Millisecond)
+	assertResults(ctx, roots[:1], nil, context.DeadlineExceeded)
+	cancel()
 
 	// case 9: fast host completes within verify timeout
 	updateBalance(types.Siacoins(10))
 	client.setSlowHost(hostKey.PublicKey(), 0)
-	assertResults(roots, []slabs.CheckSectorsResult{slabs.SectorSuccess, slabs.SectorSuccess, slabs.SectorSuccess}, nil)
+	ctx, cancel = context.WithTimeout(t.Context(), 500*time.Millisecond)
+	assertResults(ctx, roots, []slabs.CheckSectorsResult{slabs.SectorSuccess, slabs.SectorSuccess, slabs.SectorSuccess}, nil)
+	cancel()
 }

@@ -61,10 +61,10 @@ type (
 	// AccountManager defines the SlabManager's dependencies on the account
 	// manager.
 	AccountManager interface {
-		DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error
+		DebitServiceAccount(hostKey types.PublicKey, account proto.Account, amount types.Currency) error
 		RegisterServiceAccount(account proto.Account)
-		ResetAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) error
-		ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error)
+		ResetAccountBalance(hostKey types.PublicKey, account proto.Account) error
+		ServiceAccountBalance(hostKey types.PublicKey, account proto.Account) (types.Currency, error)
 	}
 
 	// ContractManager defines the SlabManager's dependencies on the contract
@@ -252,7 +252,7 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 		opt(m)
 	}
 	var err error
-	m.verifier, err = NewSectorVerifier(am, hosts, integrityAccount, m.verifyTimeout, m.log)
+	m.verifier, err = NewSectorVerifier(am, hosts, integrityAccount, m.log)
 	if err != nil {
 		return nil, err
 	}

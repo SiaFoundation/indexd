@@ -53,7 +53,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	// prepare helper to reset balance to 3SC to avoid running out of funds
 	resetBalance := func() {
 		t.Helper()
-		err := am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, oneSC.Mul64(3))
+		err := am.UpdateServiceAccountBalance(hostKey.PublicKey(), acc, oneSC.Mul64(3))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +125,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	if cm.triggeredRefills[acc] != 0 {
 		t.Fatalf("expected 0 triggered refill, got %d", cm.triggeredRefills[acc])
 	}
-	if err := am.UpdateServiceAccountBalance(context.Background(), hostKey.PublicKey(), acc, types.ZeroCurrency); err != nil {
+	if err := am.UpdateServiceAccountBalance(hostKey.PublicKey(), acc, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
 	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
@@ -174,7 +174,7 @@ func TestIntegrityChecksVerifyTimeout(t *testing.T) {
 	store.setSectorsForCheck(t, host.PublicKey, roots)
 
 	// fund the account
-	if err := am.UpdateServiceAccountBalance(t.Context(), hostKey.PublicKey(), acc, oneSC.Mul64(10)); err != nil {
+	if err := am.UpdateServiceAccountBalance(hostKey.PublicKey(), acc, oneSC.Mul64(10)); err != nil {
 		t.Fatal(err)
 	}
 

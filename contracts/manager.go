@@ -59,7 +59,7 @@ type (
 		ScheduleAccountsForFunding(hostKey types.PublicKey) error
 		ServiceAccounts(hk types.PublicKey) []accounts.HostAccount
 		UpdateHostAccounts(accounts []accounts.HostAccount) error
-		UpdateServiceAccounts(ctx context.Context, accounts []accounts.HostAccount, balance types.Currency) error
+		UpdateServiceAccounts(accounts []accounts.HostAccount, balance types.Currency) error
 	}
 
 	// ChainManager is the minimal interface of ChainManager functionality the

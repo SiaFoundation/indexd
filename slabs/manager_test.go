@@ -256,11 +256,11 @@ func (m *mockAccountManager) RegisterServiceAccount(account proto.Account) {
 	}
 }
 
-func (m *mockAccountManager) ResetAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
-	return m.UpdateServiceAccountBalance(ctx, hostKey, account, types.ZeroCurrency)
+func (m *mockAccountManager) ResetAccountBalance(hostKey types.PublicKey, account proto.Account) error {
+	return m.UpdateServiceAccountBalance(hostKey, account, types.ZeroCurrency)
 }
 
-func (m *mockAccountManager) ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
+func (m *mockAccountManager) ServiceAccountBalance(hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if hostAccounts, ok := m.serviceAccounts[account]; ok {
@@ -272,7 +272,7 @@ func (m *mockAccountManager) ServiceAccountBalance(ctx context.Context, hostKey 
 	return types.ZeroCurrency, nil
 }
 
-func (m *mockAccountManager) UpdateServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
+func (m *mockAccountManager) UpdateServiceAccountBalance(hostKey types.PublicKey, account proto.Account, balance types.Currency) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	hostAccounts, ok := m.serviceAccounts[account]
@@ -284,7 +284,7 @@ func (m *mockAccountManager) UpdateServiceAccountBalance(ctx context.Context, ho
 	return nil
 }
 
-func (m *mockAccountManager) DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
+func (m *mockAccountManager) DebitServiceAccount(hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if hostAccounts, ok := m.serviceAccounts[account]; ok {

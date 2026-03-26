@@ -67,7 +67,7 @@ func TestUploadShards(t *testing.T) {
 
 	// set balance to 1SC
 	for _, hostKey := range availableHosts {
-		err := am.UpdateServiceAccountBalance(context.Background(), hostKey, sm.MigrationAccount(), types.Siacoins(1))
+		err := am.UpdateServiceAccountBalance(hostKey, sm.MigrationAccount(), types.Siacoins(1))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +125,7 @@ func TestUploadShards(t *testing.T) {
 
 	// asserts hosts are debited for the upload
 	for _, h := range hosts[:3] {
-		balance, err := am.ServiceAccountBalance(context.Background(), h.PublicKey, sm.MigrationAccount())
+		balance, err := am.ServiceAccountBalance(h.PublicKey, sm.MigrationAccount())
 		if err != nil {
 			t.Fatal(err)
 		} else if !balance.Equals(types.Siacoins(1).Sub(h.Settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost())) {

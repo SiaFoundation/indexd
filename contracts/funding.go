@@ -61,7 +61,7 @@ func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, co
 		}
 
 		// update service account balances
-		if err := cm.accounts.UpdateServiceAccounts(ctx, serviceAccounts[:funded], fundTarget); err != nil {
+		if err := cm.accounts.UpdateServiceAccounts(serviceAccounts[:funded], fundTarget); err != nil {
 			cm.log.Warn("failed to update service account balances", zap.Error(err))
 		}
 	}

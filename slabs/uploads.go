@@ -93,7 +93,7 @@ top:
 					}
 
 					// debit service account
-					err = m.am.DebitServiceAccount(context.Background(), hostKey, m.migrationAccount, result.Usage.RenterCost())
+					err = m.am.DebitServiceAccount(hostKey, m.migrationAccount, result.Usage.RenterCost())
 					if err != nil {
 						log.Debug("failed to debit service account for sector write", zap.Error(err))
 					}

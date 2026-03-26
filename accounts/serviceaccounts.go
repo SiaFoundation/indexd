@@ -1,8 +1,6 @@
 package accounts
 
 import (
-	"context"
-
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 )
@@ -23,7 +21,7 @@ func (m *AccountManager) RegisterServiceAccount(account proto.Account) {
 // ResetAccountBalance resets the account balance of a service account to 0.
 // This should only be called when a host reports that an RPC failed due to
 // insufficient balance.
-func (m *AccountManager) ResetAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
+func (m *AccountManager) ResetAccountBalance(hostKey types.PublicKey, account proto.Account) error {
 	m.serviceAccountsMu.Lock()
 	defer m.serviceAccountsMu.Unlock()
 
@@ -35,7 +33,7 @@ func (m *AccountManager) ResetAccountBalance(ctx context.Context, hostKey types.
 }
 
 // ServiceAccountBalance returns the balance of a locked service account.
-func (m *AccountManager) ServiceAccountBalance(ctx context.Context, hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
+func (m *AccountManager) ServiceAccountBalance(hostKey types.PublicKey, account proto.Account) (types.Currency, error) {
 	m.serviceAccountsMu.Lock()
 	defer m.serviceAccountsMu.Unlock()
 
@@ -47,7 +45,7 @@ func (m *AccountManager) ServiceAccountBalance(ctx context.Context, hostKey type
 
 // DebitServiceAccount withdraws from a service account. This should be used
 // after successfully withdrawing from an account.
-func (m *AccountManager) DebitServiceAccount(ctx context.Context, hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
+func (m *AccountManager) DebitServiceAccount(hostKey types.PublicKey, account proto.Account, amount types.Currency) error {
 	m.serviceAccountsMu.Lock()
 	defer m.serviceAccountsMu.Unlock()
 
@@ -65,7 +63,7 @@ func (m *AccountManager) DebitServiceAccount(ctx context.Context, hostKey types.
 
 // UpdateServiceAccounts updates the balance of all accounts registered as
 // service accounts to 'balance'.
-func (m *AccountManager) UpdateServiceAccounts(ctx context.Context, accounts []HostAccount, balance types.Currency) error {
+func (m *AccountManager) UpdateServiceAccounts(accounts []HostAccount, balance types.Currency) error {
 	m.serviceAccountsMu.Lock()
 	for _, account := range accounts {
 		_, ok := m.serviceAccounts[account.AccountKey]

@@ -54,7 +54,7 @@ func (m *SlabManager) SetShardTimeout(t time.Duration) {
 }
 
 func (m *SlabManager) SetVerifySectorsTimeout(d time.Duration) {
-	m.verifier.verifyTimeout = d
+	m.verifyTimeout = d
 }
 
 func (m *SlabManager) MigrationAccount() proto.Account {

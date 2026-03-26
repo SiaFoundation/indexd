@@ -74,7 +74,7 @@ func (am *accountsManagerMock) UpdateHostAccounts(accs []accounts.HostAccount) e
 	return nil
 }
 
-func (am *accountsManagerMock) UpdateServiceAccounts(ctx context.Context, accs []accounts.HostAccount, balance types.Currency) error {
+func (am *accountsManagerMock) UpdateServiceAccounts(accs []accounts.HostAccount, balance types.Currency) error {
 	return nil
 }
 

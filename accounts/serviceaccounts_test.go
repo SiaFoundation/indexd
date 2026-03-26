@@ -1,7 +1,6 @@
 package accounts_test
 
 import (
-	"context"
 	"errors"
 	"testing"
 
@@ -37,7 +36,7 @@ func TestServiceAccounts(t *testing.T) {
 	// helper to assert balance
 	assertBalance := func(account proto.Account, expected types.Currency) {
 		t.Helper()
-		if balance, err := am.ServiceAccountBalance(t.Context(), host.PublicKey, account); !errors.Is(err, accounts.ErrNotFound) && err != nil {
+		if balance, err := am.ServiceAccountBalance(host.PublicKey, account); !errors.Is(err, accounts.ErrNotFound) && err != nil {
 			t.Fatal(err)
 		} else if !balance.Equals(expected) {
 			t.Fatalf("expected balance %v, got %v", expected, balance)
@@ -45,21 +44,21 @@ func TestServiceAccounts(t *testing.T) {
 	}
 
 	// try to user account before registering it
-	err = am.ResetAccountBalance(context.Background(), host.PublicKey, account1)
+	err = am.ResetAccountBalance(host.PublicKey, account1)
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected ErrNotFound")
 	}
-	_, err = am.ServiceAccountBalance(context.Background(), host.PublicKey, account1)
+	_, err = am.ServiceAccountBalance(host.PublicKey, account1)
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected ErrNotFound")
 	}
-	err = am.DebitServiceAccount(context.Background(), host.PublicKey, account1, types.Siacoins(1))
+	err = am.DebitServiceAccount(host.PublicKey, account1, types.Siacoins(1))
 	if !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatal("expected ErrNotFound")
 	}
 
 	// batch updating should ignore the account
-	err = am.UpdateServiceAccounts(context.Background(), []accounts.HostAccount{
+	err = am.UpdateServiceAccounts([]accounts.HostAccount{
 		{AccountKey: account1, HostKey: host.PublicKey},
 		{AccountKey: account2, HostKey: host.PublicKey},
 	}, types.Siacoins(1))
@@ -71,7 +70,7 @@ func TestServiceAccounts(t *testing.T) {
 
 	// register account, it's now possible to update the balance of account 1
 	am.RegisterServiceAccount(account1)
-	err = am.UpdateServiceAccounts(context.Background(), []accounts.HostAccount{
+	err = am.UpdateServiceAccounts([]accounts.HostAccount{
 		{AccountKey: account1, HostKey: host.PublicKey},
 		{AccountKey: account2, HostKey: host.PublicKey},
 	}, types.Siacoins(1))
@@ -82,10 +81,10 @@ func TestServiceAccounts(t *testing.T) {
 	assertBalance(account2, types.ZeroCurrency)
 
 	// other methods should also work now
-	err = am.DebitServiceAccount(context.Background(), host.PublicKey, account1, types.Siacoins(1).Div64(2))
+	err = am.DebitServiceAccount(host.PublicKey, account1, types.Siacoins(1).Div64(2))
 	if err != nil {
 		t.Fatal(err)
-	} else if balance, err := am.ServiceAccountBalance(context.Background(), host.PublicKey, account1); err != nil {
+	} else if balance, err := am.ServiceAccountBalance(host.PublicKey, account1); err != nil {
 		t.Fatal(err)
 	} else if !balance.Equals(types.Siacoins(1).Div64(2)) {
 		t.Fatalf("expected balance %v, got %v", types.Siacoins(1).Div64(2), balance)
@@ -93,10 +92,10 @@ func TestServiceAccounts(t *testing.T) {
 	assertBalance(account1, types.Siacoins(1).Div64(2))
 	assertBalance(account2, types.ZeroCurrency)
 
-	err = am.ResetAccountBalance(context.Background(), host.PublicKey, account1)
+	err = am.ResetAccountBalance(host.PublicKey, account1)
 	if err != nil {
 		t.Fatal(err)
-	} else if balance, err := am.ServiceAccountBalance(context.Background(), host.PublicKey, account1); err != nil {
+	} else if balance, err := am.ServiceAccountBalance(host.PublicKey, account1); err != nil {
 		t.Fatal(err)
 	} else if !balance.Equals(types.ZeroCurrency) {
 		t.Fatalf("expected balance %v, got %v", types.ZeroCurrency, balance)
