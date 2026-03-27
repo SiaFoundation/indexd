@@ -471,7 +471,15 @@ components:
         maxPinnedData:
           type: number
           format: uint64
-          description: Maximum amount of pinned data in bytes.
+          description: Maximum amount of pinned data in bytes for this app account.
+        quotaMaxPinnedData:
+          type: number
+          format: uint64
+          description: Maximum amount of pinned data in bytes allowed by the quota.
+        connectKeyPinnedData:
+          type: number
+          format: uint64
+          description: Current amount of pinned data in bytes used across all apps sharing the same connect key, before redundancy.
         pinnedData:
           type: number
           format: uint64
@@ -491,12 +499,31 @@ components:
           description: The last time the account was used. Updated when pinning a slab or retrieving a slab.
 
     AppAccountResponse:
-      allOf:
-        - $ref: "#/components/schemas/Account"
-        - type: object
-          properties:
-            connectKey:
-              not: {}
+      type: object
+      properties:
+        accountKey:
+          $ref: "#/components/schemas/Account/properties/accountKey"
+        maxPinnedData:
+          type: number
+          format: uint64
+          description: >
+            Effective maximum amount of pinned data in bytes for this app
+            account, equal to the lower of the account's maxPinnedData and
+            quotaMaxPinnedData.
+        remainingStorage:
+          type: number
+          format: uint64
+          description: Remaining amount of data in bytes that can still be pinned, after applying both the app account limit and current quota.
+        pinnedData:
+          $ref: "#/components/schemas/Account/properties/pinnedData"
+        pinnedSize:
+          $ref: "#/components/schemas/Account/properties/pinnedSize"
+        ready:
+          $ref: "#/components/schemas/Account/properties/ready"
+        app:
+          $ref: "#/components/schemas/Account/properties/app"
+        lastUsed:
+          $ref: "#/components/schemas/Account/properties/lastUsed"
 
     AppMeta:
       type: object

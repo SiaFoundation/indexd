@@ -67,14 +67,16 @@ func WithConnectKey(connectKey string) QueryAccountsOpt {
 type (
 	// Account represents an account in the indexer.
 	Account struct {
-		AccountKey    proto.Account `json:"accountKey"`
-		ConnectKey    string        `json:"connectKey"`
-		MaxPinnedData uint64        `json:"maxPinnedData"`
-		Ready         bool          `json:"ready"`
-		PinnedData    uint64        `json:"pinnedData"`
-		PinnedSize    uint64        `json:"pinnedSize"`
-		App           AppMeta       `json:"app"`
-		LastUsed      time.Time     `json:"lastUsed"`
+		AccountKey           proto.Account `json:"accountKey"`
+		ConnectKey           string        `json:"connectKey"`
+		MaxPinnedData        uint64        `json:"maxPinnedData"`
+		QuotaMaxPinnedData   uint64        `json:"quotaMaxPinnedData"`
+		ConnectKeyPinnedData uint64        `json:"connectKeyPinnedData"`
+		Ready                bool          `json:"ready"`
+		PinnedData           uint64        `json:"pinnedData"`
+		PinnedSize           uint64        `json:"pinnedSize"`
+		App                  AppMeta       `json:"app"`
+		LastUsed             time.Time     `json:"lastUsed"`
 	}
 
 	// HostAccount represents an ephemeral account on a host.

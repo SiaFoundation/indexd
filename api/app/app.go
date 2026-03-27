@@ -118,15 +118,17 @@ type (
 	}
 
 	// AccountResponse is the response body for the [GET] /account endpoint.
-	// It is the same as accounts.Account without the connect key.
+	// It exposes the effective storage limit for the app together with the
+	// remaining storage available under both the app limit and the quota.
 	AccountResponse struct {
-		AccountKey    proto.Account    `json:"accountKey"`
-		MaxPinnedData uint64           `json:"maxPinnedData"`
-		Ready         bool             `json:"ready"`
-		PinnedData    uint64           `json:"pinnedData"`
-		PinnedSize    uint64           `json:"pinnedSize"`
-		App           accounts.AppMeta `json:"app"`
-		LastUsed      time.Time        `json:"lastUsed"`
+		AccountKey       proto.Account    `json:"accountKey"`
+		MaxPinnedData    uint64           `json:"maxPinnedData"`
+		RemainingStorage uint64           `json:"remainingStorage"`
+		Ready            bool             `json:"ready"`
+		PinnedData       uint64           `json:"pinnedData"`
+		PinnedSize       uint64           `json:"pinnedSize"`
+		App              accounts.AppMeta `json:"app"`
+		LastUsed         time.Time        `json:"lastUsed"`
 	}
 
 	// RegisterAppKeyRequest is the request body for registering an application key after the user approves the connection request.
@@ -704,14 +706,22 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 	jc.Encode(AccountResponse{
-		AccountKey:    account.AccountKey,
-		MaxPinnedData: account.MaxPinnedData,
-		Ready:         account.Ready,
-		PinnedData:    account.PinnedData,
-		PinnedSize:    account.PinnedSize,
-		App:           account.App,
-		LastUsed:      account.LastUsed,
+		AccountKey:       account.AccountKey,
+		MaxPinnedData:    min(account.MaxPinnedData, account.QuotaMaxPinnedData),
+		RemainingStorage: remainingStorage(account),
+		Ready:            account.Ready,
+		PinnedData:       account.PinnedData,
+		PinnedSize:       account.PinnedSize,
+		App:              account.App,
+		LastUsed:         account.LastUsed,
 	})
+}
+
+// remainingStorage returns the remaining storage available for an account
+func remainingStorage(a accounts.Account) uint64 {
+	appRemaining := a.MaxPinnedData - min(a.PinnedData, a.MaxPinnedData)
+	quotaRemaining := a.QuotaMaxPinnedData - min(a.ConnectKeyPinnedData, a.QuotaMaxPinnedData)
+	return min(appRemaining, quotaRemaining)
 }
 
 // decodeRequest is a helper that also handles writing the error response when

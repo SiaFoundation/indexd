@@ -41,9 +41,10 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.pinned_size, COALESCE(ahr.ready_hosts, 0) >= $4, a.app_id, a.name, a.description, a.logo_url, a.service_url, a.last_used
+			SELECT a.public_key, ak.app_key, a.max_pinned_data, q.max_pinned_data, ak.pinned_data, a.pinned_data, a.pinned_size, COALESCE(ahr.ready_hosts, 0) >= $4, a.app_id, a.name, a.description, a.logo_url, a.service_url, a.last_used
 			FROM accounts a
 			INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
+			INNER JOIN quotas q ON q.name = ak.quota_name
 			LEFT JOIN LATERAL (
 				SELECT COUNT(*) AS ready_hosts
 				FROM (
@@ -84,9 +85,10 @@ func (s *Store) Account(ak types.PublicKey) (accounts.Account, error) {
 	var account accounts.Account
 	account.AccountKey = proto.Account(ak) // no need to fetch key
 	err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
-		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.max_pinned_data, a.pinned_data, a.pinned_size, COALESCE(ahr.ready_hosts, 0) >= $2, a.app_id, a.name, a.description, a.logo_url, a.service_url, a.last_used
+		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.max_pinned_data, q.max_pinned_data, ak.pinned_data, a.pinned_data, a.pinned_size, COALESCE(ahr.ready_hosts, 0) >= $2, a.app_id, a.name, a.description, a.logo_url, a.service_url, a.last_used
 FROM accounts a
 INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
+INNER JOIN quotas q ON q.name = ak.quota_name
 LEFT JOIN LATERAL (
 	SELECT COUNT(*) AS ready_hosts
 	FROM (
@@ -470,6 +472,21 @@ LIMIT $3`, hostID, threshold, limit, quotaName)
 }
 
 func scanAccount(s scanner) (account accounts.Account, err error) {
-	err = s.Scan((*sqlPublicKey)(&account.AccountKey), &account.ConnectKey, &account.MaxPinnedData, &account.PinnedData, &account.PinnedSize, &account.Ready, (*sqlHash256)(&account.App.ID), &account.App.Name, &account.App.Description, &account.App.LogoURL, &account.App.ServiceURL, &account.LastUsed)
+	err = s.Scan(
+		(*sqlPublicKey)(&account.AccountKey),
+		&account.ConnectKey,
+		&account.MaxPinnedData,
+		&account.QuotaMaxPinnedData,
+		&account.ConnectKeyPinnedData,
+		&account.PinnedData,
+		&account.PinnedSize,
+		&account.Ready,
+		(*sqlHash256)(&account.App.ID),
+		&account.App.Name,
+		&account.App.Description,
+		&account.App.LogoURL,
+		&account.App.ServiceURL,
+		&account.LastUsed,
+	)
 	return
 }
