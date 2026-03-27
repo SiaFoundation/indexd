@@ -358,6 +358,7 @@ func BenchmarkMigrateSlab(b *testing.B) {
 	)
 
 	benchMatrix := func(b *testing.B, badShards, nFailHosts, nBlockHosts int) {
+		b.Helper()
 		b.Run(fmt.Sprintf("bad %d fail %d block %d", badShards, nFailHosts, nBlockHosts), func(b *testing.B) {
 			db := newMockStore(b)
 			chain := newMockChainManager()
@@ -382,7 +383,6 @@ func BenchmarkMigrateSlab(b *testing.B) {
 				db.addTestContract(b, h.PublicKey)
 			}
 
-			// name subsets for clarity
 			badParityHosts := slabHosts[dataShards : dataShards+badShards]
 			badParityRoots := roots[dataShards : dataShards+badShards]
 			failHosts := slabHosts[:nFailHosts]
@@ -390,7 +390,7 @@ func BenchmarkMigrateSlab(b *testing.B) {
 
 			// write encrypted shards to their respective mock hosts
 			for i, shard := range shardData {
-				result, err := client.WriteSector(context.Background(), types.GeneratePrivateKey(), slabHosts[i].PublicKey, shard)
+				result, err := client.WriteSector(b.Context(), types.GeneratePrivateKey(), slabHosts[i].PublicKey, shard)
 				if err != nil {
 					b.Fatal(err)
 				} else if result.Root != roots[i] {
@@ -429,7 +429,7 @@ func BenchmarkMigrateSlab(b *testing.B) {
 				contractsMgr.contracts = append(contractsMgr.contracts, newTestContract(h.PublicKey))
 			}
 			for _, h := range badParityHosts {
-				if _, err := db.Exec(context.Background(),
+				if _, err := db.Exec(b.Context(),
 					"UPDATE contracts SET good = FALSE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)",
 					h.PublicKey[:]); err != nil {
 					b.Fatal(err)
@@ -468,19 +468,19 @@ func BenchmarkMigrateSlab(b *testing.B) {
 
 			// fund service accounts for migration operations
 			for _, h := range slabHosts {
-				if err := am.UpdateServiceAccountBalance(context.Background(), h.PublicKey, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
+				if err := am.UpdateServiceAccountBalance(b.Context(), h.PublicKey, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
 					b.Fatal(err)
 				}
 			}
 			for _, hk := range uploadCandidateKeys {
-				if err := am.UpdateServiceAccountBalance(context.Background(), hk, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
+				if err := am.UpdateServiceAccountBalance(b.Context(), hk, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
 					b.Fatal(err)
 				}
 			}
 
 			// reset restores DB state between benchmark iterations
 			reset := func() {
-				ctx := context.Background()
+				ctx := b.Context()
 				for i, h := range badParityHosts {
 					hk := h.PublicKey
 					fcid := types.FileContractID(hk)
@@ -521,9 +521,10 @@ func BenchmarkMigrateSlab(b *testing.B) {
 			}
 
 			log := zap.NewNop()
+			b.SetBytes(int64(badShards) * proto.SectorSize)
 			b.ResetTimer()
 			for b.Loop() {
-				if err := mgr.MigrateSlabs(context.Background(), []slabs.SlabID{slabID}, log); err != nil {
+				if err := mgr.MigrateSlabs(b.Context(), []slabs.SlabID{slabID}, log); err != nil {
 					b.Fatal(err)
 				}
 				b.StopTimer()
