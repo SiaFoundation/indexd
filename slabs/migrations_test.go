@@ -501,6 +501,30 @@ func BenchmarkMigrateSlab(b *testing.B) {
 						b.Fatal(err)
 					}
 				}
+				// restore stats counters modified by MigrateSector
+				if _, err := db.Exec(ctx,
+					"UPDATE stats SET stat_value = stat_value + $1 WHERE stat_name = 'num_pinned_sectors'",
+					badShards); err != nil {
+					b.Fatal(err)
+				}
+				if _, err := db.Exec(ctx,
+					"UPDATE stats SET stat_value = stat_value - $1 WHERE stat_name = 'num_unpinned_sectors'",
+					badShards); err != nil {
+					b.Fatal(err)
+				}
+				if _, err := db.Exec(ctx,
+					"UPDATE stats SET stat_value = stat_value - $1 WHERE stat_name = 'num_migrated_sectors'",
+					badShards); err != nil {
+					b.Fatal(err)
+				}
+				// restore host unpinned_sectors for upload candidates
+				for _, hk := range uploadCandidateKeys {
+					if _, err := db.Exec(ctx,
+						"UPDATE hosts SET unpinned_sectors = GREATEST(unpinned_sectors - 1, 0) WHERE public_key = $1",
+						hk[:]); err != nil {
+						b.Fatal(err)
+					}
+				}
 				// clear uploaded sectors from upload candidates
 				client.mu.Lock()
 				for _, hk := range uploadCandidateKeys {
