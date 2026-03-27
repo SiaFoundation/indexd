@@ -456,67 +456,60 @@ RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&co
 		toDelete = append(toDelete, sID)
 	}
 
-	const candidateSectorsCTE = `
-		WITH candidate_sectors AS (
-			SELECT ss.sector_id
-			FROM slab_sectors ss
-			WHERE ss.slab_id = ANY($1) AND NOT EXISTS (
-				SELECT 1
-				FROM slab_sectors ss2
-				WHERE ss2.sector_id = ss.sector_id AND NOT (ss2.slab_id = ANY($1))
-			)
-		)
-	`
-
+	// delete sectors
 	var pinned, unpinned, unpinnable int64
 	var unpinnedDeltas []unpinnedDelta
 	if len(toDelete) > 0 {
-		err := tx.QueryRow(ctx, candidateSectorsCTE+`
-			SELECT
-				COUNT(*) FILTER (WHERE s.host_id IS NOT NULL AND s.contract_sectors_map_id IS NOT NULL),
-				COUNT(*) FILTER (WHERE s.host_id IS NOT NULL AND s.contract_sectors_map_id IS NULL),
-				COUNT(*) FILTER (WHERE s.host_id IS NULL AND s.contract_sectors_map_id IS NULL)
-			FROM sectors s
-			WHERE s.id IN (SELECT sector_id FROM candidate_sectors)
-		`, toDelete).Scan(&pinned, &unpinned, &unpinnable)
-		if err != nil {
-			return fmt.Errorf("failed to query sector deletion stats: %w", err)
-		}
-
-		rows, err := tx.Query(ctx, candidateSectorsCTE+`
-			SELECT s.host_id, COUNT(*)
-			FROM sectors s
-			WHERE s.id IN (SELECT sector_id FROM candidate_sectors)
-				AND s.host_id IS NOT NULL
-				AND s.contract_sectors_map_id IS NULL
-			GROUP BY s.host_id
+		// atomically delete candidate sectors and derive stats from the
+		// returned rows to avoid races with concurrent PinSectors or
+		// MarkSectorsUnpinnable calls
+		rows, err := tx.Query(ctx, `
+			WITH candidate_sectors AS (
+				SELECT ss.sector_id
+				FROM slab_sectors ss
+				WHERE ss.slab_id = ANY($1) AND NOT EXISTS (
+					SELECT 1
+					FROM slab_sectors ss2
+					WHERE ss2.sector_id = ss.sector_id AND NOT (ss2.slab_id = ANY($1))
+				)
+			)
+			DELETE FROM sectors s
+			USING candidate_sectors cs
+			WHERE s.id = cs.sector_id
+			RETURNING s.host_id, s.contract_sectors_map_id
 		`, toDelete)
 		if err != nil {
-			return fmt.Errorf("failed to query host unpinned deltas: %w", err)
+			return fmt.Errorf("failed to delete candidate sectors: %w", err)
 		}
 		defer rows.Close()
 
+		hostUnpinned := make(map[int64]int64)
 		for rows.Next() {
-			var hostID, delta int64
-			if err := rows.Scan(&hostID, &delta); err != nil {
-				return fmt.Errorf("failed to scan host unpinned delta: %w", err)
+			var hostID sql.NullInt64
+			var contractMapID sql.NullInt64
+			if err := rows.Scan(&hostID, &contractMapID); err != nil {
+				return fmt.Errorf("failed to scan deleted sector: %w", err)
+			} else if contractMapID.Valid {
+				pinned++
+			} else if hostID.Valid {
+				unpinned++
+				hostUnpinned[hostID.Int64]++
+			} else {
+				unpinnable++
 			}
-			unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hostID, delta: -delta})
 		}
 		if err := rows.Err(); err != nil {
-			return fmt.Errorf("failed to read host unpinned deltas: %w", err)
+			return fmt.Errorf("failed to read deleted sectors: %w", err)
+		}
+
+		for hid, delta := range hostUnpinned {
+			unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hid, delta: -delta})
 		}
 	}
 
-	// prune the slab and its sectors
-	batch := &pgx.Batch{}
-	batch.Queue(candidateSectorsCTE+`
-		DELETE FROM sectors
-		WHERE id IN (SELECT sector_id FROM candidate_sectors)
-	`, toDelete)
-	batch.Queue(`DELETE FROM slabs WHERE id = ANY($1)`, toDelete)
-	if err := tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
-		return fmt.Errorf("failed to prune slab: %w", err)
+	// prune the slabs
+	if _, err := tx.Exec(ctx, `DELETE FROM slabs WHERE id = ANY($1)`, toDelete); err != nil {
+		return fmt.Errorf("failed to prune slabs: %w", err)
 	}
 
 	// update sector stats

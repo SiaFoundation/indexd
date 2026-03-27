@@ -28,6 +28,9 @@ const (
 )
 
 func incrementStat(ctx context.Context, tx *txn, name string, delta int64) error {
+	if delta == 0 {
+		return nil
+	}
 	result, err := tx.Exec(ctx, "UPDATE stats SET stat_value = stat_value + $1 WHERE stat_name = $2", delta, name)
 	if err != nil {
 		return err
