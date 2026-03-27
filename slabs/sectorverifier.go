@@ -119,7 +119,7 @@ func (v *SectorVerifier) VerifySectors(ctx context.Context, hostKey types.Public
 		// check a random segment of the sector
 		segment := frand.Uint64n(proto.LeavesPerSector)
 		_, err = v.hosts.ReadSector(ctx, v.serviceAccount, hostKey, root, io.Discard, segment*proto.LeafSize, proto.LeafSize)
-		if err != nil && (errors.Is(err, mux.ErrClosedStream) || ctx.Err() != nil) {
+		if errors.Is(err, mux.ErrClosedStream) || (err != nil && ctx.Err() != nil) {
 			return results, err // interrupted
 		}
 
