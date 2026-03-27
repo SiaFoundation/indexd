@@ -17,6 +17,7 @@ import (
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/testutils"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
 )
@@ -85,8 +86,22 @@ type testStore struct {
 	testutils.TestStore
 }
 
-func newMockStore(t testing.TB) *testStore {
-	store := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
+type mockStoreOpts struct {
+	log *zap.Logger
+}
+
+func withStoreLogger(log *zap.Logger) func(*mockStoreOpts) {
+	return func(o *mockStoreOpts) {
+		o.log = log
+	}
+}
+
+func newMockStore(t testing.TB, opts ...func(*mockStoreOpts)) *testStore {
+	o := mockStoreOpts{log: zaptest.NewLogger(t)}
+	for _, opt := range opts {
+		opt(&o)
+	}
+	store := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, o.log)
 	// override global settings to ensure hosts are always usable
 	if err := store.UpdateUsabilitySettings(hosts.UsabilitySettings{
 		MaxEgressPrice:     types.MaxCurrency,

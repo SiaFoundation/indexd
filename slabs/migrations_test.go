@@ -360,7 +360,7 @@ func BenchmarkMigrateSlab(b *testing.B) {
 	benchMatrix := func(b *testing.B, badShards, nFailHosts, nBlockHosts int) {
 		b.Helper()
 		b.Run(fmt.Sprintf("bad %d fail %d block %d", badShards, nFailHosts, nBlockHosts), func(b *testing.B) {
-			db := newMockStore(b)
+			db := newMockStore(b, withStoreLogger(zap.NewNop()))
 			chain := newMockChainManager()
 			am := newMockAccountManager()
 			hm := newMockHostManager()
@@ -528,6 +528,15 @@ func BenchmarkMigrateSlab(b *testing.B) {
 					b.Fatal(err)
 				}
 				b.StopTimer()
+				// verify all bad shards were actually migrated
+				for _, root := range badParityRoots {
+					var numMigrated int
+					if err := db.QueryRow(b.Context(), "SELECT num_migrated FROM sectors WHERE sector_root = $1", root[:]).Scan(&numMigrated); err != nil {
+						b.Fatal(err)
+					} else if numMigrated == 0 {
+						b.Fatalf("sector %v was not migrated", root)
+					}
+				}
 				reset()
 				b.StartTimer()
 			}
