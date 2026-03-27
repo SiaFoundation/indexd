@@ -371,6 +371,7 @@ type mockHostClient struct {
 	hostSectors     map[types.PublicKey]map[types.Hash256][proto.SectorSize]byte
 	slowHosts       map[types.PublicKey]time.Duration
 	integrityErrors map[types.Hash256]error
+	readHooks       map[types.Hash256]func()
 	hostKeys        map[types.PublicKey]types.PrivateKey
 	hostSettings    map[types.PublicKey]proto.HostSettings
 	unusable        map[types.PublicKey]struct{}
@@ -451,7 +452,12 @@ func (m *mockHostClient) ReadSector(ctx context.Context, accountKey types.Privat
 		m.mu.Unlock()
 		return rhp.RPCReadSectorResult{}, proto.ErrSectorNotFound
 	}
-	if err, ok := m.integrityErrors[root]; ok {
+	hook, ok := m.readHooks[root]
+	if ok {
+		hook()
+	}
+	err, ok := m.integrityErrors[root]
+	if ok && err != nil {
 		m.mu.Unlock()
 		return rhp.RPCReadSectorResult{}, err
 	}
@@ -466,8 +472,7 @@ func (m *mockHostClient) ReadSector(ctx context.Context, accountKey types.Privat
 		}
 	}
 
-	_, err := w.Write(sector[offset : offset+length])
-	if err != nil {
+	if _, err := w.Write(sector[offset : offset+length]); err != nil {
 		return rhp.RPCReadSectorResult{}, err
 	}
 	usage := m.hostSettings[hostKey].Prices.RPCReadSectorCost(length)
@@ -508,6 +513,7 @@ func newMockHostClient() *mockHostClient {
 		hostSectors:     make(map[types.PublicKey]map[types.Hash256][proto.SectorSize]byte),
 		slowHosts:       make(map[types.PublicKey]time.Duration),
 		integrityErrors: make(map[types.Hash256]error),
+		readHooks:       make(map[types.Hash256]func()),
 		hostKeys:        make(map[types.PublicKey]types.PrivateKey),
 		hostSettings:    make(map[types.PublicKey]proto.HostSettings),
 		unusable:        make(map[types.PublicKey]struct{}),

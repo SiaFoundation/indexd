@@ -114,28 +114,37 @@ func TestSectorVerifier(t *testing.T) {
 	client.integrityErrors[roots[2]] = nil // good
 	assertResults(t.Context(), roots, []slabs.CheckSectorsResult{slabs.SectorSuccess, slabs.SectorSuccess}, slabs.ErrInsufficientServiceAccountBalance)
 
-	// case 4: interruption via context
+	// case 4: interruption via context cancellation
 	updateBalance(types.Siacoins(10))
+	ctx4, cancel4 := context.WithCancel(t.Context())
 	client.integrityErrors[roots[0]] = nil              // good sector
 	client.integrityErrors[roots[1]] = context.Canceled // verification interrupted
-	assertResults(t.Context(), roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, context.Canceled)
+	client.readHooks[roots[1]] = cancel4                // cancel ctx before returning error
+	assertResults(ctx4, roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, context.Canceled)
+	delete(client.readHooks, roots[1])
 
-	// case 5: interruption via gracefully closed stream
+	// case 5: closed stream without context cancellation
 	updateBalance(types.Siacoins(10))
 	client.integrityErrors[roots[0]] = nil                 // good sector
-	client.integrityErrors[roots[1]] = mux.ErrClosedStream // verification interrupted
+	client.integrityErrors[roots[1]] = mux.ErrClosedStream // stream closed
 	assertResults(t.Context(), roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, mux.ErrClosedStream)
 
 	// case 6: interruption via deadline exceeded on second sector
 	updateBalance(types.Siacoins(10))
+	ctx6, cancel6 := context.WithCancel(t.Context())
 	client.integrityErrors[roots[0]] = nil                      // good sector
 	client.integrityErrors[roots[1]] = context.DeadlineExceeded // deadline fires during ReadSector
-	assertResults(t.Context(), roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, context.DeadlineExceeded)
+	client.readHooks[roots[1]] = cancel6                        // cancel ctx before returning error
+	assertResults(ctx6, roots[:2], []slabs.CheckSectorsResult{slabs.SectorSuccess}, context.DeadlineExceeded)
+	delete(client.readHooks, roots[1])
 
 	// case 7: interruption via deadline exceeded on first sector
 	updateBalance(types.Siacoins(10))
+	ctx7, cancel7 := context.WithCancel(t.Context())
 	client.integrityErrors[roots[0]] = context.DeadlineExceeded // deadline fires immediately
-	assertResults(t.Context(), roots[:1], nil, context.DeadlineExceeded)
+	client.readHooks[roots[0]] = cancel7                        // cancel ctx before returning error
+	assertResults(ctx7, roots[:1], nil, context.DeadlineExceeded)
+	delete(client.readHooks, roots[0])
 
 	// case 8: verify timeout fires on a slow host
 	updateBalance(types.Siacoins(10))
