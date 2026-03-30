@@ -194,8 +194,10 @@ func runUploadWorkers(ctx context.Context, client hostClient, accountKey types.P
 					return
 				}
 
-				// requeue failed hosts so other shards can use them
-				job.hosts.Retry(host)
+				// requeue timed out hosts so other shards can use them
+				if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+					job.hosts.Retry(host)
+				}
 			}
 			job.shards <- shard{err: ErrNoMoreHosts}
 		}()
