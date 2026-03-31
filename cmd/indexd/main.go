@@ -57,8 +57,8 @@ var cfg = config.Config{
 	Database: postgres.ConnectionInfo{
 		Host:     "127.0.0.1",
 		Port:     5432,
-		User:     "postgres",
-		Password: "changeme",
+		User:     "indexd",
+		Password: "",
 		Database: "indexd",
 		SSLMode:  "verify-full",
 	},
