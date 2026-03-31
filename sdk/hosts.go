@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/threadgroup"
+	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/hosts"
 )
@@ -74,13 +75,19 @@ func (chs *cachedHostStore) Usable(hostKey types.PublicKey) (bool, error) {
 }
 
 func (chs *cachedHostStore) updateHosts(ctx context.Context) error {
-	hostInfos, err := chs.client.Hosts(ctx, chs.appKey)
-	if err != nil {
-		return err
-	}
+	const pageSize = 100
 	hosts := make(map[types.PublicKey]hosts.HostInfo)
-	for _, host := range hostInfos {
-		hosts[host.PublicKey] = host
+	for offset := 0; ; offset += pageSize {
+		hostInfos, err := chs.client.Hosts(ctx, chs.appKey, api.WithOffset(offset), api.WithLimit(pageSize))
+		if err != nil {
+			return err
+		}
+		for _, host := range hostInfos {
+			hosts[host.PublicKey] = host
+		}
+		if len(hostInfos) < pageSize {
+			break
+		}
 	}
 
 	chs.mu.Lock()

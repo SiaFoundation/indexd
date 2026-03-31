@@ -668,8 +668,10 @@ WHERE` + sqlUsabilityFilter + ` AND
 		args := []any{limit, offset, queryOpts.CountryCode, (*sqlNetworkProtocol)(queryOpts.Protocol)}
 
 		if queryOpts.Location != nil {
-			baseQuery += `ORDER BY location <-> point($5, $6) `
+			baseQuery += `ORDER BY location <-> point($5, $6), hosts.id `
 			args = append(args, queryOpts.Location[0], queryOpts.Location[1])
+		} else {
+			baseQuery += `ORDER BY hosts.id `
 		}
 		baseQuery += `LIMIT $1 OFFSET $2;`
 
