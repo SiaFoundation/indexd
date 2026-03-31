@@ -79,7 +79,7 @@ func (m *mockHostDialer) WriteSector(ctx context.Context, accountKey types.Priva
 	writes := m.writeCounts[hostKey]
 	m.flakyMu.Unlock()
 	if failCount > 0 && writes <= failCount {
-		return rhp.RPCWriteSectorResult{}, errors.New("simulated write failure")
+		return rhp.RPCWriteSectorResult{}, context.DeadlineExceeded
 	}
 
 	// simulate i/o
