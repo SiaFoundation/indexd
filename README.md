@@ -22,7 +22,7 @@ languages.
 
 ```sh
 go generate ./...
-go build -o bin/ -tags='netgo timetzdata' -trimpath -a -ldflags '-s -w' ./cmd/indexd
+go build -tags='netgo timetzdata' -trimpath -a -ldflags '-s -w' ./cmd/indexd
 ```
 
 ## Getting Started
@@ -36,7 +36,7 @@ A convenient way to configure `indexd` the first time is to run
 indexd config
 ```
 which will guide you through an interactive configuration process and generate a
-config file for you. More more information on configuration options, see the
+config file for you. For more information on configuration options, see the
 [Configuration](#configuration) section below.
 
 Once indexd is configured, you can run `indexd` with
@@ -94,7 +94,7 @@ volumes:
 
 `indexd` exposes two HTTP APIs:
 
-- **Admin API** (`9980`) -- The password - protected API that serves the UI.
+- **Admin API** (`9980`) -- The password-protected API that serves the UI.
   Used for configuring the indexer and managing the wallet, contracts and apps.
 - **Application API** (`9982`) -- The public-facing API that third-party
   applications connect to for storing metadata of uploaded objects. Applications
@@ -141,7 +141,7 @@ variables if both are set.
 
 ```yaml
 autoOpenWebUI: true
-directory: /etc/indexd
+directory: /var/lib/indexd
 debug: false # Enable debug endpoints and logging
 recoveryPhrase: your twelve word recovery phrase goes here put it in now please ok # Your secret recovery phrase, you can generate one using the 'indexd seed' command
 adminAPI:

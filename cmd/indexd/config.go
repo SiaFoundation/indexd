@@ -180,13 +180,14 @@ func setAdvertiseURL() {
 	for {
 		cfg.ApplicationAPI.AdvertiseURL = readInput("Enter new application API advertise URL, this should be the URL you expect applications to connect to (e.g. https://sia.storage)")
 		u, err := url.Parse(cfg.ApplicationAPI.AdvertiseURL) // validate URL
-		if err == nil {
-			break
+		if err != nil {
+			stdoutError(fmt.Sprintf("Invalid URL %q: %s", cfg.ApplicationAPI.AdvertiseURL, err.Error()))
+			continue
 		} else if !u.IsAbs() || u.Host == "" {
 			stdoutError(fmt.Sprintf("Advertise URL must include a scheme (e.g. http:// or https://) and host: %q", cfg.ApplicationAPI.AdvertiseURL))
 			continue
 		}
-		stdoutError(fmt.Sprintf("Invalid URL %q: %s", cfg.ApplicationAPI.AdvertiseURL, err.Error()))
+		break
 	}
 }
 
@@ -302,11 +303,6 @@ func setDatabasePassword() {
 	fmt.Println("The database password is used to connect to the indexer's database.")
 	fmt.Println("It should be a strong password that is not used for any other purpose.")
 	cfg.Database.Password = readPasswordInput("Enter new database password")
-	if len(cfg.Database.Password) < 4 {
-		fmt.Println(ansiStyle("31", "Password must be at least 4 characters!"))
-		setDatabasePassword()
-		return
-	}
 }
 
 func setDatabaseSSLMode() {
