@@ -221,16 +221,17 @@ func setAdvancedConfig() {
 	fmt.Println("")
 
 	// http address of Admin API
-	fmt.Println("The HTTP address is used to serve the indexer's admin API.")
+	fmt.Println("The Admin API address is used to serve the indexer's admin API.")
 	fmt.Println("The admin API is used to configure the indexer.")
 	fmt.Println("It should only be exposed to the public internet via an https reverse proxy")
-	setListenAddress("HTTP Address", &cfg.AdminAPI.Address)
+	setListenAddress("Admin API Address", &cfg.AdminAPI.Address)
 
 	// http address of Application API
-	fmt.Println("The HTTP address is used to serve the indexer's application API.")
+	fmt.Println("")
+	fmt.Println("The Application API address is used to serve the indexer's application API.")
 	fmt.Println("The application API is used by applications to interact with the indexer.")
 	fmt.Println("It should only be exposed to the public internet via an https reverse proxy")
-	setListenAddress("HTTP Address", &cfg.ApplicationAPI.Address)
+	setListenAddress("Application API Address", &cfg.ApplicationAPI.Address)
 
 	// syncer address
 	fmt.Println("")
@@ -267,7 +268,7 @@ func setDatabaseAddress() {
 
 	// will continue to prompt until a valid value is entered
 	for {
-		input := readInput(fmt.Sprintf("Enter new database address (currently %q)", current))
+		input := readInput(fmt.Sprintf("Enter new database address (Current: %q)", current))
 		if input == "" {
 			return
 		}
@@ -327,7 +328,7 @@ func setDataDirectory() {
 	dir, err := filepath.Abs(cfg.Directory)
 	checkFatalError("failed to get absolute path of data directory", err)
 
-	fmt.Println("The data directory is where indexd will store its metadata and consensus data.")
+	fmt.Println("The data directory is where indexd will store its consensus data.")
 	fmt.Println("This directory should be on a fast, reliable storage device, preferably an SSD.")
 	fmt.Println("")
 
@@ -335,7 +336,7 @@ func setDataDirectory() {
 	dataExists := existsErr == nil
 	if dataExists {
 		fmt.Println(ansiStyle("33", "There is existing data in the data directory."))
-		fmt.Println(ansiStyle("33", "If you change your data directory, you will need to manually move consensus, gateway, tpool, and indexd.db to the new directory."))
+		fmt.Println(ansiStyle("33", "If you change your data directory, you will need to manually move the contents of the previous directory to the new directory."))
 	}
 
 	if !promptYesNo("Would you like to change the data directory? (Current: " + dir + ")") {
@@ -347,7 +348,7 @@ func setDataDirectory() {
 func setListenAddress(context string, value *string) {
 	// will continue to prompt until a valid value is entered
 	for {
-		input := readInput(fmt.Sprintf("%s (currently %q)", context, *value))
+		input := readInput(fmt.Sprintf("%s (Current: %q)", context, *value))
 		if input == "" {
 			return
 		}

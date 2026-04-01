@@ -1,4 +1,4 @@
-# [![Sia](https://sia.tech/assets/banners/sia-banner-expanded-indexd.png)](http://sia.tech)
+# [![Indexd](https://sia.tech/assets/banners/sia-banner-expanded-indexd.png)](http://sia.tech)
 
 [![GoDoc](https://godoc.org/go.sia.tech/indexd?status.svg)](https://godoc.org/go.sia.tech/indexd)
 
@@ -140,5 +140,5 @@ database:
     user: indexd # the username for the PostgreSQL server
     password: <your db password> # the password for the PostgreSQL server
     database: indexd # the name of the PostgreSQL database
-    sslmode: require # the SSL mode for the PostgreSQL connection (https://www.postgresql.org/docs/current/libpq-ssl.html)
+    sslmode: verify-full # the SSL mode for the PostgreSQL connection (https://www.postgresql.org/docs/current/libpq-ssl.html)
 ```
