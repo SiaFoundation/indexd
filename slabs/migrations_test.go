@@ -468,12 +468,12 @@ func BenchmarkMigrateSlab(b *testing.B) {
 
 			// fund service accounts for migration operations
 			for _, h := range slabHosts {
-				if err := am.UpdateServiceAccountBalance(b.Context(), h.PublicKey, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
+				if err := am.UpdateServiceAccountBalance(h.PublicKey, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
 					b.Fatal(err)
 				}
 			}
 			for _, hk := range uploadCandidateKeys {
-				if err := am.UpdateServiceAccountBalance(b.Context(), hk, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
+				if err := am.UpdateServiceAccountBalance(hk, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -533,12 +533,12 @@ func BenchmarkMigrateSlab(b *testing.B) {
 				client.mu.Unlock()
 				// replenish service account balances
 				for _, h := range slabHosts {
-					if err := am.UpdateServiceAccountBalance(ctx, h.PublicKey, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
+					if err := am.UpdateServiceAccountBalance(h.PublicKey, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
 						b.Fatal(err)
 					}
 				}
 				for _, hk := range uploadCandidateKeys {
-					if err := am.UpdateServiceAccountBalance(ctx, hk, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
+					if err := am.UpdateServiceAccountBalance(hk, mgr.MigrationAccount(), types.Siacoins(100)); err != nil {
 						b.Fatal(err)
 					}
 				}
