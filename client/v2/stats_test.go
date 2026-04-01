@@ -14,12 +14,12 @@ func TestRPCAverage(t *testing.T) {
 		t.Fatal("initial value should be zero")
 	}
 
-	ra.AddSample(100 * time.Millisecond)
+	ra.AddSample(100)
 	if v := ra.Value(); v != 100 {
 		t.Fatalf("expected 100, got %f", v)
 	}
 
-	ra.AddSample(200 * time.Millisecond)
+	ra.AddSample(200)
 	expected := 0.2*200 + 0.8*100
 	if v := ra.Value(); v != expected {
 		t.Fatalf("expected %f, got %f", expected, v)
