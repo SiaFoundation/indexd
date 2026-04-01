@@ -1,4 +1,6 @@
-# Indexd
+# [![Sia](https://sia.tech/assets/banners/sia-banner-expanded-indexd.png)](http://sia.tech)
+
+[![GoDoc](https://godoc.org/go.sia.tech/indexd?status.svg)](https://godoc.org/go.sia.tech/indexd)
 
 An indexer for the [Sia](https://sia.tech) network.
 
