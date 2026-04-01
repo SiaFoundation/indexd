@@ -50,45 +50,7 @@ which will automatically open the admin UI in your default browser if
 
 `indexd` is also available as a Docker image at `ghcr.io/siafoundation/indexd`.
 
-You can use it with a PostgreSQL database running in another container. Here's
-an example `docker-compose.yml` file to get you started. You can set the
-`INDEXD_DB_PASSWORD` environment variable in a `.env` file in the same directory
-as the `docker-compose.yml` file.
-
-Before starting indexd, to configure the container, run `docker compose run --rm
--it indexd config` to interactively create a config file. By default, the config
-uses `verify-full` as the SSL mode for the PostgreSQL connection, which requires
-the PostgreSQL server to have a valid SSL certificate. If your PostgreSQL server
-doesn't have one, you can change the mode to a less restrictive one like
-`prefer` in the advanced settings of the configuration agent.
-
-```yml
-services:
-  postgres:
-    restart: unless-stopped
-    shm_size: 16g
-    environment:
-      POSTGRES_USER: indexd
-      POSTGRES_PASSWORD: ${INDEXD_DB_PASSWORD}
-      POSTGRES_DB: indexd
-    volumes:
-      - postgres:/var/lib/postgresql/data
-
-  indexd:
-    depends_on:
-      - postgres
-    image: ghcr.io/siafoundation/indexd:master
-    restart: unless-stopped
-    ports:
-      - 10981:9981/tcp # public syncer
-      - 10982:9982/tcp # public apps API
-    volumes:
-      - indexd:/data
-      
-volumes:
-  indexd:
-  postgres:
-```
+You can use it with a PostgreSQL database running in another container. You can find an example `docker-compose.yml` file [here](docker-compose.yml).
 
 ## API
 
@@ -128,12 +90,10 @@ interactively generate one.
 ### Environment Variables
 
 The following environment variables may be used to override the default
-configuration, but the config file will take precedence over environment
-variables if both are set.
+configuration and take precedence over the config file settings.
 
 | Variable | Description |
 |----------|-------------|
-| `INDEXD_ADMIN_PASSWORD` | Password for the admin API |
 | `INDEXD_CONFIG_FILE` | Override the config file path |
 | `INDEXD_DATA_DIR` | Override the data directory |
 
@@ -143,7 +103,7 @@ variables if both are set.
 autoOpenWebUI: true
 directory: /var/lib/indexd
 debug: false # Enable debug endpoints and logging
-recoveryPhrase: your twelve word recovery phrase goes here put it in now please ok # Your secret recovery phrase, you can generate one using the 'indexd seed' command
+recoveryPhrase: <your twelve word recovery phrase> # Your secret recovery phrase
 adminAPI:
     address: :9980
     password: <your admin password> # Your admin password for protecting the admin API

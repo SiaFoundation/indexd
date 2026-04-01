@@ -26,18 +26,15 @@ import (
 )
 
 const (
-	indexdAdminPasswordEnvVar = "INDEXD_ADMIN_PASSWORD"
-	configFileEnvVar          = "INDEXD_CONFIG_FILE"
-	dataDirEnvVar             = "INDEXD_DATA_DIR"
+	configFileEnvVar = "INDEXD_CONFIG_FILE"
+	dataDirEnvVar    = "INDEXD_DATA_DIR"
 )
 
 var cfg = config.Config{
 	AutoOpenWebUI: true,
-	Directory:     os.Getenv(dataDirEnvVar), // default to env variable
 	Debug:         false,
 	AdminAPI: config.AdminAPI{
-		Address:  "127.0.0.1:9980",
-		Password: os.Getenv(indexdAdminPasswordEnvVar),
+		Address: "127.0.0.1:9980",
 	},
 	ApplicationAPI: config.ApplicationAPI{
 		Address: ":9982",
@@ -197,18 +194,18 @@ func main() {
 	// values set in the config file
 	configPath := tryLoadConfig()
 
+	// env var data directory takes precedence over config file
+	if dir := os.Getenv(dataDirEnvVar); dir != "" {
+		cfg.Directory = dir
+	}
+
 	// determine the data directory
 	cfg.Directory = dataDirectory(cfg.Directory)
 
-	var logLevelOverride string
-
 	rootCmd := flagg.Root
 	rootCmd.Usage = flagg.SimpleUsage(rootCmd, ``)
-	rootCmd.StringVar(&cfg.Directory, "dir", cfg.Directory, "directory to store indexd metadata in")
 	rootCmd.StringVar(&cfg.AdminAPI.Address, "api.admin", cfg.AdminAPI.Address, "address to serve admin API on")
 	rootCmd.StringVar(&cfg.ApplicationAPI.Address, "api.app", cfg.ApplicationAPI.Address, "address to serve application API on")
-	rootCmd.BoolVar(&cfg.Debug, "debug", cfg.Debug, "enable debug mode")
-	rootCmd.StringVar(&logLevelOverride, "log", "", "overrides the log level for all enabled loggers (debug, info, warn, error)")
 
 	versionCmd := flagg.New("version", ``)
 	seedCmd := flagg.New("seed", ``)
@@ -226,12 +223,6 @@ func main() {
 	if cfg.Debug {
 		cfg.Log.StdOut.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
 		cfg.Log.File.Level = zap.NewAtomicLevelAt(zapcore.DebugLevel)
-	}
-	if logLevelOverride != "" {
-		level, err := zap.ParseAtomicLevel(logLevelOverride)
-		checkFatalError("failed to parse log level", err)
-		cfg.Log.File.Level = level
-		cfg.Log.StdOut.Level = level
 	}
 
 	switch cmd {
@@ -270,7 +261,7 @@ func main() {
 		}
 
 		if cfg.AdminAPI.Password == "" {
-			fmt.Fprintf(os.Stderr, "missing admin password - needs to be set either via config file or '%s' env var\n", indexdAdminPasswordEnvVar)
+			fmt.Fprintf(os.Stderr, "missing admin password - needs to be set via config file\n")
 			os.Exit(1)
 		} else if cfg.RecoveryPhrase == "" {
 			fmt.Fprintf(os.Stderr, "missing recovery phrase - needs to be set via config file\n")
