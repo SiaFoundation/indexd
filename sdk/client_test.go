@@ -68,27 +68,74 @@ func TestUpload(t *testing.T) {
 	data := frand.Bytes(4096)
 
 	t.Run("timeout", func(t *testing.T) {
-		dialer.ResetSlowHosts()
-		// make enough hosts timeout to fail
-		dialer.SetSlowHosts(30, time.Second)
+		// use only 25 hosts so there are not enough for a full slab
+		dialer := newMockDialer(25)
+		s := newTestSDK(t, appKey, newMockAppClient(), dialer)
+		defer s.Close()
+
 		obj := NewEmptyObject()
-		err := s.Upload(context.Background(), &obj, bytes.NewReader(data), WithUploadHostTimeout(100*time.Millisecond))
-		if !errors.Is(err, ErrNoMoreHosts) {
-			t.Fatalf("expected ErrNoMoreHosts, got %v", err)
+		err := s.Upload(context.Background(), &obj, bytes.NewReader(data))
+		if err == nil {
+			t.Fatal("expected error, got nil")
 		}
 	})
 
 	t.Run("slow", func(t *testing.T) {
 		dialer.ResetSlowHosts()
-		// make most of the hosts slow,
-		// but not enough to fail to upload
+		// make most of the hosts slow, but not enough to fail.
+		// progressive timeout starts at 15s so 1s delay succeeds.
 		dialer.SetSlowHosts(20, time.Second)
 		obj := NewEmptyObject()
-		err := s.Upload(context.Background(), &obj, bytes.NewReader(data), WithUploadHostTimeout(100*time.Millisecond))
+		err := s.Upload(context.Background(), &obj, bytes.NewReader(data))
 		if err != nil {
 			t.Fatal(err)
 		} else if len(obj.Slabs()) != 1 {
 			t.Fatalf("expected 1 slab, got %d", len(obj.Slabs()))
+		}
+	})
+
+	t.Run("all slow", func(t *testing.T) {
+		dialer := newMockDialer(50)
+		dialer.SetSlowHosts(50, 2*time.Second)
+		s := newTestSDK(t, appKey, newMockAppClient(), dialer)
+		defer s.Close()
+
+		obj := NewEmptyObject()
+		err := s.Upload(context.Background(), &obj, bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		} else if len(obj.Slabs()) != 1 {
+			t.Fatalf("expected 1 slab, got %d", len(obj.Slabs()))
+		}
+	})
+
+	t.Run("flaky hosts", func(t *testing.T) {
+		// 10 of 30 hosts fail their first write but succeed on retry.
+		// the upload should complete because failed hosts are requeued
+		// for other shards via Retry.
+		dialer := newMockDialer(30)
+		dialer.SetFlakyHosts(t, 10, 1)
+		s := newTestSDK(t, appKey, newMockAppClient(), dialer)
+		defer s.Close()
+
+		obj := NewEmptyObject()
+		err := s.Upload(context.Background(), &obj, bytes.NewReader(data))
+		if err != nil {
+			t.Fatal(err)
+		} else if len(obj.Slabs()) != 1 {
+			t.Fatalf("expected 1 slab, got %d", len(obj.Slabs()))
+		}
+	})
+
+	t.Run("no hosts", func(t *testing.T) {
+		dialer := newMockDialer(0)
+		s := newTestSDK(t, appKey, newMockAppClient(), dialer)
+		defer s.Close()
+
+		obj := NewEmptyObject()
+		err := s.Upload(context.Background(), &obj, bytes.NewReader(data))
+		if err == nil {
+			t.Fatal("expected error, got nil")
 		}
 	})
 }
@@ -103,7 +150,7 @@ func TestResumableUpload(t *testing.T) {
 	data := frand.Bytes(5000)
 
 	for _, part := range [][]byte{data[:100], data[100:3000], data[3000:]} {
-		err := s.Upload(context.Background(), &obj, bytes.NewReader(part), WithUploadHostTimeout(100*time.Millisecond))
+		err := s.Upload(context.Background(), &obj, bytes.NewReader(part))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -286,7 +333,7 @@ func TestE2E(t *testing.T) {
 	// regular object upload
 	data := frand.Bytes(4096)
 	obj := NewEmptyObject()
-	err = client.Upload(t.Context(), &obj, bytes.NewReader(data), WithRedundancy(4, 11), WithUploadHostTimeout(10*time.Second))
+	err = client.Upload(t.Context(), &obj, bytes.NewReader(data), WithRedundancy(4, 11))
 	if err != nil {
 		t.Fatalf("failed to upload: %v", err)
 	} else if _, err := client.Object(t.Context(), obj.ID()); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
@@ -295,7 +342,7 @@ func TestE2E(t *testing.T) {
 	assertShareable(obj, data)
 
 	// packed upload
-	packed, err := client.UploadPacked(WithRedundancy(4, 11), WithUploadHostTimeout(10*time.Second))
+	packed, err := client.UploadPacked(WithRedundancy(4, 11))
 	if err != nil {
 		t.Fatalf("failed to create packed upload: %v", err)
 	}
@@ -328,7 +375,7 @@ func TestE2E(t *testing.T) {
 	assertShareable(objects[1], data2)
 
 	// packed upload spanning multiple slabs
-	packedL, err := client.UploadPacked(WithRedundancy(4, 11), WithUploadHostTimeout(10*time.Second))
+	packedL, err := client.UploadPacked(WithRedundancy(4, 11))
 	if err != nil {
 		t.Fatalf("failed to create multi-slab packed upload: %v", err)
 	}

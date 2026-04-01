@@ -96,7 +96,7 @@ func TestProviderPriority(t *testing.T) {
 	// not in any order, just ensure all hosts are returned
 	sorted := provider.Prioritize(slices.Clone(usable))
 	if len(sorted) != 10 {
-		t.Fatalf("expected 10 candidate hosts, got %d", len(sorted))
+		t.Fatalf("expected 10 hosts, got %d", len(sorted))
 	}
 
 	// simulate a failed RPC
@@ -105,7 +105,7 @@ func TestProviderPriority(t *testing.T) {
 	// ensure the first host is now the worst candidate
 	sorted = provider.Prioritize(slices.Clone(usable))
 	if len(sorted) != 10 {
-		t.Fatalf("expected 10 candidate hosts, got %d", len(sorted))
+		t.Fatalf("expected 10 hosts, got %d", len(sorted))
 	} else if sorted[len(sorted)-1] != usable[0] {
 		t.Fatal("expected host with failed RPC to be the worst candidate")
 	}
@@ -117,7 +117,7 @@ func TestProviderPriority(t *testing.T) {
 	// ensure the second host is now the worst candidate
 	sorted = provider.Prioritize(slices.Clone(usable))
 	if len(sorted) != 10 {
-		t.Fatalf("expected 10 candidate hosts, got %d", len(usable))
+		t.Fatalf("expected 10 hosts, got %d", len(usable))
 	} else if sorted[len(sorted)-1] != usable[1] {
 		t.Fatal("expected host with multiple failed RPCs to be the worst candidate")
 	} else if sorted[len(sorted)-2] != usable[0] {
@@ -130,7 +130,7 @@ func TestProviderPriority(t *testing.T) {
 	provider.AddReadSample(usable[2], 100*time.Millisecond)
 	sorted = provider.Prioritize(slices.Clone(usable))
 	if len(sorted) != 10 {
-		t.Fatalf("expected 10 candidate hosts, got %d", len(sorted))
+		t.Fatalf("expected 10 hosts, got %d", len(sorted))
 	} else if sorted[len(sorted)-1] != usable[1] {
 		t.Fatal("expected host with multiple failed RPCs to be the worst candidate")
 	} else if sorted[len(sorted)-2] != usable[0] {
@@ -143,13 +143,13 @@ func TestProviderPriority(t *testing.T) {
 	unknownHost := types.GeneratePrivateKey().PublicKey()
 	sorted = provider.Prioritize(append(slices.Clone(usable), unknownHost))
 	if len(sorted) != 10 {
-		t.Fatalf("expected 10 candidate hosts, got %d", len(sorted))
+		t.Fatalf("expected 10 hosts, got %d", len(sorted))
 	} else if slices.Contains(sorted, unknownHost) {
 		t.Fatal("expected unknown host to be ignored")
 	}
 }
 
-func TestProviderCandidates(t *testing.T) {
+func TestHostQueue(t *testing.T) {
 	s := newTestStore(t)
 	store := hosts.NewHostStore(s.Store)
 	usable := make([]types.PublicKey, 0, 10)
@@ -158,65 +158,68 @@ func TestProviderCandidates(t *testing.T) {
 	}
 	provider := client.NewProvider(store)
 
-	assertCandidates := func(candidates *client.Candidates, hosts []types.PublicKey) {
-		if candidates.Available() != len(hosts) {
-			t.Fatalf("expected %d candidates, got %d", len(hosts), candidates.Available())
+	assertQueue := func(queue *client.HostQueue, hosts []types.PublicKey) {
+		if queue.Available() != len(hosts) {
+			t.Fatalf("expected %d hosts, got %d", len(hosts), queue.Available())
 		}
 		expected := make(map[types.PublicKey]bool)
 		for _, pk := range hosts {
 			expected[pk] = true
 		}
-		for pk := range candidates.Iter() {
+		for pk := range queue.Iter() {
 			if !expected[pk] {
-				t.Fatalf("unexpected candidate host: %s", pk.String())
+				t.Fatalf("unexpected host: %s", pk.String())
 			}
 			delete(expected, pk)
 		}
 		if len(expected) != 0 {
-			t.Fatalf("missing expected candidates: %v", expected)
+			t.Fatalf("missing expected hosts: %v", expected)
 		}
 	}
 
-	candidates, err := provider.Candidates()
+	queue, err := provider.HostQueue()
 	if err != nil {
-		t.Fatalf("failed to get candidates: %v", err)
+		t.Fatalf("failed to get host queue: %v", err)
 	}
-	assertCandidates(candidates, usable)
+	assertQueue(queue, usable)
 
-	if candidates.Available() != 0 {
-		t.Fatal("expected no more candidates")
+	if queue.Available() != 0 {
+		t.Fatal("expected empty queue")
 	}
-	for range candidates.Iter() {
-		t.Fatal("expected no more candidates")
+	for range queue.Iter() {
+		t.Fatal("expected empty queue")
 	}
 
-	candidates.Retry(usable[0])
-	if candidates.Available() != 1 {
-		t.Fatalf("expected 1 candidate, got %d", candidates.Available())
+	// verify attempt tracking through retry
+	queue.Retry(usable[0])
+	if queue.Available() != 1 {
+		t.Fatalf("expected 1 host, got %d", queue.Available())
 	}
-	for pk := range candidates.Iter() {
+	for pk, attempts := range queue.Iter() {
 		if pk != usable[0] {
 			t.Fatalf("expected host %s, got %s", usable[0].String(), pk.String())
+		} else if attempts != 2 {
+			t.Fatalf("expected 2 attempts after retry, got %d", attempts)
 		}
 	}
 
-	candidates, err = provider.Candidates()
+	queue, err = provider.HostQueue()
 	if err != nil {
-		t.Fatalf("failed to get candidates: %v", err)
+		t.Fatalf("failed to get host queue: %v", err)
 	}
 
 	var wg sync.WaitGroup
-	ch := make(chan types.PublicKey, candidates.Available())
-	errCh := make(chan error, candidates.Available())
-	for range candidates.Available() {
+	ch := make(chan types.PublicKey, queue.Available())
+	errCh := make(chan error, queue.Available())
+	for range queue.Available() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for pk := range candidates.Iter() {
+			for pk := range queue.Iter() {
 				ch <- pk
 				return
 			}
-			errCh <- errors.New("expected candidate, got none")
+			errCh <- errors.New("expected host, got none")
 		}()
 	}
 
@@ -232,13 +235,13 @@ func TestProviderCandidates(t *testing.T) {
 	seen := make(map[types.PublicKey]bool)
 	for pk := range ch {
 		if seen[pk] {
-			t.Fatalf("duplicate candidate host: %s", pk.String())
+			t.Fatalf("duplicate host: %s", pk.String())
 		}
 		seen[pk] = true
 	}
 }
 
-func TestUploadCandidates(t *testing.T) {
+func TestUploadQueue(t *testing.T) {
 	s := newTestStore(t)
 	store := hosts.NewHostStore(s.Store)
 	host1 := s.addUsableHost(t)
@@ -254,27 +257,158 @@ func TestUploadCandidates(t *testing.T) {
 
 	provider := client.NewProvider(store)
 
-	candidates, err := provider.Candidates()
+	queue, err := provider.HostQueue()
 	if err != nil {
 		t.Fatal(err)
-	} else if available := candidates.Available(); available != 3 {
-		t.Fatalf("expected 3 candidates, got %d", available)
+	} else if available := queue.Available(); available != 3 {
+		t.Fatalf("expected 3 hosts, got %d", available)
 	}
 
-	uploadCandidates, err := provider.UploadCandidates()
+	uploadQueue, err := provider.UploadQueue()
 	if err != nil {
 		t.Fatal(err)
-	} else if available := uploadCandidates.Available(); available != 2 {
-		t.Fatalf("expected 2 upload candidates, got %d", available)
+	} else if available := uploadQueue.Available(); available != 2 {
+		t.Fatalf("expected 2 hosts, got %d", available)
 	}
-	for pk := range uploadCandidates.Iter() {
+	for pk := range uploadQueue.Iter() {
 		if pk != host1 && pk != host2 {
-			t.Fatalf("unexpected upload candidate: %s", pk)
+			t.Fatalf("unexpected host: %s", pk)
 		}
 	}
 }
 
-func TestDuplicateCandidates(t *testing.T) {
+func TestHostQueueAttempts(t *testing.T) {
+	hostA := types.GeneratePrivateKey().PublicKey()
+	hostB := types.GeneratePrivateKey().PublicKey()
+	hostC := types.GeneratePrivateKey().PublicKey()
+
+	queue := client.NewHostQueue([]types.PublicKey{hostA, hostB, hostC})
+
+	// first pop of each host should return attempts=1
+	pk, attempts, ok := queue.Next()
+	if !ok || pk != hostA || attempts != 1 {
+		t.Fatalf("expected hostA with 1 attempt, got %s with %d", pk, attempts)
+	}
+
+	pk, attempts, ok = queue.Next()
+	if !ok || pk != hostB || attempts != 1 {
+		t.Fatalf("expected hostB with 1 attempt, got %s with %d", pk, attempts)
+	}
+
+	// retry hostA, it should go to the back
+	queue.Retry(hostA)
+
+	// next pop should be hostC (still in front), not hostA
+	pk, attempts, ok = queue.Next()
+	if !ok || pk != hostC || attempts != 1 {
+		t.Fatalf("expected hostC with 1 attempt, got %s with %d", pk, attempts)
+	}
+
+	// now hostA comes back with attempts=2
+	pk, attempts, ok = queue.Next()
+	if !ok || pk != hostA || attempts != 2 {
+		t.Fatalf("expected hostA with 2 attempts, got %s with %d", pk, attempts)
+	}
+
+	// retry hostA again, attempts counter increments to 3
+	queue.Retry(hostA)
+
+	pk, attempts, ok = queue.Next()
+	if !ok || pk != hostA || attempts != 3 {
+		t.Fatalf("expected hostA with 3 attempts, got %s with %d", pk, attempts)
+	}
+
+	// retry once more, attempts counter increments to 4
+	queue.Retry(hostA)
+
+	pk, attempts, ok = queue.Next()
+	if !ok || pk != hostA || attempts != 4 {
+		t.Fatalf("expected hostA with 4 attempts, got %s with %d", pk, attempts)
+	}
+
+	// queue is empty
+	_, _, ok = queue.Next()
+	if ok {
+		t.Fatal("expected empty queue")
+	}
+}
+
+func TestHostQueueRetryOrdering(t *testing.T) {
+	hostA := types.GeneratePrivateKey().PublicKey()
+	hostB := types.GeneratePrivateKey().PublicKey()
+	hostC := types.GeneratePrivateKey().PublicKey()
+
+	queue := client.NewHostQueue([]types.PublicKey{hostA, hostB, hostC})
+
+	// pop all three
+	queue.Next()
+	queue.Next()
+	queue.Next()
+
+	// retry in reverse order
+	queue.Retry(hostC)
+	queue.Retry(hostB)
+	queue.Retry(hostA)
+
+	// they should come back in retry order: C, B, A
+	pk, _, _ := queue.Next()
+	if pk != hostC {
+		t.Fatalf("expected hostC first, got %s", pk)
+	}
+
+	pk, _, _ = queue.Next()
+	if pk != hostB {
+		t.Fatalf("expected hostB second, got %s", pk)
+	}
+
+	pk, _, _ = queue.Next()
+	if pk != hostA {
+		t.Fatalf("expected hostA third, got %s", pk)
+	}
+}
+
+func TestHostQueueIterAttempts(t *testing.T) {
+	hostA := types.GeneratePrivateKey().PublicKey()
+	hostB := types.GeneratePrivateKey().PublicKey()
+
+	queue := client.NewHostQueue([]types.PublicKey{hostA, hostB})
+
+	// simulate upload loop: iterate, retry failed hosts, continue
+	var order []types.PublicKey
+	var attemptLog []int
+	for pk, attempts := range queue.Iter() {
+		order = append(order, pk)
+		attemptLog = append(attemptLog, attempts)
+
+		// retry hostA on its first two attempts
+		if pk == hostA && attempts < 3 {
+			queue.Retry(pk)
+		}
+	}
+
+	// expected sequence: A(1), B(1), A(2), A(3)
+	if len(order) != 4 {
+		t.Fatalf("expected 4 iterations, got %d", len(order))
+	}
+
+	if order[0] != hostA || attemptLog[0] != 1 {
+		t.Fatalf("iteration 0: expected hostA attempt 1, got %s attempt %d", order[0], attemptLog[0])
+	}
+
+	if order[1] != hostB || attemptLog[1] != 1 {
+		t.Fatalf("iteration 1: expected hostB attempt 1, got %s attempt %d", order[1], attemptLog[1])
+	}
+
+	if order[2] != hostA || attemptLog[2] != 2 {
+		t.Fatalf("iteration 2: expected hostA attempt 2, got %s attempt %d", order[2], attemptLog[2])
+	}
+
+	if order[3] != hostA || attemptLog[3] != 3 {
+		t.Fatalf("iteration 3: expected hostA attempt 3, got %s attempt %d", order[3], attemptLog[3])
+	}
+}
+
+func TestDuplicateHostQueue(t *testing.T) {
 	hosts := []types.PublicKey{
 		types.GeneratePrivateKey().PublicKey(),
 		types.GeneratePrivateKey().PublicKey(),
@@ -282,15 +416,15 @@ func TestDuplicateCandidates(t *testing.T) {
 	}
 	duplicates := append(slices.Clone(hosts), hosts[1], hosts[2], hosts[0], hosts[1])
 
-	candidates := client.NewCandidates(duplicates)
+	queue := client.NewHostQueue(duplicates)
 	seen := make(map[types.PublicKey]struct{})
-	for pk := range candidates.Iter() {
+	for pk := range queue.Iter() {
 		if _, ok := seen[pk]; ok {
-			t.Fatalf("duplicate candidate host: %s", pk.String())
+			t.Fatalf("duplicate host: %s", pk.String())
 		}
 		seen[pk] = struct{}{}
 	}
 	if len(seen) != len(hosts) {
-		t.Fatalf("expected %d unique candidates, got %d", len(hosts), len(seen))
+		t.Fatalf("expected %d unique hosts, got %d", len(hosts), len(seen))
 	}
 }

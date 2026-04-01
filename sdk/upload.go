@@ -32,7 +32,7 @@ type (
 	}
 
 	shardUpload struct {
-		hosts  *client.Candidates
+		hosts  *client.HostQueue
 		shards chan shard
 
 		encryptionKey [32]byte
@@ -52,17 +52,16 @@ type (
 	uploadOption struct {
 		dataShards   uint8
 		parityShards uint8
-		hostTimeout  time.Duration
 		maxInflight  int
 	}
 )
 
-func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Reader, enc reedsolomon.Encoder, dataShards, parityShards, maxInflight int, hostTimeout time.Duration) {
+func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Reader, enc reedsolomon.Encoder, dataShards, parityShards, maxInflight int) {
 	shardsCh := make(chan shardUpload)
 	defer close(shardsCh)
 
 	// run 'maxInflight' upload workers that pull shards from the queue
-	go runUploadWorkers(ctx, s.hosts, s.appKey, shardsCh, maxInflight, hostTimeout)
+	go runUploadWorkers(ctx, s.hosts, s.appKey, shardsCh, maxInflight)
 
 	// convenience variables
 	slabSize := dataShards * proto4.SectorSize
@@ -78,15 +77,14 @@ func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Rea
 	// read slabs in a loop
 	buffer := make([]byte, slabSize)
 	for i := 0; ctx.Err() == nil; i++ {
-		// prepare upload candidates, every shard upload holds a reference
-		// to the upload candidates to ensure every shard is uploaded to a
-		// unique host
-		candidates, err := s.hosts.UploadCandidates()
+		// every shard upload holds a reference to the host queue to
+		// ensure every shard is uploaded to a unique host
+		queue, err := s.hosts.UploadQueue()
 		if err != nil {
-			sendErr(fmt.Errorf("failed to get upload candidates for slab %d: %w", i, err))
+			sendErr(fmt.Errorf("failed to get upload queue for slab %d: %w", i, err))
 			return
-		} else if candidates.Available() < totalShards {
-			sendErr(fmt.Errorf("not enough hosts available to upload slab %d: %d < %d", i, candidates.Available(), totalShards))
+		} else if queue.Available() < totalShards {
+			sendErr(fmt.Errorf("not enough hosts available to upload slab %d: %d < %d", i, queue.Available(), totalShards))
 			return
 		}
 
@@ -117,7 +115,7 @@ func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Rea
 			sector := make([]byte, proto4.SectorSize)
 			copy(sector, data)
 			shardsCh <- shardUpload{
-				hosts:  candidates,
+				hosts:  queue,
 				shards: uploadsCh,
 
 				encryptionKey: encryptionKey,
@@ -135,7 +133,7 @@ func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Rea
 		// launch uploads for parity shards
 		for i, data := range shards[dataShards:] {
 			shardsCh <- shardUpload{
-				hosts:  candidates,
+				hosts:  queue,
 				shards: uploadsCh,
 
 				encryptionKey: encryptionKey,
@@ -158,7 +156,15 @@ func (s *SDK) uploadSlabs(ctx context.Context, slabsCh chan slabUpload, r io.Rea
 	}
 }
 
-func runUploadWorkers(ctx context.Context, client hostClient, accountKey types.PrivateKey, queue chan shardUpload, maxInflight int, hostTimeout time.Duration) {
+// uploadTimeout returns a progressive timeout based on the 1-based
+// attempt count from HostQueue.Next. The timeout starts at 15s and
+// increases by 5s per retry, capped at 120s.
+func uploadTimeout(attempts int) time.Duration {
+	seconds := min(10+5*max(attempts, 1), 120)
+	return time.Duration(seconds) * time.Second
+}
+
+func runUploadWorkers(ctx context.Context, client hostClient, accountKey types.PrivateKey, queue chan shardUpload, maxInflight int) {
 	sema := make(chan struct{}, maxInflight)
 	for job := range queue {
 		sema <- struct{}{}
@@ -172,12 +178,13 @@ func runUploadWorkers(ctx context.Context, client hostClient, accountKey types.P
 			c.XORKeyStream(job.sector, job.sector)
 
 			// try hosts until one works or we run out of hosts
-			for host := range job.hosts.Iter() {
+			for host, attempts := range job.hosts.Iter() {
 				if ctx.Err() != nil {
 					return
 				}
 
-				root, err := uploadShard(ctx, client, accountKey, host, job.sector, hostTimeout)
+				timeout := uploadTimeout(attempts)
+				root, err := uploadShard(ctx, client, accountKey, host, job.sector, timeout)
 				if err == nil {
 					job.shards <- shard{
 						index: job.index,
@@ -185,6 +192,11 @@ func runUploadWorkers(ctx context.Context, client hostClient, accountKey types.P
 						root:  root,
 					}
 					return
+				}
+
+				// requeue timed out hosts so other shards can use them
+				if errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+					job.hosts.Retry(host)
 				}
 			}
 			job.shards <- shard{err: ErrNoMoreHosts}

@@ -291,16 +291,16 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 	return
 }
 
-// Candidates returns all host candidates ordered by their
-// historical performance.
-func (c *Client) Candidates() (*Candidates, error) {
-	return c.hosts.Candidates()
+// HostQueue returns all usable hosts ordered by their historical
+// performance.
+func (c *Client) HostQueue() (*HostQueue, error) {
+	return c.hosts.HostQueue()
 }
 
-// UploadCandidates returns host candidates that are good for uploading,
-// ordered by their historical performance.
-func (c *Client) UploadCandidates() (*Candidates, error) {
-	return c.hosts.UploadCandidates()
+// UploadQueue returns hosts that are good for uploading, ordered
+// by their historical performance.
+func (c *Client) UploadQueue() (*HostQueue, error) {
+	return c.hosts.UploadQueue()
 }
 
 // Prioritize reorders the given hosts based on their historical performance.

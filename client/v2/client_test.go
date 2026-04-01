@@ -32,11 +32,11 @@ func TestHostClient(t *testing.T) {
 	client := client.New(provider, logger)
 	defer client.Close()
 
-	candidates, err := client.Candidates()
+	queue, err := client.HostQueue()
 	if err != nil {
 		t.Fatal(err)
-	} else if candidates.Available() != 1 {
-		t.Fatalf("expected 1 candidate, got %d", candidates.Available())
+	} else if queue.Available() != 1 {
+		t.Fatalf("expected 1 host, got %d", queue.Available())
 	}
 
 	data := frand.Bytes(4096)
@@ -44,9 +44,9 @@ func TestHostClient(t *testing.T) {
 	copy(sector[:], data)
 	expectedRoot := proto.SectorRoot(&sector)
 
-	hostKey, ok := candidates.Next()
+	hostKey, _, ok := queue.Next()
 	if !ok {
-		t.Fatal("expected candidate")
+		t.Fatal("expected a host")
 	}
 
 	result, err := client.WriteSector(context.Background(), accountKey, hostKey, data)
@@ -98,20 +98,20 @@ func TestHostClientParallel(t *testing.T) {
 	client := client.New(provider, logger)
 	defer client.Close()
 
-	candidates, err := client.Candidates()
+	queue, err := client.HostQueue()
 	if err != nil {
 		t.Fatal(err)
-	} else if candidates.Available() != 2 {
-		t.Fatalf("expected 2 candidate, got %d", candidates.Available())
+	} else if queue.Available() != 2 {
+		t.Fatalf("expected 2 hosts, got %d", queue.Available())
 	}
 
-	hk1, ok := candidates.Next()
+	hk1, _, ok := queue.Next()
 	if !ok {
-		t.Fatal("expected candidate")
+		t.Fatal("expected a host")
 	}
-	hk2, ok := candidates.Next()
+	hk2, _, ok := queue.Next()
 	if !ok {
-		t.Fatal("expected candidate")
+		t.Fatal("expected a host")
 	}
 
 	errCh := make(chan error, 10)

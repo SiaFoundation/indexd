@@ -39,8 +39,8 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 		}
 	}
 
-	// prioritize available candidates based on latest reliability and performance
-	candidates := client.NewCandidates(m.hosts.Prioritize(available))
+	// prioritize available hosts based on latest reliability and performance
+	queue := client.NewHostQueue(m.hosts.Prioritize(available))
 
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, 10)
@@ -55,8 +55,8 @@ top:
 		case <-ctx.Done():
 			break top
 		case sema <- struct{}{}:
-			if candidates.Available() == 0 {
-				log.Debug("no more candidates for migration")
+			if queue.Available() == 0 {
+				log.Debug("no more hosts for migration")
 				break top
 			}
 			shard := shards[i]
@@ -66,7 +66,7 @@ top:
 				defer func() {
 					<-sema
 				}()
-				for hostKey := range candidates.Iter() {
+				for hostKey := range queue.Iter() {
 					if ctx.Err() != nil {
 						// context already cancelled
 						return

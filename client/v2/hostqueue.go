@@ -86,60 +86,61 @@ type hostMetric struct {
 	rpcFailRate     failureRate
 }
 
-// Candidates manages a queue of hosts to use for uploading. It is
-// safe for concurrent use.
-type Candidates struct {
-	mu    sync.Mutex
-	hosts []types.PublicKey
+// A HostQueue manages an ordered queue of hosts for uploading or
+// downloading. It tracks per-host attempt counts so callers can
+// implement progressive timeouts. It is safe for concurrent use.
+type HostQueue struct {
+	mu       sync.Mutex
+	hosts    []types.PublicKey
+	attempts map[types.PublicKey]int
 }
 
 // Available returns the number of remaining hosts.
-//
-// It is safe for concurrent use.
-func (c *Candidates) Available() int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return len(c.hosts)
+func (q *HostQueue) Available() int {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	return len(q.hosts)
 }
 
-// Iter returns an iterator that yields hosts one at a
-// time until there are no hosts left.
-//
-// It is safe for concurrent use.
-func (c *Candidates) Iter() iter.Seq[types.PublicKey] {
-	return func(yield func(types.PublicKey) bool) {
+// Iter returns an iterator that yields hosts and their attempt
+// counts one at a time until there are no hosts left.
+func (q *HostQueue) Iter() iter.Seq2[types.PublicKey, int] {
+	return func(yield func(types.PublicKey, int) bool) {
 		for {
-			host, ok := c.Next()
-			if !ok || !yield(host) {
+			host, attempts, ok := q.Next()
+			if !ok || !yield(host, attempts) {
 				return
 			}
 		}
 	}
 }
 
-// Next returns the next host candidate. If there are no more hosts, ok is false.
-//
-// It is safe for concurrent use.
-func (c *Candidates) Next() (types.PublicKey, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if len(c.hosts) == 0 {
-		return types.PublicKey{}, false
+// Next pops the next host from the front of the queue. The returned
+// attempt count is 1-based: 1 on the first pop, 2 after one retry,
+// and so on. If the queue is empty, ok is false.
+func (q *HostQueue) Next() (types.PublicKey, int, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if len(q.hosts) == 0 {
+		return types.PublicKey{}, 0, false
 	}
-	host := c.hosts[0]
-	c.hosts = c.hosts[1:]
-	return host, true
+	host := q.hosts[0]
+	q.hosts = q.hosts[1:]
+	return host, q.attempts[host] + 1, true
 }
 
-// Retry adds the host back to the queue for retrying later.
-func (c *Candidates) Retry(host types.PublicKey) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.hosts = append(c.hosts, host)
+// Retry pushes the host to the back of the queue and increments
+// its attempt counter.
+func (q *HostQueue) Retry(host types.PublicKey) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	q.hosts = append(q.hosts, host)
+	q.attempts[host]++
 }
 
-// NewCandidates creates a new Candidates with the provided hosts.
-func NewCandidates(hosts []types.PublicKey) *Candidates {
+// NewHostQueue creates a new HostQueue with the provided hosts,
+// deduplicating any repeated keys.
+func NewHostQueue(hosts []types.PublicKey) *HostQueue {
 	seen := make(map[types.PublicKey]struct{})
 	uniqueHosts := make([]types.PublicKey, 0, len(hosts))
 	for _, host := range hosts {
@@ -148,8 +149,9 @@ func NewCandidates(hosts []types.PublicKey) *Candidates {
 			uniqueHosts = append(uniqueHosts, host)
 		}
 	}
-	return &Candidates{
-		hosts: uniqueHosts,
+	return &HostQueue{
+		hosts:    uniqueHosts,
+		attempts: make(map[types.PublicKey]int),
 	}
 }
 
@@ -234,9 +236,9 @@ func (p *Provider) Addresses(hostKey types.PublicKey) ([]chain.NetAddress, error
 	return p.store.Addresses(hostKey)
 }
 
-// Candidates returns all host candidates ordered by their
-// historical performance.
-func (p *Provider) Candidates() (*Candidates, error) {
+// HostQueue returns all usable hosts ordered by their historical
+// performance.
+func (p *Provider) HostQueue() (*HostQueue, error) {
 	hosts, err := p.store.UsableHosts()
 	if err != nil {
 		return nil, err
@@ -246,14 +248,15 @@ func (p *Provider) Candidates() (*Candidates, error) {
 		hostKeys = append(hostKeys, host.PublicKey)
 	}
 	p.sortHosts(hostKeys)
-	return &Candidates{
-		hosts: hostKeys,
+	return &HostQueue{
+		hosts:    hostKeys,
+		attempts: make(map[types.PublicKey]int),
 	}, nil
 }
 
-// UploadCandidates returns host candidates that are good for uploading,
-// ordered by their historical performance.
-func (p *Provider) UploadCandidates() (*Candidates, error) {
+// UploadQueue returns hosts that are good for uploading, ordered
+// by their historical performance.
+func (p *Provider) UploadQueue() (*HostQueue, error) {
 	hosts, err := p.store.UsableHosts()
 	if err != nil {
 		return nil, err
@@ -265,8 +268,9 @@ func (p *Provider) UploadCandidates() (*Candidates, error) {
 		}
 	}
 	p.sortHosts(hostKeys)
-	return &Candidates{
-		hosts: hostKeys,
+	return &HostQueue{
+		hosts:    hostKeys,
+		attempts: make(map[types.PublicKey]int),
 	}, nil
 }
 

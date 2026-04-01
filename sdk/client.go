@@ -29,8 +29,7 @@ type (
 		WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (rhp.RPCWriteSectorResult, error)
 		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error)
 
-		Candidates() (*client.Candidates, error)
-		UploadCandidates() (*client.Candidates, error)
+		UploadQueue() (*client.HostQueue, error)
 		Prioritize(hosts []types.PublicKey) []types.PublicKey
 		Close() error
 	}
@@ -244,7 +243,6 @@ func (s *SDK) Upload(ctx context.Context, obj *Object, r io.Reader, opts ...Uplo
 	uo := uploadOption{
 		dataShards:   10,
 		parityShards: 20,
-		hostTimeout:  4 * time.Second, // ~10 Mbps
 		maxInflight:  30,
 	}
 	for _, opt := range opts {
@@ -266,23 +264,20 @@ func (s *SDK) Upload(ctx context.Context, obj *Object, r io.Reader, opts ...Uplo
 
 	// start uploading slabs
 	slabsCh := make(chan slabUpload, concurrentSlabUploads)
-	go s.uploadSlabs(ctx, slabsCh, r, enc, int(uo.dataShards), int(uo.parityShards), uo.maxInflight, uo.hostTimeout)
+	go s.uploadSlabs(ctx, slabsCh, r, enc, int(uo.dataShards), int(uo.parityShards), uo.maxInflight)
 
 	// collect uploaded slabs in a temporary variable to avoid modifying the
-	// object on error and to sort the slabs first
+	// object on error and to sort the slabs by index
 	var uploaded []slabs.SlabSlice
 	var uploadedIndices []int
 
-	// TODO: cleanup on failure
 top:
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case slab := <-slabsCh:
-			err := slab.err
-			if errors.Is(err, io.EOF) {
-				// all slabs complete
+			if errors.Is(slab.err, io.EOF) {
 				break top
 			} else if slab.err != nil {
 				return slab.err
@@ -623,15 +618,6 @@ func WithRedundancy(dataShards, parityShards uint8) UploadOption {
 	return func(uo *uploadOption) {
 		uo.dataShards = dataShards
 		uo.parityShards = parityShards
-	}
-}
-
-// WithUploadHostTimeout sets the timeout for writing sectors to individual
-// hosts. This avoids long hangs when a host is unresponsive or slow.
-// The default timeout is 4 seconds, worst case around 300Mbps.
-func WithUploadHostTimeout(timeout time.Duration) UploadOption {
-	return func(uo *uploadOption) {
-		uo.hostTimeout = timeout
 	}
 }
 

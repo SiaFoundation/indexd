@@ -231,7 +231,6 @@ func (s *SDK) UploadPacked(opts ...UploadOption) (*PackedUpload, error) {
 	uo := uploadOption{
 		dataShards:   10,
 		parityShards: 20,
-		hostTimeout:  4 * time.Second, // ~10 Mbps
 		maxInflight:  30,
 	}
 	for _, opt := range opts {
@@ -272,7 +271,7 @@ func (s *SDK) UploadPacked(opts ...UploadOption) (*PackedUpload, error) {
 	// upload slabs in background
 	slabCh := make(chan slabUpload, concurrentSlabUploads)
 	go func() {
-		s.uploadSlabs(ctx, slabCh, reader, enc, int(u.dataShards), int(u.parityShards), uo.maxInflight, uo.hostTimeout)
+		s.uploadSlabs(ctx, slabCh, reader, enc, int(u.dataShards), int(u.parityShards), uo.maxInflight)
 		close(slabCh)
 	}()
 
