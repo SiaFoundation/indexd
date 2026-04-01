@@ -34,18 +34,17 @@ type Store interface {
 	Usable(types.PublicKey) (bool, error)
 }
 
-// AddSample adds a new latency sample to the average.
-func (ra *rpcAverage) AddSample(latency time.Duration) {
-	sample := float64(latency.Milliseconds())
+// AddSample adds a new throughput sample to the average.
+func (ra *rpcAverage) AddSample(throughput float64) {
 	if !ra.init {
-		ra.value = sample
+		ra.value = throughput
 		ra.init = true
 	} else {
-		ra.value = emaAlpha*sample + (1.0-emaAlpha)*ra.value
+		ra.value = emaAlpha*throughput + (1.0-emaAlpha)*ra.value
 	}
 }
 
-// Value returns the current average latency in milliseconds.
+// Value returns the current average throughput in bytes per second.
 func (ra *rpcAverage) Value() float64 {
 	return ra.value
 }
@@ -185,13 +184,16 @@ func (p *Provider) cmpMetrics(a, b types.PublicKey) int {
 	if fc != 0 {
 		return fc
 	}
-	al := (am.rpcReadAverage.Value() + am.rpcWriteAverage.Value()) / 2
-	bl := (bm.rpcReadAverage.Value() + bm.rpcWriteAverage.Value()) / 2
-	return cmp.Compare(al, bl)
+	// higher throughput is better, so reverse the comparison
+	at := (am.rpcReadAverage.Value() + am.rpcWriteAverage.Value()) / 2
+	bt := (bm.rpcReadAverage.Value() + bm.rpcWriteAverage.Value()) / 2
+	return cmp.Compare(bt, at)
 }
 
 // AddReadSample records a successful read RPC attempt to the specified host.
-func (p *Provider) AddReadSample(hostKey types.PublicKey, latency time.Duration) {
+// The throughput is calculated from the number of bytes transferred and the
+// elapsed duration.
+func (p *Provider) AddReadSample(hostKey types.PublicKey, bytes uint64, elapsed time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	metric, exists := p.metrics[hostKey]
@@ -199,12 +201,16 @@ func (p *Provider) AddReadSample(hostKey types.PublicKey, latency time.Duration)
 		metric = &hostMetric{}
 		p.metrics[hostKey] = metric
 	}
-	metric.rpcReadAverage.AddSample(latency)
+	if elapsed > 0 {
+		metric.rpcReadAverage.AddSample(float64(bytes) / elapsed.Seconds())
+	}
 	metric.rpcFailRate.AddSample(true)
 }
 
 // AddWriteSample records a successful write RPC attempt to the specified host.
-func (p *Provider) AddWriteSample(hostKey types.PublicKey, latency time.Duration) {
+// The throughput is calculated from the number of bytes transferred and the
+// elapsed duration.
+func (p *Provider) AddWriteSample(hostKey types.PublicKey, bytes uint64, elapsed time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	metric, exists := p.metrics[hostKey]
@@ -212,7 +218,9 @@ func (p *Provider) AddWriteSample(hostKey types.PublicKey, latency time.Duration
 		metric = &hostMetric{}
 		p.metrics[hostKey] = metric
 	}
-	metric.rpcWriteAverage.AddSample(latency)
+	if elapsed > 0 {
+		metric.rpcWriteAverage.AddSample(float64(bytes) / elapsed.Seconds())
+	}
 	metric.rpcFailRate.AddSample(true)
 }
 
