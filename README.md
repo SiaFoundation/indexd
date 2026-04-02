@@ -48,6 +48,19 @@ Once indexd is configured, you can run `indexd` with
 which will automatically open the admin UI in your default browser if
 `autoOpenWebUI` is set to `true` in the config file.
 
+## Instant Syncing (Experimental)
+
+New users can sync instantly using `indexd --instant`. When instant syncing, the
+`indexd` node initializes using a Utreexo-based checkpoint and can immediately
+validate blocks from that point forward without replaying the whole chain state.
+The state is extremely compact and committed in block headers, making this
+initialization both quick and secure. Instant syncing also enables pruning of
+old blocks.
+
+[Learn more](https://sia.tech/learn/instant-syncing)
+
+**The wallet is required to only have v2 history to use instant syncing.**
+
 ## Docker
 
 `indexd` is also available as a Docker image at `ghcr.io/siafoundation/indexd`.
@@ -71,6 +84,14 @@ OpenAPI specifications for both APIs are available in the
 
 `indexd` is configured via a YAML config file. Run `indexd config` to
 interactively generate one.
+
+### Command-Line Flags
+
+| Flag | Description |
+|------|-------------|
+| `-api.admin` | Address to serve the admin API on (default `127.0.0.1:9980`) |
+| `-api.app` | Address to serve the application API on (default `:9982`) |
+| `-instant` | Enable instant sync mode for faster initial sync. This also enables pruning |
 
 ### Default Ports
 
@@ -120,6 +141,7 @@ syncer:
 consensus:
     network: mainnet # mainnet | zen
     indexBatchSize: 1000
+    pruneTarget: 64 # number of blocks to keep when pruning (0 to disable, minimum 6 hours of blocks)
 explorer:
     enabled: true
     url: https://api.siascan.com

@@ -43,7 +43,7 @@ type (
 		IndexBatchSize int    `yaml:"indexBatchSize"`
 		// PruneTarget is the target number of blocks to keep when pruning
 		// old blocks from the consensus database. A value of 0 disables
-		// pruning. On mainnet, this should be set to at least 36 blocks.
+		// pruning. Must be at least 6 hours of blocks if enabled.
 		PruneTarget uint64 `yaml:"pruneTarget,omitempty"`
 	}
 

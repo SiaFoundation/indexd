@@ -21,7 +21,7 @@ func WithBatchSize(bs int) Option {
 
 // WithPruneTarget sets the prune target of the subscriber. A prune target
 // of 0 means pruning is disabled. A target n > 0 means that only the last
-// n blocks will be kept. On mainnet this should be set to at least 144.
+// n blocks will be kept. Must be at least 6 hours of blocks if enabled.
 func WithPruneTarget(target uint64) Option {
 	return func(m *Subscriber) {
 		m.pruneTarget = target
