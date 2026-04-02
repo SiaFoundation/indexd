@@ -25,7 +25,7 @@ func (cm *ContractManager) performContractPruning(ctx context.Context, log *zap.
 	if err != nil {
 		return fmt.Errorf("failed to fetch hosts for pruning: %w", err)
 	} else if len(hfp) == 0 {
-		log.Warn("no hosts for pruning")
+		log.Debug("no hosts for pruning")
 		return nil
 	}
 

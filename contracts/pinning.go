@@ -26,7 +26,7 @@ func (cm *ContractManager) performSectorPinning(ctx context.Context, log *zap.Lo
 	if err != nil {
 		return fmt.Errorf("failed to fetch hosts for pinning: %w", err)
 	} else if len(hfp) == 0 {
-		log.Warn("no hosts for pinning")
+		log.Debug("no hosts for pinning")
 		return nil
 	}
 
