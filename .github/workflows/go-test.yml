@@ -11,7 +11,7 @@ jobs:
     steps:
       - name: Configure git
         run: git config --global core.autocrlf false # required on Windows
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           lfs: true
       - name: Checkout LFS objects
@@ -50,7 +50,7 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           lfs: true
       - name: Checkout LFS objects
