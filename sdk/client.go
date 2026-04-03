@@ -84,10 +84,6 @@ var (
 	// ErrNoMoreHosts is returned when there are no more hosts
 	// available to attempt to upload a shard
 	ErrNoMoreHosts = errors.New("no more hosts available")
-
-	// ErrInvalidRange is returned when an invalid range is specified for
-	// download
-	ErrInvalidRange = errors.New("invalid range")
 )
 
 type sectorDownload struct {
@@ -95,9 +91,12 @@ type sectorDownload struct {
 	sector slabs.PinnedSector
 }
 
-func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInflight int, timeout time.Duration) ([][]byte, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, timeout time.Duration) ([][]byte, error) {
+	if slab.MinShards == 0 {
+		return nil, errors.New("invalid slab: min shards cannot be 0")
+	} else if int(slab.MinShards) > len(slab.Sectors) {
+		return nil, fmt.Errorf("invalid slab: min shards %d exceeds sector count %d", slab.MinShards, len(slab.Sectors))
+	}
 
 	slabSectors := make(map[types.PublicKey]sectorDownload)
 	slabHosts := make([]types.PublicKey, 0, len(slab.Sectors))
@@ -112,6 +111,13 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 		return nil, fmt.Errorf("slab has %d sectors with hosts, minimum required: %d: %w", len(slabHosts), slab.MinShards, ErrNotEnoughShards)
 	}
 
+	var wg sync.WaitGroup
+	ctx, cancel := context.WithCancel(ctx)
+	defer func() {
+		cancel()
+		wg.Wait()
+	}()
+
 	// calculate offset and length that's required from each sector to recover
 	// the data referenced by the slab slice
 	offset, length := sectorRegion(slab)
@@ -119,55 +125,51 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 	// prioritize hosts
 	slabHosts = s.hosts.Prioritize(slabHosts)
 
-	// helper to launch download
 	type result struct {
 		index int
 		buf   []byte
 		err   error
 	}
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	responseCh := make(chan *result, len(slabSectors))
-	sema := make(chan struct{}, maxInflight)
-	tryDownloadSector := func(ctx context.Context, d sectorDownload) {
+	responseCh := make(chan result, len(slab.Sectors))
+	var outstanding int
+	// helper to launch download
+	tryDownloadSector := func(ctx context.Context, d sectorDownload) bool {
 		select {
 		case <-ctx.Done():
-			return
-		case sema <- struct{}{}:
-			// limit number of concurrent requests
+			return false
+		default:
 		}
+		outstanding++
 		wg.Go(func() {
 			buf := bytes.NewBuffer(make([]byte, 0, length))
 			err := downloadShard(ctx, s.hosts, s.appKey, d.sector.HostKey, buf, d.sector.Root, offset, length, timeout)
-			<-sema
 			select {
 			case <-ctx.Done():
 				return
-			case responseCh <- &result{index: d.index, buf: buf.Bytes(), err: err}:
+			case responseCh <- result{index: d.index, buf: buf.Bytes(), err: err}:
 			}
 		})
+		return true
 	}
 
 	// launch minShards downloads right away
 	for range slab.MinShards {
-		select {
-		case <-ctx.Done():
+		if !tryDownloadSector(ctx, slabSectors[slabHosts[0]]) {
 			return nil, ctx.Err()
-		default:
 		}
-		tryDownloadSector(ctx, slabSectors[slabHosts[0]])
 		slabHosts = slabHosts[1:]
 	}
 
-	// launch more downloads as results come in or periodically if there is
-	// still capacity in the semaphore
+	// launch more downloads as results come in or periodically to race
+	// slow hosts
 	var successful int
 	shards := make([][]byte, len(slab.Sectors))
-	timer := time.NewTimer(time.Second)
+	timer := time.NewTimer(500 * time.Millisecond)
 	defer timer.Stop()
 	for {
 		select {
 		case res := <-responseCh:
+			outstanding--
 			if res.err == nil {
 				// successful download
 				shards[res.index] = res.buf
@@ -176,33 +178,29 @@ func (s *SDK) downloadSlab(ctx context.Context, slab slabs.SlabSlice, maxInfligh
 					// enough shards downloaded
 					return shards, nil
 				}
-			} else {
-				// failed download
-				rem := max(0, int(slab.MinShards)-successful)
-				if rem == 0 {
-					return shards, nil // sanity check
-				} else if len(sema)+len(slabHosts) < rem {
-					// not enough hosts left to satisfy min shards
-					return nil, ErrNotEnoughShards
-				} else if len(sema) <= rem && len(slabHosts) > 0 {
-					// only spawn additional download tasks if there are not
-					// enough to satisfy the required number of shards. The
-					// sleep arm will handle slow hosts.
-					tryDownloadSector(ctx, slabSectors[slabHosts[0]])
+			}
+			// check if enough potential successes remain
+			rem := int(slab.MinShards) - successful
+			if outstanding+len(slabHosts) < rem {
+				return nil, ErrNotEnoughShards
+			}
+			if res.err != nil && len(slabHosts) > 0 {
+				if tryDownloadSector(ctx, slabSectors[slabHosts[0]]) {
 					slabHosts = slabHosts[1:]
 				}
 			}
 		case <-timer.C:
-			// if the semaphore has capacity, launch more downloads
-			if len(sema) < cap(sema) && len(slabHosts) > 0 {
-				tryDownloadSector(ctx, slabSectors[slabHosts[0]])
-				slabHosts = slabHosts[1:]
+			// periodically launch an extra download to race slow hosts
+			if len(slabHosts) > 0 {
+				if tryDownloadSector(ctx, slabSectors[slabHosts[0]]) {
+					slabHosts = slabHosts[1:]
+				}
 			}
 		case <-ctx.Done():
 			// download got interrupted before it could finish
 			return nil, ctx.Err()
 		}
-		timer.Reset(time.Second)
+		timer.Reset(500 * time.Millisecond)
 	}
 }
 
@@ -321,21 +319,13 @@ top:
 
 // Download downloads object metadata
 func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...DownloadOption) error {
-	// parse options
-	maxLength := obj.Size()
-	do := downloadOption{
-		hostTimeout: 4 * time.Second, // ~10 Mbps
-		maxInflight: 10,
-		offset:      0,
-		length:      maxLength,
-	}
+	do := defaultDownloadOption(obj.Size())
 	for _, opt := range opts {
 		opt(&do)
 	}
 
-	// validate range
-	if totalLength := do.offset + do.length; totalLength > maxLength {
-		return fmt.Errorf("%w; range %d-%d exceeds object size %d", ErrInvalidRange, do.offset, totalLength, maxLength)
+	if !do.normalizeRange(obj.Size()) {
+		return nil
 	}
 
 	// decrypt stream using the object's master key
@@ -344,7 +334,7 @@ func (s *SDK) Download(ctx context.Context, w io.Writer, obj Object, opts ...Dow
 	}
 	w = decrypt((*[32]byte)(obj.dataKey), w, uint64(do.offset))
 
-	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, slabsForDownload(obj.slabs, do))
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, obj.slabs, do.offset, do.length)
 }
 
 // DownloadSharedObject downloads a shared object from a shared URL
@@ -355,27 +345,38 @@ func (s *SDK) DownloadSharedObject(ctx context.Context, w io.Writer, sharedURL s
 		return err
 	}
 
-	// parse options
-	maxLength := obj.Size()
-	do := downloadOption{
-		hostTimeout: 4 * time.Second, // ~10 Mbps
-		maxInflight: 10,
-		offset:      0,
-		length:      maxLength,
-	}
+	do := defaultDownloadOption(obj.Size())
 	for _, opt := range opts {
 		opt(&do)
 	}
 
-	// validate range
-	if totalLength := do.offset + do.length; totalLength > maxLength {
-		return fmt.Errorf("%w; range %d-%d exceeds object size %d", ErrInvalidRange, do.offset, totalLength, maxLength)
+	if !do.normalizeRange(obj.Size()) {
+		return nil
 	}
 
 	// decrypt stream using the object's master key
 	w = decrypt((*[32]byte)(encryptionKey), w, uint64(do.offset))
 
-	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, slabsForDownload(obj.Slabs, do))
+	return s.downloadSlabs(ctx, w, do.maxInflight, do.hostTimeout, obj.Slabs, do.offset, do.length)
+}
+
+func defaultDownloadOption(maxLength uint64) downloadOption {
+	return downloadOption{
+		hostTimeout: 60 * time.Second, // long to handle slow hosts, racing will ensure we don't waste time unnecessarily
+		maxInflight: 80,               // ~20 MiB in memory
+		offset:      0,
+		length:      maxLength,
+	}
+}
+
+// normalizeRange clamps the download range to the object size. Returns
+// false if the range is empty (nothing to download).
+func (do *downloadOption) normalizeRange(maxLength uint64) bool {
+	if do.offset >= maxLength || do.length == 0 {
+		return false
+	}
+	do.length = min(do.length, maxLength-do.offset)
+	return true
 }
 
 // Close closes the SDK and releases all resources.
@@ -409,88 +410,205 @@ func (s *SDK) PinObject(ctx context.Context, obj Object) error {
 	return s.client.PinObject(ctx, s.appKey, obj.Seal(s.appKey).SealedObject)
 }
 
-func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, ss []slabs.SlabSlice) error {
-	type work struct {
-		skip     int
-		writeLen int
-		shards   [][]byte
-		err      error
-	}
-	workCh := make(chan work, 1)
+const chunkSize = 1 << 18 // 256 KiB
 
-	sendErr := func(err error) {
-		select {
-		case workCh <- work{err: err}:
-		case <-ctx.Done():
+// chunkIter splits slabs into fixed-size chunks for parallel recovery.
+// It handles byte-range selection internally: offset is a byte offset into
+// the logical stream of all slabs and length limits total output.
+type chunkIter struct {
+	slabs     []slabs.SlabSlice
+	slabIdx   int
+	offset    uint64 // position within current slab
+	remaining uint64 // total bytes left to yield
+}
+
+func newChunkIter(ss []slabs.SlabSlice, offset, length uint64) *chunkIter {
+	ci := &chunkIter{
+		slabs:     ss,
+		remaining: length,
+	}
+	for ci.slabIdx < len(ci.slabs) {
+		slabLength := uint64(ci.slabs[ci.slabIdx].Length)
+		if offset < slabLength {
+			break
 		}
+		offset -= slabLength
+		ci.slabIdx++
+	}
+	ci.offset = offset
+	return ci
+}
+
+func (ci *chunkIter) next() (slabs.SlabSlice, bool) {
+	for ci.remaining > 0 && ci.slabIdx < len(ci.slabs) {
+		slab := ci.slabs[ci.slabIdx]
+		available := uint64(slab.Length) - ci.offset
+		if available == 0 {
+			ci.slabIdx++
+			ci.offset = 0
+			continue
+		}
+		chunkLen := min(available, ci.remaining, chunkSize)
+		chunk := slab
+		chunk.Offset = slab.Offset + uint32(ci.offset)
+		chunk.Length = uint32(chunkLen)
+		ci.offset += chunkLen
+		if ci.offset >= uint64(slab.Length) {
+			ci.offset = 0
+			ci.slabIdx++
+		}
+		ci.remaining -= chunkLen
+		return chunk, true
+	}
+	return slabs.SlabSlice{}, false
+}
+
+type recoveredChunk struct {
+	shards   [][]byte
+	skip     int
+	writeLen int
+}
+
+func (s *SDK) recoverChunk(ctx context.Context, chunk slabs.SlabSlice, hostTimeout time.Duration) (recoveredChunk, error) {
+	shards, err := s.downloadSlab(ctx, chunk, hostTimeout)
+	if err != nil {
+		return recoveredChunk{}, fmt.Errorf("failed to download slab: %w", err)
 	}
 
+	// decrypt shards
+	counter := chunk.Offset / (proto4.LeafSize * uint32(chunk.MinShards))
+	var nonce [24]byte
+	for i, shard := range shards {
+		if shard == nil {
+			continue
+		}
+		nonce[0] = byte(i)
+		c, _ := chacha20.NewUnauthenticatedCipher(chunk.EncryptionKey[:], nonce[:])
+		c.SetCounter(counter)
+		c.XORKeyStream(shard, shard)
+	}
+
+	// reconstruct data shards
+	enc, err := reedsolomon.New(int(chunk.MinShards), len(shards)-int(chunk.MinShards))
+	if err != nil {
+		return recoveredChunk{}, fmt.Errorf("failed to create reedsolomon coder: %w", err)
+	}
+	if err := enc.ReconstructData(shards); err != nil {
+		return recoveredChunk{}, fmt.Errorf("failed to reconstruct data shards: %w", err)
+	}
+
+	return recoveredChunk{
+		shards:   shards[:int(chunk.MinShards)],
+		skip:     int(chunk.Offset) % (proto4.LeafSize * int(chunk.MinShards)),
+		writeLen: int(chunk.Length),
+	}, nil
+}
+
+func (s *SDK) downloadSlabs(ctx context.Context, w io.Writer, maxInflight int, hostTimeout time.Duration, ss []slabs.SlabSlice, offset, length uint64) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if maxInflight <= 0 {
+		return errors.New("download inflight must be greater than 0")
+	}
+
+	chunks := newChunkIter(ss, offset, length)
+	bw := bufio.NewWriterSize(w, 1<<16)
+
+	// recover first chunk synchronously for fast TTFB
+	chunk, ok := chunks.next()
+	if !ok {
+		return bw.Flush()
+	}
+	rc, err := s.recoverChunk(ctx, chunk, hostTimeout)
+	if err != nil {
+		return err
+	}
+	if err := stripedJoin(bw, rc.shards, rc.skip, rc.writeLen); err != nil {
+		return err
+	}
+
+	type chunkWork struct {
+		index int
+		chunk slabs.SlabSlice
+	}
+	type chunkResult struct {
+		index int
+		recoveredChunk
+		err error
+	}
+
+	workCh := make(chan chunkWork, maxInflight)
+	resultCh := make(chan chunkResult, maxInflight)
+
+	// start worker pool
+	var wg sync.WaitGroup
+	for range maxInflight {
+		wg.Go(func() {
+			for w := range workCh {
+				rc, err := s.recoverChunk(ctx, w.chunk, hostTimeout)
+				select {
+				case resultCh <- chunkResult{index: w.index, recoveredChunk: rc, err: err}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		})
+	}
+
+	// feed chunks to workers
 	go func() {
-		for len(ss) > 0 {
-			var slab slabs.SlabSlice
-			slab, ss = ss[0], ss[1:]
-
-			shards, err := s.downloadSlab(ctx, slab, maxInflight, hostTimeout)
-			if err != nil {
-				sendErr(fmt.Errorf("failed to download slab: %w", err))
-				return
-			}
-
-			offset := slab.Offset / (proto4.LeafSize * uint32(slab.MinShards))
-			var wg sync.WaitGroup
-			for i := range shards {
-				wg.Add(1)
-				go func(i int) {
-					nonce := make([]byte, 24)
-					nonce[0] = byte(i)
-					c, _ := chacha20.NewUnauthenticatedCipher(slab.EncryptionKey[:], nonce)
-					c.SetCounter(offset)
-					c.XORKeyStream(shards[i], shards[i])
-					wg.Done()
-				}(i)
-			}
+		defer func() {
+			close(workCh)
 			wg.Wait()
-
-			enc, err := reedsolomon.New(int(slab.MinShards), len(shards)-int(slab.MinShards))
-			if err != nil {
-				sendErr(fmt.Errorf("failed to create reedsolomon coder: %w", err))
-				return
-			} else if err := enc.ReconstructData(shards); err != nil {
-				sendErr(fmt.Errorf("failed to reconstruct data shards: %w", err))
+			close(resultCh)
+		}()
+		for chunkIdx := 0; ; chunkIdx++ {
+			chunk, ok := chunks.next()
+			if !ok {
 				return
 			}
-
-			workCh <- work{
-				skip:     int(slab.Offset) % (proto4.LeafSize * int(slab.MinShards)),
-				writeLen: int(slab.Length),
-				shards:   shards[:int(slab.MinShards)],
+			select {
+			case workCh <- chunkWork{index: chunkIdx, chunk: chunk}:
+			case <-ctx.Done():
+				return
 			}
 		}
-		workCh <- work{err: io.EOF}
 	}()
 
-	bw := bufio.NewWriterSize(w, 1<<16)
-	for i := 0; ; i++ {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case work := <-workCh:
-			err := work.err
-			if errors.Is(err, io.EOF) {
-				// EOF signals completion
-				if err := bw.Flush(); err != nil {
-					return fmt.Errorf("failed to flush write: %w", err)
-				}
-				return nil
-			} else if err != nil {
+	completed := make(map[int]chunkResult)
+	nextWrite := 0
+	for res := range resultCh {
+		if res.err != nil {
+			return res.err
+		}
+		if res.index == nextWrite {
+			if err := stripedJoin(bw, res.shards, res.skip, res.writeLen); err != nil {
 				return err
 			}
-
-			if err := stripedJoin(bw, work.shards, work.skip, work.writeLen); err != nil {
-				return fmt.Errorf("failed to write slab %d: %w", i, err)
+			nextWrite++
+			for {
+				r, ok := completed[nextWrite]
+				if !ok {
+					break
+				}
+				delete(completed, nextWrite)
+				if err := stripedJoin(bw, r.shards, r.skip, r.writeLen); err != nil {
+					return err
+				}
+				nextWrite++
 			}
+		} else {
+			completed[res.index] = res
 		}
 	}
+
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if len(completed) > 0 {
+		panic(fmt.Sprintf("%d chunks remaining but no tasks in flight", len(completed)))
+	}
+	return bw.Flush()
 }
 
 // stripedSplit splits data into striped data shards, which must have sufficient
@@ -582,35 +700,6 @@ func readAtMost(r io.Reader, buf []byte) (int, error) {
 	return n, nil
 }
 
-func slabsForDownload(objSlabs []slabs.SlabSlice, do downloadOption) (slabs []slabs.SlabSlice) {
-	// find starting slab
-	var i int
-	offset := do.offset
-	length := do.length
-	for i = range objSlabs {
-		slabLength := uint64(objSlabs[i].Length)
-		if offset < slabLength {
-			break
-		}
-		offset -= slabLength
-	}
-
-	for ; i < len(objSlabs) && length > 0; i++ {
-		slab := objSlabs[i]
-
-		// update offset and length for the slab slice
-		slabOffset := slab.Offset + uint32(offset) // cannot overflow, offset < slabLength
-		slabLength := min(uint64(slab.Length)-offset, length)
-		offset = 0
-		length -= slabLength
-
-		slab.Offset = slabOffset
-		slab.Length = uint32(slabLength)
-		slabs = append(slabs, slab)
-	}
-	return
-}
-
 // WithRedundancy sets the number of data and parity shards for the upload.
 // The number of shards must be at least 2x redundancy:
 // `(dataShards + parityShards) / dataShards >= 2`.
@@ -631,17 +720,15 @@ func WithUploadInflight(maxInflight int) UploadOption {
 }
 
 // WithDownloadHostTimeout sets the timeout for reading sectors
-// from individual hosts. This avoids long hangs when a host is unresponsive
-// or slow. The default is 4 seconds, worst case around 300Mbps.
+// from individual hosts. The default is 60 seconds.
 func WithDownloadHostTimeout(timeout time.Duration) DownloadOption {
 	return func(do *downloadOption) {
 		do.hostTimeout = timeout
 	}
 }
 
-// WithDownloadInflight sets the maximum number of concurrent shard
-// downloads. This is useful to reduce bandwidth waste, but may
-// decrease performance.
+// WithDownloadInflight sets the maximum number of concurrent chunk
+// downloads. The default is 80.
 func WithDownloadInflight(maxInflight int) DownloadOption {
 	return func(do *downloadOption) {
 		do.maxInflight = maxInflight

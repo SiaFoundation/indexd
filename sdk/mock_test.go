@@ -28,6 +28,9 @@ type mockHostDialer struct {
 	delayMu   sync.Mutex
 	slowHosts map[types.PublicKey]time.Duration
 
+	sectorDelayMu sync.Mutex
+	sectorDelays  map[types.Hash256]time.Duration
+
 	flakyMu    sync.Mutex
 	flakyHosts map[types.PublicKey]int // fail first N writes
 
@@ -54,6 +57,24 @@ func (m *mockHostDialer) delay(ctx context.Context, hostKey types.PublicKey) err
 	m.delayMu.Lock()
 	delay, ok := m.slowHosts[hostKey]
 	m.delayMu.Unlock()
+	if !ok || delay <= 0 {
+		return nil
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.After(delay):
+	}
+	return ctx.Err()
+}
+
+func (m *mockHostDialer) sectorDelay(ctx context.Context, root types.Hash256) error {
+	m.sectorDelayMu.Lock()
+	delay, ok := m.sectorDelays[root]
+	if ok {
+		m.sectorDelays[root] = delay / 2
+	}
+	m.sectorDelayMu.Unlock()
 	if !ok || delay <= 0 {
 		return nil
 	}
@@ -104,6 +125,8 @@ func (m *mockHostDialer) ReadSector(ctx context.Context, accountKey types.Privat
 	// simulate timeout
 	if err := m.delay(ctx, hostKey); err != nil {
 		return rhp.RPCReadSectorResult{}, err
+	} else if err := m.sectorDelay(ctx, sectorRoot); err != nil {
+		return rhp.RPCReadSectorResult{}, err
 	}
 
 	m.sectorsMu.Lock()
@@ -143,6 +166,12 @@ func (m *mockHostDialer) SetSlowHosts(n int, d time.Duration) {
 	}
 }
 
+func (m *mockHostDialer) SetSectorReadDelay(root types.Hash256, d time.Duration) {
+	m.sectorDelayMu.Lock()
+	defer m.sectorDelayMu.Unlock()
+	m.sectorDelays[root] = d
+}
+
 // SetFlakyHosts marks the first n hosts as flaky: each will fail its
 // first failCount write attempts before succeeding.
 func (m *mockHostDialer) SetFlakyHosts(t *testing.T, n, failCount int) {
@@ -165,10 +194,11 @@ func (m *mockHostDialer) SetFlakyHosts(t *testing.T, n, failCount int) {
 
 func newMockDialer(hosts int) *mockHostDialer {
 	m := &mockHostDialer{
-		hosts:       make(map[types.PublicKey]struct{}),
-		slowHosts:   make(map[types.PublicKey]time.Duration),
-		flakyHosts:  make(map[types.PublicKey]int),
-		hostSectors: make(map[types.PublicKey]map[types.Hash256][]byte),
+		hosts:        make(map[types.PublicKey]struct{}),
+		slowHosts:    make(map[types.PublicKey]time.Duration),
+		sectorDelays: make(map[types.Hash256]time.Duration),
+		flakyHosts:   make(map[types.PublicKey]int),
+		hostSectors:  make(map[types.PublicKey]map[types.Hash256][]byte),
 	}
 	for range hosts {
 		sk := types.GeneratePrivateKey()

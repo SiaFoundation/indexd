@@ -244,11 +244,32 @@ func TestDownload(t *testing.T) {
 			}
 		}
 
-		// assert that out-of-bounds ranges fail
-		if err := s.Download(context.Background(), nil, obj, WithDownloadRange(dataSize, 1)); err == nil {
-			t.Fatal("expected error for out-of-bounds range, got nil")
-		} else if err := s.DownloadSharedObject(t.Context(), nil, sharedURL, WithDownloadRange(dataSize, 1)); err == nil {
-			t.Fatal("expected error for out-of-bounds range, got nil")
+		// ranges that extend past EOF should be clamped.
+		buf := bytes.NewBuffer(nil)
+		if err := s.Download(context.Background(), buf, obj, WithDownloadRange(dataSize-10, 100)); err != nil {
+			t.Fatalf("failed to clamp range to EOF: %v", err)
+		} else if !bytes.Equal(buf.Bytes(), data[dataSize-10:]) {
+			t.Fatal("data mismatch")
+		}
+		buf.Reset()
+		if err := s.DownloadSharedObject(t.Context(), buf, sharedURL, WithDownloadRange(dataSize-10, 100)); err != nil {
+			t.Fatalf("failed to clamp shared range to EOF: %v", err)
+		} else if !bytes.Equal(buf.Bytes(), data[dataSize-10:]) {
+			t.Fatal("data mismatch")
+		}
+
+		// offsets at or beyond EOF should return no data.
+		buf.Reset()
+		if err := s.Download(context.Background(), buf, obj, WithDownloadRange(dataSize, 1)); err != nil {
+			t.Fatalf("expected empty EOF download, got %v", err)
+		} else if buf.Len() != 0 {
+			t.Fatalf("expected empty EOF download, got %d bytes", buf.Len())
+		}
+		buf.Reset()
+		if err := s.DownloadSharedObject(t.Context(), buf, sharedURL, WithDownloadRange(dataSize+1, 1)); err != nil {
+			t.Fatalf("expected empty shared EOF download, got %v", err)
+		} else if buf.Len() != 0 {
+			t.Fatalf("expected empty shared EOF download, got %d bytes", buf.Len())
 		}
 	})
 
