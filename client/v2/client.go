@@ -351,20 +351,18 @@ func (c *Client) WarmConnections() error {
 
 		wg.Add(1)
 		go func(hk types.PublicKey) {
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer func() {
 				<-sema
 				wg.Done()
+				cancel()
 			}()
 
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-			defer cancel()
-
 			start := time.Now()
-			_, err := c.Prices(ctx, hk)
-			if err == nil {
+			if _, err := c.Prices(ctx, hk); err == nil {
+				c.hosts.AddSettingsSample(hk, time.Since(start))
 				warmed.Add(1)
 			}
-			c.hosts.AddSettingsSample(hk, time.Since(start), err == nil)
 		}(hk)
 	}
 

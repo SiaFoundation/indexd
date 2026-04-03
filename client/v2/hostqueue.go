@@ -88,11 +88,15 @@ type hostMetric struct {
 }
 
 func (m *hostMetric) latency() float64 {
-	if m.rpcReadAverage.init || m.rpcWriteAverage.init {
+	if m.rpcReadAverage.init && m.rpcWriteAverage.init {
 		return (m.rpcReadAverage.Value() + m.rpcWriteAverage.Value()) / 2
+	} else if m.rpcReadAverage.init {
+		return m.rpcReadAverage.Value()
+	} else if m.rpcWriteAverage.init {
+		return m.rpcWriteAverage.Value()
+	} else {
+		return m.rpcSettingsAverage.Value()
 	}
-	// fall back to settings latency if no read/write samples are available
-	return m.rpcSettingsAverage.Value()
 }
 
 // A HostQueue manages an ordered queue of hosts for uploading or
@@ -224,7 +228,7 @@ func (p *Provider) AddWriteSample(hostKey types.PublicKey, latency time.Duration
 }
 
 // AddSettingsSample records a successful settings RPC to the specified host.
-func (p *Provider) AddSettingsSample(hostKey types.PublicKey, latency time.Duration, success bool) {
+func (p *Provider) AddSettingsSample(hostKey types.PublicKey, latency time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	metric, exists := p.metrics[hostKey]
@@ -233,7 +237,7 @@ func (p *Provider) AddSettingsSample(hostKey types.PublicKey, latency time.Durat
 		p.metrics[hostKey] = metric
 	}
 	metric.rpcSettingsAverage.AddSample(latency)
-	metric.rpcFailRate.AddSample(success)
+	metric.rpcFailRate.AddSample(true)
 }
 
 // AddFailedRPC records a failed RPC attempt to the specified host.
