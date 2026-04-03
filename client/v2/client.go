@@ -234,10 +234,14 @@ func (c *Client) Prices(ctx context.Context, hostKey types.PublicKey) (prices pr
 	}
 	defer done()
 
+	start := time.Now()
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
 		prices, err = c.prices(ctx, hostKey, transport)
 		return err
 	})
+	if err == nil {
+		c.hosts.AddSettingsSample(hostKey, time.Since(start))
+	}
 	return
 }
 
@@ -351,16 +355,16 @@ func (c *Client) WarmConnections() error {
 
 		wg.Add(1)
 		go func(hk types.PublicKey) {
-			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 			defer func() {
 				<-sema
 				wg.Done()
-				cancel()
 			}()
 
-			start := time.Now()
-			if _, err := c.Prices(ctx, hk); err == nil {
-				c.hosts.AddSettingsSample(hk, time.Since(start))
+			ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+			_, err := c.Prices(ctx, hk)
+			cancel()
+
+			if err == nil {
 				warmed.Add(1)
 			}
 		}(hk)
