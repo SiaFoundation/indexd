@@ -14,10 +14,52 @@ import (
 
 // nolint:misspell
 const initialSchema = `
+CREATE TABLE quotas (
+    name TEXT PRIMARY KEY CHECK (LENGTH(name) > 0 AND LENGTH(name) <= 32), -- unique, human-readable key
+    description TEXT NOT NULL,
+    max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0), -- max pinned data in bytes
+    total_uses INTEGER NOT NULL CHECK (total_uses >= 0),
+    fund_target_bytes BIGINT NOT NULL CHECK (fund_target_bytes >= 0) -- funding target in bytes per host (0 means no funding)
+);
+
+-- insert default quota: 1TB max data, 5 total uses, 16 GB fund target
+INSERT INTO quotas (name, description, max_pinned_data, total_uses, fund_target_bytes)
+VALUES ('default', 'Default quota', 1000000000000, 5, 16000000000);
+
+CREATE TABLE app_connect_keys (
+    id SERIAL PRIMARY KEY,
+    user_secret BYTEA UNIQUE NOT NULL CHECK (LENGTH(user_secret) = 32),
+    app_key TEXT UNIQUE NOT NULL,
+    use_description TEXT NOT NULL,
+    quota_name TEXT NOT NULL REFERENCES quotas(name),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_used TIMESTAMP WITH TIME ZONE,
+    pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0), -- total pinned data in bytes before redundancy
+    pinned_size BIGINT NOT NULL DEFAULT 0 CHECK (pinned_size >= 0) -- total pinned data in bytes including redundancy
+);
+CREATE INDEX app_connect_keys_quota_name_idx ON app_connect_keys(quota_name);
+
 CREATE TABLE accounts (
     id SERIAL PRIMARY KEY,
-    public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32)
+    public_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(public_key) = 32),
+    connect_key_id INTEGER NOT NULL REFERENCES app_connect_keys(id),
+
+    pinned_data BIGINT NOT NULL DEFAULT 0 CHECK (pinned_data >= 0), -- total pinned data in bytes before redundancy
+    pinned_size BIGINT NOT NULL DEFAULT 0 CHECK (pinned_size >= 0), -- total pinned data in bytes including redundancy
+    max_pinned_data BIGINT NOT NULL CHECK (max_pinned_data >= 0), -- max pinned data in bytes
+    app_id BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(app_id) = 32), -- app identifier
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    logo_url TEXT NOT NULL DEFAULT '',
+    service_url TEXT NOT NULL DEFAULT '',
+    last_used TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    deleted_at TIMESTAMP WITH TIME ZONE
 );
+CREATE INDEX accounts_last_used_idx ON accounts(last_used);
+CREATE INDEX accounts_deleted_at_idx ON accounts(deleted_at);
+CREATE INDEX accounts_connect_key_id_idx ON accounts(connect_key_id);
+CREATE INDEX accounts_app_id_idx ON accounts(app_id) WHERE deleted_at IS NULL;
 
 CREATE TABLE hosts (
     id SERIAL PRIMARY KEY,
@@ -29,7 +71,17 @@ CREATE TABLE hosts (
     last_successful_scan TIMESTAMP WITH TIME ZONE,
     last_announcement TIMESTAMP WITH TIME ZONE NOT NULL,
     next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    country_code TEXT NOT NULL DEFAULT '',
+    location POINT NOT NULL DEFAULT POINT(0.0, 0.0),
     lost_sectors INTEGER NOT NULL DEFAULT 0,
+    unpinned_sectors INTEGER NOT NULL DEFAULT 0 CHECK (unpinned_sectors >= 0),
+    stuck_since TIMESTAMP WITH TIME ZONE,
+
+    scans INTEGER NOT NULL DEFAULT 0 CHECK (scans >= 0),
+    scans_failed INTEGER NOT NULL DEFAULT 0 CHECK (scans_failed >= 0),
+
+    usage_account_funding NUMERIC(50,0) NOT NULL DEFAULT 0,
+    usage_total_spent NUMERIC(50,0) NOT NULL DEFAULT 0,
 
     settings_protocol_version BYTEA NOT NULL DEFAULT '\x000000'::bytea CHECK (LENGTH(settings_protocol_version) = 3),
     settings_release TEXT NOT NULL DEFAULT '',
@@ -51,8 +103,18 @@ CREATE TABLE hosts (
 );
 CREATE INDEX hosts_next_scan_idx ON hosts(next_scan);
 
+-- speed up querying for stuck hosts
+CREATE INDEX hosts_stuck_since_idx ON hosts(stuck_since) WHERE stuck_since IS NOT NULL;
+
 CREATE INDEX hosts_last_integrity_check_idx ON hosts(last_integrity_check ASC);
 CREATE INDEX hosts_lost_sectors_idx ON hosts(lost_sectors);
+CREATE INDEX hosts_usage_total_spent_idx ON hosts(usage_total_spent DESC);
+
+-- speed up querying by country
+CREATE INDEX hosts_country_code_idx ON hosts(country_code);
+
+-- speed up ordering by distance to a location
+CREATE INDEX hosts_location_gist_idx ON hosts USING GIST (location);
 
 CREATE TABLE account_hosts (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -62,20 +124,14 @@ CREATE TABLE account_hosts (
     CONSTRAINT account_hosts_pk PRIMARY KEY (account_id, host_id)
 );
 CREATE INDEX account_hosts_host_id_next_fund_idx ON account_hosts (host_id, next_fund);
-
-CREATE TABLE service_accounts (
-    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
-    balance NUMERIC(50,0) NOT NULL DEFAULT 0 CHECK (balance >= 0),
-    CONSTRAINT service_accounts_pk PRIMARY KEY (account_id, host_id)
-);
+CREATE INDEX account_hosts_account_id_consecutive_failed_funds_idx ON account_hosts (account_id, consecutive_failed_funds);
 
 CREATE TABLE hosts_blocklist (
     public_key BYTEA PRIMARY KEY CHECK (LENGTH(public_key) = 32),
     added TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    reason TEXT NOT NULL
+    reasons TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]
 );
-CREATE INDEX hosts_blocklist_reason_idx ON hosts_blocklist (reason);
+CREATE INDEX hosts_blocklist_reasons_gin_idx ON hosts_blocklist USING GIN(reasons);
 
 CREATE TABLE host_addresses (
     id SERIAL PRIMARY KEY,
@@ -139,6 +195,9 @@ CREATE TABLE global_settings (
     -- chain index of the last scanned block
     scanned_height BIGINT NOT NULL DEFAULT 0 CHECK(scanned_height >= 0),
     scanned_block_id BYTEA NOT NULL DEFAULT '\x0000000000000000000000000000000000000000000000000000000000000000'::bytea CHECK (LENGTH(scanned_block_id) = 32),
+
+    -- wallet info
+    wallet_hash BYTEA CHECK(wallet_hash IS NULL OR LENGTH(wallet_hash) = 32), -- used to prevent wallet seed changes
 
     -- contract manager settings
     contracts_maintenance_enabled BOOLEAN NOT NULL DEFAULT FALSE,
@@ -205,14 +264,36 @@ CREATE TABLE contracts (
   -- raw contract revision data
   raw_revision BYTEA NOT NULL
 );
-CREATE INDEX contracts_state_formation_idx ON contracts(state, formation); -- for rejecting expired contracts
-CREATE INDEX contracts_state_good_idx ON contracts(state) WHERE state <= 1 AND good; -- for filtering contracts
-CREATE INDEX contracts_last_broadcast_attempt_contract_id_idx ON contracts (last_broadcast_attempt ASC, contract_id) WHERE renewed_to IS NULL; -- for fetching contracts for broadcasting
-CREATE INDEX contracts_host_id_remaining_allowance_contract_id_idx ON contracts (host_id, remaining_allowance DESC, contract_id) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for funding
-CREATE INDEX contracts_capacity_size_contract_id_idx ON contracts (capacity DESC, size DESC, contract_id) WHERE good = true AND remaining_allowance > 0; -- for fetching contracts for pinning
 
 -- foreign key constraint index
 CREATE INDEX contracts_host_id_idx ON contracts(host_id);
+
+-- fetching contracts statistics
+CREATE INDEX contracts_active_host_size_idx ON contracts(proof_height, host_id) INCLUDE (good, capacity, size) WHERE state IN (0,1) AND renewed_to IS NULL;
+
+ -- listing contracts
+CREATE INDEX contracts_host_id_active_good_idx ON contracts(host_id) WHERE state IN (0,1) AND renewed_to IS NULL AND good;
+CREATE INDEX contracts_host_id_active_bad_idx ON contracts(host_id) WHERE state IN (0,1) AND renewed_to IS NULL AND NOT good;
+CREATE INDEX contracts_host_id_inactive_good_idx ON contracts (host_id) WHERE state IN (2,3,4) AND good;
+CREATE INDEX contracts_host_id_inactive_bad_idx ON contracts (host_id) WHERE state IN (2,3,4) AND NOT good;
+
+-- contracts for broadcasting
+CREATE INDEX contracts_last_broadcast_attempt_active_idx ON contracts (last_broadcast_attempt ASC, contract_id) WHERE state IN (0,1) AND renewed_to IS NULL;
+
+-- contract elements for broadcasting
+CREATE INDEX contracts_expiration_height_contract_id_idx ON contracts (expiration_height, contract_id) WHERE state = 1 AND renewed_to IS NULL;
+
+-- contracts for funding
+CREATE INDEX contracts_host_id_remaining_allowance_active_idx ON contracts (host_id, remaining_allowance DESC, contract_id) WHERE state IN (0,1) AND renewed_to IS NULL AND good AND remaining_allowance > 0;
+
+-- contracts for pruning
+CREATE INDEX contracts_size_contract_id_idx ON contracts (host_id, size DESC, contract_id) INCLUDE(next_prune) WHERE state IN (0,1) AND renewed_to IS NULL AND good AND remaining_allowance > 0;
+
+-- hosts for pruning
+CREATE INDEX contracts_next_prune_host_id_idx ON contracts (next_prune, host_id) WHERE state IN (0,1) AND renewed_to IS NULL AND good;
+
+-- rejecting contracts
+CREATE INDEX contracts_formation_pending_idx ON contracts(formation) WHERE state = 0;
 
 CREATE TABLE contract_sectors_map (
     id SERIAL PRIMARY KEY,
@@ -235,20 +316,69 @@ CREATE TABLE slabs (
     digest BYTEA UNIQUE NOT NULL CHECK(LENGTH(digest) = 32), -- unique identifier for the slab derived from sector roots
 
     encryption_key BYTEA NOT NULL,
-    last_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    min_shards SMALLINT NOT NULL CHECK(min_shards > 0)
+    min_shards SMALLINT NOT NULL CHECK(min_shards > 0),
+
+    consecutive_failed_repairs SMALLINT NOT NULL DEFAULT 0 CHECK (consecutive_failed_repairs >= 0),
+    next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+
 );
 CREATE INDEX slabs_digest_idx ON slabs(digest);
 CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
 
 -- speeds up lookup of unhealthy slabs
-CREATE INDEX slabs_id_last_repair_attempt_idx ON slabs(last_repair_attempt ASC);
+CREATE INDEX slabs_id_next_repair_attempt_idx ON slabs(next_repair_attempt ASC);
+
+CREATE TABLE objects (
+    id BIGSERIAL PRIMARY KEY,
+    object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32),
+    encrypted_data_key BYTEA UNIQUE NOT NULL CHECK(LENGTH(encrypted_data_key) = 72), -- user provided, data encryption key (xchacha20 nonce + key + tag)
+    encrypted_meta_key BYTEA UNIQUE CHECK(LENGTH(encrypted_meta_key) = 72), -- user provided, metadata encryption key (xchacha20 nonce + key + tag)
+    account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns object
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by update time
+    encrypted_metadata BYTEA, -- user provided, encrypted metadata
+    data_signature BYTEA UNIQUE NOT NULL CHECK(LENGTH(data_signature) = 64), -- signature of blake2b(object_key || encrypted_data_key)
+    meta_signature BYTEA UNIQUE NOT NULL CHECK(LENGTH(meta_signature) = 64) -- signature of blake2b(object ID || metadata key || encrypted_metadata)
+);
+
+-- object_key is unique per account
+CREATE UNIQUE INDEX objects_account_id_object_key_idx ON objects(account_id, object_key);
+
+CREATE TABLE object_slabs (
+    object_id BIGINT REFERENCES objects(id) ON DELETE CASCADE,
+    slab_digest BYTEA REFERENCES slabs(digest) ON DELETE CASCADE,
+    slab_index INTEGER NOT NULL, -- index within corresponding object to retrieve slabs in right order
+    slab_offset INTEGER NOT NULL, -- offset within slab
+    slab_length INTEGER NOT NULL, -- length of object data within slab
+    PRIMARY KEY (object_id, slab_digest, slab_index)
+);
+
+-- foreign key constraint indices
+-- CREATE INDEX object_slabs_object_id_idx ON object_slabs(object_id); -- covered by object_slabs_object_id_slab_index_idx
+CREATE INDEX object_slabs_slab_digest_idx ON object_slabs(slab_digest);
+
+-- speed up sorting by slab_index
+CREATE INDEX object_slabs_object_id_slab_index_idx ON object_slabs(object_id, slab_index ASC);
+
+CREATE TABLE object_events (
+    object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32), -- not a FK since deletions need to hang around
+    account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    was_deleted BOOLEAN NOT NULL, -- true if deleted, false otherwise
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), -- last time the object was created/updated/deleted
+    PRIMARY KEY (account_id, object_key)
+);
+
+-- fast sorting by update time and key
+CREATE INDEX object_events_updated_at_object_key_idx ON object_events(updated_at ASC, object_key ASC);
 
 CREATE TABLE account_slabs (
     account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns slab
     slab_id BIGSERIAL REFERENCES slabs(id) NOT NULL,
     PRIMARY KEY (account_id, slab_id)
 );
+
+-- speed up query used when unpinning slabs
+CREATE INDEX account_slabs_slab_id_idx ON account_slabs(slab_id);
 
 CREATE TABLE sectors (
     id BIGSERIAL PRIMARY KEY,
@@ -262,7 +392,15 @@ CREATE TABLE sectors (
 
     -- data integrity
     next_integrity_check TIMESTAMP WITH TIME ZONE NOT NULL,
-    consecutive_failed_checks SMALLINT NOT NULL DEFAULT 0
+    consecutive_failed_checks SMALLINT NOT NULL DEFAULT 0,
+
+    -- statistics
+    num_migrated INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE stats (
+    stat_name TEXT PRIMARY KEY NOT NULL,
+    stat_value BIGINT NOT NULL DEFAULT 0 CHECK (stat_value >= 0)
 );
 
 -- quick lookup of sectors that failed the integrity checks too many times
@@ -291,6 +429,9 @@ CREATE INDEX sectors_host_id_null_contract_map_idx ON sectors(host_id) WHERE con
 -- speed up querying sectors of a host by root
 CREATE INDEX sectors_host_id_sector_root_idx ON sectors(host_id, sector_root);
 
+-- for pruning unpinned sectors
+CREATE INDEX sectors_uploaded_at_unpinned_idx ON sectors(uploaded_at) WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NULL;
+
 CREATE TABLE slab_sectors (
     slab_id BIGINT REFERENCES slabs(id) ON DELETE CASCADE,
     sector_id BIGINT REFERENCES sectors(id) ON DELETE CASCADE,
@@ -298,11 +439,11 @@ CREATE TABLE slab_sectors (
     PRIMARY KEY (slab_id, sector_id)
 );
 
--- speeds up lookup of unhealthy slabs
-CREATE INDEX slab_sectors_sector_id_idx ON slab_sectors(sector_id);
-
 -- speed up fetching sectors for slab ordered by their position within the slab
 CREATE UNIQUE INDEX slab_sectors_slab_id_slab_index_idx ON slab_sectors(slab_id, slab_index ASC);
+
+-- speeds up finding sectors for deletion when unpinning slabs
+CREATE UNIQUE INDEX slab_sectors_sector_id_slab_id_idx ON slab_sectors(sector_id, slab_id);
 `
 
 func TestMigrationConsistency(t *testing.T) {
