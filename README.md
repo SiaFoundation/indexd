@@ -15,10 +15,8 @@ the metadata of uploaded objects. None of the data uploaded to Sia through
 stored on the Sia network. So even the indexer doesn't have access to the
 content of the files being uploaded.
 
-To build your own app, you can use the [Go SDK](sdk/README.md), the [Rust
-SDK](https://crates.io/crates/sia_storage) or one of the
-[SDK bindings](https://github.com/siafoundation/sia-storage-sdk) for other
-languages.
+To build your own app, take a look at the [Sia Developer
+Portal](https://devs.sia.storage).
 
 ## Building
 
