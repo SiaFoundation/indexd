@@ -26,8 +26,8 @@ languages.
 [GeoLite2](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data)
 database for IP geolocation. This file is stored using [Git
 LFS](https://git-lfs.com), so you must have Git LFS installed before cloning the
-repository. Otherwise, the build will fail because the embedded file will be a
-pointer rather than the actual database.
+repository. Otherwise, indexd won't run because the embedded geolocation
+database will appear corrupted.
 
 ```sh
 # set up Git LFS (once per machine after installing Git LFS)
@@ -36,7 +36,7 @@ git lfs install
 # clone the repository (LFS files are fetched automatically)
 git clone https://github.com/SiaFoundation/indexd.git
 
-# if you already cloned without LFS, pull the real files
+# if you already cloned without LFS, pull the real files from within the repo
 git lfs pull
 ```
 
