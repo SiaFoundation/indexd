@@ -10,13 +10,14 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/api/app"
 	"go.sia.tech/indexd/hosts"
 )
 
 type cachedHostStore struct {
 	tg     *threadgroup.ThreadGroup
 	appKey types.PrivateKey
-	client appClient
+	client *app.Client
 
 	mu    sync.Mutex
 	hosts map[types.PublicKey]hosts.HostInfo
@@ -95,7 +96,7 @@ func (chs *cachedHostStore) updateHosts(ctx context.Context) error {
 	return nil
 }
 
-func newCachedHostStore(client appClient, appKey types.PrivateKey) (*cachedHostStore, error) {
+func newCachedHostStore(client *app.Client, appKey types.PrivateKey) (*cachedHostStore, error) {
 	chs := &cachedHostStore{
 		tg:     threadgroup.New(),
 		appKey: appKey,

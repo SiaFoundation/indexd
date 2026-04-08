@@ -31,7 +31,6 @@ type (
 
 		UploadQueue() (*client.HostQueue, error)
 		Prioritize(hosts []types.PublicKey) []types.PublicKey
-		WarmConnections() error
 		Close() error
 	}
 
@@ -668,40 +667,16 @@ func WithLogger(log *zap.Logger) Option {
 	}
 }
 
-func initSDK(appKey types.PrivateKey, app appClient, opts ...Option) (_ *SDK, err error) {
-	// prepare sdk
+func initSDK(appKey types.PrivateKey, app appClient, provider *client.Provider, opts ...Option) *SDK {
 	sdk := &SDK{
 		appKey: appKey,
-		client: app,
+
 		log:    zap.NewNop(), // no logging by default
+		client: app,
 	}
 	for _, opt := range opts {
 		opt(sdk)
 	}
-
-	// init host store
-	hostStore, err := newCachedHostStore(app, appKey)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create host store: %w", err)
-	}
-
-	// avoid goroutine leak on error
-	defer func() {
-		if err != nil {
-			hostStore.tg.Stop()
-		}
-	}()
-
-	// init host client
-	provider := client.NewProvider(hostStore)
-	hostClient := client.New(provider, sdk.log.Named("client"))
-
-	// warm connections
-	err = hostClient.WarmConnections()
-	if err != nil {
-		return nil, fmt.Errorf("failed to warm connections: %w", err)
-	}
-
-	sdk.hosts = hostClient
-	return sdk, nil
+	sdk.hosts = client.New(provider, sdk.log.Named("client"))
+	return sdk
 }
