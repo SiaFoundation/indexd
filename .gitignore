@@ -4,3 +4,4 @@ bin/
 .worktrees
 indexd.yml
 CLAUDE.md
+GeoLite2-City.mmdb

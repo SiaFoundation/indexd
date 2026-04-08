@@ -214,7 +214,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer wm.Close()
 
-	locator, err := geoip.NewMaxMindLocator("")
+	locator, err := geoip.NewMaxMindLocator(cfg.Directory, log.Named("geoip"))
 	if err != nil {
 		return fmt.Errorf("failed to create MaxMind locator: %w", err)
 	}

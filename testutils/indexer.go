@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -160,7 +162,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	walletKey := types.GeneratePrivateKey()
 	wm := NewWallet(t, c, walletKey)
 
-	locator, err := geoip.NewMaxMindLocator("")
+	locator, err := geoip.NewMaxMindLocator(moduleRootDir(), log.Named("geoip"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,6 +367,27 @@ func (idx *Indexer) Tip() (types.ChainIndex, error) {
 // WalletAddr returns the address of the wallet.
 func (idx *Indexer) WalletAddr() types.Address {
 	return idx.wallet.Address()
+}
+
+// moduleRootDir walks up from the current working directory to find the
+// directory containing go.mod. Stops after 10 levels to avoid runaway
+// traversal.
+func moduleRootDir() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	for range 10 {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "."
+		}
+		dir = parent
+	}
+	return "."
 }
 
 // closeWithTimeout is a helper which closes a resource and panics if it takes

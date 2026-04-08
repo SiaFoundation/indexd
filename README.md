@@ -20,27 +20,9 @@ Portal](https://devs.sia.storage).
 
 ## Building
 
-`indexd` embeds a
-[GeoLite2](https://dev.maxmind.com/geoip/geolite2-free-geolocation-data)
-database for IP geolocation. This file is stored using [Git
-LFS](https://git-lfs.com), so you must have Git LFS installed before cloning the
-repository. Otherwise, indexd won't run because the embedded geolocation
-database will appear corrupted.
-
 ```sh
-# set up Git LFS (once per machine after installing Git LFS)
-git lfs install
-
-# clone the repository (LFS files are fetched automatically)
 git clone https://github.com/SiaFoundation/indexd.git
-
-# if you already cloned without LFS, pull the real files from within the repo
-git lfs pull
-```
-
-Once the LFS files are in place, build as usual:
-
-```sh
+cd indexd
 go generate ./...
 go build -tags='netgo timetzdata' -trimpath -a -ldflags '-s -w' ./cmd/indexd
 ```
@@ -182,3 +164,8 @@ database:
     database: indexd # the name of the PostgreSQL database
     sslmode: verify-full # the SSL mode for the PostgreSQL connection (https://www.postgresql.org/docs/current/libpq-ssl.html)
 ```
+
+## Attributions
+
+Indexd uses GeoLite2 data created by MaxMind, available from
+[https://www.maxmind.com](https://www.maxmind.com).
