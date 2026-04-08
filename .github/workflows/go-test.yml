@@ -54,12 +54,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: GeoLite2-City.mmdb
-          key: geolite2-city-mmdb
-      - name: Download GeoLite2 database
-        run: |
-          if [ ! -f GeoLite2-City.mmdb ]; then
-            curl -sSfL -o GeoLite2-City.mmdb https://sia.tech/api/media/file/GeoLite2-City.mmdb
-          fi
+          key: geolite2-city-mmdb-2026-04
       - name: Test
         uses: n8maninger/action-golang-test@v2
         with:

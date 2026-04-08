@@ -110,7 +110,7 @@ func downloadMaxMindDB(path string) error {
 		return fmt.Errorf("failed to write MaxMind database: %w", err)
 	} else if err := f.Close(); err != nil {
 		return fmt.Errorf("failed to close temp file: %w", err)
-	} else if err := os.Rename(f.Name(), path); err != nil {
+	} else if err := os.Rename(f.Name(), path); err != nil && !os.IsExist(err) {
 		return fmt.Errorf("failed to rename temp file: %w", err)
 	}
 	return nil
