@@ -122,7 +122,7 @@ func TestProviderSettingsSample(t *testing.T) {
 	}
 
 	// add a real read sample to hostA; read/write data should take precedence
-	provider.AddReadSample(hostA, 10*time.Millisecond)
+	provider.AddReadSample(hostA, 4<<20, 10*time.Millisecond)
 
 	sorted = provider.Prioritize(slices.Clone(usable))
 	if slices.Index(sorted, hostA) >= slices.Index(sorted, hostB) {

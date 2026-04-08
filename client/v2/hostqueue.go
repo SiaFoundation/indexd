@@ -34,19 +34,19 @@ type Store interface {
 	Usable(types.PublicKey) (bool, error)
 }
 
-// AddSample adds a new throughput sample to the average.
-func (ra *rpcAverage) AddSample(throughput float64) {
-	if !ra.init {
-		ra.value = throughput
-		ra.init = true
+// AddSample adds a new sample to the exponential moving average.
+func (e *rpcAverage) AddSample(v float64) {
+	if !e.init {
+		e.value = v
+		e.init = true
 	} else {
-		ra.value = emaAlpha*throughput + (1.0-emaAlpha)*ra.value
+		e.value = emaAlpha*v + (1.0-emaAlpha)*e.value
 	}
 }
 
-// Value returns the current average throughput in bytes per second.
-func (ra *rpcAverage) Value() float64 {
-	return ra.value
+// Value returns the current average.
+func (e *rpcAverage) Value() float64 {
+	return e.value
 }
 
 type failureRate struct {
@@ -86,15 +86,17 @@ type hostMetric struct {
 	rpcFailRate        failureRate
 }
 
+func (m *hostMetric) hasThroughput() bool {
+	return m.rpcReadAverage.init || m.rpcWriteAverage.init
+}
+
 func (m *hostMetric) throughput() float64 {
 	if m.rpcReadAverage.init && m.rpcWriteAverage.init {
 		return (m.rpcReadAverage.Value() + m.rpcWriteAverage.Value()) / 2
 	} else if m.rpcReadAverage.init {
 		return m.rpcReadAverage.Value()
-	} else if m.rpcWriteAverage.init {
-		return m.rpcWriteAverage.Value()
 	} else {
-		return m.rpcSettingsAverage.Value()
+		return m.rpcWriteAverage.Value()
 	}
 }
 
@@ -197,8 +199,19 @@ func (p *Provider) cmpMetrics(a, b types.PublicKey) int {
 	if fc != 0 {
 		return fc
 	}
-	// higher throughput is better, so reverse the comparison
-	return cmp.Compare(bm.throughput(), am.throughput())
+
+	// prefer hosts with throughput data over settings-only hosts
+	if am.hasThroughput() && bm.hasThroughput() {
+		// higher throughput is better, so reverse the comparison
+		return cmp.Compare(bm.throughput(), am.throughput())
+	} else if am.hasThroughput() {
+		return -1
+	} else if bm.hasThroughput() {
+		return 1
+	}
+
+	// lower latency is better
+	return cmp.Compare(am.rpcSettingsAverage.Value(), bm.rpcSettingsAverage.Value())
 }
 
 // AddReadSample records a successful read RPC attempt to the specified host.
@@ -244,7 +257,7 @@ func (p *Provider) AddSettingsSample(hostKey types.PublicKey, latency time.Durat
 		metric = &hostMetric{}
 		p.metrics[hostKey] = metric
 	}
-	metric.rpcSettingsAverage.AddSample(latency)
+	metric.rpcSettingsAverage.AddSample(latency.Seconds())
 	metric.rpcFailRate.AddSample(true)
 }
 
