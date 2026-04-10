@@ -334,7 +334,7 @@ func (ts testStore) addUnpinnedSectors(t testing.TB, hk types.PublicKey, roots [
 
 	// update stats for newly inserted sectors
 	if inserted > 0 {
-		_, err := ts.Exec(t.Context(), `UPDATE stats SET stat_value = stat_value + $1 WHERE stat_name = 'num_unpinned_sectors'`, inserted)
+		_, err := ts.Exec(t.Context(), `INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_unpinned_sectors', $1)`, inserted)
 		if err != nil {
 			t.Fatal(err)
 		}
