@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -51,6 +52,9 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 
 	assertStats := func(numSlabs int64) {
 		t.Helper()
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		stats, err := store.SectorStats()
 		if err != nil {
 			t.Fatal(err)
@@ -84,6 +88,62 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 	}
 }
 
+func TestFlushStatsDelta(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// insert deltas by pinning slabs
+	for i := range 5 {
+		if _, err := store.PinSlabs(account, time.Now(), slabs.SlabPinParams{
+			EncryptionKey: [32]byte{byte(i)},
+			MinShards:     1,
+			Sectors: []slabs.PinnedSector{
+				{Root: frand.Entropy256(), HostKey: hk},
+			},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// flush with a batch size of 3 — should report more remaining
+	more, err := store.FlushStatsDelta(3)
+	if err != nil {
+		t.Fatal(err)
+	} else if !more {
+		t.Fatal("expected more deltas to flush")
+	}
+
+	// flush the rest
+	more, err = store.FlushStatsDelta(math.MaxInt)
+	if err != nil {
+		t.Fatal(err)
+	} else if more {
+		t.Fatal("expected no more deltas to flush")
+	}
+
+	// verify the stats are correct after all flushes
+	stats, err := store.SectorStats()
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.Slabs != 5 {
+		t.Fatalf("expected 5 slabs, got %d", stats.Slabs)
+	} else if stats.Unpinned != 5 {
+		t.Fatalf("expected 5 unpinned, got %d", stats.Unpinned)
+	}
+
+	// flushing with nothing pending should return false
+	more, err = store.FlushStatsDelta(math.MaxInt)
+	if err != nil {
+		t.Fatal(err)
+	} else if more {
+		t.Fatal("expected no more deltas to flush")
+	}
+}
+
 func TestSectorStats(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
@@ -92,6 +152,9 @@ func TestSectorStats(t *testing.T) {
 
 	assertStats := func(pinned, unpinned, unpinnable, migrated int64) {
 		t.Helper()
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		stats, err := store.SectorStats()
 		if err != nil {
 			t.Fatal(err)
@@ -345,6 +408,9 @@ func TestIntegrityCheckStats(t *testing.T) {
 
 	assertSectorStats := func(expectedLost, expectedChecked, expectedCheckFailed int64) {
 		t.Helper()
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		var lost, checked, checkFailed int64
 		err := store.pool.QueryRow(context.Background(), `
 			SELECT
@@ -415,7 +481,9 @@ func TestAccountStatsRegistered(t *testing.T) {
 
 	var accs []types.PublicKey
 	for i := range 5 {
-		if stats, err := store.AccountStats(); err != nil {
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		} else if stats, err := store.AccountStats(); err != nil {
 			t.Fatal(err)
 		} else if stats.Registered != uint64(i) {
 			t.Fatalf("expected %d accounts, got %d", i, stats.Registered)
@@ -433,7 +501,9 @@ func TestAccountStatsRegistered(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if stats, err := store.AccountStats(); err != nil {
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		} else if stats, err := store.AccountStats(); err != nil {
 			t.Fatal(err)
 		} else if expected := uint64(len(accs)) - uint64(i) - 1; stats.Registered != expected {
 			t.Fatalf("expected %d accounts, got %d", expected, stats.Registered)
@@ -778,6 +848,9 @@ func TestAggregatedHostStats(t *testing.T) {
 	assertStats := func(expectedActiveHosts, expectedGoodForUpload uint64, expectedScans, expectedFailed int64) {
 		t.Helper()
 
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		stats, err := store.AggregatedHostStats()
 		if err != nil {
 			t.Fatal(err)

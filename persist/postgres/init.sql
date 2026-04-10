@@ -387,6 +387,12 @@ CREATE TABLE stats (
     stat_value BIGINT NOT NULL DEFAULT 0 CHECK (stat_value >= 0)
 );
 
+CREATE TABLE stats_delta (
+    id BIGSERIAL PRIMARY KEY,
+    stat_name TEXT NOT NULL,
+    stat_delta BIGINT NOT NULL
+);
+
 -- quick lookup of sectors that failed the integrity checks too many times
 CREATE INDEX sectors_consecutive_failed_checks_idx ON sectors(host_id, consecutive_failed_checks) WHERE consecutive_failed_checks > 0;
 
