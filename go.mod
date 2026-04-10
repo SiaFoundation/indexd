@@ -8,15 +8,15 @@ require (
 	github.com/klauspost/reedsolomon v1.13.3
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.19.1-0.20260326151920-bbeb92b26458
-	go.sia.tech/coreutils v0.21.2-0.20260327081620-0c3739d3b615
+	go.sia.tech/core v0.19.1
+	go.sia.tech/coreutils v0.21.2
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/mux v1.5.0
-	go.sia.tech/web/indexd v0.16.0
+	go.sia.tech/web/indexd v0.17.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.1
-	golang.org/x/crypto v0.49.0
-	golang.org/x/term v0.41.0
+	golang.org/x/crypto v0.50.0
+	golang.org/x/term v0.42.0
 	golang.org/x/time v0.15.0
 	gopkg.in/yaml.v3 v3.0.1
 	lukechampine.com/flagg v1.1.1
@@ -41,7 +41,7 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/net v0.52.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
 )
