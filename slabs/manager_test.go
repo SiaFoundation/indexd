@@ -138,7 +138,7 @@ func (s *testStore) setSectorsForCheck(t testing.TB, hk types.PublicKey, roots [
 		}
 	}
 
-	if _, err := s.Exec(context.Background(), "UPDATE stats SET stat_value = stat_value + $1 WHERE stat_name = 'num_unpinned_sectors'", len(roots)); err != nil {
+	if _, err := s.Exec(context.Background(), "INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_unpinned_sectors', $1)", len(roots)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Exec(context.Background(), "UPDATE hosts SET unpinned_sectors = unpinned_sectors + $1 WHERE public_key = $2", len(roots), hk[:]); err != nil {
@@ -244,10 +244,10 @@ func (s *testStore) pinSectorToContract(t testing.TB, root types.Hash256, fcid t
 	if err != nil {
 		t.Fatalf("failed to pin sector %x to contract %s: %v", root, fcid, err)
 	}
-	if _, err := s.Exec(context.Background(), "UPDATE stats SET stat_value = stat_value + 1 WHERE stat_name = 'num_pinned_sectors'"); err != nil {
+	if _, err := s.Exec(context.Background(), "INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_pinned_sectors', 1)"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Exec(context.Background(), "UPDATE stats SET stat_value = stat_value - 1 WHERE stat_name = 'num_unpinned_sectors'"); err != nil {
+	if _, err := s.Exec(context.Background(), "INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_unpinned_sectors', -1)"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Exec(context.Background(), "UPDATE hosts SET unpinned_sectors = unpinned_sectors - 1 WHERE id = $1", hostID); err != nil {

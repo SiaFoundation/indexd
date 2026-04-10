@@ -503,18 +503,18 @@ func BenchmarkMigrateSlab(b *testing.B) {
 				}
 				// restore stats counters modified by MigrateSector
 				if _, err := db.Exec(ctx,
-					"UPDATE stats SET stat_value = stat_value + $1 WHERE stat_name = 'num_pinned_sectors'",
+					"INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_pinned_sectors', $1)",
 					badShards); err != nil {
 					b.Fatal(err)
 				}
 				if _, err := db.Exec(ctx,
-					"UPDATE stats SET stat_value = stat_value - $1 WHERE stat_name = 'num_unpinned_sectors'",
-					badShards); err != nil {
+					"INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_unpinned_sectors', $1)",
+					-badShards); err != nil {
 					b.Fatal(err)
 				}
 				if _, err := db.Exec(ctx,
-					"UPDATE stats SET stat_value = stat_value - $1 WHERE stat_name = 'num_migrated_sectors'",
-					badShards); err != nil {
+					"INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_migrated_sectors', $1)",
+					-badShards); err != nil {
 					b.Fatal(err)
 				}
 				// restore host unpinned_sectors for upload candidates
