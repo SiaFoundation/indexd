@@ -150,8 +150,8 @@ func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 			return err
 		}
 
-		// check if there are more rows to flush
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stats_delta LIMIT 1)`).Scan(&more)
+		// check if there are more rows this flusher can acquire without blocking
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stats_delta FOR UPDATE SKIP LOCKED LIMIT 1)`).Scan(&more)
 	})
 	return
 }
