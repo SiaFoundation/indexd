@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"reflect"
 	"slices"
 	"testing"
@@ -160,6 +161,9 @@ func TestMigrateSector(t *testing.T) {
 	assertMigratedSectors := func(expected int64) {
 		t.Helper()
 
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		var got int64
 		err = store.pool.QueryRow(t.Context(), `SELECT stat_value FROM stats WHERE stat_name = $1`, statMigratedSectors).Scan(&got)
 		if err != nil {
@@ -303,6 +307,9 @@ func TestRecordIntegrityCheck(t *testing.T) {
 
 	assertSectorStats := func(expectedPinned, expectedUnpinned, expectedUnpinnable int64) {
 		t.Helper()
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		var pinned, unpinned, unpinnable int64
 		err := store.pool.QueryRow(t.Context(), `
 			SELECT
@@ -585,6 +592,9 @@ func TestPinSlabs(t *testing.T) {
 
 	assertUnpinnedSectors := func(expected uint64) {
 		t.Helper()
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		var got uint64
 		err := store.pool.QueryRow(t.Context(), "SELECT stat_value FROM stats WHERE stat_name = $1", statUnpinnedSectors).Scan(&got)
 		if err != nil {
@@ -1109,6 +1119,9 @@ func TestPinSlabsDuplicate(t *testing.T) {
 
 	assertNumSlabs := func(expected int64) {
 		t.Helper()
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		stats, err := store.SectorStats()
 		if err != nil {
 			t.Fatal(err)
@@ -1187,6 +1200,9 @@ func TestUnpinSlab(t *testing.T) {
 
 	assertSectorStats := func(pinned, unpinned, unpinnable int64) {
 		t.Helper()
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		stats, err := store.SectorStats()
 		if err != nil {
 			t.Fatal(err)
@@ -1602,6 +1618,9 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 
 	assertUnpinnableSectors := func(expected uint64) {
 		t.Helper()
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		var got uint64
 		err := store.pool.QueryRow(t.Context(), "SELECT stat_value FROM stats WHERE stat_name = $1", statUnpinnableSectors).Scan(&got)
 		if err != nil {
@@ -2637,6 +2656,9 @@ func TestMarkSectorsLost(t *testing.T) {
 
 	assertSectorStats := func(expectedPinned, expectedUnpinned, expectedUnpinnable int64) {
 		t.Helper()
+		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
+			t.Fatal(err)
+		}
 		var pinned, unpinned, unpinnable int64
 		err := store.pool.QueryRow(t.Context(), `
 			SELECT

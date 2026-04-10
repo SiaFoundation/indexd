@@ -31,12 +31,7 @@ func incrementStat(ctx context.Context, tx *txn, name string, delta int64) error
 	if delta == 0 {
 		return nil
 	}
-	result, err := tx.Exec(ctx, "UPDATE stats SET stat_value = stat_value + $1 WHERE stat_name = $2", delta, name)
-	if err != nil {
-		return err
-	} else if result.RowsAffected() == 0 {
-		return fmt.Errorf("stat %q does not exist", name)
-	}
+	_, err := tx.Exec(ctx, "INSERT INTO stats_delta (stat_name, stat_delta) VALUES ($1, $2)", name, delta)
 	return err
 }
 
@@ -121,6 +116,44 @@ func initStats(ctx context.Context, tx *txn) error {
 		statScans, statScansFailed,
 	)
 	return err
+}
+
+// FlushStatsDelta aggregates up to limit pending stat deltas and applies
+// them to the stats table atomically. It returns true if there may be
+// more rows to flush.
+func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+			WITH batch AS (
+				SELECT id FROM stats_delta
+				ORDER BY id
+				LIMIT $1
+				FOR UPDATE SKIP LOCKED
+			),
+			deleted AS (
+				DELETE FROM stats_delta
+				USING batch
+				WHERE stats_delta.id = batch.id
+				RETURNING stat_name, stat_delta
+			),
+			aggregated AS (
+				SELECT stat_name, SUM(stat_delta) AS total_delta
+				FROM deleted
+				GROUP BY stat_name
+			)
+			UPDATE stats
+			SET stat_value = stats.stat_value + aggregated.total_delta
+			FROM aggregated
+			WHERE stats.stat_name = aggregated.stat_name
+		`, limit)
+		if err != nil {
+			return err
+		}
+
+		// check if there are more rows to flush
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stats_delta LIMIT 1)`).Scan(&more)
+	})
+	return
 }
 
 // SectorStats reports statistics about the sectors and slabs stored in the

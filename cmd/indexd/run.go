@@ -37,6 +37,7 @@ import (
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/stats"
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
 	"go.sia.tech/web/indexd"
@@ -58,6 +59,12 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		return fmt.Errorf("failed to create postgres store: %w", err)
 	}
 	defer store.Close()
+
+	sm, err := stats.NewManager(store, stats.WithLogger(log.Named("stats")))
+	if err != nil {
+		return fmt.Errorf("failed to create stats manager: %w", err)
+	}
+	defer sm.Close()
 
 	var e *explorer.Explorer
 	if cfg.Explorer.Enabled {

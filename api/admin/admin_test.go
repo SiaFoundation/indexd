@@ -1276,6 +1276,9 @@ func TestHostsStatsAPI(t *testing.T) {
 		t.Fatalf("expected 0 hosts, got %d", len(res))
 	}
 
+	if _, err := cluster.Indexer.Store().FlushStatsDelta(math.MaxInt); err != nil {
+		t.Fatal(err)
+	}
 	allStats, err := admin.StatsHosts(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -1340,6 +1343,9 @@ func TestSectorStatsAPI(t *testing.T) {
 	cluster.WaitForContracts(t)
 
 	// assert 0 slabs
+	if _, err := indexer.Store().FlushStatsDelta(math.MaxInt); err != nil {
+		t.Fatal(err)
+	}
 	stats, err := adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1366,6 +1372,9 @@ func TestSectorStatsAPI(t *testing.T) {
 	slabID := slabIDs[0]
 
 	// assert 1 slab
+	if _, err := indexer.Store().FlushStatsDelta(math.MaxInt); err != nil {
+		t.Fatal(err)
+	}
 	stats, err = adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1379,6 +1388,9 @@ func TestSectorStatsAPI(t *testing.T) {
 	}
 
 	// assert 0 slabs
+	if _, err := indexer.Store().FlushStatsDelta(math.MaxInt); err != nil {
+		t.Fatal(err)
+	}
 	stats, err = adminClient.StatsSectors(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -1397,6 +1409,9 @@ func TestAccountStatsAPI(t *testing.T) {
 	account1 := types.GeneratePrivateKey().PublicKey()
 	indexer.Store().AddTestAccount(t, account1)
 
+	if _, err := indexer.Store().FlushStatsDelta(math.MaxInt); err != nil {
+		t.Fatal(err)
+	}
 	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
 		t.Fatal(err)
 	} else if stats.Registered != 1 {
@@ -1406,6 +1421,9 @@ func TestAccountStatsAPI(t *testing.T) {
 	account2 := types.GeneratePrivateKey().PublicKey()
 	indexer.Store().AddTestAccount(t, account2)
 
+	if _, err := indexer.Store().FlushStatsDelta(math.MaxInt); err != nil {
+		t.Fatal(err)
+	}
 	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
 		t.Fatal(err)
 	} else if stats.Registered != 2 {
@@ -1417,6 +1435,9 @@ func TestAccountStatsAPI(t *testing.T) {
 	}
 	time.Sleep(time.Second)
 
+	if _, err := indexer.Store().FlushStatsDelta(math.MaxInt); err != nil {
+		t.Fatal(err)
+	}
 	if stats, err := adminClient.StatsAccounts(t.Context()); err != nil {
 		t.Fatal(err)
 	} else if stats.Registered != 1 {

@@ -27,6 +27,7 @@ import (
 	"go.sia.tech/indexd/keys"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/stats"
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
@@ -201,6 +202,11 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to create subscriber: %v", err)
 	}
 
+	sm, err := stats.NewManager(store, stats.WithLogger(log.Named("stats")))
+	if err != nil {
+		t.Fatalf("failed to create stats manager: %v", err)
+	}
+
 	explorer := NewExplorer()
 	pm, err := pins.NewManager(explorer, hm, store)
 	if err != nil {
@@ -296,6 +302,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		}
 		if err := pm.Close(); err != nil {
 			t.Errorf("failed to close pin manager: %v", err)
+		}
+		if err := sm.Close(); err != nil {
+			t.Errorf("failed to close stats manager: %v", err)
 		}
 		if err := closeWithTimeout(store.Close); err != nil {
 			t.Errorf("failed to close store: %v", err)
