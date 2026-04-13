@@ -26,11 +26,10 @@ func TestManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var scans int64
-	if err := store.QueryRow(t.Context(), `SELECT stat_value FROM stats WHERE stat_name = 'num_scans'`).Scan(&scans); err != nil {
+	if s, err := store.AggregatedHostStats(); err != nil {
 		t.Fatal(err)
-	} else if scans != 100 {
-		t.Fatalf("expected 100 scans after open, got %d", scans)
+	} else if s.TotalScans != 100 {
+		t.Fatalf("expected 100 scans after open, got %d", s.TotalScans)
 	}
 
 	// insert more deltas while the manager is running
@@ -45,9 +44,9 @@ func TestManager(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := store.QueryRow(t.Context(), `SELECT stat_value FROM stats WHERE stat_name = 'num_scans'`).Scan(&scans); err != nil {
+	if s, err := store.AggregatedHostStats(); err != nil {
 		t.Fatal(err)
-	} else if scans != 150 {
-		t.Fatalf("expected 150 scans after close, got %d", scans)
+	} else if s.TotalScans != 150 {
+		t.Fatalf("expected 150 scans after close, got %d", s.TotalScans)
 	}
 }
