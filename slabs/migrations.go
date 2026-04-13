@@ -62,7 +62,9 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 	downloadStart := time.Now()
 	shards, err := m.downloadShards(ctx, slab, log.Named("recover"))
 	if err != nil {
-		log.Error("failed to download slab", zap.Error(err))
+		if ctx.Err() == nil {
+			log.Error("failed to download slab", zap.Error(err))
+		}
 		return
 	}
 	log = log.With(zap.Duration("downloadElapsed", time.Since(downloadStart)))
