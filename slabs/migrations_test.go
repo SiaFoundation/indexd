@@ -503,17 +503,17 @@ func BenchmarkMigrateSlab(b *testing.B) {
 				}
 				// restore stats counters modified by MigrateSector
 				if _, err := db.Exec(ctx,
-					"INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_pinned_sectors', $1)",
+					"INSERT INTO stats_deltas (stat_name, stat_delta) VALUES ('num_pinned_sectors', $1)",
 					badShards); err != nil {
 					b.Fatal(err)
 				}
 				if _, err := db.Exec(ctx,
-					"INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_unpinned_sectors', $1)",
+					"INSERT INTO stats_deltas (stat_name, stat_delta) VALUES ('num_unpinned_sectors', $1)",
 					-badShards); err != nil {
 					b.Fatal(err)
 				}
 				if _, err := db.Exec(ctx,
-					"INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_migrated_sectors', $1)",
+					"INSERT INTO stats_deltas (stat_name, stat_delta) VALUES ('num_migrated_sectors', $1)",
 					-badShards); err != nil {
 					b.Fatal(err)
 				}

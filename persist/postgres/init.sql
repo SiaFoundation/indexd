@@ -387,9 +387,9 @@ CREATE TABLE stats (
     stat_value BIGINT NOT NULL DEFAULT 0 CHECK (stat_value >= 0)
 );
 
-CREATE TABLE stats_delta (
+CREATE TABLE stats_deltas (
     id BIGSERIAL PRIMARY KEY,
-    stat_name TEXT NOT NULL,
+    stat_name TEXT NOT NULL REFERENCES stats(stat_name),
     stat_delta BIGINT NOT NULL
 );
 

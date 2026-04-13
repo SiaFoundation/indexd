@@ -48,7 +48,6 @@ func NewManager(store Store, opts ...Option) (*Manager, error) {
 		opt(m)
 	}
 
-	// flush any deltas left over from a previous run
 	m.flush()
 
 	ctx, cancel, err := m.tg.AddContext(context.Background())
@@ -64,9 +63,10 @@ func NewManager(store Store, opts ...Option) (*Manager, error) {
 	return m, nil
 }
 
-// Close stops the manager.
+// Close stops the manager and flushes any remaining deltas.
 func (m *Manager) Close() error {
 	m.tg.Stop()
+	m.flush()
 	return nil
 }
 

@@ -300,10 +300,10 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		if err := closeWithTimeout(subscriber.Close); err != nil {
 			t.Errorf("failed to close subscriber: %v", err)
 		}
-		if err := pm.Close(); err != nil {
+		if err := closeWithTimeout(pm.Close); err != nil {
 			t.Errorf("failed to close pin manager: %v", err)
 		}
-		if err := sm.Close(); err != nil {
+		if err := closeWithTimeout(sm.Close); err != nil {
 			t.Errorf("failed to close stats manager: %v", err)
 		}
 		if err := closeWithTimeout(store.Close); err != nil {
