@@ -57,7 +57,7 @@ func TestDownloadShards(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := store.Exec(context.Background(), "INSERT INTO stats_delta (stat_name, stat_delta) VALUES ('num_unpinned_sectors', 1)"); err != nil {
+		if _, err := store.Exec(context.Background(), "INSERT INTO stats_deltas (stat_name, stat_delta) VALUES ('num_unpinned_sectors', 1)"); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := store.Exec(context.Background(), "UPDATE hosts SET unpinned_sectors = unpinned_sectors + 1 WHERE public_key = $1", hosts[i].PublicKey[:]); err != nil {

@@ -31,7 +31,7 @@ func incrementStat(ctx context.Context, tx *txn, name string, delta int64) error
 	if delta == 0 {
 		return nil
 	}
-	_, err := tx.Exec(ctx, "INSERT INTO stats_delta (stat_name, stat_delta) VALUES ($1, $2)", name, delta)
+	_, err := tx.Exec(ctx, "INSERT INTO stats_deltas (stat_name, stat_delta) VALUES ($1, $2)", name, delta)
 	return err
 }
 
@@ -125,15 +125,15 @@ func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 			WITH batch AS (
-				SELECT id FROM stats_delta
+				SELECT id FROM stats_deltas
 				ORDER BY id
 				LIMIT $1
 				FOR UPDATE SKIP LOCKED
 			),
 			deleted AS (
-				DELETE FROM stats_delta
+				DELETE FROM stats_deltas
 				USING batch
-				WHERE stats_delta.id = batch.id
+				WHERE stats_deltas.id = batch.id
 				RETURNING stat_name, stat_delta
 			),
 			aggregated AS (
@@ -151,7 +151,7 @@ func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 		}
 
 		// check if there are more rows this flusher can acquire without blocking
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stats_delta FOR UPDATE SKIP LOCKED LIMIT 1)`).Scan(&more)
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stats_deltas FOR UPDATE SKIP LOCKED LIMIT 1)`).Scan(&more)
 	})
 	return
 }

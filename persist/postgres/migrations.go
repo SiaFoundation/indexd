@@ -9,9 +9,9 @@ import (
 var migrations = []func(context.Context, *txn, *zap.Logger) error{
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
 		_, err := tx.Exec(ctx, `
-			CREATE TABLE stats_delta (
+			CREATE TABLE stats_deltas (
 				id BIGSERIAL PRIMARY KEY,
-				stat_name TEXT NOT NULL,
+				stat_name TEXT NOT NULL REFERENCES stats(stat_name),
 				stat_delta BIGINT NOT NULL
 			);
 		`)
