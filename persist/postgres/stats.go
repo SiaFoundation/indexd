@@ -121,6 +121,11 @@ func initStats(ctx context.Context, tx *txn) error {
 // FlushStatsDelta aggregates up to limit pending stat deltas and applies
 // them to the stats table atomically. It returns true if there may be
 // more rows to flush.
+//
+// This is safe because we apply the updates in the order they were inserted.
+// BIGSERIAL never reuses IDs even when a transaction is rolled back, and only
+// a single thread (the stats manager) ever calls FlushStatsDelta.  This
+// prevents underflows from out-of-order application.
 func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
@@ -128,7 +133,7 @@ func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 				SELECT id FROM stats_deltas
 				ORDER BY id
 				LIMIT $1
-				FOR UPDATE SKIP LOCKED
+				FOR UPDATE
 			),
 			deleted AS (
 				DELETE FROM stats_deltas
@@ -150,8 +155,7 @@ func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 			return err
 		}
 
-		// check if there are more rows this flusher can acquire without blocking
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stats_deltas FOR UPDATE SKIP LOCKED LIMIT 1)`).Scan(&more)
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stats_deltas LIMIT 1)`).Scan(&more)
 	})
 	return
 }
