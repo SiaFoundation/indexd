@@ -122,10 +122,10 @@ func initStats(ctx context.Context, tx *txn) error {
 // them to the stats table atomically. It returns true if there may be
 // more rows to flush.
 //
-// This is safe because we apply the updates in the order they were inserted.
-// BIGSERIAL never reuses IDs even when a transaction is rolled back, and only
-// a single thread (the stats manager) ever calls FlushStatsDelta.  This
-// prevents underflows from out-of-order application.
+// This is safe because we apply the updates in the order they were inserted
+// (we order by ID).  BIGSERIAL never reuses IDs even when a transaction is
+// rolled back, and only a single thread (the stats manager) ever calls
+// FlushStatsDelta.  This prevents underflows from out-of-order application.
 func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
