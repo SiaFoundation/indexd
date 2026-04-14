@@ -383,6 +383,19 @@ func TestHasAccount(t *testing.T) {
 	} else if !found {
 		t.Fatal("expected account to exist")
 	}
+
+	// soft delete the account
+	if err := store.DeleteAccount(proto.Account(pk)); err != nil {
+		t.Fatal(err)
+	}
+
+	// HasAccount should return false for soft deleted accounts
+	found, err = store.HasAccount(pk)
+	if err != nil {
+		t.Fatal(err)
+	} else if found {
+		t.Fatal("expected soft deleted account to not be found")
+	}
 }
 
 func TestHostAccountsForFunding(t *testing.T) {
