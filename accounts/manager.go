@@ -200,7 +200,7 @@ func HostReadFundTarget(host hosts.Host, fundTargetBytes uint64) types.Currency 
 		return types.ZeroCurrency
 	}
 	sectors := (fundTargetBytes + proto.SectorSize - 1) / proto.SectorSize
-	return host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(sectors).Div64(2)
+	return host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(sectors)
 }
 
 // NewManager creates a new AccountManager.
