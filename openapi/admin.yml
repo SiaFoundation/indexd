@@ -1712,6 +1712,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/SectorStatsResponse"
 
+  /prometheus/metrics:
+    get:
+      tags:
+        - stats
+      summary: Get all indexer metrics in Prometheus exposition format
+      description: >
+        Returns all available indexer metrics in a single response using the
+        Prometheus text-based exposition format. Aggregates state, wallet,
+        account, connect key, contracts, aggregated host, sector, per-app, and
+        per-host metrics.
+      operationId: getPrometheusMetrics
+      responses:
+        "200":
+          description: Metrics in Prometheus exposition format
+          content:
+            text/plain:
+              schema:
+                type: string
+
   /txpool/recommendedfee:
     get:
       tags:
