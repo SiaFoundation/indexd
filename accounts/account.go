@@ -85,6 +85,7 @@ type (
 		HostKey                types.PublicKey
 		ConsecutiveFailedFunds int
 		NextFund               time.Time
+		FullStorage            bool
 	}
 
 	// UpdateAccountRequest is the request body for the
@@ -96,8 +97,9 @@ type (
 	// QuotaFundInfo contains funding info for a quota including the number
 	// of active accounts.
 	QuotaFundInfo struct {
-		QuotaName       string
-		FundTargetBytes uint64
-		ActiveAccounts  uint64
+		QuotaName           string
+		FundTargetBytes     uint64
+		ActiveAccounts      uint64
+		FullStorageAccounts uint64
 	}
 )
