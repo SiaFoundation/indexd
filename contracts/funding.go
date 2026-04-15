@@ -105,17 +105,24 @@ OUTER:
 				{uploadAccs, fundTarget},
 				{fullStorageAccs, readFundTarget},
 			} {
-				if len(batch.accs) == 0 || batch.target.IsZero() {
+				if len(batch.accs) == 0 {
 					continue
 				}
 
-				// fund accounts
-				funded, drained, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, batch.accs, batch.target, log)
-				if err != nil {
-					return fmt.Errorf("failed to fund accounts: %w", err)
+				var (
+					funded  any
+					drained int
+				)
+				if !batch.target.IsZero() {
+					// fund accounts
+					funded, drained, err = cm.accountFunder.FundAccounts(ctx, host, contractIDs, batch.accs, batch.target, log)
+					if err != nil {
+						return fmt.Errorf("failed to fund accounts: %w", err)
+					}
 				}
 
-				// update funded accounts
+				// update funded accounts, including zero-target batches so their
+				// funding state/backoff is advanced even when no funding is needed.
 				accounts.UpdateFundedAccounts(batch.accs, funded, cm.maxAccountFundingBackoff)
 				if err := cm.accounts.UpdateHostAccounts(batch.accs); err != nil {
 					return fmt.Errorf("failed to update accounts: %w", err)
