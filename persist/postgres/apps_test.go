@@ -146,9 +146,6 @@ func TestAppConnectKeys(t *testing.T) {
 		t.Fatal("expected app connect key to still be exhausted")
 	}
 
-	if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
-		t.Fatal(err)
-	}
 	stats, err := store.AccountStats()
 	if err != nil {
 		t.Fatal(err)

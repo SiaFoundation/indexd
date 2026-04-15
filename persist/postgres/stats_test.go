@@ -52,9 +52,6 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 
 	assertStats := func(numSlabs int64) {
 		t.Helper()
-		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
-			t.Fatal(err)
-		}
 		stats, err := store.SectorStats()
 		if err != nil {
 			t.Fatal(err)
@@ -152,9 +149,6 @@ func TestSectorStats(t *testing.T) {
 
 	assertStats := func(pinned, unpinned, unpinnable, migrated int64) {
 		t.Helper()
-		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
-			t.Fatal(err)
-		}
 		stats, err := store.SectorStats()
 		if err != nil {
 			t.Fatal(err)
@@ -408,15 +402,8 @@ func TestIntegrityCheckStats(t *testing.T) {
 
 	assertSectorStats := func(expectedLost, expectedChecked, expectedCheckFailed int64) {
 		t.Helper()
-		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
-			t.Fatal(err)
-		}
 		var lost, checked, checkFailed int64
-		err := store.pool.QueryRow(context.Background(), `
-			SELECT
-				(SELECT stat_value FROM stats WHERE stat_name = $1),
-				(SELECT stat_value FROM stats WHERE stat_name = $2),
-				(SELECT stat_value FROM stats WHERE stat_name = $3)`,
+		err := store.pool.QueryRow(context.Background(), `SELECT `+sqlStatValue("$1")+`, `+sqlStatValue("$2")+`, `+sqlStatValue("$3"),
 			statSectorsLost, statSectorsChecked, statSectorsCheckFailed,
 		).Scan(&lost, &checked, &checkFailed)
 		if err != nil {
@@ -481,9 +468,7 @@ func TestAccountStatsRegistered(t *testing.T) {
 
 	var accs []types.PublicKey
 	for i := range 5 {
-		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
-			t.Fatal(err)
-		} else if stats, err := store.AccountStats(); err != nil {
+		if stats, err := store.AccountStats(); err != nil {
 			t.Fatal(err)
 		} else if stats.Registered != uint64(i) {
 			t.Fatalf("expected %d accounts, got %d", i, stats.Registered)
@@ -501,9 +486,7 @@ func TestAccountStatsRegistered(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
-			t.Fatal(err)
-		} else if stats, err := store.AccountStats(); err != nil {
+		if stats, err := store.AccountStats(); err != nil {
 			t.Fatal(err)
 		} else if expected := uint64(len(accs)) - uint64(i) - 1; stats.Registered != expected {
 			t.Fatalf("expected %d accounts, got %d", expected, stats.Registered)
@@ -848,9 +831,6 @@ func TestAggregatedHostStats(t *testing.T) {
 	assertStats := func(expectedActiveHosts, expectedGoodForUpload uint64, expectedScans, expectedFailed int64) {
 		t.Helper()
 
-		if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
-			t.Fatal(err)
-		}
 		stats, err := store.AggregatedHostStats()
 		if err != nil {
 			t.Fatal(err)

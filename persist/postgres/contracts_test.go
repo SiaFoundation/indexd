@@ -1544,9 +1544,6 @@ func TestDeleteContract(t *testing.T) {
 	}
 
 	// verify sectors are pinned
-	if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
-		t.Fatal(err)
-	}
 	statsBefore, err := store.SectorStats()
 	if err != nil {
 		t.Fatal(err)
@@ -1599,9 +1596,6 @@ func TestDeleteContract(t *testing.T) {
 	}
 
 	// verify sectors are unpinned
-	if _, err := store.FlushStatsDelta(math.MaxInt); err != nil {
-		t.Fatal(err)
-	}
 	statsAfter, err := store.SectorStats()
 	if err != nil {
 		t.Fatal(err)
