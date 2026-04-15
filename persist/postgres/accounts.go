@@ -110,7 +110,7 @@ WHERE public_key = $1`, sqlPublicKey(ak), accounts.ReadyHostThreshold))
 func (s *Store) HasAccount(ak types.PublicKey) (bool, error) {
 	var exists bool
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE public_key = $1)`, sqlPublicKey(ak)).Scan(&exists)
+		return tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM accounts WHERE public_key = $1 AND deleted_at IS NULL)`, sqlPublicKey(ak)).Scan(&exists)
 	}); err != nil {
 		return false, fmt.Errorf("failed to check if account exists: %w", err)
 	}

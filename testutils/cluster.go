@@ -212,38 +212,46 @@ func (c *Cluster) WaitForAccountFunding(t *testing.T, pk proto.Account) {
 	}
 }
 
-// WaitForContracts waits until a contract is formed with every host in the cluster
+// WaitForContracts waits until all contracts are formed
 func (c *Cluster) WaitForContracts(t *testing.T) {
 	t.Helper()
-	cm := c.Indexer.Contracts()
 
-	required := make(map[types.PublicKey]struct{})
-	for _, h := range c.Hosts {
-		required[h.PublicKey()] = struct{}{}
+	start := time.Now()
+
+	// fetch maintenance settings
+	cm := c.Indexer.Contracts()
+	ms, err := cm.MaintenanceSettings(t.Context())
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	var formed int
+	// calculate how many are required
+	numHosts := len(c.Hosts)
+	numWanted := ms.WantedContracts
+	numRequired := min(numHosts, int(numWanted))
+
+	// wait until contracts get formed
 	for {
 		contracts, err := cm.Contracts(t.Context(), 0, math.MaxInt, contracts.WithGood(true), contracts.WithRevisable(true))
 		if err != nil {
 			t.Fatal(err)
 		}
 
-		seen := make(map[types.PublicKey]struct{})
+		unique := make(map[types.PublicKey]struct{})
 		for _, c := range contracts {
-			if _, ok := required[c.HostKey]; ok {
-				seen[c.HostKey] = struct{}{}
-			}
+			unique[c.HostKey] = struct{}{}
 		}
-		formed = max(formed, len(seen))
-		t.Logf("formed contracts with %d/%d hosts", formed, len(required))
 
-		if len(seen) == len(required) {
+		if len(unique) >= numRequired {
 			// mine a block to confirm all pending contracts
 			c.ConsensusNode.MineBlocks(t, types.VoidAddress, 1)
 			time.Sleep(time.Second) // wait for indexing
 			return
 		}
+
 		time.Sleep(200 * time.Millisecond)
+		if time.Since(start) > time.Minute {
+			t.Fatalf("timed out waiting for contracts to form: formed %d/%d", len(unique), numRequired)
+		}
 	}
 }
