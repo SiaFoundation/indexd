@@ -27,6 +27,12 @@ const (
 	statScansFailed        = "num_scans_failed"
 )
 
+// sqlStatValue returns a SQL expression that reads a stat's effective value
+// by adding any unflushed deltas to the checkpoint in the stats table.
+func sqlStatValue(param string) string {
+	return `(SELECT stat_value + COALESCE((SELECT SUM(stat_delta) FROM stats_deltas WHERE stat_name = ` + param + `), 0) FROM stats WHERE stat_name = ` + param + `)`
+}
+
 func incrementStat(ctx context.Context, tx *txn, name string, delta int64) error {
 	if delta == 0 {
 		return nil
@@ -166,14 +172,14 @@ func (s *Store) SectorStats() (admin.SectorsStatsResponse, error) {
 	var stats admin.SectorsStatsResponse
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		return tx.QueryRow(ctx, `SELECT
-			(SELECT stat_value FROM stats WHERE stat_name = $1),
-			(SELECT stat_value FROM stats WHERE stat_name = $2),
-			(SELECT stat_value FROM stats WHERE stat_name = $3),
-			(SELECT stat_value FROM stats WHERE stat_name = $4),
-			(SELECT stat_value FROM stats WHERE stat_name = $5),
-			(SELECT stat_value FROM stats WHERE stat_name = $6),
-			(SELECT stat_value FROM stats WHERE stat_name = $7),
-			(SELECT stat_value FROM stats WHERE stat_name = $8)`,
+			`+sqlStatValue("$1")+`,
+			`+sqlStatValue("$2")+`,
+			`+sqlStatValue("$3")+`,
+			`+sqlStatValue("$4")+`,
+			`+sqlStatValue("$5")+`,
+			`+sqlStatValue("$6")+`,
+			`+sqlStatValue("$7")+`,
+			`+sqlStatValue("$8"),
 			statSlabs, statMigratedSectors, statPinnedSectors, statUnpinnableSectors,
 			statUnpinnedSectors, statSectorsLost, statSectorsChecked, statSectorsCheckFailed).
 			Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned, &stats.Lost, &stats.Checked, &stats.CheckFailed)
@@ -223,7 +229,7 @@ OFFSET $2 LIMIT $3`,
 func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 	var stats admin.AccountStatsResponse
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		err := tx.QueryRow(ctx, "SELECT stat_value FROM stats WHERE stat_name = $1", statAccountsRegistered).Scan(&stats.Registered)
+		err := tx.QueryRow(ctx, `SELECT `+sqlStatValue("$1"), statAccountsRegistered).Scan(&stats.Registered)
 		if err != nil {
 			return fmt.Errorf("failed to get number of registered accounts: %w", err)
 		}
@@ -272,8 +278,8 @@ func (s *Store) ConnectKeyStats() (stats admin.ConnectKeyStatsResponse, err erro
 func (s *Store) AggregatedHostStats() (stats admin.AggregatedHostStatsResponse, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		if err := tx.QueryRow(ctx, `SELECT
-			(SELECT stat_value FROM stats WHERE stat_name = $1),
-			(SELECT stat_value FROM stats WHERE stat_name = $2)`,
+			`+sqlStatValue("$1")+`,
+			`+sqlStatValue("$2"),
 			statScans, statScansFailed).
 			Scan(&stats.TotalScans, &stats.FailedScans); err != nil {
 			return fmt.Errorf("failed to get scan stats: %w", err)
