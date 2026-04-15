@@ -285,6 +285,9 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /stats/hosts":          a.handleGETStatsHostsAggregated,
 		"GET /stats/hosts/detailed": a.handleGETStatsHostsDetailed,
 		"GET /stats/sectors":        a.handleGETStatsSectors,
+
+		// prometheus metrics endpoint
+		"GET /prometheus/metrics": a.handleGETPrometheusMetrics,
 	}
 
 	// debug endpoints
@@ -1250,6 +1253,104 @@ func (a *admin) handleGETStatsSectors(jc jape.Context) {
 	writeResponse(jc, stats)
 }
 
+func (a *admin) handleGETPrometheusMetrics(jc jape.Context) {
+	ci, err := a.store.LastScannedIndex()
+	if jc.Check("failed to get last scanned index", err) != nil {
+		return
+	}
+	var explorerState ExplorerState
+	if a.explorer != nil {
+		explorerState.Enabled = true
+		explorerState.URL = a.explorer.BaseURL()
+	}
+	ts := a.chain.TipState()
+	state := State{
+		Network:   ts.Network.Name,
+		StartTime: startTime,
+		Explorer:  explorerState,
+		BuildState: BuildState{
+			Version:   build.Version(),
+			Commit:    build.Commit(),
+			OS:        runtime.GOOS,
+			BuildTime: build.Time(),
+		},
+		ScanHeight: ci.Height,
+		SyncHeight: ts.Index.Height,
+		Synced:     time.Since(ts.PrevTimestamps[0]) <= 3*time.Hour,
+	}
+
+	balance, err := a.wallet.Balance()
+	if jc.Check("failed to get wallet balance", err) != nil {
+		return
+	}
+	walletResp := WalletResponse{
+		Balance: balance,
+		Address: a.wallet.Address(),
+	}
+
+	accountStats, err := a.store.AccountStats()
+	if jc.Check("failed to retrieve account stats", err) != nil {
+		return
+	}
+
+	connectKeyStats, err := a.store.ConnectKeyStats()
+	if jc.Check("failed to retrieve connect key stats", err) != nil {
+		return
+	}
+
+	contractsStats, err := a.store.ContractsStats()
+	if jc.Check("failed to retrieve contracts stats", err) != nil {
+		return
+	}
+
+	aggHostStats, err := a.store.AggregatedHostStats()
+	if jc.Check("failed to retrieve aggregated host stats", err) != nil {
+		return
+	}
+
+	sectorStats, err := a.store.SectorStats()
+	if jc.Check("failed to retrieve sector stats", err) != nil {
+		return
+	}
+
+	apps, err := a.store.AppStats(0, 1000)
+	if jc.Check("failed to retrieve app stats", err) != nil {
+		return
+	}
+
+	// unlike AppStats this returns the hosts package type that doesn't
+	// implement prometheus.Marshaller.
+	//
+	// TODO: fix this sillyness
+	hosts, err := a.hosts.Stats(jc.Request.Context(), 0, 1000)
+	if jc.Check("failed to retrieve host stats", err) != nil {
+		return
+	}
+	hostStats := make(HostStatsResponse, 0, len(hosts))
+	for _, s := range hosts {
+		hostStats = append(hostStats, HostStats(s))
+	}
+
+	jc.ResponseWriter.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	enc := prometheus.NewEncoder(jc.ResponseWriter)
+	for _, m := range []prometheus.Marshaller{
+		state,
+		walletResp,
+		accountStats,
+		connectKeyStats,
+		contractsStats,
+		aggHostStats,
+		sectorStats,
+		AppStatsResponse(apps),
+		hostStats,
+	} {
+		if err := enc.Append(m); err != nil {
+			a.log.Warn("failed to encode prometheus metric", zap.Error(err))
+			return
+		}
+	}
+}
+
 func writeResponse(jc jape.Context, resp prometheus.Marshaller) {
 	if resp == nil {
 		return
@@ -1261,7 +1362,7 @@ func writeResponse(jc jape.Context, resp prometheus.Marshaller) {
 	}
 	switch responseFormat {
 	case "prometheus":
-		jc.Request.Header.Set("Content-Type", "text/plain; version=0.0.4")
+		jc.ResponseWriter.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		enc := prometheus.NewEncoder(jc.ResponseWriter)
 		if jc.Check("failed to marshal prometheus response", enc.Append(resp)) != nil {
 			return
