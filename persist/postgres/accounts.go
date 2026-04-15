@@ -384,7 +384,11 @@ func (s *Store) AccountFundingInfo(threshold time.Time) ([]accounts.QuotaFundInf
 	var infos []accounts.QuotaFundInfo
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT q.name, q.fund_target_bytes, COUNT(*) as active_count
+			SELECT q.name, q.fund_target_bytes, COUNT(*) as active_count,
+				COUNT(*) FILTER (WHERE
+					a.pinned_data >= a.max_pinned_data OR
+					ack.pinned_data >= q.max_pinned_data
+				)
 			FROM accounts a
 			INNER JOIN app_connect_keys ack ON ack.id = a.connect_key_id
 			INNER JOIN quotas q ON q.name = ack.quota_name
@@ -398,7 +402,7 @@ func (s *Store) AccountFundingInfo(threshold time.Time) ([]accounts.QuotaFundInf
 
 		for rows.Next() {
 			var info accounts.QuotaFundInfo
-			if err := rows.Scan(&info.QuotaName, &info.FundTargetBytes, &info.ActiveAccounts); err != nil {
+			if err := rows.Scan(&info.QuotaName, &info.FundTargetBytes, &info.ActiveAccounts, &info.FullStorageAccounts); err != nil {
 				return fmt.Errorf("failed to scan quota fund info: %w", err)
 			}
 			infos = append(infos, info)
@@ -414,9 +418,12 @@ func newHostAccountsForFunding(ctx context.Context, tx *txn, hk types.PublicKey,
 	accs := make([]accounts.HostAccount, 0, limit)
 
 	rows, err := tx.Query(ctx, `
-SELECT a.public_key
+SELECT a.public_key,
+	(a.pinned_data >= a.max_pinned_data) OR
+	(ack.pinned_data >= q.max_pinned_data)
 FROM accounts a
 INNER JOIN app_connect_keys ack ON ack.id = a.connect_key_id
+INNER JOIN quotas q ON q.name = ack.quota_name
 LEFT JOIN account_hosts ah ON a.id = ah.account_id AND ah.host_id = $1
 WHERE ah.account_id IS NULL AND a.deleted_at IS NULL AND (a.last_used >= $2)
 AND ack.quota_name = $4
@@ -428,7 +435,7 @@ LIMIT $3;`, hostID, threshold, limit, quotaName)
 
 	for rows.Next() {
 		acc := accounts.HostAccount{HostKey: hk, NextFund: time.Now()}
-		if err := rows.Scan((*sqlPublicKey)(&acc.AccountKey)); err != nil {
+		if err := rows.Scan((*sqlPublicKey)(&acc.AccountKey), &acc.FullStorage); err != nil {
 			return nil, fmt.Errorf("failed to scan account key: %w", err)
 		}
 		accs = append(accs, acc)
@@ -444,10 +451,13 @@ func existingHostAccountsForFunding(ctx context.Context, tx *txn, hk types.Publi
 	accs := make([]accounts.HostAccount, 0, limit)
 
 	rows, err := tx.Query(ctx, `
-SELECT a.public_key, ha.consecutive_failed_funds, ha.next_fund
+SELECT a.public_key, ha.consecutive_failed_funds, ha.next_fund,
+	(a.pinned_data >= a.max_pinned_data) OR
+	(ack.pinned_data >= q.max_pinned_data)
 FROM account_hosts ha
 INNER JOIN accounts a ON a.id = ha.account_id
 INNER JOIN app_connect_keys ack ON ack.id = a.connect_key_id
+INNER JOIN quotas q ON q.name = ack.quota_name
 WHERE ha.host_id = $1 AND ha.next_fund <= NOW() AND a.deleted_at IS NULL AND (a.last_used >= $2)
 AND ack.quota_name = $4
 ORDER BY ha.next_fund ASC
@@ -459,7 +469,7 @@ LIMIT $3`, hostID, threshold, limit, quotaName)
 
 	for rows.Next() {
 		acc := accounts.HostAccount{HostKey: hk}
-		if err := rows.Scan((*sqlPublicKey)(&acc.AccountKey), &acc.ConsecutiveFailedFunds, &acc.NextFund); err != nil {
+		if err := rows.Scan((*sqlPublicKey)(&acc.AccountKey), &acc.ConsecutiveFailedFunds, &acc.NextFund, &acc.FullStorage); err != nil {
 			return nil, fmt.Errorf("failed to scan account: %w", err)
 		}
 		accs = append(accs, acc)

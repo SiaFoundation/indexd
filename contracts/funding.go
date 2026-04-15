@@ -73,6 +73,7 @@ OUTER:
 		if fundTarget.IsZero() {
 			continue
 		}
+		readFundTarget := accounts.HostReadFundTarget(host, quota.FundTargetBytes)
 
 		var exhausted bool
 		for !exhausted {
@@ -86,23 +87,45 @@ OUTER:
 				break
 			}
 
-			// fund accounts
-			funded, drained, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, accs, fundTarget, log)
-			if err != nil {
-				return fmt.Errorf("failed to fund accounts: %w", err)
+			// split accounts by storage state
+			var uploadAccs, fullStorageAccs []accounts.HostAccount
+			for _, acc := range accs {
+				if acc.FullStorage {
+					fullStorageAccs = append(fullStorageAccs, acc)
+				} else {
+					uploadAccs = append(uploadAccs, acc)
+				}
 			}
 
-			// update funded accounts
-			accounts.UpdateFundedAccounts(accs, funded, cm.maxAccountFundingBackoff)
-			err = cm.accounts.UpdateHostAccounts(accs)
-			if err != nil {
-				return fmt.Errorf("failed to update accounts: %w", err)
-			}
+			// fund each group with the appropriate target
+			for _, batch := range []struct {
+				accs   []accounts.HostAccount
+				target types.Currency
+			}{
+				{uploadAccs, fundTarget},
+				{fullStorageAccs, readFundTarget},
+			} {
+				if len(batch.accs) == 0 || batch.target.IsZero() {
+					continue
+				}
 
-			contractIDs = contractIDs[drained:]
-			if len(contractIDs) == 0 {
-				log.Debug("not all accounts could be funded, no more contracts available", zap.String("quota", quota.Key))
-				break OUTER
+				// fund accounts
+				funded, drained, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, batch.accs, batch.target, log)
+				if err != nil {
+					return fmt.Errorf("failed to fund accounts: %w", err)
+				}
+
+				// update funded accounts
+				accounts.UpdateFundedAccounts(batch.accs, funded, cm.maxAccountFundingBackoff)
+				if err := cm.accounts.UpdateHostAccounts(batch.accs); err != nil {
+					return fmt.Errorf("failed to update accounts: %w", err)
+				}
+
+				contractIDs = contractIDs[drained:]
+				if len(contractIDs) == 0 {
+					log.Debug("not all accounts could be funded, no more contracts available", zap.String("quota", quota.Key))
+					break OUTER
+				}
 			}
 		}
 	}
@@ -121,7 +144,12 @@ func (cm *ContractManager) ContractFundTarget(ctx context.Context, host hosts.Ho
 	// user accounts
 	var target types.Currency
 	for _, qi := range quotaInfos {
-		t := accounts.HostFundTarget(host, qi.FundTargetBytes).Mul64(qi.ActiveAccounts)
+		// accounts with remaining storage need both read and write funding
+		fullStorageAccounts := min(qi.FullStorageAccounts, qi.ActiveAccounts)
+		uploadAccounts := qi.ActiveAccounts - fullStorageAccounts
+		t := accounts.HostFundTarget(host, qi.FundTargetBytes).Mul64(uploadAccounts)
+		// accounts with no remaining storage only need read funding
+		t = t.Add(accounts.HostReadFundTarget(host, qi.FundTargetBytes).Mul64(fullStorageAccounts))
 		target = target.Add(t)
 	}
 
