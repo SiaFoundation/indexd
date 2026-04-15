@@ -36,8 +36,7 @@ type Manager struct {
 	log   *zap.Logger
 }
 
-// NewManager creates a new stats Manager. Any pending deltas left over from
-// a previous run are flushed immediately before the background loop starts.
+// NewManager creates a new stats Manager.
 func NewManager(store Store, opts ...Option) (*Manager, error) {
 	m := &Manager{
 		store: store,
@@ -61,7 +60,7 @@ func NewManager(store Store, opts ...Option) (*Manager, error) {
 	return m, nil
 }
 
-// Close stops the manager and flushes any remaining deltas.
+// Close stops the manager.
 func (m *Manager) Close() error {
 	m.tg.Stop()
 	return nil
