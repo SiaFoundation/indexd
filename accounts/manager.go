@@ -193,14 +193,15 @@ func HostFundTarget(host hosts.Host, fundTargetBytes uint64) types.Currency {
 }
 
 // HostReadFundTarget calculates the fund target for accounts that have no
-// remaining storage. Since these accounts can only download, we exclude the
-// write cost.
+// remaining storage. `fundTargetBytes` is interpreted the same way as in
+// HostFundTarget: as a combined read+write target. Since these accounts can
+// only download, we fund only the read portion of that target.
 func HostReadFundTarget(host hosts.Host, fundTargetBytes uint64) types.Currency {
 	if fundTargetBytes == 0 {
 		return types.ZeroCurrency
 	}
 	sectors := (fundTargetBytes + proto.SectorSize - 1) / proto.SectorSize
-	return host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(sectors)
+	return host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(sectors).Div64(2)
 }
 
 // NewManager creates a new AccountManager.
