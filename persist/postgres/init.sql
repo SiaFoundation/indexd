@@ -393,6 +393,9 @@ CREATE TABLE stats_deltas (
     stat_delta BIGINT NOT NULL
 );
 
+-- speed up summing pending stats deltas for a particular stat
+CREATE INDEX stats_deltas_stat_name_idx ON stats_deltas(stat_name);
+
 -- quick lookup of sectors that failed the integrity checks too many times
 CREATE INDEX sectors_consecutive_failed_checks_idx ON sectors(host_id, consecutive_failed_checks) WHERE consecutive_failed_checks > 0;
 

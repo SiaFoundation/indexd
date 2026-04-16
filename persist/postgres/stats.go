@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -27,10 +28,14 @@ const (
 	statScansFailed        = "num_scans_failed"
 )
 
-// sqlStatValue returns a SQL expression that reads a stat's effective value
-// by adding any unflushed deltas to the checkpoint in the stats table.
-func sqlStatValue(param string) string {
-	return `(SELECT stat_value + COALESCE((SELECT SUM(stat_delta) FROM stats_deltas WHERE stat_name = ` + param + `), 0) FROM stats WHERE stat_name = ` + param + `)`
+// sqlStatSelect returns a SELECT query that reads the effective values of the
+// given stats by adding any unflushed deltas to the checkpoint in the stats table.
+func sqlStatSelect(names ...string) string {
+	cols := make([]string, len(names))
+	for i, name := range names {
+		cols[i] = `(SELECT stat_value + COALESCE((SELECT SUM(stat_delta) FROM stats_deltas WHERE stat_name = '` + name + `'), 0) FROM stats WHERE stat_name = '` + name + `')`
+	}
+	return "SELECT " + strings.Join(cols, ", ")
 }
 
 func incrementStat(ctx context.Context, tx *txn, name string, delta int64) error {
@@ -129,9 +134,9 @@ func initStats(ctx context.Context, tx *txn) error {
 // more rows to flush.
 //
 // This is safe because we apply the updates in the order they were inserted
-// (we order by ID).  BIGSERIAL never reuses IDs even when a transaction is
+// (we order by ID). BIGSERIAL never reuses IDs even when a transaction is
 // rolled back, and only a single thread (the stats manager) ever calls
-// FlushStatsDelta.  This prevents underflows from out-of-order application.
+// FlushStatsDelta. This prevents underflows from out-of-order application.
 func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
@@ -171,17 +176,7 @@ func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 func (s *Store) SectorStats() (admin.SectorsStatsResponse, error) {
 	var stats admin.SectorsStatsResponse
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, `SELECT
-			`+sqlStatValue("$1")+`,
-			`+sqlStatValue("$2")+`,
-			`+sqlStatValue("$3")+`,
-			`+sqlStatValue("$4")+`,
-			`+sqlStatValue("$5")+`,
-			`+sqlStatValue("$6")+`,
-			`+sqlStatValue("$7")+`,
-			`+sqlStatValue("$8"),
-			statSlabs, statMigratedSectors, statPinnedSectors, statUnpinnableSectors,
-			statUnpinnedSectors, statSectorsLost, statSectorsChecked, statSectorsCheckFailed).
+		return tx.QueryRow(ctx, sqlStatSelect(statSlabs, statMigratedSectors, statPinnedSectors, statUnpinnableSectors, statUnpinnedSectors, statSectorsLost, statSectorsChecked, statSectorsCheckFailed)).
 			Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned, &stats.Lost, &stats.Checked, &stats.CheckFailed)
 	})
 	return stats, err
@@ -229,7 +224,7 @@ OFFSET $2 LIMIT $3`,
 func (s *Store) AccountStats() (admin.AccountStatsResponse, error) {
 	var stats admin.AccountStatsResponse
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		err := tx.QueryRow(ctx, `SELECT `+sqlStatValue("$1"), statAccountsRegistered).Scan(&stats.Registered)
+		err := tx.QueryRow(ctx, sqlStatSelect(statAccountsRegistered)).Scan(&stats.Registered)
 		if err != nil {
 			return fmt.Errorf("failed to get number of registered accounts: %w", err)
 		}
@@ -277,10 +272,7 @@ func (s *Store) ConnectKeyStats() (stats admin.ConnectKeyStatsResponse, err erro
 // number of active hosts and scan counts.
 func (s *Store) AggregatedHostStats() (stats admin.AggregatedHostStatsResponse, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		if err := tx.QueryRow(ctx, `SELECT
-			`+sqlStatValue("$1")+`,
-			`+sqlStatValue("$2"),
-			statScans, statScansFailed).
+		if err := tx.QueryRow(ctx, sqlStatSelect(statScans, statScansFailed)).
 			Scan(&stats.TotalScans, &stats.FailedScans); err != nil {
 			return fmt.Errorf("failed to get scan stats: %w", err)
 		}

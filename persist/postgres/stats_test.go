@@ -403,9 +403,8 @@ func TestIntegrityCheckStats(t *testing.T) {
 	assertSectorStats := func(expectedLost, expectedChecked, expectedCheckFailed int64) {
 		t.Helper()
 		var lost, checked, checkFailed int64
-		err := store.pool.QueryRow(context.Background(), `SELECT `+sqlStatValue("$1")+`, `+sqlStatValue("$2")+`, `+sqlStatValue("$3"),
-			statSectorsLost, statSectorsChecked, statSectorsCheckFailed,
-		).Scan(&lost, &checked, &checkFailed)
+		err := store.pool.QueryRow(context.Background(), sqlStatSelect(statSectorsLost, statSectorsChecked, statSectorsCheckFailed)).
+			Scan(&lost, &checked, &checkFailed)
 		if err != nil {
 			t.Fatal(err)
 		}

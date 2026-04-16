@@ -17,4 +17,8 @@ var migrations = []func(context.Context, *txn, *zap.Logger) error{
 		`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX stats_deltas_stat_name_idx ON stats_deltas(stat_name);`)
+		return err
+	},
 }
