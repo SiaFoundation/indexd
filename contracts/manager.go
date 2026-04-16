@@ -136,7 +136,7 @@ type (
 
 		LastScannedIndex() (ci types.ChainIndex, err error)
 
-		ContractsStats() (ContractsStats, error)
+		ContractsStats() (Stats, error)
 		DeleteContract(contractID types.FileContractID) error
 	}
 

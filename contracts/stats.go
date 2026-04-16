@@ -1,7 +1,7 @@
 package contracts
 
-// ContractsStats contains statistics about the contracts in the database.
-type ContractsStats struct {
+// Stats contains statistics about the contracts in the database.
+type Stats struct {
 	Contracts    uint64 `json:"contracts"`
 	BadContracts uint64 `json:"badContracts"`
 	Renewing     uint64 `json:"renewing"`
@@ -11,6 +11,6 @@ type ContractsStats struct {
 }
 
 // ContractsStats returns statistics about the contracts in the database.
-func (cm *ContractManager) ContractsStats() (ContractsStats, error) {
+func (cm *ContractManager) ContractsStats() (Stats, error) {
 	return cm.store.ContractsStats()
 }

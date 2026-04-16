@@ -1826,7 +1826,7 @@ func TestContractsStats(t *testing.T) {
 	// fcid5: bad, already expired
 	updateContract(fcid5, true, 9000, 10_000, 10)
 
-	expected := contracts.ContractsStats{
+	expected := contracts.Stats{
 		Contracts:     4,     // all but fcid5
 		BadContracts:  2,     // fcid2, fcid3
 		Renewing:      1,     // fcid4

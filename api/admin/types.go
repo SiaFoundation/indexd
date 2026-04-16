@@ -24,7 +24,7 @@ type (
 	AggregatedHostStatsResponse hosts.AggregatedHostStats
 
 	// ContractsStatsResponse is the response body for the [GET] /stats/contracts
-	ContractsStatsResponse contracts.ContractsStats
+	ContractsStatsResponse contracts.Stats
 
 	// ExplorerState contains static information about explorer data sources.
 	ExplorerState struct {

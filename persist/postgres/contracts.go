@@ -35,7 +35,7 @@ func (s *Store) ContractRevision(contractID types.FileContractID) (rhp.ContractR
 }
 
 // ContractsStats returns statistics about the contracts in the database.
-func (s *Store) ContractsStats() (resp contracts.ContractsStats, _ error) {
+func (s *Store) ContractsStats() (resp contracts.Stats, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		var numContracts, numGood, totalCapacity, totalSize uint64
 		err := tx.QueryRow(ctx, `
@@ -77,7 +77,7 @@ func (s *Store) ContractsStats() (resp contracts.ContractsStats, _ error) {
 			return err
 		}
 
-		resp = contracts.ContractsStats{
+		resp = contracts.Stats{
 			Contracts:    numContracts,
 			BadContracts: numContracts - numGood,
 			Renewing:     numRenewing,

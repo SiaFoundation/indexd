@@ -62,7 +62,7 @@ type (
 		Contract(ctx context.Context, contractID types.FileContractID) (contracts.Contract, error)
 		Contracts(ctx context.Context, offset, limit int, queryOpts ...contracts.ContractQueryOpt) ([]contracts.Contract, error)
 
-		ContractsStats() (contracts.ContractsStats, error)
+		ContractsStats() (contracts.Stats, error)
 		DeleteContract(contractID types.FileContractID) error
 	}
 
