@@ -70,10 +70,10 @@ func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, co
 OUTER:
 	for _, quota := range quotas {
 		fundTarget := accounts.HostFundTarget(host, quota.FundTargetBytes)
-		if fundTarget.IsZero() {
+		readFundTarget := accounts.HostReadFundTarget(host, quota.FundTargetBytes)
+		if fundTarget.IsZero() && readFundTarget.IsZero() {
 			continue
 		}
-		readFundTarget := accounts.HostReadFundTarget(host, quota.FundTargetBytes)
 
 		var exhausted bool
 		for !exhausted {
@@ -105,7 +105,7 @@ OUTER:
 				{uploadAccs, fundTarget},
 				{fullStorageAccs, readFundTarget},
 			} {
-				if len(batch.accs) == 0 {
+				if len(batch.accs) == 0 || batch.target.IsZero() {
 					continue
 				}
 
