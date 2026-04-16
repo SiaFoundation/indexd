@@ -48,9 +48,9 @@ type (
 		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
 
-	// Store defines the store interface for the application API.
-	Store interface {
-		UsableHosts(offset, limit int, opts ...hosts.UsableHostQueryOpt) ([]hosts.HostInfo, error)
+	// Hosts defines the hosts interface for the application API.
+	Hosts interface {
+		UsableHosts(ctx context.Context, offset, limit int, opts ...hosts.UsableHostQueryOpt) ([]hosts.HostInfo, error)
 	}
 
 	// Accounts defines the account management interface for the application API.
@@ -140,7 +140,7 @@ type (
 	}
 
 	app struct {
-		store     Store
+		hosts     Hosts
 		accounts  Accounts
 		contracts Contracts
 		slabs     Slabs
@@ -248,7 +248,7 @@ func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 		opts = append(opts, hosts.SortByDistance(lat, lng))
 	}
 
-	hosts, err := a.store.UsableHosts(offset, limit, opts...)
+	hosts, err := a.hosts.UsableHosts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get hosts", err) != nil {
 		return
 	}
@@ -743,13 +743,13 @@ func decodeRequest[T any](jc jape.Context) (T, bool) {
 // users, or rather their applications, to pin slabs to the indexer.
 // Authentication happens through presigned URLs that are signed with a private
 // key that corresponds to a previously registered public key.
-func NewAPI(advertiseURL string, store Store, am Accounts, contracts Contracts, slabs Slabs, opts ...Option) (http.Handler, error) {
+func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, slabs Slabs, opts ...Option) (http.Handler, error) {
 	u, err := url.Parse(advertiseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse advertise URL %q: %w", advertiseURL, err)
 	}
 	a := &app{
-		store:     store,
+		hosts:     hm,
 		accounts:  am,
 		contracts: contracts,
 		slabs:     slabs,

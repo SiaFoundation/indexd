@@ -185,6 +185,12 @@ func (hm *HostManager) Hosts(ctx context.Context, offset, limit int, queryOpts .
 	return hm.store.Hosts(offset, limit, queryOpts...)
 }
 
+// UsableHosts returns a list of hosts that are not blocked, usable and have an
+// active contract. It returns only the host's public key and addresses.
+func (hm *HostManager) UsableHosts(ctx context.Context, offset, limit int, opts ...UsableHostQueryOpt) ([]HostInfo, error) {
+	return hm.store.UsableHosts(offset, limit, opts...)
+}
+
 // HostsForFunding returns a list of hosts that have accounts that need funding
 func (hm *HostManager) HostsForFunding(ctx context.Context) ([]types.PublicKey, error) {
 	return hm.store.HostsForFunding()

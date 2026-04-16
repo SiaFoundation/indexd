@@ -251,7 +251,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	if cfg.advertiseURL == "" {
 		cfg.advertiseURL = appAPIAddr
 	}
-	appHandler, err := app.NewAPI(cfg.advertiseURL, store, am, contracts, slabs, appAPIOpts...)
+	appHandler, err := app.NewAPI(cfg.advertiseURL, hm, am, contracts, slabs, appAPIOpts...)
 	if err != nil {
 		t.Fatalf("failed to create application API: %v", err)
 	}
