@@ -1321,7 +1321,7 @@ func (a *admin) handleGETPrometheusMetrics(jc jape.Context) {
 	// unlike AppStats this returns the hosts package type that doesn't
 	// implement prometheus.Marshaller.
 	//
-	// TODO: fix this sillyness
+	// TODO: fix this silliness
 	hosts, err := a.hosts.Stats(jc.Request.Context(), 0, 1000)
 	if jc.Check("failed to retrieve host stats", err) != nil {
 		return
