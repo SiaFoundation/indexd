@@ -2026,6 +2026,8 @@ components:
       $ref: "./components.yml#/components/schemas/FileContractID"
     PublicKey:
       $ref: "./components.yml#/components/schemas/PublicKey"
+    HostKey:
+      $ref: "./components.yml#/components/schemas/HostKey"
     TransactionID:
       $ref: "./components.yml#/components/schemas/TransactionID"
 
