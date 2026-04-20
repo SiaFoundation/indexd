@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"encoding/hex"
 	"net/http"
 	"regexp"
 
@@ -9,6 +10,7 @@ import (
 	"fmt"
 	"net/http/pprof"
 	"runtime"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -864,9 +866,9 @@ func (a *admin) handleGETContracts(jc jape.Context) {
 	if strs := jc.Request.Form["hostkey"]; len(strs) > 0 {
 		hks := make([]types.PublicKey, len(strs))
 		for i := range strs {
-			var hk types.PublicKey
-			if err := hk.UnmarshalText([]byte(strs[i])); err != nil {
-				jc.Error(fmt.Errorf("failed to parse public key %s: %w", strs[i], err), http.StatusBadRequest)
+			hk, err := decodeHostKey(strs[i])
+			if err != nil {
+				jc.Error(err, http.StatusBadRequest)
 				return
 			}
 			hks[i] = hk
@@ -889,8 +891,9 @@ func (a *admin) handleGETContracts(jc jape.Context) {
 }
 
 func (a *admin) handleGETHost(jc jape.Context) {
-	var hk types.PublicKey
-	if jc.DecodeParam("hostkey", &hk) != nil {
+	hk, err := decodeHostKey(jc.PathParam("hostkey"))
+	if err != nil {
+		jc.Error(err, http.StatusBadRequest)
 		return
 	}
 	host, err := a.hosts.Host(jc.Request.Context(), hk)
@@ -904,8 +907,9 @@ func (a *admin) handleGETHost(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTHostScan(jc jape.Context) {
-	var hk types.PublicKey
-	if jc.DecodeParam("hostkey", &hk) != nil {
+	hk, err := decodeHostKey(jc.PathParam("hostkey"))
+	if err != nil {
+		jc.Error(err, http.StatusBadRequest)
 		return
 	}
 	host, err := a.hosts.ScanHost(jc.Request.Context(), hk)
@@ -919,11 +923,12 @@ func (a *admin) handlePOSTHostScan(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTHostLostSectorsReset(jc jape.Context) {
-	var hk types.PublicKey
-	if jc.DecodeParam("hostkey", &hk) != nil {
+	hk, err := decodeHostKey(jc.PathParam("hostkey"))
+	if err != nil {
+		jc.Error(err, http.StatusBadRequest)
 		return
 	}
-	err := a.hosts.ResetLostSectors(jc.Request.Context(), hk)
+	err = a.hosts.ResetLostSectors(jc.Request.Context(), hk)
 	if errors.Is(err, hosts.ErrNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
@@ -968,9 +973,9 @@ func (a *admin) handleGETHosts(jc jape.Context) {
 	if strs := jc.Request.Form["hostkey"]; len(strs) > 0 {
 		hks := make([]types.PublicKey, len(strs))
 		for i := range strs {
-			var hk types.PublicKey
-			if err := hk.UnmarshalText([]byte(strs[i])); err != nil {
-				jc.Error(fmt.Errorf("failed to parse host key %s: %w", strs[i], err), http.StatusBadRequest)
+			hk, err := decodeHostKey(strs[i])
+			if err != nil {
+				jc.Error(err, http.StatusBadRequest)
 				return
 			}
 			hks[i] = hk
@@ -1015,8 +1020,9 @@ func (a *admin) handlePUTHostsBlocklist(jc jape.Context) {
 }
 
 func (a *admin) handleDELETEHostsBlocklist(jc jape.Context) {
-	var hk types.PublicKey
-	if jc.DecodeParam("hostkey", &hk) != nil {
+	hk, err := decodeHostKey(jc.PathParam("hostkey"))
+	if err != nil {
+		jc.Error(err, http.StatusBadRequest)
 		return
 	}
 	if jc.Check("failed to unblock host", a.hosts.UnblockHost(jc.Request.Context(), hk)) != nil {
@@ -1349,6 +1355,20 @@ func (a *admin) handleGETPrometheusMetrics(jc jape.Context) {
 			return
 		}
 	}
+}
+
+func decodeHostKey(s string) (types.PublicKey, error) {
+	if !strings.HasPrefix(s, "ed25519:") {
+		if _, err := hex.DecodeString(s); err == nil && len(s) == 64 {
+			s = "ed25519:" + s
+		}
+	}
+
+	var hk types.PublicKey
+	if err := hk.UnmarshalText([]byte(s)); err != nil {
+		return types.PublicKey{}, fmt.Errorf("failed to parse host key %s: %w", s, err)
+	}
+	return hk, nil
 }
 
 func writeResponse(jc jape.Context, resp prometheus.Marshaller) {
