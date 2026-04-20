@@ -1229,12 +1229,7 @@ func (a *admin) handleGETStatsHostsDetailed(jc jape.Context) {
 	if jc.Check("failed to retrieve host stats", err) != nil {
 		return
 	}
-
-	var res []HostStats
-	for _, s := range stats {
-		res = append(res, HostStats(s))
-	}
-	writeResponse(jc, HostStatsResponse(res))
+	writeResponse(jc, HostStatsResponse(stats))
 }
 
 func (a *admin) handleGETStatsHostsAggregated(jc jape.Context) {
@@ -1318,17 +1313,9 @@ func (a *admin) handleGETPrometheusMetrics(jc jape.Context) {
 		return
 	}
 
-	// unlike AppStats this returns the hosts package type that doesn't
-	// implement prometheus.Marshaller.
-	//
-	// TODO: fix this silliness
 	hosts, err := a.hosts.Stats(jc.Request.Context(), 0, 1000)
 	if jc.Check("failed to retrieve host stats", err) != nil {
 		return
-	}
-	hostStats := make(HostStatsResponse, 0, len(hosts))
-	for _, s := range hosts {
-		hostStats = append(hostStats, HostStats(s))
 	}
 
 	jc.ResponseWriter.Header().Set("Content-Type", "text/plain; version=0.0.4")
@@ -1342,7 +1329,7 @@ func (a *admin) handleGETPrometheusMetrics(jc jape.Context) {
 		aggHostStats,
 		sectorStats,
 		AppStatsResponse(apps),
-		hostStats,
+		HostStatsResponse(hosts),
 	} {
 		if err := enc.Append(m); err != nil {
 			a.log.Warn("failed to encode prometheus metric", zap.Error(err))

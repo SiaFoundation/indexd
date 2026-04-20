@@ -95,10 +95,7 @@ type (
 	}
 
 	// HostStatsResponse is the response body for the [GET] /stats/hosts/detailed.
-	HostStatsResponse []HostStats
-
-	// HostStats wraps hosts.HostStats to provide a custom PrometheusMetric method.
-	HostStats hosts.HostStats
+	HostStatsResponse []hosts.HostStats
 
 	// State is the response body for the [GET] /state endpoint.
 	State struct {

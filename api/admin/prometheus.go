@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/internal/prometheus"
 )
 
@@ -137,13 +138,13 @@ func (s ContractsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric)
 // PrometheusMetric implements the prometheus.Marshaller interface for the
 // host stats response.
 func (h HostStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
-	metrics = prometheus.Slice([]HostStats(h)).PrometheusMetric()
+	for _, s := range h {
+		metrics = append(metrics, hostStatsMetrics(s)...)
+	}
 	return
 }
 
-// PrometheusMetric implements the prometheus.Marshaller interface for a single
-// host's stats.
-func (h HostStats) PrometheusMetric() []prometheus.Metric {
+func hostStatsMetrics(h hosts.HostStats) []prometheus.Metric {
 	release := strings.TrimSpace(h.Release)
 	if release == "" {
 		release = "unknown"
