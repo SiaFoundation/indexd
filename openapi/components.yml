@@ -778,6 +778,9 @@ components:
         acceptingContracts:
           type: boolean
           description: Whether the host is currently accepting new contracts
+        quicPort:
+          type: boolean
+          description: Whether none of the host's QUIC addresses are on a port browsers block for QUIC/WebTransport
         contractPrice:
           type: boolean
           description: Whether the host's contract price is below the maximum contract price
