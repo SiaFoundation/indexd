@@ -749,7 +749,7 @@ paths:
           schema:
             type: array
             items:
-              $ref: "#/components/schemas/PublicKey"
+              $ref: "#/components/schemas/HostKey"
           style: form
           explode: true
         - name: sortby
@@ -977,7 +977,7 @@ paths:
           in: path
           description: Public key of the host
           schema:
-            $ref: "#/components/schemas/PublicKey"
+            $ref: "#/components/schemas/HostKey"
           required: true
       responses:
         "200":
@@ -1048,7 +1048,7 @@ paths:
           schema:
             type: array
             items:
-              $ref: "#/components/schemas/PublicKey"
+              $ref: "#/components/schemas/HostKey"
           style: form
           explode: true
         - name: sortby
@@ -1243,7 +1243,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
+            $ref: "#/components/schemas/HostKey"
       responses:
         "200":
           description: Host removed from blocklist successfully
@@ -1287,7 +1287,7 @@ paths:
           in: path
           required: true
           schema:
-            type: string
+            $ref: "#/components/schemas/HostKey"
       responses:
         "200":
           description: Lost sectors count reset successfully

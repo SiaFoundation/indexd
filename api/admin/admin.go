@@ -891,7 +891,11 @@ func (a *admin) handleGETContracts(jc jape.Context) {
 }
 
 func (a *admin) handleGETHost(jc jape.Context) {
-	hk, err := decodeHostKey(jc.PathParam("hostkey"))
+	var hostKey string
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
+		return
+	}
+	hk, err := decodeHostKey(hostKey)
 	if err != nil {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -907,7 +911,11 @@ func (a *admin) handleGETHost(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTHostScan(jc jape.Context) {
-	hk, err := decodeHostKey(jc.PathParam("hostkey"))
+	var hostKey string
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
+		return
+	}
+	hk, err := decodeHostKey(hostKey)
 	if err != nil {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -923,7 +931,11 @@ func (a *admin) handlePOSTHostScan(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTHostLostSectorsReset(jc jape.Context) {
-	hk, err := decodeHostKey(jc.PathParam("hostkey"))
+	var hostKey string
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
+		return
+	}
+	hk, err := decodeHostKey(hostKey)
 	if err != nil {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -1020,7 +1032,11 @@ func (a *admin) handlePUTHostsBlocklist(jc jape.Context) {
 }
 
 func (a *admin) handleDELETEHostsBlocklist(jc jape.Context) {
-	hk, err := decodeHostKey(jc.PathParam("hostkey"))
+	var hostKey string
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
+		return
+	}
+	hk, err := decodeHostKey(hostKey)
 	if err != nil {
 		jc.Error(err, http.StatusBadRequest)
 		return
@@ -1359,8 +1375,10 @@ func (a *admin) handleGETPrometheusMetrics(jc jape.Context) {
 
 func decodeHostKey(s string) (types.PublicKey, error) {
 	if !strings.HasPrefix(s, "ed25519:") {
-		if _, err := hex.DecodeString(s); err == nil && len(s) == 64 {
-			s = "ed25519:" + s
+		if len(s) == 64 {
+			if _, err := hex.DecodeString(s); err == nil {
+				s = "ed25519:" + s
+			}
 		}
 	}
 

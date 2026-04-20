@@ -339,6 +339,11 @@ components:
       pattern: "^ed25519:[0-9a-fA-F]{64}$"
       description: A ed25519 public key
 
+    HostKey:
+      type: string
+      pattern: "^(ed25519:)?[0-9a-fA-F]{64}$"
+      description: A ed25519 public key, optionally without the "ed25519:" prefix
+
     SemVer:
       type: array
       description: "Represents a semantic version as an array of three unsigned 8-bit integers: [major, minor, patch]"
