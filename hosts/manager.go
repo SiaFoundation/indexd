@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
@@ -48,7 +49,48 @@ var (
 	ErrBadHost = errors.New("host is bad")
 
 	alertStuckHostsID = alerts.RandomAlertID()
+
+	// badQUICPorts is the set of ports blocked by browsers for QUIC/WebTransport
+	// connections. Hosts announcing QUIC on these ports will be unreachable from
+	// browsers.
+	//
+	// https://fetch.spec.whatwg.org/#port-blocking
+	// https://searchfox.org/firefox-release/source/netwerk/base/nsIOService.cpp#122-206
+	badQUICPorts = map[int]struct{}{
+		1: {}, 7: {}, 9: {}, 11: {}, 13: {}, 15: {},
+		17: {}, 19: {}, 20: {}, 21: {}, 22: {}, 23: {},
+		25: {}, 37: {}, 42: {}, 43: {}, 53: {}, 69: {},
+		77: {}, 79: {}, 87: {}, 95: {}, 101: {}, 102: {},
+		103: {}, 104: {}, 109: {}, 110: {}, 111: {}, 113: {},
+		115: {}, 117: {}, 119: {}, 123: {}, 135: {}, 137: {},
+		139: {}, 143: {}, 161: {}, 179: {}, 389: {}, 427: {},
+		465: {}, 512: {}, 513: {}, 514: {}, 515: {}, 526: {},
+		530: {}, 531: {}, 532: {}, 540: {}, 548: {}, 554: {},
+		556: {}, 563: {}, 587: {}, 601: {}, 636: {}, 989: {},
+		990: {}, 993: {}, 995: {}, 1719: {}, 1720: {}, 1723: {},
+		2049: {}, 3659: {}, 4045: {}, 4190: {}, 5060: {}, 5061: {},
+		6000: {}, 6566: {}, 6665: {}, 6666: {}, 6667: {}, 6668: {},
+		6669: {}, 6679: {}, 6697: {}, 10080: {},
+	}
 )
+
+// IsBadQUICAddress reports whether the given address is a QUIC address
+// announced on a port blocked by browsers for QUIC/WebTransport.
+func IsBadQUICAddress(na chain.NetAddress) bool {
+	if na.Protocol != quic.Protocol {
+		return false
+	}
+	_, portStr, err := net.SplitHostPort(na.Address)
+	if err != nil {
+		return false
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		return false
+	}
+	_, ok := badQUICPorts[port]
+	return ok
+}
 
 type (
 	// A HostClient provides methods to interact with a host over RHP4.

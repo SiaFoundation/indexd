@@ -54,6 +54,7 @@ CREATE TABLE hosts (
     last_failed_scan TIMESTAMP WITH TIME ZONE,
     last_successful_scan TIMESTAMP WITH TIME ZONE,
     last_announcement TIMESTAMP WITH TIME ZONE NOT NULL,
+    has_bad_quic_port BOOLEAN NOT NULL DEFAULT FALSE,
     next_scan TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     country_code TEXT NOT NULL DEFAULT '',
     location POINT NOT NULL DEFAULT POINT(0.0, 0.0),

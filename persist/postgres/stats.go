@@ -340,6 +340,7 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 						h.settings_remaining_storage,
 						h.last_successful_scan IS NOT NULL AS has_settings,
 						(get_byte(h.settings_protocol_version, 0) << 16) + (get_byte(h.settings_protocol_version, 1) << 8) + (get_byte(h.settings_protocol_version, 2)) AS settings_version,
+						NOT h.has_bad_quic_port AS good_quic_port,
 						h.recent_uptime,
 						h.settings_max_contract_duration,
 						h.settings_max_collateral,

@@ -281,8 +281,14 @@ func TestHostChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add a host
-	db.addTestHost(t, hk)
+	// add a host, announcing QUIC on a port blocked by browsers so the
+	// QUICPort check starts out failing
+	badQUICAddr := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:22"}
+	if err := db.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{badQUICAddr}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	// assert unscanned host is unusable
 	if h, err := db.Host(hk); err != nil {
@@ -367,6 +373,15 @@ func TestHostChecks(t *testing.T) {
 	_ = db.UpdateHostScan(hk, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("AcceptingContracts")
 
+	// re-announce the host on a non-blocked QUIC port so we pass the check
+	goodQUICAddr := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	if err := db.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{goodQUICAddr}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertCheckOK("QUICPort")
+
 	// adjust contract price so we pass the check
 	hs.Prices.ContractPrice = oneSC.Sub(oneH)
 	_ = db.UpdateHostScan(hk, hs, geoip.Location{}, true, time.Now())
@@ -447,6 +462,8 @@ func TestHosts(t *testing.T) {
 		ProtocolVersion:     true,
 		PriceValidity:       true,
 		AcceptingContracts:  true,
+
+		QUICPort: true,
 
 		ContractPrice:   true,
 		Collateral:      true,
