@@ -36,10 +36,10 @@ func TestRPCFnErrorDecoration(t *testing.T) {
 	customErr := errors.New("custom context error")
 
 	c := &Client{
-		log:          zap.NewNop(),
-		tg:           threadgroup.New(),
-		hosts:        NewProvider(mockStore{}),
-		cachedPrices: make(map[types.PublicKey]proto.HostPrices),
+		log:            zap.NewNop(),
+		tg:             threadgroup.New(),
+		hosts:          NewProvider(mockStore{}),
+		cachedSettings: make(map[types.PublicKey]proto.HostSettings),
 		transports: map[types.PublicKey]*transport{
 			hostKey: {tc: mockTransportClient{}},
 		},

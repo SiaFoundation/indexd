@@ -70,7 +70,7 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		var res rhp.RPCRenewContractResult
 		err = cm.rev.WithRevision(renewCtx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 			cappedCollateral := collateral
-			estimatedRenewal, _ := proto.RenewContract(rev.Revision, settings.Prices, proto.RPCRenewContractParams{
+			estimatedRenewal, _ := proto.RenewContract(rev.Revision, settings.Prices, settings.WalletAddress, proto.RPCRenewContractParams{
 				Allowance:   allowance,
 				Collateral:  cappedCollateral,
 				ContractID:  contract.ID,

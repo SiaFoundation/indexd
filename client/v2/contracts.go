@@ -55,11 +55,11 @@ func (c *Client) FormContract(ctx context.Context, chain ChainManager, signer rh
 	defer done()
 
 	err = c.rpcFn(ctx, params.HostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(ctx, params.HostKey, transport)
+		settings, _, err := c.settings(ctx, params.HostKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		result, err = rhp.RPCFormContract(ctx, transport, chain, signer, chain.TipState(), prices, params.HostKey, params.HostAddress, params.RPCFormContractParams)
+		result, err = rhp.RPCFormContract(ctx, transport, chain, signer, chain.TipState(), settings.Prices, params.HostKey, params.HostAddress, params.RPCFormContractParams)
 		return err
 	})
 	return
@@ -81,11 +81,11 @@ func (c *Client) RefreshContract(ctx context.Context, chain ChainManager, signer
 	}
 
 	err = c.rpcFn(ctx, revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(ctx, revision.HostPublicKey, transport)
+		settings, _, err := c.settings(ctx, revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		result, err = rhp.RPCRefreshContractPartialRollover(ctx, transport, chain, signer, chain.TipState(), prices, revision, rpcParams)
+		result, err = rhp.RPCRefreshContractPartialRollover(ctx, transport, chain, signer, chain.TipState(), settings.Prices, settings.WalletAddress, revision, rpcParams)
 		return err
 	})
 	return
@@ -108,11 +108,11 @@ func (c *Client) RenewContract(ctx context.Context, chain ChainManager, signer r
 	}
 
 	err = c.rpcFn(ctx, revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(ctx, revision.HostPublicKey, transport)
+		settings, _, err := c.settings(ctx, revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		result, err = rhp.RPCRenewContract(ctx, transport, chain, signer, chain.TipState(), prices, revision, rpcParams)
+		result, err = rhp.RPCRenewContract(ctx, transport, chain, signer, chain.TipState(), settings.Prices, settings.WalletAddress, revision, rpcParams)
 		return err
 	})
 	return
@@ -142,11 +142,11 @@ func (c *Client) SectorRoots(ctx context.Context, signer rhp.ContractSigner, cha
 	defer done()
 
 	err = c.rpcFn(ctx, contract.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(ctx, contract.Revision.HostPublicKey, transport)
+		settings, _, err := c.settings(ctx, contract.Revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		result, err = rhp.RPCSectorRoots(ctx, transport, chain.TipState(), prices, signer, contract, offset, length)
+		result, err = rhp.RPCSectorRoots(ctx, transport, chain.TipState(), settings.Prices, signer, contract, offset, length)
 		return err
 	})
 	return
@@ -161,11 +161,11 @@ func (c *Client) FreeSectors(ctx context.Context, signer rhp.ContractSigner, cha
 	defer done()
 
 	err = c.rpcFn(ctx, contract.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(ctx, contract.Revision.HostPublicKey, transport)
+		settings, _, err := c.settings(ctx, contract.Revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		result, err = rhp.RPCFreeSectors(ctx, transport, signer, chain.TipState(), prices, contract, indices)
+		result, err = rhp.RPCFreeSectors(ctx, transport, signer, chain.TipState(), settings.Prices, contract, indices)
 		return err
 	})
 	return
@@ -180,11 +180,11 @@ func (c *Client) AppendSectors(ctx context.Context, signer rhp.ContractSigner, c
 	defer done()
 
 	err = c.rpcFn(ctx, revision.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		prices, err := c.prices(ctx, revision.Revision.HostPublicKey, transport)
+		settings, _, err := c.settings(ctx, revision.Revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		res, err = rhp.RPCAppendSectors(ctx, transport, signer, chain.TipState(), prices, revision, sectors)
+		res, err = rhp.RPCAppendSectors(ctx, transport, signer, chain.TipState(), settings.Prices, revision, sectors)
 		return err
 	})
 	return
