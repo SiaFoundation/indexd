@@ -180,8 +180,8 @@ func newTestHost(hk types.PublicKey) hosts.Host {
 		Latitude:    frand.Float64()*180 - 90,
 		Longitude:   frand.Float64()*360 - 180,
 		Addresses: []chain.NetAddress{
-			{Protocol: siamux.Protocol, Address: "foo"},
-			{Protocol: quic.Protocol, Address: "foo"},
+			{Protocol: siamux.Protocol, Address: "test.siamux:1234"},
+			{Protocol: quic.Protocol, Address: "test.quic:2468"},
 		},
 	}
 }
