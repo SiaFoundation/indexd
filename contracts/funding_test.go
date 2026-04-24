@@ -188,7 +188,7 @@ func TestFunding(t *testing.T) {
 	}
 
 	// assert all accounts next fund was updated and consecutive failed funds was reset
-	expected = time.Now().Add(time.Hour)
+	expected = time.Now().Add(accounts.AccountFundInterval)
 	for _, ea := range s.hostAccounts(t) {
 		if !approxEqual(ea.NextFund, expected) {
 			t.Fatal("expected next fund to be updated to the next fund interval", ea.NextFund)
