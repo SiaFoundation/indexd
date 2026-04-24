@@ -23,7 +23,7 @@ const (
 	// required before an account is considered ready for use.
 	ReadyHostThreshold = 30
 	// AccountFundInterval is how often we will fund host accounts.
-	AccountFundInterval = time.Hour
+	AccountFundInterval = 15 * time.Minute
 	// AccountActivityThreshold is the threshold for determining whether an
 	// account has been active recently for the purposes of contract funding.
 	// An account is considered active if it has been used within the threshold

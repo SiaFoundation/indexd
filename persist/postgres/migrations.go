@@ -46,4 +46,11 @@ WHERE EXISTS (
 		_, err := tx.Exec(ctx, query, networkProtocolQUIC)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		// AccountFundInterval dropped from 1h to 15m, so accounts refill 4x as
+		// often. Divide existing quota targets by 4 to preserve the bytes/hour
+		// rate they were sized for.
+		_, err := tx.Exec(ctx, `UPDATE quotas SET fund_target_bytes = fund_target_bytes / 4;`)
+		return err
+	},
 }
