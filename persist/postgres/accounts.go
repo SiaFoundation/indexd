@@ -105,8 +105,9 @@ WHERE public_key = $1`, sqlPublicKey(ak), accounts.ReadyHostThreshold))
 	return account, err
 }
 
-// HasAccount checks if the account with the given public key exists in the
-// database.
+// HasAccount reports whether an account with the given public key exists and
+// has not been soft-deleted. As a side effect, when the account exists its
+// last_used timestamp is bumped to NOW() so we can track active accounts.
 func (s *Store) HasAccount(ak types.PublicKey) (bool, error) {
 	var exists bool
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {

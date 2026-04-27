@@ -387,7 +387,9 @@ func TestHasAccount(t *testing.T) {
 	store.addTestAccount(t, pk)
 
 	// pin last_used to a known past value so we can verify HasAccount bumps it
-	pastTime := time.Now().Add(-time.Hour).UTC()
+	// truncate to microseconds since timestamptz drops sub-µs precision and we
+	// later compare for exact equality.
+	pastTime := time.Now().Add(-time.Hour).Truncate(time.Microsecond).UTC()
 	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET last_used = $1 WHERE public_key = $2`, pastTime, sqlPublicKey(pk)); err != nil {
 		t.Fatal(err)
 	}

@@ -104,7 +104,8 @@ func (m *AccountManager) Close() error {
 	return nil
 }
 
-// HasAccount checks if the account exists.
+// HasAccount reports whether the account exists. As a side effect, when the
+// account exists its last_used timestamp is bumped to NOW().
 func (m *AccountManager) HasAccount(ctx context.Context, pk types.PublicKey) (bool, error) {
 	return m.store.HasAccount(pk)
 }
