@@ -623,6 +623,13 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// re-fetch the admin view after the app call so LastUsed reflects the
+	// authentication bump performed by appClient.Account.
+	account, err = adminClient.Account(context.Background(), sk.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	appRemaining := account.MaxPinnedData - min(account.PinnedData, account.MaxPinnedData)
 	quotaRemaining := account.QuotaMaxPinnedData - min(account.ConnectKeyPinnedData, account.QuotaMaxPinnedData)
 	expected := app.AccountResponse{
