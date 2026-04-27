@@ -374,7 +374,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 		// check whether adding the newly pinned data would exceed the account's
 		// storage limit and if not, update the account's pinned data
 		var pinnedData, maxPinnedData uint64
-		err = tx.QueryRow(ctx, `UPDATE accounts SET last_used = NOW(), pinned_data = pinned_data + $1, pinned_size = pinned_size + $2 WHERE id = $3 RETURNING pinned_data, max_pinned_data`, newPinnedData, newPinnedSize, accountID).Scan(&pinnedData, &maxPinnedData)
+		err = tx.QueryRow(ctx, `UPDATE accounts SET pinned_data = pinned_data + $1, pinned_size = pinned_size + $2 WHERE id = $3 RETURNING pinned_data, max_pinned_data`, newPinnedData, newPinnedSize, accountID).Scan(&pinnedData, &maxPinnedData)
 		if err != nil {
 			return fmt.Errorf("failed to update account's pinned data: %w", err)
 		} else if pinnedData > maxPinnedData {

@@ -42,8 +42,8 @@ func (s *Store) MarkSlabRepaired(slabID slabs.SlabID, success bool) error {
 
 		nextRepairBackoff := min(minRepairBackoff*time.Duration(1<<(currentFailures)), maxRepairBackoff)
 		_, err = tx.Exec(ctx, `
-			UPDATE slabs 
-			SET consecutive_failed_repairs = $2, next_repair_attempt = $3 
+			UPDATE slabs
+			SET consecutive_failed_repairs = $2, next_repair_attempt = $3
 			WHERE digest = $1`, sqlHash256(slabID), currentFailures+1, time.Now().Add(nextRepairBackoff))
 		if err != nil {
 			return fmt.Errorf("failed to update repair state: %w", err)
@@ -108,10 +108,6 @@ func (s *Store) PinnedSlab(account proto.Account, slabID slabs.SlabID) (slab sla
 	slab.ID = slabID
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		slab.Sectors = slab.Sectors[:0] // reuse same slice if transaction retries
-
-		if _, err := tx.Exec(ctx, `UPDATE accounts SET last_used = NOW() WHERE public_key = $1`, sqlPublicKey(account)); err != nil {
-			return fmt.Errorf("failed to update last used: %w", err)
-		}
 
 		var dbID int64
 		err = tx.QueryRow(ctx, `SELECT s.id, s.encryption_key, s.min_shards FROM slabs s WHERE digest = $1`, sqlHash256(slabID)).Scan(
