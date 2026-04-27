@@ -368,6 +368,15 @@ func TestDeleteAccount(t *testing.T) {
 func TestHasAccount(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
+	getLastUsed := func(pk types.PublicKey) time.Time {
+		t.Helper()
+		var lastUsed time.Time
+		if err := store.pool.QueryRow(t.Context(), `SELECT last_used FROM accounts WHERE public_key = $1`, sqlPublicKey(pk)).Scan(&lastUsed); err != nil {
+			t.Fatalf("failed to read last_used: %v", err)
+		}
+		return lastUsed
+	}
+
 	pk := types.GeneratePrivateKey().PublicKey()
 	found, err := store.HasAccount(pk)
 	if err != nil {
@@ -377,6 +386,12 @@ func TestHasAccount(t *testing.T) {
 	}
 	store.addTestAccount(t, pk)
 
+	// pin last_used to a known past value so we can verify HasAccount bumps it
+	pastTime := time.Now().Add(-time.Hour).UTC()
+	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET last_used = $1 WHERE public_key = $2`, pastTime, sqlPublicKey(pk)); err != nil {
+		t.Fatal(err)
+	}
+
 	found, err = store.HasAccount(pk)
 	if err != nil {
 		t.Fatal(err)
@@ -384,8 +399,18 @@ func TestHasAccount(t *testing.T) {
 		t.Fatal("expected account to exist")
 	}
 
+	// HasAccount should have bumped last_used to ~now
+	if lu := getLastUsed(pk); !lu.After(pastTime) {
+		t.Fatalf("expected last_used to be bumped past %s, got %s", pastTime, lu)
+	}
+
 	// soft delete the account
 	if err := store.DeleteAccount(proto.Account(pk)); err != nil {
+		t.Fatal(err)
+	}
+
+	// pin last_used again to verify HasAccount does NOT bump it for deleted accounts
+	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET last_used = $1 WHERE public_key = $2`, pastTime, sqlPublicKey(pk)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -395,6 +420,11 @@ func TestHasAccount(t *testing.T) {
 		t.Fatal(err)
 	} else if found {
 		t.Fatal("expected soft deleted account to not be found")
+	}
+
+	// last_used should remain untouched for soft-deleted accounts
+	if lu := getLastUsed(pk); !lu.Equal(pastTime) {
+		t.Fatalf("expected last_used to remain %s for soft-deleted account, got %s", pastTime, lu)
 	}
 }
 

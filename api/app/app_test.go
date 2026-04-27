@@ -704,6 +704,33 @@ func TestAppConnect(t *testing.T) {
 	}
 }
 
+func TestAccountLastUsedBumped(t *testing.T) {
+	ctx := t.Context()
+	cluster := testutils.NewCluster(t, testutils.WithHosts(0), testutils.WithLogger(zap.NewNop()))
+	indexer := cluster.Indexer
+	appClient := indexer.App
+
+	// add an account directly to the store since we don't care about it being
+	// funded
+	sk := cluster.AddAccount(t)
+	pk := sk.PublicKey()
+
+	// pin last_used to a known past value so we can detect the bump
+	pastTime := time.Now().Add(-time.Hour).UTC()
+	if _, err := indexer.Store().Exec(ctx, `UPDATE accounts SET last_used = $1 WHERE public_key = $2`, pastTime, pk[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	// asking for the account info should bump last_used via the auth check,
+	// and the returned account should reflect the new value
+	appAccount, err := appClient.Account(ctx, sk)
+	if err != nil {
+		t.Fatal(err)
+	} else if !appAccount.LastUsed.After(pastTime) {
+		t.Fatalf("expected last_used to be bumped past %s, got %s", pastTime, appAccount.LastUsed)
+	}
+}
+
 func TestSharedObjects(t *testing.T) {
 	ctx := t.Context()
 
