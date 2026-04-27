@@ -189,7 +189,7 @@ func TestHost(t *testing.T) {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(h.Settings, hs) {
 		t.Fatal("expected settings to match", h.Settings)
-	} else if len(h.Addresses) != 1 {
+	} else if len(h.Addresses) != 2 {
 		t.Fatal("unexpected", len(h.Addresses))
 	} else if h.LostSectors != 0 {
 		t.Fatal("expected lost sectors to be 0, got", h.LostSectors)
@@ -233,7 +233,7 @@ func TestHostChecks(t *testing.T) {
 	hk := types.PublicKey{1}
 
 	// define helper to assert the settings passed the check with given name
-	assertCheckOK := func(check string) {
+	assertCheck := func(check string, want bool) {
 		t.Helper()
 
 		h, err := db.Host(hk)
@@ -247,9 +247,13 @@ func TestHostChecks(t *testing.T) {
 			t.Fatalf("field '%s' not found", check)
 		} else if f.Kind() != reflect.Bool {
 			t.Fatalf("field '%s' is not a boolean", check)
-		} else if !f.Bool() {
-			t.Fatalf("expected field '%s' to be true", check)
+		} else if f.Bool() != want {
+			t.Fatalf("expected field '%s' to be %v", check, want)
 		}
+	}
+	assertCheckOK := func(check string) {
+		t.Helper()
+		assertCheck(check, true)
 	}
 
 	// define test variables
@@ -281,11 +285,9 @@ func TestHostChecks(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// add a host, announcing QUIC on a port blocked by browsers so the
-	// QUICPort check starts out failing
-	badQUICAddr := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:22"}
+	// add a host with no addresses so both QUIC and Siamux checks fail
 	if err := db.UpdateChainState(func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{badQUICAddr}, time.Now())
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{}, time.Now())
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -373,14 +375,16 @@ func TestHostChecks(t *testing.T) {
 	_ = db.UpdateHostScan(hk, hs, geoip.Location{}, true, time.Now())
 	assertCheckOK("AcceptingContracts")
 
-	// re-announce the host on a non-blocked QUIC port so we pass the check
+	// re-announce the host with both QUIC and siamux so we pass both checks
 	goodQUICAddr := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	siamuxAddr := chain.NetAddress{Protocol: siamux.Protocol, Address: "[::]:4848"}
 	if err := db.UpdateChainState(func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{goodQUICAddr}, time.Now())
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{goodQUICAddr, siamuxAddr}, time.Now())
 	}); err != nil {
 		t.Fatal(err)
 	}
-	assertCheckOK("QUICPort")
+	assertCheckOK("QUIC")
+	assertCheckOK("Siamux")
 
 	// adjust contract price so we pass the check
 	hs.Prices.ContractPrice = oneSC.Sub(oneH)
@@ -463,7 +467,8 @@ func TestHosts(t *testing.T) {
 		PriceValidity:       true,
 		AcceptingContracts:  true,
 
-		QUICPort: true,
+		QUIC:   true,
+		Siamux: true,
 
 		ContractPrice:   true,
 		Collateral:      true,
@@ -823,9 +828,9 @@ func TestUsableHosts(t *testing.T) {
 	_ = addHost(2, locationUS, siamuxProtocol, false, false, true)
 	_ = addHost(3, locationUS, siamuxProtocol, false, true, false)
 	_ = addHost(4, locationUS, siamuxProtocol, false, true, true)
-	_ = addHost(5, locationAU, siamuxProtocol, true, false, false)
-	uh1 := addHost(6, locationUS, siamuxProtocol, true, false, true)
-	_ = addHost(7, locationUS, siamuxProtocol, true, true, false)
+	_ = addHost(5, locationAU, bothProtocols, true, false, false)
+	uh1 := addHost(6, locationUS, bothProtocols, true, false, true)
+	_ = addHost(7, locationUS, bothProtocols, true, true, false)
 	_ = addHost(8, locationUS, bothProtocols, true, true, true)
 	uh2 := addHost(9, locationAU, bothProtocols, true, false, true) // second usable host
 
@@ -874,12 +879,12 @@ func TestUsableHosts(t *testing.T) {
 
 	if hosts, err := db.UsableHosts(0, 10, hosts.WithProtocol(quic.Protocol)); err != nil {
 		t.Fatal("unexpected", err)
-	} else if len(hosts) != 1 {
+	} else if len(hosts) != 2 {
 		t.Fatal("unexpected", len(hosts))
-	} else if hosts[0].PublicKey != uh2 {
-		t.Fatal("unexpected host", hosts[0])
-	} else if hosts[0].Addresses == nil {
-		t.Fatal("expected host to have address")
+	} else if hosts[0].PublicKey != uh1 || hosts[1].PublicKey != uh2 {
+		t.Fatal("unexpected hosts", hosts[0], hosts[1])
+	} else if hosts[0].Addresses == nil || hosts[1].Addresses == nil {
+		t.Fatal("expected hosts to have addresses")
 	}
 
 	// filter by country
@@ -909,17 +914,17 @@ func TestUsableHosts(t *testing.T) {
 		CountryCode: "ES",    // Spain
 		Latitude:    41.3851, // Barcelona
 		Longitude:   2.1734,
-	}, siamuxProtocol, true, false, true)
+	}, bothProtocols, true, false, true)
 	uh2 = addHost(11, geoip.Location{
 		CountryCode: "DE",    // Germany
 		Latitude:    50.1109, // Frankfurt
 		Longitude:   8.6821,
-	}, siamuxProtocol, true, false, true)
+	}, bothProtocols, true, false, true)
 	uh3 := addHost(12, geoip.Location{
 		CountryCode: "FR",    // France
 		Latitude:    48.8566, // Paris
 		Longitude:   2.3522,
-	}, siamuxProtocol, true, false, true)
+	}, bothProtocols, true, false, true)
 
 	// assert sorting by distance works
 	if hosts, err := db.UsableHosts(0, 10, hosts.SortByDistance(50.8503, 4.3517)); err != nil { // Brussels
@@ -952,7 +957,7 @@ func TestUsableHosts(t *testing.T) {
 		CountryCode: "FR", // France
 		Latitude:    0,
 		Longitude:   0,
-	}, siamuxProtocol, true, false, true)
+	}, bothProtocols, true, false, true)
 
 	// test GoodForUpload field
 	// set uh1 to have no remaining storage - should have GoodForUpload=false
@@ -3265,9 +3270,10 @@ func (s *Store) addTestHost(t testing.TB, hks ...types.PublicKey) types.PublicKe
 		panic("developer error")
 	}
 
-	ha := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	quicAddr := chain.NetAddress{Protocol: quic.Protocol, Address: "[::]:4848"}
+	siamuxAddr := chain.NetAddress{Protocol: siamux.Protocol, Address: "[::]:4848"}
 	if err := s.UpdateChainState(func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha}, time.Now())
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{quicAddr, siamuxAddr}, time.Now())
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -10,6 +10,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/contracts"
@@ -65,6 +66,7 @@ func (s *testStore) addUsableHost(t testing.TB) types.PublicKey {
 		PublicKey: pk,
 		Addresses: []chain.NetAddress{
 			{Protocol: siamux.Protocol, Address: "[::]:4848"},
+			{Protocol: quic.Protocol, Address: "[::]:4848"},
 		},
 	})
 

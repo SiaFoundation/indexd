@@ -2,6 +2,7 @@ package testutils
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
 	"testing"
@@ -11,11 +12,38 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	rhp4 "go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/testutil"
+	"go.sia.tech/coreutils/testutil/certs"
 	"go.sia.tech/coreutils/wallet"
 	"go.uber.org/zap"
 )
+
+// insecureScanner skips TLS verification when dialing QUIC.
+type insecureScanner struct{}
+
+func (insecureScanner) ScanSiamux(ctx context.Context, hk types.PublicKey, addr string) (proto4.HostSettings, error) {
+	t, err := siamux.Dial(ctx, addr, hk)
+	if err != nil {
+		return proto4.HostSettings{}, fmt.Errorf("failed to dial siamux: %w", err)
+	}
+	defer t.Close()
+
+	return rhp4.RPCSettings(ctx, t)
+}
+
+func (insecureScanner) ScanQuic(ctx context.Context, hk types.PublicKey, addr string) (proto4.HostSettings, error) {
+	t, err := quic.Dial(ctx, addr, hk, quic.WithTLSConfig(func(c *tls.Config) {
+		c.InsecureSkipVerify = true
+	}))
+	if err != nil {
+		return proto4.HostSettings{}, fmt.Errorf("failed to dial quic: %w", err)
+	}
+	defer t.Close()
+
+	return rhp4.RPCSettings(ctx, t)
+}
 
 const (
 	blocksPerMonth = 144 * 30
@@ -25,8 +53,9 @@ const (
 type (
 	// A Host is an ephemeral host that can be used for testing.
 	Host struct {
-		l  net.Listener
-		pk types.PrivateKey
+		l        net.Listener
+		quicConn net.PacketConn
+		pk       types.PrivateKey
 
 		c  *testutil.EphemeralContractor
 		ss *testutil.EphemeralSectorStore
@@ -43,6 +72,11 @@ func (h *Host) Addr() string {
 	return h.l.Addr().String()
 }
 
+// QUICAddr returns the host's QUIC address.
+func (h *Host) QUICAddr() string {
+	return h.quicConn.LocalAddr().String()
+}
+
 // WalletAddress returns the host's wallet address.
 func (h *Host) WalletAddress() types.Address {
 	return h.w.Address()
@@ -50,10 +84,16 @@ func (h *Host) WalletAddress() types.Address {
 
 // Announce announces the host on the network.
 func (h *Host) Announce() error {
-	ha := chain.V2HostAnnouncement{{
-		Protocol: siamux.Protocol,
-		Address:  h.l.Addr().String(),
-	}}
+	ha := chain.V2HostAnnouncement{
+		{
+			Protocol: siamux.Protocol,
+			Address:  h.l.Addr().String(),
+		},
+		{
+			Protocol: quic.Protocol,
+			Address:  h.quicConn.LocalAddr().String(),
+		},
+	}
 
 	// prepare transaction
 	cs := h.cm.TipState()
@@ -169,9 +209,26 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 	t.Cleanup(func() { rhp4Listener.Close() })
 	go siamux.Serve(rhp4Listener, rs, log)
 
+	udpAddr, err := net.ResolveUDPAddr("udp", ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	quicConn, err := net.ListenUDP("udp", udpAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { quicConn.Close() })
+	quicListener, err := quic.Listen(quicConn, &certs.EphemeralCertManager{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { quicListener.Close() })
+	go quic.Serve(quicListener, rs)
+
 	return &Host{
-		pk: pk,
-		l:  rhp4Listener,
+		pk:       pk,
+		l:        rhp4Listener,
+		quicConn: quicConn,
 
 		c:  contractor,
 		s:  s,

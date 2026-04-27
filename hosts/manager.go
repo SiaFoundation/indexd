@@ -82,11 +82,11 @@ func IsBadQUICAddress(na chain.NetAddress) bool {
 	}
 	_, portStr, err := net.SplitHostPort(na.Address)
 	if err != nil {
-		return false
+		return true
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
-		return false
+		return true
 	}
 	_, ok := badQUICPorts[port]
 	return ok

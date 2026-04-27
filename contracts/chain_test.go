@@ -15,6 +15,9 @@ import (
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
@@ -106,8 +109,12 @@ func newTestStore(t testing.TB) testStore {
 func (ts testStore) addTestHost(t testing.TB, host hosts.Host) {
 	t.Helper()
 
+	addrs := []chain.NetAddress{
+		{Protocol: siamux.Protocol, Address: "test.siamux:1234"},
+		{Protocol: quic.Protocol, Address: "test.quic:2468"},
+	}
 	if err := ts.UpdateChainState(func(tx subscriber.UpdateTx) error {
-		return tx.AddHostAnnouncement(host.PublicKey, host.Addresses, time.Now())
+		return tx.AddHostAnnouncement(host.PublicKey, addrs, time.Now())
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -9,6 +9,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/hosts"
@@ -178,7 +179,10 @@ func newTestHost(hk types.PublicKey) hosts.Host {
 		CountryCode: countries[frand.Intn(len(countries))],
 		Latitude:    frand.Float64()*180 - 90,
 		Longitude:   frand.Float64()*360 - 180,
-		Addresses:   []chain.NetAddress{{Protocol: siamux.Protocol, Address: "foo"}},
+		Addresses: []chain.NetAddress{
+			{Protocol: siamux.Protocol, Address: "test.siamux:1234"},
+			{Protocol: quic.Protocol, Address: "test.quic:2468"},
+		},
 	}
 }
 

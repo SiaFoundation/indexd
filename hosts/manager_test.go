@@ -209,3 +209,22 @@ func TestScanTimeout(t *testing.T) {
 		runTest(t, chain.NetAddress{Address: "1.1.1.1:1111", Protocol: quic.Protocol}, scanner, &scanner.settings.Release)
 	})
 }
+
+func TestIsBadQUICAddress(t *testing.T) {
+	tests := []struct {
+		name string
+		addr chain.NetAddress
+		want bool
+	}{
+		{"siamux", chain.NetAddress{Protocol: siamux.Protocol, Address: "1.1.1.1:22"}, false},
+		{"good port", chain.NetAddress{Protocol: quic.Protocol, Address: "1.1.1.1:4848"}, false},
+		{"bad port", chain.NetAddress{Protocol: quic.Protocol, Address: "1.1.1.1:22"}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := hosts.IsBadQUICAddress(tc.addr); got != tc.want {
+				t.Fatalf("IsBadQUICAddress(%v) = %v, want %v", tc.addr, got, tc.want)
+			}
+		})
+	}
+}

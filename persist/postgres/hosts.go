@@ -14,6 +14,8 @@ import (
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 )
@@ -49,8 +51,8 @@ const (
 
 	// sqlUsabilityCheckColumns are the boolean expressions for each
 	// usability check, returned as individual SELECT columns. Assumes
-	// has_settings, settings_version, good_quic_port, and globals.* are
-	// in scope.
+	// has_settings, settings_version, has_quic, has_siamux, and globals.*
+	// are in scope.
 	sqlUsabilityCheckColumns = `
 	recent_uptime >= 0.9,
 	has_settings AND settings_max_contract_duration >= globals.contracts_period,
@@ -58,7 +60,8 @@ const (
 	has_settings AND settings_version >= globals.host_min_version,
 	has_settings AND settings_valid_until >= last_successful_scan + INTERVAL '15 minutes',
 	has_settings AND settings_accepting_contracts,
-	good_quic_port,
+	has_quic,
+	has_siamux,
 	has_settings AND settings_contract_price <= globals.one_sc,
 	has_settings AND settings_collateral >= globals.hosts_min_collateral AND settings_collateral >= 2 * settings_storage_price,
 	has_settings AND settings_storage_price <= globals.hosts_max_storage_price,
@@ -68,7 +71,7 @@ const (
 
 	// sqlUsabilityFilter is the usability conditions AND'd together for
 	// use in WHERE clauses. Assumes has_settings, settings_version,
-	// good_quic_port, and globals.* are in scope.
+	// has_quic, has_siamux, and globals.* are in scope.
 	sqlUsabilityFilter = `
 	recent_uptime >= 0.9 AND
 	has_settings AND
@@ -77,7 +80,8 @@ const (
 	settings_version >= globals.host_min_version AND
 	settings_valid_until >= last_successful_scan + INTERVAL '15 minutes' AND
 	settings_accepting_contracts AND
-	good_quic_port AND
+	has_quic AND
+	has_siamux AND
 	settings_contract_price <= globals.one_sc AND
 	settings_collateral >= globals.hosts_min_collateral AND
 	settings_collateral >= 2 * settings_storage_price AND
@@ -94,20 +98,24 @@ type dbHost struct {
 }
 
 func (u *updateTx) AddHostAnnouncement(hk types.PublicKey, ha chain.V2HostAnnouncement, ts time.Time) error {
-	var badQUIC bool
+	var hasQUIC, hasSiamux bool
 	for _, na := range ha {
-		if hosts.IsBadQUICAddress(na) {
-			badQUIC = true
-			break
+		switch na.Protocol {
+		case quic.Protocol:
+			if !hosts.IsBadQUICAddress(na) {
+				hasQUIC = true
+			}
+		case siamux.Protocol:
+			hasSiamux = true
 		}
 	}
 
 	var hostID int64
 	err := u.tx.QueryRow(u.ctx, `
-INSERT INTO hosts (public_key, last_announcement, has_bad_quic_port)
-VALUES ($1, $2, $3)
-ON CONFLICT (public_key) DO UPDATE SET last_announcement = $2, has_bad_quic_port = $3
-RETURNING id;`, sqlPublicKey(hk), ts, badQUIC).Scan(&hostID)
+INSERT INTO hosts (public_key, last_announcement, has_quic, has_siamux)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (public_key) DO UPDATE SET last_announcement = $2, has_quic = $3, has_siamux = $4
+RETURNING id;`, sqlPublicKey(hk), ts, hasQUIC, hasSiamux).Scan(&hostID)
 	if err != nil {
 		return err
 	}
@@ -145,7 +153,7 @@ WITH `+sqlGlobalsCTE+`, hosts AS (
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until, settings_signature,
 		last_successful_scan IS NOT NULL as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
-		NOT has_bad_quic_port AS good_quic_port,
+		has_quic, has_siamux,
 		stuck_since
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
@@ -209,7 +217,7 @@ WITH `+sqlGlobalsCTE+`, hosts AS (
 		settings_egress_price, settings_free_sector_price, settings_tip_height, settings_valid_until, settings_signature,
 		last_successful_scan IS NOT NULL as has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
-		NOT has_bad_quic_port AS good_quic_port,
+		has_quic, has_siamux,
 		stuck_since
 	FROM hosts
 	LEFT JOIN hosts_blocklist hb ON hosts.public_key = hb.public_key
@@ -663,7 +671,7 @@ WITH ` + sqlGlobalsCTE + `, hosts AS (
 		settings_signature,
 		last_successful_scan IS NOT NULL AS has_settings,
 		(get_byte(settings_protocol_version, 0) << 16) + (get_byte(settings_protocol_version, 1) << 8) + (get_byte(settings_protocol_version, 2)) as settings_version,
-		NOT has_bad_quic_port AS good_quic_port,
+		has_quic, has_siamux,
 		(stuck_since IS NULL AND settings_remaining_storage > 0) AS good_for_upload
 	FROM hosts
 	WHERE last_successful_scan IS NOT NULL
@@ -739,12 +747,12 @@ WHERE` + sqlUsabilityFilter + ` AND
 	return usable, nil
 }
 
-func decorateHostAddresses(ctx context.Context, tx *txn, hosts ...*dbHost) error {
-	hostIDs := make([]int64, 0, len(hosts))
-	idToIdx := make(map[int64]int64, len(hosts))
-	for i := range hosts {
-		idToIdx[hosts[i].id] = int64(i)
-		hostIDs = append(hostIDs, hosts[i].id)
+func decorateHostAddresses(ctx context.Context, tx *txn, dbHosts ...*dbHost) error {
+	hostIDs := make([]int64, 0, len(dbHosts))
+	idToIdx := make(map[int64]int64, len(dbHosts))
+	for i := range dbHosts {
+		idToIdx[dbHosts[i].id] = int64(i)
+		hostIDs = append(hostIDs, dbHosts[i].id)
 	}
 
 	rows, err := tx.Query(ctx, `SELECT host_id, net_address, protocol FROM host_addresses WHERE host_id = ANY($1)`, hostIDs)
@@ -759,7 +767,10 @@ func decorateHostAddresses(ctx context.Context, tx *txn, hosts ...*dbHost) error
 		if err := rows.Scan(&hostID, &na.Address, (*sqlNetworkProtocol)(&na.Protocol)); err != nil {
 			return fmt.Errorf("failed to scan host address: %w", err)
 		}
-		hosts[idToIdx[hostID]].Addresses = append(hosts[idToIdx[hostID]].Addresses, na)
+		if hosts.IsBadQUICAddress(na) {
+			continue
+		}
+		dbHosts[idToIdx[hostID]].Addresses = append(dbHosts[idToIdx[hostID]].Addresses, na)
 	}
 
 	return rows.Err()
@@ -804,9 +815,10 @@ func scanHost(s scanner) (dbHost, error) {
 		&host.Settings.Prices.TipHeight,
 		&validUntil,
 		(*sqlSignature)(&host.Settings.Prices.Signature),
-		&ignore,
-		&ignore,
-		&ignore,
+		&ignore, // has_settings
+		&ignore, // settings_version
+		&ignore, // has_quic
+		&ignore, // has_siamux
 		&stuckSince,
 		&host.Usability.Uptime,
 		&host.Usability.MaxContractDuration,
@@ -814,7 +826,8 @@ func scanHost(s scanner) (dbHost, error) {
 		&host.Usability.ProtocolVersion,
 		&host.Usability.PriceValidity,
 		&host.Usability.AcceptingContracts,
-		&host.Usability.QUICPort,
+		&host.Usability.QUIC,
+		&host.Usability.Siamux,
 		&host.Usability.ContractPrice,
 		&host.Usability.Collateral,
 		&host.Usability.StoragePrice,

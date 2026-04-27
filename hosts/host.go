@@ -159,9 +159,8 @@ type (
 		PriceValidity       bool `json:"priceValidity"`
 		AcceptingContracts  bool `json:"acceptingContracts"`
 
-		// QUICPort is true if none of the host's QUIC addresses are on a
-		// port that browsers block for QUIC/WebTransport.
-		QUICPort bool `json:"quicPort"`
+		QUIC   bool `json:"quic"`
+		Siamux bool `json:"siamux"`
 
 		ContractPrice   bool `json:"contractPrice"`
 		Collateral      bool `json:"collateral"`
@@ -233,7 +232,8 @@ var GoodUsability = Usability{
 	PriceValidity:       true,
 	AcceptingContracts:  true,
 
-	QUICPort: true,
+	QUIC:   true,
+	Siamux: true,
 
 	ContractPrice:   true,
 	Collateral:      true,
@@ -269,8 +269,11 @@ func (u Usability) FailedChecks() []string {
 	if !u.AcceptingContracts {
 		reasons = append(reasons, "AcceptingContracts")
 	}
-	if !u.QUICPort {
-		reasons = append(reasons, "QUICPort")
+	if !u.QUIC {
+		reasons = append(reasons, "QUIC")
+	}
+	if !u.Siamux {
+		reasons = append(reasons, "Siamux")
 	}
 	if !u.ContractPrice {
 		reasons = append(reasons, "ContractPrice")

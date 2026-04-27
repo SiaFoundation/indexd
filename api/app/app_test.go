@@ -15,7 +15,6 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
@@ -24,7 +23,6 @@ import (
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
-	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -220,17 +218,6 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected 14 usable hosts, got", len(usableHosts))
 	}
 
-	// add quic to h1
-	if err := indexer.Store().UpdateChainState(func(tx subscriber.UpdateTx) error {
-		hosts[0].Addresses = append(hosts[0].Addresses, chain.NetAddress{
-			Protocol: quic.Protocol,
-			Address:  "127.0.0.1:1234",
-		})
-		return tx.AddHostAnnouncement(hosts[0].PublicKey, chain.V2HostAnnouncement(hosts[0].Addresses), time.Now())
-	}); err != nil {
-		t.Fatal(err)
-	}
-
 	locationUS := geoip.Location{
 		CountryCode: "US",
 		Longitude:   -10,
@@ -251,14 +238,13 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert filtering for quic only returns h1
+	// all usable hosts announce both siamux and quic, so filtering by quic
+	// returns all of them
 	usableHosts, err = client.Hosts(ctx, sk, api.WithProtocol(quic.Protocol))
 	if err != nil {
 		t.Fatal("failed to get hosts:", err)
-	} else if len(usableHosts) != 1 {
-		t.Fatal("expected 1 host, got", len(usableHosts))
-	} else if usableHosts[0].PublicKey != hosts[0].PublicKey {
-		t.Fatal("got wrong quic host")
+	} else if len(usableHosts) != 14 {
+		t.Fatal("expected 14 hosts, got", len(usableHosts))
 	}
 
 	// filtering for US should only return h1
