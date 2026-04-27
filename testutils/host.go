@@ -209,7 +209,7 @@ func (c *ConsensusNode) NewHost(t testing.TB, pk types.PrivateKey, log *zap.Logg
 	t.Cleanup(func() { rhp4Listener.Close() })
 	go siamux.Serve(rhp4Listener, rs, log)
 
-	udpAddr, err := net.ResolveUDPAddr("udp", ":0")
+	udpAddr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
