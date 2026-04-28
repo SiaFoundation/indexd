@@ -1,3 +1,10 @@
+## 0.2.1 (2026-04-28)
+
+### Fixes
+
+- Don't reset transport for invalid proof errors.
+- Reduce funding interval to 5m
+
 ## 0.2.0 (2026-04-27)
 
 ### Breaking Changes
