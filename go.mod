@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
 	github.com/jackc/pgx/v5 v5.9.2
-	github.com/klauspost/reedsolomon v1.13.3
+	github.com/klauspost/reedsolomon v1.14.0
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.20.0
@@ -14,7 +14,7 @@ require (
 	go.sia.tech/mux v1.5.0
 	go.sia.tech/web/indexd v0.17.0
 	go.uber.org/goleak v1.3.0
-	go.uber.org/zap v1.27.1
+	go.uber.org/zap v1.28.0
 	golang.org/x/crypto v0.50.0
 	golang.org/x/term v0.42.0
 	golang.org/x/time v0.15.0
