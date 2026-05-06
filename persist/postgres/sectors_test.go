@@ -93,7 +93,10 @@ func TestMigrateSector(t *testing.T) {
 			t.Fatal("object was not updated, but got", len(events), "events")
 		} else if updated {
 			lastUpdate = time.Now()
-			time.Sleep(100 * time.Millisecond)
+			// updated_at on object_events has second precision, sleep past
+			// the next second boundary so subsequent events compare strictly
+			// greater than lastUpdate.
+			time.Sleep(1100 * time.Millisecond)
 		}
 	}
 

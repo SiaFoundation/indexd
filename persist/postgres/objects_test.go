@@ -254,7 +254,9 @@ func TestObjects(t *testing.T) {
 	objs = assertObjects(acc2, 0, 1)
 	assertObj(obj1Acc2, objs[0])
 
-	// add another object to acc2
+	// add another object to acc2; sleep past the next second boundary since
+	// updated_at has second precision
+	time.Sleep(1100 * time.Millisecond)
 	obj2 := store.pinRandomObject(t, acc2, pinSlabs(acc2, randomSlabs(2)))
 
 	// listing the objects should return obj1 first since it was updated first
@@ -263,7 +265,9 @@ func TestObjects(t *testing.T) {
 	assertObj(obj1Acc2, objs[0])
 	assertObj(obj2, objs[1])
 
-	// save object 1 again to update its timestamp
+	// save object 1 again to update its timestamp; sleep past the next second
+	// boundary since updated_at has second precision
+	time.Sleep(1100 * time.Millisecond)
 	obj1Acc2.EncryptedMetadata = []byte("updated meta")
 	if err := store.PinObject(acc2, obj1Acc2.PinRequest()); err != nil {
 		t.Fatal(err)

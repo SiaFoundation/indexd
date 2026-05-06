@@ -955,7 +955,7 @@ func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migr
 		// update affected objects
 		_, err = tx.Exec(ctx, `
 			UPDATE object_events
-			SET updated_at = NOW()
+			SET updated_at = date_trunc('second', NOW())
 			WHERE (account_id, object_key) IN (
 				SELECT DISTINCT o.account_id, o.object_key
 				FROM slab_sectors

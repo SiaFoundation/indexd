@@ -269,7 +269,7 @@ func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) err
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
 		_, err = tx.Exec(ctx, `
-                       UPDATE object_events SET was_deleted = TRUE, updated_at = NOW()
+                       UPDATE object_events SET was_deleted = TRUE, updated_at = date_trunc('second', NOW())
                        WHERE account_id = $1 AND object_key = $2`,
 			accountID, sqlHash256(objectKey))
 		if err != nil {
@@ -342,7 +342,7 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 
 		_, err = tx.Exec(ctx, `
 			INSERT INTO object_events (object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, NOW())`,
+			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, date_trunc('second', NOW()))`,
 			sqlHash256(obj.ID), accountID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object event: %w", err)
