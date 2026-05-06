@@ -96,7 +96,7 @@ func TestMigrateSector(t *testing.T) {
 			// updated_at on object_events has second precision, sleep past
 			// the next second boundary so subsequent events compare strictly
 			// greater than lastUpdate.
-			time.Sleep(1100 * time.Millisecond)
+			time.Sleep(time.Second)
 		}
 	}
 
