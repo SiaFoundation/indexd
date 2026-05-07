@@ -86,12 +86,4 @@ UPDATE hosts SET has_quic = EXISTS (
 		_, err := tx.Exec(ctx, `ALTER TABLE hosts DROP COLUMN has_bad_quic_port`)
 		return err
 	},
-	func(ctx context.Context, tx *txn, log *zap.Logger) error {
-		_, err := tx.Exec(ctx, `
-			ALTER TABLE object_events
-				ALTER COLUMN updated_at TYPE TIMESTAMP(0) WITH TIME ZONE USING date_trunc('second', updated_at),
-				ALTER COLUMN updated_at SET DEFAULT date_trunc('second', NOW());
-		`)
-		return err
-	},
 }

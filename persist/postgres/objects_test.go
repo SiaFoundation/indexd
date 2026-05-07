@@ -367,7 +367,7 @@ func TestListObjectsRegression(t *testing.T) {
 		return bytes.Compare(objectIDs[i][:], objectIDs[j][:]) < 0
 	})
 
-	ts := time.Now().Round(time.Second)
+	ts := time.Now().Truncate(time.Second)
 	_, err := store.pool.Exec(t.Context(), "UPDATE objects SET updated_at = $1", ts)
 	if err != nil {
 		t.Fatal(err)

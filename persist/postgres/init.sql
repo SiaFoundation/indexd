@@ -350,7 +350,7 @@ CREATE TABLE object_events (
     object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32), -- not a FK since deletions need to hang around
     account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     was_deleted BOOLEAN NOT NULL, -- true if deleted, false otherwise
-    updated_at TIMESTAMP(0) WITH TIME ZONE DEFAULT date_trunc('second', NOW()), -- last time the object was created/updated/deleted
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), -- last time the object was created/updated/deleted truncated to second precision
     PRIMARY KEY (account_id, object_key)
 );
 
