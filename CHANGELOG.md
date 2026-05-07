@@ -1,3 +1,11 @@
+## 0.2.1 (2026-05-07)
+
+### Fixes
+
+- Don't reset transport for invalid proof errors.
+- Reduce funding interval to 5m
+- Truncate object event timestamps in database to seconds
+
 ## 0.2.0 (2026-04-27)
 
 ### Breaking Changes
