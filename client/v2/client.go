@@ -431,10 +431,8 @@ func shouldResetTransport(err error) bool {
 		// os.ErrDeadlineExceeded indicates that the stream hit a timeout which was set
 		// using SetDeadline. In this case, the mux is still healthy.
 		return false
-	case errors.Is(err, rhp.ErrInvalidProof):
-		// An invalid proof error indicates that the host sent us a response
-		// with an invalid proof. This error is raised on our side and therefore
-		// not transport related.
+	case proto.ErrorCode(err) == proto.ErrorCodeClientError:
+		// client errors are raised on our side and therefore not transport related
 		return false
 	default:
 		return proto.ErrorCode(err) == proto.ErrorCodeTransport
