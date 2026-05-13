@@ -241,10 +241,17 @@ func (p *Provider) AddSettingsSample(hostKey types.PublicKey, latency time.Durat
 }
 
 // AddFailedRPC records a failed RPC attempt to the specified host.
+// Aborted RPCs and missing sector errors are not counted as failures.
 func (p *Provider) AddFailedRPC(hostKey types.PublicKey, err error) {
 	if errors.Is(err, ErrAbortedRPC) || errors.Is(err, proto.ErrSectorNotFound) {
-		return // do not record aborted RPCs or missing sectors as failures
+		return
 	}
+	p.recordFailure(hostKey)
+}
+
+// recordFailure unconditionally records a failure for the specified host,
+// lowering its priority in future queues.
+func (p *Provider) recordFailure(hostKey types.PublicKey) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	metric, exists := p.metrics[hostKey]
