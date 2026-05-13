@@ -215,6 +215,12 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	return err
 }
 
+// AddFailedRPC unconditionally records a failed RPC attempt to the
+// specified host, lowering its priority in future queues.
+func (c *Client) AddFailedRPC(hostKey types.PublicKey) {
+	c.hosts.recordFailure(hostKey)
+}
+
 // AccountBalance fetches the account balance from the specified host.
 func (c *Client) AccountBalance(ctx context.Context, hostKey types.PublicKey, accountKey proto.Account) (balance types.Currency, err error) {
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
