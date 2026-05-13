@@ -53,6 +53,13 @@ type (
 		URL     string `yaml:"url"`
 	}
 
+	// Slabs contains the configuration for the slab manager.
+	Slabs struct {
+		// MigrationWorkers is the number of slabs to migrate in parallel. If
+		// zero, defaults to runtime.NumCPU().
+		MigrationWorkers int `yaml:"migrationWorkers"`
+	}
+
 	// FileLog configures the file output of the logger.
 	FileLog struct {
 		Enabled bool            `yaml:"enabled"`
@@ -88,6 +95,7 @@ type (
 		Syncer         Syncer                  `yaml:"syncer"`
 		Consensus      Consensus               `yaml:"consensus"`
 		Explorer       Explorer                `yaml:"explorer"`
+		Slabs          Slabs                   `yaml:"slabs"`
 		Log            Log                     `yaml:"log"`
 		Database       postgres.ConnectionInfo `yaml:"database"`
 	}
