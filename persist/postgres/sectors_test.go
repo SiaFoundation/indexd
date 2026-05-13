@@ -1035,6 +1035,23 @@ func TestPinSlabsBadHost(t *testing.T) {
 	if _, err := store.PinSlabs(proto.Account{1}, nextCheck, slab2); err == nil || !errors.Is(err, slabs.ErrBadHosts) {
 		t.Fatalf("expected error %v, got %v", slabs.ErrBadHosts, err)
 	}
+
+	// a slab with the same good host appearing on multiple shards should
+	// fail with ErrDuplicateHost
+	_, slab3 := newSlab(2, hk1, hk1)
+	if _, err := store.PinSlabs(proto.Account{1}, nextCheck, slab3); err == nil || !errors.Is(err, slabs.ErrDuplicateHost) {
+		t.Fatalf("expected error %v, got %v", slabs.ErrDuplicateHost, err)
+	}
+
+	// a slab with all unique good hosts should still succeed
+	hk3 := store.addTestHost(t)
+	store.addTestContract(t, hk3)
+	slab4ID, slab4 := newSlab(3, hk1, hk3)
+	if slabIDs, err := store.PinSlabs(proto.Account{1}, nextCheck, slab4); err != nil {
+		t.Fatal(err)
+	} else if slabIDs[0] != slab4ID {
+		t.Fatalf("expected slab ID %v, got %v", slab4ID, slabIDs[0])
+	}
 }
 
 func TestPinSlabsConflict(t *testing.T) {

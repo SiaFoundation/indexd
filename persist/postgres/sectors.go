@@ -322,10 +322,15 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			var unpinnedDeltas []unpinnedDelta
 			br := tx.SendBatch(ctx, batch)
 			sectorIDs := make([]int64, len(slab.Sectors))
+			usedHosts := make(map[types.PublicKey]struct{})
 			for i, sector := range slab.Sectors {
 				if _, ok := goodHosts[sector.HostKey]; !ok {
 					badHosts++
+				} else if _, used := usedHosts[sector.HostKey]; used {
+					br.Close()
+					return fmt.Errorf("%w: %q", slabs.ErrDuplicateHost, sector.HostKey)
 				}
+				usedHosts[sector.HostKey] = struct{}{}
 
 				var inserted bool
 				var hostID int64

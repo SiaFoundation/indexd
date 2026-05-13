@@ -32,6 +32,10 @@ var (
 	// sectors on bad hosts.
 	ErrBadHosts = errors.New("slab has too many sectors on bad hosts")
 
+	// ErrDuplicateHost is returned when attempting to pin a slab with duplicate
+	// host keys.
+	ErrDuplicateHost = errors.New("slab has duplicate host keys")
+
 	// ErrMinShards is returned when attempting to pin a slab with an invalid
 	// number of minimum shards, for example if `MinShards` exceeds the number
 	// of sectors.
