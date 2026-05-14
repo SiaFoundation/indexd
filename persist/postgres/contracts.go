@@ -276,7 +276,8 @@ LIMIT $3 OFFSET $4`, orderClause), opts.Good, opts.Revisable, limit, offset, ids
 
 func buildContractOrderByClause(sorts []contracts.ContractSortOpt) (string, error) {
 	if len(sorts) == 0 {
-		return "", nil
+		// provide a stable order when no sort is specified
+		return "ORDER BY c.contract_id ASC", nil
 	}
 
 	sortMapping := map[string]string{

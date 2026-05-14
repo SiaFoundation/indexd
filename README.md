@@ -145,6 +145,8 @@ consensus:
 explorer:
     enabled: true
     url: https://api.siascan.com
+slabs:
+    migrationWorkers: 16 # number of slabs to migrate in parallel (0 defaults to runtime.NumCPU())
 log:
     stdout:
         enabled: true # enable logging to stdout

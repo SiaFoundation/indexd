@@ -18,23 +18,26 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 	minProofHeight := bh + renewWindow
 	newProofHeight := bh + period
 
+	var eligible, attempted, successful int
 	batchSize := 50
 	for offset := 0; ; offset += batchSize {
 		contracts, err := cm.store.Contracts(offset, batchSize, WithGood(true), WithRevisable(true))
 		if err != nil {
 			return fmt.Errorf("failed to fetch contracts for renewal: %w", err)
 		}
-
+		eligible += len(contracts)
 		for _, contract := range contracts {
 			if contract.ProofHeight > minProofHeight {
 				continue // too early to renew
 			} else if !contract.Good {
 				continue // contract is bad
 			}
-
+			attempted++
 			log := log.With(zap.Stringer("contractID", contract.ID), zap.Stringer("host", contract.HostKey))
 			if err := cm.renewContract(ctx, contract, newProofHeight, log); err != nil {
 				log.Error("failed to renew contract", zap.Error(err))
+			} else {
+				successful++
 			}
 		}
 
@@ -42,7 +45,7 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 			break
 		}
 	}
-
+	log.Debug("renewals finished", zap.Int("eligible", eligible), zap.Int("attempted", attempted), zap.Int("successful", successful))
 	return nil
 }
 

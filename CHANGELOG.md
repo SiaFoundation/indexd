@@ -1,3 +1,17 @@
+## 0.2.2 (2026-05-13)
+
+### Features
+
+#### Make slab migration concurrency configurable
+
+Added a new `slabs.migrationWorkers` config field that controls the number of slabs migrated in parallel by the slab manager.
+
+### Fixes
+
+#### Default to a stable order in the contracts query
+
+Paginated callers of `Store.Contracts` that didn't pass a sort option were issuing `LIMIT/OFFSET` without an `ORDER BY`, which is non-deterministic in PostgreSQL and could cause rows to be silently skipped or duplicated between batches. The contracts query now defaults to ordering by `c.contract_id ASC` when no sort is specified.
+
 ## 0.2.1 (2026-05-07)
 
 ### Fixes

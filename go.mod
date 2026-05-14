@@ -1,4 +1,4 @@
-module go.sia.tech/indexd // v0.2.1
+module go.sia.tech/indexd // v0.2.2
 
 go 1.26.0
 
@@ -11,7 +11,7 @@ require (
 	go.sia.tech/core v0.21.0
 	go.sia.tech/coreutils v0.22.0
 	go.sia.tech/jape v0.14.1
-	go.sia.tech/mux v1.5.0
+	go.sia.tech/mux v1.5.1
 	go.sia.tech/web/indexd v0.17.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.28.0
