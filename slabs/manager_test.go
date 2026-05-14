@@ -410,7 +410,7 @@ func (m *mockHostClient) addTestHost(sk types.PrivateKey) hosts.Host {
 }
 
 // AddFailedRPC is a mock implementation that does nothing.
-func (c *mockHostClient) AddFailedRPC(hostKey types.PublicKey) {
+func (m *mockHostClient) AddFailedRPC(hostKey types.PublicKey) {
 }
 
 // Prices is a mock implementation that returns the preset host settings.
