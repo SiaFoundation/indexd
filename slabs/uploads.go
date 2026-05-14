@@ -75,9 +75,17 @@ top:
 					log := log.With(zap.Stringer("hostKey", hostKey))
 					// upload the shard
 					start := time.Now()
-					result, err := m.uploadShard(ctx, hostKey, shard)
+					timeoutCtx, timeoutCancel := context.WithTimeout(ctx, m.shardTimeout)
+					result, err := m.uploadShard(timeoutCtx, hostKey, shard)
+					timedOut := timeoutCtx.Err() != nil
+					timeoutCancel()
 					if err != nil {
 						log.Debug("failed to upload shard", zap.Duration("elapsed", time.Since(start)), zap.Error(err))
+						// demote the host if it hit the per-shard timeout while
+						// the overall migration is still in progress
+						if timedOut && ctx.Err() == nil {
+							m.hosts.AddFailedRPC(hostKey)
+						}
 						continue
 					} else if result.Root != shardRoot {
 						// note: since the RHP verifies that the root returned by the host
@@ -116,9 +124,6 @@ top:
 }
 
 func (m *SlabManager) uploadShard(ctx context.Context, hostKey types.PublicKey, shard []byte) (rhp.RPCWriteSectorResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, m.shardTimeout)
-	defer cancel()
-
 	usable, err := m.hm.Usable(ctx, hostKey)
 	if err != nil {
 		return rhp.RPCWriteSectorResult{}, fmt.Errorf("failed to check if host is usable: %w", err)
