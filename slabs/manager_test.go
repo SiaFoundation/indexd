@@ -391,6 +391,7 @@ type mockHostClient struct {
 	hostKeys        map[types.PublicKey]types.PrivateKey
 	hostSettings    map[types.PublicKey]proto.HostSettings
 	unusable        map[types.PublicKey]struct{}
+	failedRPCs      map[types.PublicKey]int
 }
 
 func (m *mockHostClient) resetStorage() {
@@ -409,8 +410,11 @@ func (m *mockHostClient) addTestHost(sk types.PrivateKey) hosts.Host {
 	return h
 }
 
-// AddFailedRPC is a mock implementation that does nothing.
+// AddFailedRPC records demote calls for inspection by tests.
 func (m *mockHostClient) AddFailedRPC(hostKey types.PublicKey) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failedRPCs[hostKey]++
 }
 
 // Prices is a mock implementation that returns the preset host settings.
@@ -542,5 +546,6 @@ func newMockHostClient() *mockHostClient {
 		hostKeys:        make(map[types.PublicKey]types.PrivateKey),
 		hostSettings:    make(map[types.PublicKey]proto.HostSettings),
 		unusable:        make(map[types.PublicKey]struct{}),
+		failedRPCs:      make(map[types.PublicKey]int),
 	}
 }
