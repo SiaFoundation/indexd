@@ -193,7 +193,7 @@ func isFailedRPC(ctx context.Context, err error) bool {
 	case errors.Is(err, proto.ErrSectorNotFound):
 		return false
 	default:
-		return true
+		return err != nil
 	}
 }
 
