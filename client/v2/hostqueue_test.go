@@ -101,7 +101,7 @@ func TestProviderSettingsSample(t *testing.T) {
 	provider.AddSettingsSample(hostA, 100*time.Millisecond)
 
 	// add a failure to hostC
-	provider.AddFailedRPC(hostC, nil)
+	provider.AddFailedRPC(hostC)
 
 	// hostA should sort behind unknown hostB but ahead of failed hostC
 	sorted := provider.Prioritize(slices.Clone(usable))
@@ -132,7 +132,7 @@ func TestProviderSettingsSample(t *testing.T) {
 	}
 
 	// record a failed RPC to hostB; it should sort behind hostA
-	provider.AddFailedRPC(hostB, nil)
+	provider.AddFailedRPC(hostB)
 
 	sorted = provider.Prioritize(slices.Clone(usable))
 	if slices.Index(sorted, hostA) >= slices.Index(sorted, hostB) {
@@ -156,7 +156,7 @@ func TestProviderPriority(t *testing.T) {
 	}
 
 	// simulate a failed RPC
-	provider.AddFailedRPC(usable[0], nil)
+	provider.AddFailedRPC(usable[0])
 
 	// ensure the first host is now the worst candidate
 	sorted = provider.Prioritize(slices.Clone(usable))
@@ -167,8 +167,8 @@ func TestProviderPriority(t *testing.T) {
 	}
 
 	// simulate multiple failed RPCs to the second host
-	provider.AddFailedRPC(usable[1], nil)
-	provider.AddFailedRPC(usable[1], nil)
+	provider.AddFailedRPC(usable[1])
+	provider.AddFailedRPC(usable[1])
 
 	// ensure the second host is now the worst candidate
 	sorted = provider.Prioritize(slices.Clone(usable))

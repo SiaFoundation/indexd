@@ -77,6 +77,7 @@ type (
 	// A HostClient defines the minimal interface for interacting with hosts that
 	// the SlabManager requires.
 	HostClient interface {
+		AddFailedRPC(hostKey types.PublicKey)
 		Prices(context.Context, types.PublicKey) (proto.HostPrices, error)
 		WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (rhp.RPCWriteSectorResult, error)
 		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error)
