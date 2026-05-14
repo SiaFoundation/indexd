@@ -12,7 +12,6 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/mux/v3"
 	"go.uber.org/zap"
 )
@@ -27,12 +26,7 @@ type slabDownload struct {
 // downloadShards downloads at least the minimum number of shards required to
 // recover the slab.
 func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Logger) ([][]byte, error) {
-	initialCtx, initialCancel := context.WithCancel(ctx)
-	overdriveCtx, overdriveCancel := context.WithCancelCause(ctx)
-	cancel := func() {
-		initialCancel()
-		overdriveCancel(client.ErrAbortedRPC)
-	}
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
 	shards := make([][]byte, len(slab.Sectors))
@@ -58,7 +52,7 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 	sema := make(chan struct{}, slab.MinShards)
 
 	// helper to download a shard from a host
-	downloadShard := func(ctx context.Context, hostKey types.PublicKey, sector slabDownload, log *zap.Logger) error {
+	downloadShard := func(hostKey types.PublicKey, sector slabDownload, log *zap.Logger) error {
 		defer func() {
 			<-sema
 		}()
@@ -120,12 +114,17 @@ initialLoop:
 		sector := slabHosts[hostKey]
 		log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("sectorRoot", sector.root))
 		wg.Go(func() {
-			if err := downloadShard(initialCtx, hostKey, slabHosts[hostKey], log); err != nil {
+			if err := downloadShard(hostKey, slabHosts[hostKey], log); err != nil {
 				log.Debug("shard download failed", zap.Error(err))
 				// non-blocking send to indicate a failure
 				select {
 				case failedCh <- struct{}{}:
 				default:
+				}
+				// initial shard failures due to cancellation are considered
+				// failed RPCs to demote slow hosts
+				if ctx.Err() != nil {
+					m.hosts.AddFailedRPC(hostKey)
 				}
 			}
 		})
@@ -137,7 +136,7 @@ raceLoop:
 	for i := int(slab.MinShards); downloaded.Load() < uint32(slab.MinShards) && i < len(candidates); i++ {
 		hostKey := candidates[i]
 		select {
-		case <-initialCtx.Done():
+		case <-ctx.Done():
 			break raceLoop
 		case <-failedCh:
 			// a download has failed
@@ -152,7 +151,7 @@ raceLoop:
 			sector := slabHosts[hostKey]
 			log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("sectorRoot", sector.root))
 			wg.Go(func() {
-				if err := downloadShard(overdriveCtx, hostKey, slabHosts[hostKey], log); err != nil {
+				if err := downloadShard(hostKey, slabHosts[hostKey], log); err != nil {
 					log.Debug("shard download failed", zap.Error(err))
 					// non-blocking send to indicate a failure
 					select {
@@ -161,7 +160,7 @@ raceLoop:
 					}
 				}
 			})
-		case <-initialCtx.Done():
+		case <-ctx.Done():
 			break raceLoop
 		}
 	}

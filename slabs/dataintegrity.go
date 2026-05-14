@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/client/v2"
 	"go.uber.org/zap"
 )
 
@@ -17,7 +16,7 @@ func (m *SlabManager) performIntegrityChecksForHost(ctx context.Context, hostKey
 	// apply a timeout on a per-host basis, ensuring that we don't spend more than 5 minutes
 	// on integrity checks for a single host, if the host has a large number of sectors to check,
 	// or is slow to respond, the next integrity check will pick up where we left off
-	ctx, cancel := context.WithTimeoutCause(ctx, m.integrityCheckTimeout, client.ErrAbortedRPC)
+	ctx, cancel := context.WithTimeout(ctx, m.integrityCheckTimeout)
 	defer cancel()
 
 	const batchSize = 1000 // batch size for sector retrieval
