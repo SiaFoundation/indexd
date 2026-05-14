@@ -155,3 +155,160 @@ func TestDownloadShards(t *testing.T) {
 		}
 	})
 }
+
+// TestDownloadShardsDemotion exercises the demote logic in downloadShards.
+// A host is demoted (AddFailedRPC) when:
+//  1. it hits its per-shard timeout while the overall download is still in
+//     progress, or
+//  2. it was part of the initial batch and was interrupted by the parent ctx
+//     being cancelled (because enough other shards completed).
+//
+// In particular, a hedge spawn that gets interrupted by parent-ctx cancellation
+// should NOT be demoted, and a host that returns an immediate non-timeout error
+// should NOT be demoted either.
+func TestDownloadShardsDemotion(t *testing.T) {
+	setup := func(t *testing.T, numHosts int, minShards uint) (*slabs.SlabManager, *mockHostClient, []hosts.Host, slabs.Slab) {
+		log := zaptest.NewLogger(t)
+		store := newMockStore(t)
+		chain := newMockChainManager()
+		am := newMockAccountManager()
+		hm := newMockHostManager()
+		client := newMockHostClient()
+
+		hs := make([]hosts.Host, numHosts)
+		slab := slabs.Slab{MinShards: minShards}
+		for i := range hs {
+			sk := types.GeneratePrivateKey()
+			h := client.addTestHost(sk)
+			hm.hosts[sk.PublicKey()] = h
+			hs[i] = h
+			store.AddTestHost(t, h)
+
+			result, err := client.WriteSector(t.Context(), types.GeneratePrivateKey(), h.PublicKey, []byte{byte(i + 1)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			slab.Sectors = append(slab.Sectors, slabs.Sector{
+				Root:    result.Root,
+				HostKey: &h.PublicKey,
+			})
+		}
+
+		account := types.GeneratePrivateKey()
+		sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
+		sm.SetShardTimeout(2 * time.Second)
+		return sm, client, hs, slab
+	}
+
+	wasDemoted := func(client *mockHostClient, hk types.PublicKey) bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return client.failedRPCs[hk] > 0
+	}
+
+	// MinShards equals total hosts, so there are no race-loop candidates. The
+	// slow initial host hits its per-shard timeout while the parent ctx is
+	// still alive (downloaded < MinShards), exercising the first demote
+	// clause.
+	t.Run("initial host shard timeout", func(t *testing.T) {
+		sm, client, hs, slab := setup(t, 3, 3)
+		client.slowHosts[hs[0].PublicKey] = 30 * time.Minute
+
+		synctest.Test(t, func(t *testing.T) {
+			_, err := sm.DownloadShards(context.Background(), slab, zap.NewNop())
+			if !errors.Is(err, slabs.ErrNotEnoughShards) {
+				t.Fatalf("expected ErrNotEnoughShards, got %v", err)
+			}
+		})
+
+		if !wasDemoted(client, hs[0].PublicKey) {
+			t.Fatalf("expected initial timed-out host to be demoted")
+		}
+		for i := 1; i < 3; i++ {
+			if wasDemoted(client, hs[i].PublicKey) {
+				t.Fatalf("expected hs[%d] not to be demoted", i)
+			}
+		}
+	})
+
+	// 3 hosts, MinShards=2. hs[0] is a very slow initial host. hs[1] is an
+	// instant initial host. hs[2] is an instant hedge spawned via the race
+	// ticker; once it succeeds the parent ctx cancels and hs[0] is
+	// interrupted before its per-shard timeout fires - the second demote
+	// clause should apply.
+	t.Run("initial host interrupted by parent cancel", func(t *testing.T) {
+		sm, client, hs, slab := setup(t, 3, 2)
+		client.slowHosts[hs[0].PublicKey] = 30 * time.Minute
+
+		synctest.Test(t, func(t *testing.T) {
+			if _, err := sm.DownloadShards(context.Background(), slab, zap.NewNop()); err != nil {
+				t.Fatal(err)
+			}
+		})
+
+		if !wasDemoted(client, hs[0].PublicKey) {
+			t.Fatalf("expected initial interrupted host to be demoted")
+		}
+		for i := 1; i < 3; i++ {
+			if wasDemoted(client, hs[i].PublicKey) {
+				t.Fatalf("expected hs[%d] not to be demoted", i)
+			}
+		}
+	})
+
+	// 4 hosts, MinShards=2.
+	//   hs[0] succeeds instantly (initial).
+	//   hs[1] returns an immediate non-timeout error (initial).
+	//   hs[2] is a very slow hedge spawned via failedCh; the parent ctx
+	//         cancels before its timeout, so it should NOT be demoted.
+	//   hs[3] succeeds instantly as a hedge spawned via the ticker.
+	// Result: none of the hosts should be demoted.
+	t.Run("hedge interrupt and quick error not demoted", func(t *testing.T) {
+		sm, client, hs, slab := setup(t, 4, 2)
+		client.failHosts[hs[1].PublicKey] = errors.New("simulated read failure")
+		client.slowHosts[hs[2].PublicKey] = 30 * time.Minute
+
+		synctest.Test(t, func(t *testing.T) {
+			if _, err := sm.DownloadShards(context.Background(), slab, zap.NewNop()); err != nil {
+				t.Fatal(err)
+			}
+		})
+
+		for i, h := range hs {
+			if wasDemoted(client, h.PublicKey) {
+				t.Fatalf("expected no host to be demoted, but hs[%d] was", i)
+			}
+		}
+	})
+
+	// 4 hosts, MinShards=2. Same shape as above, but hs[3] is also slow, so
+	// neither hedge completes and both hit their per-shard timeout while the
+	// overall download is still in progress - the first demote clause fires
+	// for hedges too.
+	t.Run("hedge host shard timeout", func(t *testing.T) {
+		sm, client, hs, slab := setup(t, 4, 2)
+		client.failHosts[hs[1].PublicKey] = errors.New("simulated read failure")
+		client.slowHosts[hs[2].PublicKey] = 30 * time.Minute
+		client.slowHosts[hs[3].PublicKey] = 30 * time.Minute
+
+		synctest.Test(t, func(t *testing.T) {
+			_, err := sm.DownloadShards(context.Background(), slab, zap.NewNop())
+			if !errors.Is(err, slabs.ErrNotEnoughShards) {
+				t.Fatalf("expected ErrNotEnoughShards, got %v", err)
+			}
+		})
+
+		if !wasDemoted(client, hs[2].PublicKey) {
+			t.Fatalf("expected hs[2] (timed-out hedge) to be demoted")
+		}
+		if !wasDemoted(client, hs[3].PublicKey) {
+			t.Fatalf("expected hs[3] (timed-out hedge) to be demoted")
+		}
+		if wasDemoted(client, hs[0].PublicKey) {
+			t.Fatalf("expected hs[0] not to be demoted")
+		}
+		if wasDemoted(client, hs[1].PublicKey) {
+			t.Fatalf("expected hs[1] not to be demoted")
+		}
+	})
+}
