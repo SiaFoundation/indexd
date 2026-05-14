@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
@@ -205,6 +206,35 @@ func (c *Client) ReplenishAccounts(ctx context.Context, signer rhp.ContractSigne
 
 	err = c.rpcFn(ctx, params.Contract.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
 		result, err = rhp.RPCReplenishAccounts(ctx, transport, params, chain.TipState(), signer)
+		return err
+	})
+	return
+}
+
+// AttachPools attaches pools to accounts on the specified host.
+func (c *Client) AttachPools(ctx context.Context, hostKey types.PublicKey, inputs []rhp.PoolAttachInput, validity time.Duration) error {
+	done, err := c.tg.Add()
+	if err != nil {
+		return err
+	}
+	defer done()
+
+	return c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
+		return rhp.RPCAttachPools(ctx, transport, inputs, validity)
+	})
+}
+
+// ReplenishPools replenishes the specified pools on the host using the
+// provided contract.
+func (c *Client) ReplenishPools(ctx context.Context, signer rhp.ContractSigner, chain ChainManager, params rhp.RPCReplenishPoolsParams) (result rhp.RPCReplenishPoolsResult, err error) {
+	done, err := c.tg.Add()
+	if err != nil {
+		return rhp.RPCReplenishPoolsResult{}, err
+	}
+	defer done()
+
+	err = c.rpcFn(ctx, params.Contract.Revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
+		result, err = rhp.RPCReplenishPools(ctx, transport, params, chain.TipState(), signer)
 		return err
 	})
 	return

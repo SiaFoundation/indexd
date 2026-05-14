@@ -13,7 +13,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool, log *zap.Logger) error {
+func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.Logger) error {
 	start := time.Now()
 
 	// fetch hosts
@@ -43,7 +43,7 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 			}
 
 			if err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
-				return cm.FundAccounts(ctx, host, contractIDs, force, log)
+				return cm.FundAccounts(ctx, host, contractIDs, log)
 			}); err != nil {
 				log.Debug("failed to fund accounts", zap.Error(err))
 			}
@@ -52,6 +52,46 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 	wg.Wait()
 
 	log.Debug("funding finished", zap.Duration("duration", time.Since(start)))
+	return ctx.Err()
+}
+
+func (cm *ContractManager) performPoolFunding(ctx context.Context, force bool, log *zap.Logger) error {
+	start := time.Now()
+
+	hostsToFund, err := cm.hosts.HostsForFunding(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch hosts for pool funding: %w", err)
+	}
+
+	var wg sync.WaitGroup
+	for _, hk := range hostsToFund {
+		wg.Add(1)
+		go func(ctx context.Context, hostKey types.PublicKey, log *zap.Logger) {
+			ctx, cancel := context.WithTimeoutCause(ctx, fundTimeout, client.ErrAbortedRPC)
+			defer func() {
+				wg.Done()
+				cancel()
+			}()
+
+			contractIDs, err := cm.store.ContractsForFunding(hostKey, 10)
+			if err != nil {
+				log.Error("failed to fetch contracts for funding", zap.Error(err))
+				return
+			} else if len(contractIDs) == 0 {
+				log.Debug("no contracts for funding")
+				return
+			}
+
+			if err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+				return cm.FundPools(ctx, host, contractIDs, force, log)
+			}); err != nil {
+				log.Debug("failed to fund pools", zap.Error(err))
+			}
+		}(ctx, hk, log.With(zap.Stringer("hostKey", hk)))
+	}
+	wg.Wait()
+
+	log.Debug("pool funding finished", zap.Duration("duration", time.Since(start)))
 	return ctx.Err()
 }
 
@@ -120,7 +160,9 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 				log.Debug("starting scheduled funding")
 			}
 			fundingLog := log.Named("accounts")
-			logError(cm.performAccountFunding(ctx, force, fundingLog), fundingLog)
+			logError(cm.performAccountFunding(ctx, fundingLog), fundingLog)
+			poolLog := log.Named("pools")
+			logError(cm.performPoolFunding(ctx, force, poolLog), poolLog)
 		}
 	})
 

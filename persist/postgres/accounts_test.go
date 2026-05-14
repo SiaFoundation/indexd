@@ -1116,16 +1116,12 @@ func TestAccountFundingInfo(t *testing.T) {
 		t.Fatalf("expected 2 default active accounts, got %d", defaultInfo.ActiveAccounts)
 	} else if defaultInfo.FundTargetBytes != defaultFundTarget {
 		t.Fatalf("expected default fund target %d, got %d", defaultFundTarget, defaultInfo.FundTargetBytes)
-	} else if defaultInfo.FullStorageAccounts != 0 {
-		t.Fatalf("expected 0 default full storage accounts, got %d", defaultInfo.FullStorageAccounts)
 	}
 
 	if premiumInfo.ActiveAccounts != 2 {
 		t.Fatalf("expected 2 premium active accounts, got %d", premiumInfo.ActiveAccounts)
 	} else if premiumInfo.FundTargetBytes != premiumFundTarget {
 		t.Fatalf("expected premium fund target %d, got %d", premiumFundTarget, premiumInfo.FundTargetBytes)
-	} else if premiumInfo.FullStorageAccounts != 0 {
-		t.Fatalf("expected 0 premium full storage accounts, got %d", premiumInfo.FullStorageAccounts)
 	}
 
 	// at a tighter threshold, only 1 premium account should be active
@@ -1145,26 +1141,6 @@ func TestAccountFundingInfo(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected premium quota in funding info")
-	}
-
-	if _, err := store.pool.Exec(t.Context(),
-		`UPDATE accounts SET pinned_data = max_pinned_data WHERE id = (SELECT id FROM accounts WHERE connect_key_id = $1 LIMIT 1)`,
-		connectKeyID,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	infos, err = store.AccountFundingInfo(threshold.Add(-time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// make sure full storage is set
-	for _, info := range infos {
-		if info.QuotaName == "default" {
-			if info.FullStorageAccounts != 1 {
-				t.Fatalf("expected 1 default full storage account, got %d", info.FullStorageAccounts)
-			}
-		}
 	}
 }
 

@@ -112,6 +112,29 @@ CREATE TABLE account_hosts (
 CREATE INDEX account_hosts_host_id_next_fund_idx ON account_hosts (host_id, next_fund);
 CREATE INDEX account_hosts_account_id_consecutive_failed_funds_idx ON account_hosts (account_id, consecutive_failed_funds);
 
+CREATE TABLE pools (
+    id SERIAL PRIMARY KEY,
+    connect_key_id INTEGER UNIQUE NOT NULL REFERENCES app_connect_keys(id) ON DELETE CASCADE
+);
+
+CREATE TABLE pool_hosts (
+    pool_id INTEGER NOT NULL REFERENCES pools(id) ON DELETE CASCADE,
+    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    next_fund TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    consecutive_failed_funds INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT pool_hosts_pk PRIMARY KEY (pool_id, host_id)
+);
+CREATE INDEX pool_hosts_host_id_next_fund_idx ON pool_hosts (host_id, next_fund);
+
+CREATE TABLE pool_attachments (
+    pool_id INTEGER NOT NULL,
+    host_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    CONSTRAINT pool_attachments_pk PRIMARY KEY (pool_id, host_id, account_id),
+    CONSTRAINT pool_attachments_pool_host_fk FOREIGN KEY (pool_id, host_id) REFERENCES pool_hosts(pool_id, host_id) ON DELETE CASCADE
+);
+CREATE INDEX pool_attachments_account_id_host_id_idx ON pool_attachments (account_id, host_id);
+
 CREATE TABLE hosts_blocklist (
     public_key BYTEA PRIMARY KEY CHECK (LENGTH(public_key) = 32),
     added TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),

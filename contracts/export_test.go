@@ -79,8 +79,8 @@ func (cm *ContractManager) PerformContractRenewals(ctx context.Context, period, 
 	return cm.performContractRenewals(ctx, period, renewWindow, log)
 }
 
-func (cm *ContractManager) PerformAccountFunding(ctx context.Context, force bool, log *zap.Logger) error {
-	return cm.performAccountFunding(ctx, force, log)
+func (cm *ContractManager) PerformAccountFunding(ctx context.Context, log *zap.Logger) error {
+	return cm.performAccountFunding(ctx, log)
 }
 
 func (cm *ContractManager) PerformBroadcastContractRevisions(ctx context.Context, log *zap.Logger) error {

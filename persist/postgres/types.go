@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/keys"
 )
 
 var (
@@ -304,6 +305,22 @@ func (pk *sqlPublicKey) Scan(src any) error {
 		return nil
 	default:
 		return fmt.Errorf("cannot scan %T to PublicKey", src)
+	}
+}
+
+// sqlPoolKey scans a user secret and derives the pool private key.
+type sqlPoolKey types.PrivateKey
+
+func (pk *sqlPoolKey) Scan(src any) error {
+	switch src := src.(type) {
+	case []byte:
+		if len(src) != 32 {
+			return fmt.Errorf("failed to scan pool key: expected 32 bytes, got %d", len(src))
+		}
+		*pk = sqlPoolKey(keys.DerivePrivateKey(types.PrivateKey(src), "pool"))
+		return nil
+	default:
+		return fmt.Errorf("cannot scan %T to pool key", src)
 	}
 }
 
