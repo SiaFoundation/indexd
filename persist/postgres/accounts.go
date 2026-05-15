@@ -46,9 +46,10 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 				SELECT COUNT(*) AS ready_hosts
 				FROM (
 					SELECT 1
-					FROM account_hosts ah
-					WHERE ah.account_id = a.id
-					  AND ah.consecutive_failed_funds = 0
+					FROM pool_attachments pa
+					INNER JOIN pool_hosts ph ON ph.pool_id = pa.pool_id AND ph.host_id = pa.host_id
+					WHERE pa.account_id = a.id
+					  AND ph.consecutive_failed_funds = 0
 					LIMIT $4
 				) ready
 			) ahr ON TRUE
@@ -90,9 +91,10 @@ LEFT JOIN LATERAL (
 	SELECT COUNT(*) AS ready_hosts
 	FROM (
 		SELECT 1
-		FROM account_hosts ah
-		WHERE ah.account_id = a.id
-		  AND ah.consecutive_failed_funds = 0
+		FROM pool_attachments pa
+		INNER JOIN pool_hosts ph ON ph.pool_id = pa.pool_id AND ph.host_id = pa.host_id
+		WHERE pa.account_id = a.id
+		  AND ph.consecutive_failed_funds = 0
 		LIMIT $2
 	) ready
 ) ahr ON TRUE

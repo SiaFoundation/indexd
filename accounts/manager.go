@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	// ReadyHostThreshold is the number of successfully funded host accounts
-	// required before an account is considered ready for use.
+	// ReadyHostThreshold is the number of hosts with a funded and attached
+	// pool required before an account is considered ready for use.
 	ReadyHostThreshold = 30
 	// AccountFundInterval is how often we will fund host accounts.
 	AccountFundInterval = 5 * time.Minute
