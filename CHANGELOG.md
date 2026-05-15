@@ -1,3 +1,11 @@
+## 0.2.3 (2026-05-15)
+
+### Fixes
+
+- Use `ErrorCodeClientError` to prevent transport reset for all client errors.
+- Expose AddFailedRPC on the client
+- Update mux to v1.5.1.
+
 ## 0.2.2 (2026-05-13)
 
 ### Features
