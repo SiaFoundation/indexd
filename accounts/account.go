@@ -103,7 +103,6 @@ type (
 	PendingAttachment struct {
 		AccountKey proto.Account
 		PoolKey    types.PrivateKey
-		HostKey    types.PublicKey
 	}
 
 	// UpdateAccountRequest is the request body for the

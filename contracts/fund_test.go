@@ -81,7 +81,7 @@ func (am *accountsManagerMock) UpdateServiceAccounts(accs []accounts.HostAccount
 	return nil
 }
 
-func (am *accountsManagerMock) InsertPoolAttachments(_ []accounts.PendingAttachment) error {
+func (am *accountsManagerMock) InsertPoolAttachments(_ types.PublicKey, _ []accounts.PendingAttachment) error {
 	return nil
 }
 

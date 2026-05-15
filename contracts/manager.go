@@ -66,7 +66,7 @@ type (
 		ServiceAccounts(hk types.PublicKey) []accounts.HostAccount
 		UpdateHostAccounts(accounts []accounts.HostAccount) error
 		UpdateHostPools(pools []accounts.HostPool) error
-		InsertPoolAttachments(attachments []accounts.PendingAttachment) error
+		InsertPoolAttachments(hk types.PublicKey, attachments []accounts.PendingAttachment) error
 		UpdateServiceAccounts(accounts []accounts.HostAccount, balance types.Currency) error
 	}
 

@@ -37,7 +37,7 @@ type (
 	Store interface {
 		HostAccountsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]HostAccount, error)
 		HostPoolsForFunding(hk types.PublicKey, quotaName string, limit int) ([]HostPool, error)
-		InsertPoolAttachments(attachments []PendingAttachment) error
+		InsertPoolAttachments(hk types.PublicKey, attachments []PendingAttachment) error
 		PendingPoolAttachments(hk types.PublicKey, limit int) ([]PendingAttachment, error)
 		PoolFundingInfo() ([]PoolFundInfo, error)
 		ScheduleAccountsForFunding(hostKey types.PublicKey) error
@@ -149,8 +149,8 @@ func (m *AccountManager) AccountFundingInfo(threshold time.Time) ([]QuotaFundInf
 }
 
 // InsertPoolAttachments records that the given attachments have been made.
-func (m *AccountManager) InsertPoolAttachments(attachments []PendingAttachment) error {
-	return m.store.InsertPoolAttachments(attachments)
+func (m *AccountManager) InsertPoolAttachments(hk types.PublicKey, attachments []PendingAttachment) error {
+	return m.store.InsertPoolAttachments(hk, attachments)
 }
 
 // PendingPoolAttachments returns pool attachments that still need to be made.

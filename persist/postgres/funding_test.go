@@ -269,14 +269,12 @@ func TestPendingPoolAttachments(t *testing.T) {
 		t.Fatal("expected one pending attachment", len(pending))
 	} else if types.PublicKey(pending[0].AccountKey) != ak1 {
 		t.Fatal("unexpected account key")
-	} else if pending[0].HostKey != hk {
-		t.Fatal("unexpected host key")
 	} else if pending[0].PoolKey.PublicKey() != pools[0].PoolKey.PublicKey() {
 		t.Fatal("unexpected pool key")
 	}
 
 	// record the attachment
-	if err := store.InsertPoolAttachments(pending); err != nil {
+	if err := store.InsertPoolAttachments(hk, pending); err != nil {
 		t.Fatal(err)
 	}
 
@@ -303,10 +301,10 @@ func TestPendingPoolAttachments(t *testing.T) {
 	}
 
 	// inserting again should be idempotent
-	if err := store.InsertPoolAttachments(pending); err != nil {
+	if err := store.InsertPoolAttachments(hk, pending); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.InsertPoolAttachments(pending); err != nil {
+	if err := store.InsertPoolAttachments(hk, pending); err != nil {
 		t.Fatal(err)
 	}
 
@@ -492,14 +490,14 @@ func TestPendingPoolAttachmentsMultiHost(t *testing.T) {
 	}
 
 	// attach on h1, h2 should be unaffected
-	if err := store.InsertPoolAttachments(pending[:0]); err != nil {
+	if err := store.InsertPoolAttachments(hk1, pending[:0]); err != nil {
 		t.Fatal(err)
 	}
 	pending1, err := store.PendingPoolAttachments(hk1, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.InsertPoolAttachments(pending1); err != nil {
+	if err := store.InsertPoolAttachments(hk1, pending1); err != nil {
 		t.Fatal(err)
 	}
 
@@ -682,7 +680,7 @@ func TestPoolCascadeDelete(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := store.InsertPoolAttachments(pending); err != nil {
+	if err := store.InsertPoolAttachments(hk, pending); err != nil {
 		t.Fatal(err)
 	}
 

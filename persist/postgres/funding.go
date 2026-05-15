@@ -176,29 +176,26 @@ func (s *Store) HostPoolsForFunding(hk types.PublicKey, quotaName string, limit 
 
 // InsertPoolAttachments records that the given attachments have been made on
 // the host.
-func (s *Store) InsertPoolAttachments(attachments []accounts.PendingAttachment) error {
+func (s *Store) InsertPoolAttachments(hk types.PublicKey, attachments []accounts.PendingAttachment) error {
 	if len(attachments) == 0 {
 		return nil
 	}
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		vals := make([]string, 0, len(attachments))
-		args := make([]any, 0, len(attachments)*2)
+		args := make([]any, 0, len(attachments)+1)
+		args = append(args, sqlPublicKey(hk))
 		for i, a := range attachments {
-			ii := i * 2
-			vals = append(vals, fmt.Sprintf(`($%d::bytea, $%d::bytea)`, ii+1, ii+2))
-			args = append(args,
-				sqlPublicKey(a.AccountKey),
-				sqlPublicKey(a.HostKey),
-			)
+			vals = append(vals, fmt.Sprintf(`($%d::bytea)`, i+2))
+			args = append(args, sqlPublicKey(a.AccountKey))
 		}
 
 		query := fmt.Sprintf(`
 INSERT INTO pool_attachments (pool_id, host_id, account_id)
 SELECT p.id, h.id, a.id
-FROM (VALUES %s) AS vals(account_pubkey, host_pubkey)
+FROM (VALUES %s) AS vals(account_pubkey)
 INNER JOIN accounts a ON a.public_key = vals.account_pubkey
 INNER JOIN pools p ON p.connect_key_id = a.connect_key_id
-INNER JOIN hosts h ON h.public_key = vals.host_pubkey
+INNER JOIN hosts h ON h.public_key = $1
 ON CONFLICT DO NOTHING`, strings.Join(vals, ", "))
 		_, err := tx.Exec(ctx, query, args...)
 		return err
@@ -235,7 +232,7 @@ LIMIT $2`, sqlPublicKey(hk), limit)
 		defer rows.Close()
 
 		for rows.Next() {
-			pa := accounts.PendingAttachment{HostKey: hk}
+			var pa accounts.PendingAttachment
 			if err := rows.Scan((*sqlPublicKey)(&pa.AccountKey), (*sqlPoolKey)(&pa.PoolKey)); err != nil {
 				return fmt.Errorf("failed to scan pending attachment: %w", err)
 			}

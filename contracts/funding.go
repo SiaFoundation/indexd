@@ -183,7 +183,7 @@ func (cm *ContractManager) attachPools(ctx context.Context, hostKey types.Public
 			return fmt.Errorf("failed to attach pools: %w", err)
 		}
 
-		if err := cm.accounts.InsertPoolAttachments(pending); err != nil {
+		if err := cm.accounts.InsertPoolAttachments(hostKey, pending); err != nil {
 			return fmt.Errorf("failed to record attachments: %w", err)
 		}
 
