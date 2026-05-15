@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
@@ -27,7 +26,7 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool
 	for _, hk := range hostsToFund {
 		wg.Add(1)
 		go func(ctx context.Context, hostKey types.PublicKey, log *zap.Logger) {
-			ctx, cancel := context.WithTimeoutCause(ctx, fundTimeout, client.ErrAbortedRPC)
+			ctx, cancel := context.WithTimeout(ctx, fundTimeout)
 			defer func() {
 				wg.Done()
 				cancel()

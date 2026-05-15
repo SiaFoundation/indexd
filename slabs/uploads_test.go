@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -166,6 +167,74 @@ func TestUploadShards(t *testing.T) {
 				t.Fatalf("corrupted sector was uploaded: %v", root)
 			}
 		}
+	}
+}
+
+// TestUploadShardsDemotion verifies that uploadShards demotes a host when
+// the per-shard timeout fires while the overall migration is still in
+// progress, and does NOT demote on quick errors (e.g. host became unusable)
+// or on successful uploads.
+func TestUploadShardsDemotion(t *testing.T) {
+	log := zaptest.NewLogger(t)
+	store := newMockStore(t)
+	chain := newMockChainManager()
+	am := newMockAccountManager()
+	hm := newMockHostManager()
+	account := types.GeneratePrivateKey()
+	client := newMockHostClient()
+
+	// 3 hosts; the queue iterates through them in order.
+	hs := make([]hosts.Host, 3)
+	available := make([]types.PublicKey, 0, len(hs))
+	for i := range hs {
+		sk := types.GeneratePrivateKey()
+		hs[i] = client.addTestHost(sk)
+		available = append(available, sk.PublicKey())
+	}
+
+	// 1 shard - one goroutine will iterate the queue trying each host.
+	root, sector := newTestSector()
+	shards := [][]byte{sector[:]}
+	slab := slabs.Slab{Sectors: []slabs.Sector{{Root: root}}}
+
+	sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey())
+	sm.SetShardTimeout(2 * time.Second)
+
+	for _, hk := range available {
+		if err := am.UpdateServiceAccountBalance(hk, sm.MigrationAccount(), types.Siacoins(1)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// hs[0] will hit the per-shard timeout (slow WriteSector) -> demote.
+	client.slowHosts[hs[0].PublicKey] = 30 * time.Minute
+	// hs[1] fails the Usable check fast -> not a timeout, not demoted.
+	hm.unusable[hs[1].PublicKey] = struct{}{}
+	// hs[2] is healthy -> succeeds, not demoted.
+
+	synctest.Test(t, func(t *testing.T) {
+		uploaded, err := sm.UploadShards(context.Background(), slab, shards, available, log)
+		if err != nil {
+			t.Fatal(err)
+		} else if uploaded != 1 {
+			t.Fatalf("expected 1 uploaded shard, got %d", uploaded)
+		}
+	})
+
+	wasDemoted := func(hk types.PublicKey) bool {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+		return client.failedRPCs[hk] > 0
+	}
+
+	if !wasDemoted(hs[0].PublicKey) {
+		t.Fatalf("expected timed-out host hs[0] to be demoted")
+	}
+	if wasDemoted(hs[1].PublicKey) {
+		t.Fatalf("expected unusable host hs[1] not to be demoted")
+	}
+	if wasDemoted(hs[2].PublicKey) {
+		t.Fatalf("expected successful host hs[2] not to be demoted")
 	}
 }
 

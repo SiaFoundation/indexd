@@ -4,62 +4,46 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"os"
 	"testing"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
-	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/coreutils/threadgroup"
-	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/mux/v3"
-	"go.uber.org/zap"
 )
 
-type mockTransportClient struct{}
+func TestIsFailedRPC(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
 
-func (mockTransportClient) DialStream(context.Context) (net.Conn, error) { return nil, nil }
-func (mockTransportClient) FrameSize() int                               { return 0 }
-func (mockTransportClient) PeerKey() types.PublicKey                     { return types.PublicKey{} }
-func (mockTransportClient) Close() error                                 { return nil }
+	deadline, cancelDeadline := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancelDeadline()
 
-type mockStore struct{}
+	tests := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{"nil err", context.Background(), nil, false},
+		{"arbitrary err", context.Background(), errors.New("boom"), true},
+		{"wrapped arbitrary err", context.Background(), fmt.Errorf("wrapped: %w", errors.New("boom")), true},
 
-func (mockStore) UsableHosts() ([]hosts.HostInfo, error) { return nil, nil }
-func (mockStore) Addresses(types.PublicKey) ([]chain.NetAddress, error) {
-	return []chain.NetAddress{{Protocol: "siamux", Address: "localhost:0"}}, nil
-}
-func (mockStore) Usable(types.PublicKey) (bool, error) { return true, nil }
+		{"sector not found", context.Background(), proto.ErrSectorNotFound, false},
+		{"wrapped sector not found", context.Background(), fmt.Errorf("wrapped: %w", proto.ErrSectorNotFound), false},
 
-func TestRPCFnErrorDecoration(t *testing.T) {
-	hostKey := types.GeneratePrivateKey().PublicKey()
-	customErr := errors.New("custom context error")
-
-	c := &Client{
-		log:            zap.NewNop(),
-		tg:             threadgroup.New(),
-		hosts:          NewProvider(mockStore{}),
-		cachedSettings: make(map[types.PublicKey]proto.HostSettings),
-		transports: map[types.PublicKey]*transport{
-			hostKey: {tc: mockTransportClient{}},
-		},
+		{"cancelled ctx, nil err", cancelled, nil, false},
+		{"cancelled ctx, arbitrary err", cancelled, errors.New("boom"), false},
+		{"cancelled ctx, sector not found", cancelled, proto.ErrSectorNotFound, false},
+		{"deadline ctx, arbitrary err", deadline, errors.New("boom"), false},
 	}
-	defer c.Close()
-
-	ctx, cancel := context.WithCancelCause(context.Background())
-	cancel(customErr)
-
-	err := c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
-		return mux.ErrClosedStream
-	})
-	if err == nil {
-		t.Fatal("expected error")
-	} else if !errors.Is(err, mux.ErrClosedStream) {
-		t.Fatalf("expected error to wrap ErrClosedStream, got: %v", err)
-	} else if !errors.Is(err, customErr) {
-		t.Fatalf("expected error to wrap custom context error, got: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isFailedRPC(tt.ctx, tt.err); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
 	}
 }
 

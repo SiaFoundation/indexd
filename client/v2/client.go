@@ -186,16 +186,22 @@ func (c *Client) hostTransport(ctx context.Context, hostKey types.PublicKey) (rh
 	return t.dial(ctx, hostKey, addresses)
 }
 
+func isFailedRPC(ctx context.Context, err error) bool {
+	switch {
+	case ctx.Err() != nil:
+		return false // interrupted RPC
+	case errors.Is(err, proto.ErrSectorNotFound):
+		return false
+	default:
+		return err != nil
+	}
+}
+
 func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx context.Context, transport rhp.TransportClient) error) (err error) {
 	defer func() {
-		// increment the failed RPC count for the host if the RPC failed
-		if err != nil {
-			// decorate the error with the context error to indicate whether the failed
-			// rpc is a consequence of context cancellation or timeout
-			if context.Cause(ctx) != nil {
-				err = fmt.Errorf("%w: %w", err, context.Cause(ctx))
-			}
-			c.hosts.AddFailedRPC(hostKey, err)
+		// increment the failed RPC count if the RPC is considered failed
+		if isFailedRPC(ctx, err) {
+			c.hosts.AddFailedRPC(hostKey)
 		}
 	}()
 
@@ -215,10 +221,15 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	return err
 }
 
-// AddFailedRPC unconditionally records a failed RPC attempt to the
-// specified host, lowering its priority in future queues.
+// AddFailedRPC records a failed RPC attempt to the specified host, lowering its
+// priority in future queues.
+// NOTE: This should only be used after an RPC failed due to context
+// cancellation or a context deadline as those failures won't be recorded by the
+// client implicitly. The client can't know whether the caller intends to treat
+// those as failed RPCs or not and punishing a good host for a cancelled RPC
+// could severely degrade performance.
 func (c *Client) AddFailedRPC(hostKey types.PublicKey) {
-	c.hosts.recordFailure(hostKey)
+	c.hosts.AddFailedRPC(hostKey)
 }
 
 // AccountBalance fetches the account balance from the specified host.

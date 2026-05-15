@@ -2,14 +2,12 @@ package client
 
 import (
 	"cmp"
-	"errors"
 	"iter"
 	"math"
 	"sort"
 	"sync"
 	"time"
 
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/indexd/hosts"
@@ -20,11 +18,6 @@ const (
 	settingsPayloadSize = 270       // size of host settings in bytes
 	defaultThroughput   = 125000000 // 1 Gbps in bytes per second
 )
-
-// ErrAbortedRPC is a special error that can be used as the cancel for an RPC
-// context to indicate that the RPC was interrupted and that the corresponding
-// host should not have a failure recorded for that RPC.
-var ErrAbortedRPC = errors.New("aborted RPC")
 
 type rpcAverage struct {
 	value float64
@@ -241,17 +234,7 @@ func (p *Provider) AddSettingsSample(hostKey types.PublicKey, latency time.Durat
 }
 
 // AddFailedRPC records a failed RPC attempt to the specified host.
-// Aborted RPCs and missing sector errors are not counted as failures.
-func (p *Provider) AddFailedRPC(hostKey types.PublicKey, err error) {
-	if errors.Is(err, ErrAbortedRPC) || errors.Is(err, proto.ErrSectorNotFound) {
-		return
-	}
-	p.recordFailure(hostKey)
-}
-
-// recordFailure unconditionally records a failure for the specified host,
-// lowering its priority in future queues.
-func (p *Provider) recordFailure(hostKey types.PublicKey) {
+func (p *Provider) AddFailedRPC(hostKey types.PublicKey) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	metric, exists := p.metrics[hostKey]
