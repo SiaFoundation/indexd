@@ -45,9 +45,11 @@ var (
 )
 
 type (
-	// AccountFunder defines an interface to fund accounts.
+	// AccountFunder defines an interface to fund accounts and pools.
 	AccountFunder interface {
+		AttachPools(ctx context.Context, hostKey types.PublicKey, inputs []rhp.PoolAttachInput, validity time.Duration) error
 		FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accounts []accounts.HostAccount, target types.Currency, log *zap.Logger) (int, int, error)
+		FundPools(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, pools []accounts.HostPool, target types.Currency, log *zap.Logger) (int, int, error)
 	}
 
 	// AccountManager defines an interface that allows fetching and updating
@@ -55,10 +57,16 @@ type (
 	AccountManager interface {
 		AccountsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]accounts.HostAccount, error)
 		AccountFundingInfo(threshold time.Time) ([]accounts.QuotaFundInfo, error)
+		PendingPoolAttachments(hk types.PublicKey, limit int) ([]accounts.PendingAttachment, error)
+		PoolFundingInfo() ([]accounts.PoolFundInfo, error)
+		PoolsForFunding(hk types.PublicKey, quotaName string, limit int) ([]accounts.HostPool, error)
 		Quotas(ctx context.Context, offset, limit int) ([]accounts.Quota, error)
 		ScheduleAccountsForFunding(hostKey types.PublicKey) error
+		SchedulePoolsForFunding(hostKey types.PublicKey) error
 		ServiceAccounts(hk types.PublicKey) []accounts.HostAccount
 		UpdateHostAccounts(accounts []accounts.HostAccount) error
+		UpdateHostPools(pools []accounts.HostPool) error
+		InsertPoolAttachments(hk types.PublicKey, attachments []accounts.PendingAttachment) error
 		UpdateServiceAccounts(accounts []accounts.HostAccount, balance types.Currency) error
 	}
 
@@ -186,10 +194,10 @@ type (
 		// proof height where we start trying to renew it.
 		RenewWindow uint64 `json:"renewWindow"`
 
-		// WantedContracts is the number of good-for-upload contracts the
+		// WantedContracts is the number of good-for-append contracts the
 		// contract manager should maintain. e.g. if a host runs out of storage,
 		// its contract(s) won't count towards this number but will still be
-		// considered good for renewing/refreshing and funding accounts.
+		// considered good for renewing/refreshing and funding.
 		WantedContracts uint64 `json:"wantedContracts"`
 	}
 

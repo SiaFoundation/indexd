@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"errors"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -17,10 +18,12 @@ type (
 	// FunderHostClient defines the interface for the funder to interact with the
 	// host.
 	FunderHostClient interface {
+		AttachPools(ctx context.Context, hostKey types.PublicKey, inputs []rhp.PoolAttachInput, validity time.Duration) error
 		ReplenishAccounts(ctx context.Context, signer rhp.ContractSigner, chain client.ChainManager, params rhp.RPCReplenishAccountsParams) (rhp.RPCReplenishAccountsResult, error)
+		ReplenishPools(ctx context.Context, signer rhp.ContractSigner, chain client.ChainManager, params rhp.RPCReplenishPoolsParams) (rhp.RPCReplenishPoolsResult, error)
 	}
 
-	// Funder dials a host and replenish a set of ephemeral accounts.
+	// Funder dials a host and replenishes ephemeral accounts and balance pools.
 	Funder struct {
 		client FunderHostClient
 		locker *ContractLocker
@@ -122,6 +125,91 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 			}
 
 			return funded == len(accountKeys), nil
+		}()
+		if err != nil {
+			return 0, 0, err
+		} else if done {
+			break
+		}
+	}
+
+	return funded, drained, nil
+}
+
+// AttachPools attaches pools to accounts on the specified host.
+func (f *Funder) AttachPools(ctx context.Context, hostKey types.PublicKey, inputs []rhp.PoolAttachInput, validity time.Duration) error {
+	return f.client.AttachPools(ctx, hostKey, inputs, validity)
+}
+
+// FundPools tops up the provided pools to the target balance using the
+// specified contracts in order.
+func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, pools []accounts.HostPool, target types.Currency, log *zap.Logger) (funded int, drained int, _ error) {
+	if len(pools) > proto.MaxAccountBatchSize {
+		return 0, 0, errors.New("too many pools")
+	} else if len(contractIDs) == 0 {
+		return 0, 0, errors.New("no contract provided")
+	} else if len(pools) == 0 {
+		return 0, 0, nil
+	}
+
+	poolKeys := make([]proto.Account, len(pools))
+	for i, pool := range pools {
+		poolKeys[i] = proto.Account(pool.PoolKey.PublicKey())
+	}
+
+	for _, contractID := range contractIDs {
+		done, err := func() (bool, error) {
+			contractLog := log.With(zap.Stringer("contractID", contractID))
+
+			lc, unlock := f.locker.TryLockContract(contractID)
+			if lc == nil {
+				contractLog.Debug("ignoring locked contract for funding")
+				return false, nil
+			}
+			defer unlock()
+
+			var res rhp.RPCReplenishPoolsResult
+			var err error
+			err = f.rev.WithRevision(ctx, lc, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+				if contract.Revision.RenterOutput.Value.Cmp(target) < 0 {
+					return rhp.ContractRevision{}, proto.Usage{}, ErrContractInsufficientFunds
+				}
+
+				batchSize := int(max(1, min(contract.Revision.RenterOutput.Value.Div(target).Big().Uint64(), proto.MaxAccountBatchSize)))
+				maxEnd := min(len(poolKeys), funded+batchSize)
+				res, err = f.client.ReplenishPools(ctx, f.signer, f.chain, rhp.RPCReplenishPoolsParams{
+					Pools:    poolKeys[funded:maxEnd],
+					Target:   target,
+					Contract: contract,
+				})
+				if err != nil {
+					return rhp.ContractRevision{}, proto.Usage{}, err
+				}
+				funded = maxEnd
+				return rhp.ContractRevision{
+					ID:       contractID,
+					Revision: res.Revision,
+				}, res.Usage, nil
+			})
+			if errors.Is(err, ErrContractInsufficientFunds) {
+				contractLog.Debug("contract has insufficient funds", zap.Error(err))
+				drained++
+				return false, nil
+			} else if errors.Is(err, ErrContractNotRevisable) {
+				contractLog.Debug("contract is not revisable", zap.Error(err))
+				drained++
+				return false, nil
+			} else if err != nil {
+				contractLog.Debug("failed to replenish pools", zap.Error(err))
+				return false, nil
+			} else if res.Revision.RemainingAllowance().Cmp(target) < 0 {
+				contractLog.Debug("contract was drained by replenish pools RPC",
+					zap.Stringer("remainingAllowance", res.Revision.RemainingAllowance()),
+					zap.Stringer("target", target))
+				drained++
+			}
+
+			return funded == len(poolKeys), nil
 		}()
 		if err != nil {
 			return 0, 0, err

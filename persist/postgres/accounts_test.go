@@ -111,8 +111,9 @@ func TestAccounts(t *testing.T) {
 func TestAccountReady(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
+	apk, _ := store.addTestAppConnectKey(t)
 	ak := types.GeneratePrivateKey().PublicKey()
-	store.addTestAccount(t, ak)
+	store.addTestAccountForKey(t, apk, ak)
 
 	assertReady := func(t *testing.T, expected bool) {
 		t.Helper()
@@ -136,23 +137,43 @@ func TestAccountReady(t *testing.T) {
 
 	assertReady(t, false)
 
-	hostAccs := make([]accounts.HostAccount, 0, accounts.ReadyHostThreshold)
+	// fund the pool on ReadyHostThreshold hosts and attach the account
+	var hosts []types.PublicKey
+	var pools []accounts.HostPool
 	for range accounts.ReadyHostThreshold {
-		hostAccs = append(hostAccs, accounts.HostAccount{
-			AccountKey: proto.Account(ak),
-			HostKey:    store.addTestHost(t),
-			NextFund:   time.Now(),
-		})
+		hk := store.addTestHost(t)
+		p, err := store.HostPoolsForFunding(hk, "default", 1)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(p) != 1 {
+			t.Fatal("expected one pool", len(p))
+		}
+		p[0].NextFund = time.Now().Add(time.Hour)
+		hosts = append(hosts, hk)
+		pools = append(pools, p[0])
 	}
-	hostAccs[len(hostAccs)-1].ConsecutiveFailedFunds = 1
 
-	if err := store.UpdateHostAccounts(hostAccs); err != nil {
+	// mark the last pool as failed
+	pools[len(pools)-1].ConsecutiveFailedFunds = 1
+	if err := store.UpdateHostPools(pools); err != nil {
 		t.Fatal(err)
 	}
+
+	// attach the account on every host
+	for i, p := range pools {
+		if err := store.InsertPoolAttachments(hosts[i], []accounts.PendingAttachment{
+			{AccountKey: proto.Account(ak), PoolKey: p.PoolKey},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// last host has consecutive_failed_funds = 1, so only 29 ready
 	assertReady(t, false)
 
-	hostAccs[len(hostAccs)-1].ConsecutiveFailedFunds = 0
-	if err := store.UpdateHostAccounts(hostAccs[len(hostAccs)-1:]); err != nil {
+	// fix the last host
+	pools[len(pools)-1].ConsecutiveFailedFunds = 0
+	if err := store.UpdateHostPools(pools[len(pools)-1:]); err != nil {
 		t.Fatal(err)
 	}
 	assertReady(t, true)
@@ -1116,16 +1137,12 @@ func TestAccountFundingInfo(t *testing.T) {
 		t.Fatalf("expected 2 default active accounts, got %d", defaultInfo.ActiveAccounts)
 	} else if defaultInfo.FundTargetBytes != defaultFundTarget {
 		t.Fatalf("expected default fund target %d, got %d", defaultFundTarget, defaultInfo.FundTargetBytes)
-	} else if defaultInfo.FullStorageAccounts != 0 {
-		t.Fatalf("expected 0 default full storage accounts, got %d", defaultInfo.FullStorageAccounts)
 	}
 
 	if premiumInfo.ActiveAccounts != 2 {
 		t.Fatalf("expected 2 premium active accounts, got %d", premiumInfo.ActiveAccounts)
 	} else if premiumInfo.FundTargetBytes != premiumFundTarget {
 		t.Fatalf("expected premium fund target %d, got %d", premiumFundTarget, premiumInfo.FundTargetBytes)
-	} else if premiumInfo.FullStorageAccounts != 0 {
-		t.Fatalf("expected 0 premium full storage accounts, got %d", premiumInfo.FullStorageAccounts)
 	}
 
 	// at a tighter threshold, only 1 premium account should be active
@@ -1145,26 +1162,6 @@ func TestAccountFundingInfo(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected premium quota in funding info")
-	}
-
-	if _, err := store.pool.Exec(t.Context(),
-		`UPDATE accounts SET pinned_data = max_pinned_data WHERE id = (SELECT id FROM accounts WHERE connect_key_id = $1 LIMIT 1)`,
-		connectKeyID,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	infos, err = store.AccountFundingInfo(threshold.Add(-time.Second))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// make sure full storage is set
-	for _, info := range infos {
-		if info.QuotaName == "default" {
-			if info.FullStorageAccounts != 1 {
-				t.Fatalf("expected 1 default full storage account, got %d", info.FullStorageAccounts)
-			}
-		}
 	}
 }
 
@@ -1293,15 +1290,15 @@ func BenchmarkPruneAccounts(b *testing.B) {
 
 func BenchmarkAccountReady(b *testing.B) {
 	const (
-		numAccounts     = 10_000
-		hostsPerAccount = 100
+		numAccounts     = 1_000
+		hostsPerAccount = 50
 	)
 
 	store := initPostgres(b, zap.NewNop())
 
 	// create a connect key
 	connectKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
-		Key:         "benchmark-connect-key",
+		Key:         fmt.Sprintf("bench-connect-key-%x", frand.Bytes(8)),
 		Description: "benchmark connect key",
 		Quota:       "default",
 	})
@@ -1325,26 +1322,46 @@ func BenchmarkAccountReady(b *testing.B) {
 		b.Fatal(err)
 	}
 
+	// get pool id
+	var poolID int64
+	if err := store.pool.QueryRow(b.Context(), `SELECT id FROM pools WHERE connect_key_id = $1`, connectKeyID).Scan(&poolID); err != nil {
+		b.Fatal(err)
+	}
+
 	// insert hosts
+	hostIDs := make([]int64, hostsPerAccount)
 	batch = &pgx.Batch{}
 	for range hostsPerAccount {
 		hk := types.GeneratePrivateKey().PublicKey()
-		batch.Queue(`INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW());`, sqlPublicKey(hk))
+		batch.Queue(`INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk))
+	}
+	br := store.pool.SendBatch(b.Context(), batch)
+	for i := range hostsPerAccount {
+		if err := br.QueryRow().Scan(&hostIDs[i]); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if err := br.Close(); err != nil {
+		b.Fatal(err)
+	}
+
+	// insert pool_hosts rows
+	batch = &pgx.Batch{}
+	for _, hostID := range hostIDs {
+		batch.Queue(`INSERT INTO pool_hosts (pool_id, host_id, consecutive_failed_funds) VALUES ($1, $2, $3);`, poolID, hostID, 0)
 	}
 	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
 		b.Fatal(err)
 	}
 
-	// insert account_hosts rows
-	batch = &pgx.Batch{}
-	for i := range numAccounts {
-		accountID := i + 1
-		for j := range hostsPerAccount {
-			hostID := j + 1
-			batch.Queue(`INSERT INTO account_hosts (account_id, host_id, consecutive_failed_funds) VALUES ($1, $2, $3);`, accountID, hostID, 0)
-		}
-	}
-	if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
+	// insert pool_attachments rows via cross join
+	if _, err := store.pool.Exec(b.Context(), `
+		INSERT INTO pool_attachments (pool_id, host_id, account_id)
+		SELECT $1, ph.host_id, a.id
+		FROM accounts a
+		CROSS JOIN pool_hosts ph
+		WHERE a.connect_key_id = $2 AND ph.pool_id = $1
+	`, poolID, connectKeyID); err != nil {
 		b.Fatal(err)
 	}
 

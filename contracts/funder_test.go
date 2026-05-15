@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
@@ -36,6 +37,14 @@ func (h *funderHostClientMock) ReplenishAccounts(ctx context.Context, signer rhp
 		panic("unexpected contract ID in mock")
 	}
 	return res.res, res.err
+}
+
+func (h *funderHostClientMock) AttachPools(_ context.Context, _ types.PublicKey, _ []rhp.PoolAttachInput, _ time.Duration) error {
+	return nil
+}
+
+func (h *funderHostClientMock) ReplenishPools(_ context.Context, _ rhp.ContractSigner, _ client.ChainManager, _ rhp.RPCReplenishPoolsParams) (rhp.RPCReplenishPoolsResult, error) {
+	return rhp.RPCReplenishPoolsResult{}, nil
 }
 
 type mockChainManager struct{}

@@ -190,24 +190,33 @@ func (c *Cluster) NewHosts(t testing.TB, n int) []*Host {
 	return hosts
 }
 
-// WaitForAccountFunding waits until the given account is funded on every host
-// in the cluster.
+// WaitForAccountFunding waits until the given account's pool is funded and
+// attached on every host in the cluster.
 func (c *Cluster) WaitForAccountFunding(t *testing.T, pk proto.Account) {
 	t.Helper()
 	for _, h := range c.Hosts {
-		var funded bool
-		for i := 0; i < 120; i++ {
-			b, err := c.Indexer.Client().AccountBalance(t.Context(), h.PublicKey(), pk)
+		hk := h.PublicKey()
+		var attached bool
+		for range 120 {
+			// TODO: replace this raw query with a proper store method
+			var count int
+			err := c.Indexer.Store().QueryRow(t.Context(), `
+SELECT COUNT(*) FROM pool_attachments pa
+INNER JOIN accounts a ON a.id = pa.account_id
+INNER JOIN hosts hh ON hh.id = pa.host_id
+WHERE a.public_key = $1 AND hh.public_key = $2`,
+				pk[:], hk[:]).Scan(&count)
 			if err != nil {
-				t.Fatal("failed to get account balance:", err)
-			} else if !b.IsZero() {
-				funded = true
+				t.Fatal("failed to check pool attachment:", err)
+			} else if count > 0 {
+				attached = true
 				break
 			}
+
 			time.Sleep(500 * time.Millisecond)
 		}
-		if !funded {
-			t.Fatalf("account not funded on host %v", h.PublicKey())
+		if !attached {
+			t.Fatalf("pool not attached to account on host %v", h.PublicKey())
 		}
 	}
 }

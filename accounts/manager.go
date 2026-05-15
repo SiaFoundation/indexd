@@ -16,14 +16,13 @@ import (
 )
 
 const (
-	// AccountFundBatch is the number of host accounts we will fund in one
-	// batch.  It is equivalent to the max batch size used in replenish RPC.
-	AccountFundBatch = proto.MaxAccountBatchSize
-	// ReadyHostThreshold is the number of successfully funded host accounts
-	// required before an account is considered ready for use.
+	// ReadyHostThreshold is the number of hosts with a funded and attached
+	// pool required before an account is considered ready for use.
 	ReadyHostThreshold = 30
 	// AccountFundInterval is how often we will fund host accounts.
 	AccountFundInterval = 5 * time.Minute
+	// PoolFundInterval is how often we will fund host pools.
+	PoolFundInterval = 15 * time.Minute
 	// AccountActivityThreshold is the threshold for determining whether an
 	// account has been active recently for the purposes of contract funding.
 	// An account is considered active if it has been used within the threshold
@@ -37,8 +36,14 @@ type (
 	// update them after funding.
 	Store interface {
 		HostAccountsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]HostAccount, error)
+		HostPoolsForFunding(hk types.PublicKey, quotaName string, limit int) ([]HostPool, error)
+		InsertPoolAttachments(hk types.PublicKey, attachments []PendingAttachment) error
+		PendingPoolAttachments(hk types.PublicKey, limit int) ([]PendingAttachment, error)
+		PoolFundingInfo() ([]PoolFundInfo, error)
 		ScheduleAccountsForFunding(hostKey types.PublicKey) error
+		SchedulePoolsForFunding(hostKey types.PublicKey) error
 		UpdateHostAccounts(accounts []HostAccount) error
+		UpdateHostPools(pools []HostPool) error
 
 		ValidAppConnectKey(string) error
 		AppConnectKeyUserSecret(string) (secret types.Hash256, err error)
@@ -143,14 +148,44 @@ func (m *AccountManager) AccountFundingInfo(threshold time.Time) ([]QuotaFundInf
 	return m.store.AccountFundingInfo(threshold)
 }
 
+// InsertPoolAttachments records that the given attachments have been made.
+func (m *AccountManager) InsertPoolAttachments(hk types.PublicKey, attachments []PendingAttachment) error {
+	return m.store.InsertPoolAttachments(hk, attachments)
+}
+
+// PendingPoolAttachments returns pool attachments that still need to be made.
+func (m *AccountManager) PendingPoolAttachments(hk types.PublicKey, limit int) ([]PendingAttachment, error) {
+	return m.store.PendingPoolAttachments(hk, limit)
+}
+
+// PoolFundingInfo returns funding info for each pool.
+func (m *AccountManager) PoolFundingInfo() ([]PoolFundInfo, error) {
+	return m.store.PoolFundingInfo()
+}
+
+// PoolsForFunding returns pools that need funding for the given host.
+func (m *AccountManager) PoolsForFunding(hk types.PublicKey, quotaName string, limit int) ([]HostPool, error) {
+	return m.store.HostPoolsForFunding(hk, quotaName, limit)
+}
+
 // ScheduleAccountsForFunding schedules all accounts for a given host to be funded.
 func (m *AccountManager) ScheduleAccountsForFunding(hostKey types.PublicKey) error {
 	return m.store.ScheduleAccountsForFunding(hostKey)
 }
 
+// SchedulePoolsForFunding schedules all pools for a given host to be funded.
+func (m *AccountManager) SchedulePoolsForFunding(hostKey types.PublicKey) error {
+	return m.store.SchedulePoolsForFunding(hostKey)
+}
+
 // UpdateHostAccounts updates the given host accounts.
 func (m *AccountManager) UpdateHostAccounts(accounts []HostAccount) error {
 	return m.store.UpdateHostAccounts(accounts)
+}
+
+// UpdateHostPools updates the given host pools.
+func (m *AccountManager) UpdateHostPools(pools []HostPool) error {
+	return m.store.UpdateHostPools(pools)
 }
 
 // ServiceAccounts returns all registered service accounts for a given host.
@@ -168,20 +203,20 @@ func (m *AccountManager) ServiceAccounts(hk types.PublicKey) []HostAccount {
 	return result
 }
 
-// UpdateFundedAccounts marks in-place the first `n` accounts as having a
+// UpdateFundedPools marks in-place the first `n` pools as having a
 // successful funding and applies the exponential backoff penalty to the
-// accounts after the first `n`.
-func UpdateFundedAccounts(accounts []HostAccount, n int, maxBackoff time.Duration) {
-	if n > len(accounts) {
-		panic("illegal number of funded accounts") // developer error
+// pools after the first `n`.
+func UpdateFundedPools(pools []HostPool, n int, maxBackoff time.Duration) {
+	if n > len(pools) {
+		panic("illegal number of funded pools") // developer error
 	}
 	for i := range n {
-		accounts[i].ConsecutiveFailedFunds = 0
-		accounts[i].NextFund = time.Now().Add(AccountFundInterval)
+		pools[i].ConsecutiveFailedFunds = 0
+		pools[i].NextFund = time.Now().Add(PoolFundInterval)
 	}
-	for i := n; i < len(accounts); i++ {
-		accounts[i].ConsecutiveFailedFunds++
-		accounts[i].NextFund = time.Now().Add(min(time.Duration(math.Pow(2, float64(accounts[i].ConsecutiveFailedFunds)))*time.Minute, maxBackoff))
+	for i := n; i < len(pools); i++ {
+		pools[i].ConsecutiveFailedFunds++
+		pools[i].NextFund = time.Now().Add(min(time.Duration(math.Pow(2, float64(pools[i].ConsecutiveFailedFunds)))*time.Minute, maxBackoff))
 	}
 }
 
@@ -197,16 +232,15 @@ func HostFundTarget(host hosts.Host, fundTargetBytes uint64) types.Currency {
 	return u1.Add(u2)
 }
 
-// HostReadFundTarget calculates the fund target for accounts that have no
-// remaining storage. `fundTargetBytes` is interpreted the same way as in
-// HostFundTarget: as a combined read+write target. Since these accounts can
-// only download, we fund only the read portion of that target.
-func HostReadFundTarget(host hosts.Host, fundTargetBytes uint64) types.Currency {
-	if fundTargetBytes == 0 {
-		return types.ZeroCurrency
-	}
-	sectors := (fundTargetBytes + proto.SectorSize - 1) / proto.SectorSize
-	return host.Settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(sectors).Div64(2)
+// PoolFundTarget calculates the fund target for a pool on the given host. The
+// target scales with the number of active accounts drawing from the pool,
+// rounded up to the nearest multiple of 3 for headroom. Pools with zero
+// accounts are still funded at the minimum so they are ready when accounts
+// connect.
+func PoolFundTarget(host hosts.Host, fundTargetBytes uint64, activeAccounts uint64) types.Currency {
+	n := max(activeAccounts, 3)
+	n = ((n + 2) / 3) * 3 // round up to nearest multiple of 3
+	return HostFundTarget(host, fundTargetBytes).Mul64(n)
 }
 
 // NewManager creates a new AccountManager.
