@@ -1436,6 +1436,36 @@ func TestPinSectors(t *testing.T) {
 	if !errors.Is(err, contracts.ErrNotFound) {
 		t.Fatal("expected ErrNotFound, got", err)
 	}
+
+	// add a second host and migrate sector 1 to it
+	hk2 := store.addTestHost(t)
+	migrated, err := store.MigrateSector(types.Hash256{1}, hk2)
+	if err != nil {
+		t.Fatal(err)
+	} else if !migrated {
+		t.Fatal("expected migration")
+	}
+
+	// PinSectors with contract 1 should skip the migrated sector since it is
+	// no longer on the contract's host
+	if err := store.PinSectors(contractID1, []types.Hash256{{1}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// verify the sector is still on host 2
+	var sectorHostID int64
+	err = store.pool.QueryRow(t.Context(),
+		`SELECT h.id FROM sectors s INNER JOIN hosts h ON s.host_id = h.id WHERE s.sector_root = $1`,
+		sqlHash256(types.Hash256{1})).Scan(&sectorHostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var hk2ID int64
+	if err := store.pool.QueryRow(t.Context(), `SELECT id FROM hosts WHERE public_key = $1`, sqlPublicKey(hk2)).Scan(&hk2ID); err != nil {
+		t.Fatal(err)
+	} else if sectorHostID != hk2ID {
+		t.Fatal("PinSectors should not overwrite a migrated sector's host")
+	}
 }
 
 func TestUnhealthySlabs(t *testing.T) {

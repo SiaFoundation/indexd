@@ -670,10 +670,9 @@ ORDER BY ss.slab_index ASC`, slabID).Query(func(rows pgx.Rows) error {
 	return results, err
 }
 
-// PinSectors pins a batch of sector roots to a given contract. This also
-// updates the host the sector is associated with to the host that we have the
-// contract with. That way, we can avoid a race where the host changes in the
-// meantime and the contract then no longer matches the host.
+// PinSectors pins a batch of sector roots to a given contract. Only sectors
+// that are currently on the contract's host or have no host set are updated.
+// Sectors that were migrated to a different host in the meantime are skipped.
 func (s *Store) PinSectors(contractID types.FileContractID, roots []types.Hash256) error {
 	if len(roots) == 0 {
 		return nil
@@ -701,8 +700,8 @@ func (s *Store) PinSectors(contractID types.FileContractID, roots []types.Hash25
 		rows, err := tx.Query(ctx, `
 			SELECT id, host_id, contract_sectors_map_id
 			FROM sectors
-			WHERE sector_root = ANY($1) AND (contract_sectors_map_id IS NULL OR contract_sectors_map_id != $2)
-			FOR UPDATE`, sqlRoots, contractMapID)
+			WHERE sector_root = ANY($1) AND (host_id IS NULL OR host_id = $3) AND (contract_sectors_map_id IS NULL OR contract_sectors_map_id != $2)
+			FOR UPDATE`, sqlRoots, contractMapID, hostID)
 		if err != nil {
 			return fmt.Errorf("failed to query sectors: %w", err)
 		}
