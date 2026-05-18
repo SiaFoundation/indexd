@@ -399,6 +399,24 @@ func (cm *ContractManager) MaintenanceSettings(ctx context.Context) (Maintenance
 	return cm.store.MaintenanceSettings()
 }
 
+// HealthyContracts returns all contracts that are revisable and good regardless
+// of renew window or size limits. Use ContractsForAppend for the narrower set
+// of contracts eligible for new sector uploads.
+func (cm *ContractManager) HealthyContracts() ([]Contract, error) {
+	var good []Contract
+	const batchSize = 50
+	for offset := 0; ; offset += batchSize {
+		batch, err := cm.store.Contracts(offset, batchSize, WithRevisable(true), WithGood(true))
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch contracts: %w", err)
+		}
+		good = append(good, batch...)
+		if len(batch) < batchSize {
+			return good, nil
+		}
+	}
+}
+
 // ContractsForAppend returns all contracts that are good for appending data.
 // These contracts are revisable, not in their renew window, good and have not
 // reached their maximum size.

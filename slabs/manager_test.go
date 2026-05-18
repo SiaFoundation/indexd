@@ -336,6 +336,12 @@ func (m *mockContractManager) TriggerAccountRefill(ctx context.Context, hostKey 
 	return nil
 }
 
+func (m *mockContractManager) HealthyContracts() ([]contracts.Contract, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Clone(m.contracts), nil
+}
+
 func (m *mockContractManager) ContractsForAppend() ([]contracts.Contract, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
