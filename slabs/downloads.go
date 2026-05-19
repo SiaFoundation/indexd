@@ -110,6 +110,7 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 				// 1. it hit the shard timeout
 				// 2. it was part of the initial batch of hosts and was interrupted
 				if (timeoutCtx.Err() != nil && ctx.Err() == nil) || (initial && ctx.Err() != nil) {
+					log.Debug("demoting host for failed download", zap.Error(err))
 					m.hosts.AddFailedRPC(hostKey)
 				}
 			}

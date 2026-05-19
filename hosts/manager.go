@@ -394,8 +394,6 @@ func (m *HostManager) Usable(ctx context.Context, hostKey types.PublicKey) (bool
 		return false, nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
-	defer cancel()
 	prices, err := m.hosts.Prices(ctx, hostKey)
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch host prices, %w", err)

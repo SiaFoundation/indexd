@@ -84,6 +84,7 @@ top:
 						// demote the host if it hit the per-shard timeout while
 						// the overall migration is still in progress
 						if timedOut && ctx.Err() == nil {
+							log.Debug("demoting host for failed upload", zap.Error(err))
 							m.hosts.AddFailedRPC(hostKey)
 						}
 						continue
