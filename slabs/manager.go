@@ -385,7 +385,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	// start a worker pool that pulls slabs from a channel
 	type migrationJob struct {
 		id    SlabID
-		state MigrationState
+		state migrationState
 	}
 	slabCh := make(chan migrationJob, m.numMigrationGoroutines)
 	var wg sync.WaitGroup

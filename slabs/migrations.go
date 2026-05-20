@@ -13,18 +13,18 @@ import (
 	"golang.org/x/crypto/chacha20"
 )
 
-// MigrationState holds the hosts, contracts, and chain state needed for
+// migrationState holds the hosts, contracts, and chain state needed for
 // slab migrations.
-type MigrationState struct {
+type migrationState struct {
 	Height              uint64
 	HealthyContracts    []contracts.Contract
 	Hosts               []hosts.Host
 	MaintenanceSettings contracts.MaintenanceSettings
 }
 
-// MigrationState fetches all available hosts, contracts, maintenance settings,
+// migrationState fetches all available hosts, contracts, maintenance settings,
 // and chain height needed for slab migrations.
-func (m *SlabManager) fetchMigrationState() (state MigrationState, err error) {
+func (m *SlabManager) fetchMigrationState() (state migrationState, err error) {
 	// fetch hosts
 	const batchSize = 500
 	for offset := 0; ; offset += batchSize {
@@ -58,7 +58,7 @@ func (m *SlabManager) fetchMigrationState() (state MigrationState, err error) {
 	return state, nil
 }
 
-func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, state MigrationState, log *zap.Logger) {
+func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, state migrationState, log *zap.Logger) {
 	slab, err := m.store.Slab(slabID)
 	if err != nil {
 		log.Error("failed to fetch slab", zap.Error(err))
@@ -159,7 +159,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, state Migr
 // minHostDistance apart from each other and are returned in random order.
 // The subset of healthy contracts eligible for uploading migrated sectors is
 // derived by filtering with GoodForAppend.
-func sectorsToMigrate(slab Slab, state MigrationState, minHostDistanceKm float64) ([]int, []types.PublicKey) {
+func sectorsToMigrate(slab Slab, state migrationState, minHostDistanceKm float64) ([]int, []types.PublicKey) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range state.Hosts {
