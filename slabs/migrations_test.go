@@ -274,9 +274,14 @@ func TestSectorsToMigrate(t *testing.T) {
 	}
 
 	// helper to assert result of sectorsToMigrate
-	assertResult := func(availableHosts []hosts.Host, healthyContracts, migrationContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
+	state := slabs.MigrationState{
+		MaintenanceSettings: contracts.MaintenanceSettings{Period: 100},
+	}
+	assertResult := func(availableHosts []hosts.Host, healthyContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
-		toRepair, toUse := slabs.SectorsToMigrate(slab, availableHosts, healthyContracts, migrationContracts, 10)
+		state.Hosts = availableHosts
+		state.HealthyContracts = healthyContracts
+		toRepair, toUse := slabs.SectorsToMigrate(slab, state, 10)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {
@@ -300,13 +305,13 @@ func TestSectorsToMigrate(t *testing.T) {
 
 	// with no contracts or hosts, all sectors require migration but no
 	// contracts are available
-	assertResult(nil, nil, nil, []int{0, 1, 2, 3, 4}, nil)
+	assertResult(nil, nil, []int{0, 1, 2, 3, 4}, nil)
 
 	// with just the hosts and contracts the slab is stored on, only the
 	// missing sectors should require migration and no candidates are available
 	allHosts := []hosts.Host{goodHost, goodHostNoContract, sameLocationHost}
 	allContracts := []contracts.Contract{goodContract, badContract, sameLocationContract}
-	assertResult(allHosts, allContracts, allContracts, []int{1, 2}, nil)
+	assertResult(allHosts, allContracts, []int{1, 2}, nil)
 
 	// prepare a bunch of hosts and contracts which can't be used for repairs
 	badHost2 := newHost(false, false)
@@ -323,7 +328,7 @@ func TestSectorsToMigrate(t *testing.T) {
 	// add the bad hosts+contracts and try again, expect same result
 	allHosts = append(allHosts, badHost2, blockedHost, sameLocationHost2)
 	allContracts = append(allContracts, cBadHost2, cBlockedHost, cSameLocationHost2)
-	assertResult(allHosts, allContracts, allContracts, []int{1, 2}, nil)
+	assertResult(allHosts, allContracts, []int{1, 2}, nil)
 
 	// prepare 2 good hosts
 	goodHost2 := newHost(true, false)
@@ -335,12 +340,13 @@ func TestSectorsToMigrate(t *testing.T) {
 	// should use them
 	allHosts = append(allHosts, goodHost2, goodHost3)
 	allContracts = append(allContracts, cGoodHost2, cGoodHost3)
-	assertResult(allHosts, allContracts, allContracts, []int{1, 2}, []hosts.Host{goodHost2, goodHost3})
+	assertResult(allHosts, allContracts, []int{1, 2}, []hosts.Host{goodHost2, goodHost3})
 
 	// add a host with a healthy contract that is not eligible for migration
-	// uploads, e.g. because it is in the renew window or at max size
+	// uploads because it is in the renew window
 	healthyOnlyHost := newHost(true, false)
 	healthyOnlyContract := newContract(healthyOnlyHost.PublicKey, true)
+	healthyOnlyContract.ProofHeight = 40 // within renew window
 
 	slab.Sectors = append(slab.Sectors, slabs.Sector{
 		Root:       types.Hash256{6},
@@ -350,15 +356,15 @@ func TestSectorsToMigrate(t *testing.T) {
 
 	allHosts = append(allHosts, healthyOnlyHost)
 	healthyAll := append(slices.Clone(allContracts), healthyOnlyContract)
-	migrationOnly := slices.Clone(allContracts)
 
 	// sector 6 should not be migrated because its contract is healthy
 	// the host should not be a candidate because it has no migration contract
-	assertResult(allHosts, healthyAll, migrationOnly, []int{1, 2}, []hosts.Host{goodHost2, goodHost3})
+	state.MaintenanceSettings.RenewWindow = 50
+	assertResult(allHosts, healthyAll, []int{1, 2}, []hosts.Host{goodHost2, goodHost3})
 
 	// when the healthy only contract is missing from the healthy list too,
 	// the sector should be flagged for migration
-	assertResult(allHosts, migrationOnly, migrationOnly, []int{1, 2, 5}, []hosts.Host{goodHost2, goodHost3})
+	assertResult(allHosts, allContracts, []int{1, 2, 5}, []hosts.Host{goodHost2, goodHost3})
 }
 
 func newTestContract(hk types.PublicKey) contracts.Contract {

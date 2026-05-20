@@ -700,8 +700,8 @@ func (s *Store) PinSectors(contractID types.FileContractID, roots []types.Hash25
 		rows, err := tx.Query(ctx, `
 			SELECT id, host_id, contract_sectors_map_id
 			FROM sectors
-			WHERE sector_root = ANY($1) AND (host_id IS NULL OR host_id = $3) AND (contract_sectors_map_id IS NULL OR contract_sectors_map_id != $2)
-			FOR UPDATE`, sqlRoots, contractMapID, hostID)
+			WHERE sector_root = ANY($1) AND (host_id IS NULL OR host_id = $2) AND (contract_sectors_map_id IS NULL OR contract_sectors_map_id != $3)
+			FOR UPDATE`, sqlRoots, hostID, contractMapID)
 		if err != nil {
 			return fmt.Errorf("failed to query sectors: %w", err)
 		}

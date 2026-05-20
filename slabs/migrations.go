@@ -13,44 +13,58 @@ import (
 	"golang.org/x/crypto/chacha20"
 )
 
-// migrationCandidates fetches all available hosts and contracts that can be
-// used for slab migrations. Two contract lists are returned, one with all
-// revisable healthy contracts for sector health checks and one with the subset
-// that is eligible for uploading migrated sectors.
-func (m *SlabManager) migrationCandidates() (allHosts []hosts.Host, healthyContracts, migrationContracts []contracts.Contract, err error) {
-	healthyContracts, err = m.cm.HealthyContracts()
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to fetch healthy contracts: %w", err)
-	}
-	migrationContracts, err = m.cm.ContractsForAppend()
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to fetch migration contracts: %w", err)
-	}
+// MigrationState holds the hosts, contracts, and chain state needed for
+// slab migrations.
+type MigrationState struct {
+	Height              uint64
+	HealthyContracts    []contracts.Contract
+	Hosts               []hosts.Host
+	MaintenanceSettings contracts.MaintenanceSettings
+}
 
+// MigrationState fetches all available hosts, contracts, maintenance settings,
+// and chain height needed for slab migrations.
+func (m *SlabManager) fetchMigrationState() (state MigrationState, err error) {
+	// fetch hosts
 	const batchSize = 500
 	for offset := 0; ; offset += batchSize {
-		var batch []hosts.Host
-		batch, err = m.store.Hosts(offset, batchSize,
+		batch, err := m.store.Hosts(offset, batchSize,
 			hosts.WithBlocked(false),
 			hosts.WithActiveContracts(true))
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to fetch hosts: %w", err)
+			return state, fmt.Errorf("failed to fetch hosts: %w", err)
 		}
 
-		allHosts = append(allHosts, batch...)
+		state.Hosts = append(state.Hosts, batch...)
 		if len(batch) < batchSize {
-			return
+			break
 		}
 	}
+
+	// fetch healthy contracts
+	state.HealthyContracts, err = m.cm.HealthyContracts()
+	if err != nil {
+		return state, fmt.Errorf("failed to fetch healthy contracts: %w", err)
+	}
+
+	// fetch maintenance settings
+	state.MaintenanceSettings, err = m.store.MaintenanceSettings()
+	if err != nil {
+		return state, fmt.Errorf("failed to fetch maintenance settings: %w", err)
+	}
+
+	// fetch chain height
+	state.Height = m.chain.Tip().Height
+	return state, nil
 }
 
-func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts []hosts.Host, healthyContracts, migrationContracts []contracts.Contract, log *zap.Logger) {
+func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, state MigrationState, log *zap.Logger) {
 	slab, err := m.store.Slab(slabID)
 	if err != nil {
 		log.Error("failed to fetch slab", zap.Error(err))
 		return
 	}
-	indices, uploadCandidates := sectorsToMigrate(slab, allHosts, healthyContracts, migrationContracts, m.minHostDistanceKm)
+	indices, uploadCandidates := sectorsToMigrate(slab, state, m.minHostDistanceKm)
 	if len(indices) == 0 {
 		log.Debug("tried to migrate slab but no indices require migration")
 		return
@@ -143,31 +157,29 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, allHosts [
 // sectors that require migration together with hosts that can be used to
 // migrate bad sectors to. These hosts are guaranteed to be at least
 // minHostDistance apart from each other and are returned in random order.
-// healthyContracts is the full set of revisable good contracts used to decide
-// whether a sector's contract is healthy. migrationContracts is the narrower
-// subset eligible for uploading migrated sectors, used to select candidate hosts.
-func sectorsToMigrate(slab Slab, allHosts []hosts.Host, healthyContracts, migrationContracts []contracts.Contract, minHostDistanceKm float64) ([]int, []types.PublicKey) {
+// The subset of healthy contracts eligible for uploading migrated sectors is
+// derived by filtering with GoodForAppend.
+func sectorsToMigrate(slab Slab, state MigrationState, minHostDistanceKm float64) ([]int, []types.PublicKey) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
-	for _, host := range allHosts {
+	for _, host := range state.Hosts {
 		if host.IsGood() {
 			hostsMap[host.PublicKey] = host
 		}
 	}
 
-	// prepare a map of healthy contracts for sector health checks
+	// prepare a map of healthy contracts for sector health checks and track
+	// which hosts have migration eligible contracts for candidate selection
 	healthyContractMap := make(map[types.FileContractID]contracts.Contract)
-	for _, contract := range healthyContracts {
-		if _, ok := hostsMap[contract.HostKey]; ok {
-			healthyContractMap[contract.ID] = contract
+	hasAppendContract := make(map[types.PublicKey]struct{})
+	for _, contract := range state.HealthyContracts {
+		host, ok := hostsMap[contract.HostKey]
+		if !ok {
+			continue
 		}
-	}
-
-	// track which hosts have migration eligible contracts for candidate selection
-	hasMigrationContract := make(map[types.PublicKey]struct{})
-	for _, contract := range migrationContracts {
-		if _, ok := hostsMap[contract.HostKey]; ok {
-			hasMigrationContract[contract.HostKey] = struct{}{}
+		healthyContractMap[contract.ID] = contract
+		if contract.GoodForAppend(host.Settings, state.MaintenanceSettings.RenewWindow, state.Height, state.MaintenanceSettings.Period) == nil {
+			hasAppendContract[contract.HostKey] = struct{}{}
 		}
 	}
 
@@ -214,8 +226,8 @@ func sectorsToMigrate(slab Slab, allHosts []hosts.Host, healthyContracts, migrat
 	}
 	var candidates []types.PublicKey
 	for _, host := range hostsMap {
-		if _, ok := hasMigrationContract[host.PublicKey]; !ok {
-			// must have a migration eligible contract
+		if _, ok := hasAppendContract[host.PublicKey]; !ok {
+			// must have an appendable contract
 			continue
 		} else if !host.StuckSince.IsZero() {
 			// can't migrate to stuck hosts

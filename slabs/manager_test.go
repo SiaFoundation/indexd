@@ -342,12 +342,6 @@ func (m *mockContractManager) HealthyContracts() ([]contracts.Contract, error) {
 	return slices.Clone(m.contracts), nil
 }
 
-func (m *mockContractManager) ContractsForAppend() ([]contracts.Contract, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return slices.Clone(m.contracts), nil
-}
-
 type mockhostManager struct {
 	mu            sync.Mutex
 	hosts         map[types.PublicKey]hosts.Host

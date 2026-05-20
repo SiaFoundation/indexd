@@ -72,7 +72,6 @@ type (
 	ContractManager interface {
 		TriggerAccountRefill(ctx context.Context, hostKey types.PublicKey, account proto.Account) error
 		HealthyContracts() ([]contracts.Contract, error)
-		ContractsForAppend() ([]contracts.Contract, error)
 	}
 
 	// A HostClient defines the minimal interface for interacting with hosts that
@@ -384,18 +383,16 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	log.Debug("starting slab migrations")
 
 	// start a worker pool that pulls slabs from a channel
-	type slab struct {
-		id                 SlabID
-		allHosts           []hosts.Host
-		healthyContracts   []contracts.Contract
-		migrationContracts []contracts.Contract
+	type migrationJob struct {
+		id    SlabID
+		state MigrationState
 	}
-	slabCh := make(chan slab, m.numMigrationGoroutines)
+	slabCh := make(chan migrationJob, m.numMigrationGoroutines)
 	var wg sync.WaitGroup
 	for range m.numMigrationGoroutines {
 		wg.Go(func() {
-			for slab := range slabCh {
-				m.migrateSlab(ctx, slab.id, slab.allHosts, slab.healthyContracts, slab.migrationContracts, log.With(zap.Stringer("slab", slab.id)))
+			for job := range slabCh {
+				m.migrateSlab(ctx, job.id, job.state, log.With(zap.Stringer("slab", job.id)))
 			}
 		})
 	}
@@ -409,8 +406,8 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 			return err
 		}
 
-		// update the candidates for every batch
-		allHosts, healthyContracts, migrationContracts, err := m.migrationCandidates()
+		// update the state for every batch
+		state, err := m.fetchMigrationState()
 		if err != nil {
 			close(slabCh)
 			wg.Wait()
@@ -419,7 +416,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 
 		for _, id := range batch {
 			select {
-			case slabCh <- slab{id: id, allHosts: allHosts, healthyContracts: healthyContracts, migrationContracts: migrationContracts}:
+			case slabCh <- migrationJob{id: id, state: state}:
 			case <-ctx.Done():
 				close(slabCh)
 				wg.Wait()
