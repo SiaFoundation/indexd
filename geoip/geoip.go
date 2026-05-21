@@ -1,6 +1,7 @@
 package geoip
 
 import (
+	"compress/gzip"
 	"fmt"
 	"io"
 	"math"
@@ -18,7 +19,7 @@ const (
 	radiusKm = 6371.0088
 
 	// maxMindCityDBURL is the URL to download the GeoLite2-City database from.
-	maxMindCityDBURL = "https://sia.tech/api/media/file/GeoLite2-City.mmdb"
+	maxMindCityDBURL = "https://public.sia.tech/indexd/GeoLite2-City.mmdb.gz"
 	// maxMindCityDBFilename is the filename of the GeoLite2-City database.
 	maxMindCityDBFilename = "GeoLite2-City.mmdb"
 )
@@ -97,6 +98,12 @@ func downloadMaxMindDB(path string) error {
 		return fmt.Errorf("failed to download MaxMind database: unexpected status %d", resp.StatusCode)
 	}
 
+	gr, err := gzip.NewReader(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to create gzip reader: %w", err)
+	}
+	defer gr.Close()
+
 	f, err := os.CreateTemp(filepath.Dir(path), ".geolite2-*.mmdb.tmp")
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
@@ -106,8 +113,10 @@ func downloadMaxMindDB(path string) error {
 		os.Remove(f.Name())
 	}()
 
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	if _, err := io.Copy(f, gr); err != nil {
 		return fmt.Errorf("failed to write MaxMind database: %w", err)
+	} else if err := f.Sync(); err != nil {
+		return fmt.Errorf("failed to sync temp file: %w", err)
 	} else if err := f.Close(); err != nil {
 		return fmt.Errorf("failed to close temp file: %w", err)
 	} else if err := os.Rename(f.Name(), path); err != nil && !os.IsExist(err) {
