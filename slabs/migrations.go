@@ -22,7 +22,7 @@ type migrationState struct {
 	MaintenanceSettings contracts.MaintenanceSettings
 }
 
-// migrationState fetches all available hosts, contracts, maintenance settings,
+// fetchMigrationState fetches all available hosts, contracts, maintenance settings,
 // and chain height needed for slab migrations.
 func (m *SlabManager) fetchMigrationState() (state migrationState, err error) {
 	// fetch hosts
