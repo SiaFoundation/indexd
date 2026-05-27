@@ -1145,6 +1145,92 @@ func TestPinSlabsDuplicate(t *testing.T) {
 	assertNumSlabs(1)
 }
 
+func TestPinSlabsRebindLostSector(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	assertStats := func(unpinned, unpinnable, lost int64) {
+		t.Helper()
+		stats, err := store.SectorStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stats.Unpinned != unpinned {
+			t.Fatalf("expected %d unpinned sectors, got %d", unpinned, stats.Unpinned)
+		} else if stats.Unpinnable != unpinnable {
+			t.Fatalf("expected %d unpinnable sectors, got %d", unpinnable, stats.Unpinnable)
+		} else if stats.Lost != lost {
+			t.Fatalf("expected %d lost sectors, got %d", lost, stats.Lost)
+		}
+	}
+
+	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
+	root := frand.Entropy256()
+
+	slab1 := slabs.SlabPinParams{
+		EncryptionKey: slabs.EncryptionKey{1},
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root, HostKey: hk}},
+	}
+	if _, err := store.PinSlabs(account, nextCheck, slab1); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(1, 0, 0)
+
+	if err := store.MarkSectorsLost(hk, []types.Hash256{root}); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(0, 1, 1)
+
+	slab2 := slabs.SlabPinParams{
+		EncryptionKey: slabs.EncryptionKey{2},
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root, HostKey: hk}},
+	}
+	slab2IDs, err := store.PinSlabs(account, nextCheck, slab2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStats(1, 0, 1)
+
+	fetched, err := store.Slabs(account, slab2IDs)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(fetched) != 1 || len(fetched[0].Sectors) != 1 {
+		t.Fatalf("expected 1 slab with 1 sector, got %d slabs", len(fetched))
+	} else if fetched[0].Sectors[0].HostKey == nil {
+		t.Fatal("expected sector to be rebound to a host, got nil host key")
+	} else if *fetched[0].Sectors[0].HostKey != hk {
+		t.Fatalf("expected sector host %x, got %x", hk, *fetched[0].Sectors[0].HostKey)
+	}
+
+	if err := store.MarkSectorsLost(hk, []types.Hash256{root}); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(0, 1, 2)
+	if _, err := store.PinSlabs(account, nextCheck, slab2); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(1, 0, 2)
+
+	fetched, err = store.Slabs(account, slab2IDs)
+	if err != nil {
+		t.Fatal(err)
+	} else if fetched[0].Sectors[0].HostKey == nil || *fetched[0].Sectors[0].HostKey != hk {
+		t.Fatalf("expected sector rebound to host %x, got %v", hk, fetched[0].Sectors[0].HostKey)
+	}
+
+	if _, err := store.pool.Exec(t.Context(), "UPDATE contracts SET good = FALSE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)", sqlPublicKey(hk)); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.PinSlabs(account, nextCheck, slab2); !errors.Is(err, slabs.ErrBadHosts) {
+		t.Fatalf("expected ErrBadHosts re-pinning onto a bad host, got %v", err)
+	}
+}
+
 func TestUnpinSlab(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
