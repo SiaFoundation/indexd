@@ -195,6 +195,10 @@ components:
           allOf:
             - $ref: "#/components/schemas/Hash256"
             - description: The object's unique ID
+        version:
+          type: integer
+          format: uint32
+          description: The object format version. 0 represents an object pinned before versioning was introduced; the highest currently supported version is 1.
         encryptedDataKey:
           type: string
           format: byte
@@ -289,6 +293,10 @@ components:
           allOf:
             - $ref: "#/components/schemas/Hash256"
             - description: The object's ID, computed as a hash of its slabs. The server validates this matches the computed value.
+        version:
+          type: integer
+          format: uint32
+          description: The object format version. Defaults to 0 when omitted, which represents an object pinned before versioning was introduced. The highest currently supported version is 1; higher values are rejected.
         encryptedDataKey:
           type: string
           format: byte
@@ -301,7 +309,7 @@ components:
         dataSignature:
           allOf:
             - $ref: "#/components/schemas/Signature"
-            - description: A signature of blake2b(object ID, encrypted_data_key) attesting that the object data has not been tampered with
+            - description: A signature of blake2b(object ID, encrypted_data_key) attesting that the object data has not been tampered with. When version is non-zero it is also covered by the signature.
         encryptedMetadataKey:
           type: string
           format: byte
@@ -313,7 +321,7 @@ components:
         metadataSignature:
           allOf:
             - $ref: "#/components/schemas/Signature"
-            - description: A signature of blake2b(object ID, metadata key, encrypted_metadata) attesting that the metadata has not been tampered with
+            - description: A signature of blake2b(object ID, metadata key, encrypted_metadata) attesting that the metadata has not been tampered with. When version is non-zero it is also covered by the signature.
 
     ObjectEvent:
       type: object
