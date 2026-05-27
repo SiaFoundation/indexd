@@ -317,6 +317,7 @@ CREATE INDEX slabs_id_next_repair_attempt_idx ON slabs(next_repair_attempt ASC);
 CREATE TABLE objects (
     id BIGSERIAL PRIMARY KEY,
     object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32),
+    version INTEGER NOT NULL DEFAULT 0, -- object format version (0 = pinned before versioning)
     encrypted_data_key BYTEA UNIQUE NOT NULL CHECK(LENGTH(encrypted_data_key) = 72), -- user provided, data encryption key (xchacha20 nonce + key + tag)
     encrypted_meta_key BYTEA UNIQUE CHECK(LENGTH(encrypted_meta_key) = 72), -- user provided, metadata encryption key (xchacha20 nonce + key + tag)
     account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns object

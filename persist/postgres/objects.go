@@ -94,8 +94,8 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 
 		var objID int64
 		var metaKey sql.Null[[]byte]
-		err = tx.QueryRow(ctx, `SELECT id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at FROM objects WHERE account_id = $1 AND object_key = $2
-		`, accountID, sqlHash256(key)).Scan(&objID, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt)
+		err = tx.QueryRow(ctx, `SELECT id, version, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at FROM objects WHERE account_id = $1 AND object_key = $2
+		`, accountID, sqlHash256(key)).Scan(&objID, &obj.Version, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrObjectNotFound
 		} else if err != nil {
@@ -183,12 +183,12 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			var obj slabs.SealedObject
 			var objID int64
 			var metaKey sql.Null[[]byte]
-			err := tx.QueryRow(ctx, `SELECT id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at
+			err := tx.QueryRow(ctx, `SELECT id, version, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at
 				FROM objects
 				WHERE account_id = $1 AND object_key = $2`,
 				accountID,
 				sqlHash256(events[i].Key),
-			).Scan(&objID, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt)
+			).Scan(&objID, &obj.Version, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt)
 			if err != nil {
 				return fmt.Errorf("failed to query objects: %w", err)
 			}
@@ -332,10 +332,10 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 
 		var objectID int64
 		err = tx.QueryRow(ctx, `
-			INSERT INTO objects (object_key, account_id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature) VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, updated_at) = (EXCLUDED.encrypted_data_key, EXCLUDED.encrypted_meta_key, EXCLUDED.encrypted_metadata, EXCLUDED.data_signature, EXCLUDED.meta_signature, NOW())
+			INSERT INTO objects (object_key, account_id, version, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (account_id, object_key) DO UPDATE SET (version, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, updated_at) = (EXCLUDED.version, EXCLUDED.encrypted_data_key, EXCLUDED.encrypted_meta_key, EXCLUDED.encrypted_metadata, EXCLUDED.data_signature, EXCLUDED.meta_signature, NOW())
 			RETURNING id`,
-			sqlHash256(obj.ID), accountID, obj.EncryptedDataKey, encryptedMetaKey, encryptedMeta, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature)).Scan(&objectID)
+			sqlHash256(obj.ID), accountID, obj.Version, obj.EncryptedDataKey, encryptedMetaKey, encryptedMeta, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature)).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}

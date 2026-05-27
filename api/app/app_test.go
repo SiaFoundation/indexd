@@ -373,6 +373,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	obj := slabs.SealedObject{
+		Version:              1,
 		EncryptedDataKey:     frand.Bytes(72),
 		EncryptedMetadataKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{
@@ -389,6 +390,24 @@ func TestApplicationAPI(t *testing.T) {
 
 	// sign and save the object
 	obj.Sign(sk)
+
+	// objects with a version above the maximum are rejected
+	for _, v := range []uint32{2, 3} {
+		badVersion := obj
+		badVersion.Version = v
+		if err := client.PinObject(context.Background(), sk, badVersion); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectUnsupportedVersion.Error()) {
+			t.Fatalf("version %d: expected %v, got %v", v, slabs.ErrObjectUnsupportedVersion, err)
+		}
+	}
+
+	// version 0 is accepted for backwards compatibility
+	v0 := obj
+	v0.Version = 0
+	v0.Sign(sk) // version is part of the signature, so re-sign at version 0
+	if err := client.PinObject(context.Background(), sk, v0); err != nil {
+		t.Fatalf("expected version 0 to be accepted, got %v", err)
+	}
+
 	if err := client.PinObject(context.Background(), sk, obj); err != nil {
 		t.Fatal(err)
 	}
@@ -451,6 +470,7 @@ func TestApplicationAPI(t *testing.T) {
 
 	// Try to save an object referencing that slab on first account
 	badObj := slabs.SealedObject{
+		Version:              1,
 		EncryptedDataKey:     frand.Bytes(72),
 		EncryptedMetadataKey: frand.Bytes(72),
 		Slabs:                []slabs.SlabSlice{p2.Slice(0, 256)},
@@ -791,6 +811,7 @@ func TestSharedObjects(t *testing.T) {
 
 	// add the object to the db
 	obj := slabs.SealedObject{
+		Version:              1,
 		EncryptedDataKey:     frand.Bytes(72),
 		EncryptedMetadataKey: frand.Bytes(72),
 		Slabs: []slabs.SlabSlice{

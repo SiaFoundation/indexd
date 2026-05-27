@@ -64,6 +64,7 @@ func (s *SlabSlice) DecodeFrom(d *types.Decoder) {
 
 // EncodeTo implements types.EncoderTo.
 func (so SealedObject) EncodeTo(e *types.Encoder) {
+	e.WriteUint64(uint64(so.Version))
 	e.WriteBytes(so.EncryptedDataKey)
 	types.EncodeSlice(e, so.Slabs)
 	so.DataSignature.EncodeTo(e)
@@ -76,6 +77,7 @@ func (so SealedObject) EncodeTo(e *types.Encoder) {
 
 // DecodeFrom implements types.DecoderFrom.
 func (so *SealedObject) DecodeFrom(d *types.Decoder) {
+	so.Version = uint32(d.ReadUint64())
 	so.EncryptedDataKey = d.ReadBytes()
 	types.DecodeSlice(d, &so.Slabs)
 	so.DataSignature.DecodeFrom(d)

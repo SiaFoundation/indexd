@@ -19,6 +19,7 @@ type (
 	// It can be safely serialized and shared, but cannot be used to access
 	// the underlying data until it has been unlocked with the app key.
 	SealedObject struct {
+		Version          uint32      `json:"version"`
 		EncryptedDataKey []byte      `json:"encryptedDataKey"`
 		Slabs            []SlabSlice `json:"slabs"`
 		// DataSignature is a signature of the blake2b(object ID, encrypted_data_key)
@@ -89,6 +90,7 @@ type (
 	// A PinObjectRequest is the minimal fields for pinning an object to the indexer. It should be created using [SealedObject.PinRequest].
 	PinObjectRequest struct {
 		ID               types.Hash256 `json:"id"`
+		Version          uint32        `json:"version"`
 		EncryptedDataKey []byte        `json:"encryptedDataKey"`
 		Slabs            []ObjectSlab  `json:"slabs"`
 		// DataSignature is a signature of the blake2b(object ID, encrypted_data_key)
@@ -107,10 +109,15 @@ type (
 )
 
 // DataSigHash returns the hash used for signing/verifying the data signature.
-// It covers the slabs through the object ID and the encrypted data key.
+// It covers the slabs through the object ID and the encrypted data key. The
+// version is only included when non-zero so that signatures produced before
+// versioning (version 0) remain valid.
 func (pr *PinObjectRequest) DataSigHash() types.Hash256 {
 	h := types.NewHasher()
 	pr.ID.EncodeTo(h.E)
+	if pr.Version > 0 {
+		h.E.WriteUint64(uint64(pr.Version))
+	}
 	h.E.Write(pr.EncryptedDataKey)
 	return h.Sum()
 }
@@ -121,6 +128,9 @@ func (pr *PinObjectRequest) DataSigHash() types.Hash256 {
 func (pr *PinObjectRequest) MetaSigHash() types.Hash256 {
 	h := types.NewHasher()
 	pr.ID.EncodeTo(h.E)
+	if pr.Version > 0 {
+		h.E.WriteUint64(uint64(pr.Version))
+	}
 	h.E.Write(pr.EncryptedMetadataKey)
 	h.E.Write(pr.EncryptedMetadata)
 	return h.Sum()
@@ -163,6 +173,11 @@ func (o *SharedObject) Size() uint64 {
 // store.
 const metadataLimit = 1024
 
+// maxSupportedObjectVersion is the highest object format version the indexer
+// will accept. Version 0 represents an object pinned before versioning was
+// introduced and is accepted for backwards compatibility.
+const maxSupportedObjectVersion = 1
+
 var (
 	// ErrInvalidObjectSignature is returned when an object's signature is invalid.
 	ErrInvalidObjectSignature = errors.New("invalid object signature")
@@ -175,6 +190,9 @@ var (
 	// ErrObjectUnpinnedSlab is returned when an user attempts to save an
 	// object containing a slab that is not pinned to their account.
 	ErrObjectUnpinnedSlab = errors.New("object contains unpinned slab")
+	// ErrObjectUnsupportedVersion is returned when an object's version is
+	// greater than the highest supported version.
+	ErrObjectUnsupportedVersion = fmt.Errorf("object version must be at most %d", maxSupportedObjectVersion)
 )
 
 // ID returns the object's ID, which is a hash of its slabs.
@@ -194,6 +212,7 @@ func (so *SealedObject) PinRequest() PinObjectRequest {
 	}
 	return PinObjectRequest{
 		ID:                   so.ID(),
+		Version:              so.Version,
 		EncryptedDataKey:     so.EncryptedDataKey,
 		Slabs:                os,
 		DataSignature:        so.DataSignature,
@@ -233,10 +252,15 @@ func pinnedObjectID(slabs []ObjectSlab) types.Hash256 {
 }
 
 // DataSigHash returns the hash used for signing/verifying the data signature.
-// It covers the slabs through the object ID and the encrypted data key.
+// It covers the slabs through the object ID and the encrypted data key. The
+// version is only included when non-zero so that signatures produced before
+// versioning (version 0) remain valid.
 func (so *SealedObject) DataSigHash() types.Hash256 {
 	h := types.NewHasher()
 	so.ID().EncodeTo(h.E)
+	if so.Version > 0 {
+		h.E.WriteUint64(uint64(so.Version))
+	}
 	h.E.Write(so.EncryptedDataKey)
 	return h.Sum()
 }
@@ -247,6 +271,9 @@ func (so *SealedObject) DataSigHash() types.Hash256 {
 func (so *SealedObject) MetaSigHash() types.Hash256 {
 	h := types.NewHasher()
 	so.ID().EncodeTo(h.E)
+	if so.Version > 0 {
+		h.E.WriteUint64(uint64(so.Version))
+	}
 	h.E.Write(so.EncryptedMetadataKey)
 	h.E.Write(so.EncryptedMetadata)
 	return h.Sum()
@@ -291,6 +318,8 @@ func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, o
 func (m *SlabManager) PinObject(ctx context.Context, account proto.Account, obj PinObjectRequest) error {
 	if len(obj.Slabs) == 0 {
 		return ErrObjectMinimumSlabs
+	} else if obj.Version > maxSupportedObjectVersion {
+		return ErrObjectUnsupportedVersion
 	} else if len(obj.EncryptedMetadata) > metadataLimit {
 		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(obj.EncryptedMetadata))
 	} else if pinnedObjectID(obj.Slabs) != obj.ID {

@@ -53,3 +53,39 @@ func TestObjectEquivalency(t *testing.T) {
 		t.Fatalf("unexpected error verifying signatures: %v", err)
 	}
 }
+
+func TestObjectVersionSignature(t *testing.T) {
+	sk := types.GeneratePrivateKey()
+	obj := SealedObject{
+		Version:          1,
+		EncryptedDataKey: frand.Bytes(72),
+		Slabs: []SlabSlice{{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors:       []PinnedSector{{Root: frand.Entropy256(), HostKey: frand.Entropy256()}},
+		}},
+		EncryptedMetadataKey: frand.Bytes(72),
+		EncryptedMetadata:    frand.Bytes(50),
+	}
+
+	v0 := obj
+	v0.Version = 0
+	if obj.DataSigHash() == v0.DataSigHash() {
+		t.Fatal("version should be included in the data signature hash")
+	} else if obj.MetaSigHash() == v0.MetaSigHash() {
+		t.Fatal("version should be included in the metadata signature hash")
+	}
+
+	// tampering with the version after signing invalidates both signatures
+	obj.Sign(sk)
+	if err := obj.VerifySignatures(sk.PublicKey()); err != nil {
+		t.Fatalf("expected valid signatures, got %v", err)
+	}
+	tampered := obj
+	tampered.Version = 0
+	if err := tampered.VerifyDataSignature(sk.PublicKey()); err == nil {
+		t.Fatal("expected data signature verification to fail after tampering with version")
+	} else if err := tampered.VerifyMetadataSignature(sk.PublicKey()); err == nil {
+		t.Fatal("expected metadata signature verification to fail after tampering with version")
+	}
+}
