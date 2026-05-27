@@ -261,7 +261,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			}
 
 			digest := slab.Digest()
-			digests = append(digests, slab.Digest())
+			digests = append(digests, digest)
 
 			// insert slab
 			var slabID int64
@@ -292,17 +292,15 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				newPinnedSize += slab.Size()
 			}
 
-			// if the slab already existed, we don't need to insert the sectors
-			if existingSlab {
-				continue
+			if !existingSlab {
+				if err := incrementNumSlabs(ctx, tx, 1); err != nil {
+					return fmt.Errorf("failed to increment number of slabs: %w", err)
+				}
 			}
 
-			// update slab stats
-			if err := incrementNumSlabs(ctx, tx, 1); err != nil {
-				return fmt.Errorf("failed to increment number of slabs: %w", err)
-			}
-
-			// insert slab's sectors in a single batch
+			// insert the slab's sectors. For a slab that already
+			// exists this may rebind any sectors that were marked
+			// lost since it was pinned.
 			batch := &pgx.Batch{}
 			for _, sector := range slab.Sectors {
 				batch.Queue(`
@@ -310,15 +308,17 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				SELECT $1, h.id, $3
 				FROM hosts h
 				WHERE h.public_key = $2
-				ON CONFLICT (sector_root) DO UPDATE SET uploaded_at=NOW()
-				RETURNING id, host_id, (xmax = 0) AS inserted`,
+				ON CONFLICT (sector_root) DO UPDATE SET
+					uploaded_at = NOW(),
+					host_id = COALESCE(sectors.host_id, EXCLUDED.host_id)
+				RETURNING id, host_id, (OLD.id IS NULL) AS inserted, (OLD.id IS NOT NULL AND OLD.host_id IS NULL) AS rebound`,
 					sqlHash256(sector.Root),
 					sqlPublicKey(sector.HostKey),
 					nextIntegrityCheck)
 			}
 
 			var badHosts int
-			var unpinned int64
+			var unpinned, rebound int64
 			var unpinnedDeltas []unpinnedDelta
 			br := tx.SendBatch(ctx, batch)
 			sectorIDs := make([]int64, len(slab.Sectors))
@@ -327,17 +327,21 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 					badHosts++
 				}
 
-				var inserted bool
+				var inserted, isRebound bool
 				var hostID int64
-				if err := br.QueryRow().Scan(&sectorIDs[i], &hostID, &inserted); err != nil {
+				if err := br.QueryRow().Scan(&sectorIDs[i], &hostID, &inserted, &isRebound); err != nil {
 					br.Close()
 					if errors.Is(err, sql.ErrNoRows) {
 						return fmt.Errorf("unknown host %q for sector", sector.HostKey)
 					}
 					return fmt.Errorf("failed to insert sector %q: %w", sector.Root, err)
-				} else if inserted {
+				}
+				if inserted || isRebound {
 					unpinned++
 					unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hostID, delta: 1})
+				}
+				if isRebound {
+					rebound++
 				}
 			}
 			br.Close()
@@ -354,6 +358,13 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 					return fmt.Errorf("failed to increment number of unpinned sectors: %w", err)
 				} else if err := incrementHostsUnpinnedSectors(ctx, tx, unpinnedDeltas); err != nil {
 					return fmt.Errorf("failed to update hosts unpinned sectors: %w", err)
+				}
+			}
+
+			// a hostless sector is counted as unpinnable; rebinding clears that.
+			if rebound > 0 {
+				if err := incrementNumUnpinnableSectors(ctx, tx, -rebound); err != nil {
+					return fmt.Errorf("failed to decrement number of unpinnable sectors: %w", err)
 				}
 			}
 

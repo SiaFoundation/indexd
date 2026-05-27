@@ -7,6 +7,7 @@ import (
 	"io"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,8 +15,10 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -533,6 +536,45 @@ func (m *mockHostClient) setSlowHost(hostKey types.PublicKey, delay time.Duratio
 		delete(m.slowHosts, hostKey)
 	} else {
 		m.slowHosts[hostKey] = delay
+	}
+}
+
+func TestSlabManagerPinSlabsValidation(t *testing.T) {
+	store := newMockStore(t)
+	sm := slabs.NewSlabManager(newMockChainManager(), newMockAccountManager(), nil, newMockHostManager(), store, newMockHostClient(), alerts.NewManager(), types.GeneratePrivateKey(), types.GeneratePrivateKey())
+
+	accountPK := types.GeneratePrivateKey().PublicKey()
+	store.AddTestAccount(t, accountPK)
+	account := proto.Account(accountPK)
+	nextCheck := time.Now().Add(time.Hour)
+
+	hostKeys := make([]types.PublicKey, 30)
+	for i := range hostKeys {
+		hostKeys[i] = types.GeneratePrivateKey().PublicKey()
+		store.AddTestHost(t, hosts.Host{PublicKey: hostKeys[i], Settings: goodSettings, Usability: hosts.GoodUsability})
+		store.addTestContract(t, hostKeys[i])
+	}
+	newSlab := func(key byte, hostFor func(i int) types.PublicKey) slabs.SlabPinParams {
+		sectors := make([]slabs.PinnedSector, len(hostKeys))
+		for i := range sectors {
+			sectors[i] = slabs.PinnedSector{Root: frand.Entropy256(), HostKey: hostFor(i)}
+		}
+		return slabs.SlabPinParams{EncryptionKey: slabs.EncryptionKey{key}, MinShards: 10, Sectors: sectors}
+	}
+
+	dup := newSlab(1, func(i int) types.PublicKey {
+		if i == 1 {
+			return hostKeys[0]
+		}
+		return hostKeys[i]
+	})
+	if _, err := sm.PinSlabs(context.Background(), account, nextCheck, dup); err == nil || !strings.Contains(err.Error(), "duplicate host key") {
+		t.Fatalf("expected duplicate host key error, got %v", err)
+	}
+
+	valid := newSlab(2, func(i int) types.PublicKey { return hostKeys[i] })
+	if _, err := sm.PinSlabs(context.Background(), account, nextCheck, valid); err != nil {
+		t.Fatalf("expected valid slab to pin, got %v", err)
 	}
 }
 
