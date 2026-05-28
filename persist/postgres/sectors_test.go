@@ -1151,7 +1151,9 @@ func TestPinSlabsRebindLostSector(t *testing.T) {
 	account := proto.Account{1}
 	store.addTestAccount(t, types.PublicKey(account))
 	hk := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
 	store.addTestContract(t, hk)
+	store.addTestContract(t, hk2)
 
 	assertStats := func(unpinned, unpinnable, lost int64) {
 		t.Helper()
@@ -1222,6 +1224,22 @@ func TestPinSlabsRebindLostSector(t *testing.T) {
 		t.Fatal(err)
 	} else if fetched[0].Sectors[0].HostKey == nil || *fetched[0].Sectors[0].HostKey != hk {
 		t.Fatalf("expected sector rebound to host %x, got %v", hk, fetched[0].Sectors[0].HostKey)
+	}
+
+	slabGood := slabs.SlabPinParams{
+		EncryptionKey: slabs.EncryptionKey{2},
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root, HostKey: hk2}},
+	}
+	if _, err := store.PinSlabs(account, nextCheck, slabGood); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(1, 0, 2)
+	fetched, err = store.Slabs(account, slab2IDs)
+	if err != nil {
+		t.Fatal(err)
+	} else if fetched[0].Sectors[0].HostKey == nil || *fetched[0].Sectors[0].HostKey != hk {
+		t.Fatalf("expected healthy sector host %x to be preserved, got %v", hk, fetched[0].Sectors[0].HostKey)
 	}
 
 	if _, err := store.pool.Exec(t.Context(), "UPDATE contracts SET good = FALSE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)", sqlPublicKey(hk)); err != nil {
