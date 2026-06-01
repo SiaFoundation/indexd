@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"time"
 
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/jape"
@@ -68,6 +69,13 @@ func WithProtocol(protocol chain.Protocol) URLQueryParameterOption {
 func WithCountry(countryCode string) URLQueryParameterOption {
 	return func(q url.Values) {
 		q.Set("country", countryCode)
+	}
+}
+
+// WithBefore sets the 'before' parameter.
+func WithBefore(t time.Time) URLQueryParameterOption {
+	return func(q url.Values) {
+		q.Set("before", t.Format(time.RFC3339Nano))
 	}
 }
 

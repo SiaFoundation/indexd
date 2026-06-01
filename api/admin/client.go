@@ -148,9 +148,18 @@ func (c *Client) UpdateAccount(ctx context.Context, ak types.PublicKey, updates 
 }
 
 // PruneSlabs prunes all pinned slabs of the given account not currently
-// connected to an object.
-func (c *Client) PruneSlabs(ctx context.Context, ak types.PublicKey) error {
-	return c.c.POST(ctx, fmt.Sprintf("/account/%s/slabs/prune", ak), nil, nil)
+// connected to an object. Use api.WithBefore to override the default cutoff
+// (1 hour ago).
+func (c *Client) PruneSlabs(ctx context.Context, ak types.PublicKey, opts ...api.URLQueryParameterOption) error {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	path := fmt.Sprintf("/account/%s/slabs/prune", ak)
+	if q := values.Encode(); q != "" {
+		path += "?" + q
+	}
+	return c.c.POST(ctx, path, nil, nil)
 }
 
 // Accounts returns all accounts registered in the indexer.
@@ -370,9 +379,17 @@ func (c *Client) DeleteSlab(ctx context.Context, slabID slabs.SlabID) error {
 }
 
 // PruneAccounts prunes orphaned slabs for all accounts. Only available in
-// debug mode.
-func (c *Client) PruneAccounts(ctx context.Context) error {
-	return c.c.POST(ctx, "/debug/slabs/prune", nil, nil)
+// debug mode. Use api.WithBefore to override the default cutoff (1 hour ago).
+func (c *Client) PruneAccounts(ctx context.Context, opts ...api.URLQueryParameterOption) error {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	path := "/debug/slabs/prune"
+	if q := values.Encode(); q != "" {
+		path += "?" + q
+	}
+	return c.c.POST(ctx, path, nil, nil)
 }
 
 // StatsAccounts returns statistics about the accounts registered on the

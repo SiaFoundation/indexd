@@ -208,9 +208,9 @@ func (m *SlabManager) SlabIDs(ctx context.Context, account proto.Account, offset
 }
 
 // PruneSlabs prunes all pinned slabs of a user not currently connected to an
-// object.
-func (m *SlabManager) PruneSlabs(ctx context.Context, account proto.Account) error {
-	return m.store.PruneSlabs(account)
+// object. Only slabs pinned before cutoff are eligible for pruning.
+func (m *SlabManager) PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error {
+	return m.store.PruneSlabs(account, cutoff)
 }
 
 // ValidateECParams checks the erasure coding parameters are
