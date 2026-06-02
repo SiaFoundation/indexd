@@ -334,6 +334,30 @@ func (c *Client) Prioritize(hosts []types.PublicKey) []types.PublicKey {
 	return c.hosts.Prioritize(hosts)
 }
 
+// PickWrite atomically selects the highest-scoring write candidate and
+// reserves an inflight slot. See [Provider.PickWrite].
+func (c *Client) PickWrite(candidates []types.PublicKey) (host types.PublicKey, release func(), remaining []types.PublicKey, ok bool) {
+	return c.hosts.PickWrite(candidates)
+}
+
+// PrioritizeAndReserveRead atomically sorts candidates and reserves
+// inflight read slots on the top n. See [Provider.PrioritizeAndReserveRead].
+func (c *Client) PrioritizeAndReserveRead(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
+	return c.hosts.PrioritizeAndReserveRead(candidates, n)
+}
+
+// TrackInflightRead increments the host's inflight read counter and
+// returns a function that decrements it. See [Provider.TrackInflightRead].
+func (c *Client) TrackInflightRead(hostKey types.PublicKey) func() {
+	return c.hosts.TrackInflightRead(hostKey)
+}
+
+// TrackInflightWrite increments the host's inflight write counter and
+// returns a function that decrements it. See [Provider.TrackInflightWrite].
+func (c *Client) TrackInflightWrite(hostKey types.PublicKey) func() {
+	return c.hosts.TrackInflightWrite(hostKey)
+}
+
 // WarmConnections establishes siamux connections and fetches prices from
 // good for upload hosts concurrently, seeding latency metrics for host ordering.
 func (c *Client) WarmConnections(ctx context.Context) error {

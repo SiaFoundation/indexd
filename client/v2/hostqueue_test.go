@@ -545,6 +545,64 @@ func TestWarmConnections(t *testing.T) {
 	}
 }
 
+func TestProviderInflightWeighting(t *testing.T) {
+	s := newTestStore(t)
+	store := hosts.NewHostStore(s.Store)
+	hostA := s.addUsableHost(t)
+	hostB := s.addUsableHost(t)
+	all := []types.PublicKey{hostA, hostB}
+
+	provider := client.NewProvider(store)
+
+	// give both hosts an identical read sample so throughput ties.
+	provider.AddReadSample(hostA, 4<<20, 10*time.Millisecond)
+	provider.AddReadSample(hostB, 4<<20, 10*time.Millisecond)
+
+	// with both idle, order among ties is arbitrary — capture it and
+	// then bump inflight on the leader.
+	sorted := provider.Prioritize(slices.Clone(all))
+	if len(sorted) != 2 {
+		t.Fatalf("expected 2 hosts, got %d", len(sorted))
+	}
+	leader := sorted[0]
+	other := sorted[1]
+
+	// hold three inflight read guards on the leader; it should now
+	// sort behind the other host since weighted throughput =
+	// throughput / (inflight + 1) demotes loaded hosts.
+	g1 := provider.TrackInflightRead(leader)
+	g2 := provider.TrackInflightRead(leader)
+	g3 := provider.TrackInflightRead(leader)
+	defer g1()
+	defer g2()
+	defer g3()
+
+	sorted = provider.Prioritize(slices.Clone(all))
+	if sorted[0] != other {
+		t.Fatalf("expected idle host to sort first, got %s", sorted[0])
+	} else if sorted[1] != leader {
+		t.Fatalf("expected loaded host to sort second, got %s", sorted[1])
+	}
+
+	// inflight writes count too: bumping the other host's write
+	// inflight enough should push it back behind the (still loaded)
+	// leader.
+	writeGuards := make([]func(), 0, 10)
+	for range 10 {
+		writeGuards = append(writeGuards, provider.TrackInflightWrite(other))
+	}
+	defer func() {
+		for _, g := range writeGuards {
+			g()
+		}
+	}()
+
+	sorted = provider.Prioritize(slices.Clone(all))
+	if sorted[0] != leader {
+		t.Fatalf("expected lower-inflight host to sort first, got %s", sorted[0])
+	}
+}
+
 func TestDuplicateHostQueue(t *testing.T) {
 	hosts := []types.PublicKey{
 		types.GeneratePrivateKey().PublicKey(),
