@@ -9,7 +9,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
-	"go.sia.tech/indexd/client/v2"
 	"go.uber.org/zap"
 )
 
@@ -39,8 +38,22 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 		}
 	}
 
-	// prioritize available hosts based on latest reliability and performance
-	queue := client.NewHostQueue(m.hosts.Prioritize(available))
+	// prioritize available hosts based on latest reliability and
+	// performance; the slice is then used as a shared candidate pool
+	// for PickWrite. Each PickWrite call atomically reserves the
+	// highest-scoring host's inflight slot under the Provider lock so
+	// concurrent shard goroutines - both within this slab and across
+	// other parallel slab migrations - disperse across less-busy hosts.
+	available = m.hosts.Prioritize(available)
+	var poolMu sync.Mutex
+
+	pickHost := func() (types.PublicKey, func(), bool) {
+		poolMu.Lock()
+		defer poolMu.Unlock()
+		host, release, remaining, ok := m.hosts.PickWrite(available)
+		available = remaining
+		return host, release, ok
+	}
 
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, 10)
@@ -55,10 +68,6 @@ top:
 		case <-ctx.Done():
 			break top
 		case sema <- struct{}{}:
-			if queue.Available() == 0 {
-				log.Debug("no more hosts for migration")
-				break top
-			}
 			shard := shards[i]
 			shardRoot := slab.Sectors[i].Root
 			log := log.With(zap.Stringer("sectorRoot", shardRoot))
@@ -66,9 +75,13 @@ top:
 				defer func() {
 					<-sema
 				}()
-				for hostKey := range queue.Iter() {
+				for {
 					if ctx.Err() != nil {
-						// context already cancelled
+						return
+					}
+					hostKey, release, ok := pickHost()
+					if !ok {
+						log.Debug("no more hosts for migration")
 						return
 					}
 
@@ -79,6 +92,10 @@ top:
 					result, err := m.uploadShard(timeoutCtx, hostKey, shard)
 					timedOut := timeoutCtx.Err() != nil
 					timeoutCancel()
+					// release the inflight reservation regardless of
+					// outcome - either we move on to another host or
+					// we're done with this one.
+					release()
 					if err != nil {
 						log.Debug("failed to upload shard", zap.Duration("elapsed", time.Since(start)), zap.Error(err))
 						// demote the host if it hit the per-shard timeout while

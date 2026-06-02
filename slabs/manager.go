@@ -83,6 +83,20 @@ type (
 		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error)
 
 		Prioritize([]types.PublicKey) []types.PublicKey
+		// PickWrite atomically selects the best write candidate and
+		// reserves an inflight slot. The release function MUST be called
+		// when the RPC completes; the picked host is removed from
+		// candidates and the shortened slice is returned as remaining.
+		PickWrite(candidates []types.PublicKey) (host types.PublicKey, release func(), remaining []types.PublicKey, ok bool)
+		// PrioritizeAndReserveRead atomically sorts candidates and
+		// reserves inflight read slots on the top n hosts under a
+		// single lock hold; callers MUST call all returned releases.
+		PrioritizeAndReserveRead(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool)
+		// TrackInflightRead increments the host's inflight read counter
+		// and returns a function that decrements it. Callers should hold
+		// it for the duration of the RPC so concurrent prioritize calls
+		// reflect current load.
+		TrackInflightRead(hostKey types.PublicKey) func()
 	}
 
 	// HostManager defines the minimal interface of HostManager functionality

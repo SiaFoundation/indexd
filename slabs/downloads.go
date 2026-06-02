@@ -46,8 +46,6 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 			index: i,
 		}
 	}
-	candidates = m.hosts.Prioritize(candidates)
-
 	// helper to download a shard from a host
 	sema := make(chan struct{}, slab.MinShards)
 	downloadShard := func(ctx context.Context, hostKey types.PublicKey, sector slabDownload, log *zap.Logger) error {
@@ -94,9 +92,14 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 
 	var wg sync.WaitGroup
 	failedCh := make(chan struct{}, slab.MinShards)
-	spawnDownload := func(hostKey types.PublicKey, sector slabDownload, initial bool) {
+	spawnDownload := func(hostKey types.PublicKey, sector slabDownload, release func(), initial bool) {
 		log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("sectorRoot", sector.root))
 		wg.Go(func() {
+			// release the inflight reservation when the RPC returns,
+			// regardless of success - the caller already incremented
+			// it before this goroutine started so concurrent
+			// Prioritize calls in other slab migrations saw the load.
+			defer release()
 			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, m.shardTimeout)
 			defer timeoutCancel()
 			if err := downloadShard(timeoutCtx, hostKey, slabHosts[hostKey], log); err != nil {
@@ -117,22 +120,36 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 		})
 	}
 
-	if len(candidates) < int(slab.MinShards) {
+	// Atomic sort + reserve top-MinShards under a single Provider
+	// lock. Concurrent slab migrations doing the same in a burst
+	// serialize at the critical section, so later callers see the
+	// inflight reservations from earlier callers during their own sort
+	// and steer to less-busy hosts instead of dogpiling the same
+	// top-N from an all-zero snapshot.
+	var releases []func()
+	var ok bool
+	candidates, releases, ok = m.hosts.PrioritizeAndReserveRead(candidates, int(slab.MinShards))
+	if !ok {
 		return nil, fmt.Errorf("only %d available sectors, minimum required: %d: %w", len(candidates), slab.MinShards, errNotEnoughShards)
 	}
 
-	// start initial shards
+	// start initial shards using the reservations made above.
+	initialHosts := candidates[:int(slab.MinShards)]
 initialLoop:
-	for _, hostKey := range candidates[:int(slab.MinShards)] {
+	for i, hostKey := range initialHosts {
 		select {
 		case <-ctx.Done():
+			// release any not-yet-spawned reservations.
+			for _, r := range releases[i:] {
+				r()
+			}
 			break initialLoop
 		case sema <- struct{}{}:
 		}
-		spawnDownload(hostKey, slabHosts[hostKey], true)
+		spawnDownload(hostKey, slabHosts[hostKey], releases[i], true)
 	}
 
-	t := time.NewTicker(m.shardTimeout / 4)
+	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 raceLoop:
 	for i := int(slab.MinShards); downloaded.Load() < uint32(slab.MinShards) && i < len(candidates); i++ {
@@ -147,11 +164,15 @@ raceLoop:
 			log.Debug("racing slow shards", zap.Uint32("downloaded", downloaded.Load()), zap.Uint32("required", uint32(slab.MinShards)))
 		}
 
+		// reserve the hedge candidate's inflight slot before spawning so
+		// concurrent prioritize calls in other slabs see the load.
+		release := m.hosts.TrackInflightRead(hostKey)
 		// wait for an available slot
 		select {
 		case sema <- struct{}{}:
-			spawnDownload(hostKey, slabHosts[hostKey], false)
+			spawnDownload(hostKey, slabHosts[hostKey], release, false)
 		case <-ctx.Done():
+			release()
 			break raceLoop
 		}
 	}

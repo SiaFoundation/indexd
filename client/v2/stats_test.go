@@ -10,19 +10,19 @@ import (
 func TestRPCAverage(t *testing.T) {
 	var ra rpcAverage
 
-	if ra.Value() != defaultThroughput {
-		t.Fatal("initial value should be defaultThroughput")
+	if _, sampled := ra.Value(); sampled {
+		t.Fatal("unsampled average should report sampled=false")
 	}
 
 	ra.AddSample(100)
-	if v := ra.Value(); v != 100 {
-		t.Fatalf("expected 100, got %f", v)
+	if v, sampled := ra.Value(); !sampled || v != 100 {
+		t.Fatalf("expected 100 sampled, got %f sampled=%v", v, sampled)
 	}
 
 	ra.AddSample(200)
 	expected := 0.2*200 + 0.8*100
-	if v := ra.Value(); v != expected {
-		t.Fatalf("expected %f, got %f", expected, v)
+	if v, sampled := ra.Value(); !sampled || v != expected {
+		t.Fatalf("expected %f sampled, got %f sampled=%v", expected, v, sampled)
 	}
 }
 
