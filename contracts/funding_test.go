@@ -121,6 +121,12 @@ func TestFundingLegacy(t *testing.T) {
 	pk2 := types.GeneratePrivateKey().PublicKey()
 	s.AddTestAccount(t, pk2)
 
+	// refresh quotas, AddTestAccount creates a testing quota
+	quotas, err = am.Quotas(context.Background(), 0, math.MaxInt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// fund accounts
 	err = cm.FundAccounts(context.Background(), host, contractIDs, quotas, zap.NewNop())
 	if err != nil {
@@ -129,7 +135,7 @@ func TestFundingLegacy(t *testing.T) {
 
 	// assert the call params
 	if len(f.calls) != 1 {
-		t.Fatal("expected one call to fund accounts")
+		t.Fatal("expected one call to fund accounts", len(f.calls))
 	} else if !reflect.DeepEqual(f.calls[0].host, host) {
 		t.Fatal("expected host key to match")
 	} else if len(f.calls[0].accounts) != 2 {
