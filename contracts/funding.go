@@ -3,7 +3,6 @@ package contracts
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -101,7 +100,7 @@ func (cm *ContractManager) ContractFundTarget(ctx context.Context, host hosts.Ho
 }
 
 // FundAccounts funds individual accounts on legacy hosts. For hosts that support pools, FundPools is used.
-func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) error {
+func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, quotas []accounts.Quota, log *zap.Logger) error {
 	if len(contractIDs) == 0 {
 		log.Debug("no contracts provided")
 		return nil
@@ -113,11 +112,6 @@ func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, co
 		return nil
 	} else if host.HasPoolSupport() {
 		return nil
-	}
-
-	quotas, err := cm.accounts.Quotas(ctx, 0, math.MaxInt)
-	if err != nil {
-		return fmt.Errorf("failed to fetch quotas: %w", err)
 	}
 
 	threshold := time.Now().Add(-accounts.AccountActivityThreshold)
@@ -217,7 +211,7 @@ func (cm *ContractManager) FundServiceAccounts(ctx context.Context, host hosts.H
 // FundPools attempts to fund all pools for the given host key. It does so
 // using the provided contract IDs, which are used in the order they're given.
 // Only hosts that support pools (>= 5.1.0) are funded.
-func (cm *ContractManager) FundPools(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) error {
+func (cm *ContractManager) FundPools(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, quotas []accounts.Quota, log *zap.Logger) error {
 	if !host.HasPoolSupport() {
 		log.Debug("host does not support pools", zap.Stringer("version", host.Settings.ProtocolVersion))
 		return nil
@@ -233,11 +227,6 @@ func (cm *ContractManager) FundPools(ctx context.Context, host hosts.Host, contr
 	}
 
 	threshold := time.Now().Add(-accounts.AccountActivityThreshold)
-	quotas, err := cm.accounts.Quotas(ctx, 0, math.MaxInt)
-	if err != nil {
-		return fmt.Errorf("failed to fetch quotas: %w", err)
-	}
-
 OUTER:
 	for _, quota := range quotas {
 		fundTarget := accounts.HostFundTarget(host, quota.FundTargetBytes)

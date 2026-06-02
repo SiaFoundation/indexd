@@ -3,6 +3,7 @@ package contracts_test
 import (
 	"context"
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 	"time"
@@ -100,8 +101,13 @@ func TestFundingLegacy(t *testing.T) {
 		Usability: hosts.GoodUsability,
 	}
 
+	quotas, err := am.Quotas(context.Background(), 0, math.MaxInt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	contractIDs := []types.FileContractID{{1}}
-	err = cm.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+	err = cm.FundAccounts(context.Background(), host, contractIDs, quotas, zap.NewNop())
 	if !errors.Is(err, hosts.ErrNotFound) {
 		t.Fatal("expected host not found error")
 	}
@@ -116,7 +122,7 @@ func TestFundingLegacy(t *testing.T) {
 	s.AddTestAccount(t, pk2)
 
 	// fund accounts
-	err = cm.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+	err = cm.FundAccounts(context.Background(), host, contractIDs, quotas, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +152,7 @@ func TestFundingLegacy(t *testing.T) {
 	f.fail = true
 	for range 3 {
 		s.resetNextFund(t)
-		err = cm.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+		err = cm.FundAccounts(context.Background(), host, contractIDs, quotas, zap.NewNop())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -173,7 +179,7 @@ func TestFundingLegacy(t *testing.T) {
 
 	// fund accounts
 	contractIDs = append(contractIDs, types.FileContractID{2})
-	err = cm.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+	err = cm.FundAccounts(context.Background(), host, contractIDs, quotas, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +211,7 @@ func TestFundingLegacy(t *testing.T) {
 	}
 
 	// assert there's no accounts to fund
-	err = cm.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+	err = cm.FundAccounts(context.Background(), host, contractIDs, quotas, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	} else if len(f.calls) != 2 {
@@ -268,9 +274,14 @@ func TestFundingPools(t *testing.T) {
 	pk2 := types.GeneratePrivateKey().PublicKey()
 	s.AddTestAccount(t, pk2)
 
+	quotas, err := am.Quotas(context.Background(), 0, math.MaxInt)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	// fund accounts on a pool host
 	contractIDs := []types.FileContractID{{1}}
-	err = cm.FundAccounts(context.Background(), host, contractIDs, zap.NewNop())
+	err = cm.FundAccounts(context.Background(), host, contractIDs, quotas, zap.NewNop())
 	if err != nil {
 		t.Fatal(err)
 	}

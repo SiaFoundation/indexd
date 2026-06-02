@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -61,6 +62,12 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 		return fmt.Errorf("failed to fetch hosts for account funding: %w", err)
 	}
 
+	// fetch quotas
+	quotas, err := cm.accounts.Quotas(ctx, 0, math.MaxInt)
+	if err != nil {
+		return fmt.Errorf("failed to fetch quotas: %w", err)
+	}
+
 	// fund accounts on all hosts
 	var wg sync.WaitGroup
 	for _, hk := range hostsToFund {
@@ -89,13 +96,13 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 					}
 
 					// fund account pools
-					err = cm.FundPools(ctx, host, contractIDs, log)
+					err = cm.FundPools(ctx, host, contractIDs, quotas, log)
 					if err != nil {
 						log.Debug("failed to fund account pools", zap.Error(err))
 					}
 
 					// fund legacy accounts
-					err = cm.FundAccounts(ctx, host, contractIDs, log)
+					err = cm.FundAccounts(ctx, host, contractIDs, quotas, log)
 					if err != nil {
 						log.Debug("failed to fund accounts", zap.Error(err))
 					}
