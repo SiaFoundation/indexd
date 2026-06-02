@@ -121,6 +121,11 @@ top:
 	if migrated == 0 {
 		return 0, fmt.Errorf("no shards were uploaded during migration")
 	}
+
+	// record the slab got migrated so object events gets updated
+	if err := m.store.RecordSlabMigrated(slab.ID); err != nil {
+		log.Error("failed to record slab migration", zap.Error(err))
+	}
 	return int(migrated), nil
 }
 

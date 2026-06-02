@@ -102,6 +102,7 @@ type (
 		MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) error
 		MarkSlabRepaired(slabID SlabID, success bool) error
 		MigrateSector(root types.Hash256, hostKey types.PublicKey) (bool, error)
+		RecordSlabMigrated(slabID SlabID) error
 		PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error)
 		UnpinSlab(proto.Account, SlabID) error
 		RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error

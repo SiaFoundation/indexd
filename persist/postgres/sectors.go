@@ -926,22 +926,45 @@ func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) 
 	return
 }
 
+// RecordSlabMigrated updates the database to reflect that a slab was migrated.
+// This should be called after a slab was migrated and one or more of its
+// sectors were updated.
+func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+			UPDATE object_events
+			SET updated_at = date_trunc('second', NOW())
+			WHERE (account_id, object_key) IN (
+				SELECT DISTINCT o.account_id, o.object_key
+				FROM object_slabs os
+				INNER JOIN objects o ON os.object_id = o.id
+				WHERE os.slab_digest = $1
+			)
+		`, sqlHash256(slabID))
+		if err != nil {
+			return fmt.Errorf("failed to update affected object events: %w", err)
+		}
+		return nil
+	})
+}
+
 // MigrateSector updates a sector that was just migrated in the database to be
 // linked to the new host identified by 'hostKey'. This will reset the contract
 // ID since a freshly migrated sector isn't pinned yet. To pin a sector
 // 'PinSectors' is used. If the host is not found, e.g. due to being deleted in
-// the meantime, this operation is a no-op.
+// the meantime, this operation is a no-op. The caller is responsible for
+// invoking RecordSlabMigrated once per slab after the batch completes to bump
+// the corresponding object_events rows.
 func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migrated bool, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		var oldHostID sql.NullInt64
 		var contractMapID sql.NullInt64
-		var sectorID int64
 		err := tx.QueryRow(ctx, `
-			SELECT id, host_id, contract_sectors_map_id
+			SELECT host_id, contract_sectors_map_id
 			FROM sectors
 			WHERE sector_root = $1
 			FOR UPDATE
-		`, sqlHash256(root)).Scan(&sectorID, &oldHostID, &contractMapID)
+		`, sqlHash256(root)).Scan(&oldHostID, &contractMapID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil // not migrated
 		} else if err != nil {
@@ -960,23 +983,6 @@ func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migr
 			return nil
 		} else if err != nil {
 			return err
-		}
-
-		// update affected objects
-		_, err = tx.Exec(ctx, `
-			UPDATE object_events
-			SET updated_at = date_trunc('second', NOW())
-			WHERE (account_id, object_key) IN (
-				SELECT DISTINCT o.account_id, o.object_key
-				FROM slab_sectors
-				INNER JOIN slabs ON slab_sectors.slab_id = slabs.id
-				INNER JOIN object_slabs ON object_slabs.slab_digest = slabs.digest
-				INNER JOIN objects o ON object_slabs.object_id = o.id
-				WHERE slab_sectors.sector_id = $1
-			)
-		`, sectorID)
-		if err != nil {
-			return fmt.Errorf("failed to update affected object events: %w", err)
 		}
 
 		migrated = true

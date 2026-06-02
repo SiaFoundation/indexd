@@ -38,7 +38,7 @@ func TestMigrateSector(t *testing.T) {
 	pinTime := time.Now().Round(time.Microsecond)
 	root1 := types.Hash256{1}
 	root2 := types.Hash256{2}
-	_, err := store.PinSlabs(account, pinTime, slabs.SlabPinParams{
+	slabIDs, err := store.PinSlabs(account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
@@ -55,6 +55,7 @@ func TestMigrateSector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	slabID := slabIDs[0]
 
 	// create an object using the pinned slab
 	so := slabs.SealedObject{
@@ -180,7 +181,13 @@ func TestMigrateSector(t *testing.T) {
 			t.Fatal(err)
 		} else if migrated != expectedMigrated {
 			t.Fatalf("expected migrated %v, got %v", expectedMigrated, migrated)
+		} else if migrated {
+			// record the slab being migrated, as we do in production
+			if err := store.RecordSlabMigrated(slabID); err != nil {
+				t.Fatal(err)
+			}
 		}
+
 		afterUploadedAt := sectorUploadedAt(root)
 
 		if expectedMigrated && afterUploadedAt.Compare(beforeUploadedAt) != 1 {
