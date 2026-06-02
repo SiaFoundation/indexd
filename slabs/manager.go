@@ -383,12 +383,17 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	log := m.log.Named("migrations")
 	log.Debug("starting slab migrations")
 
-	// start a worker pool that pulls slabs from a channel
+	// fetching UnhealthySlabs is slow enough to cause gaps between retrieving
+	// the batch and runnning it. To make sure the workers don't finish their
+	// work before we have another batch ready, we fetch a multiple of the
+	// number of workers each time.
+	slabBatchSize := 10 * m.numMigrationGoroutines
+
 	type migrationJob struct {
 		id    SlabID
 		state migrationState
 	}
-	slabCh := make(chan migrationJob, m.numMigrationGoroutines)
+	slabCh := make(chan migrationJob, slabBatchSize)
 	var wg sync.WaitGroup
 	for range m.numMigrationGoroutines {
 		wg.Go(func() {
@@ -398,41 +403,54 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 		})
 	}
 
-	// fetch unhealthy slabs and feed them to the workers
-	for {
-		batch, err := m.store.UnhealthySlabs(m.numMigrationGoroutines)
-		if err != nil {
-			close(slabCh)
-			wg.Wait()
-			return err
-		}
+	// fetch unhealthy slabs and feed them to the workers in a separate
+	// goroutine so the slow UnhealthySlabs / fetchMigrationState calls
+	// happen in parallel with worker processing rather than blocking it.
+	producerErrCh := make(chan error, 1)
+	go func() {
+		defer close(slabCh)
+		for {
+			log.Debug("processing batch")
+			fetchStart := time.Now()
+			batch, err := m.store.UnhealthySlabs(slabBatchSize)
+			if err != nil {
+				producerErrCh <- err
+				return
+			}
+			log.Debug("fetched batch of unhealthy slabs", zap.Int("batchSize", len(batch)), zap.Duration("elapsed", time.Since(fetchStart)))
 
-		// update the state for every batch
-		state, err := m.fetchMigrationState()
-		if err != nil {
-			close(slabCh)
-			wg.Wait()
-			return err
-		}
+			// update the state for every batch
+			stateStart := time.Now()
+			state, err := m.fetchMigrationState()
+			if err != nil {
+				producerErrCh <- err
+				return
+			}
+			log.Debug("fetched migration state", zap.Duration("elapsed", time.Since(stateStart)))
 
-		for _, id := range batch {
-			select {
-			case slabCh <- migrationJob{id: id, state: state}:
-			case <-ctx.Done():
-				close(slabCh)
-				wg.Wait()
-				return nil
+			for _, id := range batch {
+				select {
+				case slabCh <- migrationJob{id: id, state: state}:
+				case <-ctx.Done():
+					log.Debug("migration interrupted by context cancellation")
+					return
+				}
+			}
+			if len(batch) < m.numMigrationGoroutines {
+				log.Debug("no more unhealthy slabs to migrate", zap.Int("batchSize", len(batch)))
+				return
 			}
 		}
-		if len(batch) < m.numMigrationGoroutines {
-			break
-		}
-	}
+	}()
 
-	close(slabCh)
 	wg.Wait()
 	log.Debug("finished slab migrations", zap.Duration("elapsed", time.Since(start)))
-	return nil
+	select {
+	case err := <-producerErrCh:
+		return err
+	default:
+		return nil
+	}
 }
 
 func (m *SlabManager) registerLostSectorsAlert() {
