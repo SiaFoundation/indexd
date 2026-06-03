@@ -233,6 +233,10 @@ func (s *Store) PendingPoolAttachments(hk types.PublicKey, limit int) ([]account
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		pending = pending[:0]
 
+		// NOTE we filter on zero consecutive failed funds because a pool_hosts
+		// row can exist for hosts where funding failed and the pool was never
+		// actually created. Pools currently in backoff are temporarily skipped
+		// and resume once funding succeeds again, which resets the counter.
 		rows, err := tx.Query(ctx, `
 SELECT a.public_key, p.pool_key
 FROM pool_hosts ph
