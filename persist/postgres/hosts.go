@@ -332,7 +332,7 @@ func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 			_, err = tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE host_id = $1`, hostID)
 			if err != nil {
 				return fmt.Errorf("failed to update contracts: %w", err)
-			} else if err := recomputeSlabHealthByContractHost(ctx, tx, hostID); err != nil {
+			} else if err := recomputeSlabHealthByHostID(ctx, tx, hostID); err != nil {
 				return fmt.Errorf("failed to update slab health: %w", err)
 			}
 

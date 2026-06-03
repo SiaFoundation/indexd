@@ -2,11 +2,9 @@ package postgres
 
 import "context"
 
-// unhealthySlabExists is a correlated SQL boolean expression (referencing the
-// slabs row through the alias "s") that is TRUE when the slab has a sector that
-// needs migration: one not stored on a host, or pinned to a contract that is no
-// longer good. It is the single source of truth for the slab health definition
-// used by both UnhealthySlabs and the needs_repair flag maintained below.
+// unhealthySlabExists is an SQL boolean expression that is true when the slab
+// has a sector that needs migration: one not stored on a host, or pinned to a
+// contract that is no longer good.
 const unhealthySlabExists = `EXISTS (
 	SELECT 1
 	FROM slab_sectors ss
@@ -22,14 +20,17 @@ const unhealthySlabExists = `EXISTS (
 )`
 
 // recomputeSlabHealth recalculates the needs_repair flag for every slab
-// returned by slabIDSubquery (which may reference args as $1..$N). It must be
-// called in the same transaction as, and after, any mutation that can change
-// whether a slab's sectors need migration.
+// returned by slabIDSubquery.  It must be called in the same transaction as,
+// and after, any mutation that can change whether a slab's sectors need
+// migration.
 func recomputeSlabHealth(ctx context.Context, tx *txn, slabIDSubquery string, args ...any) error {
-	// IS DISTINCT FROM skips rewriting rows whose health is unchanged
-	_, err := tx.Exec(ctx, `UPDATE slabs s SET needs_repair = `+unhealthySlabExists+`
-		WHERE s.id IN (`+slabIDSubquery+`)
-			AND s.needs_repair IS DISTINCT FROM (`+unhealthySlabExists+`)`, args...)
+	_, err := tx.Exec(ctx, `UPDATE slabs t SET needs_repair = h.unhealthy
+		FROM (
+			SELECT s.id, `+unhealthySlabExists+` AS unhealthy
+			FROM slabs s
+			WHERE s.id IN (`+slabIDSubquery+`)
+		) h
+		WHERE t.id = h.id AND t.needs_repair IS DISTINCT FROM h.unhealthy`, args...)
 	return err
 }
 
@@ -51,9 +52,9 @@ func recomputeSlabHealthBySlabs(ctx context.Context, tx *txn, slabIDs []int64) e
 	return recomputeSlabHealth(ctx, tx, `SELECT id FROM slabs WHERE id = ANY($1)`, slabIDs)
 }
 
-// recomputeSlabHealthByContractHost recomputes the needs_repair flag for every
+// recomputeSlabHealthByHostID recomputes the needs_repair flag for every
 // slab that has a sector pinned to one of the given host's contracts.
-func recomputeSlabHealthByContractHost(ctx context.Context, tx *txn, hostID int64) error {
+func recomputeSlabHealthByHostID(ctx context.Context, tx *txn, hostID int64) error {
 	return recomputeSlabHealth(ctx, tx, `
 		SELECT ss.slab_id
 		FROM contracts c

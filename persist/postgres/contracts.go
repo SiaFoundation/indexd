@@ -740,9 +740,7 @@ func (s *Store) UpdateNextPrune(contractID types.FileContractID, nextPrune time.
 func (s *Store) MarkUnrenewableContractsBad(minProofHeight uint64) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		// flag the affected slabs directly: a bad contract can only make a
-		// pinned slab unhealthy, and a data-modifying CTE shares the query's
-		// snapshot so recomputing via unhealthySlabExists would read the
-		// contracts as still good.
+		// pinned slab unhealthy
 		_, err := tx.Exec(ctx, `
 			WITH updated AS (
 				UPDATE contracts SET good = FALSE WHERE proof_height <= $1 RETURNING contract_id
@@ -849,9 +847,7 @@ func (s *Store) DeleteContract(contractID types.FileContractID) error {
 func (s *Store) RejectPendingContracts(maxFormation time.Time) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		// flag the affected slabs directly: a rejected contract can only make a
-		// pinned slab unhealthy, and a data-modifying CTE shares the query's
-		// snapshot so recomputing via unhealthySlabExists would read the
-		// contracts as still pending.
+		// pinned slab unhealthy
 		_, err := tx.Exec(ctx, `
 			WITH updated AS (
 				UPDATE contracts SET state = 4 WHERE state = 0 AND formation < $1 RETURNING contract_id
