@@ -440,7 +440,6 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 				log.Debug("no more unhealthy slabs to migrate", zap.Int("batchSize", len(batch)))
 				return
 			}
-			}
 		}
 	}()
 
