@@ -38,12 +38,10 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 		}
 	}
 
-	// prioritize available hosts based on latest reliability and
-	// performance; the slice is then used as a shared candidate pool
-	// for PickWrite. Each PickWrite call atomically reserves the
-	// highest-scoring host's inflight slot under the Provider lock so
-	// concurrent shard goroutines - both within this slab and across
-	// other parallel slab migrations - disperse across less-busy hosts.
+	// Prioritize filters unusable hosts; PickWrite re-scores on each
+	// call so concurrent shard goroutines see each other's inflight
+	// reservations and disperse across less-busy hosts. poolMu
+	// serializes access to the shared `available` slice header.
 	available = m.hosts.Prioritize(available)
 	var poolMu sync.Mutex
 
@@ -92,9 +90,6 @@ top:
 					result, err := m.uploadShard(timeoutCtx, hostKey, shard)
 					timedOut := timeoutCtx.Err() != nil
 					timeoutCancel()
-					// release the inflight reservation regardless of
-					// outcome - either we move on to another host or
-					// we're done with this one.
 					release()
 					if err != nil {
 						log.Debug("failed to upload shard", zap.Duration("elapsed", time.Since(start)), zap.Error(err))

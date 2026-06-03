@@ -395,8 +395,6 @@ type mockHostClient struct {
 	hostSettings    map[types.PublicKey]proto.HostSettings
 	unusable        map[types.PublicKey]struct{}
 	failedRPCs      map[types.PublicKey]int
-	inflightReads   map[types.PublicKey]int
-	inflightWrites  map[types.PublicKey]int
 }
 
 func (m *mockHostClient) resetStorage() {
@@ -531,40 +529,20 @@ func (m *mockHostClient) Prioritize(hosts []types.PublicKey) []types.PublicKey {
 	return filtered
 }
 
-// PickWrite is a mock implementation that pops the first candidate (in
-// the order Prioritize returned), increments an inflight counter for
-// observability, and returns a release that decrements it.
+// PickWrite pops the first candidate in input order.
 func (m *mockHostClient) PickWrite(candidates []types.PublicKey) (host types.PublicKey, release func(), remaining []types.PublicKey, ok bool) {
 	if len(candidates) == 0 {
 		return types.PublicKey{}, nil, candidates, false
 	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	picked := candidates[0]
-	m.inflightWrites[picked]++
-	return picked, func() {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		m.inflightWrites[picked]--
-	}, candidates[1:], true
+	return candidates[0], func() {}, candidates[1:], true
 }
 
-// TrackInflightRead is a mock that bumps a counter for observability.
 func (m *mockHostClient) TrackInflightRead(hostKey types.PublicKey) func() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.inflightReads[hostKey]++
-	return func() {
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		m.inflightReads[hostKey]--
-	}
+	return func() {}
 }
 
-// PrioritizeAndReserveRead is a mock implementation that filters
-// unusable hosts, keeps the input order, and reserves inflight read
-// slots on the top n. Returns ok=false when fewer than n usable hosts
-// remain.
+// PrioritizeAndReserveRead filters unusable hosts and keeps the input
+// order. Returns ok=false when fewer than n usable hosts remain.
 func (m *mockHostClient) PrioritizeAndReserveRead(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -580,13 +558,7 @@ func (m *mockHostClient) PrioritizeAndReserveRead(candidates []types.PublicKey, 
 	}
 	releases = make([]func(), n)
 	for i := range n {
-		hk := sorted[i]
-		m.inflightReads[hk]++
-		releases[i] = func() {
-			m.mu.Lock()
-			defer m.mu.Unlock()
-			m.inflightReads[hk]--
-		}
+		releases[i] = func() {}
 	}
 	return sorted, releases, true
 }
@@ -651,7 +623,5 @@ func newMockHostClient() *mockHostClient {
 		hostSettings:    make(map[types.PublicKey]proto.HostSettings),
 		unusable:        make(map[types.PublicKey]struct{}),
 		failedRPCs:      make(map[types.PublicKey]int),
-		inflightReads:   make(map[types.PublicKey]int),
-		inflightWrites:  make(map[types.PublicKey]int),
 	}
 }
