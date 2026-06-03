@@ -95,10 +95,6 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 	spawnDownload := func(hostKey types.PublicKey, sector slabDownload, release func(), initial bool) {
 		log := log.With(zap.Stringer("hostKey", hostKey), zap.Stringer("sectorRoot", sector.root))
 		wg.Go(func() {
-			// release the inflight reservation when the RPC returns,
-			// regardless of success - the caller already incremented
-			// it before this goroutine started so concurrent
-			// Prioritize calls in other slab migrations saw the load.
 			defer release()
 			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, m.shardTimeout)
 			defer timeoutCancel()
@@ -120,12 +116,6 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 		})
 	}
 
-	// Atomic sort + reserve top-MinShards under a single Provider
-	// lock. Concurrent slab migrations doing the same in a burst
-	// serialize at the critical section, so later callers see the
-	// inflight reservations from earlier callers during their own sort
-	// and steer to less-busy hosts instead of dogpiling the same
-	// top-N from an all-zero snapshot.
 	var releases []func()
 	var ok bool
 	candidates, releases, ok = m.hosts.PrioritizeAndReserveRead(candidates, int(slab.MinShards))
@@ -133,13 +123,11 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 		return nil, fmt.Errorf("only %d available sectors, minimum required: %d: %w", len(candidates), slab.MinShards, errNotEnoughShards)
 	}
 
-	// start initial shards using the reservations made above.
 	initialHosts := candidates[:int(slab.MinShards)]
 initialLoop:
 	for i, hostKey := range initialHosts {
 		select {
 		case <-ctx.Done():
-			// release any not-yet-spawned reservations.
 			for _, r := range releases[i:] {
 				r()
 			}
@@ -164,10 +152,7 @@ raceLoop:
 			log.Debug("racing slow shards", zap.Uint32("downloaded", downloaded.Load()), zap.Uint32("required", uint32(slab.MinShards)))
 		}
 
-		// reserve the hedge candidate's inflight slot before spawning so
-		// concurrent prioritize calls in other slabs see the load.
 		release := m.hosts.TrackInflightRead(hostKey)
-		// wait for an available slot
 		select {
 		case sema <- struct{}{}:
 			spawnDownload(hostKey, slabHosts[hostKey], release, false)

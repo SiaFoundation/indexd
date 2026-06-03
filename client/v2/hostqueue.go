@@ -91,10 +91,8 @@ type hostMetric struct {
 	inflightWrites atomic.Int64
 }
 
-// combinedThroughput returns the average of read and write throughput when
-// at least one side has been sampled. The second return is false when
-// neither read nor write samples have been recorded — the caller treats
-// such hosts as the "discovery" bucket so every host gets at least one try.
+// combinedThroughput returns the average of read and write throughput
+// and whether either side has been sampled.
 func (hm *hostMetric) combinedThroughput() (float64, bool) {
 	r, rok := hm.rpcReadAverage.Value()
 	w, wok := hm.rpcWriteAverage.Value()
@@ -110,9 +108,8 @@ func (hm *hostMetric) combinedThroughput() (float64, bool) {
 	}
 }
 
-// inflight returns the total number of RPCs currently in flight to this
-// host across reads and writes. Used to weight throughput so the score
-// reflects current load rather than historical capacity alone.
+// inflight returns the total number of read+write RPCs currently in
+// flight to this host.
 func (hm *hostMetric) inflight() int64 {
 	return hm.inflightReads.Load() + hm.inflightWrites.Load()
 }
@@ -217,10 +214,6 @@ func (p *Provider) sortHosts(hosts []types.PublicKey) {
 func (p *Provider) cmpMetrics(a, b types.PublicKey) int {
 	am, aok := p.metrics[a]
 	bm, bok := p.metrics[b]
-	// hosts with no Provider entry at all sort first (truly unknown ⇒
-	// max discovery preference). This matches the pre-existing test
-	// expectation that hosts which have never even had Usable() called
-	// are not penalised.
 	if !aok && !bok {
 		return 0
 	} else if !aok {
@@ -235,28 +228,20 @@ func (p *Provider) cmpMetrics(a, b types.PublicKey) int {
 	at, asampled := am.combinedThroughput()
 	bt, bsampled := bm.combinedThroughput()
 	if !asampled && !bsampled {
-		// both unsampled: prefer the less-loaded host so concurrent
-		// pickers don't all dogpile the same candidate.
 		return cmp.Compare(am.inflight(), bm.inflight())
 	} else if !asampled {
 		return -1
 	} else if !bsampled {
 		return 1
 	}
-
-	// both sampled: rank by throughput per additional inflight RPC.
 	aw := at / float64(am.inflight()+1)
 	bw := bt / float64(bm.inflight()+1)
 	return cmp.Compare(bw, aw)
 }
 
-// metric returns the per-host metric pointer, creating it on first use.
-// The pointer is stable for the lifetime of the Provider so inflight
-// counters tracked through it remain valid across concurrent samples and
-// prioritization calls.
+// metric returns the per-host metric pointer, creating it on
+// first use. Caller must hold p.mu.
 func (p *Provider) metric(hostKey types.PublicKey) *hostMetric {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	m, ok := p.metrics[hostKey]
 	if !ok {
 		m = &hostMetric{}
@@ -269,9 +254,9 @@ func (p *Provider) metric(hostKey types.PublicKey) *hostMetric {
 // The throughput is calculated from the number of bytes transferred and the
 // elapsed duration.
 func (p *Provider) AddReadSample(hostKey types.PublicKey, bytes uint64, elapsed time.Duration) {
-	metric := p.metric(hostKey)
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	metric := p.metric(hostKey)
 	if elapsed > 0 {
 		metric.rpcReadAverage.AddSample(float64(bytes) / elapsed.Seconds())
 	}
@@ -282,9 +267,9 @@ func (p *Provider) AddReadSample(hostKey types.PublicKey, bytes uint64, elapsed 
 // The throughput is calculated from the number of bytes transferred and the
 // elapsed duration.
 func (p *Provider) AddWriteSample(hostKey types.PublicKey, bytes uint64, elapsed time.Duration) {
-	metric := p.metric(hostKey)
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	metric := p.metric(hostKey)
 	if elapsed > 0 {
 		metric.rpcWriteAverage.AddSample(float64(bytes) / elapsed.Seconds())
 	}
@@ -300,24 +285,18 @@ func (p *Provider) AddSettingsSample(hostKey types.PublicKey, latency time.Durat
 
 // AddFailedRPC records a failed RPC attempt to the specified host.
 func (p *Provider) AddFailedRPC(hostKey types.PublicKey) {
-	metric := p.metric(hostKey)
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	metric.rpcFailRate.AddSample(false)
+	p.metric(hostKey).rpcFailRate.AddSample(false)
 }
 
 // TrackInflightRead increments the host's inflight read counter and
-// returns a function that decrements it. Callers should defer the
-// returned function for the duration of the RPC so the host scorer
-// reflects current load and concurrent Prioritize calls disperse work
-// across less-busy hosts.
-//
-// For reads the candidate host is fixed (the sector lives on a specific
-// host), so the recommended pattern is: Prioritize the candidates once,
-// then immediately call TrackInflightRead on each picked host before
-// spawning the RPC goroutine.
+// returns a function that decrements it. Hold the returned function for
+// the duration of the RPC so concurrent prioritization sees the load.
 func (p *Provider) TrackInflightRead(hostKey types.PublicKey) func() {
+	p.mu.Lock()
 	m := p.metric(hostKey)
+	p.mu.Unlock()
 	m.inflightReads.Add(1)
 	return func() { m.inflightReads.Add(-1) }
 }
@@ -327,26 +306,24 @@ func (p *Provider) TrackInflightRead(hostKey types.PublicKey) func() {
 // concurrent upload selection where the host comes from a shared pool;
 // use this directly only when the host is already fixed.
 func (p *Provider) TrackInflightWrite(hostKey types.PublicKey) func() {
+	p.mu.Lock()
 	m := p.metric(hostKey)
+	p.mu.Unlock()
 	m.inflightWrites.Add(1)
 	return func() { m.inflightWrites.Add(-1) }
 }
 
 // PickWrite selects the highest-scoring host from candidates and
-// atomically reserves an inflight write slot, mirroring the Rust SDK's
-// HostQueue::pick. Atomic pick + reserve guarantees that concurrent
-// pickers — including multiple shard goroutines within the same slab —
-// see each other's reservations and disperse across less-busy hosts
-// instead of dogpiling the same top-N.
+// atomically reserves an inflight write slot under the Provider lock,
+// so concurrent pickers see each other's reservations and disperse
+// across less-busy hosts instead of dogpiling the same top-N.
 //
-// The chosen host is removed from candidates via swap-remove and the
-// shortened slice is returned as `remaining`. The caller MUST call
-// `release` when the RPC completes (use defer). Returns ok=false when
-// candidates is empty.
+// The chosen host is swap-removed from candidates; the shortened slice
+// is returned as `remaining`. Caller MUST defer `release`. Returns
+// ok=false when candidates is empty.
 //
 // There is no PickRead because read candidates are fixed (each sector
-// lives on a specific host). Reads use [Provider.Prioritize] +
-// [Provider.TrackInflightRead] instead.
+// lives on a specific host); reads use [Provider.PrioritizeAndReserveRead].
 func (p *Provider) PickWrite(candidates []types.PublicKey) (host types.PublicKey, release func(), remaining []types.PublicKey, ok bool) {
 	if len(candidates) == 0 {
 		return types.PublicKey{}, nil, candidates, false
@@ -360,11 +337,7 @@ func (p *Provider) PickWrite(candidates []types.PublicKey) (host types.PublicKey
 		}
 	}
 	picked := candidates[best]
-	m, exists := p.metrics[picked]
-	if !exists {
-		m = &hostMetric{}
-		p.metrics[picked] = m
-	}
+	m := p.metric(picked)
 	m.inflightWrites.Add(1)
 	candidates[best] = candidates[len(candidates)-1]
 	return picked, func() { m.inflightWrites.Add(-1) }, candidates[:len(candidates)-1], true
@@ -372,20 +345,12 @@ func (p *Provider) PickWrite(candidates []types.PublicKey) (host types.PublicKey
 
 // PrioritizeAndReserveRead filters candidates for usable hosts, sorts
 // them by score, and atomically reserves an inflight read slot on the
-// top n. The sort and reservation happen under a single lock hold so
-// concurrent callers in a burst serialize at that critical section -
-// later callers see earlier callers' reservations during their own
-// sort and steer to less-busy hosts instead of all dogpiling the same
-// top-N from an all-zero inflight snapshot.
+// top n — all under a single Provider lock so concurrent callers in a
+// burst see each other's reservations and steer to less-busy hosts.
 //
 // Returns the full sorted slice and n release functions matching
-// sorted[:n]; callers MUST call all releases when the corresponding
-// RPCs complete. Returns ok=false when fewer than n usable hosts are
-// available, in which case no reservations are made.
-//
-// Use this for the initial batch of a burst of concurrent read
-// selections (e.g. slab migrations). Hedges within a single slab can
-// stick with [Provider.TrackInflightRead] since they're serial.
+// sorted[:n]; callers MUST call all releases. Returns ok=false (with no
+// reservations made) when fewer than n usable hosts are available.
 func (p *Provider) PrioritizeAndReserveRead(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
 	sorted = candidates[:0]
 	for _, host := range candidates {
@@ -405,12 +370,7 @@ func (p *Provider) PrioritizeAndReserveRead(candidates []types.PublicKey, n int)
 
 	releases = make([]func(), n)
 	for i := range n {
-		host := sorted[i]
-		m, exists := p.metrics[host]
-		if !exists {
-			m = &hostMetric{}
-			p.metrics[host] = m
-		}
+		m := p.metric(sorted[i])
 		m.inflightReads.Add(1)
 		releases[i] = func() { m.inflightReads.Add(-1) }
 	}
