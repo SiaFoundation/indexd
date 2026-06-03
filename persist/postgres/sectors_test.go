@@ -225,6 +225,62 @@ func TestMigrateSector(t *testing.T) {
 	assertUpdated(true)
 }
 
+func TestRecordSlabMigrated(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	fcid := store.addTestContract(t, hk)
+
+	// pin a slab and an object that references it
+	root := frand.Entropy256()
+	encKey := frand.Entropy256()
+	slabIDs, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: encKey,
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root, HostKey: hk}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(fcid, []types.Hash256{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	so := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		Slabs:                []slabs.SlabSlice{{EncryptionKey: encKey, MinShards: 1, Sectors: []slabs.PinnedSector{{Root: root, HostKey: hk}}}},
+	}
+	if err := store.PinObject(account, so.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+
+	updatedAt := func() time.Time {
+		t.Helper()
+		var ts time.Time
+		if err := store.pool.QueryRow(t.Context(), `SELECT updated_at FROM object_events WHERE account_id = (SELECT id FROM accounts WHERE public_key = $1) AND object_key = $2`, sqlPublicKey(types.PublicKey(account)), sqlHash256(so.ID())).Scan(&ts); err != nil {
+			t.Fatal(err)
+		}
+		return ts
+	}
+
+	// updated_at has second precision, so wait past the next second boundary
+	before := updatedAt()
+	time.Sleep(time.Second)
+
+	if err := store.RecordSlabMigrated(slabIDs[0]); err != nil {
+		t.Fatal(err)
+	} else if after := updatedAt(); !after.After(before) {
+		t.Fatalf("expected updated_at to advance, before=%s after=%s", before, after)
+	}
+
+	// unknown slab is a no-op
+	if err := store.RecordSlabMigrated(slabs.SlabID(frand.Entropy256())); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRecordIntegrityCheck(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
