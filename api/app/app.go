@@ -36,7 +36,7 @@ type (
 	// Slabs defines the slab interface for the application API.
 	Slabs interface {
 		PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error)
-		PruneSlabs(ctx context.Context, account proto.Account) error
+		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
 		PinnedSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) (slabs.PinnedSlab, error)
 		SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]slabs.SlabID, error)
 		UnpinSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) error
@@ -380,7 +380,13 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 }
 
 func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
-	err := a.slabs.PruneSlabs(jc.Request.Context(), proto.Account(pk))
+	cutoff := time.Now().Add(-time.Hour)
+	if jc.Request.FormValue("before") != "" {
+		if jc.DecodeForm("before", &cutoff) != nil {
+			return
+		}
+	}
+	err := a.slabs.PruneSlabs(jc.Request.Context(), proto.Account(pk), cutoff)
 	if jc.Check("failed to prune slabs", err) != nil {
 		return
 	}

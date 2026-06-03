@@ -550,6 +550,12 @@ paths:
           required: true
           schema:
             type: string
+        - name: before
+          in: query
+          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to one hour ago.
+          schema:
+            type: string
+            format: date-time
       responses:
         "204":
           description: Slabs pruned successfully
@@ -908,6 +914,13 @@ paths:
         longer referenced by any object. This route is only available in
         debug mode.
       operationId: postDebugSlabsPrune
+      parameters:
+        - name: before
+          in: query
+          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to one hour ago.
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: All accounts pruned successfully.

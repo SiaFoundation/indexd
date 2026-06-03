@@ -433,6 +433,13 @@ paths:
         - slabs
       summary: Unpin all slabs not used by an object currently pinned by the user
       operationId: pruneSlabs
+      parameters:
+        - name: before
+          in: query
+          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to one hour ago.
+          schema:
+            type: string
+            format: date-time
       responses:
         "200":
           description: Slabs pruned successfully

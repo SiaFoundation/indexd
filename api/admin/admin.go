@@ -132,7 +132,7 @@ type (
 	SlabManager interface {
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
-		PruneSlabs(ctx context.Context, account proto.Account) error
+		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
 		SectorStats() (slabs.SectorsStats, error)
 	}
 
@@ -367,6 +367,13 @@ func (a *admin) handleDELETESlab(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTPruneAccounts(jc jape.Context) {
+	cutoff := time.Now().Add(-time.Hour)
+	if jc.Request.FormValue("before") != "" {
+		if jc.DecodeForm("before", &cutoff) != nil {
+			return
+		}
+	}
+
 	const batchSize = 100
 	for offset := 0; ; offset += batchSize {
 		accs, err := a.accounts.Accounts(jc.Request.Context(), offset, batchSize)
@@ -378,7 +385,7 @@ func (a *admin) handlePOSTPruneAccounts(jc jape.Context) {
 			if err := jc.Request.Context().Err(); err != nil {
 				return
 			}
-			if err := a.slabs.PruneSlabs(jc.Request.Context(), acc.AccountKey); err != nil {
+			if err := a.slabs.PruneSlabs(jc.Request.Context(), acc.AccountKey, cutoff); err != nil {
 				jc.Check("failed to prune slabs", err)
 				return
 			}
@@ -650,7 +657,13 @@ func (a *admin) handlePOSTAccountPrune(jc jape.Context) {
 	if jc.DecodeParam("accountkey", &ak) != nil {
 		return
 	}
-	if err := a.slabs.PruneSlabs(jc.Request.Context(), ak); errors.Is(err, accounts.ErrNotFound) {
+	cutoff := time.Now().Add(-time.Hour)
+	if jc.Request.FormValue("before") != "" {
+		if jc.DecodeForm("before", &cutoff) != nil {
+			return
+		}
+	}
+	if err := a.slabs.PruneSlabs(jc.Request.Context(), ak, cutoff); errors.Is(err, accounts.ErrNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if err != nil {

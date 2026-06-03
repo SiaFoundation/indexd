@@ -87,6 +87,10 @@ UPDATE hosts SET has_quic = EXISTS (
 		return err
 	},
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `DROP INDEX IF EXISTS sectors_next_integrity_check_idx`)
+		return err
+	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
 		if _, err := tx.Exec(ctx, `ALTER TABLE slabs ADD COLUMN needs_repair BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
 			return err
 		}
