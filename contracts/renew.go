@@ -68,12 +68,14 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 			log.Debug("skipping empty contract renewal, host already has an active empty contract")
 			continue
 		}
+		// mark the host before attempting: renewContract can fail after the renewal
+		// has already been negotiated/broadcast, and we must not negotiate a second
+		// empty contract for the same host in this run.
+		hostsWithActiveEmptyContract[contract.HostKey] = struct{}{}
 		attempted++
 		if err := cm.renewContract(ctx, contract, newProofHeight, log); err != nil {
 			log.Error("failed to renew contract", zap.Error(err))
 		} else {
-			// the renewal is also empty and is now the host's retained empty contract
-			hostsWithActiveEmptyContract[contract.HostKey] = struct{}{}
 			successful++
 		}
 	}
