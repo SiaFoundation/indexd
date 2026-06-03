@@ -1575,9 +1575,18 @@ func TestPinSectors(t *testing.T) {
 func TestUnhealthySlabs(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
-	// assertUnhealthySlabs asserts the number of unhealthy slabs
+	// assertUnhealthySlabs asserts the number of unhealthy slabs. This test
+	// mutates sector and contract state with raw SQL, which bypasses the
+	// needs_repair maintenance the Store methods perform, so the flag is
+	// recomputed from scratch here to exercise the real UnhealthySlabs query.
+	// The maintenance performed by the Store methods is covered by
+	// TestSlabHealthFlag.
 	assertUnhealthySlabs := func(expected, limit int) []slabs.SlabID {
 		t.Helper()
+
+		if _, err := store.pool.Exec(t.Context(), `UPDATE slabs s SET needs_repair = `+unhealthySlabExists); err != nil {
+			t.Fatal(err)
+		}
 
 		unhealthy, err := store.UnhealthySlabs(limit)
 		if err != nil {
@@ -1727,6 +1736,201 @@ func TestUnhealthySlabs(t *testing.T) {
 	// assert slab1 is not considered unhealthy since it is considered uploaded
 	// to a host but not yet pinned
 	assertUnhealthySlabs(0, 10)
+}
+
+func TestSlabHealthFlag(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	hk1 := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
+	contractID := store.addTestContract(t, hk1)
+
+	assertNeedsRepair := func(id slabs.SlabID, want bool) {
+		t.Helper()
+		var got bool
+		if err := store.pool.QueryRow(t.Context(), `SELECT needs_repair FROM slabs WHERE digest = $1`, sqlHash256(id)).Scan(&got); err != nil {
+			t.Fatal(err)
+		} else if got != want {
+			t.Fatalf("expected needs_repair=%v, got %v", want, got)
+		}
+	}
+
+	// pin a slab with two sectors on hk1
+	root1, root2 := frand.Entropy256(), frand.Entropy256()
+	ids, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root1, HostKey: hk1}, {Root: root2, HostKey: hk1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slabID := ids[0]
+
+	// a freshly pinned slab is healthy
+	assertNeedsRepair(slabID, false)
+
+	// losing a sector marks the slab for repair
+	if err := store.MarkSectorsLost(hk1, []types.Hash256{root1}); err != nil {
+		t.Fatal(err)
+	}
+	assertNeedsRepair(slabID, true)
+
+	// migrating the lost sector back to a host repairs the slab
+	if migrated, err := store.MigrateSector(root1, hk2); err != nil {
+		t.Fatal(err)
+	} else if !migrated {
+		t.Fatal("expected sector to be migrated")
+	}
+	assertNeedsRepair(slabID, false)
+
+	// losing a sector again and rebinding it by re-pinning the slab also repairs it
+	if err := store.MarkSectorsLost(hk2, []types.Hash256{root1}); err != nil {
+		t.Fatal(err)
+	}
+	assertNeedsRepair(slabID, true)
+	if _, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root1, HostKey: hk1}, {Root: root2, HostKey: hk1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	assertNeedsRepair(slabID, false)
+
+	// pin the sectors to the contract; the slab stays healthy while the
+	// contract is good
+	if err := store.PinSectors(contractID, []types.Hash256{root1, root2}); err != nil {
+		t.Fatal(err)
+	}
+	assertNeedsRepair(slabID, false)
+
+	// marking the contract bad makes the slab unhealthy
+	if err := store.MarkContractBad(contractID); err != nil {
+		t.Fatal(err)
+	}
+	assertNeedsRepair(slabID, true)
+
+	// deleting the bad contract unpins its sectors, which keep their host,
+	// repairing the slab
+	if err := store.DeleteContract(contractID); err != nil {
+		t.Fatal(err)
+	}
+	assertNeedsRepair(slabID, false)
+}
+
+func TestSlabHealthFlagContracts(t *testing.T) {
+	// pinSlabOnContract pins a fresh two-sector slab to a fresh contract and
+	// returns a helper asserting the slab's needs_repair flag.
+	pinSlabOnContract := func(t *testing.T, store *Store) func(bool) {
+		t.Helper()
+
+		account := proto.Account{1}
+		store.addTestAccount(t, types.PublicKey(account))
+		hk := store.addTestHost(t)
+		contractID := store.addTestContract(t, hk)
+
+		root1, root2 := frand.Entropy256(), frand.Entropy256()
+		ids, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors:       []slabs.PinnedSector{{Root: root1, HostKey: hk}, {Root: root2, HostKey: hk}},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.PinSectors(contractID, []types.Hash256{root1, root2}); err != nil {
+			t.Fatal(err)
+		}
+		slabID := ids[0]
+
+		assertNeedsRepair := func(want bool) {
+			t.Helper()
+			var got bool
+			if err := store.pool.QueryRow(t.Context(), `SELECT needs_repair FROM slabs WHERE digest = $1`, sqlHash256(slabID)).Scan(&got); err != nil {
+				t.Fatal(err)
+			} else if got != want {
+				t.Fatalf("expected needs_repair=%v, got %v", want, got)
+			}
+		}
+		return assertNeedsRepair
+	}
+
+	t.Run("MarkUnrenewableContractsBad", func(t *testing.T) {
+		store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+		assertNeedsRepair := pinSlabOnContract(t, store)
+
+		// healthy while the contract is good
+		assertNeedsRepair(false)
+
+		// the test contract has proof_height 600 (newTestRevision); marking
+		// contracts with proof_height <= 600 unrenewable makes the slab unhealthy
+		if err := store.MarkUnrenewableContractsBad(600); err != nil {
+			t.Fatal(err)
+		}
+		assertNeedsRepair(true)
+	})
+
+	t.Run("RejectPendingContracts", func(t *testing.T) {
+		store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+		assertNeedsRepair := pinSlabOnContract(t, store)
+
+		// healthy while the contract is pending
+		assertNeedsRepair(false)
+
+		// rejecting the pending contract makes the slab unhealthy
+		if err := store.RejectPendingContracts(time.Now().Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		assertNeedsRepair(true)
+	})
+}
+
+func TestSlabHealthFlagContractRenewal(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	contractID := store.addTestContract(t, hk)
+
+	root1, root2 := frand.Entropy256(), frand.Entropy256()
+	ids, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root1, HostKey: hk}, {Root: root2, HostKey: hk}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PinSectors(contractID, []types.Hash256{root1, root2}); err != nil {
+		t.Fatal(err)
+	}
+	slabID := ids[0]
+
+	assertNeedsRepair := func(want bool) {
+		t.Helper()
+		var got bool
+		if err := store.pool.QueryRow(t.Context(), `SELECT needs_repair FROM slabs WHERE digest = $1`, sqlHash256(slabID)).Scan(&got); err != nil {
+			t.Fatal(err)
+		} else if got != want {
+			t.Fatalf("expected needs_repair=%v, got %v", want, got)
+		}
+	}
+
+	if err := store.MarkContractBad(contractID); err != nil {
+		t.Fatal(err)
+	}
+	assertNeedsRepair(true)
+
+	// renewing moves the sectors to a fresh good contract, repairing the slab
+	if err := store.AddRenewedContract(contractID, types.FileContractID{9, 9, 9}, newTestRevision(hk), types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+	assertNeedsRepair(false)
 }
 
 func TestMarkSectorsUnpinnable(t *testing.T) {
@@ -2387,6 +2591,13 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 
 	// 25% of the sectors don't have a host at all
 	_, err = store.pool.Exec(b.Context(), `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id % 4 = 1`)
+	if err != nil {
+		b.Fatal(err)
+	}
+
+	// the raw updates above bypass the needs_repair maintenance the Store
+	// methods perform, so populate the flag to match the unhealthy state
+	_, err = store.pool.Exec(b.Context(), `UPDATE slabs s SET needs_repair = `+unhealthySlabExists)
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -305,14 +305,19 @@ CREATE TABLE slabs (
     min_shards SMALLINT NOT NULL CHECK(min_shards > 0),
 
     consecutive_failed_repairs SMALLINT NOT NULL DEFAULT 0 CHECK (consecutive_failed_repairs >= 0),
-    next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+    next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
 
+    -- TRUE when the slab has a sector needing migration (see UnhealthySlabs).
+    -- Maintained incrementally so unhealthy slabs can be found via an index
+    -- scan instead of scanning every sector.
+    needs_repair BOOLEAN NOT NULL DEFAULT FALSE
 );
 CREATE INDEX slabs_digest_idx ON slabs(digest);
 CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
 
--- speeds up lookup of unhealthy slabs
-CREATE INDEX slabs_id_next_repair_attempt_idx ON slabs(next_repair_attempt ASC);
+-- speeds up lookup of unhealthy slabs; partial so it only indexes slabs that
+-- need a repair
+CREATE INDEX slabs_needs_repair_idx ON slabs(next_repair_attempt ASC) WHERE needs_repair;
 
 CREATE TABLE objects (
     id BIGSERIAL PRIMARY KEY,

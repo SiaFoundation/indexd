@@ -86,4 +86,29 @@ UPDATE hosts SET has_quic = EXISTS (
 		_, err := tx.Exec(ctx, `ALTER TABLE hosts DROP COLUMN has_bad_quic_port`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		if _, err := tx.Exec(ctx, `ALTER TABLE slabs ADD COLUMN needs_repair BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `UPDATE slabs s SET needs_repair = TRUE WHERE EXISTS (
+			SELECT 1
+			FROM slab_sectors ss
+			JOIN sectors sec ON sec.id = ss.sector_id
+			LEFT JOIN contract_sectors_map csm ON csm.id = sec.contract_sectors_map_id
+			LEFT JOIN contracts c ON c.contract_id = csm.contract_id
+			WHERE ss.slab_id = s.id
+				AND (
+					sec.host_id IS NULL
+					OR (sec.contract_sectors_map_id IS NOT NULL
+						AND (c.good = FALSE OR c.state NOT IN (0, 1)))
+				)
+		)`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `DROP INDEX IF EXISTS slabs_id_next_repair_attempt_idx`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `CREATE INDEX slabs_needs_repair_idx ON slabs(next_repair_attempt ASC) WHERE needs_repair`)
+		return err
+	},
 }

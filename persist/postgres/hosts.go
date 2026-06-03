@@ -332,15 +332,35 @@ func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 			_, err = tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE host_id = $1`, hostID)
 			if err != nil {
 				return fmt.Errorf("failed to update contracts: %w", err)
+			} else if err := recomputeSlabHealthByContractHost(ctx, tx, hostID); err != nil {
+				return fmt.Errorf("failed to update slab health: %w", err)
 			}
 
-			res, err := tx.Exec(ctx, `
+			// null the host's unpinned sectors
+			var unpinnableSectorIDs []int64
+			rows, err := tx.Query(ctx, `
 				UPDATE sectors
 				SET host_id = NULL, consecutive_failed_checks = 0
-				WHERE host_id = $1 AND contract_sectors_map_id IS NULL`, hostID)
+				WHERE host_id = $1 AND contract_sectors_map_id IS NULL
+				RETURNING id`, hostID)
 			if err != nil {
 				return fmt.Errorf("failed to update sectors: %w", err)
-			} else if unpinnable := res.RowsAffected(); unpinnable > 0 {
+			}
+			for rows.Next() {
+				var id int64
+				if err := rows.Scan(&id); err != nil {
+					rows.Close()
+					return fmt.Errorf("failed to scan unpinnable sector id: %w", err)
+				}
+				unpinnableSectorIDs = append(unpinnableSectorIDs, id)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return fmt.Errorf("failed to update sectors: %w", err)
+			} else if err := recomputeSlabHealthBySectors(ctx, tx, unpinnableSectorIDs); err != nil {
+				return fmt.Errorf("failed to update slab health: %w", err)
+			}
+			if unpinnable := int64(len(unpinnableSectorIDs)); unpinnable > 0 {
 				if err := incrementNumUnpinnableSectors(ctx, tx, unpinnable); err != nil {
 					return fmt.Errorf("failed to increment unpinnable sectors: %w", err)
 				} else if err := incrementNumUnpinnedSectors(ctx, tx, -unpinnable); err != nil {
@@ -412,6 +432,8 @@ func (s *Store) UnblockHost(hk types.PublicKey) error {
 			`, sqlPublicKey(hk))
 		if err != nil {
 			return fmt.Errorf("failed to update contracts: %w", err)
+		} else if err := recomputeSlabHealthByHostKey(ctx, tx, sqlPublicKey(hk)); err != nil {
+			return fmt.Errorf("failed to update slab health: %w", err)
 		}
 		return nil
 	})

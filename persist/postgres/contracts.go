@@ -183,6 +183,11 @@ INSERT INTO contracts(host_id, contract_id, renewed_from, raw_revision, revision
 			return fmt.Errorf("failed to update contract sectors map, no entry found for contract %v", sqlHash256(renewedFrom))
 		}
 
+		// the sectors are now pinned to the renewal contract
+		if err := recomputeSlabHealthByContract(ctx, tx, sqlHash256(renewedTo)); err != nil {
+			return fmt.Errorf("failed to update slab health: %w", err)
+		}
+
 		return updateHostUsage(ctx, tx, revision.HostPublicKey, usage)
 	})
 }
@@ -604,6 +609,30 @@ func (s *Store) PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error {
 
 		s.log.Debug("pruning contract sectors map", zap.Uint64("maxBlocksSinceExpiry", maxBlocksSinceExpiry), zap.Int("toPrune", len(toPrune)))
 
+		// collect the affected slabs before unpinning so we can recompute their
+		// health afterwards
+		var affectedSlabIDs []int64
+		slabRows, err := tx.Query(ctx, `
+			SELECT DISTINCT ss.slab_id
+			FROM slab_sectors ss
+			JOIN sectors sec ON sec.id = ss.sector_id
+			WHERE sec.contract_sectors_map_id = ANY($1)`, toPrune)
+		if err != nil {
+			return fmt.Errorf("failed to query affected slabs: %w", err)
+		}
+		for slabRows.Next() {
+			var id int64
+			if err := slabRows.Scan(&id); err != nil {
+				slabRows.Close()
+				return fmt.Errorf("failed to scan affected slab id: %w", err)
+			}
+			affectedSlabIDs = append(affectedSlabIDs, id)
+		}
+		slabRows.Close()
+		if err := slabRows.Err(); err != nil {
+			return fmt.Errorf("failed to query affected slabs: %w", err)
+		}
+
 		updateBatch := &pgx.Batch{}
 		pruneBatch := &pgx.Batch{}
 		for _, id := range toPrune {
@@ -646,6 +675,11 @@ func (s *Store) PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error {
 
 		if err := tx.SendBatch(ctx, pruneBatch).Close(); err != nil {
 			return fmt.Errorf("failed to prune contract_sectors_map: %w", err)
+		}
+
+		// unpinning may have repaired the affected slabs
+		if err := recomputeSlabHealthBySlabs(ctx, tx, affectedSlabIDs); err != nil {
+			return fmt.Errorf("failed to update slab health: %w", err)
 		}
 		return nil
 	})
@@ -705,7 +739,22 @@ func (s *Store) UpdateNextPrune(contractID types.FileContractID, nextPrune time.
 // height <= minProofHeight bad.
 func (s *Store) MarkUnrenewableContractsBad(minProofHeight uint64) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE proof_height <= $1`, minProofHeight)
+		// flag the affected slabs directly: a bad contract can only make a
+		// pinned slab unhealthy, and a data-modifying CTE shares the query's
+		// snapshot so recomputing via unhealthySlabExists would read the
+		// contracts as still good.
+		_, err := tx.Exec(ctx, `
+			WITH updated AS (
+				UPDATE contracts SET good = FALSE WHERE proof_height <= $1 RETURNING contract_id
+			)
+			UPDATE slabs s SET needs_repair = TRUE
+			WHERE NOT s.needs_repair AND s.id IN (
+				SELECT ss.slab_id
+				FROM updated u
+				JOIN contract_sectors_map csm ON csm.contract_id = u.contract_id
+				JOIN sectors sec ON sec.contract_sectors_map_id = csm.id
+				JOIN slab_sectors ss ON ss.sector_id = sec.id
+			)`, minProofHeight)
 		return err
 	})
 }
@@ -716,6 +765,8 @@ func (s *Store) markContractBad(ctx context.Context, tx *txn, contractID types.F
 		return fmt.Errorf("failed to mark contract bad: %w", err)
 	} else if res.RowsAffected() != 1 {
 		return fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
+	} else if err := recomputeSlabHealthByContract(ctx, tx, sqlHash256(contractID)); err != nil {
+		return fmt.Errorf("failed to update slab health: %w", err)
 	}
 	return nil
 }
@@ -742,19 +793,37 @@ func (s *Store) DeleteContract(contractID types.FileContractID) error {
 		// unpin all sectors by setting contract_sectors_map_id to NULL and
 		// updating uploaded_at to prevent MarkSectorsUnpinnable from immediately
 		// marking them as unpinnable
-		res, err := tx.Exec(ctx, `UPDATE sectors SET contract_sectors_map_id = NULL, uploaded_at = NOW() WHERE contract_sectors_map_id = $1`, contractMapID)
+		var sectorIDs []int64
+		rows, err := tx.Query(ctx, `UPDATE sectors SET contract_sectors_map_id = NULL, uploaded_at = NOW() WHERE contract_sectors_map_id = $1 RETURNING id`, contractMapID)
 		if err != nil {
+			return fmt.Errorf("failed to unpin sectors: %w", err)
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return fmt.Errorf("failed to scan unpinned sector id: %w", err)
+			}
+			sectorIDs = append(sectorIDs, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
 			return fmt.Errorf("failed to unpin sectors: %w", err)
 		}
 
 		// delete the entry in contract_sectors_map_id
-		_, err = tx.Exec(ctx, `DELETE FROM contract_sectors_map WHERE id = $1`, contractMapID)
-		if err != nil {
+		if _, err = tx.Exec(ctx, `DELETE FROM contract_sectors_map WHERE id = $1`, contractMapID); err != nil {
 			return fmt.Errorf("failed to delete from contract sectors map: %w", err)
 		}
 
+		// recompute by sector, not via markContractBad below which matches no
+		// slabs once the contract_sectors_map row is gone
+		if err := recomputeSlabHealthBySectors(ctx, tx, sectorIDs); err != nil {
+			return fmt.Errorf("failed to update slab health: %w", err)
+		}
+
 		// update stats
-		if pinned := res.RowsAffected(); pinned > 0 {
+		if pinned := int64(len(sectorIDs)); pinned > 0 {
 			var hostID int64
 			err = tx.QueryRow(ctx, `SELECT host_id FROM contracts WHERE contract_id = $1`, sqlHash256(contractID)).Scan(&hostID)
 			if err != nil {
@@ -779,7 +848,22 @@ func (s *Store) DeleteContract(contractID types.FileContractID) error {
 // pending and have a formation height older than 'maxFormation'.
 func (s *Store) RejectPendingContracts(maxFormation time.Time) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `UPDATE contracts SET state = 4 WHERE state = 0 AND formation < $1`, maxFormation)
+		// flag the affected slabs directly: a rejected contract can only make a
+		// pinned slab unhealthy, and a data-modifying CTE shares the query's
+		// snapshot so recomputing via unhealthySlabExists would read the
+		// contracts as still pending.
+		_, err := tx.Exec(ctx, `
+			WITH updated AS (
+				UPDATE contracts SET state = 4 WHERE state = 0 AND formation < $1 RETURNING contract_id
+			)
+			UPDATE slabs s SET needs_repair = TRUE
+			WHERE NOT s.needs_repair AND s.id IN (
+				SELECT ss.slab_id
+				FROM updated u
+				JOIN contract_sectors_map csm ON csm.contract_id = u.contract_id
+				JOIN sectors sec ON sec.contract_sectors_map_id = csm.id
+				JOIN slab_sectors ss ON ss.sector_id = sec.id
+			)`, maxFormation)
 		return err
 	})
 }
@@ -889,6 +973,9 @@ func (tx *updateTx) UpdateContractState(contractID types.FileContractID, state c
 	_, err := tx.tx.Exec(tx.ctx, `UPDATE contracts SET state = $1 WHERE contract_id = $2`, sqlContractState(state), sqlHash256(contractID))
 	if err != nil {
 		return fmt.Errorf("failed to update contract state: %w", err)
+	}
+	if err := recomputeSlabHealthByContract(tx.ctx, tx.tx, sqlHash256(contractID)); err != nil {
+		return fmt.Errorf("failed to update slab health: %w", err)
 	}
 	return nil
 }
