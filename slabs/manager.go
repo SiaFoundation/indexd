@@ -384,7 +384,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	log.Debug("starting slab migrations")
 
 	// fetching UnhealthySlabs is slow enough to cause gaps between retrieving
-	// the batch and runnning it. To make sure the workers don't finish their
+	// the batch and running it. To make sure the workers don't finish their
 	// work before we have another batch ready, we fetch a multiple of the
 	// number of workers each time.
 	slabBatchSize := 10 * m.numMigrationGoroutines
