@@ -436,9 +436,10 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 					return
 				}
 			}
-			if len(batch) < m.numMigrationGoroutines {
+			if len(batch) < slabBatchSize {
 				log.Debug("no more unhealthy slabs to migrate", zap.Int("batchSize", len(batch)))
 				return
+			}
 			}
 		}
 	}()
