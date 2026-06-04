@@ -322,7 +322,6 @@ CREATE TABLE slabs (
     next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 
 );
-CREATE INDEX slabs_digest_idx ON slabs(digest);
 CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
 
 -- speeds up lookup of unhealthy slabs

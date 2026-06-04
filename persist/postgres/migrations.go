@@ -91,6 +91,10 @@ UPDATE hosts SET has_quic = EXISTS (
 		return err
 	},
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `DROP INDEX IF EXISTS slabs_digest_idx`)
+		return err
+	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
 		_, err := tx.Exec(ctx, `DROP INDEX IF EXISTS sectors_contract_sectors_map_id_uploaded_at_idx`)
 		return err
 	},
