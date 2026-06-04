@@ -89,7 +89,7 @@ func (s *Store) RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey 
 		if err := s.transaction(func(ctx context.Context, tx *txn) error {
 			return recordIntegrityCheck(ctx, tx, success, nextCheck, hostKey, roots[start:end])
 		}); err != nil {
-			return err
+			return fmt.Errorf("chunk [%d:%d] of %d: %w", start, end, len(roots), err)
 		}
 	}
 	return nil
