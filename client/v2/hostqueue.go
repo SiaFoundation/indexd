@@ -321,9 +321,6 @@ func (p *Provider) TrackInflightWrite(hostKey types.PublicKey) func() {
 // The chosen host is swap-removed from candidates; the shortened slice
 // is returned as `remaining`. Caller MUST defer `release`. Returns
 // ok=false when candidates is empty.
-//
-// There is no PickRead because read candidates are fixed (each sector
-// lives on a specific host); reads use [Provider.PrioritizeAndReserveRead].
 func (p *Provider) PickWrite(candidates []types.PublicKey) (host types.PublicKey, release func(), remaining []types.PublicKey, ok bool) {
 	if len(candidates) == 0 {
 		return types.PublicKey{}, nil, candidates, false
@@ -343,15 +340,15 @@ func (p *Provider) PickWrite(candidates []types.PublicKey) (host types.PublicKey
 	return picked, func() { m.inflightWrites.Add(-1) }, candidates[:len(candidates)-1], true
 }
 
-// PrioritizeAndReserveRead filters candidates for usable hosts, sorts
-// them by score, and atomically reserves an inflight read slot on the
-// top n — all under a single Provider lock so concurrent callers in a
-// burst see each other's reservations and steer to less-busy hosts.
+// PickReads filters candidates for usable hosts, sorts them by score,
+// and atomically reserves an inflight read slot on the top n — all
+// under a single Provider lock so concurrent callers in a burst see
+// each other's reservations and steer to less-busy hosts.
 //
 // Returns the full sorted slice and n release functions matching
 // sorted[:n]; callers MUST call all releases. Returns ok=false (with no
 // reservations made) when fewer than n usable hosts are available.
-func (p *Provider) PrioritizeAndReserveRead(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
+func (p *Provider) PickReads(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
 	sorted = candidates[:0]
 	for _, host := range candidates {
 		if u, err := p.store.Usable(host); err == nil && u {

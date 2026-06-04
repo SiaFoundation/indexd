@@ -118,7 +118,7 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 
 	var releases []func()
 	var ok bool
-	candidates, releases, ok = m.hosts.PrioritizeAndReserveRead(candidates, int(slab.MinShards))
+	candidates, releases, ok = m.hosts.PickReads(candidates, int(slab.MinShards))
 	if !ok {
 		return nil, fmt.Errorf("only %d available sectors, minimum required: %d: %w", len(candidates), slab.MinShards, errNotEnoughShards)
 	}

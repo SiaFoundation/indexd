@@ -88,10 +88,10 @@ type (
 		// when the RPC completes; the picked host is removed from
 		// candidates and the shortened slice is returned as remaining.
 		PickWrite(candidates []types.PublicKey) (host types.PublicKey, release func(), remaining []types.PublicKey, ok bool)
-		// PrioritizeAndReserveRead atomically sorts candidates and
-		// reserves inflight read slots on the top n hosts under a
-		// single lock hold; callers MUST call all returned releases.
-		PrioritizeAndReserveRead(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool)
+		// PickReads atomically sorts candidates and reserves inflight
+		// read slots on the top n hosts under a single lock hold;
+		// callers MUST call all returned releases.
+		PickReads(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool)
 		// TrackInflightRead increments the host's inflight read counter
 		// and returns a function that decrements it. Callers should hold
 		// it for the duration of the RPC so concurrent prioritize calls

@@ -541,9 +541,9 @@ func (m *mockHostClient) TrackInflightRead(hostKey types.PublicKey) func() {
 	return func() {}
 }
 
-// PrioritizeAndReserveRead filters unusable hosts and keeps the input
-// order. Returns ok=false when fewer than n usable hosts remain.
-func (m *mockHostClient) PrioritizeAndReserveRead(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
+// PickReads filters unusable hosts and keeps the input order. Returns
+// ok=false when fewer than n usable hosts remain.
+func (m *mockHostClient) PickReads(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
