@@ -79,44 +79,56 @@ func (s *Store) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) 
 	return err
 }
 
+const integrityCheckChunkSize = 100
+
 // RecordIntegrityCheck records the result of integrity checks for the given
 // sectors stored on the given host.
 func (s *Store) RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
-	return s.transaction(func(ctx context.Context, tx *txn) error {
-		sqlRoots := make([]sqlHash256, len(roots))
-		for i, root := range roots {
-			sqlRoots[i] = sqlHash256(root)
+	for start := 0; start < len(roots); start += integrityCheckChunkSize {
+		end := min(start+integrityCheckChunkSize, len(roots))
+		if err := s.transaction(func(ctx context.Context, tx *txn) error {
+			return recordIntegrityCheck(ctx, tx, success, nextCheck, hostKey, roots[start:end])
+		}); err != nil {
+			return err
 		}
-		var err error
-		if success {
-			_, err = tx.Exec(ctx, `
-				UPDATE sectors
-				SET next_integrity_check = $1, consecutive_failed_checks = 0
-				WHERE host_id = (SELECT id FROM hosts WHERE public_key = $2) AND
-					sector_root = ANY($3)
-			`, nextCheck, sqlPublicKey(hostKey), sqlRoots)
-		} else {
-			_, err = tx.Exec(ctx, `
-				UPDATE sectors
-				SET next_integrity_check = $1, consecutive_failed_checks = consecutive_failed_checks + 1
-				WHERE host_id = (SELECT id FROM hosts WHERE public_key = $2) AND
-					sector_root = ANY($3)
-			`, nextCheck, sqlPublicKey(hostKey), sqlRoots)
-		}
-		if err != nil {
-			return fmt.Errorf("failed to record integrity check: %w", err)
-		}
+	}
+	return nil
+}
 
-		if err := incrementNumSectorsChecked(ctx, tx, uint64(len(roots))); err != nil {
-			return fmt.Errorf("failed to increment sectors checked stat: %w", err)
+func recordIntegrityCheck(ctx context.Context, tx *txn, success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error {
+	sqlRoots := make([]sqlHash256, len(roots))
+	for i, root := range roots {
+		sqlRoots[i] = sqlHash256(root)
+	}
+	var err error
+	if success {
+		_, err = tx.Exec(ctx, `
+			UPDATE sectors
+			SET next_integrity_check = $1, consecutive_failed_checks = 0
+			WHERE host_id = (SELECT id FROM hosts WHERE public_key = $2) AND
+				sector_root = ANY($3)
+		`, nextCheck, sqlPublicKey(hostKey), sqlRoots)
+	} else {
+		_, err = tx.Exec(ctx, `
+			UPDATE sectors
+			SET next_integrity_check = $1, consecutive_failed_checks = consecutive_failed_checks + 1
+			WHERE host_id = (SELECT id FROM hosts WHERE public_key = $2) AND
+				sector_root = ANY($3)
+		`, nextCheck, sqlPublicKey(hostKey), sqlRoots)
+	}
+	if err != nil {
+		return fmt.Errorf("failed to record integrity check: %w", err)
+	}
+
+	if err := incrementNumSectorsChecked(ctx, tx, uint64(len(roots))); err != nil {
+		return fmt.Errorf("failed to increment sectors checked stat: %w", err)
+	}
+	if !success {
+		if err := incrementNumSectorsFailed(ctx, tx, uint64(len(roots))); err != nil {
+			return fmt.Errorf("failed to increment sectors failed stat: %w", err)
 		}
-		if !success {
-			if err := incrementNumSectorsFailed(ctx, tx, uint64(len(roots))); err != nil {
-				return fmt.Errorf("failed to increment sectors failed stat: %w", err)
-			}
-		}
-		return nil
-	})
+	}
+	return nil
 }
 
 // SectorsForIntegrityCheck returns up to `limit` sectors that are due for an
