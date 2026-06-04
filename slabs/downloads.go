@@ -137,7 +137,7 @@ initialLoop:
 		spawnDownload(hostKey, slabHosts[hostKey], releases[i], true)
 	}
 
-	t := time.NewTicker(5 * time.Second)
+	t := time.NewTicker(m.shardTimeout / 4)
 	defer t.Stop()
 raceLoop:
 	for i := int(slab.MinShards); downloaded.Load() < uint32(slab.MinShards) && i < len(candidates); i++ {

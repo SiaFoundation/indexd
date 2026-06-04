@@ -196,7 +196,7 @@ func TestDownloadShardsDemotion(t *testing.T) {
 
 		account := types.GeneratePrivateKey()
 		sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
-		sm.SetShardTimeout(30 * time.Second)
+		sm.SetShardTimeout(2 * time.Second)
 		return sm, client, hs, slab
 	}
 
