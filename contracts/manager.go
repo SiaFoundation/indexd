@@ -405,45 +405,21 @@ func (cm *ContractManager) MaintenanceSettings(ctx context.Context) (Maintenance
 	return cm.store.MaintenanceSettings()
 }
 
-// ContractsForAppend returns all contracts that are good for appending data.
-// These contracts are revisable, not in their renew window, good and have not
-// reached their maximum size.
-func (cm *ContractManager) ContractsForAppend() (good []Contract, err error) {
-	settings, err := cm.store.MaintenanceSettings()
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch maintenance settings: %w", err)
-	}
-
-	hostsMap := make(map[types.PublicKey]proto.HostSettings)
-
+// HealthyContracts returns all contracts that are revisable and good regardless
+// of renew window or size limits.
+func (cm *ContractManager) HealthyContracts() ([]Contract, error) {
+	var good []Contract
 	const batchSize = 50
 	for offset := 0; ; offset += batchSize {
 		batch, err := cm.store.Contracts(offset, batchSize, WithRevisable(true), WithGood(true))
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch contracts: %w", err)
-		} else if len(batch) == 0 {
-			break
 		}
-
-		height := cm.chain.TipState().Index.Height
-
-		for _, c := range batch {
-			hostSettings, ok := hostsMap[c.HostKey]
-			if !ok {
-				host, err := cm.hosts.Host(context.Background(), c.HostKey)
-				if err != nil {
-					return nil, fmt.Errorf("failed to fetch host %s: %w", c.HostKey.String(), err)
-				}
-				hostSettings = host.Settings
-				hostsMap[c.HostKey] = hostSettings
-			}
-
-			if c.GoodForAppend(hostSettings, settings.RenewWindow, height, settings.Period) == nil {
-				good = append(good, c)
-			}
+		good = append(good, batch...)
+		if len(batch) < batchSize {
+			return good, nil
 		}
 	}
-	return
 }
 
 // TriggerAccountRefill triggers a refill for the given account by marking it

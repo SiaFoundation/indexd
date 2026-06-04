@@ -173,6 +173,11 @@ func (s SlabPinParams) Validate() error {
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
 // with the provided account.
 func (m *SlabManager) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error) {
+	for i := range toPin {
+		if err := toPin[i].Validate(); err != nil {
+			return nil, fmt.Errorf("slab %d invalid: %w", i, err)
+		}
+	}
 	return m.store.PinSlabs(account, nextIntegrityCheck, toPin...)
 }
 
@@ -203,9 +208,9 @@ func (m *SlabManager) SlabIDs(ctx context.Context, account proto.Account, offset
 }
 
 // PruneSlabs prunes all pinned slabs of a user not currently connected to an
-// object.
-func (m *SlabManager) PruneSlabs(ctx context.Context, account proto.Account) error {
-	return m.store.PruneSlabs(account)
+// object. Only slabs pinned before cutoff are eligible for pruning.
+func (m *SlabManager) PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error {
+	return m.store.PruneSlabs(account, cutoff)
 }
 
 // ValidateECParams checks the erasure coding parameters are

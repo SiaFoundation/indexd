@@ -27,7 +27,12 @@ go generate ./...
 go build -tags='netgo timetzdata' -trimpath -a -ldflags '-s -w' ./cmd/indexd
 ```
 
-## Getting Started
+## Running a node
+
+### Prerequisites
+- Postgresql 18
+
+### Config
 
 Running `indexd` requires a PostgreSQL database. By default, `indexd` looks for
 a PostgreSQL server running on `localhost:5432` with a database named `indexd`

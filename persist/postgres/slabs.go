@@ -147,8 +147,8 @@ ORDER BY ss.slab_index ASC`, dbID)
 }
 
 // PruneSlabs prunes all pinned slabs of a user not currently connected to an
-// object.
-func (s *Store) PruneSlabs(account proto.Account) error {
+// object. Only slabs pinned before cutoff are eligible for pruning.
+func (s *Store) PruneSlabs(account proto.Account, cutoff time.Time) error {
 	var id int64
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		var err error
@@ -167,6 +167,7 @@ func (s *Store) PruneSlabs(account proto.Account) error {
 FROM slabs s
 JOIN account_slabs a ON s.id = a.slab_id
 WHERE a.account_id = $1
+	AND s.pinned_at < $2
 	AND NOT EXISTS (
 		SELECT 1
 		FROM objects o
@@ -174,8 +175,8 @@ WHERE a.account_id = $1
 		WHERE o.account_id = a.account_id
 		AND os.slab_digest = s.digest
 	)
-LIMIT $2
-`, id, limit)
+LIMIT $3
+`, id, cutoff, limit)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get unused slabs: %w", err)
 		}

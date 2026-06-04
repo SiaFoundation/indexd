@@ -166,9 +166,17 @@ func (c *Client) Slab(ctx context.Context, appKey types.PrivateKey, slabID slabs
 }
 
 // PruneSlabs prunes all pinned slabs of a user not currently connected to an
-// object.
-func (c *Client) PruneSlabs(ctx context.Context, appKey types.PrivateKey) error {
-	return c.signedRequestJSON(ctx, appKey, http.MethodPost, "/slabs/prune", nil, nil)
+// object. Use api.WithBefore to override the default cutoff (1 hour ago).
+func (c *Client) PruneSlabs(ctx context.Context, appKey types.PrivateKey, opts ...api.URLQueryParameterOption) error {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	path := "/slabs/prune"
+	if q := values.Encode(); q != "" {
+		path += "?" + q
+	}
+	return c.signedRequestJSON(ctx, appKey, http.MethodPost, path, nil, nil)
 }
 
 // SlabIDs fetches the digests of slabs associated with the account. It supports

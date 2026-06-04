@@ -366,7 +366,7 @@ func TestSlabPruning(t *testing.T) {
 	assertSlabs(acc2, slab1ID)
 
 	// prune slabs for acc1
-	if err := store.PruneSlabs(acc1); err != nil {
+	if err := store.PruneSlabs(acc1, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -382,7 +382,7 @@ func TestSlabPruning(t *testing.T) {
 	assertSlabs(acc2, slab1ID)
 
 	// prune slabs for acc2
-	if err := store.PruneSlabs(acc2); err != nil {
+	if err := store.PruneSlabs(acc2, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -458,7 +458,7 @@ func BenchmarkPruneSlabs(b *testing.B) {
 	for b.Loop() {
 		b.ReportMetric(float64(objectsPerAccount)*float64(slabsPerObject)/2.0, "slabs/op")
 
-		if err := store.PruneSlabs(accs[frand.Intn(len(accs))]); err != nil {
+		if err := store.PruneSlabs(accs[frand.Intn(len(accs))], time.Now()); err != nil {
 			b.Fatal(err)
 		}
 	}

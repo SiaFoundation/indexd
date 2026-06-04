@@ -16,6 +16,8 @@ var (
 	ErrInsufficientServiceAccountBalance = errInsufficientServiceAccountBalance
 )
 
+type MigrationState = migrationState
+
 var (
 	SectorsToMigrate    = sectorsToMigrate
 	NewSlabManager      = newSlabManager
@@ -31,12 +33,12 @@ func (m *SlabManager) DownloadShards(ctx context.Context, slab Slab, log *zap.Lo
 }
 
 func (m *SlabManager) MigrateSlabs(ctx context.Context, slabIDs []SlabID, log *zap.Logger) error {
-	allHosts, goodContracts, err := m.migrationCandidates()
+	state, err := m.fetchMigrationState()
 	if err != nil {
 		return err
 	}
 	for _, slabID := range slabIDs {
-		m.migrateSlab(ctx, slabID, allHosts, goodContracts, log.With(zap.Stringer("slab", slabID)))
+		m.migrateSlab(ctx, slabID, state, log.With(zap.Stringer("slab", slabID)))
 	}
 	return nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -272,10 +273,15 @@ func TestSectorsToMigrate(t *testing.T) {
 		},
 	}
 
-	// helper to assert result of contractsForRepair
-	assertResult := func(availableHosts []hosts.Host, availableContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
+	// helper to assert result of sectorsToMigrate
+	state := slabs.MigrationState{
+		MaintenanceSettings: contracts.MaintenanceSettings{Period: 100},
+	}
+	assertResult := func(availableHosts []hosts.Host, healthyContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
-		toRepair, toUse := slabs.SectorsToMigrate(slab, availableHosts, availableContracts, 10)
+		state.Hosts = availableHosts
+		state.HealthyContracts = healthyContracts
+		toRepair, toUse := slabs.SectorsToMigrate(slab, state, 10)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {
@@ -301,8 +307,8 @@ func TestSectorsToMigrate(t *testing.T) {
 	// contracts are available
 	assertResult(nil, nil, []int{0, 1, 2, 3, 4}, nil)
 
-	// calling contractsForRepair with just the hosts and contracts the slab is stored on should
-	// return the missing sectors and no contracts
+	// with just the hosts and contracts the slab is stored on, only the
+	// missing sectors should require migration and no candidates are available
 	allHosts := []hosts.Host{goodHost, goodHostNoContract, sameLocationHost}
 	allContracts := []contracts.Contract{goodContract, badContract, sameLocationContract}
 	assertResult(allHosts, allContracts, []int{1, 2}, nil)
@@ -319,7 +325,7 @@ func TestSectorsToMigrate(t *testing.T) {
 	sameLocationHost2.Longitude = goodHost.Longitude
 	cSameLocationHost2 := newContract(sameLocationHost2.PublicKey, true)
 
-	// add the bad hosts+contracts and try again - expect same result
+	// add the bad hosts+contracts and try again, expect same result
 	allHosts = append(allHosts, badHost2, blockedHost, sameLocationHost2)
 	allContracts = append(allContracts, cBadHost2, cBlockedHost, cSameLocationHost2)
 	assertResult(allHosts, allContracts, []int{1, 2}, nil)
@@ -335,6 +341,30 @@ func TestSectorsToMigrate(t *testing.T) {
 	allHosts = append(allHosts, goodHost2, goodHost3)
 	allContracts = append(allContracts, cGoodHost2, cGoodHost3)
 	assertResult(allHosts, allContracts, []int{1, 2}, []hosts.Host{goodHost2, goodHost3})
+
+	// add a host with a healthy contract that is not eligible for migration
+	// uploads because it is in the renew window
+	healthyOnlyHost := newHost(true, false)
+	healthyOnlyContract := newContract(healthyOnlyHost.PublicKey, true)
+	healthyOnlyContract.ProofHeight = 40 // within renew window
+
+	slab.Sectors = append(slab.Sectors, slabs.Sector{
+		Root:       types.Hash256{6},
+		ContractID: &healthyOnlyContract.ID,
+		HostKey:    &healthyOnlyContract.HostKey,
+	})
+
+	allHosts = append(allHosts, healthyOnlyHost)
+	healthyAll := append(slices.Clone(allContracts), healthyOnlyContract)
+
+	// sector 6 should not be migrated because its contract is healthy
+	// the host should not be a candidate because it has no migration contract
+	state.MaintenanceSettings.RenewWindow = 50
+	assertResult(allHosts, healthyAll, []int{1, 2}, []hosts.Host{goodHost2, goodHost3})
+
+	// when the healthy only contract is missing from the healthy list too,
+	// the sector should be flagged for migration
+	assertResult(allHosts, allContracts, []int{1, 2, 5}, []hosts.Host{goodHost2, goodHost3})
 }
 
 func newTestContract(hk types.PublicKey) contracts.Contract {
