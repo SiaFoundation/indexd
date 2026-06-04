@@ -340,10 +340,10 @@ func (c *Client) PickWrite(candidates []types.PublicKey) (host types.PublicKey, 
 	return c.hosts.PickWrite(candidates)
 }
 
-// PrioritizeAndReserveRead atomically sorts candidates and reserves
-// inflight read slots on the top n. See [Provider.PrioritizeAndReserveRead].
-func (c *Client) PrioritizeAndReserveRead(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
-	return c.hosts.PrioritizeAndReserveRead(candidates, n)
+// PickReads atomically sorts candidates and reserves inflight read
+// slots on the top n. See [Provider.PickReads].
+func (c *Client) PickReads(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
+	return c.hosts.PickReads(candidates, n)
 }
 
 // TrackInflightRead increments the host's inflight read counter and
