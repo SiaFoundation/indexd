@@ -152,12 +152,11 @@ raceLoop:
 			log.Debug("racing slow shards", zap.Uint32("downloaded", downloaded.Load()), zap.Uint32("required", uint32(slab.MinShards)))
 		}
 
-		release := m.hosts.TrackInflightRead(hostKey)
 		select {
 		case sema <- struct{}{}:
+			release := m.hosts.TrackInflightRead(hostKey)
 			spawnDownload(hostKey, slabHosts[hostKey], release, false)
 		case <-ctx.Done():
-			release()
 			break raceLoop
 		}
 	}
