@@ -934,8 +934,8 @@ func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 		_, err := tx.Exec(ctx, `
 			UPDATE object_events
 			SET updated_at = date_trunc('second', NOW())
-			WHERE (account_id, object_key) IN (
-				SELECT DISTINCT o.account_id, o.object_key
+			WHERE object_key IN (
+				SELECT DISTINCT o.object_key
 				FROM object_slabs os
 				INNER JOIN objects o ON os.object_id = o.id
 				WHERE os.slab_digest = $1

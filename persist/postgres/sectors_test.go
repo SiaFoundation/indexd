@@ -256,23 +256,41 @@ func TestRecordSlabMigrated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	updatedAt := func() time.Time {
-		t.Helper()
-		var ts time.Time
-		if err := store.pool.QueryRow(t.Context(), `SELECT updated_at FROM object_events WHERE account_id = (SELECT id FROM accounts WHERE public_key = $1) AND object_key = $2`, sqlPublicKey(types.PublicKey(account)), sqlHash256(so.ID())).Scan(&ts); err != nil {
-			t.Fatal(err)
-		}
-		return ts
+	// assert object events count
+	var count int
+	err = store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM object_events`).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	} else if count != 1 {
+		t.Fatalf("expected 1 object events, got %d", count)
 	}
 
-	// updated_at has second precision, so wait past the next second boundary
-	before := updatedAt()
-	time.Sleep(time.Second)
+	// set updated_at in the past
+	ts := time.Now().Add(-time.Hour).Round(time.Second)
+	if _, err := store.pool.Exec(t.Context(), `UPDATE object_events SET updated_at = $1`, ts); err != nil {
+		t.Fatal(err)
+	}
 
+	// record slab migration
 	if err := store.RecordSlabMigrated(slabIDs[0]); err != nil {
 		t.Fatal(err)
-	} else if after := updatedAt(); !after.After(before) {
-		t.Fatalf("expected updated_at to advance, before=%s after=%s", before, after)
+	}
+
+	// assert count has not changed
+	err = store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM object_events`).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	} else if count != 1 {
+		t.Fatalf("expected 1 object events, got %d", count)
+	}
+
+	// assert updated_at has been updated
+	var updatedAt time.Time
+	err = store.pool.QueryRow(t.Context(), `SELECT updated_at FROM object_events LIMIT 1`).Scan(&updatedAt)
+	if err != nil {
+		t.Fatal(err)
+	} else if !updatedAt.After(ts) {
+		t.Fatalf("expected updated_at to be updated, got %v", updatedAt)
 	}
 
 	// unknown slab is a no-op
