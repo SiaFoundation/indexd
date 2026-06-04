@@ -54,6 +54,8 @@ func (s *Store) AddAppConnectKey(meta accounts.AppConnectKeyRequest) (key accoun
 				return accounts.ErrQuotaNotFound
 			case pgerrcode.UniqueViolation:
 				return accounts.ErrKeyAlreadyExists
+			default:
+				return err
 			}
 		} else if err != nil {
 			return err

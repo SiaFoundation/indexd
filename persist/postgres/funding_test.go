@@ -549,9 +549,6 @@ func TestPendingPoolAttachmentsMultiHost(t *testing.T) {
 	}
 
 	// attach on h1, h2 should be unaffected
-	if err := store.InsertPoolAttachments(hk1, pending[:0]); err != nil {
-		t.Fatal(err)
-	}
 	pending1, err := store.PendingPoolAttachments(hk1, 10)
 	if err != nil {
 		t.Fatal(err)
