@@ -2292,6 +2292,56 @@ func BenchmarkMarkContractBad(b *testing.B) {
 	}
 }
 
+func BenchmarkDeleteContract(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	// one account, many hosts so each contract is on its own host
+	account := proto.Account{1}
+	store.addTestAccount(b, types.PublicKey(account))
+
+	const (
+		sectorsPerContract = 5000
+		numContracts       = 50
+	)
+
+	fcids := make([]types.FileContractID, 0, numContracts)
+	for range numContracts {
+		hk := store.addTestHost(b)
+		fcid := store.addTestContract(b, hk)
+		fcids = append(fcids, fcid)
+
+		sectors := make([]slabs.PinnedSector, sectorsPerContract)
+		for j := range sectors {
+			sectors[j] = slabs.PinnedSector{Root: frand.Entropy256(), HostKey: hk}
+		}
+		if _, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+			MinShards: 1, EncryptionKey: frand.Entropy256(), Sectors: sectors,
+		}); err != nil {
+			b.Fatal(err)
+		}
+		unpinned, err := store.UnpinnedSectors(hk, sectorsPerContract)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if err := store.PinSectors(fcid, unpinned); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	b.ResetTimer()
+	idx := 0
+	for b.Loop() {
+		if idx >= len(fcids) {
+			b.StopTimer()
+			b.Fatalf("ran out of contracts after %d iterations", idx)
+		}
+		if err := store.DeleteContract(fcids[idx]); err != nil {
+			b.Fatal(err)
+		}
+		idx++
+	}
+}
+
 func (s *Store) addTestContract(t testing.TB, hk types.PublicKey, fcids ...types.FileContractID) types.FileContractID {
 	t.Helper()
 

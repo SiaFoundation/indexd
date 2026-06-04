@@ -401,18 +401,14 @@ CREATE INDEX stats_deltas_stat_name_idx ON stats_deltas(stat_name);
 -- quick lookup of sectors that failed the integrity checks too many times
 CREATE INDEX sectors_consecutive_failed_checks_idx ON sectors(host_id, consecutive_failed_checks) WHERE consecutive_failed_checks > 0;
 
--- quick lookup of sectors to pin prioritized by upload time
-CREATE INDEX sectors_contract_sectors_map_id_uploaded_at_idx ON sectors(contract_sectors_map_id, uploaded_at ASC);
-
 -- speed up lookup of unpinned sectors
 CREATE INDEX sectors_host_id_uploaded_at_idx ON sectors(host_id, uploaded_at ASC) WHERE contract_sectors_map_id IS NULL;
 
--- speed up prunable roots check
+-- speed up prunable roots check and any csm_id equality lookup
 CREATE INDEX sectors_contract_sectors_map_id_sector_root_idx ON sectors(contract_sectors_map_id, sector_root);
 
 -- foreign key constraint keys
 CREATE INDEX sectors_host_id_idx ON sectors(host_id);
--- CREATE INDEX sectors_contract_sectors_map_id_idx ON sectors(contract_sectors_map_id); -- covered by sectors_contract_sectors_map_id_uploaded_at_idx
 
 -- speed up integrity check query
 CREATE INDEX sectors_host_id_next_integrity_check_idx ON sectors(host_id, next_integrity_check ASC);
