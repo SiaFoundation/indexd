@@ -701,11 +701,12 @@ func (s *Store) UpdateNextPrune(contractID types.FileContractID, nextPrune time.
 	})
 }
 
-// MarkUnrenewableContractsBad marks all contracts as bad that have a proof
-// height <= minProofHeight bad.
-func (s *Store) MarkUnrenewableContractsBad(minProofHeight uint64) error {
+// MarkUnrenewableContractsBad flips the good flag to false on active or
+// pending contracts that have not been renewed, are still marked good and
+// whose proof height is at or below maxProofHeight.
+func (s *Store) MarkUnrenewableContractsBad(maxProofHeight uint64) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE proof_height <= $1`, minProofHeight)
+		_, err := tx.Exec(ctx, `UPDATE contracts SET good = FALSE WHERE state IN (0,1) AND renewed_to IS NULL AND good AND proof_height <= $1`, maxProofHeight)
 		return err
 	})
 }
