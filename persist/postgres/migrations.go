@@ -86,4 +86,8 @@ UPDATE hosts SET has_quic = EXISTS (
 		_, err := tx.Exec(ctx, `ALTER TABLE hosts DROP COLUMN has_bad_quic_port`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX object_events_object_key_idx ON object_events(object_key);`)
+		return err
+	},
 }
