@@ -20,9 +20,9 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 
 	var attempted, successful int
 
-	// collect all contracts elligible for renewal and remember hosts that have
-	// an active empty contract pre-renewal as we only want to keep around one
-	// empty contract per host.
+	// collect all contracts eligible for renewal and remember hosts that already have a retained
+	// zero-size contract (renewing it would produce a zero-capacity contract); we only want to
+	// keep around one such contract per host.
 	var eligible []Contract
 	hostsWithActiveEmptyContract := make(map[types.PublicKey]struct{})
 	batchSize := 50
@@ -52,7 +52,7 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 		log := log.With(zap.Stringer("contractID", contract.ID), zap.Stringer("host", contract.HostKey))
 		if contract.Size == 0 {
 			if _, ok := hostsWithActiveEmptyContract[contract.HostKey]; ok {
-				log.Debug("skipping empty contract renewal, host already has an active empty contract")
+				log.Debug("skipping zero-size contract renewal, host already has a retained zero-size contract")
 				continue
 			}
 		}
