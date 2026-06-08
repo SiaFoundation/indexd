@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -11,48 +12,6 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
-
-func (cm *ContractManager) performAccountFunding(ctx context.Context, force bool, log *zap.Logger) error {
-	start := time.Now()
-
-	// fetch hosts
-	hostsToFund, err := cm.hosts.HostsForFunding(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch hosts for account funding: %w", err)
-	}
-
-	// fund accounts on all hosts
-	var wg sync.WaitGroup
-	for _, hk := range hostsToFund {
-		wg.Add(1)
-		go func(ctx context.Context, hostKey types.PublicKey, log *zap.Logger) {
-			ctx, cancel := context.WithTimeout(ctx, fundTimeout)
-			defer func() {
-				wg.Done()
-				cancel()
-			}()
-
-			contractIDs, err := cm.store.ContractsForFunding(hostKey, 10)
-			if err != nil {
-				log.Error("failed to fetch contracts for funding", zap.Error(err))
-				return
-			} else if len(contractIDs) == 0 {
-				log.Debug("no contracts for funding")
-				return
-			}
-
-			if err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
-				return cm.FundAccounts(ctx, host, contractIDs, force, log)
-			}); err != nil {
-				log.Debug("failed to fund accounts", zap.Error(err))
-			}
-		}(ctx, hk, log.With(zap.Stringer("hostKey", hk)))
-	}
-	wg.Wait()
-
-	log.Debug("funding finished", zap.Duration("duration", time.Since(start)))
-	return ctx.Err()
-}
 
 func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *zap.Logger) error {
 	// fetch settings and determine if maintenance is supposed to run
@@ -94,6 +53,81 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 	return nil
 }
 
+func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.Logger) error {
+	start := time.Now()
+
+	// fetch hosts
+	hostsToFund, err := cm.hosts.HostsForFunding(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to fetch hosts for account funding: %w", err)
+	}
+
+	// fetch quotas
+	quotas, err := cm.accounts.Quotas(ctx, 0, math.MaxInt)
+	if err != nil {
+		return fmt.Errorf("failed to fetch quotas: %w", err)
+	}
+
+	// fund accounts on all hosts
+	var wg sync.WaitGroup
+	for _, hk := range hostsToFund {
+		wg.Add(1)
+		go func(ctx context.Context, hostKey types.PublicKey, log *zap.Logger) {
+			ctx, cancel := context.WithTimeout(ctx, fundTimeout)
+			defer func() {
+				wg.Done()
+				cancel()
+			}()
+
+			// fetch contracts for funding
+			contractIDs, err := cm.store.ContractsForFunding(hostKey, 10)
+			if err != nil {
+				log.Error("failed to fetch contracts for funding", zap.Error(err))
+				return
+			}
+
+			// fund accounts
+			if len(contractIDs) > 0 {
+				err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
+					// fund service accounts
+					err := cm.FundServiceAccounts(ctx, host, contractIDs, log)
+					if err != nil {
+						log.Debug("failed to fund service accounts", zap.Error(err))
+					}
+
+					// fund account pools
+					err = cm.FundPools(ctx, host, contractIDs, quotas, log)
+					if err != nil {
+						log.Debug("failed to fund account pools", zap.Error(err))
+					}
+
+					// fund legacy accounts
+					err = cm.FundAccounts(ctx, host, contractIDs, quotas, log)
+					if err != nil {
+						log.Debug("failed to fund accounts", zap.Error(err))
+					}
+
+					return nil
+				})
+				if err != nil {
+					log.Debug("failed to scan host for funding", zap.Error(err))
+				}
+			} else {
+				log.Debug("no contracts for funding")
+			}
+
+			// always attach pools, even without contracts
+			if err := cm.AttachPools(ctx, hostKey, log); err != nil {
+				log.Debug("failed to attach pools", zap.Error(err))
+			}
+		}(ctx, hk, log.With(zap.Stringer("hostKey", hk)))
+	}
+	wg.Wait()
+
+	log.Debug("funding finished", zap.Duration("duration", time.Since(start)))
+	return ctx.Err()
+}
+
 // maintenanceLoop performs any background tasks that the contract manager needs
 // to perform on contracts
 func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
@@ -109,17 +143,16 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 			if !cm.waitUntilSynced(ctx, log) {
 				return
 			}
-			var force bool
 			select {
 			case <-ctx.Done():
 				return
-			case force = <-cm.triggerFundingChan:
-				log.Debug("triggering scheduled account funding", zap.Bool("force", force))
+			case <-cm.triggerFundingChan:
+				log.Debug("triggering scheduled account funding")
 			case <-t.C:
 				log.Debug("starting scheduled funding")
 			}
-			fundingLog := log.Named("accounts")
-			logError(cm.performAccountFunding(ctx, force, fundingLog), fundingLog)
+			fundingLog := log.Named("funding")
+			logError(cm.performAccountFunding(ctx, fundingLog), fundingLog)
 		}
 	})
 

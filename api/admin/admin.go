@@ -54,7 +54,7 @@ type (
 	// ephemeral accounts. If a new account is added we trigger account funding
 	// to ensure the account is funded as soon as possible.
 	ContractManager interface {
-		TriggerAccountFunding(force bool) error
+		TriggerAccountFunding() error
 
 		MaintenanceSettings(ctx context.Context) (contracts.MaintenanceSettings, error)
 		UpdateMaintenanceSettings(ctx context.Context, ms contracts.MaintenanceSettings) error
@@ -515,7 +515,7 @@ func (a *admin) handlePOSTAppsRegister(jc jape.Context) {
 		a.log.Debug("failed to use app connect key", zap.Error(err))
 		jc.Error(ErrInternalError, http.StatusInternalServerError)
 	default:
-		if err := a.contracts.TriggerAccountFunding(false); err != nil {
+		if err := a.contracts.TriggerAccountFunding(); err != nil {
 			// error is ignored since the account is already connected
 			a.log.Debug("failed to trigger account funding", zap.Error(err))
 		}

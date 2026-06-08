@@ -340,7 +340,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 func (idx *Indexer) AddTestAccount(t *testing.T, pk types.PublicKey) {
 	t.Helper()
 	idx.store.AddTestAccount(t, pk)
-	if err := idx.contracts.TriggerAccountFunding(true); err != nil {
+	if err := idx.contracts.TriggerAccountFunding(); err != nil {
 		t.Fatalf("failed to trigger account funding: %v", err)
 	}
 	time.Sleep(50 * time.Millisecond) // wait for funding to complete

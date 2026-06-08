@@ -121,6 +121,19 @@ func (ts TestStore) AddTestHost(t testing.TB, host hosts.Host) {
 	}
 }
 
+// PoolAttached reports whether the given account's pool is attached on the
+// given host.
+func (ts TestStore) PoolAttached(ctx context.Context, account types.PublicKey, host types.PublicKey) (bool, error) {
+	var count int
+	err := ts.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM pool_attachments pa
+		INNER JOIN accounts a ON a.id = pa.account_id
+		INNER JOIN hosts hh ON hh.id = pa.host_id
+		WHERE a.public_key = $1 AND hh.public_key = $2`,
+		account[:], host[:]).Scan(&count)
+	return count > 0, err
+}
+
 // AddTestAccount adds an account to the database for testing.
 func (ts TestStore) AddTestAccount(t testing.TB, ak types.PublicKey) {
 	t.Helper()

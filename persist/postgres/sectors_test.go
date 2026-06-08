@@ -372,6 +372,27 @@ func TestRecordIntegrityCheck(t *testing.T) {
 
 	// host should have lost sector
 	assertLostSectors(1)
+
+	// record more than one chunk worth of sectors at once
+	manyRoots := make([]types.Hash256, integrityCheckChunkSize+1)
+	manySectors := make([]slabs.PinnedSector, len(manyRoots))
+	for i := range manyRoots {
+		manyRoots[i] = frand.Entropy256()
+		manySectors[i] = slabs.PinnedSector{Root: manyRoots[i], HostKey: hk}
+	}
+	if _, err := store.PinSlabs(account, pinTime, slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(), MinShards: 1, Sectors: manySectors,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now = time.Now().Add(time.Hour).Round(time.Microsecond)
+	record(true, now, manyRoots)
+	var updated int
+	if err := store.pool.QueryRow(t.Context(), "SELECT COUNT(*) FROM sectors WHERE next_integrity_check = $1", now).Scan(&updated); err != nil {
+		t.Fatal(err)
+	} else if updated != len(manyRoots) {
+		t.Fatalf("expected %d updated rows, got %d", len(manyRoots), updated)
+	}
 }
 
 func TestSectorsForIntegrityCheck(t *testing.T) {

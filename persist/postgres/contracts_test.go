@@ -1465,6 +1465,63 @@ func TestMarkUnrenewableContractsBad(t *testing.T) {
 	assertContractGood(false)
 	store.MarkUnrenewableContractsBad(proofHeight + 1)
 	assertContractGood(false)
+
+	// resolved/expired/rejected and already-renewed contracts are unrenewable
+	// by definition, so MarkUnrenewableContractsBad must not flip their good
+	// flag regardless of proof_height
+
+	hk2 := store.addTestHost(t, types.PublicKey{42})
+
+	// resolved, expired and rejected contracts within the cutoff stay good
+	inactiveCases := []struct {
+		fcid  types.FileContractID
+		state contracts.ContractState
+	}{
+		{types.FileContractID{10}, contracts.ContractStateResolved},
+		{types.FileContractID{13}, contracts.ContractStateExpired},
+		{types.FileContractID{14}, contracts.ContractStateRejected},
+	}
+	var inactiveFCIDs []types.FileContractID
+	for _, tc := range inactiveCases {
+		rev := newTestRevision(hk2)
+		rev.ProofHeight = proofHeight - 50
+		rev.ExpirationHeight = 9999
+		if err := store.AddFormedContract(hk2, tc.fcid, rev, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.pool.Exec(t.Context(), `UPDATE contracts SET state = $1 WHERE contract_id = $2`, tc.state, sqlHash256(tc.fcid)); err != nil {
+			t.Fatal(err)
+		}
+		inactiveFCIDs = append(inactiveFCIDs, tc.fcid)
+	}
+
+	// renewed contract within the cutoff stays good
+	renewedFromFCID := types.FileContractID{11}
+	renewedToFCID := types.FileContractID{12}
+	renewedFromRev := newTestRevision(hk2)
+	renewedFromRev.ProofHeight = proofHeight - 50
+	renewedFromRev.ExpirationHeight = 9999
+	renewedToRev := newTestRevision(hk2)
+	renewedToRev.ProofHeight = 9000
+	renewedToRev.ExpirationHeight = 9999
+	if err := store.AddFormedContract(hk2, renewedFromFCID, renewedFromRev, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+		t.Fatal(err)
+	} else if err := store.AddRenewedContract(renewedFromFCID, renewedToFCID, renewedToRev, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.MarkUnrenewableContractsBad(proofHeight); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, id := range append(inactiveFCIDs, renewedFromFCID) {
+		c, err := store.Contract(id)
+		if err != nil {
+			t.Fatal(err)
+		} else if !c.Good {
+			t.Fatalf("contract %v should be good", id)
+		}
+	}
 }
 
 // TestMarkContractBad tests marking a contract as bad.
@@ -2287,6 +2344,54 @@ func BenchmarkMarkContractBad(b *testing.B) {
 		fcid := contractIDs[rIdx]
 		contractIDs = append(contractIDs[:rIdx], contractIDs[rIdx+1:]...)
 		if err := store.MarkContractBad(fcid); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMarkUnrenewableContractsBad(b *testing.B) {
+	const (
+		numHosts            = 1000
+		numContractsPerHost = 100
+		batchSize           = 10
+	)
+
+	store := initPostgres(b, zap.NewNop())
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
+		for range numHosts {
+			var hostID int64
+			hk := types.GeneratePrivateKey().PublicKey()
+			err := tx.QueryRow(ctx, `INSERT INTO hosts (public_key, last_announcement) VALUES ($1, NOW()) RETURNING id;`, sqlPublicKey(hk)).Scan(&hostID)
+			if err != nil {
+				return err
+			}
+			for range numContractsPerHost {
+				insertRandomContract(b, tx, hostID, hk)
+			}
+		}
+		return nil
+	}); err != nil {
+		b.Fatal(err)
+	}
+
+	// assign proof heights in ascending order so we can batch through them
+	// and avoid having to reset the database between iterations
+	if _, err := store.pool.Exec(b.Context(), `
+		WITH candidates AS (SELECT id, ROW_NUMBER() OVER (ORDER BY id) AS rn FROM contracts WHERE state IN (0, 1) AND renewed_to IS NULL AND good)
+		UPDATE contracts c SET proof_height = candidates.rn FROM candidates WHERE c.id = candidates.id`); err != nil {
+		b.Fatal(err)
+	}
+
+	// analyze so the planner has fresh statistics
+	if _, err := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contracts`); err != nil {
+		b.Fatal(err)
+	}
+
+	var cutoff uint64
+	for b.Loop() {
+		cutoff += batchSize
+		err := store.MarkUnrenewableContractsBad(cutoff)
+		if err != nil {
 			b.Fatal(err)
 		}
 	}
