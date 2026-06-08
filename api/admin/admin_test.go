@@ -775,23 +775,25 @@ func TestContractsAPI(t *testing.T) {
 	c.MineBlocks(t, types.Address{}, renewHeight-ci.Height)
 	time.Sleep(time.Second)
 
-	// assert contract was renewed - we don't pass the option here to asserts
-	// the contracts API returns only revisable contracts by default
-	contracts, err := adminClient.Contracts(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	} else if len(contracts) < 1 {
-		t.Fatal("expected at least 1 contract, got", len(contracts))
-	}
+	// the original is now in its renew window; maintenance should leave the host
+	// with a newer contract - either the renewed original, or a retained zero-size
+	// contract kept in its place (we keep only one zero-size contract per host).
 	var renewed bool
-	for _, c := range contracts {
-		if c.RenewedFrom == contract.ID {
-			renewed = true
+	for range 100 {
+		active, err := adminClient.Contracts(context.Background(), admin.WithGood(true), admin.WithRevisable(true))
+		if err != nil {
+			t.Fatal(err)
+		}
+		renewed = slices.ContainsFunc(active, func(c contracts.Contract) bool {
+			return c.ProofHeight > contract.ProofHeight
+		})
+		if renewed {
 			break
 		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	if !renewed {
-		t.Fatal("expected contract to be renewed")
+		t.Fatal("expected the host to have a contract newer than the original")
 	}
 
 	// assert usage is being tracked
@@ -806,7 +808,7 @@ func TestContractsAPI(t *testing.T) {
 	}
 
 	// test deletion
-	contracts, err = adminClient.Contracts(context.Background(), admin.WithRevisable(false))
+	contracts, err := adminClient.Contracts(context.Background(), admin.WithRevisable(false))
 	if err != nil {
 		t.Fatal(err)
 	}
