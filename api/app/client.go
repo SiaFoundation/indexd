@@ -104,6 +104,7 @@ func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, a
 
 	if !(200 <= r.StatusCode && r.StatusCode < 300) {
 		defer r.Body.Close()
+		defer io.Copy(io.Discard, r.Body)
 		b, _ := io.ReadAll(r.Body)
 		return nil, &HTTPError{StatusCode: r.StatusCode, Body: strings.TrimSpace(string(b))}
 	} else if contentType := r.Header.Get("Content-Type"); r.StatusCode != http.StatusNoContent && accept != contentType {
