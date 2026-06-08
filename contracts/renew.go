@@ -50,9 +50,11 @@ func (cm *ContractManager) performContractRenewals(ctx context.Context, period, 
 	// perform renewals on eligible contracts
 	for _, contract := range eligible {
 		log := log.With(zap.Stringer("contractID", contract.ID), zap.Stringer("host", contract.HostKey))
-		if _, ok := hostsWithActiveEmptyContract[contract.HostKey]; ok {
-			log.Debug("skipping empty contract renewal, host already has an active empty contract")
-			continue
+		if contract.Size == 0 {
+			if _, ok := hostsWithActiveEmptyContract[contract.HostKey]; ok {
+				log.Debug("skipping empty contract renewal, host already has an active empty contract")
+				continue
+			}
 		}
 		attempted++
 		if err := cm.renewContract(ctx, contract, newProofHeight, log); err != nil {

@@ -144,13 +144,16 @@ func TestPerformContractRenewalsEmptyContracts(t *testing.T) {
 	store := newTestStore(t)
 	hmMock := newHostManagerMock(store)
 
-	// four good hosts. hostA and hostB each have multiple empty contracts that
+	// five good hosts. hostA and hostB each have multiple empty contracts that
 	// are all within their renew window; exactly one per host should be renewed
 	// to keep a single empty contract per host - the rest are left to expire so
 	// we don't lock up collateral on multiple empty contracts with the same host.
 	// hostC additionally has an empty contract that is too early to renew, which
 	// is already the host's retained empty contract, so none of hostC's empty
 	// contracts in their renew window should be renewed.
+	// hostE has a retained (too early to renew) empty contract as well, but its
+	// in-window contract is non-empty. the one-empty-contract-per-host limit only
+	// applies to empty contracts, so the non-empty contract must still be renewed.
 	hostA := goodHost(1)
 	store.addTestHost(t, hostA)
 	hmMock.settings[hostA.PublicKey] = goodSettings
@@ -163,6 +166,9 @@ func TestPerformContractRenewalsEmptyContracts(t *testing.T) {
 	hostD := goodHost(4)
 	store.addTestHost(t, hostD)
 	hmMock.settings[hostD.PublicKey] = goodSettings
+	hostE := goodHost(5)
+	store.addTestHost(t, hostE)
+	hmMock.settings[hostE.PublicKey] = goodSettings
 
 	blockHeight := cmMock.TipState().Index.Height
 
@@ -211,6 +217,22 @@ func TestPerformContractRenewalsEmptyContracts(t *testing.T) {
 	store.setContractProofHeight(t, emptyDFCID, blockHeight+renewWindow+1)
 	store.setContractExpirationHeight(t, emptyDFCID, 9999)
 
+	// hostE has a retained empty contract that is too early to renew, plus a
+	// non-empty contract within its renew window. the non-empty contract must be
+	// renewed regardless of the retained empty contract - the per-host limit only
+	// applies to empty contracts.
+	retainedEFCID := types.FileContractID{10}
+	store.addTestContract(t, hostE.PublicKey, true, retainedEFCID)
+	store.setContractSize(t, retainedEFCID, 0)
+	store.setRevisionCapacity(t, retainedEFCID, 0)
+	store.setContractProofHeight(t, retainedEFCID, blockHeight+renewWindow+100)
+	store.setContractExpirationHeight(t, retainedEFCID, 9999)
+	nonEmptyEFCID := types.FileContractID{11}
+	store.addTestContract(t, hostE.PublicKey, true, nonEmptyEFCID)
+	store.setContractSize(t, nonEmptyEFCID, 1<<22) // non-empty
+	store.setContractProofHeight(t, nonEmptyEFCID, blockHeight+renewWindow+1)
+	store.setContractExpirationHeight(t, nonEmptyEFCID, 9999)
+
 	mock := newClientMock()
 	renterKey := types.PublicKey{1, 2, 3, 4, 5}
 	wallet := &walletMock{}
@@ -233,6 +255,8 @@ func TestPerformContractRenewalsEmptyContracts(t *testing.T) {
 		t.Fatalf("expected no empty contract to be renewed for hostC, got %v", got)
 	} else if got := len(mock.host(hostD.PublicKey).renewCalls); got != 1 {
 		t.Fatalf("expected exactly one empty contract to be renewed for hostD, got %v", got)
+	} else if got := len(mock.host(hostE.PublicKey).renewCalls); got != 1 {
+		t.Fatalf("expected the non-empty contract to be renewed for hostE, got %v", got)
 	}
 
 	// a subsequent run shouldn't renew another empty contract for any host,
@@ -248,6 +272,8 @@ func TestPerformContractRenewalsEmptyContracts(t *testing.T) {
 		t.Fatalf("expected no further empty renewals for hostC, got %v total", got)
 	} else if got := len(mock.host(hostD.PublicKey).renewCalls); got != 1 {
 		t.Fatalf("expected no further empty renewals for hostD, got %v total", got)
+	} else if got := len(mock.host(hostE.PublicKey).renewCalls); got != 1 {
+		t.Fatalf("expected no further renewals for hostE, got %v total", got)
 	}
 }
 
