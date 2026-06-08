@@ -31,6 +31,26 @@ type Client struct {
 	validity time.Duration
 }
 
+// HTTPError is returned by the client when the server responds with a non-2xx
+// status code. Callers can use errors.As to inspect StatusCode and decide
+// whether to retry.
+type HTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+// Error implements the error interface.
+func (e *HTTPError) Error() string {
+	msg := e.Body
+	if msg == "" {
+		msg = http.StatusText(e.StatusCode)
+	}
+	if msg == "" {
+		return fmt.Sprintf("HTTP %d", e.StatusCode)
+	}
+	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, msg)
+}
+
 // sign signs the request with the appropriate headers and returns the signed URL
 // and request body.
 func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL string, requestBuf []byte) (*url.URL, io.Reader, error) {
@@ -83,10 +103,9 @@ func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, a
 	}
 
 	if !(200 <= r.StatusCode && r.StatusCode < 300) {
-		defer io.Copy(io.Discard, r.Body)
 		defer r.Body.Close()
 		b, _ := io.ReadAll(r.Body)
-		return nil, errors.New(strings.TrimSpace(string(b)))
+		return nil, &HTTPError{StatusCode: r.StatusCode, Body: strings.TrimSpace(string(b))}
 	} else if contentType := r.Header.Get("Content-Type"); r.StatusCode != http.StatusNoContent && accept != contentType {
 		return nil, fmt.Errorf("expected content type %s, got %s", accept, contentType)
 	}
