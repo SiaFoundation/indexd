@@ -342,7 +342,7 @@ func (c *Client) PickWrite(candidates []types.PublicKey) (host types.PublicKey, 
 
 // PickReads atomically sorts candidates and reserves inflight read
 // slots on the top n. See [Provider.PickReads].
-func (c *Client) PickReads(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
+func (c *Client) PickReads(candidates []types.PublicKey, n int) (picked []types.PublicKey, releases []func(), remaining []types.PublicKey) {
 	return c.hosts.PickReads(candidates, n)
 }
 

@@ -116,14 +116,11 @@ func (m *SlabManager) downloadShards(ctx context.Context, slab Slab, log *zap.Lo
 		})
 	}
 
-	var releases []func()
-	var ok bool
-	candidates, releases, ok = m.hosts.PickReads(candidates, int(slab.MinShards))
-	if !ok {
-		return nil, fmt.Errorf("only %d available sectors, minimum required: %d: %w", len(candidates), slab.MinShards, errNotEnoughShards)
+	initialHosts, releases, remaining := m.hosts.PickReads(candidates, int(slab.MinShards))
+	if len(initialHosts) == 0 {
+		return nil, fmt.Errorf("only %d available sectors, minimum required: %d: %w", len(remaining), slab.MinShards, errNotEnoughShards)
 	}
 
-	initialHosts := candidates[:int(slab.MinShards)]
 initialLoop:
 	for i, hostKey := range initialHosts {
 		select {
@@ -140,8 +137,7 @@ initialLoop:
 	t := time.NewTicker(m.shardTimeout / 4)
 	defer t.Stop()
 raceLoop:
-	for i := int(slab.MinShards); downloaded.Load() < uint32(slab.MinShards) && i < len(candidates); i++ {
-		hostKey := candidates[i]
+	for downloaded.Load() < uint32(slab.MinShards) && len(remaining) > 0 {
 		select {
 		case <-ctx.Done():
 			break raceLoop
@@ -154,7 +150,15 @@ raceLoop:
 
 		select {
 		case sema <- struct{}{}:
-			release := m.hosts.TrackInflightRead(hostKey)
+			// re-pick the best remaining candidate atomically so we see
+			// fresh inflight state from other concurrent downloads.
+			picked, pickReleases, rem := m.hosts.PickReads(remaining, 1)
+			if len(picked) == 0 {
+				break raceLoop
+			}
+			remaining = rem
+			hostKey, release := picked[0], pickReleases[0]
+
 			spawnDownload(hostKey, slabHosts[hostKey], release, false)
 		case <-ctx.Done():
 			break raceLoop

@@ -542,25 +542,25 @@ func (m *mockHostClient) TrackInflightRead(hostKey types.PublicKey) func() {
 }
 
 // PickReads filters unusable hosts and keeps the input order. Returns
-// ok=false when fewer than n usable hosts remain.
-func (m *mockHostClient) PickReads(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
+// picked=nil when fewer than n usable hosts remain.
+func (m *mockHostClient) PickReads(candidates []types.PublicKey, n int) (picked []types.PublicKey, releases []func(), remaining []types.PublicKey) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	sorted = make([]types.PublicKey, 0, len(candidates))
+	sorted := make([]types.PublicKey, 0, len(candidates))
 	for _, hk := range candidates {
 		if _, bad := m.unusable[hk]; !bad {
 			sorted = append(sorted, hk)
 		}
 	}
 	if len(sorted) < n {
-		return sorted, nil, false
+		return nil, nil, sorted
 	}
 	releases = make([]func(), n)
 	for i := range n {
 		releases[i] = func() {}
 	}
-	return sorted, releases, true
+	return sorted[:n], releases, sorted[n:]
 }
 
 func (m *mockHostClient) setSlowHost(hostKey types.PublicKey, delay time.Duration) {

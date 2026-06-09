@@ -90,8 +90,12 @@ type (
 		PickWrite(candidates []types.PublicKey) (host types.PublicKey, release func(), remaining []types.PublicKey, ok bool)
 		// PickReads atomically sorts candidates and reserves inflight
 		// read slots on the top n hosts under a single lock hold;
-		// callers MUST call all returned releases.
-		PickReads(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool)
+		// callers MUST call all returned releases. The sorted-by-score
+		// tail is returned as remaining so callers can re-pick from
+		// it (e.g. with n=1) and see fresh inflight state. When fewer
+		// than n usable hosts are available, picked is nil and the
+		// partial sorted list is returned as remaining.
+		PickReads(candidates []types.PublicKey, n int) (picked []types.PublicKey, releases []func(), remaining []types.PublicKey)
 		// TrackInflightRead increments the host's inflight read counter
 		// and returns a function that decrements it. Callers should hold
 		// it for the duration of the RPC so concurrent prioritize calls

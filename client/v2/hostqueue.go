@@ -343,13 +343,16 @@ func (p *Provider) PickWrite(candidates []types.PublicKey) (host types.PublicKey
 // PickReads filters candidates for usable hosts, sorts them by score,
 // and atomically reserves an inflight read slot on the top n — all
 // under a single Provider lock so concurrent callers in a burst see
-// each other's reservations and steer to less-busy hosts.
+// each other's reservations and steer to less-busy hosts. Pass n=1 to
+// atomically re-pick the best remaining candidate during a race loop.
 //
-// Returns the full sorted slice and n release functions matching
-// sorted[:n]; callers MUST call all releases. Returns ok=false (with no
-// reservations made) when fewer than n usable hosts are available.
-func (p *Provider) PickReads(candidates []types.PublicKey, n int) (sorted []types.PublicKey, releases []func(), ok bool) {
-	sorted = candidates[:0]
+// Returns the top n hosts as `picked` with matching `releases`, and
+// the sorted-by-score tail as `remaining`. Callers MUST call all
+// releases. When fewer than n usable hosts are available, returns
+// picked=nil with no reservations made; the partial sorted list is
+// still returned as `remaining`.
+func (p *Provider) PickReads(candidates []types.PublicKey, n int) (picked []types.PublicKey, releases []func(), remaining []types.PublicKey) {
+	sorted := candidates[:0]
 	for _, host := range candidates {
 		if u, err := p.store.Usable(host); err == nil && u {
 			sorted = append(sorted, host)
@@ -362,7 +365,7 @@ func (p *Provider) PickReads(candidates []types.PublicKey, n int) (sorted []type
 		return p.cmpMetrics(sorted[i], sorted[j]) < 0
 	})
 	if len(sorted) < n {
-		return sorted, nil, false
+		return nil, nil, sorted
 	}
 
 	releases = make([]func(), n)
@@ -371,7 +374,7 @@ func (p *Provider) PickReads(candidates []types.PublicKey, n int) (sorted []type
 		m.inflightReads.Add(1)
 		releases[i] = func() { m.inflightReads.Add(-1) }
 	}
-	return sorted, releases, true
+	return sorted[:n], releases, sorted[n:]
 }
 
 // Addresses returns the network addresses for the specified host.
