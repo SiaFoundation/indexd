@@ -17,7 +17,7 @@ import (
 
 const (
 	// AccountFundBatch is the number of host accounts we will fund in one
-	// batch.  It is equivalent to the max batch size used in replenish RPC.
+	// batch. It is equivalent to the max batch size used in replenish RPC.
 	AccountFundBatch = proto.MaxAccountBatchSize
 	// ReadyHostThreshold is the number of successfully funded host accounts
 	// required before an account is considered ready for use.
@@ -30,6 +30,8 @@ const (
 	// period. We multiply the funding per contract by the number of active
 	// accounts.
 	AccountActivityThreshold = 24 * 7 * time.Hour
+	// PoolFundInterval is how often we will fund host pools.
+	PoolFundInterval = 5 * time.Minute
 )
 
 type (
@@ -37,8 +39,12 @@ type (
 	// update them after funding.
 	Store interface {
 		HostAccountsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]HostAccount, error)
-		ScheduleAccountsForFunding(hostKey types.PublicKey) error
+		HostPoolsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]HostPool, error)
+		InsertPoolAttachments(hk types.PublicKey, attachments []PendingAttachment) error
+		PendingPoolAttachments(hk types.PublicKey, limit int) ([]PendingAttachment, error)
+		PoolFundingInfo(threshold time.Time) ([]QuotaFundInfo, error)
 		UpdateHostAccounts(accounts []HostAccount) error
+		UpdateHostPools(pools []HostPool) error
 
 		ValidAppConnectKey(string) error
 		AppConnectKeyUserSecret(string) (secret types.Hash256, err error)
@@ -143,14 +149,35 @@ func (m *AccountManager) AccountFundingInfo(threshold time.Time) ([]QuotaFundInf
 	return m.store.AccountFundingInfo(threshold)
 }
 
-// ScheduleAccountsForFunding schedules all accounts for a given host to be funded.
-func (m *AccountManager) ScheduleAccountsForFunding(hostKey types.PublicKey) error {
-	return m.store.ScheduleAccountsForFunding(hostKey)
+// InsertPoolAttachments records that the given attachments have been made.
+func (m *AccountManager) InsertPoolAttachments(hk types.PublicKey, attachments []PendingAttachment) error {
+	return m.store.InsertPoolAttachments(hk, attachments)
+}
+
+// PendingPoolAttachments returns pool attachments that still need to be made.
+func (m *AccountManager) PendingPoolAttachments(hk types.PublicKey, limit int) ([]PendingAttachment, error) {
+	return m.store.PendingPoolAttachments(hk, limit)
+}
+
+// PoolFundingInfo returns funding info grouped by quota for pools.
+func (m *AccountManager) PoolFundingInfo(threshold time.Time) ([]QuotaFundInfo, error) {
+	return m.store.PoolFundingInfo(threshold)
+}
+
+// PoolsForFunding returns pools that need funding for the given host. Only
+// pools with at least one active account after the threshold are included.
+func (m *AccountManager) PoolsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]HostPool, error) {
+	return m.store.HostPoolsForFunding(hk, quotaName, threshold, limit)
 }
 
 // UpdateHostAccounts updates the given host accounts.
 func (m *AccountManager) UpdateHostAccounts(accounts []HostAccount) error {
 	return m.store.UpdateHostAccounts(accounts)
+}
+
+// UpdateHostPools updates the given host pools.
+func (m *AccountManager) UpdateHostPools(pools []HostPool) error {
+	return m.store.UpdateHostPools(pools)
 }
 
 // ServiceAccounts returns all registered service accounts for a given host.
@@ -182,6 +209,23 @@ func UpdateFundedAccounts(accounts []HostAccount, n int, maxBackoff time.Duratio
 	for i := n; i < len(accounts); i++ {
 		accounts[i].ConsecutiveFailedFunds++
 		accounts[i].NextFund = time.Now().Add(min(time.Duration(math.Pow(2, float64(accounts[i].ConsecutiveFailedFunds)))*time.Minute, maxBackoff))
+	}
+}
+
+// UpdateFundedPools marks in-place the first `n` pools as having a
+// successful funding and applies the exponential backoff penalty to the
+// pools after the first `n`.
+func UpdateFundedPools(pools []HostPool, n int, maxBackoff time.Duration) {
+	if n > len(pools) {
+		panic("illegal number of funded pools") // developer error
+	}
+	for i := range n {
+		pools[i].ConsecutiveFailedFunds = 0
+		pools[i].NextFund = time.Now().Add(PoolFundInterval)
+	}
+	for i := n; i < len(pools); i++ {
+		pools[i].ConsecutiveFailedFunds++
+		pools[i].NextFund = time.Now().Add(min(time.Duration(math.Pow(2, float64(pools[i].ConsecutiveFailedFunds)))*time.Minute, maxBackoff))
 	}
 }
 

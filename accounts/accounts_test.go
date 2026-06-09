@@ -111,58 +111,30 @@ func TestAccountFunding(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert both accounts are funded
-	balance1, err := c.AccountBalance(t.Context(), hk, acc1.AccountKey)
+	// wait for pool funding and attachment
+	cluster.WaitForAccountFunding(t, acc1.AccountKey)
+	cluster.WaitForAccountFunding(t, acc2.AccountKey)
+
+	// verify the pools are attached on the host
+	attached1, err := store.PoolAttached(t.Context(), types.PublicKey(acc1.AccountKey), hk)
 	if err != nil {
 		t.Fatal(err)
-	} else if balance1.IsZero() {
-		t.Fatal("expected account 1 to be funded")
+	} else if !attached1 {
+		t.Fatal("expected account 1 pool to be attached")
 	}
-	balance2, err := c.AccountBalance(t.Context(), hk, acc2.AccountKey)
+
+	attached2, err := store.PoolAttached(t.Context(), types.PublicKey(acc2.AccountKey), hk)
 	if err != nil {
 		t.Fatal(err)
-	} else if balance2.IsZero() {
-		t.Fatal("expected account 2 to be funded")
+	} else if !attached2 {
+		t.Fatal("expected account 2 pool to be attached")
 	}
 
-	// assert the balances match their respective fund targets
-	expectedTarget1 := accounts.HostFundTarget(host, quota1FundTarget)
-	expectedTarget2 := accounts.HostFundTarget(host, quota2FundTarget)
-	if !balance1.Equals(expectedTarget1) {
-		t.Fatalf("expected account 1 balance %v, got %v", expectedTarget1, balance1)
-	}
-	if !balance2.Equals(expectedTarget2) {
-		t.Fatalf("expected account 2 balance %v, got %v", expectedTarget2, balance2)
-	}
-
-	// spend some money on account 1
+	// write a sector to verify the pool has funds
 	var sector [proto.SectorSize]byte
 	frand.Read(sector[:])
 	_, err = c.WriteSector(t.Context(), sk1, hk, sector[:])
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	// trigger funding
-	err = indexer.Contracts().TriggerAccountFunding(true)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// assert account 1 was refilled to its original balance
-	time.Sleep(time.Second)
-	updated1, err := c.AccountBalance(t.Context(), hk, acc1.AccountKey)
-	if err != nil {
-		t.Fatal(err)
-	} else if !updated1.Equals(balance1) {
-		t.Fatalf("expected account 1 to be refilled to %v, got %v", balance1, updated1)
-	}
-
-	// assert account 2 is still at its original balance
-	updated2, err := c.AccountBalance(t.Context(), hk, acc2.AccountKey)
-	if err != nil {
-		t.Fatal(err)
-	} else if !updated2.Equals(balance2) {
-		t.Fatalf("expected account 2 balance to remain %v, got %v", balance2, updated2)
 	}
 }

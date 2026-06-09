@@ -128,7 +128,14 @@ type (
 		TotalSpent             types.Currency      `json:"totalSpent"`
 		StuckSince             time.Time           `json:"stuckSince,omitempty"`
 	}
+)
 
+// HasPoolSupport reports whether the host supports RHP4 balance pools.
+func (h Host) HasPoolSupport() bool {
+	return h.Settings.ProtocolVersion.Cmp(rhp.ProtocolVersion510) >= 0
+}
+
+type (
 	// HostInfo is a subset of the Host struct that contains only the public
 	// key and addresses. It is used for listing usable hosts in the
 	// application API.

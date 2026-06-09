@@ -1,3 +1,20 @@
+## 0.2.3 (2026-06-04)
+
+### Features
+
+- Add cutoff argument to PruneSlabs to only prune slabs that have been pinned for some amount of time.
+- Remove ErrAbortedRPC.
+
+### Fixes
+
+- Repinning a slab now rebinds host sectors that have been lost.
+- Use `ErrorCodeClientError` to prevent transport reset for all client errors.
+- Expose AddFailedRPC on the client
+- Fetch unhealthy slabs for migration in separate goroutine to keep pipeline saturated.
+- Slab migrations no longer move sectors whose contracts are healthy but excluded from appends, e.g. because they are in the renew window, at max size, or low on allowance/collateral.
+- Support compressed Geo IP database downloads from CDN.
+- Update mux to v1.5.1.
+
 ## 0.2.2 (2026-05-13)
 
 ### Features

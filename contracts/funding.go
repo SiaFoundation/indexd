@@ -3,16 +3,20 @@ package contracts
 import (
 	"context"
 	"fmt"
-	"math"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	rhp "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
 )
 
 const (
+	// attachValidity is the replay window for pool attachment signatures.
+	attachValidity = 5 * time.Minute
+
 	// serviceAccountFundTargetBytes is the number of bytes used to calculate
 	// the fund target for a host's service account. We fund accounts to cover
 	// this amount of read and write usage. It roughly comes down to uploading
@@ -22,10 +26,81 @@ const (
 	serviceAccountFundTargetBytes = uint64(16 << 30) // 16 GiB
 )
 
-// FundAccounts attempts to fund all accounts for the given host key. It does so
-// using the provided contract IDs, which are used in the order they're given.
-func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, force bool, log *zap.Logger) error {
-	// sanity check input
+// AttachPools attaches all pending pool attachments for the given host.
+func (cm *ContractManager) AttachPools(ctx context.Context, hostKey types.PublicKey, log *zap.Logger) error {
+	var exhausted bool
+	for !exhausted {
+		// fetch pending attachments
+		pending, err := cm.accounts.PendingPoolAttachments(hostKey, proto.MaxAccountBatchSize)
+		if err != nil {
+			return fmt.Errorf("failed to fetch pending attachments: %w", err)
+		} else if len(pending) == 0 {
+			return nil
+		} else if len(pending) < proto.MaxAccountBatchSize {
+			exhausted = true
+		}
+
+		// construct attach inputs
+		inputs := make([]rhp.PoolAttachInput, len(pending))
+		for i, p := range pending {
+			inputs[i] = rhp.PoolAttachInput{
+				Account: p.AccountKey,
+				PoolKey: p.PoolKey,
+			}
+		}
+
+		// attach pools
+		if err := cm.accountFunder.AttachPools(ctx, hostKey, inputs, attachValidity); err != nil {
+			return fmt.Errorf("failed to attach pools: %w", err)
+		} else if err := cm.accounts.InsertPoolAttachments(hostKey, pending); err != nil {
+			return fmt.Errorf("failed to record attachments: %w", err)
+		}
+
+		log.Debug("attached pools to accounts", zap.Int("count", len(pending)))
+	}
+	return nil
+}
+
+// ContractFundTarget calculates the fund target for a contract on the given
+// host. For hosts that support pools it sums per-quota pool targets, for
+// legacy hosts it sums per-quota per-account targets. One active pool counts
+// the same as one active legacy account. Service accounts are always
+// included.
+func (cm *ContractManager) ContractFundTarget(ctx context.Context, host hosts.Host, minAllowance types.Currency) (types.Currency, error) {
+	threshold := time.Now().Add(-accounts.AccountActivityThreshold)
+
+	var infos []accounts.QuotaFundInfo
+	var err error
+	if host.HasPoolSupport() {
+		infos, err = cm.accounts.PoolFundingInfo(threshold)
+	} else {
+		infos, err = cm.accounts.AccountFundingInfo(threshold)
+	}
+	if err != nil {
+		return types.ZeroCurrency, err
+	}
+
+	var target types.Currency
+	for _, info := range infos {
+		fullStorage := min(info.FullStorage, info.Active)
+		upload := info.Active - fullStorage
+		t := accounts.HostFundTarget(host, info.FundTargetBytes).Mul64(upload)
+		t = t.Add(accounts.HostReadFundTarget(host, info.FundTargetBytes).Mul64(fullStorage))
+		target = target.Add(t)
+	}
+
+	// service accounts
+	target = target.Add(accounts.HostFundTarget(host, serviceAccountFundTargetBytes).Mul64(uint64(len(cm.accounts.ServiceAccounts(host.PublicKey)))))
+
+	if target.Cmp(minAllowance) < 0 {
+		target = minAllowance
+	}
+
+	return target, nil
+}
+
+// FundAccounts funds individual accounts on legacy hosts. For hosts that support pools, FundPools is used.
+func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, quotas []accounts.Quota, log *zap.Logger) error {
 	if len(contractIDs) == 0 {
 		log.Debug("no contracts provided")
 		return nil
@@ -35,35 +110,8 @@ func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, co
 	} else if !host.Usability.Usable() {
 		log.Debug("host is not usable")
 		return nil
-	}
-
-	// if we want to force a refill on all accounts, we need to manually set the
-	// next fund time, we do this to avoid having to fetch (and update) all
-	// accounts at once
-	if force {
-		if err := cm.accounts.ScheduleAccountsForFunding(host.PublicKey); err != nil {
-			return fmt.Errorf("failed to schedule accounts for funding: %w", err)
-		}
-	}
-
-	quotas, err := cm.accounts.Quotas(ctx, 0, math.MaxInt)
-	if err != nil {
-		return fmt.Errorf("failed to fetch quotas: %w", err)
-	}
-
-	serviceAccounts := cm.accounts.ServiceAccounts(host.PublicKey)
-	if len(serviceAccounts) > 0 {
-		fundTarget := accounts.HostFundTarget(host, serviceAccountFundTargetBytes)
-		// fund them
-		funded, _, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
-		if err != nil {
-			return fmt.Errorf("failed to fund service accounts: %w", err)
-		}
-
-		// update service account balances
-		if err := cm.accounts.UpdateServiceAccounts(serviceAccounts[:funded], fundTarget); err != nil {
-			cm.log.Warn("failed to update service account balances", zap.Error(err))
-		}
+	} else if host.HasPoolSupport() {
+		return nil
 	}
 
 	threshold := time.Now().Add(-accounts.AccountActivityThreshold)
@@ -109,13 +157,11 @@ OUTER:
 					continue
 				}
 
-				// fund accounts
 				funded, drained, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, batch.accs, batch.target, log)
 				if err != nil {
 					return fmt.Errorf("failed to fund accounts: %w", err)
 				}
 
-				// update funded accounts
 				accounts.UpdateFundedAccounts(batch.accs, funded, cm.maxAccountFundingBackoff)
 				if err := cm.accounts.UpdateHostAccounts(batch.accs); err != nil {
 					return fmt.Errorf("failed to update accounts: %w", err)
@@ -133,33 +179,113 @@ OUTER:
 	return nil
 }
 
-// ContractFundTarget calculates the fund target for a contract on the given
-// host. We scale the fund target by the number of active accounts per quota.
-func (cm *ContractManager) ContractFundTarget(ctx context.Context, host hosts.Host, minAllowance types.Currency) (types.Currency, error) {
-	quotaInfos, err := cm.accounts.AccountFundingInfo(time.Now().Add(-accounts.AccountActivityThreshold))
-	if err != nil {
-		return types.ZeroCurrency, err
+// FundServiceAccounts funds service accounts on any host.
+func (cm *ContractManager) FundServiceAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, log *zap.Logger) error {
+	if len(contractIDs) == 0 {
+		log.Debug("no contracts provided")
+		return nil
+	} else if host.Blocked {
+		log.Debug("host is blocked")
+		return nil
+	} else if !host.Usability.Usable() {
+		log.Debug("host is not usable")
+		return nil
 	}
 
-	// user accounts
-	var target types.Currency
-	for _, qi := range quotaInfos {
-		// accounts with remaining storage need both read and write funding
-		fullStorageAccounts := min(qi.FullStorageAccounts, qi.ActiveAccounts)
-		uploadAccounts := qi.ActiveAccounts - fullStorageAccounts
-		t := accounts.HostFundTarget(host, qi.FundTargetBytes).Mul64(uploadAccounts)
-		// accounts with no remaining storage only need read funding
-		t = t.Add(accounts.HostReadFundTarget(host, qi.FundTargetBytes).Mul64(fullStorageAccounts))
-		target = target.Add(t)
+	// fund service accounts
+	serviceAccounts := cm.accounts.ServiceAccounts(host.PublicKey)
+	if len(serviceAccounts) > 0 {
+		fundTarget := accounts.HostFundTarget(host, serviceAccountFundTargetBytes)
+		funded, _, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
+		if err != nil {
+			return fmt.Errorf("failed to fund service accounts: %w", err)
+		}
+
+		if err := cm.accounts.UpdateServiceAccounts(serviceAccounts[:funded], fundTarget); err != nil {
+			cm.log.Warn("failed to update service account balances", zap.Error(err))
+		}
+	}
+	return nil
+}
+
+// FundPools attempts to fund all pools for the given host key. It does so
+// using the provided contract IDs, which are used in the order they're given.
+// Only hosts that support pools (>= 5.1.0) are funded.
+func (cm *ContractManager) FundPools(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, quotas []accounts.Quota, log *zap.Logger) error {
+	if !host.HasPoolSupport() {
+		log.Debug("host does not support pools", zap.Stringer("version", host.Settings.ProtocolVersion))
+		return nil
+	} else if len(contractIDs) == 0 {
+		log.Debug("no contracts provided")
+		return nil
+	} else if host.Blocked {
+		log.Debug("host is blocked")
+		return nil
+	} else if !host.Usability.Usable() {
+		log.Debug("host is not usable")
+		return nil
 	}
 
-	// service accounts
-	target = target.Add(accounts.HostFundTarget(host, serviceAccountFundTargetBytes).Mul64(uint64(len(cm.accounts.ServiceAccounts(host.PublicKey)))))
+	threshold := time.Now().Add(-accounts.AccountActivityThreshold)
+OUTER:
+	for _, quota := range quotas {
+		fundTarget := accounts.HostFundTarget(host, quota.FundTargetBytes)
+		readFundTarget := accounts.HostReadFundTarget(host, quota.FundTargetBytes)
+		if fundTarget.IsZero() && readFundTarget.IsZero() {
+			continue
+		}
 
-	// ensure target is at least minAllowance
-	if target.Cmp(minAllowance) < 0 {
-		target = minAllowance
+		var exhausted bool
+		for !exhausted {
+			pools, err := cm.accounts.PoolsForFunding(host.PublicKey, quota.Key, threshold, proto.MaxAccountBatchSize)
+			if err != nil {
+				return fmt.Errorf("failed to fetch pools for funding: %w", err)
+			} else if len(pools) < proto.MaxAccountBatchSize {
+				exhausted = true
+			}
+			if len(pools) == 0 {
+				break
+			}
+
+			// split pools by storage state
+			var uploadPools, fullStoragePools []accounts.HostPool
+			for _, p := range pools {
+				if p.FullStorage {
+					fullStoragePools = append(fullStoragePools, p)
+				} else {
+					uploadPools = append(uploadPools, p)
+				}
+			}
+
+			for _, batch := range []struct {
+				pools  []accounts.HostPool
+				target types.Currency
+			}{
+				{uploadPools, fundTarget},
+				{fullStoragePools, readFundTarget},
+			} {
+				if len(batch.pools) == 0 || batch.target.IsZero() {
+					continue
+				}
+
+				funded, drained, err := cm.accountFunder.FundPools(ctx, host, contractIDs, batch.pools, batch.target, log)
+				if err != nil {
+					return fmt.Errorf("failed to fund pools: %w", err)
+				}
+
+				accounts.UpdateFundedPools(batch.pools, funded, cm.maxAccountFundingBackoff)
+				if err := cm.accounts.UpdateHostPools(batch.pools); err != nil {
+					return fmt.Errorf("failed to update pools: %w", err)
+				}
+
+				contractIDs = contractIDs[drained:]
+				if len(contractIDs) == 0 {
+					log.Debug("not all pools could be funded, no more contracts available", zap.String("quota", quota.Key))
+					break OUTER
+				}
+			}
+		}
 	}
 
-	return target, nil
+	return nil
 }

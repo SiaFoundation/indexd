@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 
+	"go.sia.tech/core/types"
 	"go.uber.org/zap"
 )
 
@@ -85,6 +87,70 @@ UPDATE hosts SET has_quic = EXISTS (
 		}
 		_, err := tx.Exec(ctx, `ALTER TABLE hosts DROP COLUMN has_bad_quic_port`)
 		return err
+	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `DROP INDEX IF EXISTS sectors_next_integrity_check_idx`)
+		return err
+	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `DROP INDEX IF EXISTS slabs_digest_idx`)
+		return err
+	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		if _, err := tx.Exec(ctx, `
+CREATE TABLE pools (
+    id SERIAL PRIMARY KEY,
+    connect_key_id INTEGER UNIQUE NOT NULL REFERENCES app_connect_keys(id) ON DELETE CASCADE,
+    pool_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(pool_key) = 64)
+);
+
+CREATE TABLE pool_hosts (
+    pool_id INTEGER NOT NULL REFERENCES pools(id) ON DELETE CASCADE,
+    host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
+    next_fund TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    consecutive_failed_funds INTEGER NOT NULL DEFAULT 0,
+    CONSTRAINT pool_hosts_pk PRIMARY KEY (pool_id, host_id)
+);
+CREATE INDEX pool_hosts_host_id_next_fund_idx ON pool_hosts (host_id, next_fund);
+
+CREATE TABLE pool_attachments (
+    pool_id INTEGER NOT NULL,
+    host_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    CONSTRAINT pool_attachments_pk PRIMARY KEY (pool_id, host_id, account_id),
+    CONSTRAINT pool_attachments_pool_host_fk FOREIGN KEY (pool_id, host_id) REFERENCES pool_hosts(pool_id, host_id) ON DELETE CASCADE
+);
+CREATE INDEX pool_attachments_account_id_host_id_idx ON pool_attachments (account_id, host_id);
+`); err != nil {
+			return err
+		}
+
+		// backfill a pool for every existing connect key
+		rows, err := tx.Query(ctx, `SELECT id FROM app_connect_keys`)
+		if err != nil {
+			return err
+		}
+		var ids []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+			ids = append(ids, id)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		for _, id := range ids {
+			poolKey := types.GeneratePrivateKey()
+			if _, err := tx.Exec(ctx, `INSERT INTO pools (connect_key_id, pool_key) VALUES ($1, $2)`, id, []byte(poolKey)); err != nil {
+				return fmt.Errorf("failed to create pool for connect key %d: %w", id, err)
+			}
+		}
+		return nil
 	},
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
 		_, err := tx.Exec(ctx, `CREATE INDEX object_events_object_key_idx ON object_events(object_key);`)

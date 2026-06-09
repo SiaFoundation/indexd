@@ -65,7 +65,7 @@ type (
 
 	// Contracts defines the contract management interface for the application API.
 	Contracts interface {
-		TriggerAccountFunding(force bool) error
+		TriggerAccountFunding() error
 	}
 
 	// A RateLimiter allows or denies a request for the given key.
@@ -694,7 +694,7 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 		a.log.Debug("failed to use app connect key", zap.Error(err))
 		jc.Error(ErrInternalError, http.StatusInternalServerError)
 	default:
-		if err := a.contracts.TriggerAccountFunding(false); err != nil {
+		if err := a.contracts.TriggerAccountFunding(); err != nil {
 			// error is ignored since the account is already connected
 			a.log.Debug("failed to trigger account funding", zap.Error(err))
 		}
