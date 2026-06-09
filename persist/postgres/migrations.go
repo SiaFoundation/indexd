@@ -152,4 +152,8 @@ CREATE INDEX pool_attachments_account_id_host_id_idx ON pool_attachments (accoun
 		}
 		return nil
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX object_events_object_key_idx ON object_events(object_key);`)
+		return err
+	},
 }

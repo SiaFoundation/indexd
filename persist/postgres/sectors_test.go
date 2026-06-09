@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
@@ -38,7 +39,7 @@ func TestMigrateSector(t *testing.T) {
 	pinTime := time.Now().Round(time.Microsecond)
 	root1 := types.Hash256{1}
 	root2 := types.Hash256{2}
-	_, err := store.PinSlabs(account, pinTime, slabs.SlabPinParams{
+	slabIDs, err := store.PinSlabs(account, pinTime, slabs.SlabPinParams{
 		EncryptionKey: [32]byte{},
 		MinShards:     1,
 		Sectors: []slabs.PinnedSector{
@@ -55,6 +56,7 @@ func TestMigrateSector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	slabID := slabIDs[0]
 
 	// create an object using the pinned slab
 	so := slabs.SealedObject{
@@ -180,7 +182,13 @@ func TestMigrateSector(t *testing.T) {
 			t.Fatal(err)
 		} else if migrated != expectedMigrated {
 			t.Fatalf("expected migrated %v, got %v", expectedMigrated, migrated)
+		} else if migrated {
+			// record the slab being migrated, as we do in production
+			if err := store.RecordSlabMigrated(slabID); err != nil {
+				t.Fatal(err)
+			}
 		}
+
 		afterUploadedAt := sectorUploadedAt(root)
 
 		if expectedMigrated && afterUploadedAt.Compare(beforeUploadedAt) != 1 {
@@ -216,6 +224,80 @@ func TestMigrateSector(t *testing.T) {
 	assertSector(root2, hk2, types.FileContractID{}, 0, 1)
 	assertMigratedSectors(2)
 	assertUpdated(true)
+}
+
+func TestRecordSlabMigrated(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	fcid := store.addTestContract(t, hk)
+
+	// pin a slab and an object that references it
+	root := frand.Entropy256()
+	encKey := frand.Entropy256()
+	slabIDs, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: encKey,
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root, HostKey: hk}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(fcid, []types.Hash256{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	so := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		Slabs:                []slabs.SlabSlice{{EncryptionKey: encKey, MinShards: 1, Sectors: []slabs.PinnedSector{{Root: root, HostKey: hk}}}},
+	}
+	if err := store.PinObject(account, so.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert object events count
+	var count int
+	err = store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM object_events`).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	} else if count != 1 {
+		t.Fatalf("expected 1 object events, got %d", count)
+	}
+
+	// set updated_at in the past
+	ts := time.Now().Add(-time.Hour).Round(time.Second)
+	if _, err := store.pool.Exec(t.Context(), `UPDATE object_events SET updated_at = $1`, ts); err != nil {
+		t.Fatal(err)
+	}
+
+	// record slab migration
+	if err := store.RecordSlabMigrated(slabIDs[0]); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert count has not changed
+	err = store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM object_events`).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	} else if count != 1 {
+		t.Fatalf("expected 1 object events, got %d", count)
+	}
+
+	// assert updated_at has been updated
+	var updatedAt time.Time
+	err = store.pool.QueryRow(t.Context(), `SELECT updated_at FROM object_events LIMIT 1`).Scan(&updatedAt)
+	if err != nil {
+		t.Fatal(err)
+	} else if !updatedAt.After(ts) {
+		t.Fatalf("expected updated_at to be updated, got %v", updatedAt)
+	}
+
+	// unknown slab is a no-op
+	if err := store.RecordSlabMigrated(slabs.SlabID(frand.Entropy256())); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestRecordIntegrityCheck(t *testing.T) {
@@ -3061,6 +3143,86 @@ func BenchmarkMigrateSector(b *testing.B) {
 		hostKey := hks[frand.Intn(len(hks))]
 		_, err := store.MigrateSector(root, hostKey)
 		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+// BenchmarkRecordSlabMigrated benchmarks RecordSlabMigrated.
+func BenchmarkRecordSlabMigrated(b *testing.B) {
+	const (
+		numAccounts       = 1000
+		objectsPerAccount = 1000
+		flushEvery        = 50
+	)
+
+	store := initPostgres(b, zap.NewNop())
+
+	connectKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
+		Key:         "benchmark-connect-key",
+		Description: "benchmark connect key",
+		Quota:       "default",
+	})
+	if err != nil {
+		b.Fatal(err)
+	}
+	var connectKeyID int64
+	if err := store.pool.QueryRow(b.Context(), `SELECT id FROM app_connect_keys WHERE app_key = $1`, connectKey.Key).Scan(&connectKeyID); err != nil {
+		b.Fatal(err)
+	}
+
+	sampleSlabDigests := make([]slabs.SlabID, 0, numAccounts*objectsPerAccount)
+
+	flush := func(batch *pgx.Batch) {
+		b.Helper()
+		if err := store.pool.SendBatch(b.Context(), batch).Close(); err != nil {
+			b.Fatal(err)
+		}
+	}
+
+	batch := &pgx.Batch{}
+	accountID, objectID, slabID := 0, 0, 0
+	for range numAccounts {
+		ak := types.GeneratePrivateKey().PublicKey()
+		batch.Queue(`INSERT INTO accounts(public_key, connect_key_id, max_pinned_data) VALUES ($1, $2, 1000000000000)`, sqlPublicKey(ak), connectKeyID)
+		accountID++
+
+		for range objectsPerAccount {
+			objectKey := frand.Entropy256()
+			slabDigest := slabs.SlabID(frand.Entropy256())
+
+			batch.Queue(`INSERT INTO objects(object_key, account_id, encrypted_data_key, encrypted_meta_key, data_signature, meta_signature) VALUES ($1, $2, $3, $4, $5, $6)`,
+				sqlHash256(objectKey), accountID, frand.Bytes(72), frand.Bytes(72), frand.Bytes(64), frand.Bytes(64))
+			objectID++
+
+			batch.Queue(`INSERT INTO object_events(object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)`, sqlHash256(objectKey), accountID)
+
+			batch.Queue(`INSERT INTO slabs(digest, encryption_key, min_shards) VALUES ($1, $2, 1)`, sqlHash256(slabDigest), sqlHash256(frand.Entropy256()))
+			slabID++
+
+			batch.Queue(`INSERT INTO account_slabs(account_id, slab_id) VALUES ($1, $2)`, accountID, slabID)
+			batch.Queue(`INSERT INTO object_slabs(object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, 0, 0, 0)`, objectID, sqlHash256(slabDigest))
+
+			sampleSlabDigests = append(sampleSlabDigests, slabDigest)
+		}
+
+		if accountID%flushEvery == 0 {
+			flush(batch)
+			batch = &pgx.Batch{}
+		}
+	}
+	if batch.Len() > 0 {
+		flush(batch)
+	}
+
+	if _, err := store.pool.Exec(b.Context(), `VACUUM FULL ANALYZE;`); err != nil {
+		b.Fatal(err)
+	}
+
+	b.ResetTimer()
+	for b.Loop() {
+		digest := sampleSlabDigests[frand.Intn(len(sampleSlabDigests))]
+		if err := store.RecordSlabMigrated(digest); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -380,6 +380,9 @@ CREATE TABLE object_events (
 -- fast sorting by update time and key
 CREATE INDEX object_events_updated_at_object_key_idx ON object_events(updated_at ASC, object_key ASC);
 
+-- probe by object_key alone since the PK leads with account_id
+CREATE INDEX object_events_object_key_idx ON object_events(object_key);
+
 CREATE TABLE account_slabs (
     account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns slab
     slab_id BIGSERIAL REFERENCES slabs(id) NOT NULL,
