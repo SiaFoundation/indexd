@@ -305,6 +305,9 @@ CREATE INDEX contracts_next_prune_host_id_idx ON contracts (next_prune, host_id)
 -- rejecting contracts
 CREATE INDEX contracts_formation_pending_idx ON contracts(formation) WHERE state = 0;
 
+-- speeds up finding bad or inactive contracts for the unhealthy slabs query
+CREATE INDEX contracts_bad_idx ON contracts(contract_id) WHERE good = FALSE OR state NOT IN (0, 1);
+
 CREATE TABLE contract_sectors_map (
     id SERIAL PRIMARY KEY,
     contract_id BYTEA UNIQUE REFERENCES contracts(contract_id) NOT NULL
@@ -451,6 +454,9 @@ CREATE INDEX sectors_host_id_sector_root_idx ON sectors(host_id, sector_root);
 
 -- for pruning unpinned sectors
 CREATE INDEX sectors_uploaded_at_unpinned_idx ON sectors(uploaded_at) WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NULL;
+
+-- speeds up finding sectors that lost their host for the unhealthy slabs query
+CREATE INDEX sectors_lost_idx ON sectors(id) WHERE host_id IS NULL;
 
 CREATE TABLE slab_sectors (
     slab_id BIGINT REFERENCES slabs(id) ON DELETE CASCADE,

@@ -1778,6 +1778,22 @@ func TestUnhealthySlabs(t *testing.T) {
 	assertUnhealthySlabs(2, 10)
 	resetNextRepairAttemptTime()
 
+	// resolved state is also unhealthy
+	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateResolved))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertUnhealthySlabs(2, 10)
+	resetNextRepairAttemptTime()
+
+	// rejected state is also unhealthy
+	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateRejected))
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertUnhealthySlabs(2, 10)
+	resetNextRepairAttemptTime()
+
 	// set the state back to active
 	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateActive))
 	if err != nil {
@@ -1830,6 +1846,169 @@ func TestUnhealthySlabs(t *testing.T) {
 	// assert slab1 is not considered unhealthy since it is considered uploaded
 	// to a host but not yet pinned
 	assertUnhealthySlabs(0, 10)
+
+	// add ten hosts, each with their own contract
+	hks := make([]types.PublicKey, 10)
+	fcids := make([]types.FileContractID, 10)
+	for i := range hks {
+		hks[i] = store.addTestHost(t)
+		fcids[i] = store.addTestContract(t, hks[i])
+	}
+
+	// pin a third slab whose ten sectors span all ten contracts
+	slabID3 := store.pinTestSlab(t, account, 1, hks)
+
+	// pin its sectors so they have a contract mapping
+	_, err = store.pool.Exec(t.Context(), `
+		UPDATE sectors
+		SET contract_sectors_map_id = csm.id
+		FROM contract_sectors_map csm
+		JOIN contracts c ON c.contract_id = csm.contract_id
+		WHERE sectors.host_id = c.host_id`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetNextRepairAttemptTime()
+
+	// assert no unhealthy slabs
+	assertUnhealthySlabs(0, 10)
+
+	// mark exactly one of the ten contracts bad
+	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET good = FALSE WHERE contract_id = $1", sqlHash256(fcids[3]))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// the slab should be flagged unhealthy even though nine of ten sectors are healthy
+	unhealthy = assertUnhealthySlabs(1, 10)
+	if unhealthy[0] != slabID3 {
+		t.Fatalf("expected slab ID %v, got %v", slabID3, unhealthy[0])
+	}
+
+	// make all contracts good again
+	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET good = TRUE")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// pick a host and contract sectors map pair belonging to the same contract
+	var hostID, csmID int64
+	err = store.pool.QueryRow(t.Context(), `
+		SELECT c.host_id, csm.id
+		FROM contract_sectors_map csm
+		JOIN contracts c ON c.contract_id = csm.contract_id
+		LIMIT 1`).Scan(&hostID, &csmID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// addPinnedSlabs bulk inserts one slab with one pinned sector per number
+	// in the range
+	addPinnedSlabs := func(from, to int) {
+		t.Helper()
+
+		_, err := store.pool.Exec(t.Context(), `
+			WITH new_slabs AS (
+				INSERT INTO slabs (digest, encryption_key, min_shards, next_repair_attempt)
+				SELECT decode(lpad(to_hex(1000000 + g), 64, '0'), 'hex'), '\x01', 1, NOW() - INTERVAL '1 hour'
+				FROM generate_series($1::int, $2::int) g
+				RETURNING id
+			), new_sectors AS (
+				INSERT INTO sectors (sector_root, host_id, contract_sectors_map_id, next_integrity_check)
+				SELECT decode(lpad(to_hex(2000000 + g), 64, '0'), 'hex'), $3, $4, NOW()
+				FROM generate_series($1::int, $2::int) g
+				RETURNING id
+			)
+			INSERT INTO slab_sectors (slab_id, sector_id, slab_index)
+			SELECT sl.id, sec.id, 0
+			FROM (SELECT id, row_number() OVER (ORDER BY id) rn FROM new_slabs) sl
+			JOIN (SELECT id, row_number() OVER (ORDER BY id) rn FROM new_sectors) sec ON sl.rn = sec.rn`,
+			from, to, hostID, csmID)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// bulk insert one pinned sector per slab so the picked contract holds
+	// exactly badSectorThreshold sectors, it already holds one of the third
+	// slab's sectors
+	addPinnedSlabs(1, badSectorThreshold-1)
+
+	// all sectors healthy
+	assertUnhealthySlabs(0, 10)
+
+	// exactly badSectorThreshold bad sectors on a single contract routes to the
+	// collecting query, which must return every affected slab without truncation
+	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET good = FALSE WHERE host_id = $1", hostID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetNextRepairAttemptTime()
+	assertUnhealthySlabs(badSectorThreshold, badSectorThreshold+10)
+
+	// one more bad sector crosses the threshold and routes to the slab walking
+	// query, which must also return every affected slab
+	addPinnedSlabs(badSectorThreshold, badSectorThreshold)
+	resetNextRepairAttemptTime()
+	assertUnhealthySlabs(badSectorThreshold+1, badSectorThreshold+10)
+
+	// mark all contracts bad and assert the limit is applied
+	_, err = store.pool.Exec(t.Context(), `UPDATE contracts SET good = FALSE`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetNextRepairAttemptTime()
+	unhealthy = assertUnhealthySlabs(10, 10)
+
+	// returned slabs got their backoff bumped, the next call returns others
+	more := assertUnhealthySlabs(10, 10)
+	seen := make(map[slabs.SlabID]bool)
+	for _, id := range unhealthy {
+		seen[id] = true
+	}
+	for _, id := range more {
+		if seen[id] {
+			t.Fatal("slab returned twice")
+		}
+	}
+
+	// make all contracts good again and add lost sectors that belong to no
+	// slab. they pin the probe count at its cap but must not produce results
+	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET good = TRUE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.pool.Exec(t.Context(), `
+		INSERT INTO sectors (sector_root, host_id, contract_sectors_map_id, next_integrity_check)
+		SELECT decode(lpad(to_hex(3000000 + g), 64, '0'), 'hex'), NULL, NULL, NOW()
+		FROM generate_series(1, $1) g`, badSectorThreshold+1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resetNextRepairAttemptTime()
+	assertUnhealthySlabs(0, 10)
+
+	// a lost sector that does belong to a slab is still found
+	_, err = store.pool.Exec(t.Context(), `
+		UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL
+		WHERE id = (SELECT sector_id FROM slab_sectors LIMIT 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want slabs.SlabID
+	err = store.pool.QueryRow(t.Context(), `
+		SELECT s.digest
+		FROM slabs s
+		JOIN slab_sectors ss ON ss.slab_id = s.id
+		JOIN sectors sec ON sec.id = ss.sector_id
+		WHERE sec.host_id IS NULL`).Scan((*sqlHash256)(&want))
+	if err != nil {
+		t.Fatal(err)
+	}
+	unhealthy = assertUnhealthySlabs(1, 10)
+	if unhealthy[0] != want {
+		t.Fatalf("expected slab ID %v, got %v", want, unhealthy[0])
+	}
 }
 
 func TestMarkSectorsUnpinnable(t *testing.T) {
@@ -2436,9 +2615,10 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 	account := proto.Account{1}
 	store.addTestAccount(b, types.PublicKey(account))
 
-	// 30 hosts to simulate default redundancy
+	// 60 hosts, every slab lives on a random half of them so a bad host
+	// hits some slabs but not all
 	var hks []types.PublicKey
-	for i := range byte(30) {
+	for i := range byte(60) {
 		hk := store.addTestHost(b, types.PublicKey{i})
 		store.addTestContract(b, hk, types.FileContractID(hk))
 		hks = append(hks, hk)
@@ -2448,7 +2628,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 	hostSectors := make([][]types.Hash256, len(hks))
 	newSlab := func() slabs.SlabPinParams {
 		var sectors []slabs.PinnedSector
-		for i := range hks {
+		for _, i := range frand.Perm(len(hks))[:30] {
 			hostSectors[i] = append(hostSectors[i], frand.Entropy256())
 			sectors = append(sectors, slabs.PinnedSector{
 				Root:    hostSectors[i][len(hostSectors[i])-1],
@@ -2463,12 +2643,21 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		return slab
 	}
 
-	const dbBaseSize = 1 << 40    // 1TiB
-	const slabSize = 40 * 1 << 20 // 40MiB
+	const (
+		batchSize    = 100
+		dbBaseSize   = 4 << 40      // 4TiB
+		slabSize     = 40 * 1 << 20 // 40MiB
+		pinBatchSize = 100
+	)
 
 	// prepare base db
-	for range dbBaseSize / slabSize {
-		_, err := store.PinSlabs(account, time.Time{}, newSlab())
+	numSlabs := dbBaseSize / slabSize
+	for i := 0; i < numSlabs; i += pinBatchSize {
+		batch := make([]slabs.SlabPinParams, 0, pinBatchSize)
+		for range min(pinBatchSize, numSlabs-i) {
+			batch = append(batch, newSlab())
+		}
+		_, err := store.PinSlabs(account, time.Time{}, batch...)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -2482,53 +2671,116 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		}
 	}
 
-	// 25% of the sectors are stored on a bad contract
-	_, err := store.pool.Exec(b.Context(), "UPDATE contracts SET good = FALSE WHERE id % 4 = 0")
-	if err != nil {
+	// insert a bunch of contracts that marked bad and not referenced by any sectors,
+	// we never delete old contracts in the database, so this mimics a realistic scenario
+	// where we have many bad contracts that are not cleaned up yet
+	if _, err := store.pool.Exec(b.Context(), `
+		INSERT INTO contracts (host_id, contract_id, proof_height, expiration_height, state,
+			contract_price, initial_allowance, miner_fee, total_collateral,
+			used_collateral, remaining_allowance, raw_revision)
+		SELECT (g % 60) + 1, decode(lpad(to_hex(10000000 + g), 64, '0'), 'hex'),
+			1000000, 2000000, 3, 0, 0, 0, 0, 0, 0, '\x'::bytea
+		FROM generate_series(1, 5000) g`); err != nil {
 		b.Fatal(err)
 	}
 
-	// 25% of the sectors don't have a host at all
-	_, err = store.pool.Exec(b.Context(), `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id % 4 = 1`)
-	if err != nil {
+	// a handful of lost sectors, even a healthy database has a few
+	if _, err := store.pool.Exec(b.Context(), `
+		UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL
+		WHERE id IN (SELECT id FROM sectors WHERE contract_sectors_map_id IS NOT NULL LIMIT 30)`); err != nil {
 		b.Fatal(err)
 	}
 
-	// reset next_repair_attempt
-	resetUnhealthySlabs := func() {
+	// make all slabs due for repair again
+	resetNextRepairAttempt := func() {
 		b.Helper()
-		_, err = store.pool.Exec(b.Context(), "UPDATE slabs SET next_repair_attempt = (NOW() - interval '3 day') + interval '1 week' * random()")
-		if err != nil {
+		if _, err := store.pool.Exec(b.Context(), `UPDATE slabs SET next_repair_attempt = NOW() - INTERVAL '1 hour'`); err != nil {
 			b.Fatal(err)
 		}
 	}
 
 	// analyze tables to ensure query planner has up-to-date statistics
-	_, vErr1 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) slabs;`)
-	_, vErr2 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) sectors;`)
-	_, vErr3 := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) contract_sectors_map;`)
-	if err := errors.Join(vErr1, vErr2, vErr3); err != nil {
-		b.Fatal(err)
+	vacuumAnalyze := func() {
+		b.Helper()
+		for _, table := range []string{"slabs", "sectors", "contracts", "contract_sectors_map"} {
+			if _, err := store.pool.Exec(b.Context(), `VACUUM (ANALYZE) `+table); err != nil {
+				b.Fatal(err)
+			}
+		}
 	}
 
-	for _, batchSize := range []int{50, 100, 250} {
-		b.Run(fmt.Sprint(batchSize), func(b *testing.B) {
+	// each case mimics a database state seen in production. backlog marks
+	// sectors lost without restoring them, so it runs last
+	benchmarks := []struct {
+		name      string
+		unhealthy bool
+		setup     func()
+	}{
+		{
+			// nothing to repair. the slabs of the few lost sectors had a
+			// recent repair attempt, so they are not due yet
+			name: "healthy",
+			setup: func() {
+				if _, err := store.pool.Exec(b.Context(), `
+					UPDATE slabs SET next_repair_attempt = NOW() + INTERVAL '1 hour'
+					WHERE id IN (
+						SELECT ss.slab_id
+						FROM slab_sectors ss
+						JOIN sectors sec ON sec.id = ss.sector_id
+						WHERE sec.host_id IS NULL
+					)`); err != nil {
+					b.Fatal(err)
+				}
+			},
+		},
+		{
+			// one bad host, ~2% of sectors and about half of all slabs affected
+			name:      "host_blocked",
+			unhealthy: true,
+			setup: func() {
+				if _, err := store.pool.Exec(b.Context(), `UPDATE contracts SET good = FALSE WHERE id = 1`); err != nil {
+					b.Fatal(err)
+				}
+			},
+		},
+		{
+			// four bad hosts and some lost sectors, ~7% of sectors and nearly
+			// all slabs affected
+			name:      "backlog",
+			unhealthy: true,
+			setup: func() {
+				if _, err := store.pool.Exec(b.Context(), `UPDATE contracts SET good = FALSE WHERE id IN (2, 3, 4, 5)`); err != nil {
+					b.Fatal(err)
+				}
+				if _, err := store.pool.Exec(b.Context(), `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id % 1000 = 0 AND contract_sectors_map_id IS NOT NULL`); err != nil {
+					b.Fatal(err)
+				}
+			},
+		},
+	}
+
+	for _, bm := range benchmarks {
+		resetNextRepairAttempt()
+		bm.setup()
+		vacuumAnalyze()
+
+		b.Run(bm.name, func(b *testing.B) {
 			var sanityCheck bool
 			for b.Loop() {
 				slabIDs, err := store.UnhealthySlabs(batchSize)
 				if err != nil {
 					b.Fatal(err)
-				} else if len(slabIDs) < batchSize {
+				} else if !bm.unhealthy && len(slabIDs) != 0 {
+					b.Fatalf("expected no unhealthy slabs, got %d", len(slabIDs))
+				} else if bm.unhealthy && len(slabIDs) < batchSize {
 					b.StopTimer()
-					resetUnhealthySlabs()
+					resetNextRepairAttempt()
 					b.StartTimer()
 					continue
-				} else if len(slabIDs) != batchSize {
-					b.Fatalf("expected %d unhealthy slabs, got %d", batchSize, len(slabIDs))
 				}
 				sanityCheck = sanityCheck || len(slabIDs) > 0
 			}
-			if !sanityCheck {
+			if bm.unhealthy && !sanityCheck {
 				b.Fatal("sanity check failed, no unhealthy slabs were ever returned")
 			}
 		})

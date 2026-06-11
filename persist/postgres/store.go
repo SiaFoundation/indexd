@@ -66,6 +66,17 @@ func (ci ConnectionInfo) String() string {
 // transaction is committed. If the transaction fails due to a serialization
 // or deadlock error, it is retried up to maxRetryAttempts times before returning.
 func (s *Store) transaction(fn func(context.Context, *txn) error) error {
+	return s.transactionWithOptions(pgx.TxOptions{}, fn)
+}
+
+// repeatableReadTransaction is like transaction but runs at the repeatable
+// read isolation level, so every statement in the transaction sees the same
+// snapshot.
+func (s *Store) repeatableReadTransaction(fn func(context.Context, *txn) error) error {
+	return s.transactionWithOptions(pgx.TxOptions{IsoLevel: pgx.RepeatableRead}, fn)
+}
+
+func (s *Store) transactionWithOptions(opts pgx.TxOptions, fn func(context.Context, *txn) error) error {
 	var err error
 	txnID := hex.EncodeToString(frand.Bytes(4))
 	log := s.log.Named("transaction").With(zap.String("id", txnID))
@@ -74,7 +85,7 @@ func (s *Store) transaction(fn func(context.Context, *txn) error) error {
 	for ; attempt <= maxRetryAttempts; attempt++ {
 		attemptStart := time.Now()
 		log := log.With(zap.Int("attempt", attempt))
-		err = s.doTransaction(log, fn)
+		err = s.doTransaction(log, opts, fn)
 		if err == nil {
 			// no error, break out of the loop
 			return nil
@@ -103,9 +114,9 @@ func (s *Store) transaction(fn func(context.Context, *txn) error) error {
 // doTransaction is a helper function to execute a function within a transaction.
 // If fn returns an error, the transaction is rolled back. Otherwise, the
 // transaction is committed.
-func (s *Store) doTransaction(log *zap.Logger, fn func(context.Context, *txn) error) error {
+func (s *Store) doTransaction(log *zap.Logger, opts pgx.TxOptions, fn func(context.Context, *txn) error) error {
 	ctx := context.Background()
-	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := s.pool.BeginTx(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
