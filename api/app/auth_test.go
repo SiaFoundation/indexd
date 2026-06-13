@@ -82,6 +82,10 @@ func (s *mockAccounts) AppSecret(connectKey string, appID types.Hash256) (types.
 	return frand.Entropy256(), nil
 }
 
+func (s *mockAccounts) HasAppAccount(connectKey string, appID types.Hash256) (bool, error) {
+	return false, nil
+}
+
 func TestAuthConnectFieldLimits(t *testing.T) {
 	s := &mockAccounts{tokens: make(map[types.PublicKey]struct{})}
 	l, err := net.Listen("tcp", "127.0.0.1:0")

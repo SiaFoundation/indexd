@@ -911,6 +911,9 @@ components:
         approved:
           type: boolean
           description: The status of an application connection request.
+        reconnecting:
+          type: boolean
+          description: Whether the user has previously connected the app. Only set when the request is approved.
         userSecret:
           allOf:
             - $ref: "#/components/schemas/Hash256"

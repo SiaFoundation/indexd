@@ -594,6 +594,8 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("expected request to be approved")
 	} else if status.UserSecret == (types.Hash256{}) {
 		t.Fatal("expected non-empty user secret")
+	} else if status.Reconnecting {
+		t.Fatal("expected first connection to not be reconnecting")
 	}
 
 	if err := appClient.RegisterApp(ctx, resp.RegisterURL, ephemeralSK, sk); err != nil {
@@ -663,6 +665,8 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("expected request to be approved")
 	} else if status.UserSecret != secondStatus.UserSecret {
 		t.Fatal("expected same user secret")
+	} else if !secondStatus.Reconnecting {
+		t.Fatal("expected reconnecting")
 	}
 
 	// verify re-auth succeeds even when the connect key is exhausted

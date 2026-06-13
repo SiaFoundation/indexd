@@ -165,6 +165,12 @@ func (m *AccountManager) Quotas(ctx context.Context, offset, limit int) ([]Quota
 	return m.store.Quotas(offset, limit)
 }
 
+// HasAppAccount reports whether an account already exists for the given
+// connect key and app ID.
+func (m *AccountManager) HasAppAccount(connectKey string, appID types.Hash256) (bool, error) {
+	return m.store.HasAppAccount(connectKey, appID)
+}
+
 // AppSecret derives a unique application secret using a stored user secret
 // associated with the given connect key and the provided app ID.
 func (m *AccountManager) AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error) {
