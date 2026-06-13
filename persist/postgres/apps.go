@@ -205,6 +205,21 @@ func (s *Store) AppConnectKeyUserSecret(connectKey string) (secret types.Hash256
 	return
 }
 
+// HasAppAccount reports whether an account already exists for the given
+// connect key and app ID.
+func (s *Store) HasAppAccount(connectKey string, appID types.Hash256) (exists bool, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		return tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM accounts a
+				INNER JOIN app_connect_keys ack ON ack.id = a.connect_key_id
+				WHERE ack.app_key = $1 AND a.app_id = $2 AND a.deleted_at IS NULL
+			)
+		`, connectKey, sqlHash256(appID)).Scan(&exists)
+	})
+	return
+}
+
 // RegisterAppKey uses a connect key to register a new app account.
 // This secret must never be exposed to the user.
 func (s *Store) RegisterAppKey(connectKey string, appKey types.PublicKey, meta accounts.AppMeta) error {

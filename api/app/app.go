@@ -58,6 +58,7 @@ type (
 		ValidAppConnectKey(context.Context, string) error
 		RegisterAppKey(string, types.PublicKey, accounts.AppMeta) error
 		AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error)
+		HasAppAccount(connectKey string, appID types.Hash256) (bool, error)
 
 		HasAccount(context.Context, types.PublicKey) (bool, error)
 		Account(context.Context, types.PublicKey) (accounts.Account, error)
@@ -80,9 +81,10 @@ type (
 		Expiration   time.Time
 
 		// set when the user approves the request
-		Approved   bool
-		UserSecret types.Hash256
-		ConnectKey string // ties the request to the app connect key used
+		Approved     bool
+		Reconnecting bool
+		UserSecret   types.Hash256
+		ConnectKey   string // ties the request to the app connect key used
 	}
 
 	// A RegisterAppRequest is the request body for registering a new application.
@@ -98,8 +100,11 @@ type (
 	// AuthConnectStatusResponse is the response body for checking the status of an
 	// application connection request.
 	AuthConnectStatusResponse struct {
-		Approved   bool          `json:"approved"`
-		UserSecret types.Hash256 `json:"userSecret,omitempty"`
+		Approved bool `json:"approved"`
+		// Reconnecting is true if the user has previously connected the app.
+		// It is only set if the user approved the request.
+		Reconnecting bool          `json:"reconnecting"`
+		UserSecret   types.Hash256 `json:"userSecret,omitempty"`
 	}
 
 	// RegisterAppResponse is the response body for registering a new application.
@@ -601,9 +606,17 @@ func (a *app) handlePOSTAuthConnect(jc jape.Context) {
 		return
 	}
 
+	// check whether the user has previously connected the app
+	reconnecting, err := a.accounts.HasAppAccount(connectKey, authReq.Request.AppID)
+	if err != nil {
+		jc.Error(fmt.Errorf("failed to check for existing app account: %w", err), http.StatusInternalServerError)
+		return
+	}
+
 	// update the auth request with the shared secret and approval status
 	authReq.UserSecret = sharedSecret
 	authReq.Approved = approveReq.Approve
+	authReq.Reconnecting = reconnecting
 	authReq.ConnectKey = connectKey
 	a.authRequests[requestID] = authReq
 	jc.Encode(nil)
@@ -628,8 +641,9 @@ func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
 		return
 	}
 	jc.Encode(AuthConnectStatusResponse{
-		Approved:   authReq.Approved,
-		UserSecret: authReq.UserSecret,
+		Approved:     authReq.Approved,
+		Reconnecting: authReq.Reconnecting,
+		UserSecret:   authReq.UserSecret,
 	})
 }
 
