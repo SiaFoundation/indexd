@@ -32,10 +32,12 @@ type fundPoolsCall struct {
 }
 
 type accountsManagerMock struct {
-	mu             sync.Mutex
-	accountsToFund []accounts.HostAccount
-	poolsToFund    []accounts.HostPool
-	quotaInfos     []accounts.QuotaFundInfo
+	mu                 sync.Mutex
+	accountsToFund     []accounts.HostAccount
+	poolsToFund        []accounts.HostPool
+	quotaInfos         []accounts.QuotaFundInfo
+	sharingAttachments []accounts.PendingAttachment
+	markedSharing      map[[2]types.PublicKey]bool // (host, pool) keys whose sharing account has been attached
 }
 
 func newAccountsManagerMock() *accountsManagerMock {
@@ -93,6 +95,36 @@ func (am *accountsManagerMock) PendingPoolAttachments(_ types.PublicKey, _ int) 
 	return nil, nil
 }
 
+func (am *accountsManagerMock) SharingPoolAttachments(hk types.PublicKey, limit int) ([]accounts.PendingAttachment, error) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if limit <= 0 {
+		return nil, nil
+	}
+	var pending []accounts.PendingAttachment
+	for _, a := range am.sharingAttachments {
+		if len(pending) >= limit {
+			break
+		}
+		if !am.markedSharing[[2]types.PublicKey{hk, a.PoolKey.PublicKey()}] {
+			pending = append(pending, a)
+		}
+	}
+	return pending, nil
+}
+
+func (am *accountsManagerMock) MarkSharingPoolsAttached(hk types.PublicKey, attachments []accounts.PendingAttachment) error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	if am.markedSharing == nil {
+		am.markedSharing = make(map[[2]types.PublicKey]bool)
+	}
+	for _, a := range attachments {
+		am.markedSharing[[2]types.PublicKey{hk, a.PoolKey.PublicKey()}] = true
+	}
+	return nil
+}
+
 func (am *accountsManagerMock) PoolFundingInfo(_ time.Time) ([]accounts.QuotaFundInfo, error) {
 	return nil, nil
 }
@@ -110,12 +142,16 @@ func (am *accountsManagerMock) UpdateHostPools(_ []accounts.HostPool) error {
 }
 
 type accountFunderMock struct {
-	mu        sync.Mutex
-	calls     []fundAccountsCall
-	poolCalls []fundPoolsCall
+	mu          sync.Mutex
+	calls       []fundAccountsCall
+	poolCalls   []fundPoolsCall
+	attachCalls [][]rhp.PoolAttachInput
 }
 
-func (f *accountFunderMock) AttachPools(_ context.Context, _ types.PublicKey, _ []rhp.PoolAttachInput, _ time.Duration) error {
+func (f *accountFunderMock) AttachPools(_ context.Context, _ types.PublicKey, inputs []rhp.PoolAttachInput, _ time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attachCalls = append(f.attachCalls, slices.Clone(inputs))
 	return nil
 }
 
@@ -274,6 +310,70 @@ func TestPerformAccountFunding(t *testing.T) {
 		if call.host.PublicKey == hk5 {
 			t.Fatal("pool host should not have been funded via FundAccounts")
 		}
+	}
+}
+
+func TestAttachSharingPools(t *testing.T) {
+	amMock := newAccountsManagerMock()
+	funderMock := &accountFunderMock{}
+	store := newTestStore(t)
+	hmMock := newHostManagerMock(store)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, funderMock, nil, store, nil, nil, nil, contracts.NewContractLocker(), hmMock, nil, nil)
+
+	hk := types.PublicKey{1}
+
+	// no sharing attachments -> no attach calls
+	if err := cm.AttachPools(context.Background(), hk, zap.NewNop()); err != nil {
+		t.Fatal(err)
+	}
+	if len(funderMock.attachCalls) != 0 {
+		t.Fatal("expected no attach calls", len(funderMock.attachCalls))
+	}
+
+	// configure two funded pools' derived sharing accounts
+	poolKey1, poolKey2 := types.GeneratePrivateKey(), types.GeneratePrivateKey()
+	amMock.sharingAttachments = []accounts.PendingAttachment{
+		{AccountKey: [32]byte{1}, PoolKey: poolKey1},
+		{AccountKey: [32]byte{2}, PoolKey: poolKey2},
+	}
+
+	if err := cm.AttachPools(context.Background(), hk, zap.NewNop()); err != nil {
+		t.Fatal(err)
+	}
+
+	// even though there are no regular pending attachments, the sharing
+	// accounts must have been attached
+	if len(funderMock.attachCalls) != 1 {
+		t.Fatal("expected one attach call for sharing accounts", len(funderMock.attachCalls))
+	}
+	inputs := funderMock.attachCalls[0]
+	if len(inputs) != 2 {
+		t.Fatal("expected two sharing attach inputs", len(inputs))
+	}
+	if inputs[0].PoolKey.PublicKey() != poolKey1.PublicKey() || inputs[1].PoolKey.PublicKey() != poolKey2.PublicKey() {
+		t.Fatal("unexpected pool keys in sharing attach inputs")
+	}
+
+	// the attachments must have been recorded, so a subsequent cycle does not
+	// re-attach them
+	if err := cm.AttachPools(context.Background(), hk, zap.NewNop()); err != nil {
+		t.Fatal(err)
+	}
+	if len(funderMock.attachCalls) != 1 {
+		t.Fatal("expected no additional attach calls once recorded", len(funderMock.attachCalls))
+	}
+
+	// a newly funded pool is still attached on the next cycle
+	poolKey3 := types.GeneratePrivateKey()
+	amMock.sharingAttachments = append(amMock.sharingAttachments, accounts.PendingAttachment{AccountKey: [32]byte{3}, PoolKey: poolKey3})
+	if err := cm.AttachPools(context.Background(), hk, zap.NewNop()); err != nil {
+		t.Fatal(err)
+	}
+	if len(funderMock.attachCalls) != 2 {
+		t.Fatal("expected the newly funded pool to be attached", len(funderMock.attachCalls))
+	}
+	if newInputs := funderMock.attachCalls[1]; len(newInputs) != 1 || newInputs[0].PoolKey.PublicKey() != poolKey3.PublicKey() {
+		t.Fatal("expected only the new pool's sharing account to be attached")
 	}
 }
 

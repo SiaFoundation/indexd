@@ -123,9 +123,13 @@ CREATE TABLE pool_hosts (
     host_id INTEGER NOT NULL REFERENCES hosts(id) ON DELETE CASCADE,
     next_fund TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     consecutive_failed_funds INTEGER NOT NULL DEFAULT 0,
+    sharing_attached BOOLEAN NOT NULL DEFAULT FALSE, -- whether the pool's derived sharing account has been attached on this host
     CONSTRAINT pool_hosts_pk PRIMARY KEY (pool_id, host_id)
 );
 CREATE INDEX pool_hosts_host_id_next_fund_idx ON pool_hosts (host_id, next_fund);
+-- partial index for SharingPoolAttachments: only indexes pools whose sharing
+-- account still needs attaching
+CREATE INDEX pool_hosts_sharing_unattached_idx ON pool_hosts (host_id) WHERE sharing_attached = FALSE;
 
 CREATE TABLE pool_attachments (
     pool_id INTEGER NOT NULL,

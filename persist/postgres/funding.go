@@ -221,6 +221,73 @@ ON CONFLICT DO NOTHING`, strings.Join(vals, ", "))
 	})
 }
 
+// SharingPoolAttachments returns up to `limit` (sharing account, pool)
+// attachments for pools funded on the given host that have not yet had their
+// sharing account attached.
+func (s *Store) SharingPoolAttachments(hk types.PublicKey, limit int) ([]accounts.PendingAttachment, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	var attachments []accounts.PendingAttachment
+	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		attachments = attachments[:0]
+
+		rows, err := tx.Query(ctx, `
+SELECT ack.user_secret, p.pool_key
+FROM pool_hosts ph
+INNER JOIN pools p ON p.id = ph.pool_id
+INNER JOIN app_connect_keys ack ON ack.id = p.connect_key_id
+INNER JOIN hosts h ON h.id = ph.host_id
+WHERE h.public_key = $1 AND ph.consecutive_failed_funds = 0 AND ph.sharing_attached = FALSE
+ORDER BY p.id
+LIMIT $2`, sqlPublicKey(hk), limit)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var userSecret types.Hash256
+			var pa accounts.PendingAttachment
+			if err := rows.Scan((*sqlHash256)(&userSecret), (*[]byte)(&pa.PoolKey)); err != nil {
+				return fmt.Errorf("failed to scan sharing pool attachment: %w", err)
+			}
+			pa.AccountKey = proto.Account(accounts.DeriveSharingAccountKey(userSecret).PublicKey())
+			attachments = append(attachments, pa)
+		}
+		return rows.Err()
+	}); err != nil {
+		return nil, err
+	}
+
+	return attachments, nil
+}
+
+// MarkSharingPoolsAttached records that the given pools' sharing accounts have
+// been attached on the host, so they are not re-attached on subsequent funding
+// cycles. Pools are identified by their pool key.
+func (s *Store) MarkSharingPoolsAttached(hk types.PublicKey, attachments []accounts.PendingAttachment) error {
+	if len(attachments) == 0 {
+		return nil
+	} else if len(attachments) > proto.MaxAccountBatchSize {
+		return errors.New("too many attachments to mark") // sanity check batch size against max batch size used in attach RPC
+	}
+	poolKeys := make([][]byte, len(attachments))
+	for i, a := range attachments {
+		poolKeys[i] = a.PoolKey
+	}
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		_, err := tx.Exec(ctx, `
+UPDATE pool_hosts
+SET sharing_attached = TRUE
+WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)
+  AND pool_id IN (SELECT id FROM pools WHERE pool_key = ANY($2::bytea[]))`,
+			sqlPublicKey(hk), poolKeys)
+		return err
+	})
+}
+
 // PendingPoolAttachments returns up to `limit` (account, pool, host) tuples
 // where the pool has been funded on the host but not yet attached to the
 // account.

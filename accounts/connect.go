@@ -174,3 +174,11 @@ func (m *AccountManager) AppSecret(connectKey string, appID types.Hash256) (type
 	}
 	return types.Hash256(keys.Derive(secret[:], appID[:], []byte("server app secret"), 32)), nil
 }
+
+// DeriveSharingAccountKey deterministically derives a connect key's sharing
+// account key pair from its user secret.
+func DeriveSharingAccountKey(userSecret types.Hash256) types.PrivateKey {
+	seed := keys.Derive(userSecret[:], []byte("sharing"), nil, 32)
+	defer clear(seed)
+	return types.NewPrivateKeyFromSeed(seed)
+}

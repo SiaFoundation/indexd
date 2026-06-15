@@ -42,6 +42,8 @@ type (
 		HostPoolsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]HostPool, error)
 		InsertPoolAttachments(hk types.PublicKey, attachments []PendingAttachment) error
 		PendingPoolAttachments(hk types.PublicKey, limit int) ([]PendingAttachment, error)
+		SharingPoolAttachments(hk types.PublicKey, limit int) ([]PendingAttachment, error)
+		MarkSharingPoolsAttached(hk types.PublicKey, attachments []PendingAttachment) error
 		PoolFundingInfo(threshold time.Time) ([]QuotaFundInfo, error)
 		UpdateHostAccounts(accounts []HostAccount) error
 		UpdateHostPools(pools []HostPool) error
@@ -157,6 +159,18 @@ func (m *AccountManager) InsertPoolAttachments(hk types.PublicKey, attachments [
 // PendingPoolAttachments returns pool attachments that still need to be made.
 func (m *AccountManager) PendingPoolAttachments(hk types.PublicKey, limit int) ([]PendingAttachment, error) {
 	return m.store.PendingPoolAttachments(hk, limit)
+}
+
+// SharingPoolAttachments returns derived sharing account attachments that still
+// need to be made.
+func (m *AccountManager) SharingPoolAttachments(hk types.PublicKey, limit int) ([]PendingAttachment, error) {
+	return m.store.SharingPoolAttachments(hk, limit)
+}
+
+// MarkSharingPoolsAttached records that the given pools' sharing accounts have
+// been attached on the host.
+func (m *AccountManager) MarkSharingPoolsAttached(hk types.PublicKey, attachments []PendingAttachment) error {
+	return m.store.MarkSharingPoolsAttached(hk, attachments)
 }
 
 // PoolFundingInfo returns funding info grouped by quota for pools.

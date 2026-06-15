@@ -156,4 +156,11 @@ CREATE INDEX pool_attachments_account_id_host_id_idx ON pool_attachments (accoun
 		_, err := tx.Exec(ctx, `CREATE INDEX object_events_object_key_idx ON object_events(object_key);`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		if _, err := tx.Exec(ctx, `ALTER TABLE pool_hosts ADD COLUMN sharing_attached BOOLEAN NOT NULL DEFAULT FALSE`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `CREATE INDEX pool_hosts_sharing_unattached_idx ON pool_hosts (host_id) WHERE sharing_attached = FALSE`)
+		return err
+	},
 }
