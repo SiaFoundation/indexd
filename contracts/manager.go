@@ -58,6 +58,8 @@ type (
 		AccountsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]accounts.HostAccount, error)
 		AccountFundingInfo(threshold time.Time) ([]accounts.QuotaFundInfo, error)
 		PendingPoolAttachments(hk types.PublicKey, limit int) ([]accounts.PendingAttachment, error)
+		SharingPoolAttachments(hk types.PublicKey, limit int) ([]accounts.PendingAttachment, error)
+		MarkSharingPoolsAttached(hk types.PublicKey, attachments []accounts.PendingAttachment) error
 		PoolFundingInfo(threshold time.Time) ([]accounts.QuotaFundInfo, error)
 		PoolsForFunding(hk types.PublicKey, quotaName string, threshold time.Time, limit int) ([]accounts.HostPool, error)
 		Quotas(ctx context.Context, offset, limit int) ([]accounts.Quota, error)

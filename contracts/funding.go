@@ -35,7 +35,7 @@ func (cm *ContractManager) AttachPools(ctx context.Context, hostKey types.Public
 		if err != nil {
 			return fmt.Errorf("failed to fetch pending attachments: %w", err)
 		} else if len(pending) == 0 {
-			return nil
+			break
 		} else if len(pending) < proto.MaxAccountBatchSize {
 			exhausted = true
 		}
@@ -57,6 +57,42 @@ func (cm *ContractManager) AttachPools(ctx context.Context, hostKey types.Public
 		}
 
 		log.Debug("attached pools to accounts", zap.Int("count", len(pending)))
+	}
+
+	return cm.attachSharingPools(ctx, hostKey, log)
+}
+
+// attachSharingPools attaches each funded pool's derived sharing account on the
+// host.
+func (cm *ContractManager) attachSharingPools(ctx context.Context, hostKey types.PublicKey, log *zap.Logger) error {
+	var exhausted bool
+	for !exhausted {
+		sharing, err := cm.accounts.SharingPoolAttachments(hostKey, proto.MaxAccountBatchSize)
+		if err != nil {
+			return fmt.Errorf("failed to fetch sharing pool attachments: %w", err)
+		} else if len(sharing) == 0 {
+			break
+		} else if len(sharing) < proto.MaxAccountBatchSize {
+			exhausted = true
+		}
+
+		// construct attach inputs
+		inputs := make([]rhp.PoolAttachInput, len(sharing))
+		for i, p := range sharing {
+			inputs[i] = rhp.PoolAttachInput{
+				Account: p.AccountKey,
+				PoolKey: p.PoolKey,
+			}
+		}
+
+		// attach sharing accounts and record them
+		if err := cm.accountFunder.AttachPools(ctx, hostKey, inputs, attachValidity); err != nil {
+			return fmt.Errorf("failed to attach sharing pools: %w", err)
+		} else if err := cm.accounts.MarkSharingPoolsAttached(hostKey, sharing); err != nil {
+			return fmt.Errorf("failed to record sharing attachments: %w", err)
+		}
+
+		log.Debug("attached sharing accounts to pools", zap.Int("count", len(sharing)))
 	}
 	return nil
 }

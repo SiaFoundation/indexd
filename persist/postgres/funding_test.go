@@ -573,6 +573,144 @@ func TestPendingPoolAttachmentsMultiHost(t *testing.T) {
 	}
 }
 
+func TestSharingPoolAttachments(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	hk := store.addTestHost(t)
+	hk2 := store.addTestHost(t)
+	apk, poolKey := store.addTestAppConnectKey(t)
+
+	// the sharing account is derived from the connect key's user secret rather
+	// than stored, like the app secret
+	secret, err := store.AppConnectKeyUserSecret(apk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sharingAccount := accounts.DeriveSharingAccountKey(secret).PublicKey()
+
+	// it must never be persisted as an account
+	if ok, err := store.HasAccount(sharingAccount); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("sharing account should not be stored in the accounts table")
+	}
+
+	// no funded pools yet, so no sharing attachments
+	attachments, err := store.SharingPoolAttachments(hk, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(attachments) != 0 {
+		t.Fatal("expected no sharing attachments", len(attachments))
+	}
+
+	// add an app account so the pool becomes eligible for funding, then fund it
+	store.addTestAccountForKey(t, apk, types.GeneratePrivateKey().PublicKey())
+	pools, err := store.HostPoolsForFunding(hk, "default", time.Time{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(pools) != 1 {
+		t.Fatal("expected one pool", len(pools))
+	}
+	pools[0].NextFund = time.Now().Add(time.Hour)
+	if err := store.UpdateHostPools(pools); err != nil {
+		t.Fatal(err)
+	}
+
+	// the funded pool's derived sharing account should now be attachable
+	attachments, err = store.SharingPoolAttachments(hk, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(attachments) != 1 {
+		t.Fatal("expected one sharing attachment", len(attachments))
+	} else if types.PublicKey(attachments[0].AccountKey) != sharingAccount {
+		t.Fatal("unexpected sharing account key")
+	} else if attachments[0].PoolKey.PublicKey() != poolKey.PublicKey() {
+		t.Fatal("unexpected pool key")
+	}
+
+	// still derived, never stored
+	if ok, err := store.HasAccount(sharingAccount); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("sharing account should not be stored in the accounts table")
+	}
+
+	// attachment is per host: the pool is funded on hk only, so hk2 has none
+	if pending, err := store.SharingPoolAttachments(hk2, 10); err != nil {
+		t.Fatal(err)
+	} else if len(pending) != 0 {
+		t.Fatal("expected no sharing attachments for an unfunded host", len(pending))
+	}
+
+	// pools in funding backoff (consecutive failed funds) are excluded, just
+	// like regular pending attachments
+	pools[0].ConsecutiveFailedFunds = 1
+	if err := store.UpdateHostPools(pools); err != nil {
+		t.Fatal(err)
+	}
+	attachments, err = store.SharingPoolAttachments(hk, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(attachments) != 0 {
+		t.Fatal("expected no sharing attachments for a pool in backoff", len(attachments))
+	}
+
+	// once the backoff clears, the pool is attachable again
+	pools[0].ConsecutiveFailedFunds = 0
+	if err := store.UpdateHostPools(pools); err != nil {
+		t.Fatal(err)
+	}
+	attachments, err = store.SharingPoolAttachments(hk, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(attachments) != 1 {
+		t.Fatal("expected the pool to be attachable again after backoff", len(attachments))
+	}
+
+	// fund the same pool on hk2 so we can verify per-host independence below
+	pools, err = store.HostPoolsForFunding(hk2, "default", time.Time{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(pools) != 1 {
+		t.Fatal("expected one pool", len(pools))
+	}
+	pools[0].NextFund = time.Now().Add(time.Hour)
+	if err := store.UpdateHostPools(pools); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := store.SharingPoolAttachments(hk2, 10); err != nil {
+		t.Fatal(err)
+	} else if len(pending) != 1 {
+		t.Fatal("expected one sharing attachment for hk2", len(pending))
+	}
+
+	// after the sharing account is attached and recorded, the pool is not
+	// returned again so it is attached only once per host
+	if err := store.MarkSharingPoolsAttached(hk, attachments); err != nil {
+		t.Fatal(err)
+	}
+	attachments, err = store.SharingPoolAttachments(hk, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(attachments) != 0 {
+		t.Fatal("expected no sharing attachments once recorded", len(attachments))
+	}
+
+	// recording on hk is per host: hk2's attachment must be unaffected
+	if pending, err := store.SharingPoolAttachments(hk2, 10); err != nil {
+		t.Fatal(err)
+	} else if len(pending) != 1 {
+		t.Fatal("expected hk2's sharing attachment to remain after recording hk", len(pending))
+	}
+
+	// recording the attachment must not persist the account either
+	if ok, err := store.HasAccount(sharingAccount); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("sharing account should not be stored in the accounts table")
+	}
+}
+
 func TestPoolFundingInfo(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
