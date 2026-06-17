@@ -309,9 +309,6 @@ CREATE INDEX contracts_next_prune_host_id_idx ON contracts (next_prune, host_id)
 -- rejecting contracts
 CREATE INDEX contracts_formation_pending_idx ON contracts(formation) WHERE state = 0;
 
--- speeds up finding bad or inactive contracts for the unhealthy slabs query
-CREATE INDEX contracts_bad_idx ON contracts(contract_id) WHERE good = FALSE OR state NOT IN (0, 1);
-
 CREATE TABLE contract_sectors_map (
     id SERIAL PRIMARY KEY,
     contract_id BYTEA UNIQUE REFERENCES contracts(contract_id) NOT NULL
