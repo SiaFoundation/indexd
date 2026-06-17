@@ -337,9 +337,6 @@ CREATE TABLE slabs (
 );
 CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
 
--- speeds up lookup of unhealthy slabs
-CREATE INDEX slabs_id_next_repair_attempt_idx ON slabs(next_repair_attempt ASC);
-
 CREATE TABLE objects (
     id BIGSERIAL PRIMARY KEY,
     object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32),
@@ -441,7 +438,9 @@ CREATE INDEX sectors_contract_sectors_map_id_sector_root_idx ON sectors(contract
 
 -- foreign key constraint keys
 CREATE INDEX sectors_host_id_idx ON sectors(host_id);
--- CREATE INDEX sectors_contract_sectors_map_id_idx ON sectors(contract_sectors_map_id); -- covered by sectors_contract_sectors_map_id_uploaded_at_idx
+
+-- speeds up the bad contract scan in the unhealthy slabs query
+CREATE INDEX sectors_contract_sectors_map_id_id_idx ON sectors(contract_sectors_map_id, id);
 
 -- speed up integrity check query
 CREATE INDEX sectors_host_id_next_integrity_check_idx ON sectors(host_id, next_integrity_check ASC);

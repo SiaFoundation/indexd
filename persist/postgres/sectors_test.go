@@ -1675,17 +1675,50 @@ func TestPinSectors(t *testing.T) {
 	}
 }
 
+// collectUnhealthySlabs walks the cursor to the end and returns every unhealthy
+// slab found. It fails if a slab shows up twice. The small batch size makes the
+// cursor page across many iterations.
+func collectUnhealthySlabs(t testing.TB, store *Store) []slabs.SlabID {
+	t.Helper()
+
+	const batchSize = 10
+	var all []slabs.SlabID
+	seen := make(map[slabs.SlabID]bool)
+	var cursor int64
+	for {
+		batch, next, err := store.UnhealthySlabs(cursor, batchSize)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, id := range batch {
+			if seen[id] {
+				t.Fatal("slab returned twice")
+			}
+			seen[id] = true
+			all = append(all, id)
+		}
+		if next == 0 {
+			break
+		}
+		cursor = next
+	}
+	return all
+}
+
 func TestUnhealthySlabs(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
-	// assertUnhealthySlabs asserts the number of unhealthy slabs
-	assertUnhealthySlabs := func(expected, limit int) []slabs.SlabID {
+	const (
+		bulkSlabs         = 250
+		orphanLostSectors = 1000
+	)
+
+	// assertUnhealthySlabs collects all unhealthy slabs and checks the count
+	assertUnhealthySlabs := func(expected int) []slabs.SlabID {
 		t.Helper()
 
-		unhealthy, err := store.UnhealthySlabs(limit)
-		if err != nil {
-			t.Fatal(err)
-		} else if len(unhealthy) != expected {
+		unhealthy := collectUnhealthySlabs(t, store)
+		if len(unhealthy) != expected {
 			t.Fatalf("expected %d unhealthy slabs, got %d", expected, len(unhealthy))
 		}
 		return unhealthy
@@ -1723,7 +1756,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// assert we have no unhealthy slabs
-	assertUnhealthySlabs(0, 10)
+	assertUnhealthySlabs(0)
 
 	// renew the contract
 	renewal := newTestRevision(hk)
@@ -1734,7 +1767,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// assert we still have no unhealthy slabs
-	assertUnhealthySlabs(0, 10)
+	assertUnhealthySlabs(0)
 
 	// update the contract to be bad
 	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET good = FALSE")
@@ -1743,23 +1776,20 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// assert both slabs are unhealthy
-	assertUnhealthySlabs(2, 10)
+	assertUnhealthySlabs(2)
 
 	// assert consecutive calls to unhealthy slabs return no new slabs
-	assertUnhealthySlabs(0, 10)
+	assertUnhealthySlabs(0)
 
-	// reset the next repair attempt time and assert we have unhealthy slabs
+	// reset and assert both slabs come back
 	resetNextRepairAttemptTime()
-	assertUnhealthySlabs(2, 10)
-
-	// reset the next repair attempt time and assert the limit is applied
-	resetNextRepairAttemptTime()
-	assertUnhealthySlabs(1, 1)
-
-	// we can call it again since we have one left, should be SlabID2
-	unhealthy := assertUnhealthySlabs(1, 1)
-	if unhealthy[0] != slabID2 {
-		t.Fatalf("expected slab ID %v, got %v", slabID2, unhealthy[0])
+	unhealthy := assertUnhealthySlabs(2)
+	got := make(map[slabs.SlabID]bool)
+	for _, id := range unhealthy {
+		got[id] = true
+	}
+	if !got[slabID1] || !got[slabID2] {
+		t.Fatal("expected both slab1 and slab2", unhealthy)
 	}
 	resetNextRepairAttemptTime()
 
@@ -1768,14 +1798,14 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertUnhealthySlabs(0, 10)
+	assertUnhealthySlabs(0)
 
 	// update the contract to be no longer active or pending and assert both slabs are unhealthy
 	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateExpired))
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertUnhealthySlabs(2, 10)
+	assertUnhealthySlabs(2)
 	resetNextRepairAttemptTime()
 
 	// resolved state is also unhealthy
@@ -1783,7 +1813,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertUnhealthySlabs(2, 10)
+	assertUnhealthySlabs(2)
 	resetNextRepairAttemptTime()
 
 	// rejected state is also unhealthy
@@ -1791,7 +1821,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertUnhealthySlabs(2, 10)
+	assertUnhealthySlabs(2)
 	resetNextRepairAttemptTime()
 
 	// set the state back to active
@@ -1807,7 +1837,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// assert slab1 is unhealthy
-	unhealthy = assertUnhealthySlabs(1, 10)
+	unhealthy = assertUnhealthySlabs(1)
 	if unhealthy[0] != slabID1 {
 		t.Fatalf("expected slab ID %v, got %v", slabID1, unhealthy[0])
 	}
@@ -1818,7 +1848,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertUnhealthySlabs(0, 10)
+	assertUnhealthySlabs(0)
 
 	// recalculate sector stats
 	_, err = store.pool.Exec(t.Context(), `
@@ -1845,7 +1875,7 @@ func TestUnhealthySlabs(t *testing.T) {
 
 	// assert slab1 is not considered unhealthy since it is considered uploaded
 	// to a host but not yet pinned
-	assertUnhealthySlabs(0, 10)
+	assertUnhealthySlabs(0)
 
 	// add ten hosts, each with their own contract
 	hks := make([]types.PublicKey, 10)
@@ -1871,7 +1901,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	resetNextRepairAttemptTime()
 
 	// assert no unhealthy slabs
-	assertUnhealthySlabs(0, 10)
+	assertUnhealthySlabs(0)
 
 	// mark exactly one of the ten contracts bad
 	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET good = FALSE WHERE contract_id = $1", sqlHash256(fcids[3]))
@@ -1880,7 +1910,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	}
 
 	// the slab should be flagged unhealthy even though nine of ten sectors are healthy
-	unhealthy = assertUnhealthySlabs(1, 10)
+	unhealthy = assertUnhealthySlabs(1)
 	if unhealthy[0] != slabID3 {
 		t.Fatalf("expected slab ID %v, got %v", slabID3, unhealthy[0])
 	}
@@ -1929,51 +1959,37 @@ func TestUnhealthySlabs(t *testing.T) {
 		}
 	}
 
-	// bulk insert one pinned sector per slab so the picked contract holds
-	// exactly badSectorThreshold sectors, it already holds one of the third
-	// slab's sectors
-	addPinnedSlabs(1, badSectorThreshold-1)
+	// bulk insert one pinned sector per slab on the picked contract, which
+	// already holds one of the third slab's sectors
+	addPinnedSlabs(1, bulkSlabs)
 
 	// all sectors healthy
-	assertUnhealthySlabs(0, 10)
+	assertUnhealthySlabs(0)
 
-	// exactly badSectorThreshold bad sectors on a single contract routes to the
-	// collecting query, which must return every affected slab without truncation
+	// mark the picked contract bad, every bulk slab plus the third slab is now
+	// unhealthy and the cursor must page through all of them
 	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET good = FALSE WHERE host_id = $1", hostID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resetNextRepairAttemptTime()
-	assertUnhealthySlabs(badSectorThreshold, badSectorThreshold+10)
+	assertUnhealthySlabs(bulkSlabs + 1)
 
-	// one more bad sector crosses the threshold and routes to the slab walking
-	// query, which must also return every affected slab
-	addPinnedSlabs(badSectorThreshold, badSectorThreshold)
-	resetNextRepairAttemptTime()
-	assertUnhealthySlabs(badSectorThreshold+1, badSectorThreshold+10)
-
-	// mark all contracts bad and assert the limit is applied
+	// mark every contract bad. collecting again returns nothing since the first
+	// bumped them
 	_, err = store.pool.Exec(t.Context(), `UPDATE contracts SET good = FALSE`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resetNextRepairAttemptTime()
-	unhealthy = assertUnhealthySlabs(10, 10)
-
-	// returned slabs got their backoff bumped, the next call returns others
-	more := assertUnhealthySlabs(10, 10)
-	seen := make(map[slabs.SlabID]bool)
-	for _, id := range unhealthy {
-		seen[id] = true
-	}
-	for _, id := range more {
-		if seen[id] {
-			t.Fatal("slab returned twice")
-		}
+	unhealthy = collectUnhealthySlabs(t, store)
+	if len(unhealthy) < bulkSlabs+1 {
+		t.Fatalf("expected at least %d unhealthy slabs, got %d", bulkSlabs+1, len(unhealthy))
+	} else if again := collectUnhealthySlabs(t, store); len(again) != 0 {
+		t.Fatalf("expected 0 unhealthy slabs the second time, got %d", len(again))
 	}
 
-	// make all contracts good again and add lost sectors that belong to no
-	// slab. they pin the probe count at its cap but must not produce results
+	// add lost sectors with no slab, the join to slab_sectors drops them
 	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET good = TRUE")
 	if err != nil {
 		t.Fatal(err)
@@ -1981,12 +1997,12 @@ func TestUnhealthySlabs(t *testing.T) {
 	_, err = store.pool.Exec(t.Context(), `
 		INSERT INTO sectors (sector_root, host_id, contract_sectors_map_id, next_integrity_check)
 		SELECT decode(lpad(to_hex(3000000 + g), 64, '0'), 'hex'), NULL, NULL, NOW()
-		FROM generate_series(1, $1) g`, badSectorThreshold+1)
+		FROM generate_series(1, $1) g`, orphanLostSectors)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resetNextRepairAttemptTime()
-	assertUnhealthySlabs(0, 10)
+	assertUnhealthySlabs(0)
 
 	// a lost sector that does belong to a slab is still found
 	_, err = store.pool.Exec(t.Context(), `
@@ -2005,7 +2021,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	unhealthy = assertUnhealthySlabs(1, 10)
+	unhealthy = assertUnhealthySlabs(1)
 	if unhealthy[0] != want {
 		t.Fatalf("expected slab ID %v, got %v", want, unhealthy[0])
 	}
@@ -2068,10 +2084,8 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 
 	// after pinning, no slab should be unhealthy since their sectors aren't
 	// pinned to contracts yet.
-	unhealthyIDs, err := store.UnhealthySlabs(1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 0 {
+	unhealthyIDs := collectUnhealthySlabs(t, store)
+	if len(unhealthyIDs) != 0 {
 		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
 	}
 
@@ -2084,10 +2098,8 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 
 	// we should still have no unhealthy slabs because the host_id has not been
 	// set to null yet
-	unhealthyIDs, err = store.UnhealthySlabs(1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 0 {
+	unhealthyIDs = collectUnhealthySlabs(t, store)
+	if len(unhealthyIDs) != 0 {
 		t.Fatalf("expected 0 unhealthy slabs, got %d", len(unhealthyIDs))
 	}
 
@@ -2108,10 +2120,8 @@ func TestMarkSectorsUnpinnable(t *testing.T) {
 
 	// sector should have had host_id nulled out due to MarkSectorsUnpinnable
 	// and should now be unhealthy
-	unhealthyIDs, err = store.UnhealthySlabs(1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthyIDs) != 1 {
+	unhealthyIDs = collectUnhealthySlabs(t, store)
+	if len(unhealthyIDs) != 1 {
 		t.Fatalf("expected 1 unhealthy slabs, got %d", len(unhealthyIDs))
 	}
 
@@ -2684,14 +2694,14 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	// a handful of lost sectors, even a healthy database has a few
+	// add a couple of lost sectors
 	if _, err := store.pool.Exec(b.Context(), `
 		UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL
 		WHERE id IN (SELECT id FROM sectors WHERE contract_sectors_map_id IS NOT NULL LIMIT 30)`); err != nil {
 		b.Fatal(err)
 	}
 
-	// make all slabs due for repair again
+	// resetNextRepairAttempt is a helper to mark all slabs as due for repair again
 	resetNextRepairAttempt := func() {
 		b.Helper()
 		if _, err := store.pool.Exec(b.Context(), `UPDATE slabs SET next_repair_attempt = NOW() - INTERVAL '1 hour'`); err != nil {
@@ -2699,7 +2709,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		}
 	}
 
-	// analyze tables to ensure query planner has up-to-date statistics
+	// vacuumAnalyze is a helper to analyze tables and ensure the query planner has up-to-date statistics
 	vacuumAnalyze := func() {
 		b.Helper()
 		for _, table := range []string{"slabs", "sectors", "contracts", "contract_sectors_map"} {
@@ -2709,16 +2719,14 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		}
 	}
 
-	// each case mimics a database state seen in production. backlog marks
-	// sectors lost without restoring them, so it runs last
+	// define benchmarks with different scenarios
 	benchmarks := []struct {
 		name      string
 		unhealthy bool
 		setup     func()
 	}{
 		{
-			// nothing to repair. the slabs of the few lost sectors had a
-			// recent repair attempt, so they are not due yet
+			// nothing to repair
 			name: "healthy",
 			setup: func() {
 				if _, err := store.pool.Exec(b.Context(), `
@@ -2734,7 +2742,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 			},
 		},
 		{
-			// one bad host, ~2% of sectors and about half of all slabs affected
+			// 1 bad host, ~2% of sectors and about half of all slabs affected
 			name:      "host_blocked",
 			unhealthy: true,
 			setup: func() {
@@ -2744,15 +2752,27 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 			},
 		},
 		{
-			// four bad hosts and some lost sectors, ~7% of sectors and nearly
-			// all slabs affected
-			name:      "backlog",
+			// 4 bad hosts and some lost sectors, ~7% of sectors and nearly all slabs affected
+			name:      "contract_bad",
 			unhealthy: true,
 			setup: func() {
 				if _, err := store.pool.Exec(b.Context(), `UPDATE contracts SET good = FALSE WHERE id IN (2, 3, 4, 5)`); err != nil {
 					b.Fatal(err)
 				}
 				if _, err := store.pool.Exec(b.Context(), `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id % 1000 = 0 AND contract_sectors_map_id IS NOT NULL`); err != nil {
+					b.Fatal(err)
+				}
+			},
+		},
+		{
+			// reset good contracts but add lots of sectors with no host
+			name:      "sectors_lost",
+			unhealthy: true,
+			setup: func() {
+				if _, err := store.pool.Exec(b.Context(), `UPDATE contracts SET good = TRUE`); err != nil {
+					b.Fatal(err)
+				}
+				if _, err := store.pool.Exec(b.Context(), `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id % 200 = 0 AND contract_sectors_map_id IS NOT NULL`); err != nil {
 					b.Fatal(err)
 				}
 			},
@@ -2767,21 +2787,21 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		b.Run(bm.name, func(b *testing.B) {
 			var sanityCheck bool
 			for b.Loop() {
-				slabIDs, err := store.UnhealthySlabs(batchSize)
+				if bm.unhealthy {
+					b.StopTimer()
+					resetNextRepairAttempt()
+					b.StartTimer()
+				}
+				slabIDs, _, err := store.UnhealthySlabs(0, batchSize)
 				if err != nil {
 					b.Fatal(err)
 				} else if !bm.unhealthy && len(slabIDs) != 0 {
 					b.Fatalf("expected no unhealthy slabs, got %d", len(slabIDs))
-				} else if bm.unhealthy && len(slabIDs) < batchSize {
-					b.StopTimer()
-					resetNextRepairAttempt()
-					b.StartTimer()
-					continue
 				}
 				sanityCheck = sanityCheck || len(slabIDs) > 0
 			}
 			if bm.unhealthy && !sanityCheck {
-				b.Fatal("sanity check failed, no unhealthy slabs were ever returned")
+				b.Fatal("sanity check failed, no unhealthy slabs found")
 			}
 		})
 	}

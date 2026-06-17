@@ -159,8 +159,13 @@ CREATE INDEX pool_attachments_account_id_host_id_idx ON pool_attachments (accoun
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
 		if _, err := tx.Exec(ctx, `CREATE INDEX IF NOT EXISTS sectors_lost_idx ON sectors(id) WHERE host_id IS NULL`); err != nil {
 			return err
+		} else if _, err := tx.Exec(ctx, `CREATE INDEX IF NOT EXISTS contracts_bad_idx ON contracts(contract_id) WHERE good = FALSE OR state NOT IN (0, 1)`); err != nil {
+			return err
+		} else if _, err := tx.Exec(ctx, `CREATE INDEX IF NOT EXISTS sectors_contract_sectors_map_id_id_idx ON sectors(contract_sectors_map_id, id)`); err != nil {
+			return err
+		} else if _, err := tx.Exec(ctx, `DROP INDEX IF EXISTS slabs_id_next_repair_attempt_idx`); err != nil {
+			return err
 		}
-		_, err := tx.Exec(ctx, `CREATE INDEX IF NOT EXISTS contracts_bad_idx ON contracts(contract_id) WHERE good = FALSE OR state NOT IN (0, 1)`)
-		return err
+		return nil
 	},
 }

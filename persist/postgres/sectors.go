@@ -22,10 +22,6 @@ const (
 	// maxBadParityShards is the maximum proportion of parity shards that can be
 	// on bad hosts when pinning a slab.
 	maxBadParityShards = 0.2
-	// badSectorThreshold is the bad sector count at which UnhealthySlabs
-	// switches strategy. around 50k collecting the bad sectors costs about
-	// as much as walking the slabs.
-	badSectorThreshold = 50_000
 )
 
 // MarkSectorsLost marks the sectors as lost by setting both the contract ID and
@@ -874,7 +870,8 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 }
 
 // UnhealthySlabs returns the IDs of slabs which have at least one sector that
-// needs to be migrated.
+// needs to be migrated. It walks the sectors table by id starting after cursor
+// and returns the next cursor to resume from, or 0 once the end is reached.
 //
 // The condition for such a sector is that it's either not stored on a host or
 // it's not pinned to a good contract.
@@ -885,119 +882,42 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 // migration was attempted.
 //
 // NOTE: For the sake of scalability, we don't prioritize slabs based on their
-// health but simply return the slabs that have been waiting the longest for a
-// repair first.
-func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) {
+// health but walk the sectors table by id, which roughly follows upload order.
+func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabID, nextCursor int64, err error) {
 	start := time.Now()
-	var lostSectors, badPinnedSectors int
-	var strategy string
-	err = s.repeatableReadTransaction(func(ctx context.Context, tx *txn) error {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		unhealthy = unhealthy[:0] // reuse same slice if transaction retries
+		nextCursor = 0            // reset on retry
 
-		// a sector is bad when host ID is nil or when the contract holding it
-		// can no longer be used, we count both instances, using a reasonable
-		// limit
-		//
-		// the lost count is a plain index scan. it also counts lost sectors
-		// that belong to no slab, which is fine since overcounting just makes
-		// us pick the slab walking query.
-		//
-		// the bad contract count starts from contract_sectors_map because rows
-		// in that table are pruned once their contract expires, so the many old
-		// dead contracts are skipped entirely. the LATERAL with the inner LIMIT
-		// looks odd but is load bearing, postgres is not allowed to rewrite it
-		// into a join, which keeps it from picking a terrible plan when the
-		// table statistics are misleading.
-		const probeQuery = `SELECT
-			(SELECT COUNT(*) FROM (
-				SELECT 1 FROM sectors WHERE host_id IS NULL LIMIT $1
-			) lost_scan),
-			(SELECT COUNT(*) FROM (
-				SELECT 1
-				FROM (
-					SELECT csm.id
-					FROM contract_sectors_map csm
-					JOIN contracts c ON c.contract_id = csm.contract_id
-					WHERE c.good = FALSE OR c.state NOT IN (0, 1)
-				) bad_csm
+		const query = `WITH lost AS (
+				SELECT id FROM sectors
+				WHERE host_id IS NULL AND id > $1
+				ORDER BY id LIMIT $2
+			), bad AS (
+				SELECT sec.id
+				FROM contract_sectors_map csm
+				JOIN contracts c ON c.contract_id = csm.contract_id
 				CROSS JOIN LATERAL (
-					SELECT 1 FROM sectors WHERE contract_sectors_map_id = bad_csm.id LIMIT $1
+					SELECT id FROM sectors
+					WHERE contract_sectors_map_id = csm.id AND id > $1
+					ORDER BY id LIMIT $2
 				) sec
-				LIMIT $1
-			) bad_scan);`
+				WHERE c.good = FALSE OR c.state NOT IN (0, 1)
+			), batch AS (
+				SELECT id FROM (SELECT id FROM lost UNION ALL SELECT id FROM bad) u
+				ORDER BY id LIMIT $2
+			), unhealthy AS (
+				SELECT DISTINCT s.id, s.digest
+				FROM slab_sectors ss
+				JOIN slabs s ON s.id = ss.slab_id
+				WHERE ss.sector_id IN (SELECT id FROM batch)
+					AND s.next_repair_attempt < NOW()
+			)
+			SELECT cur.next_cursor, u.id, u.digest
+			FROM (SELECT max(id) AS next_cursor FROM batch) cur
+			LEFT JOIN unhealthy u ON true;`
 
-		if err := tx.QueryRow(ctx, probeQuery, badSectorThreshold+1).Scan(&lostSectors, &badPinnedSectors); err != nil {
-			return fmt.Errorf("failed to count bad sectors: %w", err)
-		} else if lostSectors == 0 && badPinnedSectors == 0 {
-			strategy = "none"
-			return nil // no unhealthy slabs
-		}
-
-		var query string
-		if lostSectors+badPinnedSectors > badSectorThreshold {
-			// with many bad sectors most slabs are unhealthy, so it is cheapest
-			// to walk slabs in repair order and check each one until the batch
-			// is full. the LATERAL with LIMIT 1 asks whether a slab has at
-			// least one bad sector and stops at the first hit. it also forces
-			// postgres to actually walk slab by slab, without it the planner
-			// sometimes joins entire tables instead, which took minutes in
-			// production.
-			strategy = "walk"
-			query = `SELECT s.id, s.digest
-				FROM slabs s
-				CROSS JOIN LATERAL (
-					SELECT 1
-					FROM slab_sectors ss
-					JOIN sectors sec ON sec.id = ss.sector_id
-					LEFT JOIN contract_sectors_map csm ON csm.id = sec.contract_sectors_map_id
-					LEFT JOIN contracts c ON c.contract_id = csm.contract_id
-					WHERE ss.slab_id = s.id
-						AND (
-						sec.host_id IS NULL
-						OR (sec.contract_sectors_map_id IS NOT NULL
-							AND (c.good = FALSE OR c.state NOT IN (0, 1)))
-						)
-					LIMIT 1
-				) unhealthy
-				WHERE s.next_repair_attempt < NOW()
-				ORDER BY s.next_repair_attempt ASC
-				LIMIT $1;`
-		} else {
-			// with few bad sectors it is cheapest to collect them all, look up
-			// the slabs they belong to and return the oldest ones. the cost
-			// depends on the number of bad sectors, not on the size of the
-			// database. collecting them all is safe because the probe finished
-			// counting without hitting its cap and repeatable read guarantees
-			// this query sees the same rows the probe counted. the LATERAL
-			// limit never kicks in for the same reason, it only exists so
-			// postgres cannot rewrite the subquery into a join and pick a bad
-			// plan.
-			strategy = "collect"
-			query = fmt.Sprintf(`SELECT s.id, s.digest
-				FROM slabs s
-				WHERE s.next_repair_attempt < NOW()
-					AND s.id IN (
-						SELECT ss.slab_id
-						FROM slab_sectors ss
-						WHERE ss.sector_id IN (
-							SELECT id FROM sectors WHERE host_id IS NULL
-							UNION ALL
-							SELECT sec.id
-							FROM (
-								SELECT csm.id
-								FROM contract_sectors_map csm
-								JOIN contracts c ON c.contract_id = csm.contract_id
-								WHERE c.good = FALSE OR c.state NOT IN (0, 1)
-							) bad_csm
-							CROSS JOIN LATERAL (
-								SELECT id FROM sectors WHERE contract_sectors_map_id = bad_csm.id LIMIT %d
-							) sec
-						)
-					)
-				ORDER BY s.next_repair_attempt ASC
-				LIMIT $1;`, badSectorThreshold+1)
-		}
-		rows, err := tx.Query(ctx, query, limit)
+		rows, err := tx.Query(ctx, query, cursor, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query unhealthy slabs: %w", err)
 		}
@@ -1005,19 +925,22 @@ func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) 
 
 		var slabIDs []int64
 		for rows.Next() {
-			var id int64
-			var slabID slabs.SlabID
-			if err := rows.Scan(&id, (*sqlHash256)(&slabID)); err != nil {
+			var nc, slabID sql.NullInt64
+			var digest sql.Null[sqlHash256]
+			if err := rows.Scan(&nc, &slabID, &digest); err != nil {
 				return fmt.Errorf("failed to scan unhealthy slab: %w", err)
 			}
-			unhealthy = append(unhealthy, slabID)
-			slabIDs = append(slabIDs, id)
+			nextCursor = nc.Int64
+			if slabID.Valid {
+				unhealthy = append(unhealthy, slabs.SlabID(digest.V))
+				slabIDs = append(slabIDs, slabID.Int64)
+			}
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("failed to get unhealthy slabs: %w", err)
 		} else if len(slabIDs) == 0 {
-			return nil // no unhealthy slabs
+			return nil
 		}
 
 		// update next repair attempt time
@@ -1029,7 +952,7 @@ func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) 
 		return nil
 	})
 	if err == nil {
-		s.log.Debug("unhealthy slabs", zap.String("strategy", strategy), zap.Int("lostSectors", lostSectors), zap.Int("badPinnedSectors", badPinnedSectors), zap.Int("slabs", len(unhealthy)), zap.Duration("elapsed", time.Since(start)))
+		s.log.Debug("unhealthy slabs", zap.Int64("cursor", cursor), zap.Int64("nextCursor", nextCursor), zap.Int("slabs", len(unhealthy)), zap.Duration("elapsed", time.Since(start)))
 	}
 	return
 }
