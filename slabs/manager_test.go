@@ -395,6 +395,7 @@ type mockHostClient struct {
 	hostSettings    map[types.PublicKey]proto.HostSettings
 	unusable        map[types.PublicKey]struct{}
 	failedRPCs      map[types.PublicKey]int
+	readEstimate    time.Duration
 }
 
 func (m *mockHostClient) resetStorage() {
@@ -541,6 +542,14 @@ func (m *mockHostClient) TrackInflightRead(hostKey types.PublicKey) func() {
 	return func() {}
 }
 
+// ReadEstimate returns a fixed, small estimate so that adaptive download
+// racing fires quickly and deterministically under synctest.
+func (m *mockHostClient) ReadEstimate(bytes uint64) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.readEstimate
+}
+
 // PickReads filters unusable hosts and keeps the input order. Returns
 // picked=nil when fewer than n usable hosts remain.
 func (m *mockHostClient) PickReads(candidates []types.PublicKey, n int) (picked []types.PublicKey, releases []func(), remaining []types.PublicKey) {
@@ -623,5 +632,6 @@ func newMockHostClient() *mockHostClient {
 		hostSettings:    make(map[types.PublicKey]proto.HostSettings),
 		unusable:        make(map[types.PublicKey]struct{}),
 		failedRPCs:      make(map[types.PublicKey]int),
+		readEstimate:    10 * time.Millisecond,
 	}
 }
