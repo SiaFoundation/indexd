@@ -129,7 +129,7 @@ type (
 		Slab(slabID SlabID) (slab Slab, err error)
 		Slabs(account proto.Account, slabIDs []SlabID) ([]Slab, error)
 		SlabIDs(account proto.Account, offset, limit int) ([]SlabID, error)
-		UnhealthySlabs(limit int) ([]SlabID, error)
+		UnhealthySlabs(cursor int64, limit int) ([]SlabID, int64, error)
 		PruneSlabs(account proto.Account, cutoff time.Time) error
 
 		// Object methods
@@ -402,10 +402,8 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	log := m.log.Named("migrations")
 	log.Debug("starting slab migrations")
 
-	// fetching UnhealthySlabs is slow enough to cause gaps between retrieving
-	// the batch and running it. To make sure the workers don't finish their
-	// work before we have another batch ready, we fetch a multiple of the
-	// number of workers each time.
+	// to make sure the workers don't finish their work before we have another
+	// batch ready, we fetch a multiple of the number of workers each time.
 	slabBatchSize := 10 * m.numMigrationGoroutines
 
 	type migrationJob struct {
@@ -428,15 +426,16 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 	producerErrCh := make(chan error, 1)
 	go func() {
 		defer close(slabCh)
+		var cursor int64
 		for {
 			log.Debug("processing batch")
 			fetchStart := time.Now()
-			batch, err := m.store.UnhealthySlabs(slabBatchSize)
+			batch, nextCursor, err := m.store.UnhealthySlabs(cursor, slabBatchSize)
 			if err != nil {
 				producerErrCh <- err
 				return
 			}
-			log.Debug("fetched batch of unhealthy slabs", zap.Int("batchSize", len(batch)), zap.Duration("elapsed", time.Since(fetchStart)))
+			log.Debug("fetched batch of unhealthy slabs", zap.Int("batchSize", len(batch)), zap.Int64("cursor", cursor), zap.Int64("nextCursor", nextCursor), zap.Duration("elapsed", time.Since(fetchStart)))
 
 			// update the state for every batch
 			stateStart := time.Now()
@@ -455,10 +454,13 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 					return
 				}
 			}
-			if len(batch) < slabBatchSize {
-				log.Debug("no more unhealthy slabs to migrate", zap.Int("batchSize", len(batch)))
+
+			// if the next cursor is 0 it means we're through all unhealthy slabs
+			if nextCursor == 0 {
+				log.Debug("no more unhealthy slabs to migrate")
 				return
 			}
+			cursor = nextCursor
 		}
 	}()
 

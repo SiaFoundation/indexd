@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/slabs"
+	"go.uber.org/zap"
 )
 
 const (
@@ -869,7 +870,8 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 }
 
 // UnhealthySlabs returns the IDs of slabs which have at least one sector that
-// needs to be migrated and have not been abandoned.
+// needs to be migrated. It walks the sectors table by id starting after cursor
+// and returns the next cursor to resume from, or 0 once the end is reached.
 //
 // The condition for such a sector is that it's either not stored on a host or
 // it's not pinned to a good contract.
@@ -880,31 +882,42 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 // migration was attempted.
 //
 // NOTE: For the sake of scalability, we don't prioritize slabs based on their
-// health but simply return the slabs that have been waiting the longest for a
-// repair first.
-func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) {
+// health but walk the sectors table by id, which roughly follows upload order.
+func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabID, nextCursor int64, err error) {
+	start := time.Now()
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		unhealthy = unhealthy[:0] // reuse same slice if transaction retries
+		nextCursor = 0            // reset on retry
 
-		const query = `SELECT s.id, s.digest
-			FROM slabs s
-			WHERE s.next_repair_attempt < NOW()
-				AND EXISTS (
-					SELECT 1
-					FROM slab_sectors ss
-					JOIN sectors sec ON sec.id = ss.sector_id
-					LEFT JOIN contract_sectors_map csm ON csm.id = sec.contract_sectors_map_id
-					LEFT JOIN contracts c ON c.contract_id = csm.contract_id
-					WHERE ss.slab_id = s.id
-						AND (
-						sec.host_id IS NULL
-						OR (sec.contract_sectors_map_id IS NOT NULL
-							AND (c.good = FALSE OR c.state NOT IN (0, 1)))
-						)
-				)
-			ORDER BY s.next_repair_attempt ASC
-			LIMIT $1;`
-		rows, err := tx.Query(ctx, query, limit)
+		const query = `WITH lost AS (
+				SELECT id FROM sectors
+				WHERE host_id IS NULL AND id > $1
+				ORDER BY id LIMIT $2
+			), bad AS (
+				SELECT sec.id
+				FROM contract_sectors_map csm
+				JOIN contracts c ON c.contract_id = csm.contract_id
+				CROSS JOIN LATERAL (
+					SELECT id FROM sectors
+					WHERE contract_sectors_map_id = csm.id AND id > $1
+					ORDER BY id LIMIT $2
+				) sec
+				WHERE c.good = FALSE OR c.state NOT IN (0, 1)
+			), batch AS (
+				SELECT id FROM (SELECT id FROM lost UNION ALL SELECT id FROM bad) u
+				ORDER BY id LIMIT $2
+			), unhealthy AS (
+				SELECT DISTINCT s.id, s.digest
+				FROM slab_sectors ss
+				JOIN slabs s ON s.id = ss.slab_id
+				WHERE ss.sector_id IN (SELECT id FROM batch)
+					AND s.next_repair_attempt < NOW()
+			)
+			SELECT cur.next_cursor, u.id, u.digest
+			FROM (SELECT max(id) AS next_cursor FROM batch) cur
+			LEFT JOIN unhealthy u ON true;`
+
+		rows, err := tx.Query(ctx, query, cursor, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query unhealthy slabs: %w", err)
 		}
@@ -912,19 +925,22 @@ func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) 
 
 		var slabIDs []int64
 		for rows.Next() {
-			var id int64
-			var slabID slabs.SlabID
-			if err := rows.Scan(&id, (*sqlHash256)(&slabID)); err != nil {
+			var nc, slabID sql.NullInt64
+			var digest sql.Null[sqlHash256]
+			if err := rows.Scan(&nc, &slabID, &digest); err != nil {
 				return fmt.Errorf("failed to scan unhealthy slab: %w", err)
 			}
-			unhealthy = append(unhealthy, slabID)
-			slabIDs = append(slabIDs, id)
+			nextCursor = nc.Int64
+			if slabID.Valid {
+				unhealthy = append(unhealthy, slabs.SlabID(digest.V))
+				slabIDs = append(slabIDs, slabID.Int64)
+			}
 		}
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("failed to get unhealthy slabs: %w", err)
 		} else if len(slabIDs) == 0 {
-			return nil // no unhealthy slabs
+			return nil
 		}
 
 		// update next repair attempt time
@@ -935,6 +951,9 @@ func (s *Store) UnhealthySlabs(limit int) (unhealthy []slabs.SlabID, err error) 
 
 		return nil
 	})
+	if err == nil {
+		s.log.Debug("unhealthy slabs", zap.Int64("cursor", cursor), zap.Int64("nextCursor", nextCursor), zap.Int("slabs", len(unhealthy)), zap.Duration("elapsed", time.Since(start)))
+	}
 	return
 }
 

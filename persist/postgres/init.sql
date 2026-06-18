@@ -338,9 +338,6 @@ CREATE TABLE slabs (
 );
 CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
 
--- speeds up lookup of unhealthy slabs
-CREATE INDEX slabs_id_next_repair_attempt_idx ON slabs(next_repair_attempt ASC);
-
 CREATE TABLE objects (
     id BIGSERIAL PRIMARY KEY,
     object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32),
@@ -442,7 +439,9 @@ CREATE INDEX sectors_contract_sectors_map_id_sector_root_idx ON sectors(contract
 
 -- foreign key constraint keys
 CREATE INDEX sectors_host_id_idx ON sectors(host_id);
--- CREATE INDEX sectors_contract_sectors_map_id_idx ON sectors(contract_sectors_map_id); -- covered by sectors_contract_sectors_map_id_uploaded_at_idx
+
+-- speeds up the bad contract scan in the unhealthy slabs query
+CREATE INDEX sectors_contract_sectors_map_id_id_idx ON sectors(contract_sectors_map_id, id);
 
 -- speed up integrity check query
 CREATE INDEX sectors_host_id_next_integrity_check_idx ON sectors(host_id, next_integrity_check ASC);
@@ -455,6 +454,9 @@ CREATE INDEX sectors_host_id_sector_root_idx ON sectors(host_id, sector_root);
 
 -- for pruning unpinned sectors
 CREATE INDEX sectors_uploaded_at_unpinned_idx ON sectors(uploaded_at) WHERE host_id IS NOT NULL AND contract_sectors_map_id IS NULL;
+
+-- speeds up finding sectors that lost their host for the unhealthy slabs query
+CREATE INDEX sectors_lost_idx ON sectors(id) WHERE host_id IS NULL;
 
 CREATE TABLE slab_sectors (
     slab_id BIGINT REFERENCES slabs(id) ON DELETE CASCADE,

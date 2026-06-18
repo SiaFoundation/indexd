@@ -109,11 +109,28 @@ func TestMigrateSlab(t *testing.T) {
 	}
 	resetNextRepair()
 
+	// collectUnhealthy walks the cursor to the end and returns every unhealthy slab
+	collectUnhealthy := func() []slabs.SlabID {
+		t.Helper()
+		var all []slabs.SlabID
+		var cursor int64
+		for {
+			batch, next, err := db.UnhealthySlabs(cursor, 10)
+			if err != nil {
+				t.Fatal(err)
+			}
+			all = append(all, batch...)
+			if next == 0 {
+				break
+			}
+			cursor = next
+		}
+		return all
+	}
+
 	// assert it's unhealthy
-	unhealthSlabIDs, err := db.UnhealthySlabs(1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthSlabIDs) != 1 {
+	unhealthSlabIDs := collectUnhealthy()
+	if len(unhealthSlabIDs) != 1 {
 		t.Fatalf("expected 1 slab, got %d", len(unhealthSlabIDs))
 	} else if unhealthSlabIDs[0] != slabID {
 		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabIDs[0])
@@ -148,10 +165,8 @@ func TestMigrateSlab(t *testing.T) {
 	resetNextRepair()
 
 	// assert the slab is still unhealthy
-	unhealthSlabIDs, err = db.UnhealthySlabs(1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthSlabIDs) != 1 {
+	unhealthSlabIDs = collectUnhealthy()
+	if len(unhealthSlabIDs) != 1 {
 		t.Fatalf("expected 1 slab, got %d", len(unhealthSlabIDs))
 	} else if unhealthSlabIDs[0] != slabID {
 		t.Fatalf("expected slab ID %v, got %v", slabID, unhealthSlabIDs[0])
@@ -176,10 +191,8 @@ func TestMigrateSlab(t *testing.T) {
 	assertMigrated(h5.PublicKey, []types.Hash256{roots[1], roots[3]}, 1)
 
 	// assert it's now healthy
-	unhealthSlabIDs, err = db.UnhealthySlabs(1)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(unhealthSlabIDs) != 0 {
+	unhealthSlabIDs = collectUnhealthy()
+	if len(unhealthSlabIDs) != 0 {
 		t.Fatal("expected no unhealthy slabs")
 	}
 }
