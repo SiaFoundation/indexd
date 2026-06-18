@@ -90,6 +90,10 @@ type (
 		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error)
 
 		Prioritize([]types.PublicKey) []types.PublicKey
+		// ReadEstimate returns the expected time to read the given number
+		// of bytes based on the network-wide observed read throughput. It
+		// is used to size adaptive download racing.
+		ReadEstimate(bytes uint64) time.Duration
 		// PickWrite atomically selects the best write candidate and
 		// reserves an inflight slot. The release function MUST be called
 		// when the RPC completes; the picked host is removed from

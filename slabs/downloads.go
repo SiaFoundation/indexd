@@ -25,6 +25,17 @@ var errNotEnoughShards = errors.New("not enough shards")
 // proto.LeafSize.
 const defaultRecoveryChunkSize = 1 << 20 // 1 MiB
 
+const (
+	// raceFactor scales the chunk read estimate to decide when to start a
+	// parallel download against a slow host. It matches the Rust SDK.
+	raceFactor = 1.5
+
+	// minRaceInterval floors the adaptive race interval so a fast network
+	// (where the estimate dips below typical RPC latency) doesn't dogpile
+	// hosts with redundant reads.
+	minRaceInterval = 200 * time.Millisecond
+)
+
 type slabDownload struct {
 	root  types.Hash256
 	index int
@@ -151,6 +162,21 @@ chunkLoop:
 	return out, nil
 }
 
+// raceInterval returns how long recoverChunk waits without progress before
+// hedging a chunk read against an additional host. It is derived from the
+// network-wide read-throughput estimate (scaled by raceFactor), floored by
+// minRaceInterval and capped by the hard per-RPC shardTimeout.
+func (m *SlabManager) raceInterval(length uint64) time.Duration {
+	d := time.Duration(float64(m.hosts.ReadEstimate(length)) * raceFactor)
+	if d < minRaceInterval {
+		d = minRaceInterval
+	}
+	if d > m.shardTimeout {
+		d = m.shardTimeout
+	}
+	return d
+}
+
 // recoverChunk downloads the [offset, offset+length) byte range of MinShards of
 // the slab's sectors, spread across the available hosts, then decrypts and
 // reconstructs that range for every required shard.
@@ -273,19 +299,31 @@ initialLoop:
 		spawnDownload(hostKey, slabHosts[hostKey], releases[i], true)
 	}
 
-	t := time.NewTicker(m.shardTimeout / 4)
-	defer t.Stop()
+	// hedge against slow shards on an adaptive interval sized to the expected
+	// time to read this chunk, decoupled from the hard per-RPC shardTimeout.
+	raceInterval := m.raceInterval(length)
+	timer := time.NewTimer(raceInterval)
+	defer timer.Stop()
 raceLoop:
 	for downloaded.Load() < uint32(r.slab.MinShards) && len(remaining) > 0 {
 		select {
 		case <-ctx.Done():
 			break raceLoop
 		case <-failedCh:
-			// a download has failed
-		case <-t.C:
-			// hedge against slow shards
-			r.log.Debug("racing slow shards", zap.Uint32("downloaded", downloaded.Load()), zap.Uint32("required", uint32(r.slab.MinShards)))
+			// a download has failed - hedge immediately
+		case <-timer.C:
+			// no progress within the race interval - hedge against slow shards
+			r.log.Debug("racing slow shards", zap.Uint32("downloaded", downloaded.Load()), zap.Uint32("required", uint32(r.slab.MinShards)), zap.Duration("raceInterval", raceInterval))
 		}
+
+		// reset the race interval before attempting the next hedge
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(raceInterval)
 
 		select {
 		case sema <- struct{}{}:
