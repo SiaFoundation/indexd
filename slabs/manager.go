@@ -40,6 +40,12 @@ type (
 		shardTimeout                time.Duration
 		integrityCheckTimeout       time.Duration
 
+		// recoveryChunkSize is the size of the segment-aligned byte range
+		// requested from each host during slab recovery. Smaller chunks
+		// spread a recovery across more hosts (more parallel pipes) at the
+		// cost of more RPCs. Must be a multiple of proto.LeafSize.
+		recoveryChunkSize int
+
 		alerter AlertsManager
 		chain   ChainManager
 		am      AccountManager
@@ -212,6 +218,20 @@ func WithNumMigrationGoroutines(size int) Option {
 	}
 }
 
+// WithRecoveryChunkSize sets the size of the segment-aligned byte range
+// requested from each host during slab recovery. Smaller chunks spread a
+// recovery across more hosts at the cost of more RPCs. The value is rounded
+// down to a multiple of proto.LeafSize and clamped to proto.SectorSize. The
+// default is 1 MiB.
+func WithRecoveryChunkSize(size int) Option {
+	return func(m *SlabManager) {
+		if size <= 0 {
+			panic("recovery chunk size must be positive") // developer error
+		}
+		m.recoveryChunkSize = size
+	}
+}
+
 // WithMinHostDistance sets the minimum distance between hosts used for storing
 // sectors of the same slab. The default is 10km, if set to 0, the distance
 // check is disabled.
@@ -273,6 +293,7 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 		integrityCheckTimeout:       5 * time.Minute,
 		numIntegrityCheckGoroutines: 50,
 		numMigrationGoroutines:      runtime.NumCPU(),
+		recoveryChunkSize:           defaultRecoveryChunkSize,
 
 		chain:   chain,
 		am:      am,

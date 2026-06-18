@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/klauspost/reedsolomon"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
@@ -74,54 +73,28 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, state migr
 	}
 	log = log.With(zap.Int("toMigrate", len(indices)), zap.Int("uploadCandidates", len(uploadCandidates)))
 
-	// download enough shards to reconstruct the slab's shards
-	// note: timeouts are set within downloadShards to avoid timing
-	// out the database
-	downloadStart := time.Now()
-	shards, err := m.downloadShards(ctx, slab, log.Named("recover"))
-	if err != nil {
-		if ctx.Err() == nil {
-			log.Error("failed to download slab", zap.Error(err))
-		}
-		return
-	}
-	log = log.With(zap.Duration("downloadElapsed", time.Since(downloadStart)))
-
-	// decrypt the shards
-	nonce := make([]byte, 24)
-	var recovered int
-	for i := range shards {
-		if len(shards[i]) == 0 {
-			continue
-		}
-		nonce[0] = byte(i)
-		c, _ := chacha20.NewUnauthenticatedCipher(slab.EncryptionKey[:], nonce)
-		c.XORKeyStream(shards[i], shards[i])
-		recovered++
-	}
-	log.Debug("recovered shards", zap.Int("recovered", recovered))
-
 	// indicate what shards are required
 	required := make([]bool, len(slab.Sectors))
 	for _, i := range indices {
 		required[i] = true
 	}
 
-	// reconstruct the missing shards
-	rs, err := reedsolomon.New(int(slab.MinShards), len(slab.Sectors)-int(slab.MinShards))
+	// recover the required shards by downloading segment-aligned chunks spread
+	// across all available hosts and reconstructing them in plaintext.
+	// note: timeouts are set within recoverShards to avoid timing
+	// out the database
+	downloadStart := time.Now()
+	shards, err := m.recoverShards(ctx, slab, required, log.Named("recover"))
 	if err != nil {
-		// both of these are developer errors. New will only return an error
-		// if the parameters are invalid, which they shouldn't be since they
-		// originate from the database.
-		log.Panic("failed to create reedsolomon encoder", zap.Error(err))
-	} else if err := rs.ReconstructSome(shards, required); err != nil {
-		// reconstructing should only fail if there are not enough shards
-		// available, which should not happen since the download should have
-		// errored if not enough shards could be retrieved.
-		log.Panic("failed to reconstruct shards", zap.Error(err))
+		if ctx.Err() == nil {
+			log.Error("failed to recover slab", zap.Error(err))
+		}
+		return
 	}
+	log = log.With(zap.Duration("downloadElapsed", time.Since(downloadStart)))
 
-	// re-encrypt the shards that are required
+	// re-encrypt the recovered shards for upload
+	nonce := make([]byte, 24)
 	for i, required := range required {
 		if !required {
 			shards[i] = nil
