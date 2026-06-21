@@ -112,6 +112,55 @@ func TestObject(t *testing.T) {
 	}
 }
 
+func TestObjectSlabVersion(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	acc := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	fcid := store.addTestContract(t, hk)
+
+	params := slabs.SlabPinParams{
+		Version:       1,
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{Root: frand.Entropy256(), HostKey: hk},
+		},
+	}
+	if _, err := store.PinSlabs(acc, time.Time{}, params); err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(fcid, []types.Hash256{params.Sectors[0].Root}); err != nil {
+		t.Fatal(err)
+	}
+
+	obj := slabs.SealedObject{
+		EncryptedDataKey:  frand.Bytes(72),
+		DataSignature:     types.Signature(frand.Bytes(64)),
+		MetadataSignature: types.Signature(frand.Bytes(64)),
+		Slabs:             []slabs.SlabSlice{params.Slice(0, 100)},
+	}
+	if obj.Slabs[0].Version != 1 {
+		t.Fatalf("expected slice version 1 before save, got %d", obj.Slabs[0].Version)
+	}
+	if err := store.PinObject(acc, obj.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := store.Object(acc, obj.ID())
+	if err != nil {
+		t.Fatal(err)
+	} else if got.Slabs[0].Version != 1 {
+		t.Fatalf("Object: expected reloaded slice version 1, got %d", got.Slabs[0].Version)
+	}
+
+	shared, err := store.SharedObject(obj.ID())
+	if err != nil {
+		t.Fatal(err)
+	} else if shared.Slabs[0].Version != 1 {
+		t.Fatalf("SharedObject: expected reloaded slice version 1, got %d", shared.Slabs[0].Version)
+	}
+}
+
 func TestObjects(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 

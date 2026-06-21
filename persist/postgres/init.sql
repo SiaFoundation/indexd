@@ -331,6 +331,7 @@ CREATE TABLE slabs (
 
     encryption_key BYTEA NOT NULL,
     min_shards SMALLINT NOT NULL CHECK(min_shards > 0),
+    version SMALLINT NOT NULL DEFAULT 0 CHECK(version >= 0), -- slab encoding version, folded into digest for version > 0
 
     consecutive_failed_repairs SMALLINT NOT NULL DEFAULT 0 CHECK (consecutive_failed_repairs >= 0),
     next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()

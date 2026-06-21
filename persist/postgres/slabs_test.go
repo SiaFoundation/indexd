@@ -100,6 +100,64 @@ func TestSlab(t *testing.T) {
 	}
 }
 
+func TestSlabVersionRoundTrip(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	hosts := make([]types.PublicKey, 3)
+	for i := range hosts {
+		hosts[i] = store.addTestHost(t)
+		store.addTestContract(t, hosts[i])
+	}
+
+	params := slabs.SlabPinParams{
+		Version:       1,
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       make([]slabs.PinnedSector, 0, len(hosts)),
+	}
+	for _, host := range hosts {
+		params.Sectors = append(params.Sectors, slabs.PinnedSector{
+			Root:    frand.Entropy256(),
+			HostKey: host,
+		})
+	}
+
+	slabIDs, err := store.PinSlabs(account, time.Time{}, params)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// the version is folded into the slab ID
+	if slabIDs[0] != params.Digest() {
+		t.Fatalf("expected slab ID %v, got %v", params.Digest(), slabIDs[0])
+	}
+
+	slab, err := store.Slab(slabIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	} else if slab.Version != 1 {
+		t.Fatalf("Slab: expected version 1, got %d", slab.Version)
+	}
+
+	pinned, err := store.PinnedSlab(account, slabIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	} else if pinned.Version != 1 {
+		t.Fatalf("PinnedSlab: expected version 1, got %d", pinned.Version)
+	}
+
+	bulk, err := store.Slabs(account, slabIDs)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(bulk) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(bulk))
+	} else if bulk[0].Version != 1 {
+		t.Fatalf("Slabs: expected version 1, got %d", bulk[0].Version)
+	}
+}
+
 func TestMarkSlabRepaired(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
