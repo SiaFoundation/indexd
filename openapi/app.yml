@@ -268,6 +268,12 @@ paths:
             schema:
               type: object
               properties:
+                version:
+                  type: integer
+                  format: uint8
+                  maximum: 1
+                  default: 0
+                  description: The slab encoding version.
                 encryptionKey:
                   allOf:
                     - $ref: "#/components/schemas/EncryptionKey"
@@ -348,6 +354,10 @@ paths:
                     allOf:
                       - $ref: "#/components/schemas/SlabID"
                       - description: The ID of the slab
+                  version:
+                    type: integer
+                    format: uint8
+                    description: The slab encoding version, folded into the slab ID for versions greater than 0
                   encryptionKey:
                     allOf:
                       - $ref: "#/components/schemas/EncryptionKey"
