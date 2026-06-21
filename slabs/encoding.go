@@ -46,6 +46,7 @@ func (ps *PinnedSlab) DecodeFrom(d *types.Decoder) {
 
 // EncodeTo implements types.EncoderTo.
 func (s SlabSlice) EncodeTo(e *types.Encoder) {
+	e.WriteUint8(s.Version)
 	e.Write(s.EncryptionKey[:])
 	e.WriteUint8(uint8(s.MinShards))
 	types.EncodeSlice(e, s.Sectors)
@@ -54,6 +55,7 @@ func (s SlabSlice) EncodeTo(e *types.Encoder) {
 
 // DecodeFrom implements types.DecoderFrom.
 func (s *SlabSlice) DecodeFrom(d *types.Decoder) {
+	s.Version = d.ReadUint8()
 	d.Read(s.EncryptionKey[:])
 	s.MinShards = uint(d.ReadUint8())
 	types.DecodeSlice(d, &s.Sectors)

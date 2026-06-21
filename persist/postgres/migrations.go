@@ -181,4 +181,8 @@ CREATE TABLE slab_deletion_queue (
 );`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `ALTER TABLE slabs ADD COLUMN version SMALLINT NOT NULL DEFAULT 0 CHECK (version >= 0)`)
+		return err
+	},
 }
