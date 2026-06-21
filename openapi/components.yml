@@ -472,6 +472,10 @@ components:
       properties:
         id:
           $ref: "#/components/schemas/SlabID"
+        version:
+          type: integer
+          format: uint8
+          description: The slab encoding version
         encryptionKey:
           $ref: "#/components/schemas/EncryptionKey"
         minShards:

@@ -25,7 +25,7 @@ func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error
 			return fmt.Errorf("failed to query shared object: %w", err)
 		}
 
-		rows, err := tx.Query(ctx, `SELECT s.id, s.encryption_key, s.min_shards, os.slab_offset, os.slab_length
+		rows, err := tx.Query(ctx, `SELECT s.id, s.encryption_key, s.min_shards, os.slab_offset, os.slab_length, s.version
 		FROM object_slabs os
 		INNER JOIN slabs s ON (os.slab_digest = s.digest)
 		WHERE os.object_id = $1
@@ -39,7 +39,7 @@ func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error
 		for rows.Next() {
 			var slab slabs.SlabSlice
 			var slabDBID int64
-			err := rows.Scan(&slabDBID, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Offset, &slab.Length)
+			err := rows.Scan(&slabDBID, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Offset, &slab.Length, &slab.Version)
 			if err != nil {
 				return fmt.Errorf("failed to scan slab: %w", err)
 			}
@@ -106,7 +106,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT slabs.id, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
+			SELECT slabs.id, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards, slabs.version
 			FROM object_slabs
 			JOIN slabs ON slabs.digest = object_slabs.slab_digest
 			WHERE object_id = $1
@@ -121,7 +121,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 		for rows.Next() {
 			var slab slabs.SlabSlice
 			var slabID int64
-			err := rows.Scan(&slabID, &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
+			err := rows.Scan(&slabID, &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Version)
 			if err != nil {
 				return fmt.Errorf("failed to scan slab: %w", err)
 			}
@@ -209,7 +209,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			}
 
 			rows, err = tx.Query(ctx, `
-				SELECT slabs.id, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards
+				SELECT slabs.id, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards, slabs.version
 				FROM object_slabs
 				JOIN slabs ON slabs.digest = object_slabs.slab_digest
 				WHERE object_id = $1
@@ -223,7 +223,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			for rows.Next() {
 				var slab slabs.SlabSlice
 				var slabID int64
-				err := rows.Scan(&slabID, &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
+				err := rows.Scan(&slabID, &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Version)
 				if err != nil {
 					rows.Close()
 					return fmt.Errorf("failed to scan slab: %w", err)

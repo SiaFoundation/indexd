@@ -87,6 +87,25 @@ func TestSlabPinParamsDigest(t *testing.T) {
 	}
 }
 
+func TestSlabVersionDigest(t *testing.T) {
+	v0 := slabs.SlabPinParams{
+		Version:       0,
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     10,
+		Sectors: []slabs.PinnedSector{
+			{Root: frand.Entropy256(), HostKey: frand.Entropy256()},
+			{Root: frand.Entropy256(), HostKey: frand.Entropy256()},
+		},
+	}
+
+	v1 := v0
+	v1.Version = 1
+
+	if v0.Digest() == v1.Digest() {
+		t.Fatal("expected version 1 slab to have a different ID than version 0")
+	}
+}
+
 func TestSlabPinParamsSize(t *testing.T) {
 	params := slabs.SlabPinParams{
 		MinShards: 10,

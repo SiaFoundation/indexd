@@ -19,6 +19,9 @@ const (
 
 	// maxTotalShards is the maximum number of total shards (data + parity) allowed in a slab.
 	maxTotalShards = 256
+
+	// maxSlabVersion is the maximum slab version supported by the indexer
+	maxSlabVersion = 1
 )
 
 var (
@@ -36,6 +39,10 @@ var (
 	// number of minimum shards, for example if `MinShards` exceeds the number
 	// of sectors.
 	ErrMinShards = errors.New("slab has invalid number of minimum shards")
+
+	// ErrUnsupportedSlabVersion is returned when attempting to pin a slab with
+	// a version that is not yet supported.
+	ErrUnsupportedSlabVersion = errors.New("unsupported slab version")
 )
 
 type (
@@ -60,6 +67,7 @@ type (
 	// to hosts.
 	Slab struct {
 		ID            SlabID        `json:"id"`
+		Version       uint8         `json:"version"`
 		EncryptionKey EncryptionKey `json:"encryptionKey"`
 		MinShards     uint          `json:"minShards"`
 		Sectors       []Sector      `json:"sectors"`
@@ -74,6 +82,7 @@ type (
 
 	// SlabPinParams is the input to PinSlabs
 	SlabPinParams struct {
+		Version       uint8          `json:"version"`
 		EncryptionKey EncryptionKey  `json:"encryptionKey"`
 		MinShards     uint           `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
@@ -82,6 +91,7 @@ type (
 	// A PinnedSlab is a slab that has been pinned to hosts.
 	PinnedSlab struct {
 		ID            SlabID         `json:"id"`
+		Version       uint8          `json:"version"`
 		EncryptionKey EncryptionKey  `json:"encryptionKey"`
 		MinShards     uint           `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
@@ -111,12 +121,12 @@ func (s *SlabID) UnmarshalText(b []byte) error {
 
 // Digest computes the digest for the slab pin params.
 func (s SlabPinParams) Digest() SlabID {
-	return slabDigest(s.MinShards, s.EncryptionKey, s.Sectors)
+	return slabDigest(s.Version, s.MinShards, s.EncryptionKey, s.Sectors)
 }
 
 // Digest computes the digest for the slab slice.
 func (s SlabSlice) Digest() SlabID {
-	return slabDigest(s.MinShards, s.EncryptionKey, s.Sectors)
+	return slabDigest(s.Version, s.MinShards, s.EncryptionKey, s.Sectors)
 }
 
 // slabDigest creates a unique digest for a slab. It is important, that the same
@@ -124,8 +134,14 @@ func (s SlabSlice) Digest() SlabID {
 // if one user makes the mistake of pinning a slab with a different encryption
 // key, this shouldn't prevent other users from pinning the same slab with the
 // correct key.
-func slabDigest(minShards uint, ec [32]byte, sectors []PinnedSector) SlabID {
+//
+// The version is only included in the digest for version 1 and above so that
+// version 0 slabs retain the same ID as before versioning was introduced.
+func slabDigest(version uint8, minShards uint, ec [32]byte, sectors []PinnedSector) SlabID {
 	hasher := types.NewHasher()
+	if version > 0 {
+		hasher.E.WriteUint8(version)
+	}
 	hasher.E.WriteUint64(uint64(minShards))
 	hasher.E.Write(ec[:])
 	for _, sector := range sectors {
@@ -149,7 +165,9 @@ func (s SlabPinParams) DataSize() uint64 {
 // encryption key is set, the minimum number of shards is met, and that there
 // are no duplicate host keys or empty roots in the sectors.
 func (s SlabPinParams) Validate() error {
-	if s.EncryptionKey == ([32]byte{}) {
+	if s.Version > maxSlabVersion {
+		return fmt.Errorf("%w: %d", ErrUnsupportedSlabVersion, s.Version)
+	} else if s.EncryptionKey == ([32]byte{}) {
 		return errors.New("encryption key is empty")
 	} else if err := ValidateECParams(int(s.MinShards), len(s.Sectors)); err != nil {
 		return err
