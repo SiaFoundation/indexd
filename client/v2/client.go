@@ -334,6 +334,20 @@ func (c *Client) Prioritize(hosts []types.PublicKey) []types.PublicKey {
 	return c.hosts.Prioritize(hosts)
 }
 
+// ReadEstimate returns the expected time to read the given number of bytes
+// based on the network-wide observed read throughput. See
+// [Provider.ReadEstimate].
+func (c *Client) ReadEstimate(bytes uint64) time.Duration {
+	return c.hosts.ReadEstimate(bytes)
+}
+
+// WriteEstimate returns the expected time to write the given number of bytes
+// based on the network-wide observed write throughput. See
+// [Provider.WriteEstimate].
+func (c *Client) WriteEstimate(bytes uint64) time.Duration {
+	return c.hosts.WriteEstimate(bytes)
+}
+
 // PickWrite atomically selects the highest-scoring write candidate and
 // reserves an inflight slot. See [Provider.PickWrite].
 func (c *Client) PickWrite(candidates []types.PublicKey) (host types.PublicKey, release func(), remaining []types.PublicKey, ok bool) {

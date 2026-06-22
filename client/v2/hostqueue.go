@@ -17,6 +17,15 @@ import (
 const (
 	emaAlpha            = 0.2
 	settingsPayloadSize = 270 // size of host settings in bytes
+
+	// defaultReadThroughput is the assumed read rate before bulk reads are sampled
+	defaultReadThroughput = 1 << 20 // 1 MiB/s
+
+	// defaultWriteThroughput is the assumed write rate before bulk writes are sampled
+	defaultWriteThroughput = (1 << 22) / 5 // 4 MiB sector / 5s
+
+	// minThroughputSampleBytes is the smallest transfer that feeds the network-wide throughput estimate
+	minThroughputSampleBytes = 1 << 16 // 64 KiB
 )
 
 type rpcAverage struct {
@@ -189,6 +198,12 @@ type Provider struct {
 
 	mu      sync.Mutex // protects the fields below
 	metrics map[types.PublicKey]*hostMetric
+
+	// globalReadThroughput and globalWriteThroughput are network-wide EMAs of
+	// bulk transfer throughput in bytes/second, used by Read/WriteEstimate to
+	// size adaptive racing.
+	globalReadThroughput  rpcAverage
+	globalWriteThroughput rpcAverage
 }
 
 func (p *Provider) sortHosts(hosts []types.PublicKey) {
@@ -258,9 +273,27 @@ func (p *Provider) AddReadSample(hostKey types.PublicKey, bytes uint64, elapsed 
 	defer p.mu.Unlock()
 	metric := p.metric(hostKey)
 	if elapsed > 0 {
-		metric.rpcReadAverage.AddSample(float64(bytes) / elapsed.Seconds())
+		throughput := float64(bytes) / elapsed.Seconds()
+		metric.rpcReadAverage.AddSample(throughput)
+		// only bulk reads are taken into account for the global estimate
+		if bytes >= minThroughputSampleBytes {
+			p.globalReadThroughput.AddSample(throughput)
+		}
 	}
 	metric.rpcFailRate.AddSample(true)
+}
+
+// ReadEstimate returns the expected time to read the given number of bytes
+// based on the network-wide observed read throughput, falling back to
+// defaultReadThroughput before any bulk reads have been sampled.
+func (p *Provider) ReadEstimate(bytes uint64) time.Duration {
+	p.mu.Lock()
+	rate, ok := p.globalReadThroughput.Value()
+	p.mu.Unlock()
+	if !ok || rate <= 0 {
+		rate = defaultReadThroughput
+	}
+	return time.Duration(float64(bytes) / rate * float64(time.Second))
 }
 
 // AddWriteSample records a successful write RPC attempt to the specified host.
@@ -271,9 +304,27 @@ func (p *Provider) AddWriteSample(hostKey types.PublicKey, bytes uint64, elapsed
 	defer p.mu.Unlock()
 	metric := p.metric(hostKey)
 	if elapsed > 0 {
-		metric.rpcWriteAverage.AddSample(float64(bytes) / elapsed.Seconds())
+		throughput := float64(bytes) / elapsed.Seconds()
+		metric.rpcWriteAverage.AddSample(throughput)
+		// only bulk writes are taken into account for the global estimate
+		if bytes >= minThroughputSampleBytes {
+			p.globalWriteThroughput.AddSample(throughput)
+		}
 	}
 	metric.rpcFailRate.AddSample(true)
+}
+
+// WriteEstimate returns the expected time to write the given number of bytes
+// based on the network-wide observed write throughput, falling back to
+// defaultWriteThroughput before any bulk writes have been sampled.
+func (p *Provider) WriteEstimate(bytes uint64) time.Duration {
+	p.mu.Lock()
+	rate, ok := p.globalWriteThroughput.Value()
+	p.mu.Unlock()
+	if !ok || rate <= 0 {
+		rate = defaultWriteThroughput
+	}
+	return time.Duration(float64(bytes) / rate * float64(time.Second))
 }
 
 // AddSettingsSample records a successful settings RPC to the specified host.

@@ -603,6 +603,74 @@ func TestProviderInflightWeighting(t *testing.T) {
 	}
 }
 
+func TestProviderReadEstimate(t *testing.T) {
+	s := newTestStore(t)
+	store := hosts.NewHostStore(s.Store)
+
+	hostA := s.addUsableHost(t)
+
+	provider := client.NewProvider(store)
+
+	// before any samples, a 1 MiB read uses the 1 MiB/s default and takes ~1s
+	if got := provider.ReadEstimate(1 << 20); got < 900*time.Millisecond || got > 1100*time.Millisecond {
+		t.Fatalf("expected ~1s default estimate, got %v", got)
+	}
+
+	// a tiny latency-bound read must not skew the network-wide estimate
+	provider.AddReadSample(hostA, 270, 100*time.Millisecond)
+	if got := provider.ReadEstimate(1 << 20); got < 900*time.Millisecond || got > 1100*time.Millisecond {
+		t.Fatalf("sub-threshold read should not change the estimate, got %v", got)
+	}
+
+	// a bulk read at 4 MiB / 100ms = ~41.9 MiB/s should drop the estimate for
+	// a 4 MiB read to ~100ms
+	provider.AddReadSample(hostA, 4<<20, 100*time.Millisecond)
+	if got := provider.ReadEstimate(4 << 20); got < 80*time.Millisecond || got > 130*time.Millisecond {
+		t.Fatalf("expected ~100ms estimate after bulk sample, got %v", got)
+	}
+
+	// the estimate scales linearly with the requested size
+	full := provider.ReadEstimate(4 << 20)
+	half := provider.ReadEstimate(2 << 20)
+	if half < full/2-10*time.Millisecond || half > full/2+10*time.Millisecond {
+		t.Fatalf("expected half-size estimate (~%v) to be half of full (%v)", half, full)
+	}
+}
+
+func TestProviderWriteEstimate(t *testing.T) {
+	s := newTestStore(t)
+	store := hosts.NewHostStore(s.Store)
+
+	hostA := s.addUsableHost(t)
+
+	provider := client.NewProvider(store)
+
+	// before any samples, a 4 MiB write uses the 4 MiB / 5s default and takes ~5s
+	if got := provider.WriteEstimate(4 << 20); got < 4500*time.Millisecond || got > 5500*time.Millisecond {
+		t.Fatalf("expected ~5s default estimate, got %v", got)
+	}
+
+	// a tiny latency-bound write must not skew the network-wide estimate
+	provider.AddWriteSample(hostA, 270, 100*time.Millisecond)
+	if got := provider.WriteEstimate(4 << 20); got < 4500*time.Millisecond || got > 5500*time.Millisecond {
+		t.Fatalf("sub-threshold write should not change the estimate, got %v", got)
+	}
+
+	// a bulk write at 4 MiB / 100ms = ~41.9 MiB/s should drop the estimate for
+	// a 4 MiB write to ~100ms
+	provider.AddWriteSample(hostA, 4<<20, 100*time.Millisecond)
+	if got := provider.WriteEstimate(4 << 20); got < 80*time.Millisecond || got > 130*time.Millisecond {
+		t.Fatalf("expected ~100ms estimate after bulk sample, got %v", got)
+	}
+
+	// the estimate scales linearly with the requested size
+	full := provider.WriteEstimate(4 << 20)
+	half := provider.WriteEstimate(2 << 20)
+	if half < full/2-10*time.Millisecond || half > full/2+10*time.Millisecond {
+		t.Fatalf("expected half-size estimate (~%v) to be half of full (%v)", half, full)
+	}
+}
+
 func TestDuplicateHostQueue(t *testing.T) {
 	hosts := []types.PublicKey{
 		types.GeneratePrivateKey().PublicKey(),
