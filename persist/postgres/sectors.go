@@ -907,23 +907,28 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 				SELECT id FROM (SELECT id FROM lost UNION ALL SELECT id FROM bad) u
 				ORDER BY id LIMIT $2
 			), unhealthy AS (
-				SELECT DISTINCT s.id, s.digest
+				SELECT DISTINCT ss.slab_id AS id
 				FROM slab_sectors ss
-				JOIN slabs s ON s.id = ss.slab_id
 				WHERE ss.sector_id IN (SELECT id FROM batch)
-					AND s.next_repair_attempt < NOW()
+			), claimed AS (
+				UPDATE slabs SET next_repair_attempt = $3
+				WHERE id IN (
+					SELECT id FROM slabs
+					WHERE id IN (SELECT id FROM unhealthy) AND next_repair_attempt < NOW()
+					FOR UPDATE SKIP LOCKED
+				)
+				RETURNING id, digest
 			)
-			SELECT cur.next_cursor, u.id, u.digest
+			SELECT cur.next_cursor, c.id, c.digest
 			FROM (SELECT max(id) AS next_cursor FROM batch) cur
-			LEFT JOIN unhealthy u ON true;`
+			LEFT JOIN claimed c ON true;`
 
-		rows, err := tx.Query(ctx, query, cursor, limit)
+		rows, err := tx.Query(ctx, query, cursor, limit, time.Now().Add(minRepairBackoff))
 		if err != nil {
 			return fmt.Errorf("failed to query unhealthy slabs: %w", err)
 		}
 		defer rows.Close()
 
-		var slabIDs []int64
 		for rows.Next() {
 			var nc, slabID sql.NullInt64
 			var digest sql.Null[sqlHash256]
@@ -933,23 +938,9 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 			nextCursor = nc.Int64
 			if slabID.Valid {
 				unhealthy = append(unhealthy, slabs.SlabID(digest.V))
-				slabIDs = append(slabIDs, slabID.Int64)
 			}
 		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("failed to get unhealthy slabs: %w", err)
-		} else if len(slabIDs) == 0 {
-			return nil
-		}
-
-		// update next repair attempt time
-		_, err = tx.Exec(ctx, `UPDATE slabs SET next_repair_attempt = $1 WHERE id = ANY($2)`, time.Now().Add(minRepairBackoff), slabIDs)
-		if err != nil {
-			return fmt.Errorf("failed to update next repair attempt: %w", err)
-		}
-
-		return nil
+		return rows.Err()
 	})
 	if err == nil {
 		s.log.Debug("unhealthy slabs", zap.Int64("cursor", cursor), zap.Int64("nextCursor", nextCursor), zap.Int("slabs", len(unhealthy)), zap.Duration("elapsed", time.Since(start)))
