@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"reflect"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -2024,6 +2025,76 @@ func TestUnhealthySlabs(t *testing.T) {
 	unhealthy = assertUnhealthySlabs(1)
 	if unhealthy[0] != want {
 		t.Fatalf("expected slab ID %v, got %v", want, unhealthy[0])
+	}
+}
+
+// TestUnhealthySlabsConcurrent verifies that multiple processes walking
+// UnhealthySlabs against the same database claim disjoint sets of slabs.
+func TestUnhealthySlabsConcurrent(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	const numSlabs = 2000
+	want := make(map[slabs.SlabID]struct{}, numSlabs)
+	for i := range numSlabs {
+		// mix 1-of-2 and 2-of-2 slabs
+		want[store.pinTestSlab(t, account, uint(1+i%2), []types.PublicKey{hk, hk})] = struct{}{}
+	}
+	// pin every sector to the contract, mark it bad, and make all slabs
+	// immediately eligible so the whole set is unhealthy at once.
+	if _, err := store.pool.Exec(t.Context(), "UPDATE sectors SET contract_sectors_map_id = 1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.pool.Exec(t.Context(), "UPDATE contracts SET good = FALSE"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.pool.Exec(t.Context(), "UPDATE slabs SET next_repair_attempt = NOW() - INTERVAL '1 hour'"); err != nil {
+		t.Fatal(err)
+	}
+
+	// run several concurrent walkers, each advancing its own cursor.
+	const workers = 8
+	var mu sync.Mutex
+	claimed := make(map[slabs.SlabID]int)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Go(func() {
+			var cursor int64
+			for {
+				batch, next, err := store.UnhealthySlabs(cursor, 10)
+				if err != nil {
+					t.Error(err)
+					return
+				}
+				mu.Lock()
+				for _, id := range batch {
+					claimed[id]++
+				}
+				mu.Unlock()
+				if next == 0 {
+					return
+				}
+				cursor = next
+			}
+		})
+	}
+	wg.Wait()
+
+	// every unhealthy slab claimed exactly once, by exactly one walker
+	for id, n := range claimed {
+		if n != 1 {
+			t.Fatalf("slab %v claimed %d times, want exactly 1", id, n)
+		}
+		if _, ok := want[id]; !ok {
+			t.Fatalf("claimed unexpected slab %v", id)
+		}
+	}
+	if len(claimed) != numSlabs {
+		t.Fatalf("claimed %d distinct slabs, want %d", len(claimed), numSlabs)
 	}
 }
 
