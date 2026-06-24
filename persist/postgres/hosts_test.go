@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -2789,6 +2790,86 @@ func TestHostsForIntegrityChecks(t *testing.T) {
 		t.Fatal(err)
 	} else if len(hosts) != 0 {
 		t.Fatalf("expected 0 hosts, got %d", len(hosts))
+	}
+}
+
+// TestHostsForIntegrityChecksConcurrent verifies that when multiple nodes run
+// the integrity-check loop concurrently against the same database, each host is
+// claimed by exactly one node (no duplicate work, full coverage). This mirrors
+// TestUnhealthySlabsConcurrent for the migration loop.
+func TestHostsForIntegrityChecksConcurrent(t *testing.T) {
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	acc := proto4.Account{1}
+	db.addTestAccount(t, types.PublicKey(acc))
+
+	// create many hosts, each with a contract and a single sector that is due
+	// for an integrity check (next_integrity_check in the past).
+	const nHosts = 200
+	oneHAgo := time.Now().Add(-time.Hour)
+	want := make(map[types.PublicKey]struct{}, nHosts)
+	for i := 0; i < nHosts; i++ {
+		hk := db.addTestHost(t)
+		db.addTestContract(t, hk)
+		if _, err := db.PinSlabs(acc, oneHAgo, slabs.SlabPinParams{
+			MinShards:     1,
+			EncryptionKey: frand.Entropy256(),
+			Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		want[hk] = struct{}{}
+	}
+
+	// all hosts require
+	if _, err := db.pool.Exec(context.Background(), `UPDATE hosts SET last_integrity_check = NOW() - INTERVAL '1 hour'`); err != nil {
+		t.Fatal(err)
+	}
+	maxLastCheck := time.Now().Add(-time.Minute)
+
+	const (
+		walkers   = 8
+		batchSize = 5
+	)
+	var mu sync.Mutex
+	claimedBy := make(map[types.PublicKey]int) // host -> number of walkers that claimed it
+
+	var wg sync.WaitGroup
+	for w := 0; w < walkers; w++ {
+		wg.Go(func() {
+			for {
+				batch, err := db.HostsForIntegrityChecks(maxLastCheck, batchSize)
+				if err != nil {
+					t.Errorf("walker failed: %v", err)
+					return
+				}
+				if len(batch) == 0 {
+					return
+				}
+				mu.Lock()
+				for _, hk := range batch {
+					claimedBy[hk]++
+				}
+				mu.Unlock()
+			}
+		})
+	}
+	wg.Wait()
+
+	// every host must be claimed exactly once: no duplicates, full coverage.
+	var duplicates, missing int
+	for hk := range want {
+		switch claimedBy[hk] {
+		case 0:
+			missing++
+		case 1:
+		default:
+			duplicates++
+		}
+	}
+	if duplicates != 0 || missing != 0 {
+		t.Fatalf("expected every host claimed exactly once: %d duplicated, %d missing (of %d)", duplicates, missing, nHosts)
 	}
 }
 
