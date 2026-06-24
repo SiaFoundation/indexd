@@ -22,6 +22,13 @@ const (
 	// maxBadParityShards is the maximum proportion of parity shards that can be
 	// on bad hosts when pinning a slab.
 	maxBadParityShards = 0.2
+	// integrityCheckClaimInterval is how far into the future
+	// SectorsForIntegrityCheck pushes the next_integrity_check of the sectors
+	// it hands out. It acts as a lease so that concurrent integrity-check
+	// workers never fetch the same sectors. If a check is interrupted before
+	// its result is recorded, the sectors are retried after this interval
+	// instead of immediately.
+	integrityCheckClaimInterval = 30 * time.Minute
 )
 
 // MarkSectorsLost marks the sectors as lost by setting both the contract ID and
@@ -133,7 +140,13 @@ func recordIntegrityCheck(ctx context.Context, tx *txn, success bool, nextCheck 
 }
 
 // SectorsForIntegrityCheck returns up to `limit` sectors that are due for an
-// integrity check.
+// integrity check, claiming them by pushing their next_integrity_check
+// integrityCheckClaimInterval into the future. The claim is atomic (FOR UPDATE
+// SKIP LOCKED) so that concurrent callers receive disjoint sets of sectors
+// rather than re-verifying the same ones. Once a sector is checked,
+// RecordIntegrityCheck overwrites next_integrity_check with the real
+// (success/failure) interval; if the check is interrupted before that, the
+// sector is retried after the claim interval.
 func (s *Store) SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]types.Hash256, error) {
 	var sectors []types.Hash256
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
@@ -143,14 +156,20 @@ func (s *Store) SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]
 			WITH hid AS (
 				SELECT id FROM hosts WHERE public_key = $1
 			)
-			SELECT sector_root
-			FROM sectors
-			WHERE
-				host_id = (SELECT id FROM hid)
-				AND next_integrity_check <= NOW()
-			ORDER BY next_integrity_check ASC
-			LIMIT $2
-		`, sqlPublicKey(hostKey), limit)
+			UPDATE sectors
+			SET next_integrity_check = NOW() + make_interval(secs => $3)
+			WHERE id IN (
+				SELECT id
+				FROM sectors
+				WHERE
+					host_id = (SELECT id FROM hid)
+					AND next_integrity_check <= NOW()
+				ORDER BY next_integrity_check ASC
+				LIMIT $2
+				FOR UPDATE SKIP LOCKED
+			)
+			RETURNING sector_root
+		`, sqlPublicKey(hostKey), limit, integrityCheckClaimInterval.Seconds())
 		if err != nil {
 			return err
 		}

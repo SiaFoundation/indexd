@@ -56,6 +56,17 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 		}
 	}
 
+	// prepare helper to force the host's sectors due for a check. Fetching a
+	// sector now claims it (pushes next_integrity_check into the future), so
+	// re-checking the same sector across calls requires making it due again
+	// rather than relying on the tiny re-check interval elapsing between calls.
+	makeDue := func() {
+		t.Helper()
+		if _, err := store.Exec(context.Background(), `UPDATE sectors SET next_integrity_check = NOW() - INTERVAL '1 minute' WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)`, host.PublicKey[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	// prepare sectors
 	roots := make([]types.Hash256, 3)
 	for i := range roots {
@@ -113,6 +124,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	// checks before a bad sector gets removed
 	for i := uint(1); i < sm.MaxFailedIntegrityChecks(); i++ {
 		resetBalance()
+		makeDue()
 		sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	}
 	assertLostAndFailed(nil, roots[1:3])
@@ -125,6 +137,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	if err := am.UpdateServiceAccountBalance(hostKey.PublicKey(), acc, types.ZeroCurrency); err != nil {
 		t.Fatal(err)
 	}
+	makeDue()
 	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	if cm.triggeredRefills[acc] != 1 {
 		t.Fatalf("expected 1 triggered refill, got %d", cm.triggeredRefills[acc])
