@@ -131,14 +131,31 @@ func (s *Store) HasAccount(ak types.PublicKey) (bool, error) {
 	return exists, nil
 }
 
-// DeleteAccount deletes the account in the database with given account key.
+// DeleteAccount soft deletes the account in the database with the given account
+// key. The account's pinned totals are reclaimed from its connect key
+// immediately so freed space is reflected right away; the account's objects,
+// slabs and the row itself are cleaned up later by PruneAccounts.
 func (s *Store) DeleteAccount(acc proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		res, err := tx.Exec(ctx, `UPDATE accounts SET deleted_at = NOW() WHERE public_key = $1 AND deleted_at IS NULL`, sqlPublicKey(acc))
-		if err != nil {
-			return fmt.Errorf("failed to delete account: %w", err)
-		} else if res.RowsAffected() == 0 {
+		// mark the account deleted and decrement the connect key's pinned totals
+		// by the account's current usage
+		var deleted bool
+		err := tx.QueryRow(ctx, `
+WITH deleted AS (
+	UPDATE accounts SET deleted_at = NOW()
+	WHERE public_key = $1 AND deleted_at IS NULL
+	RETURNING connect_key_id, pinned_data, pinned_size
+)
+UPDATE app_connect_keys ack
+SET pinned_data = ack.pinned_data - deleted.pinned_data,
+	pinned_size = ack.pinned_size - deleted.pinned_size
+FROM deleted
+WHERE ack.id = deleted.connect_key_id
+RETURNING TRUE`, sqlPublicKey(acc)).Scan(&deleted)
+		if errors.Is(err, sql.ErrNoRows) {
 			return accounts.ErrNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to delete account: %w", err)
 		}
 		return nil
 	})
@@ -225,7 +242,7 @@ RETURNING o.object_key;`, accountID, remaining)
 				)
 				RETURNING slab_id
 			), queued AS (
-				INSERT INTO account_slabs_for_deletion (slab_id)
+				INSERT INTO slab_deletion_queue (slab_id)
 				SELECT slab_id FROM deleted
 			)
 			SELECT COUNT(*) FROM deleted;`, accountID, remaining).Scan(&queued); err != nil {
@@ -235,14 +252,10 @@ RETURNING o.object_key;`, accountID, remaining)
 			return nil
 		}
 
-		// no slabs left; decrement the connect key's pinned totals and hard
-		// delete the account
-		var connectKeyID int64
-		var pinnedData, pinnedSize uint64
-		if err := tx.QueryRow(ctx, `DELETE FROM accounts WHERE id = $1 RETURNING connect_key_id, pinned_data, pinned_size`, accountID).Scan(&connectKeyID, &pinnedData, &pinnedSize); err != nil {
+		// no slabs left; hard delete the account. its connect key's pinned
+		// totals were already reclaimed when the account was soft deleted
+		if _, err := tx.Exec(ctx, `DELETE FROM accounts WHERE id = $1`, accountID); err != nil {
 			return fmt.Errorf("failed to delete account: %w", err)
-		} else if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data - $1, pinned_size = pinned_size - $2 WHERE id = $3`, pinnedData, pinnedSize, connectKeyID); err != nil {
-			return fmt.Errorf("failed to update connect key pinned data: %w", err)
 		} else if err := incrementNumAccounts(ctx, tx, -1); err != nil {
 			return fmt.Errorf("failed to decrement account count: %w", err)
 		}
@@ -266,7 +279,7 @@ func (s *Store) PruneDeletedSlabs(limit int) (int, error) {
 
 		// read a batch of queue rows; only the rows we read are deleted (by id),
 		// so a row appended after this read waits for a later pass
-		rows, err := tx.Query(ctx, `SELECT id, slab_id FROM account_slabs_for_deletion ORDER BY id LIMIT $1`, limit)
+		rows, err := tx.Query(ctx, `SELECT id, slab_id FROM slab_deletion_queue ORDER BY id LIMIT $1`, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query slabs for deletion: %w", err)
 		}
@@ -300,7 +313,7 @@ func (s *Store) PruneDeletedSlabs(limit int) (int, error) {
 		}
 
 		// clear only the rows we read
-		if _, err := tx.Exec(ctx, `DELETE FROM account_slabs_for_deletion WHERE id = ANY($1)`, queueIDs); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM slab_deletion_queue WHERE id = ANY($1)`, queueIDs); err != nil {
 			return fmt.Errorf("failed to clear queued slabs: %w", err)
 		}
 
