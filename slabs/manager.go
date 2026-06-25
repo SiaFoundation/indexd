@@ -213,9 +213,9 @@ func WithNumMigrationGoroutines(size int) Option {
 
 // WithRecoveryChunkSize sets the size of the segment-aligned byte range
 // requested from each host during slab recovery. Smaller chunks spread a
-// recovery across more hosts at the cost of more RPCs. The value is rounded
-// down to a multiple of proto.LeafSize and clamped to proto.SectorSize. The
-// default is 1 MiB.
+// recovery across more hosts at the cost of more RPCs. The value is clamped
+// to [proto.LeafSize, proto.SectorSize] and rounded down to a multiple of
+// proto.LeafSize when used. The default is 1 MiB.
 func WithRecoveryChunkSize(size int) Option {
 	return func(m *SlabManager) {
 		if size <= 0 {
