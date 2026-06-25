@@ -79,6 +79,7 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 		if err := store.UnpinSlab(account, slabID); err != nil {
 			t.Fatal(err)
 		}
+		store.pruneAllDeletedSlabs(t)
 		pinned = pinned[1:]
 		assertStats(int64(len(pinned)))
 	}
@@ -329,6 +330,8 @@ func TestSectorStats(t *testing.T) {
 	if err := store.UnpinSlab(account, slabIDs[0]); err != nil {
 		t.Fatal(err)
 	}
+	// prune the background slab/sector deletion queued by UnpinSlab
+	store.pruneAllDeletedSlabs(t)
 	assertStats(0, 0, 3, 6)
 
 	if unpinned, err := store.UnpinnedSectors(hk1, 1); err != nil {

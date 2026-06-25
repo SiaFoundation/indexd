@@ -944,8 +944,26 @@ func TestPruneAccount(t *testing.T) {
 		}
 	}
 
+	countRows := func(table string) int {
+		t.Helper()
+		var got int
+		if err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM `+table).Scan(&got); err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	assertCount := func(table string, expected int) {
+		t.Helper()
+		if got := countRows(table); got != expected {
+			t.Fatalf("expected %d rows in %s, got %d", expected, table, got)
+		}
+	}
 	assertObjects(acc1, 2)
 	assertObjects(acc2, 2)
+
+	// the accounts share 6 distinct slabs (and sectors)
+	assertCount("slabs", 6)
+	assertCount("sectors", 6)
 
 	if err := store.DeleteAccount(acc1); err != nil {
 		t.Fatal(err)
@@ -966,8 +984,10 @@ func TestPruneAccount(t *testing.T) {
 	if err := store.PruneAccounts(1); err != nil {
 		t.Fatal(err)
 	}
+	assertObjects(acc1, 0)
 
-	// delete all the slabs (6) and and thus delete acc1
+	// acc1 has no objects left; this pass queues its slabs and, because fewer
+	// than the batch limit remained, hard deletes the account in the same pass
 	if err := store.PruneAccounts(10); err != nil {
 		t.Fatal(err)
 	}
@@ -978,19 +998,34 @@ func TestPruneAccount(t *testing.T) {
 	}
 	assertObjects(acc2, 2)
 
+	// pruning the queued slabs must not remove anything still pinned by acc2
+	store.pruneAllDeletedSlabs(t)
+	assertObjects(acc2, 2)
+	assertCount("slabs", 6)
+	assertCount("sectors", 6)
+
 	if err := store.DeleteAccount(acc2); err != nil {
 		t.Fatal(err)
 	}
 
-	// this should delete all 2 of acc2's objects and acc2 at once
-	if err := store.PruneAccounts(10); err != nil {
-		t.Fatal(err)
+	// prune acc2's objects, queue its slabs and delete the account
+	for {
+		if err := store.PruneAccounts(10); errors.Is(err, accounts.ErrNotFound) {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// acc2 should be deleted now so calling again will result in error
 	if err := store.PruneAccounts(1); !errors.Is(err, accounts.ErrNotFound) {
 		t.Fatalf("expected %v, got %v", accounts.ErrNotFound, err)
 	}
+
+	// pruning now removes the orphaned slabs and sectors
+	store.pruneAllDeletedSlabs(t)
+	assertCount("slabs", 0)
+	assertCount("sectors", 0)
 }
 
 func TestAccountFundingInfo(t *testing.T) {
