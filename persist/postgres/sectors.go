@@ -457,7 +457,7 @@ RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&co
 
 	// queue the slabs for background deletion; the queue is append-only so a
 	// concurrent prune can't swallow a re-queue
-	if _, err := tx.Exec(ctx, `INSERT INTO account_slabs_for_deletion (slab_id)
+	if _, err := tx.Exec(ctx, `INSERT INTO slab_deletion_queue (slab_id)
 SELECT * FROM unnest($1::bigint[])`, sIDs); err != nil {
 		return fmt.Errorf("failed to queue slabs for deletion: %w", err)
 	}
@@ -564,14 +564,11 @@ func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) 
 
 	// prune the slabs, counting rows actually deleted since the queue can hold
 	// a slab twice
-	var deletedSlabs int64
-	if err := tx.QueryRow(ctx, `
-		WITH deleted AS (
-			DELETE FROM slabs WHERE id = ANY($1) RETURNING id
-		)
-		SELECT COUNT(*) FROM deleted`, toDelete).Scan(&deletedSlabs); err != nil {
+	res, err := tx.Exec(ctx, `DELETE FROM slabs WHERE id = ANY($1)`, toDelete)
+	if err != nil {
 		return fmt.Errorf("failed to prune slabs: %w", err)
 	}
+	deletedSlabs := res.RowsAffected()
 
 	// update sector stats
 	if err := incrementNumPinnedSectors(ctx, tx, -pinned); err != nil {
@@ -947,7 +944,6 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 				SELECT DISTINCT ss.slab_id AS id
 				FROM slab_sectors ss
 				WHERE ss.sector_id IN (SELECT id FROM batch)
-					AND EXISTS (SELECT 1 FROM account_slabs a WHERE a.slab_id = ss.slab_id)
 			), claimed AS (
 				UPDATE slabs SET next_repair_attempt = $3
 				WHERE id IN (

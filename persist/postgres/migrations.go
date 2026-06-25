@@ -175,7 +175,7 @@ CREATE INDEX pool_attachments_account_id_host_id_idx ON pool_attachments (accoun
 	},
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
 		_, err := tx.Exec(ctx, `
-CREATE TABLE account_slabs_for_deletion (
+CREATE TABLE slab_deletion_queue (
     id BIGSERIAL PRIMARY KEY,
     slab_id BIGINT NOT NULL
 );`)

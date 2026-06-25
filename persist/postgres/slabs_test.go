@@ -495,7 +495,7 @@ func TestSlabPruningConcurrent(t *testing.T) {
 		err := store.pool.QueryRow(t.Context(), `SELECT
 			(SELECT COUNT(*) FROM slabs),
 			(SELECT COUNT(*) FROM sectors),
-			(SELECT COUNT(*) FROM account_slabs_for_deletion)`).Scan(&slabCount, &sectorCount, &queued)
+			(SELECT COUNT(*) FROM slab_deletion_queue)`).Scan(&slabCount, &sectorCount, &queued)
 		if err != nil {
 			t.Fatal(err)
 		}
