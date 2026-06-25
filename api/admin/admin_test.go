@@ -1380,11 +1380,20 @@ func TestSectorStatsAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert 0 slabs
-	stats, err = adminClient.StatsSectors(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	} else if stats.Slabs != 0 {
+	// the slab is removed by the background slab-prune loop, not synchronously by
+	// UnpinSlab, so poll until it's pruned
+	var pruned bool
+	for range 50 {
+		stats, err = adminClient.StatsSectors(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		} else if stats.Slabs == 0 {
+			pruned = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !pruned {
 		t.Fatalf("expected no slabs, got %d", stats.Slabs)
 	}
 }

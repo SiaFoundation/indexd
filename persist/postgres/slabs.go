@@ -103,14 +103,21 @@ func (s *Store) Slab(slabID slabs.SlabID) (slab slabs.Slab, err error) {
 	return
 }
 
-// PinnedSlab retrieves a pinned slab from the database by its ID.
+// PinnedSlab retrieves a slab currently pinned by the account by its ID. A slab
+// the account has unpinned is not returned, even if its row still exists pending
+// the background prune.
 func (s *Store) PinnedSlab(account proto.Account, slabID slabs.SlabID) (slab slabs.PinnedSlab, err error) {
 	slab.ID = slabID
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		slab.Sectors = slab.Sectors[:0] // reuse same slice if transaction retries
 
+		// require an account_slabs association so an unpinned slab reads as not found
 		var dbID int64
-		err = tx.QueryRow(ctx, `SELECT s.id, s.encryption_key, s.min_shards FROM slabs s WHERE digest = $1`, sqlHash256(slabID)).Scan(
+		err = tx.QueryRow(ctx, `SELECT s.id, s.encryption_key, s.min_shards
+FROM slabs s
+JOIN account_slabs a ON a.slab_id = s.id
+JOIN accounts acc ON acc.id = a.account_id
+WHERE s.digest = $1 AND acc.public_key = $2`, sqlHash256(slabID), sqlPublicKey(account)).Scan(
 			&dbID, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrSlabNotFound
@@ -146,8 +153,10 @@ ORDER BY ss.slab_index ASC`, dbID)
 	return
 }
 
-// PruneSlabs prunes all pinned slabs of a user not currently connected to an
-// object. Only slabs pinned before cutoff are eligible for pruning.
+// PruneSlabs unpins all of a user's slabs that are not currently connected to
+// an object. Only slabs pinned before cutoff are eligible. The unpinned slabs
+// and their sectors are queued for deletion by PruneDeletedSlabs rather than
+// removed inline.
 func (s *Store) PruneSlabs(account proto.Account, cutoff time.Time) error {
 	var id int64
 	err := s.transaction(func(ctx context.Context, tx *txn) error {

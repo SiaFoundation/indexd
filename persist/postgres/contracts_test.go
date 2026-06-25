@@ -739,6 +739,9 @@ func TestPrunableContractRoots(t *testing.T) {
 	if err := store.UnpinSlab(account, slabID); err != nil {
 		t.Fatal(err)
 	}
+	// unpinning queues the slab for background deletion; prune it so the
+	// sectors are actually removed and become prunable
+	store.pruneAllDeletedSlabs(t)
 
 	// assert prunable roots for both contracts
 	if prunable, err := store.PrunableContractRoots(fcid1, roots[:2]); err != nil {

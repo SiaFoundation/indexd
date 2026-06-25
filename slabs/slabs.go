@@ -182,9 +182,8 @@ func (m *SlabManager) PinSlabs(ctx context.Context, account proto.Account, nextI
 }
 
 // UnpinSlab removes the association between the account and the given slab. If
-// this slab was only referenced by the given account, it will also be deleted.
-// The sectors are potentially orphaned and will be removed by a background
-// process.
+// this slab is no longer referenced by any account, it and its potentially
+// orphaned sectors are queued for deletion and removed by a background process.
 func (m *SlabManager) UnpinSlab(ctx context.Context, account proto.Account, slabID SlabID) error {
 	return m.store.UnpinSlab(account, slabID)
 }

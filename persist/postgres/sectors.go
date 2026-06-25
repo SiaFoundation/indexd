@@ -423,6 +423,9 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 	return digests, err
 }
 
+// unpinSlabs removes the account's association with the given slabs and updates
+// the account's pinned totals. The slabs and their sectors are not deleted
+// inline; they are queued for deleteOrphanedSlabs to prune in a background loop.
 func (s *Store) unpinSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64) error {
 	// delete the association between the account and the slab
 	_, err := tx.Exec(ctx, `DELETE FROM account_slabs a
@@ -450,6 +453,26 @@ RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&co
 	}
 	if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data - $1, pinned_size = pinned_size - $2 WHERE id = $3`, pinnedDataDelta, pinnedSizeDelta, connectKeyID); err != nil {
 		return fmt.Errorf("failed to update connect key pinned data: %w", err)
+	}
+
+	// queue the slabs for background deletion; the queue is append-only so a
+	// concurrent prune can't swallow a re-queue
+	if _, err := tx.Exec(ctx, `INSERT INTO account_slabs_for_deletion (slab_id)
+SELECT * FROM unnest($1::bigint[])`, sIDs); err != nil {
+		return fmt.Errorf("failed to queue slabs for deletion: %w", err)
+	}
+	return nil
+}
+
+// deleteOrphanedSlabs deletes the slabs in sIDs that are no longer pinned by
+// any account, along with any sectors that are only referenced by those slabs,
+// and updates the relevant sector and slab statistics. Callers must have
+// already removed the relevant account_slabs associations.
+func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
+	// lock the candidate slabs so a concurrent re-pin serializes against the
+	// pinned check below
+	if _, err := tx.Exec(ctx, `SELECT id FROM slabs WHERE id = ANY($1) ORDER BY id FOR UPDATE`, sIDs); err != nil {
+		return fmt.Errorf("failed to lock slabs: %w", err)
 	}
 
 	// ignore the slabs that are pinned by another account
@@ -484,6 +507,14 @@ RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&co
 	var pinned, unpinned, unpinnable int64
 	var unpinnedDeltas []unpinnedDelta
 	if len(toDelete) > 0 {
+		// lock the candidate sectors too, so a concurrent re-pin reusing a shared
+		// sector serializes against the orphan check below
+		if _, err := tx.Exec(ctx, `SELECT id FROM sectors WHERE id IN (
+	SELECT sector_id FROM slab_sectors WHERE slab_id = ANY($1)
+) ORDER BY id FOR UPDATE`, toDelete); err != nil {
+			return fmt.Errorf("failed to lock sectors: %w", err)
+		}
+
 		// atomically delete candidate sectors and derive stats from the
 		// returned rows to avoid races with concurrent PinSectors or
 		// MarkSectorsUnpinnable calls
@@ -531,8 +562,14 @@ RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&co
 		}
 	}
 
-	// prune the slabs
-	if _, err := tx.Exec(ctx, `DELETE FROM slabs WHERE id = ANY($1)`, toDelete); err != nil {
+	// prune the slabs, counting rows actually deleted since the queue can hold
+	// a slab twice
+	var deletedSlabs int64
+	if err := tx.QueryRow(ctx, `
+		WITH deleted AS (
+			DELETE FROM slabs WHERE id = ANY($1) RETURNING id
+		)
+		SELECT COUNT(*) FROM deleted`, toDelete).Scan(&deletedSlabs); err != nil {
 		return fmt.Errorf("failed to prune slabs: %w", err)
 	}
 
@@ -548,7 +585,7 @@ RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&co
 	}
 
 	// update slab stats
-	if err := incrementNumSlabs(ctx, tx, -int64(len(toDelete))); err != nil {
+	if err := incrementNumSlabs(ctx, tx, -deletedSlabs); err != nil {
 		return fmt.Errorf("failed to decrement number of slabs: %w", err)
 	}
 
@@ -556,8 +593,8 @@ RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&co
 }
 
 // UnpinSlab removes the association between the account and the given slab. If
-// this slab was only owned by the given account, it will also be deleted.  The
-// sectors of the slab will also be removed in that case.
+// this slab is no longer owned by any account, it and its sectors are queued
+// for deletion by PruneDeletedSlabs in a background loop.
 func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		id, _, err := accountID(ctx, tx, account)
@@ -910,6 +947,7 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 				SELECT DISTINCT ss.slab_id AS id
 				FROM slab_sectors ss
 				WHERE ss.sector_id IN (SELECT id FROM batch)
+					AND EXISTS (SELECT 1 FROM account_slabs a WHERE a.slab_id = ss.slab_id)
 			), claimed AS (
 				UPDATE slabs SET next_repair_attempt = $3
 				WHERE id IN (
