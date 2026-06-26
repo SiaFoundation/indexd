@@ -50,6 +50,7 @@ func runRemoteCmd(ctx context.Context, cfg config.Config, walletKey types.Privat
 	defer am.Close()
 
 	hostClient := client.New(client.NewProvider(hosts.NewHostStore(store)), log.Named("client"))
+	defer hostClient.Close()
 
 	chain := &remoteChainManager{store: store, log: log.Named("chain")}
 	cm := &remoteContractManager{store: store}
