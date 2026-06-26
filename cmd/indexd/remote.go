@@ -60,6 +60,7 @@ func runRemoteCmd(ctx context.Context, cfg config.Config, walletKey types.Privat
 	slabOpts := []slabs.Option{
 		slabs.WithLogger(log.Named("slabs")),
 		slabs.WithIntegrityChecks(false),
+		slabs.WithMigrations(true),
 	}
 	if cfg.Slabs.MigrationWorkers > 0 {
 		slabOpts = append(slabOpts, slabs.WithNumMigrationGoroutines(cfg.Slabs.MigrationWorkers))
