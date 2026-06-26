@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/keys"
 	"go.uber.org/zap"
 )
 
@@ -44,7 +45,9 @@ type (
 		// requested from each host during slab recovery. Smaller chunks
 		// spread a recovery across more hosts (more parallel pipes) at the
 		// cost of more RPCs. Must be a multiple of proto.LeafSize.
-		recoveryChunkSize int
+		recoveryChunkSize  int
+		runIntegrityChecks bool
+		runMigrations      bool
 
 		alerter AlertsManager
 		chain   ChainManager
@@ -263,6 +266,29 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
+// WithIntegrityChecks enables or disables the periodic integrity-check loop.
+// The default is enabled.
+func WithIntegrityChecks(enabled bool) Option {
+	return func(m *SlabManager) {
+		m.runIntegrityChecks = enabled
+	}
+}
+
+// WithMigrations enables or disables the periodic slab-migration loop.
+// The default is enabled.
+func WithMigrations(enabled bool) Option {
+	return func(m *SlabManager) {
+		m.runMigrations = enabled
+	}
+}
+
+// DeriveAccountKeys derives the migration and integrity service-account keys
+// the slab manager uses from a wallet key. All nodes (primary and remote) must
+// derive them identically so the host-side accounts line up.
+func DeriveAccountKeys(walletKey types.PrivateKey) (migration, integrity types.PrivateKey) {
+	return keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity")
+}
+
 // NewManager creates a new slab manager.
 func NewManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
 	sm := newSlabManager(chain, am, cm, hm, store, hosts, alerter, migrationAccount, integrityAccount, opts...)
@@ -298,6 +324,9 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 		numIntegrityCheckGoroutines: 50,
 		numMigrationGoroutines:      runtime.NumCPU(),
 		recoveryChunkSize:           defaultRecoveryChunkSize,
+
+		runIntegrityChecks: true,
+		runMigrations:      true,
 
 		chain:   chain,
 		am:      am,
@@ -367,10 +396,11 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 
 	// register lost sectors alerts on startup
 	m.registerLostSectorsAlert()
-
 	launch("integrity checks", m.healthCheckInterval, m.performIntegrityChecks)
-	launch("slab migrations", m.healthCheckInterval, m.performSlabMigrations)
 	launch("prune deleted slabs", m.pruneDeletedSlabsInterval, m.performPruneDeletedSlabs)
+	if m.runMigrations {
+		launch("slab migrations", m.healthCheckInterval, m.performSlabMigrations)
+	}
 	wg.Wait()
 }
 
