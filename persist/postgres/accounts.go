@@ -230,8 +230,7 @@ RETURNING o.object_key;`, accountID, remaining)
 		}
 
 		// queue up to `remaining` slab associations for background deletion
-		var queued int64
-		if err := tx.QueryRow(ctx, `
+		res, err := tx.Exec(ctx, `
 			WITH deleted AS (
 				DELETE FROM account_slabs
 				WHERE account_id = $1 AND slab_id IN (
@@ -241,13 +240,12 @@ RETURNING o.object_key;`, accountID, remaining)
 					LIMIT $2
 				)
 				RETURNING slab_id
-			), queued AS (
-				INSERT INTO slab_deletion_queue (slab_id)
-				SELECT slab_id FROM deleted
 			)
-			SELECT COUNT(*) FROM deleted;`, accountID, remaining).Scan(&queued); err != nil {
+			INSERT INTO slab_deletion_queue (slab_id)
+			SELECT slab_id FROM deleted;`, accountID, remaining)
+		if err != nil {
 			return fmt.Errorf("failed to queue account slabs for deletion: %w", err)
-		} else if queued == int64(remaining) {
+		} else if res.RowsAffected() == int64(remaining) {
 			// filled the batch, so more may remain
 			return nil
 		}
