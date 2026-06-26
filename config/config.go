@@ -58,6 +58,8 @@ type (
 		// MigrationWorkers is the number of slabs to migrate in parallel. If
 		// zero, defaults to runtime.NumCPU().
 		MigrationWorkers int `yaml:"migrationWorkers"`
+		// Migrations enables the slab-migration loop. Enabled by default.
+		Migrations bool `yaml:"migrations"`
 	}
 
 	// FileLog configures the file output of the logger.

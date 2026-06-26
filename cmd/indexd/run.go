@@ -33,7 +33,6 @@ import (
 	"go.sia.tech/indexd/explorer"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/keys"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/slabs"
@@ -255,7 +254,9 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	if cfg.Slabs.MigrationWorkers > 0 {
 		slabOpts = append(slabOpts, slabs.WithNumMigrationGoroutines(cfg.Slabs.MigrationWorkers))
 	}
-	slabs, err := slabs.NewManager(cm, am, contracts, hm, store, client, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), slabOpts...)
+	slabOpts = append(slabOpts, slabs.WithMigrations(cfg.Slabs.Migrations))
+	migrationKey, integrityKey := slabs.DeriveAccountKeys(walletKey)
+	slabs, err := slabs.NewManager(cm, am, contracts, hm, store, client, alerter, migrationKey, integrityKey, slabOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create slabs manager: %w", err)
 	}

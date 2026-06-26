@@ -385,8 +385,15 @@ func (m *HostManager) UpdateUsabilitySettings(ctx context.Context, us UsabilityS
 // This method is more efficient than [HostManager.ScannedHost] as it does not
 // require the host to be reachable on all announced addresses.
 func (m *HostManager) Usable(ctx context.Context, hostKey types.PublicKey) (bool, error) {
+	return Usable(ctx, m.store, m.hosts, hostKey)
+}
+
+// Usable reports whether the host identified by hostKey is currently usable for
+// slab operations. It confirms the host isn't blocked, refreshes its prices via
+// a live RPC (persisting them) and returns whether the host is good.
+func Usable(ctx context.Context, store Store, client HostClient, hostKey types.PublicKey) (bool, error) {
 	// fetch host
-	host, err := m.store.Host(hostKey)
+	host, err := store.Host(hostKey)
 	if err != nil {
 		return false, fmt.Errorf("failed to get host, %w", err)
 	} else if host.Blocked {
@@ -394,18 +401,18 @@ func (m *HostManager) Usable(ctx context.Context, hostKey types.PublicKey) (bool
 		return false, nil
 	}
 
-	prices, err := m.hosts.Prices(ctx, hostKey)
+	prices, err := client.Prices(ctx, hostKey)
 	if err != nil {
 		return false, fmt.Errorf("failed to fetch host prices, %w", err)
 	} else if err := prices.Validate(hostKey); err != nil {
 		return false, nil // host somehow returned bad prices
 	}
 
-	err = m.store.UpdateHostPrices(hostKey, prices)
+	err = store.UpdateHostPrices(hostKey, prices)
 	if err != nil {
 		return false, fmt.Errorf("failed to update host prices, %w", err)
 	}
-	host, err = m.store.Host(hostKey)
+	host, err = store.Host(hostKey)
 	return host.IsGood(), err
 }
 

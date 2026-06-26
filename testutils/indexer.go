@@ -24,7 +24,6 @@ import (
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/keys"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/stats"
@@ -192,7 +191,8 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to create contract manager: %v", err)
 	}
 
-	slabs, err := slabs.NewManager(c.cm, am, contracts, hm, store, client, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), cfg.slabOpts...)
+	migrationKey, integrityKey := slabs.DeriveAccountKeys(walletKey)
+	slabs, err := slabs.NewManager(c.cm, am, contracts, hm, store, client, alerter, migrationKey, integrityKey, cfg.slabOpts...)
 	if err != nil {
 		t.Fatalf("failed to create slab manager: %v", err)
 	}
