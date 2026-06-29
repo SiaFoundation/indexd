@@ -193,7 +193,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 
 	slabOpts := append([]slabs.Option{slabs.WithPruneDeletedSlabsInterval(100 * time.Millisecond)}, cfg.slabOpts...)
 	migrationKey, integrityKey := slabs.DeriveAccountKeys(walletKey)
-	slabs, err := slabs.NewManager(c.cm, am, contracts, hm, store, client, alerter, migrationKey, integrityKey, slabOpts...)
+	slabs, err := slabs.NewManager(am, contracts, hm, store, client, alerter, migrationKey, integrityKey, slabOpts...)
 	if err != nil {
 		t.Fatalf("failed to create slab manager: %v", err)
 	}

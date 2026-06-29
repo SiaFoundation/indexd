@@ -256,7 +256,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	slabOpts = append(slabOpts, slabs.WithMigrations(cfg.Slabs.Migrations))
 	migrationKey, integrityKey := slabs.DeriveAccountKeys(walletKey)
-	slabs, err := slabs.NewManager(cm, am, contracts, hm, store, client, alerter, migrationKey, integrityKey, slabOpts...)
+	slabs, err := slabs.NewManager(am, contracts, hm, store, client, alerter, migrationKey, integrityKey, slabOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create slabs manager: %w", err)
 	}

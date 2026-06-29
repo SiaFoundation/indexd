@@ -52,7 +52,6 @@ func runRemoteCmd(ctx context.Context, cfg config.Config, walletKey types.Privat
 	hostClient := client.New(client.NewProvider(hosts.NewHostStore(store)), log.Named("client"))
 	defer hostClient.Close()
 
-	chain := &remoteChainManager{store: store, log: log.Named("chain")}
 	cm := &remoteContractManager{store: store}
 	hm := &remoteHostManager{store: store, client: hostClient}
 
@@ -67,7 +66,7 @@ func runRemoteCmd(ctx context.Context, cfg config.Config, walletKey types.Privat
 		slabOpts = append(slabOpts, slabs.WithNumMigrationGoroutines(cfg.Slabs.MigrationWorkers))
 	}
 
-	sm, err := slabs.NewManager(chain, am, cm, hm, store, hostClient, alerter, migrationKey, integrityKey, slabOpts...)
+	sm, err := slabs.NewManager(am, cm, hm, store, hostClient, alerter, migrationKey, integrityKey, slabOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create slabs manager: %w", err)
 	}
@@ -77,25 +76,6 @@ func runRemoteCmd(ctx context.Context, cfg config.Config, walletKey types.Privat
 	<-ctx.Done()
 	log.Info("shutting down")
 	return nil
-}
-
-// remoteChainManager satisfies slabs.ChainManager by reading the chain tip from
-// the shared database rather than running its own consensus.
-type remoteChainManager struct {
-	store *postgres.Store
-	log   *zap.Logger
-}
-
-// Tip returns the last scanned chain index from the database. On error it logs
-// and returns the zero index; the slab manager only uses the tip height for
-// migration eligibility, so staleness is acceptable.
-func (m *remoteChainManager) Tip() types.ChainIndex {
-	tip, err := m.store.Tip()
-	if err != nil {
-		m.log.Error("failed to fetch chain tip", zap.Error(err))
-		return types.ChainIndex{}
-	}
-	return tip
 }
 
 // remoteContractManager satisfies slabs.ContractManager using only the shared

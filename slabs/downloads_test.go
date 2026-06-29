@@ -59,7 +59,6 @@ func assertRecovered(t *testing.T, encryptionKey [32]byte, required []bool, root
 func TestRecoverShards(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	store := newMockStore(t)
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	hm := newMockHostManager()
 	client := newMockHostClient()
@@ -108,7 +107,7 @@ func TestRecoverShards(t *testing.T) {
 	}
 
 	account := types.GeneratePrivateKey()
-	sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
+	sm := slabs.NewSlabManager(am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
 
 	// assert that not enough usable hosts results in errNotEnoughShards
 	t.Run("not enough usable hosts", func(t *testing.T) {
@@ -223,7 +222,6 @@ func TestRecoverShardsDemotion(t *testing.T) {
 	setup := func(t *testing.T, numHosts int, minShards uint) (*slabs.SlabManager, *mockHostClient, []hosts.Host, slabs.Slab) {
 		log := zaptest.NewLogger(t)
 		store := newMockStore(t)
-		chain := newMockChainManager()
 		am := newMockAccountManager()
 		hm := newMockHostManager()
 		client := newMockHostClient()
@@ -248,7 +246,7 @@ func TestRecoverShardsDemotion(t *testing.T) {
 		}
 
 		account := types.GeneratePrivateKey()
-		sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
+		sm := slabs.NewSlabManager(am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
 		sm.SetShardTimeout(2 * time.Second)
 		// a single chunk keeps the demote assertions deterministic
 		sm.SetRecoveryChunkSize(proto.SectorSize)
