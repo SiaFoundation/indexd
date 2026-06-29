@@ -152,6 +152,7 @@ explorer:
     url: https://api.siascan.com
 slabs:
     migrationWorkers: 16 # number of slabs to migrate in parallel (0 defaults to runtime.NumCPU())
+    migrations: true # run slab migrations (set to false to outsource migrations to a remote node)
 log:
     stdout:
         enabled: true # enable logging to stdout
