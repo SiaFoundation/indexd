@@ -393,6 +393,11 @@ CREATE TABLE account_slabs (
 -- speed up query used when unpinning slabs
 CREATE INDEX account_slabs_slab_id_idx ON account_slabs(slab_id);
 
+CREATE TABLE slab_deletion_queue (
+    id BIGSERIAL PRIMARY KEY,
+    slab_id BIGINT NOT NULL
+);
+
 CREATE TABLE sectors (
     id BIGSERIAL PRIMARY KEY,
     sector_root BYTEA UNIQUE NOT NULL,

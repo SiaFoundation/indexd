@@ -1421,6 +1421,9 @@ func TestHostUnpinnedSectors(t *testing.T) {
 	if err := db.UnpinSlab(account, slabIDs[0]); err != nil {
 		t.Fatal(err)
 	}
+	// unpinning queues the slab for background deletion; prune it so the host
+	// unpinned counts settle
+	db.pruneAllDeletedSlabs(t)
 	assertHostUnpinned(hk1, 0)
 	assertHostUnpinned(hk2, 0)
 }

@@ -25,7 +25,8 @@ type (
 	// checking their integrity on the network and migrating their sectors if
 	// necessary.
 	SlabManager struct {
-		healthCheckInterval time.Duration
+		healthCheckInterval       time.Duration
+		pruneDeletedSlabsInterval time.Duration
 
 		integrityCheckInterval       time.Duration
 		failedIntegrityCheckInterval time.Duration
@@ -40,8 +41,17 @@ type (
 		shardTimeout                time.Duration
 		integrityCheckTimeout       time.Duration
 
-		runIntegrityChecks bool
-		runMigrations      bool
+		// runMigrations gates the migration loop on a full node so it can be
+		// disabled to outsource migrations to a remote node. The default is
+		// enabled. It has no effect on a remote node (remoteLoop always
+		// migrates).
+		runMigrations bool
+
+		// recoveryChunkSize is the size of the segment-aligned byte range
+		// requested from each host during slab recovery. Smaller chunks
+		// spread a recovery across more hosts (more parallel pipes) at the
+		// cost of more RPCs. Must be a multiple of proto.LeafSize.
+		recoveryChunkSize int
 
 		alerter AlertsManager
 		am      AccountManager
@@ -81,6 +91,10 @@ type (
 		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error)
 
 		Prioritize([]types.PublicKey) []types.PublicKey
+		// ReadEstimate returns the expected time to read the given number
+		// of bytes based on the network-wide observed read throughput. It
+		// is used to size adaptive download racing.
+		ReadEstimate(bytes uint64) time.Duration
 		// PickWrite atomically selects the best write candidate and
 		// reserves an inflight slot. The release function MUST be called
 		// when the RPC completes; the picked host is removed from
@@ -130,6 +144,7 @@ type (
 		Tip() (types.ChainIndex, error)
 		UnhealthySlabs(cursor int64, limit int) ([]SlabID, int64, error)
 		PruneSlabs(account proto.Account, cutoff time.Time) error
+		PruneDeletedSlabs(limit int) (int, error)
 
 		// Object methods
 		Object(account proto.Account, key types.Hash256) (SealedObject, error)
@@ -160,6 +175,15 @@ type Option func(*SlabManager)
 func WithHealthCheckInterval(interval time.Duration) Option {
 	return func(m *SlabManager) {
 		m.healthCheckInterval = interval
+	}
+}
+
+// WithPruneDeletedSlabsInterval sets the interval at which the slab manager
+// prunes deleted slabs, removing those no longer pinned by any account along
+// with their orphaned sectors.
+func WithPruneDeletedSlabsInterval(interval time.Duration) Option {
+	return func(m *SlabManager) {
+		m.pruneDeletedSlabsInterval = interval
 	}
 }
 
@@ -200,6 +224,20 @@ func WithNumMigrationGoroutines(size int) Option {
 	}
 }
 
+// WithRecoveryChunkSize sets the size of the segment-aligned byte range
+// requested from each host during slab recovery. Smaller chunks spread a
+// recovery across more hosts at the cost of more RPCs. The value is clamped
+// to [proto.LeafSize, proto.SectorSize] and rounded down to a multiple of
+// proto.LeafSize when used. The default is 1 MiB.
+func WithRecoveryChunkSize(size int) Option {
+	return func(m *SlabManager) {
+		if size <= 0 {
+			panic("recovery chunk size must be positive") // developer error
+		}
+		m.recoveryChunkSize = size
+	}
+}
+
 // WithMinHostDistance sets the minimum distance between hosts used for storing
 // sectors of the same slab. The default is 10km, if set to 0, the distance
 // check is disabled.
@@ -227,16 +265,8 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
-// WithIntegrityChecks enables or disables the periodic integrity-check loop.
-// The default is enabled.
-func WithIntegrityChecks(enabled bool) Option {
-	return func(m *SlabManager) {
-		m.runIntegrityChecks = enabled
-	}
-}
-
-// WithMigrations enables or disables the periodic slab-migration loop.
-// The default is enabled.
+// WithMigrations enables or disables the migration loop on a full node. The
+// default is enabled. It has no effect on a remote node, which always migrates.
 func WithMigrations(enabled bool) Option {
 	return func(m *SlabManager) {
 		m.runMigrations = enabled
@@ -267,9 +297,29 @@ func NewManager(am AccountManager, cm ContractManager, hm HostManager, store Sto
 	return sm, nil
 }
 
+// NewRemoteManager creates a slab manager for a remote node. Unlike NewManager
+// it only runs the slab-migration loop; integrity checks, lost-sector alerts
+// and slab pruning remain the responsibility of the primary node.
+func NewRemoteManager(am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+	sm := newSlabManager(am, cm, hm, store, hosts, alerter, migrationAccount, integrityAccount, opts...)
+
+	ctx, cancel, err := sm.tg.AddContext(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		defer cancel()
+		sm.remoteLoop(ctx)
+	}()
+
+	return sm, nil
+}
+
 func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) *SlabManager {
 	m := &SlabManager{
-		healthCheckInterval: time.Minute,
+		healthCheckInterval:       time.Minute,
+		pruneDeletedSlabsInterval: time.Minute,
 
 		integrityCheckInterval:       14 * 24 * time.Hour,
 		failedIntegrityCheckInterval: 12 * time.Hour,
@@ -283,9 +333,9 @@ func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store
 		integrityCheckTimeout:       5 * time.Minute,
 		numIntegrityCheckGoroutines: 50,
 		numMigrationGoroutines:      runtime.NumCPU(),
+		recoveryChunkSize:           defaultRecoveryChunkSize,
 
-		runIntegrityChecks: true,
-		runMigrations:      true,
+		runMigrations: true,
 
 		am:      am,
 		cm:      cm,
@@ -334,14 +384,14 @@ func (m *SlabManager) initServiceAccounts(migrationAccount, integrityAccount typ
 // perform on slabs
 func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 	var wg sync.WaitGroup
-	launch := func(descr string, task func(context.Context) error) {
-		healthTicker := time.NewTicker(m.healthCheckInterval)
+	launch := func(descr string, interval time.Duration, task func(context.Context) error) {
+		ticker := time.NewTicker(interval)
 
 		wg.Go(func() {
-			defer healthTicker.Stop()
+			defer ticker.Stop()
 			for {
 				select {
-				case <-healthTicker.C:
+				case <-ticker.C:
 				case <-ctx.Done():
 					return
 				}
@@ -352,14 +402,59 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 		})
 	}
 
-	if m.runIntegrityChecks {
-		m.registerLostSectorsAlert()
-		launch("integrity checks", m.performIntegrityChecks)
-	}
+	// register lost sectors alerts on startup
+	m.registerLostSectorsAlert()
+
+	launch("integrity checks", m.healthCheckInterval, m.performIntegrityChecks)
 	if m.runMigrations {
-		launch("slab migrations", m.performSlabMigrations)
+		launch("slab migrations", m.healthCheckInterval, m.performSlabMigrations)
 	}
+	launch("prune deleted slabs", m.pruneDeletedSlabsInterval, m.performPruneDeletedSlabs)
 	wg.Wait()
+}
+
+// remoteLoop runs the maintenance a remote node is responsible for: slab
+// migrations only. Integrity checks, lost-sector alerts and slab pruning are
+// owned by the primary node.
+func (m *SlabManager) remoteLoop(ctx context.Context) {
+	ticker := time.NewTicker(m.healthCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return
+		}
+		if err := m.performSlabMigrations(ctx); err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			m.log.Error("maintenance failed", zap.String("task", "slab migrations"), zap.Error(err))
+		}
+	}
+}
+
+// performPruneDeletedSlabs prunes deleted slabs, removing those no longer pinned
+// by any account along with their orphaned sectors.
+func (m *SlabManager) performPruneDeletedSlabs(ctx context.Context) error {
+	start := time.Now()
+	log := m.log.Named("prune")
+	log.Debug("starting deleted slab pruning")
+
+	const batchSize = 100
+	var pruned int
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		n, err := m.store.PruneDeletedSlabs(batchSize)
+		if err != nil {
+			return fmt.Errorf("failed to prune deleted slabs: %w", err)
+		} else if n == 0 {
+			break
+		}
+		pruned += n
+	}
+
+	log.Debug("finished pruning deleted slabs", zap.Int("pruned", pruned), zap.Duration("elapsed", time.Since(start)))
+	return nil
 }
 
 func newLostSectorsAlert(hks []types.PublicKey) alerts.Alert {

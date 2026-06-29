@@ -79,6 +79,7 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 		if err := store.UnpinSlab(account, slabID); err != nil {
 			t.Fatal(err)
 		}
+		store.pruneAllDeletedSlabs(t)
 		pinned = pinned[1:]
 		assertStats(int64(len(pinned)))
 	}
@@ -329,6 +330,8 @@ func TestSectorStats(t *testing.T) {
 	if err := store.UnpinSlab(account, slabIDs[0]); err != nil {
 		t.Fatal(err)
 	}
+	// prune the background slab/sector deletion queued by UnpinSlab
+	store.pruneAllDeletedSlabs(t)
 	assertStats(0, 0, 3, 6)
 
 	if unpinned, err := store.UnpinnedSectors(hk1, 1); err != nil {
@@ -560,16 +563,22 @@ func TestAppStats(t *testing.T) {
 	assertStats(appID1, "App One", 2, 2, 0)
 	assertStats(appID2, "App Two", 1, 1, 0)
 
-	// set pinned_data for some accounts
-	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET pinned_data = 100 WHERE public_key = $1`, sqlPublicKey(acc1)); err != nil {
-		t.Fatal(err)
+	// set pinned_data for some accounts, keeping each account's connect key
+	// total consistent so DeleteAccount can reclaim it
+	setPinnedData := func(ak types.PublicKey, pinned uint64) {
+		t.Helper()
+		if _, err := store.pool.Exec(t.Context(), `
+WITH updated AS (
+	UPDATE accounts SET pinned_data = $2 WHERE public_key = $1 RETURNING connect_key_id
+)
+UPDATE app_connect_keys SET pinned_data = $2 WHERE id = (SELECT connect_key_id FROM updated)`,
+			sqlPublicKey(ak), pinned); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET pinned_data = 200 WHERE public_key = $1`, sqlPublicKey(acc2)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET pinned_data = 500 WHERE public_key = $1`, sqlPublicKey(acc3)); err != nil {
-		t.Fatal(err)
-	}
+	setPinnedData(acc1, 100)
+	setPinnedData(acc2, 200)
+	setPinnedData(acc3, 500)
 	assertStats(appID1, "App One", 2, 2, 300)
 	assertStats(appID2, "App Two", 1, 1, 500)
 

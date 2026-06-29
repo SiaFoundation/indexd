@@ -1585,6 +1585,7 @@ func TestUnpinSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	store.pruneAllDeletedSlabs(t)
 
 	// assert counts
 	assertAccountSlabs(acc1, 1)
@@ -1602,6 +1603,7 @@ func TestUnpinSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	store.pruneAllDeletedSlabs(t)
 
 	// assert counts
 	assertAccountSlabs(acc1, 0)
@@ -1619,6 +1621,7 @@ func TestUnpinSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	store.pruneAllDeletedSlabs(t)
 
 	// assert counts
 	assertAccountSlabs(acc1, 0)
@@ -1636,6 +1639,7 @@ func TestUnpinSlab(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	store.pruneAllDeletedSlabs(t)
 
 	// assert counts
 	assertAccountSlabs(acc1, 0)
@@ -2060,12 +2064,15 @@ func TestUnhealthySlabs(t *testing.T) {
 				SELECT decode(lpad(to_hex(2000000 + g), 64, '0'), 'hex'), $3, $4, NOW()
 				FROM generate_series($1::int, $2::int) g
 				RETURNING id
+			), linked AS (
+				INSERT INTO slab_sectors (slab_id, sector_id, slab_index)
+				SELECT sl.id, sec.id, 0
+				FROM (SELECT id, row_number() OVER (ORDER BY id) rn FROM new_slabs) sl
+				JOIN (SELECT id, row_number() OVER (ORDER BY id) rn FROM new_sectors) sec ON sl.rn = sec.rn
 			)
-			INSERT INTO slab_sectors (slab_id, sector_id, slab_index)
-			SELECT sl.id, sec.id, 0
-			FROM (SELECT id, row_number() OVER (ORDER BY id) rn FROM new_slabs) sl
-			JOIN (SELECT id, row_number() OVER (ORDER BY id) rn FROM new_sectors) sec ON sl.rn = sec.rn`,
-			from, to, hostID, csmID)
+			INSERT INTO account_slabs (account_id, slab_id)
+			SELECT (SELECT id FROM accounts WHERE public_key = $5), id FROM new_slabs`,
+			from, to, hostID, csmID, sqlPublicKey(types.PublicKey(account)))
 		if err != nil {
 			t.Fatal(err)
 		}

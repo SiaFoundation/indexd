@@ -28,8 +28,12 @@ func (m *SlabManager) UploadShards(ctx context.Context, slab Slab, shards [][]by
 	return m.uploadShards(ctx, slab, shards, available, log)
 }
 
-func (m *SlabManager) DownloadShards(ctx context.Context, slab Slab, log *zap.Logger) ([][]byte, error) {
-	return m.downloadShards(ctx, slab, log)
+func (m *SlabManager) RecoverShards(ctx context.Context, slab Slab, required []bool, log *zap.Logger) ([][]byte, error) {
+	return m.recoverShards(ctx, slab, required, log)
+}
+
+func (m *SlabManager) SetRecoveryChunkSize(size int) {
+	m.recoveryChunkSize = size
 }
 
 func (m *SlabManager) MigrateSlabs(ctx context.Context, slabIDs []SlabID, log *zap.Logger) error {

@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -265,6 +266,52 @@ func TestPinnedSlab(t *testing.T) {
 	}
 }
 
+func TestPinnedSlabUnpinned(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	store.addTestAccount(t, types.PublicKey(acc1))
+	store.addTestAccount(t, types.PublicKey(acc2))
+
+	host := store.addTestHost(t)
+	store.addTestContract(t, host)
+
+	// both accounts pin the same slab
+	params := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: host}},
+	}
+	slabID := store.pinTestSlabs(t, acc1, params)[0]
+	store.pinTestSlabs(t, acc2, params)
+
+	// both accounts can fetch it
+	if _, err := store.PinnedSlab(acc1, slabID); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.PinnedSlab(acc2, slabID); err != nil {
+		t.Fatal(err)
+	}
+
+	// acc1 unpins the slab; the row is only queued for deletion, not removed yet
+	if err := store.UnpinSlab(acc1, slabID); err != nil {
+		t.Fatal(err)
+	}
+
+	// acc1 no longer pins the slab, so it must not be returned
+	if _, err := store.PinnedSlab(acc1, slabID); !errors.Is(err, slabs.ErrSlabNotFound) {
+		t.Fatalf("expected ErrSlabNotFound for unpinned slab, got %v", err)
+	}
+	// acc2 still pins it, so it remains fetchable
+	if _, err := store.PinnedSlab(acc2, slabID); err != nil {
+		t.Fatalf("expected acc2 to still fetch the slab, got %v", err)
+	}
+
+	// a slab the account never pinned is also not found
+	if _, err := store.PinnedSlab(proto.Account{3}, slabID); !errors.Is(err, slabs.ErrSlabNotFound) {
+		t.Fatalf("expected ErrSlabNotFound for unknown account, got %v", err)
+	}
+}
+
 func TestSlabPruning(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
@@ -390,6 +437,260 @@ func TestSlabPruning(t *testing.T) {
 	assertSlabs(acc2)
 }
 
+// pinTestSlabs pins params for account, failing the test on error.
+func (s *Store) pinTestSlabs(t testing.TB, account proto.Account, params ...slabs.SlabPinParams) []slabs.SlabID {
+	t.Helper()
+	ids, err := s.PinSlabs(account, time.Time{}, params...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ids
+}
+
+// newTestSlab builds a slab on host hk with the given sectors, padded to two
+// sectors with fresh unique roots.
+func newTestSlab(hk types.PublicKey, sectors ...slabs.PinnedSector) slabs.SlabPinParams {
+	for len(sectors) < 2 {
+		sectors = append(sectors, slabs.PinnedSector{Root: frand.Entropy256(), HostKey: hk})
+	}
+	return slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       sectors,
+	}
+}
+
+// newTestPinParams builds n slabs, each with two unique sectors, on host hk.
+func newTestPinParams(n int, hk types.PublicKey) []slabs.SlabPinParams {
+	params := make([]slabs.SlabPinParams, n)
+	for i := range params {
+		params[i] = newTestSlab(hk)
+	}
+	return params
+}
+
+// TestSlabPruningConcurrent runs two pruners in parallel that together remove
+// the last reference to every slab and sector; nothing must be left behind.
+func TestSlabPruningConcurrent(t *testing.T) {
+	const (
+		rounds = 5
+		nSlabs = 50
+	)
+	cutoff := time.Now().Add(time.Hour) // all slabs eligible for pruning
+
+	store := initPostgres(t, zap.NewNop())
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	store.addTestAccount(t, types.PublicKey(acc1))
+	store.addTestAccount(t, types.PublicKey(acc2))
+
+	// assertSlabsPruned asserts no slabs or sectors remain, the deletion queue is
+	// empty and the stat counters have returned to zero.
+	assertSlabsPruned := func(t testing.TB) {
+		t.Helper()
+
+		var slabCount, sectorCount, queued int64
+		err := store.pool.QueryRow(t.Context(), `SELECT
+			(SELECT COUNT(*) FROM slabs),
+			(SELECT COUNT(*) FROM sectors),
+			(SELECT COUNT(*) FROM slab_deletion_queue)`).Scan(&slabCount, &sectorCount, &queued)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slabCount != 0 || sectorCount != 0 || queued != 0 {
+			t.Fatalf("after pruning: %d slabs, %d sectors, %d queued for deletion", slabCount, sectorCount, queued)
+		}
+
+		stats, err := store.SectorStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stats.Slabs != 0 || stats.Pinned != 0 || stats.Unpinned != 0 || stats.Unpinnable != 0 {
+			t.Fatalf("stats not zeroed after pruning: slabs=%d pinned=%d unpinned=%d unpinnable=%d", stats.Slabs, stats.Pinned, stats.Unpinned, stats.Unpinnable)
+		}
+	}
+
+	pruneSlabs := func(account proto.Account) func() error {
+		return func() error { return store.PruneSlabs(account, cutoff) }
+	}
+
+	// each case pins a round's worth of slabs and returns the prune funcs to run
+	// concurrently
+	tests := []struct {
+		name    string
+		prepare func(t testing.TB) []func() error
+	}{
+		{
+			// both accounts pin the same slabs, so the last reference to each slab
+			// is removed concurrently
+			name: "shared slabs",
+			prepare: func(t testing.TB) []func() error {
+				params := newTestPinParams(nSlabs, hk)
+				store.pinTestSlabs(t, acc1, params...)
+				store.pinTestSlabs(t, acc2, params...)
+				return []func() error{pruneSlabs(acc1), pruneSlabs(acc2)}
+			},
+		},
+		{
+			// each account pins its own slabs that share a sector, so the last slab
+			// referencing each sector is removed concurrently
+			name: "shared sectors",
+			prepare: func(t testing.TB) []func() error {
+				p1 := make([]slabs.SlabPinParams, nSlabs)
+				p2 := make([]slabs.SlabPinParams, nSlabs)
+				for i := range p1 {
+					shared := slabs.PinnedSector{Root: frand.Entropy256(), HostKey: hk}
+					p1[i] = newTestSlab(hk, shared)
+					p2[i] = newTestSlab(hk, shared)
+				}
+				store.pinTestSlabs(t, acc1, p1...)
+				store.pinTestSlabs(t, acc2, p2...)
+				return []func() error{pruneSlabs(acc1), pruneSlabs(acc2)}
+			},
+		},
+		{
+			// a soft-deleted account is pruned (same staging path) while acc2 prunes
+			name: "account pruning",
+			prepare: func(t testing.TB) []func() error {
+				del := proto.Account(types.GeneratePrivateKey().PublicKey())
+				store.addTestAccount(t, types.PublicKey(del))
+				params := newTestPinParams(nSlabs, hk)
+				store.pinTestSlabs(t, del, params...)
+				store.pinTestSlabs(t, acc2, params...)
+				if err := store.DeleteAccount(del); err != nil {
+					t.Fatal(err)
+				}
+				return []func() error{
+					func() error {
+						for {
+							if err := store.PruneAccounts(2 * nSlabs); errors.Is(err, accounts.ErrNotFound) {
+								return nil
+							} else if err != nil {
+								return err
+							}
+						}
+					},
+					pruneSlabs(acc2),
+				}
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for range rounds {
+				store.runConcurrentPrune(t, 2*nSlabs, tt.prepare(t)...)
+				assertSlabsPruned(t)
+			}
+		})
+	}
+}
+
+// TestSlabRepinDuringPrune re-pins slabs while acc1 is being pruned. acc2 ends
+// up pinning every slab, so the locks in deleteOrphanedSlabs must keep all slabs
+// and sectors alive.
+func TestSlabRepinDuringPrune(t *testing.T) {
+	const (
+		rounds         = 30
+		numSlabs       = 100
+		sectorsPerSlab = 2
+		repinBatch     = 5 // small batches widen the interleaving window
+	)
+	cutoff := time.Now().Add(time.Hour) // all slabs eligible for pruning
+
+	store := initPostgres(t, zap.NewNop())
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	store.addTestAccount(t, types.PublicKey(acc1))
+	store.addTestAccount(t, types.PublicKey(acc2))
+
+	// assertSlabsIntact asserts exactly wantSlabs slabs remain, each with
+	// sectorsPerSlab sectors and no orphaned sectors.
+	assertSlabsIntact := func(t testing.TB, wantSlabs, sectorsPerSlab int) {
+		t.Helper()
+
+		var slabCount, shortSlabs, orphanedSectors int64
+		err := store.pool.QueryRow(t.Context(), `SELECT
+			(SELECT COUNT(*) FROM slabs),
+			(SELECT COUNT(*) FROM slabs s WHERE (SELECT COUNT(*) FROM slab_sectors ss WHERE ss.slab_id = s.id) <> $1),
+			(SELECT COUNT(*) FROM sectors se WHERE NOT EXISTS (SELECT 1 FROM slab_sectors ss WHERE ss.sector_id = se.id))`,
+			sectorsPerSlab).Scan(&slabCount, &shortSlabs, &orphanedSectors)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slabCount != int64(wantSlabs) || shortSlabs != 0 || orphanedSectors != 0 {
+			t.Fatalf("want %d intact slabs with %d sectors each; got slabs=%d slabsMissingSectors=%d orphanedSectors=%d",
+				wantSlabs, sectorsPerSlab, slabCount, shortSlabs, orphanedSectors)
+		}
+	}
+
+	// each case returns acc1's slabs and the slabs acc2 re-pins concurrently
+	tests := []struct {
+		name   string
+		params func() (p1, p2 []slabs.SlabPinParams)
+	}{
+		{
+			// acc2 re-pins the exact same slabs; the slabs lock serializes the
+			// prune against the re-pin
+			name: "same digest",
+			params: func() (p1, p2 []slabs.SlabPinParams) {
+				p1 = newTestPinParams(numSlabs, hk)
+				return p1, p1
+			},
+		},
+		{
+			// acc2 pins different-digest slabs that reuse acc1's sector roots; only
+			// the sectors lock keeps the shared sectors alive
+			name: "shared sector",
+			params: func() (p1, p2 []slabs.SlabPinParams) {
+				p1 = make([]slabs.SlabPinParams, numSlabs)
+				p2 = make([]slabs.SlabPinParams, numSlabs)
+				for i := range p1 {
+					shared := slabs.PinnedSector{Root: frand.Entropy256(), HostKey: hk}
+					p1[i] = newTestSlab(hk, shared)
+					p2[i] = newTestSlab(hk, shared)
+				}
+				return p1, p2
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for range rounds {
+				p1, p2 := tt.params()
+				store.pinTestSlabs(t, acc1, p1...)
+
+				store.runConcurrentPrune(t, 2*numSlabs,
+					func() error { return store.PruneSlabs(acc1, cutoff) },
+					func() error {
+						// re-pin in small batches so the prune loop interleaves
+						// with the inserts
+						for i := 0; i < len(p2); i += repinBatch {
+							if _, err := store.PinSlabs(acc2, time.Time{}, p2[i:min(i+repinBatch, len(p2))]...); err != nil {
+								return err
+							}
+						}
+						return nil
+					},
+				)
+
+				assertSlabsIntact(t, numSlabs, sectorsPerSlab)
+
+				// clean up for the next round
+				if err := store.PruneSlabs(acc2, cutoff); err != nil {
+					t.Fatal(err)
+				}
+				store.pruneAllDeletedSlabs(t)
+			}
+		})
+	}
+}
+
 func BenchmarkPruneSlabs(b *testing.B) {
 	const (
 		numAccounts       = 1000
@@ -460,6 +761,71 @@ func BenchmarkPruneSlabs(b *testing.B) {
 
 		if err := store.PruneSlabs(accs[frand.Intn(len(accs))], time.Now()); err != nil {
 			b.Fatal(err)
+		}
+	}
+}
+
+// pruneAllDeletedSlabs runs PruneDeletedSlabs until none remain, so tests can
+// force the queued slabs and their orphaned sectors to actually be removed.
+func (s *Store) pruneAllDeletedSlabs(t testing.TB) {
+	t.Helper()
+	for {
+		n, err := s.PruneDeletedSlabs(100)
+		if err != nil {
+			t.Fatal(err)
+		} else if n == 0 {
+			break
+		}
+	}
+}
+
+// runConcurrentPrune runs fns concurrently while a background goroutine prunes
+// the deletion queue, then stops the pruner and does a final synchronous prune.
+func (s *Store) runConcurrentPrune(t testing.TB, pruneBatch int, fns ...func() error) {
+	t.Helper()
+
+	errCh := make(chan error, len(fns)+1)
+	start := make(chan struct{})
+	stopPrune := make(chan struct{})
+
+	var pruneWG sync.WaitGroup
+	pruneWG.Go(func() {
+		<-start
+		for {
+			select {
+			case <-stopPrune:
+				return
+			default:
+			}
+			if _, err := s.PruneDeletedSlabs(pruneBatch); err != nil {
+				errCh <- err
+				return
+			}
+		}
+	})
+
+	var wg sync.WaitGroup
+	for _, fn := range fns {
+		wg.Go(func() {
+			<-start
+			if err := fn(); err != nil {
+				errCh <- err
+			}
+		})
+	}
+	close(start)
+
+	wg.Wait()
+	close(stopPrune)
+	pruneWG.Wait()
+
+	// clear anything queued after the pruner last looped
+	s.pruneAllDeletedSlabs(t)
+
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 }

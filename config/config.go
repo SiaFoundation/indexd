@@ -58,7 +58,8 @@ type (
 		// MigrationWorkers is the number of slabs to migrate in parallel. If
 		// zero, defaults to runtime.NumCPU().
 		MigrationWorkers int `yaml:"migrationWorkers"`
-		// Migrations enables the slab-migration loop. Enabled by default.
+		// Migrations enables the slab-migration loop. Enabled by default; set
+		// to false to outsource migrations to a remote node.
 		Migrations bool `yaml:"migrations"`
 	}
 
