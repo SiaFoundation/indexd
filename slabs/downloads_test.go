@@ -21,7 +21,6 @@ import (
 func TestDownloadShards(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	store := newMockStore(t)
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	hm := newMockHostManager()
 	client := newMockHostClient()
@@ -66,7 +65,7 @@ func TestDownloadShards(t *testing.T) {
 	}
 
 	account := types.GeneratePrivateKey()
-	sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
+	sm := slabs.NewSlabManager(am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
 
 	// assert that not enough usable hosts results in errNotEnoughShards
 	t.Run("not enough usable hosts", func(t *testing.T) {
@@ -170,7 +169,6 @@ func TestDownloadShardsDemotion(t *testing.T) {
 	setup := func(t *testing.T, numHosts int, minShards uint) (*slabs.SlabManager, *mockHostClient, []hosts.Host, slabs.Slab) {
 		log := zaptest.NewLogger(t)
 		store := newMockStore(t)
-		chain := newMockChainManager()
 		am := newMockAccountManager()
 		hm := newMockHostManager()
 		client := newMockHostClient()
@@ -195,7 +193,7 @@ func TestDownloadShardsDemotion(t *testing.T) {
 		}
 
 		account := types.GeneratePrivateKey()
-		sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
+		sm := slabs.NewSlabManager(am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
 		sm.SetShardTimeout(2 * time.Second)
 		return sm, client, hs, slab
 	}

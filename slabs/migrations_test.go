@@ -25,7 +25,6 @@ func TestMigrateSlab(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := newMockStore(t)
 	contractsMgr := newMockContractManager()
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	hm := newMockHostManager()
 
@@ -94,7 +93,7 @@ func TestMigrateSlab(t *testing.T) {
 	msk := types.GeneratePrivateKey()
 	ssk := types.GeneratePrivateKey()
 	alerter := alerts.NewManager()
-	mgr := slabs.NewSlabManager(chain, am, contractsMgr, hm, db, client, alerter, msk, ssk, slabs.WithLogger(log.Named("slabs")), slabs.WithMinHostDistance(0))
+	mgr := slabs.NewSlabManager(am, contractsMgr, hm, db, client, alerter, msk, ssk, slabs.WithLogger(log.Named("slabs")), slabs.WithMinHostDistance(0))
 
 	for _, h := range hostsList {
 		if err := am.UpdateServiceAccountBalance(h.PublicKey, mgr.MigrationAccount(), types.Siacoins(10)); err != nil {
@@ -404,7 +403,6 @@ func BenchmarkMigrateSlab(b *testing.B) {
 		b.Helper()
 		b.Run(fmt.Sprintf("bad %d fail %d block %d", badShards, nFailHosts, nBlockHosts), func(b *testing.B) {
 			db := newMockStore(b, withStoreLogger(zap.NewNop()))
-			chain := newMockChainManager()
 			am := newMockAccountManager()
 			hm := newMockHostManager()
 			client := newMockHostClient()
@@ -502,7 +500,7 @@ func BenchmarkMigrateSlab(b *testing.B) {
 
 			// create slab manager
 			alerter := alerts.NewManager()
-			mgr := slabs.NewSlabManager(chain, am, contractsMgr, hm, db, client, alerter,
+			mgr := slabs.NewSlabManager(am, contractsMgr, hm, db, client, alerter,
 				types.GeneratePrivateKey(), types.GeneratePrivateKey(),
 				slabs.WithLogger(zap.NewNop()),
 				slabs.WithMinHostDistance(0),

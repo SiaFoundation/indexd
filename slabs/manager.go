@@ -44,7 +44,6 @@ type (
 		runMigrations      bool
 
 		alerter AlertsManager
-		chain   ChainManager
 		am      AccountManager
 		cm      ContractManager
 		hm      HostManager
@@ -55,11 +54,6 @@ type (
 
 		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
-	}
-
-	// ChainManager provides information about the current chain state.
-	ChainManager interface {
-		Tip() types.ChainIndex
 	}
 
 	// AccountManager defines the SlabManager's dependencies on the account
@@ -133,6 +127,7 @@ type (
 		Slab(slabID SlabID) (slab Slab, err error)
 		Slabs(account proto.Account, slabIDs []SlabID) ([]Slab, error)
 		SlabIDs(account proto.Account, offset, limit int) ([]SlabID, error)
+		Tip() (types.ChainIndex, error)
 		UnhealthySlabs(cursor int64, limit int) ([]SlabID, int64, error)
 		PruneSlabs(account proto.Account, cutoff time.Time) error
 
@@ -256,8 +251,8 @@ func DeriveAccountKeys(walletKey types.PrivateKey) (migration, integrity types.P
 }
 
 // NewManager creates a new slab manager.
-func NewManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
-	sm := newSlabManager(chain, am, cm, hm, store, hosts, alerter, migrationAccount, integrityAccount, opts...)
+func NewManager(am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+	sm := newSlabManager(am, cm, hm, store, hosts, alerter, migrationAccount, integrityAccount, opts...)
 
 	ctx, cancel, err := sm.tg.AddContext(context.Background())
 	if err != nil {
@@ -272,7 +267,7 @@ func NewManager(chain ChainManager, am AccountManager, cm ContractManager, hm Ho
 	return sm, nil
 }
 
-func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) *SlabManager {
+func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) *SlabManager {
 	m := &SlabManager{
 		healthCheckInterval: time.Minute,
 
@@ -292,7 +287,6 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 		runIntegrityChecks: true,
 		runMigrations:      true,
 
-		chain:   chain,
 		am:      am,
 		cm:      cm,
 		hosts:   hosts,

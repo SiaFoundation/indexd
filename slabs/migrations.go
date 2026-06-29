@@ -54,7 +54,11 @@ func (m *SlabManager) fetchMigrationState() (state migrationState, err error) {
 	}
 
 	// fetch chain height
-	state.Height = m.chain.Tip().Height
+	tip, err := m.store.Tip()
+	if err != nil {
+		return state, fmt.Errorf("failed to fetch consensus tip: %w", err)
+	}
+	state.Height = tip.Height
 	return state, nil
 }
 

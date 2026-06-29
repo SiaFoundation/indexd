@@ -24,7 +24,6 @@ func TestUploadShards(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	// prepare dependencies
 	store := newMockStore(t)
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
@@ -61,7 +60,7 @@ func TestUploadShards(t *testing.T) {
 
 	// create manager
 	alerter := alerts.NewManager()
-	sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerter, account, types.GeneratePrivateKey())
+	sm := slabs.NewSlabManager(am, nil, hm, store, client, alerter, account, types.GeneratePrivateKey())
 	sm.SetShardTimeout(50 * time.Millisecond)
 
 	// set balance to 1SC
@@ -177,7 +176,6 @@ func TestUploadShards(t *testing.T) {
 func TestUploadShardsDemotion(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	store := newMockStore(t)
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
@@ -197,7 +195,7 @@ func TestUploadShardsDemotion(t *testing.T) {
 	shards := [][]byte{sector[:]}
 	slab := slabs.Slab{Sectors: []slabs.Sector{{Root: root}}}
 
-	sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey())
+	sm := slabs.NewSlabManager(am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey())
 	sm.SetShardTimeout(2 * time.Second)
 
 	for _, hk := range available {

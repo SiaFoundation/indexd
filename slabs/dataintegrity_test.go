@@ -33,7 +33,6 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 
 	// prepare managers
 	store := newMockStore(t)
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	cm := newMockContractManager()
 	hm := newMockHostManager()
@@ -45,7 +44,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	acc := proto.Account(sk.PublicKey())
 
 	// prepare slab manager
-	sm := slabs.NewSlabManager(chain, am, cm, hm, store, client, nil, sk, sk, slabs.WithIntegrityCheckIntervals(time.Millisecond, time.Millisecond))
+	sm := slabs.NewSlabManager(am, cm, hm, store, client, nil, sk, sk, slabs.WithIntegrityCheckIntervals(time.Millisecond, time.Millisecond))
 
 	// prepare helper to reset balance to 3SC to avoid running out of funds
 	resetBalance := func() {
@@ -154,7 +153,6 @@ func TestIntegrityChecksVerifyTimeout(t *testing.T) {
 
 	// prepare managers
 	store := newMockStore(t)
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	cm := newMockContractManager()
 	hm := newMockHostManager()
@@ -166,7 +164,7 @@ func TestIntegrityChecksVerifyTimeout(t *testing.T) {
 	acc := proto.Account(sk.PublicKey())
 
 	// prepare slab manager with a short verify timeout
-	sm := slabs.NewSlabManager(chain, am, cm, hm, store, client, nil, sk, sk, slabs.WithIntegrityCheckIntervals(time.Millisecond, time.Millisecond), slabs.WithIntegrityCheckTimeout(200*time.Millisecond))
+	sm := slabs.NewSlabManager(am, cm, hm, store, client, nil, sk, sk, slabs.WithIntegrityCheckIntervals(time.Millisecond, time.Millisecond), slabs.WithIntegrityCheckTimeout(200*time.Millisecond))
 
 	// prepare sectors
 	roots := make([]types.Hash256, 3)
@@ -209,7 +207,7 @@ func TestIntegrityChecksVerifyTimeout(t *testing.T) {
 func TestIntegrityChecksAlert(t *testing.T) {
 	store := newMockStore(t)
 	alerter := alerts.NewManager()
-	sm := slabs.NewSlabManager(newMockChainManager(), newMockAccountManager(), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
+	sm := slabs.NewSlabManager(newMockAccountManager(), nil, nil, store, nil, alerter, types.GeneratePrivateKey(), types.GeneratePrivateKey())
 
 	// assert there are no alerts
 	if alerts, err := alerter.Alerts(0, math.MaxInt64); err != nil {
