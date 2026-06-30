@@ -299,11 +299,11 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			var slabID int64
 			var existingSlab bool
 			err = tx.QueryRow(ctx, `
-			INSERT INTO slabs (digest, encryption_key, min_shards)
-			VALUES ($1, $2, $3)
+			INSERT INTO slabs (digest, encryption_key, min_shards, version)
+			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (digest) DO UPDATE SET pinned_at = NOW()
 			RETURNING id, (xmax <> 0)
-			`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards).Scan(&slabID, &existingSlab)
+			`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards, slab.Version).Scan(&slabID, &existingSlab)
 			if err != nil {
 				return err
 			}
@@ -686,14 +686,14 @@ func (s *Store) Slabs(account proto.Account, slabIDs []slabs.SlabID) ([]slabs.Sl
 		var dbIDs []int64
 		slabBatch := &pgx.Batch{}
 		for i, slabID := range slabIDs {
-			slabBatch.Queue(`SELECT s.id, s.encryption_key, s.min_shards, s.pinned_at
+			slabBatch.Queue(`SELECT s.id, s.encryption_key, s.min_shards, s.version, s.pinned_at
 				FROM slabs s
 				INNER JOIN account_slabs ac ON s.id = ac.slab_id
 				INNER JOIN accounts a ON a.id = ac.account_id
 				WHERE digest = $1 AND a.public_key = $2`, sqlHash256(slabID), sqlPublicKey(account)).QueryRow(func(row pgx.Row) error {
 				results[i].ID = slabID
 				var dbID int64
-				if err := row.Scan(&dbID, (*sqlHash256)(&results[i].EncryptionKey), &results[i].MinShards, &results[i].PinnedAt); err != nil {
+				if err := row.Scan(&dbID, (*sqlHash256)(&results[i].EncryptionKey), &results[i].MinShards, &results[i].Version, &results[i].PinnedAt); err != nil {
 					if errors.Is(err, sql.ErrNoRows) {
 						err = slabs.ErrSlabNotFound
 					}
