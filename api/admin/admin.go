@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
@@ -134,6 +135,10 @@ type (
 		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
 		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
 		SectorStats() (slabs.SectorsStats, error)
+
+		// migration endpoints used by remote nodes
+		PrepareMigrationJobs(cursor int64, limit int) ([]slabs.MigrationJob, int64, error)
+		ApplyMigrationResults(results []slabs.MigrationResult) error
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -256,6 +261,11 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"PUT /settings/hosts":        a.handlePUTSettingsHosts,
 		"GET /settings/pricepinning": a.handleGETSettingsPricePinning,
 		"PUT /settings/pricepinning": a.handlePUTSettingsPricePinning,
+
+		// migration endpoints used by remote nodes to fetch and report on
+		// slab-migration work
+		"GET  /migrations/jobs":    a.handleGETMigrationJobs,
+		"POST /migrations/results": a.handlePOSTMigrationResults,
 
 		// syncer endpoints
 		"POST /syncer/connect": a.handlePOSTSyncerConnect,
@@ -766,6 +776,81 @@ func (a *admin) handleGETState(jc jape.Context) {
 		SyncHeight: ts.Index.Height,
 		Synced:     time.Since(ts.PrevTimestamps[0]) <= 3*time.Hour,
 	})
+}
+
+// handleGETMigrationJobs returns a batch of prepared slab-migration jobs for a
+// remote node, resolving the connection info for every host the remote needs to
+// reach (download sources and upload candidates).
+func (a *admin) handleGETMigrationJobs(jc jape.Context) {
+	var cursor int64
+	if jc.DecodeForm("cursor", &cursor) != nil {
+		return
+	}
+	limit := 100
+	if jc.DecodeForm("limit", &limit) != nil {
+		return
+	} else if limit < 1 {
+		jc.Error(errors.New("limit must be positive"), http.StatusBadRequest)
+		return
+	}
+
+	jobs, nextCursor, err := a.slabs.PrepareMigrationJobs(cursor, limit)
+	if !a.checkServerError(jc, "failed to prepare migration jobs", err) {
+		return
+	}
+
+	ctx := jc.Request.Context()
+	addrCache := make(map[types.PublicKey][]chain.NetAddress)
+	resolve := func(hk types.PublicKey) ([]chain.NetAddress, bool) {
+		if addrs, ok := addrCache[hk]; ok {
+			return addrs, len(addrs) > 0
+		}
+		host, err := a.hosts.Host(ctx, hk)
+		if err != nil {
+			// host may have been pruned; cache the miss and skip it as a
+			// connection target.
+			addrCache[hk] = nil
+			return nil, false
+		}
+		addrCache[hk] = host.Addresses
+		return host.Addresses, len(host.Addresses) > 0
+	}
+
+	for i := range jobs {
+		seen := make(map[types.PublicKey]struct{})
+		addHost := func(hk types.PublicKey) {
+			if _, ok := seen[hk]; ok {
+				return
+			}
+			seen[hk] = struct{}{}
+			if addrs, ok := resolve(hk); ok {
+				jobs[i].Hosts = append(jobs[i].Hosts, slabs.HostConn{PublicKey: hk, Addresses: addrs})
+			}
+		}
+		for _, sector := range jobs[i].Slab.Sectors {
+			if sector.HostKey != nil {
+				addHost(*sector.HostKey)
+			}
+		}
+		for _, hk := range jobs[i].Candidates {
+			addHost(hk)
+		}
+	}
+
+	jc.Encode(MigrationJobsResponse{Jobs: jobs, NextCursor: nextCursor})
+}
+
+// handlePOSTMigrationResults persists the outcomes of migration jobs reported
+// by a remote node.
+func (a *admin) handlePOSTMigrationResults(jc jape.Context) {
+	var results []slabs.MigrationResult
+	if jc.Decode(&results) != nil {
+		return
+	}
+	if !a.checkServerError(jc, "failed to apply migration results", a.slabs.ApplyMigrationResults(results)) {
+		return
+	}
+	jc.Encode(nil)
 }
 
 func (a *admin) handlePOSTSyncerConnect(jc jape.Context) {

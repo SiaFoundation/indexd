@@ -24,11 +24,11 @@ var (
 	NewLostSectorsAlert = newLostSectorsAlert
 )
 
-func (m *SlabManager) UploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) (int, error) {
+func (m *SlabManager) UploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) ([]Shard, error) {
 	return m.uploadShards(ctx, slab, shards, available, log)
 }
 
-func (m *SlabManager) RecoverShards(ctx context.Context, slab Slab, required []bool, log *zap.Logger) ([][]byte, error) {
+func (m *SlabManager) RecoverShards(ctx context.Context, slab Slab, required []bool, log *zap.Logger) ([][]byte, []Shard, error) {
 	return m.recoverShards(ctx, slab, required, log)
 }
 

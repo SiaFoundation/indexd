@@ -4,57 +4,50 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
+	"sync"
+	"time"
 
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/wallet"
-	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
+	adminapi "go.sia.tech/indexd/api/admin"
 	client "go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/config"
-	"go.sia.tech/indexd/contracts"
-	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 )
 
-// runRemoteCmd runs a remote worker that connects to an existing indexd's
-// database and only runs slab migrations. It serves no API and runs no syncer,
-// consensus, subscriber, wallet or contract maintenance. Service accounts are
-// kept funded on hosts by the primary node; the remote derives the same account
-// keys from the shared recovery phrase and spends from those host-side accounts.
+// remoteJobBatchSize is the number of migration jobs a remote node fetches from
+// the primary node per request.
+const remoteJobBatchSize = 100
+
+// remoteMigrationInterval is how long a remote node waits between passes once it
+// has worked through all currently-unhealthy slabs.
+const remoteMigrationInterval = time.Minute
+
+// runRemoteCmd runs a remote worker that helps the primary indexd migrate
+// unhealthy slabs. It holds no database connection: it fetches prepared
+// migration jobs from the primary node's admin API, downloads and re-uploads the
+// affected shards itself, and reports the results back for the primary to
+// persist. Service accounts are funded on hosts by the primary node; the remote
+// derives the same account keys from the shared recovery phrase and spends from
+// those host-side accounts.
 func runRemoteCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateKey, log *zap.Logger) error {
-	store, err := postgres.NewStore(ctx, cfg.Database, contracts.DefaultMaintenanceSettings, hosts.DefaultUsabilitySettings, log.Named("postgres"))
-	if err != nil {
-		return fmt.Errorf("failed to create postgres store: %w", err)
-	}
-	defer store.Close()
-
-	// ensure the configured recovery phrase matches the primary node's wallet
-	// so the derived migration account key lines up with the host-side accounts
-	// the primary funds.
-	walletHash := types.HashBytes(walletKey[:])
-	if err := store.VerifyWalletKey(walletHash); errors.Is(err, wallet.ErrDifferentSeed) {
-		return errors.New("wallet seed does not match the primary node's database")
-	} else if err != nil {
-		return fmt.Errorf("failed to verify wallet key: %w", err)
+	if cfg.Remote.Address == "" {
+		return errors.New("remote.address must be set to the primary node's admin API URL")
 	}
 
-	alerter := alerts.NewManager()
+	primary := adminapi.NewClient(cfg.Remote.Address, cfg.Remote.Password)
 
-	am, err := accounts.NewManager(store, accounts.WithLogger(log.Named("accounts")))
-	if err != nil {
-		return fmt.Errorf("failed to create accounts manager: %w", err)
-	}
-	defer am.Close()
-
-	hostClient := client.New(client.NewProvider(hosts.NewHostStore(store)), log.Named("client"))
+	// note: the recovery phrase must match the primary node's so the derived
+	// migration account key lines up with the host-side accounts the primary
+	// funds. A mismatch is not fatal: the host accounts simply go unfunded and
+	// surface as insufficient-balance errors in the logs.
+	directory := newRemoteHostDirectory()
+	hostClient := client.New(client.NewProvider(directory), log.Named("client"))
 	defer hostClient.Close()
 
-	cm := &remoteContractManager{store: store}
-	hm := &remoteHostManager{store: store, client: hostClient}
-
+	am := newInMemoryServiceAccounts()
 	migrationKey, integrityKey := slabs.DeriveAccountKeys(walletKey)
 
 	slabOpts := []slabs.Option{
@@ -66,48 +59,86 @@ func runRemoteCmd(ctx context.Context, cfg config.Config, walletKey types.Privat
 		slabOpts = append(slabOpts, slabs.WithNumMigrationGoroutines(cfg.Slabs.MigrationWorkers))
 	}
 
-	sm, err := slabs.NewManager(am, cm, hm, store, hostClient, alerter, migrationKey, integrityKey, slabOpts...)
-	if err != nil {
-		return fmt.Errorf("failed to create slabs manager: %w", err)
-	}
+	alerter := alerts.NewManager()
+	sm := slabs.NewRemoteManager(am, alwaysUsableHostManager{}, hostClient, alerter, migrationKey, integrityKey, slabOpts...)
 	defer sm.Close()
 
-	log.Info("remote node started")
-	<-ctx.Done()
+	workers := cfg.Slabs.MigrationWorkers
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+
+	log.Info("remote node started", zap.String("primary", cfg.Remote.Address), zap.Int("workers", workers))
+	runRemoteMigrationLoop(ctx, primary, directory, sm, workers, log.Named("migrations"))
 	log.Info("shutting down")
 	return nil
 }
 
-// remoteContractManager satisfies slabs.ContractManager using only the shared
-// database. It does not run any contract maintenance; account funding is
-// performed proactively by the primary node.
-type remoteContractManager struct {
-	store *postgres.Store
-}
-
-// HealthyContracts returns all revisable, good contracts from the store.
-func (m *remoteContractManager) HealthyContracts() ([]contracts.Contract, error) {
-	return contracts.HealthyContracts(m.store)
-}
-
-// TriggerAccountRefill marks the account for funding in the shared database.
-// The primary node's funding loop picks it up; the remote does no funding
-// itself.
-func (m *remoteContractManager) TriggerAccountRefill(ctx context.Context, hostKey types.PublicKey, account proto.Account) error {
-	if err := m.store.ScheduleAccountForFunding(hostKey, account); err != nil {
-		return fmt.Errorf("failed to schedule account for funding: %w", err)
+// runRemoteMigrationLoop repeatedly works through all currently-unhealthy slabs,
+// pausing between passes.
+func runRemoteMigrationLoop(ctx context.Context, primary *adminapi.Client, directory *remoteHostDirectory, sm *slabs.SlabManager, workers int, log *zap.Logger) {
+	ticker := time.NewTicker(remoteMigrationInterval)
+	defer ticker.Stop()
+	for {
+		if err := runRemoteMigrationPass(ctx, primary, directory, sm, workers, log); err != nil {
+			if ctx.Err() != nil {
+				return
+			}
+			log.Error("migration pass failed", zap.Error(err))
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
 	}
-	return nil
 }
 
-// remoteHostManager satisfies slabs.HostManager by delegating to hosts.Usable,
-// so the remote shares the exact usability logic of a full node.
-type remoteHostManager struct {
-	store  *postgres.Store
-	client *client.Client
-}
+// runRemoteMigrationPass pages through all unhealthy slabs the primary node has,
+// fetching prepared jobs, executing them and reporting the results back.
+func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, directory *remoteHostDirectory, sm *slabs.SlabManager, workers int, log *zap.Logger) error {
+	var cursor int64
+	for {
+		resp, err := primary.MigrationJobs(ctx, cursor, remoteJobBatchSize)
+		if err != nil {
+			return fmt.Errorf("failed to fetch migration jobs: %w", err)
+		}
+		log.Debug("fetched migration jobs", zap.Int("jobs", len(resp.Jobs)), zap.Int64("cursor", cursor), zap.Int64("nextCursor", resp.NextCursor))
 
-// Usable reports whether the host is usable for slab operations.
-func (m *remoteHostManager) Usable(ctx context.Context, hostKey types.PublicKey) (bool, error) {
-	return hosts.Usable(ctx, m.store, m.client, hostKey)
+		results := make([]slabs.MigrationResult, len(resp.Jobs))
+		var wg sync.WaitGroup
+		sema := make(chan struct{}, workers)
+		for i, job := range resp.Jobs {
+			directory.learn(job.Hosts)
+			select {
+			case <-ctx.Done():
+				wg.Wait()
+				return ctx.Err()
+			case sema <- struct{}{}:
+			}
+			wg.Add(1)
+			go func(i int, job slabs.MigrationJob) {
+				defer wg.Done()
+				defer func() { <-sema }()
+				results[i] = sm.MigrateJob(ctx, job)
+			}(i, job)
+		}
+		wg.Wait()
+
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		if len(results) > 0 {
+			if err := primary.ApplyMigrationResults(ctx, results); err != nil {
+				return fmt.Errorf("failed to report migration results: %w", err)
+			}
+		}
+
+		// a next cursor of 0 means there are no more unhealthy slabs
+		if resp.NextCursor == 0 {
+			return nil
+		}
+		cursor = resp.NextCursor
+	}
 }

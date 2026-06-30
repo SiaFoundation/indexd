@@ -116,8 +116,8 @@ func TestUploadShards(t *testing.T) {
 	uploaded, err := sm.UploadShards(context.Background(), slab, shards, availableHosts[:3], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	} else if uploaded != 3 {
-		t.Fatalf("expected 3 uploaded shards, got %d", uploaded)
+	} else if len(uploaded) != 3 {
+		t.Fatalf("expected 3 uploaded shards, got %d", len(uploaded))
 	}
 	assertSectors(t, []types.Hash256{root1, root2, root3}, 3, nil)
 
@@ -135,8 +135,8 @@ func TestUploadShards(t *testing.T) {
 	uploaded, err = sm.UploadShards(context.Background(), slab, shards, availableHosts[:2], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	} else if uploaded != 2 {
-		t.Fatalf("expected 2 uploaded shards, got %d", uploaded)
+	} else if len(uploaded) != 2 {
+		t.Fatalf("expected 2 uploaded shards, got %d", len(uploaded))
 	}
 	assertSectors(t, []types.Hash256{root1, root2, root3}, 2, nil) // all are possible, but only 2 should be succeed
 
@@ -145,8 +145,8 @@ func TestUploadShards(t *testing.T) {
 	uploaded, err = sm.UploadShards(context.Background(), slab, shards, availableHosts, log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	} else if uploaded != 3 {
-		t.Fatalf("expected 3 uploaded shards, got %d", uploaded)
+	} else if len(uploaded) != 3 {
+		t.Fatalf("expected 3 uploaded shards, got %d", len(uploaded))
 	}
 	assertSectors(t, []types.Hash256{root1, root2, root3}, 3, nil)
 
@@ -157,8 +157,8 @@ func TestUploadShards(t *testing.T) {
 	uploaded, err = sm.UploadShards(context.Background(), corrupted, shards, availableHosts, log)
 	if err != nil {
 		t.Fatal(err)
-	} else if uploaded >= 3 {
-		t.Fatalf("expected fewer uploaded shards, got %d", uploaded)
+	} else if len(uploaded) >= 3 {
+		t.Fatalf("expected fewer uploaded shards, got %d", len(uploaded))
 	}
 	for _, stored := range client.hostSectors {
 		for root := range stored {
@@ -214,8 +214,8 @@ func TestUploadShardsDemotion(t *testing.T) {
 		uploaded, err := sm.UploadShards(context.Background(), slab, shards, available, log)
 		if err != nil {
 			t.Fatal(err)
-		} else if uploaded != 1 {
-			t.Fatalf("expected 1 uploaded shard, got %d", uploaded)
+		} else if len(uploaded) != 1 {
+			t.Fatalf("expected 1 uploaded shard, got %d", len(uploaded))
 		}
 	})
 

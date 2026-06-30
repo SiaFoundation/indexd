@@ -48,6 +48,12 @@ tags:
   - name: quotas
     description: Manage quotas for app connect keys.
 
+  - name: migrations
+    description: >
+      Endpoints used by remote nodes to fetch slab-migration work and report
+      its results. Remote nodes help the primary node migrate unhealthy slabs
+      without accessing its database directly.
+
 paths:
   /state:
     get:
@@ -1593,6 +1599,66 @@ paths:
               password: "your-admin-password"
             })
             await admin.syncerConnect("118.92.232.145:9981")
+
+  /migrations/jobs:
+    get:
+      tags:
+        - migrations
+      summary: Fetch slab-migration jobs
+      description: >-
+        Returns a batch of prepared slab-migration jobs for a remote node, each
+        including the slab to repair, the sector indices to migrate, the vetted
+        upload-candidate hosts and the connection info for every host the remote
+        must reach. A nextCursor of 0 means there are no more unhealthy slabs.
+      operationId: getMigrationJobs
+      parameters:
+        - in: query
+          name: cursor
+          schema:
+            type: integer
+            format: int64
+          description: Cursor returned by the previous call; omit or 0 to start.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+          description: Maximum number of jobs to return.
+      responses:
+        "200":
+          description: A batch of migration jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      type: object
+                  nextCursor:
+                    type: integer
+                    format: int64
+
+  /migrations/results:
+    post:
+      tags:
+        - migrations
+      summary: Report slab-migration results
+      description: >-
+        Reports the outcomes of migration jobs so the primary node can persist
+        them (record migrated and lost sectors and update repair state). Used by
+        remote nodes.
+      operationId: postMigrationResults
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+      responses:
+        "200":
+          description: Results applied
 
   /stats/accounts:
     get:

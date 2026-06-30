@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -14,14 +13,16 @@ import (
 
 // Shard represents a sector present on a host.
 type Shard struct {
-	Root    types.Hash256
-	HostKey types.PublicKey
+	Root    types.Hash256   `json:"root"`
+	HostKey types.PublicKey `json:"hostKey"`
 }
 
 // uploadShards uploads the shards to the given hosts. If any shards were migrated,
 // no error is returned. The given shards must not be nil and
-// the given hosts must all be good and be sufficiently spaced apart.
-func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) (int, error) {
+// the given hosts must all be good and be sufficiently spaced apart. It returns
+// the (root, host) pairs that were successfully migrated; the caller is
+// responsible for persisting them.
+func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) ([]Shard, error) {
 	if len(slab.Sectors) != len(shards) {
 		panic(fmt.Sprintf("slab %s has %d sectors but %d shards", slab.ID, len(slab.Sectors), len(shards))) // developer error
 	}
@@ -55,7 +56,8 @@ func (m *SlabManager) uploadShards(ctx context.Context, slab Slab, shards [][]by
 
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, 10)
-	var migrated int32
+	var migratedMu sync.Mutex
+	var migrated []Shard
 top:
 	for i := range shards {
 		if shards[i] == nil {
@@ -119,26 +121,19 @@ top:
 						log.Debug("failed to debit service account for sector write", zap.Error(err))
 					}
 
-					if _, err := m.store.MigrateSector(shardRoot, hostKey); err != nil {
-						log.Error("failed to record migrated sector", zap.Error(err))
-						return
-					}
-					atomic.AddInt32(&migrated, 1)
+					migratedMu.Lock()
+					migrated = append(migrated, Shard{Root: shardRoot, HostKey: hostKey})
+					migratedMu.Unlock()
 					return
 				}
 			})
 		}
 	}
 	wg.Wait() // wait for all inflight uploads to finish
-	if migrated == 0 {
-		return 0, fmt.Errorf("no shards were uploaded during migration")
+	if len(migrated) == 0 {
+		return nil, fmt.Errorf("no shards were uploaded during migration")
 	}
-
-	// record the slab got migrated so object events gets updated
-	if err := m.store.RecordSlabMigrated(slab.ID); err != nil {
-		log.Debug("failed to record slab migration", zap.Error(err))
-	}
-	return int(migrated), nil
+	return migrated, nil
 }
 
 func (m *SlabManager) uploadShard(ctx context.Context, hostKey types.PublicKey, shard []byte) (rhp.RPCWriteSectorResult, error) {

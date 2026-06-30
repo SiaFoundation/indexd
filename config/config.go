@@ -53,6 +53,17 @@ type (
 		URL     string `yaml:"url"`
 	}
 
+	// Remote contains the configuration a remote node uses to reach the
+	// primary node's admin API. A remote node fetches slab-migration jobs from
+	// the primary and reports their results back rather than touching the
+	// database directly.
+	Remote struct {
+		// Address is the base URL of the primary node's admin API.
+		Address string `yaml:"address"`
+		// Password is the primary node's admin API password.
+		Password string `yaml:"password"`
+	}
+
 	// Slabs contains the configuration for the slab manager.
 	Slabs struct {
 		// MigrationWorkers is the number of slabs to migrate in parallel. If
@@ -98,6 +109,7 @@ type (
 		Consensus      Consensus               `yaml:"consensus"`
 		Explorer       Explorer                `yaml:"explorer"`
 		Slabs          Slabs                   `yaml:"slabs"`
+		Remote         Remote                  `yaml:"remote"`
 		Log            Log                     `yaml:"log"`
 		Database       postgres.ConnectionInfo `yaml:"database"`
 	}

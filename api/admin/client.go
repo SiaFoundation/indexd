@@ -441,3 +441,20 @@ func (c *Client) StatsSectors(ctx context.Context) (resp SectorsStatsResponse, e
 	err = c.c.GET(ctx, "/stats/sectors", &resp)
 	return
 }
+
+// MigrationJobs fetches a batch of prepared slab-migration jobs starting from
+// the given cursor. A returned NextCursor of 0 means there are no more
+// unhealthy slabs to migrate. It is used by remote nodes.
+func (c *Client) MigrationJobs(ctx context.Context, cursor int64, limit int) (resp MigrationJobsResponse, err error) {
+	values := url.Values{}
+	values.Set("cursor", fmt.Sprintf("%d", cursor))
+	values.Set("limit", fmt.Sprintf("%d", limit))
+	err = c.c.GET(ctx, "/migrations/jobs?"+values.Encode(), &resp)
+	return
+}
+
+// ApplyMigrationResults reports the outcomes of migration jobs to the primary
+// node so it can persist them. It is used by remote nodes.
+func (c *Client) ApplyMigrationResults(ctx context.Context, results []slabs.MigrationResult) error {
+	return c.c.POST(ctx, "/migrations/results", results, nil)
+}

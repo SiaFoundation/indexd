@@ -23,6 +23,12 @@ type (
 	// AggregatedHostStatsResponse is the response body for the [GET] /stats/hosts
 	AggregatedHostStatsResponse hosts.AggregatedHostStats
 
+	// MigrationJobsResponse is the response body for [GET] /migrations/jobs.
+	MigrationJobsResponse struct {
+		Jobs       []slabs.MigrationJob `json:"jobs"`
+		NextCursor int64                `json:"nextCursor"`
+	}
+
 	// ContractsStatsResponse is the response body for the [GET] /stats/contracts
 	ContractsStatsResponse contracts.Stats
 
