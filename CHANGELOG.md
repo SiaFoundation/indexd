@@ -1,3 +1,33 @@
+## 0.3.0 (2026-06-30)
+
+### Breaking Changes
+
+#### Add basic pool support.
+
+Fund one pool per connect key instead of individual accounts. Accounts attached to a pool draw from its shared balance.
+
+### Features
+
+- Added `reconnecting` field to auth connect status so apps can tell if a user is returning or connecting for the first time.
+
+#### Add network read and write throughput estimates to the client.
+
+The client now exposes `ReadEstimate` and `WriteEstimate`, returning the expected duration to transfer a given number of bytes from the network-wide observed throughput. Both fall back to a default rate before any bulk transfers have been sampled.
+
+### Fixes
+
+- Chunk downloads for slab migrations rather than downloading full sectors to spread downloads out over more hosts.
+- Chunk RecordIntegrityCheck UPDATEs to bound per-statement latency and shorten row-lock windows.
+- Don't renew a contract with capacity 0 if there is another active contract with capacity 0 already
+- Ensure that pruning slabs/sectors in parallel doesn't leave orphaned slabs/sectors
+- Rework the unhealthy slabs query to avoid full table scans on large databases.
+- Register additional sharing account for each user
+- Take into account inflight uploads and downloads when scheduling hosts.
+
+#### Return a typed HTTPError from the app client on non-2xx responses.
+
+The app client previously returned `errors.New("")` when an upstream proxy returned a non-2xx status code with an empty body, making failures impossible to diagnose. It now returns an `*HTTPError` carrying both the status code and body, formatted as `HTTP <code>: <message>`. Callers can `errors.As` on it to branch retry behavior on the status code.
+
 ## 0.2.3 (2026-06-04)
 
 ### Features
