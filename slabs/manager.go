@@ -16,6 +16,7 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/keys"
 	"go.uber.org/zap"
 )
 
@@ -40,6 +41,12 @@ type (
 		shardTimeout                time.Duration
 		integrityCheckTimeout       time.Duration
 
+		// runMigrations gates the migration loop on a full node so it can be
+		// disabled to outsource migrations to a remote node. The default is
+		// enabled. It has no effect on a remote node (remoteLoop always
+		// migrates).
+		runMigrations bool
+
 		// recoveryChunkSize is the size of the segment-aligned byte range
 		// requested from each host during slab recovery. Smaller chunks
 		// spread a recovery across more hosts (more parallel pipes) at the
@@ -47,7 +54,6 @@ type (
 		recoveryChunkSize int
 
 		alerter AlertsManager
-		chain   ChainManager
 		am      AccountManager
 		cm      ContractManager
 		hm      HostManager
@@ -58,11 +64,6 @@ type (
 
 		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
-	}
-
-	// ChainManager provides information about the current chain state.
-	ChainManager interface {
-		Tip() types.ChainIndex
 	}
 
 	// AccountManager defines the SlabManager's dependencies on the account
@@ -140,6 +141,7 @@ type (
 		Slab(slabID SlabID) (slab Slab, err error)
 		Slabs(account proto.Account, slabIDs []SlabID) ([]Slab, error)
 		SlabIDs(account proto.Account, offset, limit int) ([]SlabID, error)
+		Tip() (types.ChainIndex, error)
 		UnhealthySlabs(cursor int64, limit int) ([]SlabID, int64, error)
 		PruneSlabs(account proto.Account, cutoff time.Time) error
 		PruneDeletedSlabs(limit int) (int, error)
@@ -263,9 +265,24 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
+// WithMigrations enables or disables the migration loop on a full node. The
+// default is enabled. It has no effect on a remote node, which always migrates.
+func WithMigrations(enabled bool) Option {
+	return func(m *SlabManager) {
+		m.runMigrations = enabled
+	}
+}
+
+// DeriveAccountKeys derives the migration and integrity service-account keys
+// the slab manager uses from a wallet key. All nodes (primary and remote) must
+// derive them identically so the host-side accounts line up.
+func DeriveAccountKeys(walletKey types.PrivateKey) (migration, integrity types.PrivateKey) {
+	return keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity")
+}
+
 // NewManager creates a new slab manager.
-func NewManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
-	sm := newSlabManager(chain, am, cm, hm, store, hosts, alerter, migrationAccount, integrityAccount, opts...)
+func NewManager(am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+	sm := newSlabManager(am, cm, hm, store, hosts, alerter, migrationAccount, integrityAccount, opts...)
 
 	ctx, cancel, err := sm.tg.AddContext(context.Background())
 	if err != nil {
@@ -280,7 +297,26 @@ func NewManager(chain ChainManager, am AccountManager, cm ContractManager, hm Ho
 	return sm, nil
 }
 
-func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) *SlabManager {
+// NewRemoteManager creates a slab manager for a remote node. Unlike NewManager
+// it only runs the slab-migration loop; integrity checks, lost-sector alerts
+// and slab pruning remain the responsibility of the primary node.
+func NewRemoteManager(am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) (*SlabManager, error) {
+	sm := newSlabManager(am, cm, hm, store, hosts, alerter, migrationAccount, integrityAccount, opts...)
+
+	ctx, cancel, err := sm.tg.AddContext(context.Background())
+	if err != nil {
+		return nil, err
+	}
+
+	go func() {
+		defer cancel()
+		sm.remoteLoop(ctx)
+	}()
+
+	return sm, nil
+}
+
+func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store Store, hosts HostClient, alerter AlertsManager, migrationAccount, integrityAccount types.PrivateKey, opts ...Option) *SlabManager {
 	m := &SlabManager{
 		healthCheckInterval:       time.Minute,
 		pruneDeletedSlabsInterval: time.Minute,
@@ -299,7 +335,8 @@ func newSlabManager(chain ChainManager, am AccountManager, cm ContractManager, h
 		numMigrationGoroutines:      runtime.NumCPU(),
 		recoveryChunkSize:           defaultRecoveryChunkSize,
 
-		chain:   chain,
+		runMigrations: true,
+
 		am:      am,
 		cm:      cm,
 		hosts:   hosts,
@@ -369,9 +406,29 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 	m.registerLostSectorsAlert()
 
 	launch("integrity checks", m.healthCheckInterval, m.performIntegrityChecks)
-	launch("slab migrations", m.healthCheckInterval, m.performSlabMigrations)
+	if m.runMigrations {
+		launch("slab migrations", m.healthCheckInterval, m.performSlabMigrations)
+	}
 	launch("prune deleted slabs", m.pruneDeletedSlabsInterval, m.performPruneDeletedSlabs)
 	wg.Wait()
+}
+
+// remoteLoop runs the maintenance a remote node is responsible for: slab
+// migrations only. Integrity checks, lost-sector alerts and slab pruning are
+// owned by the primary node.
+func (m *SlabManager) remoteLoop(ctx context.Context) {
+	ticker := time.NewTicker(m.healthCheckInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+		case <-ctx.Done():
+			return
+		}
+		if err := m.performSlabMigrations(ctx); err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			m.log.Error("maintenance failed", zap.String("task", "slab migrations"), zap.Error(err))
+		}
+	}
 }
 
 // performPruneDeletedSlabs prunes deleted slabs, removing those no longer pinned
