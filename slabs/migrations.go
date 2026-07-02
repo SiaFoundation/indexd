@@ -13,18 +13,19 @@ import (
 	"golang.org/x/crypto/chacha20"
 )
 
-// extraJobCandidates is the number of upload candidates included in a
-// migration job beyond the number of sectors to migrate, giving the remote
-// spare hosts to retry failed uploads against.
-const extraJobCandidates = 10
-
-// migrationState holds the hosts, contracts, and chain state needed for
-// slab migrations.
-type migrationState struct {
-	Height              uint64
-	HealthyContracts    []contracts.Contract
-	Hosts               []hosts.Host
-	MaintenanceSettings contracts.MaintenanceSettings
+// MigrationState holds the hosts, contracts, and chain state needed to
+// determine which sectors of a slab require migration and which hosts can
+// receive them. It is shipped to remote nodes alongside a batch of unhealthy
+// slabs so they can make the same decisions the local migration loop makes.
+type MigrationState struct {
+	Height              uint64                        `json:"height"`
+	HealthyContracts    []contracts.Contract          `json:"healthyContracts"`
+	Hosts               []hosts.Host                  `json:"hosts"`
+	MaintenanceSettings contracts.MaintenanceSettings `json:"maintenanceSettings"`
+	// MinHostDistanceKm is the primary node's minimum distance between hosts
+	// storing sectors of the same slab, so remote nodes apply the same
+	// placement policy.
+	MinHostDistanceKm float64 `json:"minHostDistanceKm"`
 }
 
 type (
@@ -55,15 +56,17 @@ type (
 		Addresses []chain.NetAddress `json:"addresses"`
 	}
 
-	// MigrationJob is a fully-prepared unit of migration work handed to a
-	// remote node: the slab to repair, which sector indices need migrating and
-	// the vetted upload-candidate hosts. The connection info for the hosts
-	// involved (download sources and candidates) is carried alongside the jobs,
-	// deduplicated across a batch.
-	MigrationJob struct {
-		Slab       Slab              `json:"slab"`
-		Migrate    []int             `json:"migrate"`
-		Candidates []types.PublicKey `json:"candidates"`
+	// MigrationBatch is a batch of unhealthy slabs together with everything a
+	// remote node needs to migrate them: the migration state to determine
+	// which sectors to migrate and where, and the connection info for
+	// download-source hosts that are absent from the state (e.g. blocked
+	// hosts, which can still serve reads). A NextCursor of 0 means there are
+	// no more unhealthy slabs.
+	MigrationBatch struct {
+		Slabs      []Slab         `json:"slabs"`
+		State      MigrationState `json:"state"`
+		Hosts      []HostConn     `json:"hosts"`
+		NextCursor int64          `json:"nextCursor"`
 	}
 
 	// MigrationResult is the outcome of a MigrationJob, reported back by a
@@ -83,7 +86,8 @@ type (
 
 // fetchMigrationState fetches all available hosts, contracts, maintenance settings,
 // and chain height needed for slab migrations.
-func (m *SlabManager) fetchMigrationState() (state migrationState, err error) {
+func (m *SlabManager) fetchMigrationState() (state MigrationState, err error) {
+	state.MinHostDistanceKm = m.minHostDistanceKm
 	// fetch hosts
 	const batchSize = 500
 	for offset := 0; ; offset += batchSize {
@@ -121,23 +125,15 @@ func (m *SlabManager) fetchMigrationState() (state migrationState, err error) {
 	return state, nil
 }
 
-func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, state migrationState, log *zap.Logger) {
+func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, state MigrationState, log *zap.Logger) {
 	slab, err := m.store.Slab(slabID)
 	if err != nil {
 		log.Error("failed to fetch slab", zap.Error(err))
 		return
 	}
-	indices, uploadCandidates := sectorsToMigrate(slab, state, m.minHostDistanceKm)
-	if len(indices) == 0 {
-		log.Debug("tried to migrate slab but no indices require migration")
-		return
-	} else if len(uploadCandidates) == 0 {
-		log.Warn("tried to migrate slab but no hosts are available for migration")
-		return
+	if res, attempted := m.migrator.MigrateSlab(ctx, slab, state); attempted {
+		m.applyMigrationResult(res, log)
 	}
-
-	res := m.migrator.MigrateJob(ctx, MigrationJob{Slab: slab, Migrate: indices, Candidates: uploadCandidates})
-	m.applyMigrationResult(res, log)
 }
 
 // A MigratorOption configures an optional Migrator setting.
@@ -279,37 +275,26 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 	}
 }
 
-// PrepareMigrationJobs selects a batch of unhealthy slabs and prepares
-// migration jobs for them, determining which sectors need migrating and the
-// candidate hosts to migrate them to. The returned jobs do not include host
-// connection info; callers resolve host addresses before handing jobs to a
-// remote node. The returned cursor is passed to the next call to continue
-// paging; a cursor of 0 means there are no more unhealthy slabs.
-func (m *SlabManager) PrepareMigrationJobs(cursor int64, limit int) ([]MigrationJob, int64, error) {
+// PrepareMigrationBatch selects a batch of unhealthy slabs and bundles them
+// with the migration state a remote node needs to migrate them, mirroring the
+// decisions the local migration loop makes. The batch's cursor is passed to
+// the next call to continue paging; a cursor of 0 means there are no more
+// unhealthy slabs.
+func (m *SlabManager) PrepareMigrationBatch(cursor int64, limit int) (MigrationBatch, error) {
 	ids, nextCursor, err := m.store.UnhealthySlabs(cursor, limit)
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to fetch unhealthy slabs: %w", err)
+		return MigrationBatch{}, fmt.Errorf("failed to fetch unhealthy slabs: %w", err)
 	} else if len(ids) == 0 {
-		return nil, nextCursor, nil
+		return MigrationBatch{NextCursor: nextCursor}, nil
 	}
 
 	state, err := m.fetchMigrationState()
 	if err != nil {
-		return nil, 0, fmt.Errorf("failed to fetch migration state: %w", err)
-	}
-
-	// hosts without a known address can never be dialed by a remote; drop
-	// them from the candidate pool before capping so the cap doesn't waste
-	// slots on unreachable hosts.
-	reachable := make(map[types.PublicKey]struct{}, len(state.Hosts))
-	for _, h := range state.Hosts {
-		if len(h.Addresses) > 0 {
-			reachable[h.PublicKey] = struct{}{}
-		}
+		return MigrationBatch{}, fmt.Errorf("failed to fetch migration state: %w", err)
 	}
 
 	log := m.log.Named("migrations")
-	jobs := make([]MigrationJob, 0, len(ids))
+	batchSlabs := make([]Slab, 0, len(ids))
 	for _, id := range ids {
 		slab, err := m.store.Slab(id)
 		if err != nil {
@@ -319,35 +304,50 @@ func (m *SlabManager) PrepareMigrationJobs(cursor int64, limit int) ([]Migration
 			log.Error("failed to fetch slab", zap.Stringer("slab", id), zap.Error(err))
 			continue
 		}
-		indices, candidates := sectorsToMigrate(slab, state, m.minHostDistanceKm)
-		viable := candidates[:0]
-		for _, hk := range candidates {
-			if _, ok := reachable[hk]; ok {
-				viable = append(viable, hk)
+		batchSlabs = append(batchSlabs, slab)
+	}
+
+	// the migration state only covers unblocked hosts with active contracts,
+	// but download sources can be blocked or contract-less and still serve
+	// reads; resolve their addresses separately. Hosts that remain unresolved
+	// (e.g. pruned) simply carry no connection info.
+	known := make(map[types.PublicKey]struct{}, len(state.Hosts))
+	for _, h := range state.Hosts {
+		known[h.PublicKey] = struct{}{}
+	}
+	missing := make(map[types.PublicKey]struct{})
+	for _, slab := range batchSlabs {
+		for _, sector := range slab.Sectors {
+			if sector.HostKey != nil {
+				if _, ok := known[*sector.HostKey]; !ok {
+					missing[*sector.HostKey] = struct{}{}
+				}
 			}
 		}
-		candidates = viable
-		if len(indices) == 0 {
-			log.Debug("skipping slab, no indices require migration", zap.Stringer("slab", id))
-			continue
-		} else if len(candidates) == 0 {
-			// mirror the local loop's warning so a slab that can never be
-			// repaired is visible even when migrations are outsourced.
-			log.Warn("skipping slab, no hosts are available for migration", zap.Stringer("slab", id))
-			continue
-		}
-		// sectorsToMigrate returns every eligible host in random order; the
-		// job only needs enough of them for the required uploads plus spares
-		// for failed attempts. Truncating keeps the wire payload proportional
-		// to the work instead of the network size.
-		candidates = candidates[:min(len(candidates), len(indices)+extraJobCandidates)]
-		jobs = append(jobs, MigrationJob{
-			Slab:       slab,
-			Migrate:    indices,
-			Candidates: candidates,
-		})
 	}
-	return jobs, nextCursor, nil
+	var conns []HostConn
+	if len(missing) > 0 {
+		hks := make([]types.PublicKey, 0, len(missing))
+		for hk := range missing {
+			hks = append(hks, hk)
+		}
+		batch, err := m.store.Hosts(0, len(hks), hosts.WithPublicKeys(hks))
+		if err != nil {
+			return MigrationBatch{}, fmt.Errorf("failed to resolve host addresses: %w", err)
+		}
+		for _, h := range batch {
+			if len(h.Addresses) > 0 {
+				conns = append(conns, HostConn{PublicKey: h.PublicKey, Addresses: h.Addresses})
+			}
+		}
+	}
+
+	return MigrationBatch{
+		Slabs:      batchSlabs,
+		State:      state,
+		Hosts:      conns,
+		NextCursor: nextCursor,
+	}, nil
 }
 
 // migratableDestinations returns the set of destination hosts from the results
@@ -406,27 +406,43 @@ func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) {
 	}
 }
 
-// MigrateJob executes a prepared migration job, performing the shard recovery
-// and upload, and returns the result for the primary node to persist. It
-// performs no store writes and is used by remote nodes.
-func (m *Migrator) MigrateJob(ctx context.Context, job MigrationJob) MigrationResult {
-	log := m.log.With(zap.Stringer("slab", job.Slab.ID), zap.Int("toMigrate", len(job.Migrate)), zap.Int("uploadCandidates", len(job.Candidates)))
-	migrated, lost, err := m.executeMigration(ctx, job.Slab, job.Migrate, job.Candidates, log)
-	res := MigrationResult{SlabID: job.Slab.ID, Migrated: migrated, Lost: lost}
+// MigrateSlab determines which of the slab's sectors require migration and
+// which hosts can receive them — the same decisions the local migration loop
+// makes — then performs the shard recovery and upload. It performs no store
+// writes; the returned result is persisted by the primary node. attempted
+// reports whether a migration was actually performed: a slab that needs no
+// migration or has no candidate hosts is skipped and its result must not be
+// applied.
+func (m *Migrator) MigrateSlab(ctx context.Context, slab Slab, state MigrationState) (res MigrationResult, attempted bool) {
+	res = MigrationResult{SlabID: slab.ID}
+	log := m.log.With(zap.Stringer("slab", slab.ID))
+
+	indices, candidates := sectorsToMigrate(slab, state, state.MinHostDistanceKm)
+	if len(indices) == 0 {
+		log.Debug("tried to migrate slab but no indices require migration")
+		return res, false
+	} else if len(candidates) == 0 {
+		log.Warn("tried to migrate slab but no hosts are available for migration")
+		return res, false
+	}
+	log = log.With(zap.Int("toMigrate", len(indices)), zap.Int("uploadCandidates", len(candidates)))
+
+	migrated, lost, err := m.executeMigration(ctx, slab, indices, candidates, log)
+	res.Migrated, res.Lost = migrated, lost
 	if err != nil {
 		if ctx.Err() == nil {
 			log.Error("failed to recover slab", zap.Error(err))
 		}
-		return res
+		return res, true
 	}
 	res.Recovered = true
-	res.Success = len(migrated) == len(job.Migrate)
+	res.Success = len(migrated) == len(indices)
 	if res.Success {
 		log.Debug("slab successfully repaired")
 	} else {
 		log.Debug("slab partially repaired")
 	}
-	return res
+	return res, true
 }
 
 // sectorsToMigrate filters the sectors of a slab and returns the indices of the
@@ -435,7 +451,7 @@ func (m *Migrator) MigrateJob(ctx context.Context, job MigrationJob) MigrationRe
 // minHostDistance apart from each other and are returned in random order.
 // The subset of healthy contracts eligible for uploading migrated sectors is
 // derived by filtering with GoodForAppend.
-func sectorsToMigrate(slab Slab, state migrationState, minHostDistanceKm float64) ([]int, []types.PublicKey) {
+func sectorsToMigrate(slab Slab, state MigrationState, minHostDistanceKm float64) ([]int, []types.PublicKey) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range state.Hosts {

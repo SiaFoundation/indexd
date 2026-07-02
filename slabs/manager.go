@@ -469,7 +469,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 
 	type migrationJob struct {
 		id    SlabID
-		state migrationState
+		state MigrationState
 	}
 	slabCh := make(chan migrationJob, slabBatchSize)
 	var wg sync.WaitGroup

@@ -16,8 +16,6 @@ var (
 	ErrInsufficientServiceAccountBalance = errInsufficientServiceAccountBalance
 )
 
-type MigrationState = migrationState
-
 var (
 	SectorsToMigrate    = sectorsToMigrate
 	NewSlabManager      = newSlabManager

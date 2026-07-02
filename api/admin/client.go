@@ -442,14 +442,15 @@ func (c *Client) StatsSectors(ctx context.Context) (resp SectorsStatsResponse, e
 	return
 }
 
-// MigrationJobs fetches a batch of prepared slab-migration jobs starting from
-// the given cursor. A returned NextCursor of 0 means there are no more
-// unhealthy slabs to migrate. It is used by remote nodes.
-func (c *Client) MigrationJobs(ctx context.Context, cursor int64, limit int) (resp MigrationJobsResponse, err error) {
+// MigrationBatch fetches a batch of unhealthy slabs together with the
+// migration state needed to migrate them, starting from the given cursor. A
+// returned NextCursor of 0 means there are no more unhealthy slabs to migrate.
+// It is used by remote nodes.
+func (c *Client) MigrationBatch(ctx context.Context, cursor int64, limit int) (batch slabs.MigrationBatch, err error) {
 	values := url.Values{}
 	values.Set("cursor", fmt.Sprintf("%d", cursor))
 	values.Set("limit", fmt.Sprintf("%d", limit))
-	err = c.c.GET(ctx, "/migrations/jobs?"+values.Encode(), &resp)
+	err = c.c.GET(ctx, "/migrations/batch?"+values.Encode(), &batch)
 	return
 }
 

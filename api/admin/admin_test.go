@@ -1787,11 +1787,11 @@ func TestMigrationJobsEmpty(t *testing.T) {
 	adminClient := indexer.Admin
 
 	// no unhealthy slabs on a fresh indexer
-	resp, err := adminClient.MigrationJobs(context.Background(), 0, 100)
+	resp, err := adminClient.MigrationBatch(context.Background(), 0, 100)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(resp.Jobs) != 0 {
-		t.Fatalf("expected no jobs, got %d", len(resp.Jobs))
+	} else if len(resp.Slabs) != 0 {
+		t.Fatalf("expected no slabs, got %d", len(resp.Slabs))
 	} else if resp.NextCursor != 0 {
 		t.Fatalf("expected cursor 0, got %d", resp.NextCursor)
 	}

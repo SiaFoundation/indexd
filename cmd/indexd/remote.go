@@ -31,24 +31,13 @@ func newCachedHostStore() *cachedHostStore {
 	return &cachedHostStore{addrs: make(map[types.PublicKey][]chain.NetAddress)}
 }
 
-// learn records the connection info carried by a batch of migration jobs.
-func (s *cachedHostStore) learn(conns []slabs.HostConn) {
+// update records the connection info carried by a batch of migration jobs.
+func (s *cachedHostStore) update(conns []slabs.HostConn) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, c := range conns {
-		if len(c.Addresses) > 0 {
-			s.addrs[c.PublicKey] = c.Addresses
-		}
+		s.addrs[c.PublicKey] = c.Addresses
 	}
-}
-
-// reset clears the store. It is called when no jobs are in flight (at the start
-// of a migration pass) so entries for hosts that no longer appear in any job
-// don't accumulate for the lifetime of the process.
-func (s *cachedHostStore) reset() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	clear(s.addrs)
 }
 
 // Addresses implements client.Store.
@@ -175,31 +164,28 @@ func runRemoteMigrationLoop(ctx context.Context, primary *adminapi.Client, store
 }
 
 // runRemoteMigrationPass pages through all unhealthy slabs the primary node
-// has, fetching prepared jobs, executing them and reporting the results back.
-// It returns how many jobs were executed and how many of them recovered their
-// slab's shards.
+// has, determining which of their sectors to migrate from the state shipped
+// with each batch, executing the migrations and reporting the results back. It
+// returns how many migrations were attempted and how many of them recovered
+// their slab's shards.
 func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store *cachedHostStore, migrator *slabs.Migrator, workers int, log *zap.Logger) (executed, recovered int, _ error) {
-	// the host store only needs the hosts referenced by the current pass;
-	// reset it so entries for long-pruned hosts don't accumulate forever.
-	store.reset()
-
 	var cursor int64
 	for {
 		fetchCtx, cancel := context.WithTimeout(ctx, remoteRequestTimeout)
-		resp, err := primary.MigrationJobs(fetchCtx, cursor, remoteJobBatchSize)
+		batch, err := primary.MigrationBatch(fetchCtx, cursor, remoteJobBatchSize)
 		cancel()
 		if err != nil {
-			return executed, recovered, fmt.Errorf("failed to fetch migration jobs: %w", err)
+			return executed, recovered, fmt.Errorf("failed to fetch migration batch: %w", err)
 		}
-		log.Debug("fetched migration jobs", zap.Int("jobs", len(resp.Jobs)), zap.Int64("cursor", cursor), zap.Int64("nextCursor", resp.NextCursor))
-		store.learn(resp.Hosts)
+		log.Debug("fetched migration batch", zap.Int("slabs", len(batch.Slabs)), zap.Int64("cursor", cursor), zap.Int64("nextCursor", batch.NextCursor))
+		store.update(batch.Hosts)
 
 		var mu sync.Mutex
-		results := make([]slabs.MigrationResult, 0, len(resp.Jobs))
+		results := make([]slabs.MigrationResult, 0, len(batch.Slabs))
 		var wg sync.WaitGroup
 		sema := make(chan struct{}, workers)
 	dispatch:
-		for _, job := range resp.Jobs {
+		for _, slab := range batch.Slabs {
 			select {
 			case <-ctx.Done():
 				break dispatch
@@ -209,10 +195,11 @@ func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store
 			go func() {
 				defer wg.Done()
 				defer func() { <-sema }()
-				res := migrator.MigrateJob(ctx, job)
-				mu.Lock()
-				results = append(results, res)
-				mu.Unlock()
+				if res, attempted := migrator.MigrateSlab(ctx, slab, batch.State); attempted {
+					mu.Lock()
+					results = append(results, res)
+					mu.Unlock()
+				}
 			}()
 		}
 		wg.Wait()
@@ -232,10 +219,10 @@ func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store
 		}
 
 		// a next cursor of 0 means there are no more unhealthy slabs
-		if resp.NextCursor == 0 {
+		if batch.NextCursor == 0 {
 			return executed, recovered, nil
 		}
-		cursor = resp.NextCursor
+		cursor = batch.NextCursor
 	}
 }
 
