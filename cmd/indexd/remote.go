@@ -85,20 +85,25 @@ func (s *cachedHostStore) UsableHosts() ([]hosts.HostInfo, error) {
 const remoteJobBatchSize = 100
 
 // remoteMigrationInterval is how long a remote node waits between passes once it
-// has worked through all currently-unhealthy slabs.
-const remoteMigrationInterval = time.Minute
-
-// resultReportAttempts and resultReportRetryInterval control how often a batch
-// of migration results is retried before the pass is abandoned. Results
-// represent completed downloads and uploads, so dropping them orphans the
-// uploaded sectors and forgets discovered lost sectors.
+// has worked through all currently-unhealthy slabs. maxRemoteBackoff caps the
+// exponential backoff applied when consecutive passes fail every recovery,
+// which points at a systemic problem such as a recovery phrase that doesn't
+// match the primary's.
 const (
-	resultReportAttempts      = 3
-	resultReportRetryInterval = 10 * time.Second
+	remoteMigrationInterval = time.Minute
+	maxRemoteBackoff        = 30 * time.Minute
+)
 
-	// resultFlushTimeout bounds the best-effort report of completed results
-	// during shutdown.
-	resultFlushTimeout = 30 * time.Second
+const (
+	// resultReportTimeout bounds the single report of a batch's results. The
+	// report runs on its own context so a shutdown mid-report doesn't abort
+	// it: the results represent completed downloads and uploads, and dropping
+	// them orphans the uploaded sectors and forgets discovered lost sectors.
+	resultReportTimeout = time.Minute
+
+	// remoteRequestTimeout bounds a single request to the primary so a
+	// half-open connection cannot stall the worker indefinitely.
+	remoteRequestTimeout = 5 * time.Minute
 )
 
 // runRemoteCmd runs a remote worker that helps the primary indexd migrate
@@ -134,35 +139,57 @@ func runRemoteCmd(ctx context.Context, cfg config.Config, walletKey types.Privat
 }
 
 // runRemoteMigrationLoop repeatedly works through all currently-unhealthy slabs,
-// pausing between passes.
+// pausing between passes. When every job of a pass fails recovery the pause
+// grows exponentially: a worker that can never succeed (e.g. its recovery
+// phrase doesn't match the primary's, so its account is unfunded) would
+// otherwise claim and burn a fresh batch of slabs every interval, parking them
+// for the claim duration with nothing to show.
 func runRemoteMigrationLoop(ctx context.Context, primary *adminapi.Client, store *cachedHostStore, migrator *slabs.Migrator, workers int, log *zap.Logger) {
+	barrenPasses := 0
 	for {
-		if err := runRemoteMigrationPass(ctx, primary, store, migrator, workers, log); err != nil {
+		executed, recovered, err := runRemoteMigrationPass(ctx, primary, store, migrator, workers, log)
+		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			log.Error("migration pass failed", zap.Error(err))
 		}
+		if executed > 0 && recovered == 0 {
+			barrenPasses++
+		} else if executed > 0 {
+			barrenPasses = 0
+		}
+
+		interval := remoteMigrationInterval
+		if barrenPasses > 0 {
+			interval = min(remoteMigrationInterval<<barrenPasses, maxRemoteBackoff)
+			log.Warn("every migration of the pass failed recovery, backing off",
+				zap.Int("consecutivePasses", barrenPasses), zap.Duration("interval", interval))
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(remoteMigrationInterval):
+		case <-time.After(interval):
 		}
 	}
 }
 
-// runRemoteMigrationPass pages through all unhealthy slabs the primary node has,
-// fetching prepared jobs, executing them and reporting the results back.
-func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store *cachedHostStore, migrator *slabs.Migrator, workers int, log *zap.Logger) error {
+// runRemoteMigrationPass pages through all unhealthy slabs the primary node
+// has, fetching prepared jobs, executing them and reporting the results back.
+// It returns how many jobs were executed and how many of them recovered their
+// slab's shards.
+func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store *cachedHostStore, migrator *slabs.Migrator, workers int, log *zap.Logger) (executed, recovered int, _ error) {
 	// the host store only needs the hosts referenced by the current pass;
 	// reset it so entries for long-pruned hosts don't accumulate forever.
 	store.reset()
 
 	var cursor int64
 	for {
-		resp, err := primary.MigrationJobs(ctx, cursor, remoteJobBatchSize)
+		fetchCtx, cancel := context.WithTimeout(ctx, remoteRequestTimeout)
+		resp, err := primary.MigrationJobs(fetchCtx, cursor, remoteJobBatchSize)
+		cancel()
 		if err != nil {
-			return fmt.Errorf("failed to fetch migration jobs: %w", err)
+			return executed, recovered, fmt.Errorf("failed to fetch migration jobs: %w", err)
 		}
 		log.Debug("fetched migration jobs", zap.Int("jobs", len(resp.Jobs)), zap.Int64("cursor", cursor), zap.Int64("nextCursor", resp.NextCursor))
 		store.learn(resp.Hosts)
@@ -190,50 +217,39 @@ func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store
 		}
 		wg.Wait()
 
-		if ctx.Err() != nil {
-			// best-effort flush of completed work before shutting down so
-			// uploaded sectors are recorded rather than orphaned.
-			flushCtx, cancel := context.WithTimeout(context.Background(), resultFlushTimeout)
-			defer cancel()
-			if err := reportMigrationResults(flushCtx, primary, results, log); err != nil {
-				log.Warn("failed to flush migration results during shutdown", zap.Error(err))
+		for _, res := range results {
+			executed++
+			if res.Recovered {
+				recovered++
 			}
-			return ctx.Err()
 		}
 
-		if err := reportMigrationResults(ctx, primary, results, log); err != nil {
-			return fmt.Errorf("failed to report migration results: %w", err)
+		if err := reportMigrationResults(primary, results); err != nil {
+			return executed, recovered, fmt.Errorf("failed to report migration results: %w", err)
+		}
+		if ctx.Err() != nil {
+			return executed, recovered, ctx.Err()
 		}
 
 		// a next cursor of 0 means there are no more unhealthy slabs
 		if resp.NextCursor == 0 {
-			return nil
+			return executed, recovered, nil
 		}
 		cursor = resp.NextCursor
 	}
 }
 
 // reportMigrationResults reports a batch of migration results to the primary
-// node, retrying transient failures. The results represent completed downloads
-// and uploads: dropping them would orphan the uploaded sectors on their new
-// hosts and lose any lost-sector discoveries, so a report is only abandoned
-// after repeated failures.
-func reportMigrationResults(ctx context.Context, primary *adminapi.Client, results []slabs.MigrationResult, log *zap.Logger) error {
+// node. It deliberately runs on its own context rather than the pass context:
+// the results represent completed downloads and uploads, so a shutdown that
+// interrupts the report would orphan the uploaded sectors on their new hosts
+// and lose any lost-sector discoveries. The batch is not retried on failure;
+// the affected slabs are simply repaired again once their claim expires.
+func reportMigrationResults(primary *adminapi.Client, results []slabs.MigrationResult) error {
 	if len(results) == 0 {
 		return nil
 	}
-	var err error
-	for attempt := 1; ; attempt++ {
-		if err = primary.ApplyMigrationResults(ctx, results); err == nil {
-			return nil
-		} else if attempt == resultReportAttempts {
-			return err
-		}
-		log.Warn("failed to report migration results, retrying", zap.Int("attempt", attempt), zap.Error(err))
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(resultReportRetryInterval):
-		}
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), resultReportTimeout)
+	defer cancel()
+	return primary.ApplyMigrationResults(ctx, results)
 }

@@ -37,18 +37,8 @@ type (
 		numMigrationGoroutines      int
 		integrityCheckTimeout       time.Duration
 
-		// runMigrations gates the migration loop on a full node so it can be
-		// disabled to outsource migrations to remote nodes. The default is
-		// enabled.
 		runMigrations bool
-
-		// migOpts collects migrator options set via SlabManager options; they
-		// are applied when the migrator is built after all options resolve.
-		migOpts []MigratorOption
-
-		// mig performs the shard recovery and upload for migrations. The same
-		// code runs on remote nodes, which use a Migrator without a SlabManager.
-		mig *Migrator
+		migrator      *Migrator
 
 		alerter AlertsManager
 		am      AccountManager
@@ -220,14 +210,10 @@ func WithNumMigrationGoroutines(size int) Option {
 	}
 }
 
-// WithRecoveryChunkSize sets the size of the segment-aligned byte range
-// requested from each host during slab recovery. Smaller chunks spread a
-// recovery across more hosts at the cost of more RPCs. The value is clamped
-// to [proto.LeafSize, proto.SectorSize] and rounded down to a multiple of
-// proto.LeafSize when used. The default is 1 MiB.
-func WithRecoveryChunkSize(size int) Option {
+// WithMigratorOption applies a MigratorOption to the SlabManager's migrator.
+func WithMigratorOption(opt MigratorOption) Option {
 	return func(m *SlabManager) {
-		m.migOpts = append(m.migOpts, WithMigratorRecoveryChunkSize(size))
+		opt(m.migrator)
 	}
 }
 
@@ -306,6 +292,8 @@ func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store
 
 		runMigrations: true,
 
+		migrator: NewMigrator(hosts, migrationAccount, nil),
+
 		am:      am,
 		cm:      cm,
 		hm:      hm,
@@ -318,8 +306,8 @@ func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store
 		opt(m)
 	}
 
-	// build the migrator from the resolved configuration
-	m.mig = NewMigrator(hosts, migrationAccount, m.log.Named("migrations"), m.migOpts...)
+	// propagate the resolved logger to the migrator
+	m.migrator.log = m.log.Named("migrations")
 
 	m.verifier = NewSectorVerifier(am, hosts, integrityAccount, m.log)
 	m.initServiceAccounts(migrationAccount.PublicKey(), integrityAccount.PublicKey())

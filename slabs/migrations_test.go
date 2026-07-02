@@ -660,3 +660,98 @@ func NewTestShards(t testing.TB, dataShards, parityShards int) ([32]byte, [][]by
 
 	return encryptionKey, shards, roots
 }
+
+// TestApplyMigrationResults exercises the persistence choke-point for remote
+// migration results: lost-sector persistence, the Recovered=false gating that
+// leaves repair state untouched, destination re-validation and the
+// persist-aware success gating.
+func TestApplyMigrationResults(t *testing.T) {
+	log := zaptest.NewLogger(t)
+	db := newMockStore(t)
+	am := newMockAccountManager()
+	hm := newMockHostManager()
+	client := newMockHostClient()
+
+	a1 := types.PublicKey{1}
+	db.AddTestAccount(t, a1)
+
+	// hosts 0-3 hold the slab's sectors; hosts 4 and 5 are migration
+	// destinations, with host 5 getting blocked before its result is applied.
+	hostsList := make([]hosts.Host, 6)
+	for i := range hostsList {
+		h := client.addTestHost(types.GeneratePrivateKey())
+		db.AddTestHost(t, h)
+		db.addTestContract(t, h.PublicKey)
+		hostsList[i] = h
+	}
+	dest, blockedDest := hostsList[4], hostsList[5]
+
+	encryptionKey, _, roots := NewTestShards(t, 2, 2)
+	slabIDs, err := db.PinSlabs(proto.Account(a1), time.Now().Add(time.Hour), slabs.SlabPinParams{
+		EncryptionKey: encryptionKey,
+		MinShards:     2,
+		Sectors: []slabs.PinnedSector{
+			{Root: roots[0], HostKey: hostsList[0].PublicKey},
+			{Root: roots[1], HostKey: hostsList[1].PublicKey},
+			{Root: roots[2], HostKey: hostsList[2].PublicKey},
+			{Root: roots[3], HostKey: hostsList[3].PublicKey},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	slabID := slabIDs[0]
+
+	mgr := slabs.NewSlabManager(am, newMockContractManager(), hm, db, client, alerts.NewManager(), types.GeneratePrivateKey(), types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
+
+	failedRepairs := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(context.Background(), "SELECT consecutive_failed_repairs FROM slabs WHERE digest = $1", sqlHash256(slabID)).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+
+	// a failed recovery persists the discovered lost sectors but leaves the
+	// repair state untouched so the slab is retried without backoff
+	mgr.ApplyMigrationResults([]slabs.MigrationResult{{
+		SlabID: slabID,
+		Lost:   []slabs.Shard{{Root: roots[0], HostKey: hostsList[0].PublicKey}},
+	}})
+	if _, ok := db.lostSectors(t)[roots[0]]; !ok {
+		t.Fatal("expected lost sector to be persisted")
+	} else if n := failedRepairs(); n != 0 {
+		t.Fatalf("expected repair state to be untouched, got %d failed repairs", n)
+	}
+
+	// a successful result records the new location and resets the repair state
+	mgr.ApplyMigrationResults([]slabs.MigrationResult{{
+		SlabID:    slabID,
+		Migrated:  []slabs.Shard{{Root: roots[1], HostKey: dest.PublicKey}},
+		Recovered: true,
+		Success:   true,
+	}})
+	if _, ok := db.migratedSectors(t, dest.PublicKey)[roots[1]]; !ok {
+		t.Fatal("expected sector to be migrated to the destination host")
+	} else if n := failedRepairs(); n != 0 {
+		t.Fatalf("expected successful repair, got %d failed repairs", n)
+	}
+
+	// a destination blocked after the job was prepared must not receive the
+	// sector, and the incomplete repair must incur a failure backoff
+	if err := db.BlockHosts([]types.PublicKey{blockedDest.PublicKey}, []string{t.Name()}); err != nil {
+		t.Fatal(err)
+	}
+	mgr.ApplyMigrationResults([]slabs.MigrationResult{{
+		SlabID:    slabID,
+		Migrated:  []slabs.Shard{{Root: roots[2], HostKey: blockedDest.PublicKey}},
+		Recovered: true,
+		Success:   true,
+	}})
+	if migrated := db.migratedSectors(t, blockedDest.PublicKey); len(migrated) != 0 {
+		t.Fatalf("expected no sector on the blocked destination, got %d", len(migrated))
+	} else if n := failedRepairs(); n != 1 {
+		t.Fatalf("expected 1 failed repair after dropping the blocked destination, got %d", n)
+	}
+}

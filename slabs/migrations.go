@@ -136,17 +136,19 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, state migr
 		return
 	}
 
-	res := m.mig.MigrateJob(ctx, MigrationJob{Slab: slab, Migrate: indices, Candidates: uploadCandidates})
+	res := m.migrator.MigrateJob(ctx, MigrationJob{Slab: slab, Migrate: indices, Candidates: uploadCandidates})
 	m.applyMigrationResult(res, log)
 }
 
 // A MigratorOption configures an optional Migrator setting.
 type MigratorOption func(*Migrator)
 
-// WithMigratorRecoveryChunkSize sets the size of the segment-aligned byte range
-// requested from each host during recovery. See SlabManager's
-// WithRecoveryChunkSize for the semantics.
-func WithMigratorRecoveryChunkSize(size int) MigratorOption {
+// WithRecoveryChunkSize sets the size of the segment-aligned byte range
+// requested from each host during slab recovery. Smaller chunks spread a
+// recovery across more hosts at the cost of more RPCs. The value is clamped
+// to [proto.LeafSize, proto.SectorSize] and rounded down to a multiple of
+// proto.LeafSize when used. The default is 1 MiB.
+func WithRecoveryChunkSize(size int) MigratorOption {
 	return func(m *Migrator) {
 		if size <= 0 {
 			panic("recovery chunk size must be positive") // developer error
@@ -250,13 +252,17 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 	}
 
 	// a migrated sector only counts as repaired once its new location is
-	// persisted; a store failure here must not mark the slab successfully
-	// repaired or the uploaded sector is orphaned and the slab's failure
-	// counter is reset even though it still needs repair.
+	// persisted; a store failure or no-op here must not mark the slab
+	// successfully repaired or the uploaded sector is orphaned and the slab's
+	// failure counter is reset even though it still needs repair.
 	persisted := 0
 	for _, s := range res.Migrated {
-		if _, err := m.store.MigrateSector(s.Root, s.HostKey); err != nil {
+		if migrated, err := m.store.MigrateSector(s.Root, s.HostKey); err != nil {
 			log.Error("failed to record migrated sector", zap.Stringer("root", s.Root), zap.Error(err))
+			continue
+		} else if !migrated {
+			// the sector or the destination host no longer exists
+			log.Warn("migrated sector no longer applicable", zap.Stringer("root", s.Root), zap.Stringer("host", s.HostKey))
 			continue
 		}
 		persisted++
@@ -292,7 +298,17 @@ func (m *SlabManager) PrepareMigrationJobs(cursor int64, limit int) ([]Migration
 		return nil, 0, fmt.Errorf("failed to fetch migration state: %w", err)
 	}
 
-	log := m.mig.log
+	// hosts without a known address can never be dialed by a remote; drop
+	// them from the candidate pool before capping so the cap doesn't waste
+	// slots on unreachable hosts.
+	reachable := make(map[types.PublicKey]struct{}, len(state.Hosts))
+	for _, h := range state.Hosts {
+		if len(h.Addresses) > 0 {
+			reachable[h.PublicKey] = struct{}{}
+		}
+	}
+
+	log := m.log.Named("migrations")
 	jobs := make([]MigrationJob, 0, len(ids))
 	for _, id := range ids {
 		slab, err := m.store.Slab(id)
@@ -304,6 +320,13 @@ func (m *SlabManager) PrepareMigrationJobs(cursor int64, limit int) ([]Migration
 			continue
 		}
 		indices, candidates := sectorsToMigrate(slab, state, m.minHostDistanceKm)
+		viable := candidates[:0]
+		for _, hk := range candidates {
+			if _, ok := reachable[hk]; ok {
+				viable = append(viable, hk)
+			}
+		}
+		candidates = viable
 		if len(indices) == 0 {
 			log.Debug("skipping slab, no indices require migration", zap.Stringer("slab", id))
 			continue
@@ -317,9 +340,7 @@ func (m *SlabManager) PrepareMigrationJobs(cursor int64, limit int) ([]Migration
 		// job only needs enough of them for the required uploads plus spares
 		// for failed attempts. Truncating keeps the wire payload proportional
 		// to the work instead of the network size.
-		if max := len(indices) + extraJobCandidates; len(candidates) > max {
-			candidates = candidates[:max]
-		}
+		candidates = candidates[:min(len(candidates), len(indices)+extraJobCandidates)]
 		jobs = append(jobs, MigrationJob{
 			Slab:       slab,
 			Migrate:    indices,
@@ -329,12 +350,59 @@ func (m *SlabManager) PrepareMigrationJobs(cursor int64, limit int) ([]Migration
 	return jobs, nextCursor, nil
 }
 
-// ApplyMigrationResults persists the outcomes of migration jobs reported by a
-// remote node. Per-result store failures are logged and skipped, matching the
-// local migration loop.
-func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) {
+// migratableDestinations returns the set of destination hosts from the results
+// that are still known and unblocked. A nil map disables filtering; it is
+// returned when the results carry no migrated sectors or when the host lookup
+// fails (per-sector writes surface persistent store failures themselves).
+func (m *SlabManager) migratableDestinations(results []MigrationResult, log *zap.Logger) map[types.PublicKey]struct{} {
+	keys := make(map[types.PublicKey]struct{})
 	for _, res := range results {
-		m.applyMigrationResult(res, m.mig.log.With(zap.Stringer("slab", res.SlabID)))
+		for _, s := range res.Migrated {
+			keys[s.HostKey] = struct{}{}
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	hks := make([]types.PublicKey, 0, len(keys))
+	for hk := range keys {
+		hks = append(hks, hk)
+	}
+	batch, err := m.store.Hosts(0, len(hks), hosts.WithPublicKeys(hks), hosts.WithBlocked(false))
+	if err != nil {
+		log.Error("failed to validate migration destinations, applying unfiltered", zap.Error(err))
+		return nil
+	}
+	allowed := make(map[types.PublicKey]struct{}, len(batch))
+	for _, h := range batch {
+		allowed[h.PublicKey] = struct{}{}
+	}
+	return allowed
+}
+
+// ApplyMigrationResults persists the outcomes of migration jobs reported by a
+// remote node. Destination hosts are re-validated so sectors are not recorded
+// on hosts that were blocked or pruned after the job was prepared. Per-result
+// store failures are logged and skipped, matching the local migration loop.
+func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) {
+	log := m.log.Named("migrations")
+	allowed := m.migratableDestinations(results, log)
+	for _, res := range results {
+		log := log.With(zap.Stringer("slab", res.SlabID))
+		if allowed != nil {
+			migrated := res.Migrated[:0]
+			for _, s := range res.Migrated {
+				if _, ok := allowed[s.HostKey]; ok {
+					migrated = append(migrated, s)
+					continue
+				}
+				// keep the failure backoff: the repair is incomplete
+				log.Warn("dropping migrated sector, destination host is blocked or unknown", zap.Stringer("root", s.Root), zap.Stringer("host", s.HostKey))
+				res.Success = false
+			}
+			res.Migrated = migrated
+		}
+		m.applyMigrationResult(res, log)
 	}
 }
 
