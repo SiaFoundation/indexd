@@ -21,19 +21,20 @@ import (
 // client with. It gets refreshed on ever batch fetched for migration.
 type cachedHostStore struct {
 	mu    sync.RWMutex
-	addrs map[types.PublicKey][]chain.NetAddress
+	hosts map[types.PublicKey]hosts.Host
 }
 
 func newCachedHostStore() *cachedHostStore {
-	return &cachedHostStore{addrs: make(map[types.PublicKey][]chain.NetAddress)}
+	return &cachedHostStore{hosts: make(map[types.PublicKey]hosts.Host)}
 }
 
 // update records the connection info carried by a batch of migration jobs.
-func (s *cachedHostStore) update(conns []hosts.Host) {
+func (s *cachedHostStore) update(usableHosts []hosts.Host) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, c := range conns {
-		s.addrs[c.PublicKey] = c.Addresses
+	clear(s.hosts)
+	for _, host := range usableHosts {
+		s.hosts[host.PublicKey] = host
 	}
 }
 
@@ -41,9 +42,9 @@ func (s *cachedHostStore) update(conns []hosts.Host) {
 func (s *cachedHostStore) Addresses(hostKey types.PublicKey) ([]chain.NetAddress, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	addrs, ok := s.addrs[hostKey]
-	if !ok {
-		return nil, fmt.Errorf("no addresses known for host %v", hostKey)
+	var addrs []chain.NetAddress
+	for _, addr := range s.hosts[hostKey].Addresses {
+		addrs = append(addrs, addr)
 	}
 	return addrs, nil
 }
@@ -52,7 +53,7 @@ func (s *cachedHostStore) Addresses(hostKey types.PublicKey) ([]chain.NetAddress
 func (s *cachedHostStore) Usable(hostKey types.PublicKey) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	_, ok := s.addrs[hostKey]
+	_, ok := s.hosts[hostKey]
 	return ok, nil
 }
 
@@ -60,7 +61,20 @@ func (s *cachedHostStore) Usable(hostKey types.PublicKey) (bool, error) {
 // path (which works from the explicit candidate list in each job) and exists
 // only to satisfy the interface.
 func (s *cachedHostStore) UsableHosts() ([]hosts.HostInfo, error) {
-	return nil, nil
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var infos []hosts.HostInfo
+	for _, h := range s.hosts {
+		infos = append(infos, hosts.HostInfo{
+			PublicKey:     h.PublicKey,
+			Addresses:     h.Addresses,
+			CountryCode:   h.CountryCode,
+			Latitude:      h.Latitude,
+			Longitude:     h.Longitude,
+			GoodForUpload: h.IsGood() && h.StuckSince.IsZero() && h.Settings.RemainingStorage > 0, // match primary node's definition
+		})
+	}
+	return infos, nil
 }
 
 // remoteJobBatchSize is the number of migration jobs a remote node fetches from
