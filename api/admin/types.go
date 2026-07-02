@@ -24,8 +24,12 @@ type (
 	AggregatedHostStatsResponse hosts.AggregatedHostStats
 
 	// MigrationJobsResponse is the response body for [GET] /migrations/jobs.
+	// Hosts carries the connection info for every host the batch's jobs
+	// reference (download sources and upload candidates), deduplicated across
+	// the batch.
 	MigrationJobsResponse struct {
 		Jobs       []slabs.MigrationJob `json:"jobs"`
+		Hosts      []slabs.HostConn     `json:"hosts"`
 		NextCursor int64                `json:"nextCursor"`
 	}
 

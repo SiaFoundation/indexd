@@ -171,6 +171,27 @@ func buildLogger(cfg config.Config) (*zap.Logger, func(), error) {
 	}, nil
 }
 
+// loadWalletAndLogger derives the wallet key from the configured recovery
+// phrase, ensures the data directory exists and builds the logger. It is shared
+// by the commands that start a node; the caller is responsible for deferring the
+// returned cleanup function. Any failure is fatal.
+func loadWalletAndLogger(cfg config.Config) (types.PrivateKey, *zap.Logger, func()) {
+	var seed [32]byte
+	checkFatalError("failed to load wallet seed", wallet.SeedFromPhrase(&seed, cfg.RecoveryPhrase))
+	walletKey := wallet.KeyFromSeed(&seed, 0)
+
+	if cfg.Directory != "" {
+		// create the data directory if it does not already exist
+		if err := os.MkdirAll(cfg.Directory, 0700); err != nil {
+			checkFatalError("failed to create data directory", err)
+		}
+	}
+
+	log, closeLog, err := buildLogger(cfg)
+	checkFatalError("failed to initialize logger", err)
+	return walletKey, log, closeLog
+}
+
 func tryConfigPaths() []string {
 	if str := os.Getenv(configFileEnvVar); str != "" {
 		return []string{str}
@@ -276,9 +297,11 @@ func main() {
 	seedCmd := flagg.New("seed", ``)
 	configCmd := flagg.New("config", ``)
 
-	remoteCmd := flagg.New("remote", `Run a remote worker that connects to an existing indexd's database and only
-runs slab migrations. No API is served. The same recovery phrase as the
-primary node must be configured.`)
+	remoteCmd := flagg.New("remote", `Run a remote worker that helps a primary indexd migrate unhealthy slabs. It
+holds no database connection: it fetches prepared migration jobs from the
+primary node's admin API and reports the results back. No API is served.
+Requires the primary's admin API address and password under the 'remote'
+config section and the same recovery phrase as the primary node.`)
 
 	cmd := flagg.Parse(flagg.Tree{
 		Cmd: rootCmd,
@@ -338,19 +361,7 @@ primary node must be configured.`)
 			os.Exit(1)
 		}
 
-		var seed [32]byte
-		checkFatalError("failed to load wallet seed", wallet.SeedFromPhrase(&seed, cfg.RecoveryPhrase))
-		walletKey := wallet.KeyFromSeed(&seed, 0)
-
-		if cfg.Directory != "" {
-			// create the data directory if it does not already exist
-			if err := os.MkdirAll(cfg.Directory, 0700); err != nil {
-				checkFatalError("failed to create data directory", err)
-			}
-		}
-
-		log, closeLog, err := buildLogger(cfg)
-		checkFatalError("failed to initialize logger", err)
+		walletKey, log, closeLog := loadWalletAndLogger(cfg)
 		defer closeLog()
 
 		if cfg.Syncer.Bootstrap {
@@ -383,21 +394,15 @@ primary node must be configured.`)
 		if cfg.RecoveryPhrase == "" {
 			fmt.Fprintf(os.Stderr, "missing recovery phrase - needs to be set via config file and match the primary node\n")
 			os.Exit(1)
+		} else if cfg.Remote.Address == "" {
+			fmt.Fprintf(os.Stderr, "missing remote address - needs to be set via config file to the primary node's admin API URL\n")
+			os.Exit(1)
+		} else if cfg.Remote.Password == "" {
+			fmt.Fprintf(os.Stderr, "missing remote password - needs to be set via config file to the primary node's admin API password\n")
+			os.Exit(1)
 		}
 
-		var seed [32]byte
-		checkFatalError("failed to load wallet seed", wallet.SeedFromPhrase(&seed, cfg.RecoveryPhrase))
-		walletKey := wallet.KeyFromSeed(&seed, 0)
-
-		if cfg.Directory != "" {
-			// create the data directory if it does not already exist
-			if err := os.MkdirAll(cfg.Directory, 0700); err != nil {
-				checkFatalError("failed to create data directory", err)
-			}
-		}
-
-		log, closeLog, err := buildLogger(cfg)
-		checkFatalError("failed to initialize logger", err)
+		walletKey, log, closeLog := loadWalletAndLogger(cfg)
 		defer closeLog()
 
 		checkFatalError("remote startup failed", runRemoteCmd(ctx, cfg, walletKey, log))

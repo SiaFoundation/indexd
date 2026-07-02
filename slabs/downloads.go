@@ -47,7 +47,7 @@ type slabDownload struct {
 // across all available hosts. Allowing a slab download that requires 10 shards
 // out of 30 to actually leverage 30 hosts.
 type slabRecovery struct {
-	m        *SlabManager
+	m        *Migrator
 	slab     Slab
 	required []bool
 	rs       reedsolomon.Encoder
@@ -74,7 +74,7 @@ type slabRecovery struct {
 // indices are nil. Any sectors a host reported lost during recovery are
 // returned in lost (populated even when an error is returned) so the caller can
 // persist them.
-func (m *SlabManager) recoverShards(ctx context.Context, slab Slab, required []bool, log *zap.Logger) (shards [][]byte, lost []Shard, err error) {
+func (m *Migrator) recoverShards(ctx context.Context, slab Slab, required []bool, log *zap.Logger) (shards [][]byte, lost []Shard, err error) {
 	if len(required) != len(slab.Sectors) {
 		panic(fmt.Sprintf("slab %s has %d sectors but %d required flags", slab.ID, len(slab.Sectors), len(required))) // developer error
 	}
@@ -172,7 +172,7 @@ chunkLoop:
 // hedging a chunk read against an additional host. It is derived from the
 // network-wide read-throughput estimate (scaled by raceFactor), floored by
 // minRaceInterval and capped by the hard per-RPC shardTimeout.
-func (m *SlabManager) raceInterval(length uint64) time.Duration {
+func (m *Migrator) raceInterval(length uint64) time.Duration {
 	d := time.Duration(float64(m.hosts.ReadEstimate(length)) * raceFactor)
 	if d < minRaceInterval {
 		d = minRaceInterval
@@ -223,19 +223,6 @@ func (r *slabRecovery) recoverChunk(ctx context.Context, offset, length uint64) 
 		}()
 		if ctx.Err() != nil {
 			return ctx.Err()
-		}
-
-		prices, err := m.hosts.Prices(ctx, hostKey)
-		if err != nil {
-			return fmt.Errorf("failed to fetch host prices: %w", err)
-		}
-
-		// debit the service account for the read since the host may charge for it
-		// even if it is cancelled quickly. This is best effort, it's fine to
-		// log the error and continue on failure.
-		cost := prices.RPCReadSectorCost(length).RenterCost()
-		if err = m.am.DebitServiceAccount(hostKey, m.migrationAccount, cost); err != nil {
-			log.Warn("failed to debit service account for read sector", zap.Error(err))
 		}
 
 		start := time.Now()
@@ -384,13 +371,6 @@ func (r *slabRecovery) reconstructChunk(offset, length uint64, cols [][]byte) er
 		copy(r.out[i][offset:offset+length], cols[i])
 	}
 	return nil
-}
-
-// exclude marks a host so that subsequent chunks skip it.
-func (r *slabRecovery) exclude(hostKey types.PublicKey) {
-	r.mu.Lock()
-	r.excluded[hostKey] = struct{}{}
-	r.mu.Unlock()
 }
 
 // markLost excludes the host from subsequent chunks and records the sector as

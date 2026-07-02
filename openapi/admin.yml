@@ -1622,7 +1622,8 @@ paths:
           name: limit
           schema:
             type: integer
-          description: Maximum number of jobs to return.
+            maximum: 500
+          description: Maximum number of jobs to return (default 100, max 500).
       responses:
         "200":
           description: A batch of migration jobs
@@ -1633,6 +1634,13 @@ paths:
                 properties:
                   jobs:
                     type: array
+                    items:
+                      type: object
+                  hosts:
+                    type: array
+                    description: >-
+                      Connection info for every host the batch's jobs reference,
+                      deduplicated across the batch.
                     items:
                       type: object
                   nextCursor:

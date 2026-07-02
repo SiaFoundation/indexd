@@ -33,27 +33,27 @@ type (
 		maxFailedIntegrityChecks     uint
 		minHostDistanceKm            float64
 
-		migrationAccount    proto.Account
-		migrationAccountKey types.PrivateKey
-
 		numIntegrityCheckGoroutines int
 		numMigrationGoroutines      int
-		shardTimeout                time.Duration
 		integrityCheckTimeout       time.Duration
 
-		// recoveryChunkSize is the size of the segment-aligned byte range
-		// requested from each host during slab recovery. Smaller chunks
-		// spread a recovery across more hosts (more parallel pipes) at the
-		// cost of more RPCs. Must be a multiple of proto.LeafSize.
-		recoveryChunkSize  int
-		runIntegrityChecks bool
-		runMigrations      bool
+		// runMigrations gates the migration loop on a full node so it can be
+		// disabled to outsource migrations to remote nodes. The default is
+		// enabled.
+		runMigrations bool
+
+		// migOpts collects migrator options set via SlabManager options; they
+		// are applied when the migrator is built after all options resolve.
+		migOpts []MigratorOption
+
+		// mig performs the shard recovery and upload for migrations. The same
+		// code runs on remote nodes, which use a Migrator without a SlabManager.
+		mig *Migrator
 
 		alerter AlertsManager
 		am      AccountManager
 		cm      ContractManager
 		hm      HostManager
-		hosts   HostClient
 
 		store    Store
 		verifier *SectorVerifier
@@ -227,10 +227,7 @@ func WithNumMigrationGoroutines(size int) Option {
 // proto.LeafSize when used. The default is 1 MiB.
 func WithRecoveryChunkSize(size int) Option {
 	return func(m *SlabManager) {
-		if size <= 0 {
-			panic("recovery chunk size must be positive") // developer error
-		}
-		m.recoveryChunkSize = size
+		m.migOpts = append(m.migOpts, WithMigratorRecoveryChunkSize(size))
 	}
 }
 
@@ -261,16 +258,8 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
-// WithIntegrityChecks enables or disables the periodic integrity-check loop.
-// The default is enabled.
-func WithIntegrityChecks(enabled bool) Option {
-	return func(m *SlabManager) {
-		m.runIntegrityChecks = enabled
-	}
-}
-
-// WithMigrations enables or disables the periodic slab-migration loop.
-// The default is enabled.
+// WithMigrations enables or disables the migration loop on a full node. The
+// default is enabled; set to false to outsource migrations to remote nodes.
 func WithMigrations(enabled bool) Option {
 	return func(m *SlabManager) {
 		m.runMigrations = enabled
@@ -311,21 +300,14 @@ func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store
 		maxFailedIntegrityChecks:     5,
 		minHostDistanceKm:            10,
 
-		migrationAccount:    proto.Account(migrationAccount.PublicKey()),
-		migrationAccountKey: migrationAccount,
-
-		shardTimeout:                2 * time.Minute,
 		integrityCheckTimeout:       5 * time.Minute,
 		numIntegrityCheckGoroutines: 50,
 		numMigrationGoroutines:      runtime.NumCPU(),
-		recoveryChunkSize:           defaultRecoveryChunkSize,
 
-		runIntegrityChecks: true,
-		runMigrations:      true,
+		runMigrations: true,
 
 		am:      am,
 		cm:      cm,
-		hosts:   hosts,
 		hm:      hm,
 		store:   store,
 		alerter: alerter,
@@ -335,8 +317,11 @@ func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store
 	for _, opt := range opts {
 		opt(m)
 	}
-	m.verifier = NewSectorVerifier(am, hosts, integrityAccount, m.log)
 
+	// build the migrator from the resolved configuration
+	m.mig = NewMigrator(hosts, migrationAccount, m.log.Named("migrations"), m.migOpts...)
+
+	m.verifier = NewSectorVerifier(am, hosts, integrityAccount, m.log)
 	m.initServiceAccounts(migrationAccount.PublicKey(), integrityAccount.PublicKey())
 	return m
 }

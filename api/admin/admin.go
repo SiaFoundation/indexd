@@ -138,7 +138,7 @@ type (
 
 		// migration endpoints used by remote nodes
 		PrepareMigrationJobs(cursor int64, limit int) ([]slabs.MigrationJob, int64, error)
-		ApplyMigrationResults(results []slabs.MigrationResult) error
+		ApplyMigrationResults(results []slabs.MigrationResult)
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -780,64 +780,97 @@ func (a *admin) handleGETState(jc jape.Context) {
 
 // handleGETMigrationJobs returns a batch of prepared slab-migration jobs for a
 // remote node, resolving the connection info for every host the remote needs to
-// reach (download sources and upload candidates).
+// reach (download sources and upload candidates). The connection info is
+// deduplicated across the batch.
 func (a *admin) handleGETMigrationJobs(jc jape.Context) {
-	var cursor int64
-	if jc.DecodeForm("cursor", &cursor) != nil {
-		return
-	}
-	limit := 100
-	if jc.DecodeForm("limit", &limit) != nil {
-		return
-	} else if limit < 1 {
-		jc.Error(errors.New("limit must be positive"), http.StatusBadRequest)
+	cursor, limit, ok := api.ParseCursorLimit(jc)
+	if !ok {
 		return
 	}
 
 	jobs, nextCursor, err := a.slabs.PrepareMigrationJobs(cursor, limit)
 	if !a.checkServerError(jc, "failed to prepare migration jobs", err) {
 		return
+	} else if len(jobs) == 0 {
+		jc.Encode(MigrationJobsResponse{NextCursor: nextCursor})
+		return
 	}
 
-	ctx := jc.Request.Context()
-	addrCache := make(map[types.PublicKey][]chain.NetAddress)
-	resolve := func(hk types.PublicKey) ([]chain.NetAddress, bool) {
-		if addrs, ok := addrCache[hk]; ok {
-			return addrs, len(addrs) > 0
-		}
-		host, err := a.hosts.Host(ctx, hk)
-		if err != nil {
-			// host may have been pruned; cache the miss and skip it as a
-			// connection target.
-			addrCache[hk] = nil
-			return nil, false
-		}
-		addrCache[hk] = host.Addresses
-		return host.Addresses, len(host.Addresses) > 0
-	}
-
-	for i := range jobs {
-		seen := make(map[types.PublicKey]struct{})
-		addHost := func(hk types.PublicKey) {
-			if _, ok := seen[hk]; ok {
-				return
-			}
-			seen[hk] = struct{}{}
-			if addrs, ok := resolve(hk); ok {
-				jobs[i].Hosts = append(jobs[i].Hosts, slabs.HostConn{PublicKey: hk, Addresses: addrs})
-			}
-		}
-		for _, sector := range jobs[i].Slab.Sectors {
+	// collect the unique host keys the batch's jobs reference
+	keys := make(map[types.PublicKey]struct{})
+	for _, job := range jobs {
+		for _, sector := range job.Slab.Sectors {
 			if sector.HostKey != nil {
-				addHost(*sector.HostKey)
+				keys[*sector.HostKey] = struct{}{}
 			}
 		}
-		for _, hk := range jobs[i].Candidates {
-			addHost(hk)
+		for _, hk := range job.Candidates {
+			keys[hk] = struct{}{}
 		}
 	}
 
-	jc.Encode(MigrationJobsResponse{Jobs: jobs, NextCursor: nextCursor})
+	// resolve their addresses in a single batch query; hosts pruned since the
+	// jobs were prepared are simply absent from the result. Blocked hosts are
+	// included on purpose: they can be download sources.
+	hks := make([]types.PublicKey, 0, len(keys))
+	for hk := range keys {
+		hks = append(hks, hk)
+	}
+	batch, err := a.hosts.Hosts(jc.Request.Context(), 0, len(hks), hosts.WithPublicKeys(hks))
+	if !a.checkServerError(jc, "failed to resolve host addresses", err) {
+		return
+	}
+	addrs := make(map[types.PublicKey][]chain.NetAddress)
+	for _, host := range batch {
+		if len(host.Addresses) > 0 {
+			addrs[host.PublicKey] = host.Addresses
+		}
+	}
+
+	// drop candidates the remote cannot reach so it doesn't burn upload
+	// attempts on them, and drop jobs left without candidates entirely.
+	filtered := jobs[:0]
+	for _, job := range jobs {
+		candidates := job.Candidates[:0]
+		for _, hk := range job.Candidates {
+			if _, ok := addrs[hk]; ok {
+				candidates = append(candidates, hk)
+			}
+		}
+		job.Candidates = candidates
+		if len(job.Candidates) == 0 {
+			// mirror PrepareMigrationJobs' no-candidates warning so the slab's
+			// unrepairable state is visible.
+			a.log.Warn("dropping migration job, no candidate host is reachable", zap.Stringer("slab", job.Slab.ID))
+			continue
+		}
+		filtered = append(filtered, job)
+	}
+
+	// carry connection info only for hosts the remaining jobs reference
+	conns := make([]slabs.HostConn, 0, len(addrs))
+	seen := make(map[types.PublicKey]struct{})
+	addConn := func(hk types.PublicKey) {
+		if _, ok := seen[hk]; ok {
+			return
+		}
+		seen[hk] = struct{}{}
+		if a, ok := addrs[hk]; ok {
+			conns = append(conns, slabs.HostConn{PublicKey: hk, Addresses: a})
+		}
+	}
+	for _, job := range filtered {
+		for _, sector := range job.Slab.Sectors {
+			if sector.HostKey != nil {
+				addConn(*sector.HostKey)
+			}
+		}
+		for _, hk := range job.Candidates {
+			addConn(hk)
+		}
+	}
+
+	jc.Encode(MigrationJobsResponse{Jobs: filtered, Hosts: conns, NextCursor: nextCursor})
 }
 
 // handlePOSTMigrationResults persists the outcomes of migration jobs reported
@@ -847,9 +880,7 @@ func (a *admin) handlePOSTMigrationResults(jc jape.Context) {
 	if jc.Decode(&results) != nil {
 		return
 	}
-	if !a.checkServerError(jc, "failed to apply migration results", a.slabs.ApplyMigrationResults(results)) {
-		return
-	}
+	a.slabs.ApplyMigrationResults(results)
 	jc.Encode(nil)
 }
 

@@ -13,6 +13,11 @@ import (
 	"golang.org/x/crypto/chacha20"
 )
 
+// extraJobCandidates is the number of upload candidates included in a
+// migration job beyond the number of sectors to migrate, giving the remote
+// spare hosts to retry failed uploads against.
+const extraJobCandidates = 10
+
 // migrationState holds the hosts, contracts, and chain state needed for
 // slab migrations.
 type migrationState struct {
@@ -23,6 +28,26 @@ type migrationState struct {
 }
 
 type (
+	// Migrator performs the network-heavy part of a slab migration: it recovers
+	// a slab's missing shards from hosts and uploads the re-encrypted shards to
+	// new hosts. It holds only what recovery and upload require and is used both
+	// by the SlabManager (full node) and directly by remote migration workers.
+	// It trusts the candidate hosts it is given — they were vetted when the
+	// migration was prepared.
+	Migrator struct {
+		hosts               HostClient
+		migrationAccountKey types.PrivateKey
+		shardTimeout        time.Duration
+
+		// recoveryChunkSize is the size of the segment-aligned byte range
+		// requested from each host during slab recovery. Smaller chunks
+		// spread a recovery across more hosts (more parallel pipes) at the
+		// cost of more RPCs. Must be a multiple of proto.LeafSize.
+		recoveryChunkSize int
+
+		log *zap.Logger
+	}
+
 	// HostConn carries the connection information a remote node needs to reach
 	// a host during a migration.
 	HostConn struct {
@@ -31,14 +56,14 @@ type (
 	}
 
 	// MigrationJob is a fully-prepared unit of migration work handed to a
-	// remote node: the slab to repair, which sector indices need migrating, the
-	// vetted upload-candidate hosts and the connection info for every host
-	// involved (download sources and candidates).
+	// remote node: the slab to repair, which sector indices need migrating and
+	// the vetted upload-candidate hosts. The connection info for the hosts
+	// involved (download sources and candidates) is carried alongside the jobs,
+	// deduplicated across a batch.
 	MigrationJob struct {
 		Slab       Slab              `json:"slab"`
 		Migrate    []int             `json:"migrate"`
 		Candidates []types.PublicKey `json:"candidates"`
-		Hosts      []HostConn        `json:"hosts"`
 	}
 
 	// MigrationResult is the outcome of a MigrationJob, reported back by a
@@ -110,27 +135,46 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, state migr
 		log.Warn("tried to migrate slab but no hosts are available for migration")
 		return
 	}
-	log = log.With(zap.Int("toMigrate", len(indices)), zap.Int("uploadCandidates", len(uploadCandidates)))
 
-	migrated, lost, err := m.executeMigration(ctx, slab, indices, uploadCandidates, log)
-	res := MigrationResult{SlabID: slabID, Migrated: migrated, Lost: lost}
-	if err != nil {
-		if ctx.Err() == nil {
-			log.Error("failed to recover slab", zap.Error(err))
-		}
-	} else {
-		res.Recovered = true
-		res.Success = len(migrated) == len(indices)
-	}
+	res := m.mig.MigrateJob(ctx, MigrationJob{Slab: slab, Migrate: indices, Candidates: uploadCandidates})
 	m.applyMigrationResult(res, log)
+}
 
-	if res.Recovered {
-		if res.Success {
-			log.Debug("slab successfully repaired")
-		} else {
-			log.Debug("slab partially repaired")
+// A MigratorOption configures an optional Migrator setting.
+type MigratorOption func(*Migrator)
+
+// WithMigratorRecoveryChunkSize sets the size of the segment-aligned byte range
+// requested from each host during recovery. See SlabManager's
+// WithRecoveryChunkSize for the semantics.
+func WithMigratorRecoveryChunkSize(size int) MigratorOption {
+	return func(m *Migrator) {
+		if size <= 0 {
+			panic("recovery chunk size must be positive") // developer error
 		}
+		m.recoveryChunkSize = size
 	}
+}
+
+// NewMigrator creates a Migrator that recovers a slab's shards from hosts and
+// uploads the re-encrypted shards to new hosts. It is what a remote migration
+// worker runs directly (a remote node pulls prepared jobs from the primary,
+// executes them via MigrateJob and reports the results back); the full
+// SlabManager uses one internally.
+func NewMigrator(hosts HostClient, migrationAccount types.PrivateKey, log *zap.Logger, opts ...MigratorOption) *Migrator {
+	if log == nil {
+		log = zap.NewNop()
+	}
+	m := &Migrator{
+		hosts:               hosts,
+		migrationAccountKey: migrationAccount,
+		shardTimeout:        2 * time.Minute,
+		recoveryChunkSize:   defaultRecoveryChunkSize,
+		log:                 log,
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
 }
 
 // executeMigration recovers the required shards of a slab, re-encrypts them and
@@ -139,7 +183,7 @@ func (m *SlabManager) migrateSlab(ctx context.Context, slabID SlabID, state migr
 // failed, in which case the slab's repair state should be left untouched; lost
 // is still populated so the caller can persist any sectors discovered lost
 // during the failed recovery.
-func (m *SlabManager) executeMigration(ctx context.Context, slab Slab, indices []int, candidates []types.PublicKey, log *zap.Logger) (migrated, lost []Shard, err error) {
+func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []int, candidates []types.PublicKey, log *zap.Logger) (migrated, lost []Shard, err error) {
 	// indicate what shards are required
 	required := make([]bool, len(slab.Sectors))
 	for _, i := range indices {
@@ -186,9 +230,16 @@ func (m *SlabManager) executeMigration(ctx context.Context, slab Slab, indices [
 // slab's repair state. It is shared by the local migration loop and the remote
 // result-reporting endpoint.
 func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger) {
-	for _, s := range res.Lost {
-		if err := m.store.MarkSectorsLost(s.HostKey, []types.Hash256{s.Root}); err != nil {
-			log.Error("failed to mark sector as lost", zap.Stringer("host", s.HostKey), zap.Error(err))
+	// group lost sectors by host so each host is marked in a single call
+	if len(res.Lost) > 0 {
+		lostByHost := make(map[types.PublicKey][]types.Hash256)
+		for _, s := range res.Lost {
+			lostByHost[s.HostKey] = append(lostByHost[s.HostKey], s.Root)
+		}
+		for hk, roots := range lostByHost {
+			if err := m.store.MarkSectorsLost(hk, roots); err != nil {
+				log.Error("failed to mark sectors as lost", zap.Stringer("host", hk), zap.Error(err))
+			}
 		}
 	}
 
@@ -198,18 +249,26 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 		return
 	}
 
+	// a migrated sector only counts as repaired once its new location is
+	// persisted; a store failure here must not mark the slab successfully
+	// repaired or the uploaded sector is orphaned and the slab's failure
+	// counter is reset even though it still needs repair.
+	persisted := 0
 	for _, s := range res.Migrated {
 		if _, err := m.store.MigrateSector(s.Root, s.HostKey); err != nil {
 			log.Error("failed to record migrated sector", zap.Stringer("root", s.Root), zap.Error(err))
+			continue
 		}
+		persisted++
 	}
-	if len(res.Migrated) > 0 {
+	if persisted > 0 {
 		// record the slab got migrated so object events get updated
 		if err := m.store.RecordSlabMigrated(res.SlabID); err != nil {
 			log.Debug("failed to record slab migration", zap.Error(err))
 		}
 	}
-	if err := m.store.MarkSlabRepaired(res.SlabID, res.Success); err != nil {
+	success := res.Success && persisted == len(res.Migrated)
+	if err := m.store.MarkSlabRepaired(res.SlabID, success); err != nil {
 		log.Error("failed to mark slab repaired", zap.Error(err))
 	}
 }
@@ -233,17 +292,33 @@ func (m *SlabManager) PrepareMigrationJobs(cursor int64, limit int) ([]Migration
 		return nil, 0, fmt.Errorf("failed to fetch migration state: %w", err)
 	}
 
+	log := m.mig.log
 	jobs := make([]MigrationJob, 0, len(ids))
 	for _, id := range ids {
 		slab, err := m.store.Slab(id)
 		if err != nil {
-			return nil, 0, fmt.Errorf("failed to fetch slab %s: %w", id, err)
+			// tolerate per-slab failures (e.g. the slab was pruned after being
+			// claimed) so one bad slab doesn't abort a batch of already-claimed
+			// slabs, mirroring the local migration loop.
+			log.Error("failed to fetch slab", zap.Stringer("slab", id), zap.Error(err))
+			continue
 		}
 		indices, candidates := sectorsToMigrate(slab, state, m.minHostDistanceKm)
-		if len(indices) == 0 || len(candidates) == 0 {
-			// nothing to migrate, or nowhere to migrate to; skip so the slab is
-			// retried on a later pass without altering its repair state.
+		if len(indices) == 0 {
+			log.Debug("skipping slab, no indices require migration", zap.Stringer("slab", id))
 			continue
+		} else if len(candidates) == 0 {
+			// mirror the local loop's warning so a slab that can never be
+			// repaired is visible even when migrations are outsourced.
+			log.Warn("skipping slab, no hosts are available for migration", zap.Stringer("slab", id))
+			continue
+		}
+		// sectorsToMigrate returns every eligible host in random order; the
+		// job only needs enough of them for the required uploads plus spares
+		// for failed attempts. Truncating keeps the wire payload proportional
+		// to the work instead of the network size.
+		if max := len(indices) + extraJobCandidates; len(candidates) > max {
+			candidates = candidates[:max]
 		}
 		jobs = append(jobs, MigrationJob{
 			Slab:       slab,
@@ -255,20 +330,19 @@ func (m *SlabManager) PrepareMigrationJobs(cursor int64, limit int) ([]Migration
 }
 
 // ApplyMigrationResults persists the outcomes of migration jobs reported by a
-// remote node.
-func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) error {
-	log := m.log.Named("migrations")
+// remote node. Per-result store failures are logged and skipped, matching the
+// local migration loop.
+func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) {
 	for _, res := range results {
-		m.applyMigrationResult(res, log.With(zap.Stringer("slab", res.SlabID)))
+		m.applyMigrationResult(res, m.mig.log.With(zap.Stringer("slab", res.SlabID)))
 	}
-	return nil
 }
 
 // MigrateJob executes a prepared migration job, performing the shard recovery
 // and upload, and returns the result for the primary node to persist. It
 // performs no store writes and is used by remote nodes.
-func (m *SlabManager) MigrateJob(ctx context.Context, job MigrationJob) MigrationResult {
-	log := m.log.Named("migrations").With(zap.Stringer("slab", job.Slab.ID), zap.Int("toMigrate", len(job.Migrate)), zap.Int("uploadCandidates", len(job.Candidates)))
+func (m *Migrator) MigrateJob(ctx context.Context, job MigrationJob) MigrationResult {
+	log := m.log.With(zap.Stringer("slab", job.Slab.ID), zap.Int("toMigrate", len(job.Migrate)), zap.Int("uploadCandidates", len(job.Candidates)))
 	migrated, lost, err := m.executeMigration(ctx, job.Slab, job.Migrate, job.Candidates, log)
 	res := MigrationResult{SlabID: job.Slab.ID, Migrated: migrated, Lost: lost}
 	if err != nil {

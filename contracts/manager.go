@@ -410,16 +410,10 @@ func (cm *ContractManager) MaintenanceSettings(ctx context.Context) (Maintenance
 // HealthyContracts returns all contracts that are revisable and good regardless
 // of renew window or size limits.
 func (cm *ContractManager) HealthyContracts() ([]Contract, error) {
-	return HealthyContracts(cm.store)
-}
-
-// HealthyContracts returns all contracts that are revisable and good from a
-// store.
-func HealthyContracts(store Store) ([]Contract, error) {
 	var good []Contract
 	const batchSize = 50
 	for offset := 0; ; offset += batchSize {
-		batch, err := store.Contracts(offset, batchSize, WithRevisable(true), WithGood(true))
+		batch, err := cm.store.Contracts(offset, batchSize, WithRevisable(true), WithGood(true))
 		if err != nil {
 			return nil, fmt.Errorf("failed to fetch contracts: %w", err)
 		}

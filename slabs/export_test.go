@@ -25,15 +25,15 @@ var (
 )
 
 func (m *SlabManager) UploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) ([]Shard, error) {
-	return m.uploadShards(ctx, slab, shards, available, log)
+	return m.mig.uploadShards(ctx, slab, shards, available, log)
 }
 
 func (m *SlabManager) RecoverShards(ctx context.Context, slab Slab, required []bool, log *zap.Logger) ([][]byte, []Shard, error) {
-	return m.recoverShards(ctx, slab, required, log)
+	return m.mig.recoverShards(ctx, slab, required, log)
 }
 
 func (m *SlabManager) SetRecoveryChunkSize(size int) {
-	m.recoveryChunkSize = size
+	m.mig.recoveryChunkSize = size
 }
 
 func (m *SlabManager) MigrateSlabs(ctx context.Context, slabIDs []SlabID, log *zap.Logger) error {
@@ -56,11 +56,11 @@ func (m *SlabManager) PerformIntegrityChecks(ctx context.Context) error {
 }
 
 func (m *SlabManager) SetShardTimeout(t time.Duration) {
-	m.shardTimeout = t
+	m.mig.shardTimeout = t
 }
 
 func (m *SlabManager) MigrationAccount() proto.Account {
-	return m.migrationAccount
+	return proto.Account(m.mig.migrationAccountKey.PublicKey())
 }
 
 func (m *SlabManager) MaxFailedIntegrityChecks() uint {

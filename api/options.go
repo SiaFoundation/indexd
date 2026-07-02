@@ -21,6 +21,9 @@ var (
 	// ErrInvalidOffset is returned when the requested offset is invalid.
 	ErrInvalidOffset = errors.New("offset must be non-negative")
 
+	// ErrInvalidCursor is returned when the requested cursor is invalid.
+	ErrInvalidCursor = errors.New("cursor must be non-negative")
+
 	// ErrInvalidLimit is returned when the requested limit is invalid.
 	ErrInvalidLimit = fmt.Errorf("limit must between 1 and %d", maxLimit)
 
@@ -79,6 +82,20 @@ func WithBefore(t time.Time) URLQueryParameterOption {
 	}
 }
 
+// parseLimit parses the 'limit' query parameter, applying the shared default
+// and maximum. It returns false and writes an appropriate error to the response
+// body if the value is invalid.
+func parseLimit(jc jape.Context) (limit int, ok bool) {
+	limit = defaultLimit
+	if jc.DecodeForm("limit", &limit) != nil {
+		return 0, false
+	} else if limit < 1 || limit > maxLimit {
+		jc.Error(ErrInvalidLimit, http.StatusBadRequest)
+		return 0, false
+	}
+	return limit, true
+}
+
 // ParseOffsetLimit parses the 'offset' and 'limit' query parameters from the
 // request context. It returns the offset and limit values, and a boolean
 // indicating whether the parsing was successful. If the parameters are not
@@ -92,15 +109,30 @@ func ParseOffsetLimit(jc jape.Context) (offset int, limit int, ok bool) {
 		return 0, 0, false
 	}
 
-	limit = defaultLimit
-	if jc.DecodeForm("limit", &limit) != nil {
+	limit, ok = parseLimit(jc)
+	if !ok {
 		return 0, 0, false
-	} else if limit < 1 || limit > maxLimit {
-		jc.Error(ErrInvalidLimit, http.StatusBadRequest)
+	}
+	return offset, limit, true
+}
+
+// ParseCursorLimit parses the 'cursor' and 'limit' query parameters from the
+// request context, applying the same default and maximum limit as
+// ParseOffsetLimit. It returns false and writes an appropriate error to the
+// response body if a parameter is invalid.
+func ParseCursorLimit(jc jape.Context) (cursor int64, limit int, ok bool) {
+	if jc.DecodeForm("cursor", &cursor) != nil {
+		return 0, 0, false
+	} else if cursor < 0 {
+		jc.Error(ErrInvalidCursor, http.StatusBadRequest)
 		return 0, 0, false
 	}
 
-	return offset, limit, true
+	limit, ok = parseLimit(jc)
+	if !ok {
+		return 0, 0, false
+	}
+	return cursor, limit, true
 }
 
 // SortOption represents a single sorting configuration parsed from request

@@ -418,6 +418,10 @@ func (m *mockHostClient) Prices(ctx context.Context, hostKey types.PublicKey) (p
 // WriteSector is a mock implementation that writes a sector to the mock host.
 func (m *mockHostClient) WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (rhp.RPCWriteSectorResult, error) {
 	m.mu.Lock()
+	if err, ok := m.failHosts[hostKey]; ok {
+		m.mu.Unlock()
+		return rhp.RPCWriteSectorResult{}, err
+	}
 	delay := m.slowHosts[hostKey]
 	m.mu.Unlock()
 	if delay > 0 {
