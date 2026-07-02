@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
-	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
@@ -49,13 +48,6 @@ type (
 		log *zap.Logger
 	}
 
-	// HostConn carries the connection information a remote node needs to reach
-	// a host during a migration.
-	HostConn struct {
-		PublicKey types.PublicKey    `json:"publicKey"`
-		Addresses []chain.NetAddress `json:"addresses"`
-	}
-
 	// MigrationBatch is a batch of unhealthy slabs together with everything a
 	// remote node needs to migrate them: the migration state to determine
 	// which sectors to migrate and where, and the connection info for
@@ -65,7 +57,6 @@ type (
 	MigrationBatch struct {
 		Slabs      []Slab         `json:"slabs"`
 		State      MigrationState `json:"state"`
-		Hosts      []HostConn     `json:"hosts"`
 		NextCursor int64          `json:"nextCursor"`
 	}
 
@@ -325,7 +316,7 @@ func (m *SlabManager) PrepareMigrationBatch(cursor int64, limit int) (MigrationB
 			}
 		}
 	}
-	var conns []HostConn
+	var conns []hosts.HostInfo
 	if len(missing) > 0 {
 		hks := make([]types.PublicKey, 0, len(missing))
 		for hk := range missing {
@@ -337,7 +328,14 @@ func (m *SlabManager) PrepareMigrationBatch(cursor int64, limit int) (MigrationB
 		}
 		for _, h := range batch {
 			if len(h.Addresses) > 0 {
-				conns = append(conns, HostConn{PublicKey: h.PublicKey, Addresses: h.Addresses})
+				conns = append(conns, hosts.HostInfo{
+					PublicKey:     h.PublicKey,
+					Addresses:     h.Addresses,
+					CountryCode:   h.CountryCode,
+					Latitude:      h.Latitude,
+					Longitude:     h.Longitude,
+					GoodForUpload: h.IsGood() && h.StuckSince.IsZero() && h.Settings.RemainingStorage > 0,
+				})
 			}
 		}
 	}
@@ -345,7 +343,6 @@ func (m *SlabManager) PrepareMigrationBatch(cursor int64, limit int) (MigrationB
 	return MigrationBatch{
 		Slabs:      batchSlabs,
 		State:      state,
-		Hosts:      conns,
 		NextCursor: nextCursor,
 	}, nil
 }

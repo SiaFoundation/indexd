@@ -297,10 +297,8 @@ func main() {
 	seedCmd := flagg.New("seed", ``)
 	configCmd := flagg.New("config", ``)
 
-	remoteCmd := flagg.New("remote", `Run a remote worker that helps a primary indexd migrate unhealthy slabs. It
-holds no database connection: it fetches prepared migration jobs from the
-primary node's admin API and reports the results back. No API is served.
-Requires the primary's admin API address and password under the 'remote'
+	remoteCmd := flagg.New("remote", `Run a remote worker that helps a primary indexd migrate unhealthy slabs.
+It serves no API and requires the primary's admin API address and password under the 'remote'
 config section and the same recovery phrase as the primary node.`)
 
 	cmd := flagg.Parse(flagg.Tree{

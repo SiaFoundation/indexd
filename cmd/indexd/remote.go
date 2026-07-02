@@ -18,10 +18,7 @@ import (
 )
 
 // cachedHostStore is the client.Store a remote migration worker backs its RHP
-// client with. A remote node has no database; the addresses of the hosts it
-// must reach are supplied by the primary node with each batch of migration
-// jobs. It makes no judgement about host quality — the primary node vetted the
-// hosts — so every known host is reported usable.
+// client with. It gets refreshed on ever batch fetched for migration.
 type cachedHostStore struct {
 	mu    sync.RWMutex
 	addrs map[types.PublicKey][]chain.NetAddress
@@ -32,7 +29,7 @@ func newCachedHostStore() *cachedHostStore {
 }
 
 // update records the connection info carried by a batch of migration jobs.
-func (s *cachedHostStore) update(conns []slabs.HostConn) {
+func (s *cachedHostStore) update(conns []hosts.Host) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for _, c := range conns {
@@ -51,10 +48,7 @@ func (s *cachedHostStore) Addresses(hostKey types.PublicKey) ([]chain.NetAddress
 	return addrs, nil
 }
 
-// Usable implements client.Store. The primary node only ever sends hosts it has
-// already vetted, so any host the store has addresses for is usable; hosts it
-// doesn't know (e.g. pruned download sources) are filtered so the client
-// doesn't pick candidates it cannot dial.
+// Usable implements client.Store.
 func (s *cachedHostStore) Usable(hostKey types.PublicKey) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -178,7 +172,7 @@ func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store
 			return executed, recovered, fmt.Errorf("failed to fetch migration batch: %w", err)
 		}
 		log.Debug("fetched migration batch", zap.Int("slabs", len(batch.Slabs)), zap.Int64("cursor", cursor), zap.Int64("nextCursor", batch.NextCursor))
-		store.update(batch.Hosts)
+		store.update(batch.State.Hosts)
 
 		var mu sync.Mutex
 		results := make([]slabs.MigrationResult, 0, len(batch.Slabs))
