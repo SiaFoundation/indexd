@@ -1,3 +1,9 @@
+## 0.3.2 (2026-07-04)
+
+### Fixes
+
+- Updated coreutils to v0.23.1 for new sector read error message.
+
 ## 0.3.0 (2026-06-30)
 
 ### Breaking Changes
