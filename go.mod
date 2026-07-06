@@ -8,8 +8,8 @@ require (
 	github.com/klauspost/reedsolomon v1.14.1
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
-	go.sia.tech/core v0.21.4
-	go.sia.tech/coreutils v0.23.3
+	go.sia.tech/core v0.21.5
+	go.sia.tech/coreutils v0.23.4
 	go.sia.tech/jape v0.14.1
 	go.sia.tech/mux v1.5.2
 	go.sia.tech/web/indexd v0.18.0
@@ -34,7 +34,7 @@ require (
 	github.com/oschwald/maxminddb-golang v1.13.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/quic-go/quic-go v0.60.0 // indirect
-	github.com/quic-go/webtransport-go v0.11.0 // indirect
+	github.com/quic-go/webtransport-go v0.11.1 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	go.etcd.io/bbolt v1.5.0 // indirect
 	go.sia.tech/web v0.0.0-20240422221546-c1709d16b6ef // indirect
