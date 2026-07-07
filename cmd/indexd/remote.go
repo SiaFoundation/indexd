@@ -9,12 +9,35 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/indexd/api"
 	adminapi "go.sia.tech/indexd/api/admin"
 	client "go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/config"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
+)
+
+// remoteMigrationInterval is how long a remote node waits between passes once it
+// has worked through all currently-unhealthy slabs. maxRemoteBackoff caps the
+// exponential backoff applied when consecutive passes fail every recovery,
+// which points at a systemic problem such as a recovery phrase that doesn't
+// match the primary's.
+const (
+	remoteMigrationInterval = time.Minute
+	maxRemoteBackoff        = 30 * time.Minute
+)
+
+const (
+	// resultReportTimeout bounds the single report of a batch's results. The
+	// report runs on its own context so a shutdown mid-report doesn't abort
+	// it: the results represent completed downloads and uploads, and dropping
+	// them orphans the uploaded sectors and forgets discovered lost sectors.
+	resultReportTimeout = 5 * time.Minute
+
+	// remoteRequestTimeout bounds a single request to the primary so a
+	// half-open connection cannot stall the worker indefinitely.
+	remoteRequestTimeout = 5 * time.Minute
 )
 
 // cachedHostStore is the client.Store a remote migration worker backs its RHP
@@ -28,9 +51,9 @@ func newCachedHostStore() *cachedHostStore {
 	return &cachedHostStore{hosts: make(map[types.PublicKey]hosts.Host)}
 }
 
-// update replaces the store's contents with the usable hosts carried by a
+// reset replaces the store's contents with the usable hosts carried by a
 // migration batch's state.
-func (s *cachedHostStore) update(usableHosts []hosts.Host) {
+func (s *cachedHostStore) reset(usableHosts []hosts.Host) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	clear(s.hosts)
@@ -78,32 +101,6 @@ func (s *cachedHostStore) UsableHosts() ([]hosts.HostInfo, error) {
 	return infos, nil
 }
 
-// remoteBatchSize is the number of unhealthy slabs a remote node fetches from
-// the primary node per batch.
-const remoteBatchSize = 100
-
-// remoteMigrationInterval is how long a remote node waits between passes once it
-// has worked through all currently-unhealthy slabs. maxRemoteBackoff caps the
-// exponential backoff applied when consecutive passes fail every recovery,
-// which points at a systemic problem such as a recovery phrase that doesn't
-// match the primary's.
-const (
-	remoteMigrationInterval = time.Minute
-	maxRemoteBackoff        = 30 * time.Minute
-)
-
-const (
-	// resultReportTimeout bounds the single report of a batch's results. The
-	// report runs on its own context so a shutdown mid-report doesn't abort
-	// it: the results represent completed downloads and uploads, and dropping
-	// them orphans the uploaded sectors and forgets discovered lost sectors.
-	resultReportTimeout = time.Minute
-
-	// remoteRequestTimeout bounds a single request to the primary so a
-	// half-open connection cannot stall the worker indefinitely.
-	remoteRequestTimeout = 5 * time.Minute
-)
-
 // runRemoteCmd runs a remote worker that helps the primary indexd migrate
 // unhealthy slabs. It holds no database connection: it fetches prepared
 // migration jobs from the primary node's admin API, downloads and re-uploads the
@@ -143,7 +140,7 @@ func runRemoteCmd(ctx context.Context, cfg config.Config, walletKey types.Privat
 // otherwise claim and burn a fresh batch of slabs every interval, parking them
 // for the claim duration with nothing to show.
 func runRemoteMigrationLoop(ctx context.Context, primary *adminapi.Client, store *cachedHostStore, migrator *slabs.Migrator, workers int, log *zap.Logger) {
-	barrenPasses := 0
+	failedPasses := 0
 	for {
 		executed, recovered, err := runRemoteMigrationPass(ctx, primary, store, migrator, workers, log)
 		if err != nil {
@@ -153,16 +150,16 @@ func runRemoteMigrationLoop(ctx context.Context, primary *adminapi.Client, store
 			log.Error("migration pass failed", zap.Error(err))
 		}
 		if executed > 0 && recovered == 0 {
-			barrenPasses++
+			failedPasses++
 		} else if executed > 0 {
-			barrenPasses = 0
+			failedPasses = 0
 		}
 
 		interval := remoteMigrationInterval
-		if barrenPasses > 0 {
-			interval = min(remoteMigrationInterval<<barrenPasses, maxRemoteBackoff)
+		if failedPasses > 0 {
+			interval = min(remoteMigrationInterval<<failedPasses, maxRemoteBackoff)
 			log.Warn("every migration of the pass failed recovery, backing off",
-				zap.Int("consecutivePasses", barrenPasses), zap.Duration("interval", interval))
+				zap.Int("consecutivePasses", failedPasses), zap.Duration("interval", interval))
 		}
 		select {
 		case <-ctx.Done():
@@ -178,16 +175,20 @@ func runRemoteMigrationLoop(ctx context.Context, primary *adminapi.Client, store
 // returns how many migrations were attempted and how many of them recovered
 // their slab's shards.
 func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store *cachedHostStore, migrator *slabs.Migrator, workers int, log *zap.Logger) (executed, recovered int, _ error) {
+	// fetch a multiple of the number of workers per batch, like the local
+	// migration loop does, bounded by the API's maximum limit
+	batchSize := min(slabs.MigrationSlabsPerWorker*workers, api.MaxLimit)
+
 	var cursor int64
 	for {
 		fetchCtx, cancel := context.WithTimeout(ctx, remoteRequestTimeout)
-		batch, err := primary.MigrationBatch(fetchCtx, cursor, remoteBatchSize)
+		batch, err := primary.MigrationBatch(fetchCtx, cursor, batchSize)
 		cancel()
 		if err != nil {
 			return executed, recovered, fmt.Errorf("failed to fetch migration batch: %w", err)
 		}
 		log.Debug("fetched migration batch", zap.Int("slabs", len(batch.Slabs)), zap.Int64("cursor", cursor), zap.Int64("nextCursor", batch.NextCursor))
-		store.update(batch.State.Hosts)
+		store.reset(batch.State.Hosts)
 
 		var mu sync.Mutex
 		results := make([]slabs.MigrationResult, 0, len(batch.Slabs))
@@ -221,6 +222,8 @@ func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store
 		if err := reportMigrationResults(primary, results); err != nil {
 			return executed, recovered, fmt.Errorf("failed to report migration results: %w", err)
 		}
+
+		// check if we were interrupted
 		if ctx.Err() != nil {
 			return executed, recovered, ctx.Err()
 		}

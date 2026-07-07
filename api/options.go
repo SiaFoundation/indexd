@@ -14,7 +14,10 @@ import (
 
 const (
 	defaultLimit = 100
-	maxLimit     = 500
+
+	// MaxLimit is the maximum value of the 'limit' query parameter accepted by
+	// paginated endpoints.
+	MaxLimit = 500
 )
 
 var (
@@ -25,7 +28,7 @@ var (
 	ErrInvalidCursor = errors.New("cursor must be non-negative")
 
 	// ErrInvalidLimit is returned when the requested limit is invalid.
-	ErrInvalidLimit = fmt.Errorf("limit must between 1 and %d", maxLimit)
+	ErrInvalidLimit = fmt.Errorf("limit must between 1 and %d", MaxLimit)
 
 	// ErrInvalidSortPair is returned when the requested sort parameters are
 	// invalid.
@@ -89,7 +92,7 @@ func parseLimit(jc jape.Context) (limit int, ok bool) {
 	limit = defaultLimit
 	if jc.DecodeForm("limit", &limit) != nil {
 		return 0, false
-	} else if limit < 1 || limit > maxLimit {
+	} else if limit < 1 || limit > MaxLimit {
 		jc.Error(ErrInvalidLimit, http.StatusBadRequest)
 		return 0, false
 	}

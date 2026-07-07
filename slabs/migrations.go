@@ -12,6 +12,12 @@ import (
 	"golang.org/x/crypto/chacha20"
 )
 
+// MigrationSlabsPerWorker is the number of unhealthy slabs fetched per
+// migration worker when batching migrations, ensuring the workers don't finish
+// their work before the next batch is ready. It is shared by the local
+// migration loop and remote migration workers.
+const MigrationSlabsPerWorker = 10
+
 // MigrationState holds the hosts, contracts, and chain state needed to
 // determine which sectors of a slab require migration and which hosts can
 // receive them. It is shipped to remote nodes alongside a batch of unhealthy

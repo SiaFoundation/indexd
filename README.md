@@ -173,6 +173,33 @@ database:
     sslmode: verify-full # the SSL mode for the PostgreSQL connection (https://www.postgresql.org/docs/current/libpq-ssl.html)
 ```
 
+### Example Config (remote migration node)
+
+A remote migration node is started with `indexd remote` and helps a primary
+indexer migrate unhealthy slabs. It holds no database connection and serves no
+API: it fetches batches of unhealthy slabs from the primary node's admin API,
+downloads and re-uploads the affected sectors, and reports the results back.
+The recovery phrase must match the primary node's so the derived account keys
+line up with the host-side accounts the primary funds. Set
+`slabs.migrations: false` on the primary to outsource migrations entirely to
+remote nodes.
+
+```yaml
+directory: /var/lib/indexd
+recoveryPhrase: <your twelve word recovery phrase> # must match the primary node's recovery phrase
+remote:
+    address: https://indexd.example.com:9980/api # the URL of the primary node's admin API
+    password: <the primary's admin password> # the primary node's admin API password
+slabs:
+    migrationWorkers: 16 # number of slabs to migrate in parallel (0 defaults to runtime.NumCPU())
+log:
+    stdout:
+        enabled: true
+        level: info
+        format: human
+        enableANSI: true
+```
+
 ## Attributions
 
 Indexd uses GeoLite2 data created by MaxMind, available from
