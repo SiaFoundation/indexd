@@ -8,16 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/klauspost/reedsolomon"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
-	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
 
@@ -52,7 +51,7 @@ func TestMigrateSlab(t *testing.T) {
 		}
 	}
 
-	encryptionKey, shards, roots := NewTestShards(t, 2, 2)
+	encryptionKey, shards, roots := testutils.NewTestShards(t, 2, 2)
 	for i, sector := range shards[:3] {
 		result, err := client.WriteSector(t.Context(), types.GeneratePrivateKey(), hostsList[i].PublicKey, sector)
 		if err != nil {
@@ -288,12 +287,13 @@ func TestSectorsToMigrate(t *testing.T) {
 	// helper to assert result of sectorsToMigrate
 	state := slabs.MigrationState{
 		MaintenanceSettings: contracts.MaintenanceSettings{Period: 100},
+		MinHostDistanceKm:   10,
 	}
 	assertResult := func(availableHosts []hosts.Host, healthyContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
 		state.Hosts = availableHosts
 		state.HealthyContracts = healthyContracts
-		toRepair, toUse := slabs.SectorsToMigrate(slab, state, 10)
+		toRepair, toUse := slabs.SectorsToMigrate(slab, state)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {
@@ -411,7 +411,7 @@ func BenchmarkMigrateSlab(b *testing.B) {
 			accountKey := types.PublicKey{1}
 			db.AddTestAccount(b, accountKey)
 
-			encryptionKey, shardData, roots := NewTestShards(b, dataShards, parityShards)
+			encryptionKey, shardData, roots := testutils.NewTestShards(b, dataShards, parityShards)
 
 			// create slab hosts (one per sector)
 			slabHosts := make([]hosts.Host, totalShards)
@@ -622,45 +622,6 @@ func BenchmarkMigrateSlab(b *testing.B) {
 	}
 }
 
-// NewTestShards returns a new set of test shards along with their encryption
-// key and roots.
-func NewTestShards(t testing.TB, dataShards, parityShards int) ([32]byte, [][]byte, []types.Hash256) {
-	enc, err := reedsolomon.New(dataShards, parityShards)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	shards := make([][]byte, dataShards+parityShards)
-	for i := range shards {
-		if i < dataShards {
-			shards[i] = frand.Bytes(proto.SectorSize)
-		} else {
-			shards[i] = make([]byte, proto.SectorSize)
-		}
-	}
-
-	err = enc.Encode(shards)
-	if err != nil {
-		t.Fatalf("failed to encode shards: %v", err)
-	}
-
-	var encryptionKey [32]byte
-	frand.Read(encryptionKey[:])
-	nonce := make([]byte, 24)
-	for i := range shards {
-		nonce[0] = byte(i)
-		c, _ := chacha20.NewUnauthenticatedCipher(encryptionKey[:], nonce)
-		c.XORKeyStream(shards[i], shards[i])
-	}
-
-	var roots []types.Hash256
-	for _, shard := range shards {
-		roots = append(roots, proto.SectorRoot((*[proto.SectorSize]byte)(shard)))
-	}
-
-	return encryptionKey, shards, roots
-}
-
 // TestApplyMigrationResults exercises the persistence choke-point for remote
 // migration results: lost-sector persistence, the Recovered=false gating that
 // leaves repair state untouched, destination re-validation and the
@@ -686,7 +647,7 @@ func TestApplyMigrationResults(t *testing.T) {
 	}
 	dest, blockedDest := hostsList[4], hostsList[5]
 
-	encryptionKey, _, roots := NewTestShards(t, 2, 2)
+	encryptionKey, _, roots := testutils.NewTestShards(t, 2, 2)
 	slabIDs, err := db.PinSlabs(proto.Account(a1), time.Now().Add(time.Hour), slabs.SlabPinParams{
 		EncryptionKey: encryptionKey,
 		MinShards:     2,

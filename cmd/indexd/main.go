@@ -16,9 +16,11 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
+	adminapi "go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/build"
 	"go.sia.tech/indexd/config"
 	"go.sia.tech/indexd/persist/postgres"
+	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/flagg"
@@ -403,6 +405,21 @@ config section and the same recovery phrase as the primary node.`)
 		walletKey, log, closeLog := loadWalletAndLogger(cfg)
 		defer closeLog()
 
-		checkFatalError("remote startup failed", runRemoteCmd(ctx, cfg, walletKey, log))
+		// note: the recovery phrase must match the primary node's so the
+		// derived migration account key lines up with the host-side accounts
+		// the primary funds. A mismatch is not fatal: the host accounts simply
+		// go unfunded and surface as insufficient-balance errors in the logs.
+		migrationKey, _ := slabs.DeriveAccountKeys(walletKey)
+
+		var opts []slabs.RemoteMigratorOption
+		if cfg.Slabs.MigrationWorkers > 0 {
+			opts = append(opts, slabs.WithRemoteWorkers(cfg.Slabs.MigrationWorkers))
+		}
+		primary := adminapi.NewClient(cfg.Remote.Address, cfg.Remote.Password)
+		worker := slabs.NewRemoteMigrator(primary, migrationKey, log.Named("migrations"), opts...)
+
+		log.Info("remote node started", zap.String("primary", cfg.Remote.Address))
+		worker.Run(ctx)
+		log.Info("shutting down")
 	}
 }

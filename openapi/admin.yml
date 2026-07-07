@@ -1601,7 +1601,7 @@ paths:
             await admin.syncerConnect("118.92.232.145:9981")
 
   /migrations/batch:
-    get:
+    post:
       tags:
         - migrations
       summary: Fetch a batch of slabs to migrate
@@ -1611,7 +1611,7 @@ paths:
         and which hosts can receive them — the same decisions the primary's own
         migration loop makes. A nextCursor of 0 means there are no more
         unhealthy slabs.
-      operationId: getMigrationBatch
+      operationId: postMigrationBatch
       parameters:
         - in: query
           name: cursor

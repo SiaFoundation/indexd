@@ -79,11 +79,10 @@ type (
 	}
 )
 
-// fetchMigrationState fetches all available hosts, contracts, maintenance settings,
-// and chain height needed for slab migrations.
+// fetchMigrationState fetches all unblocked hosts with active contracts, healthy contracts,
+// maintenance settings, and chain height needed for slab migrations.
 func (m *SlabManager) fetchMigrationState() (state MigrationState, err error) {
 	state.MinHostDistanceKm = m.minHostDistanceKm
-	// fetch hosts
 	const batchSize = 500
 	for offset := 0; ; offset += batchSize {
 		batch, err := m.store.Hosts(offset, batchSize,
@@ -150,9 +149,9 @@ func WithRecoveryChunkSize(size int) MigratorOption {
 
 // NewMigrator creates a Migrator that recovers a slab's shards from hosts and
 // uploads the re-encrypted shards to new hosts. It is what a remote migration
-// worker runs directly (a remote node pulls prepared jobs from the primary,
-// executes them via MigrateJob and reports the results back); the full
-// SlabManager uses one internally.
+// worker runs directly (a remote node fetches batches of unhealthy slabs from
+// the primary, migrates them via MigrateSlab and reports the results back);
+// the full SlabManager uses one internally.
 func NewMigrator(hosts HostClient, migrationAccount types.PrivateKey, log *zap.Logger, opts ...MigratorOption) *Migrator {
 	if log == nil {
 		log = zap.NewNop()
@@ -310,10 +309,9 @@ func (m *SlabManager) PrepareMigrationBatch(cursor int64, limit int) (MigrationB
 }
 
 // migratableDestinations returns the set of destination hosts from the results
-// that are still known and unblocked. A nil map disables filtering; it is
-// returned when the results carry no migrated sectors or when the host lookup
-// fails (per-sector writes surface persistent store failures themselves).
-func (m *SlabManager) migratableDestinations(results []MigrationResult, log *zap.Logger) map[types.PublicKey]struct{} {
+// that are still known and unblocked. A nil map with a nil error disables
+// filtering and is returned when the results carry no migrated sectors.
+func (m *SlabManager) migratableDestinations(results []MigrationResult) (map[types.PublicKey]struct{}, error) {
 	keys := make(map[types.PublicKey]struct{})
 	for _, res := range results {
 		for _, s := range res.Migrated {
@@ -321,7 +319,7 @@ func (m *SlabManager) migratableDestinations(results []MigrationResult, log *zap
 		}
 	}
 	if len(keys) == 0 {
-		return nil
+		return nil, nil
 	}
 	hks := make([]types.PublicKey, 0, len(keys))
 	for hk := range keys {
@@ -329,23 +327,27 @@ func (m *SlabManager) migratableDestinations(results []MigrationResult, log *zap
 	}
 	batch, err := m.store.Hosts(0, len(hks), hosts.WithPublicKeys(hks), hosts.WithBlocked(false))
 	if err != nil {
-		log.Error("failed to validate migration destinations, applying unfiltered", zap.Error(err))
-		return nil
+		return nil, fmt.Errorf("failed to validate migration destinations: %w", err)
 	}
 	allowed := make(map[types.PublicKey]struct{}, len(batch))
 	for _, h := range batch {
 		allowed[h.PublicKey] = struct{}{}
 	}
-	return allowed
+	return allowed, nil
 }
 
-// ApplyMigrationResults persists the outcomes of migration jobs reported by a
+// ApplyMigrationResults persists the outcomes of migrations reported by a
 // remote node. Destination hosts are re-validated so sectors are not recorded
-// on hosts that were blocked or pruned after the job was prepared. Per-result
-// store failures are logged and skipped, matching the local migration loop.
-func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) {
+// on hosts that were blocked or pruned after the batch was prepared; if that
+// validation fails, nothing is applied and an error is returned rather than
+// recording sectors on potentially blocked hosts. Per-result store failures
+// are logged and skipped, matching the local migration loop.
+func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) error {
 	log := m.log.Named("migrations")
-	allowed := m.migratableDestinations(results, log)
+	allowed, err := m.migratableDestinations(results)
+	if err != nil {
+		return err
+	}
 	for _, res := range results {
 		log := log.With(zap.Stringer("slab", res.SlabID))
 		if allowed != nil {
@@ -363,6 +365,7 @@ func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) {
 		}
 		m.applyMigrationResult(res, log)
 	}
+	return nil
 }
 
 // MigrateSlab determines which of the slab's sectors require migration and
@@ -376,7 +379,7 @@ func (m *Migrator) MigrateSlab(ctx context.Context, slab Slab, state MigrationSt
 	res = MigrationResult{SlabID: slab.ID}
 	log := m.log.With(zap.Stringer("slab", slab.ID))
 
-	indices, candidates := sectorsToMigrate(slab, state, state.MinHostDistanceKm)
+	indices, candidates := sectorsToMigrate(slab, state)
 	if len(indices) == 0 {
 		log.Debug("tried to migrate slab but no indices require migration")
 		return res, false
@@ -410,7 +413,7 @@ func (m *Migrator) MigrateSlab(ctx context.Context, slab Slab, state MigrationSt
 // minHostDistance apart from each other and are returned in random order.
 // The subset of healthy contracts eligible for uploading migrated sectors is
 // derived by filtering with GoodForAppend.
-func sectorsToMigrate(slab Slab, state MigrationState, minHostDistanceKm float64) ([]int, []types.PublicKey) {
+func sectorsToMigrate(slab Slab, state MigrationState) ([]int, []types.PublicKey) {
 	// prepare a map of good hosts
 	hostsMap := make(map[types.PublicKey]hosts.Host)
 	for _, host := range state.Hosts {
@@ -438,7 +441,7 @@ func sectorsToMigrate(slab Slab, state MigrationState, minHostDistanceKm float64
 	// that are sufficiently far apart. We don't care if two good sectors on
 	// hosts that are too close to one another, but we don't want to migrate bad
 	// sectors to hosts that are too close to those same hosts
-	set := hosts.NewSpacedSet(minHostDistanceKm)
+	set := hosts.NewSpacedSet(state.MinHostDistanceKm)
 
 	// determine whether the sector needs to be migrated. That's the case if
 	// one of the following is true:
@@ -480,11 +483,8 @@ func sectorsToMigrate(slab Slab, state MigrationState, minHostDistanceKm float64
 		if _, ok := hasAppendContract[host.PublicKey]; !ok {
 			// must have an appendable contract
 			continue
-		} else if !host.StuckSince.IsZero() {
-			// can't migrate to stuck hosts
-			continue
-		} else if host.Settings.RemainingStorage == 0 {
-			// can't migrate to hosts without storage
+		} else if !host.GoodForUpload() {
+			// must not be stuck and have storage left
 			continue
 		}
 

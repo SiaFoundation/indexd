@@ -57,6 +57,8 @@ type (
 		AdminPassword string
 		AppURL        string
 
+		walletKey types.PrivateKey
+
 		Admin *admin.Client
 		App   *app.Client
 
@@ -321,6 +323,8 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		AdminPassword: password,
 		AppURL:        appAPIAddr,
 
+		walletKey: walletKey,
+
 		Admin: admin.NewClient(adminAPIAddr, password),
 		App:   app.NewClient(appAPIAddr),
 
@@ -380,6 +384,12 @@ func (idx *Indexer) Tip() (types.ChainIndex, error) {
 // WalletAddr returns the address of the wallet.
 func (idx *Indexer) WalletAddr() types.Address {
 	return idx.wallet.Address()
+}
+
+// WalletKey returns the indexer's wallet private key. Remote migration
+// workers derive their service-account keys from it.
+func (idx *Indexer) WalletKey() types.PrivateKey {
+	return idx.walletKey
 }
 
 // moduleRootDir walks up from the current working directory to find the

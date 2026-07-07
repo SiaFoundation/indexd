@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/crypto/chacha20"
@@ -64,7 +65,7 @@ func TestRecoverShards(t *testing.T) {
 	client := newMockHostClient()
 
 	// build a 2-of-4 encoded slab (2 data + 2 parity shards)
-	encryptionKey, shards, roots := NewTestShards(t, 2, 2)
+	encryptionKey, shards, roots := testutils.NewTestShards(t, 2, 2)
 
 	// one host per sector
 	hostList := make([]hosts.Host, len(shards))

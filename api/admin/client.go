@@ -445,17 +445,18 @@ func (c *Client) StatsSectors(ctx context.Context) (resp SectorsStatsResponse, e
 // MigrationBatch fetches a batch of unhealthy slabs together with the
 // migration state needed to migrate them, starting from the given cursor. A
 // returned NextCursor of 0 means there are no more unhealthy slabs to migrate.
-// It is used by remote nodes.
+// It is a POST because fetching a batch claims the returned slabs for the
+// duration of the repair backoff. It is used by remote nodes.
 func (c *Client) MigrationBatch(ctx context.Context, cursor int64, limit int) (batch slabs.MigrationBatch, err error) {
 	values := url.Values{}
 	values.Set("cursor", fmt.Sprintf("%d", cursor))
 	values.Set("limit", fmt.Sprintf("%d", limit))
-	err = c.c.GET(ctx, "/migrations/batch?"+values.Encode(), &batch)
+	err = c.c.POST(ctx, "/migrations/batch?"+values.Encode(), nil, &batch)
 	return
 }
 
-// ApplyMigrationResults reports the outcomes of migration jobs to the primary
-// node so it can persist them. It is used by remote nodes.
+// ApplyMigrationResults reports the outcomes of migrations to the primary node
+// so it can persist them. It is used by remote nodes.
 func (c *Client) ApplyMigrationResults(ctx context.Context, results []slabs.MigrationResult) error {
 	return c.c.POST(ctx, "/migrations/results", results, nil)
 }

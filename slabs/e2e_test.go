@@ -44,7 +44,7 @@ func setupUnhealthySlab(t *testing.T, opts ...testutils.ClusterOpt) (*testutils.
 	cluster.WaitForContracts(t)
 
 	// upload sectors to hosts (4 data + 10 parity = 14 total shards, valid 4-of-14 params)
-	encryptionKey, shards, roots := NewTestShards(t, 4, 10)
+	encryptionKey, shards, roots := testutils.NewTestShards(t, 4, 10)
 	client := client.New(client.NewProvider(hosts.NewHostStore(indexer.Store())), logger)
 	defer client.Close()
 	for i := range shards {
@@ -131,7 +131,7 @@ func TestMigrationBatchAPI(t *testing.T) {
 	// computing the sectors to migrate from the batch's state - like a remote
 	// node does - should flag the blocked host's sector (index 0) and offer at
 	// least one upload candidate.
-	indices, candidates := slabs.SectorsToMigrate(slab, batch.State, batch.State.MinHostDistanceKm)
+	indices, candidates := slabs.SectorsToMigrate(slab, batch.State)
 	if len(indices) == 0 {
 		t.Fatal("expected at least one sector to migrate")
 	} else if !slices.Contains(indices, 0) {
@@ -161,6 +161,46 @@ func TestMigrations(t *testing.T) {
 	indexer := cluster.Indexer
 
 	// assert sector was migrated
+	if err := retry(t, 300, 100*time.Millisecond, func() error {
+		if pinned, err := indexer.App.Slab(context.Background(), sk, slabID); err != nil {
+			t.Fatal(err)
+		} else if len(pinned.Sectors) != 14 {
+			return fmt.Errorf("expected 14 pinned sectors, got %d", len(pinned.Sectors))
+		} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != cluster.Hosts[14].PublicKey() {
+			return fmt.Errorf("expected sector %s on host %s, got %s on host %s", roots[0], cluster.Hosts[14].PublicKey(), pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestRemoteMigration exercises the full remote migration path: with local
+// migrations disabled, a RemoteMigrator running against the primary's admin
+// API fetches the unhealthy slab, repairs it and reports the result back for
+// the primary to persist.
+func TestRemoteMigration(t *testing.T) {
+	cluster, sk, slabID, roots := setupUnhealthySlab(t, testutils.WithIndexer(testutils.WithSlabOptions(slabs.WithMigrations(false))))
+	indexer := cluster.Indexer
+
+	// run a remote migrator against the primary's admin API, exactly like the
+	// remote subcommand does
+	migrationKey, _ := slabs.DeriveAccountKeys(indexer.WalletKey())
+	worker := slabs.NewRemoteMigrator(indexer.Admin, migrationKey, zap.NewNop(), slabs.WithRemoteInterval(100*time.Millisecond))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		worker.Run(ctx)
+	}()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	// assert the sector was migrated and the repair persisted by the primary
 	if err := retry(t, 300, 100*time.Millisecond, func() error {
 		if pinned, err := indexer.App.Slab(context.Background(), sk, slabID); err != nil {
 			t.Fatal(err)
