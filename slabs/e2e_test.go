@@ -15,16 +15,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// retry calls fn up to tries times, sleeping between attempts, and returns the
-// last error.
-func retry(t testing.TB, tries int, durationBetweenAttempts time.Duration, fn func() error) error {
+// retry calls fn up to tries times, sleeping 100ms between attempts, and
+// returns the last error.
+func retry(t testing.TB, tries int, fn func() error) error {
 	t.Helper()
 	var err error
 	for range tries {
 		if err = fn(); err == nil {
 			break
 		}
-		time.Sleep(durationBetweenAttempts)
+		time.Sleep(100 * time.Millisecond)
 	}
 	return err
 }
@@ -70,7 +70,7 @@ func setupUnhealthySlab(t *testing.T, opts ...testutils.ClusterOpt) (*testutils.
 	slabID := slabIDs[0]
 
 	// wait for the slab to be fully pinned
-	if err := retry(t, 100, 100*time.Millisecond, func() error {
+	if err := retry(t, 100, func() error {
 		slab, err := indexer.Store().Slab(slabID)
 		if err != nil {
 			return err
@@ -105,7 +105,7 @@ func TestMigrationBatchAPI(t *testing.T) {
 	// locally so it is never repaired out from under us.
 	var slab slabs.Slab
 	var batch slabs.MigrationBatch
-	if err := retry(t, 300, 100*time.Millisecond, func() error {
+	if err := retry(t, 300, func() error {
 		var cursor int64
 		for {
 			resp, err := indexer.Admin.MigrationBatch(context.Background(), cursor, 100)
@@ -161,7 +161,7 @@ func TestMigrations(t *testing.T) {
 	indexer := cluster.Indexer
 
 	// assert sector was migrated
-	if err := retry(t, 300, 100*time.Millisecond, func() error {
+	if err := retry(t, 300, func() error {
 		if pinned, err := indexer.App.Slab(context.Background(), sk, slabID); err != nil {
 			t.Fatal(err)
 		} else if len(pinned.Sectors) != 14 {
@@ -201,7 +201,7 @@ func TestRemoteMigration(t *testing.T) {
 	}()
 
 	// assert the sector was migrated and the repair persisted by the primary
-	if err := retry(t, 300, 100*time.Millisecond, func() error {
+	if err := retry(t, 300, func() error {
 		if pinned, err := indexer.App.Slab(context.Background(), sk, slabID); err != nil {
 			t.Fatal(err)
 		} else if len(pinned.Sectors) != 14 {
