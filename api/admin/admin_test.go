@@ -1781,7 +1781,7 @@ func TestPruneAccounts(t *testing.T) {
 	}
 }
 
-func TestMigrationJobsEmpty(t *testing.T) {
+func TestMigrationBatchEmpty(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())
 	adminClient := indexer.Admin

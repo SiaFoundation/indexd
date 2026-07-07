@@ -28,7 +28,8 @@ func newCachedHostStore() *cachedHostStore {
 	return &cachedHostStore{hosts: make(map[types.PublicKey]hosts.Host)}
 }
 
-// update records the connection info carried by a batch of migration jobs.
+// update replaces the store's contents with the usable hosts carried by a
+// migration batch's state.
 func (s *cachedHostStore) update(usableHosts []hosts.Host) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -77,9 +78,9 @@ func (s *cachedHostStore) UsableHosts() ([]hosts.HostInfo, error) {
 	return infos, nil
 }
 
-// remoteJobBatchSize is the number of migration jobs a remote node fetches from
-// the primary node per request.
-const remoteJobBatchSize = 100
+// remoteBatchSize is the number of unhealthy slabs a remote node fetches from
+// the primary node per batch.
+const remoteBatchSize = 100
 
 // remoteMigrationInterval is how long a remote node waits between passes once it
 // has worked through all currently-unhealthy slabs. maxRemoteBackoff caps the
@@ -180,7 +181,7 @@ func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store
 	var cursor int64
 	for {
 		fetchCtx, cancel := context.WithTimeout(ctx, remoteRequestTimeout)
-		batch, err := primary.MigrationBatch(fetchCtx, cursor, remoteJobBatchSize)
+		batch, err := primary.MigrationBatch(fetchCtx, cursor, remoteBatchSize)
 		cancel()
 		if err != nil {
 			return executed, recovered, fmt.Errorf("failed to fetch migration batch: %w", err)
@@ -199,16 +200,14 @@ func runRemoteMigrationPass(ctx context.Context, primary *adminapi.Client, store
 				break dispatch
 			case sema <- struct{}{}:
 			}
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				defer func() { <-sema }()
 				if res, attempted := migrator.MigrateSlab(ctx, slab, batch.State); attempted {
 					mu.Lock()
 					results = append(results, res)
 					mu.Unlock()
 				}
-			}()
+			})
 		}
 		wg.Wait()
 

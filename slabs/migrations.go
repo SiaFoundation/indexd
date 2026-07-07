@@ -48,20 +48,18 @@ type (
 		log *zap.Logger
 	}
 
-	// MigrationBatch is a batch of unhealthy slabs together with everything a
-	// remote node needs to migrate them: the migration state to determine
-	// which sectors to migrate and where, and the connection info for
-	// download-source hosts that are absent from the state (e.g. blocked
-	// hosts, which can still serve reads). A NextCursor of 0 means there are
-	// no more unhealthy slabs.
+	// MigrationBatch is a batch of unhealthy slabs together with the migration
+	// state a remote node needs to determine which of their sectors to migrate
+	// and which hosts can receive them. A NextCursor of 0 means there are no
+	// more unhealthy slabs.
 	MigrationBatch struct {
 		Slabs      []Slab         `json:"slabs"`
 		State      MigrationState `json:"state"`
 		NextCursor int64          `json:"nextCursor"`
 	}
 
-	// MigrationResult is the outcome of a MigrationJob, reported back by a
-	// remote node for the primary to persist.
+	// MigrationResult is the outcome of migrating a single slab, reported back
+	// by a remote node for the primary to persist.
 	MigrationResult struct {
 		SlabID   SlabID  `json:"slabID"`
 		Migrated []Shard `json:"migrated"`
@@ -296,48 +294,6 @@ func (m *SlabManager) PrepareMigrationBatch(cursor int64, limit int) (MigrationB
 			continue
 		}
 		batchSlabs = append(batchSlabs, slab)
-	}
-
-	// the migration state only covers unblocked hosts with active contracts,
-	// but download sources can be blocked or contract-less and still serve
-	// reads; resolve their addresses separately. Hosts that remain unresolved
-	// (e.g. pruned) simply carry no connection info.
-	known := make(map[types.PublicKey]struct{}, len(state.Hosts))
-	for _, h := range state.Hosts {
-		known[h.PublicKey] = struct{}{}
-	}
-	missing := make(map[types.PublicKey]struct{})
-	for _, slab := range batchSlabs {
-		for _, sector := range slab.Sectors {
-			if sector.HostKey != nil {
-				if _, ok := known[*sector.HostKey]; !ok {
-					missing[*sector.HostKey] = struct{}{}
-				}
-			}
-		}
-	}
-	var conns []hosts.HostInfo
-	if len(missing) > 0 {
-		hks := make([]types.PublicKey, 0, len(missing))
-		for hk := range missing {
-			hks = append(hks, hk)
-		}
-		batch, err := m.store.Hosts(0, len(hks), hosts.WithPublicKeys(hks))
-		if err != nil {
-			return MigrationBatch{}, fmt.Errorf("failed to resolve host addresses: %w", err)
-		}
-		for _, h := range batch {
-			if len(h.Addresses) > 0 {
-				conns = append(conns, hosts.HostInfo{
-					PublicKey:     h.PublicKey,
-					Addresses:     h.Addresses,
-					CountryCode:   h.CountryCode,
-					Latitude:      h.Latitude,
-					Longitude:     h.Longitude,
-					GoodForUpload: h.IsGood() && h.StuckSince.IsZero() && h.Settings.RemainingStorage > 0,
-				})
-			}
-		}
 	}
 
 	return MigrationBatch{

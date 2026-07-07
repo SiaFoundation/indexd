@@ -1600,17 +1600,18 @@ paths:
             })
             await admin.syncerConnect("118.92.232.145:9981")
 
-  /migrations/jobs:
+  /migrations/batch:
     get:
       tags:
         - migrations
-      summary: Fetch slab-migration jobs
+      summary: Fetch a batch of slabs to migrate
       description: >-
-        Returns a batch of prepared slab-migration jobs for a remote node, each
-        including the slab to repair, the sector indices to migrate, the vetted
-        upload-candidate hosts and the connection info for every host the remote
-        must reach. A nextCursor of 0 means there are no more unhealthy slabs.
-      operationId: getMigrationJobs
+        Returns a batch of unhealthy slabs for a remote node together with the
+        migration state it needs to determine which of their sectors to migrate
+        and which hosts can receive them — the same decisions the primary's own
+        migration loop makes. A nextCursor of 0 means there are no more
+        unhealthy slabs.
+      operationId: getMigrationBatch
       parameters:
         - in: query
           name: cursor
@@ -1623,26 +1624,24 @@ paths:
           schema:
             type: integer
             maximum: 500
-          description: Maximum number of jobs to return (default 100, max 500).
+          description: Maximum number of slabs to return (default 100, max 500).
       responses:
         "200":
-          description: A batch of migration jobs
+          description: A batch of unhealthy slabs and the state to migrate them
           content:
             application/json:
               schema:
                 type: object
                 properties:
-                  jobs:
+                  slabs:
                     type: array
                     items:
                       type: object
-                  hosts:
-                    type: array
+                  state:
+                    type: object
                     description: >-
-                      Connection info for every host the batch's jobs reference,
-                      deduplicated across the batch.
-                    items:
-                      type: object
+                      Hosts, healthy contracts, maintenance settings and chain
+                      height used to decide which sectors to migrate and where.
                   nextCursor:
                     type: integer
                     format: int64
