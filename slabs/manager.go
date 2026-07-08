@@ -465,7 +465,7 @@ func (m *SlabManager) performSlabMigrations(ctx context.Context) error {
 
 	// to make sure the workers don't finish their work before we have another
 	// batch ready, we fetch a multiple of the number of workers each time.
-	slabBatchSize := MigrationSlabsPerWorker * m.numMigrationGoroutines
+	slabBatchSize := migrationSlabsPerWorker * m.numMigrationGoroutines
 
 	type migrationJob struct {
 		id    SlabID

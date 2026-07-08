@@ -448,6 +448,9 @@ func (c *Client) StatsSectors(ctx context.Context) (resp SectorsStatsResponse, e
 // It is a POST because fetching a batch claims the returned slabs for the
 // duration of the repair backoff. It is used by remote nodes.
 func (c *Client) MigrationBatch(ctx context.Context, cursor int64, limit int) (batch slabs.MigrationBatch, err error) {
+	if limit > api.MaxLimit {
+		limit = api.MaxLimit
+	}
 	values := url.Values{}
 	values.Set("cursor", fmt.Sprintf("%d", cursor))
 	values.Set("limit", fmt.Sprintf("%d", limit))

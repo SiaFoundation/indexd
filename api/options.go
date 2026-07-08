@@ -28,7 +28,7 @@ var (
 	ErrInvalidCursor = errors.New("cursor must be non-negative")
 
 	// ErrInvalidLimit is returned when the requested limit is invalid.
-	ErrInvalidLimit = fmt.Errorf("limit must between 1 and %d", MaxLimit)
+	ErrInvalidLimit = fmt.Errorf("limit must be between 1 and %d", MaxLimit)
 
 	// ErrInvalidSortPair is returned when the requested sort parameters are
 	// invalid.

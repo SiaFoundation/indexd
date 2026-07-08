@@ -624,8 +624,7 @@ func BenchmarkMigrateSlab(b *testing.B) {
 
 // TestApplyMigrationResults exercises the persistence choke-point for remote
 // migration results: lost-sector persistence, the Recovered=false gating that
-// leaves repair state untouched, destination re-validation and the
-// persist-aware success gating.
+// leaves repair state untouched, and recording a successful migration.
 func TestApplyMigrationResults(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := newMockStore(t)
@@ -636,16 +635,15 @@ func TestApplyMigrationResults(t *testing.T) {
 	a1 := types.PublicKey{1}
 	db.AddTestAccount(t, a1)
 
-	// hosts 0-3 hold the slab's sectors; hosts 4 and 5 are migration
-	// destinations, with host 5 getting blocked before its result is applied.
-	hostsList := make([]hosts.Host, 6)
+	// hosts 0-3 hold the slab's sectors; host 4 is a migration destination.
+	hostsList := make([]hosts.Host, 5)
 	for i := range hostsList {
 		h := client.addTestHost(types.GeneratePrivateKey())
 		db.AddTestHost(t, h)
 		db.addTestContract(t, h.PublicKey)
 		hostsList[i] = h
 	}
-	dest, blockedDest := hostsList[4], hostsList[5]
+	dest := hostsList[4]
 
 	encryptionKey, _, roots := testutils.NewTestShards(t, 2, 2)
 	slabIDs, err := db.PinSlabs(proto.Account(a1), time.Now().Add(time.Hour), slabs.SlabPinParams{
@@ -697,22 +695,5 @@ func TestApplyMigrationResults(t *testing.T) {
 		t.Fatal("expected sector to be migrated to the destination host")
 	} else if n := failedRepairs(); n != 0 {
 		t.Fatalf("expected successful repair, got %d failed repairs", n)
-	}
-
-	// a destination blocked after the job was prepared must not receive the
-	// sector, and the incomplete repair must incur a failure backoff
-	if err := db.BlockHosts([]types.PublicKey{blockedDest.PublicKey}, []string{t.Name()}); err != nil {
-		t.Fatal(err)
-	}
-	mgr.ApplyMigrationResults([]slabs.MigrationResult{{
-		SlabID:    slabID,
-		Migrated:  []slabs.Shard{{Root: roots[2], HostKey: blockedDest.PublicKey}},
-		Recovered: true,
-		Success:   true,
-	}})
-	if migrated := db.migratedSectors(t, blockedDest.PublicKey); len(migrated) != 0 {
-		t.Fatalf("expected no sector on the blocked destination, got %d", len(migrated))
-	} else if n := failedRepairs(); n != 1 {
-		t.Fatalf("expected 1 failed repair after dropping the blocked destination, got %d", n)
 	}
 }

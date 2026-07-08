@@ -156,15 +156,16 @@ func TestMigrationBatchAPI(t *testing.T) {
 	}
 }
 
-func TestMigrations(t *testing.T) {
-	cluster, sk, slabID, roots := setupUnhealthySlab(t)
-	indexer := cluster.Indexer
-
-	// assert sector was migrated
+// assertSectorMigrated waits for the slab's blocked sector (index 0) to be
+// repaired onto host 14 and the slab to be fully pinned again.
+func assertSectorMigrated(t *testing.T, cluster *testutils.Cluster, sk types.PrivateKey, slabID slabs.SlabID, roots []types.Hash256) {
+	t.Helper()
 	if err := retry(t, 300, func() error {
-		if pinned, err := indexer.App.Slab(context.Background(), sk, slabID); err != nil {
-			t.Fatal(err)
-		} else if len(pinned.Sectors) != 14 {
+		pinned, err := cluster.Indexer.App.Slab(context.Background(), sk, slabID)
+		if err != nil {
+			return err
+		}
+		if len(pinned.Sectors) != 14 {
 			return fmt.Errorf("expected 14 pinned sectors, got %d", len(pinned.Sectors))
 		} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != cluster.Hosts[14].PublicKey() {
 			return fmt.Errorf("expected sector %s on host %s, got %s on host %s", roots[0], cluster.Hosts[14].PublicKey(), pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
@@ -173,6 +174,11 @@ func TestMigrations(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestMigrations(t *testing.T) {
+	cluster, sk, slabID, roots := setupUnhealthySlab(t)
+	assertSectorMigrated(t, cluster, sk, slabID, roots)
 }
 
 // TestRemoteMigration exercises the full remote migration path: with local
@@ -189,7 +195,6 @@ func TestRemoteMigration(t *testing.T) {
 	worker := slabs.NewRemoteMigrator(indexer.Admin, migrationKey, zap.NewNop(), slabs.WithRemoteInterval(100*time.Millisecond))
 
 	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
@@ -201,16 +206,5 @@ func TestRemoteMigration(t *testing.T) {
 	}()
 
 	// assert the sector was migrated and the repair persisted by the primary
-	if err := retry(t, 300, func() error {
-		if pinned, err := indexer.App.Slab(context.Background(), sk, slabID); err != nil {
-			t.Fatal(err)
-		} else if len(pinned.Sectors) != 14 {
-			return fmt.Errorf("expected 14 pinned sectors, got %d", len(pinned.Sectors))
-		} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != cluster.Hosts[14].PublicKey() {
-			return fmt.Errorf("expected sector %s on host %s, got %s on host %s", roots[0], cluster.Hosts[14].PublicKey(), pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
+	assertSectorMigrated(t, cluster, sk, slabID, roots)
 }

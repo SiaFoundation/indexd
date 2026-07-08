@@ -12,11 +12,11 @@ import (
 	"golang.org/x/crypto/chacha20"
 )
 
-// MigrationSlabsPerWorker is the number of unhealthy slabs fetched per
+// migrationSlabsPerWorker is the number of unhealthy slabs fetched per
 // migration worker when batching migrations, ensuring the workers don't finish
 // their work before the next batch is ready. It is shared by the local
 // migration loop and remote migration workers.
-const MigrationSlabsPerWorker = 10
+const migrationSlabsPerWorker = 10
 
 // MigrationState holds the hosts, contracts, and chain state needed to
 // determine which sectors of a slab require migration and which hosts can
@@ -79,8 +79,10 @@ type (
 	}
 )
 
-// fetchMigrationState fetches all unblocked hosts with active contracts, healthy contracts,
-// maintenance settings, and chain height needed for slab migrations.
+// fetchMigrationState fetches everything needed to decide which of a slab's
+// sectors to migrate and where: all unblocked hosts with active contracts, the
+// healthy contracts, maintenance settings, chain height, and the configured
+// minimum host distance.
 func (m *SlabManager) fetchMigrationState() (state MigrationState, err error) {
 	state.MinHostDistanceKm = m.minHostDistanceKm
 	const batchSize = 500
@@ -308,64 +310,16 @@ func (m *SlabManager) PrepareMigrationBatch(cursor int64, limit int) (MigrationB
 	}, nil
 }
 
-// migratableDestinations returns the set of destination hosts from the results
-// that are still known and unblocked. A nil map with a nil error disables
-// filtering and is returned when the results carry no migrated sectors.
-func (m *SlabManager) migratableDestinations(results []MigrationResult) (map[types.PublicKey]struct{}, error) {
-	keys := make(map[types.PublicKey]struct{})
-	for _, res := range results {
-		for _, s := range res.Migrated {
-			keys[s.HostKey] = struct{}{}
-		}
-	}
-	if len(keys) == 0 {
-		return nil, nil
-	}
-	hks := make([]types.PublicKey, 0, len(keys))
-	for hk := range keys {
-		hks = append(hks, hk)
-	}
-	batch, err := m.store.Hosts(0, len(hks), hosts.WithPublicKeys(hks), hosts.WithBlocked(false))
-	if err != nil {
-		return nil, fmt.Errorf("failed to validate migration destinations: %w", err)
-	}
-	allowed := make(map[types.PublicKey]struct{}, len(batch))
-	for _, h := range batch {
-		allowed[h.PublicKey] = struct{}{}
-	}
-	return allowed, nil
-}
-
 // ApplyMigrationResults persists the outcomes of migrations reported by a
-// remote node. Destination hosts are re-validated so sectors are not recorded
-// on hosts that were blocked or pruned after the batch was prepared; if that
-// validation fails, nothing is applied and an error is returned rather than
-// recording sectors on potentially blocked hosts. Per-result store failures
-// are logged and skipped, matching the local migration loop.
-func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) error {
+// remote node. Per-result store failures are logged and skipped, matching the
+// local migration loop. A destination host that was blocked after the batch
+// was prepared is not re-validated here: the sector is recorded and the next
+// health check re-flags the slab, re-migrating it away at most one batch later.
+func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) {
 	log := m.log.Named("migrations")
-	allowed, err := m.migratableDestinations(results)
-	if err != nil {
-		return err
-	}
 	for _, res := range results {
-		log := log.With(zap.Stringer("slab", res.SlabID))
-		if allowed != nil {
-			migrated := res.Migrated[:0]
-			for _, s := range res.Migrated {
-				if _, ok := allowed[s.HostKey]; ok {
-					migrated = append(migrated, s)
-					continue
-				}
-				// keep the failure backoff: the repair is incomplete
-				log.Warn("dropping migrated sector, destination host is blocked or unknown", zap.Stringer("root", s.Root), zap.Stringer("host", s.HostKey))
-				res.Success = false
-			}
-			res.Migrated = migrated
-		}
-		m.applyMigrationResult(res, log)
+		m.applyMigrationResult(res, log.With(zap.Stringer("slab", res.SlabID)))
 	}
-	return nil
 }
 
 // MigrateSlab determines which of the slab's sectors require migration and

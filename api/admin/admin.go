@@ -137,7 +137,7 @@ type (
 
 		// migration endpoints used by remote nodes
 		PrepareMigrationBatch(cursor int64, limit int) (slabs.MigrationBatch, error)
-		ApplyMigrationResults(results []slabs.MigrationResult) error
+		ApplyMigrationResults(results []slabs.MigrationResult)
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -802,9 +802,7 @@ func (a *admin) handlePOSTMigrationResults(jc jape.Context) {
 	if jc.Decode(&results) != nil {
 		return
 	}
-	if !a.checkServerError(jc, "failed to apply migration results", a.slabs.ApplyMigrationResults(results)) {
-		return
-	}
+	a.slabs.ApplyMigrationResults(results)
 	jc.Encode(nil)
 }
 

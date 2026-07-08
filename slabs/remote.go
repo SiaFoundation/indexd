@@ -9,7 +9,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
-	"go.sia.tech/indexd/api"
 	client "go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap"
@@ -18,14 +17,14 @@ import (
 const (
 	// remoteMigrationInterval is how long a remote node waits between passes
 	// once it has worked through all currently-unhealthy slabs.
-	// maxRemoteBackoff caps the exponential backoff applied when consecutive
-	// passes migrate nothing, which points at a systemic problem such as a
-	// recovery phrase that doesn't match the primary's. maxBackoffShift bounds
-	// the exponent so the shift can't overflow; 1m << 5 already exceeds
-	// maxRemoteBackoff.
 	remoteMigrationInterval = time.Minute
-	maxRemoteBackoff        = 30 * time.Minute
-	maxBackoffShift         = 5
+
+	// maxBackoffShift bounds the exponent of the exponential backoff applied
+	// when consecutive passes migrate nothing, which points at a systemic
+	// problem such as a recovery phrase that doesn't match the primary's. It
+	// caps the pause at 2^5 = 32x the base interval and keeps the shift from
+	// overflowing.
+	maxBackoffShift = 5
 
 	// resultReportTimeout bounds the single report of a batch's results. The
 	// report runs on its own context so a shutdown mid-report doesn't abort
@@ -131,15 +130,21 @@ func (rm *RemoteMigrator) Run(ctx context.Context) {
 			}
 			rm.log.Error("migration pass failed", zap.Error(err))
 		}
-		if executed > 0 && migrated == 0 {
-			failedPasses++
-		} else if executed > 0 {
-			failedPasses = 0
+		// a pass makes progress only when it migrated sectors AND reported them
+		// successfully; a failed report (err != nil) means the uploads weren't
+		// persisted, so treat it as barren to keep a persistently failing
+		// primary from hot-looping.
+		if executed > 0 {
+			if err == nil && migrated > 0 {
+				failedPasses = 0
+			} else {
+				failedPasses++
+			}
 		}
 
 		interval := rm.interval
 		if failedPasses > 0 {
-			interval = min(rm.interval<<min(failedPasses, maxBackoffShift), maxRemoteBackoff)
+			interval = rm.interval << min(failedPasses, maxBackoffShift)
 			rm.log.Warn("pass didn't migrate a single sector, backing off",
 				zap.Int("consecutivePasses", failedPasses), zap.Duration("interval", interval))
 		}
@@ -157,8 +162,8 @@ func (rm *RemoteMigrator) Run(ctx context.Context) {
 // migrations were attempted and how many sectors they migrated in total.
 func (rm *RemoteMigrator) runPass(ctx context.Context, store *cachedHostStore, migrator *Migrator) (executed, migrated int, _ error) {
 	// fetch a multiple of the number of workers per batch, like the local
-	// migration loop does, bounded by the API's maximum limit
-	batchSize := min(MigrationSlabsPerWorker*rm.workers, api.MaxLimit)
+	// migration loop does; the primary clamps the limit to its maximum.
+	batchSize := migrationSlabsPerWorker * rm.workers
 
 	var cursor int64
 	for {
@@ -252,12 +257,19 @@ func (s *cachedHostStore) reset(usableHosts []hosts.Host) {
 	}
 }
 
-// Addresses implements client.Store. The stored slices are never mutated —
-// reset replaces entries wholesale — so the slice is returned directly.
+// Addresses implements client.Store. It errors for hosts absent from the
+// current batch's state — matching hosts.HostStore.Addresses — so a dial
+// against an unknown host fails with a clear cause rather than a generic "no
+// addresses found". The stored slices are never mutated (reset replaces
+// entries wholesale) so the slice is returned directly.
 func (s *cachedHostStore) Addresses(hostKey types.PublicKey) ([]chain.NetAddress, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.hosts[hostKey].Addresses, nil
+	h, ok := s.hosts[hostKey]
+	if !ok {
+		return nil, hosts.ErrNotFound
+	}
+	return h.Addresses, nil
 }
 
 // Usable implements client.Store. It mirrors the primary node's DB-backed
