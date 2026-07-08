@@ -100,6 +100,7 @@ type (
 		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
 		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error
+		RemoveBlocklistReasons(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error
 		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
 		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)
 
@@ -368,6 +369,57 @@ func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
 			continue
 		}
 		log.Warn("blocking unusable host", zap.Stringer("hostKey", hk), zap.Strings("usability", reasons))
+	}
+	return nil
+}
+
+// unblockUsableHosts unblocks hosts that were blocked for failing usability
+// checks but that are usable again and no longer have any active contracts.
+// Only reasons that correspond to usability checks are removed; any other
+// blocklist reasons are left intact.
+func (cm *ContractManager) unblockUsableHosts(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	log := cm.log.Named("unblockhosts")
+
+	usabilityChecks := make(map[string]struct{})
+	for _, name := range hosts.AllUsabilityChecks() {
+		usabilityChecks[name] = struct{}{}
+	}
+
+	const batchSize = 100
+	toUnblock := make(map[types.PublicKey][]string)
+	for offset := 0; ; offset += batchSize {
+		hosts, err := cm.hosts.Hosts(ctx, offset, batchSize,
+			hosts.WithBlocked(true),
+			hosts.WithUsable(true),
+			hosts.WithActiveContracts(false))
+		if err != nil {
+			return fmt.Errorf("failed to fetch hosts to unblock: %w", err)
+		}
+		for _, host := range hosts {
+			// skip hosts blocked solely for non-usability reasons; we have nothing to remove
+			var remove []string
+			for _, r := range host.BlockedReasons {
+				if _, ok := usabilityChecks[r]; ok {
+					remove = append(remove, r)
+				}
+			}
+			if len(remove) > 0 {
+				toUnblock[host.PublicKey] = remove
+			}
+		}
+		if len(hosts) < batchSize {
+			break
+		}
+	}
+
+	for hk, reasons := range toUnblock {
+		if err := cm.hosts.RemoveBlocklistReasons(ctx, []types.PublicKey{hk}, reasons); err != nil {
+			log.Error("failed to unblock host", zap.Stringer("hostKey", hk), zap.Error(err))
+			continue
+		}
+		log.Info("unblocking usable host", zap.Stringer("hostKey", hk), zap.Strings("usability", reasons))
 	}
 	return nil
 }
