@@ -99,6 +99,10 @@ func (cm *ContractManager) BlockBadHosts(ctx context.Context) error {
 	return cm.blockBadHosts(ctx)
 }
 
+func (cm *ContractManager) UnblockUsableHosts(ctx context.Context) error {
+	return cm.unblockUsableHosts(ctx)
+}
+
 func (cm *ContractManager) SetRevisionBroadcastInterval(d time.Duration) {
 	cm.revisionBroadcastInterval = d
 }

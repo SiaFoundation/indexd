@@ -176,6 +176,7 @@ type (
 		BlockHosts(hostKeys []types.PublicKey, reasons []string) error
 		BlockedHosts(offset, limit int) ([]types.PublicKey, error)
 		UnblockHost(hk types.PublicKey) error
+		RemoveBlocklistReasons(hostKeys []types.PublicKey, reasons []string) error
 		ResetLostSectors(hk types.PublicKey) error
 
 		PruneHosts(lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
@@ -266,6 +267,12 @@ func (hm *HostManager) BlockedHosts(ctx context.Context, offset, limit int) ([]t
 // UnblockHost unblocks the given host
 func (hm *HostManager) UnblockHost(ctx context.Context, hk types.PublicKey) error {
 	return hm.store.UnblockHost(hk)
+}
+
+// RemoveBlocklistReasons removes the given reasons from the blocklist entries of
+// the given hosts, leaving any other reasons intact.
+func (hm *HostManager) RemoveBlocklistReasons(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error {
+	return hm.store.RemoveBlocklistReasons(hostKeys, reasons)
 }
 
 // ResetLostSectors resets the lost sectors count for the given host

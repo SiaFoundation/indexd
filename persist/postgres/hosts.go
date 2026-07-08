@@ -232,7 +232,7 @@ WHERE
 	-- blocked host filter
 	AND (($4::boolean IS NULL) OR ($4::boolean = hosts.blocked))
 	-- active contracts filter
-	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND proof_height > globals.scanned_height)))
+	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND proof_height > globals.scanned_height)))
 	-- public key filter
 	AND ((CARDINALITY($6::bytea[]) = 0) OR (public_key = ANY($6)))
 	%s -- orderClause
@@ -395,23 +395,74 @@ func (s *Store) HostsWithUnpinnableSectors() ([]types.PublicKey, error) {
 	return hosts, nil
 }
 
+// fullyUnblockHost removes the given host key from the blocklist and marks its
+// contracts as good again.
+func fullyUnblockHost(ctx context.Context, tx *txn, hk types.PublicKey) error {
+	_, err := tx.Exec(ctx, "DELETE FROM hosts_blocklist WHERE public_key = $1", sqlPublicKey(hk))
+	if err != nil {
+		return fmt.Errorf("failed to remove host %q from blocklist: %w", hk, err)
+	}
+	_, err = tx.Exec(ctx, `
+		UPDATE contracts
+		SET good = TRUE
+		FROM contracts c
+		INNER JOIN hosts h ON h.id = c.host_id
+		WHERE contracts.id = c.id AND h.public_key = $1
+		`, sqlPublicKey(hk))
+	if err != nil {
+		return fmt.Errorf("failed to update contracts: %w", err)
+	}
+	return nil
+}
+
 // UnblockHost removes the given host key from the blocklist and marks its
 // contracts as good again.
 func (s *Store) UnblockHost(hk types.PublicKey) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, "DELETE FROM hosts_blocklist WHERE public_key = $1", sqlPublicKey(hk))
-		if err != nil {
-			return fmt.Errorf("failed to remove host %q from blocklist: %w", hk, err)
-		}
-		_, err = tx.Exec(ctx, `
-			UPDATE contracts
-			SET good = TRUE
-			FROM contracts c
-			INNER JOIN hosts h ON h.id = c.host_id
-			WHERE contracts.id = c.id AND h.public_key = $1
-			`, sqlPublicKey(hk))
-		if err != nil {
-			return fmt.Errorf("failed to update contracts: %w", err)
+		return fullyUnblockHost(ctx, tx, hk)
+	})
+}
+
+// RemoveBlocklistReasons removes the given reasons from each host's blocklist
+// entry, leaving any other reasons untouched. A host left with no remaining
+// reasons is removed from the blocklist and its contracts are marked good again.
+func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		for _, hk := range hks {
+			var current []string
+			err := tx.QueryRow(ctx, `
+				SELECT reasons
+				FROM hosts_blocklist
+				WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&current)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue // host not blocked
+			} else if err != nil {
+				return fmt.Errorf("failed to fetch blocklist entry for host %q: %w", hk, err)
+			}
+
+			// keep any reasons not being removed
+			var remaining []string
+			for _, r := range current {
+				if !slices.Contains(reasons, r) {
+					remaining = append(remaining, r)
+				}
+			}
+
+			if len(remaining) == 0 {
+				// no reasons remain, fully unblock the host
+				if err := fullyUnblockHost(ctx, tx, hk); err != nil {
+					return err
+				}
+				continue
+			}
+
+			_, err = tx.Exec(ctx, `
+				UPDATE hosts_blocklist
+				SET reasons = $2
+				WHERE public_key = $1`, sqlPublicKey(hk), remaining)
+			if err != nil {
+				return fmt.Errorf("failed to update blocklist entry for host %q: %w", hk, err)
+			}
 		}
 		return nil
 	})
@@ -1133,8 +1184,10 @@ func (s *Store) StuckHosts() ([]hosts.StuckHost, error) {
 }
 
 func buildHostOrderByClause(sorts []hosts.HostSortOpt) (string, error) {
+	// hosts.id is appended as a final tiebreaker so LIMIT/OFFSET pagination is
+	// deterministic even without a sort or when sort columns contain ties.
 	if len(sorts) == 0 {
-		return "", nil
+		return "ORDER BY hosts.id", nil
 	}
 
 	var sortMapping = map[string]string{
@@ -1167,5 +1220,6 @@ func buildHostOrderByClause(sorts []hosts.HostSortOpt) (string, error) {
 		}
 	}
 
+	parts = append(parts, "hosts.id")
 	return "ORDER BY " + strings.Join(parts, ", "), nil
 }
