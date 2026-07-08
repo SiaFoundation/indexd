@@ -1631,20 +1631,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  slabs:
-                    type: array
-                    items:
-                      type: object
-                  state:
-                    type: object
-                    description: >-
-                      Hosts, healthy contracts, maintenance settings and chain
-                      height used to decide which sectors to migrate and where.
-                  nextCursor:
-                    type: integer
-                    format: int64
+                $ref: "#/components/schemas/MigrationBatch"
 
   /migrations/results:
     post:
@@ -1662,7 +1649,7 @@ paths:
             schema:
               type: array
               items:
-                type: object
+                $ref: "#/components/schemas/MigrationResult"
       responses:
         "200":
           description: Results applied
@@ -2137,6 +2124,16 @@ components:
       $ref: "./components.yml#/components/schemas/Host"
     MaintenanceSettings:
       $ref: "./components.yml#/components/schemas/MaintenanceSettings"
+    Slab:
+      $ref: "./components.yml#/components/schemas/Slab"
+    Shard:
+      $ref: "./components.yml#/components/schemas/Shard"
+    MigrationState:
+      $ref: "./components.yml#/components/schemas/MigrationState"
+    MigrationBatch:
+      $ref: "./components.yml#/components/schemas/MigrationBatch"
+    MigrationResult:
+      $ref: "./components.yml#/components/schemas/MigrationResult"
     PinnedSettings:
       $ref: "./components.yml#/components/schemas/PinnedSettings"
     SyncerAddress:

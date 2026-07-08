@@ -39,7 +39,10 @@ func NewTestShards(t testing.TB, dataShards, parityShards int) ([32]byte, [][]by
 	nonce := make([]byte, 24)
 	for i := range shards {
 		nonce[0] = byte(i)
-		c, _ := chacha20.NewUnauthenticatedCipher(encryptionKey[:], nonce)
+		c, err := chacha20.NewUnauthenticatedCipher(encryptionKey[:], nonce)
+		if err != nil {
+			t.Fatalf("failed to create cipher: %v", err)
+		}
 		c.XORKeyStream(shards[i], shards[i])
 	}
 
