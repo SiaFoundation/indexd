@@ -416,10 +416,10 @@ func (cm *ContractManager) unblockUsableHosts(ctx context.Context) error {
 
 	for hk, reasons := range toUnblock {
 		if err := cm.hosts.RemoveBlocklistReasons(ctx, []types.PublicKey{hk}, reasons); err != nil {
-			log.Error("failed to unblock host", zap.Stringer("hostKey", hk), zap.Error(err))
+			log.Error("failed to remove usability blocklist reasons", zap.Stringer("hostKey", hk), zap.Error(err))
 			continue
 		}
-		log.Info("unblocking usable host", zap.Stringer("hostKey", hk), zap.Strings("usability", reasons))
+		log.Info("removed usability blocklist reasons", zap.Stringer("hostKey", hk), zap.Strings("usability", reasons))
 	}
 	return nil
 }

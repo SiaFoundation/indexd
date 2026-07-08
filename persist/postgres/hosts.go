@@ -403,12 +403,11 @@ func fullyUnblockHost(ctx context.Context, tx *txn, hk types.PublicKey) error {
 		return fmt.Errorf("failed to remove host %q from blocklist: %w", hk, err)
 	}
 	_, err = tx.Exec(ctx, `
-		UPDATE contracts
+		UPDATE contracts AS c
 		SET good = TRUE
-		FROM contracts c
-		INNER JOIN hosts h ON h.id = c.host_id
-		WHERE contracts.id = c.id AND h.public_key = $1
-		`, sqlPublicKey(hk))
+		FROM hosts h
+		WHERE c.host_id = h.id AND h.public_key = $1
+	`, sqlPublicKey(hk))
 	if err != nil {
 		return fmt.Errorf("failed to update contracts: %w", err)
 	}
@@ -442,10 +441,17 @@ func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) 
 
 			// keep any reasons not being removed
 			var remaining []string
+			changed := false
 			for _, r := range current {
-				if !slices.Contains(reasons, r) {
-					remaining = append(remaining, r)
+				if slices.Contains(reasons, r) {
+					changed = true
+					continue
 				}
+				remaining = append(remaining, r)
+			}
+
+			if !changed {
+				continue // nothing to remove
 			}
 
 			if len(remaining) == 0 {
