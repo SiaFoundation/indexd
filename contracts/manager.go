@@ -100,7 +100,6 @@ type (
 		HostsForPruning(ctx context.Context) ([]types.PublicKey, error)
 		HostsForPinning(ctx context.Context) ([]types.PublicKey, error)
 		BlockHosts(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error
-		RemoveBlocklistReasons(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error
 		HostsWithUnpinnableSectors(ctx context.Context) ([]types.PublicKey, error)
 		UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error)
 
@@ -370,47 +369,6 @@ func (cm *ContractManager) blockBadHosts(ctx context.Context) error {
 		}
 		log.Warn("blocking unusable host", zap.Stringer("hostKey", hk), zap.Strings("usability", reasons))
 	}
-	return nil
-}
-
-// unblockUsableHosts unblocks hosts that were blocked for failing usability
-// checks but that are usable again and no longer have any active contracts.
-// Only reasons that correspond to usability checks are removed; any other
-// blocklist reasons are left intact.
-func (cm *ContractManager) unblockUsableHosts(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-	log := cm.log.Named("unblockhosts")
-
-	const batchSize = 100
-	var toUnblock []types.PublicKey
-	for offset := 0; ; offset += batchSize {
-		hosts, err := cm.hosts.Hosts(ctx, offset, batchSize,
-			hosts.WithBlocked(true),
-			hosts.WithUsable(true),
-			hosts.WithActiveContracts(false))
-		if err != nil {
-			return fmt.Errorf("failed to fetch hosts to unblock: %w", err)
-		}
-		for _, host := range hosts {
-			toUnblock = append(toUnblock, host.PublicKey)
-		}
-		if len(hosts) < batchSize {
-			break
-		}
-	}
-
-	if len(toUnblock) == 0 {
-		return nil
-	}
-
-	// removing reasons not present on a host is a no-op, so we can strip all
-	// usability reasons unconditionally. Non-usability reasons (e.g. manual
-	// blocks) are left intact.
-	if err := cm.hosts.RemoveBlocklistReasons(ctx, toUnblock, hosts.AllUsabilityChecks()); err != nil {
-		return fmt.Errorf("failed to remove usability blocklist reasons: %w", err)
-	}
-	log.Info("removed usability blocklist reasons", zap.Int("hosts", len(toUnblock)))
 	return nil
 }
 
