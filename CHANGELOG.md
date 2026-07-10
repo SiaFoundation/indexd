@@ -1,3 +1,15 @@
+## 0.4.0 (2026-07-08)
+
+### Breaking Changes
+
+#### Added support for slab versioning
+
+Slab versioning lets us change the encoding scheme of slabs to add new features or change functionality
+
+### Fixes
+
+- Updated coreutils to v0.23.3
+
 ## 0.3.2 (2026-07-04)
 
 ### Fixes
