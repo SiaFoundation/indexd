@@ -404,10 +404,6 @@ func (s *hostManagerMock) BlockHosts(ctx context.Context, hostKeys []types.Publi
 	return s.store.BlockHosts(hostKeys, reasons)
 }
 
-func (s *hostManagerMock) RemoveBlocklistReasons(ctx context.Context, hostKeys []types.PublicKey, reasons []string) error {
-	return s.store.RemoveBlocklistReasons(hostKeys, reasons)
-}
-
 func (s *hostManagerMock) UsabilitySettings(ctx context.Context) (hosts.UsabilitySettings, error) {
 	return s.store.UsabilitySettings()
 }

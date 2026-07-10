@@ -30,11 +30,6 @@ func (cm *ContractManager) performContractMaintenance(ctx context.Context, log *
 		return fmt.Errorf("failed to block bad hosts: %w", err)
 	}
 
-	// unblock hosts that are usable again and no longer have active contracts
-	if err := cm.unblockUsableHosts(ctx); err != nil {
-		return fmt.Errorf("failed to unblock usable hosts: %w", err)
-	}
-
 	// renew any good contracts within their renew window
 	if err := cm.performContractRenewals(ctx, settings.Period, settings.RenewWindow, log.Named("renew")); err != nil {
 		return fmt.Errorf("failed to renew contracts: %w", err)

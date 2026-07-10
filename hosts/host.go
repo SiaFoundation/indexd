@@ -255,13 +255,6 @@ func (u Usability) Usable() bool {
 	return u == GoodUsability
 }
 
-// AllUsabilityChecks returns the full set of usability check names, i.e. the
-// reasons applied automatically when blocking a host that fails its usability
-// checks.
-func AllUsabilityChecks() []string {
-	return Usability{}.FailedChecks()
-}
-
 // FailedChecks returns a string representing all failed Usability checks.
 func (u Usability) FailedChecks() []string {
 	var reasons []string
