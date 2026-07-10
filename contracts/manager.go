@@ -382,13 +382,8 @@ func (cm *ContractManager) unblockUsableHosts(ctx context.Context) error {
 	defer cancel()
 	log := cm.log.Named("unblockhosts")
 
-	usabilityChecks := make(map[string]struct{})
-	for _, name := range hosts.AllUsabilityChecks() {
-		usabilityChecks[name] = struct{}{}
-	}
-
 	const batchSize = 100
-	toUnblock := make(map[types.PublicKey][]string)
+	var toUnblock []types.PublicKey
 	for offset := 0; ; offset += batchSize {
 		hosts, err := cm.hosts.Hosts(ctx, offset, batchSize,
 			hosts.WithBlocked(true),
@@ -398,29 +393,24 @@ func (cm *ContractManager) unblockUsableHosts(ctx context.Context) error {
 			return fmt.Errorf("failed to fetch hosts to unblock: %w", err)
 		}
 		for _, host := range hosts {
-			// skip hosts blocked solely for non-usability reasons; we have nothing to remove
-			var remove []string
-			for _, r := range host.BlockedReasons {
-				if _, ok := usabilityChecks[r]; ok {
-					remove = append(remove, r)
-				}
-			}
-			if len(remove) > 0 {
-				toUnblock[host.PublicKey] = remove
-			}
+			toUnblock = append(toUnblock, host.PublicKey)
 		}
 		if len(hosts) < batchSize {
 			break
 		}
 	}
 
-	for hk, reasons := range toUnblock {
-		if err := cm.hosts.RemoveBlocklistReasons(ctx, []types.PublicKey{hk}, reasons); err != nil {
-			log.Error("failed to remove usability blocklist reasons", zap.Stringer("hostKey", hk), zap.Error(err))
-			continue
-		}
-		log.Info("removed usability blocklist reasons", zap.Stringer("hostKey", hk), zap.Strings("usability", reasons))
+	if len(toUnblock) == 0 {
+		return nil
 	}
+
+	// removing reasons not present on a host is a no-op, so we can strip all
+	// usability reasons unconditionally. Non-usability reasons (e.g. manual
+	// blocks) are left intact.
+	if err := cm.hosts.RemoveBlocklistReasons(ctx, toUnblock, hosts.AllUsabilityChecks()); err != nil {
+		return fmt.Errorf("failed to remove usability blocklist reasons: %w", err)
+	}
+	log.Info("removed usability blocklist reasons", zap.Int("hosts", len(toUnblock)))
 	return nil
 }
 

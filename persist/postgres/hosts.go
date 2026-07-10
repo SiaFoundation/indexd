@@ -426,49 +426,62 @@ func (s *Store) UnblockHost(hk types.PublicKey) error {
 // entry, leaving any other reasons untouched. A host left with no remaining
 // reasons is removed from the blocklist and its contracts are marked good again.
 func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) error {
+	if len(hks) == 0 || len(reasons) == 0 {
+		return nil
+	}
+	sqlHks := make([]sqlPublicKey, len(hks))
+	for i, hk := range hks {
+		sqlHks[i] = sqlPublicKey(hk)
+	}
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		for _, hk := range hks {
-			var current []string
-			err := tx.QueryRow(ctx, `
-				SELECT reasons
-				FROM hosts_blocklist
-				WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&current)
-			if errors.Is(err, sql.ErrNoRows) {
-				continue // host not blocked
-			} else if err != nil {
-				return fmt.Errorf("failed to fetch blocklist entry for host %q: %w", hk, err)
+		// delete the entries that would be left with no reasons at all, i.e.
+		// where none of the current reasons survive the removal. Collect their
+		// host keys so we can mark their contracts good again.
+		rows, err := tx.Query(ctx, `
+			DELETE FROM hosts_blocklist
+			WHERE public_key = ANY($1)
+			  AND NOT EXISTS (
+			      SELECT 1 FROM unnest(reasons) AS r WHERE r <> ALL($2::text[])
+			  )
+			RETURNING public_key`, sqlHks, reasons)
+		if err != nil {
+			return fmt.Errorf("failed to remove fully-unblocked hosts: %w", err)
+		}
+		var unblocked []sqlPublicKey
+		for rows.Next() {
+			var hk sqlPublicKey
+			if err := rows.Scan(&hk); err != nil {
+				rows.Close()
+				return err
 			}
+			unblocked = append(unblocked, hk)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
 
-			// keep any reasons not being removed
-			var remaining []string
-			changed := false
-			for _, r := range current {
-				if slices.Contains(reasons, r) {
-					changed = true
-					continue
-				}
-				remaining = append(remaining, r)
+		// mark the fully-unblocked hosts' contracts good again.
+		if len(unblocked) > 0 {
+			if _, err := tx.Exec(ctx, `
+				UPDATE contracts c
+				SET good = TRUE
+				FROM hosts h
+				WHERE c.host_id = h.id AND h.public_key = ANY($1)`, unblocked); err != nil {
+				return fmt.Errorf("failed to mark contracts good: %w", err)
 			}
+		}
 
-			if !changed {
-				continue // nothing to remove
-			}
-
-			if len(remaining) == 0 {
-				// no reasons remain, fully unblock the host
-				if err := fullyUnblockHost(ctx, tx, hk); err != nil {
-					return err
-				}
-				continue
-			}
-
-			_, err = tx.Exec(ctx, `
-				UPDATE hosts_blocklist
-				SET reasons = $2
-				WHERE public_key = $1`, sqlPublicKey(hk), remaining)
-			if err != nil {
-				return fmt.Errorf("failed to update blocklist entry for host %q: %w", hk, err)
-			}
+		// strip the reasons from the entries that still have some left; the
+		// fully-emptied entries were already deleted above. Reasons not present
+		// on an entry are a no-op.
+		if _, err := tx.Exec(ctx, `
+			UPDATE hosts_blocklist
+			SET reasons = ARRAY(
+				SELECT r FROM unnest(reasons) AS r WHERE r <> ALL($2::text[])
+			)
+			WHERE public_key = ANY($1)`, sqlHks, reasons); err != nil {
+			return fmt.Errorf("failed to update blocklist reasons: %w", err)
 		}
 		return nil
 	})
