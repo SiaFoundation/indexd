@@ -1787,7 +1787,7 @@ func TestMigrationBatchEmpty(t *testing.T) {
 	adminClient := indexer.Admin
 
 	// no unhealthy slabs on a fresh indexer
-	resp, err := adminClient.MigrationBatch(context.Background(), 0, 100)
+	resp, err := adminClient.MigrationBatch(t.Context(), 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(resp.Slabs) != 0 {
