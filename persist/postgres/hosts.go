@@ -395,30 +395,24 @@ func (s *Store) HostsWithUnpinnableSectors() ([]types.PublicKey, error) {
 	return hosts, nil
 }
 
-// fullyUnblockHost removes the given host key from the blocklist and marks its
-// contracts as good again.
-func fullyUnblockHost(ctx context.Context, tx *txn, hk types.PublicKey) error {
-	_, err := tx.Exec(ctx, "DELETE FROM hosts_blocklist WHERE public_key = $1", sqlPublicKey(hk))
-	if err != nil {
-		return fmt.Errorf("failed to remove host %q from blocklist: %w", hk, err)
-	}
-	_, err = tx.Exec(ctx, `
-		UPDATE contracts AS c
-		SET good = TRUE
-		FROM hosts h
-		WHERE c.host_id = h.id AND h.public_key = $1
-	`, sqlPublicKey(hk))
-	if err != nil {
-		return fmt.Errorf("failed to update contracts: %w", err)
-	}
-	return nil
-}
-
 // UnblockHost removes the given host key from the blocklist and marks its
 // contracts as good again.
 func (s *Store) UnblockHost(hk types.PublicKey) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		return fullyUnblockHost(ctx, tx, hk)
+		_, err := tx.Exec(ctx, "DELETE FROM hosts_blocklist WHERE public_key = $1", sqlPublicKey(hk))
+		if err != nil {
+			return fmt.Errorf("failed to remove host %q from blocklist: %w", hk, err)
+		}
+		_, err = tx.Exec(ctx, `
+			UPDATE contracts AS c
+			SET good = TRUE
+			FROM hosts h
+			WHERE c.host_id = h.id AND h.public_key = $1
+		`, sqlPublicKey(hk))
+		if err != nil {
+			return fmt.Errorf("failed to update contracts: %w", err)
+		}
+		return nil
 	})
 }
 

@@ -631,8 +631,10 @@ loop:
 	wg.Wait()
 
 	m.log.Debug("host scans finished", zap.Int("hosts", len(hosts)), zap.Duration("duration", time.Since(start)))
-	if err := m.unblockUsableHosts(ctx); err != nil {
+	if unblocked, err := m.unblockUsableHosts(ctx); err != nil {
 		m.log.Error("failed to unblock usable hosts after scanning", zap.Error(err))
+	} else {
+		m.log.Debug("unblocked usable hosts", zap.Int("hosts", unblocked))
 	}
 }
 
@@ -640,7 +642,7 @@ loop:
 // checks but that are usable again and no longer have any active contracts.
 // Only reasons that correspond to usability checks are removed; any other
 // blocklist reasons are left intact.
-func (m *HostManager) unblockUsableHosts(ctx context.Context) error {
+func (m *HostManager) unblockUsableHosts(ctx context.Context) (int, error) {
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 
@@ -648,14 +650,14 @@ func (m *HostManager) unblockUsableHosts(ctx context.Context) error {
 	var toUnblock []types.PublicKey
 	for offset := 0; ; offset += batchSize {
 		if err := ctx.Err(); err != nil {
-			return err
+			return 0, err
 		}
 		hosts, err := m.store.Hosts(offset, batchSize,
 			WithBlocked(true),
 			WithUsable(true),
 			WithActiveContracts(false))
 		if err != nil {
-			return fmt.Errorf("failed to fetch hosts to unblock: %w", err)
+			return 0, fmt.Errorf("failed to fetch hosts to unblock: %w", err)
 		}
 		for _, host := range hosts {
 			toUnblock = append(toUnblock, host.PublicKey)
@@ -666,18 +668,15 @@ func (m *HostManager) unblockUsableHosts(ctx context.Context) error {
 	}
 
 	if len(toUnblock) == 0 {
-		return nil
-	} else if err := ctx.Err(); err != nil {
-		return err
+		return 0, nil
 	}
 
 	// removing reasons not present on a host is a no-op, so strip all usability
 	// reasons unconditionally while preserving manual blocklist reasons.
 	if err := m.store.RemoveBlocklistReasons(toUnblock, Usability{}.FailedChecks()); err != nil {
-		return fmt.Errorf("failed to remove usability blocklist reasons: %w", err)
+		return 0, fmt.Errorf("failed to remove usability blocklist reasons: %w", err)
 	}
-	m.log.Info("removed usability blocklist reasons", zap.Int("hosts", len(toUnblock)))
-	return nil
+	return len(toUnblock), nil
 }
 
 func newStuckHostsAlert(hosts []StuckHost) alerts.Alert {
