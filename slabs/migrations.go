@@ -177,7 +177,7 @@ func NewMigrator(hosts HostClient, migrationAccount types.PrivateKey, log *zap.L
 // failed, in which case the slab's repair state should be left untouched; lost
 // is still populated so the caller can persist any sectors discovered lost
 // during the failed recovery.
-func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []int, candidates []types.PublicKey, log *zap.Logger) (migrated, lost []Shard, err error) {
+func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []int, candidates []types.PublicKey, log *zap.Logger) (migrated, lost []Shard, downloadElapsed, uploadElapsed time.Duration, err error) {
 	// indicate what shards are required
 	required := make([]bool, len(slab.Sectors))
 	for _, i := range indices {
@@ -190,10 +190,10 @@ func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []in
 	// out the database
 	downloadStart := time.Now()
 	shards, lost, err := m.recoverShards(ctx, slab, required, log.Named("recover"))
+	downloadElapsed = time.Since(downloadStart)
 	if err != nil {
-		return nil, lost, err
+		return nil, lost, downloadElapsed, 0, err
 	}
-	log = log.With(zap.Duration("downloadElapsed", time.Since(downloadStart)))
 
 	// re-encrypt the recovered shards for upload
 	nonce := make([]byte, 24)
@@ -212,11 +212,14 @@ func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []in
 	// note: timeouts are set within uploadShards to avoid timing out the database
 	uploadStart := time.Now()
 	migrated, err = m.uploadShards(ctx, slab, shards, candidates, log.Named("migrate"))
-	log = log.With(zap.Duration("uploadElapsed", time.Since(uploadStart)), zap.Int("migrated", len(migrated)))
+	uploadElapsed = time.Since(uploadStart)
 	if err != nil {
-		log.Warn("failed to upload migrated shards", zap.Error(err))
+		log.Warn("failed to upload migrated shards",
+			zap.Duration("downloadElapsed", downloadElapsed),
+			zap.Duration("uploadElapsed", uploadElapsed),
+			zap.Int("migrated", len(migrated)), zap.Error(err))
 	}
-	return migrated, lost, nil
+	return migrated, lost, downloadElapsed, uploadElapsed, nil
 }
 
 // applyMigrationResult persists the outcome of migrating a single slab: it
@@ -343,8 +346,9 @@ func (m *Migrator) MigrateSlab(ctx context.Context, slab Slab, state MigrationSt
 	}
 	log = log.With(zap.Int("toMigrate", len(indices)), zap.Int("uploadCandidates", len(candidates)))
 
-	migrated, lost, err := m.executeMigration(ctx, slab, indices, candidates, log)
+	migrated, lost, downloadElapsed, uploadElapsed, err := m.executeMigration(ctx, slab, indices, candidates, log)
 	res.Migrated, res.Lost = migrated, lost
+	log = log.With(zap.Duration("downloadElapsed", downloadElapsed), zap.Duration("uploadElapsed", uploadElapsed), zap.Int("migrated", len(migrated)))
 	if err != nil {
 		if ctx.Err() == nil {
 			log.Error("failed to recover slab", zap.Error(err))

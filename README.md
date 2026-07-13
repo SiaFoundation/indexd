@@ -72,6 +72,8 @@ old blocks.
 
 You can use it with a PostgreSQL database running in another container. You can find an example `docker-compose.yml` file [here](docker-compose.yml).
 
+An example compose file for running a [remote migration node](#example-config-remote-migration-node) is available in [docker-compose.remote.yml](docker-compose.remote.yml).
+
 ## API
 
 `indexd` exposes two HTTP APIs:
@@ -188,7 +190,7 @@ remote nodes.
 directory: /var/lib/indexd
 recoveryPhrase: <your twelve word recovery phrase> # must match the primary node's recovery phrase
 remote:
-    address: https://indexd.example.com:9980/api # the URL of the primary node's admin API
+    address: https://indexd.example.com:9980 # the base URL of the primary node
     password: <the primary's admin password> # the primary node's admin API password
 slabs:
     migrationWorkers: 16 # number of slabs to migrate in parallel (0 defaults to runtime.NumCPU())

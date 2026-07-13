@@ -58,7 +58,8 @@ type (
 	// the primary and reports their results back rather than touching the
 	// database directly.
 	Remote struct {
-		// Address is the base URL of the primary node's admin API.
+		// Address is the base URL of the primary node, e.g.
+		// "https://primary.example.com".
 		Address string `yaml:"address"`
 		// Password is the primary node's admin API password.
 		Password string `yaml:"password"`

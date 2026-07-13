@@ -167,6 +167,7 @@ func (rm *RemoteMigrator) runPass(ctx context.Context, store *cachedHostStore, m
 
 	var cursor int64
 	for {
+		rm.log.Debug("fetching migration batch", zap.Int64("cursor", cursor), zap.Int("limit", batchSize))
 		fetchCtx, cancel := context.WithTimeout(ctx, remoteRequestTimeout)
 		batch, err := rm.primary.MigrationBatch(fetchCtx, cursor, batchSize)
 		cancel()

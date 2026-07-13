@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -300,7 +301,7 @@ func main() {
 	configCmd := flagg.New("config", ``)
 
 	remoteCmd := flagg.New("remote", `Run a remote worker that helps a primary indexd migrate unhealthy slabs.
-It serves no API and requires the primary's admin API address and password under the 'remote'
+It serves no API and requires the primary's URL and admin password under the 'remote'
 config section and the same recovery phrase as the primary node.`)
 
 	cmd := flagg.Parse(flagg.Tree{
@@ -395,7 +396,7 @@ config section and the same recovery phrase as the primary node.`)
 			fmt.Fprintf(os.Stderr, "missing recovery phrase - needs to be set via config file and match the primary node\n")
 			os.Exit(1)
 		} else if cfg.Remote.Address == "" {
-			fmt.Fprintf(os.Stderr, "missing remote address - needs to be set via config file to the primary node's admin API URL\n")
+			fmt.Fprintf(os.Stderr, "missing remote address - needs to be set via config file to the primary node's URL\n")
 			os.Exit(1)
 		} else if cfg.Remote.Password == "" {
 			fmt.Fprintf(os.Stderr, "missing remote password - needs to be set via config file to the primary node's admin API password\n")
@@ -415,7 +416,7 @@ config section and the same recovery phrase as the primary node.`)
 		if cfg.Slabs.MigrationWorkers > 0 {
 			opts = append(opts, slabs.WithRemoteWorkers(cfg.Slabs.MigrationWorkers))
 		}
-		primary := adminapi.NewClient(cfg.Remote.Address, cfg.Remote.Password)
+		primary := adminapi.NewClient(strings.TrimSuffix(cfg.Remote.Address, "/")+"/api", cfg.Remote.Password)
 		worker := slabs.NewRemoteMigrator(primary, migrationKey, log.Named("migrations"), opts...)
 
 		log.Info("remote node started", zap.String("primary", cfg.Remote.Address))
