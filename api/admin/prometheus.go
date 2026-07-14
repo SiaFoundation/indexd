@@ -127,6 +127,14 @@ func (s ContractsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric)
 			Value: float64(s.Renewing),
 		},
 		{
+			Name:  "indexd_contracts_locked_allowance",
+			Value: s.LockedAllowance.Siacoins(),
+		},
+		{
+			Name:  "indexd_contracts_spent_allowance",
+			Value: s.SpentAllowance.Siacoins(),
+		},
+		{
 			Name:  "indexd_contracts_total_capacity",
 			Value: float64(s.TotalCapacity),
 		},
@@ -168,6 +176,16 @@ func hostStatsMetrics(h hosts.HostStats) []prometheus.Metric {
 			Name:   "indexd_host_total_usage",
 			Labels: labels,
 			Value:  float64(h.TotalUsage.Siacoins()),
+		},
+		{
+			Name:   "indexd_host_locked_allowance",
+			Labels: labels,
+			Value:  float64(h.LockedAllowance.Siacoins()),
+		},
+		{
+			Name:   "indexd_host_spent_allowance",
+			Labels: labels,
+			Value:  float64(h.SpentAllowance.Siacoins()),
 		},
 		{
 			Name:   "indexd_host_scans",

@@ -38,22 +38,32 @@ func (s *Store) ContractRevision(contractID types.FileContractID) (rhp.ContractR
 func (s *Store) ContractsStats() (resp contracts.Stats, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		var numContracts, numGood, totalCapacity, totalSize uint64
+		var lockedAllowance, spentAllowance types.Currency
 		err := tx.QueryRow(ctx, `
 			WITH globals AS (
 				SELECT scanned_height FROM global_settings
 			)
 			SELECT
-				COUNT(*),       				-- non-expired contracts
-				COALESCE(SUM(good::int), 0), 	-- good contracts
-				COALESCE(SUM(capacity), 0),  	-- total capacity
-				COALESCE(SUM(size), 0)      	-- total size
+				COUNT(*), -- non-expired contracts
+				COALESCE(SUM(good::int), 0), -- good contracts
+				COALESCE(SUM(capacity), 0), -- total capacity
+				COALESCE(SUM(size), 0), -- total size
+				COALESCE(SUM(initial_allowance), 0), -- locked allowance
+				COALESCE(SUM(GREATEST(initial_allowance - remaining_allowance, 0)), 0) -- spent allowance
 			FROM contracts
 			CROSS JOIN globals
 			WHERE
 				state IN (0,1) AND
 				renewed_to IS NULL AND
 				proof_height > globals.scanned_height
-		`).Scan(&numContracts, &numGood, &totalCapacity, &totalSize)
+		`).Scan(
+			&numContracts,
+			&numGood,
+			&totalCapacity,
+			&totalSize,
+			(*sqlCurrency)(&lockedAllowance),
+			(*sqlCurrency)(&spentAllowance),
+		)
 		if err != nil {
 			return err
 		}
@@ -82,8 +92,10 @@ func (s *Store) ContractsStats() (resp contracts.Stats, _ error) {
 			BadContracts: numContracts - numGood,
 			Renewing:     numRenewing,
 
-			TotalCapacity: totalCapacity,
-			TotalSize:     totalSize,
+			LockedAllowance: lockedAllowance,
+			SpentAllowance:  spentAllowance,
+			TotalCapacity:   totalCapacity,
+			TotalSize:       totalSize,
 		}
 		return nil
 	})
