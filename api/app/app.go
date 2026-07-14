@@ -57,8 +57,8 @@ type (
 	Accounts interface {
 		ValidAppConnectKey(context.Context, string) error
 		RegisterAppKey(string, types.PublicKey, accounts.AppMeta) error
-		AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error)
-		HasAppAccount(connectKey string, appID types.Hash256) (bool, error)
+		AuthorizeAppConnectKey(connectKey string, appID types.Hash256) (accounts.AppAuthorization, error)
+		AuthorizePreAuthorizedKey(publicKey types.PublicKey, appID types.Hash256) (accounts.AppAuthorization, error)
 
 		HasAccount(context.Context, types.PublicKey) (bool, error)
 		Account(context.Context, types.PublicKey) (accounts.Account, error)
@@ -95,6 +95,11 @@ type (
 		LogoURL     string        `json:"logoURL"`
 		ServiceURL  string        `json:"serviceURL"`
 		CallbackURL string        `json:"callbackURL"`
+
+		// PreAuthorizedKey and PreAuthorizationSignature allow the request to
+		// bypass interactive approval when signed by a pre-authorized key.
+		PreAuthorizedKey          types.PublicKey `json:"preAuthorizedKey,omitzero"`
+		PreAuthorizationSignature types.Signature `json:"preAuthorizationSignature,omitzero"`
 	}
 
 	// AuthConnectStatusResponse is the response body for checking the status of an
@@ -104,7 +109,7 @@ type (
 		// Reconnecting is true if the user has previously connected the app.
 		// It is only set if the user approved the request.
 		Reconnecting bool          `json:"reconnecting"`
-		UserSecret   types.Hash256 `json:"userSecret,omitempty"`
+		UserSecret   types.Hash256 `json:"userSecret,omitzero"`
 	}
 
 	// RegisterAppResponse is the response body for registering a new application.
@@ -508,13 +513,47 @@ func (a *app) handleAuthRequest(jc jape.Context) {
 
 	requestID := hex.EncodeToString(frand.Bytes(16))
 	expiration := time.Now().Add(10 * time.Minute)
-
-	a.mu.Lock()
-	a.authRequests[requestID] = authReq{
+	authRequest := authReq{
 		Request:      req,
 		Expiration:   expiration,
 		EphemeralKey: ephemeralKey,
 	}
+
+	hasPreAuthorizedKey := req.PreAuthorizedKey != (types.PublicKey{})
+	hasPreAuthorizationSignature := req.PreAuthorizationSignature != (types.Signature{})
+	if hasPreAuthorizedKey != hasPreAuthorizationSignature {
+		jc.Error(errors.New("invalid pre-authorization"), http.StatusUnauthorized)
+		return
+	}
+	if hasPreAuthorizedKey {
+		proofHash := preAuthorizationHash(ephemeralKey, req)
+		if !req.PreAuthorizedKey.VerifyHash(proofHash, req.PreAuthorizationSignature) {
+			jc.Error(errors.New("invalid pre-authorization"), http.StatusUnauthorized)
+			return
+		}
+
+		authorization, err := a.accounts.AuthorizePreAuthorizedKey(req.PreAuthorizedKey, req.AppID)
+		switch {
+		case errors.Is(err, accounts.ErrKeyNotFound),
+			errors.Is(err, accounts.ErrPreAuthorizedKeyExpired),
+			errors.Is(err, accounts.ErrPreAuthorizedKeyExhausted),
+			errors.Is(err, accounts.ErrPreAuthorizedKeyAppMismatch):
+			jc.Error(errors.New("invalid pre-authorized key"), http.StatusUnauthorized)
+			return
+		case err != nil:
+			a.log.Debug("failed to authorize pre-authorized key", zap.Error(err))
+			jc.Error(ErrInternalError, http.StatusInternalServerError)
+			return
+		}
+
+		authRequest.Approved = true
+		authRequest.Reconnecting = authorization.Reconnecting
+		authRequest.UserSecret = authorization.UserSecret
+		authRequest.ConnectKey = authorization.ConnectKey
+	}
+
+	a.mu.Lock()
+	a.authRequests[requestID] = authRequest
 	a.mu.Unlock()
 	time.AfterFunc(time.Until(expiration), func() {
 		a.mu.Lock()
@@ -599,25 +638,17 @@ func (a *app) handlePOSTAuthConnect(jc jape.Context) {
 		return
 	}
 
-	// derive shared secret
-	sharedSecret, err := a.accounts.AppSecret(connectKey, authReq.Request.AppID)
+	authorization, err := a.accounts.AuthorizeAppConnectKey(connectKey, authReq.Request.AppID)
 	if err != nil {
-		jc.Error(fmt.Errorf("failed to derive app secret: %w", err), http.StatusInternalServerError)
-		return
-	}
-
-	// check whether the user has previously connected the app
-	reconnecting, err := a.accounts.HasAppAccount(connectKey, authReq.Request.AppID)
-	if err != nil {
-		jc.Error(fmt.Errorf("failed to check for existing app account: %w", err), http.StatusInternalServerError)
+		jc.Error(fmt.Errorf("failed to authorize app connect key: %w", err), http.StatusInternalServerError)
 		return
 	}
 
 	// update the auth request with the shared secret and approval status
-	authReq.UserSecret = sharedSecret
+	authReq.UserSecret = authorization.UserSecret
 	authReq.Approved = approveReq.Approve
-	authReq.Reconnecting = reconnecting
-	authReq.ConnectKey = connectKey
+	authReq.Reconnecting = authorization.Reconnecting
+	authReq.ConnectKey = authorization.ConnectKey
 	a.authRequests[requestID] = authReq
 	jc.Encode(nil)
 }

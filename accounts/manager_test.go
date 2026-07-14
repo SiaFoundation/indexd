@@ -1,11 +1,14 @@
 package accounts_test
 
 import (
+	"errors"
 	"math"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/testutils"
@@ -195,6 +198,53 @@ func TestUpdateFundedPools(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPruneExpiredPreAuthorizedKeys(t *testing.T) {
+	store := newTestStore(t)
+	synctest.Test(t, func(t *testing.T) {
+		const maintenanceInterval = time.Hour
+		manager, err := accounts.NewManager(store, accounts.WithPruneAccountsInterval(maintenanceInterval))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer manager.Close()
+
+		fundTarget := uint64(1)
+		if err := manager.PutQuota(t.Context(), testutils.TestQuotaName, accounts.PutQuotaRequest{
+			MaxPinnedData:   1,
+			TotalUses:       1,
+			FundTargetBytes: &fundTarget,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		connectKey, err := manager.AddAppConnectKey(t.Context(), accounts.AppConnectKeyRequest{Key: "connect-key", Quota: testutils.TestQuotaName})
+		if err != nil {
+			t.Fatal(err)
+		}
+		preAuthorizedPrivateKey := types.GeneratePrivateKey()
+		preAuthorizedKeyRequest := accounts.PreAuthorizedKeyRequest{
+			ConnectKey: connectKey.Key,
+			Expiration: time.Now().Add(maintenanceInterval / 2),
+			TotalUses:  1,
+		}
+		preAuthorizedKeyRequest.Sign(preAuthorizedPrivateKey)
+		preAuthorizedKey, err := manager.AddPreAuthorizedKey(t.Context(), preAuthorizedKeyRequest)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		synctest.Wait()
+		if _, err := manager.PreAuthorizedKey(t.Context(), preAuthorizedKey.PublicKey); err != nil {
+			t.Fatalf("expected key before maintenance: %v", err)
+		}
+
+		time.Sleep(maintenanceInterval)
+		synctest.Wait()
+		if _, err := manager.PreAuthorizedKey(t.Context(), preAuthorizedKey.PublicKey); !errors.Is(err, accounts.ErrKeyNotFound) {
+			t.Fatalf("expected expired key to be pruned, got %v", err)
+		}
+	})
 }
 
 // approxEqual checks if two time.Time values are within a second of each

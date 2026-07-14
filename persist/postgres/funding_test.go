@@ -582,7 +582,7 @@ func TestSharingPoolAttachments(t *testing.T) {
 
 	// the sharing account is derived from the connect key's user secret rather
 	// than stored, like the app secret
-	secret, err := store.AppConnectKeyUserSecret(apk)
+	secret, _, err := store.AppAuthorization(apk, types.Hash256{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -28,6 +28,22 @@ var (
 	// associated to it.
 	ErrKeyInUse = errors.New("key in use")
 
+	// ErrPreAuthorizedKeyExpired is returned when a pre-authorized key has
+	// passed its expiration time.
+	ErrPreAuthorizedKeyExpired = errors.New("pre-authorized key expired")
+
+	// ErrPreAuthorizedKeyExhausted is returned when a pre-authorized key has no
+	// remaining uses.
+	ErrPreAuthorizedKeyExhausted = errors.New("pre-authorized key has no remaining uses")
+
+	// ErrPreAuthorizedKeyAppMismatch is returned when a pre-authorized key is
+	// restricted to a different application.
+	ErrPreAuthorizedKeyAppMismatch = errors.New("pre-authorized key is not valid for this app")
+
+	// ErrInvalidPreAuthorizedKey is returned when a pre-authorized key request
+	// has invalid fields or signature.
+	ErrInvalidPreAuthorizedKey = errors.New("invalid pre-authorized key")
+
 	// ErrQuotaNotFound is returned when a quota is not found.
 	ErrQuotaNotFound = errors.New("quota not found")
 
@@ -74,6 +90,39 @@ type (
 		Quota       string `json:"quota"`
 	}
 
+	// PreAuthorizedKey is a limited-use authorization that allows an application
+	// to skip the interactive approval step for a connect key.
+	PreAuthorizedKey struct {
+		PublicKey     types.PublicKey `json:"publicKey"`
+		ConnectKey    string          `json:"connectKey"`
+		Expiration    time.Time       `json:"expiration"`
+		TotalUses     int             `json:"totalUses"`
+		RemainingUses int             `json:"remainingUses"`
+		AllowedAppID  *types.Hash256  `json:"allowedAppID,omitempty"`
+		DateCreated   time.Time       `json:"dateCreated"`
+		LastUsed      time.Time       `json:"lastUsed"`
+	}
+
+	// PreAuthorizedKeyRequest is the request type for creating a
+	// pre-authorized key.
+	PreAuthorizedKeyRequest struct {
+		PublicKey types.PublicKey `json:"publicKey"`
+		Signature types.Signature `json:"signature"`
+
+		ConnectKey   string         `json:"connectKey"`
+		Expiration   time.Time      `json:"expiration"`
+		TotalUses    int            `json:"totalUses"`
+		AllowedAppID *types.Hash256 `json:"allowedAppID,omitempty"`
+	}
+
+	// AppAuthorization contains the information needed to complete an
+	// application connection.
+	AppAuthorization struct {
+		ConnectKey   string
+		UserSecret   types.Hash256
+		Reconnecting bool
+	}
+
 	// AppMeta contains additional metadata associated with an account.
 	AppMeta struct {
 		ID          types.Hash256 `json:"id"`
@@ -91,6 +140,29 @@ type (
 		FundTargetBytes *uint64 `json:"fundTargetBytes"`
 	}
 )
+
+// SigHash returns the domain-separated hash signed when creating a
+// pre-authorized key.
+func (req PreAuthorizedKeyRequest) SigHash() types.Hash256 {
+	h := types.NewHasher()
+	h.E.WriteString("indexd/preauthorized-key/create/v1")
+	req.PublicKey.EncodeTo(h.E)
+	h.E.WriteString(req.ConnectKey)
+	h.E.WriteTime(req.Expiration)
+	h.E.WriteUint64(uint64(req.TotalUses))
+	h.E.WriteBool(req.AllowedAppID != nil)
+	if req.AllowedAppID != nil {
+		h.E.Write(req.AllowedAppID[:])
+	}
+	return h.Sum()
+}
+
+// Sign proves control of privateKey and binds the complete pre-authorization
+// policy to its corresponding public key.
+func (req *PreAuthorizedKeyRequest) Sign(privateKey types.PrivateKey) {
+	req.PublicKey = privateKey.PublicKey()
+	req.Signature = privateKey.SignHash(req.SigHash())
+}
 
 // AddAppConnectKey adds a new app connect key. If the key field in the
 // request is empty, a random key will be generated.
@@ -129,6 +201,51 @@ func (m *AccountManager) AppConnectKeys(ctx context.Context, offset, limit int) 
 	return m.store.AppConnectKeys(offset, limit)
 }
 
+// AddPreAuthorizedKey creates a limited-use authorization for bypassing the
+// interactive application approval flow.
+func (m *AccountManager) AddPreAuthorizedKey(ctx context.Context, req PreAuthorizedKeyRequest) (PreAuthorizedKey, error) {
+	if req.PublicKey == (types.PublicKey{}) || req.ConnectKey == "" || req.TotalUses <= 0 || !req.Expiration.After(time.Now()) || !req.PublicKey.VerifyHash(req.SigHash(), req.Signature) {
+		return PreAuthorizedKey{}, ErrInvalidPreAuthorizedKey
+	}
+	return m.store.AddPreAuthorizedKey(req)
+}
+
+// DeletePreAuthorizedKey deletes a pre-authorized key.
+func (m *AccountManager) DeletePreAuthorizedKey(ctx context.Context, publicKey types.PublicKey) error {
+	return m.store.DeletePreAuthorizedKey(publicKey)
+}
+
+// PreAuthorizedKey returns the pre-authorized key with the given public key.
+func (m *AccountManager) PreAuthorizedKey(ctx context.Context, publicKey types.PublicKey) (PreAuthorizedKey, error) {
+	return m.store.PreAuthorizedKey(publicKey)
+}
+
+// PreAuthorizedKeys returns a paginated list of pre-authorized keys.
+func (m *AccountManager) PreAuthorizedKeys(ctx context.Context, offset, limit int) ([]PreAuthorizedKey, error) {
+	return m.store.PreAuthorizedKeys(offset, limit)
+}
+
+// AuthorizePreAuthorizedKey consumes one use of a pre-authorized key and
+// returns the information needed to complete an application connection.
+func (m *AccountManager) AuthorizePreAuthorizedKey(publicKey types.PublicKey, appID types.Hash256) (AppAuthorization, error) {
+	connectKey, userSecret, reconnecting, err := m.store.ConsumePreAuthorizedKey(publicKey, appID)
+	if err != nil {
+		return AppAuthorization{}, err
+	}
+	return authorizeApp(connectKey, &userSecret, appID, reconnecting), nil
+}
+
+// AuthorizeAppConnectKey authorizes an application connection using a regular
+// connect key. It returns the app-specific secret and whether the application
+// was previously connected.
+func (m *AccountManager) AuthorizeAppConnectKey(connectKey string, appID types.Hash256) (AppAuthorization, error) {
+	userSecret, reconnecting, err := m.store.AppAuthorization(connectKey, appID)
+	if err != nil {
+		return AppAuthorization{}, err
+	}
+	return authorizeApp(connectKey, &userSecret, appID, reconnecting), nil
+}
+
 // RegisterAppKey uses an existing app connect key to add an account. If the key is exhausted, it
 // returns [ErrKeyExhausted]. If the key is not found, it returns [ErrKeyNotFound].
 func (m *AccountManager) RegisterAppKey(key string, pk types.PublicKey, meta AppMeta) error {
@@ -165,20 +282,13 @@ func (m *AccountManager) Quotas(ctx context.Context, offset, limit int) ([]Quota
 	return m.store.Quotas(offset, limit)
 }
 
-// HasAppAccount reports whether an account already exists for the given
-// connect key and app ID.
-func (m *AccountManager) HasAppAccount(connectKey string, appID types.Hash256) (bool, error) {
-	return m.store.HasAppAccount(connectKey, appID)
-}
-
-// AppSecret derives a unique application secret using a stored user secret
-// associated with the given connect key and the provided app ID.
-func (m *AccountManager) AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error) {
-	secret, err := m.store.AppConnectKeyUserSecret(connectKey)
-	if err != nil {
-		return types.Hash256{}, err
+func authorizeApp(connectKey string, userSecret *types.Hash256, appID types.Hash256, reconnecting bool) AppAuthorization {
+	defer clear(userSecret[:])
+	return AppAuthorization{
+		ConnectKey:   connectKey,
+		UserSecret:   types.Hash256(keys.Derive(userSecret[:], appID[:], []byte("server app secret"), 32)),
+		Reconnecting: reconnecting,
 	}
-	return types.Hash256(keys.Derive(secret[:], appID[:], []byte("server app secret"), 32)), nil
 }
 
 // DeriveSharingAccountKey deterministically derives a connect key's sharing
