@@ -1002,6 +1002,14 @@ components:
           type: integer
           format: int64
           description: Number of contracts currently within their renew window
+        lockedAllowance:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total initial allowance locked in all active contracts
+        spentAllowance:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: Total allowance spent from all active contracts
         totalCapacity:
           type: integer
           format: int64
@@ -1024,6 +1032,14 @@ components:
             type: integer
             format: int64
             description: Total size of all active contracts on this host
+          lockedAllowance:
+            allOf:
+              - $ref: "#/components/schemas/Currency"
+              - description: Total initial allowance locked in active contracts with this host
+          spentAllowance:
+            allOf:
+              - $ref: "#/components/schemas/Currency"
+              - description: Total allowance spent from active contracts with this host
           publicKey:
             allOf:
               - $ref: "#/components/schemas/PublicKey"

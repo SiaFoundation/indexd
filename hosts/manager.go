@@ -125,6 +125,8 @@ type (
 	HostStats struct {
 		AccountUsage        types.Currency         `json:"accountUsage"`
 		ActiveContractsSize int64                  `json:"activeContractsSize"`
+		LockedAllowance     types.Currency         `json:"lockedAllowance"`
+		SpentAllowance      types.Currency         `json:"spentAllowance"`
 		PublicKey           types.PublicKey        `json:"publicKey"`
 		LostSectors         int64                  `json:"lostSectors"`
 		UnpinnedSectors     int64                  `json:"unpinnedSectors"`

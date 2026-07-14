@@ -185,4 +185,11 @@ CREATE TABLE slab_deletion_queue (
 		_, err := tx.Exec(ctx, `ALTER TABLE slabs ADD COLUMN version SMALLINT NOT NULL DEFAULT 0 CHECK (version >= 0)`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+DROP INDEX IF EXISTS contracts_active_host_size_idx;
+CREATE INDEX contracts_active_host_size_idx ON contracts(proof_height, host_id) INCLUDE (good, capacity, size, initial_allowance, remaining_allowance) WHERE state IN (0,1) AND renewed_to IS NULL;
+`)
+		return err
+	},
 }

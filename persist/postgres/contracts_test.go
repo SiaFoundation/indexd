@@ -1861,6 +1861,16 @@ func TestContractsStats(t *testing.T) {
 			t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
 		}
 	}
+	updateContractAllowances := func(id types.FileContractID, initial, remaining types.Currency) {
+		t.Helper()
+		res, err := store.pool.Exec(t.Context(), `UPDATE contracts SET initial_allowance = $1, remaining_allowance = $2 WHERE contract_id = $3`,
+			sqlCurrency(initial), sqlCurrency(remaining), sqlHash256(id))
+		if err != nil {
+			t.Fatal(err)
+		} else if res.RowsAffected() != 1 {
+			t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
+		}
+	}
 
 	// set scanned height to 100 and renew window to 20
 	res, err := store.pool.Exec(t.Context(), "UPDATE global_settings SET scanned_height = $1, contracts_renew_window = $2",
@@ -1873,25 +1883,32 @@ func TestContractsStats(t *testing.T) {
 
 	// fcid1: good, active, not in renew window
 	updateContract(fcid1, true, 1000, 2000, 200)
+	updateContractAllowances(fcid1, types.Siacoins(10), types.Siacoins(8))
 
 	// fcid2: bad, active, not in renew window
 	updateContract(fcid2, false, 3000, 4000, 200)
+	updateContractAllowances(fcid2, types.Siacoins(20), types.Siacoins(15))
 
 	// fcid3: bad, active, in renew window
 	updateContract(fcid3, false, 5000, 6000, 100)
+	updateContractAllowances(fcid3, types.Siacoins(30), types.Siacoins(20))
 
 	// fcid4: good, active, in renew window
 	updateContract(fcid4, true, 7000, 8000, 100)
+	updateContractAllowances(fcid4, types.Siacoins(40), types.Siacoins(10))
 
 	// fcid5: bad, already expired
 	updateContract(fcid5, true, 9000, 10_000, 10)
+	updateContractAllowances(fcid5, types.Siacoins(50), types.ZeroCurrency)
 
 	expected := contracts.Stats{
-		Contracts:     4,     // all but fcid5
-		BadContracts:  2,     // fcid2, fcid3
-		Renewing:      1,     // fcid4
-		TotalCapacity: 20000, // (2000 + 4000 + 6000 + 8000) = 20000
-		TotalSize:     16000, // (1000 + 3000 + 5000 + 7000) = 16000
+		Contracts:       4,                   // all but fcid5
+		BadContracts:    2,                   // fcid2, fcid3
+		Renewing:        1,                   // fcid4
+		LockedAllowance: types.Siacoins(100), // 10 + 20 + 30 + 40
+		SpentAllowance:  types.Siacoins(47),  // 2 + 5 + 10 + 30
+		TotalCapacity:   20000,               // (2000 + 4000 + 6000 + 8000) = 20000
+		TotalSize:       16000,               // (1000 + 3000 + 5000 + 7000) = 16000
 	}
 
 	stats, err := store.ContractsStats()
@@ -1910,6 +1927,7 @@ func TestContractsStats(t *testing.T) {
 
 	// make sure fcid6 has the same attributes as its parent
 	updateContract(fcid6, true, 7000, 8000, 100)
+	updateContractAllowances(fcid6, types.Siacoins(40), types.Siacoins(10))
 
 	// assert stats stay the same
 	stats, err = store.ContractsStats()

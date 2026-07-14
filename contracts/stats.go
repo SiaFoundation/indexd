@@ -1,13 +1,17 @@
 package contracts
 
+import "go.sia.tech/core/types"
+
 // Stats contains statistics about the contracts in the database.
 type Stats struct {
 	Contracts    uint64 `json:"contracts"`
 	BadContracts uint64 `json:"badContracts"`
 	Renewing     uint64 `json:"renewing"`
 
-	TotalCapacity uint64 `json:"totalCapacity"`
-	TotalSize     uint64 `json:"totalSize"`
+	LockedAllowance types.Currency `json:"lockedAllowance"`
+	SpentAllowance  types.Currency `json:"spentAllowance"`
+	TotalCapacity   uint64         `json:"totalCapacity"`
+	TotalSize       uint64         `json:"totalSize"`
 }
 
 // ContractsStats returns statistics about the contracts in the database.
