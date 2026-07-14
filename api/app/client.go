@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,21 @@ type Client struct {
 	baseURL string
 
 	validity time.Duration
+}
+
+type requestAppConnectionOptions struct {
+	preAuthorizedKey types.PrivateKey
+}
+
+// RequestAppConnectionOption configures an application connection request.
+type RequestAppConnectionOption func(*requestAppConnectionOptions)
+
+// WithPreAuthorizedKey authorizes a connection request without interactive
+// approval. The key is used only to sign the request and is not transmitted.
+func WithPreAuthorizedKey(key types.PrivateKey) RequestAppConnectionOption {
+	return func(opts *requestAppConnectionOptions) {
+		opts.preAuthorizedKey = key
+	}
 }
 
 // HTTPError is returned by the client when the server responds with a non-2xx
@@ -299,7 +315,21 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 }
 
 // RequestAppConnection requests an application connection to the indexer.
-func (c *Client) RequestAppConnection(ctx context.Context, ephemeralKey types.PrivateKey, request RegisterAppRequest) (resp RegisterAppResponse, err error) {
+func (c *Client) RequestAppConnection(ctx context.Context, ephemeralKey types.PrivateKey, request RegisterAppRequest, options ...RequestAppConnectionOption) (resp RegisterAppResponse, err error) {
+	var opts requestAppConnectionOptions
+	for _, option := range options {
+		option(&opts)
+	}
+	if opts.preAuthorizedKey != nil && len(opts.preAuthorizedKey) != ed25519.PrivateKeySize {
+		return RegisterAppResponse{}, errors.New("invalid pre-authorized private key")
+	}
+
+	if opts.preAuthorizedKey != nil {
+		request.PreAuthorizedKey = opts.preAuthorizedKey.PublicKey()
+		proofHash := preAuthorizationHash(ephemeralKey.PublicKey(), request)
+		request.PreAuthorizationSignature = opts.preAuthorizedKey.SignHash(proofHash)
+	}
+
 	requestBuf, err := json.Marshal(request)
 	if err != nil {
 		return RegisterAppResponse{}, fmt.Errorf("failed to marshal request data: %w", err)
