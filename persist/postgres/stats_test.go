@@ -608,8 +608,11 @@ func TestHostStats(t *testing.T) {
 	}
 	updateContractAllowances := func(id types.FileContractID, initial, remaining types.Currency) {
 		t.Helper()
-		if _, err := store.pool.Exec(t.Context(), "UPDATE contracts SET initial_allowance = $1, remaining_allowance = $2 WHERE contract_id = $3", sqlCurrency(initial), sqlCurrency(remaining), sqlHash256(id)); err != nil {
+		res, err := store.pool.Exec(t.Context(), "UPDATE contracts SET initial_allowance = $1, remaining_allowance = $2 WHERE contract_id = $3", sqlCurrency(initial), sqlCurrency(remaining), sqlHash256(id))
+		if err != nil {
 			t.Fatal(err)
+		} else if res.RowsAffected() != 1 {
+			t.Fatalf("expected 1 row to be affected, got %d", res.RowsAffected())
 		}
 	}
 
