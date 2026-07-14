@@ -418,16 +418,18 @@ func (s *Store) UnblockHost(hk types.PublicKey) error {
 
 // RemoveBlocklistReasons removes the given reasons from each host's blocklist
 // entry, leaving any other reasons untouched. A host left with no remaining
-// reasons is removed from the blocklist and its contracts are marked good again.
-func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) error {
+// reasons is removed from the blocklist and its contracts are marked good
+// again. Returns the number of hosts that were fully unblocked.
+func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) (int, error) {
 	if len(hks) == 0 || len(reasons) == 0 {
-		return nil
+		return 0, nil
 	}
 	sqlHks := make([]sqlPublicKey, len(hks))
 	for i, hk := range hks {
 		sqlHks[i] = sqlPublicKey(hk)
 	}
-	return s.transaction(func(ctx context.Context, tx *txn) error {
+	var numUnblocked int
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		// delete the entries that would be left with no reasons at all, i.e.
 		// where none of the current reasons survive the removal. Collect their
 		// host keys so we can mark their contracts good again.
@@ -454,6 +456,7 @@ func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) 
 		if err := rows.Err(); err != nil {
 			return err
 		}
+		numUnblocked = len(unblocked)
 
 		// mark the fully-unblocked hosts' contracts good again.
 		if len(unblocked) > 0 {
@@ -479,6 +482,10 @@ func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) 
 		}
 		return nil
 	})
+	if err != nil {
+		return 0, err
+	}
+	return numUnblocked, nil
 }
 
 // HostsForScanning returns a list of hosts where the next scan is due.

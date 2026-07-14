@@ -176,7 +176,7 @@ type (
 		BlockHosts(hostKeys []types.PublicKey, reasons []string) error
 		BlockedHosts(offset, limit int) ([]types.PublicKey, error)
 		UnblockHost(hk types.PublicKey) error
-		RemoveBlocklistReasons(hostKeys []types.PublicKey, reasons []string) error
+		RemoveBlocklistReasons(hostKeys []types.PublicKey, reasons []string) (int, error)
 		ResetLostSectors(hk types.PublicKey) error
 
 		PruneHosts(lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
@@ -633,7 +633,7 @@ loop:
 	m.log.Debug("host scans finished", zap.Int("hosts", len(hosts)), zap.Duration("duration", time.Since(start)))
 	if unblocked, err := m.unblockUsableHosts(ctx); err != nil {
 		m.log.Error("failed to unblock usable hosts after scanning", zap.Error(err))
-	} else {
+	} else if unblocked > 0 {
 		m.log.Debug("unblocked usable hosts", zap.Int("hosts", unblocked))
 	}
 }
@@ -673,10 +673,11 @@ func (m *HostManager) unblockUsableHosts(ctx context.Context) (int, error) {
 
 	// removing reasons not present on a host is a no-op, so strip all usability
 	// reasons unconditionally while preserving manual blocklist reasons.
-	if err := m.store.RemoveBlocklistReasons(toUnblock, Usability{}.FailedChecks()); err != nil {
+	unblocked, err := m.store.RemoveBlocklistReasons(toUnblock, Usability{}.FailedChecks())
+	if err != nil {
 		return 0, fmt.Errorf("failed to remove usability blocklist reasons: %w", err)
 	}
-	return len(toUnblock), nil
+	return unblocked, nil
 }
 
 func newStuckHostsAlert(hosts []StuckHost) alerts.Alert {

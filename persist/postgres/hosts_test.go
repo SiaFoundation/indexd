@@ -194,8 +194,10 @@ func TestRemoveBlocklistReasons(t *testing.T) {
 
 	// removing only one reason leaves the other and keeps the host blocked; its
 	// contract stays bad
-	if err := store.RemoveBlocklistReasons([]types.PublicKey{hk1}, []string{"EgressPrice"}); err != nil {
+	if n, err := store.RemoveBlocklistReasons([]types.PublicKey{hk1}, []string{"EgressPrice"}); err != nil {
 		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatalf("expected 0 unblocked hosts, got %d", n)
 	}
 	assertReasons(hk1, true, []string{"foo"})
 	if c, err := store.Contract(fcid); err != nil {
@@ -206,8 +208,10 @@ func TestRemoveBlocklistReasons(t *testing.T) {
 
 	// removing the remaining reason fully unblocks the host and marks its
 	// contract good again
-	if err := store.RemoveBlocklistReasons([]types.PublicKey{hk1}, []string{"foo"}); err != nil {
+	if n, err := store.RemoveBlocklistReasons([]types.PublicKey{hk1}, []string{"foo"}); err != nil {
 		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatalf("expected 1 unblocked host, got %d", n)
 	}
 	assertReasons(hk1, false, nil)
 	if c, err := store.Contract(fcid); err != nil {
@@ -217,14 +221,18 @@ func TestRemoveBlocklistReasons(t *testing.T) {
 	}
 
 	// removing all of hk2's reasons fully unblocks it
-	if err := store.RemoveBlocklistReasons([]types.PublicKey{hk2}, []string{"EgressPrice", "IngressPrice"}); err != nil {
+	if n, err := store.RemoveBlocklistReasons([]types.PublicKey{hk2}, []string{"EgressPrice", "IngressPrice"}); err != nil {
 		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatalf("expected 1 unblocked host, got %d", n)
 	}
 	assertReasons(hk2, false, nil)
 
 	// unblocking a host that isn't blocked is a no-op
-	if err := store.RemoveBlocklistReasons([]types.PublicKey{hk3}, []string{"EgressPrice"}); err != nil {
+	if n, err := store.RemoveBlocklistReasons([]types.PublicKey{hk3}, []string{"EgressPrice"}); err != nil {
 		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatalf("expected 0 unblocked hosts, got %d", n)
 	}
 }
 
