@@ -667,10 +667,10 @@ func TestHostStats(t *testing.T) {
 		t.Fatalf("expected first host to have %d active contract size, got %d", testRevision.Filesize, stats[0].ActiveContractsSize)
 	} else if stats[1].ActiveContractsSize != int64(testRevision.Filesize) {
 		t.Fatalf("expected second host to have %d active contract size, got %d", testRevision.Filesize, stats[1].ActiveContractsSize)
-	} else if !stats[0].LockedAllowance.Equals(types.Siacoins(20)) || !stats[0].SpentAllowance.Equals(types.Siacoins(5)) {
-		t.Fatalf("expected first host to have locked %v and spent %v, got locked %v and spent %v", types.Siacoins(20), types.Siacoins(5), stats[0].LockedAllowance, stats[0].SpentAllowance)
-	} else if !stats[1].LockedAllowance.Equals(types.Siacoins(10)) || !stats[1].SpentAllowance.Equals(types.Siacoins(6)) {
-		t.Fatalf("expected second host to have locked %v and spent %v, got locked %v and spent %v", types.Siacoins(10), types.Siacoins(6), stats[1].LockedAllowance, stats[1].SpentAllowance)
+	} else if !stats[0].LockedAllowance.Equals(types.Siacoins(20)) || !stats[0].RemainingAllowance.Equals(types.Siacoins(15)) {
+		t.Fatalf("expected first host to have locked %v and remaining %v, got locked %v and remaining %v", types.Siacoins(20), types.Siacoins(15), stats[0].LockedAllowance, stats[0].RemainingAllowance)
+	} else if !stats[1].LockedAllowance.Equals(types.Siacoins(10)) || !stats[1].RemainingAllowance.Equals(types.Siacoins(4)) {
+		t.Fatalf("expected second host to have locked %v and remaining %v, got locked %v and remaining %v", types.Siacoins(10), types.Siacoins(4), stats[1].LockedAllowance, stats[1].RemainingAllowance)
 	}
 	if stats[0].Blocked || stats[1].Blocked {
 		t.Fatal("expected both hosts to be unblocked")
@@ -722,10 +722,10 @@ func TestHostStats(t *testing.T) {
 		t.Fatalf("expected first host to have %d active contract size, got %d", testRevision.Filesize, stats[0].ActiveContractsSize)
 	} else if stats[1].ActiveContractsSize != 0 {
 		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[1].ActiveContractsSize)
-	} else if !stats[0].LockedAllowance.Equals(types.Siacoins(20)) || !stats[0].SpentAllowance.Equals(types.Siacoins(5)) {
-		t.Fatalf("expected first host to have locked %v and spent %v, got locked %v and spent %v", types.Siacoins(20), types.Siacoins(5), stats[0].LockedAllowance, stats[0].SpentAllowance)
-	} else if !stats[1].LockedAllowance.IsZero() || !stats[1].SpentAllowance.IsZero() {
-		t.Fatalf("expected resolved contract allowances to be excluded, got locked %v, spent %v", stats[1].LockedAllowance, stats[1].SpentAllowance)
+	} else if !stats[0].LockedAllowance.Equals(types.Siacoins(20)) || !stats[0].RemainingAllowance.Equals(types.Siacoins(15)) {
+		t.Fatalf("expected first host to have locked %v and remaining %v, got locked %v and remaining %v", types.Siacoins(20), types.Siacoins(15), stats[0].LockedAllowance, stats[0].RemainingAllowance)
+	} else if !stats[1].LockedAllowance.IsZero() || !stats[1].RemainingAllowance.IsZero() {
+		t.Fatalf("expected resolved contract allowances to be excluded, got locked %v, remaining %v", stats[1].LockedAllowance, stats[1].RemainingAllowance)
 	}
 	// set scanned height to the proof height - should exclude it
 	proofHeight := testRevision.ProofHeight
@@ -745,10 +745,10 @@ func TestHostStats(t *testing.T) {
 		t.Fatalf("expected first host to have 0 active contract size, got %d", stats[0].ActiveContractsSize)
 	} else if stats[1].ActiveContractsSize != 0 {
 		t.Fatalf("expected second host to have 0 active contract size, got %d", stats[1].ActiveContractsSize)
-	} else if !stats[0].LockedAllowance.IsZero() || !stats[0].SpentAllowance.IsZero() {
-		t.Fatalf("expected expired contract allowances to be excluded, got locked %v, spent %v", stats[0].LockedAllowance, stats[0].SpentAllowance)
-	} else if !stats[1].LockedAllowance.IsZero() || !stats[1].SpentAllowance.IsZero() {
-		t.Fatalf("expected resolved contract allowances to remain excluded, got locked %v, spent %v", stats[1].LockedAllowance, stats[1].SpentAllowance)
+	} else if !stats[0].LockedAllowance.IsZero() || !stats[0].RemainingAllowance.IsZero() {
+		t.Fatalf("expected expired contract allowances to be excluded, got locked %v, remaining %v", stats[0].LockedAllowance, stats[0].RemainingAllowance)
+	} else if !stats[1].LockedAllowance.IsZero() || !stats[1].RemainingAllowance.IsZero() {
+		t.Fatalf("expected resolved contract allowances to remain excluded, got locked %v, remaining %v", stats[1].LockedAllowance, stats[1].RemainingAllowance)
 	}
 
 	// assert limit and offset are applied

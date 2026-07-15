@@ -1006,10 +1006,10 @@ components:
           allOf:
             - $ref: "#/components/schemas/Currency"
             - description: Total initial allowance locked in all active contracts
-        spentAllowance:
+        remainingAllowance:
           allOf:
             - $ref: "#/components/schemas/Currency"
-            - description: Total allowance spent from all active contracts
+            - description: Total allowance remaining in all active contracts
         totalCapacity:
           type: integer
           format: int64
@@ -1036,10 +1036,10 @@ components:
             allOf:
               - $ref: "#/components/schemas/Currency"
               - description: Total initial allowance locked in active contracts with this host
-          spentAllowance:
+          remainingAllowance:
             allOf:
               - $ref: "#/components/schemas/Currency"
-              - description: Total allowance spent from active contracts with this host
+              - description: Total allowance remaining in active contracts with this host
           publicKey:
             allOf:
               - $ref: "#/components/schemas/PublicKey"
