@@ -170,22 +170,22 @@ func hostStatsMetrics(h hosts.HostStats) []prometheus.Metric {
 		{
 			Name:   "indexd_host_account_usage",
 			Labels: labels,
-			Value:  float64(h.AccountUsage.Siacoins()),
+			Value:  h.AccountUsage.Siacoins(),
 		},
 		{
 			Name:   "indexd_host_total_usage",
 			Labels: labels,
-			Value:  float64(h.TotalUsage.Siacoins()),
+			Value:  h.TotalUsage.Siacoins(),
 		},
 		{
 			Name:   "indexd_host_locked_allowance",
 			Labels: labels,
-			Value:  float64(h.LockedAllowance.Siacoins()),
+			Value:  h.LockedAllowance.Siacoins(),
 		},
 		{
 			Name:   "indexd_host_remaining_allowance",
 			Labels: labels,
-			Value:  float64(h.RemainingAllowance.Siacoins()),
+			Value:  h.RemainingAllowance.Siacoins(),
 		},
 		{
 			Name:   "indexd_host_scans",
