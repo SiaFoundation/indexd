@@ -643,9 +643,6 @@ loop:
 // Only reasons that correspond to usability checks are removed; any other
 // blocklist reasons are left intact.
 func (m *HostManager) unblockUsableHosts(ctx context.Context) (int, error) {
-	ctx, cancel := context.WithTimeout(ctx, time.Minute)
-	defer cancel()
-
 	const batchSize = 100
 	var toUnblock []types.PublicKey
 	for offset := 0; ; offset += batchSize {
