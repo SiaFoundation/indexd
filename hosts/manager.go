@@ -126,7 +126,7 @@ type (
 		AccountUsage        types.Currency         `json:"accountUsage"`
 		ActiveContractsSize int64                  `json:"activeContractsSize"`
 		LockedAllowance     types.Currency         `json:"lockedAllowance"`
-		SpentAllowance      types.Currency         `json:"spentAllowance"`
+		RemainingAllowance  types.Currency         `json:"remainingAllowance"`
 		PublicKey           types.PublicKey        `json:"publicKey"`
 		LostSectors         int64                  `json:"lostSectors"`
 		UnpinnedSectors     int64                  `json:"unpinnedSectors"`

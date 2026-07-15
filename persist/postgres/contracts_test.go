@@ -1902,13 +1902,13 @@ func TestContractsStats(t *testing.T) {
 	updateContractAllowances(fcid5, types.Siacoins(50), types.ZeroCurrency)
 
 	expected := contracts.Stats{
-		Contracts:       4,                   // all but fcid5
-		BadContracts:    2,                   // fcid2, fcid3
-		Renewing:        1,                   // fcid4
-		LockedAllowance: types.Siacoins(100), // 10 + 20 + 30 + 40
-		SpentAllowance:  types.Siacoins(47),  // 2 + 5 + 10 + 30
-		TotalCapacity:   20000,               // (2000 + 4000 + 6000 + 8000) = 20000
-		TotalSize:       16000,               // (1000 + 3000 + 5000 + 7000) = 16000
+		Contracts:          4,                   // all but fcid5
+		BadContracts:       2,                   // fcid2, fcid3
+		Renewing:           1,                   // fcid4
+		LockedAllowance:    types.Siacoins(100), // 10 + 20 + 30 + 40
+		RemainingAllowance: types.Siacoins(53),  // 8 + 15 + 20 + 10
+		TotalCapacity:      20000,               // (2000 + 4000 + 6000 + 8000) = 20000
+		TotalSize:          16000,               // (1000 + 3000 + 5000 + 7000) = 16000
 	}
 
 	stats, err := store.ContractsStats()
