@@ -15,7 +15,17 @@ import (
 )
 
 const (
-	emaAlpha            = 0.2
+	emaAlpha = 0.2
+
+	// failureRateHalfLife is the idle duration over which a host's failure
+	// rate is halved.
+	failureRateHalfLife = time.Minute
+
+	// failureRateZeroThreshold is the failure rate below which a host is
+	// treated as failure-free; a lone failure among successes (rate ~0.2)
+	// clears after ~5 idle minutes, an all-failure host (rate 1) after ~7.
+	failureRateZeroThreshold = 0.01
+
 	settingsPayloadSize = 270 // size of host settings in bytes
 
 	// defaultReadThroughput is the assumed read rate before bulk reads are sampled
@@ -57,13 +67,14 @@ func (ra *rpcAverage) Value() (float64, bool) {
 }
 
 type failureRate struct {
-	value       float64
-	init        bool
-	lastAttempt time.Time
+	value     float64
+	init      bool
+	lastDecay time.Time
 }
 
 // AddSample adds a new success/failure sample to the failure rate.
 func (fr *failureRate) AddSample(success bool) {
+	now := time.Now()
 	sample := 1.0
 	if success {
 		sample = 0.0
@@ -72,18 +83,38 @@ func (fr *failureRate) AddSample(success bool) {
 		fr.value = sample
 		fr.init = true
 	} else {
+		if elapsed := now.Sub(fr.lastDecay); fr.value != 0 && elapsed >= failureRateHalfLife {
+			fr.decay(elapsed)
+		}
 		fr.value = emaAlpha*sample + (1.0-emaAlpha)*fr.value
 	}
-	fr.lastAttempt = time.Now()
+	if fr.value < failureRateZeroThreshold {
+		fr.value = 0
+	}
+	fr.lastDecay = now
 }
 
+// Value returns the failure rate, decaying it for idle time since the last
+// sample. Mutates fr; not safe for concurrent use.
 func (fr *failureRate) Value() float64 {
-	if fr.init && time.Since(fr.lastAttempt) >= 5*time.Minute {
-		elapsed := time.Since(fr.lastAttempt).Minutes() / 5
-		fr.value *= math.Pow(1.0-emaAlpha, elapsed)
-		fr.lastAttempt = time.Now()
+	if fr.init && fr.value != 0 {
+		if elapsed := time.Since(fr.lastDecay); elapsed >= failureRateHalfLife {
+			fr.decay(elapsed)
+		}
 	}
 	return fr.value
+}
+
+// decay halves the failure rate for every idle half-life, kept independent
+// of the sample EMA so forgiveness does not hinge on the EMA's tuning.
+// Values below the threshold count as no failures.
+func (fr *failureRate) decay(elapsed time.Duration) {
+	periods := elapsed / failureRateHalfLife
+	fr.value = math.Ldexp(fr.value, -int(periods))
+	fr.lastDecay = fr.lastDecay.Add(periods * failureRateHalfLife)
+	if fr.value < failureRateZeroThreshold {
+		fr.value = 0
+	}
 }
 
 type hostMetric struct {
