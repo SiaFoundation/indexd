@@ -105,13 +105,13 @@ func (fr *failureRate) Value() float64 {
 	return fr.value
 }
 
-// decay halves the failure rate for every idle half-life, kept independent
-// of the sample EMA so forgiveness does not hinge on the EMA's tuning.
-// Values below the threshold count as no failures.
+// decay halves the failure rate for every idle half-life. This decay schedule is
+// independent of the sample EMA (emaAlpha), though emaAlpha still affects the
+// rate immediately after samples are applied.
 func (fr *failureRate) decay(elapsed time.Duration) {
-	periods := elapsed / failureRateHalfLife
-	fr.value = math.Ldexp(fr.value, -int(periods))
-	fr.lastDecay = fr.lastDecay.Add(periods * failureRateHalfLife)
+halfLives := elapsed / failureRateHalfLife
+fr.value = math.Ldexp(fr.value, -int(halfLives))
+fr.lastDecay = fr.lastDecay.Add(elapsed - (elapsed % failureRateHalfLife))
 	if fr.value < failureRateZeroThreshold {
 		fr.value = 0
 	}
