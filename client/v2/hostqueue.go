@@ -109,9 +109,9 @@ func (fr *failureRate) Value() float64 {
 // independent of the sample EMA (emaAlpha), though emaAlpha still affects the
 // rate immediately after samples are applied.
 func (fr *failureRate) decay(elapsed time.Duration) {
-halfLives := elapsed / failureRateHalfLife
-fr.value = math.Ldexp(fr.value, -int(halfLives))
-fr.lastDecay = fr.lastDecay.Add(elapsed - (elapsed % failureRateHalfLife))
+	halfLives := elapsed / failureRateHalfLife
+	fr.value = math.Ldexp(fr.value, -int(halfLives))
+	fr.lastDecay = fr.lastDecay.Add(elapsed - (elapsed % failureRateHalfLife))
 	if fr.value < failureRateZeroThreshold {
 		fr.value = 0
 	}
