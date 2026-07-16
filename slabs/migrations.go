@@ -2,6 +2,7 @@ package slabs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -227,8 +228,11 @@ func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []in
 // applyMigrationResult persists the outcome of migrating a single slab: it
 // records lost sectors, the new locations of migrated sectors and updates the
 // slab's repair state. It is shared by the local migration loop and the remote
-// result-reporting endpoint.
-func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger) {
+// result-reporting endpoint. All failures are logged; the returned error
+// reports store failures only, so a stale result (e.g. a sector that no
+// longer needs migrating) is not an error.
+func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger) error {
+	var errs []error
 	// group lost sectors by host so each host is marked in a single call
 	if len(res.Lost) > 0 {
 		lostByHost := make(map[types.PublicKey][]types.Hash256)
@@ -238,6 +242,7 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 		for hk, roots := range lostByHost {
 			if err := m.store.MarkSectorsLost(hk, roots); err != nil {
 				log.Error("failed to mark sectors as lost", zap.Stringer("host", hk), zap.Error(err))
+				errs = append(errs, fmt.Errorf("failed to mark sectors as lost: %w", err))
 			}
 		}
 	}
@@ -245,7 +250,7 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 	// if recovery failed, leave the repair state untouched so the slab is
 	// retried without incurring a repair-failure backoff.
 	if !res.Recovered {
-		return
+		return errors.Join(errs...)
 	}
 
 	// a migrated sector only counts as repaired once its new location is
@@ -256,6 +261,7 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 	for _, s := range res.Migrated {
 		if migrated, err := m.store.MigrateSector(s.Root, s.HostKey); err != nil {
 			log.Error("failed to record migrated sector", zap.Stringer("root", s.Root), zap.Error(err))
+			errs = append(errs, fmt.Errorf("failed to record migrated sector: %w", err))
 			continue
 		} else if !migrated {
 			// the sector or the destination host no longer exists
@@ -271,9 +277,15 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 		}
 	}
 	success := res.Success && persisted == len(res.Migrated)
-	if err := m.store.MarkSlabRepaired(res.SlabID, success); err != nil {
+	if err := m.store.MarkSlabRepaired(res.SlabID, success); errors.Is(err, ErrSlabNotFound) {
+		// the slab was deleted after the migration was prepared; staleness,
+		// not a store failure
+		log.Debug("repaired slab no longer exists", zap.Error(err))
+	} else if err != nil {
 		log.Error("failed to mark slab repaired", zap.Error(err))
+		errs = append(errs, fmt.Errorf("failed to mark slab repaired: %w", err))
 	}
+	return errors.Join(errs...)
 }
 
 // PrepareMigrationBatch selects a batch of unhealthy slabs and bundles them
@@ -317,14 +329,26 @@ func (m *SlabManager) PrepareMigrationBatch(cursor int64, limit int) (MigrationB
 
 // ApplyMigrationResults persists the outcomes of migrations reported by a
 // remote node. Per-result store failures are logged and skipped, matching the
-// local migration loop. A destination host that was blocked after the batch
-// was prepared is not re-validated here: the sector is recorded and the next
-// health check re-flags the slab, re-migrating it away at most one batch later.
-func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) {
+// local migration loop, but if every result in the batch failed to persist —
+// indicating a database problem rather than per-result staleness — an error
+// is returned so the reporting node fails its report and backs off. A
+// destination host that was blocked after the batch was prepared is not
+// re-validated here: the sector is recorded and the next health check
+// re-flags the slab, re-migrating it away at most one batch later.
+func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) error {
 	log := m.log.Named("migrations")
+	failed := 0
+	var lastErr error
 	for _, res := range results {
-		m.applyMigrationResult(res, log.With(zap.Stringer("slab", res.SlabID)))
+		if err := m.applyMigrationResult(res, log.With(zap.Stringer("slab", res.SlabID))); err != nil {
+			failed++
+			lastErr = err
+		}
 	}
+	if len(results) > 0 && failed == len(results) {
+		return fmt.Errorf("failed to persist all %d migration results: %w", len(results), lastErr)
+	}
+	return nil
 }
 
 // MigrateSlab determines which of the slab's sectors require migration and

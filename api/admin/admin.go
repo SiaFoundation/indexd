@@ -137,7 +137,7 @@ type (
 
 		// migration endpoints used by remote nodes
 		PrepareMigrationBatch(cursor int64, limit int) (slabs.MigrationBatch, error)
-		ApplyMigrationResults(results []slabs.MigrationResult)
+		ApplyMigrationResults(results []slabs.MigrationResult) error
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -796,13 +796,17 @@ func (a *admin) handlePOSTMigrationBatch(jc jape.Context) {
 }
 
 // handlePOSTMigrationResults persists the outcomes of migrations reported by a
-// remote node.
+// remote node. A batch where every result failed to persist indicates a
+// database problem and is surfaced as an error so the reporting node backs
+// off instead of burning through fresh batches.
 func (a *admin) handlePOSTMigrationResults(jc jape.Context) {
 	var results []slabs.MigrationResult
 	if jc.Decode(&results) != nil {
 		return
 	}
-	a.slabs.ApplyMigrationResults(results)
+	if jc.Check("failed to apply migration results", a.slabs.ApplyMigrationResults(results)) != nil {
+		return
+	}
 	jc.Encode(nil)
 }
 
