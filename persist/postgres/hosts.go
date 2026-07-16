@@ -232,7 +232,7 @@ WHERE
 	-- blocked host filter
 	AND (($4::boolean IS NULL) OR ($4::boolean = hosts.blocked))
 	-- active contracts filter
-	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND proof_height > globals.scanned_height)))
+	AND (($5::boolean IS NULL) OR ($5::boolean = EXISTS (SELECT 1 FROM contracts WHERE host_id = hosts.id AND state IN (0,1) AND renewed_to IS NULL AND proof_height > globals.scanned_height)))
 	-- public key filter
 	AND ((CARDINALITY($6::bytea[]) = 0) OR (public_key = ANY($6)))
 	%s -- orderClause
@@ -404,17 +404,88 @@ func (s *Store) UnblockHost(hk types.PublicKey) error {
 			return fmt.Errorf("failed to remove host %q from blocklist: %w", hk, err)
 		}
 		_, err = tx.Exec(ctx, `
-			UPDATE contracts
+			UPDATE contracts AS c
 			SET good = TRUE
-			FROM contracts c
-			INNER JOIN hosts h ON h.id = c.host_id
-			WHERE contracts.id = c.id AND h.public_key = $1
-			`, sqlPublicKey(hk))
+			FROM hosts h
+			WHERE c.host_id = h.id AND h.public_key = $1
+		`, sqlPublicKey(hk))
 		if err != nil {
 			return fmt.Errorf("failed to update contracts: %w", err)
 		}
 		return nil
 	})
+}
+
+// RemoveBlocklistReasons removes the given reasons from each host's blocklist
+// entry, leaving any other reasons untouched. A host left with no remaining
+// reasons is removed from the blocklist and its contracts are marked good
+// again. Returns the number of hosts that were fully unblocked.
+func (s *Store) RemoveBlocklistReasons(hks []types.PublicKey, reasons []string) (int, error) {
+	if len(hks) == 0 || len(reasons) == 0 {
+		return 0, nil
+	}
+	sqlHks := make([]sqlPublicKey, len(hks))
+	for i, hk := range hks {
+		sqlHks[i] = sqlPublicKey(hk)
+	}
+	var numUnblocked int
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		// delete the entries that would be left with no reasons at all, i.e.
+		// where none of the current reasons survive the removal. Collect their
+		// host keys so we can mark their contracts good again.
+		rows, err := tx.Query(ctx, `
+			DELETE FROM hosts_blocklist
+			WHERE public_key = ANY($1)
+			  AND NOT EXISTS (
+			      SELECT 1 FROM unnest(reasons) AS r WHERE r <> ALL($2::text[])
+			  )
+			RETURNING public_key`, sqlHks, reasons)
+		if err != nil {
+			return fmt.Errorf("failed to remove fully-unblocked hosts: %w", err)
+		}
+		var unblocked []sqlPublicKey
+		for rows.Next() {
+			var hk sqlPublicKey
+			if err := rows.Scan(&hk); err != nil {
+				rows.Close()
+				return err
+			}
+			unblocked = append(unblocked, hk)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		numUnblocked = len(unblocked)
+
+		// mark the fully-unblocked hosts' contracts good again.
+		if len(unblocked) > 0 {
+			if _, err := tx.Exec(ctx, `
+				UPDATE contracts c
+				SET good = TRUE
+				FROM hosts h
+				WHERE c.host_id = h.id AND h.public_key = ANY($1)`, unblocked); err != nil {
+				return fmt.Errorf("failed to mark contracts good: %w", err)
+			}
+		}
+
+		// strip the reasons from the entries that still have some left; the
+		// fully-emptied entries were already deleted above. Reasons not present
+		// on an entry are a no-op.
+		if _, err := tx.Exec(ctx, `
+			UPDATE hosts_blocklist
+			SET reasons = ARRAY(
+				SELECT r FROM unnest(reasons) AS r WHERE r <> ALL($2::text[])
+			)
+			WHERE public_key = ANY($1)`, sqlHks, reasons); err != nil {
+			return fmt.Errorf("failed to update blocklist reasons: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return 0, err
+	}
+	return numUnblocked, nil
 }
 
 // HostsForScanning returns a list of hosts where the next scan is due.
@@ -1133,8 +1204,10 @@ func (s *Store) StuckHosts() ([]hosts.StuckHost, error) {
 }
 
 func buildHostOrderByClause(sorts []hosts.HostSortOpt) (string, error) {
+	// hosts.id is appended as a final tiebreaker so LIMIT/OFFSET pagination is
+	// deterministic even without a sort or when sort columns contain ties.
 	if len(sorts) == 0 {
-		return "", nil
+		return "ORDER BY hosts.id", nil
 	}
 
 	var sortMapping = map[string]string{
@@ -1167,5 +1240,6 @@ func buildHostOrderByClause(sorts []hosts.HostSortOpt) (string, error) {
 		}
 	}
 
+	parts = append(parts, "hosts.id")
 	return "ORDER BY " + strings.Join(parts, ", "), nil
 }

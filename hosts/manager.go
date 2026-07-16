@@ -125,6 +125,8 @@ type (
 	HostStats struct {
 		AccountUsage        types.Currency         `json:"accountUsage"`
 		ActiveContractsSize int64                  `json:"activeContractsSize"`
+		LockedAllowance     types.Currency         `json:"lockedAllowance"`
+		RemainingAllowance  types.Currency         `json:"remainingAllowance"`
 		PublicKey           types.PublicKey        `json:"publicKey"`
 		LostSectors         int64                  `json:"lostSectors"`
 		UnpinnedSectors     int64                  `json:"unpinnedSectors"`
@@ -176,6 +178,7 @@ type (
 		BlockHosts(hostKeys []types.PublicKey, reasons []string) error
 		BlockedHosts(offset, limit int) ([]types.PublicKey, error)
 		UnblockHost(hk types.PublicKey) error
+		RemoveBlocklistReasons(hostKeys []types.PublicKey, reasons []string) (int, error)
 		ResetLostSectors(hk types.PublicKey) error
 
 		PruneHosts(lastSuccessfulScanCutoff time.Time, minConsecutiveFailedScans int) (int64, error)
@@ -630,6 +633,50 @@ loop:
 	wg.Wait()
 
 	m.log.Debug("host scans finished", zap.Int("hosts", len(hosts)), zap.Duration("duration", time.Since(start)))
+	if unblocked, err := m.unblockUsableHosts(ctx); err != nil {
+		m.log.Error("failed to unblock usable hosts after scanning", zap.Error(err))
+	} else if unblocked > 0 {
+		m.log.Debug("unblocked usable hosts", zap.Int("hosts", unblocked))
+	}
+}
+
+// unblockUsableHosts unblocks hosts that were blocked for failing usability
+// checks but that are usable again and no longer have any active contracts.
+// Only reasons that correspond to usability checks are removed; any other
+// blocklist reasons are left intact.
+func (m *HostManager) unblockUsableHosts(ctx context.Context) (int, error) {
+	const batchSize = 100
+	var toUnblock []types.PublicKey
+	for offset := 0; ; offset += batchSize {
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
+		hosts, err := m.store.Hosts(offset, batchSize,
+			WithBlocked(true),
+			WithUsable(true),
+			WithActiveContracts(false))
+		if err != nil {
+			return 0, fmt.Errorf("failed to fetch hosts to unblock: %w", err)
+		}
+		for _, host := range hosts {
+			toUnblock = append(toUnblock, host.PublicKey)
+		}
+		if len(hosts) < batchSize {
+			break
+		}
+	}
+
+	if len(toUnblock) == 0 {
+		return 0, nil
+	}
+
+	// removing reasons not present on a host is a no-op, so strip all usability
+	// reasons unconditionally while preserving manual blocklist reasons.
+	unblocked, err := m.store.RemoveBlocklistReasons(toUnblock, Usability{}.FailedChecks())
+	if err != nil {
+		return 0, fmt.Errorf("failed to remove usability blocklist reasons: %w", err)
+	}
+	return unblocked, nil
 }
 
 func newStuckHostsAlert(hosts []StuckHost) alerts.Alert {

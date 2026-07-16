@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"testing"
 	"time"
 
@@ -157,6 +158,81 @@ func TestBlockHosts(t *testing.T) {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(host.BlockedReasons, []string{"a", "b", "c"}) {
 		t.Fatal("expected host to have correct blocked reasons", host.BlockedReasons)
+	}
+}
+
+func TestRemoveBlocklistReasons(t *testing.T) {
+	log := zaptest.NewLogger(t)
+	store := initPostgres(t, log.Named("postgres"))
+
+	hk1 := store.addTestHost(t, types.PublicKey{1})
+	hk2 := store.addTestHost(t, types.PublicKey{2})
+	hk3 := types.PublicKey{3} // not in DB
+
+	// give hk1 a contract so we can assert good is restored on full unblock
+	fcid := store.addTestContract(t, hk1)
+
+	// hk1 blocked for two reasons, hk2 for two others
+	if err := store.BlockHosts([]types.PublicKey{hk1}, []string{"EgressPrice", "foo"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.BlockHosts([]types.PublicKey{hk2}, []string{"EgressPrice", "IngressPrice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertReasons := func(hk types.PublicKey, blocked bool, reasons []string) {
+		t.Helper()
+		host, err := store.Host(hk)
+		if err != nil {
+			t.Fatal(err)
+		} else if host.Blocked != blocked {
+			t.Fatalf("expected host %v to be blocked=%v, got blocked=%v", hk, blocked, host.Blocked)
+		} else if blocked && !slices.Equal(slices.Sorted(slices.Values(host.BlockedReasons)), slices.Sorted(slices.Values(reasons))) {
+			t.Fatalf("expected host %v to be blocked due to %v, got blocked due to %v", hk, reasons, host.BlockedReasons)
+		}
+	}
+
+	// removing only one reason leaves the other and keeps the host blocked; its
+	// contract stays bad
+	if n, err := store.RemoveBlocklistReasons([]types.PublicKey{hk1}, []string{"EgressPrice"}); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatalf("expected 0 unblocked hosts, got %d", n)
+	}
+	assertReasons(hk1, true, []string{"foo"})
+	if c, err := store.Contract(fcid); err != nil {
+		t.Fatal(err)
+	} else if c.Good {
+		t.Fatal("expected contract to remain bad while host is still blocked")
+	}
+
+	// removing the remaining reason fully unblocks the host and marks its
+	// contract good again
+	if n, err := store.RemoveBlocklistReasons([]types.PublicKey{hk1}, []string{"foo"}); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatalf("expected 1 unblocked host, got %d", n)
+	}
+	assertReasons(hk1, false, nil)
+	if c, err := store.Contract(fcid); err != nil {
+		t.Fatal(err)
+	} else if !c.Good {
+		t.Fatal("expected contract to be good again after full unblock")
+	}
+
+	// removing all of hk2's reasons fully unblocks it
+	if n, err := store.RemoveBlocklistReasons([]types.PublicKey{hk2}, []string{"EgressPrice", "IngressPrice"}); err != nil {
+		t.Fatal(err)
+	} else if n != 1 {
+		t.Fatalf("expected 1 unblocked host, got %d", n)
+	}
+	assertReasons(hk2, false, nil)
+
+	// unblocking a host that isn't blocked is a no-op
+	if n, err := store.RemoveBlocklistReasons([]types.PublicKey{hk3}, []string{"EgressPrice"}); err != nil {
+		t.Fatal(err)
+	} else if n != 0 {
+		t.Fatalf("expected 0 unblocked hosts, got %d", n)
 	}
 }
 

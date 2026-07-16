@@ -366,7 +366,9 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 				h.public_key,
 				h.lost_sectors,
 				h.unpinned_sectors,
-				COALESCE(cs.total_contracts_size, 0) AS total_contracts_size,
+				COALESCE(cs.active_contracts_size, 0) AS active_contracts_size,
+				COALESCE(cs.locked_allowance, 0) AS locked_allowance,
+				COALESCE(cs.remaining_allowance, 0) AS remaining_allowance,
 				h.usage_account_funding,
 				h.usage_total_spent,
 				h.settings_protocol_version,
@@ -380,7 +382,10 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 				h.usable AND h.stuck_since IS NULL AND h.settings_remaining_storage > 0 AS good_for_upload
 			FROM selected_hosts h
 			LEFT JOIN LATERAL (
-			SELECT SUM(size) AS total_contracts_size
+			SELECT
+				SUM(size) AS active_contracts_size,
+				SUM(initial_allowance) AS locked_allowance,
+				SUM(remaining_allowance) AS remaining_allowance
 			FROM contracts
 			WHERE host_id = h.id
 				AND state IN (0,1)
@@ -402,6 +407,8 @@ func (s *Store) HostStats(offset, limit int) ([]hosts.HostStats, error) {
 				&hs.LostSectors,
 				&hs.UnpinnedSectors,
 				&hs.ActiveContractsSize,
+				(*sqlCurrency)(&hs.LockedAllowance),
+				(*sqlCurrency)(&hs.RemainingAllowance),
 				(*sqlCurrency)(&hs.AccountUsage),
 				(*sqlCurrency)(&hs.TotalUsage),
 				(*sqlProtocolVersion)(&hs.ProtocolVersion),

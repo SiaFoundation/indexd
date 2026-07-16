@@ -283,7 +283,7 @@ CREATE TABLE contracts (
 CREATE INDEX contracts_host_id_idx ON contracts(host_id);
 
 -- fetching contracts statistics
-CREATE INDEX contracts_active_host_size_idx ON contracts(proof_height, host_id) INCLUDE (good, capacity, size) WHERE state IN (0,1) AND renewed_to IS NULL;
+CREATE INDEX contracts_active_host_size_idx ON contracts(proof_height, host_id) INCLUDE (good, capacity, size, initial_allowance, remaining_allowance) WHERE state IN (0,1) AND renewed_to IS NULL;
 
  -- listing contracts
 CREATE INDEX contracts_host_id_active_good_idx ON contracts(host_id) WHERE state IN (0,1) AND renewed_to IS NULL AND good;

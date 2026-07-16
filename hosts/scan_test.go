@@ -21,6 +21,11 @@ var cancelledCtx = func() context.Context {
 	return ctx
 }()
 
+// ScanHosts synchronously scans the provided hosts for external tests.
+func (m *HostManager) ScanHosts(ctx context.Context, hostKeys []types.PublicKey) {
+	m.scanHosts(ctx, hostKeys)
+}
+
 // mockClient is a mock that implements the RHP4Client interface.
 type mockClient struct {
 	settings map[string]proto4.HostSettings
