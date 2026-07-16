@@ -145,7 +145,7 @@ func TestPreAuthorizedAuth(t *testing.T) {
 
 	ephemeralKey := types.GeneratePrivateKey()
 	client := NewClient(appAPIAddr)
-	resp, err := client.RequestAppConnection(t.Context(), ephemeralKey, RegisterAppRequest{
+	resp, err := client.RequestAppConnection(t.Context(), ephemeralKey, Info{
 		AppID:       appID,
 		Name:        "test-app",
 		Description: "A test app",
@@ -194,10 +194,12 @@ func TestPreAuthorizationBoundToEphemeralKey(t *testing.T) {
 	go server.Serve(l)
 
 	request := RegisterAppRequest{
-		AppID:            types.Hash256{1},
-		Name:             "test-app",
-		Description:      "A test app",
-		ServiceURL:       "https://example.com",
+		Info: Info{
+			AppID:       types.Hash256{1},
+			Name:        "test-app",
+			Description: "A test app",
+			ServiceURL:  "https://example.com",
+		},
 		PreAuthorizedKey: preAuthorizedKey.PublicKey(),
 	}
 	validUntil := time.Now().Add(time.Minute)
@@ -250,7 +252,7 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 	client := NewClient(appAPIAddr)
 
 	// valid request should succeed
-	valid := RegisterAppRequest{
+	valid := Info{
 		AppID:       frand.Entropy256(),
 		Name:        "test-app",
 		Description: "A test app",
@@ -262,13 +264,13 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		modify func(*RegisterAppRequest)
+		modify func(*Info)
 	}{
-		{"name too long", func(r *RegisterAppRequest) { r.Name = strings.Repeat("a", maxNameLen+1) }},
-		{"description too long", func(r *RegisterAppRequest) { r.Description = strings.Repeat("a", maxDescriptionLen+1) }},
-		{"logoURL too long", func(r *RegisterAppRequest) { r.LogoURL = strings.Repeat("a", maxURLLen+1) }},
-		{"serviceURL too long", func(r *RegisterAppRequest) { r.ServiceURL = strings.Repeat("a", maxURLLen+1) }},
-		{"callbackURL too long", func(r *RegisterAppRequest) { r.CallbackURL = strings.Repeat("a", maxURLLen+1) }},
+		{"name too long", func(r *Info) { r.Name = strings.Repeat("a", maxNameLen+1) }},
+		{"description too long", func(r *Info) { r.Description = strings.Repeat("a", maxDescriptionLen+1) }},
+		{"logoURL too long", func(r *Info) { r.LogoURL = strings.Repeat("a", maxURLLen+1) }},
+		{"serviceURL too long", func(r *Info) { r.ServiceURL = strings.Repeat("a", maxURLLen+1) }},
+		{"callbackURL too long", func(r *Info) { r.CallbackURL = strings.Repeat("a", maxURLLen+1) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -303,7 +305,7 @@ func TestAuthConnectRateLimit(t *testing.T) {
 	ephemeralKey := types.GeneratePrivateKey()
 
 	client := NewClient(appAPIAddr)
-	req := RegisterAppRequest{
+	req := Info{
 		AppID:       frand.Entropy256(),
 		Name:        "test-app",
 		Description: "A test app",

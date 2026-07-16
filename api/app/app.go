@@ -87,14 +87,19 @@ type (
 		ConnectKey   string // ties the request to the app connect key used
 	}
 
-	// A RegisterAppRequest is the request body for registering a new application.
-	RegisterAppRequest struct {
+	// Info describes an application requesting a connection.
+	Info struct {
 		AppID       types.Hash256 `json:"appID"`
 		Name        string        `json:"name"`
 		Description string        `json:"description"`
 		LogoURL     string        `json:"logoURL"`
 		ServiceURL  string        `json:"serviceURL"`
 		CallbackURL string        `json:"callbackURL"`
+	}
+
+	// A RegisterAppRequest is the request body for registering a new application.
+	RegisterAppRequest struct {
+		Info
 
 		// PreAuthorizedKey and PreAuthorizationSignature allow the request to
 		// bypass interactive approval when signed by a pre-authorized key.

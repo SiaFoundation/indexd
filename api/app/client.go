@@ -315,7 +315,7 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 }
 
 // RequestAppConnection requests an application connection to the indexer.
-func (c *Client) RequestAppConnection(ctx context.Context, ephemeralKey types.PrivateKey, request RegisterAppRequest, options ...RequestAppConnectionOption) (resp RegisterAppResponse, err error) {
+func (c *Client) RequestAppConnection(ctx context.Context, ephemeralKey types.PrivateKey, info Info, options ...RequestAppConnectionOption) (resp RegisterAppResponse, err error) {
 	var opts requestAppConnectionOptions
 	for _, option := range options {
 		option(&opts)
@@ -324,6 +324,7 @@ func (c *Client) RequestAppConnection(ctx context.Context, ephemeralKey types.Pr
 		return RegisterAppResponse{}, errors.New("invalid pre-authorized private key")
 	}
 
+	request := RegisterAppRequest{Info: info}
 	if opts.preAuthorizedKey != nil {
 		request.PreAuthorizedKey = opts.preAuthorizedKey.PublicKey()
 		proofHash := preAuthorizationHash(ephemeralKey.PublicKey(), request)
