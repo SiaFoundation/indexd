@@ -57,7 +57,9 @@ type (
 	// MigrationBatch is a batch of unhealthy slabs together with the migration
 	// state a remote node needs to determine which of their sectors to migrate
 	// and which hosts can receive them. A NextCursor of 0 means there are no
-	// more unhealthy slabs.
+	// more unhealthy slabs. State is only populated when the batch's page had
+	// claimable slabs: a batch with an empty Slabs list may carry a zero
+	// State, so consumers must not act on it.
 	MigrationBatch struct {
 		Slabs      []Slab         `json:"slabs"`
 		State      MigrationState `json:"state"`
@@ -334,6 +336,12 @@ func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) {
 // applied.
 func (m *Migrator) MigrateSlab(ctx context.Context, slab Slab, state MigrationState) (res MigrationResult, attempted bool) {
 	res = MigrationResult{SlabID: slab.ID}
+	// a caller whose context is already dead gets no attempt: queued work
+	// drained during shutdown must not produce doomed results that would be
+	// recorded as failed repair attempts
+	if ctx.Err() != nil {
+		return res, false
+	}
 	log := m.log.With(zap.Stringer("slab", slab.ID))
 
 	indices, candidates := sectorsToMigrate(slab, state)
