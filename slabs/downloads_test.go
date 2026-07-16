@@ -184,13 +184,14 @@ func TestRecoverShards(t *testing.T) {
 		})
 	})
 
-	// assert that a host losing a sector marks the sector as lost and recovery
+	// assert that a host reporting a corrupt sector marks the sector as lost and recovery
 	// still completes by reconstructing from the remaining hosts
-	t.Run("mark sector lost", func(t *testing.T) {
+	t.Run("mark corrupt sector lost", func(t *testing.T) {
 		sm.SetRecoveryChunkSize(proto.SectorSize)
-		client.hostSectors[hostList[0].PublicKey] = make(map[types.Hash256][proto.SectorSize]byte) // remove sector from host 0
+		client.integrityErrors[roots[0]] = wrapRPCErr(proto.ErrSectorCorrupt)
 		t.Cleanup(func() {
 			sm.SetRecoveryChunkSize(1 << 20)
+			delete(client.integrityErrors, roots[0])
 		})
 		required := make([]bool, len(slab.Sectors))
 		required[3] = true

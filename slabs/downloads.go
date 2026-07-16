@@ -236,7 +236,7 @@ func (r *slabRecovery) recoverChunk(ctx context.Context, offset, length uint64) 
 		buf := bytes.NewBuffer(make([]byte, 0, length))
 		if _, err := m.hosts.ReadSector(ctx, m.migrationAccountKey, hostKey, sector.root, buf, offset, length); err != nil {
 			if isErrLostSector(err) {
-				log.Debug("host reports sector lost", zap.Duration("elapsed", time.Since(start)))
+				log.Debug("host reports sector lost or corrupt", zap.Duration("elapsed", time.Since(start)))
 				// exclude the host from subsequent chunks and mark the sector lost
 				r.exclude(hostKey)
 				if err := m.store.MarkSectorsLost(hostKey, []types.Hash256{sector.root}); err != nil {
@@ -390,7 +390,8 @@ func (r *slabRecovery) exclude(hostKey types.PublicKey) {
 }
 
 func isErrLostSector(err error) bool {
-	return err != nil && strings.Contains(err.Error(), proto.ErrSectorNotFound.Error())
+	return err != nil && (strings.Contains(err.Error(), proto.ErrSectorNotFound.Error()) ||
+		strings.Contains(err.Error(), proto.ErrSectorCorrupt.Error()))
 }
 
 func isErrNotEnoughFunds(err error) bool {

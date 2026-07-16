@@ -14,8 +14,8 @@ import (
 )
 
 const (
-	// SectorLost indicates that the sector was lost. This is returned if the
-	// host admits to losing the sector.
+	// SectorLost indicates that the sector was lost or corrupt. This is returned
+	// if the host admits to losing the sector or reports that it is corrupt.
 	SectorLost = CheckSectorsResult(iota)
 
 	// SectorFailed indicates that the sector failed verification for some
@@ -48,7 +48,7 @@ type (
 
 	// CheckSectorsResult is the result of a sector verification. It indicates
 	// whether:
-	// - the sector was lost
+	// - the sector was lost or corrupt
 	// - the sector failed verification for any reason
 	// - the sector was successfully verified
 	CheckSectorsResult int
