@@ -3,6 +3,7 @@ package slabs_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -95,16 +96,16 @@ func TestSectorVerifier(t *testing.T) {
 
 	// case 1: successfully verify a lost, corrupt, and good sector, should debit the
 	// account balance
-	client.integrityErrors[roots[0]] = wrapRPCErr(proto.ErrSectorNotFound) // lost
-	client.integrityErrors[roots[1]] = wrapRPCErr(proto.ErrSectorCorrupt)  // corrupt
-	client.integrityErrors[roots[2]] = nil                                 // good
+	client.integrityErrors[roots[0]] = fmt.Errorf("wrapped: %w", proto.ErrSectorNotFound) // wrapped sentinel
+	client.integrityErrors[roots[1]] = deserializeRPCErr(proto.ErrSectorCorrupt)          // deserialized RPC error
+	client.integrityErrors[roots[2]] = nil                                                // good
 	assertResults(t.Context(), roots, []slabs.CheckSectorsResult{slabs.SectorLost, slabs.SectorLost, slabs.SectorSuccess}, nil)
 	assertBalance(oneSC.Mul64(7))
 
 	// case 2: running out of funds unexpectedly (malicious host) should reset the balance but
 	// should continue to verify sectors
-	client.integrityErrors[roots[0]] = wrapRPCErr(proto.ErrNotEnoughFunds) // unexpected OOF
-	client.integrityErrors[roots[1]] = nil                                 // good
+	client.integrityErrors[roots[0]] = deserializeRPCErr(proto.ErrNotEnoughFunds) // unexpected OOF
+	client.integrityErrors[roots[1]] = nil                                        // good
 	assertResults(t.Context(), roots[:2], []slabs.CheckSectorsResult{slabs.SectorFailed, slabs.SectorSuccess}, nil)
 	assertBalance(types.ZeroCurrency)
 

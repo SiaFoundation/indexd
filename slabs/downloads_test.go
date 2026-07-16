@@ -188,7 +188,7 @@ func TestRecoverShards(t *testing.T) {
 	// still completes by reconstructing from the remaining hosts
 	t.Run("mark corrupt sector lost", func(t *testing.T) {
 		sm.SetRecoveryChunkSize(proto.SectorSize)
-		client.integrityErrors[roots[0]] = wrapRPCErr(proto.ErrSectorCorrupt)
+		client.integrityErrors[roots[0]] = deserializeRPCErr(proto.ErrSectorCorrupt)
 		t.Cleanup(func() {
 			sm.SetRecoveryChunkSize(1 << 20)
 			delete(client.integrityErrors, roots[0])
