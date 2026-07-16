@@ -390,8 +390,8 @@ func (r *slabRecovery) exclude(hostKey types.PublicKey) {
 }
 
 func isErrLostSector(err error) bool {
-	return err != nil && (strings.Contains(err.Error(), proto.ErrSectorNotFound.Error()) ||
-		strings.Contains(err.Error(), proto.ErrSectorCorrupt.Error()))
+	return errors.Is(err, proto.ErrSectorNotFound) ||
+		errors.Is(err, proto.ErrSectorCorrupt)
 }
 
 func isErrNotEnoughFunds(err error) bool {

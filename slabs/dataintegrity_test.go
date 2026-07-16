@@ -16,11 +16,14 @@ import (
 	"go.uber.org/zap"
 )
 
-// wrapRPCErr is a helper to wrap RPC errors in a way that they can be compared
-// by value but not with errors.Is. To simulate errors that are deserialized
-// over the RPC boundary.
-func wrapRPCErr(err error) error {
-	return errors.New(err.Error())
+// deserializeRPCErr returns a distinct RPC error with the same code and
+// description, simulating an error decoded from the network.
+func deserializeRPCErr(err error) error {
+	var rpcErr *proto.RPCError
+	if !errors.As(err, &rpcErr) {
+		panic("expected RPC error")
+	}
+	return proto.NewRPCError(rpcErr.Code, rpcErr.Description)
 }
 
 func TestPerformIntegrityChecksForHost(t *testing.T) {
@@ -115,9 +118,9 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 
 	// perform the checks once
 	resetBalance()
-	client.integrityErrors[roots[1]] = wrapRPCErr(proto.ErrSectorNotFound) // simulate lost sector
-	client.integrityErrors[roots[2]] = wrapRPCErr(proto.ErrSectorCorrupt)  // simulate corrupt sector
-	client.integrityErrors[roots[3]] = wrapRPCErr(proto.ErrNotEnoughFunds) // simulate bad sector
+	client.integrityErrors[roots[1]] = deserializeRPCErr(proto.ErrSectorNotFound) // simulate lost sector
+	client.integrityErrors[roots[2]] = deserializeRPCErr(proto.ErrSectorCorrupt)  // simulate corrupt sector
+	client.integrityErrors[roots[3]] = deserializeRPCErr(proto.ErrNotEnoughFunds) // simulate bad sector
 	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	assertLostAndFailed(roots[3:4], roots[1:3])
 
