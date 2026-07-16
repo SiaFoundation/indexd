@@ -47,10 +47,10 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	// prepare slab manager
 	sm := slabs.NewSlabManager(chain, am, cm, hm, store, client, nil, sk, sk, slabs.WithIntegrityCheckIntervals(time.Millisecond, time.Millisecond))
 
-	// prepare helper to reset balance to 3SC to avoid running out of funds
+	// prepare helper to reset balance to 4SC to avoid running out of funds
 	resetBalance := func() {
 		t.Helper()
-		err := am.UpdateServiceAccountBalance(hostKey.PublicKey(), acc, oneSC.Mul64(3))
+		err := am.UpdateServiceAccountBalance(hostKey.PublicKey(), acc, oneSC.Mul64(4))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -68,7 +68,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	}
 
 	// prepare sectors
-	roots := make([]types.Hash256, 3)
+	roots := make([]types.Hash256, 4)
 	for i := range roots {
 		root, err := client.WriteSector(context.Background(), types.GeneratePrivateKey(), host.PublicKey, []byte{byte(i + 1)})
 		if err != nil {
@@ -116,9 +116,10 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 	// perform the checks once
 	resetBalance()
 	client.integrityErrors[roots[1]] = wrapRPCErr(proto.ErrSectorNotFound) // simulate lost sector
-	client.integrityErrors[roots[2]] = wrapRPCErr(proto.ErrNotEnoughFunds) // simulate bad sector
+	client.integrityErrors[roots[2]] = wrapRPCErr(proto.ErrSectorCorrupt)  // simulate corrupt sector
+	client.integrityErrors[roots[3]] = wrapRPCErr(proto.ErrNotEnoughFunds) // simulate bad sector
 	sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
-	assertLostAndFailed(roots[2:3], roots[1:2])
+	assertLostAndFailed(roots[3:4], roots[1:3])
 
 	// perform the checks a few more time to reach the maximum number of failed
 	// checks before a bad sector gets removed
@@ -127,7 +128,7 @@ func TestPerformIntegrityChecksForHost(t *testing.T) {
 		makeDue()
 		sm.PerformIntegrityChecksForHost(context.Background(), host.PublicKey, zap.NewNop())
 	}
-	assertLostAndFailed(nil, roots[1:3])
+	assertLostAndFailed(nil, roots[1:4])
 
 	// empty the service account to trigger a "not enough funds" error which
 	// causes triggering a refill.

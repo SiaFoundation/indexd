@@ -32,6 +32,8 @@ func TestIsFailedRPC(t *testing.T) {
 
 		{"sector not found", context.Background(), proto.ErrSectorNotFound, false},
 		{"wrapped sector not found", context.Background(), fmt.Errorf("wrapped: %w", proto.ErrSectorNotFound), false},
+		{"sector corrupt", context.Background(), proto.ErrSectorCorrupt, false},
+		{"wrapped sector corrupt", context.Background(), fmt.Errorf("wrapped: %w", proto.ErrSectorCorrupt), false},
 
 		{"cancelled ctx, nil err", cancelled, nil, false},
 		{"cancelled ctx, arbitrary err", cancelled, errors.New("boom"), false},
