@@ -88,19 +88,20 @@ func (fr *failureRate) AddSample(success bool) {
 		}
 		fr.value = emaAlpha*sample + (1.0-emaAlpha)*fr.value
 	}
-	if fr.value < failureRateZeroThreshold {
-		fr.value = 0
-	}
 	fr.lastDecay = now
 }
 
 // Value returns the failure rate, decaying it for idle time since the last
-// sample. Mutates fr; not safe for concurrent use.
+// sample and reporting rates below failureRateZeroThreshold as zero. Mutates
+// fr; not safe for concurrent use.
 func (fr *failureRate) Value() float64 {
 	if fr.init && fr.value != 0 {
 		if elapsed := time.Since(fr.lastDecay); elapsed >= failureRateHalfLife {
 			fr.decay(elapsed)
 		}
+	}
+	if fr.value < failureRateZeroThreshold {
+		return 0
 	}
 	return fr.value
 }
@@ -112,9 +113,6 @@ func (fr *failureRate) decay(elapsed time.Duration) {
 	halfLives := int(elapsed / failureRateHalfLife)
 	fr.value = math.Ldexp(fr.value, -halfLives)
 	fr.lastDecay = fr.lastDecay.Add(time.Duration(halfLives) * failureRateHalfLife)
-	if fr.value < failureRateZeroThreshold {
-		fr.value = 0
-	}
 }
 
 type hostMetric struct {
