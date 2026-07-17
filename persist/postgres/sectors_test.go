@@ -3461,7 +3461,7 @@ func TestMarkSectorsLostProofHeightCutoff(t *testing.T) {
 	if err := store.MarkSectorsLost(hk, []types.Hash256{rootPinned1}); err != nil {
 		t.Fatal(err)
 	}
-	assertSectorLost(t, store, rootPinned1, true)
+	assertSectorLost(t, store, rootPinned1)
 	assertHostLostSectors(t, store, hk, 1)
 
 	// once the contract reached its proof height the host might have submitted
@@ -3471,7 +3471,7 @@ func TestMarkSectorsLostProofHeightCutoff(t *testing.T) {
 	if err := store.MarkSectorsLost(hk, []types.Hash256{rootPinned2}); err != nil {
 		t.Fatal(err)
 	}
-	assertSectorLost(t, store, rootPinned2, true)
+	assertSectorLost(t, store, rootPinned2)
 	assertHostLostSectors(t, store, hk, 1)
 
 	// an unpinned sector counts against the host since the host is expected to
@@ -3480,7 +3480,7 @@ func TestMarkSectorsLostProofHeightCutoff(t *testing.T) {
 	if err := store.MarkSectorsLost(hk, []types.Hash256{rootUnpinned}); err != nil {
 		t.Fatal(err)
 	}
-	assertSectorLost(t, store, rootUnpinned, true)
+	assertSectorLost(t, store, rootUnpinned)
 	assertHostLostSectors(t, store, hk, 2)
 }
 
@@ -3542,8 +3542,8 @@ func TestMarkFailingSectorsLostProofHeightCutoff(t *testing.T) {
 	if err := store.MarkFailingSectorsLost(hk, 2); err != nil {
 		t.Fatal(err)
 	}
-	assertSectorLost(t, store, rootPinned1, true)
-	assertSectorLost(t, store, rootUnpinned, true)
+	assertSectorLost(t, store, rootPinned1)
+	assertSectorLost(t, store, rootUnpinned)
 	assertHostLostSectors(t, store, hk, 2)
 
 	// once the contract reached its proof height, a failing sector is unlinked
@@ -3554,7 +3554,7 @@ func TestMarkFailingSectorsLostProofHeightCutoff(t *testing.T) {
 	if err := store.MarkFailingSectorsLost(hk, 2); err != nil {
 		t.Fatal(err)
 	}
-	assertSectorLost(t, store, rootPinned2, true)
+	assertSectorLost(t, store, rootPinned2)
 	assertHostLostSectors(t, store, hk, 2)
 }
 
@@ -3854,16 +3854,16 @@ func (s *Store) pinTestSlab(t testing.TB, account proto.Account, minShards uint,
 	return slabIDs[0]
 }
 
-// assertSectorLost asserts whether the sector with the given root is lost,
-// i.e. detached from both its host and contract.
-func assertSectorLost(t *testing.T, store *Store, root types.Hash256, lost bool) {
+// assertSectorLost asserts that the sector with the given root is lost, i.e.
+// detached from both its host and contract.
+func assertSectorLost(t *testing.T, store *Store, root types.Hash256) {
 	t.Helper()
 	var isLost bool
 	err := store.pool.QueryRow(t.Context(), `SELECT host_id IS NULL AND contract_sectors_map_id IS NULL FROM sectors WHERE sector_root = $1`, sqlHash256(root)).Scan(&isLost)
 	if err != nil {
 		t.Fatal(err)
-	} else if isLost != lost {
-		t.Fatalf("expected sector %x to be lost: %v, got %v", root, lost, isLost)
+	} else if !isLost {
+		t.Fatalf("expected sector %x to be lost", root)
 	}
 }
 
