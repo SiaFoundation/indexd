@@ -35,6 +35,11 @@ const (
 // host ID to NULL. This is meant to be used in 2 cases:
 // - The host reports that the sector is lost (e.g. when pinning it, during the integrity check or when fetching it for migration)
 // - The host has failed the integrity check for that sector enough times
+//
+// A sector only counts against the host's lost_sectors counter if it is
+// unpinned or pinned to a contract that has not reached its proof height yet,
+// since past the proof height the host might have submitted a proof and
+// fulfilled its obligation to hold on to the data.
 func (s *Store) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) error {
 	if len(roots) == 0 {
 		return nil
@@ -53,30 +58,34 @@ func (s *Store) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) 
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT id, host_id, contract_sectors_map_id
-			FROM sectors
-			WHERE host_id = $1 AND sector_root = ANY($2)
-			FOR UPDATE`, hostID, sqlRoots)
+			SELECT s.id, s.contract_sectors_map_id,
+				COALESCE(c.proof_height > g.scanned_height, TRUE) AS lost
+			FROM sectors s
+			LEFT JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
+			LEFT JOIN contracts c ON csm.contract_id = c.contract_id
+			CROSS JOIN (SELECT scanned_height FROM global_settings) g
+			WHERE s.host_id = $1 AND s.sector_root = ANY($2)
+			FOR UPDATE OF s`, hostID, sqlRoots)
 		if err != nil {
 			return fmt.Errorf("failed to query sectors: %w", err)
 		}
 		defer rows.Close()
 
-		sectorIDs, pinned, unpinned, _, err := scanSectorIDs(rows)
+		sectorIDs, pinned, unpinned, lost, err := scanLostSectorIDs(rows)
 		if err != nil {
 			return fmt.Errorf("failed to scan sectors: %w", err)
 		} else if len(sectorIDs) == 0 {
 			return nil
 		}
 
-		totalLost := pinned + unpinned
+		detached := pinned + unpinned
 		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id = ANY($1)`, sectorIDs); err != nil {
 			return fmt.Errorf("failed to mark sectors as lost: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, totalLost, hostID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, lost, hostID); err != nil {
 			return fmt.Errorf("failed to increment host's lost sectors: %w", err)
 		}
-		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, totalLost); err != nil {
+		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, detached); err != nil {
 			return fmt.Errorf("failed to update sector stats: %w", err)
 		} else if err := incrementHostUnpinnedSectors(ctx, tx, hostID, -unpinned); err != nil {
 			return fmt.Errorf("failed to update host %v unpinned sectors: %w", hostKey, err)
@@ -201,11 +210,12 @@ func (s *Store) MarkFailingSectorsLost(hostKey types.PublicKey, maxChecks uint) 
 	return nil
 }
 
-// markFailingSectorsLostBatch marks a batch of failing sectors as lost. We have
-// to batch it because we first need to select all sectors to update in order to
+// markFailingSectorsLostBatch marks a batch of failing sectors as lost and
+// returns the number of sectors that were detached from the host. We have to
+// batch it because we first need to select all sectors to update in order to
 // correctly updated the pinned sectors statistics.
 func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, batchSize uint) (int64, error) {
-	var totalLost int64
+	var detached int64
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		var hostID int64
 		err := tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = $1", sqlPublicKey(hostKey)).Scan(&hostID)
@@ -214,32 +224,36 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT id, host_id, contract_sectors_map_id
-			FROM sectors
-			WHERE host_id = $1 AND consecutive_failed_checks >= $2
+			SELECT s.id, s.contract_sectors_map_id,
+				COALESCE(c.proof_height > g.scanned_height, TRUE) AS lost
+			FROM sectors s
+			LEFT JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
+			LEFT JOIN contracts c ON csm.contract_id = c.contract_id
+			CROSS JOIN (SELECT scanned_height FROM global_settings) g
+			WHERE s.host_id = $1 AND s.consecutive_failed_checks >= $2
 			LIMIT $3
-			FOR UPDATE
+			FOR UPDATE OF s
 		`, hostID, maxChecks, batchSize)
 		if err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		}
 		defer rows.Close()
 
-		sectorIDs, pinned, unpinned, _, err := scanSectorIDs(rows)
+		sectorIDs, pinned, unpinned, lost, err := scanLostSectorIDs(rows)
 		if err != nil {
 			return fmt.Errorf("failed to scan sectors: %w", err)
 		} else if len(sectorIDs) == 0 {
 			return nil
 		}
 
-		totalLost = pinned + unpinned
+		detached = pinned + unpinned
 		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id = ANY($1)`, sectorIDs); err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, totalLost, hostID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, lost, hostID); err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		}
-		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, totalLost); err != nil {
+		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, detached); err != nil {
 			return fmt.Errorf("failed to update sector stats: %w", err)
 		} else if err := incrementHostUnpinnedSectors(ctx, tx, hostID, -unpinned); err != nil {
 			return fmt.Errorf("failed to update host %v unpinned sectors: %w", hostKey, err)
@@ -249,7 +263,7 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 		return 0, err
 	}
 
-	return totalLost, nil
+	return detached, nil
 }
 
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
@@ -1127,6 +1141,37 @@ func scanSectorIDs(rows *rows) (sectorIDs []int64, pinned, unpinned, unpinnable 
 			unpinned++
 		} else {
 			unpinnable++
+		}
+		sectorIDs = append(sectorIDs, sectorID)
+	}
+	err = rows.Err()
+	return
+}
+
+// scanLostSectorIDs scans sector IDs from the given rows. It also counts how
+// many of the sectors are currently pinned and unpinned as well as how many
+// count as lost for the host, i.e. are unpinned or pinned to a contract that
+// has not reached its proof height yet.
+//
+// Unpinned sectors always count as lost because [Store.MarkSectorsUnpinnable]
+// detaches sectors from their host once they have been unpinned for longer
+// than the retention window, so any unpinned sector that still has a host is
+// implicitly within the window the host is expected to retain it for.
+func scanLostSectorIDs(rows *rows) (sectorIDs []int64, pinned, unpinned, lost int64, err error) {
+	for rows.Next() {
+		var sectorID int64
+		var contractMapID sql.NullInt64
+		var isLost bool
+		if err := rows.Scan(&sectorID, &contractMapID, &isLost); err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("failed to scan sector row: %w", err)
+		}
+		if contractMapID.Valid {
+			pinned++
+		} else {
+			unpinned++
+		}
+		if isLost {
+			lost++
 		}
 		sectorIDs = append(sectorIDs, sectorID)
 	}
