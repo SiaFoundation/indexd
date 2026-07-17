@@ -3455,53 +3455,24 @@ func TestMarkSectorsLostProofHeightCutoff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertSectorLost := func(root types.Hash256, lost bool) {
-		t.Helper()
-		var isLost bool
-		err := store.pool.QueryRow(t.Context(), `SELECT host_id IS NULL AND contract_sectors_map_id IS NULL FROM sectors WHERE sector_root = $1`, sqlHash256(root)).Scan(&isLost)
-		if err != nil {
-			t.Fatal(err)
-		} else if isLost != lost {
-			t.Fatalf("expected sector %x to be lost: %v, got %v", root, lost, isLost)
-		}
-	}
-
-	assertLostSectors := func(numLost int) {
-		t.Helper()
-		var count int
-		err := store.pool.QueryRow(t.Context(), `SELECT lost_sectors FROM hosts WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&count)
-		if err != nil {
-			t.Fatal(err)
-		} else if count != numLost {
-			t.Fatalf("expected %d lost sectors for host %x, got %d", numLost, hk, count)
-		}
-	}
-
-	setScannedHeight := func(height uint64) {
-		t.Helper()
-		if _, err := store.pool.Exec(t.Context(), `UPDATE global_settings SET scanned_height = $1`, height); err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	// a sector pinned to a contract that has not reached its proof height
 	// counts against the host when the host reports it lost
-	setScannedHeight(599)
+	setScannedHeight(t, store, 599)
 	if err := store.MarkSectorsLost(hk, []types.Hash256{rootPinned1}); err != nil {
 		t.Fatal(err)
 	}
-	assertSectorLost(rootPinned1, true)
-	assertLostSectors(1)
+	assertSectorLost(t, store, rootPinned1, true)
+	assertHostLostSectors(t, store, hk, 1)
 
 	// once the contract reached its proof height the host might have submitted
 	// a proof and legitimately deleted the data, so the sector is unlinked but
 	// doesn't count against the host
-	setScannedHeight(600)
+	setScannedHeight(t, store, 600)
 	if err := store.MarkSectorsLost(hk, []types.Hash256{rootPinned2}); err != nil {
 		t.Fatal(err)
 	}
-	assertSectorLost(rootPinned2, true)
-	assertLostSectors(1)
+	assertSectorLost(t, store, rootPinned2, true)
+	assertHostLostSectors(t, store, hk, 1)
 
 	// an unpinned sector counts against the host since the host is expected to
 	// retain it until it is either pinned or given up on and detached by
@@ -3509,8 +3480,8 @@ func TestMarkSectorsLostProofHeightCutoff(t *testing.T) {
 	if err := store.MarkSectorsLost(hk, []types.Hash256{rootUnpinned}); err != nil {
 		t.Fatal(err)
 	}
-	assertSectorLost(rootUnpinned, true)
-	assertLostSectors(2)
+	assertSectorLost(t, store, rootUnpinned, true)
+	assertHostLostSectors(t, store, hk, 2)
 }
 
 func TestMarkFailingSectorsLostProofHeightCutoff(t *testing.T) {
@@ -3555,35 +3526,6 @@ func TestMarkFailingSectorsLostProofHeightCutoff(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertSectorLost := func(root types.Hash256, lost bool) {
-		t.Helper()
-		var isLost bool
-		err := store.pool.QueryRow(t.Context(), `SELECT host_id IS NULL AND contract_sectors_map_id IS NULL FROM sectors WHERE sector_root = $1`, sqlHash256(root)).Scan(&isLost)
-		if err != nil {
-			t.Fatal(err)
-		} else if isLost != lost {
-			t.Fatalf("expected sector %x to be lost: %v, got %v", root, lost, isLost)
-		}
-	}
-
-	assertLostSectors := func(numLost int) {
-		t.Helper()
-		var count int
-		err := store.pool.QueryRow(t.Context(), `SELECT lost_sectors FROM hosts WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&count)
-		if err != nil {
-			t.Fatal(err)
-		} else if count != numLost {
-			t.Fatalf("expected %d lost sectors for host %x, got %d", numLost, hk, count)
-		}
-	}
-
-	setScannedHeight := func(height uint64) {
-		t.Helper()
-		if _, err := store.pool.Exec(t.Context(), `UPDATE global_settings SET scanned_height = $1`, height); err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	record := func(roots ...types.Hash256) {
 		t.Helper()
 		if err := store.RecordIntegrityCheck(false, time.Now(), hk, roots); err != nil {
@@ -3594,26 +3536,26 @@ func TestMarkFailingSectorsLostProofHeightCutoff(t *testing.T) {
 	// fail the integrity check twice for a pinned and an unpinned sector; the
 	// sector pinned to a contract that has not reached its proof height counts
 	// against the host, as does the unpinned sector
-	setScannedHeight(599)
+	setScannedHeight(t, store, 599)
 	record(rootPinned1, rootUnpinned)
 	record(rootPinned1, rootUnpinned)
 	if err := store.MarkFailingSectorsLost(hk, 2); err != nil {
 		t.Fatal(err)
 	}
-	assertSectorLost(rootPinned1, true)
-	assertSectorLost(rootUnpinned, true)
-	assertLostSectors(2)
+	assertSectorLost(t, store, rootPinned1, true)
+	assertSectorLost(t, store, rootUnpinned, true)
+	assertHostLostSectors(t, store, hk, 2)
 
 	// once the contract reached its proof height, a failing sector is unlinked
 	// but doesn't count against the host
-	setScannedHeight(600)
+	setScannedHeight(t, store, 600)
 	record(rootPinned2)
 	record(rootPinned2)
 	if err := store.MarkFailingSectorsLost(hk, 2); err != nil {
 		t.Fatal(err)
 	}
-	assertSectorLost(rootPinned2, true)
-	assertLostSectors(2)
+	assertSectorLost(t, store, rootPinned2, true)
+	assertHostLostSectors(t, store, hk, 2)
 }
 
 // BenchmarkMarkSectorsLost benchmarks MarkSectorsLost in various batch sizes.
@@ -3910,4 +3852,37 @@ func (s *Store) pinTestSlab(t testing.TB, account proto.Account, minShards uint,
 		t.Fatal(err)
 	}
 	return slabIDs[0]
+}
+
+// assertSectorLost asserts whether the sector with the given root is lost,
+// i.e. detached from both its host and contract.
+func assertSectorLost(t *testing.T, store *Store, root types.Hash256, lost bool) {
+	t.Helper()
+	var isLost bool
+	err := store.pool.QueryRow(t.Context(), `SELECT host_id IS NULL AND contract_sectors_map_id IS NULL FROM sectors WHERE sector_root = $1`, sqlHash256(root)).Scan(&isLost)
+	if err != nil {
+		t.Fatal(err)
+	} else if isLost != lost {
+		t.Fatalf("expected sector %x to be lost: %v, got %v", root, lost, isLost)
+	}
+}
+
+// assertHostLostSectors asserts the lost_sectors counter of the given host.
+func assertHostLostSectors(t *testing.T, store *Store, hk types.PublicKey, numLost int) {
+	t.Helper()
+	var count int
+	err := store.pool.QueryRow(t.Context(), `SELECT lost_sectors FROM hosts WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	} else if count != numLost {
+		t.Fatalf("expected %d lost sectors for host %x, got %d", numLost, hk, count)
+	}
+}
+
+// setScannedHeight updates the global scanned height.
+func setScannedHeight(t *testing.T, store *Store, height uint64) {
+	t.Helper()
+	if _, err := store.pool.Exec(t.Context(), `UPDATE global_settings SET scanned_height = $1`, height); err != nil {
+		t.Fatal(err)
+	}
 }
