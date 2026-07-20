@@ -217,6 +217,7 @@ func (s *Store) MarkFailingSectorsLost(hostKey types.PublicKey, maxChecks uint) 
 func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, batchSize uint) (int64, error) {
 	var detached int64
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		detached = 0
 		var hostID int64
 		err := tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = $1", sqlPublicKey(hostKey)).Scan(&hostID)
 		if err != nil {
