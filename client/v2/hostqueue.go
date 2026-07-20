@@ -17,13 +17,13 @@ import (
 const (
 	emaAlpha = 0.2
 
-	// failureRateHalfLife is the idle duration over which a host's failure
-	// rate is halved.
+	// failureRateHalfLife is the duration over which a host's failure rate
+	// is halved, regardless of whether new samples arrive.
 	failureRateHalfLife = time.Minute
 
 	// failureRateZeroThreshold is the failure rate below which a host is
 	// treated as failure-free; a lone failure among successes (rate ~0.2)
-	// clears after ~5 idle minutes, an all-failure host (rate 1) after ~7.
+	// clears after ~5 minutes, an all-failure host (rate 1) after ~7.
 	failureRateZeroThreshold = 0.01
 
 	settingsPayloadSize = 270 // size of host settings in bytes
@@ -74,7 +74,6 @@ type failureRate struct {
 
 // AddSample adds a new success/failure sample to the failure rate.
 func (fr *failureRate) AddSample(success bool) {
-	now := time.Now()
 	sample := 1.0
 	if success {
 		sample = 0.0
@@ -82,35 +81,33 @@ func (fr *failureRate) AddSample(success bool) {
 	if !fr.init {
 		fr.value = sample
 		fr.init = true
-	} else {
-		if elapsed := now.Sub(fr.lastDecay); fr.value != 0 && elapsed >= failureRateHalfLife {
-			fr.decay(elapsed)
-		}
-		fr.value = emaAlpha*sample + (1.0-emaAlpha)*fr.value
+		fr.lastDecay = time.Now()
+		return
 	}
-	fr.lastDecay = now
+	fr.decay()
+	fr.value = emaAlpha*sample + (1.0-emaAlpha)*fr.value
 }
 
-// Value returns the failure rate, decaying it for idle time since the last
-// sample and reporting rates below failureRateZeroThreshold as zero. Mutates
+// Value returns the failure rate, decayed for time elapsed since the last
+// halving and reporting rates below failureRateZeroThreshold as zero. Mutates
 // fr; not safe for concurrent use.
 func (fr *failureRate) Value() float64 {
-	if fr.init && fr.value != 0 {
-		if elapsed := time.Since(fr.lastDecay); elapsed >= failureRateHalfLife {
-			fr.decay(elapsed)
-		}
-	}
+	fr.decay()
 	if fr.value < failureRateZeroThreshold {
 		return 0
 	}
 	return fr.value
 }
 
-// decay halves the failure rate for every idle half-life. This decay schedule is
-// independent of the sample EMA (emaAlpha), though emaAlpha still affects the
-// rate immediately after samples are applied.
-func (fr *failureRate) decay(elapsed time.Duration) {
-	halfLives := int(elapsed / failureRateHalfLife)
+// decay halves the failure rate for every half-life elapsed since the last
+// decay. This decay schedule is independent of the sample EMA (emaAlpha),
+// though emaAlpha still affects the rate immediately after samples are
+// applied.
+func (fr *failureRate) decay() {
+	if !fr.init {
+		return
+	}
+	halfLives := int(time.Since(fr.lastDecay) / failureRateHalfLife)
 	fr.value = math.Ldexp(fr.value, -halfLives)
 	fr.lastDecay = fr.lastDecay.Add(time.Duration(halfLives) * failureRateHalfLife)
 }
