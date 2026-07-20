@@ -21,7 +21,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// defaultConnectTimeout bounds connection establishment separately from the
+// RPC context, so an unresponsive host costs seconds instead of the full RPC
+// budget.
+const defaultConnectTimeout = 10 * time.Second
+
 type transport struct {
+	connectTimeout time.Duration
+
 	mu     sync.Mutex
 	dialCh chan struct{} // signals dial completion
 	tc     rhp.TransportClient
@@ -89,7 +96,7 @@ func (t *transport) dial(ctx context.Context, hostKey types.PublicKey, addresses
 
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, 2)
-	var dialCtx, dialCancel = context.WithCancel(ctx)
+	var dialCtx, dialCancel = context.WithTimeout(ctx, t.connectTimeout)
 	defer dialCancel()
 
 	connectErrs := make([]error, len(addresses))
@@ -179,7 +186,7 @@ func (c *Client) hostTransport(ctx context.Context, hostKey types.PublicKey) (rh
 	c.mu.Lock()
 	t := c.transports[hostKey]
 	if t == nil {
-		t = &transport{}
+		t = &transport{connectTimeout: defaultConnectTimeout}
 		c.transports[hostKey] = t
 	}
 	c.mu.Unlock()

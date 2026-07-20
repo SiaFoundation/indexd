@@ -4,12 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
+	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/mux/v3"
 )
 
@@ -46,6 +51,51 @@ func TestIsFailedRPC(t *testing.T) {
 				t.Fatalf("expected %v, got %v", tt.want, got)
 			}
 		})
+	}
+}
+
+func TestTransportDialConnectTimeout(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+
+	// accept and hold connections open without completing the mux handshake
+	var mu sync.Mutex
+	var conns []net.Conn
+	go func() {
+		for {
+			conn, err := l.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			conns = append(conns, conn)
+			mu.Unlock()
+		}
+	}()
+	t.Cleanup(func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, conn := range conns {
+			conn.Close()
+		}
+	})
+
+	// dial with a deadline well beyond the connect timeout
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	tr := &transport{connectTimeout: 100 * time.Millisecond}
+	addresses := []chain.NetAddress{{Protocol: siamux.Protocol, Address: l.Addr().String()}}
+
+	start := time.Now()
+	_, err = tr.dial(ctx, types.GeneratePrivateKey().PublicKey(), addresses)
+	if err == nil {
+		t.Fatal("expected dial to fail")
+	} else if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatal("dial ignored connect timeout", elapsed)
 	}
 }
 
