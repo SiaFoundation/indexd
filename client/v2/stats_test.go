@@ -28,28 +28,35 @@ func TestRPCAverage(t *testing.T) {
 
 func TestFailureRate(t *testing.T) {
 	t.Run("Basic", func(t *testing.T) {
-		var fr failureRate
+		synctest.Test(t, func(t *testing.T) {
+			var fr failureRate
 
-		if fr.Value() != 0 {
-			t.Fatal("initial value should be zero")
-		}
+			if fr.Value() != 0 {
+				t.Fatal("initial value should be zero")
+			}
 
-		fr.AddSample(true)
-		if v := fr.Value(); v != 0 {
-			t.Fatalf("expected 0, got %f", v)
-		}
-
-		fr.AddSample(false)
-		if v := fr.Value(); v != emaAlpha {
-			t.Fatalf("expected %f, got %f", emaAlpha, v)
-		}
-
-		for range 21 {
 			fr.AddSample(true)
-		}
-		if v := fr.Value(); v != 0 {
-			t.Fatalf("expected samples below the threshold to be clamped to zero, got %f", v)
-		}
+			if v := fr.Value(); v != 0 {
+				t.Fatalf("expected 0, got %f", v)
+			}
+
+			fr.AddSample(false)
+			if v := fr.Value(); v != emaAlpha {
+				t.Fatalf("expected %f, got %f", emaAlpha, v)
+			}
+
+			for range 13 {
+				fr.AddSample(true)
+			}
+			if v := fr.Value(); v == 0 {
+				t.Fatal("expected value just above the threshold to be reported")
+			}
+
+			fr.AddSample(true)
+			if v := fr.Value(); v != 0 {
+				t.Fatalf("expected samples below the threshold to be clamped to zero, got %f", v)
+			}
+		})
 	})
 
 	t.Run("TimeDecay", func(t *testing.T) {
@@ -62,25 +69,21 @@ func TestFailureRate(t *testing.T) {
 			}
 
 			time.Sleep(failureRateHalfLife - time.Second)
-			synctest.Wait()
 			if v := fr.Value(); v != 1 {
 				t.Fatalf("expected no decay before the half-life, got %f", v)
 			}
 
 			time.Sleep(time.Second)
-			synctest.Wait()
 			if v := fr.Value(); v != math.Ldexp(1, -1) {
 				t.Fatalf("expected 0.5 after one half-life, got %f", v)
 			}
 
 			time.Sleep(5 * failureRateHalfLife)
-			synctest.Wait()
 			if v := fr.Value(); v != math.Ldexp(1, -6) {
 				t.Fatalf("expected value above threshold after six half-lives, got %f", v)
 			}
 
 			time.Sleep(failureRateHalfLife)
-			synctest.Wait()
 			if v := fr.Value(); v != 0 {
 				t.Fatalf("expected failure rate to be forgiven after seven half-lives, got %f", v)
 			}
@@ -93,8 +96,6 @@ func TestFailureRate(t *testing.T) {
 
 			fr.AddSample(false)
 			time.Sleep(failureRateHalfLife)
-			synctest.Wait()
-
 			// AddSample must decay the idle value before applying the EMA,
 			// without any intervening Value call doing the decay for it.
 			fr.AddSample(false)
@@ -118,7 +119,6 @@ func TestFailureRate(t *testing.T) {
 			}
 
 			time.Sleep(5 * failureRateHalfLife)
-			synctest.Wait()
 			if v := fr.Value(); v != 0 {
 				t.Fatalf("expected a single failure to be forgiven, got %f", v)
 			}
