@@ -291,28 +291,12 @@ INNER JOIN deleted d ON (d.slab_digest = s.digest)`, objectID)
 			return fmt.Errorf("failed to update object events: %w", err)
 		}
 
-		// lock the object's slabs so concurrent deletions of objects sharing
-		// a slab serialize; otherwise two deleters could each still see the
-		// other's object and neither would unpin the shared slab. This also
-		// serializes against PinObject's pin check, so an object pinned
-		// concurrently can't lose a slab it references.
-		if err := lockSlabs(ctx, tx, objectSlabIDs); err != nil {
-			return err
-		}
-
-		// unpin the slabs that are no longer referenced by any of the
-		// account's objects
-		toUnpin, err := unreferencedSlabs(ctx, tx, accountID, objectSlabIDs, nil)
-		if err != nil {
-			return err
-		}
-
-		if len(toUnpin) > 0 {
-			if err := s.unpinSlabs(ctx, tx, accountID, toUnpin); err != nil {
-				return fmt.Errorf("failed to unpin unreferenced slabs: %w", err)
-			}
-		}
-		return nil
+		// unpin the object's slabs that are no longer referenced by any of
+		// the account's objects; the locking inside serializes concurrent
+		// deletions of objects sharing a slab, which could otherwise each
+		// still see the other's object and leave the shared slab pinned
+		// forever
+		return s.unpinUnreferencedSlabs(ctx, tx, accountID, objectSlabIDs, nil)
 	})
 }
 
