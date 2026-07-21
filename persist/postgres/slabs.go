@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
@@ -189,22 +190,7 @@ LIMIT $3
 		if err != nil {
 			return nil, fmt.Errorf("failed to get unused slabs: %w", err)
 		}
-		defer rows.Close()
-
-		var slabIDs []int64
-		for rows.Next() {
-			var slabID int64
-			if err := rows.Scan(&slabID); err != nil {
-				return nil, fmt.Errorf("failed to scan slab ID: %w", err)
-			}
-			slabIDs = append(slabIDs, slabID)
-		}
-		if err := rows.Err(); err != nil {
-			return nil, fmt.Errorf("failed to get slab IDs: %w", err)
-		} else if len(slabIDs) == 0 {
-			return nil, nil
-		}
-		return slabIDs, nil
+		return pgx.CollectRows(rows, pgx.RowTo[int64])
 	}
 
 	var exhausted bool

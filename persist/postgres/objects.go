@@ -264,23 +264,21 @@ func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) err
 			return fmt.Errorf("failed to get object id: %w", err)
 		}
 
-		// remember the object's slabs so the now unreferenced ones can be
-		// unpinned after the object is deleted
-		rows, err := tx.Query(ctx, `SELECT DISTINCT s.id FROM slabs s
-INNER JOIN object_slabs os ON (os.slab_digest = s.digest)
-WHERE os.object_id = $1`, objectID)
+		// delete the object's slab references, remembering the slabs so the
+		// now unreferenced ones can be unpinned after the object is deleted
+		rows, err := tx.Query(ctx, `WITH deleted AS (
+	DELETE FROM object_slabs WHERE object_id = $1 RETURNING slab_digest
+)
+SELECT DISTINCT s.id FROM slabs s
+INNER JOIN deleted d ON (d.slab_digest = s.digest)`, objectID)
 		if err != nil {
-			return fmt.Errorf("failed to query object slabs: %w", err)
+			return fmt.Errorf("failed to delete object slabs: %w", err)
 		}
 		objectSlabIDs, err := pgx.CollectRows(rows, pgx.RowTo[int64])
 		if err != nil {
 			return fmt.Errorf("failed to collect object slab ids: %w", err)
 		}
 
-		_, err = tx.Exec(ctx, `DELETE FROM object_slabs WHERE object_id = $1`, objectID)
-		if err != nil {
-			return fmt.Errorf("failed to delete object slabs: %w", err)
-		}
 		_, err = tx.Exec(ctx, `DELETE FROM objects WHERE id = $1`, objectID)
 		if err != nil {
 			return fmt.Errorf("failed to delete object: %w", err)

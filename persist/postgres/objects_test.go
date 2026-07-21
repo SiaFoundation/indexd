@@ -18,6 +18,45 @@ import (
 	"lukechampine.com/frand"
 )
 
+// assertPinnedSlabs asserts the account pins exactly the expected slabs,
+// ignoring order.
+func (s *Store) assertPinnedSlabs(t testing.TB, acc proto.Account, expected ...slabs.SlabID) {
+	t.Helper()
+
+	got, err := s.SlabIDs(acc, 0, math.MaxInt64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sortIDs := func(ids []slabs.SlabID) {
+		sort.Slice(ids, func(i, j int) bool { return bytes.Compare(ids[i][:], ids[j][:]) < 0 })
+	}
+	sortIDs(expected)
+	sortIDs(got)
+	if !reflect.DeepEqual(expected, got) {
+		t.Fatalf("mismatched slab IDs: expected %v, got %v", expected, got)
+	}
+}
+
+// assertStoreCleanedUp asserts no slabs, sectors, pins or queued deletions
+// remain and all pinned totals are back to zero.
+func (s *Store) assertStoreCleanedUp(t testing.TB) {
+	t.Helper()
+
+	var slabCount, sectorCount, accountSlabs, queued, pinned int64
+	err := s.pool.QueryRow(t.Context(), `SELECT
+		(SELECT COUNT(*) FROM slabs),
+		(SELECT COUNT(*) FROM sectors),
+		(SELECT COUNT(*) FROM account_slabs),
+		(SELECT COUNT(*) FROM slab_deletion_queue),
+		(SELECT COALESCE(SUM(pinned_data + pinned_size), 0) FROM accounts)`).Scan(&slabCount, &sectorCount, &accountSlabs, &queued, &pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slabCount != 0 || sectorCount != 0 || accountSlabs != 0 || queued != 0 || pinned != 0 {
+		t.Fatalf("expected everything cleaned up, got %d slabs, %d sectors, %d pins, %d queued, %d pinned data", slabCount, sectorCount, accountSlabs, queued, pinned)
+	}
+}
+
 func (s *Store) pinRandomObject(t testing.TB, acc proto.Account, ss []slabs.SlabSlice) slabs.SealedObject {
 	obj := slabs.SealedObject{
 		EncryptedDataKey:     frand.Bytes(72),
@@ -730,23 +769,6 @@ func TestDeleteObjectUnpinsSlabs(t *testing.T) {
 	obj2 := store.pinRandomObject(t, acc1, []slabs.SlabSlice{slabShared.Slice(0, 100)})
 	obj3 := store.pinRandomObject(t, acc2, []slabs.SlabSlice{slabForeign.Slice(0, 100)})
 
-	assertSlabs := func(acc proto.Account, expected ...slabs.SlabID) {
-		t.Helper()
-
-		got, err := store.SlabIDs(acc, 0, math.MaxInt64)
-		if err != nil {
-			t.Fatal(err)
-		}
-		sortIDs := func(ids []slabs.SlabID) {
-			sort.Slice(ids, func(i, j int) bool { return bytes.Compare(ids[i][:], ids[j][:]) < 0 })
-		}
-		sortIDs(expected)
-		sortIDs(got)
-		if !reflect.DeepEqual(expected, got) {
-			t.Fatalf("mismatched slab IDs: expected %v, got %v", expected, got)
-		}
-	}
-
 	assertSlabExists := func(id slabs.SlabID, exists bool) {
 		t.Helper()
 
@@ -758,16 +780,16 @@ func TestDeleteObjectUnpinsSlabs(t *testing.T) {
 		}
 	}
 
-	assertSlabs(acc1, slabShared.Digest(), slabSole.Digest(), slabForeign.Digest())
-	assertSlabs(acc2, slabForeign.Digest())
+	store.assertPinnedSlabs(t, acc1, slabShared.Digest(), slabSole.Digest(), slabForeign.Digest())
+	store.assertPinnedSlabs(t, acc2, slabForeign.Digest())
 
 	// delete obj1; slabSole and slabForeign are no longer referenced by any of
 	// acc1's objects and are unpinned, slabShared is still referenced by obj2
 	if err := store.DeleteObject(acc1, obj1.ID()); err != nil {
 		t.Fatal(err)
 	}
-	assertSlabs(acc1, slabShared.Digest())
-	assertSlabs(acc2, slabForeign.Digest())
+	store.assertPinnedSlabs(t, acc1, slabShared.Digest())
+	store.assertPinnedSlabs(t, acc2, slabForeign.Digest())
 
 	// process the deletion queue; slabSole is deleted, slabForeign survives
 	// since acc2 still pins it
@@ -783,27 +805,13 @@ func TestDeleteObjectUnpinsSlabs(t *testing.T) {
 	if err := store.DeleteObject(acc2, obj3.ID()); err != nil {
 		t.Fatal(err)
 	}
-	assertSlabs(acc1)
-	assertSlabs(acc2)
+	store.assertPinnedSlabs(t, acc1)
+	store.assertPinnedSlabs(t, acc2)
 
 	store.pruneAllDeletedSlabs(t)
 	assertSlabExists(slabShared.Digest(), false)
 	assertSlabExists(slabForeign.Digest(), false)
-
-	// no slabs, sectors or queued deletions may remain and the accounts'
-	// pinned totals must be back to zero
-	var slabCount, sectorCount, queued, pinned int64
-	err := store.pool.QueryRow(t.Context(), `SELECT
-		(SELECT COUNT(*) FROM slabs),
-		(SELECT COUNT(*) FROM sectors),
-		(SELECT COUNT(*) FROM slab_deletion_queue),
-		(SELECT COALESCE(SUM(pinned_data + pinned_size), 0) FROM accounts)`).Scan(&slabCount, &sectorCount, &queued, &pinned)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if slabCount != 0 || sectorCount != 0 || queued != 0 || pinned != 0 {
-		t.Fatalf("expected everything cleaned up, got %d slabs, %d sectors, %d queued, %d pinned", slabCount, sectorCount, queued, pinned)
-	}
+	store.assertStoreCleanedUp(t)
 }
 
 // TestPinObjectAfterScheduledDeletion asserts that an object can be pinned
@@ -930,18 +938,7 @@ func TestUnpinSlabInUse(t *testing.T) {
 		t.Fatalf("expected slab to be deleted, got %v", err)
 	}
 
-	// no slabs, sectors or queued deletions may remain
-	var slabCount, sectorCount, queued int64
-	err := store.pool.QueryRow(t.Context(), `SELECT
-		(SELECT COUNT(*) FROM slabs),
-		(SELECT COUNT(*) FROM sectors),
-		(SELECT COUNT(*) FROM slab_deletion_queue)`).Scan(&slabCount, &sectorCount, &queued)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if slabCount != 0 || sectorCount != 0 || queued != 0 {
-		t.Fatalf("expected everything cleaned up, got %d slabs, %d sectors, %d queued", slabCount, sectorCount, queued)
-	}
+	store.assertStoreCleanedUp(t)
 }
 
 // TestDeleteObjectKeepsObjectlessPin asserts that deleting the only object
@@ -971,24 +968,13 @@ func TestDeleteObjectKeepsObjectlessPin(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	assertSlabs := func(acc proto.Account, expected ...slabs.SlabID) {
-		t.Helper()
-
-		got, err := store.SlabIDs(acc, 0, math.MaxInt64)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !reflect.DeepEqual(expected, got) {
-			t.Fatalf("mismatched slab IDs: expected %v, got %v", expected, got)
-		}
-	}
-	assertSlabs(accA, slab.Digest())
-	assertSlabs(accB)
+	store.assertPinnedSlabs(t, accA, slab.Digest())
+	store.assertPinnedSlabs(t, accB)
 
 	// processing the queue must not delete the slab since A still pins it
 	store.pruneAllDeletedSlabs(t)
-	assertSlabs(accA, slab.Digest())
-	assertSlabs(accB)
+	store.assertPinnedSlabs(t, accA, slab.Digest())
+	store.assertPinnedSlabs(t, accB)
 	if _, err := store.PinnedSlab(accA, slab.Digest()); err != nil {
 		t.Fatalf("expected slab to still be pinned by account A, got %v", err)
 	}
@@ -1010,26 +996,6 @@ func TestParallelObjectDeletion(t *testing.T) {
 
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
-
-	// assertCleanedUp asserts no slabs, sectors, pins or queued deletions
-	// remain and the account's pinned totals are back to zero
-	assertCleanedUp := func(t testing.TB) {
-		t.Helper()
-
-		var slabCount, sectorCount, accountSlabs, queued, pinned int64
-		err := store.pool.QueryRow(t.Context(), `SELECT
-			(SELECT COUNT(*) FROM slabs),
-			(SELECT COUNT(*) FROM sectors),
-			(SELECT COUNT(*) FROM account_slabs),
-			(SELECT COUNT(*) FROM slab_deletion_queue),
-			(SELECT COALESCE(SUM(pinned_data + pinned_size), 0) FROM accounts)`).Scan(&slabCount, &sectorCount, &accountSlabs, &queued, &pinned)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if slabCount != 0 || sectorCount != 0 || accountSlabs != 0 || queued != 0 || pinned != 0 {
-			t.Fatalf("expected everything cleaned up, got %d slabs, %d sectors, %d pins, %d queued, %d pinned data", slabCount, sectorCount, accountSlabs, queued, pinned)
-		}
-	}
 
 	// two objects sharing a slab are deleted in parallel; exactly one of the
 	// deletions must unpin the shared slab
@@ -1055,7 +1021,7 @@ func TestParallelObjectDeletion(t *testing.T) {
 		if _, err := store.Slab(shared.Digest()); !errors.Is(err, slabs.ErrSlabNotFound) {
 			t.Fatalf("expected slab to be deleted, got %v", err)
 		}
-		assertCleanedUp(t)
+		store.assertStoreCleanedUp(t)
 	}
 
 	// pinning a new object referencing the slab races the deletion of the
@@ -1107,7 +1073,7 @@ func TestParallelObjectDeletion(t *testing.T) {
 		if _, err := store.Slab(slab.Digest()); !errors.Is(err, slabs.ErrSlabNotFound) {
 			t.Fatalf("expected slab to be deleted, got %v", err)
 		}
-		assertCleanedUp(t)
+		store.assertStoreCleanedUp(t)
 	}
 
 	// an explicit unpin races the deletion of the last object referencing the
@@ -1141,7 +1107,7 @@ func TestParallelObjectDeletion(t *testing.T) {
 		if _, err := store.Slab(slab.Digest()); !errors.Is(err, slabs.ErrSlabNotFound) {
 			t.Fatalf("expected slab to be deleted, got %v", err)
 		}
-		assertCleanedUp(t)
+		store.assertStoreCleanedUp(t)
 	}
 }
 
