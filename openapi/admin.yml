@@ -983,8 +983,9 @@ paths:
       description: >
         Deletes all objects across all accounts that reference the given slab.
         This is useful for cleaning up old slabs that can no longer be
-        repaired. Use /debug/slabs/prune afterwards to prune orphaned
-        slabs. This route is only available in debug mode.
+        repaired. Slabs that are no longer referenced by any of an account's
+        objects are unpinned along the way and queued for deletion by a
+        background process. This route is only available in debug mode.
       operationId: deleteDebugSlab
       parameters:
         - name: slabid

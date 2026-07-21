@@ -28,6 +28,10 @@ var (
 	// ErrSlabNotFound is returned when a slab is not found in the database.
 	ErrSlabNotFound = errors.New("slab not found")
 
+	// ErrSlabInUse is returned when attempting to unpin a slab that is still
+	// referenced by one of the account's objects.
+	ErrSlabInUse = errors.New("slab is in use by an object")
+
 	// ErrUnrecoverable is returned when a slab is unrecoverable, meaning it cannot be repaired or migrated.
 	ErrUnrecoverable = errors.New("slab is unrecoverable")
 
@@ -199,9 +203,11 @@ func (m *SlabManager) PinSlabs(ctx context.Context, account proto.Account, nextI
 	return m.store.PinSlabs(account, nextIntegrityCheck, toPin...)
 }
 
-// UnpinSlab removes the association between the account and the given slab. If
-// this slab is no longer referenced by any account, it and its potentially
-// orphaned sectors are queued for deletion and removed by a background process.
+// UnpinSlab removes the association between the account and the given slab. A
+// slab that is still referenced by one of the account's objects can not be
+// unpinned and returns ErrSlabInUse. If this slab is no longer referenced by
+// any account, it and its potentially orphaned sectors are queued for deletion
+// and removed by a background process.
 func (m *SlabManager) UnpinSlab(ctx context.Context, account proto.Account, slabID SlabID) error {
 	return m.store.UnpinSlab(account, slabID)
 }

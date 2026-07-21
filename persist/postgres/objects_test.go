@@ -3,6 +3,7 @@ package postgres
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math"
 	"reflect"
 	"slices"
@@ -691,6 +692,404 @@ func TestObjectsForSlab(t *testing.T) {
 		t.Fatal(err)
 	} else if len(objects) != 0 {
 		t.Fatalf("expected 0 objects, got %d", len(objects))
+	}
+}
+
+// TestDeleteObjectUnpinsSlabs asserts that deleting an object unpins the slabs
+// that are no longer referenced by any of the account's objects and queues
+// them for deletion, while slabs referenced by other objects or pinned by
+// other accounts stay alive.
+func TestDeleteObjectUnpinsSlabs(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	for _, acc := range []proto.Account{acc1, acc2} {
+		store.addTestAccount(t, types.PublicKey(acc))
+	}
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// slabShared is referenced by both of acc1's objects, slabSole only by
+	// acc1's first object and slabForeign by acc1's first object as well as
+	// acc2's object
+	slabShared := newTestSlab(hk)
+	slabSole := newTestSlab(hk)
+	slabForeign := newTestSlab(hk)
+	store.pinTestSlabs(t, acc1, slabShared, slabSole, slabForeign)
+	store.pinTestSlabs(t, acc2, slabForeign)
+
+	// obj1 references slabSole twice to make sure duplicate references are
+	// handled
+	obj1 := store.pinRandomObject(t, acc1, []slabs.SlabSlice{
+		slabShared.Slice(0, 100),
+		slabSole.Slice(0, 100),
+		slabSole.Slice(100, 200),
+		slabForeign.Slice(0, 100),
+	})
+	obj2 := store.pinRandomObject(t, acc1, []slabs.SlabSlice{slabShared.Slice(0, 100)})
+	obj3 := store.pinRandomObject(t, acc2, []slabs.SlabSlice{slabForeign.Slice(0, 100)})
+
+	assertSlabs := func(acc proto.Account, expected ...slabs.SlabID) {
+		t.Helper()
+
+		got, err := store.SlabIDs(acc, 0, math.MaxInt64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sortIDs := func(ids []slabs.SlabID) {
+			sort.Slice(ids, func(i, j int) bool { return bytes.Compare(ids[i][:], ids[j][:]) < 0 })
+		}
+		sortIDs(expected)
+		sortIDs(got)
+		if !reflect.DeepEqual(expected, got) {
+			t.Fatalf("mismatched slab IDs: expected %v, got %v", expected, got)
+		}
+	}
+
+	assertSlabExists := func(id slabs.SlabID, exists bool) {
+		t.Helper()
+
+		_, err := store.Slab(id)
+		if exists && err != nil {
+			t.Fatalf("expected slab %v to exist, got %v", id, err)
+		} else if !exists && !errors.Is(err, slabs.ErrSlabNotFound) {
+			t.Fatalf("expected slab %v to be gone, got %v", id, err)
+		}
+	}
+
+	assertSlabs(acc1, slabShared.Digest(), slabSole.Digest(), slabForeign.Digest())
+	assertSlabs(acc2, slabForeign.Digest())
+
+	// delete obj1; slabSole and slabForeign are no longer referenced by any of
+	// acc1's objects and are unpinned, slabShared is still referenced by obj2
+	if err := store.DeleteObject(acc1, obj1.ID()); err != nil {
+		t.Fatal(err)
+	}
+	assertSlabs(acc1, slabShared.Digest())
+	assertSlabs(acc2, slabForeign.Digest())
+
+	// process the deletion queue; slabSole is deleted, slabForeign survives
+	// since acc2 still pins it
+	store.pruneAllDeletedSlabs(t)
+	assertSlabExists(slabShared.Digest(), true)
+	assertSlabExists(slabSole.Digest(), false)
+	assertSlabExists(slabForeign.Digest(), true)
+
+	// delete the remaining objects; all pins are removed
+	if err := store.DeleteObject(acc1, obj2.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteObject(acc2, obj3.ID()); err != nil {
+		t.Fatal(err)
+	}
+	assertSlabs(acc1)
+	assertSlabs(acc2)
+
+	store.pruneAllDeletedSlabs(t)
+	assertSlabExists(slabShared.Digest(), false)
+	assertSlabExists(slabForeign.Digest(), false)
+
+	// no slabs, sectors or queued deletions may remain and the accounts'
+	// pinned totals must be back to zero
+	var slabCount, sectorCount, queued, pinned int64
+	err := store.pool.QueryRow(t.Context(), `SELECT
+		(SELECT COUNT(*) FROM slabs),
+		(SELECT COUNT(*) FROM sectors),
+		(SELECT COUNT(*) FROM slab_deletion_queue),
+		(SELECT COALESCE(SUM(pinned_data + pinned_size), 0) FROM accounts)`).Scan(&slabCount, &sectorCount, &queued, &pinned)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slabCount != 0 || sectorCount != 0 || queued != 0 || pinned != 0 {
+		t.Fatalf("expected everything cleaned up, got %d slabs, %d sectors, %d queued, %d pinned", slabCount, sectorCount, queued, pinned)
+	}
+}
+
+// TestPinObjectAfterScheduledDeletion asserts that an object can be pinned
+// while its slabs are queued for deletion and that processing the queue
+// afterwards keeps the referenced slabs alive.
+func TestPinObjectAfterScheduledDeletion(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	for _, acc := range []proto.Account{acc1, acc2} {
+		store.addTestAccount(t, types.PublicKey(acc))
+	}
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// both accounts pin the slab, only acc1 references it with an object
+	slab := newTestSlab(hk)
+	store.pinTestSlabs(t, acc1, slab)
+	store.pinTestSlabs(t, acc2, slab)
+	obj1 := store.pinRandomObject(t, acc1, []slabs.SlabSlice{slab.Slice(0, 100)})
+
+	// delete the object; the slab is unpinned for acc1 and queued for deletion
+	if err := store.DeleteObject(acc1, obj1.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	// acc1 unpinned the slab, so it can't pin the object again without
+	// re-pinning the slab first
+	obj2 := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		Slabs:                []slabs.SlabSlice{slab.Slice(0, 100)},
+		DataSignature:        (types.Signature)(frand.Bytes(64)),
+		MetadataSignature:    (types.Signature)(frand.Bytes(64)),
+	}
+	if err := store.PinObject(acc1, obj2.PinRequest()); !errors.Is(err, slabs.ErrObjectUnpinnedSlab) {
+		t.Fatalf("expected ErrObjectUnpinnedSlab, got %v", err)
+	}
+
+	// acc2 still pins the slab and pins the object while the slab is queued
+	// for deletion
+	obj2 = store.pinRandomObject(t, acc2, []slabs.SlabSlice{slab.Slice(0, 100)})
+
+	// processing the queue must not delete the slab
+	store.pruneAllDeletedSlabs(t)
+	if _, err := store.Slab(slab.Digest()); err != nil {
+		t.Fatalf("expected slab to survive the prune, got %v", err)
+	}
+
+	// simulate the transient state where an object references the slab while
+	// no account pins it; the prune must keep the slab alive as well
+	_, err := store.pool.Exec(t.Context(), `DELETE FROM account_slabs`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = store.pool.Exec(t.Context(), `INSERT INTO slab_deletion_queue (slab_id) SELECT id FROM slabs`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store.pruneAllDeletedSlabs(t)
+	if _, err := store.Slab(slab.Digest()); err != nil {
+		t.Fatalf("expected referenced slab to survive the prune, got %v", err)
+	}
+
+	// the object must still be fully intact
+	obj, err := store.Object(acc2, obj2.ID())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(obj.Slabs) != 1 {
+		t.Fatalf("expected 1 slab, got %d", len(obj.Slabs))
+	} else if len(obj.Slabs[0].Sectors) != len(slab.Sectors) {
+		t.Fatalf("expected %d sectors, got %d", len(slab.Sectors), len(obj.Slabs[0].Sectors))
+	}
+}
+
+// TestUnpinSlabInUse asserts that a slab can not be unpinned while an object
+// of the same account references it, that objects of other accounts don't
+// block the unpin, and that deleting the object cleans the slab up through the
+// regular unpin path.
+func TestUnpinSlabInUse(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	accA, accB := proto.Account{1}, proto.Account{2}
+	for _, acc := range []proto.Account{accA, accB} {
+		store.addTestAccount(t, types.PublicKey(acc))
+	}
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// both accounts pin the slab, only accB references it with an object
+	slab := newTestSlab(hk)
+	store.pinTestSlabs(t, accA, slab)
+	store.pinTestSlabs(t, accB, slab)
+	obj := store.pinRandomObject(t, accB, []slabs.SlabSlice{slab.Slice(0, 100)})
+
+	// explicitly unpinning the slab while the account's own object references
+	// it must fail
+	if err := store.UnpinSlab(accB, slab.Digest()); !errors.Is(err, slabs.ErrSlabInUse) {
+		t.Fatalf("expected ErrSlabInUse, got %v", err)
+	}
+
+	// accB's object doesn't prevent accA from unpinning the slab
+	if err := store.UnpinSlab(accA, slab.Digest()); err != nil {
+		t.Fatal(err)
+	}
+
+	// the queued deletion must not remove the slab since accB still pins it
+	store.pruneAllDeletedSlabs(t)
+	if _, err := store.Slab(slab.Digest()); err != nil {
+		t.Fatalf("expected slab to survive the prune, got %v", err)
+	}
+
+	// deleting the object unpins the slab and queues it for deletion
+	if err := store.DeleteObject(accB, obj.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UnpinSlab(accB, slab.Digest()); !errors.Is(err, slabs.ErrSlabNotFound) {
+		t.Fatalf("expected ErrSlabNotFound, got %v", err)
+	}
+	store.pruneAllDeletedSlabs(t)
+	if _, err := store.Slab(slab.Digest()); !errors.Is(err, slabs.ErrSlabNotFound) {
+		t.Fatalf("expected slab to be deleted, got %v", err)
+	}
+
+	// no slabs, sectors or queued deletions may remain
+	var slabCount, sectorCount, queued int64
+	err := store.pool.QueryRow(t.Context(), `SELECT
+		(SELECT COUNT(*) FROM slabs),
+		(SELECT COUNT(*) FROM sectors),
+		(SELECT COUNT(*) FROM slab_deletion_queue)`).Scan(&slabCount, &sectorCount, &queued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slabCount != 0 || sectorCount != 0 || queued != 0 {
+		t.Fatalf("expected everything cleaned up, got %d slabs, %d sectors, %d queued", slabCount, sectorCount, queued)
+	}
+}
+
+// TestDeleteObjectKeepsObjectlessPin asserts that deleting the only object
+// referencing a slab unpins it for the deleting account only; another account
+// pinning the slab without any object keeps its pin and the slab survives the
+// deletion queue.
+func TestDeleteObjectKeepsObjectlessPin(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	accA, accB := proto.Account{1}, proto.Account{2}
+	for _, acc := range []proto.Account{accA, accB} {
+		store.addTestAccount(t, types.PublicKey(acc))
+	}
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// account A pins the slab without attaching it to an object, account B
+	// pins it and references it with an object
+	slab := newTestSlab(hk)
+	store.pinTestSlabs(t, accA, slab)
+	store.pinTestSlabs(t, accB, slab)
+	obj := store.pinRandomObject(t, accB, []slabs.SlabSlice{slab.Slice(0, 100)})
+
+	// delete the object; B's pin is removed, A's pin stays
+	if err := store.DeleteObject(accB, obj.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSlabs := func(acc proto.Account, expected ...slabs.SlabID) {
+		t.Helper()
+
+		got, err := store.SlabIDs(acc, 0, math.MaxInt64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(expected, got) {
+			t.Fatalf("mismatched slab IDs: expected %v, got %v", expected, got)
+		}
+	}
+	assertSlabs(accA, slab.Digest())
+	assertSlabs(accB)
+
+	// processing the queue must not delete the slab since A still pins it
+	store.pruneAllDeletedSlabs(t)
+	assertSlabs(accA, slab.Digest())
+	assertSlabs(accB)
+	if _, err := store.PinnedSlab(accA, slab.Digest()); err != nil {
+		t.Fatalf("expected slab to still be pinned by account A, got %v", err)
+	}
+	if _, err := store.PinnedSlab(accB, slab.Digest()); !errors.Is(err, slabs.ErrSlabNotFound) {
+		t.Fatalf("expected slab to no longer be pinned by account B, got %v", err)
+	}
+}
+
+// TestParallelObjectDeletion races deletions of objects sharing a slab as well
+// as explicit unpins against object deletions. The shared slab must be cleaned
+// up exactly once and the account's pinned totals must return to zero.
+func TestParallelObjectDeletion(t *testing.T) {
+	const rounds = 30
+
+	store := initPostgres(t, zap.NewNop())
+
+	acc := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// assertCleanedUp asserts no slabs, sectors, pins or queued deletions
+	// remain and the account's pinned totals are back to zero
+	assertCleanedUp := func(t testing.TB) {
+		t.Helper()
+
+		var slabCount, sectorCount, accountSlabs, queued, pinned int64
+		err := store.pool.QueryRow(t.Context(), `SELECT
+			(SELECT COUNT(*) FROM slabs),
+			(SELECT COUNT(*) FROM sectors),
+			(SELECT COUNT(*) FROM account_slabs),
+			(SELECT COUNT(*) FROM slab_deletion_queue),
+			(SELECT COALESCE(SUM(pinned_data + pinned_size), 0) FROM accounts)`).Scan(&slabCount, &sectorCount, &accountSlabs, &queued, &pinned)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slabCount != 0 || sectorCount != 0 || accountSlabs != 0 || queued != 0 || pinned != 0 {
+			t.Fatalf("expected everything cleaned up, got %d slabs, %d sectors, %d pins, %d queued, %d pinned data", slabCount, sectorCount, accountSlabs, queued, pinned)
+		}
+	}
+
+	// two objects sharing a slab are deleted in parallel; exactly one of the
+	// deletions must unpin the shared slab
+	for range rounds {
+		shared := newTestSlab(hk)
+		store.pinTestSlabs(t, acc, shared)
+		obj1 := store.pinRandomObject(t, acc, []slabs.SlabSlice{shared.Slice(0, 100)})
+		obj2 := store.pinRandomObject(t, acc, []slabs.SlabSlice{shared.Slice(0, 100), shared.Slice(100, 200)})
+
+		errs := make(chan error, 2)
+		for _, key := range []types.Hash256{obj1.ID(), obj2.ID()} {
+			go func() {
+				errs <- store.DeleteObject(acc, key)
+			}()
+		}
+		for range 2 {
+			if err := <-errs; err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		store.pruneAllDeletedSlabs(t)
+		if _, err := store.Slab(shared.Digest()); !errors.Is(err, slabs.ErrSlabNotFound) {
+			t.Fatalf("expected slab to be deleted, got %v", err)
+		}
+		assertCleanedUp(t)
+	}
+
+	// an explicit unpin races the deletion of the last object referencing the
+	// slab; the account's totals must only be decremented once
+	for range rounds {
+		slab := newTestSlab(hk)
+		store.pinTestSlabs(t, acc, slab)
+		obj := store.pinRandomObject(t, acc, []slabs.SlabSlice{slab.Slice(0, 100)})
+
+		errs := make(chan error, 2)
+		go func() {
+			errs <- store.DeleteObject(acc, obj.ID())
+		}()
+		go func() {
+			// the slab is in use until the object is deleted and unpinned
+			// right after, so the explicit unpin always fails with one of the
+			// two errors depending on how the calls interleave
+			if err := store.UnpinSlab(acc, slab.Digest()); errors.Is(err, slabs.ErrSlabInUse) || errors.Is(err, slabs.ErrSlabNotFound) {
+				errs <- nil
+			} else {
+				errs <- fmt.Errorf("expected ErrSlabInUse or ErrSlabNotFound, got %w", err)
+			}
+		}()
+		for range 2 {
+			if err := <-errs; err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		store.pruneAllDeletedSlabs(t)
+		if _, err := store.Slab(slab.Digest()); !errors.Is(err, slabs.ErrSlabNotFound) {
+			t.Fatalf("expected slab to be deleted, got %v", err)
+		}
+		assertCleanedUp(t)
 	}
 }
 

@@ -246,6 +246,9 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 }
 
 // DeleteObject deletes the object with the given key for the given account.
+// Slabs that were referenced by the object and are no longer referenced by any
+// of the account's objects are unpinned and queued for deletion by
+// PruneDeletedSlabs.
 func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
@@ -254,12 +257,26 @@ func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) err
 		}
 
 		var objectID int64
-		err = tx.QueryRow(ctx, `SELECT id FROM objects WHERE object_key = $1 AND account_id = $2`, sqlHash256(objectKey), accountID).Scan(&objectID)
+		err = tx.QueryRow(ctx, `SELECT id FROM objects WHERE object_key = $1 AND account_id = $2 FOR UPDATE`, sqlHash256(objectKey), accountID).Scan(&objectID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrObjectNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to get object id: %w", err)
 		}
+
+		// remember the object's slabs so the now unreferenced ones can be
+		// unpinned after the object is deleted
+		rows, err := tx.Query(ctx, `SELECT DISTINCT s.id FROM slabs s
+INNER JOIN object_slabs os ON (os.slab_digest = s.digest)
+WHERE os.object_id = $1`, objectID)
+		if err != nil {
+			return fmt.Errorf("failed to query object slabs: %w", err)
+		}
+		objectSlabIDs, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+		if err != nil {
+			return fmt.Errorf("failed to collect object slab ids: %w", err)
+		}
+
 		_, err = tx.Exec(ctx, `DELETE FROM object_slabs WHERE object_id = $1`, objectID)
 		if err != nil {
 			return fmt.Errorf("failed to delete object slabs: %w", err)
@@ -276,6 +293,42 @@ func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) err
 			return fmt.Errorf("failed to update object events: %w", err)
 		}
 
+		// lock the object's slabs so concurrent deletions of objects sharing
+		// a slab serialize; otherwise two deleters could each still see the
+		// other's object and neither would unpin the shared slab. This also
+		// serializes against PinObject's pin check, so an object pinned
+		// concurrently can't lose a slab it references.
+		if _, err := tx.Exec(ctx, `SELECT id FROM slabs WHERE id = ANY($1) ORDER BY id FOR UPDATE`, objectSlabIDs); err != nil {
+			return fmt.Errorf("failed to lock slabs: %w", err)
+		}
+
+		// unpin the slabs that are no longer referenced by any of the
+		// account's objects
+		rows, err = tx.Query(ctx, `SELECT s.id
+FROM slabs s
+JOIN account_slabs a ON s.id = a.slab_id
+WHERE a.account_id = $1
+	AND s.id = ANY($2)
+	AND NOT EXISTS (
+		SELECT 1
+		FROM objects o
+		JOIN object_slabs os ON o.id = os.object_id
+		WHERE o.account_id = a.account_id
+		AND os.slab_digest = s.digest
+	)`, accountID, objectSlabIDs)
+		if err != nil {
+			return fmt.Errorf("failed to query unreferenced slabs: %w", err)
+		}
+		toUnpin, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+		if err != nil {
+			return fmt.Errorf("failed to collect unreferenced slab ids: %w", err)
+		}
+
+		if len(toUnpin) > 0 {
+			if err := s.unpinSlabs(ctx, tx, accountID, toUnpin); err != nil {
+				return fmt.Errorf("failed to unpin unreferenced slabs: %w", err)
+			}
+		}
 		return nil
 	})
 }
@@ -361,11 +414,17 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 			args = append(args, sqlHash256(slabIDs[i]))
 		}
 
+		// lock the slabs so a concurrent prune of the deletion queue can't
+		// delete them between this check and the object_slabs insert below
 		var count int
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM slabs
-JOIN account_slabs ON account_slabs.slab_id = slabs.id
-WHERE account_slabs.account_id = $1
-AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM (
+	SELECT slabs.id FROM slabs
+	JOIN account_slabs ON account_slabs.slab_id = slabs.id
+	WHERE account_slabs.account_id = $1
+	AND slabs.digest = ANY($2)
+	ORDER BY slabs.id
+	FOR KEY SHARE OF slabs
+) locked`, accountID, args).Scan(&count); err != nil {
 			return fmt.Errorf("failed to check how many slab IDs exist: %w", err)
 		} else if len(seen) != count {
 			return slabs.ErrObjectUnpinnedSlab

@@ -443,14 +443,26 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 }
 
 // unpinSlabs removes the account's association with the given slabs and updates
-// the account's pinned totals. The slabs and their sectors are not deleted
-// inline; they are queued for deleteOrphanedSlabs to prune in a background loop.
+// the account's pinned totals. Slabs the account no longer pins are ignored, so
+// a concurrent unpin of the same slab can't double-decrement the totals. The
+// slabs and their sectors are not deleted inline; they are queued for
+// deleteOrphanedSlabs to prune in a background loop.
 func (s *Store) unpinSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64) error {
-	// delete the association between the account and the slab
-	_, err := tx.Exec(ctx, `DELETE FROM account_slabs a
-WHERE a.account_id = $1 AND a.slab_id = ANY($2);`, accountID, sIDs)
+	// delete the association between the account and the slab, keeping track
+	// of the associations that actually existed
+	rows, err := tx.Query(ctx, `DELETE FROM account_slabs a
+WHERE a.account_id = $1 AND a.slab_id = ANY($2)
+RETURNING a.slab_id`, accountID, sIDs)
 	if err != nil {
 		return fmt.Errorf("failed to delete account slabs: %w", err)
+	}
+	unpinned, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return fmt.Errorf("failed to collect unpinned slab ids: %w", err)
+	}
+
+	if len(unpinned) == 0 {
+		return nil // all slabs were already unpinned
 	}
 
 	// update the account's pinned data and pinned size
@@ -458,7 +470,7 @@ WHERE a.account_id = $1 AND a.slab_id = ANY($2);`, accountID, sIDs)
 	if err := tx.QueryRow(ctx, `SELECT
 		(SELECT COALESCE(SUM(min_shards::bigint), 0) * $1 FROM slabs WHERE id = ANY($2)),
 		(SELECT COUNT(*) * $1 FROM slab_sectors WHERE slab_id = ANY($2))`,
-		proto.SectorSize, sIDs).Scan(&pinnedDataDelta, &pinnedSizeDelta); err != nil {
+		proto.SectorSize, unpinned).Scan(&pinnedDataDelta, &pinnedSizeDelta); err != nil {
 		return fmt.Errorf("failed to get storage delta: %w", err)
 	}
 
@@ -477,16 +489,17 @@ RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&co
 	// queue the slabs for background deletion; the queue is append-only so a
 	// concurrent prune can't swallow a re-queue
 	if _, err := tx.Exec(ctx, `INSERT INTO slab_deletion_queue (slab_id)
-SELECT * FROM unnest($1::bigint[])`, sIDs); err != nil {
+SELECT * FROM unnest($1::bigint[])`, unpinned); err != nil {
 		return fmt.Errorf("failed to queue slabs for deletion: %w", err)
 	}
 	return nil
 }
 
 // deleteOrphanedSlabs deletes the slabs in sIDs that are no longer pinned by
-// any account, along with any sectors that are only referenced by those slabs,
-// and updates the relevant sector and slab statistics. Callers must have
-// already removed the relevant account_slabs associations.
+// any account nor referenced by any object, along with any sectors that are
+// only referenced by those slabs, and updates the relevant sector and slab
+// statistics. Callers must have already removed the relevant account_slabs
+// associations.
 func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
 	// lock the candidate slabs so a concurrent re-pin serializes against the
 	// pinned check below
@@ -494,10 +507,16 @@ func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) 
 		return fmt.Errorf("failed to lock slabs: %w", err)
 	}
 
-	// ignore the slabs that are pinned by another account
-	rows, err := tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE slab_id = ANY($1)`, sIDs)
+	// ignore the slabs that are pinned by an account or referenced by an
+	// object; a slab can be re-pinned and attached to a new object after it
+	// was queued for deletion
+	rows, err := tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE slab_id = ANY($1)
+UNION
+SELECT s.id FROM slabs s
+JOIN object_slabs os ON os.slab_digest = s.digest
+WHERE s.id = ANY($1)`, sIDs)
 	if err != nil {
-		return fmt.Errorf("failed to check if slab was pinned: %w", err)
+		return fmt.Errorf("failed to check if slab was pinned or referenced: %w", err)
 	}
 	defer rows.Close()
 
@@ -505,15 +524,15 @@ func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) 
 	for rows.Next() {
 		var sID int64
 		if err := rows.Scan(&sID); err != nil {
-			return fmt.Errorf("failed to check pinned slab: %w", err)
+			return fmt.Errorf("failed to scan in-use slab: %w", err)
 		}
 		seen[sID] = struct{}{}
 	}
 	if err := rows.Err(); err != nil {
-		return fmt.Errorf("failed to get pinned slabs: %w", err)
+		return fmt.Errorf("failed to get in-use slabs: %w", err)
 	}
 
-	// get all of the slabs that are not pinned by another account
+	// get all of the slabs that are neither pinned nor referenced
 	var toDelete []int64
 	for _, sID := range sIDs {
 		if _, ok := seen[sID]; ok {
@@ -608,9 +627,11 @@ func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) 
 	return nil
 }
 
-// UnpinSlab removes the association between the account and the given slab. If
-// this slab is no longer owned by any account, it and its sectors are queued
-// for deletion by PruneDeletedSlabs in a background loop.
+// UnpinSlab removes the association between the account and the given slab. A
+// slab that is still referenced by one of the account's objects can not be
+// unpinned and returns ErrSlabInUse. If this slab is no longer owned by any
+// account, it and its sectors are queued for deletion by PruneDeletedSlabs in
+// a background loop.
 func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		id, _, err := accountID(ctx, tx, account)
@@ -624,6 +645,28 @@ func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 			return slabs.ErrSlabNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to check if slab exists: %w", err)
+		}
+
+		// lock the slab so the reference check below serializes against a
+		// concurrent PinObject attaching the slab to a new object
+		if _, err := tx.Exec(ctx, `SELECT id FROM slabs WHERE id = $1 FOR UPDATE`, sID); err != nil {
+			return fmt.Errorf("failed to lock slab: %w", err)
+		}
+
+		// refuse to unpin a slab that is still referenced by one of the
+		// account's objects; otherwise the account would free up quota while
+		// the object keeps the slab alive
+		var inUse bool
+		err = tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1
+			FROM objects o
+			JOIN object_slabs os ON o.id = os.object_id
+			WHERE o.account_id = $1 AND os.slab_digest = $2
+		)`, id, sqlHash256(slabID)).Scan(&inUse)
+		if err != nil {
+			return fmt.Errorf("failed to check if slab is in use: %w", err)
+		} else if inUse {
+			return slabs.ErrSlabInUse
 		}
 
 		if err := s.unpinSlabs(ctx, tx, id, []int64{sID}); err != nil {

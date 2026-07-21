@@ -283,6 +283,8 @@ func (m *SlabManager) Object(ctx context.Context, account proto.Account, key typ
 }
 
 // DeleteObject deletes the object with the given key for the given account.
+// Slabs that were referenced by the object and are no longer referenced by any
+// of the account's objects are unpinned and queued for deletion.
 func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error {
 	return m.store.DeleteObject(account, objectKey)
 }
