@@ -298,30 +298,15 @@ WHERE os.object_id = $1`, objectID)
 		// other's object and neither would unpin the shared slab. This also
 		// serializes against PinObject's pin check, so an object pinned
 		// concurrently can't lose a slab it references.
-		if _, err := tx.Exec(ctx, `SELECT id FROM slabs WHERE id = ANY($1) ORDER BY id FOR UPDATE`, objectSlabIDs); err != nil {
-			return fmt.Errorf("failed to lock slabs: %w", err)
+		if err := lockSlabs(ctx, tx, objectSlabIDs); err != nil {
+			return err
 		}
 
 		// unpin the slabs that are no longer referenced by any of the
 		// account's objects
-		rows, err = tx.Query(ctx, `SELECT s.id
-FROM slabs s
-JOIN account_slabs a ON s.id = a.slab_id
-WHERE a.account_id = $1
-	AND s.id = ANY($2)
-	AND NOT EXISTS (
-		SELECT 1
-		FROM objects o
-		JOIN object_slabs os ON o.id = os.object_id
-		WHERE o.account_id = a.account_id
-		AND os.slab_digest = s.digest
-	)`, accountID, objectSlabIDs)
+		toUnpin, err := unreferencedSlabs(ctx, tx, accountID, objectSlabIDs, nil)
 		if err != nil {
-			return fmt.Errorf("failed to query unreferenced slabs: %w", err)
-		}
-		toUnpin, err := pgx.CollectRows(rows, pgx.RowTo[int64])
-		if err != nil {
-			return fmt.Errorf("failed to collect unreferenced slab ids: %w", err)
+			return err
 		}
 
 		if len(toUnpin) > 0 {
@@ -415,16 +400,23 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 		}
 
 		// lock the slabs so a concurrent prune of the deletion queue can't
-		// delete them between this check and the object_slabs insert below
+		// delete them between the pin check and the object_slabs insert
+		// below. KEY SHARE is what the FK insert takes anyway; it conflicts
+		// with the FOR UPDATE held by deleters but not with pinned_at
+		// refreshes. Locks are acquired in digest order like everywhere else.
+		if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE digest = ANY($1) ORDER BY digest FOR KEY SHARE`, args); err != nil {
+			return fmt.Errorf("failed to lock slabs: %w", err)
+		}
+
+		// check that this account has pinned these slabs. The check runs as
+		// a separate statement after the lock so its snapshot includes pins
+		// removed by a concurrent unpin we may have waited on; a single
+		// combined statement would count rows from before the wait.
 		var count int
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM (
-	SELECT slabs.id FROM slabs
-	JOIN account_slabs ON account_slabs.slab_id = slabs.id
-	WHERE account_slabs.account_id = $1
-	AND slabs.digest = ANY($2)
-	ORDER BY slabs.id
-	FOR KEY SHARE OF slabs
-) locked`, accountID, args).Scan(&count); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM slabs
+JOIN account_slabs ON account_slabs.slab_id = slabs.id
+WHERE account_slabs.account_id = $1
+AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 			return fmt.Errorf("failed to check how many slab IDs exist: %w", err)
 		} else if len(seen) != count {
 			return slabs.ErrObjectUnpinnedSlab

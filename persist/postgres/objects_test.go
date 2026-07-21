@@ -1058,6 +1058,58 @@ func TestParallelObjectDeletion(t *testing.T) {
 		assertCleanedUp(t)
 	}
 
+	// pinning a new object referencing the slab races the deletion of the
+	// last object referencing it; the pin must either succeed with the slab
+	// still pinned or fail with ErrObjectUnpinnedSlab — it must never
+	// succeed while the deletion removes the pin
+	for range rounds {
+		slab := newTestSlab(hk)
+		store.pinTestSlabs(t, acc, slab)
+		obj1 := store.pinRandomObject(t, acc, []slabs.SlabSlice{slab.Slice(0, 100)})
+		obj2 := slabs.SealedObject{
+			EncryptedDataKey:     frand.Bytes(72),
+			EncryptedMetadataKey: frand.Bytes(72),
+			Slabs:                []slabs.SlabSlice{slab.Slice(0, 100), slab.Slice(100, 200)},
+			DataSignature:        (types.Signature)(frand.Bytes(64)),
+			MetadataSignature:    (types.Signature)(frand.Bytes(64)),
+		}
+
+		delErrCh := make(chan error, 1)
+		pinErrCh := make(chan error, 1)
+		go func() {
+			delErrCh <- store.DeleteObject(acc, obj1.ID())
+		}()
+		go func() {
+			pinErrCh <- store.PinObject(acc, obj2.PinRequest())
+		}()
+		if err := <-delErrCh; err != nil {
+			t.Fatal(err)
+		}
+		pinErr := <-pinErrCh
+		if pinErr != nil && !errors.Is(pinErr, slabs.ErrObjectUnpinnedSlab) {
+			t.Fatal(pinErr)
+		}
+
+		if pinErr == nil {
+			// the object was pinned, so the account must still pin the slab
+			ids, err := store.SlabIDs(acc, 0, math.MaxInt64)
+			if err != nil {
+				t.Fatal(err)
+			} else if !slices.Contains(ids, slab.Digest()) {
+				t.Fatal("pinned object references a slab the account no longer pins")
+			}
+			if err := store.DeleteObject(acc, obj2.ID()); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		store.pruneAllDeletedSlabs(t)
+		if _, err := store.Slab(slab.Digest()); !errors.Is(err, slabs.ErrSlabNotFound) {
+			t.Fatalf("expected slab to be deleted, got %v", err)
+		}
+		assertCleanedUp(t)
+	}
+
 	// an explicit unpin races the deletion of the last object referencing the
 	// slab; the account's totals must only be decremented once
 	for range rounds {
