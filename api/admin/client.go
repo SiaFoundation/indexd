@@ -99,6 +99,32 @@ func (c *Client) UpdateAppConnectKey(ctx context.Context, req accounts.AppConnec
 	return c.c.PUT(ctx, "/apps/connect/keys", req)
 }
 
+// PreAuthorizedKeys retrieves a paginated list of pre-authorized keys.
+func (c *Client) PreAuthorizedKeys(ctx context.Context, offset, limit int) (keys []accounts.PreAuthorizedKey, err error) {
+	values := url.Values{}
+	values.Set("offset", fmt.Sprintf("%d", offset))
+	values.Set("limit", fmt.Sprintf("%d", limit))
+	err = c.c.GET(ctx, "/apps/preauthorized/keys?"+values.Encode(), &keys)
+	return
+}
+
+// PreAuthorizedKey retrieves a pre-authorized key by its public key.
+func (c *Client) PreAuthorizedKey(ctx context.Context, publicKey types.PublicKey) (preAuthorizedKey accounts.PreAuthorizedKey, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/apps/preauthorized/keys/%s", publicKey), &preAuthorizedKey)
+	return
+}
+
+// AddPreAuthorizedKey registers a client-generated pre-authorized public key.
+func (c *Client) AddPreAuthorizedKey(ctx context.Context, req accounts.PreAuthorizedKeyRequest) (key accounts.PreAuthorizedKey, err error) {
+	err = c.c.POST(ctx, "/apps/preauthorized/keys", req, &key)
+	return
+}
+
+// DeletePreAuthorizedKey deletes a pre-authorized key by its public key.
+func (c *Client) DeletePreAuthorizedKey(ctx context.Context, publicKey types.PublicKey) error {
+	return c.c.DELETE(ctx, fmt.Sprintf("/apps/preauthorized/keys/%s", publicKey))
+}
+
 // RegisterAppKey registers an app key with the given connect key.
 func (c *Client) RegisterAppKey(ctx context.Context, req RegisterAppKeyRequest) error {
 	return c.c.POST(ctx, "/apps/register", req, nil)

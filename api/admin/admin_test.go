@@ -158,6 +158,74 @@ func TestAppConnectKeys(t *testing.T) {
 	}
 }
 
+func TestPreAuthorizedKeys(t *testing.T) {
+	c := testutils.NewConsensusNode(t, zap.NewNop())
+	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
+	ctx := t.Context()
+
+	connectKey, err := adminClient.AddAppConnectKey(ctx, accounts.AppConnectKeyRequest{Quota: "default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appID := types.Hash256(frand.Entropy256())
+	preAuthorizedPrivateKey := types.GeneratePrivateKey()
+	createRequest := accounts.PreAuthorizedKeyRequest{
+		ConnectKey:   connectKey.Key,
+		Expiration:   time.Now().Add(time.Hour),
+		TotalUses:    3,
+		AllowedAppID: &appID,
+	}
+	createRequest.Sign(preAuthorizedPrivateKey)
+	created, err := adminClient.AddPreAuthorizedKey(ctx, createRequest)
+	if err != nil {
+		t.Fatal(err)
+	} else if created.PublicKey != preAuthorizedPrivateKey.PublicKey() || created.ConnectKey != connectKey.Key {
+		t.Fatalf("unexpected pre-authorized key: %+v", created)
+	} else if created.TotalUses != 3 || created.RemainingUses != 3 {
+		t.Fatalf("unexpected use limits: %+v", created)
+	} else if created.AllowedAppID == nil || *created.AllowedAppID != appID {
+		t.Fatalf("unexpected app restriction: %+v", created)
+	}
+
+	keys, err := adminClient.PreAuthorizedKeys(ctx, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(keys) != 1 {
+		t.Fatalf("unexpected key list: %+v", keys)
+	}
+	if !reflect.DeepEqual(keys[0], created) {
+		t.Fatalf("expected %+v, got %+v", created, keys[0])
+	}
+	got, err := adminClient.PreAuthorizedKey(ctx, created.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(got, created) {
+		t.Fatalf("expected %+v, got %+v", created, got)
+	}
+
+	expiredRequest := accounts.PreAuthorizedKeyRequest{
+		ConnectKey: connectKey.Key,
+		Expiration: time.Now().Add(-time.Minute),
+		TotalUses:  1,
+	}
+	expiredRequest.Sign(types.GeneratePrivateKey())
+	_, err = adminClient.AddPreAuthorizedKey(ctx, expiredRequest)
+	if err == nil {
+		t.Fatal("expected expired creation request to fail")
+	}
+
+	tamperedRequest := createRequest
+	tamperedRequest.TotalUses++
+	if _, err := adminClient.AddPreAuthorizedKey(ctx, tamperedRequest); err == nil {
+		t.Fatal("expected creation request with an invalid signature to fail")
+	} else if err := adminClient.DeletePreAuthorizedKey(ctx, created.PublicKey); err != nil {
+		t.Fatal(err)
+	} else if _, err := adminClient.PreAuthorizedKey(ctx, created.PublicKey); err == nil {
+		t.Fatal("expected deleted key to be missing")
+	}
+}
+
 func TestQuotasAPI(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
 	indexer := testutils.NewIndexer(t, c, zap.NewNop())

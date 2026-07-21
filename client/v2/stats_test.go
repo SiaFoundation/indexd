@@ -27,45 +27,101 @@ func TestRPCAverage(t *testing.T) {
 }
 
 func TestFailureRate(t *testing.T) {
-	var fr failureRate
+	t.Run("Basic", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var fr failureRate
 
-	if fr.Value() != 0 {
-		t.Fatal("initial value should be zero")
-	}
+			if fr.Value() != 0 {
+				t.Fatal("initial value should be zero")
+			}
 
-	fr.AddSample(true)
-	if v := fr.Value(); v != 0 {
-		t.Fatalf("expected 0, got %f", v)
-	}
+			fr.AddSample(true)
+			if v := fr.Value(); v != 0 {
+				t.Fatalf("expected 0, got %f", v)
+			}
 
-	fr.AddSample(false)
-	expected := 0.2
-	if v := fr.Value(); v != expected {
-		t.Fatalf("expected %f, got %f", expected, v)
-	}
-}
+			fr.AddSample(false)
+			if v := fr.Value(); v != emaAlpha {
+				t.Fatalf("expected %f, got %f", emaAlpha, v)
+			}
 
-func TestFailureRateTimeDecay(t *testing.T) {
-	const (
-		minutesBetweenDecays = 5
-		totalDecayMinutes    = 10
-	)
-	synctest.Test(t, func(t *testing.T) {
-		var fr failureRate
+			for range 13 {
+				fr.AddSample(true)
+			}
+			if v := fr.Value(); v == 0 {
+				t.Fatal("expected value just above the threshold to be reported")
+			}
 
-		fr.AddSample(false)
-		expected := 1.0
-		if v := fr.Value(); v != expected {
-			t.Fatalf("expected %f, got %f", expected, v)
-		}
+			fr.AddSample(true)
+			if v := fr.Value(); v != 0 {
+				t.Fatalf("expected samples below the threshold to be clamped to zero, got %f", v)
+			}
+		})
+	})
 
-		time.Sleep(totalDecayMinutes * time.Minute)
-		synctest.Wait()
+	t.Run("TimeDecay", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var fr failureRate
 
-		decayFactor := math.Pow(1.0-emaAlpha, totalDecayMinutes/minutesBetweenDecays)
-		expected *= decayFactor
-		if v := fr.Value(); v != expected {
-			t.Fatalf("expected %f, got %f", expected, v)
-		}
+			fr.AddSample(false)
+			if v := fr.Value(); v != 1 {
+				t.Fatalf("expected 1, got %f", v)
+			}
+
+			time.Sleep(failureRateHalfLife - time.Second)
+			if v := fr.Value(); v != 1 {
+				t.Fatalf("expected no decay before the half-life, got %f", v)
+			}
+
+			time.Sleep(time.Second)
+			if v := fr.Value(); v != math.Ldexp(1, -1) {
+				t.Fatalf("expected 0.5 after one half-life, got %f", v)
+			}
+
+			time.Sleep(5 * failureRateHalfLife)
+			if v := fr.Value(); v != math.Ldexp(1, -6) {
+				t.Fatalf("expected value above threshold after six half-lives, got %f", v)
+			}
+
+			time.Sleep(failureRateHalfLife)
+			if v := fr.Value(); v != 0 {
+				t.Fatalf("expected failure rate to be forgiven after seven half-lives, got %f", v)
+			}
+		})
+	})
+
+	t.Run("DecayBeforeSample", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var fr failureRate
+
+			fr.AddSample(false)
+			time.Sleep(failureRateHalfLife)
+			// AddSample must decay the idle value before applying the EMA,
+			// without any intervening Value call doing the decay for it.
+			fr.AddSample(false)
+
+			decayed := math.Ldexp(1, -1)
+			expected := emaAlpha*1.0 + (1.0-emaAlpha)*decayed
+			if v := fr.Value(); v != expected {
+				t.Fatalf("expected %f, got %f", expected, v)
+			}
+		})
+	})
+
+	t.Run("ForgivesSingleFailure", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			var fr failureRate
+
+			fr.AddSample(true)
+			fr.AddSample(false)
+			if v := fr.Value(); v != emaAlpha {
+				t.Fatalf("expected %f, got %f", emaAlpha, v)
+			}
+
+			time.Sleep(5 * failureRateHalfLife)
+			if v := fr.Value(); v != 0 {
+				t.Fatalf("expected a single failure to be forgiven, got %f", v)
+			}
+		})
 	})
 }

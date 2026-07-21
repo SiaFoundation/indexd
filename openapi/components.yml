@@ -1340,6 +1340,81 @@ components:
           format: uint64
           description: Sum of all the pinned data including redundancy of the accounts associated with this key
 
+    PreAuthorizedKey:
+      type: object
+      required:
+        - publicKey
+        - connectKey
+        - expiration
+        - totalUses
+        - remainingUses
+        - dateCreated
+      properties:
+        publicKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: Public key used to identify and manage the pre-authorization
+        connectKey:
+          type: string
+          description: Connect key this authorization uses
+        expiration:
+          type: string
+          format: date-time
+          description: Time after which this authorization cannot be used
+        totalUses:
+          type: integer
+          minimum: 1
+          description: Initial number of authorized uses
+        remainingUses:
+          type: integer
+          minimum: 0
+          description: Number of authorized uses remaining
+        allowedAppID:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: Optional app ID restriction
+        dateCreated:
+          type: string
+          format: date-time
+          description: Time the authorization was created
+        lastUsed:
+          type: string
+          format: date-time
+          description: Time the authorization was last consumed
+
+    PreAuthorizedKeyRequest:
+      type: object
+      required:
+        - publicKey
+        - signature
+        - connectKey
+        - expiration
+        - totalUses
+      properties:
+        publicKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: Client-generated Ed25519 public key; the corresponding private key remains with the client
+        signature:
+          allOf:
+            - $ref: "#/components/schemas/Signature"
+            - description: Proof of control of the private key, signing a domain-separated hash of the complete creation policy
+        connectKey:
+          type: string
+          description: Connect key this authorization should use
+        expiration:
+          type: string
+          format: date-time
+          description: Time after which this authorization cannot be used; must be in the future
+        totalUses:
+          type: integer
+          minimum: 1
+          description: Maximum number of times this authorization may be used
+        allowedAppID:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: Optional app ID restriction
+
     AppConnectKeyRequest:
       type: object
       required:

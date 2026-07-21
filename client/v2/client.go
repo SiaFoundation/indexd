@@ -190,7 +190,7 @@ func isFailedRPC(ctx context.Context, err error) bool {
 	switch {
 	case ctx.Err() != nil:
 		return false // interrupted RPC
-	case errors.Is(err, proto.ErrSectorNotFound):
+	case errors.Is(err, proto.ErrSectorNotFound), errors.Is(err, proto.ErrSectorCorrupt):
 		return false
 	default:
 		return err != nil

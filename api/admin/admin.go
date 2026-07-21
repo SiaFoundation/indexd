@@ -116,6 +116,10 @@ type (
 		DeleteAppConnectKey(context.Context, string) error
 		AppConnectKey(ctx context.Context, key string) (accounts.ConnectKey, error)
 		AppConnectKeys(ctx context.Context, offset, limit int) ([]accounts.ConnectKey, error)
+		AddPreAuthorizedKey(context.Context, accounts.PreAuthorizedKeyRequest) (accounts.PreAuthorizedKey, error)
+		DeletePreAuthorizedKey(context.Context, types.PublicKey) error
+		PreAuthorizedKey(context.Context, types.PublicKey) (accounts.PreAuthorizedKey, error)
+		PreAuthorizedKeys(context.Context, int, int) ([]accounts.PreAuthorizedKey, error)
 		RegisterAppKey(string, types.PublicKey, accounts.AppMeta) error
 
 		PutQuota(ctx context.Context, key string, req accounts.PutQuotaRequest) error
@@ -276,12 +280,16 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /txpool/recommendedfee": a.handleGETTxpoolRecommendedFee,
 
 		// connect endpoints
-		"GET    /apps/connect/keys":      a.handleGETAppConnectKeys,
-		"POST   /apps/connect/keys":      a.handlePOSTAppConnectKeys,
-		"PUT    /apps/connect/keys":      a.handlePUTAppConnectKeys,
-		"GET    /apps/connect/keys/:key": a.handleGETAppConnectKeysKey,
-		"DELETE /apps/connect/keys/:key": a.handleDELETEAppConnectKeys,
-		"POST   /apps/register":          a.handlePOSTAppsRegister,
+		"GET    /apps/connect/keys":                  a.handleGETAppConnectKeys,
+		"POST   /apps/connect/keys":                  a.handlePOSTAppConnectKeys,
+		"PUT    /apps/connect/keys":                  a.handlePUTAppConnectKeys,
+		"GET    /apps/connect/keys/:key":             a.handleGETAppConnectKeysKey,
+		"DELETE /apps/connect/keys/:key":             a.handleDELETEAppConnectKeys,
+		"GET    /apps/preauthorized/keys":            a.handleGETPreAuthorizedKeys,
+		"POST   /apps/preauthorized/keys":            a.handlePOSTPreAuthorizedKeys,
+		"GET    /apps/preauthorized/keys/:publicKey": a.handleGETPreAuthorizedKeysKey,
+		"DELETE /apps/preauthorized/keys/:publicKey": a.handleDELETEPreAuthorizedKeys,
+		"POST   /apps/register":                      a.handlePOSTAppsRegister,
 
 		// quota endpoints
 		"GET    /quotas":      a.handleGETQuotas,
@@ -495,6 +503,71 @@ func (a *admin) handleDELETEAppConnectKeys(jc jape.Context) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to delete app connect key", err) != nil {
+		return
+	}
+	jc.Encode(nil)
+}
+
+func (a *admin) handleGETPreAuthorizedKeys(jc jape.Context) {
+	offset, limit, ok := api.ParseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+
+	keys, err := a.accounts.PreAuthorizedKeys(jc.Request.Context(), offset, limit)
+	if jc.Check("failed to get pre-authorized keys", err) != nil {
+		return
+	}
+	jc.Encode(keys)
+}
+
+func (a *admin) handlePOSTPreAuthorizedKeys(jc jape.Context) {
+	var req accounts.PreAuthorizedKeyRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	created, err := a.accounts.AddPreAuthorizedKey(jc.Request.Context(), req)
+	switch {
+	case errors.Is(err, accounts.ErrInvalidPreAuthorizedKey):
+		jc.Error(err, http.StatusBadRequest)
+	case errors.Is(err, accounts.ErrKeyNotFound):
+		jc.Error(err, http.StatusNotFound)
+	case errors.Is(err, accounts.ErrKeyAlreadyExists):
+		jc.Error(err, http.StatusConflict)
+	case jc.Check("failed to add pre-authorized key", err) != nil:
+	default:
+		jc.Encode(created)
+	}
+}
+
+func (a *admin) handleGETPreAuthorizedKeysKey(jc jape.Context) {
+	var publicKey types.PublicKey
+	if jc.DecodeParam("publicKey", &publicKey) != nil {
+		return
+	}
+
+	preAuthorizedKey, err := a.accounts.PreAuthorizedKey(jc.Request.Context(), publicKey)
+	if errors.Is(err, accounts.ErrKeyNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get pre-authorized key", err) != nil {
+		return
+	}
+	jc.Encode(preAuthorizedKey)
+}
+
+func (a *admin) handleDELETEPreAuthorizedKeys(jc jape.Context) {
+	var publicKey types.PublicKey
+	if jc.DecodeParam("publicKey", &publicKey) != nil {
+		return
+	}
+
+	err := a.accounts.DeletePreAuthorizedKey(jc.Request.Context(), publicKey)
+	if errors.Is(err, accounts.ErrKeyNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to delete pre-authorized key", err) != nil {
 		return
 	}
 	jc.Encode(nil)

@@ -279,6 +279,99 @@ paths:
         "404":
           description: Connect key not found
 
+  /apps/preauthorized/keys:
+    get:
+      tags:
+        - apps
+      summary: List pre-authorized application keys
+      operationId: getPreAuthorizedKeys
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: A list of pre-authorized keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PreAuthorizedKey"
+    post:
+      tags:
+        - apps
+      summary: Create a pre-authorized application key
+      description: Registers a client-generated Ed25519 public key as a limited-use authorization tied to a connect key. A signature proves control of the private key and binds the complete policy; the private key is never sent to the server.
+      operationId: createPreAuthorizedKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreAuthorizedKeyRequest"
+      responses:
+        "200":
+          description: Pre-authorized key created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreAuthorizedKey"
+        "400":
+          description: Public key, signature, expiration, or use count is invalid
+        "404":
+          description: Connect key not found
+        "409":
+          description: Pre-authorized key already exists
+
+  /apps/preauthorized/keys/{publicKey}:
+    get:
+      tags:
+        - apps
+      summary: Retrieve a pre-authorized application key
+      operationId: getPreAuthorizedKey
+      parameters:
+        - name: publicKey
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+      responses:
+        "200":
+          description: Pre-authorized key retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreAuthorizedKey"
+        "404":
+          description: Pre-authorized key not found
+    delete:
+      tags:
+        - apps
+      summary: Delete a pre-authorized application key
+      operationId: deletePreAuthorizedKey
+      parameters:
+        - name: publicKey
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+      responses:
+        "204":
+          description: Pre-authorized key deleted successfully
+        "404":
+          description: Pre-authorized key not found
+
   /apps/register:
     post:
       tags:
@@ -2142,6 +2235,10 @@ components:
       $ref: "./components.yml#/components/schemas/UsabilitySettings"
     ConnectKey:
       $ref: "./components.yml#/components/schemas/ConnectKey"
+    PreAuthorizedKey:
+      $ref: "./components.yml#/components/schemas/PreAuthorizedKey"
+    PreAuthorizedKeyRequest:
+      $ref: "./components.yml#/components/schemas/PreAuthorizedKeyRequest"
     AccountStatsResponse:
       $ref: "./components.yml#/components/schemas/AccountStatsResponse"
     AppStatsResponse:
