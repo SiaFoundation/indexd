@@ -286,14 +286,38 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			return fmt.Errorf("failed to get good host rows: %w", err)
 		}
 
-		var newPinnedData, newPinnedSize uint64
+		// validate the slabs and compute their digests
+		digestArgs := make([]any, 0, len(toPin))
+		rootArgs := make([]any, 0, len(toPin))
 		for _, slab := range toPin {
 			if slab.MinShards <= 0 || uint(len(slab.Sectors)) < slab.MinShards {
 				return slabs.ErrMinShards
 			}
-
 			digest := slab.Digest()
 			digests = append(digests, digest)
+			digestArgs = append(digestArgs, sqlHash256(digest))
+			for _, sector := range slab.Sectors {
+				rootArgs = append(rootArgs, sqlHash256(sector.Root))
+			}
+		}
+
+		// lock the slabs and sectors that already exist up front, in the
+		// same order the other lockers use (slabs by digest, then sectors by
+		// root), so the row locks the upserts below take can't deadlock with
+		// concurrent deletions and prunes. Rows the upserts insert are
+		// invisible to concurrent lockers, so the upserts themselves may run
+		// in the caller's order, which also determines the order sectors are
+		// pinned to contracts in.
+		if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE digest = ANY($1) ORDER BY digest FOR NO KEY UPDATE`, digestArgs); err != nil {
+			return fmt.Errorf("failed to lock slabs: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `SELECT sector_root FROM sectors WHERE sector_root = ANY($1) ORDER BY sector_root FOR NO KEY UPDATE`, rootArgs); err != nil {
+			return fmt.Errorf("failed to lock sectors: %w", err)
+		}
+
+		var newPinnedData, newPinnedSize uint64
+		for idx, slab := range toPin {
+			digest := digests[idx]
 
 			// insert slab
 			var slabID int64
@@ -442,6 +466,45 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 	return digests, err
 }
 
+// lockSlabs locks the given slabs FOR UPDATE. Locks are always acquired in
+// ascending digest order — the same order PinSlabs upserts slab rows in — so
+// concurrent transactions locking overlapping sets can't deadlock. Every
+// other slab locker must use the same order.
+func lockSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
+	if len(sIDs) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE id = ANY($1) ORDER BY digest FOR UPDATE`, sIDs); err != nil {
+		return fmt.Errorf("failed to lock slabs: %w", err)
+	}
+	return nil
+}
+
+// unreferencedSlabs returns the subset of the given slabs that are pinned by
+// the account but not referenced by any of the account's objects. Only slabs
+// pinned before cutoff are returned; a nil cutoff returns them regardless of
+// when they were pinned. Callers must hold locks on the slabs so the check
+// can't race a concurrent PinObject.
+func unreferencedSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64, cutoff *time.Time) ([]int64, error) {
+	rows, err := tx.Query(ctx, `SELECT s.id
+FROM slabs s
+JOIN account_slabs a ON s.id = a.slab_id
+WHERE a.account_id = $1
+	AND s.id = ANY($2)
+	AND ($3::TIMESTAMPTZ IS NULL OR s.pinned_at < $3)
+	AND NOT EXISTS (
+		SELECT 1
+		FROM objects o
+		JOIN object_slabs os ON o.id = os.object_id
+		WHERE o.account_id = a.account_id
+		AND os.slab_digest = s.digest
+	)`, accountID, sIDs, cutoff)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query unreferenced slabs: %w", err)
+	}
+	return pgx.CollectRows(rows, pgx.RowTo[int64])
+}
+
 // unpinSlabs removes the account's association with the given slabs and updates
 // the account's pinned totals. Slabs the account no longer pins are ignored, so
 // a concurrent unpin of the same slab can't double-decrement the totals. The
@@ -503,8 +566,8 @@ SELECT * FROM unnest($1::bigint[])`, unpinned); err != nil {
 func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
 	// lock the candidate slabs so a concurrent re-pin serializes against the
 	// pinned check below
-	if _, err := tx.Exec(ctx, `SELECT id FROM slabs WHERE id = ANY($1) ORDER BY id FOR UPDATE`, sIDs); err != nil {
-		return fmt.Errorf("failed to lock slabs: %w", err)
+	if err := lockSlabs(ctx, tx, sIDs); err != nil {
+		return err
 	}
 
 	// ignore the slabs that are pinned by an account or referenced by an
@@ -545,11 +608,13 @@ WHERE s.id = ANY($1)`, sIDs)
 	var pinned, unpinned, unpinnable int64
 	var unpinnedDeltas []unpinnedDelta
 	if len(toDelete) > 0 {
-		// lock the candidate sectors too, so a concurrent re-pin reusing a shared
-		// sector serializes against the orphan check below
-		if _, err := tx.Exec(ctx, `SELECT id FROM sectors WHERE id IN (
+		// lock the candidate sectors too, so a concurrent re-pin reusing a
+		// shared sector serializes against the orphan check below. Locks are
+		// acquired in ascending root order to match the order PinSlabs
+		// upserts sectors in.
+		if _, err := tx.Exec(ctx, `SELECT sector_root FROM sectors WHERE id IN (
 	SELECT sector_id FROM slab_sectors WHERE slab_id = ANY($1)
-) ORDER BY id FOR UPDATE`, toDelete); err != nil {
+) ORDER BY sector_root FOR UPDATE`, toDelete); err != nil {
 			return fmt.Errorf("failed to lock sectors: %w", err)
 		}
 
@@ -639,18 +704,26 @@ func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 			return fmt.Errorf("failed to get account ID: %w", err)
 		}
 
+		// lock the slab before any checks so they serialize against
+		// concurrent unpins and against PinObject attaching the slab to a
+		// new object; the checks run as separate statements after the lock,
+		// so they see the state committed by whoever held the lock before us
 		var sID int64
-		err = tx.QueryRow(ctx, `SELECT slab_id FROM account_slabs WHERE account_id = $1 and slab_id = (SELECT id FROM slabs WHERE digest = $2)`, id, sqlHash256(slabID)).Scan(&sID)
+		err = tx.QueryRow(ctx, `SELECT id FROM slabs WHERE digest = $1 FOR UPDATE`, sqlHash256(slabID)).Scan(&sID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrSlabNotFound
 		} else if err != nil {
-			return fmt.Errorf("failed to check if slab exists: %w", err)
+			return fmt.Errorf("failed to lock slab: %w", err)
 		}
 
-		// lock the slab so the reference check below serializes against a
-		// concurrent PinObject attaching the slab to a new object
-		if _, err := tx.Exec(ctx, `SELECT id FROM slabs WHERE id = $1 FOR UPDATE`, sID); err != nil {
-			return fmt.Errorf("failed to lock slab: %w", err)
+		var pinned bool
+		err = tx.QueryRow(ctx, `SELECT EXISTS (
+			SELECT 1 FROM account_slabs WHERE account_id = $1 AND slab_id = $2
+		)`, id, sID).Scan(&pinned)
+		if err != nil {
+			return fmt.Errorf("failed to check if slab is pinned: %w", err)
+		} else if !pinned {
+			return slabs.ErrSlabNotFound
 		}
 
 		// refuse to unpin a slab that is still referenced by one of the
