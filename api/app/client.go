@@ -192,7 +192,8 @@ func (c *Client) PinSlabs(ctx context.Context, appKey types.PrivateKey, params .
 	return
 }
 
-// UnpinSlab unpins a slab from the indexer.
+// UnpinSlab unpins a slab from the indexer. A slab that is still referenced by
+// one of the account's objects can not be unpinned.
 func (c *Client) UnpinSlab(ctx context.Context, appKey types.PrivateKey, slabID slabs.SlabID) error {
 	return c.signedRequestJSON(ctx, appKey, http.MethodDelete, fmt.Sprintf("/slabs/%s", slabID), nil, nil)
 }
@@ -255,6 +256,8 @@ func (c *Client) PinObject(ctx context.Context, appKey types.PrivateKey, obj sla
 }
 
 // DeleteObject deletes the object with the given key for the given account.
+// Slabs that were referenced by the object and are no longer referenced by any
+// of the account's objects are unpinned and queued for deletion.
 func (c *Client) DeleteObject(ctx context.Context, appKey types.PrivateKey, key types.Hash256) (err error) {
 	err = c.signedRequestJSON(ctx, appKey, http.MethodDelete, fmt.Sprintf("/objects/%s", key), nil, nil)
 	return

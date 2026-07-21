@@ -465,6 +465,9 @@ func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
 	if errors.Is(err, slabs.ErrSlabNotFound) {
 		jc.Error(fmt.Errorf("slab %s not found", slabID), http.StatusNotFound)
 		return
+	} else if errors.Is(err, slabs.ErrSlabInUse) {
+		jc.Error(fmt.Errorf("slab %s: %w", slabID, slabs.ErrSlabInUse), http.StatusConflict)
+		return
 	} else if jc.Check("failed to unpin slab", err) != nil {
 		return
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
@@ -211,14 +212,47 @@ LIMIT $3
 	const batchSize = 100
 	for !exhausted {
 		err := s.transaction(func(ctx context.Context, tx *txn) error {
-			slabIDs, err := getSlabs(ctx, tx, batchSize)
+			candidates, err := getSlabs(ctx, tx, batchSize)
 			if err != nil {
 				return fmt.Errorf("failed to get slabs to unpin: %w", err)
-			} else if err := s.unpinSlabs(ctx, tx, id, slabIDs); err != nil {
-				return fmt.Errorf("failed to unpin slabs: %w", err)
 			}
-			if len(slabIDs) < batchSize {
-				exhausted = true
+			exhausted = len(candidates) < batchSize
+			if len(candidates) == 0 {
+				return nil
+			}
+
+			// lock the candidates so the re-check below serializes against a
+			// concurrent PinObject attaching one of them to an object;
+			// without it the check and the pin could interleave, leaving a
+			// slab unpinned while an object references it
+			if _, err := tx.Exec(ctx, `SELECT id FROM slabs WHERE id = ANY($1) ORDER BY id FOR UPDATE`, candidates); err != nil {
+				return fmt.Errorf("failed to lock slabs: %w", err)
+			}
+
+			// re-check the candidates under the lock
+			rows, err := tx.Query(ctx, `SELECT s.id
+FROM slabs s
+JOIN account_slabs a ON s.id = a.slab_id
+WHERE a.account_id = $1
+	AND s.id = ANY($2)
+	AND s.pinned_at < $3
+	AND NOT EXISTS (
+		SELECT 1
+		FROM objects o
+		JOIN object_slabs os ON o.id = os.object_id
+		WHERE o.account_id = a.account_id
+		AND os.slab_digest = s.digest
+	)`, id, candidates, cutoff)
+			if err != nil {
+				return fmt.Errorf("failed to re-check slabs to unpin: %w", err)
+			}
+			toUnpin, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+			if err != nil {
+				return fmt.Errorf("failed to collect slabs to unpin: %w", err)
+			}
+
+			if err := s.unpinSlabs(ctx, tx, id, toUnpin); err != nil {
+				return fmt.Errorf("failed to unpin slabs: %w", err)
 			}
 			return nil
 		})
