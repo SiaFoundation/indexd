@@ -570,38 +570,19 @@ func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) 
 		return err
 	}
 
-	// ignore the slabs that are pinned by an account or referenced by an
-	// object; a slab can be re-pinned and attached to a new object after it
-	// was queued for deletion
-	rows, err := tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE slab_id = ANY($1)
-UNION
-SELECT s.id FROM slabs s
-JOIN object_slabs os ON os.slab_digest = s.digest
-WHERE s.id = ANY($1)`, sIDs)
+	// get the slabs that are neither pinned by an account nor referenced by
+	// an object; a slab can be re-pinned and attached to a new object after
+	// it was queued for deletion
+	rows, err := tx.Query(ctx, `SELECT s.id FROM slabs s
+WHERE s.id = ANY($1)
+	AND NOT EXISTS (SELECT 1 FROM account_slabs a WHERE a.slab_id = s.id)
+	AND NOT EXISTS (SELECT 1 FROM object_slabs os WHERE os.slab_digest = s.digest)`, sIDs)
 	if err != nil {
-		return fmt.Errorf("failed to check if slab was pinned or referenced: %w", err)
+		return fmt.Errorf("failed to query deletable slabs: %w", err)
 	}
-	defer rows.Close()
-
-	seen := make(map[int64]struct{})
-	for rows.Next() {
-		var sID int64
-		if err := rows.Scan(&sID); err != nil {
-			return fmt.Errorf("failed to scan in-use slab: %w", err)
-		}
-		seen[sID] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("failed to get in-use slabs: %w", err)
-	}
-
-	// get all of the slabs that are neither pinned nor referenced
-	var toDelete []int64
-	for _, sID := range sIDs {
-		if _, ok := seen[sID]; ok {
-			continue
-		}
-		toDelete = append(toDelete, sID)
+	toDelete, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return fmt.Errorf("failed to collect deletable slabs: %w", err)
 	}
 
 	// delete sectors
