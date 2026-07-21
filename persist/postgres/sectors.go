@@ -551,15 +551,19 @@ RETURNING a.slab_id`, accountID, sIDs)
 	}
 
 	var connectKeyID int64
+	var active bool
 	err = tx.QueryRow(ctx, `UPDATE accounts
 SET pinned_data = pinned_data - $1, pinned_size = pinned_size - $2
 WHERE id = $3
-RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&connectKeyID)
+RETURNING connect_key_id, deleted_at IS NULL`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&connectKeyID, &active)
 	if err != nil {
 		return fmt.Errorf("failed to update account's pinned data: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data - $1, pinned_size = pinned_size - $2 WHERE id = $3`, pinnedDataDelta, pinnedSizeDelta, connectKeyID); err != nil {
-		return fmt.Errorf("failed to update connect key pinned data: %w", err)
+
+	if active {
+		if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data - $1, pinned_size = pinned_size - $2 WHERE id = $3`, pinnedDataDelta, pinnedSizeDelta, connectKeyID); err != nil {
+			return fmt.Errorf("failed to update connect key pinned data: %w", err)
+		}
 	}
 
 	// queue the slabs for background deletion; the queue is append-only so a
