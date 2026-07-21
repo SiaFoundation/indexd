@@ -206,24 +206,7 @@ LIMIT $3
 				return nil
 			}
 
-			// lock the candidates so the re-check below serializes against a
-			// concurrent PinObject attaching one of them to an object;
-			// without it the check and the pin could interleave, leaving a
-			// slab unpinned while an object references it
-			if err := lockSlabs(ctx, tx, candidates); err != nil {
-				return err
-			}
-
-			// re-check the candidates under the lock
-			toUnpin, err := unreferencedSlabs(ctx, tx, id, candidates, &cutoff)
-			if err != nil {
-				return err
-			}
-
-			if err := s.unpinSlabs(ctx, tx, id, toUnpin); err != nil {
-				return fmt.Errorf("failed to unpin slabs: %w", err)
-			}
-			return nil
+			return s.unpinUnreferencedSlabs(ctx, tx, id, candidates, &cutoff)
 		})
 		if err != nil {
 			return err

@@ -480,12 +480,17 @@ func lockSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
 	return nil
 }
 
-// unreferencedSlabs returns the subset of the given slabs that are pinned by
-// the account but not referenced by any of the account's objects. Only slabs
-// pinned before cutoff are returned; a nil cutoff returns them regardless of
-// when they were pinned. Callers must hold locks on the slabs so the check
-// can't race a concurrent PinObject.
-func unreferencedSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64, cutoff *time.Time) ([]int64, error) {
+// unpinUnreferencedSlabs unpins the subset of the given slabs that are pinned
+// by the account but not referenced by any of the account's objects, queueing
+// them for deletion by deleteOrphanedSlabs. Only slabs pinned before cutoff
+// are unpinned; a nil cutoff unpins them regardless of when they were pinned.
+// The slabs are locked first so the reference check can't race a concurrent
+// PinObject or another unpinner.
+func (s *Store) unpinUnreferencedSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64, cutoff *time.Time) error {
+	if err := lockSlabs(ctx, tx, sIDs); err != nil {
+		return err
+	}
+
 	rows, err := tx.Query(ctx, `SELECT s.id
 FROM slabs s
 JOIN account_slabs a ON s.id = a.slab_id
@@ -500,9 +505,17 @@ WHERE a.account_id = $1
 		AND os.slab_digest = s.digest
 	)`, accountID, sIDs, cutoff)
 	if err != nil {
-		return nil, fmt.Errorf("failed to query unreferenced slabs: %w", err)
+		return fmt.Errorf("failed to query unreferenced slabs: %w", err)
 	}
-	return pgx.CollectRows(rows, pgx.RowTo[int64])
+	toUnpin, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return fmt.Errorf("failed to collect unreferenced slabs: %w", err)
+	}
+
+	if len(toUnpin) == 0 {
+		return nil
+	}
+	return s.unpinSlabs(ctx, tx, accountID, toUnpin)
 }
 
 // unpinSlabs removes the account's association with the given slabs and updates
