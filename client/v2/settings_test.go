@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"errors"
+	"math"
 	"net"
 	"testing"
 	"time"
@@ -64,6 +65,7 @@ func TestCheckPricesHeight(t *testing.T) {
 		{"host far ahead is fine", 1000, 100, false},
 		{"local at tolerance from genesis", 0, 10, false},
 		{"local beyond tolerance from genesis", 0, 11, true},
+		{"host height near max does not overflow", math.MaxUint64 - 5, 100, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
