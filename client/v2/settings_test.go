@@ -132,3 +132,25 @@ func TestSettingsRefresh(t *testing.T) {
 		t.Fatalf("expected tip height 199, got %d", settings.Prices.TipHeight)
 	}
 }
+
+func TestRefreshSettingsInvalidPrices(t *testing.T) {
+	hostKey := types.GeneratePrivateKey()
+	hk := hostKey.PublicKey()
+
+	// prices signed by a different key than the host's
+	transport := &fakeSettingsTransport{
+		hostKey:  hostKey,
+		settings: testSettings(types.GeneratePrivateKey(), 100, time.Now().Add(10*time.Minute)),
+	}
+	c := &Client{
+		heightTolerance: 36,
+		cachedSettings:  make(map[types.PublicKey]proto.HostSettings),
+	}
+
+	if _, err := c.refreshSettings(context.Background(), hk, transport); err == nil {
+		t.Fatal("expected error for invalidly signed prices")
+	}
+	if len(c.cachedSettings) != 0 {
+		t.Fatal("invalid settings should not be cached")
+	}
+}
