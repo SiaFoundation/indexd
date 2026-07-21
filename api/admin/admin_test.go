@@ -1849,6 +1849,27 @@ func TestPruneAccounts(t *testing.T) {
 	}
 }
 
+func TestMigrationBatchEmpty(t *testing.T) {
+	c := testutils.NewConsensusNode(t, zap.NewNop())
+	indexer := testutils.NewIndexer(t, c, zap.NewNop())
+	adminClient := indexer.Admin
+
+	// no unhealthy slabs on a fresh indexer
+	resp, err := adminClient.MigrationBatch(t.Context(), 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(resp.Slabs) != 0 {
+		t.Fatalf("expected no slabs, got %d", len(resp.Slabs))
+	} else if resp.NextCursor != 0 {
+		t.Fatalf("expected cursor 0, got %d", resp.NextCursor)
+	}
+
+	// reporting an empty set of results is a no-op
+	if err := adminClient.ApplyMigrationResults(context.Background(), nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // newTestLogger creates a console logger used for testing.
 func newTestLogger(enable bool) *zap.Logger {
 	if !enable {

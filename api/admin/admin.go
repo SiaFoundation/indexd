@@ -138,6 +138,10 @@ type (
 		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
 		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
 		SectorStats() (slabs.SectorsStats, error)
+
+		// migration endpoints used by remote nodes
+		PrepareMigrationBatch(cursor int64, limit int) (slabs.MigrationBatch, error)
+		ApplyMigrationResults(results []slabs.MigrationResult) error
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -260,6 +264,14 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"PUT /settings/hosts":        a.handlePUTSettingsHosts,
 		"GET /settings/pricepinning": a.handleGETSettingsPricePinning,
 		"PUT /settings/pricepinning": a.handlePUTSettingsPricePinning,
+
+		// migration endpoints used by remote nodes to fetch and report on
+		// slab-migration work. Fetching a batch is a POST because it claims
+		// the returned slabs for the duration of the repair backoff; Go's
+		// http.Transport silently retries idempotent GETs on dead keep-alive
+		// connections, which would double-claim.
+		"POST /migrations/batch":   a.handlePOSTMigrationBatch,
+		"POST /migrations/results": a.handlePOSTMigrationResults,
 
 		// syncer endpoints
 		"POST /syncer/connect": a.handlePOSTSyncerConnect,
@@ -839,6 +851,36 @@ func (a *admin) handleGETState(jc jape.Context) {
 		SyncHeight: ts.Index.Height,
 		Synced:     time.Since(ts.PrevTimestamps[0]) <= 3*time.Hour,
 	})
+}
+
+// handlePOSTMigrationBatch returns a batch of unhealthy slabs for a remote
+// node together with the migration state it needs to migrate them.
+func (a *admin) handlePOSTMigrationBatch(jc jape.Context) {
+	cursor, limit, ok := api.ParseCursorLimit(jc)
+	if !ok {
+		return
+	}
+
+	batch, err := a.slabs.PrepareMigrationBatch(cursor, limit)
+	if !a.checkServerError(jc, "failed to prepare migration batch", err) {
+		return
+	}
+	jc.Encode(batch)
+}
+
+// handlePOSTMigrationResults persists the outcomes of migrations reported by a
+// remote node. A batch where every result failed to persist indicates a
+// database problem and is surfaced as an error so the reporting node backs
+// off instead of burning through fresh batches.
+func (a *admin) handlePOSTMigrationResults(jc jape.Context) {
+	var results []slabs.MigrationResult
+	if jc.Decode(&results) != nil {
+		return
+	}
+	if jc.Check("failed to apply migration results", a.slabs.ApplyMigrationResults(results)) != nil {
+		return
+	}
+	jc.Encode(nil)
 }
 
 func (a *admin) handlePOSTSyncerConnect(jc jape.Context) {

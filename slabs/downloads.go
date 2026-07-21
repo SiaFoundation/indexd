@@ -47,7 +47,7 @@ type slabDownload struct {
 // across all available hosts. Allowing a slab download that requires 10 shards
 // out of 30 to actually leverage 30 hosts.
 type slabRecovery struct {
-	m        *SlabManager
+	m        *Migrator
 	slab     Slab
 	required []bool
 	rs       reedsolomon.Encoder
@@ -59,17 +59,22 @@ type slabRecovery struct {
 	out [][]byte
 
 	// excluded tracks hosts that reported a lost sector mid-recovery so that
-	// later chunks skip them.
+	// later chunks skip them. lost accumulates the (host, root) pairs reported
+	// lost so the caller can persist them after recovery completes rather than
+	// writing to the store mid-download.
 	mu       sync.Mutex
 	excluded map[types.PublicKey]struct{}
+	lost     []Shard
 }
 
 // recoverShards downloads enough segment-aligned chunks of the slab's sectors,
 // spread across all available hosts, to reconstruct the shards marked in
 // required. It returns a slice of length len(slab.Sectors) where each required
 // index holds the decrypted, reconstructed plaintext shard and all other
-// indices are nil.
-func (m *SlabManager) recoverShards(ctx context.Context, slab Slab, required []bool, log *zap.Logger) ([][]byte, error) {
+// indices are nil. Any sectors a host reported lost during recovery are
+// returned in lost (populated even when an error is returned) so the caller can
+// persist them.
+func (m *Migrator) recoverShards(ctx context.Context, slab Slab, required []bool, log *zap.Logger) (shards [][]byte, lost []Shard, err error) {
 	if len(required) != len(slab.Sectors) {
 		panic(fmt.Sprintf("slab %s has %d sectors but %d required flags", slab.ID, len(slab.Sectors), len(required))) // developer error
 	}
@@ -154,19 +159,20 @@ chunkLoop:
 	}
 	wg.Wait()
 
+	lost = r.lostShards()
 	if firstErr != nil {
-		return nil, firstErr
+		return nil, lost, firstErr
 	} else if ctx.Err() != nil {
-		return nil, ctx.Err()
+		return nil, lost, ctx.Err()
 	}
-	return out, nil
+	return out, lost, nil
 }
 
 // raceInterval returns how long recoverChunk waits without progress before
 // hedging a chunk read against an additional host. It is derived from the
 // network-wide read-throughput estimate (scaled by raceFactor), floored by
 // minRaceInterval and capped by the hard per-RPC shardTimeout.
-func (m *SlabManager) raceInterval(length uint64) time.Duration {
+func (m *Migrator) raceInterval(length uint64) time.Duration {
 	d := time.Duration(float64(m.hosts.ReadEstimate(length)) * raceFactor)
 	if d < minRaceInterval {
 		d = minRaceInterval
@@ -219,29 +225,14 @@ func (r *slabRecovery) recoverChunk(ctx context.Context, offset, length uint64) 
 			return ctx.Err()
 		}
 
-		prices, err := m.hosts.Prices(ctx, hostKey)
-		if err != nil {
-			return fmt.Errorf("failed to fetch host prices: %w", err)
-		}
-
-		// debit the service account for the read since the host may charge for it
-		// even if it is cancelled quickly. This is best effort, it's fine to
-		// log the error and continue on failure.
-		cost := prices.RPCReadSectorCost(length).RenterCost()
-		if err = m.am.DebitServiceAccount(hostKey, m.migrationAccount, cost); err != nil {
-			log.Warn("failed to debit service account for read sector", zap.Error(err))
-		}
-
 		start := time.Now()
 		buf := bytes.NewBuffer(make([]byte, 0, length))
 		if _, err := m.hosts.ReadSector(ctx, m.migrationAccountKey, hostKey, sector.root, buf, offset, length); err != nil {
 			if isErrLostSector(err) {
 				log.Debug("host reports sector lost or corrupt", zap.Duration("elapsed", time.Since(start)))
-				// exclude the host from subsequent chunks and mark the sector lost
-				r.exclude(hostKey)
-				if err := m.store.MarkSectorsLost(hostKey, []types.Hash256{sector.root}); err != nil {
-					log.Error("failed to mark sector as lost", zap.Error(err))
-				}
+				// exclude the host from subsequent chunks and record the sector
+				// as lost so the caller can persist it once recovery completes.
+				r.markLost(hostKey, sector.root)
 			} else if !errors.Is(err, mux.ErrClosedStream) && !errors.Is(err, ctx.Err()) {
 				log.Debug("failed to download shard", zap.Duration("elapsed", time.Since(start)), zap.Error(err))
 			}
@@ -382,11 +373,20 @@ func (r *slabRecovery) reconstructChunk(offset, length uint64, cols [][]byte) er
 	return nil
 }
 
-// exclude marks a host so that subsequent chunks skip it.
-func (r *slabRecovery) exclude(hostKey types.PublicKey) {
+// markLost excludes the host from subsequent chunks and records the sector as
+// lost on that host for the caller to persist after recovery.
+func (r *slabRecovery) markLost(hostKey types.PublicKey, root types.Hash256) {
 	r.mu.Lock()
 	r.excluded[hostKey] = struct{}{}
+	r.lost = append(r.lost, Shard{Root: root, HostKey: hostKey})
 	r.mu.Unlock()
+}
+
+// lostShards returns the sectors reported lost during recovery.
+func (r *slabRecovery) lostShards() []Shard {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lost
 }
 
 func isErrLostSector(err error) bool {

@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"golang.org/x/crypto/chacha20"
@@ -59,13 +60,12 @@ func assertRecovered(t *testing.T, encryptionKey [32]byte, required []bool, root
 func TestRecoverShards(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	store := newMockStore(t)
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	hm := newMockHostManager()
 	client := newMockHostClient()
 
 	// build a 2-of-4 encoded slab (2 data + 2 parity shards)
-	encryptionKey, shards, roots := NewTestShards(t, 2, 2)
+	encryptionKey, shards, roots := testutils.NewTestShards(t, 2, 2)
 
 	// one host per sector
 	hostList := make([]hosts.Host, len(shards))
@@ -108,7 +108,7 @@ func TestRecoverShards(t *testing.T) {
 	}
 
 	account := types.GeneratePrivateKey()
-	sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
+	sm := slabs.NewSlabManager(am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
 
 	// assert that not enough usable hosts results in errNotEnoughShards
 	t.Run("not enough usable hosts", func(t *testing.T) {
@@ -120,7 +120,7 @@ func TestRecoverShards(t *testing.T) {
 			delete(client.unusable, hostList[1].PublicKey)
 			delete(client.unusable, hostList[2].PublicKey)
 		})
-		_, err := sm.RecoverShards(context.Background(), slab, allRequired(len(slab.Sectors)), zap.NewNop())
+		_, _, err := sm.RecoverShards(context.Background(), slab, allRequired(len(slab.Sectors)), zap.NewNop())
 		if !errors.Is(err, slabs.ErrNotEnoughShards) {
 			t.Fatal(err)
 		}
@@ -134,7 +134,7 @@ func TestRecoverShards(t *testing.T) {
 		unavailableSlab.Sectors[0].HostKey = nil
 		unavailableSlab.Sectors[1].HostKey = nil
 		unavailableSlab.Sectors[2].HostKey = nil
-		_, err := sm.RecoverShards(context.Background(), unavailableSlab, allRequired(len(unavailableSlab.Sectors)), zap.NewNop())
+		_, _, err := sm.RecoverShards(context.Background(), unavailableSlab, allRequired(len(unavailableSlab.Sectors)), zap.NewNop())
 		if !errors.Is(err, slabs.ErrNotEnoughShards) {
 			t.Fatal(err)
 		}
@@ -144,7 +144,7 @@ func TestRecoverShards(t *testing.T) {
 	// regardless of which MinShards were actually downloaded for each chunk
 	t.Run("success", func(t *testing.T) {
 		required := allRequired(len(slab.Sectors))
-		recovered, err := sm.RecoverShards(context.Background(), slab, required, zap.NewNop())
+		recovered, _, err := sm.RecoverShards(context.Background(), slab, required, zap.NewNop())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -156,7 +156,7 @@ func TestRecoverShards(t *testing.T) {
 		required := make([]bool, len(slab.Sectors))
 		required[1] = true
 		required[3] = true
-		recovered, err := sm.RecoverShards(context.Background(), slab, required, zap.NewNop())
+		recovered, _, err := sm.RecoverShards(context.Background(), slab, required, zap.NewNop())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -176,7 +176,7 @@ func TestRecoverShards(t *testing.T) {
 				client.slowHosts = make(map[types.PublicKey]time.Duration)
 			})
 			required := allRequired(len(slab.Sectors))
-			recovered, err := sm.RecoverShards(context.Background(), slab, required, zap.NewNop())
+			recovered, _, err := sm.RecoverShards(context.Background(), slab, required, zap.NewNop())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -195,15 +195,15 @@ func TestRecoverShards(t *testing.T) {
 		})
 		required := make([]bool, len(slab.Sectors))
 		required[3] = true
-		recovered, err := sm.RecoverShards(context.Background(), slab, required, log)
+		recovered, lost, err := sm.RecoverShards(context.Background(), slab, required, log)
 		if err != nil {
 			t.Fatal(err)
-		} else if lost := store.lostSectors(t); len(lost) == 0 {
-			t.Fatalf("expected lost sector for host %v, got none", hostList[0].PublicKey)
 		} else if len(lost) != 1 {
 			t.Fatalf("expected 1 lost sector for host %v, got %d %+v", hostList[0].PublicKey, len(lost), lost)
-		} else if _, ok := lost[slab.Sectors[0].Root]; !ok {
-			t.Fatalf("expected sector %v to be marked as lost, but it wasn't", slab.Sectors[0].Root)
+		} else if lost[0].Root != slab.Sectors[0].Root {
+			t.Fatalf("expected sector %v to be marked as lost, got %v", slab.Sectors[0].Root, lost[0].Root)
+		} else if lost[0].HostKey != hostList[0].PublicKey {
+			t.Fatalf("expected lost sector on host %v, got %v", hostList[0].PublicKey, lost[0].HostKey)
 		}
 		assertRecovered(t, encryptionKey, required, roots, recovered)
 	})
@@ -224,7 +224,6 @@ func TestRecoverShardsDemotion(t *testing.T) {
 	setup := func(t *testing.T, numHosts int, minShards uint) (*slabs.SlabManager, *mockHostClient, []hosts.Host, slabs.Slab) {
 		log := zaptest.NewLogger(t)
 		store := newMockStore(t)
-		chain := newMockChainManager()
 		am := newMockAccountManager()
 		hm := newMockHostManager()
 		client := newMockHostClient()
@@ -249,7 +248,7 @@ func TestRecoverShardsDemotion(t *testing.T) {
 		}
 
 		account := types.GeneratePrivateKey()
-		sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
+		sm := slabs.NewSlabManager(am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
 		sm.SetShardTimeout(2 * time.Second)
 		// a single chunk keeps the demote assertions deterministic
 		sm.SetRecoveryChunkSize(proto.SectorSize)
@@ -271,7 +270,7 @@ func TestRecoverShardsDemotion(t *testing.T) {
 		client.slowHosts[hs[0].PublicKey] = 30 * time.Minute
 
 		synctest.Test(t, func(t *testing.T) {
-			_, err := sm.RecoverShards(context.Background(), slab, make([]bool, len(slab.Sectors)), zap.NewNop())
+			_, _, err := sm.RecoverShards(context.Background(), slab, make([]bool, len(slab.Sectors)), zap.NewNop())
 			if !errors.Is(err, slabs.ErrNotEnoughShards) {
 				t.Fatalf("expected ErrNotEnoughShards, got %v", err)
 			}
@@ -297,7 +296,7 @@ func TestRecoverShardsDemotion(t *testing.T) {
 		client.slowHosts[hs[0].PublicKey] = 30 * time.Minute
 
 		synctest.Test(t, func(t *testing.T) {
-			if _, err := sm.RecoverShards(context.Background(), slab, make([]bool, len(slab.Sectors)), zap.NewNop()); err != nil {
+			if _, _, err := sm.RecoverShards(context.Background(), slab, make([]bool, len(slab.Sectors)), zap.NewNop()); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -325,7 +324,7 @@ func TestRecoverShardsDemotion(t *testing.T) {
 		client.slowHosts[hs[2].PublicKey] = 30 * time.Minute
 
 		synctest.Test(t, func(t *testing.T) {
-			if _, err := sm.RecoverShards(context.Background(), slab, make([]bool, len(slab.Sectors)), zap.NewNop()); err != nil {
+			if _, _, err := sm.RecoverShards(context.Background(), slab, make([]bool, len(slab.Sectors)), zap.NewNop()); err != nil {
 				t.Fatal(err)
 			}
 		})
@@ -348,7 +347,7 @@ func TestRecoverShardsDemotion(t *testing.T) {
 		client.slowHosts[hs[3].PublicKey] = 30 * time.Minute
 
 		synctest.Test(t, func(t *testing.T) {
-			_, err := sm.RecoverShards(context.Background(), slab, make([]bool, len(slab.Sectors)), zap.NewNop())
+			_, _, err := sm.RecoverShards(context.Background(), slab, make([]bool, len(slab.Sectors)), zap.NewNop())
 			if !errors.Is(err, slabs.ErrNotEnoughShards) {
 				t.Fatalf("expected ErrNotEnoughShards, got %v", err)
 			}

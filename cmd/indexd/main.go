@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -16,9 +17,11 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
+	adminapi "go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/build"
 	"go.sia.tech/indexd/config"
 	"go.sia.tech/indexd/persist/postgres"
+	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"lukechampine.com/flagg"
@@ -72,6 +75,9 @@ var cfg = config.Config{
 			EnableANSI: runtime.GOOS != "windows",
 		},
 	},
+	Slabs: config.Slabs{
+		Migrations: true,
+	},
 }
 
 // checkFatalError prints an error message to stderr and exits with a 1 exit code. If err is nil, this is a no-op.
@@ -107,6 +113,86 @@ func humanEncoder(showColors bool) zapcore.Encoder {
 	cfg.StacktraceKey = ""
 	cfg.CallerKey = ""
 	return zapcore.NewConsoleEncoder(cfg)
+}
+
+// buildLogger constructs the zap logger from the config's stdout and file log
+// settings and redirects the standard library logger to it. It returns the
+// logger and a cleanup function that flushes and closes the log outputs.
+func buildLogger(cfg config.Config) (*zap.Logger, func(), error) {
+	var logCores []zapcore.Core
+	cleanup := func() {}
+
+	if cfg.Log.StdOut.Enabled {
+		var encoder zapcore.Encoder
+		switch cfg.Log.StdOut.Format {
+		case "json":
+			encoder = jsonEncoder()
+		default:
+			encoder = humanEncoder(cfg.Log.StdOut.EnableANSI)
+		}
+
+		// create the stdout logger
+		logCores = append(logCores, zapcore.NewCore(encoder, zapcore.Lock(os.Stdout), cfg.Log.StdOut.Level))
+	}
+
+	if cfg.Log.File.Enabled {
+		// normalize log path
+		if cfg.Log.File.Path == "" {
+			cfg.Log.File.Path = filepath.Join(cfg.Directory, "indexd.log")
+		}
+
+		// configure file logging
+		var encoder zapcore.Encoder
+		switch cfg.Log.File.Format {
+		case "json":
+			encoder = jsonEncoder()
+		default:
+			encoder = humanEncoder(false) // disable colors in file log
+		}
+
+		fileWriter, closeFn, err := zap.Open(cfg.Log.File.Path)
+		if err != nil {
+			return nil, nil, fmt.Errorf("failed to open log file: %w", err)
+		}
+		cleanup = closeFn
+
+		// create the file logger
+		logCores = append(logCores, zapcore.NewCore(encoder, zapcore.Lock(fileWriter), cfg.Log.File.Level))
+	}
+
+	var log *zap.Logger
+	if len(logCores) == 1 {
+		log = zap.New(logCores[0], zap.AddCaller())
+	} else {
+		log = zap.New(zapcore.NewTee(logCores...), zap.AddCaller())
+	}
+	zap.RedirectStdLog(log.Named("stdlib"))
+
+	return log, func() {
+		log.Sync()
+		cleanup()
+	}, nil
+}
+
+// loadWalletAndLogger derives the wallet key from the configured recovery
+// phrase, ensures the data directory exists and builds the logger. It is shared
+// by the commands that start a node; the caller is responsible for deferring the
+// returned cleanup function. Any failure is fatal.
+func loadWalletAndLogger(cfg config.Config) (types.PrivateKey, *zap.Logger, func()) {
+	var seed [32]byte
+	checkFatalError("failed to load wallet seed", wallet.SeedFromPhrase(&seed, cfg.RecoveryPhrase))
+	walletKey := wallet.KeyFromSeed(&seed, 0)
+
+	if cfg.Directory != "" {
+		// create the data directory if it does not already exist
+		if err := os.MkdirAll(cfg.Directory, 0700); err != nil {
+			checkFatalError("failed to create data directory", err)
+		}
+	}
+
+	log, closeLog, err := buildLogger(cfg)
+	checkFatalError("failed to initialize logger", err)
+	return walletKey, log, closeLog
 }
 
 func tryConfigPaths() []string {
@@ -214,12 +300,17 @@ func main() {
 	seedCmd := flagg.New("seed", ``)
 	configCmd := flagg.New("config", ``)
 
+	remoteCmd := flagg.New("remote", `Run a remote worker that helps a primary indexd migrate unhealthy slabs.
+It serves no API and requires the primary's URL and admin password under the 'remote'
+config section and the same recovery phrase as the primary node.`)
+
 	cmd := flagg.Parse(flagg.Tree{
 		Cmd: rootCmd,
 		Sub: []flagg.Tree{
 			{Cmd: versionCmd},
 			{Cmd: seedCmd},
 			{Cmd: configCmd},
+			{Cmd: remoteCmd},
 		},
 	})
 
@@ -271,54 +362,8 @@ func main() {
 			os.Exit(1)
 		}
 
-		var seed [32]byte
-		checkFatalError("failed to load wallet seed", wallet.SeedFromPhrase(&seed, cfg.RecoveryPhrase))
-		walletKey := wallet.KeyFromSeed(&seed, 0)
-
-		if cfg.Directory != "" {
-			// create the data directory if it does not already exist
-			if err := os.MkdirAll(cfg.Directory, 0700); err != nil {
-				checkFatalError("failed to create data directory", err)
-			}
-		}
-
-		var logCores []zapcore.Core
-
-		if cfg.Log.StdOut.Enabled {
-			var encoder zapcore.Encoder
-			switch cfg.Log.StdOut.Format {
-			case "json":
-				encoder = jsonEncoder()
-			default:
-				encoder = humanEncoder(cfg.Log.StdOut.EnableANSI)
-			}
-
-			// create the stdout logger
-			logCores = append(logCores, zapcore.NewCore(encoder, zapcore.Lock(os.Stdout), cfg.Log.StdOut.Level))
-		}
-
-		if cfg.Log.File.Enabled {
-			// normalize log path
-			if cfg.Log.File.Path == "" {
-				cfg.Log.File.Path = filepath.Join(cfg.Directory, "indexd.log")
-			}
-
-			// configure file logging
-			var encoder zapcore.Encoder
-			switch cfg.Log.File.Format {
-			case "json":
-				encoder = jsonEncoder()
-			default:
-				encoder = humanEncoder(false) // disable colors in file log
-			}
-
-			fileWriter, closeFn, err := zap.Open(cfg.Log.File.Path)
-			checkFatalError("failed to open log file", err)
-			defer closeFn()
-
-			// create the file logger
-			logCores = append(logCores, zapcore.NewCore(encoder, zapcore.Lock(fileWriter), cfg.Log.File.Level))
-		}
+		walletKey, log, closeLog := loadWalletAndLogger(cfg)
+		defer closeLog()
 
 		if cfg.Syncer.Bootstrap {
 			switch cfg.Consensus.Network {
@@ -340,15 +385,42 @@ func main() {
 			checkFatalError("invalid network", errors.New("must be one of 'mainnet', 'zen' or 'anagami'"))
 		}
 
-		var log *zap.Logger
-		if len(logCores) == 1 {
-			log = zap.New(logCores[0], zap.AddCaller())
-		} else {
-			log = zap.New(zapcore.NewTee(logCores...), zap.AddCaller())
-		}
-		defer log.Sync()
-		zap.RedirectStdLog(log.Named("stdlib"))
-
 		checkFatalError("daemon startup failed", runRootCmd(ctx, cfg, walletKey, instantSync, network, genesis, log))
+	case remoteCmd:
+		if len(cmd.Args()) != 0 {
+			cmd.Usage()
+			return
+		}
+
+		if cfg.RecoveryPhrase == "" {
+			fmt.Fprintf(os.Stderr, "missing recovery phrase - needs to be set via config file and match the primary node\n")
+			os.Exit(1)
+		} else if cfg.Remote.Address == "" {
+			fmt.Fprintf(os.Stderr, "missing remote address - needs to be set via config file to the primary node's URL\n")
+			os.Exit(1)
+		} else if cfg.Remote.Password == "" {
+			fmt.Fprintf(os.Stderr, "missing remote password - needs to be set via config file to the primary node's admin API password\n")
+			os.Exit(1)
+		}
+
+		walletKey, log, closeLog := loadWalletAndLogger(cfg)
+		defer closeLog()
+
+		// note: the recovery phrase must match the primary node's so the
+		// derived migration account key lines up with the host-side accounts
+		// the primary funds. A mismatch is not fatal: the host accounts simply
+		// go unfunded and surface as insufficient-balance errors in the logs.
+		migrationKey, _ := slabs.DeriveAccountKeys(walletKey)
+
+		var opts []slabs.RemoteMigratorOption
+		if cfg.Slabs.MigrationWorkers > 0 {
+			opts = append(opts, slabs.WithRemoteWorkers(cfg.Slabs.MigrationWorkers))
+		}
+		primary := adminapi.NewClient(strings.TrimSuffix(cfg.Remote.Address, "/")+"/api", cfg.Remote.Password)
+		worker := slabs.NewRemoteMigrator(primary, migrationKey, log.Named("migrations"), opts...)
+
+		log.Info("remote node started", zap.String("primary", cfg.Remote.Address))
+		worker.Run(ctx)
+		log.Info("shutting down")
 	}
 }

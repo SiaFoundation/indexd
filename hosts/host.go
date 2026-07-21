@@ -212,6 +212,13 @@ func (h *Host) IsGood() bool {
 	return h.Usability.Usable() && !h.Blocked
 }
 
+// GoodForUpload returns true if the host is good and can receive new sectors.
+// It mirrors the host-level checks of the store's good_for_upload predicate
+// except for the check on whether the host has a contract with capacity > size.
+func (h *Host) GoodForUpload() bool {
+	return h.IsGood() && h.StuckSince.IsZero() && h.Settings.RemainingStorage > 0
+}
+
 // Location returns the geoip location of the host.
 func (h *Host) Location() geoip.Location {
 	return geoip.Location{

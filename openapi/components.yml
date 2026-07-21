@@ -254,6 +254,116 @@ components:
             - $ref: "#/components/schemas/PublicKey"
             - description: The public key of the host storing the sector
 
+    Sector:
+      type: object
+      description: A 4MiB sector of a slab stored on a host.
+      properties:
+        root:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The Merkle root of the sector
+        contractID:
+          allOf:
+            - $ref: "#/components/schemas/FileContractID"
+            - description: The contract the sector is pinned to; omitted if the sector is not pinned
+        host:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The host storing the sector; omitted if the sector was lost and requires migration
+
+    Slab:
+      type: object
+      description: A group of sectors that is encrypted, erasure-coded and uploaded to hosts.
+      properties:
+        id:
+          $ref: "#/components/schemas/SlabID"
+        encryptionKey:
+          $ref: "#/components/schemas/EncryptionKey"
+        minShards:
+          type: integer
+          format: uint
+          description: The number of shards required to reconstruct the slab
+        sectors:
+          type: array
+          items:
+            $ref: "#/components/schemas/Sector"
+        pinnedAt:
+          type: string
+          format: date-time
+
+    Shard:
+      type: object
+      description: A sector present on a host.
+      properties:
+        root:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The Merkle root of the sector
+        hostKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The public key of the host storing the sector
+
+    MigrationState:
+      type: object
+      description: >-
+        The hosts, contracts and chain state a remote node needs to decide
+        which of a slab's sectors to migrate and which hosts can receive them.
+      properties:
+        height:
+          type: integer
+          format: uint64
+          description: The chain height used to evaluate contract eligibility
+        healthyContracts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Contract"
+        hosts:
+          type: array
+          items:
+            $ref: "#/components/schemas/Host"
+        maintenanceSettings:
+          $ref: "#/components/schemas/MaintenanceSettings"
+        minHostDistanceKm:
+          type: number
+          description: The minimum distance between hosts storing sectors of the same slab
+
+    MigrationBatch:
+      type: object
+      description: A batch of unhealthy slabs together with the migration state needed to migrate them.
+      properties:
+        slabs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Slab"
+        state:
+          $ref: "#/components/schemas/MigrationState"
+        nextCursor:
+          type: integer
+          format: int64
+          description: Cursor for the next batch; 0 means there are no more unhealthy slabs
+
+    MigrationResult:
+      type: object
+      description: The outcome of migrating a single slab, reported back for the primary to persist.
+      properties:
+        slabID:
+          $ref: "#/components/schemas/SlabID"
+        migrated:
+          type: array
+          items:
+            $ref: "#/components/schemas/Shard"
+        lost:
+          type: array
+          items:
+            $ref: "#/components/schemas/Shard"
+        recovered:
+          type: boolean
+          description: Whether the slab's shards were recovered; if false the repair state is left untouched
+        success:
+          type: boolean
+          description: Whether every required sector was migrated; only meaningful when recovered is true
+
     ObjectSlab:
       type: object
       description: A reference to a previously pinned slab that is part of an object

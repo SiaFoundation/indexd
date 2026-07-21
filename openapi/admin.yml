@@ -48,6 +48,12 @@ tags:
   - name: quotas
     description: Manage quotas for app connect keys.
 
+  - name: migrations
+    description: >
+      Endpoints used by remote nodes to fetch slab-migration work and report
+      its results. Remote nodes help the primary node migrate unhealthy slabs
+      without accessing its database directly.
+
 paths:
   /state:
     get:
@@ -1687,6 +1693,60 @@ paths:
             })
             await admin.syncerConnect("118.92.232.145:9981")
 
+  /migrations/batch:
+    post:
+      tags:
+        - migrations
+      summary: Fetch a batch of slabs to migrate
+      description: >-
+        Returns a batch of unhealthy slabs for a remote node together with the
+        migration state it needs to determine which of their sectors to migrate
+        and which hosts can receive them — the same decisions the primary's own
+        migration loop makes. A nextCursor of 0 means there are no more
+        unhealthy slabs.
+      operationId: postMigrationBatch
+      parameters:
+        - in: query
+          name: cursor
+          schema:
+            type: integer
+            format: int64
+          description: Cursor returned by the previous call; omit or 0 to start.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            maximum: 500
+          description: Maximum number of slabs to return (default 100, max 500).
+      responses:
+        "200":
+          description: A batch of unhealthy slabs and the state to migrate them
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MigrationBatch"
+
+  /migrations/results:
+    post:
+      tags:
+        - migrations
+      summary: Report slab-migration results
+      description: >-
+        Reports the outcomes of migration jobs so the primary node can persist
+        them (record migrated and lost sectors and update repair state). Used by
+        remote nodes.
+      operationId: postMigrationResults
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/MigrationResult"
+      responses:
+        "200":
+          description: Results applied
+
   /stats/accounts:
     get:
       tags:
@@ -2157,6 +2217,16 @@ components:
       $ref: "./components.yml#/components/schemas/Host"
     MaintenanceSettings:
       $ref: "./components.yml#/components/schemas/MaintenanceSettings"
+    Slab:
+      $ref: "./components.yml#/components/schemas/Slab"
+    Shard:
+      $ref: "./components.yml#/components/schemas/Shard"
+    MigrationState:
+      $ref: "./components.yml#/components/schemas/MigrationState"
+    MigrationBatch:
+      $ref: "./components.yml#/components/schemas/MigrationBatch"
+    MigrationResult:
+      $ref: "./components.yml#/components/schemas/MigrationResult"
     PinnedSettings:
       $ref: "./components.yml#/components/schemas/PinnedSettings"
     SyncerAddress:

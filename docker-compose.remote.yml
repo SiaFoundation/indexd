@@ -1,0 +1,22 @@
+# This file contains an example docker-compose configuration for running a
+# remote migration node. A remote node helps a primary indexd migrate unhealthy
+# slabs: it fetches migration jobs from the primary node's admin API and
+# reports the results back. It needs no database, serves no API and exposes no
+# ports.
+#
+# The node reads its config from /data/indexd.yml inside the volume. It must
+# contain the primary node's recovery phrase plus the 'remote' section with
+# the primary's URL and admin password — see "Example Config (remote migration
+# node)" in the README. Note that 'indexd config' does not generate the
+# 'remote' section, so add it by hand.
+
+services:
+  indexd-remote:
+    image: ghcr.io/siafoundation/indexd:master
+    restart: unless-stopped
+    command: remote
+    volumes:
+      - indexd-remote:/data
+
+volumes:
+  indexd-remote:

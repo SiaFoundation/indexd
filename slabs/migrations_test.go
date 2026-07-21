@@ -8,16 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/klauspost/reedsolomon"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
-	"golang.org/x/crypto/chacha20"
 	"lukechampine.com/frand"
 )
 
@@ -25,7 +24,6 @@ func TestMigrateSlab(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	db := newMockStore(t)
 	contractsMgr := newMockContractManager()
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	hm := newMockHostManager()
 
@@ -53,7 +51,7 @@ func TestMigrateSlab(t *testing.T) {
 		}
 	}
 
-	encryptionKey, shards, roots := NewTestShards(t, 2, 2)
+	encryptionKey, shards, roots := testutils.NewTestShards(t, 2, 2)
 	for i, sector := range shards[:3] {
 		result, err := client.WriteSector(t.Context(), types.GeneratePrivateKey(), hostsList[i].PublicKey, sector)
 		if err != nil {
@@ -94,7 +92,7 @@ func TestMigrateSlab(t *testing.T) {
 	msk := types.GeneratePrivateKey()
 	ssk := types.GeneratePrivateKey()
 	alerter := alerts.NewManager()
-	mgr := slabs.NewSlabManager(chain, am, contractsMgr, hm, db, client, alerter, msk, ssk, slabs.WithLogger(log.Named("slabs")), slabs.WithMinHostDistance(0))
+	mgr := slabs.NewSlabManager(am, contractsMgr, hm, db, client, alerter, msk, ssk, slabs.WithLogger(log.Named("slabs")), slabs.WithMinHostDistance(0))
 
 	for _, h := range hostsList {
 		if err := am.UpdateServiceAccountBalance(h.PublicKey, mgr.MigrationAccount(), types.Siacoins(10)); err != nil {
@@ -289,12 +287,13 @@ func TestSectorsToMigrate(t *testing.T) {
 	// helper to assert result of sectorsToMigrate
 	state := slabs.MigrationState{
 		MaintenanceSettings: contracts.MaintenanceSettings{Period: 100},
+		MinHostDistanceKm:   10,
 	}
 	assertResult := func(availableHosts []hosts.Host, healthyContracts []contracts.Contract, expectedRoots []int, expectedHosts []hosts.Host) {
 		t.Helper()
 		state.Hosts = availableHosts
 		state.HealthyContracts = healthyContracts
-		toRepair, toUse := slabs.SectorsToMigrate(slab, state, 10)
+		toRepair, toUse := slabs.SectorsToMigrate(slab, state)
 		if len(toRepair) != len(expectedRoots) {
 			t.Fatalf("expected %d roots to repair, got %d: %v", len(expectedRoots), len(toRepair), toRepair)
 		} else if len(toUse) != len(expectedHosts) {
@@ -404,7 +403,6 @@ func BenchmarkMigrateSlab(b *testing.B) {
 		b.Helper()
 		b.Run(fmt.Sprintf("bad %d fail %d block %d", badShards, nFailHosts, nBlockHosts), func(b *testing.B) {
 			db := newMockStore(b, withStoreLogger(zap.NewNop()))
-			chain := newMockChainManager()
 			am := newMockAccountManager()
 			hm := newMockHostManager()
 			client := newMockHostClient()
@@ -413,7 +411,7 @@ func BenchmarkMigrateSlab(b *testing.B) {
 			accountKey := types.PublicKey{1}
 			db.AddTestAccount(b, accountKey)
 
-			encryptionKey, shardData, roots := NewTestShards(b, dataShards, parityShards)
+			encryptionKey, shardData, roots := testutils.NewTestShards(b, dataShards, parityShards)
 
 			// create slab hosts (one per sector)
 			slabHosts := make([]hosts.Host, totalShards)
@@ -502,7 +500,7 @@ func BenchmarkMigrateSlab(b *testing.B) {
 
 			// create slab manager
 			alerter := alerts.NewManager()
-			mgr := slabs.NewSlabManager(chain, am, contractsMgr, hm, db, client, alerter,
+			mgr := slabs.NewSlabManager(am, contractsMgr, hm, db, client, alerter,
 				types.GeneratePrivateKey(), types.GeneratePrivateKey(),
 				slabs.WithLogger(zap.NewNop()),
 				slabs.WithMinHostDistance(0),
@@ -624,41 +622,78 @@ func BenchmarkMigrateSlab(b *testing.B) {
 	}
 }
 
-// NewTestShards returns a new set of test shards along with their encryption
-// key and roots.
-func NewTestShards(t testing.TB, dataShards, parityShards int) ([32]byte, [][]byte, []types.Hash256) {
-	enc, err := reedsolomon.New(dataShards, parityShards)
+// TestApplyMigrationResults exercises the persistence choke-point for remote
+// migration results: lost-sector persistence, the Recovered=false gating that
+// leaves repair state untouched, and recording a successful migration.
+func TestApplyMigrationResults(t *testing.T) {
+	log := zaptest.NewLogger(t)
+	db := newMockStore(t)
+	am := newMockAccountManager()
+	hm := newMockHostManager()
+	client := newMockHostClient()
+
+	a1 := types.PublicKey{1}
+	db.AddTestAccount(t, a1)
+
+	// hosts 0-3 hold the slab's sectors; host 4 is a migration destination.
+	hostsList := make([]hosts.Host, 5)
+	for i := range hostsList {
+		h := client.addTestHost(types.GeneratePrivateKey())
+		db.AddTestHost(t, h)
+		db.addTestContract(t, h.PublicKey)
+		hostsList[i] = h
+	}
+	dest := hostsList[4]
+
+	encryptionKey, _, roots := testutils.NewTestShards(t, 2, 2)
+	slabIDs, err := db.PinSlabs(proto.Account(a1), time.Now().Add(time.Hour), slabs.SlabPinParams{
+		EncryptionKey: encryptionKey,
+		MinShards:     2,
+		Sectors: []slabs.PinnedSector{
+			{Root: roots[0], HostKey: hostsList[0].PublicKey},
+			{Root: roots[1], HostKey: hostsList[1].PublicKey},
+			{Root: roots[2], HostKey: hostsList[2].PublicKey},
+			{Root: roots[3], HostKey: hostsList[3].PublicKey},
+		},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	slabID := slabIDs[0]
 
-	shards := make([][]byte, dataShards+parityShards)
-	for i := range shards {
-		if i < dataShards {
-			shards[i] = frand.Bytes(proto.SectorSize)
-		} else {
-			shards[i] = make([]byte, proto.SectorSize)
+	mgr := slabs.NewSlabManager(am, newMockContractManager(), hm, db, client, alerts.NewManager(), types.GeneratePrivateKey(), types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
+
+	failedRepairs := func() int {
+		t.Helper()
+		var n int
+		if err := db.QueryRow(context.Background(), "SELECT consecutive_failed_repairs FROM slabs WHERE digest = $1", sqlHash256(slabID)).Scan(&n); err != nil {
+			t.Fatal(err)
 		}
+		return n
 	}
 
-	err = enc.Encode(shards)
-	if err != nil {
-		t.Fatalf("failed to encode shards: %v", err)
+	// a failed recovery persists the discovered lost sectors but leaves the
+	// repair state untouched so the slab is retried without backoff
+	mgr.ApplyMigrationResults([]slabs.MigrationResult{{
+		SlabID: slabID,
+		Lost:   []slabs.Shard{{Root: roots[0], HostKey: hostsList[0].PublicKey}},
+	}})
+	if _, ok := db.lostSectors(t)[roots[0]]; !ok {
+		t.Fatal("expected lost sector to be persisted")
+	} else if n := failedRepairs(); n != 0 {
+		t.Fatalf("expected repair state to be untouched, got %d failed repairs", n)
 	}
 
-	var encryptionKey [32]byte
-	frand.Read(encryptionKey[:])
-	nonce := make([]byte, 24)
-	for i := range shards {
-		nonce[0] = byte(i)
-		c, _ := chacha20.NewUnauthenticatedCipher(encryptionKey[:], nonce)
-		c.XORKeyStream(shards[i], shards[i])
+	// a successful result records the new location and resets the repair state
+	mgr.ApplyMigrationResults([]slabs.MigrationResult{{
+		SlabID:    slabID,
+		Migrated:  []slabs.Shard{{Root: roots[1], HostKey: dest.PublicKey}},
+		Recovered: true,
+		Success:   true,
+	}})
+	if _, ok := db.migratedSectors(t, dest.PublicKey)[roots[1]]; !ok {
+		t.Fatal("expected sector to be migrated to the destination host")
+	} else if n := failedRepairs(); n != 0 {
+		t.Fatalf("expected successful repair, got %d failed repairs", n)
 	}
-
-	var roots []types.Hash256
-	for _, shard := range shards {
-		roots = append(roots, proto.SectorRoot((*[proto.SectorSize]byte)(shard)))
-	}
-
-	return encryptionKey, shards, roots
 }

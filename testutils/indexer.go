@@ -24,7 +24,6 @@ import (
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
-	"go.sia.tech/indexd/keys"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/stats"
@@ -57,6 +56,8 @@ type (
 		AdminURL      string
 		AdminPassword string
 		AppURL        string
+
+		walletKey types.PrivateKey
 
 		Admin *admin.Client
 		App   *app.Client
@@ -193,7 +194,8 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	}
 
 	slabOpts := append([]slabs.Option{slabs.WithPruneDeletedSlabsInterval(100 * time.Millisecond)}, cfg.slabOpts...)
-	slabs, err := slabs.NewManager(c.cm, am, contracts, hm, store, client, alerter, keys.DerivePrivateKey(walletKey, "migration"), keys.DerivePrivateKey(walletKey, "integrity"), slabOpts...)
+	migrationKey, integrityKey := slabs.DeriveAccountKeys(walletKey)
+	slabs, err := slabs.NewManager(am, contracts, hm, store, client, alerter, migrationKey, integrityKey, slabOpts...)
 	if err != nil {
 		t.Fatalf("failed to create slab manager: %v", err)
 	}
@@ -321,6 +323,8 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		AdminPassword: password,
 		AppURL:        appAPIAddr,
 
+		walletKey: walletKey,
+
 		Admin: admin.NewClient(adminAPIAddr, password),
 		App:   app.NewClient(appAPIAddr),
 
@@ -380,6 +384,12 @@ func (idx *Indexer) Tip() (types.ChainIndex, error) {
 // WalletAddr returns the address of the wallet.
 func (idx *Indexer) WalletAddr() types.Address {
 	return idx.wallet.Address()
+}
+
+// WalletKey returns the indexer's wallet private key. Remote migration
+// workers derive their service-account keys from it.
+func (idx *Indexer) WalletKey() types.PrivateKey {
+	return idx.walletKey
 }
 
 // moduleRootDir walks up from the current working directory to find the

@@ -58,33 +58,6 @@ var goodSettings = proto.HostSettings{
 	MaxCollateral:       types.Siacoins(1000),
 }
 
-type mockChainManager struct {
-	mu  sync.Mutex
-	tip types.ChainIndex
-}
-
-func (m *mockChainManager) AdvanceToHeight(height uint64) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.tip.Height = height
-	m.tip.ID = frand.Entropy256()
-}
-
-func (m *mockChainManager) Tip() types.ChainIndex {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.tip
-}
-
-func newMockChainManager() *mockChainManager {
-	return &mockChainManager{
-		tip: types.ChainIndex{
-			Height: 0,
-			ID:     frand.Entropy256(),
-		},
-	}
-}
-
 type testStore struct {
 	testutils.TestStore
 }
@@ -445,6 +418,10 @@ func (m *mockHostClient) Prices(ctx context.Context, hostKey types.PublicKey) (p
 // WriteSector is a mock implementation that writes a sector to the mock host.
 func (m *mockHostClient) WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (rhp.RPCWriteSectorResult, error) {
 	m.mu.Lock()
+	if err, ok := m.failHosts[hostKey]; ok {
+		m.mu.Unlock()
+		return rhp.RPCWriteSectorResult{}, err
+	}
 	delay := m.slowHosts[hostKey]
 	m.mu.Unlock()
 	if delay > 0 {
@@ -584,7 +561,7 @@ func (m *mockHostClient) setSlowHost(hostKey types.PublicKey, delay time.Duratio
 
 func TestSlabManagerPinSlabsValidation(t *testing.T) {
 	store := newMockStore(t)
-	sm := slabs.NewSlabManager(newMockChainManager(), newMockAccountManager(), nil, newMockHostManager(), store, newMockHostClient(), alerts.NewManager(), types.GeneratePrivateKey(), types.GeneratePrivateKey())
+	sm := slabs.NewSlabManager(newMockAccountManager(), nil, newMockHostManager(), store, newMockHostClient(), alerts.NewManager(), types.GeneratePrivateKey(), types.GeneratePrivateKey())
 
 	accountPK := types.GeneratePrivateKey().PublicKey()
 	store.AddTestAccount(t, accountPK)
