@@ -18,6 +18,10 @@ const (
 	// MaxLimit is the maximum value of the 'limit' query parameter accepted by
 	// paginated endpoints.
 	MaxLimit = 500
+
+	// DefaultSlabPruneCutoff is the default age a slab must exceed to be
+	// eligible for pruning when no explicit 'before' cutoff is provided.
+	DefaultSlabPruneCutoff = 72 * time.Hour
 )
 
 var (

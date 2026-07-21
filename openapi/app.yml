@@ -446,7 +446,7 @@ paths:
       parameters:
         - name: before
           in: query
-          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to one hour ago.
+          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to 72 hours ago.
           schema:
             type: string
             format: date-time

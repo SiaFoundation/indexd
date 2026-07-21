@@ -204,7 +204,7 @@ func (c *Client) Slab(ctx context.Context, appKey types.PrivateKey, slabID slabs
 }
 
 // PruneSlabs prunes all pinned slabs of a user not currently connected to an
-// object. Use api.WithBefore to override the default cutoff (1 hour ago).
+// object. Use api.WithBefore to override the default cutoff (24 hours ago).
 func (c *Client) PruneSlabs(ctx context.Context, appKey types.PrivateKey, opts ...api.URLQueryParameterOption) error {
 	values := url.Values{}
 	for _, opt := range opts {
