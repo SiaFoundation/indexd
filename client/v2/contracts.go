@@ -186,16 +186,17 @@ func (c *Client) AppendSectors(ctx context.Context, signer rhp.ContractSigner, c
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		if c.checkPricesHeight(settings.Prices, chain.TipState().Index.Height) != nil {
+		tipState := chain.TipState()
+		if c.checkPricesHeight(settings.Prices, tipState.Index.Height) != nil {
 			settings, err = c.refreshSettings(ctx, hostKey, transport)
 			if err != nil {
 				return fmt.Errorf("failed to refresh host prices: %w", err)
 			}
 		}
-		if err := c.checkPricesHeight(settings.Prices, chain.TipState().Index.Height); err != nil {
+		if err := c.checkPricesHeight(settings.Prices, tipState.Index.Height); err != nil {
 			return err
 		}
-		res, err = rhp.RPCAppendSectors(ctx, transport, signer, chain.TipState(), settings.Prices, revision, sectors)
+		res, err = rhp.RPCAppendSectors(ctx, transport, signer, tipState, settings.Prices, revision, sectors)
 		return err
 	})
 	return

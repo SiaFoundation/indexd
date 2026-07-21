@@ -456,7 +456,7 @@ var ErrPricesHeightDrift = errors.New("host prices tip height too far behind loc
 // prices is no more than the client's height tolerance behind the local tip
 // height.
 func (c *Client) checkPricesHeight(prices proto.HostPrices, localHeight uint64) error {
-	if prices.TipHeight+c.heightTolerance < localHeight {
+	if prices.TipHeight < localHeight && localHeight-prices.TipHeight > c.heightTolerance {
 		return fmt.Errorf("%w: host height %d, local height %d, tolerance %d", ErrPricesHeightDrift, prices.TipHeight, localHeight, c.heightTolerance)
 	}
 	return nil
