@@ -377,7 +377,10 @@ func (a *admin) handleDELETESlab(jc jape.Context) {
 
 	// delete each object
 	for _, obj := range objects {
-		if err := a.slabs.DeleteObject(jc.Request.Context(), obj.Account, obj.ObjectID); err != nil {
+		err := a.slabs.DeleteObject(jc.Request.Context(), obj.Account, obj.ObjectID)
+		if errors.Is(err, slabs.ErrObjectNotFound) {
+			continue
+		} else if err != nil {
 			jc.Check("failed to delete object", err)
 			return
 		}
