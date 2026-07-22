@@ -455,7 +455,7 @@ func (c *Client) settings(ctx context.Context, hostKey types.PublicKey, transpor
 	c.mu.Lock()
 	settings, ok := c.cachedSettings[hostKey]
 	c.mu.Unlock()
-	// only fresh, validated settings are cached, so the signature never needs
+	// settings are cached only after signature validation, so the signature never needs
 	// rechecking here. this keeps the ed25519 verify off the per-rpc hot path
 	if ok && time.Until(settings.Prices.ValidUntil) > 30*time.Second {
 		return settings, true, nil
