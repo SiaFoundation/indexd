@@ -702,9 +702,9 @@ func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 			return fmt.Errorf("failed to get account ID: %w", err)
 		}
 
-		// lock the slab before any checks so they serialize against
+		// lock the slab before the checks so they serialize against
 		// concurrent unpins and against PinObject attaching the slab to a
-		// new object; the checks run as separate statements after the lock,
+		// new object; the checks run in a separate statement after the lock,
 		// so they see the state committed by whoever held the lock before us
 		var sID int64
 		err = tx.QueryRow(ctx, `SELECT id FROM slabs WHERE digest = $1 FOR UPDATE`, sqlHash256(slabID)).Scan(&sID)
@@ -714,28 +714,23 @@ func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 			return fmt.Errorf("failed to lock slab: %w", err)
 		}
 
-		var pinned bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS (
-			SELECT 1 FROM account_slabs WHERE account_id = $1 AND slab_id = $2
-		)`, id, sID).Scan(&pinned)
+		// the slab must still be pinned by the account and must not be
+		// referenced by one of its objects; refusing the unpin while an object
+		// references the slab stops the account from freeing quota while the
+		// object keeps the slab alive
+		var pinned, inUse bool
+		err = tx.QueryRow(ctx, `SELECT
+			EXISTS (SELECT 1 FROM account_slabs WHERE account_id = $1 AND slab_id = $2),
+			EXISTS (
+				SELECT 1
+				FROM objects o
+				JOIN object_slabs os ON o.id = os.object_id
+				WHERE o.account_id = $1 AND os.slab_digest = $3
+			)`, id, sID, sqlHash256(slabID)).Scan(&pinned, &inUse)
 		if err != nil {
-			return fmt.Errorf("failed to check if slab is pinned: %w", err)
+			return fmt.Errorf("failed to check slab pin state: %w", err)
 		} else if !pinned {
 			return slabs.ErrSlabNotFound
-		}
-
-		// refuse to unpin a slab that is still referenced by one of the
-		// account's objects; otherwise the account would free up quota while
-		// the object keeps the slab alive
-		var inUse bool
-		err = tx.QueryRow(ctx, `SELECT EXISTS (
-			SELECT 1
-			FROM objects o
-			JOIN object_slabs os ON o.id = os.object_id
-			WHERE o.account_id = $1 AND os.slab_digest = $2
-		)`, id, sqlHash256(slabID)).Scan(&inUse)
-		if err != nil {
-			return fmt.Errorf("failed to check if slab is in use: %w", err)
 		} else if inUse {
 			return slabs.ErrSlabInUse
 		}
