@@ -1,6 +1,7 @@
 package app_test
 
 import (
+	"bytes"
 	"errors"
 	"net/http"
 	"testing"
@@ -162,28 +163,73 @@ func TestSharingKeys(t *testing.T) {
 		t.Fatalf("unexpected totals: %+v", key)
 	}
 
-	if objs, err := appClient.SharedObjects(ctx, sk1, shareKey); err != nil {
+	if objs, err := appClient.SharingKeyObjects(ctx, sk1, shareKey); err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 || objs[0].ID() != obj.ID() {
 		t.Fatalf("unexpected shared objects: %v", objs)
 	}
 
-	if objs, err := appClient.SharedObjects(ctx, sk1, shareKey, api.WithOffset(1)); err != nil {
+	if objs, err := appClient.SharingKeyObjects(ctx, sk1, shareKey, api.WithOffset(1)); err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
 		t.Fatalf("expected no objects at offset 1, got %d", len(objs))
 	}
 
-	if _, err := appClient.SharedObjects(ctx, sk1, types.GeneratePrivateKey().PublicKey()); err == nil {
+	if _, err := appClient.SharingKeyObjects(ctx, sk1, types.GeneratePrivateKey().PublicKey()); err == nil {
 		t.Fatal("expected error listing objects of unknown key")
 	} else {
 		assertStatus(t, err, http.StatusNotFound)
 	}
 
-	if _, err := appClient.SharedObjects(ctx, sk2, shareKey); err == nil {
+	if _, err := appClient.SharingKeyObjects(ctx, sk2, shareKey); err == nil {
 		t.Fatal("expected error listing another account's key objects")
 	} else {
 		assertStatus(t, err, http.StatusNotFound)
+	}
+
+	// the following requests are authenticated with the sharing key itself
+	if stats, err := appClient.SharedStats(ctx, shareKeyPriv); err != nil {
+		t.Fatal(err)
+	} else if stats.ObjectCount != 1 || stats.ObjectSize != 256 ||
+		stats.PinnedData != 4*uint64(proto.SectorSize) ||
+		stats.PinnedSize != uint64(len(hostList))*uint64(proto.SectorSize) {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+
+	if objs, err := appClient.SharedObjects(ctx, shareKeyPriv); err != nil {
+		t.Fatal(err)
+	} else if len(objs) != 1 || objs[0].ID() != obj.ID() || !bytes.Equal(objs[0].EncryptedDataKey, sharedReq.EncryptedDataKey) {
+		t.Fatalf("unexpected shared objects: %+v", objs)
+	}
+
+	if got, err := appClient.SharedObjectByID(ctx, shareKeyPriv, obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if got.ID() != obj.ID() || !bytes.Equal(got.EncryptedDataKey, sharedReq.EncryptedDataKey) {
+		t.Fatalf("unexpected shared object: %+v", got)
+	}
+
+	if _, err := appClient.SharedObjects(ctx, types.GeneratePrivateKey()); err == nil {
+		t.Fatal("expected unauthorized for a non-sharing key")
+	} else {
+		assertStatus(t, err, http.StatusUnauthorized)
+	}
+
+	appHosts, err := appClient.Hosts(ctx, sk1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sharedHosts, err := appClient.SharedHosts(ctx, shareKeyPriv); err != nil {
+		t.Fatal(err)
+	} else if len(sharedHosts) != len(appHosts) {
+		t.Fatalf("expected %d shared hosts, got %d", len(appHosts), len(sharedHosts))
+	}
+
+	if token, err := appClient.SharedHostToken(ctx, shareKeyPriv, hostList[0].PublicKey); err != nil {
+		t.Fatal(err)
+	} else if token.HostKey != hostList[0].PublicKey {
+		t.Fatalf("unexpected token host: %v", token.HostKey)
+	} else if !types.PublicKey(token.Account).VerifyHash(token.SigHash(), token.Signature) {
+		t.Fatal("invalid account token signature")
 	}
 
 	forged := sharedReq

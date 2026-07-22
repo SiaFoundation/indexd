@@ -24,6 +24,8 @@ type (
 		PruneExpiredSharingKeys(cutoff time.Time) error
 
 		SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
+		SharingKeyObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
+		SharingAccountKey(sharingKey types.PublicKey) (types.PrivateKey, error)
 	}
 
 	// A Manager manages sharing keys and the objects attached to them.
@@ -131,6 +133,29 @@ func (m *Manager) OwnedSharedObjects(account proto.Account, sharingKey types.Pub
 		return nil, err
 	}
 	return m.store.SharedObjects(sharingKey, offset, limit)
+}
+
+// SharedObjects returns a paginated list of the objects attached to the sharing
+// key. It is the recipient-facing view: the caller is authenticated by the
+// sharing key itself, so no ownership check is required.
+func (m *Manager) SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error) {
+	return m.store.SharedObjects(sharingKey, offset, limit)
+}
+
+// SharedObject returns a single object attached to the sharing key.
+func (m *Manager) SharedObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error) {
+	return m.store.SharingKeyObject(sharingKey, objectKey)
+}
+
+// AccountToken returns an RHP4 account token for the given host, signed with the
+// sharing account derived from the sharing key's owner. The recipient uses it to
+// pay for downloading the shared objects.
+func (m *Manager) AccountToken(sharingKey types.PublicKey, hostKey types.PublicKey) (proto.AccountToken, error) {
+	key, err := m.store.SharingAccountKey(sharingKey)
+	if err != nil {
+		return proto.AccountToken{}, err
+	}
+	return proto.NewAccountToken(key, hostKey), nil
 }
 
 // NewManager creates a new sharing Manager.
