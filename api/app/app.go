@@ -395,7 +395,7 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 }
 
 func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
-	cutoff := time.Now().Add(-time.Hour)
+	cutoff := time.Now().Add(-api.DefaultSlabPruneCutoff)
 	if jc.Request.FormValue("before") != "" {
 		if jc.DecodeForm("before", &cutoff) != nil {
 			return

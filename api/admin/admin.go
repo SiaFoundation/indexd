@@ -387,7 +387,7 @@ func (a *admin) handleDELETESlab(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTPruneAccounts(jc jape.Context) {
-	cutoff := time.Now().Add(-time.Hour)
+	cutoff := time.Now().Add(-api.DefaultSlabPruneCutoff)
 	if jc.Request.FormValue("before") != "" {
 		if jc.DecodeForm("before", &cutoff) != nil {
 			return
@@ -742,7 +742,7 @@ func (a *admin) handlePOSTAccountPrune(jc jape.Context) {
 	if jc.DecodeParam("accountkey", &ak) != nil {
 		return
 	}
-	cutoff := time.Now().Add(-time.Hour)
+	cutoff := time.Now().Add(-api.DefaultSlabPruneCutoff)
 	if jc.Request.FormValue("before") != "" {
 		if jc.DecodeForm("before", &cutoff) != nil {
 			return
