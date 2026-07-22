@@ -66,6 +66,18 @@ type (
 		UpdatedAt  time.Time  `json:"updatedAt"`
 	}
 
+	// KeyStats reports a sharing key's aggregate totals. It omits the fields
+	// that identify the key or its owner so it is safe to return to recipients.
+	KeyStats struct {
+		ObjectCount uint64     `json:"objectCount"`
+		ObjectSize  uint64     `json:"objectSize"`
+		PinnedData  uint64     `json:"pinnedData"`
+		PinnedSize  uint64     `json:"pinnedSize"`
+		ExpiresAt   *time.Time `json:"expiresAt,omitempty"`
+		CreatedAt   time.Time  `json:"createdAt"`
+		UpdatedAt   time.Time  `json:"updatedAt"`
+	}
+
 	// A KeyRequest contains the fields required to create a sharing key. It must
 	// be signed by the sharing key to prove control of its private key.
 	KeyRequest struct {
@@ -117,6 +129,19 @@ func (r KeyRequest) VerifySignature() error {
 		return fmt.Errorf("%w: invalid signature", ErrInvalidRequest)
 	}
 	return nil
+}
+
+// Stats returns the key's aggregate totals.
+func (k Key) Stats() KeyStats {
+	return KeyStats{
+		ObjectCount: k.ObjectCount,
+		ObjectSize:  k.ObjectSize,
+		PinnedData:  k.PinnedData,
+		PinnedSize:  k.PinnedSize,
+		ExpiresAt:   k.ExpiresAt,
+		CreatedAt:   k.CreatedAt,
+		UpdatedAt:   k.UpdatedAt,
+	}
 }
 
 func (r KeyRequest) validate() error {

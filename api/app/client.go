@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
@@ -308,14 +309,57 @@ func (c *Client) DeleteSharedObject(ctx context.Context, appKey types.PrivateKey
 	return c.signedRequestJSON(ctx, appKey, http.MethodDelete, fmt.Sprintf("/sharing/%s/objects/%s", sharingKey, objectKey), nil, nil)
 }
 
-// SharedObjects lists the object IDs attached to one of the account's sharing
+// SharingKeyObjects lists the objects attached to one of the account's sharing
 // keys. It supports pagination through the provided options.
-func (c *Client) SharedObjects(ctx context.Context, appKey types.PrivateKey, sharingKey types.PublicKey, opts ...api.URLQueryParameterOption) (objects []slabs.SealedObject, err error) {
+func (c *Client) SharingKeyObjects(ctx context.Context, appKey types.PrivateKey, sharingKey types.PublicKey, opts ...api.URLQueryParameterOption) (objects []slabs.SealedObject, err error) {
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
 	}
 	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, fmt.Sprintf("/sharing/%s/objects?%s", sharingKey, values.Encode()), nil, &objects)
+	return
+}
+
+// SharedStats returns the sharing key's aggregate totals. The request is signed
+// with the sharing key's private key.
+func (c *Client) SharedStats(ctx context.Context, sharingKey types.PrivateKey) (stats sharing.KeyStats, err error) {
+	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared", nil, &stats)
+	return
+}
+
+// SharedObjects lists the objects the sharing key grants access to. The request
+// is signed with the sharing key's private key.
+func (c *Client) SharedObjects(ctx context.Context, sharingKey types.PrivateKey, opts ...api.URLQueryParameterOption) (objects []slabs.SealedObject, err error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared/objects?"+values.Encode(), nil, &objects)
+	return
+}
+
+// SharedObjectByID retrieves a single object the sharing key grants access to.
+// The request is signed with the sharing key's private key.
+func (c *Client) SharedObjectByID(ctx context.Context, sharingKey types.PrivateKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
+	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, fmt.Sprintf("/shared/objects/%s", objectKey), nil, &obj)
+	return
+}
+
+// SharedHosts lists usable hosts using the sharing key for authentication.
+func (c *Client) SharedHosts(ctx context.Context, sharingKey types.PrivateKey, opts ...api.URLQueryParameterOption) (hosts []hosts.HostInfo, err error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared/hosts?"+values.Encode(), nil, &hosts)
+	return
+}
+
+// SharedHostToken returns an account token for the given host, signed with the
+// sharing account of the sharing key's owner. The recipient uses it to pay for
+// downloads from the host.
+func (c *Client) SharedHostToken(ctx context.Context, sharingKey types.PrivateKey, hostKey types.PublicKey) (token proto.AccountToken, err error) {
+	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, fmt.Sprintf("/shared/hosts/%s/token", hostKey), nil, &token)
 	return
 }
 

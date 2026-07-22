@@ -287,6 +287,71 @@ func (s *Store) SharedObjects(sharingKey types.PublicKey, offset, limit int) (ob
 	return
 }
 
+// SharingKeyObject returns a single object attached to the sharing key with its
+// encryption keys re-sealed under the sharing key and its slabs decorated with
+// sectors.
+func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		obj = slabs.SealedObject{} // reset if the transaction retries
+
+		var sharingKeyID int64
+		err := tx.QueryRow(ctx, `
+			SELECT sk.id FROM sharing_keys sk
+			INNER JOIN accounts a ON a.id = sk.account_id
+			WHERE sk.public_key = $1 AND a.deleted_at IS NULL AND (sk.expires_at IS NULL OR sk.expires_at > NOW())
+		`, sqlPublicKey(sharingKey)).Scan(&sharingKeyID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return sharing.ErrSharingKeyNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to get sharing key: %w", err)
+		}
+
+		var objectID int64
+		var metaKey sql.Null[[]byte]
+		err = tx.QueryRow(ctx, `
+			SELECT so.object_id, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at
+			FROM shared_objects so
+			INNER JOIN objects o ON o.id = so.object_id
+			WHERE so.sharing_key_id = $1 AND o.object_key = $2
+		`, sharingKeyID, sqlHash256(objectKey)).Scan(&objectID, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt)
+		if errors.Is(err, sql.ErrNoRows) {
+			return sharing.ErrSharedObjectNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to get shared object: %w", err)
+		}
+		if metaKey.Valid {
+			obj.EncryptedMetadataKey = metaKey.V
+		}
+
+		return loadObjectSlabs(ctx, tx, objectID, &obj)
+	})
+	return
+}
+
+// SharingAccountKey returns the sharing account key derived from the owner of
+// the sharing key. It is used to sign account tokens for downloading the
+// shared objects.
+func (s *Store) SharingAccountKey(sharingKey types.PublicKey) (key types.PrivateKey, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		var userSecret types.Hash256
+		err := tx.QueryRow(ctx, `
+			SELECT ack.user_secret
+			FROM sharing_keys sk
+			INNER JOIN accounts a ON a.id = sk.account_id
+			INNER JOIN app_connect_keys ack ON ack.id = a.connect_key_id
+			WHERE sk.public_key = $1 AND a.deleted_at IS NULL AND (sk.expires_at IS NULL OR sk.expires_at > NOW())
+		`, sqlPublicKey(sharingKey)).Scan((*sqlHash256)(&userSecret))
+		if errors.Is(err, sql.ErrNoRows) {
+			return sharing.ErrSharingKeyNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to get user secret: %w", err)
+		}
+		key = accounts.DeriveSharingAccountKey(userSecret)
+		return nil
+	})
+	return
+}
+
 // DeleteSharedObject detaches an object from one of the account's sharing keys.
 func (s *Store) DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey types.Hash256) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {

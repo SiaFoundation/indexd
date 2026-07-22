@@ -220,6 +220,10 @@ func TestSharingKeyDeletedAccount(t *testing.T) {
 
 	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
 	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	obj := store.pinTestObject(t, acc, hk)
 
 	pk := types.GeneratePrivateKey().PublicKey()
 	if _, err := store.AddSharingKey(acc, sharing.KeyRequest{
@@ -229,21 +233,41 @@ func TestSharingKeyDeletedAccount(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-
-	// the key is reachable while the account is active
-	if _, err := store.SharingKey(pk); err != nil {
+	if err := store.AddSharedObject(acc, pk, sharing.SharedObjectRequest{
+		ObjectID:          obj.ID(),
+		EncryptedDataKey:  frand.Bytes(sharing.EncryptionKeySize),
+		DataSignature:     types.Signature(frand.Bytes(64)),
+		MetadataSignature: types.Signature(frand.Bytes(64)),
+	}); err != nil {
 		t.Fatal(err)
 	}
 
-	// soft-deleting the account hides the key from recipient reads before pruning
+	// every recipient read is reachable while the account is active
+	if _, err := store.SharingKey(pk); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SharingKeyObject(pk, obj.ID()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SharingAccountKey(pk); err != nil {
+		t.Fatal(err)
+	}
+
+	// soft-deleting the account hides the key from every recipient read before pruning
 	if err := store.DeleteAccount(acc); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.SharingKey(pk); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
-		t.Fatalf("expected ErrSharingKeyNotFound for soft-deleted account, got %v", err)
+		t.Fatalf("expected ErrSharingKeyNotFound from SharingKey, got %v", err)
 	}
 	if _, err := store.SharedObjects(pk, 0, 10); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
-		t.Fatalf("expected ErrSharingKeyNotFound for soft-deleted account, got %v", err)
+		t.Fatalf("expected ErrSharingKeyNotFound from SharedObjects, got %v", err)
+	}
+	if _, err := store.SharingKeyObject(pk, obj.ID()); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		t.Fatalf("expected ErrSharingKeyNotFound from SharingKeyObject, got %v", err)
+	}
+	if _, err := store.SharingAccountKey(pk); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		t.Fatalf("expected ErrSharingKeyNotFound from SharingAccountKey, got %v", err)
 	}
 }
 
