@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/indexd/geoip"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/pins"
+	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/stats"
 	"go.sia.tech/indexd/subscriber"
@@ -200,6 +201,11 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		t.Fatalf("failed to create slab manager: %v", err)
 	}
 
+	sharing, err := sharing.NewManager(store, sharing.WithLogger(log.Named("sharing")))
+	if err != nil {
+		t.Fatalf("failed to create sharing manager: %v", err)
+	}
+
 	subscriber, err := subscriber.New(c.cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
 	if err != nil {
 		t.Fatalf("failed to create subscriber: %v", err)
@@ -260,7 +266,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	if cfg.advertiseURL == "" {
 		cfg.advertiseURL = appAPIAddr
 	}
-	appHandler, err := app.NewAPI(cfg.advertiseURL, hm, am, contracts, slabs, appAPIOpts...)
+	appHandler, err := app.NewAPI(cfg.advertiseURL, hm, am, contracts, slabs, sharing, appAPIOpts...)
 	if err != nil {
 		t.Fatalf("failed to create application API: %v", err)
 	}
@@ -302,6 +308,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		}
 		if err := closeWithTimeout(slabs.Close); err != nil {
 			t.Errorf("failed to close slab manager: %v", err)
+		}
+		if err := closeWithTimeout(sharing.Close); err != nil {
+			t.Errorf("failed to close sharing manager: %v", err)
 		}
 		if err := closeWithTimeout(subscriber.Close); err != nil {
 			t.Errorf("failed to close subscriber: %v", err)

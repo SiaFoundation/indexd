@@ -241,6 +241,113 @@ components:
           items:
             $ref: "#/components/schemas/SlabSlice"
 
+    Nonce:
+      type: string
+      pattern: "^[0-9a-fA-F]{64}$"
+      description: A 32-byte value (hex-encoded) used as the HKDF salt to derive a sharing key from an app key
+
+    # A scoped, read-only key that grants access to a specific set of objects
+    # without requiring the recipient to log in.
+    SharingKey:
+      type: object
+      properties:
+        account:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The public key of the account that owns the sharing key
+        publicKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The sharing key's public key, derived from the owner's app key and nonce
+        nonce:
+          $ref: "#/components/schemas/Nonce"
+        description:
+          type: string
+        objectCount:
+          type: integer
+          format: uint64
+          description: The number of objects attached to the key
+        objectSize:
+          type: integer
+          format: uint64
+          description: The total logical size of the attached objects in bytes
+        pinnedData:
+          type: integer
+          format: uint64
+          description: The total size of the attached objects before redundancy in bytes
+        pinnedSize:
+          type: integer
+          format: uint64
+          description: The total size of the attached objects including redundancy in bytes
+        expiresAt:
+          type: string
+          format: date-time
+          description: Optional expiration; after this time the key is no longer returned and is eventually pruned
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SharingKeyRequest:
+      type: object
+      description: The request body for creating a sharing key
+      required:
+        - publicKey
+        - nonce
+      properties:
+        publicKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The sharing key's public key, derived from the owner's app key and nonce
+        nonce:
+          $ref: "#/components/schemas/Nonce"
+        description:
+          type: string
+          description: Optional description (max 1024 bytes)
+        expiresAt:
+          type: string
+          format: date-time
+          description: Optional expiration time
+
+    SharedObjectRequest:
+      type: object
+      description: >
+        The request body for attaching an object to a sharing key. The object's
+        encryption keys are re-sealed under the sharing key and signed with it so
+        the recipient can decrypt and verify them.
+      required:
+        - objectID
+        - encryptedDataKey
+        - dataSignature
+        - metadataSignature
+      properties:
+        objectID:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The ID of the object to attach; the account must own it
+        encryptedDataKey:
+          type: string
+          format: byte
+          description: The object's data key re-sealed with the sharing key (base64-encoded in JSON)
+        dataSignature:
+          allOf:
+            - $ref: "#/components/schemas/Signature"
+            - description: A signature of blake2b(object ID, encrypted_data_key) made with the sharing key
+        encryptedMetadataKey:
+          type: string
+          format: byte
+          description: Optional metadata key re-sealed with the sharing key (base64-encoded in JSON)
+        encryptedMetadata:
+          type: string
+          format: byte
+          description: Optional metadata (base64-encoded in JSON) limitted to 1KiB.
+        metadataSignature:
+          allOf:
+            - $ref: "#/components/schemas/Signature"
+            - description: A signature of blake2b(object ID, metadata key, encrypted_metadata) made with the sharing key
+
     # A sector pinned to a host.
     PinnedSector:
       type: object

@@ -398,6 +398,75 @@ CREATE INDEX object_events_updated_at_object_key_idx ON object_events(updated_at
 -- probe by object_key alone since the PK leads with account_id
 CREATE INDEX object_events_object_key_idx ON object_events(object_key);
 
+CREATE TABLE sharing_keys (
+    id BIGSERIAL PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    public_key BYTEA UNIQUE NOT NULL CHECK(LENGTH(public_key) = 32),
+    nonce BYTEA UNIQUE NOT NULL CHECK(LENGTH(nonce) = 32), -- share_key = HKDF(app_key, nonce, "share key")
+    use_description TEXT NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE, -- optional automatic expiration
+    object_count BIGINT NOT NULL CHECK(object_count >= 0), -- number of attached objects, maintained by trigger
+    size BIGINT NOT NULL CHECK(size >= 0), -- total logical size of attached objects (sum of object.Size()), maintained by trigger
+    pinned_data BIGINT NOT NULL CHECK(pinned_data >= 0), -- total data size of attached objects before redundancy, maintained by trigger
+    pinned_size BIGINT NOT NULL CHECK(pinned_size >= 0), -- total size of attached objects including redundancy, maintained by trigger
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW() -- allow sorting by update time
+);
+CREATE INDEX sharing_keys_account_id_idx ON sharing_keys(account_id);
+
+CREATE TABLE shared_objects (
+    object_id BIGINT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,
+    sharing_key_id BIGINT NOT NULL REFERENCES sharing_keys(id) ON DELETE CASCADE,
+    encrypted_data_key BYTEA UNIQUE NOT NULL CHECK(LENGTH(encrypted_data_key) = 72), -- user provided, data encryption key (xchacha20 nonce + key + tag)
+    encrypted_meta_key BYTEA UNIQUE CHECK(LENGTH(encrypted_meta_key) = 72), -- user provided, metadata encryption key (xchacha20 nonce + key + tag)
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by update time
+    encrypted_metadata BYTEA, -- user provided, encrypted metadata
+    data_signature BYTEA UNIQUE NOT NULL CHECK(LENGTH(data_signature) = 64), -- signature of blake2b(object_key || encrypted_data_key)
+    meta_signature BYTEA UNIQUE NOT NULL CHECK(LENGTH(meta_signature) = 64), -- signature of blake2b(object ID || metadata key || encrypted_metadata)
+    size BIGINT NOT NULL, -- logical size of the object (object.Size()), captured at attach time for trigger
+    pinned_data BIGINT NOT NULL, -- data size of the object before redundancy, captured at attach time for trigger
+    pinned_size BIGINT NOT NULL, -- size of the object including redundancy, captured at attach time for trigger
+    PRIMARY KEY (object_id, sharing_key_id)
+);
+CREATE INDEX shared_objects_sharing_key_id_idx ON shared_objects(sharing_key_id);
+
+-- maintain sharing_keys.{object_count, pinned_data, pinned_size} as objects are
+-- attached and detached.
+CREATE FUNCTION shared_objects_maintain_totals() RETURNS TRIGGER AS $$
+BEGIN
+    IF (TG_OP = 'INSERT') THEN
+        UPDATE sharing_keys SET
+            object_count = object_count + 1,
+            size = size + NEW.size,
+            pinned_data = pinned_data + NEW.pinned_data,
+            pinned_size = pinned_size + NEW.pinned_size,
+            updated_at = NOW()
+        WHERE id = NEW.sharing_key_id;
+    ELSIF (TG_OP = 'UPDATE') THEN
+        UPDATE sharing_keys SET
+            size = size + NEW.size - OLD.size,
+            pinned_data = pinned_data + NEW.pinned_data - OLD.pinned_data,
+            pinned_size = pinned_size + NEW.pinned_size - OLD.pinned_size,
+            updated_at = NOW()
+        WHERE id = NEW.sharing_key_id;
+    ELSIF (TG_OP = 'DELETE') THEN
+        UPDATE sharing_keys SET
+            object_count = object_count - 1,
+            size = size - OLD.size,
+            pinned_data = pinned_data - OLD.pinned_data,
+            pinned_size = pinned_size - OLD.pinned_size,
+            updated_at = NOW()
+        WHERE id = OLD.sharing_key_id;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER shared_objects_maintain_totals
+AFTER INSERT OR UPDATE OR DELETE ON shared_objects
+FOR EACH ROW EXECUTE FUNCTION shared_objects_maintain_totals();
+
 CREATE TABLE account_slabs (
     account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns slab
     slab_id BIGSERIAL REFERENCES slabs(id) NOT NULL,
