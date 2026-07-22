@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/jape"
 )
 
@@ -20,6 +21,8 @@ import (
 const maxRequestSize = 10 << 20 // 10 MB
 
 type authedHandler func(jape.Context, types.PublicKey)
+
+type sharedHandler func(jape.Context, sharing.Key)
 
 var (
 	// ErrInternalError is returned when a signed URL can not be authenticated
@@ -118,6 +121,27 @@ func validateSignedURLAuth(jc jape.Context, hostname string, store Accounts) (ty
 		return types.PublicKey{}, false
 	}
 	return pk, true
+}
+
+// validateSharedURLAuth validates a signed URL for the shared-key API. The
+// request must be signed with a sharing key's private key; the signer's public
+// key must resolve to an existing, unexpired sharing key. On success it returns
+// that sharing key.
+func validateSharedURLAuth(jc jape.Context, hostname string, store Sharing) (sharing.Key, bool) {
+	pk, ok := ValidateURLSignature(jc.Request, jc.ResponseWriter, hostname)
+	if !ok {
+		return sharing.Key{}, false
+	}
+
+	key, err := store.SharingKey(pk)
+	if errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		jc.Error(sharing.ErrSharingKeyNotFound, http.StatusUnauthorized)
+		return sharing.Key{}, false
+	} else if err != nil {
+		jc.Error(ErrInternalError, http.StatusInternalServerError)
+		return sharing.Key{}, false
+	}
+	return key, true
 }
 
 func parseCredential(req *http.Request) (pk types.PublicKey, _ error) {
