@@ -156,9 +156,10 @@ top:
 
 // A Client is used to interact with Sia hosts over RHP4.
 type Client struct {
-	log   *zap.Logger
-	tg    *threadgroup.ThreadGroup
-	hosts *Provider
+	log             *zap.Logger
+	tg              *threadgroup.ThreadGroup
+	hosts           *Provider
+	heightTolerance uint64
 
 	mu             sync.Mutex // protects the fields below
 	cachedSettings map[types.PublicKey]proto.HostSettings
@@ -454,10 +455,40 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// ErrPricesHeightDrift is returned when the tip height a host claims in its
+// signed prices is too far behind the local tip height.
+var ErrPricesHeightDrift = errors.New("host prices tip height too far behind local tip height")
+
+// checkPricesHeight verifies that the tip height a host claims in its signed
+// prices is no more than the client's height tolerance behind the local tip
+// height.
+func (c *Client) checkPricesHeight(prices proto.HostPrices, localHeight uint64) error {
+	if prices.TipHeight < localHeight && localHeight-prices.TipHeight > c.heightTolerance {
+		return fmt.Errorf("%w: host height %d, local height %d, tolerance %d", ErrPricesHeightDrift, prices.TipHeight, localHeight, c.heightTolerance)
+	}
+	return nil
+}
+
+// refreshSettings fetches the host settings from the host, bypassing the
+// cache. Valid settings are cached for future use.
+func (c *Client) refreshSettings(ctx context.Context, hostKey types.PublicKey, transport rhp.TransportClient) (proto.HostSettings, error) {
+	settings, err := rhp.RPCSettings(ctx, transport)
+	if err != nil {
+		return proto.HostSettings{}, err
+	} else if err := settings.Prices.Validate(hostKey); err != nil {
+		return proto.HostSettings{}, fmt.Errorf("host returned invalid prices: %w", err)
+	}
+
+	c.mu.Lock()
+	c.cachedSettings[hostKey] = settings
+	c.mu.Unlock()
+	return settings, nil
+}
+
 // settings fetches the host settings using an existing transport connection.
 //
 // If the settings are cached and valid, the cached settings are returned with a
-// boolean flag set to 'true'.
+// boolean flag set to 'true'. Otherwise, they are refreshed from the host.
 func (c *Client) settings(ctx context.Context, hostKey types.PublicKey, transport rhp.TransportClient) (proto.HostSettings, bool, error) {
 	c.mu.Lock()
 	settings := c.cachedSettings[hostKey]
@@ -467,15 +498,9 @@ func (c *Client) settings(ctx context.Context, hostKey types.PublicKey, transpor
 	}
 	c.mu.Unlock()
 
-	settings, err := rhp.RPCSettings(ctx, transport)
+	settings, err := c.refreshSettings(ctx, hostKey, transport)
 	if err != nil {
 		return proto.HostSettings{}, false, err
-	}
-
-	if settings.Prices.Validate(hostKey) == nil {
-		c.mu.Lock()
-		c.cachedSettings[hostKey] = settings
-		c.mu.Unlock()
 	}
 	return settings, false, nil
 }
@@ -501,10 +526,11 @@ func shouldResetTransport(err error) bool {
 // New creates a new Client.
 func New(hosts *Provider, log *zap.Logger) *Client {
 	return &Client{
-		log:            log,
-		tg:             threadgroup.New(),
-		hosts:          hosts,
-		cachedSettings: make(map[types.PublicKey]proto.HostSettings),
-		transports:     make(map[types.PublicKey]*transport),
+		heightTolerance: 36, // ~6 hours of blocks
+		log:             log,
+		tg:              threadgroup.New(),
+		hosts:           hosts,
+		cachedSettings:  make(map[types.PublicKey]proto.HostSettings),
+		transports:      make(map[types.PublicKey]*transport),
 	}
 }

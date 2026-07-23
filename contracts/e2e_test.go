@@ -245,20 +245,31 @@ func TestSectorPinning(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert the slab is pinned
-	time.Sleep(time.Second)
-	res, err := indexer.Store().Slabs(acc.AccountKey, slabIDs)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(res) != 1 {
-		t.Fatalf("expected 1 slab, got %d", len(res))
-	}
-
-	// assert the sectors were pinned
-	for _, sector := range res[0].Sectors {
-		if sector.HostKey == nil || sector.ContractID == nil {
-			t.Fatal("sector is not pinned")
+	// assert the slab and all its sectors are pinned; pinning happens
+	// asynchronously so poll until it's done
+	var pinned bool
+	for range 100 {
+		res, err := indexer.Store().Slabs(acc.AccountKey, slabIDs)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(res) != 1 {
+			t.Fatalf("expected 1 slab, got %d", len(res))
 		}
+
+		pinned = true
+		for _, sector := range res[0].Sectors {
+			if sector.HostKey == nil || sector.ContractID == nil {
+				pinned = false
+				break
+			}
+		}
+		if pinned {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !pinned {
+		t.Fatal("sector is not pinned")
 	}
 
 	// unpin the slab
