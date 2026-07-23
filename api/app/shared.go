@@ -43,8 +43,7 @@ func (a *app) handleGETSharedObject(jc jape.Context, key sharing.Key) {
 	} else if errors.Is(err, sharing.ErrSharedObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
-	} else if err != nil {
-		jc.Error(err, http.StatusInternalServerError)
+	} else if jc.Check("failed to get shared object", err) != nil {
 		return
 	}
 	jc.Encode(obj)
@@ -56,7 +55,7 @@ func (a *app) handleGETSharedHosts(jc jape.Context, _ sharing.Key) {
 
 func (a *app) handleGETSharedHostToken(jc jape.Context, key sharing.Key) {
 	var hostKey types.PublicKey
-	if jc.DecodeParam("pubkey", &hostKey) != nil {
+	if jc.DecodeParam("hostkey", &hostKey) != nil {
 		return
 	}
 
