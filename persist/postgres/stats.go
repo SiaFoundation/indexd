@@ -246,10 +246,17 @@ func (s *Store) AccountStats() (accounts.AccountStats, error) {
 func (s *Store) ConnectKeyStats() (stats accounts.ConnectKeyStats, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		rows, err := tx.Query(ctx, `
-			SELECT quota_name, COUNT(*)
-			FROM app_connect_keys
-			GROUP BY quota_name
-			ORDER BY quota_name`)
+			SELECT
+				ack.quota_name,
+				COUNT(*),
+				COUNT(*) FILTER (WHERE ack.last_used >= $1 OR EXISTS (
+					SELECT 1 FROM accounts a
+					WHERE a.connect_key_id = ack.id AND a.deleted_at IS NULL AND a.last_used >= $1
+				))
+			FROM app_connect_keys ack
+			GROUP BY ack.quota_name
+			ORDER BY ack.quota_name`,
+			time.Now().Add(-accounts.AccountActivityThreshold))
 		if err != nil {
 			return fmt.Errorf("failed to get connect key stats: %w", err)
 		}
@@ -257,10 +264,11 @@ func (s *Store) ConnectKeyStats() (stats accounts.ConnectKeyStats, err error) {
 
 		for rows.Next() {
 			var qs accounts.ConnectKeyQuotaStats
-			if err := rows.Scan(&qs.Quota, &qs.Total); err != nil {
+			if err := rows.Scan(&qs.Quota, &qs.Total, &qs.Active); err != nil {
 				return err
 			}
 			stats.Total += qs.Total
+			stats.Active += qs.Active
 			stats.Quotas = append(stats.Quotas, qs)
 		}
 		return rows.Err()
