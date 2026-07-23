@@ -290,6 +290,56 @@ components:
           type: string
           format: date-time
 
+    KeyStats:
+      type: object
+      description: A sharing key's aggregate totals, returned to recipients (omits fields identifying the key or its owner).
+      properties:
+        objectCount:
+          type: integer
+          format: uint64
+          description: The number of objects attached to the key
+        objectSize:
+          type: integer
+          format: uint64
+          description: The total logical size of the attached objects in bytes
+        pinnedData:
+          type: integer
+          format: uint64
+          description: The total size of the attached objects before redundancy in bytes
+        pinnedSize:
+          type: integer
+          format: uint64
+          description: The total size of the attached objects including redundancy in bytes
+        expiresAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AccountToken:
+      type: object
+      description: An RHP4 account token authorizing debits from a sharing account on a host, used to pay for downloads.
+      properties:
+        hostKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The host the token is valid for
+        account:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The sharing account the token debits
+        validUntil:
+          type: string
+          format: date-time
+        signature:
+          allOf:
+            - $ref: "#/components/schemas/Signature"
+            - description: A signature over the token made with the sharing account key
+
     SharingKeyRequest:
       type: object
       description: The request body for creating a sharing key, signed by that key to prove control of its private key

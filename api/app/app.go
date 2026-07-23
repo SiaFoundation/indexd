@@ -55,10 +55,14 @@ type (
 		AddSharingKey(account proto.Account, req sharing.KeyRequest) (sharing.Key, error)
 		DeleteSharingKey(account proto.Account, publicKey types.PublicKey) error
 		SharingKeys(account proto.Account, offset, limit int) ([]sharing.Key, error)
+		SharingKey(publicKey types.PublicKey) (sharing.Key, error)
 		OwnedSharingKey(account proto.Account, publicKey types.PublicKey) (sharing.Key, error)
 		AddSharedObject(account proto.Account, sharingKey types.PublicKey, req sharing.SharedObjectRequest) error
 		DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey types.Hash256) error
 		OwnedSharedObjects(account proto.Account, sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
+		SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
+		SharedObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
+		AccountToken(sharingKey types.PublicKey, hostKey types.PublicKey) (proto.AccountToken, error)
 	}
 
 	// Hosts defines the hosts interface for the application API.
@@ -241,6 +245,10 @@ func WrapRateLimit(rl RateLimiter, next jape.Handler) jape.Handler {
 }
 
 func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
+	a.listUsableHosts(jc)
+}
+
+func (a *app) listUsableHosts(jc jape.Context) {
 	offset, limit, ok := api.ParseOffsetLimit(jc)
 	if !ok {
 		return
@@ -982,6 +990,16 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		}
 	}
 
+	wrapSharedAuth := func(h sharedHandler) jape.Handler {
+		return func(jc jape.Context) {
+			key, ok := validateSharedURLAuth(jc, a.hostname, sharing)
+			if !ok {
+				return
+			}
+			h(jc, key)
+		}
+	}
+
 	wrapBasicAuth := func(h jape.Handler) jape.Handler {
 		return func(jc jape.Context) {
 			_, password, ok := jc.Request.BasicAuth()
@@ -1034,6 +1052,13 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		"POST /sharing/:key/objects":              wrapSignedAuth(a.handlePOSTSharingObject),
 		"GET /sharing/:key/objects":               wrapSignedAuth(a.handleGETSharingObjects),
 		"DELETE /sharing/:key/objects/:objectkey": wrapSignedAuth(a.handleDELETESharingObject),
+
+		// shared-key endpoints, authenticated with a sharing key
+		"GET /shared":                      wrapSharedAuth(a.handleGETShared),
+		"GET /shared/objects":              wrapSharedAuth(a.handleGETSharedObjects),
+		"GET /shared/objects/:id":          wrapSharedAuth(a.handleGETSharedObject),
+		"GET /shared/hosts":                wrapSharedAuth(a.handleGETSharedHosts),
+		"GET /shared/hosts/:hostkey/token": wrapSharedAuth(a.handleGETSharedHostToken),
 
 		"GET /slabs":            wrapSignedAuth(a.handleGETSlabs),
 		"POST /slabs":           wrapSignedAuth(a.handlePOSTSlabs),
