@@ -267,7 +267,8 @@ func (c *Client) Account(ctx context.Context, appKey types.PrivateKey) (resp Acc
 	return
 }
 
-// AddSharingKey creates a sharing key for the account.
+// AddSharingKey creates a sharing key for the account. The request must be
+// signed by the sharing key.
 func (c *Client) AddSharingKey(ctx context.Context, appKey types.PrivateKey, req sharing.KeyRequest) (key sharing.Key, err error) {
 	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/sharing", req, &key)
 	return

@@ -71,6 +71,7 @@ func TestSharingKeys(t *testing.T) {
 		Nonce:       nonce,
 		Description: "my share",
 	}
+	req.Sign(shareKeyPriv)
 	key, err := appClient.AddSharingKey(ctx, sk1, req)
 	if err != nil {
 		t.Fatal(err)
@@ -89,6 +90,14 @@ func TestSharingKeys(t *testing.T) {
 	bad.Nonce = sharing.Nonce{}
 	if _, err := appClient.AddSharingKey(ctx, sk1, bad); err == nil {
 		t.Fatal("expected error for empty nonce")
+	} else {
+		assertStatus(t, err, http.StatusBadRequest)
+	}
+
+	badSignature := req
+	badSignature.Description = "tampered"
+	if _, err := appClient.AddSharingKey(ctx, sk1, badSignature); err == nil {
+		t.Fatal("expected error for invalid sharing key signature")
 	} else {
 		assertStatus(t, err, http.StatusBadRequest)
 	}
@@ -124,6 +133,25 @@ func TestSharingKeys(t *testing.T) {
 	sharedReq.Sign(shareKeyPriv)
 	if err := appClient.AddSharedObject(ctx, sk1, shareKey, sharedReq); err != nil {
 		t.Fatal(err)
+	}
+
+	// reusing an encrypted key envelope under another sharing key is rejected.
+	nonce2 := sharing.Nonce(frand.Entropy256())
+	shareKeyPriv2 := sharing.DeriveSharingKey(sk1, nonce2)
+	keyReq2 := sharing.KeyRequest{
+		Nonce:       nonce2,
+		Description: "second share",
+	}
+	keyReq2.Sign(shareKeyPriv2)
+	if _, err := appClient.AddSharingKey(ctx, sk1, keyReq2); err != nil {
+		t.Fatal(err)
+	}
+	reusedKeyReq := sharedReq
+	reusedKeyReq.Sign(shareKeyPriv2)
+	if err := appClient.AddSharedObject(ctx, sk1, shareKeyPriv2.PublicKey(), reusedKeyReq); err == nil {
+		t.Fatal("expected error reusing encrypted key envelope")
+	} else {
+		assertStatus(t, err, http.StatusConflict)
 	}
 
 	if key, err := appClient.SharingKey(ctx, sk1, shareKey); err != nil {

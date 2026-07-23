@@ -160,9 +160,8 @@ func (o *SharedObject) Size() uint64 {
 	return size
 }
 
-// metadataLimit represents the maximum size of an objects metadata we will
-// store.
-const metadataLimit = 1024
+// MaxMetadataSize is the maximum size of object metadata that may be stored.
+const MaxMetadataSize = 1024
 
 var (
 	// ErrInvalidObjectSignature is returned when an object's signature is invalid.
@@ -172,7 +171,7 @@ var (
 	// ErrObjectMinimumSlabs is returned when the object has no slabs.
 	ErrObjectMinimumSlabs = errors.New("object must have at least one slab")
 	// ErrObjectMetadataLimitExceeded is returned when the provided metadata is too large.
-	ErrObjectMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", metadataLimit)
+	ErrObjectMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", MaxMetadataSize)
 	// ErrObjectUnpinnedSlab is returned when an user attempts to save an
 	// object containing a slab that is not pinned to their account.
 	ErrObjectUnpinnedSlab = errors.New("object contains unpinned slab")
@@ -292,7 +291,7 @@ func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, o
 func (m *SlabManager) PinObject(ctx context.Context, account proto.Account, obj PinObjectRequest) error {
 	if len(obj.Slabs) == 0 {
 		return ErrObjectMinimumSlabs
-	} else if len(obj.EncryptedMetadata) > metadataLimit {
+	} else if len(obj.EncryptedMetadata) > MaxMetadataSize {
 		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(obj.EncryptedMetadata))
 	} else if pinnedObjectID(obj.Slabs) != obj.ID {
 		return fmt.Errorf("%w: object ID does not match slabs", ErrInvalidObjectSignature)

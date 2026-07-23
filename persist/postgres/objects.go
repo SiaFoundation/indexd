@@ -177,37 +177,8 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			if events[i].Deleted {
 				continue
 			}
-
-			rows, err = tx.Query(ctx, `
-				SELECT slabs.id, slab_offset, slab_length, slabs.encryption_key, slabs.min_shards, slabs.version
-				FROM object_slabs
-				JOIN slabs ON slabs.digest = object_slabs.slab_digest
-				WHERE object_id = $1
-				ORDER BY slab_index ASC
-			`, objectIDs[events[i].Key])
-			if err != nil {
-				return fmt.Errorf("failed to query slabs: %w", err)
-			}
-
-			var slabIDs []int64
-			for rows.Next() {
-				var slab slabs.SlabSlice
-				var slabID int64
-				err := rows.Scan(&slabID, &slab.Offset, &slab.Length, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Version)
-				if err != nil {
-					rows.Close()
-					return fmt.Errorf("failed to scan slab: %w", err)
-				}
-				events[i].Object.Slabs = append(events[i].Object.Slabs, slab)
-				slabIDs = append(slabIDs, slabID)
-			}
-			if err := rows.Err(); err != nil {
+			if err := loadObjectSlabs(ctx, tx, objectIDs[events[i].Key], events[i].Object); err != nil {
 				return err
-			}
-			rows.Close()
-
-			if err := decorateSectors(ctx, tx, events[i].Object, slabIDs); err != nil {
-				return fmt.Errorf("failed to decorate sectors of slab: %w", err)
 			}
 		}
 		return nil

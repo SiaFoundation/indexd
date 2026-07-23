@@ -357,6 +357,8 @@ paths:
           description: Invalid request or signature
         "404":
           description: Sharing key not found, or the account does not own the object
+        "409":
+          description: The encrypted keys or signatures are already used by another shared-object attachment
   /sharing/{key}/objects/{objectKey}:
     delete:
       tags:
@@ -930,8 +932,8 @@ components:
       $ref: "./components.yml#/components/schemas/ObjectSlab"
     SharedObject:
       $ref: "./components.yml#/components/schemas/SharedObject"
-    Nonce:
-      $ref: "./components.yml#/components/schemas/Nonce"
+    SharingKeyNonce:
+      $ref: "./components.yml#/components/schemas/SharingKeyNonce"
     SharingKey:
       $ref: "./components.yml#/components/schemas/SharingKey"
     SharingKeyRequest:

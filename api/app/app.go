@@ -53,9 +53,9 @@ type (
 	// API.
 	Sharing interface {
 		AddSharingKey(account proto.Account, req sharing.KeyRequest) (sharing.Key, error)
-		SharingKey(publicKey types.PublicKey) (sharing.Key, error)
-		SharingKeys(account proto.Account, offset, limit int) ([]sharing.Key, error)
 		DeleteSharingKey(account proto.Account, publicKey types.PublicKey) error
+		SharingKeys(account proto.Account, offset, limit int) ([]sharing.Key, error)
+		OwnedSharingKey(account proto.Account, publicKey types.PublicKey) (sharing.Key, error)
 		AddSharedObject(account proto.Account, sharingKey types.PublicKey, req sharing.SharedObjectRequest) error
 		DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey types.Hash256) error
 		OwnedSharedObjects(account proto.Account, sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
@@ -421,10 +421,9 @@ func (a *app) handleGETSharingKey(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	sk, err := a.sharing.SharingKey(key)
-	// scope to the caller: a key owned by another account reads as not found
-	if errors.Is(err, sharing.ErrSharingKeyNotFound) || (err == nil && sk.Account != pk) {
-		jc.Error(sharing.ErrSharingKeyNotFound, http.StatusNotFound)
+	sk, err := a.sharing.OwnedSharingKey(proto.Account(pk), key)
+	if errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		jc.Error(err, http.StatusNotFound)
 		return
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
@@ -464,6 +463,9 @@ func (a *app) handlePOSTSharingObject(jc jape.Context, pk types.PublicKey) {
 	err := a.sharing.AddSharedObject(proto.Account(pk), key, req)
 	if errors.Is(err, sharing.ErrInvalidRequest) {
 		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if errors.Is(err, sharing.ErrSharedObjectConflict) {
+		jc.Error(err, http.StatusConflict)
 		return
 	} else if errors.Is(err, sharing.ErrSharingKeyNotFound) || errors.Is(err, slabs.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)

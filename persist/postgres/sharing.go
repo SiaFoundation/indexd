@@ -17,7 +17,6 @@ import (
 )
 
 func scanSharingKey(s scanner) (key sharing.Key, err error) {
-	var expiresAt sql.NullTime
 	var nonce []byte
 	err = s.Scan(
 		(*sqlPublicKey)(&key.Account),
@@ -28,14 +27,11 @@ func scanSharingKey(s scanner) (key sharing.Key, err error) {
 		&key.ObjectSize,
 		&key.PinnedData,
 		&key.PinnedSize,
-		&expiresAt,
+		&key.ExpiresAt,
 		&key.CreatedAt,
 		&key.UpdatedAt,
 	)
 	copy(key.Nonce[:], nonce)
-	if expiresAt.Valid {
-		key.ExpiresAt = &expiresAt.Time
-	}
 	return
 }
 
@@ -211,6 +207,10 @@ func (s *Store) AddSharedObject(account proto.Account, sharingKey types.PublicKe
 			ON CONFLICT (object_id, sharing_key_id) DO UPDATE SET (encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, size, pinned_data, pinned_size, updated_at) = (EXCLUDED.encrypted_data_key, EXCLUDED.encrypted_meta_key, EXCLUDED.encrypted_metadata, EXCLUDED.data_signature, EXCLUDED.meta_signature, EXCLUDED.size, EXCLUDED.pinned_data, EXCLUDED.pinned_size, NOW())`,
 			objectID, sharingKeyID, req.EncryptedDataKey, encryptedMetaKey, encryptedMeta, sqlSignature(req.DataSignature), sqlSignature(req.MetadataSignature), size, pinnedData, pinnedSize)
 		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+				return sharing.ErrSharedObjectConflict
+			}
 			return fmt.Errorf("failed to insert shared object: %w", err)
 		}
 		return nil

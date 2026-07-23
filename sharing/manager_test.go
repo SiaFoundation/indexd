@@ -42,11 +42,17 @@ func TestManager(t *testing.T) {
 		t.Fatalf("expected ErrSharingKeyNotFound, got %v", err)
 	}
 
-	key, err := m.AddSharingKey(acc, sharing.KeyRequest{
+	req := sharing.KeyRequest{
 		PublicKey:   pk,
 		Nonce:       nonce,
 		Description: "share",
-	})
+	}
+	if _, err := m.AddSharingKey(acc, req); !errors.Is(err, sharing.ErrInvalidRequest) {
+		t.Fatalf("expected ErrInvalidRequest for unsigned sharing key, got %v", err)
+	}
+	req.Sign(shareKey)
+
+	key, err := m.AddSharingKey(acc, req)
 	if err != nil {
 		t.Fatal(err)
 	} else if key.PublicKey != pk || key.Description != "share" || key.Account != appKey.PublicKey() {
@@ -60,6 +66,16 @@ func TestManager(t *testing.T) {
 		t.Fatalf("expected public key %v, got %v", pk, got.PublicKey)
 	} else if got.Nonce != nonce {
 		t.Fatalf("expected stored nonce %x, got %x", nonce, got.Nonce)
+	}
+
+	if got, err := m.OwnedSharingKey(acc, pk); err != nil {
+		t.Fatal(err)
+	} else if got.PublicKey != pk {
+		t.Fatalf("expected public key %v, got %v", pk, got.PublicKey)
+	}
+	otherAccount := proto.Account(types.GeneratePrivateKey().PublicKey())
+	if _, err := m.OwnedSharingKey(otherAccount, pk); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		t.Fatalf("expected ErrSharingKeyNotFound for another account, got %v", err)
 	}
 
 	// the owner can re-derive the same sharing key from the app key and the

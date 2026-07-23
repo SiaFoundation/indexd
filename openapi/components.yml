@@ -241,7 +241,7 @@ components:
           items:
             $ref: "#/components/schemas/SlabSlice"
 
-    Nonce:
+    SharingKeyNonce:
       type: string
       pattern: "^[0-9a-fA-F]{64}$"
       description: A 32-byte value (hex-encoded) used as the HKDF salt to derive a sharing key from an app key
@@ -260,7 +260,7 @@ components:
             - $ref: "#/components/schemas/PublicKey"
             - description: The sharing key's public key, derived from the owner's app key and nonce
         nonce:
-          $ref: "#/components/schemas/Nonce"
+          $ref: "#/components/schemas/SharingKeyNonce"
         description:
           type: string
         objectCount:
@@ -292,17 +292,22 @@ components:
 
     SharingKeyRequest:
       type: object
-      description: The request body for creating a sharing key
+      description: The request body for creating a sharing key, signed by that key to prove control of its private key
       required:
         - publicKey
+        - signature
         - nonce
       properties:
         publicKey:
           allOf:
             - $ref: "#/components/schemas/PublicKey"
             - description: The sharing key's public key, derived from the owner's app key and nonce
+        signature:
+          allOf:
+            - $ref: "#/components/schemas/Signature"
+            - description: A signature of the complete request made with the sharing key
         nonce:
-          $ref: "#/components/schemas/Nonce"
+          $ref: "#/components/schemas/SharingKeyNonce"
         description:
           type: string
           description: Optional description (max 1024 bytes)

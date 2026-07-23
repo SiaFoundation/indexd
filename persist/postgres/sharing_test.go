@@ -318,6 +318,20 @@ func TestSharedObjectRequest(t *testing.T) {
 		t.Fatalf("expected 1 shared object after re-attach, got %d", n)
 	}
 
+	skPK2 := types.GeneratePrivateKey().PublicKey()
+	if _, err := store.AddSharingKey(acc, sharing.KeyRequest{
+		PublicKey:   skPK2,
+		Nonce:       (sharing.Nonce)(frand.Bytes(32)),
+		Description: "second share",
+	}); err != nil {
+		t.Fatal(err)
+	} else if err := store.AddSharedObject(acc, skPK2, req2); !errors.Is(err, sharing.ErrSharedObjectConflict) {
+		t.Fatalf("expected ErrSharedObjectConflict for reused sealed keys, got %v", err)
+	}
+	if n := countSharedObjects(t, store); n != 1 {
+		t.Fatalf("expected 1 shared object after conflict, got %d", n)
+	}
+
 	// another account can neither reach the sharing key nor detach
 	acc2 := proto.Account(types.GeneratePrivateKey().PublicKey())
 	store.addTestAccount(t, types.PublicKey(acc2))

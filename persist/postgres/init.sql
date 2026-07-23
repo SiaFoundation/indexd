@@ -413,6 +413,7 @@ CREATE TABLE sharing_keys (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW() -- allow sorting by update time
 );
 CREATE INDEX sharing_keys_account_id_idx ON sharing_keys(account_id);
+CREATE INDEX sharing_keys_expires_at_idx ON sharing_keys(expires_at);
 
 CREATE TABLE shared_objects (
     object_id BIGINT NOT NULL REFERENCES objects(id) ON DELETE CASCADE,

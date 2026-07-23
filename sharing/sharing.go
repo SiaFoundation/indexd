@@ -8,6 +8,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/keys"
+	"go.sia.tech/indexd/slabs"
 )
 
 const (
@@ -20,8 +21,8 @@ const (
 	// MaxDescriptionSize is the maximum length of a sharing key description.
 	MaxDescriptionSize = 1024
 	// MaxMetadataSize is the maximum length of a shared object's encrypted
-	// metadata, mirroring the limit on a normal object's metadata.
-	MaxMetadataSize = 1024
+	// metadata.
+	MaxMetadataSize = slabs.MaxMetadataSize
 )
 
 var (
@@ -33,6 +34,9 @@ var (
 	// ErrSharedObjectNotFound is returned when an object is not attached to a
 	// sharing key.
 	ErrSharedObjectNotFound = errors.New("shared object not found")
+	// ErrSharedObjectConflict is returned when an attachment reuses encrypted
+	// keys or signatures from another attachment.
+	ErrSharedObjectConflict = errors.New("shared object conflicts with existing attachment")
 	// ErrInvalidRequest is returned when a request fails validation.
 	ErrInvalidRequest = errors.New("invalid request")
 )
@@ -62,9 +66,11 @@ type (
 		UpdatedAt  time.Time  `json:"updatedAt"`
 	}
 
-	// A KeyRequest contains the fields required to create a sharing key.
+	// A KeyRequest contains the fields required to create a sharing key. It must
+	// be signed by the sharing key to prove control of its private key.
 	KeyRequest struct {
 		PublicKey   types.PublicKey `json:"publicKey"`
+		Signature   types.Signature `json:"signature"`
 		Nonce       Nonce           `json:"nonce"`
 		Description string          `json:"description"`
 		ExpiresAt   *time.Time      `json:"expiresAt,omitempty"`
@@ -82,6 +88,36 @@ type (
 		MetadataSignature    types.Signature `json:"metadataSignature"`
 	}
 )
+
+// SigHash returns the domain-separated hash signed when creating a sharing
+// key.
+func (r KeyRequest) SigHash() types.Hash256 {
+	h := types.NewHasher()
+	h.E.WriteString("indexd/sharing-key/create/v1")
+	r.PublicKey.EncodeTo(h.E)
+	h.E.Write(r.Nonce[:])
+	h.E.WriteString(r.Description)
+	h.E.WriteBool(r.ExpiresAt != nil)
+	if r.ExpiresAt != nil {
+		h.E.WriteTime(*r.ExpiresAt)
+	}
+	return h.Sum()
+}
+
+// Sign proves control of privateKey and binds the complete sharing key request
+// to its corresponding public key.
+func (r *KeyRequest) Sign(privateKey types.PrivateKey) {
+	r.PublicKey = privateKey.PublicKey()
+	r.Signature = privateKey.SignHash(r.SigHash())
+}
+
+// VerifySignature verifies that the sharing key owner signed the request.
+func (r KeyRequest) VerifySignature() error {
+	if !r.PublicKey.VerifyHash(r.SigHash(), r.Signature) {
+		return fmt.Errorf("%w: invalid signature", ErrInvalidRequest)
+	}
+	return nil
+}
 
 func (r KeyRequest) validate() error {
 	switch {
