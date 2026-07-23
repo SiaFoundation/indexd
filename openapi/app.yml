@@ -18,6 +18,8 @@ tags:
     description: List, pin, unpin and retrieve pinned slab details
   - name: accounts
     description: Retrieve current account
+  - name: sharing
+    description: Create, list and delete sharing keys and the objects attached to them
 
 paths:
   /account:
@@ -203,6 +205,182 @@ paths:
         "404":
           description: Object not found
 
+  /sharing:
+    get:
+      tags:
+        - sharing
+      summary: List the account's sharing keys
+      operationId: listSharingKeys
+      parameters:
+        - name: limit
+          in: query
+          description: The maximum number of sharing keys to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: offset
+          in: query
+          description: The number of sharing keys to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: A list of sharing keys, most recently created first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SharingKey"
+    post:
+      tags:
+        - sharing
+      summary: Create a sharing key
+      operationId: addSharingKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SharingKeyRequest"
+      responses:
+        "200":
+          description: The created sharing key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SharingKey"
+        "400":
+          description: Invalid request, e.g. a missing public key or nonce
+        "409":
+          description: A sharing key with the same public key already exists
+  /sharing/{key}:
+    get:
+      tags:
+        - sharing
+      summary: Get one of the account's sharing keys
+      operationId: getSharingKey
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+      responses:
+        "200":
+          description: The sharing key
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SharingKey"
+        "404":
+          description: Sharing key not found
+    delete:
+      tags:
+        - sharing
+      summary: Delete one of the account's sharing keys and its attached objects
+      operationId: deleteSharingKey
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+      responses:
+        "200":
+          description: Sharing key deleted successfully
+        "404":
+          description: Sharing key not found
+  /sharing/{key}/objects:
+    get:
+      tags:
+        - sharing
+      summary: List the objects attached to one of the account's sharing keys
+      operationId: listSharingKeyObjects
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+        - name: limit
+          in: query
+          description: The maximum number of objects to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: offset
+          in: query
+          description: The number of objects to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: A list of objects with their re-sealed keys, most recently attached first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SealedObject"
+        "404":
+          description: Sharing key not found
+    post:
+      tags:
+        - sharing
+      summary: Attach an object to a sharing key
+      operationId: addSharedObject
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SharedObjectRequest"
+      responses:
+        "200":
+          description: Object attached successfully
+        "400":
+          description: Invalid request or signature
+        "404":
+          description: Sharing key not found, or the account does not own the object
+        "409":
+          description: The encrypted keys or signatures are already used by another shared-object attachment
+  /sharing/{key}/objects/{objectKey}:
+    delete:
+      tags:
+        - sharing
+      summary: Detach an object from a sharing key
+      operationId: deleteSharedObject
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+        - name: objectKey
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hash256"
+      responses:
+        "200":
+          description: Object detached successfully
+        "404":
+          description: Object not attached to the sharing key
   /slabs:
     get:
       tags:
@@ -754,3 +932,11 @@ components:
       $ref: "./components.yml#/components/schemas/ObjectSlab"
     SharedObject:
       $ref: "./components.yml#/components/schemas/SharedObject"
+    SharingKeyNonce:
+      $ref: "./components.yml#/components/schemas/SharingKeyNonce"
+    SharingKey:
+      $ref: "./components.yml#/components/schemas/SharingKey"
+    SharingKeyRequest:
+      $ref: "./components.yml#/components/schemas/SharingKeyRequest"
+    SharedObjectRequest:
+      $ref: "./components.yml#/components/schemas/SharedObjectRequest"

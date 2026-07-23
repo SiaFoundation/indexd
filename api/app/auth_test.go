@@ -135,7 +135,7 @@ func TestPreAuthorizedAuth(t *testing.T) {
 	}
 	defer l.Close()
 	appAPIAddr := fmt.Sprintf("http://%s", l.Addr())
-	handler, err := NewAPI(appAPIAddr, nil, s, &mockContracts{}, nil)
+	handler, err := NewAPI(appAPIAddr, nil, s, &mockContracts{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestPreAuthorizationBoundToEphemeralKey(t *testing.T) {
 	}
 	defer l.Close()
 	appAPIAddr := fmt.Sprintf("http://%s", l.Addr())
-	handler, err := NewAPI(appAPIAddr, nil, s, &mockContracts{}, nil)
+	handler, err := NewAPI(appAPIAddr, nil, s, &mockContracts{}, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 	defer l.Close()
 
 	appAPIAddr := fmt.Sprintf("http://%s", l.Addr().String())
-	handler, err := NewAPI(appAPIAddr, nil, s, nil, nil)
+	handler, err := NewAPI(appAPIAddr, nil, s, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestAuthConnectRateLimit(t *testing.T) {
 	defer l.Close()
 
 	appAPIAddr := fmt.Sprintf("http://%s", l.Addr().String())
-	handler, err := NewAPI(appAPIAddr, nil, s, nil, nil, WithRateLimiter(rl))
+	handler, err := NewAPI(appAPIAddr, nil, s, nil, nil, nil, WithRateLimiter(rl))
 	if err != nil {
 		t.Fatal(err)
 	}
