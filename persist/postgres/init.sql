@@ -438,35 +438,76 @@ CREATE FUNCTION shared_objects_maintain_totals() RETURNS TRIGGER AS $$
 BEGIN
     IF (TG_OP = 'INSERT') THEN
         UPDATE sharing_keys SET
-            object_count = object_count + 1,
-            size = size + NEW.size,
-            pinned_data = pinned_data + NEW.pinned_data,
-            pinned_size = pinned_size + NEW.pinned_size,
+            object_count = sharing_keys.object_count + agg.object_count,
+            size = sharing_keys.size + agg.size,
+            pinned_data = sharing_keys.pinned_data + agg.pinned_data,
+            pinned_size = sharing_keys.pinned_size + agg.pinned_size,
             updated_at = NOW()
-        WHERE id = NEW.sharing_key_id;
+        FROM (
+            SELECT sharing_key_id,
+                COUNT(*) AS object_count,
+                SUM(size) AS size,
+                SUM(pinned_data) AS pinned_data,
+                SUM(pinned_size) AS pinned_size
+            FROM new_rows
+            GROUP BY sharing_key_id
+        ) agg
+        WHERE sharing_keys.id = agg.sharing_key_id;
     ELSIF (TG_OP = 'UPDATE') THEN
         UPDATE sharing_keys SET
-            size = size + NEW.size - OLD.size,
-            pinned_data = pinned_data + NEW.pinned_data - OLD.pinned_data,
-            pinned_size = pinned_size + NEW.pinned_size - OLD.pinned_size,
+            size = sharing_keys.size + agg.size,
+            pinned_data = sharing_keys.pinned_data + agg.pinned_data,
+            pinned_size = sharing_keys.pinned_size + agg.pinned_size,
             updated_at = NOW()
-        WHERE id = NEW.sharing_key_id;
+        FROM (
+            SELECT sharing_key_id,
+                SUM(size) AS size,
+                SUM(pinned_data) AS pinned_data,
+                SUM(pinned_size) AS pinned_size
+            FROM (
+                SELECT sharing_key_id, size, pinned_data, pinned_size FROM new_rows
+                UNION ALL
+                SELECT sharing_key_id, -size, -pinned_data, -pinned_size FROM old_rows
+            ) deltas
+            GROUP BY sharing_key_id
+        ) agg
+        WHERE sharing_keys.id = agg.sharing_key_id;
     ELSIF (TG_OP = 'DELETE') THEN
         UPDATE sharing_keys SET
-            object_count = object_count - 1,
-            size = size - OLD.size,
-            pinned_data = pinned_data - OLD.pinned_data,
-            pinned_size = pinned_size - OLD.pinned_size,
+            object_count = sharing_keys.object_count - agg.object_count,
+            size = sharing_keys.size - agg.size,
+            pinned_data = sharing_keys.pinned_data - agg.pinned_data,
+            pinned_size = sharing_keys.pinned_size - agg.pinned_size,
             updated_at = NOW()
-        WHERE id = OLD.sharing_key_id;
+        FROM (
+            SELECT sharing_key_id,
+                COUNT(*) AS object_count,
+                SUM(size) AS size,
+                SUM(pinned_data) AS pinned_data,
+                SUM(pinned_size) AS pinned_size
+            FROM old_rows
+            GROUP BY sharing_key_id
+        ) agg
+        WHERE sharing_keys.id = agg.sharing_key_id;
     END IF;
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER shared_objects_maintain_totals
-AFTER INSERT OR UPDATE OR DELETE ON shared_objects
-FOR EACH ROW EXECUTE FUNCTION shared_objects_maintain_totals();
+CREATE TRIGGER shared_objects_maintain_totals_insert
+AFTER INSERT ON shared_objects
+REFERENCING NEW TABLE AS new_rows
+FOR EACH STATEMENT EXECUTE FUNCTION shared_objects_maintain_totals();
+
+CREATE TRIGGER shared_objects_maintain_totals_update
+AFTER UPDATE ON shared_objects
+REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
+FOR EACH STATEMENT EXECUTE FUNCTION shared_objects_maintain_totals();
+
+CREATE TRIGGER shared_objects_maintain_totals_delete
+AFTER DELETE ON shared_objects
+REFERENCING OLD TABLE AS old_rows
+FOR EACH STATEMENT EXECUTE FUNCTION shared_objects_maintain_totals();
 
 CREATE TABLE account_slabs (
     account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns slab

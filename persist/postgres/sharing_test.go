@@ -361,6 +361,42 @@ func TestSharedObjectRequest(t *testing.T) {
 	}
 }
 
+func (s *Store) addTestSharingKey(t testing.TB, acc proto.Account, description string) types.PublicKey {
+	t.Helper()
+	pk := types.GeneratePrivateKey().PublicKey()
+	if _, err := s.AddSharingKey(acc, sharing.KeyRequest{
+		PublicKey:   pk,
+		Nonce:       (sharing.Nonce)(frand.Bytes(32)),
+		Description: description,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return pk
+}
+
+func attachTestObject(t testing.TB, store *Store, acc proto.Account, sharingKey types.PublicKey, objectID types.Hash256) {
+	t.Helper()
+	if err := store.AddSharedObject(acc, sharingKey, sharing.SharedObjectRequest{
+		ObjectID:          objectID,
+		EncryptedDataKey:  frand.Bytes(sharing.EncryptionKeySize),
+		DataSignature:     types.Signature(frand.Bytes(64)),
+		MetadataSignature: types.Signature(frand.Bytes(64)),
+	}); err != nil {
+		t.Fatalf("failed to attach object: %v", err)
+	}
+}
+
+func assertKeyTotals(t testing.TB, store *Store, pk types.PublicKey, count, size, pinnedData, pinnedSize uint64) {
+	t.Helper()
+	key, err := store.SharingKey(pk)
+	if err != nil {
+		t.Fatal(err)
+	} else if key.ObjectCount != count || key.ObjectSize != size || key.PinnedData != pinnedData || key.PinnedSize != pinnedSize {
+		t.Fatalf("unexpected totals: count=%d objectSize=%d pinnedData=%d pinnedSize=%d, want %d/%d/%d/%d",
+			key.ObjectCount, key.ObjectSize, key.PinnedData, key.PinnedSize, count, size, pinnedData, pinnedSize)
+	}
+}
+
 func countSharedObjects(t testing.TB, store *Store) (n int) {
 	t.Helper()
 	if err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM shared_objects`).Scan(&n); err != nil {
@@ -450,4 +486,70 @@ func TestSharingKeyTotals(t *testing.T) {
 	}
 	assertTotals(0, 0, 0, 0)
 	assertUpdatedAtBumped(updatedAt)
+}
+
+func TestSharedObjectCascadeAcrossKeys(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	objA := store.pinTestObject(t, acc, hk)
+	objB := store.pinTestObject(t, acc, hk)
+
+	k1 := store.addTestSharingKey(t, acc, "k1")
+	k2 := store.addTestSharingKey(t, acc, "k2")
+	for _, sk := range []types.PublicKey{k1, k2} {
+		attachTestObject(t, store, acc, sk, objA.ID())
+		attachTestObject(t, store, acc, sk, objB.ID())
+	}
+
+	sectorSize := uint64(proto.SectorSize)
+	assertKeyTotals(t, store, k1, 2, 200, 2*sectorSize, 2*sectorSize)
+	assertKeyTotals(t, store, k2, 2, 200, 2*sectorSize, 2*sectorSize)
+	if n := countSharedObjects(t, store); n != 4 {
+		t.Fatalf("expected 4 shared objects, got %d", n)
+	}
+
+	// deleting objA cascades a single DELETE spanning both keys
+	if err := store.DeleteObject(acc, objA.ID()); err != nil {
+		t.Fatal(err)
+	}
+	assertKeyTotals(t, store, k1, 1, 100, sectorSize, sectorSize)
+	assertKeyTotals(t, store, k2, 1, 100, sectorSize, sectorSize)
+	if n := countSharedObjects(t, store); n != 2 {
+		t.Fatalf("expected 2 shared objects after cascade, got %d", n)
+	}
+}
+
+func TestSharingKeyDeleteCascadesObjects(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	objA := store.pinTestObject(t, acc, hk)
+	objB := store.pinTestObject(t, acc, hk)
+
+	sk := store.addTestSharingKey(t, acc, "share")
+	attachTestObject(t, store, acc, sk, objA.ID())
+	attachTestObject(t, store, acc, sk, objB.ID())
+	if n := countSharedObjects(t, store); n != 2 {
+		t.Fatalf("expected 2 shared objects, got %d", n)
+	}
+
+	// the DELETE trigger fires against the key row being deleted
+	if err := store.DeleteSharingKey(acc, sk); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SharingKey(sk); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		t.Fatalf("expected ErrSharingKeyNotFound after delete, got %v", err)
+	}
+	if n := countSharedObjects(t, store); n != 0 {
+		t.Fatalf("expected shared objects to be cascade-deleted, got %d", n)
+	}
 }
