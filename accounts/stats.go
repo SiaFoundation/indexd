@@ -17,14 +17,16 @@ type (
 	// ConnectKeyQuotaStats contains the number of connect keys associated with
 	// a particular quota.
 	ConnectKeyQuotaStats struct {
-		Quota string `json:"quota"`
-		Total uint64 `json:"total"`
+		Quota  string `json:"quota"`
+		Total  uint64 `json:"total"`
+		Active uint64 `json:"active"`
 	}
 
 	// ConnectKeyStats reports statistics about connect keys, including the
 	// total number of keys and the breakdown by quota.
 	ConnectKeyStats struct {
 		Total  uint64                 `json:"total"`
+		Active uint64                 `json:"active"`
 		Quotas []ConnectKeyQuotaStats `json:"quotas"`
 	}
 

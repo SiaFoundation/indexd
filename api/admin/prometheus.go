@@ -39,11 +39,20 @@ func (s ConnectKeyStatsResponse) PrometheusMetric() (metrics []prometheus.Metric
 		Name:  "indexd_connect_keys_total",
 		Value: float64(s.Total),
 	})
+	metrics = append(metrics, prometheus.Metric{
+		Name:  "indexd_connect_keys_active",
+		Value: float64(s.Active),
+	})
 	for _, q := range s.Quotas {
 		metrics = append(metrics, prometheus.Metric{
 			Name:   "indexd_connect_keys_quota",
 			Labels: map[string]any{"quota": q.Quota},
 			Value:  float64(q.Total),
+		})
+		metrics = append(metrics, prometheus.Metric{
+			Name:   "indexd_connect_keys_active_quota",
+			Labels: map[string]any{"quota": q.Quota},
+			Value:  float64(q.Active),
 		})
 	}
 	return

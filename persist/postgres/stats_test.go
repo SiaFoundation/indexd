@@ -998,6 +998,8 @@ func TestConnectKeyStats(t *testing.T) {
 		t.Fatal(err)
 	} else if stats.Total != 5 {
 		t.Fatalf("expected 5 total connect keys, got %d", stats.Total)
+	} else if stats.Active != 0 {
+		t.Fatalf("expected 0 active connect keys, got %d", stats.Active)
 	} else if len(stats.Quotas) != 2 {
 		t.Fatalf("expected 2 quotas, got %d", len(stats.Quotas))
 	}
@@ -1008,6 +1010,39 @@ func TestConnectKeyStats(t *testing.T) {
 	}
 	if stats.Quotas[1].Quota != "premium" || stats.Quotas[1].Total != 2 {
 		t.Fatalf("expected premium quota with 2 keys, got %q with %d", stats.Quotas[1].Quota, stats.Quotas[1].Total)
+	}
+
+	recent := time.Now().Add(-time.Hour)
+	stale := time.Now().Add(-2 * accounts.AccountActivityThreshold)
+
+	if _, err := store.pool.Exec(t.Context(),
+		`UPDATE app_connect_keys SET last_used = $1 WHERE app_key = $2`, recent, "default-key-0"); err != nil {
+		t.Fatal(err)
+	}
+
+	insertAccount := func(appKey string, lastUsed time.Time) {
+		var connectKeyID int64
+		if err := store.pool.QueryRow(t.Context(), `SELECT id FROM app_connect_keys WHERE app_key = $1`, appKey).Scan(&connectKeyID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := store.pool.Exec(t.Context(),
+			`INSERT INTO accounts (public_key, connect_key_id, last_used, max_pinned_data) VALUES ($1, $2, $3, 1000000)`,
+			sqlPublicKey(types.GeneratePrivateKey().PublicKey()), connectKeyID, lastUsed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertAccount("default-key-1", recent)
+	insertAccount("premium-key-0", stale)
+
+	stats, err = store.ConnectKeyStats()
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.Active != 2 {
+		t.Fatalf("expected 2 active connect keys, got %d", stats.Active)
+	} else if stats.Quotas[0].Quota != "default" || stats.Quotas[0].Active != 2 {
+		t.Fatalf("expected default quota with 2 active keys, got %q with %d", stats.Quotas[0].Quota, stats.Quotas[0].Active)
+	} else if stats.Quotas[1].Quota != "premium" || stats.Quotas[1].Active != 0 {
+		t.Fatalf("expected premium quota with 0 active keys, got %q with %d", stats.Quotas[1].Quota, stats.Quotas[1].Active)
 	}
 
 	// delete a key and verify stats update
