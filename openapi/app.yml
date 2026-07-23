@@ -513,14 +513,14 @@ paths:
                   $ref: "#/components/schemas/HostInfo"
         "401":
           description: The request is not signed by a valid sharing key
-  /shared/hosts/{pubkey}/token:
+  /shared/hosts/{hostkey}/token:
     get:
       tags:
         - shared
       summary: Get an account token for a host, signed by the owner's sharing account
       operationId: getSharedHostToken
       parameters:
-        - name: pubkey
+        - name: hostkey
           in: path
           required: true
           schema:

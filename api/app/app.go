@@ -1054,11 +1054,11 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		"DELETE /sharing/:key/objects/:objectkey": wrapSignedAuth(a.handleDELETESharingObject),
 
 		// shared-key endpoints, authenticated with a sharing key
-		"GET /shared":                     wrapSharedAuth(a.handleGETShared),
-		"GET /shared/objects":             wrapSharedAuth(a.handleGETSharedObjects),
-		"GET /shared/objects/:id":         wrapSharedAuth(a.handleGETSharedObject),
-		"GET /shared/hosts":               wrapSharedAuth(a.handleGETSharedHosts),
-		"GET /shared/hosts/:pubkey/token": wrapSharedAuth(a.handleGETSharedHostToken),
+		"GET /shared":                      wrapSharedAuth(a.handleGETShared),
+		"GET /shared/objects":              wrapSharedAuth(a.handleGETSharedObjects),
+		"GET /shared/objects/:id":          wrapSharedAuth(a.handleGETSharedObject),
+		"GET /shared/hosts":                wrapSharedAuth(a.handleGETSharedHosts),
+		"GET /shared/hosts/:hostkey/token": wrapSharedAuth(a.handleGETSharedHostToken),
 
 		"GET /slabs":            wrapSignedAuth(a.handleGETSlabs),
 		"POST /slabs":           wrapSignedAuth(a.handlePOSTSlabs),
