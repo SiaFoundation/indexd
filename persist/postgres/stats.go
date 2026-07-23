@@ -262,6 +262,7 @@ func (s *Store) ConnectKeyStats() (stats accounts.ConnectKeyStats, err error) {
 		}
 		defer rows.Close()
 
+		stats = accounts.ConnectKeyStats{}
 		for rows.Next() {
 			var qs accounts.ConnectKeyQuotaStats
 			if err := rows.Scan(&qs.Quota, &qs.Total, &qs.Active); err != nil {
