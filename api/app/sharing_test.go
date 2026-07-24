@@ -218,18 +218,18 @@ func TestSharingKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sharedHosts, err := appClient.SharedHosts(ctx, shareKeyPriv); err != nil {
+	sharedHosts, err := appClient.SharedHosts(ctx, shareKeyPriv)
+	if err != nil {
 		t.Fatal(err)
 	} else if len(sharedHosts) != len(appHosts) {
 		t.Fatalf("expected %d shared hosts, got %d", len(appHosts), len(sharedHosts))
 	}
-
-	if token, err := appClient.SharedHostToken(ctx, shareKeyPriv, hostList[0].PublicKey); err != nil {
-		t.Fatal(err)
-	} else if token.HostKey != hostList[0].PublicKey {
-		t.Fatalf("unexpected token host: %v", token.HostKey)
-	} else if !types.PublicKey(token.Account).VerifyHash(token.SigHash(), token.Signature) {
-		t.Fatal("invalid account token signature")
+	for _, h := range sharedHosts {
+		if h.Token.HostKey != h.PublicKey {
+			t.Fatalf("expected token host %v, got %v", h.PublicKey, h.Token.HostKey)
+		} else if !types.PublicKey(h.Token.Account).VerifyHash(h.Token.SigHash(), h.Token.Signature) {
+			t.Fatal("invalid account token signature")
+		}
 	}
 
 	forged := sharedReq

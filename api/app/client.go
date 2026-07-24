@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
@@ -345,21 +344,15 @@ func (c *Client) SharedObjectByID(ctx context.Context, sharingKey types.PrivateK
 	return
 }
 
-// SharedHosts lists usable hosts using the sharing key for authentication.
-func (c *Client) SharedHosts(ctx context.Context, sharingKey types.PrivateKey, opts ...api.URLQueryParameterOption) (hosts []hosts.HostInfo, err error) {
+// SharedHosts lists usable hosts using the sharing key for authentication. Each
+// host includes an account token the recipient can use to pay for downloads
+// from that host.
+func (c *Client) SharedHosts(ctx context.Context, sharingKey types.PrivateKey, opts ...api.URLQueryParameterOption) (sharedHosts []SharedHost, err error) {
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
 	}
-	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared/hosts?"+values.Encode(), nil, &hosts)
-	return
-}
-
-// SharedHostToken returns an account token for the given host, signed with the
-// sharing account of the sharing key's owner. The recipient uses it to pay for
-// downloads from the host.
-func (c *Client) SharedHostToken(ctx context.Context, sharingKey types.PrivateKey, hostKey types.PublicKey) (token proto.AccountToken, err error) {
-	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, fmt.Sprintf("/shared/hosts/%s/token", hostKey), nil, &token)
+	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared/hosts?"+values.Encode(), nil, &sharedHosts)
 	return
 }
 

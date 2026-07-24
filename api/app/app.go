@@ -62,7 +62,7 @@ type (
 		OwnedSharedObjects(account proto.Account, sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
 		SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
 		SharedObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
-		AccountToken(sharingKey types.PublicKey, hostKey types.PublicKey) (proto.AccountToken, error)
+		AccountTokens(sharingKey types.PublicKey, hostKeys []types.PublicKey) ([]proto.AccountToken, error)
 	}
 
 	// Hosts defines the hosts interface for the application API.
@@ -245,51 +245,53 @@ func WrapRateLimit(rl RateLimiter, next jape.Handler) jape.Handler {
 }
 
 func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
-	a.listUsableHosts(jc)
+	if h, ok := a.usableHosts(jc); ok {
+		jc.Encode(h)
+	}
 }
 
-func (a *app) listUsableHosts(jc jape.Context) {
+func (a *app) usableHosts(jc jape.Context) ([]hosts.HostInfo, bool) {
 	offset, limit, ok := api.ParseOffsetLimit(jc)
 	if !ok {
-		return
+		return nil, false
 	}
 
 	var opts []hosts.UsableHostQueryOpt
 
 	var protocol string
 	if jc.DecodeForm("protocol", &protocol) != nil {
-		return
+		return nil, false
 	} else if protocol != "" && protocol != string(siamux.Protocol) && protocol != string(quic.Protocol) {
 		jc.Error(fmt.Errorf("invalid protocol %q", protocol), http.StatusBadRequest)
-		return
+		return nil, false
 	} else if protocol != "" {
 		opts = append(opts, hosts.WithProtocol(chain.Protocol(protocol)))
 	}
 
 	var countryCode string
 	if jc.DecodeForm("country", &countryCode) != nil {
-		return
+		return nil, false
 	} else if countryCode != "" {
 		opts = append(opts, hosts.WithCountry(countryCode))
 	}
 
 	var locationStr string
 	if jc.DecodeForm("location", &locationStr) != nil {
-		return
+		return nil, false
 	} else if locationStr != "" {
 		var lat, lng float64
 		if _, err := fmt.Sscanf(locationStr, "(%f,%f)", &lat, &lng); err != nil {
 			jc.Error(fmt.Errorf("invalid location %q, must be of the form (lat,lng)", locationStr), http.StatusBadRequest)
-			return
+			return nil, false
 		}
 		opts = append(opts, hosts.SortByDistance(lat, lng))
 	}
 
-	hosts, err := a.hosts.UsableHosts(jc.Request.Context(), offset, limit, opts...)
+	h, err := a.hosts.UsableHosts(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get hosts", err) != nil {
-		return
+		return nil, false
 	}
-	jc.Encode(hosts)
+	return h, true
 }
 
 func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
@@ -1054,11 +1056,10 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		"DELETE /sharing/:key/objects/:objectkey": wrapSignedAuth(a.handleDELETESharingObject),
 
 		// shared-key endpoints, authenticated with a sharing key
-		"GET /shared":                      wrapSharedAuth(a.handleGETShared),
-		"GET /shared/objects":              wrapSharedAuth(a.handleGETSharedObjects),
-		"GET /shared/objects/:id":          wrapSharedAuth(a.handleGETSharedObject),
-		"GET /shared/hosts":                wrapSharedAuth(a.handleGETSharedHosts),
-		"GET /shared/hosts/:hostkey/token": wrapSharedAuth(a.handleGETSharedHostToken),
+		"GET /shared":             wrapSharedAuth(a.handleGETShared),
+		"GET /shared/objects":     wrapSharedAuth(a.handleGETSharedObjects),
+		"GET /shared/objects/:id": wrapSharedAuth(a.handleGETSharedObject),
+		"GET /shared/hosts":       wrapSharedAuth(a.handleGETSharedHosts),
 
 		"GET /slabs":            wrapSignedAuth(a.handleGETSlabs),
 		"POST /slabs":           wrapSignedAuth(a.handlePOSTSlabs),
