@@ -460,12 +460,13 @@ func (c *Client) Close() error {
 // boolean flag set to 'true'.
 func (c *Client) settings(ctx context.Context, hostKey types.PublicKey, transport rhp.TransportClient) (proto.HostSettings, bool, error) {
 	c.mu.Lock()
-	settings := c.cachedSettings[hostKey]
-	if settings.Prices.Validate(hostKey) == nil && time.Until(settings.Prices.ValidUntil) > 30*time.Second {
-		c.mu.Unlock()
+	settings, ok := c.cachedSettings[hostKey]
+	c.mu.Unlock()
+	// settings are cached only after signature validation, so the signature never needs
+	// rechecking here. this keeps the ed25519 verify off the per-rpc hot path
+	if ok && time.Until(settings.Prices.ValidUntil) > 30*time.Second {
 		return settings, true, nil
 	}
-	c.mu.Unlock()
 
 	settings, err := rhp.RPCSettings(ctx, transport)
 	if err != nil {
