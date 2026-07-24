@@ -125,6 +125,8 @@ func (r KeyRequest) validate() error {
 		return fmt.Errorf("%w: public key is required", ErrInvalidRequest)
 	case r.Nonce == (Nonce{}):
 		return fmt.Errorf("%w: nonce is required", ErrInvalidRequest)
+	case r.ExpiresAt != nil && r.ExpiresAt.Before(time.Now()):
+		return fmt.Errorf("%w: expires at must be in the future", ErrInvalidRequest)
 	case len(r.Description) > MaxDescriptionSize:
 		return fmt.Errorf("%w: description exceeds %d bytes", ErrInvalidRequest, MaxDescriptionSize)
 	}
