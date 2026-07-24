@@ -4,11 +4,20 @@ import (
 	"errors"
 	"net/http"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/jape"
 )
+
+// A SharedHost is a usable host paired with an account token the recipient can
+// use to pay for downloads from that host.
+type SharedHost struct {
+	hosts.HostInfo
+	Token proto.AccountToken `json:"token"`
+}
 
 func (a *app) handleGETShared(jc jape.Context, key sharing.Key) {
 	jc.Encode(key.Stats())
@@ -49,22 +58,28 @@ func (a *app) handleGETSharedObject(jc jape.Context, key sharing.Key) {
 	jc.Encode(obj)
 }
 
-func (a *app) handleGETSharedHosts(jc jape.Context, _ sharing.Key) {
-	a.listUsableHosts(jc)
-}
-
-func (a *app) handleGETSharedHostToken(jc jape.Context, key sharing.Key) {
-	var hostKey types.PublicKey
-	if jc.DecodeParam("hostkey", &hostKey) != nil {
+func (a *app) handleGETSharedHosts(jc jape.Context, key sharing.Key) {
+	usable, ok := a.usableHosts(jc)
+	if !ok {
 		return
 	}
 
-	token, err := a.sharing.AccountToken(key.PublicKey, hostKey)
+	hostKeys := make([]types.PublicKey, len(usable))
+	for i, h := range usable {
+		hostKeys[i] = h.PublicKey
+	}
+
+	tokens, err := a.sharing.AccountTokens(key.PublicKey, hostKeys)
 	if errors.Is(err, sharing.ErrSharingKeyNotFound) {
 		jc.Error(err, http.StatusUnauthorized)
 		return
-	} else if jc.Check("failed to create account token", err) != nil {
+	} else if jc.Check("failed to create account tokens", err) != nil {
 		return
 	}
-	jc.Encode(token)
+
+	sharedHosts := make([]SharedHost, len(usable))
+	for i, h := range usable {
+		sharedHosts[i] = SharedHost{HostInfo: h, Token: tokens[i]}
+	}
+	jc.Encode(sharedHosts)
 }

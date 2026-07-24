@@ -147,15 +147,19 @@ func (m *Manager) SharedObject(sharingKey types.PublicKey, objectKey types.Hash2
 	return m.store.SharingKeyObject(sharingKey, objectKey)
 }
 
-// AccountToken returns an RHP4 account token for the given host, signed with the
-// sharing account derived from the sharing key's owner. The recipient uses it to
-// pay for downloading the shared objects.
-func (m *Manager) AccountToken(sharingKey types.PublicKey, hostKey types.PublicKey) (proto.AccountToken, error) {
+// AccountTokens returns an RHP4 account token for each of the given hosts, all
+// signed with the sharing account derived from the sharing key's owner. The
+// recipient uses them to pay for downloading the shared objects.
+func (m *Manager) AccountTokens(sharingKey types.PublicKey, hostKeys []types.PublicKey) ([]proto.AccountToken, error) {
 	key, err := m.store.SharingAccountKey(sharingKey)
 	if err != nil {
-		return proto.AccountToken{}, err
+		return nil, err
 	}
-	return proto.NewAccountToken(key, hostKey), nil
+	tokens := make([]proto.AccountToken, len(hostKeys))
+	for i, hostKey := range hostKeys {
+		tokens[i] = proto.NewAccountToken(key, hostKey)
+	}
+	return tokens, nil
 }
 
 // NewManager creates a new sharing Manager.
