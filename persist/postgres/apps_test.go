@@ -4,7 +4,9 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"sync"
 	"testing"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -284,5 +286,189 @@ func TestUpdateConnectKey(t *testing.T) {
 		Quota:       "updated-quota",
 	}); !errors.Is(err, accounts.ErrKeyNotFound) {
 		t.Fatalf("expected err %q, got %q", accounts.ErrKeyNotFound, err)
+	}
+}
+
+func TestPreAuthorizedKeys(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	store.addTestQuota(t, "test-quota", 10, 3)
+
+	connectKey, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{
+		Key:   "connect-key",
+		Quota: "test-quota",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appID := types.Hash256{1}
+	expiration := time.Now().Add(time.Hour).Truncate(time.Microsecond)
+	privateKey := types.GeneratePrivateKey()
+	created, err := store.AddPreAuthorizedKey(accounts.PreAuthorizedKeyRequest{
+		PublicKey:    privateKey.PublicKey(),
+		ConnectKey:   connectKey.Key,
+		Expiration:   expiration,
+		TotalUses:    2,
+		AllowedAppID: &appID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if created.PublicKey != privateKey.PublicKey() || created.ConnectKey != connectKey.Key {
+		t.Fatalf("unexpected pre-authorized key: %+v", created)
+	} else if !created.Expiration.Equal(expiration) || created.TotalUses != 2 || created.RemainingUses != 2 {
+		t.Fatalf("unexpected limits: %+v", created)
+	} else if created.AllowedAppID == nil || *created.AllowedAppID != appID {
+		t.Fatalf("unexpected allowed app ID: %+v", created.AllowedAppID)
+	} else if created.DateCreated.IsZero() || !created.LastUsed.IsZero() {
+		t.Fatalf("unexpected timestamps: %+v", created)
+	}
+	var storedPublicKey sqlPublicKey
+	if err := store.pool.QueryRow(t.Context(), `SELECT public_key FROM preauthorized_keys WHERE public_key = $1`, sqlPublicKey(created.PublicKey)).Scan(&storedPublicKey); err != nil {
+		t.Fatal(err)
+	} else if types.PublicKey(storedPublicKey) != created.PublicKey {
+		t.Fatalf("expected stored public key %v, got %v", created.PublicKey, storedPublicKey)
+	}
+
+	if _, err := store.AddPreAuthorizedKey(accounts.PreAuthorizedKeyRequest{
+		PublicKey:  created.PublicKey,
+		ConnectKey: connectKey.Key,
+		Expiration: expiration,
+		TotalUses:  1,
+	}); !errors.Is(err, accounts.ErrKeyAlreadyExists) {
+		t.Fatalf("expected duplicate key error, got %v", err)
+	}
+
+	if _, err := store.AddPreAuthorizedKey(accounts.PreAuthorizedKeyRequest{
+		PublicKey:  types.GeneratePrivateKey().PublicKey(),
+		ConnectKey: "missing",
+		Expiration: expiration,
+		TotalUses:  1,
+	}); !errors.Is(err, accounts.ErrKeyNotFound) {
+		t.Fatalf("expected connect key not found, got %v", err)
+	}
+
+	listed, err := store.PreAuthorizedKeys(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(listed) != 1 {
+		t.Fatalf("unexpected pre-authorized keys: %+v", listed)
+	}
+	if !reflect.DeepEqual(listed[0], created) {
+		t.Fatalf("expected %+v, got %+v", created, listed[0])
+	}
+	got, err := store.PreAuthorizedKey(created.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(got, created) {
+		t.Fatalf("expected %+v, got %+v", created, got)
+	}
+
+	if _, _, _, err := store.ConsumePreAuthorizedKey(created.PublicKey, types.Hash256{2}); !errors.Is(err, accounts.ErrPreAuthorizedKeyAppMismatch) {
+		t.Fatalf("expected app mismatch, got %v", err)
+	}
+	got, err = store.PreAuthorizedKey(created.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if got.RemainingUses != 2 {
+		t.Fatalf("app mismatch consumed a use: %+v", got)
+	}
+
+	consumedConnectKey, userSecret, reconnecting, err := store.ConsumePreAuthorizedKey(created.PublicKey, appID)
+	if err != nil {
+		t.Fatal(err)
+	} else if consumedConnectKey != connectKey.Key || userSecret == (types.Hash256{}) || reconnecting {
+		t.Fatalf("unexpected authorization result: %q %v %v", consumedConnectKey, userSecret, reconnecting)
+	}
+
+	if err := store.RegisterAppKey(connectKey.Key, types.GeneratePrivateKey().PublicKey(), accounts.AppMeta{ID: appID}); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, _, reconnecting, err = store.ConsumePreAuthorizedKey(created.PublicKey, appID); err != nil {
+		t.Fatal(err)
+	} else if !reconnecting {
+		t.Fatal("expected reconnecting authorization")
+	} else if _, _, _, err := store.ConsumePreAuthorizedKey(created.PublicKey, appID); !errors.Is(err, accounts.ErrPreAuthorizedKeyExhausted) {
+		t.Fatalf("expected exhausted key, got %v", err)
+	}
+
+	expiredPrivateKey := types.GeneratePrivateKey()
+	expiredKey, err := store.AddPreAuthorizedKey(accounts.PreAuthorizedKeyRequest{
+		PublicKey:  expiredPrivateKey.PublicKey(),
+		ConnectKey: connectKey.Key,
+		Expiration: time.Now().Add(-time.Minute),
+		TotalUses:  1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if _, _, _, err := store.ConsumePreAuthorizedKey(expiredKey.PublicKey, appID); !errors.Is(err, accounts.ErrPreAuthorizedKeyExpired) {
+		t.Fatalf("expected expired key, got %v", err)
+	} else if err := store.PruneExpiredPreAuthorizedKeys(time.Now()); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.PreAuthorizedKey(expiredKey.PublicKey); !errors.Is(err, accounts.ErrKeyNotFound) {
+		t.Fatalf("expected expired key to be pruned, got %v", err)
+	} else if _, err := store.PreAuthorizedKey(created.PublicKey); err != nil {
+		t.Fatalf("expected non-expired key to be retained, got %v", err)
+	}
+	unrestrictedPrivateKey := types.GeneratePrivateKey()
+	_, err = store.AddPreAuthorizedKey(accounts.PreAuthorizedKeyRequest{
+		PublicKey:  unrestrictedPrivateKey.PublicKey(),
+		ConnectKey: connectKey.Key,
+		Expiration: expiration,
+		TotalUses:  1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if _, _, _, err := store.ConsumePreAuthorizedKey(unrestrictedPrivateKey.PublicKey(), types.Hash256{9}); err != nil {
+		t.Fatalf("expected unrestricted key to allow any app ID, got %v", err)
+	}
+
+	concurrentPrivateKey := types.GeneratePrivateKey()
+	_, err = store.AddPreAuthorizedKey(accounts.PreAuthorizedKeyRequest{
+		PublicKey:  concurrentPrivateKey.PublicKey(),
+		ConnectKey: connectKey.Key,
+		Expiration: expiration,
+		TotalUses:  1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const consumers = 8
+	start := make(chan struct{})
+	errs := make(chan error, consumers)
+	var wg sync.WaitGroup
+	for range consumers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, _, _, err := store.ConsumePreAuthorizedKey(concurrentPrivateKey.PublicKey(), types.Hash256{10})
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	var successes, exhausted int
+	for err := range errs {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, accounts.ErrPreAuthorizedKeyExhausted):
+			exhausted++
+		default:
+			t.Fatalf("unexpected concurrent consumption error: %v", err)
+		}
+	}
+	if successes != 1 || exhausted != consumers-1 {
+		t.Fatalf("expected one successful consumption and %d exhausted, got %d and %d", consumers-1, successes, exhausted)
+	}
+
+	if err := store.DeletePreAuthorizedKey(created.PublicKey); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.PreAuthorizedKey(created.PublicKey); !errors.Is(err, accounts.ErrKeyNotFound) {
+		t.Fatalf("expected deleted key to be missing, got %v", err)
+	} else if err := store.DeletePreAuthorizedKey(created.PublicKey); !errors.Is(err, accounts.ErrKeyNotFound) {
+		t.Fatalf("expected missing delete error, got %v", err)
 	}
 }

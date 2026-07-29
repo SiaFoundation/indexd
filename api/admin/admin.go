@@ -116,6 +116,10 @@ type (
 		DeleteAppConnectKey(context.Context, string) error
 		AppConnectKey(ctx context.Context, key string) (accounts.ConnectKey, error)
 		AppConnectKeys(ctx context.Context, offset, limit int) ([]accounts.ConnectKey, error)
+		AddPreAuthorizedKey(context.Context, accounts.PreAuthorizedKeyRequest) (accounts.PreAuthorizedKey, error)
+		DeletePreAuthorizedKey(context.Context, types.PublicKey) error
+		PreAuthorizedKey(context.Context, types.PublicKey) (accounts.PreAuthorizedKey, error)
+		PreAuthorizedKeys(context.Context, int, int) ([]accounts.PreAuthorizedKey, error)
 		RegisterAppKey(string, types.PublicKey, accounts.AppMeta) error
 
 		PutQuota(ctx context.Context, key string, req accounts.PutQuotaRequest) error
@@ -134,6 +138,10 @@ type (
 		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
 		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
 		SectorStats() (slabs.SectorsStats, error)
+
+		// migration endpoints used by remote nodes
+		PrepareMigrationBatch(cursor int64, limit int) (slabs.MigrationBatch, error)
+		ApplyMigrationResults(results []slabs.MigrationResult) error
 	}
 
 	// A Syncer can connect to other peers and synchronize the blockchain.
@@ -257,6 +265,14 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /settings/pricepinning": a.handleGETSettingsPricePinning,
 		"PUT /settings/pricepinning": a.handlePUTSettingsPricePinning,
 
+		// migration endpoints used by remote nodes to fetch and report on
+		// slab-migration work. Fetching a batch is a POST because it claims
+		// the returned slabs for the duration of the repair backoff; Go's
+		// http.Transport silently retries idempotent GETs on dead keep-alive
+		// connections, which would double-claim.
+		"POST /migrations/batch":   a.handlePOSTMigrationBatch,
+		"POST /migrations/results": a.handlePOSTMigrationResults,
+
 		// syncer endpoints
 		"POST /syncer/connect": a.handlePOSTSyncerConnect,
 
@@ -264,12 +280,16 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /txpool/recommendedfee": a.handleGETTxpoolRecommendedFee,
 
 		// connect endpoints
-		"GET    /apps/connect/keys":      a.handleGETAppConnectKeys,
-		"POST   /apps/connect/keys":      a.handlePOSTAppConnectKeys,
-		"PUT    /apps/connect/keys":      a.handlePUTAppConnectKeys,
-		"GET    /apps/connect/keys/:key": a.handleGETAppConnectKeysKey,
-		"DELETE /apps/connect/keys/:key": a.handleDELETEAppConnectKeys,
-		"POST   /apps/register":          a.handlePOSTAppsRegister,
+		"GET    /apps/connect/keys":                  a.handleGETAppConnectKeys,
+		"POST   /apps/connect/keys":                  a.handlePOSTAppConnectKeys,
+		"PUT    /apps/connect/keys":                  a.handlePUTAppConnectKeys,
+		"GET    /apps/connect/keys/:key":             a.handleGETAppConnectKeysKey,
+		"DELETE /apps/connect/keys/:key":             a.handleDELETEAppConnectKeys,
+		"GET    /apps/preauthorized/keys":            a.handleGETPreAuthorizedKeys,
+		"POST   /apps/preauthorized/keys":            a.handlePOSTPreAuthorizedKeys,
+		"GET    /apps/preauthorized/keys/:publicKey": a.handleGETPreAuthorizedKeysKey,
+		"DELETE /apps/preauthorized/keys/:publicKey": a.handleDELETEPreAuthorizedKeys,
+		"POST   /apps/register":                      a.handlePOSTAppsRegister,
 
 		// quota endpoints
 		"GET    /quotas":      a.handleGETQuotas,
@@ -367,7 +387,7 @@ func (a *admin) handleDELETESlab(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTPruneAccounts(jc jape.Context) {
-	cutoff := time.Now().Add(-time.Hour)
+	cutoff := time.Now().Add(-api.DefaultSlabPruneCutoff)
 	if jc.Request.FormValue("before") != "" {
 		if jc.DecodeForm("before", &cutoff) != nil {
 			return
@@ -483,6 +503,71 @@ func (a *admin) handleDELETEAppConnectKeys(jc jape.Context) {
 		jc.Error(err, http.StatusNotFound)
 		return
 	} else if jc.Check("failed to delete app connect key", err) != nil {
+		return
+	}
+	jc.Encode(nil)
+}
+
+func (a *admin) handleGETPreAuthorizedKeys(jc jape.Context) {
+	offset, limit, ok := api.ParseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+
+	keys, err := a.accounts.PreAuthorizedKeys(jc.Request.Context(), offset, limit)
+	if jc.Check("failed to get pre-authorized keys", err) != nil {
+		return
+	}
+	jc.Encode(keys)
+}
+
+func (a *admin) handlePOSTPreAuthorizedKeys(jc jape.Context) {
+	var req accounts.PreAuthorizedKeyRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+
+	created, err := a.accounts.AddPreAuthorizedKey(jc.Request.Context(), req)
+	switch {
+	case errors.Is(err, accounts.ErrInvalidPreAuthorizedKey):
+		jc.Error(err, http.StatusBadRequest)
+	case errors.Is(err, accounts.ErrKeyNotFound):
+		jc.Error(err, http.StatusNotFound)
+	case errors.Is(err, accounts.ErrKeyAlreadyExists):
+		jc.Error(err, http.StatusConflict)
+	case jc.Check("failed to add pre-authorized key", err) != nil:
+	default:
+		jc.Encode(created)
+	}
+}
+
+func (a *admin) handleGETPreAuthorizedKeysKey(jc jape.Context) {
+	var publicKey types.PublicKey
+	if jc.DecodeParam("publicKey", &publicKey) != nil {
+		return
+	}
+
+	preAuthorizedKey, err := a.accounts.PreAuthorizedKey(jc.Request.Context(), publicKey)
+	if errors.Is(err, accounts.ErrKeyNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get pre-authorized key", err) != nil {
+		return
+	}
+	jc.Encode(preAuthorizedKey)
+}
+
+func (a *admin) handleDELETEPreAuthorizedKeys(jc jape.Context) {
+	var publicKey types.PublicKey
+	if jc.DecodeParam("publicKey", &publicKey) != nil {
+		return
+	}
+
+	err := a.accounts.DeletePreAuthorizedKey(jc.Request.Context(), publicKey)
+	if errors.Is(err, accounts.ErrKeyNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to delete pre-authorized key", err) != nil {
 		return
 	}
 	jc.Encode(nil)
@@ -657,7 +742,7 @@ func (a *admin) handlePOSTAccountPrune(jc jape.Context) {
 	if jc.DecodeParam("accountkey", &ak) != nil {
 		return
 	}
-	cutoff := time.Now().Add(-time.Hour)
+	cutoff := time.Now().Add(-api.DefaultSlabPruneCutoff)
 	if jc.Request.FormValue("before") != "" {
 		if jc.DecodeForm("before", &cutoff) != nil {
 			return
@@ -766,6 +851,36 @@ func (a *admin) handleGETState(jc jape.Context) {
 		SyncHeight: ts.Index.Height,
 		Synced:     time.Since(ts.PrevTimestamps[0]) <= 3*time.Hour,
 	})
+}
+
+// handlePOSTMigrationBatch returns a batch of unhealthy slabs for a remote
+// node together with the migration state it needs to migrate them.
+func (a *admin) handlePOSTMigrationBatch(jc jape.Context) {
+	cursor, limit, ok := api.ParseCursorLimit(jc)
+	if !ok {
+		return
+	}
+
+	batch, err := a.slabs.PrepareMigrationBatch(cursor, limit)
+	if !a.checkServerError(jc, "failed to prepare migration batch", err) {
+		return
+	}
+	jc.Encode(batch)
+}
+
+// handlePOSTMigrationResults persists the outcomes of migrations reported by a
+// remote node. A batch where every result failed to persist indicates a
+// database problem and is surfaced as an error so the reporting node backs
+// off instead of burning through fresh batches.
+func (a *admin) handlePOSTMigrationResults(jc jape.Context) {
+	var results []slabs.MigrationResult
+	if jc.Decode(&results) != nil {
+		return
+	}
+	if jc.Check("failed to apply migration results", a.slabs.ApplyMigrationResults(results)) != nil {
+		return
+	}
+	jc.Encode(nil)
 }
 
 func (a *admin) handlePOSTSyncerConnect(jc jape.Context) {

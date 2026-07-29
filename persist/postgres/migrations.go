@@ -192,4 +192,21 @@ CREATE INDEX contracts_active_host_size_idx ON contracts(proof_height, host_id) 
 `)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+CREATE TABLE preauthorized_keys (
+    public_key BYTEA PRIMARY KEY CHECK (LENGTH(public_key) = 32),
+    connect_key_id INTEGER NOT NULL REFERENCES app_connect_keys(id) ON DELETE CASCADE,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    total_uses INTEGER NOT NULL CHECK (total_uses > 0),
+    remaining_uses INTEGER NOT NULL CHECK (remaining_uses >= 0 AND remaining_uses <= total_uses),
+    allowed_app_id BYTEA CHECK (allowed_app_id IS NULL OR LENGTH(allowed_app_id) = 32),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    last_used TIMESTAMP WITH TIME ZONE
+);
+CREATE INDEX preauthorized_keys_connect_key_id_idx ON preauthorized_keys(connect_key_id);
+CREATE INDEX preauthorized_keys_expires_at_idx ON preauthorized_keys(expires_at);
+`)
+		return err
+	},
 }

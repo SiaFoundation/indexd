@@ -72,7 +72,7 @@ func newAccount(t *testing.T, cluster *testutils.Cluster) (types.PrivateKey, acc
 	}
 
 	ephemeralKey := types.GeneratePrivateKey()
-	connectResp, err := client.RequestAppConnection(ctx, ephemeralKey, app.RegisterAppRequest{
+	connectResp, err := client.RequestAppConnection(ctx, ephemeralKey, app.Info{
 		AppID:       frand.Entropy256(),
 		Name:        "Test App",
 		Description: "A test application",
@@ -478,7 +478,7 @@ func TestEphemeralKeyAuth(t *testing.T) {
 	appKey := types.GeneratePrivateKey()
 	appClient := indexer.App
 
-	connectResp, err := appClient.RequestAppConnection(ctx, ephemeralKey, app.RegisterAppRequest{
+	connectResp, err := appClient.RequestAppConnection(ctx, ephemeralKey, app.Info{
 		AppID:       frand.Entropy256(),
 		Name:        "test",
 		Description: "test",
@@ -512,6 +512,83 @@ func TestEphemeralKeyAuth(t *testing.T) {
 	}
 }
 
+func TestPreAuthorizedAppConnect(t *testing.T) {
+	ctx := t.Context()
+	cluster := testutils.NewCluster(t, testutils.WithHosts(0), testutils.WithLogger(zap.NewNop()))
+	indexer := cluster.Indexer
+
+	connectKey, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AppConnectKeyRequest{
+		Quota: "default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appID := types.Hash256(frand.Entropy256())
+	preAuthorizedPrivateKey := types.GeneratePrivateKey()
+	preAuthorizedKeyRequest := accounts.PreAuthorizedKeyRequest{
+		ConnectKey:   connectKey.Key,
+		Expiration:   time.Now().Add(time.Hour),
+		TotalUses:    1,
+		AllowedAppID: &appID,
+	}
+	preAuthorizedKeyRequest.Sign(preAuthorizedPrivateKey)
+	preAuthorizedKey, err := indexer.Admin.AddPreAuthorizedKey(ctx, preAuthorizedKeyRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ephemeralKey := types.GeneratePrivateKey()
+	appKey := types.GeneratePrivateKey()
+	appMeta := app.Info{
+		AppID:       appID,
+		Name:        "pre-authorized-app",
+		Description: "A pre-authorized application",
+		ServiceURL:  "https://example.com",
+	}
+	connectResp, err := indexer.App.RequestAppConnection(ctx, ephemeralKey, appMeta, app.WithPreAuthorizedKey(preAuthorizedPrivateKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := indexer.App.RequestStatus(ctx, ephemeralKey, connectResp.StatusURL)
+	if err != nil {
+		t.Fatal(err)
+	} else if !status.Approved {
+		t.Fatal("expected pre-authorized request to be approved")
+	} else if status.Reconnecting {
+		t.Fatal("expected first connection to not be reconnecting")
+	} else if status.UserSecret == (types.Hash256{}) {
+		t.Fatal("expected non-empty user secret")
+	}
+
+	preAuthorizedKey, err = indexer.Admin.PreAuthorizedKey(ctx, preAuthorizedKey.PublicKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if preAuthorizedKey.RemainingUses != 0 {
+		t.Fatalf("expected pre-authorized key to be consumed, got %d remaining uses", preAuthorizedKey.RemainingUses)
+	} else if preAuthorizedKey.LastUsed.IsZero() {
+		t.Fatal("expected pre-authorized key last-used time to be set")
+	}
+
+	if err := indexer.App.RegisterApp(ctx, connectResp.RegisterURL, ephemeralKey, appKey); err != nil {
+		t.Fatal(err)
+	} else if authenticated, err := indexer.App.CheckAppAuth(ctx, appKey); err != nil {
+		t.Fatal(err)
+	} else if !authenticated {
+		t.Fatal("expected registered app to be authenticated")
+	}
+
+	account, err := indexer.Admin.Account(ctx, appKey.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	} else if account.ConnectKey != connectKey.Key {
+		t.Fatalf("expected connect key %q, got %q", connectKey.Key, account.ConnectKey)
+	} else if account.App.ID != appID || account.App.Name != appMeta.Name {
+		t.Fatalf("unexpected app metadata: %+v", account.App)
+	}
+}
+
 func TestAppConnect(t *testing.T) {
 	appID := frand.Entropy256()
 
@@ -541,7 +618,7 @@ func TestAppConnect(t *testing.T) {
 		t.Fatal("expected app to not be authenticated yet")
 	}
 
-	resp, err := appClient.RequestAppConnection(ctx, ephemeralSK, app.RegisterAppRequest{
+	resp, err := appClient.RequestAppConnection(ctx, ephemeralSK, app.Info{
 		AppID:       appID,
 		Name:        "test-app",
 		Description: "A test app",
@@ -575,7 +652,7 @@ func TestAppConnect(t *testing.T) {
 	}
 
 	// try again
-	resp, err = appClient.RequestAppConnection(ctx, ephemeralSK, app.RegisterAppRequest{
+	resp, err = appClient.RequestAppConnection(ctx, ephemeralSK, app.Info{
 		AppID:       appID,
 		Name:        "test-app",
 		Description: "A test app",
@@ -648,7 +725,7 @@ func TestAppConnect(t *testing.T) {
 	}
 
 	// authenticate again to ensure the same user secret is returned
-	resp, err = appClient.RequestAppConnection(ctx, ephemeralSK, app.RegisterAppRequest{
+	resp, err = appClient.RequestAppConnection(ctx, ephemeralSK, app.Info{
 		AppID:       appID,
 		Name:        "test-app",
 		Description: "A test app",
@@ -688,7 +765,7 @@ func TestAppConnect(t *testing.T) {
 
 	ephemeralKey := types.GeneratePrivateKey()
 	sk2 := types.GeneratePrivateKey()
-	appMeta := app.RegisterAppRequest{
+	appMeta := app.Info{
 		AppID:       frand.Entropy256(),
 		Name:        "test-app-2",
 		Description: "test-app-2",

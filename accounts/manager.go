@@ -49,14 +49,19 @@ type (
 		UpdateHostPools(pools []HostPool) error
 
 		ValidAppConnectKey(string) error
-		AppConnectKeyUserSecret(string) (secret types.Hash256, err error)
-		HasAppAccount(connectKey string, appID types.Hash256) (bool, error)
+		AppAuthorization(connectKey string, appID types.Hash256) (userSecret types.Hash256, reconnecting bool, err error)
 		RegisterAppKey(string, types.PublicKey, AppMeta) error
 		AddAppConnectKey(AppConnectKeyRequest) (ConnectKey, error)
 		UpdateAppConnectKey(AppConnectKeyRequest) (ConnectKey, error)
 		DeleteAppConnectKey(string) error
 		AppConnectKey(key string) (ConnectKey, error)
 		AppConnectKeys(offset, limit int) ([]ConnectKey, error)
+		AddPreAuthorizedKey(PreAuthorizedKeyRequest) (PreAuthorizedKey, error)
+		DeletePreAuthorizedKey(types.PublicKey) error
+		PreAuthorizedKey(types.PublicKey) (PreAuthorizedKey, error)
+		PreAuthorizedKeys(offset, limit int) ([]PreAuthorizedKey, error)
+		ConsumePreAuthorizedKey(types.PublicKey, types.Hash256) (connectKey string, userSecret types.Hash256, reconnecting bool, err error)
+		PruneExpiredPreAuthorizedKeys(time.Time) error
 
 		PutQuota(key string, req PutQuotaRequest) error
 		DeleteQuota(key string) error
@@ -100,7 +105,8 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
-// WithPruneAccountsInterval sets the interval for pruning accounts.
+// WithPruneAccountsInterval sets the interval for pruning accounts and expired
+// pre-authorized keys.
 func WithPruneAccountsInterval(interval time.Duration) Option {
 	return func(m *AccountManager) {
 		m.pruneAccountsInterval = interval
@@ -294,20 +300,22 @@ func NewManager(store Store, opts ...Option) (*AccountManager, error) {
 	return m, nil
 }
 
-// maintenanceLoop performs any background tasks that the accounts manager
-// needs to perform on accounts
+// maintenanceLoop performs background account-management tasks.
 func (m *AccountManager) maintenanceLoop(ctx context.Context) {
-	healthTicker := time.NewTicker(m.pruneAccountsInterval)
-	defer healthTicker.Stop()
+	maintenanceTicker := time.NewTicker(m.pruneAccountsInterval)
+	defer maintenanceTicker.Stop()
 
 	for {
 		select {
-		case <-healthTicker.C:
+		case <-maintenanceTicker.C:
 		case <-ctx.Done():
 			return
 		}
 		if err := m.performPruneAccounts(); err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
 			m.log.Error("maintenance failed", zap.String("task", "prune accounts"), zap.Error(err))
+		}
+		if err := m.store.PruneExpiredPreAuthorizedKeys(time.Now()); err != nil && !(errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			m.log.Error("maintenance failed", zap.String("task", "prune expired pre-authorized keys"), zap.Error(err))
 		}
 	}
 }

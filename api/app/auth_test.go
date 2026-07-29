@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -55,7 +57,11 @@ func TestRemainingStorage(t *testing.T) {
 	}
 }
 
-type mockAccounts struct{ tokens map[types.PublicKey]struct{} }
+type mockAccounts struct {
+	tokens    map[types.PublicKey]struct{}
+	authorize func(types.PublicKey, types.Hash256) (accounts.AppAuthorization, error)
+	register  func(string, types.PublicKey, accounts.AppMeta) error
+}
 
 func (s *mockAccounts) HasAccount(_ context.Context, ak types.PublicKey) (bool, error) {
 	_, found := s.tokens[ak]
@@ -75,15 +81,154 @@ func (s *mockAccounts) ValidAppConnectKey(context.Context, string) error {
 }
 
 func (s *mockAccounts) RegisterAppKey(connectKey string, appKey types.PublicKey, meta accounts.AppMeta) error {
+	if s.register != nil {
+		return s.register(connectKey, appKey, meta)
+	}
 	return nil
 }
 
-func (s *mockAccounts) AppSecret(connectKey string, appID types.Hash256) (types.Hash256, error) {
-	return frand.Entropy256(), nil
+func (s *mockAccounts) AuthorizeAppConnectKey(connectKey string, appID types.Hash256) (accounts.AppAuthorization, error) {
+	return accounts.AppAuthorization{ConnectKey: connectKey, UserSecret: frand.Entropy256()}, nil
 }
 
-func (s *mockAccounts) HasAppAccount(connectKey string, appID types.Hash256) (bool, error) {
-	return false, nil
+func (s *mockAccounts) AuthorizePreAuthorizedKey(key types.PublicKey, appID types.Hash256) (accounts.AppAuthorization, error) {
+	if s.authorize != nil {
+		return s.authorize(key, appID)
+	}
+	return accounts.AppAuthorization{}, accounts.ErrKeyNotFound
+}
+
+type mockContracts struct{}
+
+func (*mockContracts) TriggerAccountFunding() error { return nil }
+
+func TestPreAuthorizedAuth(t *testing.T) {
+	appID := types.Hash256{1}
+	userSecret := types.Hash256{2}
+	appKey := types.GeneratePrivateKey()
+	preAuthorizedKey := types.GeneratePrivateKey()
+	var registered bool
+	s := &mockAccounts{
+		tokens: make(map[types.PublicKey]struct{}),
+		authorize: func(key types.PublicKey, gotAppID types.Hash256) (accounts.AppAuthorization, error) {
+			if key != preAuthorizedKey.PublicKey() || gotAppID != appID {
+				t.Fatalf("unexpected authorization: %v %v", key, gotAppID)
+			}
+			return accounts.AppAuthorization{
+				ConnectKey:   "connect-key",
+				UserSecret:   userSecret,
+				Reconnecting: true,
+			}, nil
+		},
+		register: func(connectKey string, gotAppKey types.PublicKey, meta accounts.AppMeta) error {
+			if connectKey != "connect-key" || gotAppKey != appKey.PublicKey() || meta.ID != appID {
+				t.Fatalf("unexpected registration: %q %v %+v", connectKey, gotAppKey, meta)
+			}
+			registered = true
+			return nil
+		},
+	}
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	appAPIAddr := fmt.Sprintf("http://%s", l.Addr())
+	handler, err := NewAPI(appAPIAddr, nil, s, &mockContracts{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: handler}
+	defer server.Close()
+	go server.Serve(l)
+
+	ephemeralKey := types.GeneratePrivateKey()
+	client := NewClient(appAPIAddr)
+	resp, err := client.RequestAppConnection(t.Context(), ephemeralKey, Info{
+		AppID:       appID,
+		Name:        "test-app",
+		Description: "A test app",
+		ServiceURL:  "https://example.com",
+	}, WithPreAuthorizedKey(preAuthorizedKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status, err := client.RequestStatus(t.Context(), ephemeralKey, resp.StatusURL)
+	if err != nil {
+		t.Fatal(err)
+	} else if !status.Approved || !status.Reconnecting || status.UserSecret != userSecret {
+		t.Fatalf("unexpected status: %+v", status)
+	}
+	if err := client.RegisterApp(t.Context(), resp.RegisterURL, ephemeralKey, appKey); err != nil {
+		t.Fatal(err)
+	} else if !registered {
+		t.Fatal("expected app key to be registered")
+	}
+}
+
+func TestPreAuthorizationBoundToEphemeralKey(t *testing.T) {
+	preAuthorizedKey := types.GeneratePrivateKey()
+	var authorizeCalled bool
+	s := &mockAccounts{
+		tokens: make(map[types.PublicKey]struct{}),
+		authorize: func(types.PublicKey, types.Hash256) (accounts.AppAuthorization, error) {
+			authorizeCalled = true
+			return accounts.AppAuthorization{}, nil
+		},
+	}
+
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	appAPIAddr := fmt.Sprintf("http://%s", l.Addr())
+	handler, err := NewAPI(appAPIAddr, nil, s, &mockContracts{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: handler}
+	defer server.Close()
+	go server.Serve(l)
+
+	request := RegisterAppRequest{
+		Info: Info{
+			AppID:       types.Hash256{1},
+			Name:        "test-app",
+			Description: "A test app",
+			ServiceURL:  "https://example.com",
+		},
+		PreAuthorizedKey: preAuthorizedKey.PublicKey(),
+	}
+	validUntil := time.Now().Add(time.Minute)
+	endpointURL := appAPIAddr + "/auth/connect"
+
+	// The pre-authorization proof was captured from a request using a different
+	// ephemeral key. Even though the attacker signs the outer request correctly,
+	// the proof in the request body must not authorize it.
+	originalEphemeralKey := types.GeneratePrivateKey()
+	proofHash := preAuthorizationHash(originalEphemeralKey.PublicKey(), request)
+	request.PreAuthorizationSignature = preAuthorizedKey.SignHash(proofHash)
+
+	requestBuf, err := json.Marshal(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attackerEphemeralKey := types.GeneratePrivateKey()
+	u, body, err := sign(attackerEphemeralKey, validUntil, http.MethodPost, endpointURL, requestBuf)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = doRequest(t.Context(), http.MethodPost, u, body, applicationJSON)
+	var httpErr *HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized response, got %v", err)
+	} else if authorizeCalled {
+		t.Fatal("invalid proof reached pre-authorized key consumption")
+	}
 }
 
 func TestAuthConnectFieldLimits(t *testing.T) {
@@ -107,7 +252,7 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 	client := NewClient(appAPIAddr)
 
 	// valid request should succeed
-	valid := RegisterAppRequest{
+	valid := Info{
 		AppID:       frand.Entropy256(),
 		Name:        "test-app",
 		Description: "A test app",
@@ -119,13 +264,13 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 
 	tests := []struct {
 		name   string
-		modify func(*RegisterAppRequest)
+		modify func(*Info)
 	}{
-		{"name too long", func(r *RegisterAppRequest) { r.Name = strings.Repeat("a", maxNameLen+1) }},
-		{"description too long", func(r *RegisterAppRequest) { r.Description = strings.Repeat("a", maxDescriptionLen+1) }},
-		{"logoURL too long", func(r *RegisterAppRequest) { r.LogoURL = strings.Repeat("a", maxURLLen+1) }},
-		{"serviceURL too long", func(r *RegisterAppRequest) { r.ServiceURL = strings.Repeat("a", maxURLLen+1) }},
-		{"callbackURL too long", func(r *RegisterAppRequest) { r.CallbackURL = strings.Repeat("a", maxURLLen+1) }},
+		{"name too long", func(r *Info) { r.Name = strings.Repeat("a", maxNameLen+1) }},
+		{"description too long", func(r *Info) { r.Description = strings.Repeat("a", maxDescriptionLen+1) }},
+		{"logoURL too long", func(r *Info) { r.LogoURL = strings.Repeat("a", maxURLLen+1) }},
+		{"serviceURL too long", func(r *Info) { r.ServiceURL = strings.Repeat("a", maxURLLen+1) }},
+		{"callbackURL too long", func(r *Info) { r.CallbackURL = strings.Repeat("a", maxURLLen+1) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -160,7 +305,7 @@ func TestAuthConnectRateLimit(t *testing.T) {
 	ephemeralKey := types.GeneratePrivateKey()
 
 	client := NewClient(appAPIAddr)
-	req := RegisterAppRequest{
+	req := Info{
 		AppID:       frand.Entropy256(),
 		Name:        "test-app",
 		Description: "A test app",

@@ -2,6 +2,7 @@ package slabs_test
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -24,7 +25,6 @@ func TestUploadShards(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	// prepare dependencies
 	store := newMockStore(t)
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
@@ -61,7 +61,7 @@ func TestUploadShards(t *testing.T) {
 
 	// create manager
 	alerter := alerts.NewManager()
-	sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerter, account, types.GeneratePrivateKey())
+	sm := slabs.NewSlabManager(am, nil, hm, store, client, alerter, account, types.GeneratePrivateKey())
 	sm.SetShardTimeout(50 * time.Millisecond)
 
 	// set balance to 1SC
@@ -117,27 +117,17 @@ func TestUploadShards(t *testing.T) {
 	uploaded, err := sm.UploadShards(context.Background(), slab, shards, availableHosts[:3], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	} else if uploaded != 3 {
-		t.Fatalf("expected 3 uploaded shards, got %d", uploaded)
+	} else if len(uploaded) != 3 {
+		t.Fatalf("expected 3 uploaded shards, got %d", len(uploaded))
 	}
 	assertSectors(t, []types.Hash256{root1, root2, root3}, 3, nil)
-
-	// asserts hosts are debited for the upload
-	for _, h := range hosts[:3] {
-		balance, err := am.ServiceAccountBalance(h.PublicKey, sm.MigrationAccount())
-		if err != nil {
-			t.Fatal(err)
-		} else if !balance.Equals(types.Siacoins(1).Sub(h.Settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost())) {
-			t.Fatalf("unexpected balance %v", balance)
-		}
-	}
 
 	// assert passing in too few hosts returns the uploaded shards and no error
 	uploaded, err = sm.UploadShards(context.Background(), slab, shards, availableHosts[:2], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	} else if uploaded != 2 {
-		t.Fatalf("expected 2 uploaded shards, got %d", uploaded)
+	} else if len(uploaded) != 2 {
+		t.Fatalf("expected 2 uploaded shards, got %d", len(uploaded))
 	}
 	assertSectors(t, []types.Hash256{root1, root2, root3}, 2, nil) // all are possible, but only 2 should be succeed
 
@@ -146,8 +136,8 @@ func TestUploadShards(t *testing.T) {
 	uploaded, err = sm.UploadShards(context.Background(), slab, shards, availableHosts, log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
-	} else if uploaded != 3 {
-		t.Fatalf("expected 3 uploaded shards, got %d", uploaded)
+	} else if len(uploaded) != 3 {
+		t.Fatalf("expected 3 uploaded shards, got %d", len(uploaded))
 	}
 	assertSectors(t, []types.Hash256{root1, root2, root3}, 3, nil)
 
@@ -158,8 +148,8 @@ func TestUploadShards(t *testing.T) {
 	uploaded, err = sm.UploadShards(context.Background(), corrupted, shards, availableHosts, log)
 	if err != nil {
 		t.Fatal(err)
-	} else if uploaded >= 3 {
-		t.Fatalf("expected fewer uploaded shards, got %d", uploaded)
+	} else if len(uploaded) >= 3 {
+		t.Fatalf("expected fewer uploaded shards, got %d", len(uploaded))
 	}
 	for _, stored := range client.hostSectors {
 		for root := range stored {
@@ -177,7 +167,6 @@ func TestUploadShards(t *testing.T) {
 func TestUploadShardsDemotion(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	store := newMockStore(t)
-	chain := newMockChainManager()
 	am := newMockAccountManager()
 	hm := newMockHostManager()
 	account := types.GeneratePrivateKey()
@@ -197,7 +186,7 @@ func TestUploadShardsDemotion(t *testing.T) {
 	shards := [][]byte{sector[:]}
 	slab := slabs.Slab{Sectors: []slabs.Sector{{Root: root}}}
 
-	sm := slabs.NewSlabManager(chain, am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey())
+	sm := slabs.NewSlabManager(am, nil, hm, store, client, alerts.NewManager(), account, types.GeneratePrivateKey())
 	sm.SetShardTimeout(2 * time.Second)
 
 	for _, hk := range available {
@@ -208,16 +197,16 @@ func TestUploadShardsDemotion(t *testing.T) {
 
 	// hs[0] will hit the per-shard timeout (slow WriteSector) -> demote.
 	client.slowHosts[hs[0].PublicKey] = 30 * time.Minute
-	// hs[1] fails the Usable check fast -> not a timeout, not demoted.
-	hm.unusable[hs[1].PublicKey] = struct{}{}
+	// hs[1] fails the write fast -> not a timeout, not demoted.
+	client.failHosts[hs[1].PublicKey] = errors.New("simulated write failure")
 	// hs[2] is healthy -> succeeds, not demoted.
 
 	synctest.Test(t, func(t *testing.T) {
 		uploaded, err := sm.UploadShards(context.Background(), slab, shards, available, log)
 		if err != nil {
 			t.Fatal(err)
-		} else if uploaded != 1 {
-			t.Fatalf("expected 1 uploaded shard, got %d", uploaded)
+		} else if len(uploaded) != 1 {
+			t.Fatalf("expected 1 uploaded shard, got %d", len(uploaded))
 		}
 	})
 
@@ -231,7 +220,7 @@ func TestUploadShardsDemotion(t *testing.T) {
 		t.Fatalf("expected timed-out host hs[0] to be demoted")
 	}
 	if wasDemoted(hs[1].PublicKey) {
-		t.Fatalf("expected unusable host hs[1] not to be demoted")
+		t.Fatalf("expected quick-failing host hs[1] not to be demoted")
 	}
 	if wasDemoted(hs[2].PublicKey) {
 		t.Fatalf("expected successful host hs[2] not to be demoted")

@@ -167,6 +167,20 @@ func requestHash(method string, hostname, path string, validUntil time.Time, bod
 	return h.Sum()
 }
 
+func preAuthorizationHash(ephemeralKey types.PublicKey, request RegisterAppRequest) types.Hash256 {
+	h := types.NewHasher()
+	h.E.WriteString("indexd/preauthorize-app/v1")
+	ephemeralKey.EncodeTo(h.E)
+	request.AppID.EncodeTo(h.E)
+	h.E.WriteString(request.Name)
+	h.E.WriteString(request.Description)
+	h.E.WriteString(request.LogoURL)
+	h.E.WriteString(request.ServiceURL)
+	h.E.WriteString(request.CallbackURL)
+	request.PreAuthorizedKey.EncodeTo(h.E)
+	return h.Sum()
+}
+
 func registerAppKeyHash(ephemeralKey types.PublicKey, requestID string) types.Hash256 {
 	h := types.NewHasher()
 	h.E.Write([]byte("registerAppKey"))

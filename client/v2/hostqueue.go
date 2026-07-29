@@ -15,7 +15,17 @@ import (
 )
 
 const (
-	emaAlpha            = 0.2
+	emaAlpha = 0.2
+
+	// failureRateHalfLife is the duration over which a host's failure rate
+	// is halved, regardless of whether new samples arrive.
+	failureRateHalfLife = time.Minute
+
+	// failureRateZeroThreshold is the failure rate below which a host is
+	// treated as failure-free; a lone failure among successes (rate ~0.2)
+	// clears after ~5 minutes, an all-failure host (rate 1) after ~7.
+	failureRateZeroThreshold = 0.01
+
 	settingsPayloadSize = 270 // size of host settings in bytes
 
 	// defaultReadThroughput is the assumed read rate before bulk reads are sampled
@@ -57,9 +67,9 @@ func (ra *rpcAverage) Value() (float64, bool) {
 }
 
 type failureRate struct {
-	value       float64
-	init        bool
-	lastAttempt time.Time
+	value     float64
+	init      bool
+	lastDecay time.Time
 }
 
 // AddSample adds a new success/failure sample to the failure rate.
@@ -71,19 +81,35 @@ func (fr *failureRate) AddSample(success bool) {
 	if !fr.init {
 		fr.value = sample
 		fr.init = true
-	} else {
-		fr.value = emaAlpha*sample + (1.0-emaAlpha)*fr.value
+		fr.lastDecay = time.Now()
+		return
 	}
-	fr.lastAttempt = time.Now()
+	fr.decay()
+	fr.value = emaAlpha*sample + (1.0-emaAlpha)*fr.value
 }
 
+// Value returns the failure rate, decayed for time elapsed since the last
+// halving and reporting rates below failureRateZeroThreshold as zero. Mutates
+// fr; not safe for concurrent use.
 func (fr *failureRate) Value() float64 {
-	if fr.init && time.Since(fr.lastAttempt) >= 5*time.Minute {
-		elapsed := time.Since(fr.lastAttempt).Minutes() / 5
-		fr.value *= math.Pow(1.0-emaAlpha, elapsed)
-		fr.lastAttempt = time.Now()
+	fr.decay()
+	if fr.value < failureRateZeroThreshold {
+		return 0
 	}
 	return fr.value
+}
+
+// decay halves the failure rate for every half-life elapsed since the last
+// decay. This decay schedule is independent of the sample EMA (emaAlpha),
+// though emaAlpha still affects the rate immediately after samples are
+// applied.
+func (fr *failureRate) decay() {
+	if !fr.init {
+		return
+	}
+	halfLives := int(time.Since(fr.lastDecay) / failureRateHalfLife)
+	fr.value = math.Ldexp(fr.value, -halfLives)
+	fr.lastDecay = fr.lastDecay.Add(time.Duration(halfLives) * failureRateHalfLife)
 }
 
 type hostMetric struct {

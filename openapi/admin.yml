@@ -48,6 +48,12 @@ tags:
   - name: quotas
     description: Manage quotas for app connect keys.
 
+  - name: migrations
+    description: >
+      Endpoints used by remote nodes to fetch slab-migration work and report
+      its results. Remote nodes help the primary node migrate unhealthy slabs
+      without accessing its database directly.
+
 paths:
   /state:
     get:
@@ -272,6 +278,99 @@ paths:
           description: Connect key deleted successfully
         "404":
           description: Connect key not found
+
+  /apps/preauthorized/keys:
+    get:
+      tags:
+        - apps
+      summary: List pre-authorized application keys
+      operationId: getPreAuthorizedKeys
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: A list of pre-authorized keys
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PreAuthorizedKey"
+    post:
+      tags:
+        - apps
+      summary: Create a pre-authorized application key
+      description: Registers a client-generated Ed25519 public key as a limited-use authorization tied to a connect key. A signature proves control of the private key and binds the complete policy; the private key is never sent to the server.
+      operationId: createPreAuthorizedKey
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PreAuthorizedKeyRequest"
+      responses:
+        "200":
+          description: Pre-authorized key created successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreAuthorizedKey"
+        "400":
+          description: Public key, signature, expiration, or use count is invalid
+        "404":
+          description: Connect key not found
+        "409":
+          description: Pre-authorized key already exists
+
+  /apps/preauthorized/keys/{publicKey}:
+    get:
+      tags:
+        - apps
+      summary: Retrieve a pre-authorized application key
+      operationId: getPreAuthorizedKey
+      parameters:
+        - name: publicKey
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+      responses:
+        "200":
+          description: Pre-authorized key retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PreAuthorizedKey"
+        "404":
+          description: Pre-authorized key not found
+    delete:
+      tags:
+        - apps
+      summary: Delete a pre-authorized application key
+      operationId: deletePreAuthorizedKey
+      parameters:
+        - name: publicKey
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+      responses:
+        "204":
+          description: Pre-authorized key deleted successfully
+        "404":
+          description: Pre-authorized key not found
 
   /apps/register:
     post:
@@ -552,7 +651,7 @@ paths:
             type: string
         - name: before
           in: query
-          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to one hour ago.
+          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to 72 hours ago.
           schema:
             type: string
             format: date-time
@@ -917,7 +1016,7 @@ paths:
       parameters:
         - name: before
           in: query
-          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to one hour ago.
+          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to 72 hours ago.
           schema:
             type: string
             format: date-time
@@ -1594,6 +1693,60 @@ paths:
             })
             await admin.syncerConnect("118.92.232.145:9981")
 
+  /migrations/batch:
+    post:
+      tags:
+        - migrations
+      summary: Fetch a batch of slabs to migrate
+      description: >-
+        Returns a batch of unhealthy slabs for a remote node together with the
+        migration state it needs to determine which of their sectors to migrate
+        and which hosts can receive them — the same decisions the primary's own
+        migration loop makes. A nextCursor of 0 means there are no more
+        unhealthy slabs.
+      operationId: postMigrationBatch
+      parameters:
+        - in: query
+          name: cursor
+          schema:
+            type: integer
+            format: int64
+          description: Cursor returned by the previous call; omit or 0 to start.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            maximum: 500
+          description: Maximum number of slabs to return (default 100, max 500).
+      responses:
+        "200":
+          description: A batch of unhealthy slabs and the state to migrate them
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MigrationBatch"
+
+  /migrations/results:
+    post:
+      tags:
+        - migrations
+      summary: Report slab-migration results
+      description: >-
+        Reports the outcomes of migration jobs so the primary node can persist
+        them (record migrated and lost sectors and update repair state). Used by
+        remote nodes.
+      operationId: postMigrationResults
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/MigrationResult"
+      responses:
+        "200":
+          description: Results applied
+
   /stats/accounts:
     get:
       tags:
@@ -2064,6 +2217,16 @@ components:
       $ref: "./components.yml#/components/schemas/Host"
     MaintenanceSettings:
       $ref: "./components.yml#/components/schemas/MaintenanceSettings"
+    Slab:
+      $ref: "./components.yml#/components/schemas/Slab"
+    Shard:
+      $ref: "./components.yml#/components/schemas/Shard"
+    MigrationState:
+      $ref: "./components.yml#/components/schemas/MigrationState"
+    MigrationBatch:
+      $ref: "./components.yml#/components/schemas/MigrationBatch"
+    MigrationResult:
+      $ref: "./components.yml#/components/schemas/MigrationResult"
     PinnedSettings:
       $ref: "./components.yml#/components/schemas/PinnedSettings"
     SyncerAddress:
@@ -2072,6 +2235,10 @@ components:
       $ref: "./components.yml#/components/schemas/UsabilitySettings"
     ConnectKey:
       $ref: "./components.yml#/components/schemas/ConnectKey"
+    PreAuthorizedKey:
+      $ref: "./components.yml#/components/schemas/PreAuthorizedKey"
+    PreAuthorizedKeyRequest:
+      $ref: "./components.yml#/components/schemas/PreAuthorizedKeyRequest"
     AccountStatsResponse:
       $ref: "./components.yml#/components/schemas/AccountStatsResponse"
     AppStatsResponse:

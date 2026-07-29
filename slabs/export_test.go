@@ -16,24 +16,22 @@ var (
 	ErrInsufficientServiceAccountBalance = errInsufficientServiceAccountBalance
 )
 
-type MigrationState = migrationState
-
 var (
 	SectorsToMigrate    = sectorsToMigrate
 	NewSlabManager      = newSlabManager
 	NewLostSectorsAlert = newLostSectorsAlert
 )
 
-func (m *SlabManager) UploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) (int, error) {
-	return m.uploadShards(ctx, slab, shards, available, log)
+func (m *SlabManager) UploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) ([]Shard, error) {
+	return m.migrator.uploadShards(ctx, slab, shards, available, log)
 }
 
-func (m *SlabManager) RecoverShards(ctx context.Context, slab Slab, required []bool, log *zap.Logger) ([][]byte, error) {
-	return m.recoverShards(ctx, slab, required, log)
+func (m *SlabManager) RecoverShards(ctx context.Context, slab Slab, required []bool, log *zap.Logger) ([][]byte, []Shard, error) {
+	return m.migrator.recoverShards(ctx, slab, required, log)
 }
 
 func (m *SlabManager) SetRecoveryChunkSize(size int) {
-	m.recoveryChunkSize = size
+	m.migrator.recoveryChunkSize = size
 }
 
 func (m *SlabManager) MigrateSlabs(ctx context.Context, slabIDs []SlabID, log *zap.Logger) error {
@@ -56,11 +54,11 @@ func (m *SlabManager) PerformIntegrityChecks(ctx context.Context) error {
 }
 
 func (m *SlabManager) SetShardTimeout(t time.Duration) {
-	m.shardTimeout = t
+	m.migrator.shardTimeout = t
 }
 
 func (m *SlabManager) MigrationAccount() proto.Account {
-	return m.migrationAccount
+	return proto.Account(m.migrator.migrationAccountKey.PublicKey())
 }
 
 func (m *SlabManager) MaxFailedIntegrityChecks() uint {
