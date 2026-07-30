@@ -491,12 +491,13 @@ func (c *Client) refreshSettings(ctx context.Context, hostKey types.PublicKey, t
 // boolean flag set to 'true'. Otherwise, they are refreshed from the host.
 func (c *Client) settings(ctx context.Context, hostKey types.PublicKey, transport rhp.TransportClient) (proto.HostSettings, bool, error) {
 	c.mu.Lock()
-	settings := c.cachedSettings[hostKey]
-	if settings.Prices.Validate(hostKey) == nil && time.Until(settings.Prices.ValidUntil) > 30*time.Second {
-		c.mu.Unlock()
+	settings, ok := c.cachedSettings[hostKey]
+	c.mu.Unlock()
+	// settings are cached only after signature validation, so the signature never needs
+	// rechecking here. this keeps the ed25519 verify off the per-rpc hot path
+	if ok && time.Until(settings.Prices.ValidUntil) > 30*time.Second {
 		return settings, true, nil
 	}
-	c.mu.Unlock()
 
 	settings, err := c.refreshSettings(ctx, hostKey, transport)
 	if err != nil {
