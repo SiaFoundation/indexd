@@ -205,10 +205,25 @@ func isFailedRPC(ctx context.Context, err error) bool {
 	}
 }
 
+// isStalledRPC reports whether an RPC failed because its deadline expired
+// while it was in flight, which means the peer stopped responding after the
+// connection was established. A cancelled RPC does not qualify: cancelling is
+// routine, since overprovisioned reads are cancelled by design, and treating
+// that as a stall would discard connections that are still serving other
+// streams.
+func isStalledRPC(ctx context.Context, err error) bool {
+	return err != nil && ctx.Err() == context.DeadlineExceeded
+}
+
 func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx context.Context, transport rhp.TransportClient) error) (err error) {
+	var stalled bool
+
 	defer func() {
-		// increment the failed RPC count if the RPC is considered failed
-		if isFailedRPC(ctx, err) {
+		// increment the failed RPC count if the RPC is considered failed. a
+		// stalled RPC counts too: its context interrupted it, so isFailedRPC
+		// ignores it, but a peer that stops responding mid RPC must not keep
+		// its place at the front of the queue.
+		if isFailedRPC(ctx, err) || stalled {
 			c.hosts.AddFailedRPC(hostKey)
 		}
 	}()
@@ -221,7 +236,15 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	err = fn(ctx, transport)
 	if err == nil {
 		return nil
-	} else if shouldResetTransport(err) {
+	}
+
+	// the stream that stalled unwinds on its own once its context expires, but
+	// the connection underneath it keeps a full send buffer and a write loop
+	// parked on the socket, so later RPCs would queue behind it until the
+	// kernel abandons it, which takes about 15 minutes with the usual
+	// tcp_retries2
+	stalled = isStalledRPC(ctx, err)
+	if stalled || shouldResetTransport(err) {
 		c.log.Debug("resetting transport", zap.Stringer("host", hostKey), zap.Error(err))
 		c.resetTransport(hostKey)
 	}

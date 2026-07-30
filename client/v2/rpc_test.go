@@ -54,6 +54,39 @@ func TestIsFailedRPC(t *testing.T) {
 	}
 }
 
+func TestIsStalledRPC(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	expired, cancelExpired := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancelExpired()
+
+	tests := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		want bool
+	}{
+		{"live ctx, nil err", context.Background(), nil, false},
+		{"live ctx, arbitrary err", context.Background(), errors.New("boom"), false},
+
+		{"cancelled ctx, nil err", cancelled, nil, false},
+		{"cancelled ctx, arbitrary err", cancelled, errors.New("boom"), false},
+
+		{"expired ctx, nil err", expired, nil, false},
+		{"expired ctx, arbitrary err", expired, errors.New("boom"), true},
+		{"expired ctx, closed stream", expired, mux.ErrClosedStream, true},
+		{"expired ctx, wrapped closed stream", expired, fmt.Errorf("failed to write request: %w", mux.ErrClosedStream), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isStalledRPC(tt.ctx, tt.err); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestTransportDialConnectTimeout(t *testing.T) {
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
