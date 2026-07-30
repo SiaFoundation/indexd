@@ -949,6 +949,109 @@ func TestPruneContractSectorsMap(t *testing.T) {
 	}
 }
 
+// TestPruneContractSectorsMapDetachesHost asserts that pruning the sectors of
+// an expired contract also detaches them from their host, since the host is no
+// longer obligated to hold on to the data.
+func TestPruneContractSectorsMapDetachesHost(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	// add a host with a contract, the test revision expires at height 800
+	hk := store.addTestHost(t)
+	fcid := store.addTestContract(t, hk)
+
+	// pin a slab and its sector to the contract
+	root := frand.Entropy256()
+	_, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+		MinShards: 1,
+		Sectors:   []slabs.PinnedSector{{Root: root, HostKey: hk}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSectors(fcid, []types.Hash256{root}); err != nil {
+		t.Fatal(err)
+	}
+
+	assertSector := func(hosted, pinned bool) {
+		t.Helper()
+		var isHosted, isPinned bool
+		if err := store.pool.QueryRow(t.Context(),
+			`SELECT host_id IS NOT NULL, contract_sectors_map_id IS NOT NULL FROM sectors WHERE sector_root = $1`,
+			sqlHash256(root)).Scan(&isHosted, &isPinned); err != nil {
+			t.Fatal(err)
+		} else if isHosted != hosted {
+			t.Fatalf("expected sector hosted=%t, got %t", hosted, isHosted)
+		} else if isPinned != pinned {
+			t.Fatalf("expected sector pinned=%t, got %t", pinned, isPinned)
+		}
+	}
+
+	assertStats := func(pinned, unpinned, unpinnable, lost int64) {
+		t.Helper()
+		stats, err := store.SectorStats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stats.Pinned != pinned {
+			t.Fatalf("expected %d pinned sectors, got %d", pinned, stats.Pinned)
+		} else if stats.Unpinned != unpinned {
+			t.Fatalf("expected %d unpinned sectors, got %d", unpinned, stats.Unpinned)
+		} else if stats.Unpinnable != unpinnable {
+			t.Fatalf("expected %d unpinnable sectors, got %d", unpinnable, stats.Unpinnable)
+		} else if stats.Lost != lost {
+			t.Fatalf("expected %d lost sectors, got %d", lost, stats.Lost)
+		}
+
+		var hostUnpinned int64
+		if err := store.pool.QueryRow(t.Context(),
+			`SELECT unpinned_sectors FROM hosts WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&hostUnpinned); err != nil {
+			t.Fatal(err)
+		} else if hostUnpinned != 0 {
+			t.Fatalf("expected host to have 0 unpinned sectors, got %d", hostUnpinned)
+		}
+	}
+
+	assertUnhealthy := func(expected int) {
+		t.Helper()
+		unhealthy, _, err := store.UnhealthySlabs(0, 100)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(unhealthy) != expected {
+			t.Fatalf("expected %d unhealthy slabs, got %d", expected, len(unhealthy))
+		}
+	}
+
+	// while the contract is live the sector is pinned and the slab is healthy
+	assertSector(true, true)
+	assertStats(1, 0, 0, 0)
+	assertUnhealthy(0)
+
+	// advance past the expiration height plus the prune buffer and prune
+	setScannedHeight(t, store, 836)
+	if err := store.PruneContractSectorsMap(36); err != nil {
+		t.Fatal(err)
+	}
+
+	// the sector is now detached from the host entirely, not merely unpinned
+	assertSector(false, false)
+
+	// it counts as unpinnable rather than unpinned, and is not counted as lost
+	assertStats(0, 0, 1, 0)
+
+	// it is no longer offered to the host for re-pinning, so the host can't be
+	// blamed for no longer having it
+	if roots, err := store.UnpinnedSectors(hk, 10); err != nil {
+		t.Fatal(err)
+	} else if len(roots) != 0 {
+		t.Fatalf("expected no re-pin candidates, got %d", len(roots))
+	}
+
+	// and the slab is now reported as needing repair
+	assertUnhealthy(1)
+}
+
 func TestFormRenewContract(t *testing.T) {
 	start := time.Now().Round(time.Microsecond)
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))

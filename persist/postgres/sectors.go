@@ -85,7 +85,7 @@ func (s *Store) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) 
 		if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, lost, hostID); err != nil {
 			return fmt.Errorf("failed to increment host's lost sectors: %w", err)
 		}
-		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, detached); err != nil {
+		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, detached, lost); err != nil {
 			return fmt.Errorf("failed to update sector stats: %w", err)
 		} else if err := incrementHostUnpinnedSectors(ctx, tx, hostID, -unpinned); err != nil {
 			return fmt.Errorf("failed to update host %v unpinned sectors: %w", hostKey, err)
@@ -254,7 +254,7 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 		if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, lost, hostID); err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		}
-		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, detached); err != nil {
+		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, detached, lost); err != nil {
 			return fmt.Errorf("failed to update sector stats: %w", err)
 		} else if err := incrementHostUnpinnedSectors(ctx, tx, hostID, -unpinned); err != nil {
 			return fmt.Errorf("failed to update host %v unpinned sectors: %w", hostKey, err)
@@ -1110,7 +1110,7 @@ func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migr
 	return
 }
 
-func updateSectorStats(ctx context.Context, tx *txn, pinnedDelta, unpinnedDelta, unpinnableDelta int64) error {
+func updateSectorStats(ctx context.Context, tx *txn, pinnedDelta, unpinnedDelta, unpinnableDelta, lostDelta int64) error {
 	if err := incrementNumPinnedSectors(ctx, tx, pinnedDelta); err != nil {
 		return fmt.Errorf("failed to update pinned sectors: %w", err)
 	}
@@ -1120,7 +1120,7 @@ func updateSectorStats(ctx context.Context, tx *txn, pinnedDelta, unpinnedDelta,
 	if err := incrementNumUnpinnableSectors(ctx, tx, unpinnableDelta); err != nil {
 		return fmt.Errorf("failed to update unpinnable sectors: %w", err)
 	}
-	if err := incrementNumSectorsLost(ctx, tx, uint64(unpinnableDelta)); err != nil {
+	if err := incrementNumSectorsLost(ctx, tx, uint64(lostDelta)); err != nil {
 		return fmt.Errorf("failed to update sectors lost: %w", err)
 	}
 

@@ -580,16 +580,23 @@ WHERE fces.contract_id = contracts.contract_id AND current_height.scanned_height
 
 // PruneContractSectorsMap prunes the contract_sectors_map table of contracts
 // that have been expired for at least 'maxBlocksSinceExpiry' blocks.
+//
+// The pruned sectors are also detached from their host. Once the contract
+// expired the host is under no obligation to hold on to the data, so we can't
+// rely on it being there. Keeping the host would both overstate the redundancy
+// of the sector's slab, since [Store.UnhealthySlabs] only considers a sector
+// lost once it has no host, and cause the host to be blamed by
+// [Store.MarkSectorsLost] when it reports the sector missing on a subsequent
+// re-pin attempt.
 func (s *Store) PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		// fetch rows to prune
 		var toPrune []int64
-		csmToHostID := make(map[int64]int64)
 		rows, err := tx.Query(ctx, `
 			WITH current_height AS (
 				SELECT scanned_height FROM global_settings
 			)
-			SELECT csm.id, c.host_id
+			SELECT csm.id
 			FROM contract_sectors_map csm
 			CROSS JOIN current_height
 			INNER JOIN contracts c ON csm.contract_id = c.contract_id
@@ -601,12 +608,11 @@ func (s *Store) PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error {
 		defer rows.Close()
 
 		for rows.Next() {
-			var id, hostID int64
-			if err := rows.Scan(&id, &hostID); err != nil {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
 				return fmt.Errorf("failed to scan contract_sectors_map id: %w", err)
 			}
 			toPrune = append(toPrune, id)
-			csmToHostID[id] = hostID
 		}
 		if rows.Err() != nil {
 			return fmt.Errorf("failed to iterate over contract_sectors_map rows: %w", rows.Err())
@@ -619,10 +625,9 @@ func (s *Store) PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error {
 		updateBatch := &pgx.Batch{}
 		pruneBatch := &pgx.Batch{}
 		for _, id := range toPrune {
-			// update sectors table
 			updateBatch.Queue(`
 				UPDATE sectors s
-				SET contract_sectors_map_id = NULL
+				SET contract_sectors_map_id = NULL, host_id = NULL, consecutive_failed_checks = 0
 				WHERE s.contract_sectors_map_id = $1
 			`, id)
 
@@ -633,27 +638,26 @@ func (s *Store) PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error {
 			`, id)
 		}
 
-		var totalUnpinned int64
-		var unpinnedDeltas []unpinnedDelta
+		// the sectors go straight from pinned to unpinnable, so neither the
+		// global nor the per-host unpinned counters are affected. They are also
+		// not counted as lost since the data wasn't lost by a host but by the
+		// contract expiring, and it can still be restored by a migration.
+		var totalUnpinnable int64
 		res := tx.SendBatch(ctx, updateBatch)
-		for _, id := range toPrune {
+		for range toPrune {
 			ct, err := res.Exec()
 			if err != nil {
 				res.Close()
 				return fmt.Errorf("failed to update sectors table: %w", err)
 			}
-			unpinned := ct.RowsAffected()
-			unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: csmToHostID[id], delta: int64(unpinned)})
-			totalUnpinned += unpinned
+			totalUnpinnable += ct.RowsAffected()
 		}
 		if err := res.Close(); err != nil {
 			return err
-		} else if err := incrementNumPinnedSectors(ctx, tx, -totalUnpinned); err != nil {
+		} else if err := incrementNumPinnedSectors(ctx, tx, -totalUnpinnable); err != nil {
 			return fmt.Errorf("failed to update number of pinned sectors: %w", err)
-		} else if err := incrementNumUnpinnedSectors(ctx, tx, totalUnpinned); err != nil {
-			return fmt.Errorf("failed to update number of unpinned sectors: %w", err)
-		} else if err := incrementHostsUnpinnedSectors(ctx, tx, unpinnedDeltas); err != nil {
-			return fmt.Errorf("failed to update hosts unpinned sectors: %w", err)
+		} else if err := incrementNumUnpinnableSectors(ctx, tx, totalUnpinnable); err != nil {
+			return fmt.Errorf("failed to update number of unpinnable sectors: %w", err)
 		}
 
 		if err := tx.SendBatch(ctx, pruneBatch).Close(); err != nil {

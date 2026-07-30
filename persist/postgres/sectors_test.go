@@ -1989,8 +1989,18 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatalf("expected 0 contract sectors map rows, got %d", count)
 	}
 
-	// assert slab1 is not considered unhealthy since it is considered uploaded
-	// to a host but not yet pinned
+	// pruning detaches the pruned sectors from their host, so both slabs are
+	// now reported as needing repair
+	assertUnhealthySlabs(2)
+	resetNextRepairAttemptTime()
+
+	// re-attach the sectors to a host without pinning them to a contract. They
+	// are then considered uploaded to a host but not yet pinned, which is
+	// healthy.
+	_, err = store.pool.Exec(t.Context(), "UPDATE sectors SET host_id = 1 WHERE host_id IS NULL")
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertUnhealthySlabs(0)
 
 	// add ten hosts, each with their own contract
@@ -3463,16 +3473,18 @@ func TestMarkSectorsLostProofHeightCutoff(t *testing.T) {
 	}
 	assertSectorLost(t, store, rootPinned1)
 	assertHostLostSectors(t, store, hk, 1)
+	assertLostSectorStats(t, store, 1, 1)
 
 	// once the contract reached its proof height the host might have submitted
 	// a proof and legitimately deleted the data, so the sector is unlinked but
-	// doesn't count against the host
+	// doesn't count against the host or the global lost sectors stat
 	setScannedHeight(t, store, 600)
 	if err := store.MarkSectorsLost(hk, []types.Hash256{rootPinned2}); err != nil {
 		t.Fatal(err)
 	}
 	assertSectorLost(t, store, rootPinned2)
 	assertHostLostSectors(t, store, hk, 1)
+	assertLostSectorStats(t, store, 2, 1)
 
 	// an unpinned sector counts against the host since the host is expected to
 	// retain it until it is either pinned or given up on and detached by
@@ -3482,6 +3494,7 @@ func TestMarkSectorsLostProofHeightCutoff(t *testing.T) {
 	}
 	assertSectorLost(t, store, rootUnpinned)
 	assertHostLostSectors(t, store, hk, 2)
+	assertLostSectorStats(t, store, 3, 2)
 }
 
 func TestMarkFailingSectorsLostProofHeightCutoff(t *testing.T) {
@@ -3545,9 +3558,10 @@ func TestMarkFailingSectorsLostProofHeightCutoff(t *testing.T) {
 	assertSectorLost(t, store, rootPinned1)
 	assertSectorLost(t, store, rootUnpinned)
 	assertHostLostSectors(t, store, hk, 2)
+	assertLostSectorStats(t, store, 2, 2)
 
 	// once the contract reached its proof height, a failing sector is unlinked
-	// but doesn't count against the host
+	// but doesn't count against the host or the global lost sectors stat
 	setScannedHeight(t, store, 600)
 	record(rootPinned2)
 	record(rootPinned2)
@@ -3556,6 +3570,7 @@ func TestMarkFailingSectorsLostProofHeightCutoff(t *testing.T) {
 	}
 	assertSectorLost(t, store, rootPinned2)
 	assertHostLostSectors(t, store, hk, 2)
+	assertLostSectorStats(t, store, 3, 2)
 }
 
 // BenchmarkMarkSectorsLost benchmarks MarkSectorsLost in various batch sizes.
@@ -3876,6 +3891,21 @@ func assertHostLostSectors(t *testing.T, store *Store, hk types.PublicKey, numLo
 		t.Fatal(err)
 	} else if count != numLost {
 		t.Fatalf("expected %d lost sectors for host %x, got %d", numLost, hk, count)
+	}
+}
+
+// assertLostSectorStats asserts the global unpinnable and lost sector stats.
+// Every sector detached from its host becomes unpinnable, but only sectors the
+// host was still expected to hold on to count as lost.
+func assertLostSectorStats(t *testing.T, store *Store, unpinnable, lost int64) {
+	t.Helper()
+	stats, err := store.SectorStats()
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.Unpinnable != unpinnable {
+		t.Fatalf("expected %d unpinnable sectors, got %d", unpinnable, stats.Unpinnable)
+	} else if stats.Lost != lost {
+		t.Fatalf("expected %d lost sectors, got %d", lost, stats.Lost)
 	}
 }
 
