@@ -1451,8 +1451,9 @@ func TestHostUnpinnedSectors(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// assert unpinned sectors after pruning
-	assertHostUnpinned(hk3, 1)
+	// pruning detaches the sectors from the host altogether rather than leaving
+	// them unpinned, so the host's unpinned counter stays at zero
+	assertHostUnpinned(hk3, 0)
 
 	// test BlockHosts: add another host with unpinned sectors
 	root5 := frand.Entropy256()
