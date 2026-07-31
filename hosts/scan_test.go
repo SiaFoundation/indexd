@@ -10,6 +10,7 @@ import (
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/testutils/mock"
 	"go.uber.org/zap"
@@ -143,6 +144,33 @@ func TestResolveHost(t *testing.T) {
 		t.Fatal("unexpected", len(addrs))
 	} else if loc != mock.Location {
 		t.Fatalf("expected location %v, got %v", mock.Location, loc)
+	}
+}
+
+func TestValidateAddress(t *testing.T) {
+	tests := []struct {
+		name   string
+		addr   chain.NetAddress
+		expErr bool
+	}{
+		{"siamux", chain.NetAddress{Protocol: siamux.Protocol, Address: "example.com:9983"}, false},
+		{"quic", chain.NetAddress{Protocol: quic.Protocol, Address: "example.com:9984"}, false},
+		{"blocked quic port", chain.NetAddress{Protocol: quic.Protocol, Address: "example.com:22"}, false},
+		{"unknown protocol", chain.NetAddress{Protocol: "tcp", Address: "example.com:9983"}, true},
+		{"empty address", chain.NetAddress{Protocol: siamux.Protocol}, true},
+		{"missing port", chain.NetAddress{Protocol: siamux.Protocol, Address: "example.com"}, true},
+		{"empty host", chain.NetAddress{Protocol: siamux.Protocol, Address: ":9983"}, true},
+		{"non-numeric port", chain.NetAddress{Protocol: siamux.Protocol, Address: "example.com:http"}, true},
+		{"zero port", chain.NetAddress{Protocol: siamux.Protocol, Address: "example.com:0"}, true},
+		{"port out of range", chain.NetAddress{Protocol: siamux.Protocol, Address: "example.com:65536"}, true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateAddress(tt.addr); (err != nil) != tt.expErr {
+				t.Fatalf("expected error %t, got %v", tt.expErr, err)
+			}
+		})
 	}
 }
 

@@ -176,6 +176,9 @@ components:
 
     NetAddress:
       type: object
+      required:
+        - address
+        - protocol
       properties:
         address:
           type: string
@@ -870,6 +873,22 @@ components:
         goodForUpload:
           type: boolean
           description: Whether the host is good for uploading data. False if the host is stuck or out of storage.
+
+    HostImportRequest:
+      type: object
+      required:
+        - publicKey
+        - addresses
+      properties:
+        publicKey:
+          $ref: "#/components/schemas/PublicKey"
+        addresses:
+          type: array
+          minItems: 1
+          maxItems: 4
+          description: Network addresses to use when scanning the host. Addresses must use host:port syntax with a numeric port between 1 and 65535, and at most two addresses per protocol are allowed. A QUIC address on a port blocked by browsers is stored, but leaves the host's quic usability check unset just as an announcement would.
+          items:
+            $ref: "#/components/schemas/NetAddress"
 
     HostUsability:
       type: object

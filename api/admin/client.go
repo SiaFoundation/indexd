@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/alerts"
@@ -274,10 +275,27 @@ func (c *Client) Host(ctx context.Context, hostKey types.PublicKey) (h hosts.Hos
 	return
 }
 
+// ImportHost adds a host and its network addresses to the indexer, replacing
+// the addresses of a host that is already known and queueing it for the next
+// scan.
+func (c *Client) ImportHost(ctx context.Context, hostKey types.PublicKey, addresses []chain.NetAddress) (h hosts.Host, err error) {
+	err = c.c.POST(ctx, "/hosts", HostImportRequest{
+		PublicKey: hostKey,
+		Addresses: addresses,
+	}, &h)
+	return
+}
+
 // ScanHost triggers a manual host scan.
 func (c *Client) ScanHost(ctx context.Context, hostKey types.PublicKey) (resp hosts.Host, err error) {
 	err = c.c.POST(ctx, fmt.Sprintf("/host/%s/scan", hostKey), nil, &resp)
 	return
+}
+
+// ScanHosts triggers a scan of all hosts regardless of when their next scan is
+// scheduled.
+func (c *Client) ScanHosts(ctx context.Context) error {
+	return c.c.POST(ctx, "/hosts/scan", nil, nil)
 }
 
 // ResetHostLostSectors resets the lost sectors count for the given host.

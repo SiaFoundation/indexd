@@ -24,6 +24,14 @@ var (
 	// ErrInvalidSortField is returned when we don't support sorting by the
 	// requested field.
 	ErrInvalidSortField = errors.New("invalid sort field")
+
+	// ErrInvalidAddress is returned when a host import contains an invalid set
+	// of network addresses.
+	ErrInvalidAddress = errors.New("invalid host address")
+
+	// ErrInvalidHostKey is returned when a host import does not specify a
+	// public key.
+	ErrInvalidHostKey = errors.New("invalid host key")
 )
 var (
 	// DefaultHostsQueryOpts are the default options applied when querying hosts. By

@@ -85,6 +85,107 @@ func TestAddHostAnnouncement(t *testing.T) {
 	}
 }
 
+func TestImportHost(t *testing.T) {
+	// create database
+	log := zaptest.NewLogger(t)
+	db := initPostgres(t, log.Named("postgres"))
+
+	// import a host that is not in the database yet
+	now := time.Now().Truncate(time.Microsecond)
+	hk := types.PublicKey{1}
+	ha1 := chain.NetAddress{Protocol: quic.Protocol, Address: "1.2.3.4:4848"}
+	ha2 := chain.NetAddress{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"}
+	if err := db.ImportHost(hk, []chain.NetAddress{ha1, ha2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the host got inserted, its announcement is seeded on insert
+	h, err := db.Host(hk)
+	if err != nil {
+		t.Fatal("unexpected", err)
+	} else if h.LastAnnouncement.Before(now) {
+		t.Fatal("unexpected", h.LastAnnouncement)
+	} else if len(h.Addresses) != 2 {
+		t.Fatal("unexpected", len(h.Addresses))
+	}
+	announced := h.LastAnnouncement
+
+	// bury the host in the scan backoff
+	if _, err := db.pool.Exec(t.Context(), `UPDATE hosts SET consecutive_failed_scans = 20, next_scan = NOW() + INTERVAL '128 hours' WHERE public_key = $1`, sqlPublicKey(hk)); err != nil {
+		t.Fatal(err)
+	}
+
+	// reimport the host with a corrected address
+	now = time.Now().Truncate(time.Microsecond)
+	ha3 := chain.NetAddress{Protocol: siamux.Protocol, Address: "8.7.6.5:4321"}
+	if err := db.ImportHost(hk, []chain.NetAddress{ha3}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert addresses are overwritten, the announcement is untouched and the
+	// scan backoff is cleared
+	h, err = db.Host(hk)
+	if err != nil {
+		t.Fatal("unexpected", err)
+	} else if !slices.Equal(h.Addresses, []chain.NetAddress{ha3}) {
+		t.Fatal("unexpected", h.Addresses)
+	} else if h.Usability.QUIC || !h.Usability.Siamux {
+		t.Fatal("unexpected", h.Usability)
+	} else if h.LastAnnouncement != announced {
+		t.Fatal("unexpected", h.LastAnnouncement)
+	} else if h.ConsecutiveFailedScans != 0 {
+		t.Fatal("unexpected", h.ConsecutiveFailedScans)
+	} else if h.NextScan.Before(now) {
+		t.Fatal("unexpected", h.NextScan)
+	}
+
+	// assert the host is due for scanning again
+	if forScanning, err := db.HostsForScanning(); err != nil {
+		t.Fatal(err)
+	} else if !slices.Contains(forScanning, hk) {
+		t.Fatal("unexpected", forScanning)
+	}
+
+	// reannounce the host, the announcement takes precedence over the import
+	announced = announced.Add(time.Hour)
+	if err := db.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.AddHostAnnouncement(hk, chain.V2HostAnnouncement{ha1, ha2}, announced)
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if h, err := db.Host(hk); err != nil {
+		t.Fatal("unexpected", err)
+	} else if h.LastAnnouncement != announced {
+		t.Fatal("unexpected", h.LastAnnouncement)
+	} else if !slices.Contains(h.Addresses, ha1) || !slices.Contains(h.Addresses, ha2) {
+		t.Fatal("unexpected", h.Addresses)
+	}
+
+	// import a host with a QUIC address on a port blocked by browsers
+	hk2 := types.PublicKey{2}
+	ha4 := chain.NetAddress{Protocol: quic.Protocol, Address: "1.2.3.4:22"}
+	if err := db.ImportHost(hk2, []chain.NetAddress{ha4, ha2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert the address is stored, just like for an announcement
+	var stored int
+	if err := db.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM host_addresses ha JOIN hosts h ON h.id = ha.host_id WHERE h.public_key = $1`, sqlPublicKey(hk2)).Scan(&stored); err != nil {
+		t.Fatal(err)
+	} else if stored != 2 {
+		t.Fatal("unexpected", stored)
+	}
+
+	// assert it is filtered out on read, leaving the quic check unset
+	if h, err := db.Host(hk2); err != nil {
+		t.Fatal("unexpected", err)
+	} else if !slices.Equal(h.Addresses, []chain.NetAddress{ha2}) {
+		t.Fatal("unexpected", h.Addresses)
+	} else if h.Usability.QUIC || !h.Usability.Siamux {
+		t.Fatal("unexpected", h.Usability)
+	}
+}
+
 func TestBlockHosts(t *testing.T) {
 	// create database
 	log := zaptest.NewLogger(t)
