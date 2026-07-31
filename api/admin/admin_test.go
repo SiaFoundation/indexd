@@ -25,6 +25,7 @@ import (
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/api/admin"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/testutils"
@@ -935,6 +936,84 @@ func TestTxpoolAPI(t *testing.T) {
 		t.Fatal(err)
 	} else if fee == types.ZeroCurrency {
 		t.Fatal("expected non-zero fee")
+	}
+}
+
+func TestHostManagementAPI(t *testing.T) {
+	cluster := testutils.NewCluster(t, testutils.WithHosts(0))
+	indexer := cluster.Indexer
+	adminClient := indexer.Admin
+
+	// start a host without announcing it on chain, then import it
+	host := cluster.NewHosts(t, 1)[0]
+	cluster.AddHosts(t.Context(), t, host)
+	hostKey := host.PublicKey()
+	addresses := []chain.NetAddress{
+		{Protocol: "siamux", Address: host.Addr()},
+		{Protocol: "quic", Address: host.QUICAddr()},
+	}
+	created, err := adminClient.ImportHost(t.Context(), hostKey, addresses)
+	if err != nil {
+		t.Fatal(err)
+	} else if created.PublicKey != hostKey {
+		t.Fatalf("expected %v, got %v", hostKey, created.PublicKey)
+	}
+
+	imported, err := adminClient.Host(t.Context(), hostKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(imported.Addresses) != len(addresses) {
+		t.Fatalf("expected %d addresses, got %d", len(addresses), len(imported.Addresses))
+	}
+	for _, address := range addresses {
+		if !slices.Contains(imported.Addresses, address) {
+			t.Fatal("unexpected", imported.Addresses)
+		}
+	}
+
+	// invalid addresses and an empty public key are rejected with 400 and
+	// nothing is persisted
+	if _, err := adminClient.ImportHost(t.Context(), types.GeneratePrivateKey().PublicKey(), nil); err == nil || !strings.Contains(err.Error(), hosts.ErrInvalidAddress.Error()) {
+		t.Fatalf("expected %v, got %v", hosts.ErrInvalidAddress, err)
+	}
+	if _, err := adminClient.ImportHost(t.Context(), types.GeneratePrivateKey().PublicKey(), []chain.NetAddress{{Protocol: "tcp", Address: "example.com:9983"}}); err == nil || !strings.Contains(err.Error(), hosts.ErrInvalidAddress.Error()) {
+		t.Fatalf("expected %v, got %v", hosts.ErrInvalidAddress, err)
+	}
+	if _, err := adminClient.ImportHost(t.Context(), types.PublicKey{}, addresses); err == nil || !strings.Contains(err.Error(), hosts.ErrInvalidHostKey.Error()) {
+		t.Fatalf("expected %v, got %v", hosts.ErrInvalidHostKey, err)
+	}
+	if importedHosts, err := adminClient.Hosts(t.Context()); err != nil {
+		t.Fatal(err)
+	} else if len(importedHosts) != 1 {
+		t.Fatalf("expected 1 host, got %d", len(importedHosts))
+	}
+
+	// move the next scheduled scan far into the future, then verify that the
+	// all-host scan endpoint ignores the schedule
+	if _, err := indexer.Store().Exec(t.Context(), `UPDATE hosts SET next_scan = NOW() + INTERVAL '1 day' WHERE public_key = $1`, hostKey[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	var scansBefore int64
+	if err := indexer.Store().QueryRow(t.Context(), `SELECT scans FROM hosts WHERE public_key = $1`, hostKey[:]).Scan(&scansBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := adminClient.ScanHosts(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	var scansAfter int64
+	for range 100 {
+		if err := indexer.Store().QueryRow(t.Context(), `SELECT scans FROM hosts WHERE public_key = $1`, hostKey[:]).Scan(&scansAfter); err != nil {
+			t.Fatal(err)
+		} else if scansAfter > scansBefore {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	if scansAfter <= scansBefore {
+		t.Fatalf("expected more than %d scans, got %d", scansBefore, scansAfter)
 	}
 }
 

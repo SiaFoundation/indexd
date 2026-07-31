@@ -15,6 +15,7 @@ import (
 	"go.sia.tech/core/consensus"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
@@ -71,10 +72,12 @@ type (
 		LastScannedIndex() (types.ChainIndex, error)
 	}
 
-	// HostManager defines an interface that allows triggering a host scan.
+	// HostManager defines the host management operations exposed by the admin
+	// API.
 	HostManager interface {
 		TriggerHostScanning()
 		ScanHost(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
+		ImportHost(ctx context.Context, hk types.PublicKey, addresses []chain.NetAddress) (hosts.Host, error)
 
 		Host(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
 		Hosts(ctx context.Context, offset, limit int, queryOpts ...hosts.HostQueryOpt) ([]hosts.Host, error)
@@ -253,9 +256,11 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 
 		// hosts endpoints
 		"GET    /hosts":                    a.handleGETHosts,
+		"POST   /hosts":                    a.handlePOSTHosts,
 		"GET    /hosts/blocklist":          a.handleGETHostsBlocklist,
 		"PUT    /hosts/blocklist":          a.handlePUTHostsBlocklist,
 		"DELETE /hosts/blocklist/:hostkey": a.handleDELETEHostsBlocklist,
+		"POST   /hosts/scan":               a.handlePOSTHostsScan,
 
 		// settings endpoints
 		"GET /settings/contracts":    a.handleGETSettingsContracts,
@@ -1127,6 +1132,29 @@ func (a *admin) handleGETHosts(jc jape.Context) {
 		return
 	}
 	jc.Encode(res)
+}
+
+func (a *admin) handlePOSTHosts(jc jape.Context) {
+	var req HostImportRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	host, err := a.hosts.ImportHost(jc.Request.Context(), req.PublicKey, req.Addresses)
+	if errors.Is(err, hosts.ErrInvalidHostKey) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if errors.Is(err, hosts.ErrInvalidAddress) {
+		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if jc.Check("failed to import host", err) != nil {
+		return
+	}
+	jc.Encode(host)
+}
+
+func (a *admin) handlePOSTHostsScan(jc jape.Context) {
+	a.hosts.TriggerHostScanning()
+	jc.Encode(nil)
 }
 
 func (a *admin) handleGETHostsBlocklist(jc jape.Context) {

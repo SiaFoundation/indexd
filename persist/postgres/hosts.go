@@ -135,6 +135,47 @@ RETURNING id;`, sqlPublicKey(hk), ts, hasQUIC, hasSiamux).Scan(&hostID)
 	return nil
 }
 
+// ImportHost adds a host and its addresses to the database. If the host is
+// already known, its addresses are replaced and it is scheduled to be scanned
+// again. last_announcement is only seeded on insert since the column is NOT
+// NULL, an import never overwrites the announcement of a known host.
+func (s *Store) ImportHost(hk types.PublicKey, addresses []chain.NetAddress) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		var hasQUIC, hasSiamux bool
+		for _, na := range addresses {
+			switch na.Protocol {
+			case quic.Protocol:
+				if !hosts.IsBadQUICAddress(na) {
+					hasQUIC = true
+				}
+			case siamux.Protocol:
+				hasSiamux = true
+			}
+		}
+
+		var hostID int64
+		err := tx.QueryRow(ctx, `
+INSERT INTO hosts (public_key, last_announcement, has_quic, has_siamux)
+VALUES ($1, NOW(), $2, $3)
+ON CONFLICT (public_key) DO UPDATE SET has_quic = $2, has_siamux = $3, next_scan = NOW(), consecutive_failed_scans = 0
+RETURNING id;`, sqlPublicKey(hk), hasQUIC, hasSiamux).Scan(&hostID)
+		if err != nil {
+			return fmt.Errorf("failed to import host: %w", err)
+		}
+
+		if _, err := tx.Exec(ctx, `DELETE FROM host_addresses WHERE host_id = $1`, hostID); err != nil {
+			return fmt.Errorf("failed to delete host addresses: %w", err)
+		}
+
+		for _, na := range addresses {
+			if _, err := tx.Exec(ctx, `INSERT INTO host_addresses (host_id, net_address, protocol) VALUES ($1, $2, $3)`, hostID, na.Address, sqlNetworkProtocol(na.Protocol)); err != nil {
+				return fmt.Errorf("failed to insert host address: %w", err)
+			}
+		}
+		return nil
+	})
+}
+
 // Host returns the host for given public key
 func (s *Store) Host(hk types.PublicKey) (hosts.Host, error) {
 	var host hosts.Host

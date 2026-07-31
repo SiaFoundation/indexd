@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/wallet"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
@@ -36,6 +37,12 @@ type (
 	HostsBlocklistRequest struct {
 		HostKeys []types.PublicKey `json:"hostKeys"`
 		Reasons  []string          `json:"reasons"`
+	}
+
+	// HostImportRequest is the request body for the [POST] /hosts endpoint.
+	HostImportRequest struct {
+		PublicKey types.PublicKey    `json:"publicKey"`
+		Addresses []chain.NetAddress `json:"addresses"`
 	}
 
 	// SectorsStatsResponse is the response body for the [GET] /stats/sectors

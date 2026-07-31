@@ -1130,6 +1130,29 @@ paths:
             })
             const host = await admin.host("ed25519:host-public-key")
 
+  /host/{hostkey}/scan:
+    post:
+      tags:
+        - hosts
+      summary: Scan a specific host immediately
+      operationId: scanHost
+      parameters:
+        - name: hostkey
+          in: path
+          description: Public key of the host
+          schema:
+            $ref: "#/components/schemas/PublicKey"
+          required: true
+      responses:
+        "200":
+          description: Updated host details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Host"
+        "404":
+          description: Host not found
+
   /hosts:
     get:
       tags:
@@ -1233,6 +1256,28 @@ paths:
               password: "your-admin-password"
             })
             const hosts = await admin.hosts()
+    post:
+      tags:
+        - hosts
+      summary: Import a host
+      description: Adds a host and its network addresses to the indexer and marks it as due for scanning. The background scanner picks up due hosts on its next polling cycle, which occurs every five minutes by default. If the host is already known, its addresses are replaced and any scan backoff is cleared. Scan history and uptime are preserved. A host announcement processed after the import replaces the imported addresses.
+      operationId: importHost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/HostImportRequest"
+      responses:
+        "200":
+          description: The imported host
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Host"
+        "400":
+          description: Invalid host public key or addresses
+
   /hosts/blocklist:
     get:
       tags:
@@ -1388,6 +1433,17 @@ paths:
               password: "your-admin-password"
             })
             await admin.hostsBlocklistDelete("ed25519:host-public-key")
+
+  /hosts/scan:
+    post:
+      tags:
+        - hosts
+      summary: Scan all hosts
+      description: Queues a background scan of every host known when the scan begins, regardless of its scheduled next scan time. Duplicate requests are ignored while a scan request is waiting to be processed. A request received after scanning has begun may queue another full scan.
+      operationId: scanHosts
+      responses:
+        "204":
+          description: Host scanning triggered successfully
 
   /hosts/{hostkey}/lostsectors/reset:
     post:
@@ -2216,6 +2272,8 @@ components:
       $ref: "./components.yml#/components/schemas/Contract"
     Host:
       $ref: "./components.yml#/components/schemas/Host"
+    HostImportRequest:
+      $ref: "./components.yml#/components/schemas/HostImportRequest"
     MaintenanceSettings:
       $ref: "./components.yml#/components/schemas/MaintenanceSettings"
     Slab:
