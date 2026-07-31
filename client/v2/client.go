@@ -26,6 +26,12 @@ import (
 // budget.
 const defaultConnectTimeout = 10 * time.Second
 
+// stalledTransportGrace is how long a stalled transport stays open after it
+// stops being handed out. It exceeds the longest budget any caller puts on a
+// single RPC, so the RPCs sharing that connection fail on their own deadlines
+// instead of failing the moment another one gives up.
+const stalledTransportGrace = 2 * time.Minute
+
 type transport struct {
 	connectTimeout time.Duration
 
@@ -52,6 +58,20 @@ func (t *transport) reset() {
 		t.tc.Close()
 		t.tc = nil
 	}
+}
+
+// detach stops handing tc out and reports whether it did. A transport that was
+// already replaced stays in place, since discarding it would penalize a
+// connection the caller never used.
+func (t *transport) detach(tc rhp.TransportClient) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if tc == nil || t.tc != tc {
+		return false
+	}
+	t.tc = nil
+	return true
 }
 
 func (t *transport) dial(ctx context.Context, hostKey types.PublicKey, addresses []chain.NetAddress) (rhp.TransportClient, error) {
@@ -175,6 +195,36 @@ func (c *Client) resetTransport(hostKey types.PublicKey) {
 	c.mu.Unlock()
 }
 
+// dropStalledTransport stops handing tc to new RPCs, then closes it once the
+// grace period elapses or the client shuts down. Closing it right away would
+// take down every other stream on that connection, and a stalled RPC only
+// proves the peer stopped answering its own stream.
+func (c *Client) dropStalledTransport(hostKey types.PublicKey, tc rhp.TransportClient) {
+	c.mu.Lock()
+	t := c.transports[hostKey]
+	c.mu.Unlock()
+
+	if t == nil || !t.detach(tc) {
+		return
+	}
+
+	ctx, cancel, err := c.tg.AddContext(context.Background())
+	if err != nil {
+		tc.Close() // the client is shutting down
+		return
+	}
+
+	go func() {
+		defer cancel()
+
+		select {
+		case <-time.After(stalledTransportGrace):
+		case <-ctx.Done():
+		}
+		tc.Close()
+	}()
+}
+
 // hostTransport opens a transport connection to the specified host.
 func (c *Client) hostTransport(ctx context.Context, hostKey types.PublicKey) (rhp.TransportClient, error) {
 	addresses, err := c.hosts.Addresses(hostKey)
@@ -216,14 +266,9 @@ func isStalledRPC(ctx context.Context, err error) bool {
 }
 
 func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx context.Context, transport rhp.TransportClient) error) (err error) {
-	var stalled bool
-
 	defer func() {
-		// increment the failed RPC count if the RPC is considered failed. a
-		// stalled RPC counts too: its context interrupted it, so isFailedRPC
-		// ignores it, but a peer that stops responding mid RPC must not keep
-		// its place at the front of the queue.
-		if isFailedRPC(ctx, err) || stalled {
+		// increment the failed RPC count if the RPC is considered failed
+		if isFailedRPC(ctx, err) {
 			c.hosts.AddFailedRPC(hostKey)
 		}
 	}()
@@ -238,13 +283,15 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 		return nil
 	}
 
-	// the stream that stalled unwinds on its own once its context expires, but
-	// the connection underneath it keeps a full send buffer and a write loop
-	// parked on the socket, so later RPCs would queue behind it until the
-	// kernel abandons it, which takes about 15 minutes with the usual
+	// a deadline that expired while the RPC was in flight means the peer
+	// stopped answering. The stream unwound when its context died, but nothing
+	// marks the connection as broken, so it would keep being handed out until
+	// the kernel abandons the socket, about 15 minutes with the usual
 	// tcp_retries2
-	stalled = isStalledRPC(ctx, err)
-	if stalled || shouldResetTransport(err) {
+	if isStalledRPC(ctx, err) {
+		c.log.Debug("dropping stalled transport", zap.Stringer("host", hostKey), zap.Error(err))
+		c.dropStalledTransport(hostKey, transport)
+	} else if shouldResetTransport(err) {
 		c.log.Debug("resetting transport", zap.Stringer("host", hostKey), zap.Error(err))
 		c.resetTransport(hostKey)
 	}

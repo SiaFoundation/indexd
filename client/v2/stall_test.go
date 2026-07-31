@@ -212,12 +212,20 @@ func TestStalledRPCResetsTransport(t *testing.T) {
 		t.Fatal("stalled write returned late", overshoot)
 	}
 
-	// the connection it stalled on must not be handed out again and the host
-	// must carry the failure
+	// the connection it stalled on must not be handed out again, while the
+	// demotion is left to the caller, which can tell an attempt that ate its
+	// deadline from one it cancelled on purpose
 	if cachedTransport() != nil {
 		t.Fatal("stalled transport was not dropped")
-	} else if rate := failRate(); rate <= healthy {
-		t.Fatal("host was not demoted", rate)
+	} else if rate := failRate(); rate != healthy {
+		t.Fatal("client demoted the host", rate)
+	}
+
+	// dropping it must not close it, since other RPCs may still be running on
+	// that connection and they keep their own deadlines
+	sc.release()
+	if _, err := rhp.RPCSettings(t.Context(), tc); err != nil {
+		t.Fatal("dropped transport was closed while it was still in use", err)
 	}
 
 	// the next RPC dials a fresh connection and succeeds
