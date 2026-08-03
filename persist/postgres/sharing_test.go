@@ -488,6 +488,49 @@ func TestSharingKeyTotals(t *testing.T) {
 	assertUpdatedAtBumped(updatedAt)
 }
 
+func TestSharingKeyTotalsRepeatedSlab(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	params := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}},
+	}
+	if _, err := store.PinSlabs(acc, time.Time{}, params); err != nil {
+		t.Fatalf("failed to pin slabs: %v", err)
+	}
+
+	// an object may reference the same slab at more than one index
+	obj := slabs.SealedObject{
+		EncryptedDataKey:  frand.Bytes(72),
+		DataSignature:     types.Signature(frand.Bytes(64)),
+		MetadataSignature: types.Signature(frand.Bytes(64)),
+		Slabs:             []slabs.SlabSlice{params.Slice(0, 100), params.Slice(100, 100)},
+	}
+	if err := store.PinObject(acc, obj.PinRequest()); err != nil {
+		t.Fatalf("failed to pin object: %v", err)
+	}
+
+	var accountPinnedData, accountPinnedSize uint64
+	if err := store.pool.QueryRow(t.Context(),
+		`SELECT pinned_data, pinned_size FROM accounts WHERE public_key = $1`,
+		sqlPublicKey(types.PublicKey(acc))).Scan(&accountPinnedData, &accountPinnedSize); err != nil {
+		t.Fatal(err)
+	}
+
+	sk := store.addTestSharingKey(t, acc, "repeated slab")
+	attachTestObject(t, store, acc, sk, obj.ID())
+
+	// both slices share one slab, so the key's storage totals must match what
+	// the account was charged; only the logical size counts each slice
+	assertKeyTotals(t, store, sk, 1, 200, accountPinnedData, accountPinnedSize)
+}
+
 func TestSharedObjectCascadeAcrossKeys(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 

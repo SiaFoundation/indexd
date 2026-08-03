@@ -173,16 +173,20 @@ func (s *Store) AddSharedObject(account proto.Account, sharingKey types.PublicKe
 		// capture the object's sizes at attach time so the trigger can
 		// maintain the sharing key's totals: size is the object's logical size
 		// (sum of slab slice lengths), pinned_data/pinned_size are its storage
-		// footprint before and after redundancy.
+		// footprint before and after redundancy. a slab referenced by more than
+		// one slice is only stored once, so it only counts once towards them.
 		var objectSize, minShards, sectorCount int64
 		err = tx.QueryRow(ctx, `
+			WITH object_slab_ids AS (
+				SELECT DISTINCT s.id, s.min_shards
+				FROM object_slabs os
+				INNER JOIN slabs s ON s.digest = os.slab_digest
+				WHERE os.object_id = $1
+			)
 			SELECT
-				COALESCE(SUM(os.slab_length), 0)::bigint,
-				COALESCE(SUM(s.min_shards), 0)::bigint,
-				COALESCE(SUM((SELECT COUNT(*) FROM slab_sectors ss WHERE ss.slab_id = s.id)), 0)::bigint
-			FROM object_slabs os
-			INNER JOIN slabs s ON s.digest = os.slab_digest
-			WHERE os.object_id = $1
+				(SELECT COALESCE(SUM(slab_length), 0)::bigint FROM object_slabs WHERE object_id = $1),
+				(SELECT COALESCE(SUM(min_shards), 0)::bigint FROM object_slab_ids),
+				(SELECT COUNT(*)::bigint FROM slab_sectors WHERE slab_id IN (SELECT id FROM object_slab_ids))
 		`, objectID).Scan(&objectSize, &minShards, &sectorCount)
 		if err != nil {
 			return fmt.Errorf("failed to compute object size: %w", err)
