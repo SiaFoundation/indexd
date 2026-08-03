@@ -1166,6 +1166,10 @@ components:
           type: integer
           format: uint64
           description: Number of connect keys associated with this quota
+        active:
+          type: integer
+          format: uint64
+          description: Number of connect keys associated with this quota active in the last week.
 
     ConnectKeyStatsResponse:
       type: object
@@ -1174,6 +1178,10 @@ components:
           type: integer
           format: uint64
           description: Total number of connect keys
+        active:
+          type: integer
+          format: uint64
+          description: Total number of connect keys active in the last week.
         quotas:
           type: array
           items:

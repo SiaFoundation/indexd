@@ -447,6 +447,20 @@ func TestSlabPruning(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// pin a third slab for the first account that is never attached to an
+	// object
+	slab3 := slabs.SlabPinParams{
+		MinShards: 1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	if _, err := store.PinSlabs(acc1, time.Time{}, slab3); err != nil {
+		t.Fatal(err)
+	}
+	slab3ID := slab3.Digest()
+
 	assertSlabs := func(acc proto.Account, expected ...slabs.SlabID) {
 		t.Helper()
 
@@ -459,18 +473,20 @@ func TestSlabPruning(t *testing.T) {
 		}
 	}
 
-	assertSlabs(acc1, slab2ID, slab1ID)
+	assertSlabs(acc1, slab3ID, slab2ID, slab1ID)
 	assertSlabs(acc2, slab1ID)
 
-	// delete object for acc1
+	// delete object for acc1; slab1 is no longer referenced by any of acc1's
+	// objects and is unpinned right away
 	if err := store.DeleteObject(acc1, obj1Key); err != nil {
 		t.Fatal(err)
 	}
 
-	assertSlabs(acc1, slab2ID, slab1ID)
+	assertSlabs(acc1, slab3ID, slab2ID)
 	assertSlabs(acc2, slab1ID)
 
-	// prune slabs for acc1
+	// prune slabs for acc1; this removes slab3 which was pinned but never
+	// attached to an object
 	if err := store.PruneSlabs(acc1, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -478,15 +494,15 @@ func TestSlabPruning(t *testing.T) {
 	assertSlabs(acc1, slab2ID)
 	assertSlabs(acc2, slab1ID)
 
-	// delete object for acc2
+	// delete object for acc2; slab1 is unpinned right away
 	if err := store.DeleteObject(acc2, obj1Key); err != nil {
 		t.Fatal(err)
 	}
 
 	assertSlabs(acc1, slab2ID)
-	assertSlabs(acc2, slab1ID)
+	assertSlabs(acc2)
 
-	// prune slabs for acc2
+	// prune slabs for acc2 is a no-op
 	if err := store.PruneSlabs(acc2, time.Now()); err != nil {
 		t.Fatal(err)
 	}

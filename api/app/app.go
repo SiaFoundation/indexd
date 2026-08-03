@@ -547,7 +547,7 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 }
 
 func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
-	cutoff := time.Now().Add(-time.Hour)
+	cutoff := time.Now().Add(-api.DefaultSlabPruneCutoff)
 	if jc.Request.FormValue("before") != "" {
 		if jc.DecodeForm("before", &cutoff) != nil {
 			return
@@ -616,6 +616,9 @@ func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
 	err := a.slabs.UnpinSlab(jc.Request.Context(), proto.Account(pk), slabID)
 	if errors.Is(err, slabs.ErrSlabNotFound) {
 		jc.Error(fmt.Errorf("slab %s not found", slabID), http.StatusNotFound)
+		return
+	} else if errors.Is(err, slabs.ErrSlabInUse) {
+		jc.Error(fmt.Errorf("slab %s: %w", slabID, slabs.ErrSlabInUse), http.StatusConflict)
 		return
 	} else if jc.Check("failed to unpin slab", err) != nil {
 		return

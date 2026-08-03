@@ -35,6 +35,11 @@ const (
 // host ID to NULL. This is meant to be used in 2 cases:
 // - The host reports that the sector is lost (e.g. when pinning it, during the integrity check or when fetching it for migration)
 // - The host has failed the integrity check for that sector enough times
+//
+// A sector only counts against the host's lost_sectors counter if it is
+// unpinned or pinned to a contract that has not reached its proof height yet,
+// since past the proof height the host might have submitted a proof and
+// fulfilled its obligation to hold on to the data.
 func (s *Store) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) error {
 	if len(roots) == 0 {
 		return nil
@@ -53,30 +58,34 @@ func (s *Store) MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) 
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT id, host_id, contract_sectors_map_id
-			FROM sectors
-			WHERE host_id = $1 AND sector_root = ANY($2)
-			FOR UPDATE`, hostID, sqlRoots)
+			SELECT s.id, s.contract_sectors_map_id,
+				COALESCE(c.proof_height > g.scanned_height, TRUE) AS lost
+			FROM sectors s
+			LEFT JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
+			LEFT JOIN contracts c ON csm.contract_id = c.contract_id
+			CROSS JOIN (SELECT scanned_height FROM global_settings) g
+			WHERE s.host_id = $1 AND s.sector_root = ANY($2)
+			FOR UPDATE OF s`, hostID, sqlRoots)
 		if err != nil {
 			return fmt.Errorf("failed to query sectors: %w", err)
 		}
 		defer rows.Close()
 
-		sectorIDs, pinned, unpinned, _, err := scanSectorIDs(rows)
+		sectorIDs, pinned, unpinned, lost, err := scanLostSectorIDs(rows)
 		if err != nil {
 			return fmt.Errorf("failed to scan sectors: %w", err)
 		} else if len(sectorIDs) == 0 {
 			return nil
 		}
 
-		totalLost := pinned + unpinned
+		detached := pinned + unpinned
 		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id = ANY($1)`, sectorIDs); err != nil {
 			return fmt.Errorf("failed to mark sectors as lost: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, totalLost, hostID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, lost, hostID); err != nil {
 			return fmt.Errorf("failed to increment host's lost sectors: %w", err)
 		}
-		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, totalLost); err != nil {
+		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, detached, lost); err != nil {
 			return fmt.Errorf("failed to update sector stats: %w", err)
 		} else if err := incrementHostUnpinnedSectors(ctx, tx, hostID, -unpinned); err != nil {
 			return fmt.Errorf("failed to update host %v unpinned sectors: %w", hostKey, err)
@@ -201,12 +210,14 @@ func (s *Store) MarkFailingSectorsLost(hostKey types.PublicKey, maxChecks uint) 
 	return nil
 }
 
-// markFailingSectorsLostBatch marks a batch of failing sectors as lost. We have
-// to batch it because we first need to select all sectors to update in order to
+// markFailingSectorsLostBatch marks a batch of failing sectors as lost and
+// returns the number of sectors that were detached from the host. We have to
+// batch it because we first need to select all sectors to update in order to
 // correctly updated the pinned sectors statistics.
 func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, batchSize uint) (int64, error) {
-	var totalLost int64
+	var detached int64
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
+		detached = 0
 		var hostID int64
 		err := tx.QueryRow(ctx, "SELECT id FROM hosts WHERE public_key = $1", sqlPublicKey(hostKey)).Scan(&hostID)
 		if err != nil {
@@ -214,32 +225,36 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT id, host_id, contract_sectors_map_id
-			FROM sectors
-			WHERE host_id = $1 AND consecutive_failed_checks >= $2
+			SELECT s.id, s.contract_sectors_map_id,
+				COALESCE(c.proof_height > g.scanned_height, TRUE) AS lost
+			FROM sectors s
+			LEFT JOIN contract_sectors_map csm ON s.contract_sectors_map_id = csm.id
+			LEFT JOIN contracts c ON csm.contract_id = c.contract_id
+			CROSS JOIN (SELECT scanned_height FROM global_settings) g
+			WHERE s.host_id = $1 AND s.consecutive_failed_checks >= $2
 			LIMIT $3
-			FOR UPDATE
+			FOR UPDATE OF s
 		`, hostID, maxChecks, batchSize)
 		if err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		}
 		defer rows.Close()
 
-		sectorIDs, pinned, unpinned, _, err := scanSectorIDs(rows)
+		sectorIDs, pinned, unpinned, lost, err := scanLostSectorIDs(rows)
 		if err != nil {
 			return fmt.Errorf("failed to scan sectors: %w", err)
 		} else if len(sectorIDs) == 0 {
 			return nil
 		}
 
-		totalLost = pinned + unpinned
+		detached = pinned + unpinned
 		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = NULL, contract_sectors_map_id = NULL WHERE id = ANY($1)`, sectorIDs); err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		}
-		if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, totalLost, hostID); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE hosts SET lost_sectors = lost_sectors + $1 WHERE id = $2`, lost, hostID); err != nil {
 			return fmt.Errorf("failed to mark failing sectors as lost: %w", err)
 		}
-		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, totalLost); err != nil {
+		if err := updateSectorStats(ctx, tx, -pinned, -unpinned, detached, lost); err != nil {
 			return fmt.Errorf("failed to update sector stats: %w", err)
 		} else if err := incrementHostUnpinnedSectors(ctx, tx, hostID, -unpinned); err != nil {
 			return fmt.Errorf("failed to update host %v unpinned sectors: %w", hostKey, err)
@@ -249,7 +264,7 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 		return 0, err
 	}
 
-	return totalLost, nil
+	return detached, nil
 }
 
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
@@ -286,14 +301,38 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			return fmt.Errorf("failed to get good host rows: %w", err)
 		}
 
-		var newPinnedData, newPinnedSize uint64
+		// validate the slabs and compute their digests
+		digestArgs := make([]any, 0, len(toPin))
+		rootArgs := make([]any, 0, len(toPin))
 		for _, slab := range toPin {
 			if slab.MinShards <= 0 || uint(len(slab.Sectors)) < slab.MinShards {
 				return slabs.ErrMinShards
 			}
-
 			digest := slab.Digest()
 			digests = append(digests, digest)
+			digestArgs = append(digestArgs, sqlHash256(digest))
+			for _, sector := range slab.Sectors {
+				rootArgs = append(rootArgs, sqlHash256(sector.Root))
+			}
+		}
+
+		// lock the slabs and sectors that already exist up front, in the
+		// same order the other lockers use (slabs by digest, then sectors by
+		// root), so the row locks the upserts below take can't deadlock with
+		// concurrent deletions and prunes. Rows the upserts insert are
+		// invisible to concurrent lockers, so the upserts themselves may run
+		// in the caller's order, which also determines the order sectors are
+		// pinned to contracts in.
+		if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE digest = ANY($1) ORDER BY digest FOR NO KEY UPDATE`, digestArgs); err != nil {
+			return fmt.Errorf("failed to lock slabs: %w", err)
+		}
+		if _, err := tx.Exec(ctx, `SELECT sector_root FROM sectors WHERE sector_root = ANY($1) ORDER BY sector_root FOR NO KEY UPDATE`, rootArgs); err != nil {
+			return fmt.Errorf("failed to lock sectors: %w", err)
+		}
+
+		var newPinnedData, newPinnedSize uint64
+		for idx, slab := range toPin {
+			digest := digests[idx]
 
 			// insert slab
 			var slabID int64
@@ -442,15 +481,79 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 	return digests, err
 }
 
+// lockSlabs locks the given slabs FOR UPDATE. Locks are always acquired in
+// ascending digest order — the same order PinSlabs upserts slab rows in — so
+// concurrent transactions locking overlapping sets can't deadlock. Every
+// other slab locker must use the same order.
+func lockSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
+	if len(sIDs) == 0 {
+		return nil
+	}
+	if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE id = ANY($1) ORDER BY digest FOR UPDATE`, sIDs); err != nil {
+		return fmt.Errorf("failed to lock slabs: %w", err)
+	}
+	return nil
+}
+
+// unpinUnreferencedSlabs unpins the subset of the given slabs that are pinned
+// by the account but not referenced by any of the account's objects, queueing
+// them for deletion by deleteOrphanedSlabs. Only slabs pinned before cutoff
+// are unpinned; a nil cutoff unpins them regardless of when they were pinned.
+// The slabs are locked first so the reference check can't race a concurrent
+// PinObject or another unpinner.
+func (s *Store) unpinUnreferencedSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64, cutoff *time.Time) error {
+	if err := lockSlabs(ctx, tx, sIDs); err != nil {
+		return err
+	}
+
+	rows, err := tx.Query(ctx, `SELECT s.id
+FROM slabs s
+JOIN account_slabs a ON s.id = a.slab_id
+WHERE a.account_id = $1
+	AND s.id = ANY($2)
+	AND ($3::TIMESTAMPTZ IS NULL OR s.pinned_at < $3)
+	AND NOT EXISTS (
+		SELECT 1
+		FROM objects o
+		JOIN object_slabs os ON o.id = os.object_id
+		WHERE o.account_id = a.account_id
+		AND os.slab_digest = s.digest
+	)`, accountID, sIDs, cutoff)
+	if err != nil {
+		return fmt.Errorf("failed to query unreferenced slabs: %w", err)
+	}
+	toUnpin, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return fmt.Errorf("failed to collect unreferenced slabs: %w", err)
+	}
+
+	if len(toUnpin) == 0 {
+		return nil
+	}
+	return s.unpinSlabs(ctx, tx, accountID, toUnpin)
+}
+
 // unpinSlabs removes the account's association with the given slabs and updates
-// the account's pinned totals. The slabs and their sectors are not deleted
-// inline; they are queued for deleteOrphanedSlabs to prune in a background loop.
+// the account's pinned totals. Slabs the account no longer pins are ignored, so
+// a concurrent unpin of the same slab can't double-decrement the totals. The
+// slabs and their sectors are not deleted inline; they are queued for
+// deleteOrphanedSlabs to prune in a background loop.
 func (s *Store) unpinSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64) error {
-	// delete the association between the account and the slab
-	_, err := tx.Exec(ctx, `DELETE FROM account_slabs a
-WHERE a.account_id = $1 AND a.slab_id = ANY($2);`, accountID, sIDs)
+	// delete the association between the account and the slab, keeping track
+	// of the associations that actually existed
+	rows, err := tx.Query(ctx, `DELETE FROM account_slabs a
+WHERE a.account_id = $1 AND a.slab_id = ANY($2)
+RETURNING a.slab_id`, accountID, sIDs)
 	if err != nil {
 		return fmt.Errorf("failed to delete account slabs: %w", err)
+	}
+	unpinned, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return fmt.Errorf("failed to collect unpinned slab ids: %w", err)
+	}
+
+	if len(unpinned) == 0 {
+		return nil // all slabs were already unpinned
 	}
 
 	// update the account's pinned data and pinned size
@@ -458,79 +561,73 @@ WHERE a.account_id = $1 AND a.slab_id = ANY($2);`, accountID, sIDs)
 	if err := tx.QueryRow(ctx, `SELECT
 		(SELECT COALESCE(SUM(min_shards::bigint), 0) * $1 FROM slabs WHERE id = ANY($2)),
 		(SELECT COUNT(*) * $1 FROM slab_sectors WHERE slab_id = ANY($2))`,
-		proto.SectorSize, sIDs).Scan(&pinnedDataDelta, &pinnedSizeDelta); err != nil {
+		proto.SectorSize, unpinned).Scan(&pinnedDataDelta, &pinnedSizeDelta); err != nil {
 		return fmt.Errorf("failed to get storage delta: %w", err)
 	}
 
 	var connectKeyID int64
+	var active bool
 	err = tx.QueryRow(ctx, `UPDATE accounts
 SET pinned_data = pinned_data - $1, pinned_size = pinned_size - $2
 WHERE id = $3
-RETURNING connect_key_id`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&connectKeyID)
+RETURNING connect_key_id, deleted_at IS NULL`, pinnedDataDelta, pinnedSizeDelta, accountID).Scan(&connectKeyID, &active)
 	if err != nil {
 		return fmt.Errorf("failed to update account's pinned data: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data - $1, pinned_size = pinned_size - $2 WHERE id = $3`, pinnedDataDelta, pinnedSizeDelta, connectKeyID); err != nil {
-		return fmt.Errorf("failed to update connect key pinned data: %w", err)
+
+	if active {
+		if _, err := tx.Exec(ctx, `UPDATE app_connect_keys SET pinned_data = pinned_data - $1, pinned_size = pinned_size - $2 WHERE id = $3`, pinnedDataDelta, pinnedSizeDelta, connectKeyID); err != nil {
+			return fmt.Errorf("failed to update connect key pinned data: %w", err)
+		}
 	}
 
 	// queue the slabs for background deletion; the queue is append-only so a
 	// concurrent prune can't swallow a re-queue
 	if _, err := tx.Exec(ctx, `INSERT INTO slab_deletion_queue (slab_id)
-SELECT * FROM unnest($1::bigint[])`, sIDs); err != nil {
+SELECT * FROM unnest($1::bigint[])`, unpinned); err != nil {
 		return fmt.Errorf("failed to queue slabs for deletion: %w", err)
 	}
 	return nil
 }
 
 // deleteOrphanedSlabs deletes the slabs in sIDs that are no longer pinned by
-// any account, along with any sectors that are only referenced by those slabs,
-// and updates the relevant sector and slab statistics. Callers must have
-// already removed the relevant account_slabs associations.
+// any account nor referenced by any object, along with any sectors that are
+// only referenced by those slabs, and updates the relevant sector and slab
+// statistics. Callers must have already removed the relevant account_slabs
+// associations.
 func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
 	// lock the candidate slabs so a concurrent re-pin serializes against the
 	// pinned check below
-	if _, err := tx.Exec(ctx, `SELECT id FROM slabs WHERE id = ANY($1) ORDER BY id FOR UPDATE`, sIDs); err != nil {
-		return fmt.Errorf("failed to lock slabs: %w", err)
+	if err := lockSlabs(ctx, tx, sIDs); err != nil {
+		return err
 	}
 
-	// ignore the slabs that are pinned by another account
-	rows, err := tx.Query(ctx, `SELECT slab_id FROM account_slabs WHERE slab_id = ANY($1)`, sIDs)
+	// get the slabs that are neither pinned by an account nor referenced by
+	// an object; a slab can be re-pinned and attached to a new object after
+	// it was queued for deletion
+	rows, err := tx.Query(ctx, `SELECT s.id FROM slabs s
+WHERE s.id = ANY($1)
+	AND NOT EXISTS (SELECT 1 FROM account_slabs a WHERE a.slab_id = s.id)
+	AND NOT EXISTS (SELECT 1 FROM object_slabs os WHERE os.slab_digest = s.digest)`, sIDs)
 	if err != nil {
-		return fmt.Errorf("failed to check if slab was pinned: %w", err)
+		return fmt.Errorf("failed to query deletable slabs: %w", err)
 	}
-	defer rows.Close()
-
-	seen := make(map[int64]struct{})
-	for rows.Next() {
-		var sID int64
-		if err := rows.Scan(&sID); err != nil {
-			return fmt.Errorf("failed to check pinned slab: %w", err)
-		}
-		seen[sID] = struct{}{}
-	}
-	if err := rows.Err(); err != nil {
-		return fmt.Errorf("failed to get pinned slabs: %w", err)
-	}
-
-	// get all of the slabs that are not pinned by another account
-	var toDelete []int64
-	for _, sID := range sIDs {
-		if _, ok := seen[sID]; ok {
-			continue
-		}
-		toDelete = append(toDelete, sID)
+	toDelete, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return fmt.Errorf("failed to collect deletable slabs: %w", err)
 	}
 
 	// delete sectors
 	var pinned, unpinned, unpinnable int64
 	var unpinnedDeltas []unpinnedDelta
 	if len(toDelete) > 0 {
-		// lock the candidate sectors too, so a concurrent re-pin reusing a shared
-		// sector serializes against the orphan check below
-		if _, err := tx.Exec(ctx, `SELECT id FROM sectors WHERE id IN (
+		// lock the candidate sectors too, so a concurrent re-pin reusing a
+		// shared sector serializes against the orphan check below. Locks are
+		// acquired in ascending root order to match the order PinSlabs
+		// upserts sectors in.
+		if _, err := tx.Exec(ctx, `SELECT sector_root FROM sectors WHERE id IN (
 	SELECT sector_id FROM slab_sectors WHERE slab_id = ANY($1)
-) ORDER BY id FOR UPDATE`, toDelete); err != nil {
+) ORDER BY sector_root FOR UPDATE`, toDelete); err != nil {
 			return fmt.Errorf("failed to lock sectors: %w", err)
 		}
 
@@ -608,9 +705,11 @@ func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) 
 	return nil
 }
 
-// UnpinSlab removes the association between the account and the given slab. If
-// this slab is no longer owned by any account, it and its sectors are queued
-// for deletion by PruneDeletedSlabs in a background loop.
+// UnpinSlab removes the association between the account and the given slab. A
+// slab that is still referenced by one of the account's objects can not be
+// unpinned and returns ErrSlabInUse. If this slab is no longer owned by any
+// account, it and its sectors are queued for deletion by PruneDeletedSlabs in
+// a background loop.
 func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		id, _, err := accountID(ctx, tx, account)
@@ -618,12 +717,37 @@ func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 			return fmt.Errorf("failed to get account ID: %w", err)
 		}
 
+		// lock the slab before the checks so they serialize against
+		// concurrent unpins and against PinObject attaching the slab to a
+		// new object; the checks run in a separate statement after the lock,
+		// so they see the state committed by whoever held the lock before us
 		var sID int64
-		err = tx.QueryRow(ctx, `SELECT slab_id FROM account_slabs WHERE account_id = $1 and slab_id = (SELECT id FROM slabs WHERE digest = $2)`, id, sqlHash256(slabID)).Scan(&sID)
+		err = tx.QueryRow(ctx, `SELECT id FROM slabs WHERE digest = $1 FOR UPDATE`, sqlHash256(slabID)).Scan(&sID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrSlabNotFound
 		} else if err != nil {
-			return fmt.Errorf("failed to check if slab exists: %w", err)
+			return fmt.Errorf("failed to lock slab: %w", err)
+		}
+
+		// the slab must still be pinned by the account and must not be
+		// referenced by one of its objects; refusing the unpin while an object
+		// references the slab stops the account from freeing quota while the
+		// object keeps the slab alive
+		var pinned, inUse bool
+		err = tx.QueryRow(ctx, `SELECT
+			EXISTS (SELECT 1 FROM account_slabs WHERE account_id = $1 AND slab_id = $2),
+			EXISTS (
+				SELECT 1
+				FROM objects o
+				JOIN object_slabs os ON o.id = os.object_id
+				WHERE o.account_id = $1 AND os.slab_digest = $3
+			)`, id, sID, sqlHash256(slabID)).Scan(&pinned, &inUse)
+		if err != nil {
+			return fmt.Errorf("failed to check slab pin state: %w", err)
+		} else if !pinned {
+			return slabs.ErrSlabNotFound
+		} else if inUse {
+			return slabs.ErrSlabInUse
 		}
 
 		if err := s.unpinSlabs(ctx, tx, id, []int64{sID}); err != nil {
@@ -1095,7 +1219,7 @@ func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migr
 	return
 }
 
-func updateSectorStats(ctx context.Context, tx *txn, pinnedDelta, unpinnedDelta, unpinnableDelta int64) error {
+func updateSectorStats(ctx context.Context, tx *txn, pinnedDelta, unpinnedDelta, unpinnableDelta, lostDelta int64) error {
 	if err := incrementNumPinnedSectors(ctx, tx, pinnedDelta); err != nil {
 		return fmt.Errorf("failed to update pinned sectors: %w", err)
 	}
@@ -1105,7 +1229,7 @@ func updateSectorStats(ctx context.Context, tx *txn, pinnedDelta, unpinnedDelta,
 	if err := incrementNumUnpinnableSectors(ctx, tx, unpinnableDelta); err != nil {
 		return fmt.Errorf("failed to update unpinnable sectors: %w", err)
 	}
-	if err := incrementNumSectorsLost(ctx, tx, uint64(unpinnableDelta)); err != nil {
+	if err := incrementNumSectorsLost(ctx, tx, uint64(lostDelta)); err != nil {
 		return fmt.Errorf("failed to update sectors lost: %w", err)
 	}
 
@@ -1127,6 +1251,37 @@ func scanSectorIDs(rows *rows) (sectorIDs []int64, pinned, unpinned, unpinnable 
 			unpinned++
 		} else {
 			unpinnable++
+		}
+		sectorIDs = append(sectorIDs, sectorID)
+	}
+	err = rows.Err()
+	return
+}
+
+// scanLostSectorIDs scans sector IDs from the given rows. It also counts how
+// many of the sectors are currently pinned and unpinned as well as how many
+// count as lost for the host, i.e. are unpinned or pinned to a contract that
+// has not reached its proof height yet.
+//
+// Unpinned sectors always count as lost because [Store.MarkSectorsUnpinnable]
+// detaches sectors from their host once they have been unpinned for longer
+// than the retention window, so any unpinned sector that still has a host is
+// implicitly within the window the host is expected to retain it for.
+func scanLostSectorIDs(rows *rows) (sectorIDs []int64, pinned, unpinned, lost int64, err error) {
+	for rows.Next() {
+		var sectorID int64
+		var contractMapID sql.NullInt64
+		var isLost bool
+		if err := rows.Scan(&sectorID, &contractMapID, &isLost); err != nil {
+			return nil, 0, 0, 0, fmt.Errorf("failed to scan sector row: %w", err)
+		}
+		if contractMapID.Valid {
+			pinned++
+		} else {
+			unpinned++
+		}
+		if isLost {
+			lost++
 		}
 		sectorIDs = append(sectorIDs, sectorID)
 	}

@@ -377,7 +377,10 @@ func (a *admin) handleDELETESlab(jc jape.Context) {
 
 	// delete each object
 	for _, obj := range objects {
-		if err := a.slabs.DeleteObject(jc.Request.Context(), obj.Account, obj.ObjectID); err != nil {
+		err := a.slabs.DeleteObject(jc.Request.Context(), obj.Account, obj.ObjectID)
+		if errors.Is(err, slabs.ErrObjectNotFound) {
+			continue
+		} else if err != nil {
 			jc.Check("failed to delete object", err)
 			return
 		}
@@ -387,7 +390,7 @@ func (a *admin) handleDELETESlab(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTPruneAccounts(jc jape.Context) {
-	cutoff := time.Now().Add(-time.Hour)
+	cutoff := time.Now().Add(-api.DefaultSlabPruneCutoff)
 	if jc.Request.FormValue("before") != "" {
 		if jc.DecodeForm("before", &cutoff) != nil {
 			return
@@ -742,7 +745,7 @@ func (a *admin) handlePOSTAccountPrune(jc jape.Context) {
 	if jc.DecodeParam("accountkey", &ak) != nil {
 		return
 	}
-	cutoff := time.Now().Add(-time.Hour)
+	cutoff := time.Now().Add(-api.DefaultSlabPruneCutoff)
 	if jc.Request.FormValue("before") != "" {
 		if jc.DecodeForm("before", &cutoff) != nil {
 			return

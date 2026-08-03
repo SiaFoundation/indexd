@@ -211,6 +211,13 @@ CREATE INDEX preauthorized_keys_expires_at_idx ON preauthorized_keys(expires_at)
 	},
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
 		_, err := tx.Exec(ctx, `
+ALTER TABLE object_slabs DROP CONSTRAINT object_slabs_slab_digest_fkey;
+ALTER TABLE object_slabs ADD CONSTRAINT object_slabs_slab_digest_fkey FOREIGN KEY (slab_digest) REFERENCES slabs(digest) ON DELETE RESTRICT;
+`)
+		return err
+	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
 CREATE TABLE sharing_keys (
     id BIGSERIAL PRIMARY KEY,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

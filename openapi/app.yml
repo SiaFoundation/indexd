@@ -173,6 +173,10 @@ paths:
       tags:
         - objects
       summary: Delete an object
+      description: >
+        Deletes the object. Slabs that were referenced by the object and are no
+        longer referenced by any of the account's objects are unpinned and
+        queued for deletion by a background process.
       parameters:
         - name: key
           in: path
@@ -593,6 +597,10 @@ paths:
       responses:
         "204":
           description: Slab unpinned successfully
+        "404":
+          description: Slab not found
+        "409":
+          description: Slab is still referenced by one of the account's objects
 
       x-codeSamples:
         - lang: Go
@@ -624,7 +632,7 @@ paths:
       parameters:
         - name: before
           in: query
-          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to one hour ago.
+          description: Only slabs pinned before this timestamp are eligible for pruning. Defaults to 72 hours ago.
           schema:
             type: string
             format: date-time

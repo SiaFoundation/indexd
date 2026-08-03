@@ -21,7 +21,14 @@ import (
 	"go.uber.org/zap"
 )
 
+// defaultConnectTimeout bounds connection establishment separately from the
+// RPC context, so an unresponsive host costs seconds instead of the full RPC
+// budget.
+const defaultConnectTimeout = 10 * time.Second
+
 type transport struct {
+	connectTimeout time.Duration
+
 	mu     sync.Mutex
 	dialCh chan struct{} // signals dial completion
 	tc     rhp.TransportClient
@@ -89,7 +96,7 @@ func (t *transport) dial(ctx context.Context, hostKey types.PublicKey, addresses
 
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, 2)
-	var dialCtx, dialCancel = context.WithCancel(ctx)
+	var dialCtx, dialCancel = context.WithTimeout(ctx, t.connectTimeout)
 	defer dialCancel()
 
 	connectErrs := make([]error, len(addresses))
@@ -149,9 +156,10 @@ top:
 
 // A Client is used to interact with Sia hosts over RHP4.
 type Client struct {
-	log   *zap.Logger
-	tg    *threadgroup.ThreadGroup
-	hosts *Provider
+	log             *zap.Logger
+	tg              *threadgroup.ThreadGroup
+	hosts           *Provider
+	heightTolerance uint64
 
 	mu             sync.Mutex // protects the fields below
 	cachedSettings map[types.PublicKey]proto.HostSettings
@@ -179,7 +187,7 @@ func (c *Client) hostTransport(ctx context.Context, hostKey types.PublicKey) (rh
 	c.mu.Lock()
 	t := c.transports[hostKey]
 	if t == nil {
-		t = &transport{}
+		t = &transport{connectTimeout: defaultConnectTimeout}
 		c.transports[hostKey] = t
 	}
 	c.mu.Unlock()
@@ -447,28 +455,53 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// ErrPricesHeightDrift is returned when the tip height a host claims in its
+// signed prices is too far behind the local tip height.
+var ErrPricesHeightDrift = errors.New("host prices tip height too far behind local tip height")
+
+// checkPricesHeight verifies that the tip height a host claims in its signed
+// prices is no more than the client's height tolerance behind the local tip
+// height.
+func (c *Client) checkPricesHeight(prices proto.HostPrices, localHeight uint64) error {
+	if prices.TipHeight < localHeight && localHeight-prices.TipHeight > c.heightTolerance {
+		return fmt.Errorf("%w: host height %d, local height %d, tolerance %d", ErrPricesHeightDrift, prices.TipHeight, localHeight, c.heightTolerance)
+	}
+	return nil
+}
+
+// refreshSettings fetches the host settings from the host, bypassing the
+// cache. Valid settings are cached for future use.
+func (c *Client) refreshSettings(ctx context.Context, hostKey types.PublicKey, transport rhp.TransportClient) (proto.HostSettings, error) {
+	settings, err := rhp.RPCSettings(ctx, transport)
+	if err != nil {
+		return proto.HostSettings{}, err
+	} else if err := settings.Prices.Validate(hostKey); err != nil {
+		return proto.HostSettings{}, fmt.Errorf("host returned invalid prices: %w", err)
+	}
+
+	c.mu.Lock()
+	c.cachedSettings[hostKey] = settings
+	c.mu.Unlock()
+	return settings, nil
+}
+
 // settings fetches the host settings using an existing transport connection.
 //
 // If the settings are cached and valid, the cached settings are returned with a
-// boolean flag set to 'true'.
+// boolean flag set to 'true'. Otherwise, they are refreshed from the host.
 func (c *Client) settings(ctx context.Context, hostKey types.PublicKey, transport rhp.TransportClient) (proto.HostSettings, bool, error) {
 	c.mu.Lock()
-	settings := c.cachedSettings[hostKey]
-	if settings.Prices.Validate(hostKey) == nil && time.Until(settings.Prices.ValidUntil) > 30*time.Second {
-		c.mu.Unlock()
+	settings, ok := c.cachedSettings[hostKey]
+	c.mu.Unlock()
+	// settings are cached only after signature validation, so the signature never needs
+	// rechecking here. this keeps the ed25519 verify off the per-rpc hot path
+	if ok && time.Until(settings.Prices.ValidUntil) > 30*time.Second {
 		return settings, true, nil
 	}
-	c.mu.Unlock()
 
-	settings, err := rhp.RPCSettings(ctx, transport)
+	settings, err := c.refreshSettings(ctx, hostKey, transport)
 	if err != nil {
 		return proto.HostSettings{}, false, err
-	}
-
-	if settings.Prices.Validate(hostKey) == nil {
-		c.mu.Lock()
-		c.cachedSettings[hostKey] = settings
-		c.mu.Unlock()
 	}
 	return settings, false, nil
 }
@@ -494,10 +527,11 @@ func shouldResetTransport(err error) bool {
 // New creates a new Client.
 func New(hosts *Provider, log *zap.Logger) *Client {
 	return &Client{
-		log:            log,
-		tg:             threadgroup.New(),
-		hosts:          hosts,
-		cachedSettings: make(map[types.PublicKey]proto.HostSettings),
-		transports:     make(map[types.PublicKey]*transport),
+		heightTolerance: 36, // ~6 hours of blocks
+		log:             log,
+		tg:              threadgroup.New(),
+		hosts:           hosts,
+		cachedSettings:  make(map[types.PublicKey]proto.HostSettings),
+		transports:      make(map[types.PublicKey]*transport),
 	}
 }

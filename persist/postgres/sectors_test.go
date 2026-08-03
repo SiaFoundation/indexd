@@ -1989,8 +1989,18 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatalf("expected 0 contract sectors map rows, got %d", count)
 	}
 
-	// assert slab1 is not considered unhealthy since it is considered uploaded
-	// to a host but not yet pinned
+	// pruning detaches the pruned sectors from their host, so both slabs are
+	// now reported as needing repair
+	assertUnhealthySlabs(2)
+	resetNextRepairAttemptTime()
+
+	// re-attach the sectors to a host without pinning them to a contract. They
+	// are then considered uploaded to a host but not yet pinned, which is
+	// healthy.
+	_, err = store.pool.Exec(t.Context(), "UPDATE sectors SET host_id = 1 WHERE host_id IS NULL")
+	if err != nil {
+		t.Fatal(err)
+	}
 	assertUnhealthySlabs(0)
 
 	// add ten hosts, each with their own contract
@@ -3413,6 +3423,156 @@ func TestMarkSectorsLost(t *testing.T) {
 	assertSectorLost(root4, true)
 }
 
+func TestMarkSectorsLostProofHeightCutoff(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	// add a host with a contract, the test revision has a proof height of 600
+	hk := store.addTestHost(t)
+	fcid := store.addTestContract(t, hk)
+
+	// pin a slab that adds 3 sectors to the host
+	rootPinned1 := frand.Entropy256()
+	rootPinned2 := frand.Entropy256()
+	rootUnpinned := frand.Entropy256()
+	_, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{
+				Root:    rootPinned1,
+				HostKey: hk,
+			},
+			{
+				Root:    rootPinned2,
+				HostKey: hk,
+			},
+			{
+				Root:    rootUnpinned,
+				HostKey: hk,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// pin the first two sectors to the contract, the third remains unpinned
+	if err := store.PinSectors(fcid, []types.Hash256{rootPinned1, rootPinned2}); err != nil {
+		t.Fatal(err)
+	}
+
+	// a sector pinned to a contract that has not reached its proof height
+	// counts against the host when the host reports it lost
+	setScannedHeight(t, store, 599)
+	if err := store.MarkSectorsLost(hk, []types.Hash256{rootPinned1}); err != nil {
+		t.Fatal(err)
+	}
+	assertSectorLost(t, store, rootPinned1)
+	assertHostLostSectors(t, store, hk, 1)
+	assertLostSectorStats(t, store, 1, 1)
+
+	// once the contract reached its proof height the host might have submitted
+	// a proof and legitimately deleted the data, so the sector is unlinked but
+	// doesn't count against the host or the global lost sectors stat
+	setScannedHeight(t, store, 600)
+	if err := store.MarkSectorsLost(hk, []types.Hash256{rootPinned2}); err != nil {
+		t.Fatal(err)
+	}
+	assertSectorLost(t, store, rootPinned2)
+	assertHostLostSectors(t, store, hk, 1)
+	assertLostSectorStats(t, store, 2, 1)
+
+	// an unpinned sector counts against the host since the host is expected to
+	// retain it until it is either pinned or given up on and detached by
+	// MarkSectorsUnpinnable
+	if err := store.MarkSectorsLost(hk, []types.Hash256{rootUnpinned}); err != nil {
+		t.Fatal(err)
+	}
+	assertSectorLost(t, store, rootUnpinned)
+	assertHostLostSectors(t, store, hk, 2)
+	assertLostSectorStats(t, store, 3, 2)
+}
+
+func TestMarkFailingSectorsLostProofHeightCutoff(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	// add a host with a contract, the test revision has a proof height of 600
+	hk := store.addTestHost(t)
+	fcid := store.addTestContract(t, hk)
+
+	// pin a slab that adds 3 sectors to the host
+	rootPinned1 := frand.Entropy256()
+	rootPinned2 := frand.Entropy256()
+	rootUnpinned := frand.Entropy256()
+	_, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+		EncryptionKey: [32]byte{},
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{
+				Root:    rootPinned1,
+				HostKey: hk,
+			},
+			{
+				Root:    rootPinned2,
+				HostKey: hk,
+			},
+			{
+				Root:    rootUnpinned,
+				HostKey: hk,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// pin the first two sectors to the contract, the third remains unpinned
+	if err := store.PinSectors(fcid, []types.Hash256{rootPinned1, rootPinned2}); err != nil {
+		t.Fatal(err)
+	}
+
+	record := func(roots ...types.Hash256) {
+		t.Helper()
+		if err := store.RecordIntegrityCheck(false, time.Now(), hk, roots); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// fail the integrity check twice for a pinned and an unpinned sector; the
+	// sector pinned to a contract that has not reached its proof height counts
+	// against the host, as does the unpinned sector
+	setScannedHeight(t, store, 599)
+	record(rootPinned1, rootUnpinned)
+	record(rootPinned1, rootUnpinned)
+	if err := store.MarkFailingSectorsLost(hk, 2); err != nil {
+		t.Fatal(err)
+	}
+	assertSectorLost(t, store, rootPinned1)
+	assertSectorLost(t, store, rootUnpinned)
+	assertHostLostSectors(t, store, hk, 2)
+	assertLostSectorStats(t, store, 2, 2)
+
+	// once the contract reached its proof height, a failing sector is unlinked
+	// but doesn't count against the host or the global lost sectors stat
+	setScannedHeight(t, store, 600)
+	record(rootPinned2)
+	record(rootPinned2)
+	if err := store.MarkFailingSectorsLost(hk, 2); err != nil {
+		t.Fatal(err)
+	}
+	assertSectorLost(t, store, rootPinned2)
+	assertHostLostSectors(t, store, hk, 2)
+	assertLostSectorStats(t, store, 3, 2)
+}
+
 // BenchmarkMarkSectorsLost benchmarks MarkSectorsLost in various batch sizes.
 func BenchmarkMarkSectorsLost(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
@@ -3707,4 +3867,52 @@ func (s *Store) pinTestSlab(t testing.TB, account proto.Account, minShards uint,
 		t.Fatal(err)
 	}
 	return slabIDs[0]
+}
+
+// assertSectorLost asserts that the sector with the given root is lost, i.e.
+// detached from both its host and contract.
+func assertSectorLost(t *testing.T, store *Store, root types.Hash256) {
+	t.Helper()
+	var isLost bool
+	err := store.pool.QueryRow(t.Context(), `SELECT host_id IS NULL AND contract_sectors_map_id IS NULL FROM sectors WHERE sector_root = $1`, sqlHash256(root)).Scan(&isLost)
+	if err != nil {
+		t.Fatal(err)
+	} else if !isLost {
+		t.Fatalf("expected sector %x to be lost", root)
+	}
+}
+
+// assertHostLostSectors asserts the lost_sectors counter of the given host.
+func assertHostLostSectors(t *testing.T, store *Store, hk types.PublicKey, numLost int) {
+	t.Helper()
+	var count int
+	err := store.pool.QueryRow(t.Context(), `SELECT lost_sectors FROM hosts WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&count)
+	if err != nil {
+		t.Fatal(err)
+	} else if count != numLost {
+		t.Fatalf("expected %d lost sectors for host %x, got %d", numLost, hk, count)
+	}
+}
+
+// assertLostSectorStats asserts the global unpinnable and lost sector stats.
+// Every sector detached from its host becomes unpinnable, but only sectors the
+// host was still expected to hold on to count as lost.
+func assertLostSectorStats(t *testing.T, store *Store, unpinnable, lost int64) {
+	t.Helper()
+	stats, err := store.SectorStats()
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.Unpinnable != unpinnable {
+		t.Fatalf("expected %d unpinnable sectors, got %d", unpinnable, stats.Unpinnable)
+	} else if stats.Lost != lost {
+		t.Fatalf("expected %d lost sectors, got %d", lost, stats.Lost)
+	}
+}
+
+// setScannedHeight updates the global scanned height.
+func setScannedHeight(t *testing.T, store *Store, height uint64) {
+	t.Helper()
+	if _, err := store.pool.Exec(t.Context(), `UPDATE global_settings SET scanned_height = $1`, height); err != nil {
+		t.Fatal(err)
+	}
 }
