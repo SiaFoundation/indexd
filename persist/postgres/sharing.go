@@ -102,7 +102,7 @@ func (s *Store) SharingKeys(account proto.Account, offset, limit int) (keys []sh
 			FROM sharing_keys sk
 			INNER JOIN accounts a ON a.id = sk.account_id
 			WHERE sk.account_id = $1 AND (sk.expires_at IS NULL OR sk.expires_at > NOW())
-			ORDER BY sk.created_at DESC
+			ORDER BY sk.id DESC
 			LIMIT $2 OFFSET $3
 		`, accountID, limit, offset)
 		if err != nil {

@@ -748,4 +748,87 @@ func TestMigrationConsistency(t *testing.T) {
 			t.Errorf("unexpected check constraint %s", cc)
 		}
 	}
+
+	getDefinitions := func(db *pgxpool.Pool, query string) (map[string]bool, error) {
+		rows, err := db.Query(ctx, query)
+		if err != nil {
+			return nil, err
+		}
+		defer rows.Close()
+
+		definitions := make(map[string]bool)
+		for rows.Next() {
+			var name, def string
+			if err := rows.Scan(&name, &def); err != nil {
+				return nil, err
+			}
+			definitions[fmt.Sprintf("%s.%s", name, def)] = true
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		return definitions, nil
+	}
+
+	// ensure the migrated database has the same definitions as the baseline for
+	// the schema objects information_schema does not fully describe
+	for _, test := range []struct {
+		kind  string
+		query string
+	}{
+		{
+			// https://www.postgresql.org/docs/current/catalog-pg-constraint.html
+			// the definition covers the ON DELETE/UPDATE actions, which
+			// information_schema.key_column_usage omits. the constraint name is
+			// left out since it doesn't match between databases
+			kind: "foreign key",
+			query: `SELECT c.relname, pg_get_constraintdef(con.oid)
+FROM pg_constraint con
+INNER JOIN pg_class c ON (c.oid = con.conrelid)
+INNER JOIN pg_namespace n ON (n.oid = c.relnamespace)
+WHERE n.nspname = 'public' AND con.contype = 'f'`,
+		},
+		{
+			// https://www.postgresql.org/docs/current/catalog-pg-proc.html
+			// prokind filters out aggregates, which pg_get_functiondef rejects
+			kind: "function",
+			query: `SELECT p.proname, pg_get_functiondef(p.oid)
+FROM pg_proc p
+INNER JOIN pg_namespace n ON (n.oid = p.pronamespace)
+WHERE n.nspname = 'public' AND p.prokind = 'f'`,
+		},
+		{
+			// https://www.postgresql.org/docs/current/catalog-pg-trigger.html
+			// tgisinternal excludes the triggers postgres creates to enforce
+			// foreign keys
+			kind: "trigger",
+			query: `SELECT c.relname, pg_get_triggerdef(t.oid)
+FROM pg_trigger t
+INNER JOIN pg_class c ON (c.oid = t.tgrelid)
+INNER JOIN pg_namespace n ON (n.oid = c.relnamespace)
+WHERE n.nspname = 'public' AND NOT t.tgisinternal`,
+		},
+	} {
+		baselineDefinitions, err := getDefinitions(baseline.pool, test.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		migratedDefinitions, err := getDefinitions(store.pool, test.query)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		for d := range baselineDefinitions {
+			if !migratedDefinitions[d] {
+				t.Errorf("missing %s %s", test.kind, d)
+			}
+		}
+
+		for d := range migratedDefinitions {
+			if !baselineDefinitions[d] {
+				t.Errorf("unexpected %s %s", test.kind, d)
+			}
+		}
+	}
 }
