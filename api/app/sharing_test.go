@@ -20,8 +20,8 @@ import (
 
 func assertStatus(t *testing.T, err error, status int) {
 	t.Helper()
-	var he *app.HTTPError
-	if !errors.As(err, &he) {
+	he, ok := errors.AsType[*app.HTTPError](err)
+	if !ok {
 		t.Fatalf("expected *app.HTTPError, got %v", err)
 	} else if he.StatusCode != status {
 		t.Fatalf("expected status %d, got %d (%s)", status, he.StatusCode, he.Body)

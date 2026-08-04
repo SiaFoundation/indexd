@@ -273,19 +273,21 @@ BEGIN
         WHERE sharing_keys.id = agg.sharing_key_id;
     ELSIF (TG_OP = 'UPDATE') THEN
         UPDATE sharing_keys SET
+            object_count = sharing_keys.object_count + agg.object_count,
             size = sharing_keys.size + agg.size,
             pinned_data = sharing_keys.pinned_data + agg.pinned_data,
             pinned_size = sharing_keys.pinned_size + agg.pinned_size,
             updated_at = NOW()
         FROM (
             SELECT sharing_key_id,
+                SUM(object_count) AS object_count,
                 SUM(size) AS size,
                 SUM(pinned_data) AS pinned_data,
                 SUM(pinned_size) AS pinned_size
             FROM (
-                SELECT sharing_key_id, size, pinned_data, pinned_size FROM new_rows
+                SELECT sharing_key_id, 1 AS object_count, size, pinned_data, pinned_size FROM new_rows
                 UNION ALL
-                SELECT sharing_key_id, -size, -pinned_data, -pinned_size FROM old_rows
+                SELECT sharing_key_id, -1, -size, -pinned_data, -pinned_size FROM old_rows
             ) deltas
             GROUP BY sharing_key_id
         ) agg
