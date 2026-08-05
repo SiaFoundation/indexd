@@ -367,6 +367,25 @@ func (p *Provider) AddFailedRPC(hostKey types.PublicKey) {
 	p.metric(hostKey).rpcFailRate.AddSample(false)
 }
 
+// AddTimedOutRPC records an RPC that consumed its full deadline without
+// completing. Alongside the failure sample it feeds bytes/elapsed as a
+// worst-case throughput sample for the host.
+func (p *Provider) AddTimedOutRPC(hostKey types.PublicKey, write bool, bytes uint64, elapsed time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	metric := p.metric(hostKey)
+	metric.rpcFailRate.AddSample(false)
+	if elapsed <= 0 {
+		return
+	}
+	throughput := float64(bytes) / elapsed.Seconds()
+	if write {
+		metric.rpcWriteAverage.AddSample(throughput)
+	} else {
+		metric.rpcReadAverage.AddSample(throughput)
+	}
+}
+
 // TrackInflightRead increments the host's inflight read counter and
 // returns a function that decrements it. Hold the returned function for
 // the duration of the RPC so concurrent prioritization sees the load.

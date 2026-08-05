@@ -254,6 +254,7 @@ func (r *slabRecovery) recoverChunk(ctx context.Context, offset, length uint64) 
 			defer release()
 			timeoutCtx, timeoutCancel := context.WithTimeout(ctx, m.shardTimeout)
 			defer timeoutCancel()
+			start := time.Now()
 			if err := downloadShard(timeoutCtx, hostKey, sector, log); err != nil {
 				log.Debug("shard download failed", zap.Error(err))
 				// non-blocking send to indicate a failure
@@ -264,7 +265,17 @@ func (r *slabRecovery) recoverChunk(ctx context.Context, offset, length uint64) 
 				// a host gets demoted if either
 				// 1. it hit the shard timeout
 				// 2. it was part of the initial batch of hosts and was interrupted
-				if (timeoutCtx.Err() != nil && ctx.Err() == nil) || (initial && ctx.Err() != nil) {
+				switch {
+				case timeoutCtx.Err() != nil && ctx.Err() == nil:
+					// the host burned the entire shard timeout, which also
+					// tells us how slow it is; record that so it doesn't stay
+					// in the unsampled bucket that outranks measured hosts.
+					log.Debug("demoting host for failed download", zap.Error(err))
+					m.hosts.AddTimedOutRPC(hostKey, false, length, time.Since(start))
+				case initial && ctx.Err() != nil:
+					// interrupted because the race was already won. It was
+					// slower than the winners, but it never got its full
+					// deadline, so there is no worst-case throughput to infer.
 					log.Debug("demoting host for failed download", zap.Error(err))
 					m.hosts.AddFailedRPC(hostKey)
 				}

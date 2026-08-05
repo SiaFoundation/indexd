@@ -97,12 +97,13 @@ top:
 					timeoutCancel()
 					release()
 					if err != nil {
-						log.Debug("failed to upload shard", zap.Duration("elapsed", time.Since(start)), zap.Error(err))
+						elapsed := time.Since(start)
+						log.Debug("failed to upload shard", zap.Duration("elapsed", elapsed), zap.Error(err))
 						// demote the host if it hit the per-shard timeout while
-						// the overall migration is still in progress
+						// the overall migration is still in progress.
 						if timedOut && ctx.Err() == nil {
 							log.Debug("demoting host for failed upload", zap.Error(err))
-							m.hosts.AddFailedRPC(hostKey)
+							m.hosts.AddTimedOutRPC(hostKey, true, uint64(len(shard)), elapsed)
 						}
 						continue
 					} else if result.Root != shardRoot {

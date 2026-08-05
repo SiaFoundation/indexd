@@ -691,3 +691,77 @@ func TestDuplicateHostQueue(t *testing.T) {
 		t.Fatalf("expected %d unique hosts, got %d", len(hosts), len(seen))
 	}
 }
+
+// TestProviderTimedOutRPC covers the ranking of a host that accepts a
+// connection and then goes silent until the caller's deadline expires. Such a
+// host never produces a throughput sample — those are only recorded on success
+// — so without AddTimedOutRPC it stays in the unsampled bucket that outranks
+// every measured host, and returns to the front of the queue as soon as its
+// failure rate decays.
+func TestProviderTimedOutRPC(t *testing.T) {
+	const sectorSize = 4 << 20
+	const shardTimeout = 2 * time.Minute
+
+	s := newTestStore(t)
+	store := hosts.NewHostStore(s.Store)
+
+	stalled := s.addUsableHost(t)
+	unsampled := s.addUsableHost(t)
+	healthy := s.addUsableHost(t)
+
+	provider := client.NewProvider(store)
+
+	// a sector that never arrived before the shard timeout expired
+	provider.AddTimedOutRPC(stalled, true, sectorSize, shardTimeout)
+	// give the unsampled host the same single failure so the failure rate
+	// ties and the ordering is decided by whether a host has been sampled
+	provider.AddFailedRPC(unsampled)
+
+	sorted := provider.Prioritize([]types.PublicKey{stalled, unsampled})
+	if slices.Index(sorted, unsampled) >= slices.Index(sorted, stalled) {
+		t.Fatal("expected the timed out host to sort behind an unsampled host with an equal failure rate")
+	}
+
+	// a host that actually delivered sectors must outrank it
+	provider.AddWriteSample(healthy, sectorSize, 250*time.Millisecond)
+	sorted = provider.Prioritize([]types.PublicKey{stalled, healthy})
+	if slices.Index(sorted, healthy) >= slices.Index(sorted, stalled) {
+		t.Fatal("expected the timed out host to sort behind a host with real throughput")
+	}
+
+	// one success must be enough to start lifting it back out
+	provider.AddWriteSample(stalled, sectorSize, 250*time.Millisecond)
+	sorted = provider.Prioritize([]types.PublicKey{stalled, unsampled})
+	if slices.Index(sorted, stalled) >= slices.Index(sorted, unsampled) {
+		t.Fatal("expected a recovered host to sort ahead of an unsampled failed host")
+	}
+}
+
+// TestProviderTimedOutRPCGlobalEstimate ensures the worst-case throughput of a
+// timed out RPC stays out of the network-wide estimates that size download
+// racing: it is a floor derived from a failure, not an observation of what the
+// network can do.
+func TestProviderTimedOutRPCGlobalEstimate(t *testing.T) {
+	const sectorSize = 4 << 20
+	const shardTimeout = 2 * time.Minute
+
+	s := newTestStore(t)
+	store := hosts.NewHostStore(s.Store)
+	provider := client.NewProvider(store)
+
+	readBefore := provider.ReadEstimate(sectorSize)
+	writeBefore := provider.WriteEstimate(sectorSize)
+
+	for range 32 {
+		host := s.addUsableHost(t)
+		provider.AddTimedOutRPC(host, true, sectorSize, shardTimeout)
+		provider.AddTimedOutRPC(host, false, sectorSize, shardTimeout)
+	}
+
+	if got := provider.ReadEstimate(sectorSize); got != readBefore {
+		t.Fatalf("timed out RPCs changed the global read estimate: %v -> %v", readBefore, got)
+	}
+	if got := provider.WriteEstimate(sectorSize); got != writeBefore {
+		t.Fatalf("timed out RPCs changed the global write estimate: %v -> %v", writeBefore, got)
+	}
+}

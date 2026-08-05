@@ -394,6 +394,14 @@ func (m *mockHostClient) AddFailedRPC(hostKey types.PublicKey) {
 	m.failedRPCs[hostKey]++
 }
 
+// AddTimedOutRPC records demote calls for inspection by tests. Timed-out RPCs
+// are demotions too, so they land in the same counter.
+func (m *mockHostClient) AddTimedOutRPC(hostKey types.PublicKey, write bool, bytes uint64, elapsed time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.failedRPCs[hostKey]++
+}
+
 // Prices is a mock implementation that returns the preset host settings.
 func (m *mockHostClient) Prices(ctx context.Context, hostKey types.PublicKey) (proto.HostPrices, error) {
 	m.mu.Lock()
