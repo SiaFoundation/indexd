@@ -313,6 +313,7 @@ components:
         expiresAt:
           type: string
           format: date-time
+          description: Optional expiration; omitted if the key never expires
         createdAt:
           type: string
           format: date-time
@@ -335,10 +336,20 @@ components:
         validUntil:
           type: string
           format: date-time
+          description: The time the token expires, five minutes after it was issued
         signature:
           allOf:
             - $ref: "#/components/schemas/Signature"
             - description: A signature over the token made with the sharing account key
+
+    SharedHost:
+      description: A usable host paired with an account token the recipient can use to pay for downloads from that host.
+      allOf:
+        - $ref: "#/components/schemas/HostInfo"
+        - type: object
+          properties:
+            token:
+              $ref: "#/components/schemas/AccountToken"
 
     SharingKeyRequest:
       type: object
