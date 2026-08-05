@@ -21,7 +21,10 @@ tags:
   - name: sharing
     description: Create, list and delete sharing keys and the objects attached to them
   - name: shared
-    description: Recipient endpoints authenticated with a sharing key
+    description: >
+      Recipient endpoints authenticated with a sharing key. The request URL must be
+      signed with the sharing key's private key instead of an app key; the signer must
+      resolve to an existing, unexpired sharing key.
 
 paths:
   /account:
@@ -407,7 +410,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/KeyStats"
         "401":
-          description: The request is not signed by a valid sharing key
+          description: The request is not signed by a valid, unexpired sharing key
   /shared/objects:
     get:
       tags:
@@ -440,7 +443,7 @@ paths:
                 items:
                   $ref: "#/components/schemas/SealedObject"
         "401":
-          description: The request is not signed by a valid sharing key
+          description: The request is not signed by a valid, unexpired sharing key
   /shared/objects/{id}:
     get:
       tags:
@@ -461,14 +464,14 @@ paths:
               schema:
                 $ref: "#/components/schemas/SealedObject"
         "401":
-          description: The request is not signed by a valid sharing key
+          description: The request is not signed by a valid, unexpired sharing key
         "404":
           description: Object not attached to the sharing key
   /shared/hosts:
     get:
       tags:
         - shared
-      summary: List usable hosts, authenticated with the sharing key
+      summary: List usable hosts, each with an account token for paying for downloads
       operationId: getSharedHosts
       parameters:
         - name: limit
@@ -504,36 +507,17 @@ paths:
             type: string
       responses:
         "200":
-          description: A list of usable hosts
+          description: A list of usable hosts, each paired with an account token for that host
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: "#/components/schemas/HostInfo"
+                  $ref: "#/components/schemas/SharedHost"
+        "400":
+          description: Invalid protocol or location parameter
         "401":
-          description: The request is not signed by a valid sharing key
-  /shared/hosts/{hostkey}/token:
-    get:
-      tags:
-        - shared
-      summary: Get an account token for a host, signed by the owner's sharing account
-      operationId: getSharedHostToken
-      parameters:
-        - name: hostkey
-          in: path
-          required: true
-          schema:
-            $ref: "#/components/schemas/PublicKey"
-      responses:
-        "200":
-          description: A signed account token for the host
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AccountToken"
-        "401":
-          description: The request is not signed by a valid sharing key
+          description: The request is not signed by a valid, unexpired sharing key
   /slabs:
     get:
       tags:
@@ -1097,3 +1081,5 @@ components:
       $ref: "./components.yml#/components/schemas/KeyStats"
     AccountToken:
       $ref: "./components.yml#/components/schemas/AccountToken"
+    SharedHost:
+      $ref: "./components.yml#/components/schemas/SharedHost"
