@@ -331,4 +331,14 @@ FOR EACH STATEMENT EXECUTE FUNCTION shared_objects_maintain_totals();
 `)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		// Inserts took the column default and kept microseconds, so a client
+		// cursor, which carries milliseconds, could never advance past such a
+		// row. The UPDATE paths already truncate.
+		_, err := tx.Exec(ctx, `
+			ALTER TABLE object_events
+				ALTER COLUMN updated_at SET DEFAULT date_trunc('second', NOW());
+		`)
+		return err
+	},
 }
