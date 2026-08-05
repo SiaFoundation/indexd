@@ -240,6 +240,19 @@ func (c *Client) AddFailedRPC(hostKey types.PublicKey) {
 	c.hosts.AddFailedRPC(hostKey)
 }
 
+// AddTimedOutRPC records an RPC that burned its full deadline without
+// completing, demoting the host and recording the worst-case throughput it
+// implies. Prefer it over [Client.AddFailedRPC] whenever the caller knows its
+// own deadline expired: without a throughput sample the host stays in the
+// unsampled bucket that outranks every measured host.
+//
+// The same NOTE as AddFailedRPC applies — only the caller can tell whether its
+// deadline expiring means the host misbehaved, since a parent deadline
+// propagates context.DeadlineExceeded down to the RPC's own context.
+func (c *Client) AddTimedOutRPC(hostKey types.PublicKey, write bool, bytes uint64, elapsed time.Duration) {
+	c.hosts.AddTimedOutRPC(hostKey, write, bytes, elapsed)
+}
+
 // AccountBalance fetches the account balance from the specified host.
 func (c *Client) AccountBalance(ctx context.Context, hostKey types.PublicKey, accountKey proto.Account) (balance types.Currency, err error) {
 	err = c.rpcFn(ctx, hostKey, func(ctx context.Context, transport rhp.TransportClient) error {
