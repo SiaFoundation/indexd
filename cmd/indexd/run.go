@@ -35,6 +35,7 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/persist/postgres"
 	"go.sia.tech/indexd/pins"
+	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/stats"
 	"go.sia.tech/indexd/subscriber"
@@ -262,6 +263,12 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 	defer slabs.Close()
 
+	sharing, err := sharing.NewManager(store, sharing.WithLogger(log.Named("sharing")))
+	if err != nil {
+		return fmt.Errorf("failed to create sharing manager: %w", err)
+	}
+	defer sharing.Close()
+
 	subscriber, err := subscriber.New(cm, hm, contracts, wm, store,
 		subscriber.WithLogger(log.Named("subscriber")),
 		subscriber.WithBatchSize(cfg.Consensus.IndexBatchSize),
@@ -334,7 +341,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		}
 	}
 
-	appHandler, err := app.NewAPI(advertiseURL, hm, am, contracts, slabs, appAPIOpts...)
+	appHandler, err := app.NewAPI(advertiseURL, hm, am, contracts, slabs, sharing, appAPIOpts...)
 	if err != nil {
 		return fmt.Errorf("failed to create application API: %w", err)
 	}
