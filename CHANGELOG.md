@@ -1,3 +1,28 @@
+## 0.4.2 (2026-08-06)
+
+### Features
+
+- Delete slabs of an object after deleting the object if the slabs become unreferenced
+
+#### Added support for sharing keys
+
+Sharing keys let an app grant read-only access to a specific set of objects without requiring the viewer to sign up or log in. Each key is a scoped, read-only credential derived from the app's own key and limited to the objects explicitly attached to it.
+
+SDKs can access objects using the `/shared` endpoints and a valid sharing key
+
+#### Unpinning a slab that is still referenced by an object returns an error
+
+`DELETE /slabs/:slabid` now fails with `409 Conflict` if one of the account's
+objects still references the slab. Previously the slab was unpinned anyway,
+freeing up the account's quota while the object kept the slab alive.
+
+### Fixes
+
+- Check tip height of host against local height in AppendSectors.
+- Don't consider sectors lost when they are pinned to a contract beyond its proof height.
+- Fix objects_events.updated_at not truncating default.
+- Skip redundant host settings signature verification on cache hits
+
 ## 0.4.1 (2026-07-23)
 
 ### Features
