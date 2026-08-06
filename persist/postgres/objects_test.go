@@ -479,6 +479,111 @@ func TestListObjectsRegression(t *testing.T) {
 	}
 }
 
+// TestObjectEventTimestampPrecision asserts that object_events.updated_at is
+// truncated to second precision on every write path. Freshly inserted rows used
+// to take the column default, which kept microseconds, while the update paths
+// truncated. A client cursor that carries less precision than that, e.g.
+// milliseconds, could therefore never advance past a newly pinned object and
+// would be handed the same event over and over again.
+func TestObjectEventTimestampPrecision(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	slab := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	if _, err := store.PinSlabs(acc, time.Time{}, slab); err != nil {
+		t.Fatal(err)
+	}
+
+	// read updated_at straight from the db to make sure nothing rounds it on
+	// the way out
+	assertTruncated := func(context string) time.Time {
+		t.Helper()
+
+		var updatedAt time.Time
+		if err := store.pool.QueryRow(t.Context(), `SELECT updated_at FROM object_events`).Scan(&updatedAt); err != nil {
+			t.Fatal(err)
+		} else if updatedAt.Nanosecond() != 0 {
+			t.Fatalf("expected %s to truncate updated_at to second precision, got %v", context, updatedAt.Format(time.RFC3339Nano))
+		}
+		return updatedAt
+	}
+
+	// a cursor built from a listed event, with the precision a client is able
+	// to express, must not return that same event again
+	assertCursorAdvances := func(context string) {
+		t.Helper()
+
+		events, err := store.ListObjects(acc, slabs.Cursor{}, 10)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(events) != 1 {
+			t.Fatalf("expected 1 event, got %d", len(events))
+		}
+
+		cursor := slabs.Cursor{
+			After: events[0].UpdatedAt.Truncate(time.Millisecond),
+			Key:   events[0].Key,
+		}
+		events, err = store.ListObjects(acc, cursor, 10)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(events) != 0 {
+			t.Fatalf("expected cursor to advance past the %s event, got %d events", context, len(events))
+		}
+	}
+
+	// pin the object, inserting the event
+	obj := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		EncryptedMetadata:    frand.Bytes(50),
+		Slabs:                []slabs.SlabSlice{slab.Slice(0, 100)},
+		DataSignature:        types.Signature(frand.Bytes(64)),
+		MetadataSignature:    types.Signature(frand.Bytes(64)),
+	}
+	if err := store.PinObject(acc, obj.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	inserted := assertTruncated("insert")
+	assertCursorAdvances("insert")
+
+	// pin it again, updating the event. updated_at has second precision, so
+	// sleep past the next second boundary for the timestamp to move.
+	time.Sleep(time.Second)
+	obj.EncryptedMetadata = frand.Bytes(50)
+	if err := store.PinObject(acc, obj.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	updated := assertTruncated("update")
+	if !updated.After(inserted) {
+		t.Fatalf("expected updated_at to advance, got %v after %v", updated, inserted)
+	}
+	assertCursorAdvances("update")
+
+	// delete the object, updating the event once more
+	time.Sleep(time.Second)
+	if err := store.DeleteObject(acc, obj.ID()); err != nil {
+		t.Fatal(err)
+	}
+	deleted := assertTruncated("delete")
+	if !deleted.After(updated) {
+		t.Fatalf("expected updated_at to advance, got %v after %v", deleted, updated)
+	}
+	assertCursorAdvances("delete")
+}
+
 func TestSaveObject(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
