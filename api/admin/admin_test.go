@@ -988,33 +988,60 @@ func TestHostManagementAPI(t *testing.T) {
 		t.Fatalf("expected 1 host, got %d", len(importedHosts))
 	}
 
-	// move the next scheduled scan far into the future, then verify that the
-	// all-host scan endpoint ignores the schedule
+	scans := func(hk types.PublicKey) (n int64) {
+		t.Helper()
+		if err := indexer.Store().QueryRow(t.Context(), `SELECT scans FROM hosts WHERE public_key = $1`, hk[:]).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	waitForScan := func(hk types.PublicKey, after int64) {
+		t.Helper()
+		for range 100 {
+			if scans(hk) > after {
+				return
+			}
+			time.Sleep(25 * time.Millisecond)
+		}
+		t.Fatalf("expected host %v to be scanned more than %d times", hk, scans(hk))
+	}
+
+	// move the next scheduled scan far into the future
 	if _, err := indexer.Store().Exec(t.Context(), `UPDATE hosts SET next_scan = NOW() + INTERVAL '1 day' WHERE public_key = $1`, hostKey[:]); err != nil {
 		t.Fatal(err)
 	}
 
-	var scansBefore int64
-	if err := indexer.Store().QueryRow(t.Context(), `SELECT scans FROM hosts WHERE public_key = $1`, hostKey[:]).Scan(&scansBefore); err != nil {
+	// import a second host, it is due for scanning immediately and scans are
+	// processed one batch at a time, so waiting for it to be scanned means every
+	// scan that was already in flight has finished
+	dueHost := cluster.NewHosts(t, 1)[0]
+	cluster.AddHosts(t.Context(), t, dueHost)
+	dueHostKey := dueHost.PublicKey()
+	if _, err := adminClient.ImportHost(t.Context(), dueHostKey, []chain.NetAddress{
+		{Protocol: "siamux", Address: dueHost.Addr()},
+		{Protocol: "quic", Address: dueHost.QUICAddr()},
+	}); err != nil {
 		t.Fatal(err)
 	}
+	waitForScan(dueHostKey, 0)
 
-	if err := adminClient.ScanHosts(t.Context()); err != nil {
+	// a scan without force only picks up the hosts that are due
+	scansBefore, dueScansBefore := scans(hostKey), scans(dueHostKey)
+	if _, err := indexer.Store().Exec(t.Context(), `UPDATE hosts SET next_scan = NOW() WHERE public_key = $1`, dueHostKey[:]); err != nil {
+		t.Fatal(err)
+	} else if err := adminClient.ScanHosts(t.Context(), false); err != nil {
 		t.Fatal(err)
 	}
+	waitForScan(dueHostKey, dueScansBefore)
+	if got := scans(hostKey); got != scansBefore {
+		t.Fatalf("expected the host that is not due to be skipped, got %d scans instead of %d", got, scansBefore)
+	}
 
-	var scansAfter int64
-	for range 100 {
-		if err := indexer.Store().QueryRow(t.Context(), `SELECT scans FROM hosts WHERE public_key = $1`, hostKey[:]).Scan(&scansAfter); err != nil {
-			t.Fatal(err)
-		} else if scansAfter > scansBefore {
-			break
-		}
-		time.Sleep(25 * time.Millisecond)
+	// forcing a scan ignores the schedule
+	if err := adminClient.ScanHosts(t.Context(), true); err != nil {
+		t.Fatal(err)
 	}
-	if scansAfter <= scansBefore {
-		t.Fatalf("expected more than %d scans, got %d", scansBefore, scansAfter)
-	}
+	waitForScan(hostKey, scansBefore)
 }
 
 func TestHostsAPI(t *testing.T) {

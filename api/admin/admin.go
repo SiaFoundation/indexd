@@ -75,7 +75,7 @@ type (
 	// HostManager defines the host management operations exposed by the admin
 	// API.
 	HostManager interface {
-		TriggerHostScanning()
+		TriggerHostScanning(force bool)
 		ScanHost(ctx context.Context, hk types.PublicKey) (hosts.Host, error)
 		ImportHost(ctx context.Context, hk types.PublicKey, addresses []chain.NetAddress) (hosts.Host, error)
 
@@ -1153,7 +1153,11 @@ func (a *admin) handlePOSTHosts(jc jape.Context) {
 }
 
 func (a *admin) handlePOSTHostsScan(jc jape.Context) {
-	a.hosts.TriggerHostScanning()
+	var force bool
+	if jc.DecodeForm("force", &force) != nil {
+		return
+	}
+	a.hosts.TriggerHostScanning(force)
 	jc.Encode(nil)
 }
 

@@ -292,10 +292,13 @@ func (c *Client) ScanHost(ctx context.Context, hostKey types.PublicKey) (resp ho
 	return
 }
 
-// ScanHosts triggers a scan of all hosts regardless of when their next scan is
+// ScanHosts triggers a scan of the hosts that are due to be scanned. If force
+// is true, all hosts are scanned regardless of when their next scan is
 // scheduled.
-func (c *Client) ScanHosts(ctx context.Context) error {
-	return c.c.POST(ctx, "/hosts/scan", nil, nil)
+func (c *Client) ScanHosts(ctx context.Context, force bool) error {
+	values := url.Values{}
+	values.Set("force", fmt.Sprint(force))
+	return c.c.POST(ctx, "/hosts/scan?"+values.Encode(), nil, nil)
 }
 
 // ResetHostLostSectors resets the lost sectors count for the given host.

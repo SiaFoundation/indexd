@@ -115,7 +115,8 @@ type (
 		store         Store
 		alerter       AlertsManager
 
-		triggerHostScanningChan chan struct{}
+		triggerHostScanningChan       chan struct{}
+		triggerForcedHostScanningChan chan struct{}
 
 		tg  *threadgroup.ThreadGroup
 		log *zap.Logger
@@ -331,7 +332,8 @@ func NewManager(syncer Syncer, locator Locator, client HostClient, store Store, 
 		hosts:         client,
 		alerter:       alerter,
 
-		triggerHostScanningChan: make(chan struct{}, 1),
+		triggerHostScanningChan:       make(chan struct{}, 1),
+		triggerForcedHostScanningChan: make(chan struct{}, 1),
 
 		tg:  threadgroup.New(),
 		log: zap.NewNop(),
@@ -363,6 +365,10 @@ func NewManager(syncer Syncer, locator Locator, client HostClient, store Store, 
 			stuckTicker.Stop()
 			scanTicker.Stop()
 		}()
+		resetScanTicker := func() {
+			scanTicker.Stop()
+			scanTicker = time.NewTicker(m.scanFrequency)
+		}
 
 		for {
 			select {
@@ -371,10 +377,12 @@ func NewManager(syncer Syncer, locator Locator, client HostClient, store Store, 
 			case <-stuckTicker.C:
 				m.registerStuckHostsAlert()
 			case <-m.triggerHostScanningChan:
-				// reset ticker
-				scanTicker.Stop()
-				scanTicker = time.NewTicker(m.scanFrequency)
+				resetScanTicker()
 				m.log.Debug("triggered host scanning")
+				m.scanHosts(ctx, m.hostsForScanning(false))
+			case <-m.triggerForcedHostScanningChan:
+				resetScanTicker()
+				m.log.Debug("triggered forced host scanning")
 				m.scanHosts(ctx, m.hostsForScanning(true))
 			case <-scanTicker.C:
 				m.scanHosts(ctx, m.hostsForScanning(false))
@@ -393,10 +401,17 @@ func (m *HostManager) Close() error {
 	return nil
 }
 
-// TriggerHostScanning triggers a scan of all hosts.
-func (m *HostManager) TriggerHostScanning() {
+// TriggerHostScanning triggers a scan of the hosts that are due for scanning.
+// If force is true, every known host is scanned regardless of when its next
+// scan is scheduled. Triggering is best-effort, it is a no-op if a scan of the
+// same kind is already queued.
+func (m *HostManager) TriggerHostScanning(force bool) {
+	ch := m.triggerHostScanningChan
+	if force {
+		ch = m.triggerForcedHostScanningChan
+	}
 	select {
-	case m.triggerHostScanningChan <- struct{}{}:
+	case ch <- struct{}{}:
 	default:
 	}
 }
