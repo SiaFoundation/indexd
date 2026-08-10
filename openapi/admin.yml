@@ -1438,9 +1438,16 @@ paths:
     post:
       tags:
         - hosts
-      summary: Scan all hosts
-      description: Queues a background scan of every host known when the scan begins, regardless of its scheduled next scan time. Duplicate requests are ignored while a scan request is waiting to be processed. A request received after scanning has begun may queue another full scan.
+      summary: Scan hosts
+      description: Queues a background scan of the hosts that are due to be scanned, which is the set of hosts imported or announced since the last scan plus those whose next scan time has passed. Set force to scan every host known when the scan begins regardless of its scheduled next scan time. Duplicate requests are ignored while a scan request of the same kind is waiting to be processed. A request received after scanning has begun may queue another scan.
       operationId: scanHosts
+      parameters:
+        - name: force
+          in: query
+          description: Scan every known host instead of only those that are due.
+          schema:
+            type: boolean
+            default: false
       responses:
         "204":
           description: Host scanning triggered successfully
