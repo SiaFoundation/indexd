@@ -78,7 +78,6 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 
 	var dbstore *chain.DBStore
-	var tipState consensus.State
 	minPruneTarget := uint64(6 * time.Hour / network.BlockInterval)
 	if instantSync && cfg.Consensus.PruneTarget == 0 {
 		// default to 6 hours of blocks
@@ -139,7 +138,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		}
 		defer bdb.Close()
 
-		dbstore, tipState, err = chain.NewDBStoreAtCheckpoint(bdb, cs, b, chain.NewZapMigrationLogger(log.Named("chaindb")))
+		dbstore, err = chain.NewDBStoreAtCheckpoint(bdb, cs, b, chain.NewZapMigrationLogger(log.Named("chaindb")))
 		if err != nil {
 			return fmt.Errorf("failed to create chain store from checkpoint: %w", err)
 		}
@@ -156,12 +155,12 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		}
 		defer bdb.Close()
 
-		dbstore, tipState, err = chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(log.Named("chaindb")))
+		dbstore, err = chain.NewDBStore(bdb, network, genesis, chain.NewZapMigrationLogger(log.Named("chaindb")))
 		if err != nil {
 			return fmt.Errorf("failed to create chain store: %w", err)
 		}
 	}
-	cm := chain.NewManager(dbstore, tipState, chain.WithLog(log.Named("chain")))
+	cm := chain.NewManager(dbstore, chain.WithLog(log.Named("chain")))
 
 	syncerListener, err := net.Listen("tcp", cfg.Syncer.Address)
 	if err != nil {

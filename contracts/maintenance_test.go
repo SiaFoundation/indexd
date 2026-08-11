@@ -33,11 +33,11 @@ func TestWalletMaintenance(t *testing.T) {
 	network, genesis := testutil.V2Network()
 	network.MaturityDelay = 0
 
-	dbstore, tipState, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, chain.NewZapMigrationLogger(log.Named("chaindb")))
+	dbstore, err := chain.NewDBStore(chain.NewMemDB(), network, genesis, chain.NewZapMigrationLogger(log.Named("chaindb")))
 	if err != nil {
 		t.Fatalf("failed to create chain store: %v", err)
 	}
-	cm := chain.NewManager(dbstore, tipState, chain.WithLog(log.Named("chain")))
+	cm := chain.NewManager(dbstore, chain.WithLog(log.Named("chain")))
 
 	s := testutils.NewSyncer(t, genesis.ID(), cm)
 	defer s.Close()
