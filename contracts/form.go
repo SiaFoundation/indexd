@@ -147,9 +147,6 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 		if !host.IsGood() {
 			return errors.New("host is not good")
 		}
-		refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-		defer cancel()
-
 		if contract.ProofHeight <= host.Settings.Prices.TipHeight {
 			return fmt.Errorf("contract is expired and cannot be refreshed")
 		}
@@ -158,6 +155,9 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 
 		lc, unlock := cm.cl.LockContract(contract.ID)
 		defer unlock()
+
+		refreshCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		defer cancel()
 
 		var res rhp.RPCRefreshContractResult
 		err := cm.rev.WithRevision(refreshCtx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {

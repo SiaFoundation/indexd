@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -26,36 +27,46 @@ import (
 // budget.
 const defaultConnectTimeout = 10 * time.Second
 
+var (
+	errTransportDropped = errors.New("transport was dropped before use")
+	errTransportClosed  = errors.New("transport is closed")
+)
+
 type transport struct {
 	connectTimeout time.Duration
 
 	mu      sync.Mutex
 	dialCh  chan struct{} // signals dial completion
-	current *transportState
-	open    map[*transportState]struct{}
+	closed  bool
+	current *transportRef
+	open    map[*transportRef]struct{}
 }
 
-// transportState tracks RPCs using one generation of a cached transport.
-// Once detached, it is closed as soon as the last RPC releases it.
-type transportState struct {
-	client   rhp.TransportClient
-	owner    *transport
+// transportRef is a counted reference to a cached transport.
+type transportRef struct {
+	tc       rhp.TransportClient
 	refs     int
 	detached bool
 	closed   bool
 }
 
-func (ts *transportState) release() { ts.owner.release(ts) }
-func (ts *transportState) detach()  { ts.owner.detach(ts) }
-func (ts *transportState) reset()   { ts.owner.reset(ts) }
+func newTransport(connectTimeout time.Duration) *transport {
+	return &transport{
+		connectTimeout: connectTimeout,
+		open:           make(map[*transportRef]struct{}),
+	}
+}
 
+// close closes every transport the host has open. Later dials are refused
+// rather than cached.
 func (t *transport) close() {
 	t.mu.Lock()
+	t.closed = true
 	clients := make([]rhp.TransportClient, 0, len(t.open))
-	for ts := range t.open {
-		ts.detached = true
-		if t.closeLocked(ts) {
-			clients = append(clients, ts.client)
+	for ref := range t.open {
+		ref.detached = true
+		if t.closeLocked(ref) {
+			clients = append(clients, ref.tc)
 		}
 	}
 	t.current = nil
@@ -66,86 +77,73 @@ func (t *transport) close() {
 	}
 }
 
-func (t *transport) addLocked(tc rhp.TransportClient) *transportState {
-	state := &transportState{client: tc, owner: t}
-	if t.open == nil {
-		t.open = make(map[*transportState]struct{})
-	}
-	t.open[state] = struct{}{}
-	t.current = state
-	return state
+func (t *transport) addLocked(tc rhp.TransportClient) *transportRef {
+	ref := &transportRef{tc: tc}
+	t.open[ref] = struct{}{}
+	t.current = ref
+	return ref
 }
 
-func (t *transport) closeLocked(ts *transportState) bool {
-	if ts.closed {
+func (t *transport) closeLocked(ref *transportRef) bool {
+	if ref.closed {
 		return false
 	}
-	ts.closed = true
-	delete(t.open, ts)
+	ref.closed = true
+	delete(t.open, ref)
 	return true
 }
 
-func (t *transport) reset(ts *transportState) {
+// detach stops handing ref's transport to new RPCs and reports whether it was
+// cached. The transport stays open until the last reference to it is released.
+func (t *transport) detach(ref *transportRef) bool {
 	t.mu.Lock()
-	if t.current == ts {
-		t.current = nil
-	}
-	ts.detached = true
-	shouldClose := t.closeLocked(ts)
-	t.mu.Unlock()
-
-	if shouldClose {
-		_ = ts.client.Close()
-	}
-}
-
-// detach stops handing the state's transport to new RPCs and reports whether
-// it was cached. A replacement stays cached because the caller did not use it.
-func (t *transport) detach(ts *transportState) bool {
-	t.mu.Lock()
-	if ts == nil || t.current != ts {
+	if ref == nil || t.current != ref {
 		t.mu.Unlock()
 		return false
 	}
 	t.current = nil
-	ts.detached = true
-	shouldClose := ts.refs == 0 && t.closeLocked(ts)
+	ref.detached = true
+	shouldClose := ref.refs == 0 && t.closeLocked(ref)
 	t.mu.Unlock()
 
 	if shouldClose {
-		_ = ts.client.Close()
+		_ = ref.tc.Close()
 	}
 	return true
 }
 
-func (t *transport) release(ts *transportState) {
+// release drops a reference, closing the transport if it was detached.
+func (t *transport) release(ref *transportRef) {
 	t.mu.Lock()
-	if ts.refs <= 0 {
+	if ref.refs <= 0 {
 		t.mu.Unlock()
-		panic("released transport without a reference")
+		panic("released transport without a reference") // developer error
 	}
-	ts.refs--
-	shouldClose := ts.detached && ts.refs == 0 && t.closeLocked(ts)
+	ref.refs--
+	shouldClose := ref.detached && ref.refs == 0 && t.closeLocked(ref)
 	t.mu.Unlock()
 
 	if shouldClose {
-		_ = ts.client.Close()
+		_ = ref.tc.Close()
 	}
 }
 
-func (t *transport) acquireLocked() *transportState {
+func (t *transport) acquireLocked() *transportRef {
 	t.current.refs++
 	return t.current
 }
 
-func (t *transport) dial(ctx context.Context, hostKey types.PublicKey, addresses []chain.NetAddress) (*transportState, error) {
+func (t *transport) dial(ctx context.Context, hostKey types.PublicKey, addresses []chain.NetAddress) (*transportRef, error) {
 	var dialCh chan struct{}
 	for {
 		t.mu.Lock()
-		if t.current != nil {
-			tc := t.acquireLocked()
+		if t.closed {
 			t.mu.Unlock()
-			return tc, nil
+			return nil, errTransportClosed
+		} else if t.current != nil {
+			ref := t.acquireLocked()
+			t.mu.Unlock()
+			return ref, nil
 		} else if t.dialCh == nil {
 			dialCh = make(chan struct{})
 			t.dialCh = dialCh
@@ -168,6 +166,7 @@ func (t *transport) dial(ctx context.Context, hostKey types.PublicKey, addresses
 	defer dialCancel()
 
 	connectErrs := make([]error, len(addresses))
+	var dialed bool // guarded by t.mu
 
 top:
 	for i, addr := range addresses {
@@ -191,6 +190,7 @@ top:
 			/*case quic.Protocol:
 			transport, err = quic.Dial(dialCtx, addr.Address, hostKey)*/
 			default:
+				connectErrs[i] = fmt.Errorf("unsupported protocol %q", addr.Protocol)
 				return
 			}
 			connectErrs[i] = err
@@ -203,12 +203,15 @@ top:
 			}
 			dialCancel()
 			t.mu.Lock()
-			if t.current == nil {
+			keep := !dialed && !t.closed
+			if keep {
 				t.addLocked(transport)
-			} else {
-				_ = transport.Close()
+				dialed = true
 			}
 			t.mu.Unlock()
+			if !keep {
+				_ = transport.Close()
+			}
 		}(i, addr)
 	}
 	// wait for all dial attempts to finish
@@ -217,13 +220,23 @@ top:
 	t.mu.Lock()
 	t.dialCh = nil
 	close(dialCh)
-	if t.current == nil {
+	if t.current != nil {
+		ref := t.acquireLocked()
 		t.mu.Unlock()
-		return nil, fmt.Errorf("failed to connect to host %s (%w)", hostKey.String(), errors.Join(connectErrs...))
+		return ref, nil
 	}
-	tc := t.acquireLocked()
+	closed, dropped := t.closed, dialed
 	t.mu.Unlock()
-	return tc, nil
+
+	if closed {
+		return nil, errTransportClosed
+	} else if dropped {
+		return nil, fmt.Errorf("%w: host %s", errTransportDropped, hostKey.String())
+	} else if err := errors.Join(connectErrs...); err != nil {
+		return nil, fmt.Errorf("failed to connect to host %s (%w)", hostKey.String(), err)
+	}
+	// connectErrs is empty when no attempt finished before the connect timeout
+	return nil, fmt.Errorf("failed to connect to host %s (%w)", hostKey.String(), dialCtx.Err())
 }
 
 // A Client is used to interact with Sia hosts over RHP4.
@@ -238,23 +251,29 @@ type Client struct {
 	transports     map[types.PublicKey]*transport
 }
 
-// hostTransport opens a transport connection to the specified host.
-func (c *Client) hostTransport(ctx context.Context, hostKey types.PublicKey) (*transportState, error) {
+// hostTransport opens a transport connection to the specified host, returning
+// the host's transport and a reference to the connection to use.
+func (c *Client) hostTransport(ctx context.Context, hostKey types.PublicKey) (*transport, *transportRef, error) {
 	addresses, err := c.hosts.Addresses(hostKey)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get host addresses: %w", err)
+		return nil, nil, fmt.Errorf("failed to get host addresses: %w", err)
 	} else if len(addresses) == 0 {
-		return nil, errors.New("no addresses found for host")
+		return nil, nil, errors.New("no addresses found for host")
 	}
 
 	c.mu.Lock()
 	t := c.transports[hostKey]
 	if t == nil {
-		t = &transport{connectTimeout: defaultConnectTimeout}
+		t = newTransport(defaultConnectTimeout)
 		c.transports[hostKey] = t
 	}
 	c.mu.Unlock()
-	return t.dial(ctx, hostKey, addresses)
+
+	ref, err := t.dial(ctx, hostKey, addresses)
+	if err != nil {
+		return nil, nil, err
+	}
+	return t, ref, nil
 }
 
 func isFailedRPC(ctx context.Context, err error) bool {
@@ -263,21 +282,44 @@ func isFailedRPC(ctx context.Context, err error) bool {
 		return false // interrupted RPC
 	case errors.Is(err, proto.ErrSectorNotFound), errors.Is(err, proto.ErrSectorCorrupt):
 		return false
+	case errors.Is(err, errTransportDropped), errors.Is(err, errTransportClosed):
+		return false // the client dropped the transport, not the host
 	default:
 		return err != nil
 	}
 }
 
-// isStalledRPC reports whether an RPC that reached a transport failed when its
-// deadline expired. Cancellation is excluded because speculative reads are
-// routinely cancelled after another host wins the race.
+// streamTransport records whether an RPC opened a stream on the transport,
+// separating a deadline that expired before the RPC reached the network from
+// one that expired on the wire.
+type streamTransport struct {
+	rhp.TransportClient
+	dialed atomic.Bool
+}
+
+func (t *streamTransport) DialStream(ctx context.Context) (net.Conn, error) {
+	s, err := t.TransportClient.DialStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	t.dialed.Store(true)
+	return s, nil
+}
+
+// isStalledRPC reports whether an RPC failed because its deadline expired.
+// Cancellation is excluded because speculative reads are routinely cancelled
+// after another host wins the race.
 func isStalledRPC(ctx context.Context, err error) bool {
-	return err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded)
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return false
+	}
+	return errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, os.ErrDeadlineExceeded) ||
+		errors.Is(err, mux.ErrClosedStream)
 }
 
 func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx context.Context, transport rhp.TransportClient) error) (err error) {
-	// an already-expired context cannot say anything about a host or cached
-	// transport because the RPC never started.
+	// nothing can be blamed on the host if the RPC never started
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -289,30 +331,27 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 		}
 	}()
 
-	state, err := c.hostTransport(ctx, hostKey)
+	t, ref, err := c.hostTransport(ctx, hostKey)
 	if err != nil {
 		return fmt.Errorf("failed to get transport: %w", err)
 	}
-	defer state.release()
+	defer t.release(ref)
 
 	if err := ctx.Err(); err != nil {
-		// the context may have expired while resolving addresses or dialing. No
-		// RPC used the returned transport, so leave it cached.
+		// no RPC used the transport, so leave it cached
 		return err
 	}
 
-	err = fn(ctx, state.client)
+	transport := &streamTransport{TransportClient: ref.tc}
+	err = fn(ctx, transport)
 	if err == nil {
 		return nil
-	} else if isStalledRPC(ctx, err) {
-		// closing the RPC's stream does not mark the mux unhealthy. Detach this
-		// exact transport so the next RPC dials a fresh connection, but leave it
-		// alive until concurrent RPCs release it.
-		c.log.Debug("dropping stalled transport", zap.Stringer("host", hostKey), zap.Error(err))
-		state.detach()
-	} else if shouldResetTransport(err) {
-		c.log.Debug("resetting transport", zap.Stringer("host", hostKey), zap.Error(err))
-		state.reset()
+	}
+
+	stalled := transport.dialed.Load() && isStalledRPC(ctx, err)
+	if stalled || shouldResetTransport(err) {
+		c.log.Debug("dropping transport", zap.Bool("stalled", stalled), zap.Stringer("host", hostKey), zap.Error(err))
+		t.detach(ref)
 	}
 
 	return err

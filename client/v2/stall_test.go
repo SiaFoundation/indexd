@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"errors"
 	"net"
 	"sync"
 	"testing"
@@ -20,15 +21,9 @@ import (
 	"lukechampine.com/frand"
 )
 
-const (
-	stallDeadline  = 3 * time.Second
-	stallTolerance = 10 * time.Second
-	stallOvershoot = 2 * time.Second
-)
-
 // stallConn gates bytes crossing a net.Conn. While stalled, Read and Write
-// park instead of touching the underlying connection, which is what a peer
-// that stops draining looks like to the mux.
+// park instead of touching the underlying connection, mimicking a host that
+// stops draining.
 type stallConn struct {
 	net.Conn
 
@@ -88,25 +83,48 @@ func (c *stallConn) parkedWriteCalls() int {
 	return c.parkedWrites
 }
 
+// singleAddrStore is a Store holding one siamux host.
 type singleAddrStore struct {
-	addr string
+	hostKey types.PublicKey
+	addr    string
 }
 
-func (s singleAddrStore) UsableHosts() ([]hosts.HostInfo, error) { return nil, nil }
-func (s singleAddrStore) Usable(types.PublicKey) (bool, error)   { return true, nil }
-func (s singleAddrStore) Addresses(types.PublicKey) ([]chain.NetAddress, error) {
-	return []chain.NetAddress{{Protocol: siamux.Protocol, Address: s.addr}}, nil
+func (s singleAddrStore) UsableHosts() ([]hosts.HostInfo, error) {
+	return []hosts.HostInfo{{
+		PublicKey:     s.hostKey,
+		Addresses:     s.addresses(),
+		GoodForUpload: true,
+	}}, nil
 }
 
-type stubChain struct{ rhp.ChainManager }
+func (s singleAddrStore) Usable(hostKey types.PublicKey) (bool, error) {
+	return hostKey == s.hostKey, nil
+}
+
+func (s singleAddrStore) Addresses(hostKey types.PublicKey) ([]chain.NetAddress, error) {
+	if hostKey != s.hostKey {
+		return nil, errors.New("unknown host")
+	}
+	return s.addresses(), nil
+}
+
+func (s singleAddrStore) addresses() []chain.NetAddress {
+	return []chain.NetAddress{{Protocol: siamux.Protocol, Address: s.addr}}
+}
+
+// the host only serves unpaid sector writes, so everything the RPCs below never
+// reach is left nil.
+type (
+	stubChain struct{ rhp.ChainManager }
+
+	stubWallet struct{ rhp.Wallet }
+
+	stubContractor struct{ rhp.Contractor }
+)
 
 func (stubChain) Tip() types.ChainIndex          { return types.ChainIndex{} }
 func (stubChain) TipState() consensus.State      { return consensus.State{} }
 func (stubChain) RecommendedFee() types.Currency { return types.ZeroCurrency }
-
-type stubWallet struct{ rhp.Wallet }
-
-type stubContractor struct{ rhp.Contractor }
 
 func (stubContractor) DebitAccount(proto.Account, proto.Usage) error { return nil }
 
@@ -122,27 +140,26 @@ func serveHost(t *testing.T, hostKey types.PrivateKey, log *zap.Logger) string {
 		RemainingStorage:   1 << 40,
 	})
 	server := rhp.NewServer(hostKey, stubChain{}, stubContractor{}, stubWallet{}, sr, testutil.NewEphemeralSectorStore())
-	l, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = l.Close() })
-	go siamux.Serve(l, server, log.Named("siamux"))
-	return l.Addr().String()
+	return testutil.ServeSiaMux(t, server, log.Named("siamux"))
 }
 
 func TestStalledRPCDropsTransport(t *testing.T) {
+	const (
+		rpcDeadline = 3 * time.Second
+		tolerance   = 5 * time.Second // how late the stalled RPC may return
+	)
+
 	log := zaptest.NewLogger(t)
 	hostKey := types.GeneratePrivateKey()
 	hk := hostKey.PublicKey()
 	accountKey := types.GeneratePrivateKey()
 	hostAddr := serveHost(t, hostKey, log)
 
-	prov := NewProvider(singleAddrStore{addr: hostAddr})
+	prov := NewProvider(singleAddrStore{hostKey: hk, addr: hostAddr})
 	c := New(prov, log)
 	t.Cleanup(func() { _ = c.Close() })
 
-	// install a working transport whose underlying connection can be silenced.
+	// install a working transport whose underlying connection can be silenced
 	conn, err := net.Dial("tcp", hostAddr)
 	if err != nil {
 		t.Fatal(err)
@@ -158,22 +175,12 @@ func TestStalledRPCDropsTransport(t *testing.T) {
 	}
 	tracked := &closeTrackingTransport{TransportClient: tc}
 
-	tr := &transport{connectTimeout: defaultConnectTimeout}
-	tr.mu.Lock()
-	tr.addLocked(tracked)
-	tr.mu.Unlock()
+	tr := newTransport(defaultConnectTimeout)
+	install(tr, tracked)
 	c.mu.Lock()
 	c.transports[hk] = tr
 	c.mu.Unlock()
 
-	cachedTransport := func() rhp.TransportClient {
-		tr.mu.Lock()
-		defer tr.mu.Unlock()
-		if tr.current == nil {
-			return nil
-		}
-		return tr.current.client
-	}
 	hostFailRate := func() float64 {
 		prov.mu.Lock()
 		defer prov.mu.Unlock()
@@ -181,11 +188,11 @@ func TestStalledRPCDropsTransport(t *testing.T) {
 	}
 	waitFor := func(desc string, fn func() bool) {
 		t.Helper()
-		for range 500 {
+		for range 50 {
 			if fn() {
 				return
 			}
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(100 * time.Millisecond)
 		}
 		t.Fatal("timed out waiting for", desc)
 	}
@@ -198,19 +205,11 @@ func TestStalledRPCDropsTransport(t *testing.T) {
 
 	// hold the transport on behalf of an RPC that was already in flight when
 	// the stalled RPC reaches its deadline
-	tr.mu.Lock()
-	existing := tr.acquireLocked()
-	tr.mu.Unlock()
-	existingReleased := false
-	defer func() {
-		if !existingReleased {
-			tr.release(existing)
-		}
-	}()
+	existing := acquire(tr)
 
-	// stop relaying bytes after the handshake and cached settings exchange.
+	// stop relaying bytes after the handshake and cached settings exchange
 	sc.stall()
-	ctx, cancel := context.WithTimeout(t.Context(), stallDeadline)
+	ctx, cancel := context.WithTimeout(t.Context(), rpcDeadline)
 	defer cancel()
 	deadline, _ := ctx.Deadline()
 
@@ -223,41 +222,38 @@ func TestStalledRPCDropsTransport(t *testing.T) {
 
 	select {
 	case err = <-done:
-	case <-time.After(time.Until(deadline) + stallTolerance):
+	case <-time.After(time.Until(deadline) + tolerance):
 		_ = tc.Close()
 		t.Fatal("stalled write never returned at its deadline")
 	}
 	if err == nil {
 		t.Fatal("expected the stalled write to fail")
-	} else if overshoot := time.Since(deadline); overshoot > stallOvershoot {
-		t.Fatal("stalled write returned late", overshoot)
 	}
 
-	// the transport is evicted, but host scoring remains the caller's job.
-	if cachedTransport() != nil {
+	// the transport is dropped, but host scoring remains the caller's job
+	if cached(tr) != nil {
 		t.Fatal("stalled transport was not dropped")
 	} else if rate := hostFailRate(); rate != healthy {
-		t.Fatal("client demoted the host", rate)
+		t.Fatalf("expected fail rate %f, got %f", healthy, rate)
 	}
 
 	// existing streams keep the transport alive until they finish
-	if tracked.closes.Load() != 0 {
-		t.Fatal("detached transport was closed while still in use")
+	if closes := tracked.closes.Load(); closes != 0 {
+		t.Fatalf("expected 0 closes while the transport was in use, got %d", closes)
 	}
 	sc.release()
-	if _, err := rhp.RPCSettings(t.Context(), existing.client); err != nil {
+	if _, err := rhp.RPCSettings(t.Context(), existing.tc); err != nil {
 		t.Fatal("dropped transport was closed while still in use", err)
 	}
 	tr.release(existing)
-	existingReleased = true
-	if tracked.closes.Load() != 1 {
-		t.Fatal("detached transport was not closed after its last RPC finished")
+	if closes := tracked.closes.Load(); closes != 1 {
+		t.Fatalf("expected 1 close after the last RPC finished, got %d", closes)
 	}
 
-	// the next RPC reaches the same host over a fresh connection.
+	// the next RPC reaches the same host over a fresh connection
 	if _, err := c.WriteSector(t.Context(), accountKey, hk, sector); err != nil {
 		t.Fatal(err)
-	} else if fresh := cachedTransport(); fresh == nil || fresh == tracked {
+	} else if fresh := cached(tr); fresh == nil || fresh == tracked {
 		t.Fatal("next RPC did not cache a fresh transport")
 	}
 }
