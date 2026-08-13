@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,6 +18,19 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/mux/v3"
 )
+
+type closeTrackingTransport struct {
+	rhp.TransportClient
+	closes atomic.Int64
+}
+
+func (t *closeTrackingTransport) Close() error {
+	t.closes.Add(1)
+	if t.TransportClient != nil {
+		return t.TransportClient.Close()
+	}
+	return nil
+}
 
 func TestIsFailedRPC(t *testing.T) {
 	cancelled, cancel := context.WithCancel(context.Background())
@@ -82,19 +96,60 @@ func TestIsStalledRPC(t *testing.T) {
 }
 
 func TestTransportDetach(t *testing.T) {
-	oldTransport := &fakeSettingsTransport{}
-	replacement := &fakeSettingsTransport{}
-	tr := &transport{tc: replacement}
+	oldTransport := &closeTrackingTransport{}
+	replacement := &closeTrackingTransport{}
+	tr := &transport{}
+	oldClient := &transportState{client: oldTransport, owner: tr}
+	tr.mu.Lock()
+	replacementClient := tr.addLocked(replacement)
+	tr.mu.Unlock()
 
-	if tr.detach(oldTransport) {
+	if tr.detach(oldClient) {
 		t.Fatal("detached a replacement transport that the caller did not use")
-	} else if tr.tc != replacement {
+	} else if tr.current != replacementClient {
 		t.Fatal("replaced the cached transport")
 	}
-	if !tr.detach(replacement) {
+
+	tr.mu.Lock()
+	first := tr.acquireLocked()
+	second := tr.acquireLocked()
+	tr.mu.Unlock()
+	if !tr.detach(replacementClient) {
 		t.Fatal("failed to detach the matching transport")
-	} else if tr.tc != nil {
+	} else if tr.current != nil {
 		t.Fatal("detached transport is still cached")
+	} else if replacement.closes.Load() != 0 {
+		t.Fatal("detached transport was closed while in use")
+	}
+
+	tr.release(first)
+	if replacement.closes.Load() != 0 {
+		t.Fatal("detached transport was closed before its last user released it")
+	}
+	tr.release(second)
+	if replacement.closes.Load() != 1 {
+		t.Fatal("detached transport was not closed after its last user released it")
+	}
+}
+
+func TestTransportCloseDetached(t *testing.T) {
+	underlying := &closeTrackingTransport{}
+	tr := &transport{}
+	tr.mu.Lock()
+	tc := tr.addLocked(underlying)
+	tr.acquireLocked()
+	tr.mu.Unlock()
+
+	if !tr.detach(tc) {
+		t.Fatal("failed to detach transport")
+	}
+	tr.close()
+	if underlying.closes.Load() != 1 {
+		t.Fatal("close did not close detached transport")
+	}
+	tr.release(tc)
+	if underlying.closes.Load() != 1 {
+		t.Fatal("released transport was closed twice")
 	}
 }
 

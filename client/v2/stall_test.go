@@ -156,8 +156,12 @@ func TestStalledRPCDropsTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	tracked := &closeTrackingTransport{TransportClient: tc}
 
-	tr := &transport{connectTimeout: defaultConnectTimeout, tc: tc}
+	tr := &transport{connectTimeout: defaultConnectTimeout}
+	tr.mu.Lock()
+	tr.addLocked(tracked)
+	tr.mu.Unlock()
 	c.mu.Lock()
 	c.transports[hk] = tr
 	c.mu.Unlock()
@@ -165,7 +169,10 @@ func TestStalledRPCDropsTransport(t *testing.T) {
 	cachedTransport := func() rhp.TransportClient {
 		tr.mu.Lock()
 		defer tr.mu.Unlock()
-		return tr.tc
+		if tr.current == nil {
+			return nil
+		}
+		return tr.current.client
 	}
 	hostFailRate := func() float64 {
 		prov.mu.Lock()
@@ -188,6 +195,18 @@ func TestStalledRPCDropsTransport(t *testing.T) {
 		t.Fatal(err)
 	}
 	healthy := hostFailRate()
+
+	// hold the transport on behalf of an RPC that was already in flight when
+	// the stalled RPC reaches its deadline
+	tr.mu.Lock()
+	existing := tr.acquireLocked()
+	tr.mu.Unlock()
+	existingReleased := false
+	defer func() {
+		if !existingReleased {
+			tr.release(existing)
+		}
+	}()
 
 	// stop relaying bytes after the handshake and cached settings exchange.
 	sc.stall()
@@ -221,16 +240,24 @@ func TestStalledRPCDropsTransport(t *testing.T) {
 		t.Fatal("client demoted the host", rate)
 	}
 
-	// existing streams get a grace period instead of being closed immediately.
+	// existing streams keep the transport alive until they finish
+	if tracked.closes.Load() != 0 {
+		t.Fatal("detached transport was closed while still in use")
+	}
 	sc.release()
-	if _, err := rhp.RPCSettings(t.Context(), tc); err != nil {
+	if _, err := rhp.RPCSettings(t.Context(), existing.client); err != nil {
 		t.Fatal("dropped transport was closed while still in use", err)
+	}
+	tr.release(existing)
+	existingReleased = true
+	if tracked.closes.Load() != 1 {
+		t.Fatal("detached transport was not closed after its last RPC finished")
 	}
 
 	// the next RPC reaches the same host over a fresh connection.
 	if _, err := c.WriteSector(t.Context(), accountKey, hk, sector); err != nil {
 		t.Fatal(err)
-	} else if fresh := cachedTransport(); fresh == nil || fresh == tc {
+	} else if fresh := cachedTransport(); fresh == nil || fresh == tracked {
 		t.Fatal("next RPC did not cache a fresh transport")
 	}
 }
