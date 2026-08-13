@@ -26,11 +26,11 @@ import (
 // budget.
 const defaultConnectTimeout = 10 * time.Second
 
-// stalledTransportGrace is how long a stalled transport stays open after it
-// stops being handed out. It exceeds the longest budget any caller puts on a
-// single RPC, so the RPCs sharing that connection fail on their own deadlines
-// instead of failing the moment another one gives up.
-const stalledTransportGrace = 2 * time.Minute
+// stalledTransportGrace bounds how long a detached transport is kept alive.
+// It exceeds the longest RPC deadline used by indexd, giving RPCs already
+// sharing the mux time to finish without being interrupted by the RPC that
+// detected the stall.
+const stalledTransportGrace = 11 * time.Minute
 
 type transport struct {
 	connectTimeout time.Duration
@@ -60,9 +60,8 @@ func (t *transport) reset() {
 	}
 }
 
-// detach stops handing tc out and reports whether it did. A transport that was
-// already replaced stays in place, since discarding it would penalize a
-// connection the caller never used.
+// detach stops handing tc to new RPCs and reports whether it did. A transport
+// that was already replaced stays cached, since the caller did not use it.
 func (t *transport) detach(tc rhp.TransportClient) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -195,10 +194,9 @@ func (c *Client) resetTransport(hostKey types.PublicKey) {
 	c.mu.Unlock()
 }
 
-// dropStalledTransport stops handing tc to new RPCs, then closes it once the
-// grace period elapses or the client shuts down. Closing it right away would
-// take down every other stream on that connection, and a stalled RPC only
-// proves the peer stopped answering its own stream.
+// dropStalledTransport stops handing tc to new RPCs, then closes it after a
+// grace period or when the client shuts down. Closing it immediately would
+// interrupt every other stream sharing the mux.
 func (c *Client) dropStalledTransport(hostKey types.PublicKey, tc rhp.TransportClient) {
 	c.mu.Lock()
 	t := c.transports[hostKey]
@@ -210,18 +208,20 @@ func (c *Client) dropStalledTransport(hostKey types.PublicKey, tc rhp.TransportC
 
 	ctx, cancel, err := c.tg.AddContext(context.Background())
 	if err != nil {
-		tc.Close() // the client is shutting down
+		_ = tc.Close() // the client is shutting down
 		return
 	}
 
 	go func() {
 		defer cancel()
+		timer := time.NewTimer(stalledTransportGrace)
+		defer timer.Stop()
 
 		select {
-		case <-time.After(stalledTransportGrace):
+		case <-timer.C:
 		case <-ctx.Done():
 		}
-		tc.Close()
+		_ = tc.Close()
 	}()
 }
 
@@ -255,17 +255,20 @@ func isFailedRPC(ctx context.Context, err error) bool {
 	}
 }
 
-// isStalledRPC reports whether an RPC failed because its deadline expired
-// while it was in flight, which means the peer stopped responding after the
-// connection was established. A cancelled RPC does not qualify: cancelling is
-// routine, since overprovisioned reads are cancelled by design, and treating
-// that as a stall would discard connections that are still serving other
-// streams.
+// isStalledRPC reports whether an RPC that reached a transport failed when its
+// deadline expired. Cancellation is excluded because speculative reads are
+// routinely cancelled after another host wins the race.
 func isStalledRPC(ctx context.Context, err error) bool {
-	return err != nil && ctx.Err() == context.DeadlineExceeded
+	return err != nil && errors.Is(ctx.Err(), context.DeadlineExceeded)
 }
 
 func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx context.Context, transport rhp.TransportClient) error) (err error) {
+	// an already-expired context cannot say anything about a host or cached
+	// transport because the RPC never started.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	defer func() {
 		// increment the failed RPC count if the RPC is considered failed
 		if isFailedRPC(ctx, err) {
@@ -276,19 +279,19 @@ func (c *Client) rpcFn(ctx context.Context, hostKey types.PublicKey, fn func(ctx
 	transport, err := c.hostTransport(ctx, hostKey)
 	if err != nil {
 		return fmt.Errorf("failed to get transport: %w", err)
+	} else if err := ctx.Err(); err != nil {
+		// the context may have expired while resolving addresses or dialing. No
+		// RPC used the returned transport, so leave it cached.
+		return err
 	}
 
 	err = fn(ctx, transport)
 	if err == nil {
 		return nil
-	}
-
-	// a deadline that expired while the RPC was in flight means the peer
-	// stopped answering. The stream unwound when its context died, but nothing
-	// marks the connection as broken, so it would keep being handed out until
-	// the kernel abandons the socket, about 15 minutes with the usual
-	// tcp_retries2
-	if isStalledRPC(ctx, err) {
+	} else if isStalledRPC(ctx, err) {
+		// closing the RPC's stream does not mark the mux unhealthy. Detach this
+		// exact transport so the next RPC dials a fresh connection, but leave it
+		// alive temporarily for concurrent streams.
 		c.log.Debug("dropping stalled transport", zap.Stringer("host", hostKey), zap.Error(err))
 		c.dropStalledTransport(hostKey, transport)
 	} else if shouldResetTransport(err) {

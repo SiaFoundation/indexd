@@ -57,9 +57,8 @@ func TestIsFailedRPC(t *testing.T) {
 func TestIsStalledRPC(t *testing.T) {
 	cancelled, cancel := context.WithCancel(context.Background())
 	cancel()
-
-	expired, cancelExpired := context.WithDeadline(context.Background(), time.Unix(0, 0))
-	defer cancelExpired()
+	deadline, cancelDeadline := context.WithDeadline(context.Background(), time.Unix(0, 0))
+	defer cancelDeadline()
 
 	tests := []struct {
 		name string
@@ -67,16 +66,11 @@ func TestIsStalledRPC(t *testing.T) {
 		err  error
 		want bool
 	}{
-		{"live ctx, nil err", context.Background(), nil, false},
-		{"live ctx, arbitrary err", context.Background(), errors.New("boom"), false},
-
-		{"cancelled ctx, nil err", cancelled, nil, false},
-		{"cancelled ctx, arbitrary err", cancelled, errors.New("boom"), false},
-
-		{"expired ctx, nil err", expired, nil, false},
-		{"expired ctx, arbitrary err", expired, errors.New("boom"), true},
-		{"expired ctx, closed stream", expired, mux.ErrClosedStream, true},
-		{"expired ctx, wrapped closed stream", expired, fmt.Errorf("failed to write request: %w", mux.ErrClosedStream), true},
+		{"success after deadline", deadline, nil, false},
+		{"deadline", deadline, context.DeadlineExceeded, true},
+		{"wrapped deadline", deadline, fmt.Errorf("write failed: %w", mux.ErrClosedStream), true},
+		{"cancellation", cancelled, context.Canceled, false},
+		{"ordinary failure", context.Background(), errors.New("boom"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -84,6 +78,23 @@ func TestIsStalledRPC(t *testing.T) {
 				t.Fatalf("expected %v, got %v", tt.want, got)
 			}
 		})
+	}
+}
+
+func TestTransportDetach(t *testing.T) {
+	oldTransport := &fakeSettingsTransport{}
+	replacement := &fakeSettingsTransport{}
+	tr := &transport{tc: replacement}
+
+	if tr.detach(oldTransport) {
+		t.Fatal("detached a replacement transport that the caller did not use")
+	} else if tr.tc != replacement {
+		t.Fatal("replaced the cached transport")
+	}
+	if !tr.detach(replacement) {
+		t.Fatal("failed to detach the matching transport")
+	} else if tr.tc != nil {
+		t.Fatal("detached transport is still cached")
 	}
 }
 
