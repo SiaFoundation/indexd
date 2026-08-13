@@ -766,11 +766,15 @@ func TestSlabRepinDuringPrune(t *testing.T) {
 }
 
 func BenchmarkPruneSlabs(b *testing.B) {
-	const (
-		numAccounts       = 1000
-		objectsPerAccount = 500
-		slabsPerObject    = 3
-	)
+	benchmarkPruneSlabs(b, 1000, 500)
+}
+
+func BenchmarkPruneSlabsLargeAccount(b *testing.B) {
+	benchmarkPruneSlabs(b, 1, 10_000)
+}
+
+func benchmarkPruneSlabs(b *testing.B, numAccounts, objectsPerAccount int) {
+	const slabsPerObject = 3
 
 	store := initPostgres(b, zap.NewNop())
 
@@ -790,6 +794,7 @@ func BenchmarkPruneSlabs(b *testing.B) {
 
 	batch := &pgx.Batch{}
 	var accs []proto.Account
+	orphaned := make([][]int64, numAccounts)
 	var slabID, objectID int64
 	pinnedPerAccount := int64(objectsPerAccount*slabsPerObject) * int64(proto.SectorSize)
 	for i := range numAccounts {
@@ -816,6 +821,8 @@ func BenchmarkPruneSlabs(b *testing.B) {
 				batch.Queue(`INSERT INTO account_slabs(account_id, slab_id) VALUES ($1, $2)`, accountID, slabID)
 				if j%2 == 0 {
 					batch.Queue(`INSERT INTO object_slabs(object_id, slab_digest, slab_index, slab_offset, slab_length) VALUES ($1, $2, $3, 0, 0)`, objectID, slabDigest, k)
+				} else {
+					orphaned[i] = append(orphaned[i], slabID)
 				}
 			}
 		}
@@ -831,9 +838,27 @@ func BenchmarkPruneSlabs(b *testing.B) {
 	}
 
 	for b.Loop() {
-		b.ReportMetric(float64(objectsPerAccount)*float64(slabsPerObject)/2.0, "slabs/op")
+		b.ReportMetric(float64(len(orphaned[0])), "slabs/op")
+		accountIndex := frand.Intn(len(accs))
 
-		if err := store.PruneSlabs(accs[frand.Intn(len(accs))], time.Now()); err != nil {
+		b.StopTimer()
+		res, err := store.pool.Exec(b.Context(), `INSERT INTO account_slabs(account_id, slab_id)
+SELECT $1, slab_id FROM unnest($2::bigint[]) AS orphaned(slab_id)
+ON CONFLICT DO NOTHING`, accountIndex+1, orphaned[accountIndex])
+		if err != nil {
+			b.Fatal(err)
+		}
+		if restored := res.RowsAffected(); restored > 0 {
+			delta := restored * int64(proto.SectorSize)
+			if _, err := store.pool.Exec(b.Context(), `UPDATE accounts SET pinned_data = pinned_data + $1 WHERE id = $2`, delta, accountIndex+1); err != nil {
+				b.Fatal(err)
+			} else if _, err := store.pool.Exec(b.Context(), `UPDATE app_connect_keys SET pinned_data = pinned_data + $1 WHERE id = $2`, delta, connectKeyID); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.StartTimer()
+
+		if err := store.PruneSlabs(accs[accountIndex], time.Now()); err != nil {
 			b.Fatal(err)
 		}
 	}
