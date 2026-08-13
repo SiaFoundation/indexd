@@ -172,12 +172,13 @@ func (s *Store) PruneSlabs(account proto.Account, cutoff time.Time) error {
 		return err
 	}
 
-	getSlabs := func(ctx context.Context, tx *txn, limit int64) ([]int64, error) {
+	getSlabs := func(ctx context.Context, tx *txn, cursor, limit int64) ([]int64, error) {
 		rows, err := tx.Query(ctx, `SELECT s.id
 FROM slabs s
 JOIN account_slabs a ON s.id = a.slab_id
 WHERE a.account_id = $1
-	AND s.pinned_at < $2
+	AND a.slab_id > $2
+	AND s.pinned_at < $3
 	AND NOT EXISTS (
 		SELECT 1
 		FROM objects o
@@ -185,19 +186,25 @@ WHERE a.account_id = $1
 		WHERE o.account_id = a.account_id
 		AND os.slab_digest = s.digest
 	)
-LIMIT $3
-`, id, cutoff, limit)
+ORDER BY a.slab_id
+LIMIT $4
+`, id, cursor, cutoff, limit)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get unused slabs: %w", err)
 		}
 		return pgx.CollectRows(rows, pgx.RowTo[int64])
 	}
 
-	var exhausted bool
+	var cursor int64
 	const batchSize = 100
-	for !exhausted {
+	for {
+		var nextCursor int64
+		var exhausted bool
 		err := s.transaction(func(ctx context.Context, tx *txn) error {
-			candidates, err := getSlabs(ctx, tx, batchSize)
+			nextCursor = cursor
+			exhausted = false
+
+			candidates, err := getSlabs(ctx, tx, cursor, batchSize)
 			if err != nil {
 				return fmt.Errorf("failed to get slabs to unpin: %w", err)
 			}
@@ -205,13 +212,16 @@ LIMIT $3
 			if len(candidates) == 0 {
 				return nil
 			}
+			nextCursor = candidates[len(candidates)-1]
 
 			return s.unpinUnreferencedSlabs(ctx, tx, id, candidates, &cutoff)
 		})
 		if err != nil {
 			return err
 		}
+		cursor = nextCursor
+		if exhausted {
+			return nil
+		}
 	}
-
-	return nil
 }
