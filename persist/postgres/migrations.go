@@ -347,4 +347,16 @@ CREATE INDEX IF NOT EXISTS object_events_account_id_updated_at_object_key_idx ON
 DROP INDEX IF EXISTS object_events_updated_at_object_key_idx;`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+			CREATE TABLE blocked_objects (
+				object_key BYTEA PRIMARY KEY CHECK(LENGTH(object_key) = 32),
+				reason TEXT NOT NULL,
+				created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+			);
+
+			CREATE INDEX blocked_objects_created_at_idx ON blocked_objects(created_at DESC, object_key ASC);
+		`)
+		return err
+	},
 }

@@ -174,6 +174,12 @@ func (s *Store) AddSharedObject(account proto.Account, sharingKey types.PublicKe
 			return fmt.Errorf("failed to get sharing key: %w", err)
 		}
 
+		if blocked, err := objectBlocked(ctx, tx, req.ObjectID); err != nil {
+			return err
+		} else if blocked {
+			return slabs.ErrObjectBlocked
+		}
+
 		var objectID int64
 		err = tx.QueryRow(ctx, `SELECT id FROM objects WHERE object_key = $1 AND account_id = $2`, sqlHash256(req.ObjectID), accountID).Scan(&objectID)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -263,7 +269,9 @@ func (s *Store) SharedObjects(sharingKey types.PublicKey, offset, limit int) (ob
 		rows, err := tx.Query(ctx, `
 			SELECT so.object_id, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at
 			FROM shared_objects so
+			INNER JOIN objects o ON o.id = so.object_id
 			WHERE so.sharing_key_id = $1
+			  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = o.object_key)
 			ORDER BY so.created_at DESC
 			LIMIT $2 OFFSET $3
 		`, sharingKeyID, limit, offset)
@@ -309,6 +317,12 @@ func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey types.Has
 			return sharing.ErrSharingKeyNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to get sharing key: %w", err)
+		}
+
+		if blocked, err := objectBlocked(ctx, tx, objectKey); err != nil {
+			return err
+		} else if blocked {
+			return slabs.ErrObjectBlocked
 		}
 
 		rows, err := tx.Query(ctx, `

@@ -140,6 +140,12 @@ type (
 		ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
 		SharedObject(key types.Hash256) (SharedObject, error)
 
+		// Blocklist methods
+		BlockObject(objectKey types.Hash256, reason string) error
+		UnblockObject(objectKey types.Hash256) error
+		BlockedObject(objectKey types.Hash256) (BlockedObject, error)
+		BlockedObjects(offset, limit int) ([]BlockedObject, error)
+
 		ObjectsForSlab(slabID SlabID) ([]SlabObject, error)
 		SectorStats() (SectorsStats, error)
 	}

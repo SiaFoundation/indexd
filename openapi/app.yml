@@ -117,6 +117,7 @@ paths:
       tags:
         - objects
       summary: List all objects
+      description: Objects on the indexer's blocklist are hidden from this listing.
       parameters:
         - name: limit
           in: query
@@ -164,6 +165,8 @@ paths:
           description: Object created or updated successfully
         "400":
           description: Object has no slabs, metadata exceeds size limit, or object contains unpinned slab
+        "451":
+          description: The object is on the indexer's blocklist
   /objects/{key}:
     get:
       tags:
@@ -184,6 +187,8 @@ paths:
                 $ref: "#/components/schemas/SealedObject"
         "404":
           description: Object not found
+        "451":
+          description: The object is on the indexer's blocklist
     delete:
       tags:
         - objects
@@ -223,6 +228,8 @@ paths:
                 $ref: "#/components/schemas/SharedObject"
         "404":
           description: Object not found
+        "451":
+          description: The object is on the indexer's blocklist
 
   /sharing:
     get:
@@ -319,6 +326,7 @@ paths:
       tags:
         - sharing
       summary: List the objects attached to one of the account's sharing keys
+      description: Objects on the indexer's blocklist are hidden from this listing.
       operationId: listSharingKeyObjects
       parameters:
         - name: key
@@ -378,6 +386,8 @@ paths:
           description: Sharing key not found, or the account does not own the object
         "409":
           description: The encrypted keys or signatures are already used by another shared-object attachment
+        "451":
+          description: The object is on the indexer's blocklist
   /sharing/{key}/objects/{objectKey}:
     delete:
       tags:
@@ -420,6 +430,7 @@ paths:
       tags:
         - shared
       summary: List the objects the sharing key grants access to
+      description: Objects on the indexer's blocklist are hidden from this listing.
       operationId: getSharedObjects
       parameters:
         - name: limit
@@ -471,6 +482,8 @@ paths:
           description: The request is not signed by a valid, unexpired sharing key
         "404":
           description: Object not attached to the sharing key
+        "451":
+          description: The object is on the indexer's blocklist
   /shared/hosts:
     get:
       tags:
