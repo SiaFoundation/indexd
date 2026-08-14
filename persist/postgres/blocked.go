@@ -47,10 +47,13 @@ func (s *Store) UnblockObject(objectKey types.Hash256) error {
 		}
 
 		// bump the event past every live cursor so clients that already
-		// paginated past the object see it again
+		// paginated past the object see it again. Timestamps have second
+		// precision, so an unblock in the same second as the last event has to
+		// be pushed into the next one or the event stays behind cursors sitting
+		// on that second.
 		if _, err := tx.Exec(ctx, `
 			UPDATE object_events
-			SET updated_at = date_trunc('second', NOW())
+			SET updated_at = GREATEST(date_trunc('second', NOW()), updated_at + INTERVAL '1 second')
 			WHERE object_key = $1
 		`, sqlHash256(objectKey)); err != nil {
 			return fmt.Errorf("failed to bump object events: %w", err)

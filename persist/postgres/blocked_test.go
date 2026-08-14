@@ -3,6 +3,7 @@ package postgres
 import (
 	"errors"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -168,8 +169,13 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		}
 	}
 
+	updatedAt := make(map[types.Hash256]time.Time)
 	if events := listAll(); len(events) != n {
 		t.Fatalf("expected %d objects, got %d", n, len(events))
+	} else {
+		for _, ev := range events {
+			updatedAt[ev.Key] = ev.UpdatedAt
+		}
 	}
 
 	// block a run larger than the page size: filtering after the limit would
@@ -194,31 +200,26 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 	}
 
 	// unblocking bumps the event timestamps so a caught-up client sees the
-	// objects again. Timestamps are truncated to the second, so unblock inside
-	// the next second to separate the bumps from the pins. The margin keeps the
-	// unblocks off the boundary itself, which a sleep can wake just short of.
-	boundary := time.Now().Truncate(time.Second).Add(time.Second)
-	time.Sleep(time.Until(boundary.Add(100 * time.Millisecond)))
+	// objects again. The bump has to advance even when the unblock lands in the
+	// same second as the last event.
 	for _, b := range blocked {
 		if err := store.UnblockObject(b); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	events, err := store.ListObjects(acc, slabs.Cursor{After: boundary.Add(-time.Millisecond)}, math.MaxInt16)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(events) != len(blocked) {
-		t.Fatalf("expected %d objects after unblocking, got %d", len(blocked), len(events))
+	all := listAll()
+	if len(all) != n {
+		t.Fatalf("expected %d objects after unblocking, got %d", n, len(all))
 	}
-	for _, ev := range events {
-		if ev.Object == nil {
+	for _, ev := range all {
+		if !slices.Contains(blocked, ev.Key) {
+			continue
+		} else if !ev.UpdatedAt.After(updatedAt[ev.Key]) {
+			t.Fatalf("expected object %v to be bumped past %v, got %v", ev.Key, updatedAt[ev.Key], ev.UpdatedAt)
+		} else if ev.Object == nil {
 			t.Fatalf("expected object %v to be populated", ev.Key)
 		}
-	}
-
-	if all := listAll(); len(all) != n {
-		t.Fatalf("expected %d objects after unblocking, got %d", n, len(all))
 	}
 }
 
