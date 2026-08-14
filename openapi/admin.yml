@@ -2492,6 +2492,8 @@ components:
       $ref: "./components.yml#/components/schemas/Alert"
     Contract:
       $ref: "./components.yml#/components/schemas/Contract"
+    BlockedObject:
+      $ref: "./components.yml#/components/schemas/BlockedObject"
     Host:
       $ref: "./components.yml#/components/schemas/Host"
     HostImportRequest:

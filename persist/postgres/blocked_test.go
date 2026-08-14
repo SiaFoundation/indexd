@@ -150,9 +150,8 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		objs[i] = store.pinTestObject(t, acc, hk)
 	}
 
-	// listAll pages through every event and returns them with the cursor of a
-	// client that has caught up
-	listAll := func() ([]slabs.ObjectEvent, slabs.Cursor) {
+	// listAll pages through every event two at a time
+	listAll := func() []slabs.ObjectEvent {
 		t.Helper()
 		var all []slabs.ObjectEvent
 		var cursor slabs.Cursor
@@ -161,7 +160,7 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			} else if len(events) == 0 {
-				return all, cursor
+				return all
 			}
 			all = append(all, events...)
 			last := events[len(events)-1]
@@ -169,7 +168,7 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		}
 	}
 
-	if events, _ := listAll(); len(events) != n {
+	if events := listAll(); len(events) != n {
 		t.Fatalf("expected %d objects, got %d", n, len(events))
 	}
 
@@ -182,7 +181,7 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		}
 	}
 
-	events, caughtUp := listAll()
+	events := listAll()
 	if len(events) != n-len(blocked) {
 		t.Fatalf("expected %d objects, got %d", n-len(blocked), len(events))
 	}
@@ -195,16 +194,18 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 	}
 
 	// unblocking bumps the event timestamps so a caught-up client sees the
-	// objects again. Timestamps are truncated to the second, so wait for the
-	// next one.
-	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second)))
+	// objects again. Timestamps are truncated to the second, so unblock inside
+	// the next second to separate the bumps from the pins. The margin keeps the
+	// unblocks off the boundary itself, which a sleep can wake just short of.
+	boundary := time.Now().Truncate(time.Second).Add(time.Second)
+	time.Sleep(time.Until(boundary.Add(100 * time.Millisecond)))
 	for _, b := range blocked {
 		if err := store.UnblockObject(b); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	events, err := store.ListObjects(acc, caughtUp, math.MaxInt16)
+	events, err := store.ListObjects(acc, slabs.Cursor{After: boundary.Add(-time.Millisecond)}, math.MaxInt16)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(events) != len(blocked) {
@@ -216,7 +217,7 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		}
 	}
 
-	if all, _ := listAll(); len(all) != n {
+	if all := listAll(); len(all) != n {
 		t.Fatalf("expected %d objects after unblocking, got %d", n, len(all))
 	}
 }
