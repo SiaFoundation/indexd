@@ -398,6 +398,16 @@ CREATE INDEX object_events_account_id_updated_at_object_key_idx ON object_events
 -- probe by object_key alone since the PK leads with account_id
 CREATE INDEX object_events_object_key_idx ON object_events(object_key);
 
+-- object keys that may not be pinned, listed, fetched or shared
+CREATE TABLE blocked_objects (
+    object_key BYTEA PRIMARY KEY CHECK(LENGTH(object_key) = 32),
+    reason TEXT NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+
+-- fast sorting of the blocklist, most recently blocked first
+CREATE INDEX blocked_objects_created_at_idx ON blocked_objects(created_at DESC, object_key ASC);
+
 CREATE TABLE sharing_keys (
     id BIGSERIAL PRIMARY KEY,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

@@ -304,6 +304,9 @@ func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
 	if errors.Is(err, slabs.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
 		return
+	} else if errors.Is(err, slabs.ErrObjectBlocked) {
+		jc.Error(err, http.StatusUnavailableForLegalReasons)
+		return
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
@@ -321,6 +324,9 @@ func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
 	obj, err := a.slabs.SharedObject(jc.Request.Context(), key)
 	if errors.Is(err, slabs.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, slabs.ErrObjectBlocked) {
+		jc.Error(err, http.StatusUnavailableForLegalReasons)
 		return
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
@@ -367,6 +373,9 @@ func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
 	err := a.slabs.PinObject(jc.Request.Context(), proto.Account(pk), obj)
 	if errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) || errors.Is(err, slabs.ErrObjectUnpinnedSlab) || errors.Is(err, slabs.ErrInvalidObjectSignature) {
 		jc.Error(err, http.StatusBadRequest)
+		return
+	} else if errors.Is(err, slabs.ErrObjectBlocked) {
+		jc.Error(err, http.StatusUnavailableForLegalReasons)
 		return
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
@@ -479,6 +488,9 @@ func (a *app) handlePOSTSharingObject(jc jape.Context, pk types.PublicKey) {
 		return
 	} else if errors.Is(err, sharing.ErrSharingKeyNotFound) || errors.Is(err, slabs.ErrObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, slabs.ErrObjectBlocked) {
+		jc.Error(err, http.StatusUnavailableForLegalReasons)
 		return
 	} else if err != nil {
 		jc.Error(err, http.StatusInternalServerError)

@@ -21,6 +21,12 @@ const sqlObjectsByKey = `
 // SharedObject retrieves the shared object with the given key for the given account.
 func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		if blocked, err := objectBlocked(ctx, tx, key); err != nil {
+			return err
+		} else if blocked {
+			return slabs.ErrObjectBlocked
+		}
+
 		var objID int64
 		err := tx.QueryRow(ctx, `SELECT id FROM objects WHERE object_key = $1
 		`, sqlHash256(key)).Scan(&objID)
@@ -97,6 +103,12 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 			return err
 		}
 
+		if blocked, err := objectBlocked(ctx, tx, key); err != nil {
+			return err
+		} else if blocked {
+			return slabs.ErrObjectBlocked
+		}
+
 		rows, err := tx.Query(ctx, sqlObjectsByKey, accountID, []sqlHash256{sqlHash256(key)})
 		if err != nil {
 			return fmt.Errorf("failed to query object: %w", err)
@@ -128,9 +140,10 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 
 		rows, err := tx.Query(ctx, `
 			SELECT object_key, was_deleted, updated_at
-			FROM object_events
-			WHERE account_id = $1 AND (updated_at, object_key) > ($2, $3)
-			ORDER BY updated_at ASC, object_key ASC
+			FROM object_events oe
+			WHERE oe.account_id = $1 AND (oe.updated_at, oe.object_key) > ($2, $3)
+			  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = oe.object_key)
+			ORDER BY oe.updated_at ASC, oe.object_key ASC
 			LIMIT $4
 		`, accountID, cursor.After, sqlHash256(cursor.Key), limit)
 		if err != nil {
@@ -275,6 +288,12 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 			return err
 		} else if deleted {
 			return accounts.ErrNotFound
+		}
+
+		if blocked, err := objectBlocked(ctx, tx, obj.ID); err != nil {
+			return err
+		} else if blocked {
+			return slabs.ErrObjectBlocked
 		}
 
 		// ensure empty slices are passed as nil

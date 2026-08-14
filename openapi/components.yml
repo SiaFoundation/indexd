@@ -620,6 +620,22 @@ components:
             - $ref: "#/components/schemas/SealedObject"
             - description: The object, if it exists
 
+    BlockedObject:
+      type: object
+      description: An object key on the blocklist
+      properties:
+        key:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The blocked object's unique ID
+        reason:
+          type: string
+          description: Why the object was blocked
+        createdAt:
+          type: string
+          format: date-time
+          description: When the object was blocked
+
     PublicKey:
       type: string
       pattern: "^ed25519:[0-9a-fA-F]{64}$"

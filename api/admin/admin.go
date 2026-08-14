@@ -142,6 +142,11 @@ type (
 		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
 		SectorStats() (slabs.SectorsStats, error)
 
+		BlockObject(ctx context.Context, objectKey types.Hash256, reason string) error
+		UnblockObject(ctx context.Context, objectKey types.Hash256) error
+		BlockedObject(ctx context.Context, objectKey types.Hash256) (slabs.BlockedObject, error)
+		BlockedObjects(ctx context.Context, offset, limit int) ([]slabs.BlockedObject, error)
+
 		// migration endpoints used by remote nodes
 		PrepareMigrationBatch(cursor int64, limit int) (slabs.MigrationBatch, error)
 		ApplyMigrationResults(results []slabs.MigrationResult) error
@@ -261,6 +266,12 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"PUT    /hosts/blocklist":          a.handlePUTHostsBlocklist,
 		"DELETE /hosts/blocklist/:hostkey": a.handleDELETEHostsBlocklist,
 		"POST   /hosts/scan":               a.handlePOSTHostsScan,
+
+		// object blocklist endpoints
+		"GET    /objects/blocklist":            a.handleGETObjectsBlocklist,
+		"GET    /objects/blocklist/:objectkey": a.handleGETObjectsBlocklistKey,
+		"PUT    /objects/blocklist/:objectkey": a.handlePUTObjectsBlocklist,
+		"DELETE /objects/blocklist/:objectkey": a.handleDELETEObjectsBlocklist,
 
 		// settings endpoints
 		"GET /settings/contracts":    a.handleGETSettingsContracts,
@@ -1190,6 +1201,63 @@ func (a *admin) handleDELETEHostsBlocklist(jc jape.Context) {
 		return
 	}
 	if jc.Check("failed to unblock host", a.hosts.UnblockHost(jc.Request.Context(), hk)) != nil {
+		return
+	}
+	jc.Encode(nil)
+}
+
+func (a *admin) handleGETObjectsBlocklist(jc jape.Context) {
+	offset, limit, ok := api.ParseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+	blocked, err := a.slabs.BlockedObjects(jc.Request.Context(), offset, limit)
+	if jc.Check("failed to get blocklist", err) != nil {
+		return
+	}
+	jc.Encode(blocked)
+}
+
+func (a *admin) handlePUTObjectsBlocklist(jc jape.Context) {
+	var objectKey types.Hash256
+	if jc.DecodeParam("objectkey", &objectKey) != nil {
+		return
+	}
+	var req ObjectBlocklistRequest
+	if jc.Decode(&req) != nil {
+		return
+	}
+	if jc.Check("failed to add object to blocklist", a.slabs.BlockObject(jc.Request.Context(), objectKey, req.Reason)) != nil {
+		return
+	}
+	jc.Encode(nil)
+}
+
+func (a *admin) handleGETObjectsBlocklistKey(jc jape.Context) {
+	var objectKey types.Hash256
+	if jc.DecodeParam("objectkey", &objectKey) != nil {
+		return
+	}
+	blocked, err := a.slabs.BlockedObject(jc.Request.Context(), objectKey)
+	if errors.Is(err, slabs.ErrObjectNotBlocked) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get blocked object", err) != nil {
+		return
+	}
+	jc.Encode(blocked)
+}
+
+func (a *admin) handleDELETEObjectsBlocklist(jc jape.Context) {
+	var objectKey types.Hash256
+	if jc.DecodeParam("objectkey", &objectKey) != nil {
+		return
+	}
+	err := a.slabs.UnblockObject(jc.Request.Context(), objectKey)
+	if errors.Is(err, slabs.ErrObjectNotBlocked) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to unblock object", err) != nil {
 		return
 	}
 	jc.Encode(nil)

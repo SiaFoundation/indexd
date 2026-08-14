@@ -342,6 +342,36 @@ func (c *Client) HostsBlocklistRemove(ctx context.Context, hostKey types.PublicK
 	return
 }
 
+// ObjectsBlocklist returns the objects on the blocklist.
+func (c *Client) ObjectsBlocklist(ctx context.Context, opts ...api.URLQueryParameterOption) (blocklist []slabs.BlockedObject, err error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	err = c.c.GET(ctx, "/objects/blocklist?"+values.Encode(), &blocklist)
+	return
+}
+
+// ObjectBlocklistAdd adds the given object key to the blocklist.
+func (c *Client) ObjectBlocklistAdd(ctx context.Context, objectKey types.Hash256, reason string) (err error) {
+	err = c.c.PUT(ctx, fmt.Sprintf("/objects/blocklist/%s", objectKey), ObjectBlocklistRequest{
+		Reason: reason,
+	})
+	return
+}
+
+// ObjectBlocklistEntry returns the blocklist entry for the given object key.
+func (c *Client) ObjectBlocklistEntry(ctx context.Context, objectKey types.Hash256) (blocked slabs.BlockedObject, err error) {
+	err = c.c.GET(ctx, fmt.Sprintf("/objects/blocklist/%s", objectKey), &blocked)
+	return
+}
+
+// ObjectBlocklistRemove removes the object with the given key from the blocklist.
+func (c *Client) ObjectBlocklistRemove(ctx context.Context, objectKey types.Hash256) (err error) {
+	err = c.c.DELETE(ctx, fmt.Sprintf("/objects/blocklist/%s", objectKey))
+	return
+}
+
 // SettingsContracts returns the contract settings used by the contract manager.
 func (c *Client) SettingsContracts(ctx context.Context) (s contracts.MaintenanceSettings, err error) {
 	err = c.c.GET(ctx, "/settings/contracts", &s)

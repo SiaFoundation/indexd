@@ -9,6 +9,7 @@ import (
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/sharing"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/jape"
 )
 
@@ -51,6 +52,9 @@ func (a *app) handleGETSharedObject(jc jape.Context, key sharing.Key) {
 		return
 	} else if errors.Is(err, sharing.ErrSharedObjectNotFound) {
 		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, slabs.ErrObjectBlocked) {
+		jc.Error(err, http.StatusUnavailableForLegalReasons)
 		return
 	} else if jc.Check("failed to get shared object", err) != nil {
 		return

@@ -39,6 +39,11 @@ type (
 		Reasons  []string          `json:"reasons"`
 	}
 
+	// ObjectBlocklistRequest is the request body for the [PUT] /objects/blocklist/:objectkey endpoint.
+	ObjectBlocklistRequest struct {
+		Reason string `json:"reason"`
+	}
+
 	// HostImportRequest is the request body for the [POST] /hosts endpoint.
 	HostImportRequest struct {
 		PublicKey types.PublicKey    `json:"publicKey"`
