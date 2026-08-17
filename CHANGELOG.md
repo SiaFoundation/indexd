@@ -1,3 +1,15 @@
+## 0.4.3 (2026-08-17)
+
+### Features
+
+- Add manual admin host import and scan endpoint
+
+### Fixes
+
+- Improved performance of object events pagination queries.
+- Rank hosts that stall until the deadline by the implied throughput
+- Speed up pruning
+
 ## 0.4.2 (2026-08-06)
 
 ### Features
