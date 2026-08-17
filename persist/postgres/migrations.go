@@ -341,4 +341,10 @@ FOR EACH STATEMENT EXECUTE FUNCTION shared_objects_maintain_totals();
 		`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+CREATE INDEX IF NOT EXISTS object_events_account_id_updated_at_object_key_idx ON object_events(account_id, updated_at ASC, object_key ASC);
+DROP INDEX IF EXISTS object_events_updated_at_object_key_idx;`)
+		return err
+	},
 }

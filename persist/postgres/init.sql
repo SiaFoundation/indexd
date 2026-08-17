@@ -392,8 +392,8 @@ CREATE TABLE object_events (
     PRIMARY KEY (account_id, object_key)
 );
 
--- fast sorting by update time and key
-CREATE INDEX object_events_updated_at_object_key_idx ON object_events(updated_at ASC, object_key ASC);
+-- fast per-account events cursor pagination sorted by update time and object key
+CREATE INDEX object_events_account_id_updated_at_object_key_idx ON object_events(account_id, updated_at ASC, object_key ASC);
 
 -- probe by object_key alone since the PK leads with account_id
 CREATE INDEX object_events_object_key_idx ON object_events(object_key);
