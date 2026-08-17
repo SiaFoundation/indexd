@@ -124,10 +124,10 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 		rows, err := tx.Query(ctx, `
 			SELECT object_key, was_deleted, updated_at
 			FROM object_events
-			WHERE (updated_at > $1 OR (updated_at = $1 AND object_key > $2)) AND account_id = $3
+			WHERE account_id = $1 AND (updated_at, object_key) > ($2, $3)
 			ORDER BY updated_at ASC, object_key ASC
 			LIMIT $4
-		`, cursor.After, sqlHash256(cursor.Key), accountID, limit)
+		`, accountID, cursor.After, sqlHash256(cursor.Key), limit)
 		if err != nil {
 			return fmt.Errorf("failed to query objects: %w", err)
 		}
