@@ -140,6 +140,14 @@ func uploadRandomSlab(t testing.TB, client *client.Client, sk types.PrivateKey, 
 	}
 }
 
+// awaitEventSecond waits out the current second so events written in it become
+// listable; ListObjects withholds the second still in progress.
+func awaitEventSecond(t testing.TB) {
+	t.Helper()
+	now := time.Now()
+	time.Sleep(now.Truncate(time.Second).Add(time.Second).Sub(now) + 20*time.Millisecond)
+}
+
 func TestApplicationAPI(t *testing.T) {
 	ctx := t.Context()
 	// create cluster with three hosts
@@ -393,6 +401,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	awaitEventSecond(t)
 	objs, err = client.ListObjects(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
@@ -430,6 +439,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
 	}
 
+	awaitEventSecond(t)
 	objs, err = client.ListObjects(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)

@@ -230,6 +230,7 @@ func TestObjects(t *testing.T) {
 
 	assertObjects := func(acc proto.Account, expectedDeleted, expectedExist int) []slabs.ObjectEvent {
 		t.Helper()
+		awaitEventSecond(t)
 		objects, err := store.ListObjects(acc, slabs.Cursor{}, 10)
 		if err != nil {
 			t.Fatal(err)
@@ -456,7 +457,8 @@ func TestListObjectsRegression(t *testing.T) {
 		return bytes.Compare(objectIDs[i][:], objectIDs[j][:]) < 0
 	})
 
-	ts := time.Now().Truncate(time.Second)
+	// backdate the events; the current second is withheld
+	ts := time.Now().Add(-time.Minute).Truncate(time.Second)
 	_, err := store.pool.Exec(t.Context(), "UPDATE objects SET updated_at = $1", ts)
 	if err != nil {
 		t.Fatal(err)
@@ -485,6 +487,39 @@ func TestListObjectsRegression(t *testing.T) {
 // truncated. A client cursor that carries less precision than that, e.g.
 // milliseconds, could therefore never advance past a newly pinned object and
 // would be handed the same event over and over again.
+// TestListObjectsWithholdsCurrentSecond checks that events from the second still
+// in progress are withheld, so a cursor cannot come to rest inside a second that
+// may still receive writes with smaller keys.
+func TestListObjectsWithholdsCurrentSecond(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// start at the top of a second so the pin and the listing below share it
+	awaitEventSecond(t)
+	obj := store.pinTestObject(t, acc, hk)
+
+	events, err := store.ListObjects(acc, slabs.Cursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 0 {
+		t.Fatalf("expected the in-progress second to be withheld, got %d events", len(events))
+	}
+
+	awaitEventSecond(t)
+	events, err = store.ListObjects(acc, slabs.Cursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 {
+		t.Fatalf("expected 1 event once the second elapsed, got %d", len(events))
+	} else if events[0].Key != obj.ID() {
+		t.Fatalf("expected object %v, got %v", obj.ID(), events[0].Key)
+	}
+}
+
 func TestObjectEventTimestampPrecision(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
@@ -524,6 +559,7 @@ func TestObjectEventTimestampPrecision(t *testing.T) {
 	// to express, must not return that same event again
 	assertCursorAdvances := func(context string) {
 		t.Helper()
+		awaitEventSecond(t)
 
 		events, err := store.ListObjects(acc, slabs.Cursor{}, 10)
 		if err != nil {

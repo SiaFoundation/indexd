@@ -130,7 +130,9 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 }
 
 // ListObjects lists objects for the given account that were updated after the
-// the given 'after' time.
+// the given 'after' time. The in-progress second is withheld: updated_at has
+// second precision, so a cursor resting inside a second that can still receive
+// writes would lose any later event in it with a smaller object_key.
 func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
@@ -142,6 +144,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			SELECT object_key, was_deleted, updated_at
 			FROM object_events oe
 			WHERE oe.account_id = $1 AND (oe.updated_at, oe.object_key) > ($2, $3)
+			  AND oe.updated_at < date_trunc('second', NOW())
 			  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = oe.object_key)
 			ORDER BY oe.updated_at ASC, oe.object_key ASC
 			LIMIT $4

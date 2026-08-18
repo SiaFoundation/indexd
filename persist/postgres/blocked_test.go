@@ -154,6 +154,7 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 	// listAll pages through every event two at a time
 	listAll := func() []slabs.ObjectEvent {
 		t.Helper()
+		awaitEventSecond(t)
 		var all []slabs.ObjectEvent
 		var cursor slabs.Cursor
 		for {
@@ -220,6 +221,57 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		} else if ev.Object == nil {
 			t.Fatalf("expected object %v to be populated", ev.Key)
 		}
+	}
+}
+
+// TestUnblockObjectVisibleToLiveCursor checks that an unblocked object reaches a
+// client whose cursor is parked on a newer event with a larger key.
+func TestUnblockObjectVisibleToLiveCursor(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// the object we block has to sort before the one the cursor rests on
+	first, second := store.pinTestObject(t, acc, hk), store.pinTestObject(t, acc, hk)
+	firstID, secondID := first.ID(), second.ID()
+	blocked, live := firstID, secondID
+	if slices.Compare(firstID[:], secondID[:]) > 0 {
+		blocked, live = secondID, firstID
+	}
+
+	if err := store.BlockObject(blocked, "dmca"); err != nil {
+		t.Fatal(err)
+	}
+
+	// park a cursor on the live object, all a client can see for now
+	awaitEventSecond(t)
+	events, err := store.ListObjects(acc, slabs.Cursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 {
+		t.Fatalf("expected 1 visible object, got %d", len(events))
+	} else if events[0].Key != live {
+		t.Fatalf("expected live object %v, got %v", live, events[0].Key)
+	}
+	cursor := slabs.Cursor{After: events[0].UpdatedAt, Key: events[0].Key}
+
+	if err := store.UnblockObject(blocked); err != nil {
+		t.Fatal(err)
+	}
+
+	awaitEventSecond(t)
+	events, err = store.ListObjects(acc, cursor, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 {
+		t.Fatalf("expected unblocked object %v to be visible from the parked cursor, got %d events", blocked, len(events))
+	} else if events[0].Key != blocked {
+		t.Fatalf("expected unblocked object %v, got %v", blocked, events[0].Key)
+	} else if events[0].Object == nil {
+		t.Fatalf("expected object %v to be populated", blocked)
 	}
 }
 

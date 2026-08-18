@@ -46,14 +46,12 @@ func (s *Store) UnblockObject(objectKey types.Hash256) error {
 			return slabs.ErrObjectNotBlocked
 		}
 
-		// bump the event past every live cursor so clients that already
-		// paginated past the object see it again. Timestamps have second
-		// precision, so an unblock in the same second as the last event has to
-		// be pushed into the next one or the event stays behind cursors sitting
-		// on that second.
+		// bump the event so clients that already paged past the object pick it
+		// up again. ListObjects withholds the in-progress second, so a cursor
+		// can never rest on the one we stamp here.
 		if _, err := tx.Exec(ctx, `
 			UPDATE object_events
-			SET updated_at = GREATEST(date_trunc('second', NOW()), updated_at + INTERVAL '1 second')
+			SET updated_at = date_trunc('second', NOW())
 			WHERE object_key = $1
 		`, sqlHash256(objectKey)); err != nil {
 			return fmt.Errorf("failed to bump object events: %w", err)
