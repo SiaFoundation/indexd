@@ -429,6 +429,37 @@ func countSharedObjects(t testing.TB, store *Store) (n int) {
 	return
 }
 
+func TestSharingKeyObjects(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	sharingKey := store.addTestSharingKey(t, acc, "objects")
+	want := make(map[types.Hash256]bool)
+	for range 3 {
+		obj := store.pinTestObject(t, acc, hk)
+		attachTestObject(t, store, acc, sharingKey, obj.ID())
+		want[obj.ID()] = true
+	}
+
+	objects, err := store.SharedObjects(sharingKey, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(objects) != len(want) {
+		t.Fatalf("expected %d objects, got %d", len(want), len(objects))
+	}
+	for _, obj := range objects {
+		if !want[obj.ID()] {
+			t.Fatalf("unexpected object %v", obj.ID())
+		} else if len(obj.Slabs) != 1 || len(obj.Slabs[0].Sectors) != 1 {
+			t.Fatalf("unexpected slabs for object %v: %+v", obj.ID(), obj.Slabs)
+		}
+	}
+}
+
 func TestSharingKeyTotals(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 

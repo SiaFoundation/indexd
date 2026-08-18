@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -15,6 +16,17 @@ import (
 	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/indexd/slabs"
 )
+
+func scanSharedObject(row pgx.CollectableRow) (objectID int64, obj slabs.SealedObject, err error) {
+	var metaKey sql.Null[[]byte]
+	if err = row.Scan(&objectID, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt); err != nil {
+		return
+	}
+	if metaKey.Valid {
+		obj.EncryptedMetadataKey = metaKey.V
+	}
+	return
+}
 
 func scanSharingKey(s scanner) (key sharing.Key, err error) {
 	var nonce []byte
@@ -258,35 +270,24 @@ func (s *Store) SharedObjects(sharingKey types.PublicKey, offset, limit int) (ob
 		if err != nil {
 			return err
 		}
-
 		var objectIDs []int64
-		objects = objects[:0]
-		for rows.Next() {
-			var objectID int64
-			var obj slabs.SealedObject
-			var metaKey sql.Null[[]byte]
-			if err := rows.Scan(&objectID, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt); err != nil {
-				rows.Close()
-				return fmt.Errorf("failed to scan shared object: %w", err)
+		objects, err = pgx.AppendRows(objects[:0], rows, func(row pgx.CollectableRow) (slabs.SealedObject, error) {
+			objectID, obj, err := scanSharedObject(row)
+			if err != nil {
+				return slabs.SealedObject{}, err
 			}
-			if metaKey.Valid {
-				obj.EncryptedMetadataKey = metaKey.V
-			}
-			objects = append(objects, obj)
 			objectIDs = append(objectIDs, objectID)
-		}
-		rows.Close()
-		if err := rows.Err(); err != nil {
-			return err
+			return obj, nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to scan shared objects: %w", err)
 		}
 
-		// load each object's slabs (with decorated sectors)
-		for i := range objects {
-			if err := loadObjectSlabs(ctx, tx, objectIDs[i], &objects[i]); err != nil {
-				return err
-			}
+		objectsByID := make(map[int64]*slabs.SealedObject, len(objects))
+		for i, objectID := range objectIDs {
+			objectsByID[objectID] = &objects[i]
 		}
-		return nil
+		return loadObjectSlabs(ctx, tx, objectsByID)
 	})
 	return
 }
@@ -310,24 +311,27 @@ func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey types.Has
 			return fmt.Errorf("failed to get sharing key: %w", err)
 		}
 
-		var objectID int64
-		var metaKey sql.Null[[]byte]
-		err = tx.QueryRow(ctx, `
+		rows, err := tx.Query(ctx, `
 			SELECT so.object_id, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at
 			FROM shared_objects so
 			INNER JOIN objects o ON o.id = so.object_id
 			WHERE so.sharing_key_id = $1 AND o.object_key = $2
-		`, sharingKeyID, sqlHash256(objectKey)).Scan(&objectID, &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt)
+		`, sharingKeyID, sqlHash256(objectKey))
+		if err != nil {
+			return fmt.Errorf("failed to get shared object: %w", err)
+		}
+		objectID, err := pgx.CollectOneRow(rows, func(row pgx.CollectableRow) (int64, error) {
+			id, o, err := scanSharedObject(row)
+			obj = o
+			return id, err
+		})
 		if errors.Is(err, sql.ErrNoRows) {
 			return sharing.ErrSharedObjectNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to get shared object: %w", err)
 		}
-		if metaKey.Valid {
-			obj.EncryptedMetadataKey = metaKey.V
-		}
 
-		return loadObjectSlabs(ctx, tx, objectID, &obj)
+		return loadObjectSlabs(ctx, tx, map[int64]*slabs.SealedObject{objectID: &obj})
 	})
 	return
 }

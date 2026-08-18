@@ -91,7 +91,7 @@ func TestImportHost(t *testing.T) {
 	db := initPostgres(t, log.Named("postgres"))
 
 	// import a host that is not in the database yet
-	now := time.Now().Truncate(time.Microsecond)
+	now := time.Now().Truncate(time.Second)
 	hk := types.PublicKey{1}
 	ha1 := chain.NetAddress{Protocol: quic.Protocol, Address: "1.2.3.4:4848"}
 	ha2 := chain.NetAddress{Protocol: siamux.Protocol, Address: "1.2.3.4:5678"}
