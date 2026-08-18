@@ -359,4 +359,9 @@ DROP INDEX IF EXISTS object_events_updated_at_object_key_idx;`)
 		`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+CREATE INDEX IF NOT EXISTS shared_objects_sharing_key_id_created_at_idx ON shared_objects(sharing_key_id, created_at DESC);`)
+		return err
+	},
 }
