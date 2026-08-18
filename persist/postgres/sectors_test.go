@@ -85,6 +85,7 @@ func TestMigrateSector(t *testing.T) {
 	lastUpdate := time.Now().Add(-time.Second)
 	assertUpdated := func(updated bool) {
 		t.Helper()
+		awaitEventSecond(t)
 		events, err := store.ListObjects(account, slabs.Cursor{
 			After: lastUpdate,
 		}, 10)

@@ -48,6 +48,14 @@ func connectionInfoFromEnv() ConnectionInfo {
 	}
 }
 
+// awaitEventSecond waits out the current second so events written in it become
+// listable; ListObjects withholds the second still in progress.
+func awaitEventSecond(t testing.TB) {
+	t.Helper()
+	now := time.Now()
+	time.Sleep(now.Truncate(time.Second).Add(time.Second).Sub(now) + 20*time.Millisecond)
+}
+
 func initPostgres(t testing.TB, log *zap.Logger) *Store {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

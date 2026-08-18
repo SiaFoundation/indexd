@@ -117,7 +117,8 @@ paths:
       tags:
         - objects
       summary: List all objects
-      description: Objects on the indexer's blocklist are hidden from this listing.
+      description: >-
+        Objects on the indexer's blocklist are hidden from this listing.
       parameters:
         - name: limit
           in: query
