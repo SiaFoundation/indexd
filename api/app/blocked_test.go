@@ -205,7 +205,8 @@ func TestBlockedObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := adminClient.ObjectBlocklistRemove(ctx, blockedObj.ID()); err == nil {
-		t.Fatal("expected error unblocking an unblocked object")
+	// DELETE is idempotent, so unblocking an unblocked object is a no-op
+	if err := adminClient.ObjectBlocklistRemove(ctx, blockedObj.ID()); err != nil {
+		t.Fatalf("expected unblocking an unblocked object to be a no-op, got %v", err)
 	}
 }

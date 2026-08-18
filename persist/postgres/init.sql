@@ -442,6 +442,9 @@ CREATE TABLE shared_objects (
 );
 CREATE INDEX shared_objects_sharing_key_id_idx ON shared_objects(sharing_key_id);
 
+-- serve a sharing key's object listing in created_at order without a sort
+CREATE INDEX shared_objects_sharing_key_id_created_at_idx ON shared_objects(sharing_key_id, created_at DESC);
+
 -- maintain sharing_keys.{object_count, pinned_data, pinned_size} as objects are
 -- attached and detached.
 CREATE FUNCTION shared_objects_maintain_totals() RETURNS TRIGGER AS $$
