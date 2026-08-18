@@ -1643,7 +1643,8 @@ paths:
       summary: Remove an object from the blocklist
       description: >
         The object reappears in object listings with a fresh event timestamp so
-        clients that already paged past it pick it up again.
+        clients that already paged past it pick it up again. Removing a key that
+        is not blocked is a no-op.
       operationId: removeObjectFromBlocklist
       parameters:
         - name: objectkey
@@ -1654,8 +1655,6 @@ paths:
       responses:
         "200":
           description: Object removed from blocklist successfully
-        "404":
-          description: Object is not blocked
       x-codeSamples:
         - lang: Go
           label: Go

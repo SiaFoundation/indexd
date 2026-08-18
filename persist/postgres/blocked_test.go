@@ -22,8 +22,8 @@ func TestBlocklist(t *testing.T) {
 
 	if _, err := store.BlockedObject(keys[0]); !errors.Is(err, slabs.ErrObjectNotBlocked) {
 		t.Fatalf("expected ErrObjectNotBlocked, got %v", err)
-	} else if err := store.UnblockObject(keys[0]); !errors.Is(err, slabs.ErrObjectNotBlocked) {
-		t.Fatalf("expected ErrObjectNotBlocked, got %v", err)
+	} else if err := store.UnblockObject(keys[0]); err != nil {
+		t.Fatalf("expected unblocking an unblocked key to be a no-op, got %v", err)
 	}
 
 	// a key does not have to reference an existing object
