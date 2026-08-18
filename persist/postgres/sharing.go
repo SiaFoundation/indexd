@@ -174,10 +174,8 @@ func (s *Store) AddSharedObject(account proto.Account, sharingKey types.PublicKe
 			return fmt.Errorf("failed to get sharing key: %w", err)
 		}
 
-		if blocked, err := objectBlocked(ctx, tx, req.ObjectID); err != nil {
+		if err := assertObjectNotBlocked(ctx, tx, req.ObjectID); err != nil {
 			return err
-		} else if blocked {
-			return slabs.ErrObjectBlocked
 		}
 
 		var objectID int64
@@ -319,10 +317,8 @@ func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey types.Has
 			return fmt.Errorf("failed to get sharing key: %w", err)
 		}
 
-		if blocked, err := objectBlocked(ctx, tx, objectKey); err != nil {
+		if err := assertObjectNotBlocked(ctx, tx, objectKey); err != nil {
 			return err
-		} else if blocked {
-			return slabs.ErrObjectBlocked
 		}
 
 		rows, err := tx.Query(ctx, `

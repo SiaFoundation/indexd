@@ -10,14 +10,16 @@ import (
 	"go.sia.tech/indexd/slabs"
 )
 
-// objectBlocked reports whether the given object key is on the blocklist.
-func objectBlocked(ctx context.Context, tx *txn, objectKey types.Hash256) (bool, error) {
+// assertObjectNotBlocked returns slabs.ErrObjectBlocked if the given object key
+// is on the blocklist.
+func assertObjectNotBlocked(ctx context.Context, tx *txn, objectKey types.Hash256) error {
 	var blocked bool
-	err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blocked_objects WHERE object_key = $1)`, sqlHash256(objectKey)).Scan(&blocked)
-	if err != nil {
-		return false, fmt.Errorf("failed to check blocklist: %w", err)
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blocked_objects WHERE object_key = $1)`, sqlHash256(objectKey)).Scan(&blocked); err != nil {
+		return fmt.Errorf("failed to check blocklist: %w", err)
+	} else if blocked {
+		return slabs.ErrObjectBlocked
 	}
-	return blocked, nil
+	return nil
 }
 
 // BlockObject adds the given object key to the blocklist. If the key is already
@@ -36,14 +38,15 @@ func (s *Store) BlockObject(objectKey types.Hash256, reason string) error {
 	})
 }
 
-// UnblockObject removes an object key from the blocklist.
+// UnblockObject removes an object key from the blocklist. Unblocking a key that
+// is not blocked is a no-op.
 func (s *Store) UnblockObject(objectKey types.Hash256) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		res, err := tx.Exec(ctx, `DELETE FROM blocked_objects WHERE object_key = $1`, sqlHash256(objectKey))
 		if err != nil {
 			return fmt.Errorf("failed to unblock object: %w", err)
 		} else if res.RowsAffected() == 0 {
-			return slabs.ErrObjectNotBlocked
+			return nil // nothing was blocked, so there is no event to bump
 		}
 
 		// bump the event so clients that already paged past the object pick it

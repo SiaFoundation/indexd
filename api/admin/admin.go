@@ -1253,11 +1253,7 @@ func (a *admin) handleDELETEObjectsBlocklist(jc jape.Context) {
 	if jc.DecodeParam("objectkey", &objectKey) != nil {
 		return
 	}
-	err := a.slabs.UnblockObject(jc.Request.Context(), objectKey)
-	if errors.Is(err, slabs.ErrObjectNotBlocked) {
-		jc.Error(err, http.StatusNotFound)
-		return
-	} else if jc.Check("failed to unblock object", err) != nil {
+	if jc.Check("failed to unblock object", a.slabs.UnblockObject(jc.Request.Context(), objectKey)) != nil {
 		return
 	}
 	jc.Encode(nil)

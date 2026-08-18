@@ -21,10 +21,8 @@ const sqlObjectsByKey = `
 // SharedObject retrieves the shared object with the given key for the given account.
 func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		if blocked, err := objectBlocked(ctx, tx, key); err != nil {
+		if err := assertObjectNotBlocked(ctx, tx, key); err != nil {
 			return err
-		} else if blocked {
-			return slabs.ErrObjectBlocked
 		}
 
 		var objID int64
@@ -103,10 +101,8 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 			return err
 		}
 
-		if blocked, err := objectBlocked(ctx, tx, key); err != nil {
+		if err := assertObjectNotBlocked(ctx, tx, key); err != nil {
 			return err
-		} else if blocked {
-			return slabs.ErrObjectBlocked
 		}
 
 		rows, err := tx.Query(ctx, sqlObjectsByKey, accountID, []sqlHash256{sqlHash256(key)})
@@ -293,10 +289,8 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 			return accounts.ErrNotFound
 		}
 
-		if blocked, err := objectBlocked(ctx, tx, obj.ID); err != nil {
+		if err := assertObjectNotBlocked(ctx, tx, obj.ID); err != nil {
 			return err
-		} else if blocked {
-			return slabs.ErrObjectBlocked
 		}
 
 		// ensure empty slices are passed as nil
