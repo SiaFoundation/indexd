@@ -874,28 +874,9 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 		return
 	}
 
-	a.mu.Lock()
-	authReq, ok := a.authRequests[requestID]
-	a.mu.Unlock()
-	if !ok {
-		jc.Error(fmt.Errorf("unknown request ID %q", requestID), http.StatusNotFound)
-		return
-	} else if time.Now().After(authReq.Expiration) {
-		jc.Error(fmt.Errorf("request expired"), http.StatusGone)
-		return
-	} else if !authReq.Approved {
-		jc.Error(ErrUserRejected, http.StatusForbidden)
-		return
-	} else if authReq.UserSecret == (types.Hash256{}) {
-		panic("user secret is empty for approved request") // should never happen
-	}
-
 	// check whether the request is signed with the ephemeral key
 	ephemeralKey, ok := ValidateURLSignature(jc.Request, jc.ResponseWriter, a.hostname)
 	if !ok {
-		return
-	} else if authReq.EphemeralKey != ephemeralKey {
-		jc.Error(fmt.Errorf("invalid request signature"), http.StatusUnauthorized)
 		return
 	}
 
@@ -903,32 +884,43 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 	if !ok {
 		return
 	}
-	// verify ownership of the app key
-	if !registerReq.AppKey.VerifyHash(registerAppKeyHash(authReq.EphemeralKey, requestID), registerReq.Signature) {
-		jc.Error(fmt.Errorf("invalid signature"), http.StatusUnauthorized)
+	// verify ownership of the app key. The proof is bound to the key that
+	// signed the URL, which claimAuthRequest checks against the request.
+	if !registerReq.AppKey.VerifyHash(registerAppKeyHash(ephemeralKey, requestID), registerReq.Signature) {
+		jc.Error(errors.New("invalid signature"), http.StatusUnauthorized)
 		return
 	}
 
-	// claim the request for this app key so one approval can't register more
-	// than one account. This must happen after the signature checks, otherwise
-	// an unauthenticated caller could burn the claim.
+	// validate the request and claim it for this app key, so that one approval
+	// can only ever register one account.
+	var status int
+	var err error
 	a.mu.Lock()
-	authReq, ok = a.authRequests[requestID]
-	if !ok {
-		a.mu.Unlock()
-		jc.Error(fmt.Errorf("unknown request ID %q", requestID), http.StatusNotFound)
-		return
-	} else if authReq.RegisteredKey == (types.PublicKey{}) {
+	authReq, ok := a.authRequests[requestID]
+	switch {
+	case !ok:
+		status, err = http.StatusNotFound, fmt.Errorf("unknown request ID %q", requestID)
+	case time.Now().After(authReq.Expiration):
+		status, err = http.StatusGone, errors.New("request expired")
+	case !authReq.Approved:
+		status, err = http.StatusForbidden, ErrUserRejected
+	case authReq.EphemeralKey != ephemeralKey:
+		status, err = http.StatusUnauthorized, errors.New("invalid request signature")
+	case authReq.RegisteredKey == (types.PublicKey{}):
 		authReq.RegisteredKey = registerReq.AppKey
 		a.authRequests[requestID] = authReq
-	} else if authReq.RegisteredKey != registerReq.AppKey {
-		a.mu.Unlock()
-		jc.Error(ErrRequestClaimed, http.StatusConflict)
-		return
+	case authReq.RegisteredKey != registerReq.AppKey:
+		status, err = http.StatusConflict, ErrRequestClaimed
 	}
 	a.mu.Unlock()
+	if err != nil {
+		jc.Error(err, status)
+		return
+	} else if authReq.UserSecret == (types.Hash256{}) {
+		panic("user secret is empty for approved request") // should never happen
+	}
 
-	err := a.accounts.RegisterAppKey(authReq.ConnectKey, registerReq.AppKey, accounts.AppMeta{
+	err = a.accounts.RegisterAppKey(authReq.ConnectKey, registerReq.AppKey, accounts.AppMeta{
 		ID:          authReq.Request.AppID,
 		Name:        authReq.Request.Name,
 		Description: authReq.Request.Description,
