@@ -599,6 +599,72 @@ func TestPreAuthorizedAppConnect(t *testing.T) {
 	}
 }
 
+func TestAppRegisterSingleAppKeyPerRequest(t *testing.T) {
+	ctx := t.Context()
+	cluster := testutils.NewCluster(t, testutils.WithHosts(0), testutils.WithLogger(zap.NewNop()))
+	indexer := cluster.Indexer
+
+	// the default quota has multiple uses so it doesn't mask request reuse
+	connectKey, err := indexer.Admin.AddAppConnectKey(ctx, accounts.AppConnectKeyRequest{
+		Quota: "default",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	appID := types.Hash256(frand.Entropy256())
+	preAuthorizedPrivateKey := types.GeneratePrivateKey()
+	preAuthorizedKeyRequest := accounts.PreAuthorizedKeyRequest{
+		ConnectKey:   connectKey.Key,
+		Expiration:   time.Now().Add(time.Hour),
+		TotalUses:    1,
+		AllowedAppID: &appID,
+	}
+	preAuthorizedKeyRequest.Sign(preAuthorizedPrivateKey)
+	if _, err := indexer.Admin.AddPreAuthorizedKey(ctx, preAuthorizedKeyRequest); err != nil {
+		t.Fatal(err)
+	}
+
+	ephemeralKey := types.GeneratePrivateKey()
+	appKey := types.GeneratePrivateKey()
+	otherAppKey := types.GeneratePrivateKey()
+	connectResp, err := indexer.App.RequestAppConnection(ctx, ephemeralKey, app.Info{
+		AppID:       appID,
+		Name:        "pre-authorized-app",
+		Description: "A pre-authorized application",
+		ServiceURL:  "https://example.com",
+	}, app.WithPreAuthorizedKey(preAuthorizedPrivateKey))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := indexer.App.RegisterApp(ctx, connectResp.RegisterURL, ephemeralKey, appKey); err != nil {
+		t.Fatal(err)
+	}
+
+	// a different app key on the same request must be rejected
+	var httpErr *app.HTTPError
+	if err := indexer.App.RegisterApp(ctx, connectResp.RegisterURL, ephemeralKey, otherAppKey); !errors.As(err, &httpErr) {
+		t.Fatalf("expected HTTP error registering a second app key, got %v", err)
+	} else if httpErr.StatusCode != http.StatusConflict {
+		t.Fatalf("expected status %d, got %d", http.StatusConflict, httpErr.StatusCode)
+	}
+	if authenticated, err := indexer.App.CheckAppAuth(ctx, otherAppKey); err != nil {
+		t.Fatal(err)
+	} else if authenticated {
+		t.Fatal("expected second app key to not be registered")
+	}
+
+	// retrying with the same app key is idempotent
+	if err := indexer.App.RegisterApp(ctx, connectResp.RegisterURL, ephemeralKey, appKey); err != nil {
+		t.Fatal(err)
+	} else if authenticated, err := indexer.App.CheckAppAuth(ctx, appKey); err != nil {
+		t.Fatal(err)
+	} else if !authenticated {
+		t.Fatal("expected registered app to be authenticated")
+	}
+}
+
 func TestAppConnect(t *testing.T) {
 	appID := frand.Entropy256()
 
