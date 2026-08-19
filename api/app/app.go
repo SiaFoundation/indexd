@@ -102,6 +102,8 @@ type (
 		Reconnecting bool
 		UserSecret   types.Hash256
 		ConnectKey   string // ties the request to the app connect key used
+
+		RegisteredKey types.PublicKey // the app key this request has been claimed by
 	}
 
 	// Info describes an application requesting a connection.
@@ -201,6 +203,10 @@ var (
 	// ErrUserRejected is returned when a user rejects an application
 	// connection request.
 	ErrUserRejected = errors.New("user rejected connection request")
+
+	// ErrRequestClaimed is returned when a connection request is reused to
+	// register a different app key.
+	ErrRequestClaimed = errors.New("connection request already registered a different app key")
 )
 
 const (
@@ -902,6 +908,25 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 		jc.Error(fmt.Errorf("invalid signature"), http.StatusUnauthorized)
 		return
 	}
+
+	// claim the request for this app key so one approval can't register more
+	// than one account. This must happen after the signature checks, otherwise
+	// an unauthenticated caller could burn the claim.
+	a.mu.Lock()
+	authReq, ok = a.authRequests[requestID]
+	if !ok {
+		a.mu.Unlock()
+		jc.Error(fmt.Errorf("unknown request ID %q", requestID), http.StatusNotFound)
+		return
+	} else if authReq.RegisteredKey == (types.PublicKey{}) {
+		authReq.RegisteredKey = registerReq.AppKey
+		a.authRequests[requestID] = authReq
+	} else if authReq.RegisteredKey != registerReq.AppKey {
+		a.mu.Unlock()
+		jc.Error(ErrRequestClaimed, http.StatusConflict)
+		return
+	}
+	a.mu.Unlock()
 
 	err := a.accounts.RegisterAppKey(authReq.ConnectKey, registerReq.AppKey, accounts.AppMeta{
 		ID:          authReq.Request.AppID,
