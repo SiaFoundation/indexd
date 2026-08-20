@@ -102,8 +102,6 @@ type (
 		Reconnecting bool
 		UserSecret   types.Hash256
 		ConnectKey   string // ties the request to the app connect key used
-
-		RegisteredKey types.PublicKey // the app key this request has been claimed by
 	}
 
 	// Info describes an application requesting a connection.
@@ -203,10 +201,6 @@ var (
 	// ErrUserRejected is returned when a user rejects an application
 	// connection request.
 	ErrUserRejected = errors.New("user rejected connection request")
-
-	// ErrRequestClaimed is returned when a connection request is reused to
-	// register a different app key.
-	ErrRequestClaimed = errors.New("connection request already registered a different app key")
 )
 
 const (
@@ -885,14 +879,14 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 		return
 	}
 	// verify ownership of the app key. The proof is bound to the key that
-	// signed the URL, which claimAuthRequest checks against the request.
+	// signed the URL, which is checked against the request below.
 	if !registerReq.AppKey.VerifyHash(registerAppKeyHash(ephemeralKey, requestID), registerReq.Signature) {
 		jc.Error(errors.New("invalid signature"), http.StatusUnauthorized)
 		return
 	}
 
-	// validate the request and claim it for this app key, so that one approval
-	// can only ever register one account.
+	// validate the request and consume it, so that one approval can only ever
+	// register one account.
 	var status int
 	var err error
 	a.mu.Lock()
@@ -906,11 +900,8 @@ func (a *app) handleAuthRegister(jc jape.Context) {
 		status, err = http.StatusForbidden, ErrUserRejected
 	case authReq.EphemeralKey != ephemeralKey:
 		status, err = http.StatusUnauthorized, errors.New("invalid request signature")
-	case authReq.RegisteredKey == (types.PublicKey{}):
-		authReq.RegisteredKey = registerReq.AppKey
-		a.authRequests[requestID] = authReq
-	case authReq.RegisteredKey != registerReq.AppKey:
-		status, err = http.StatusConflict, ErrRequestClaimed
+	default:
+		delete(a.authRequests, requestID)
 	}
 	a.mu.Unlock()
 	if err != nil {

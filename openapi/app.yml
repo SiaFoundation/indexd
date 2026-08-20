@@ -1017,8 +1017,8 @@ paths:
         the initial connect request. The body contains the application public key and a
         proof-of-possession signature: `appKey.Sign(hash("registerAppKey" + ephemeralPubKey + requestID))`.
         This proves the caller both controls the ephemeral key and knows the private key of the app
-        key being registered. A request only registers one app key; repeating it with the same
-        `appKey` is idempotent, a different `appKey` returns `409`.
+        key being registered. Registering consumes the connection request, so it only ever registers
+        one app key; any further attempt returns `404`.
       operationId: authRegister
       parameters:
         - name: requestID
@@ -1054,9 +1054,7 @@ paths:
         "403":
           description: Connect key exhausted or request not approved
         "404":
-          description: Unknown request ID
-        "409":
-          description: The request has already registered a different application key
+          description: Unknown request ID, or the request was already used to register an app key
         "410":
           description: Request expired
 

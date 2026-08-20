@@ -599,7 +599,7 @@ func TestPreAuthorizedAppConnect(t *testing.T) {
 	}
 }
 
-func TestAppRegisterSingleAppKeyPerRequest(t *testing.T) {
+func TestAppRegisterConsumesRequest(t *testing.T) {
 	ctx := t.Context()
 	cluster := testutils.NewCluster(t, testutils.WithHosts(0), testutils.WithLogger(zap.NewNop()))
 	indexer := cluster.Indexer
@@ -640,14 +640,18 @@ func TestAppRegisterSingleAppKeyPerRequest(t *testing.T) {
 
 	if err := indexer.App.RegisterApp(ctx, connectResp.RegisterURL, ephemeralKey, appKey); err != nil {
 		t.Fatal(err)
+	} else if authenticated, err := indexer.App.CheckAppAuth(ctx, appKey); err != nil {
+		t.Fatal(err)
+	} else if !authenticated {
+		t.Fatal("expected registered app to be authenticated")
 	}
 
-	// a different app key on the same request must be rejected
+	// registering consumed the request, so a second app key can't use it
 	var httpErr *app.HTTPError
 	if err := indexer.App.RegisterApp(ctx, connectResp.RegisterURL, ephemeralKey, otherAppKey); !errors.As(err, &httpErr) {
 		t.Fatalf("expected HTTP error registering a second app key, got %v", err)
-	} else if httpErr.StatusCode != http.StatusConflict {
-		t.Fatalf("expected status %d, got %d", http.StatusConflict, httpErr.StatusCode)
+	} else if httpErr.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, httpErr.StatusCode)
 	}
 	if authenticated, err := indexer.App.CheckAppAuth(ctx, otherAppKey); err != nil {
 		t.Fatal(err)
@@ -655,13 +659,11 @@ func TestAppRegisterSingleAppKeyPerRequest(t *testing.T) {
 		t.Fatal("expected second app key to not be registered")
 	}
 
-	// retrying with the same app key is idempotent
-	if err := indexer.App.RegisterApp(ctx, connectResp.RegisterURL, ephemeralKey, appKey); err != nil {
-		t.Fatal(err)
-	} else if authenticated, err := indexer.App.CheckAppAuth(ctx, appKey); err != nil {
-		t.Fatal(err)
-	} else if !authenticated {
-		t.Fatal("expected registered app to be authenticated")
+	// the same key can't reuse it either
+	if err := indexer.App.RegisterApp(ctx, connectResp.RegisterURL, ephemeralKey, appKey); !errors.As(err, &httpErr) {
+		t.Fatalf("expected HTTP error re-registering the same app key, got %v", err)
+	} else if httpErr.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, httpErr.StatusCode)
 	}
 }
 
