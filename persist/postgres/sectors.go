@@ -377,9 +377,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			batch := &pgx.Batch{}
 			for _, sector := range slab.Sectors {
 				batch.Queue(`
-				INSERT INTO sectors (sector_root, host_id, next_integrity_check, uploaded_at)
-				SELECT $1, h.id, $3, LEAST(NOW(), $4::timestamptz)
-				FROM hosts h
+				SELECT $1, h.id, $3, LEAST(NOW(), COALESCE($4::timestamptz, NOW()))
 				WHERE h.public_key = $2
 				ON CONFLICT (sector_root) DO UPDATE SET
 					uploaded_at = GREATEST(sectors.uploaded_at, EXCLUDED.uploaded_at),
