@@ -68,6 +68,21 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, msg)
 }
 
+// matchBadRequest joins err with the first of sentinels whose message appears
+// in the body of a 400 response so callers can match it with errors.Is.
+func matchBadRequest(err error, sentinels ...error) error {
+	httpErr, ok := errors.AsType[*HTTPError](err)
+	if !ok || httpErr.StatusCode != http.StatusBadRequest {
+		return err
+	}
+	for _, sentinel := range sentinels {
+		if strings.Contains(httpErr.Body, sentinel.Error()) {
+			return fmt.Errorf("%w: %w", sentinel, err)
+		}
+	}
+	return err
+}
+
 // sign signs the request with the appropriate headers and returns the signed URL
 // and request body.
 func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL string, requestBuf []byte) (*url.URL, io.Reader, error) {
@@ -187,9 +202,12 @@ func (c *Client) Hosts(ctx context.Context, appKey types.PrivateKey, opts ...api
 	return
 }
 
-// PinSlabs pins slabs to the indexer.
+// PinSlabs pins slabs to the indexer. A slab with an unacceptable upload time
+// is rejected with slabs.ErrSlabUploadTooOld, meaning it has to be re-uploaded,
+// or slabs.ErrSlabUploadInFuture, meaning the client's clock is ahead.
 func (c *Client) PinSlabs(ctx context.Context, appKey types.PrivateKey, params ...slabs.SlabPinParams) (slabIDs []slabs.SlabID, err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/slabs", params, &slabIDs)
+	err = matchBadRequest(c.signedRequestJSON(ctx, appKey, http.MethodPost, "/slabs", params, &slabIDs),
+		slabs.ErrSlabUploadTooOld, slabs.ErrSlabUploadInFuture)
 	return
 }
 

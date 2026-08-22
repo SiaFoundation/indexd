@@ -200,7 +200,7 @@ func (cm *ContractManager) maintenanceLoop(ctx context.Context) {
 			logError(cm.performSectorPinning(ctx, pinningLog), pinningLog)
 
 			unpinnableLog := log.Named("unpinnable")
-			threshold := time.Now().Add(-unpinnableSectorThreshold)
+			threshold := time.Now().Add(-UnpinnableSectorThreshold)
 			logError(cm.store.MarkSectorsUnpinnable(threshold), unpinnableLog)
 			log.Debug("maintenance complete")
 		}
