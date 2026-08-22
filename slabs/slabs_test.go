@@ -1,9 +1,11 @@
 package slabs_test
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -25,32 +27,51 @@ func TestSlabPinParamsValidate(t *testing.T) {
 			return s
 		}(),
 	}
-	if err := params.Validate(); err != nil {
+	now := time.Now()
+	if err := params.Validate(now); err != nil {
 		t.Fatal("unexpected", err)
 	}
 
+	// assert the accepted upload time range is inclusive at both bounds
+	for _, tc := range []struct {
+		name       string
+		uploadedAt time.Time
+		want       error
+	}{
+		{"oldest accepted", now.Add(-slabs.MaxSlabUploadAge), nil},
+		{"one ns too old", now.Add(-slabs.MaxSlabUploadAge - 1), slabs.ErrSlabUploadTooOld},
+		{"furthest ahead accepted", now.Add(slabs.MaxSlabUploadSkew), nil},
+		{"one ns too far ahead", now.Add(slabs.MaxSlabUploadSkew + 1), slabs.ErrSlabUploadInFuture},
+	} {
+		params.UploadedAt = &tc.uploadedAt
+		if err := params.Validate(now); !errors.Is(err, tc.want) {
+			t.Fatalf("%s: expected %v, got %v", tc.name, tc.want, err)
+		}
+	}
+	params.UploadedAt = nil
+
 	// assert empty encryption key is illegal
 	params.EncryptionKey = [32]byte{}
-	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "encryption key is empty") {
+	if err := params.Validate(now); err == nil || !strings.Contains(err.Error(), "encryption key is empty") {
 		t.Fatal("unexpected", err)
 	}
 
 	// assert duplicate host keys are illegal
 	params.EncryptionKey = frand.Entropy256()
 	params.Sectors[2] = params.Sectors[1]
-	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate host key") {
+	if err := params.Validate(now); err == nil || !strings.Contains(err.Error(), "duplicate host key") {
 		t.Fatal("unexpected", err)
 	}
 
 	// assert insufficient redundancy is illegal
 	params.Sectors = params.Sectors[:10]
-	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "is too low") {
+	if err := params.Validate(now); err == nil || !strings.Contains(err.Error(), "is too low") {
 		t.Fatal("unexpected", err)
 	}
 
 	// assert exceeding max total shards is illegal
 	params.Sectors = make([]slabs.PinnedSector, slabs.MaxTotalShards+1)
-	if err := params.Validate(); err == nil || !strings.Contains(err.Error(), "exceeds maximum") {
+	if err := params.Validate(now); err == nil || !strings.Contains(err.Error(), "exceeds maximum") {
 		t.Fatal("unexpected", err)
 	}
 }
@@ -84,6 +105,13 @@ func TestSlabPinParamsDigest(t *testing.T) {
 	slabID := params.Digest()
 	if slabID != expectedID {
 		t.Fatalf("expected %v, got %v", expectedID, slabID)
+	}
+
+	// assert the upload time does not affect the slab ID
+	uploadedAt := time.Now()
+	params.UploadedAt = &uploadedAt
+	if digest := params.Digest(); digest != slabID {
+		t.Fatalf("expected upload time to preserve slab ID %v, got %v", slabID, digest)
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/contracts"
 )
 
 const (
@@ -22,6 +23,17 @@ const (
 
 	// maxSlabVersion is the maximum slab version supported by the indexer
 	maxSlabVersion = 1
+)
+
+const (
+	// MaxSlabUploadAge is the oldest upload time accepted when pinning a slab,
+	// leaving a day to pin its sectors before hosts delete them from temporary
+	// storage.
+	MaxSlabUploadAge = contracts.UnpinnableSectorThreshold - 24*time.Hour
+
+	// MaxSlabUploadSkew is the furthest a slab's upload time may be ahead of
+	// the indexer's clock.
+	MaxSlabUploadSkew = 5 * time.Minute
 )
 
 var (
@@ -47,6 +59,15 @@ var (
 	// ErrUnsupportedSlabVersion is returned when attempting to pin a slab with
 	// a version that is not yet supported.
 	ErrUnsupportedSlabVersion = errors.New("unsupported slab version")
+
+	// ErrSlabUploadTooOld is returned when attempting to pin a slab whose
+	// sectors may already have been deleted from temporary storage. Clients
+	// match these two by message, so keep the thresholds out of them.
+	ErrSlabUploadTooOld = errors.New("slab upload is too old")
+
+	// ErrSlabUploadInFuture is returned when attempting to pin a slab whose
+	// upload time is ahead of the indexer's clock.
+	ErrSlabUploadInFuture = errors.New("slab upload time is in the future")
 )
 
 type (
@@ -90,6 +111,7 @@ type (
 		EncryptionKey EncryptionKey  `json:"encryptionKey"`
 		MinShards     uint           `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
+		UploadedAt    *time.Time     `json:"uploadedAt,omitempty"`
 	}
 
 	// A PinnedSlab is a slab that has been pinned to hosts.
@@ -166,15 +188,24 @@ func (s SlabPinParams) DataSize() uint64 {
 }
 
 // Validate checks if the SlabPinParams are valid. It ensures that the
-// encryption key is set, the minimum number of shards is met, and that there
-// are no duplicate host keys or empty roots in the sectors.
-func (s SlabPinParams) Validate() error {
+// encryption key is set, the minimum number of shards is met, the optional
+// upload time is recent relative to now, and that there are no duplicate host
+// keys or empty roots in the sectors.
+func (s SlabPinParams) Validate(now time.Time) error {
 	if s.Version > maxSlabVersion {
 		return fmt.Errorf("%w: %d", ErrUnsupportedSlabVersion, s.Version)
 	} else if s.EncryptionKey == ([32]byte{}) {
 		return errors.New("encryption key is empty")
 	} else if err := ValidateECParams(int(s.MinShards), len(s.Sectors)); err != nil {
 		return err
+	}
+
+	if s.UploadedAt != nil {
+		if s.UploadedAt.Before(now.Add(-MaxSlabUploadAge)) {
+			return fmt.Errorf("%w (max %v)", ErrSlabUploadTooOld, MaxSlabUploadAge)
+		} else if s.UploadedAt.After(now.Add(MaxSlabUploadSkew)) {
+			return fmt.Errorf("%w (max %v ahead)", ErrSlabUploadInFuture, MaxSlabUploadSkew)
+		}
 	}
 
 	hks := make(map[types.PublicKey]struct{}, len(s.Sectors))
@@ -195,8 +226,9 @@ func (s SlabPinParams) Validate() error {
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
 // with the provided account.
 func (m *SlabManager) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error) {
+	now := time.Now()
 	for i := range toPin {
-		if err := toPin[i].Validate(); err != nil {
+		if err := toPin[i].Validate(now); err != nil {
 			return nil, fmt.Errorf("slab %d invalid: %w", i, err)
 		}
 	}

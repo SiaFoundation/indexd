@@ -629,6 +629,14 @@ paths:
                         allOf:
                           - $ref: "#/components/schemas/PublicKey"
                           - description: The public key of the host that stores the sector
+                uploadedAt:
+                  type: string
+                  format: date-time
+                  description: >-
+                    When the upload of the slab's sectors began. If provided,
+                    it must be no more than 48 hours old and no more than 5
+                    minutes ahead of the indexer's clock, leaving enough time
+                    to pin the sectors before temporary storage expires.
       responses:
         "201":
           description: Slab pinned successfully
@@ -641,6 +649,21 @@ paths:
                     allOf:
                       - $ref: "#/components/schemas/SlabID"
                       - description: The ID of the pinned slab
+        "400":
+          description: >-
+            Invalid slab parameters. A client may identify an upload that must
+            be repeated by matching the stable "slab upload is too old" text
+            in the response body. "slab upload time is in the future" means
+            the client's clock is more than 5 minutes ahead.
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                tooOld:
+                  value: "invalid slab pin params: slab upload is too old (max 48h0m0s)"
+                inFuture:
+                  value: "invalid slab pin params: slab upload time is in the future (max 5m0s ahead)"
 
       x-codeSamples:
         - lang: Go
