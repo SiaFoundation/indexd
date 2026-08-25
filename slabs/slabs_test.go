@@ -43,12 +43,12 @@ func TestSlabPinParamsValidate(t *testing.T) {
 		{"furthest ahead accepted", now.Add(slabs.MaxSlabUploadSkew), nil},
 		{"one ns too far ahead", now.Add(slabs.MaxSlabUploadSkew + 1), slabs.ErrSlabUploadInFuture},
 	} {
-		params.UploadedAt = &tc.uploadedAt
+		params.Sectors[1].UploadedAt = &tc.uploadedAt
 		if err := params.Validate(now); !errors.Is(err, tc.want) {
 			t.Fatalf("%s: expected %v, got %v", tc.name, tc.want, err)
 		}
 	}
-	params.UploadedAt = nil
+	params.Sectors[1].UploadedAt = nil
 
 	// assert empty encryption key is illegal
 	params.EncryptionKey = [32]byte{}
@@ -107,9 +107,9 @@ func TestSlabPinParamsDigest(t *testing.T) {
 		t.Fatalf("expected %v, got %v", expectedID, slabID)
 	}
 
-	// assert the upload time does not affect the slab ID
+	// assert a sector's upload time does not affect the slab ID
 	uploadedAt := time.Now()
-	params.UploadedAt = &uploadedAt
+	params.Sectors[0].UploadedAt = &uploadedAt
 	if digest := params.Digest(); digest != slabID {
 		t.Fatalf("expected upload time to preserve slab ID %v, got %v", slabID, digest)
 	}

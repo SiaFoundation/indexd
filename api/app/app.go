@@ -20,6 +20,7 @@ import (
 	"go.sia.tech/coreutils/rhp/v4/siamux"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/api/apierr"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/indexd/slabs"
@@ -556,10 +557,10 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	}
 
 	slabIDs, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), now.Add(6*time.Hour), params...)
-	if errors.Is(err, slabs.ErrBadHosts) ||
-		errors.Is(err, slabs.ErrMinShards) ||
-		errors.Is(err, slabs.ErrSlabUploadTooOld) ||
-		errors.Is(err, slabs.ErrSlabUploadInFuture) {
+	if statusErr, ok := errors.AsType[*apierr.StatusError](err); ok {
+		jc.Error(err, statusErr.Status)
+		return
+	} else if errors.Is(err, slabs.ErrBadHosts) || errors.Is(err, slabs.ErrMinShards) {
 		jc.Error(err, http.StatusBadRequest)
 		return
 	} else if jc.Check("failed to pin slab", err) != nil {

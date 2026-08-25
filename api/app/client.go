@@ -17,6 +17,7 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
+	"go.sia.tech/indexd/api/apierr"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/indexd/slabs"
@@ -68,19 +69,11 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, msg)
 }
 
-// matchBadRequest joins err with the first of sentinels whose message appears
-// in the body of a 400 response so callers can match it with errors.Is.
-func matchBadRequest(err error, sentinels ...error) error {
-	httpErr, ok := errors.AsType[*HTTPError](err)
-	if !ok || httpErr.StatusCode != http.StatusBadRequest {
-		return err
-	}
-	for _, sentinel := range sentinels {
-		if strings.Contains(httpErr.Body, sentinel.Error()) {
-			return fmt.Errorf("%w: %w", sentinel, err)
-		}
-	}
-	return err
+// Is matches target if it is an *apierr.StatusError with the same status code
+// and a message contained in the response body.
+func (e *HTTPError) Is(target error) bool {
+	se, ok := errors.AsType[*apierr.StatusError](target)
+	return ok && e.StatusCode == se.Status && strings.Contains(e.Body, se.Message)
 }
 
 // sign signs the request with the appropriate headers and returns the signed URL
@@ -202,12 +195,10 @@ func (c *Client) Hosts(ctx context.Context, appKey types.PrivateKey, opts ...api
 	return
 }
 
-// PinSlabs pins slabs to the indexer. A slab with an unacceptable upload time
-// is rejected with slabs.ErrSlabUploadTooOld, meaning it has to be re-uploaded,
-// or slabs.ErrSlabUploadInFuture, meaning the client's clock is ahead.
+// PinSlabs pins slabs to the indexer. A sector with an unacceptable upload time
+// is rejected with slabs.ErrSlabUploadTooOld or slabs.ErrSlabUploadInFuture.
 func (c *Client) PinSlabs(ctx context.Context, appKey types.PrivateKey, params ...slabs.SlabPinParams) (slabIDs []slabs.SlabID, err error) {
-	err = matchBadRequest(c.signedRequestJSON(ctx, appKey, http.MethodPost, "/slabs", params, &slabIDs),
-		slabs.ErrSlabUploadTooOld, slabs.ErrSlabUploadInFuture)
+	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/slabs", params, &slabIDs)
 	return
 }
 

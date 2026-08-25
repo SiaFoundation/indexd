@@ -268,8 +268,8 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 }
 
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
-// with the provided account. A slab's upload time, capped at the current time,
-// becomes the uploaded_at of its sectors.
+// with the provided account. A sector's reported upload time, capped at now,
+// becomes its uploaded_at.
 func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
 	var digests []slabs.SlabID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
@@ -388,7 +388,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 					sqlHash256(sector.Root),
 					sqlPublicKey(sector.HostKey),
 					nextIntegrityCheck,
-					slab.UploadedAt)
+					sector.UploadedAt)
 			}
 
 			var badHosts int
