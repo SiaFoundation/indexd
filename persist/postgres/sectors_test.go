@@ -1451,8 +1451,8 @@ func TestPinSlabsRebindLostSector(t *testing.T) {
 	}
 }
 
-// TestPinSlabsUploadedAt asserts that a slab's upload time becomes the
-// uploaded_at of its sectors and that a re-pin can't move it backwards.
+// TestPinSlabsUploadedAt asserts that a sector's reported upload time becomes
+// its uploaded_at and that a re-pin can't move it backwards.
 func TestPinSlabsUploadedAt(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 	account := proto.Account{1}
@@ -1460,6 +1460,13 @@ func TestPinSlabsUploadedAt(t *testing.T) {
 
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
+
+	setUploadedAt := func(params slabs.SlabPinParams, ts *time.Time) slabs.SlabPinParams {
+		for i := range params.Sectors {
+			params.Sectors[i].UploadedAt = ts
+		}
+		return params
+	}
 
 	assertUploadedAt := func(sectors []slabs.PinnedSector, expected time.Time) {
 		t.Helper()
@@ -1471,7 +1478,7 @@ func TestPinSlabsUploadedAt(t *testing.T) {
 		}
 	}
 
-	// a slab without an upload time falls back to now
+	// a sector without an upload time falls back to now
 	before := time.Now().Add(-time.Second)
 	fresh := newTestSlab(hk)
 	store.pinTestSlabs(t, account, fresh)
@@ -1481,41 +1488,44 @@ func TestPinSlabsUploadedAt(t *testing.T) {
 
 	// an upload time is persisted
 	uploadedAt := time.Now().Add(-40 * time.Hour).Round(time.Microsecond)
-	stale := newTestSlab(hk)
-	stale.UploadedAt = &uploadedAt
+	stale := setUploadedAt(newTestSlab(hk), &uploadedAt)
 	store.pinTestSlabs(t, account, stale)
 	assertUploadedAt(stale.Sectors, uploadedAt)
 
+	// sectors of one slab keep their own upload times
+	mixed := newTestSlab(hk)
+	earlier := uploadedAt.Add(-time.Hour)
+	mixed.Sectors[0].UploadedAt = &earlier
+	mixed.Sectors[1].UploadedAt = &uploadedAt
+	store.pinTestSlabs(t, account, mixed)
+	assertUploadedAt(mixed.Sectors[:1], earlier)
+	assertUploadedAt(mixed.Sectors[1:], uploadedAt)
+
 	// an upload time in the future is capped at now
 	future := time.Now().Add(time.Hour)
-	ahead := newTestSlab(hk)
-	ahead.UploadedAt = &future
+	ahead := setUploadedAt(newTestSlab(hk), &future)
 	store.pinTestSlabs(t, account, ahead)
 	if ts := store.sectorUploadedAt(t, ahead.Sectors[0].Root); !ts.Before(future) {
 		t.Fatalf("expected uploaded_at before %v, got %v", future, ts)
 	}
 
 	// re-pinning existing sectors keeps their upload time
-	repin := newTestSlab(hk, stale.Sectors...)
-	repin.UploadedAt = &uploadedAt
+	repin := setUploadedAt(newTestSlab(hk, stale.Sectors...), &uploadedAt)
 	store.pinTestSlabs(t, account, repin)
 	assertUploadedAt(stale.Sectors, uploadedAt)
 
 	// and can not move it backwards
 	older := uploadedAt.Add(-7 * time.Hour)
-	repin.UploadedAt = &older
-	store.pinTestSlabs(t, account, repin)
+	store.pinTestSlabs(t, account, setUploadedAt(repin, &older))
 	assertUploadedAt(stale.Sectors, uploadedAt)
 
 	// re-uploading them does move it forward
 	refreshed := time.Now().Add(-time.Minute).Round(time.Microsecond)
-	repin.UploadedAt = &refreshed
-	store.pinTestSlabs(t, account, repin)
+	store.pinTestSlabs(t, account, setUploadedAt(repin, &refreshed))
 	assertUploadedAt(stale.Sectors, refreshed)
 
 	// a re-pin without an upload time still falls back to now
-	repin.UploadedAt = nil
-	store.pinTestSlabs(t, account, repin)
+	store.pinTestSlabs(t, account, setUploadedAt(repin, nil))
 	for _, sector := range stale.Sectors {
 		if ts := store.sectorUploadedAt(t, sector.Root); !ts.After(refreshed) {
 			t.Fatalf("expected uploaded_at after %v, got %v", refreshed, ts)

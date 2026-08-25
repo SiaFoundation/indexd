@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/api/apierr"
 	"go.sia.tech/indexd/contracts"
 )
 
@@ -60,14 +62,14 @@ var (
 	// a version that is not yet supported.
 	ErrUnsupportedSlabVersion = errors.New("unsupported slab version")
 
-	// ErrSlabUploadTooOld is returned when attempting to pin a slab whose
-	// sectors may already have been deleted from temporary storage. Clients
-	// match these two by message, so keep the thresholds out of them.
-	ErrSlabUploadTooOld = errors.New("slab upload is too old")
+	// ErrSlabUploadTooOld is returned when pinning a sector that may already
+	// have been deleted from temporary storage. Clients match these two by
+	// message, so keep the thresholds out of them.
+	ErrSlabUploadTooOld = apierr.New(http.StatusBadRequest, "slab upload is too old")
 
-	// ErrSlabUploadInFuture is returned when attempting to pin a slab whose
-	// upload time is ahead of the indexer's clock.
-	ErrSlabUploadInFuture = errors.New("slab upload time is in the future")
+	// ErrSlabUploadInFuture is returned when a sector's upload time is ahead of
+	// the indexer's clock.
+	ErrSlabUploadInFuture = apierr.New(http.StatusBadRequest, "slab upload time is in the future")
 )
 
 type (
@@ -99,10 +101,12 @@ type (
 		PinnedAt      time.Time     `json:"pinnedAt"`
 	}
 
-	// A PinnedSector is a sector that has been pinned to a host.
+	// A PinnedSector is a sector that has been pinned to a host. UploadedAt is
+	// when it was written, if reported.
 	PinnedSector struct {
-		Root    types.Hash256   `json:"root"`
-		HostKey types.PublicKey `json:"hostKey"`
+		Root       types.Hash256   `json:"root"`
+		HostKey    types.PublicKey `json:"hostKey"`
+		UploadedAt *time.Time      `json:"uploadedAt,omitempty"`
 	}
 
 	// SlabPinParams is the input to PinSlabs
@@ -111,7 +115,6 @@ type (
 		EncryptionKey EncryptionKey  `json:"encryptionKey"`
 		MinShards     uint           `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
-		UploadedAt    *time.Time     `json:"uploadedAt,omitempty"`
 	}
 
 	// A PinnedSlab is a slab that has been pinned to hosts.
@@ -188,9 +191,8 @@ func (s SlabPinParams) DataSize() uint64 {
 }
 
 // Validate checks if the SlabPinParams are valid. It ensures that the
-// encryption key is set, the minimum number of shards is met, the optional
-// upload time is recent relative to now, and that there are no duplicate host
-// keys or empty roots in the sectors.
+// encryption key is set, the minimum number of shards is met, and that the
+// sectors have unique host keys, non-empty roots and recent upload times.
 func (s SlabPinParams) Validate(now time.Time) error {
 	if s.Version > maxSlabVersion {
 		return fmt.Errorf("%w: %d", ErrUnsupportedSlabVersion, s.Version)
@@ -198,14 +200,6 @@ func (s SlabPinParams) Validate(now time.Time) error {
 		return errors.New("encryption key is empty")
 	} else if err := ValidateECParams(int(s.MinShards), len(s.Sectors)); err != nil {
 		return err
-	}
-
-	if s.UploadedAt != nil {
-		if s.UploadedAt.Before(now.Add(-MaxSlabUploadAge)) {
-			return fmt.Errorf("%w (max %v)", ErrSlabUploadTooOld, MaxSlabUploadAge)
-		} else if s.UploadedAt.After(now.Add(MaxSlabUploadSkew)) {
-			return fmt.Errorf("%w (max %v ahead)", ErrSlabUploadInFuture, MaxSlabUploadSkew)
-		}
 	}
 
 	hks := make(map[types.PublicKey]struct{}, len(s.Sectors))
@@ -216,6 +210,12 @@ func (s SlabPinParams) Validate(now time.Time) error {
 			return fmt.Errorf("sector %d invalid: host key is empty", i)
 		} else if _, exists := hks[sector.HostKey]; exists {
 			return fmt.Errorf("sector %d is invalid: duplicate host key %q", i, sector.HostKey)
+		} else if sector.UploadedAt != nil {
+			if sector.UploadedAt.Before(now.Add(-MaxSlabUploadAge)) {
+				return fmt.Errorf("sector %d invalid: %w (max %v)", i, ErrSlabUploadTooOld, MaxSlabUploadAge)
+			} else if sector.UploadedAt.After(now.Add(MaxSlabUploadSkew)) {
+				return fmt.Errorf("sector %d invalid: %w (max %v ahead)", i, ErrSlabUploadInFuture, MaxSlabUploadSkew)
+			}
 		}
 		hks[sector.HostKey] = struct{}{}
 	}
