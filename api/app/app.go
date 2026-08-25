@@ -548,15 +548,7 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	if !ok {
 		return
 	}
-	now := time.Now()
-	for _, param := range params {
-		if err := param.Validate(now); err != nil {
-			jc.Error(fmt.Errorf("invalid slab pin params: %w", err), http.StatusBadRequest)
-			return
-		}
-	}
-
-	slabIDs, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), now.Add(6*time.Hour), params...)
+	slabIDs, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), time.Now().Add(6*time.Hour), params...)
 	if statusErr, ok := errors.AsType[*apierr.StatusError](err); ok {
 		jc.Error(err, statusErr.Status)
 		return

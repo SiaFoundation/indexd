@@ -62,6 +62,10 @@ var (
 	// a version that is not yet supported.
 	ErrUnsupportedSlabVersion = errors.New("unsupported slab version")
 
+	// ErrInvalidPinParams is returned when the params of a slab to pin are
+	// invalid. It wraps the underlying reason.
+	ErrInvalidPinParams = apierr.New(http.StatusBadRequest, "invalid slab pin params")
+
 	// ErrSlabUploadTooOld is returned when pinning a sector that may already
 	// have been deleted from temporary storage. Clients match these two by
 	// message, so keep the thresholds out of them.
@@ -229,7 +233,7 @@ func (m *SlabManager) PinSlabs(ctx context.Context, account proto.Account, nextI
 	now := time.Now()
 	for i := range toPin {
 		if err := toPin[i].Validate(now); err != nil {
-			return nil, fmt.Errorf("slab %d invalid: %w", i, err)
+			return nil, fmt.Errorf("%w: slab %d: %w", ErrInvalidPinParams, i, err)
 		}
 	}
 	return m.store.PinSlabs(account, nextIntegrityCheck, toPin...)
