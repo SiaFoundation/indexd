@@ -312,9 +312,10 @@ func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, h
 	return
 }
 
-// ReadSector writes the data of a sector from the specified host into w.
-// If an error is returned, the contents of w must be discarded.
-func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (result rhp.RPCReadSectorResult, err error) {
+// ReadSector writes the data of a sector from the specified host into w,
+// paying with the provided account token. If an error is returned, the
+// contents of w must be discarded.
+func (c *Client) ReadSector(ctx context.Context, token proto.AccountToken, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (result rhp.RPCReadSectorResult, err error) {
 	done, err := c.tg.Add()
 	if err != nil {
 		return rhp.RPCReadSectorResult{}, err
@@ -327,7 +328,6 @@ func (c *Client) ReadSector(ctx context.Context, accountKey types.PrivateKey, ho
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		token := proto.NewAccountToken(accountKey, hostKey)
 		result, err = rhp.RPCReadSector(ctx, transport, settings.Prices, token, w, root, offset, length)
 		return err
 	})
