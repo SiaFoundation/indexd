@@ -75,7 +75,7 @@ type (
 		AddTimedOutRPC(hostKey types.PublicKey, write bool, bytes uint64, elapsed time.Duration)
 		Prices(context.Context, types.PublicKey) (proto.HostPrices, error)
 		WriteSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, data []byte) (rhp.RPCWriteSectorResult, error)
-		ReadSector(ctx context.Context, accountKey types.PrivateKey, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error)
+		ReadSector(ctx context.Context, token proto.AccountToken, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error)
 
 		Prioritize([]types.PublicKey) []types.PublicKey
 		// ReadEstimate returns the expected time to read the given number
