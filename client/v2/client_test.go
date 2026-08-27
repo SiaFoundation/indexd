@@ -84,6 +84,16 @@ func TestHostClient(t *testing.T) {
 	} else if !bytes.Equal(buf.Bytes(), data[1024:][:256]) {
 		t.Fatal("unexpected data")
 	}
+
+	// read with a token minted for a different host
+	buf.Reset()
+	badToken := proto.NewAccountToken(accountKey, types.GeneratePrivateKey().PublicKey())
+	_, err = client.ReadSector(t.Context(), badToken, hostKey, result.Root, buf, 0, proto.SectorSize)
+	if !errors.Is(err, proto.ErrHostKeyMismatch) {
+		t.Fatalf("expected ErrHostKeyMismatch, got %v", err)
+	} else if buf.Len() != 0 {
+		t.Fatal("unexpected data")
+	}
 }
 
 func TestHostClientParallel(t *testing.T) {

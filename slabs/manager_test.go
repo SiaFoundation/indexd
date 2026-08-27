@@ -459,6 +459,9 @@ func (m *mockHostClient) WriteSector(ctx context.Context, accountKey types.Priva
 
 // ReadSector is a mock implementation that reads a sector from the mock host.
 func (m *mockHostClient) ReadSector(ctx context.Context, token proto.AccountToken, hostKey types.PublicKey, root types.Hash256, w io.Writer, offset, length uint64) (rhp.RPCReadSectorResult, error) {
+	if err := token.Validate(hostKey); err != nil {
+		return rhp.RPCReadSectorResult{}, err
+	}
 	m.mu.Lock()
 	if err, ok := m.failHosts[hostKey]; ok {
 		m.mu.Unlock()
