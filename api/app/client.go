@@ -20,6 +20,9 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/x402"
+
+	xtypes "github.com/x402-foundation/x402/go/v2/types"
 )
 
 const (
@@ -105,6 +108,10 @@ func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL str
 }
 
 func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, accept string) (io.ReadCloser, error) {
+	return doRequestWithHeaders(ctx, method, u, body, accept, nil)
+}
+
+func doRequestWithHeaders(ctx context.Context, method string, u *url.URL, body io.Reader, accept string, headers map[string]string) (io.ReadCloser, error) {
 	if u == nil {
 		return nil, errors.New("nil URL")
 	}
@@ -113,6 +120,9 @@ func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, a
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	req.Header.Set("Accept", accept)
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -122,7 +132,13 @@ func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, a
 	if !(200 <= r.StatusCode && r.StatusCode < 300) {
 		defer r.Body.Close()
 		defer io.Copy(io.Discard, r.Body)
-		b, _ := io.ReadAll(io.LimitReader(r.Body, 1024))
+		b, _ := io.ReadAll(io.LimitReader(r.Body, 4096))
+		// a 402 carries a quote; surface it rather than a bare status
+		if r.StatusCode == http.StatusPaymentRequired {
+			if quote, err := decodeQuote(r.Header, b); err == nil {
+				return nil, &PaymentRequiredError{Quote: quote}
+			}
+		}
 		return nil, &HTTPError{StatusCode: r.StatusCode, Body: strings.TrimSpace(string(b))}
 	} else if contentType := r.Header.Get("Content-Type"); r.StatusCode != http.StatusNoContent && accept != contentType {
 		defer r.Body.Close()
@@ -133,7 +149,7 @@ func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, a
 	return r.Body, nil
 }
 
-func (c *Client) signedRequestCustom(ctx context.Context, appKey types.PrivateKey, accept, method, route string, request any) (io.ReadCloser, error) {
+func (c *Client) signedRequestCustom(ctx context.Context, appKey types.PrivateKey, accept, method, route string, request any, headers ...map[string]string) (io.ReadCloser, error) {
 	var requestBuf []byte
 	if request != nil {
 		var err error
@@ -146,11 +162,15 @@ func (c *Client) signedRequestCustom(ctx context.Context, appKey types.PrivateKe
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign request: %w", err)
 	}
-	return doRequest(ctx, method, u, body, accept)
+	var extra map[string]string
+	if len(headers) > 0 {
+		extra = headers[0]
+	}
+	return doRequestWithHeaders(ctx, method, u, body, accept, extra)
 }
 
-func (c *Client) signedRequestJSON(ctx context.Context, appKey types.PrivateKey, method, route string, data, resp any) error {
-	body, err := c.signedRequestCustom(ctx, appKey, applicationJSON, method, route, data)
+func (c *Client) signedRequestJSON(ctx context.Context, appKey types.PrivateKey, method, route string, data, resp any, headers ...map[string]string) error {
+	body, err := c.signedRequestCustom(ctx, appKey, applicationJSON, method, route, data, headers...)
 	if err != nil {
 		return err
 	}
@@ -331,31 +351,23 @@ func (c *Client) SharedStats(ctx context.Context, sharingKey types.PrivateKey) (
 
 // SharedObjects lists the objects the sharing key grants access to. The request
 // is signed with the sharing key's private key.
-func (c *Client) SharedObjects(ctx context.Context, sharingKey types.PrivateKey, opts ...api.URLQueryParameterOption) (objects []slabs.SealedObject, err error) {
-	values := url.Values{}
-	for _, opt := range opts {
-		opt(values)
-	}
-	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared/objects?"+values.Encode(), nil, &objects)
+func (c *Client) SharedObjects(ctx context.Context, sharingKey types.PrivateKey, opts ...SharedOption) (objects []slabs.SealedObject, err error) {
+	err = c.sharedGetJSON(ctx, sharingKey, "/shared/objects", opts, &objects)
 	return
 }
 
 // SharedObjectByID retrieves a single object the sharing key grants access to.
 // The request is signed with the sharing key's private key.
-func (c *Client) SharedObjectByID(ctx context.Context, sharingKey types.PrivateKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
-	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, fmt.Sprintf("/shared/objects/%s", objectKey), nil, &obj)
+func (c *Client) SharedObjectByID(ctx context.Context, sharingKey types.PrivateKey, objectKey types.Hash256, opts ...SharedOption) (obj slabs.SealedObject, err error) {
+	err = c.sharedGetJSON(ctx, sharingKey, fmt.Sprintf("/shared/objects/%s", objectKey), opts, &obj)
 	return
 }
 
 // SharedHosts lists usable hosts using the sharing key for authentication. Each
 // host includes an account token the recipient can use to pay for downloads
 // from that host.
-func (c *Client) SharedHosts(ctx context.Context, sharingKey types.PrivateKey, opts ...api.URLQueryParameterOption) (sharedHosts []SharedHost, err error) {
-	values := url.Values{}
-	for _, opt := range opts {
-		opt(values)
-	}
-	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared/hosts?"+values.Encode(), nil, &sharedHosts)
+func (c *Client) SharedHosts(ctx context.Context, sharingKey types.PrivateKey, opts ...SharedOption) (sharedHosts []SharedHost, err error) {
+	err = c.sharedGetJSON(ctx, sharingKey, "/shared/hosts", opts, &sharedHosts)
 	return
 }
 
@@ -566,4 +578,76 @@ func NewClient(address string, opts ...ClientOption) *Client {
 		opt(c)
 	}
 	return c
+}
+
+// decodeQuote reads the quote from a 402. v2 carries it in the
+// PAYMENT-REQUIRED header; the body is a fallback.
+func decodeQuote(header http.Header, body []byte) (xtypes.PaymentRequired, error) {
+	if h := header.Get(x402.HeaderPaymentRequired); h != "" {
+		return x402.DecodePaymentRequired(h)
+	}
+	var quote xtypes.PaymentRequired
+	if err := json.Unmarshal(body, &quote); err != nil {
+		return xtypes.PaymentRequired{}, fmt.Errorf("no %s header and body is not a quote: %w", x402.HeaderPaymentRequired, err)
+	}
+	return quote, nil
+}
+
+// sharedGetJSON performs a signed GET, carrying any attached payment.
+func (c *Client) sharedGetJSON(ctx context.Context, sharingKey types.PrivateKey, route string, opts []SharedOption, resp any) error {
+	var r sharedRequest
+	r.query = url.Values{}
+	for _, opt := range opts {
+		opt(&r)
+	}
+	if q := r.query.Encode(); q != "" {
+		route += "?" + q
+	}
+
+	var headers map[string]string
+	if r.payment != "" {
+		headers = map[string]string{x402.HeaderPayment: r.payment}
+	}
+	return c.signedRequestJSON(ctx, sharingKey, http.MethodGet, route, nil, resp, headers)
+}
+
+// A SharedOption configures a request against the shared endpoints.
+type SharedOption func(*sharedRequest)
+
+type sharedRequest struct {
+	query   url.Values
+	payment string
+}
+
+// WithQuery applies query parameter options, such as pagination.
+func WithQuery(opts ...api.URLQueryParameterOption) SharedOption {
+	return func(r *sharedRequest) {
+		for _, opt := range opts {
+			opt(r.query)
+		}
+	}
+}
+
+// WithPayment attaches a signed x402 payment, paying for the key if it has not
+// been paid for. The payload must be signed by the buyer's wallet against the
+// quote from the 402; this client does not sign payments itself.
+func WithPayment(payload xtypes.PaymentPayload) SharedOption {
+	return func(r *sharedRequest) {
+		if buf, err := json.Marshal(payload); err == nil {
+			r.payment = base64.StdEncoding.EncodeToString(buf)
+		}
+	}
+}
+
+// A PaymentRequiredError is returned when the indexer answers with 402.
+type PaymentRequiredError struct {
+	Quote xtypes.PaymentRequired
+}
+
+// Error implements the error interface.
+func (e *PaymentRequiredError) Error() string {
+	if e.Quote.Error != "" {
+		return fmt.Sprintf("payment required: %s", e.Quote.Error)
+	}
+	return "payment required"
 }

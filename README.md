@@ -155,6 +155,11 @@ explorer:
 slabs:
     migrationWorkers: 16 # number of slabs to migrate in parallel (0 defaults to runtime.NumCPU())
     migrations: true # run slab migrations (set to false to outsource migrations to a remote node)
+payments:
+    enabled: false # let sharing key owners paywall the objects behind their keys
+    facilitatorURL: https://x402.org/facilitator # the x402 facilitator that verifies and settles payments
+    networks: ["eip155:84532"] # CAIP-2 networks payment is accepted on (base sepolia)
+    facilitatorHeaders: {} # sent on every facilitator request, e.g. {Authorization: "Bearer ..."}
 log:
     stdout:
         enabled: true # enable logging to stdout

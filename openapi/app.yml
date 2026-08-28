@@ -26,6 +26,14 @@ tags:
       signed with the sharing key's private key instead of an app key; the signer must
       resolve to an existing, unexpired sharing key.
 
+
+      If the key's owner has put a price on it, every one of these routes stays
+      locked until the key has been paid for, and takes the payment itself
+      following the x402 protocol: a refused request answers 402 with a quote,
+      and retrying the same request with a PAYMENT-SIGNATURE header returns the
+      resource. After that the key alone is enough. Unpriced keys are
+      unaffected.
+
 paths:
   /account:
     get:
@@ -353,6 +361,11 @@ paths:
       responses:
         "200":
           description: A list of objects with their re-sealed keys, most recently attached first
+          headers:
+            PAYMENT-RESPONSE:
+              description: The base64-encoded settlement receipt, when the request carried a payment
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -417,15 +430,46 @@ paths:
         - shared
       summary: Get the aggregate stats of the authenticated sharing key
       operationId: getSharedStats
+      parameters:
+        - name: PAYMENT-SIGNATURE
+          in: header
+          required: false
+          description: >
+            A signed x402 payment, paying for the sharing key if it is
+            paywalled and has not been paid for yet. Sent when retrying a
+            request that was refused with 402.
+          schema:
+            type: string
       responses:
         "200":
           description: The sharing key's stats
+          headers:
+            PAYMENT-RESPONSE:
+              description: The base64-encoded settlement receipt, when the request carried a payment
+              schema:
+                type: string
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/KeyStats"
         "401":
           description: The request is not signed by a valid, unexpired sharing key
+        "402":
+          description: >
+            The sharing key has a price and has not been paid for, or a
+            payment that was supplied was rejected. The quote states the price;
+            retry this request with a PAYMENT-SIGNATURE header to pay it.
+          headers:
+            PAYMENT-REQUIRED:
+              description: The base64-encoded quote
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentRequired"
+        "501":
+          description: The sharing key is paywalled but the indexer cannot take payments
   /shared/objects:
     get:
       tags:
@@ -434,6 +478,15 @@ paths:
       description: Objects on the indexer's blocklist are hidden from this listing.
       operationId: getSharedObjects
       parameters:
+        - name: PAYMENT-SIGNATURE
+          in: header
+          required: false
+          description: >
+            A signed x402 payment, paying for the sharing key if it is
+            paywalled and has not been paid for yet. Sent when retrying a
+            request that was refused with 402.
+          schema:
+            type: string
         - name: limit
           in: query
           description: The maximum number of objects to return
@@ -452,6 +505,11 @@ paths:
       responses:
         "200":
           description: A list of objects with their re-sealed keys, most recently attached first
+          headers:
+            PAYMENT-RESPONSE:
+              description: The base64-encoded settlement receipt, when the request carried a payment
+              schema:
+                type: string
           content:
             application/json:
               schema:
@@ -460,6 +518,22 @@ paths:
                   $ref: "#/components/schemas/SealedObject"
         "401":
           description: The request is not signed by a valid, unexpired sharing key
+        "402":
+          description: >
+            The sharing key has a price and has not been paid for, or a
+            payment that was supplied was rejected. The quote states the price;
+            retry this request with a PAYMENT-SIGNATURE header to pay it.
+          headers:
+            PAYMENT-REQUIRED:
+              description: The base64-encoded quote
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentRequired"
+        "501":
+          description: The sharing key is paywalled but the indexer cannot take payments
   /shared/objects/{id}:
     get:
       tags:
@@ -467,6 +541,15 @@ paths:
       summary: Get a single object the sharing key grants access to
       operationId: getSharedObject
       parameters:
+        - name: PAYMENT-SIGNATURE
+          in: header
+          required: false
+          description: >
+            A signed x402 payment, paying for the sharing key if it is
+            paywalled and has not been paid for yet. Sent when retrying a
+            request that was refused with 402.
+          schema:
+            type: string
         - name: id
           in: path
           required: true
@@ -481,6 +564,22 @@ paths:
                 $ref: "#/components/schemas/SealedObject"
         "401":
           description: The request is not signed by a valid, unexpired sharing key
+        "402":
+          description: >
+            The sharing key has a price and has not been paid for, or a
+            payment that was supplied was rejected. The quote states the price;
+            retry this request with a PAYMENT-SIGNATURE header to pay it.
+          headers:
+            PAYMENT-REQUIRED:
+              description: The base64-encoded quote
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentRequired"
+        "501":
+          description: The sharing key is paywalled but the indexer cannot take payments
         "404":
           description: Object not attached to the sharing key
         "451":
@@ -492,6 +591,15 @@ paths:
       summary: List usable hosts, each with an account token for paying for downloads
       operationId: getSharedHosts
       parameters:
+        - name: PAYMENT-SIGNATURE
+          in: header
+          required: false
+          description: >
+            A signed x402 payment, paying for the sharing key if it is
+            paywalled and has not been paid for yet. Sent when retrying a
+            request that was refused with 402.
+          schema:
+            type: string
         - name: limit
           in: query
           description: The maximum number of hosts to return
@@ -536,6 +644,22 @@ paths:
           description: Invalid protocol or location parameter
         "401":
           description: The request is not signed by a valid, unexpired sharing key
+        "402":
+          description: >
+            The sharing key has a price and has not been paid for, or a
+            payment that was supplied was rejected. The quote states the price;
+            retry this request with a PAYMENT-SIGNATURE header to pay it.
+          headers:
+            PAYMENT-REQUIRED:
+              description: The base64-encoded quote
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentRequired"
+        "501":
+          description: The sharing key is paywalled but the indexer cannot take payments
   /slabs:
     get:
       tags:

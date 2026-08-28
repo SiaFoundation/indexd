@@ -28,8 +28,19 @@ func scanSharedObject(row pgx.CollectableRow) (objectID int64, obj slabs.SealedO
 	return
 }
 
+// sharingKeySelect reads a sharing key with its optional price. Callers append
+// a WHERE clause.
+const sharingKeySelect = `
+	SELECT a.public_key, sk.public_key, sk.nonce, sk.use_description, sk.object_count, sk.size, sk.pinned_data, sk.pinned_size, sk.expires_at, sk.created_at, sk.updated_at, c.amount, c.asset, c.network, c.pay_to, c.extra, c.paid
+	FROM sharing_keys sk
+	INNER JOIN accounts a ON a.id = sk.account_id
+	LEFT JOIN prices c ON c.id = sk.price_id`
+
 func scanSharingKey(s scanner) (key sharing.Key, err error) {
 	var nonce []byte
+	var extra map[string]string
+	var amount, asset, network, payTo sql.Null[string]
+	var paid sql.Null[bool]
 	err = s.Scan(
 		(*sqlPublicKey)(&key.Account),
 		(*sqlPublicKey)(&key.PublicKey),
@@ -42,8 +53,27 @@ func scanSharingKey(s scanner) (key sharing.Key, err error) {
 		&key.ExpiresAt,
 		&key.CreatedAt,
 		&key.UpdatedAt,
+		&amount,
+		&asset,
+		&network,
+		&payTo,
+		&extra,
+		&paid,
 	)
+	if err != nil {
+		return
+	}
 	copy(key.Nonce[:], nonce)
+	if amount.Valid {
+		key.Price = &sharing.Price{
+			Amount:  amount.V,
+			Asset:   asset.V,
+			Network: network.V,
+			PayTo:   payTo.V,
+			Extra:   extra,
+			Paid:    paid.V,
+		}
+	}
 	return
 }
 
@@ -61,23 +91,45 @@ func (s *Store) AddSharingKey(account proto.Account, req sharing.KeyRequest) (ke
 		if req.ExpiresAt != nil {
 			expiresAt = *req.ExpiresAt
 		}
-		key, err = scanSharingKey(tx.QueryRow(ctx, `
-			WITH ins AS (
-				INSERT INTO sharing_keys (account_id, public_key, nonce, use_description, object_count, size, pinned_data, pinned_size, expires_at)
-				VALUES ($1, $2, $3, $4, 0, 0, 0, 0, $5)
-				ON CONFLICT (public_key) DO NOTHING
-				RETURNING account_id, public_key, nonce, use_description, object_count, size, pinned_data, pinned_size, expires_at, created_at, updated_at
-			)
-			SELECT a.public_key, ins.public_key, ins.nonce, ins.use_description, ins.object_count, ins.size, ins.pinned_data, ins.pinned_size, ins.expires_at, ins.created_at, ins.updated_at
-			FROM ins INNER JOIN accounts a ON a.id = ins.account_id
-		`, accountID, sqlPublicKey(req.PublicKey), req.Nonce[:], req.Description, expiresAt))
+
+		var priceID any
+		if req.Price != nil {
+			var extra any
+			if len(req.Price.Extra) > 0 {
+				extra = req.Price.Extra
+			}
+
+			var id int64
+			if err := tx.QueryRow(ctx, `
+				INSERT INTO prices (amount, asset, network, pay_to, extra)
+				VALUES ($1, $2, $3, $4, $5)
+				RETURNING id
+			`, req.Price.Amount, req.Price.Asset, req.Price.Network, req.Price.PayTo, extra).Scan(&id); err != nil {
+				return fmt.Errorf("failed to add price: %w", err)
+			}
+			priceID = id
+		}
+
+		var sharingKeyID int64
+		err = tx.QueryRow(ctx, `
+			INSERT INTO sharing_keys (account_id, public_key, nonce, use_description, object_count, size, pinned_data, pinned_size, expires_at, price_id)
+			VALUES ($1, $2, $3, $4, 0, 0, 0, 0, $5, $6)
+			ON CONFLICT (public_key) DO NOTHING
+			RETURNING id
+		`, accountID, sqlPublicKey(req.PublicKey), req.Nonce[:], req.Description, expiresAt, priceID).Scan(&sharingKeyID)
 		if errors.Is(err, sql.ErrNoRows) {
 			return sharing.ErrSharingKeyExists
 		}
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
 			return sharing.ErrSharingKeyExists
+		} else if err != nil {
+			return fmt.Errorf("failed to add sharing key: %w", err)
 		}
+
+		key, err = scanSharingKey(tx.QueryRow(ctx, sharingKeySelect+`
+			WHERE sk.id = $1
+		`, sharingKeyID))
 		return err
 	})
 	return
@@ -86,10 +138,7 @@ func (s *Store) AddSharingKey(account proto.Account, req sharing.KeyRequest) (ke
 // SharingKey returns the sharing key with the given public key.
 func (s *Store) SharingKey(publicKey types.PublicKey) (key sharing.Key, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		key, err = scanSharingKey(tx.QueryRow(ctx, `
-			SELECT a.public_key, sk.public_key, sk.nonce, sk.use_description, sk.object_count, sk.size, sk.pinned_data, sk.pinned_size, sk.expires_at, sk.created_at, sk.updated_at
-			FROM sharing_keys sk
-			INNER JOIN accounts a ON a.id = sk.account_id
+		key, err = scanSharingKey(tx.QueryRow(ctx, sharingKeySelect+`
 			WHERE sk.public_key = $1 AND a.deleted_at IS NULL AND (sk.expires_at IS NULL OR sk.expires_at > NOW())
 		`, sqlPublicKey(publicKey)))
 		if errors.Is(err, sql.ErrNoRows) {
@@ -109,10 +158,7 @@ func (s *Store) SharingKeys(account proto.Account, offset, limit int) (keys []sh
 			return err
 		}
 
-		rows, err := tx.Query(ctx, `
-			SELECT a.public_key, sk.public_key, sk.nonce, sk.use_description, sk.object_count, sk.size, sk.pinned_data, sk.pinned_size, sk.expires_at, sk.created_at, sk.updated_at
-			FROM sharing_keys sk
-			INNER JOIN accounts a ON a.id = sk.account_id
+		rows, err := tx.Query(ctx, sharingKeySelect+`
 			WHERE sk.account_id = $1 AND (sk.expires_at IS NULL OR sk.expires_at > NOW())
 			ORDER BY sk.id DESC
 			LIMIT $2 OFFSET $3
@@ -144,10 +190,21 @@ func (s *Store) DeleteSharingKey(account proto.Account, publicKey types.PublicKe
 			return err
 		}
 
-		res, err := tx.Exec(ctx, `DELETE FROM sharing_keys WHERE public_key = $1 AND account_id = $2`, sqlPublicKey(publicKey), accountID)
+		// the key references its price, so nothing cascades: delete both
+		var deleted int
+		err = tx.QueryRow(ctx, `
+			WITH deleted AS (
+				DELETE FROM sharing_keys
+				WHERE public_key = $1 AND account_id = $2
+				RETURNING price_id
+			), pruned AS (
+				DELETE FROM prices WHERE id IN (SELECT price_id FROM deleted WHERE price_id IS NOT NULL)
+			)
+			SELECT COUNT(*) FROM deleted
+		`, sqlPublicKey(publicKey), accountID).Scan(&deleted)
 		if err != nil {
 			return err
-		} else if res.RowsAffected() == 0 {
+		} else if deleted == 0 {
 			return sharing.ErrSharingKeyNotFound
 		}
 		return nil
@@ -241,7 +298,14 @@ func (s *Store) AddSharedObject(account proto.Account, sharingKey types.PublicKe
 // the cutoff.
 func (s *Store) PruneExpiredSharingKeys(cutoff time.Time) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `DELETE FROM sharing_keys WHERE expires_at IS NOT NULL AND expires_at <= $1`, cutoff)
+		_, err := tx.Exec(ctx, `
+			WITH deleted AS (
+				DELETE FROM sharing_keys
+				WHERE expires_at IS NOT NULL AND expires_at <= $1
+				RETURNING price_id
+			)
+			DELETE FROM prices WHERE id IN (SELECT price_id FROM deleted WHERE price_id IS NOT NULL)
+		`, cutoff)
 		return err
 	})
 }
@@ -368,6 +432,22 @@ func (s *Store) SharingAccountKey(sharingKey types.PublicKey) (key types.Private
 		return nil
 	})
 	return
+}
+
+// MarkSharingKeyPaid records a settled payment, unlocking the key.
+func (s *Store) MarkSharingKeyPaid(sharingKey types.PublicKey) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		res, err := tx.Exec(ctx, `
+			UPDATE prices SET paid = TRUE
+			WHERE id = (SELECT price_id FROM sharing_keys WHERE public_key = $1)
+		`, sqlPublicKey(sharingKey))
+		if err != nil {
+			return fmt.Errorf("failed to mark sharing key paid: %w", err)
+		} else if res.RowsAffected() == 0 {
+			return sharing.ErrNotForSale
+		}
+		return nil
+	})
 }
 
 // DeleteSharedObject detaches an object from one of the account's sharing keys.

@@ -23,6 +23,7 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/x402"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -63,6 +64,8 @@ type (
 		SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
 		SharedObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
 		AccountTokens(sharingKey types.PublicKey, hostKeys []types.PublicKey) ([]proto.AccountToken, error)
+
+		MarkSharingKeyPaid(sharingKey types.PublicKey) error
 	}
 
 	// Hosts defines the hosts interface for the application API.
@@ -179,6 +182,7 @@ type (
 		sharing   Sharing
 		log       *zap.Logger
 		rl        RateLimiter
+		paywall   *x402.Paywall // nil unless payments are enabled
 
 		hostname     string
 		advertiseURL string
@@ -219,6 +223,14 @@ const (
 func WithLogger(log *zap.Logger) Option {
 	return func(api *app) {
 		api.log = log
+	}
+}
+
+// WithPaywall enables payment for priced sharing keys. Without it, a key can
+// be priced but nobody can pay.
+func WithPaywall(p *x402.Paywall) Option {
+	return func(a *app) {
+		a.paywall = p
 	}
 }
 
@@ -404,6 +416,14 @@ func (a *app) handleDELETEObjects(jc jape.Context, pk types.PublicKey) {
 func (a *app) handlePOSTSharing(jc jape.Context, pk types.PublicKey) {
 	req, ok := decodeRequest[sharing.KeyRequest](jc)
 	if !ok {
+		return
+	}
+
+	if err := a.checkPrice(req.Price); errors.Is(err, ErrPaywallDisabled) {
+		jc.Error(err, http.StatusNotImplemented)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusBadRequest)
 		return
 	}
 
@@ -1020,6 +1040,8 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 			key, ok := validateSharedURLAuth(jc, a.hostname, sharing)
 			if !ok {
 				return
+			} else if !a.authorizeShared(jc, key) {
+				return
 			}
 			h(jc, key)
 		}
@@ -1078,7 +1100,8 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		"GET /sharing/:key/objects":               wrapSignedAuth(a.handleGETSharingObjects),
 		"DELETE /sharing/:key/objects/:objectkey": wrapSignedAuth(a.handleDELETESharingObject),
 
-		// shared-key endpoints, authenticated with a sharing key
+		// shared-key endpoints, authenticated with a sharing key. Might require
+		// x402 payment.
 		"GET /shared":             wrapSharedAuth(a.handleGETShared),
 		"GET /shared/objects":     wrapSharedAuth(a.handleGETSharedObjects),
 		"GET /shared/objects/:id": wrapSharedAuth(a.handleGETSharedObject),
