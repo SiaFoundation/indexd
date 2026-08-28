@@ -1462,6 +1462,7 @@ func TestPinSlabsUploadedAt(t *testing.T) {
 	store.addTestContract(t, hk)
 
 	setUploadedAt := func(params slabs.SlabPinParams, ts *time.Time) slabs.SlabPinParams {
+		params.Sectors = slices.Clone(params.Sectors)
 		for i := range params.Sectors {
 			params.Sectors[i].UploadedAt = ts
 		}

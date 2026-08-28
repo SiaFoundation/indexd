@@ -17,7 +17,6 @@ import (
 
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
-	"go.sia.tech/indexd/api/apierr"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/indexd/slabs"
@@ -69,11 +68,10 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, msg)
 }
 
-// Is matches target if it is an *apierr.StatusError with the same status code
-// and a message contained in the response body.
+// Is matches target if its message is contained in the response body.
 func (e *HTTPError) Is(target error) bool {
-	se, ok := errors.AsType[*apierr.StatusError](target)
-	return ok && e.StatusCode == se.Status && strings.Contains(e.Body, se.Message)
+	msg := target.Error()
+	return msg != "" && strings.Contains(e.Body, msg)
 }
 
 // sign signs the request with the appropriate headers and returns the signed URL
