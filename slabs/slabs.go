@@ -5,12 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"net/http"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
-	"go.sia.tech/indexd/api/apierr"
 	"go.sia.tech/indexd/contracts"
 )
 
@@ -64,16 +62,16 @@ var (
 
 	// ErrInvalidPinParams is returned when the params of a slab to pin are
 	// invalid. It wraps the underlying reason.
-	ErrInvalidPinParams = apierr.New(http.StatusBadRequest, "invalid slab pin params")
+	ErrInvalidPinParams = errors.New("invalid slab pin params")
 
 	// ErrSlabUploadTooOld is returned when pinning a sector that may already
 	// have been deleted from temporary storage. Clients match these two by
 	// message, so keep the thresholds out of them.
-	ErrSlabUploadTooOld = apierr.New(http.StatusBadRequest, "slab upload is too old")
+	ErrSlabUploadTooOld = errors.New("slab upload is too old")
 
 	// ErrSlabUploadInFuture is returned when a sector's upload time is ahead of
 	// the indexer's clock.
-	ErrSlabUploadInFuture = apierr.New(http.StatusBadRequest, "slab upload time is in the future")
+	ErrSlabUploadInFuture = errors.New("slab upload time is in the future")
 )
 
 type (

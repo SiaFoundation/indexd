@@ -378,7 +378,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			for _, sector := range slab.Sectors {
 				batch.Queue(`
 				INSERT INTO sectors (sector_root, host_id, next_integrity_check, uploaded_at)
-				SELECT $1, h.id, $3, LEAST(NOW(), COALESCE($4::timestamptz, NOW()))
+				SELECT $1, h.id, $3, LEAST(NOW(), $4::timestamptz)
 				FROM hosts h
 				WHERE h.public_key = $2
 				ON CONFLICT (sector_root) DO UPDATE SET
