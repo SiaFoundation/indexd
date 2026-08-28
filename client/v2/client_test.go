@@ -60,7 +60,7 @@ func TestHostClient(t *testing.T) {
 
 	// read the full sector back
 	buf := bytes.NewBuffer(nil)
-	_, err = client.ReadSector(context.Background(), token, hostKey, result.Root, buf, 0, proto.SectorSize)
+	_, err = client.ReadSector(context.Background(), token, result.Root, buf, 0, proto.SectorSize)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(buf.Bytes(), sector[:]) {
@@ -69,7 +69,7 @@ func TestHostClient(t *testing.T) {
 
 	// read the first 4096 bytes back
 	buf.Reset()
-	_, err = client.ReadSector(context.Background(), token, hostKey, result.Root, buf, 0, uint64(len(data)))
+	_, err = client.ReadSector(context.Background(), token, result.Root, buf, 0, uint64(len(data)))
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(buf.Bytes(), data) {
@@ -78,20 +78,10 @@ func TestHostClient(t *testing.T) {
 
 	// read an offset of the sector back
 	buf.Reset()
-	_, err = client.ReadSector(context.Background(), token, hostKey, result.Root, buf, 1024, 256)
+	_, err = client.ReadSector(context.Background(), token, result.Root, buf, 1024, 256)
 	if err != nil {
 		t.Fatal(err)
 	} else if !bytes.Equal(buf.Bytes(), data[1024:][:256]) {
-		t.Fatal("unexpected data")
-	}
-
-	// read with a token minted for a different host
-	buf.Reset()
-	badToken := proto.NewAccountToken(accountKey, types.GeneratePrivateKey().PublicKey())
-	_, err = client.ReadSector(t.Context(), badToken, hostKey, result.Root, buf, 0, proto.SectorSize)
-	if !errors.Is(err, proto.ErrHostKeyMismatch) {
-		t.Fatalf("expected ErrHostKeyMismatch, got %v", err)
-	} else if buf.Len() != 0 {
 		t.Fatal("unexpected data")
 	}
 }
@@ -146,7 +136,7 @@ func TestHostClientParallel(t *testing.T) {
 			}
 
 			buf := bytes.NewBuffer(nil)
-			_, err = client.ReadSector(context.Background(), proto.NewAccountToken(accountKey, hk), hk, result.Root, buf, 0, proto.SectorSize)
+			_, err = client.ReadSector(context.Background(), proto.NewAccountToken(accountKey, hk), result.Root, buf, 0, proto.SectorSize)
 			if err != nil {
 				errCh <- fmt.Errorf("failed to read sector: %w", err)
 				return
