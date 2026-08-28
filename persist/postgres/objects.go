@@ -125,7 +125,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 	return obj, err
 }
 
-// ListObjects lists objects for the given account that were updated after the
+// ListObjects lists objects for the given account that were updated after
 // the given 'after' time.
 func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
@@ -141,6 +141,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			  AND oe.updated_at < date_trunc('second', COALESCE((
 				SELECT MIN(a.xact_start) FROM pg_stat_activity a
 				WHERE a.xact_start IS NOT NULL AND a.datname = current_database()
+				  AND a.backend_type = 'client backend' AND a.pid <> pg_backend_pid()
 			  ), NOW()))
 			  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = oe.object_key)
 			ORDER BY oe.updated_at ASC, oe.object_key ASC

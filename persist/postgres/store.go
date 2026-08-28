@@ -188,7 +188,7 @@ func NewStore(ctx context.Context, ci ConnectionInfo, defaultMaintenanceSettings
 func assertStatsReadable(ctx context.Context, pool *pgxpool.Pool) error {
 	var readable bool
 	if err := pool.QueryRow(ctx, `SELECT pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')`).Scan(&readable); err != nil {
-		return fmt.Errorf("failed to check pg_stat_activity access: %w", err)
+		return fmt.Errorf("failed to check pg_read_all_stats membership: %w", err)
 	} else if !readable {
 		return errors.New("the database role must be granted pg_read_all_stats so the object event stream can tell which transactions are still in flight")
 	}
