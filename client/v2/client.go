@@ -312,8 +312,8 @@ func (c *Client) WriteSector(ctx context.Context, accountKey types.PrivateKey, h
 	return
 }
 
-// ReadSector writes the data of a sector from a host corresponding to the account 
-// token into w, paying with the provided account token. If an error is returned, 
+// ReadSector writes the data of a sector from a host corresponding to the account
+// token into w, paying with the provided account token. If an error is returned,
 // the contents of w must be discarded.
 func (c *Client) ReadSector(ctx context.Context, token proto.AccountToken, root types.Hash256, w io.Writer, offset, length uint64) (result rhp.RPCReadSectorResult, err error) {
 	hostKey := token.HostKey
