@@ -86,12 +86,13 @@ func TestMigrateSector(t *testing.T) {
 	assertUpdated := func(updated bool) {
 		t.Helper()
 		awaitEventSecond(t)
-		events, err := store.ListObjects(account, slabs.Cursor{
-			After: lastUpdate,
-		}, 10)
-		if err != nil {
-			t.Fatal(err)
-		} else if updated && len(events) != 1 {
+
+		want := 0
+		if updated {
+			want = 1
+		}
+		events := store.waitForEvents(t, account, slabs.Cursor{After: lastUpdate}, want)
+		if updated && len(events) != 1 {
 			t.Fatal("object was updated unexpectedly, got", len(events), "events")
 		} else if !updated && len(events) != 0 {
 			t.Fatal("object was not updated, but got", len(events), "events")

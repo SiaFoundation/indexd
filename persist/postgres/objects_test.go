@@ -57,6 +57,24 @@ func (s *Store) assertStoreCleanedUp(t testing.TB) {
 	}
 }
 
+// waitForEvents lists events from the cursor until at least n are returned. An
+// open transaction withholds events, so a short listing is retried.
+func (s *Store) waitForEvents(t testing.TB, acc proto.Account, cursor slabs.Cursor, n int) []slabs.ObjectEvent {
+	t.Helper()
+
+	for range 100 {
+		events, err := s.ListObjects(acc, cursor, 10)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(events) >= n {
+			return events
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("expected %d events", n)
+	return nil
+}
+
 func (s *Store) pinRandomObject(t testing.TB, acc proto.Account, ss []slabs.SlabSlice) slabs.SealedObject {
 	obj := slabs.SealedObject{
 		EncryptedDataKey:     frand.Bytes(72),
@@ -230,11 +248,7 @@ func TestObjects(t *testing.T) {
 
 	assertObjects := func(acc proto.Account, expectedDeleted, expectedExist int) []slabs.ObjectEvent {
 		t.Helper()
-		awaitEventSecond(t)
-		objects, err := store.ListObjects(acc, slabs.Cursor{}, 10)
-		if err != nil {
-			t.Fatal(err)
-		}
+		objects := store.waitForEvents(t, acc, slabs.Cursor{}, expectedDeleted+expectedExist)
 
 		var exist, deleted int
 		for _, obj := range objects {
@@ -522,9 +536,7 @@ func TestListObjectsWithholdsCurrentSecond(t *testing.T) {
 
 // TestListObjectsLatePinCommit asserts that a pin's event is still delivered
 // when its transaction commits after a listing already served the second it is
-// stamped with. The stamp is taken when the pin transaction starts, so a pin
-// that stalls before committing lands an event behind any cursor handed out
-// while it was in flight.
+// stamped with.
 func TestListObjectsLatePinCommit(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
@@ -533,32 +545,36 @@ func TestListObjectsLatePinCommit(t *testing.T) {
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 
-	waitFor := func(desc string, cond func() bool) {
-		t.Helper()
-		for start := time.Now(); !cond(); time.Sleep(10 * time.Millisecond) {
-			if time.Since(start) > 10*time.Second {
-				t.Fatal("timeout waiting for", desc)
-			}
+	// build the objects by hand so a slab can be locked and the keys ordered
+	newObject := func() (slabs.SlabPinParams, slabs.SealedObject) {
+		params := slabs.SlabPinParams{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}},
+		}
+		return params, slabs.SealedObject{
+			EncryptedDataKey:     frand.Bytes(72),
+			EncryptedMetadataKey: frand.Bytes(72),
+			EncryptedMetadata:    frand.Bytes(50),
+			DataSignature:        types.Signature(frand.Bytes(64)),
+			MetadataSignature:    types.Signature(frand.Bytes(64)),
+			Slabs:                []slabs.SlabSlice{params.Slice(0, 100)},
 		}
 	}
 
-	// build the slow object by hand so its slab can be locked
-	params := slabs.SlabPinParams{
-		EncryptionKey: frand.Entropy256(),
-		MinShards:     1,
-		Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}},
+	// the stalled pin has to sort below the other one, since events sharing a
+	// second are ordered by key and only a lower key can land behind the cursor
+	slowParams, slow := newObject()
+	fastParams, fast := newObject()
+	for slowKey, fastKey := slow.ID(), fast.ID(); bytes.Compare(slowKey[:], fastKey[:]) >= 0; slowKey, fastKey = slow.ID(), fast.ID() {
+		fastParams, fast = newObject()
 	}
-	if _, err := store.PinSlabs(acc, time.Time{}, params); err != nil {
+	if _, err := store.PinSlabs(acc, time.Time{}, slowParams, fastParams); err != nil {
 		t.Fatal(err)
 	}
-	slow := slabs.SealedObject{
-		EncryptedDataKey:     frand.Bytes(72),
-		EncryptedMetadataKey: frand.Bytes(72),
-		EncryptedMetadata:    frand.Bytes(50),
-		DataSignature:        types.Signature(frand.Bytes(64)),
-		MetadataSignature:    types.Signature(frand.Bytes(64)),
-		Slabs:                []slabs.SlabSlice{params.Slice(0, 100)},
-	}
+
+	// start at the top of a second so the lock and both pins share it
+	awaitEventSecond(t)
 
 	// hold a row lock the pin blocks on after inserting its event
 	lockTx, err := store.pool.Begin(t.Context())
@@ -566,7 +582,7 @@ func TestListObjectsLatePinCommit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = lockTx.Rollback(t.Context()) }()
-	if _, err := lockTx.Exec(t.Context(), `SELECT digest FROM slabs WHERE digest = $1 FOR UPDATE`, sqlHash256(params.Digest())); err != nil {
+	if _, err := lockTx.Exec(t.Context(), `SELECT digest FROM slabs WHERE digest = $1 FOR UPDATE`, sqlHash256(slowParams.Digest())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -575,50 +591,59 @@ func TestListObjectsLatePinCommit(t *testing.T) {
 	go func() {
 		pinErr <- store.PinObject(acc, slow.PinRequest())
 	}()
-	waitFor("pin to block", func() bool {
+	var blocked bool
+	for range 100 {
 		var waiting int
-		err := store.pool.QueryRow(t.Context(), `
+		if err := store.pool.QueryRow(t.Context(), `
 			SELECT COUNT(*) FROM pg_locks l
 			JOIN pg_stat_activity a ON a.pid = l.pid
-			WHERE NOT l.granted AND a.datname = current_database()`).Scan(&waiting)
+			WHERE NOT l.granted AND a.datname = current_database()`).Scan(&waiting); err != nil {
+			t.Fatal(err)
+		} else if waiting > 0 {
+			blocked = true
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !blocked {
+		t.Fatal("expected the pin to block on the locked slab")
+	}
+
+	// pin the other object into the same second while the slow one is
+	// uncommitted, then read everything on offer and advance the cursor
+	if err := store.PinObject(acc, fast.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+
+	// read from a later second, so only the stalled transaction still holds
+	// these events back
+	awaitEventSecond(t)
+
+	var cursor slabs.Cursor
+	for {
+		events, err := store.ListObjects(acc, cursor, 10)
 		if err != nil {
 			t.Fatal(err)
+		} else if len(events) == 0 {
+			break
 		}
-		return waiting > 0
-	})
-
-	// a later second serves another pin while the slow one is uncommitted
-	awaitEventSecond(t)
-	fast := store.pinTestObject(t, acc, hk)
-	awaitEventSecond(t)
-	events, err := store.ListObjects(acc, slabs.Cursor{}, 10)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(events) != 1 || events[0].Key != fast.ID() {
-		t.Fatal("expected only the fast pin's event, got", len(events))
+		last := events[len(events)-1]
+		cursor = slabs.Cursor{After: last.UpdatedAt, Key: last.Key}
 	}
-	cursor := slabs.Cursor{After: events[0].UpdatedAt, Key: events[0].Key}
 
-	// release the slow pin and wait for its event to become servable
+	// release the slow pin, its event commits into a second the cursor may
+	// already have passed
 	if err := lockTx.Rollback(t.Context()); err != nil {
 		t.Fatal(err)
 	} else if err := <-pinErr; err != nil {
 		t.Fatal(err)
 	}
-	waitFor("the slow pin's event", func() bool {
-		events, err := store.ListObjects(acc, slabs.Cursor{}, 10)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return len(events) == 2
-	})
 
-	// the event committed behind the cursor must still reach the client
-	events, err = store.ListObjects(acc, cursor, 10)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(events) != 1 || events[0].Key != slow.ID() {
-		t.Fatalf("the slow pin's event was skipped, expected 1 event, got %d", len(events))
+	events := store.waitForEvents(t, acc, cursor, 2)
+	if events[0].Key != slow.ID() {
+		t.Fatal("mismatch", events[0].Key)
+	} else if events[1].Key != fast.ID() {
+		t.Fatal("mismatch", events[1].Key)
 	}
 }
 
@@ -663,10 +688,8 @@ func TestObjectEventTimestampPrecision(t *testing.T) {
 		t.Helper()
 		awaitEventSecond(t)
 
-		events, err := store.ListObjects(acc, slabs.Cursor{}, 10)
-		if err != nil {
-			t.Fatal(err)
-		} else if len(events) != 1 {
+		events := store.waitForEvents(t, acc, slabs.Cursor{}, 1)
+		if len(events) != 1 {
 			t.Fatalf("expected 1 event, got %d", len(events))
 		}
 
@@ -674,8 +697,7 @@ func TestObjectEventTimestampPrecision(t *testing.T) {
 			After: events[0].UpdatedAt.Truncate(time.Millisecond),
 			Key:   events[0].Key,
 		}
-		events, err = store.ListObjects(acc, cursor, 10)
-		if err != nil {
+		if events, err := store.ListObjects(acc, cursor, 10); err != nil {
 			t.Fatal(err)
 		} else if len(events) != 0 {
 			t.Fatalf("expected cursor to advance past the %s event, got %d events", context, len(events))

@@ -177,7 +177,22 @@ func NewStore(ctx context.Context, ci ConnectionInfo, defaultMaintenanceSettings
 		return nil, fmt.Errorf("database version %v is newer than expected %v. database downgrades are not supported", version, target)
 	}
 
+	if err := assertStatsReadable(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
 	return s, nil
+}
+
+func assertStatsReadable(ctx context.Context, pool *pgxpool.Pool) error {
+	var readable bool
+	if err := pool.QueryRow(ctx, `SELECT pg_has_role(current_user, 'pg_read_all_stats', 'USAGE')`).Scan(&readable); err != nil {
+		return fmt.Errorf("failed to check pg_stat_activity access: %w", err)
+	} else if !readable {
+		return errors.New("the database role must be granted pg_read_all_stats so the object event stream can tell which transactions are still in flight")
+	}
+	return nil
 }
 
 func ensureDatabase(ctx context.Context, ci ConnectionInfo) error {
