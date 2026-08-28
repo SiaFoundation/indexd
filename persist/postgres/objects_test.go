@@ -520,6 +520,108 @@ func TestListObjectsWithholdsCurrentSecond(t *testing.T) {
 	}
 }
 
+// TestListObjectsLatePinCommit asserts that a pin's event is still delivered
+// when its transaction commits after a listing already served the second it is
+// stamped with. The stamp is taken when the pin transaction starts, so a pin
+// that stalls before committing lands an event behind any cursor handed out
+// while it was in flight.
+func TestListObjectsLatePinCommit(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	waitFor := func(desc string, cond func() bool) {
+		t.Helper()
+		for start := time.Now(); !cond(); time.Sleep(10 * time.Millisecond) {
+			if time.Since(start) > 10*time.Second {
+				t.Fatal("timeout waiting for", desc)
+			}
+		}
+	}
+
+	// build the slow object by hand so its slab can be locked
+	params := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}},
+	}
+	if _, err := store.PinSlabs(acc, time.Time{}, params); err != nil {
+		t.Fatal(err)
+	}
+	slow := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		EncryptedMetadata:    frand.Bytes(50),
+		DataSignature:        types.Signature(frand.Bytes(64)),
+		MetadataSignature:    types.Signature(frand.Bytes(64)),
+		Slabs:                []slabs.SlabSlice{params.Slice(0, 100)},
+	}
+
+	// hold a row lock the pin blocks on after inserting its event
+	lockTx, err := store.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lockTx.Rollback(t.Context()) }()
+	if _, err := lockTx.Exec(t.Context(), `SELECT digest FROM slabs WHERE digest = $1 FOR UPDATE`, sqlHash256(params.Digest())); err != nil {
+		t.Fatal(err)
+	}
+
+	// the pin fixes its event timestamp on start, then blocks on the slab
+	pinErr := make(chan error, 1)
+	go func() {
+		pinErr <- store.PinObject(acc, slow.PinRequest())
+	}()
+	waitFor("pin to block", func() bool {
+		var waiting int
+		err := store.pool.QueryRow(t.Context(), `
+			SELECT COUNT(*) FROM pg_locks l
+			JOIN pg_stat_activity a ON a.pid = l.pid
+			WHERE NOT l.granted AND a.datname = current_database()`).Scan(&waiting)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return waiting > 0
+	})
+
+	// a later second serves another pin while the slow one is uncommitted
+	awaitEventSecond(t)
+	fast := store.pinTestObject(t, acc, hk)
+	awaitEventSecond(t)
+	events, err := store.ListObjects(acc, slabs.Cursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 || events[0].Key != fast.ID() {
+		t.Fatal("expected only the fast pin's event, got", len(events))
+	}
+	cursor := slabs.Cursor{After: events[0].UpdatedAt, Key: events[0].Key}
+
+	// release the slow pin and wait for its event to become servable
+	if err := lockTx.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	} else if err := <-pinErr; err != nil {
+		t.Fatal(err)
+	}
+	waitFor("the slow pin's event", func() bool {
+		events, err := store.ListObjects(acc, slabs.Cursor{}, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return len(events) == 2
+	})
+
+	// the event committed behind the cursor must still reach the client
+	events, err = store.ListObjects(acc, cursor, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 || events[0].Key != slow.ID() {
+		t.Fatalf("the slow pin's event was skipped, expected 1 event, got %d", len(events))
+	}
+}
+
 func TestObjectEventTimestampPrecision(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
