@@ -39,6 +39,7 @@ import (
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/stats"
 	"go.sia.tech/indexd/subscriber"
+	"go.sia.tech/indexd/x402"
 	"go.sia.tech/jape"
 	"go.sia.tech/web/indexd"
 	"go.uber.org/zap"
@@ -338,6 +339,23 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		} else {
 			advertiseURL = "http://" + net.JoinHostPort(host, port)
 		}
+	}
+
+	if cfg.Payments.Enabled {
+		// bounded so an unreachable facilitator fails the boot instead of
+		// hanging it
+		initCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		var paywallOpts []x402.Option
+		if len(cfg.Payments.FacilitatorHeaders) > 0 {
+			paywallOpts = append(paywallOpts, x402.WithAuth(x402.StaticAuth(cfg.Payments.FacilitatorHeaders)))
+		}
+		paywall, err := x402.NewPaywall(initCtx, cfg.Payments.FacilitatorURL, advertiseURL, cfg.Payments.Networks, app.PaywalledRoutes, paywallOpts...)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("failed to create paywall: %w", err)
+		}
+		appAPIOpts = append(appAPIOpts, app.WithPaywall(paywall))
+		log.Info("sharing key payments enabled", zap.String("facilitator", cfg.Payments.FacilitatorURL), zap.Strings("networks", cfg.Payments.Networks))
 	}
 
 	appHandler, err := app.NewAPI(advertiseURL, hm, am, contracts, slabs, sharing, appAPIOpts...)

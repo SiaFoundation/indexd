@@ -364,4 +364,21 @@ DROP INDEX IF EXISTS object_events_updated_at_object_key_idx;`)
 CREATE INDEX IF NOT EXISTS shared_objects_sharing_key_id_created_at_idx ON shared_objects(sharing_key_id, created_at DESC);`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		// A price is a cost something may be sold for. Anything monetizable
+		// can carry one by referencing it; a sharing key is the first.
+		_, err := tx.Exec(ctx, `
+CREATE TABLE prices (
+    id BIGSERIAL PRIMARY KEY,
+    amount TEXT NOT NULL,  -- atomic units of asset
+    asset TEXT NOT NULL,   -- token identifier, e.g. a USDC contract address
+    network TEXT NOT NULL, -- CAIP-2 x402 network identifier, e.g. "eip155:8453"
+    pay_to TEXT NOT NULL,  -- address the payment settles to
+    extra JSONB,           -- scheme-specific data, e.g. the token's EIP-712 domain
+    paid BOOLEAN NOT NULL DEFAULT FALSE -- set once a payment has settled
+);
+
+ALTER TABLE sharing_keys ADD COLUMN price_id BIGINT REFERENCES prices(id);`)
+		return err
+	},
 }

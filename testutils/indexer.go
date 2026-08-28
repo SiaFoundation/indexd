@@ -83,6 +83,7 @@ type (
 		maintenanceSettings contracts.MaintenanceSettings
 		slabOpts            []slabs.Option
 		contractOpts        []contracts.ContractManagerOpt
+		appOpts             []app.Option
 	}
 )
 
@@ -124,6 +125,13 @@ func WithMaintenanceSettings(ms contracts.MaintenanceSettings) IndexerOpt {
 func WithContractOptions(opts ...contracts.ContractManagerOpt) IndexerOpt {
 	return func(cfg *indexerCfg) {
 		cfg.contractOpts = append(cfg.contractOpts, opts...)
+	}
+}
+
+// WithAppOptions allows for passing application API options to the indexer.
+func WithAppOptions(opts ...app.Option) IndexerOpt {
+	return func(cfg *indexerCfg) {
+		cfg.appOpts = append(cfg.appOpts, opts...)
 	}
 }
 
@@ -254,9 +262,9 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 		}
 	}()
 
-	appAPIOpts := []app.Option{
+	appAPIOpts := append([]app.Option{
 		app.WithLogger(log.Named("api.application")),
-	}
+	}, cfg.appOpts...)
 
 	appListener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {

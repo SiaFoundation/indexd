@@ -26,6 +26,8 @@ type (
 		SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
 		SharingKeyObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
 		SharingAccountKey(sharingKey types.PublicKey) (types.PrivateKey, error)
+
+		MarkSharingKeyPaid(sharingKey types.PublicKey) error
 	}
 
 	// A Manager manages sharing keys and the objects attached to them.
@@ -145,6 +147,11 @@ func (m *Manager) SharedObjects(sharingKey types.PublicKey, offset, limit int) (
 // SharedObject returns a single object attached to the sharing key.
 func (m *Manager) SharedObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error) {
 	return m.store.SharingKeyObject(sharingKey, objectKey)
+}
+
+// MarkSharingKeyPaid records a settled payment, unlocking the key.
+func (m *Manager) MarkSharingKeyPaid(sharingKey types.PublicKey) error {
+	return m.store.MarkSharingKeyPaid(sharingKey)
 }
 
 // AccountTokens returns an RHP4 account token for each of the given hosts, all

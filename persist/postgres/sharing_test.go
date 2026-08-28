@@ -651,3 +651,119 @@ func TestSharingKeyDeleteCascadesObjects(t *testing.T) {
 		t.Fatalf("expected shared objects to be cascade-deleted, got %d", n)
 	}
 }
+
+func TestSharingKeyPrice(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc))
+
+	priceCount := func() (n int) {
+		t.Helper()
+		if err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM prices`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	addKey := func(price *sharing.Price) types.PublicKey {
+		t.Helper()
+		pk := types.GeneratePrivateKey().PublicKey()
+		if _, err := store.AddSharingKey(acc, sharing.KeyRequest{
+			PublicKey: pk,
+			Nonce:     (sharing.Nonce)(frand.Bytes(32)),
+			Price:     price,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return pk
+	}
+
+	// an unpriced key has nothing to pay for and creates no price row
+	free := addKey(nil)
+	if n := priceCount(); n != 0 {
+		t.Fatalf("expected no prices, got %d", n)
+	}
+	if key, err := store.SharingKey(free); err != nil {
+		t.Fatal(err)
+	} else if key.Price != nil {
+		t.Fatalf("expected no price, got %+v", key.Price)
+	}
+
+	priced := addKey(&sharing.Price{
+		Amount:  "10000",
+		Asset:   "0xasset",
+		Network: "eip155:84532",
+		PayTo:   "0xseller",
+		Extra:   map[string]string{"name": "USDC"},
+	})
+	if n := priceCount(); n != 1 {
+		t.Fatalf("expected 1 price, got %d", n)
+	}
+
+	// the price round-trips through the reference
+	key, err := store.SharingKey(priced)
+	if err != nil {
+		t.Fatal(err)
+	} else if key.Price == nil {
+		t.Fatal("expected a price")
+	} else if key.Price.Amount != "10000" || key.Price.PayTo != "0xseller" {
+		t.Fatalf("unexpected price: %+v", key.Price)
+	}
+	if key.Price.Extra["name"] != "USDC" {
+		t.Fatalf("unexpected extra: %v", key.Price.Extra)
+	}
+
+	// a key starts unpaid and stays paid once marked, and the flag rides along
+	// with the key rather than needing a second query
+	if key.Price.Paid {
+		t.Fatal("expected the key to start unpaid")
+	}
+	if err := store.MarkSharingKeyPaid(priced); err != nil {
+		t.Fatal(err)
+	}
+	if key, err := store.SharingKey(priced); err != nil {
+		t.Fatal(err)
+	} else if !key.Price.Paid {
+		t.Fatal("expected the key to be paid")
+	}
+
+	// marking an unpriced key is an error rather than a silent no-op
+	if err := store.MarkSharingKeyPaid(free); !errors.Is(err, sharing.ErrNotForSale) {
+		t.Fatalf("expected ErrNotForSale, got %v", err)
+	}
+
+	// deleting a key takes its price with it: the reference points from the
+	// key to the price, so nothing cascades on its own
+	if err := store.DeleteSharingKey(acc, priced); err != nil {
+		t.Fatal(err)
+	} else if n := priceCount(); n != 0 {
+		t.Fatalf("expected the price to be deleted with the key, got %d", n)
+	}
+	if err := store.DeleteSharingKey(acc, free); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteSharingKey(acc, priced); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		t.Fatalf("expected ErrSharingKeyNotFound, got %v", err)
+	}
+
+	// expiry prunes the price too
+	expires := time.Now().Add(-time.Hour)
+	pk := types.GeneratePrivateKey().PublicKey()
+	if _, err := store.AddSharingKey(acc, sharing.KeyRequest{
+		PublicKey: pk,
+		Nonce:     (sharing.Nonce)(frand.Bytes(32)),
+		ExpiresAt: &expires,
+		Price:     &sharing.Price{Amount: "1", Asset: "0xasset", Network: "eip155:84532", PayTo: "0xseller"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if n := priceCount(); n != 1 {
+		t.Fatalf("expected 1 price, got %d", n)
+	}
+	if err := store.PruneExpiredSharingKeys(time.Now()); err != nil {
+		t.Fatal(err)
+	} else if n := priceCount(); n != 0 {
+		t.Fatalf("expected the price to be pruned with the key, got %d", n)
+	}
+}

@@ -65,6 +65,24 @@ type (
 		Password string `yaml:"password"`
 	}
 
+	// Payments configures the x402 paywall. indexd never holds funds: it
+	// quotes a price, hands the payment to a facilitator, and trusts the
+	// receipt.
+	Payments struct {
+		Enabled bool `yaml:"enabled"`
+		// FacilitatorURL is the facilitator that verifies and settles payments,
+		// e.g. "https://x402.org/facilitator". Self-hosted or public.
+		FacilitatorURL string `yaml:"facilitatorURL"`
+		// Networks are the CAIP-2 x402 networks payment is accepted on, e.g.
+		// "eip155:8453". A key priced on any other network cannot be paid for.
+		Networks []string `yaml:"networks"`
+		// FacilitatorHeaders are sent on every facilitator request, for one
+		// that sits behind a bearer token or an API-key gateway. A facilitator
+		// that mints short-lived credentials per request needs an
+		// x402.AuthProvider instead.
+		FacilitatorHeaders map[string]string `yaml:"facilitatorHeaders,omitempty"`
+	}
+
 	// Slabs contains the configuration for the slab manager.
 	Slabs struct {
 		// MigrationWorkers is the number of slabs to migrate in parallel. If
@@ -110,6 +128,7 @@ type (
 		Consensus      Consensus               `yaml:"consensus"`
 		Explorer       Explorer                `yaml:"explorer"`
 		Slabs          Slabs                   `yaml:"slabs"`
+		Payments       Payments                `yaml:"payments"`
 		Remote         Remote                  `yaml:"remote"`
 		Log            Log                     `yaml:"log"`
 		Database       postgres.ConnectionInfo `yaml:"database"`

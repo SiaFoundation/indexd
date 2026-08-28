@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"go.sia.tech/indexd/x402"
 	"go.sia.tech/jape"
 )
 
@@ -139,6 +140,7 @@ func corsMux(enabledRoutes map[string]jape.Handler, disabledRoutes map[string]ja
 			jc.ResponseWriter.Header().Set("Access-Control-Allow-Origin", "*")
 			jc.ResponseWriter.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE")
 			jc.ResponseWriter.Header().Set("Access-Control-Allow-Headers", "*")
+			jc.ResponseWriter.Header().Set("Access-Control-Expose-Headers", strings.Join([]string{x402.HeaderPaymentRequired, x402.HeaderPaymentResponse}, ", "))
 			h(jc)
 		}
 	}

@@ -408,6 +408,18 @@ CREATE TABLE blocked_objects (
 -- fast sorting of the blocklist, most recently blocked first
 CREATE INDEX blocked_objects_created_at_idx ON blocked_objects(created_at DESC, object_key ASC);
 
+-- a cost something may be sold for. a row belongs to exactly one thing, which
+-- references it, so paid describes that thing.
+CREATE TABLE prices (
+    id BIGSERIAL PRIMARY KEY,
+    amount TEXT NOT NULL,  -- atomic units of asset
+    asset TEXT NOT NULL,   -- token identifier, e.g. a USDC contract address
+    network TEXT NOT NULL, -- CAIP-2 x402 network identifier, e.g. "eip155:8453"
+    pay_to TEXT NOT NULL,  -- address the payment settles to
+    extra JSONB,           -- scheme-specific data, e.g. the token's EIP-712 domain
+    paid BOOLEAN NOT NULL DEFAULT FALSE -- set once a payment has settled
+);
+
 CREATE TABLE sharing_keys (
     id BIGSERIAL PRIMARY KEY,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -420,7 +432,8 @@ CREATE TABLE sharing_keys (
     pinned_data BIGINT NOT NULL CHECK(pinned_data >= 0), -- total data size of attached objects before redundancy, maintained by trigger
     pinned_size BIGINT NOT NULL CHECK(pinned_size >= 0), -- total size of attached objects including redundancy, maintained by trigger
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW() -- allow sorting by update time
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by update time
+    price_id BIGINT REFERENCES prices(id) -- set if the key must be paid for
 );
 CREATE INDEX sharing_keys_account_id_idx ON sharing_keys(account_id);
 CREATE INDEX sharing_keys_expires_at_idx ON sharing_keys(expires_at);

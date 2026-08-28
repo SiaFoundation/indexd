@@ -286,6 +286,10 @@ components:
           type: string
           format: date-time
           description: Optional expiration; after this time the key is no longer returned and is eventually pruned
+        price:
+          allOf:
+            - $ref: "#/components/schemas/SharingKeyPrice"
+            - description: Present if the key has a price; absent for keys that are free to use
         createdAt:
           type: string
           format: date-time
@@ -295,8 +299,15 @@ components:
 
     KeyStats:
       type: object
-      description: A sharing key's aggregate totals, returned to recipients (omits fields identifying the key or its owner).
+      description: >
+        A sharing key's aggregate totals, returned to recipients (omits fields
+        identifying the key or its owner). Includes the price, if any, so a
+        recipient can see what they are being asked to pay for before paying.
       properties:
+        price:
+          allOf:
+            - $ref: "#/components/schemas/SharingKeyPrice"
+            - description: Present if the key has a price
         objectCount:
           type: integer
           format: uint64
@@ -379,6 +390,98 @@ components:
           type: string
           format: date-time
           description: Optional expiration time
+        price:
+          allOf:
+            - $ref: "#/components/schemas/SharingKeyPrice"
+            - description: >
+                Optional price. Setting it paywalls the objects behind the key:
+                the key is still distributed by its owner, but the indexer
+                will not serve the objects until the key has been paid for at
+                GET /shared/access.
+
+    SharingKeyPrice:
+      type: object
+      description: >
+        What a sharing key costs. The key itself is distributed out of band by
+        its owner, who never gives it to the indexer; what a payment buys is
+        the indexer's willingness to serve the objects behind it. Once paid, a
+        key stays paid. indexd never holds the funds: they move directly from
+        the buyer to payTo when a facilitator settles the payment.
+      required:
+        - amount
+        - asset
+        - network
+        - payTo
+      properties:
+        amount:
+          type: string
+          pattern: "^[0-9]+$"
+          description: The price in the asset's atomic units, e.g. "10000" for 0.01 USDC
+        asset:
+          type: string
+          description: The token the payment must be denominated in; on EVM networks, its contract address
+        network:
+          type: string
+          description: The CAIP-2 x402 network identifier, e.g. "eip155:8453"
+        payTo:
+          type: string
+          description: The address the payment settles to
+        extra:
+          type: object
+          additionalProperties:
+            type: string
+          description: >
+            Scheme-specific data passed through to the buyer and the
+            facilitator. For "exact" on EVM chains, the token's EIP-712 domain,
+            e.g. {"name":"USDC","version":"2"}.
+
+    PaymentRequirements:
+      type: object
+      description: One way a buyer may pay for a resource, as defined by x402 v2
+      properties:
+        scheme:
+          type: string
+          example: exact
+        network:
+          type: string
+          example: "eip155:84532"
+        asset:
+          type: string
+        amount:
+          type: string
+          description: The price in the asset's atomic units
+        payTo:
+          type: string
+        maxTimeoutSeconds:
+          type: integer
+        extra:
+          type: object
+
+    PaymentRequired:
+      type: object
+      description: >
+        An x402 v2 quote. The protocol carries it in the base64-encoded
+        PAYMENT-REQUIRED response header; indexd also returns it as the 402
+        response body so a plain HTTP client can read it.
+      properties:
+        x402Version:
+          type: integer
+          example: 2
+        error:
+          type: string
+          description: Why the request was rejected, e.g. a missing or invalid payment
+        resource:
+          type: object
+          description: The resource being paid for
+          properties:
+            url:
+              type: string
+            mimeType:
+              type: string
+        accepts:
+          type: array
+          items:
+            $ref: "#/components/schemas/PaymentRequirements"
 
     SharedObjectRequest:
       type: object
