@@ -133,6 +133,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 // writes would lose any later event in it with a smaller object_key.
 func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		events = events[:0] // reuse same slice if transaction retries
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
 			return err
