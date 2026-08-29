@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
@@ -136,62 +138,144 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			return err
 		}
 
-		rows, err := tx.Query(ctx, `
-			SELECT object_key, was_deleted, updated_at
-			FROM object_events oe
-			WHERE oe.account_id = $1 AND (oe.updated_at, oe.object_key) > ($2, $3)
-			  AND oe.updated_at < date_trunc('second', NOW())
-			  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = oe.object_key)
-			ORDER BY oe.updated_at ASC, oe.object_key ASC
-			LIMIT $4
-		`, accountID, cursor.After, sqlHash256(cursor.Key), limit)
+		var eventsByObjectID map[int64]int
+		events, eventsByObjectID, err = listObjectPage(ctx, tx, accountID, cursor, limit)
 		if err != nil {
-			return fmt.Errorf("failed to query object events: %w", err)
+			return err
 		}
-		events, err = pgx.AppendRows(events[:0], rows, scanObjectEvent)
-		if err != nil {
-			return fmt.Errorf("failed to scan object events: %w", err)
-		}
-
-		objectKeys := make([]sqlHash256, 0, len(events))
-		eventByKey := make(map[types.Hash256]int, len(events))
-		for i := range events {
-			if events[i].Deleted {
-				continue
-			}
-			objectKeys = append(objectKeys, sqlHash256(events[i].Key))
-			eventByKey[events[i].Key] = i
-		}
-		if len(objectKeys) == 0 {
-			return nil
-		}
-
-		rows, err = tx.Query(ctx, sqlObjectsByKey, accountID, objectKeys)
-		if err != nil {
-			return fmt.Errorf("failed to query objects: %w", err)
-		}
-		objectsByID := make(map[int64]*slabs.SealedObject, len(objectKeys))
-		err = forEachRow(rows, func(row pgx.CollectableRow) error {
-			id, key, obj, err := scanObject(row)
-			if err != nil {
-				return err
-			}
-			eventIndex, ok := eventByKey[key]
-			if !ok {
-				return fmt.Errorf("queried object not present in event page (developer error): %v", key)
-			}
-			events[eventIndex].Object = &obj
-			objectsByID[id] = &obj
-			return nil
-		})
-		if err != nil {
-			return fmt.Errorf("failed to scan objects: %w", err)
-		} else if len(objectsByID) != len(objectKeys) {
-			return fmt.Errorf("failed to query objects: expected %d objects, got %d", len(objectKeys), len(objectsByID))
+		objectsByID := make(map[int64]*slabs.SealedObject, len(eventsByObjectID))
+		for id, i := range eventsByObjectID {
+			objectsByID[id] = events[i].Object
 		}
 		return loadObjectSlabs(ctx, tx, objectsByID)
 	})
 	return
+}
+
+// ListObjectReferences lists object events without expanding their slabs into
+// sectors. Each slab is represented by its ID, offset, and length.
+func (s *Store) ListObjectReferences(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEventReference, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		accountID, _, err := accountID(ctx, tx, account)
+		if err != nil {
+			return err
+		}
+
+		page, eventsByObjectID, err := listObjectPage(ctx, tx, accountID, cursor, limit)
+		if err != nil {
+			return err
+		}
+		slabsByObjectID, err := loadObjectSlabReferences(ctx, tx, slices.Collect(maps.Keys(eventsByObjectID)))
+		if err != nil {
+			return err
+		}
+
+		events = make([]slabs.ObjectEventReference, len(page))
+		for i, event := range page {
+			events[i] = slabs.ObjectEventReference{
+				Key:       event.Key,
+				Deleted:   event.Deleted,
+				UpdatedAt: event.UpdatedAt,
+			}
+		}
+		for id, i := range eventsByObjectID {
+			events[i].Object = page[i].Object.Reference(slabsByObjectID[id])
+		}
+		return nil
+	})
+	return
+}
+
+// listObjectPage returns the page of object events selected by the cursor and
+// the index of each non-deleted event keyed by its object's database ID. The
+// objects' slabs are not loaded.
+func listObjectPage(ctx context.Context, tx *txn, accountID int64, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, eventsByObjectID map[int64]int, err error) {
+	rows, err := tx.Query(ctx, `
+		SELECT object_key, was_deleted, updated_at
+		FROM object_events oe
+		WHERE oe.account_id = $1 AND (oe.updated_at, oe.object_key) > ($2, $3)
+		  AND oe.updated_at < date_trunc('second', NOW())
+		  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = oe.object_key)
+		ORDER BY oe.updated_at ASC, oe.object_key ASC
+		LIMIT $4
+	`, accountID, cursor.After, sqlHash256(cursor.Key), limit)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query object events: %w", err)
+	}
+	events, err = pgx.AppendRows(events, rows, scanObjectEvent)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to scan object events: %w", err)
+	}
+
+	objectKeys := make([]sqlHash256, 0, len(events))
+	eventByKey := make(map[types.Hash256]int, len(events))
+	for i := range events {
+		if events[i].Deleted {
+			continue
+		}
+		objectKeys = append(objectKeys, sqlHash256(events[i].Key))
+		eventByKey[events[i].Key] = i
+	}
+	eventsByObjectID = make(map[int64]int, len(objectKeys))
+	if len(objectKeys) == 0 {
+		return events, eventsByObjectID, nil
+	}
+
+	rows, err = tx.Query(ctx, sqlObjectsByKey, accountID, objectKeys)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query objects: %w", err)
+	}
+	err = forEachRow(rows, func(row pgx.CollectableRow) error {
+		id, key, obj, err := scanObject(row)
+		if err != nil {
+			return err
+		}
+		eventIndex, ok := eventByKey[key]
+		if !ok {
+			return fmt.Errorf("queried object not present in event page (developer error): %v", key)
+		}
+		events[eventIndex].Object = &obj
+		eventsByObjectID[id] = eventIndex
+		return nil
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to scan objects: %w", err)
+	} else if len(eventsByObjectID) != len(objectKeys) {
+		return nil, nil, fmt.Errorf("failed to query objects: expected %d objects, got %d", len(objectKeys), len(eventsByObjectID))
+	}
+	return events, eventsByObjectID, nil
+}
+
+// loadObjectSlabReferences returns the slab references of each object in
+// slab_index order, keyed by object database ID.
+func loadObjectSlabReferences(ctx context.Context, tx *txn, objectIDs []int64) (map[int64][]slabs.ObjectSlab, error) {
+	slabsByObjectID := make(map[int64][]slabs.ObjectSlab, len(objectIDs))
+	if len(objectIDs) == 0 {
+		return slabsByObjectID, nil
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT object_id, slab_digest, slab_offset, slab_length
+		FROM object_slabs
+		WHERE object_id = ANY($1)
+		ORDER BY object_id, slab_index ASC
+	`, objectIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query object slab references: %w", err)
+	}
+	err = forEachRow(rows, func(row pgx.CollectableRow) error {
+		var objectID int64
+		var slab slabs.ObjectSlab
+		if err := row.Scan(&objectID, (*sqlHash256)(&slab.ID), &slab.Offset, &slab.Length); err != nil {
+			return err
+		}
+		slabsByObjectID[objectID] = append(slabsByObjectID[objectID], slab)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan object slab references: %w", err)
+	}
+	return slabsByObjectID, nil
 }
 
 // DeleteObject deletes the object with the given key for the given account.
@@ -484,7 +568,18 @@ func loadObjectSlabs(ctx context.Context, tx *txn, objects map[int64]*slabs.Seal
 		return nil
 	}
 
-	rows, err = tx.Query(ctx, `
+	return forEachSlabSector(ctx, tx, slabIDs, func(slabID int64, sector slabs.PinnedSector) error {
+		for _, loc := range slabLocations[slabID] {
+			objects[loc.objectID].Slabs[loc.slab].Sectors = append(objects[loc.objectID].Slabs[loc.slab].Sectors, sector)
+		}
+		return nil
+	})
+}
+
+// forEachSlabSector calls fn with every sector of the given slabs in slab_index
+// order. Lost sectors have a zero host key.
+func forEachSlabSector(ctx context.Context, tx *txn, slabIDs []int64, fn func(slabID int64, sector slabs.PinnedSector) error) error {
+	rows, err := tx.Query(ctx, `
 		SELECT ss.slab_id, s.sector_root, h.public_key
 		FROM slab_sectors ss
 		JOIN sectors s ON s.id = ss.sector_id
@@ -500,10 +595,7 @@ func loadObjectSlabs(ctx context.Context, tx *txn, objects map[int64]*slabs.Seal
 		if err != nil {
 			return err
 		}
-		for _, loc := range slabLocations[slabID] {
-			objects[loc.objectID].Slabs[loc.slab].Sectors = append(objects[loc.objectID].Slabs[loc.slab].Sectors, sector)
-		}
-		return nil
+		return fn(slabID, sector)
 	})
 	if err != nil {
 		return fmt.Errorf("failed to scan slab sectors: %w", err)

@@ -101,6 +101,10 @@ type (
 		Sectors       []PinnedSector `json:"sectors"`
 	}
 
+	// PinnedSlabs is a list of pinned slabs. It implements the binary encoding
+	// used by the application API.
+	PinnedSlabs []PinnedSlab
+
 	// SlabObject identifies an object that references a slab.
 	SlabObject struct {
 		Account  proto.Account
@@ -221,6 +225,13 @@ func (m *SlabManager) Slabs(ctx context.Context, account proto.Account, slabIDs 
 // is not nil, the last used field of that account will be updated.
 func (m *SlabManager) PinnedSlab(ctx context.Context, account proto.Account, slabID SlabID) (PinnedSlab, error) {
 	return m.store.PinnedSlab(account, slabID)
+}
+
+// PinnedSlabs retrieves the slabs currently pinned by the account in request
+// order, omitting slabs the account has not pinned. Unlike PinnedSlab, lost
+// sectors are kept in place with a zero host key.
+func (m *SlabManager) PinnedSlabs(ctx context.Context, account proto.Account, slabIDs []SlabID) ([]PinnedSlab, error) {
+	return m.store.PinnedSlabs(account, slabIDs)
 }
 
 // SlabIDs returns the IDs of slabs associated with the given account. The IDs

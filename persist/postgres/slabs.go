@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -150,6 +152,73 @@ ORDER BY ss.slab_index ASC`, dbID)
 			return fmt.Errorf("recovery requires at least %d sectors, slab has %d sectors: %w", slab.MinShards, len(slab.Sectors), slabs.ErrUnrecoverable)
 		}
 		return rows.Err()
+	})
+	return
+}
+
+// PinnedSlabs retrieves the slabs currently pinned by the account in request
+// order, omitting slabs the account has not pinned. Unlike PinnedSlab, lost
+// sectors are kept in place with a zero host key.
+func (s *Store) PinnedSlabs(account proto.Account, slabIDs []slabs.SlabID) (result []slabs.PinnedSlab, err error) {
+	if len(slabIDs) == 0 {
+		return nil, nil
+	}
+
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		result = result[:0] // reuse same slice if transaction retries
+
+		sqlSlabIDs := make([]sqlHash256, len(slabIDs))
+		for i, slabID := range slabIDs {
+			sqlSlabIDs[i] = sqlHash256(slabID)
+		}
+
+		// require an account_slabs association so an unpinned slab is omitted
+		slabsByID := make(map[slabs.SlabID]*slabs.PinnedSlab, len(slabIDs))
+		slabsByDBID := make(map[int64]*slabs.PinnedSlab, len(slabIDs))
+		rows, err := tx.Query(ctx, `
+			SELECT s.id, s.digest, s.encryption_key, s.min_shards, s.version
+			FROM slabs s
+			JOIN account_slabs a ON a.slab_id = s.id
+			JOIN accounts acc ON acc.id = a.account_id
+			WHERE acc.public_key = $1 AND s.digest = ANY($2::bytea[])
+		`, sqlPublicKey(account), sqlSlabIDs)
+		if err != nil {
+			return fmt.Errorf("failed to query pinned slabs: %w", err)
+		}
+		err = forEachRow(rows, func(row pgx.CollectableRow) error {
+			var dbID int64
+			var slab slabs.PinnedSlab
+			if err := row.Scan(&dbID, (*sqlHash256)(&slab.ID), (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Version); err != nil {
+				return err
+			}
+			slabsByID[slab.ID] = &slab
+			slabsByDBID[dbID] = &slab
+			return nil
+		})
+		if err != nil {
+			return fmt.Errorf("failed to scan pinned slabs: %w", err)
+		} else if len(slabsByDBID) == 0 {
+			return nil
+		}
+
+		err = forEachSlabSector(ctx, tx, slices.Collect(maps.Keys(slabsByDBID)), func(dbID int64, sector slabs.PinnedSector) error {
+			slab, ok := slabsByDBID[dbID]
+			if !ok {
+				return fmt.Errorf("queried sector for unknown slab (developer error): %d", dbID)
+			}
+			slab.Sectors = append(slab.Sectors, sector)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+
+		for _, slabID := range slabIDs {
+			if slab, ok := slabsByID[slabID]; ok {
+				result = append(result, *slab)
+			}
+		}
+		return nil
 	})
 	return
 }

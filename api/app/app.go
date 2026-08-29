@@ -39,6 +39,7 @@ type (
 		PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error)
 		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
 		PinnedSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) (slabs.PinnedSlab, error)
+		PinnedSlabs(ctx context.Context, account proto.Account, slabIDs []slabs.SlabID) ([]slabs.PinnedSlab, error)
 		SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]slabs.SlabID, error)
 		UnpinSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) error
 
@@ -46,6 +47,7 @@ type (
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		PinObject(ctx context.Context, account proto.Account, obj slabs.PinObjectRequest) error
 		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
+		ListObjectReferences(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventReference, error)
 		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
 
@@ -352,15 +354,30 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	objs, err := a.slabs.ListObjects(jc.Request.Context(), proto.Account(pk), slabs.Cursor{
+	cursor := slabs.Cursor{
 		After: after,
 		Key:   key,
-	}, limit)
+	}
+	expandSlabs := true
+	if jc.DecodeForm("expandslabs", &expandSlabs) != nil {
+		return
+	}
+
+	if !expandSlabs {
+		refs, err := a.slabs.ListObjectReferences(jc.Request.Context(), proto.Account(pk), cursor, limit)
+		if err != nil {
+			jc.Error(err, http.StatusInternalServerError)
+			return
+		}
+		encodeResponse(jc, slabs.ObjectEventReferences(refs))
+		return
+	}
+
+	objs, err := a.slabs.ListObjects(jc.Request.Context(), proto.Account(pk), cursor, limit)
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-
 	jc.Encode(objs)
 }
 
@@ -583,6 +600,32 @@ func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(nil)
 }
 
+func (a *app) handlePOSTSlabsBatch(jc jape.Context, pk types.PublicKey) {
+	slabIDs, ok := decodeRequest[[]slabs.SlabID](jc)
+	if !ok {
+		return
+	} else if len(slabIDs) > api.MaxLimit {
+		jc.Error(fmt.Errorf("request exceeds maximum of %d slab IDs", api.MaxLimit), http.StatusBadRequest)
+		return
+	}
+
+	pinned, err := a.slabs.PinnedSlabs(jc.Request.Context(), proto.Account(pk), slabIDs)
+	if jc.Check("failed to get slabs", err) != nil {
+		return
+	}
+	encodeResponse(jc, slabs.PinnedSlabs(pinned))
+}
+
+// encodeResponse writes resp in the Sia binary encoding if the client accepts
+// application/octet-stream and as JSON otherwise.
+func encodeResponse(jc jape.Context, resp types.EncoderTo) {
+	if jc.Request.Header.Get(acceptHeader) == applicationOctetStream {
+		encodeBinary(jc, resp)
+		return
+	}
+	jc.Encode(resp)
+}
+
 func encodeBinary(jc jape.Context, resp types.EncoderTo) {
 	var buf bytes.Buffer
 	e := types.NewEncoder(&buf)
@@ -607,12 +650,7 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 	} else if jc.Check("failed to get slab", err) != nil {
 		return
 	}
-
-	if accept := jc.Request.Header.Get(acceptHeader); accept == applicationOctetStream {
-		encodeBinary(jc, slab)
-		return
-	}
-	jc.Encode(slab)
+	encodeResponse(jc, slab)
 }
 
 func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
@@ -1086,6 +1124,7 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 
 		"GET /slabs":            wrapSignedAuth(a.handleGETSlabs),
 		"POST /slabs":           wrapSignedAuth(a.handlePOSTSlabs),
+		"POST /slabs/batch":     wrapSignedAuth(a.handlePOSTSlabsBatch),
 		"POST /slabs/prune":     wrapSignedAuth(a.handlePOSTSlabsPrune),
 		"GET /slabs/:slabid":    wrapSignedAuth(a.handleGETSlab),
 		"DELETE /slabs/:slabid": wrapSignedAuth(a.handleDELETESlab),

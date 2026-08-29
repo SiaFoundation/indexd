@@ -65,6 +65,36 @@ type (
 		Object *SealedObject `json:"object,omitempty"`
 	}
 
+	// An ObjectEventReference is an object event whose object references its
+	// slabs by ID instead of expanding them into sectors. The slabs can be
+	// fetched with PinnedSlabs.
+	ObjectEventReference struct {
+		Key       types.Hash256 `json:"key"`
+		Deleted   bool          `json:"deleted"`
+		UpdatedAt time.Time     `json:"updatedAt"`
+
+		Object *SealedObjectReference `json:"object,omitempty"`
+	}
+
+	// ObjectEventReferences is a list of object event references. It implements
+	// the binary encoding used by the application API.
+	ObjectEventReferences []ObjectEventReference
+
+	// A SealedObjectReference is a sealed object whose slabs are represented by
+	// their IDs instead of their sectors.
+	SealedObjectReference struct {
+		EncryptedDataKey []byte          `json:"encryptedDataKey"`
+		Slabs            []ObjectSlab    `json:"slabs"`
+		DataSignature    types.Signature `json:"dataSignature"`
+
+		EncryptedMetadataKey []byte          `json:"encryptedMetadataKey,omitempty"`
+		EncryptedMetadata    []byte          `json:"encryptedMetadata,omitempty"`
+		MetadataSignature    types.Signature `json:"metadataSignature"`
+
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+
 	// Cursor describes a cursor for paginating through objects. During
 	// pagination, 'After' is meant to be set to the 'UpdatedAt' value of the
 	// last object received and 'Key' is meant to be set to the 'Key' value of
@@ -80,7 +110,9 @@ type (
 		Key   types.Hash256
 	}
 
-	// ObjectSlab represents a slab that should be associated with an object. It should already be pinned to the indexer.
+	// ObjectSlab references a slab that is part of an object by its ID, offset,
+	// and length. A slab must already be pinned to the indexer before an object
+	// can reference it.
 	ObjectSlab struct {
 		ID     SlabID `json:"id"`
 		Offset uint32 `json:"offset"`
@@ -182,6 +214,11 @@ func (so *SealedObject) ID() types.Hash256 {
 	return ObjectID(so.Slabs)
 }
 
+// ID returns the object's ID, which is a hash of its slab references.
+func (so *SealedObjectReference) ID() types.Hash256 {
+	return pinnedObjectID(so.Slabs)
+}
+
 // PinRequest converts the SealedObject to a PinObjectRequest.
 func (so *SealedObject) PinRequest() PinObjectRequest {
 	os := make([]ObjectSlab, len(so.Slabs))
@@ -201,6 +238,39 @@ func (so *SealedObject) PinRequest() PinObjectRequest {
 		EncryptedMetadata:    so.EncryptedMetadata,
 		MetadataSignature:    so.MetadataSignature,
 	}
+}
+
+// Reference returns the object with its slabs replaced by the given references.
+func (so *SealedObject) Reference(slabs []ObjectSlab) *SealedObjectReference {
+	return &SealedObjectReference{
+		EncryptedDataKey:     so.EncryptedDataKey,
+		Slabs:                slabs,
+		DataSignature:        so.DataSignature,
+		EncryptedMetadataKey: so.EncryptedMetadataKey,
+		EncryptedMetadata:    so.EncryptedMetadata,
+		MetadataSignature:    so.MetadataSignature,
+		CreatedAt:            so.CreatedAt,
+		UpdatedAt:            so.UpdatedAt,
+	}
+}
+
+// Expand expands the object's slab references with the given pinned slabs,
+// which must include every referenced slab.
+func (so *SealedObjectReference) Expand(pinned map[SlabID]PinnedSlab) *SealedObject {
+	obj := &SealedObject{
+		EncryptedDataKey:     so.EncryptedDataKey,
+		Slabs:                make([]SlabSlice, len(so.Slabs)),
+		DataSignature:        so.DataSignature,
+		EncryptedMetadataKey: so.EncryptedMetadataKey,
+		EncryptedMetadata:    so.EncryptedMetadata,
+		MetadataSignature:    so.MetadataSignature,
+		CreatedAt:            so.CreatedAt,
+		UpdatedAt:            so.UpdatedAt,
+	}
+	for i, s := range so.Slabs {
+		obj.Slabs[i] = pinned[s.ID].Slice(s.Offset, s.Length)
+	}
+	return obj
 }
 
 // Sign signs the object's data and metadata signatures using the given private
@@ -307,6 +377,11 @@ func (m *SlabManager) PinObject(ctx context.Context, account proto.Account, obj 
 // the given 'after' time.
 func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error) {
 	return m.store.ListObjects(account, cursor, limit)
+}
+
+// ListObjectReferences lists object events without expanding their slabs.
+func (m *SlabManager) ListObjectReferences(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEventReference, error) {
+	return m.store.ListObjectReferences(account, cursor, limit)
 }
 
 // SharedObject retrieves the shared object with the given key for the given account.

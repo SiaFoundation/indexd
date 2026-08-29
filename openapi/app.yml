@@ -139,18 +139,35 @@ paths:
           schema:
             type: string
             format: date-time
+        - name: expandslabs
+          in: query
+          description: >
+            Whether to expand each object's slabs into their sectors. When false, slabs are
+            referenced by ID and can be fetched in batches with `POST /slabs/batch`, and the
+            Accept header may be set to application/octet-stream to receive the events in the
+            Sia binary encoding instead of JSON.
+          schema:
+            type: boolean
+            default: true
       responses:
         "200":
-          description: A list of object events
+          description: A list of object events. The binary encoding is only available for expandslabs=false.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  slabs:
-                    type: array
+                anyOf:
+                  - type: array
+                    description: Object events with expanded slabs (expandslabs=true)
                     items:
                       $ref: "#/components/schemas/ObjectEvent"
+                  - type: array
+                    description: Object events with slab references (expandslabs=false)
+                    items:
+                      $ref: "#/components/schemas/ObjectEventReference"
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
     post:
       tags:
         - objects
@@ -677,40 +694,11 @@ paths:
             type: string
       responses:
         "200":
-          description: Details of the pinned slab
+          description: Details of the pinned slab. Lost sectors are omitted.
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  id:
-                    allOf:
-                      - $ref: "#/components/schemas/SlabID"
-                      - description: The ID of the slab
-                  version:
-                    type: integer
-                    format: uint8
-                    description: The slab encoding version, folded into the slab ID for versions greater than 0
-                  encryptionKey:
-                    allOf:
-                      - $ref: "#/components/schemas/EncryptionKey"
-                      - description: The encryption key used for the slab
-                  minShards:
-                    type: integer
-                    description: The minimum number of shards required for the slab
-                  sectors:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        root:
-                          allOf:
-                            - $ref: "#/components/schemas/Hash256"
-                            - description: The root hash of the sector
-                        hostKey:
-                          allOf:
-                            - $ref: "#/components/schemas/PublicKey"
-                            - description: The public key of the host storing the sector
+                $ref: "#/components/schemas/PinnedSlab"
         "404":
           description: Slab not found
 
@@ -790,6 +778,43 @@ paths:
       responses:
         "200":
           description: Slabs pruned successfully
+
+  /slabs/batch:
+    post:
+      tags:
+        - slabs
+      summary: Get details of multiple pinned slabs
+      description: >
+        Fetches multiple pinned slabs by ID in one request, for example the slab references
+        returned by `GET /objects?expandslabs=false`. Slabs the account has not pinned are omitted.
+        Unlike `GET /slabs/{slabid}`, lost sectors are kept in place with a zero host key. Set the
+        Accept header to application/octet-stream to receive the Sia binary encoding instead of JSON.
+      operationId: getSlabs
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              maxItems: 500
+              items:
+                $ref: "#/components/schemas/SlabID"
+      responses:
+        "200":
+          description: The pinned slabs in request order, or null if none of the requested slabs are pinned
+          content:
+            application/json:
+              schema:
+                type: array
+                nullable: true
+                items:
+                  $ref: "#/components/schemas/PinnedSlab"
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Too many slab IDs requested
 
   /auth/connect:
     post:
@@ -1076,6 +1101,12 @@ components:
       $ref: "./components.yml#/components/schemas/SealedObject"
     ObjectEvent:
       $ref: "./components.yml#/components/schemas/ObjectEvent"
+    ObjectEventReference:
+      $ref: "./components.yml#/components/schemas/ObjectEventReference"
+    SealedObjectReference:
+      $ref: "./components.yml#/components/schemas/SealedObjectReference"
+    PinnedSlab:
+      $ref: "./components.yml#/components/schemas/PinnedSlab"
     PublicKey:
       $ref: "./components.yml#/components/schemas/PublicKey"
     Signature:
