@@ -130,7 +130,7 @@ paths:
             default: 100
         - name: key
           in: query
-          description: The object key that is used as an offset when paginating
+          description: The object key that is used as an offset when paginating, taken from the last event's key
           schema:
             $ref: "#/components/schemas/Hash256"
         - name: after

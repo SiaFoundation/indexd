@@ -139,7 +139,8 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 		rows, err := tx.Query(ctx, `
 			SELECT object_key, was_deleted, published_at
 			FROM object_events oe
-			WHERE oe.account_id = $1 AND (oe.published_at, oe.object_key) > ($2, $3)
+			WHERE oe.account_id = $1 AND oe.published_at IS NOT NULL
+			  AND (oe.published_at, oe.object_key) > ($2, $3)
 			  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = oe.object_key)
 			ORDER BY oe.published_at ASC, oe.object_key ASC
 			LIMIT $4
@@ -383,6 +384,15 @@ const objectEventPublishBatchSize = 5000
 // have one yet. At most one batch of events is published per wall clock second.
 func (s *Store) PublishObjectEvents() error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
+		// an idle tick skips the settings row entirely, the partial index on
+		// unpublished events makes the probe cheap
+		var pending bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM object_events WHERE published_at IS NULL)`).Scan(&pending); err != nil {
+			return fmt.Errorf("failed to check for unpublished object events: %w", err)
+		} else if !pending {
+			return nil
+		}
+
 		// the row lock serializes publishers, so a batch's second is unique
 		// and every event in it sorts after all existing cursors
 		var published time.Time

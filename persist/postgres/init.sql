@@ -246,7 +246,7 @@ CREATE TABLE global_settings (
     pins_max_ingress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_ingress_price >= 0),
     pins_max_egress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_egress_price >= 0),
 
-    object_events_last_published TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '-infinity' -- highest second assigned to published object events
+    object_events_last_published TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '-infinity' -- last second claimed by a publisher
 );
 
 CREATE TABLE contracts (
