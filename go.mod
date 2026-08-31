@@ -10,7 +10,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.21.7
 	go.sia.tech/coreutils v0.24.0
-	go.sia.tech/jape v0.14.1
+	go.sia.tech/jape v0.14.2
 	go.sia.tech/mux v1.5.3
 	go.sia.tech/web/indexd v0.18.0
 	go.uber.org/goleak v1.3.0
@@ -25,6 +25,10 @@ require (
 )
 
 require (
+	github.com/bytedance/gopkg v0.1.3 // indirect
+	github.com/bytedance/sonic v1.15.2 // indirect
+	github.com/bytedance/sonic/loader v0.5.1 // indirect
+	github.com/cloudwego/base64x v0.1.6 // indirect
 	github.com/dunglas/httpsfv v1.1.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
@@ -36,9 +40,11 @@ require (
 	github.com/quic-go/quic-go v0.61.0 // indirect
 	github.com/quic-go/webtransport-go v0.12.0 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
+	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	go.etcd.io/bbolt v1.5.0 // indirect
 	go.sia.tech/web v0.0.0-20240422221546-c1709d16b6ef // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
