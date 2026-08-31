@@ -244,7 +244,9 @@ CREATE TABLE global_settings (
     pins_min_collateral DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_min_collateral >= 0),
     pins_max_storage_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_storage_price >= 0),
     pins_max_ingress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_ingress_price >= 0),
-    pins_max_egress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_egress_price >= 0)
+    pins_max_egress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_egress_price >= 0),
+
+    object_events_last_published TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '-infinity' -- highest second assigned to published object events
 );
 
 CREATE TABLE contracts (
@@ -388,12 +390,15 @@ CREATE TABLE object_events (
     object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32), -- not a FK since deletions need to hang around
     account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     was_deleted BOOLEAN NOT NULL, -- true if deleted, false otherwise
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT date_trunc('second', NOW()), -- last time the object was created/updated/deleted, truncated to second precision so a client cursor can express it exactly
+    published_at TIMESTAMP WITH TIME ZONE,
     PRIMARY KEY (account_id, object_key)
 );
 
--- fast per-account events cursor pagination sorted by update time and object key
-CREATE INDEX object_events_account_id_updated_at_object_key_idx ON object_events(account_id, updated_at ASC, object_key ASC);
+-- fast per account events cursor pagination sorted by publish time and object key
+CREATE INDEX object_events_account_id_published_at_object_key_idx ON object_events(account_id, published_at ASC, object_key ASC);
+
+-- fast lookup of events awaiting publication
+CREATE INDEX object_events_unpublished_idx ON object_events(account_id, object_key) WHERE published_at IS NULL;
 
 -- probe by object_key alone since the PK leads with account_id
 CREATE INDEX object_events_object_key_idx ON object_events(object_key);

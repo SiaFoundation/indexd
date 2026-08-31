@@ -614,7 +614,7 @@ components:
         updatedAt:
           type: string
           format: date-time
-          description: Last time the object was created, updated, or deleted.
+          description: The event's position in the stream, used as a pagination cursor. Positions increase, are truncated to second precision, and an object that changes again is given a new one. Use the object's own timestamps to tell when it was last modified.
         object:
           allOf:
             - $ref: "#/components/schemas/SealedObject"

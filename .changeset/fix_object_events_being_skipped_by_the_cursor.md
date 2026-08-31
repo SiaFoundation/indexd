@@ -4,7 +4,8 @@ default: patch
 
 # Fix object events being skipped by the cursor
 
-Fixes a bug where a client could miss an object event. `GET /objects` now
-withholds events until the transactions that could still write into them
-settle. Clients need no update, but the database role has to be granted
-`pg_read_all_stats`.
+An event now takes its position in the stream from a background publisher rather
+than from the transaction that wrote it, so a slow commit can no longer land
+behind a cursor that has already moved on. Clients need no update, though an
+event becomes visible up to two seconds after the write instead of within the
+same second.

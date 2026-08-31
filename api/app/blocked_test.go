@@ -93,7 +93,7 @@ func TestBlockedObjects(t *testing.T) {
 
 	assertVisible := func(want int) {
 		t.Helper()
-		awaitEventSecond(t)
+		publishEvents(t, indexer)
 		if events, err := appClient.ListObjects(ctx, sk, slabs.Cursor{}, 100); err != nil {
 			t.Fatal(err)
 		} else if len(events) != want {

@@ -151,37 +151,28 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		objs[i] = store.pinTestObject(t, acc, hk)
 	}
 
-	// listAll pages through every event two at a time until at least want
-	// events are returned. An open transaction withholds events, so a short
-	// listing is retried.
-	listAll := func(want int) []slabs.ObjectEvent {
+	// listAll publishes pending events and pages through them two at a time
+	listAll := func() []slabs.ObjectEvent {
 		t.Helper()
-		awaitEventSecond(t)
+		store.publishEvents(t)
+
 		var all []slabs.ObjectEvent
-		for range 100 {
-			all = all[:0]
-			var cursor slabs.Cursor
-			for {
-				events, err := store.ListObjects(acc, cursor, 2)
-				if err != nil {
-					t.Fatal(err)
-				} else if len(events) == 0 {
-					break
-				}
-				all = append(all, events...)
-				last := events[len(events)-1]
-				cursor = slabs.Cursor{After: last.UpdatedAt, Key: last.Key}
-			}
-			if len(all) >= want {
+		var cursor slabs.Cursor
+		for {
+			events, err := store.ListObjects(acc, cursor, 2)
+			if err != nil {
+				t.Fatal(err)
+			} else if len(events) == 0 {
 				return all
 			}
-			time.Sleep(100 * time.Millisecond)
+			all = append(all, events...)
+			last := events[len(events)-1]
+			cursor = slabs.Cursor{After: last.UpdatedAt, Key: last.Key}
 		}
-		return all
 	}
 
 	updatedAt := make(map[types.Hash256]time.Time)
-	if events := listAll(n); len(events) != n {
+	if events := listAll(); len(events) != n {
 		t.Fatalf("expected %d objects, got %d", n, len(events))
 	} else {
 		for _, ev := range events {
@@ -198,7 +189,7 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		}
 	}
 
-	events := listAll(n - len(blocked))
+	events := listAll()
 	if len(events) != n-len(blocked) {
 		t.Fatalf("expected %d objects, got %d", n-len(blocked), len(events))
 	}
@@ -210,16 +201,15 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		}
 	}
 
-	// unblocking bumps the event timestamps so a caught-up client sees the
-	// objects again. The bump has to advance even when the unblock lands in the
-	// same second as the last event.
+	// unblocking republishes the events so a caught-up client sees the objects
+	// again, at positions past the one its cursor rests on
 	for _, b := range blocked {
 		if err := store.UnblockObject(b); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	all := listAll(n)
+	all := listAll()
 	if len(all) != n {
 		t.Fatalf("expected %d objects after unblocking, got %d", n, len(all))
 	}
@@ -257,8 +247,7 @@ func TestUnblockObjectVisibleToLiveCursor(t *testing.T) {
 	}
 
 	// park a cursor on the live object, all a client can see for now
-	awaitEventSecond(t)
-	events := store.waitForEvents(t, acc, slabs.Cursor{}, 1)
+	events := store.listEvents(t, acc, slabs.Cursor{})
 	if len(events) != 1 {
 		t.Fatalf("expected 1 visible object, got %d", len(events))
 	} else if events[0].Key != live {
@@ -270,8 +259,7 @@ func TestUnblockObjectVisibleToLiveCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	awaitEventSecond(t)
-	events = store.waitForEvents(t, acc, cursor, 1)
+	events = store.listEvents(t, acc, cursor)
 	if len(events) != 1 {
 		t.Fatalf("expected unblocked object %v to be visible from the parked cursor, got %d events", blocked, len(events))
 	} else if events[0].Key != blocked {

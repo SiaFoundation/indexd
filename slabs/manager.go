@@ -20,6 +20,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const objectEventPublishInterval = time.Second
+
 type (
 	// SlabManager is responsible for managing slabs, including pinning them,
 	// checking their integrity on the network and migrating their sectors if
@@ -138,6 +140,7 @@ type (
 		DeleteObject(account proto.Account, objectKey types.Hash256) error
 		PinObject(account proto.Account, obj PinObjectRequest) error
 		ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
+		PublishObjectEvents() error
 		SharedObject(key types.Hash256) (SharedObject, error)
 
 		// Blocklist methods
@@ -372,10 +375,17 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 	m.registerLostSectorsAlert()
 	launch("integrity checks", m.healthCheckInterval, m.performIntegrityChecks)
 	launch("prune deleted slabs", m.pruneDeletedSlabsInterval, m.performPruneDeletedSlabs)
+	launch("object event publishing", objectEventPublishInterval, m.performObjectEventPublish)
 	if m.runMigrations {
 		launch("slab migrations", m.healthCheckInterval, m.performSlabMigrations)
 	}
 	wg.Wait()
+}
+
+// performObjectEventPublish gives object events written since the last run
+// their position in the event stream.
+func (m *SlabManager) performObjectEventPublish(context.Context) error {
+	return m.store.PublishObjectEvents()
 }
 
 // performPruneDeletedSlabs prunes deleted slabs, removing those no longer pinned

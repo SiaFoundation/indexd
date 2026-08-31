@@ -135,7 +135,7 @@ paths:
             $ref: "#/components/schemas/Hash256"
         - name: after
           in: query
-          description: The updated at timestamp that is used as an offset when paginating
+          description: The stream position that is used as an offset when paginating, taken from the last event's updatedAt
           schema:
             type: string
             format: date-time

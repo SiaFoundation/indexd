@@ -237,8 +237,8 @@ func (c *Client) Object(ctx context.Context, appKey types.PrivateKey, objectID t
 	return
 }
 
-// ListObjects lists objects for the given account that were updated after the
-// the given 'after' time.
+// ListObjects lists object events for the given account that were published
+// after the given cursor.
 func (c *Client) ListObjects(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEvent, err error) {
 	values := url.Values{}
 	values.Set("limit", fmt.Sprintf("%d", limit))

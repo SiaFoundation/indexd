@@ -81,27 +81,18 @@ func TestMigrateSector(t *testing.T) {
 		},
 	}
 
-	// helper to determine that object was updated since 'lastUpdate'
-	lastUpdate := time.Now().Add(-time.Second)
+	// helper to determine that object was updated since 'cursor'
+	var cursor slabs.Cursor
 	assertUpdated := func(updated bool) {
 		t.Helper()
-		awaitEventSecond(t)
 
-		want := 0
-		if updated {
-			want = 1
-		}
-		events := store.waitForEvents(t, account, slabs.Cursor{After: lastUpdate}, want)
+		events := store.listEvents(t, account, cursor)
 		if updated && len(events) != 1 {
 			t.Fatal("object was updated unexpectedly, got", len(events), "events")
 		} else if !updated && len(events) != 0 {
 			t.Fatal("object was not updated, but got", len(events), "events")
 		} else if updated {
-			lastUpdate = time.Now()
-			// updated_at on object_events has second precision, sleep past
-			// the next second boundary so subsequent events compare strictly
-			// greater than lastUpdate.
-			time.Sleep(time.Second)
+			cursor = slabs.Cursor{After: events[0].UpdatedAt, Key: events[0].Key}
 		}
 	}
 
@@ -269,9 +260,10 @@ func TestRecordSlabMigrated(t *testing.T) {
 		t.Fatalf("expected 1 object events, got %d", count)
 	}
 
-	// set updated_at in the past
+	// publish the event, then set its position in the past
+	store.publishEvents(t)
 	ts := time.Now().Add(-time.Hour).Round(time.Second)
-	if _, err := store.pool.Exec(t.Context(), `UPDATE object_events SET updated_at = $1`, ts); err != nil {
+	if _, err := store.pool.Exec(t.Context(), `UPDATE object_events SET published_at = $1`, ts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -279,6 +271,7 @@ func TestRecordSlabMigrated(t *testing.T) {
 	if err := store.RecordSlabMigrated(slabIDs[0]); err != nil {
 		t.Fatal(err)
 	}
+	store.publishEvents(t)
 
 	// assert count has not changed
 	err = store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM object_events`).Scan(&count)
@@ -288,13 +281,13 @@ func TestRecordSlabMigrated(t *testing.T) {
 		t.Fatalf("expected 1 object events, got %d", count)
 	}
 
-	// assert updated_at has been updated
-	var updatedAt time.Time
-	err = store.pool.QueryRow(t.Context(), `SELECT updated_at FROM object_events LIMIT 1`).Scan(&updatedAt)
+	// assert published_at has been updated
+	var publishedAt time.Time
+	err = store.pool.QueryRow(t.Context(), `SELECT published_at FROM object_events LIMIT 1`).Scan(&publishedAt)
 	if err != nil {
 		t.Fatal(err)
-	} else if !updatedAt.After(ts) {
-		t.Fatalf("expected updated_at to be updated, got %v", updatedAt)
+	} else if !publishedAt.After(ts) {
+		t.Fatalf("expected published_at to be updated, got %v", publishedAt)
 	}
 
 	// unknown slab is a no-op

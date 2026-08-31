@@ -48,12 +48,15 @@ func connectionInfoFromEnv() ConnectionInfo {
 	}
 }
 
-// awaitEventSecond waits out the current second so events written in it become
-// listable; ListObjects withholds the second still in progress.
-func awaitEventSecond(t testing.TB) {
+// publishEvents publishes the events written so far, waiting out the current
+// second first since at most one batch is published per second.
+func (s *Store) publishEvents(t testing.TB) {
 	t.Helper()
 	now := time.Now()
 	time.Sleep(now.Truncate(time.Second).Add(time.Second).Sub(now) + 20*time.Millisecond)
+	if err := s.PublishObjectEvents(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func initPostgres(t testing.TB, log *zap.Logger) *Store {

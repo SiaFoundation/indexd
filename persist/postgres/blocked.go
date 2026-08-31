@@ -46,18 +46,17 @@ func (s *Store) UnblockObject(objectKey types.Hash256) error {
 		if err != nil {
 			return fmt.Errorf("failed to unblock object: %w", err)
 		} else if res.RowsAffected() == 0 {
-			return nil // nothing was blocked, so there is no event to bump
+			return nil // nothing was blocked, so there is no event to republish
 		}
 
-		// bump the event so clients that already paged past the object pick it
-		// up again. ListObjects withholds the in-progress second, so a cursor
-		// can never rest on the one we stamp here.
+		// unpublish the event so clients that already paged past the object
+		// pick it up again once the publisher gives it a new position
 		if _, err := tx.Exec(ctx, `
 			UPDATE object_events
-			SET updated_at = date_trunc('second', NOW())
+			SET published_at = NULL
 			WHERE object_key = $1
 		`, sqlHash256(objectKey)); err != nil {
-			return fmt.Errorf("failed to bump object events: %w", err)
+			return fmt.Errorf("failed to unpublish object events: %w", err)
 		}
 		return nil
 	})

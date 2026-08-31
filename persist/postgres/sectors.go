@@ -1132,7 +1132,7 @@ func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 			UPDATE object_events
-			SET updated_at = date_trunc('second', NOW())
+			SET published_at = NULL
 			WHERE object_key IN (
 				SELECT DISTINCT o.object_key
 				FROM object_slabs os
@@ -1152,8 +1152,8 @@ func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 // ID since a freshly migrated sector isn't pinned yet. To pin a sector
 // 'PinSectors' is used. If the host is not found, e.g. due to being deleted in
 // the meantime, this operation is a no-op. The caller is responsible for
-// invoking RecordSlabMigrated once per slab after the batch completes to bump
-// the corresponding object_events rows.
+// invoking RecordSlabMigrated once per slab after the batch completes to
+// republish the corresponding object_events rows.
 func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migrated bool, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		var oldHostID sql.NullInt64
