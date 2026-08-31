@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -244,28 +243,5 @@ func TestListObjectsBatchedConcurrentDeletes(t *testing.T) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	} else if listings.Load() != 2 {
 		t.Fatalf("expected 2 listing attempts, got %d", listings.Load())
-	}
-}
-
-func TestListObjectsBatchedUnsupported(t *testing.T) {
-	// an older indexer ignores the parameter and the Accept header
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", applicationJSON)
-		json.NewEncoder(w).Encode([]slabs.ObjectEvent{{
-			Key: types.Hash256{1},
-			Object: &slabs.SealedObject{
-				Slabs: []slabs.SlabSlice{{
-					MinShards: 1,
-					Sectors:   []slabs.PinnedSector{{Root: types.Hash256{2}, HostKey: types.PublicKey{1}}},
-					Length:    1,
-				}},
-			},
-		}})
-	}))
-	defer srv.Close()
-
-	_, err := NewClient(srv.URL).ListObjectsBatched(t.Context(), types.GeneratePrivateKey(), slabs.Cursor{}, 1)
-	if err == nil || !strings.Contains(err.Error(), "expected content type") {
-		t.Fatalf("expected content type mismatch, got %v", err)
 	}
 }

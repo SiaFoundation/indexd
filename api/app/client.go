@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -179,17 +180,13 @@ func (c *Client) signedRequestBinary(ctx context.Context, appKey types.PrivateKe
 	return d.Err()
 }
 
-// listObjectsRoute builds the GET /objects route for the cursor. The
-// expandslabs parameter is only set when it differs from the default so the
-// route stays compatible with older indexers.
+// listObjectsRoute builds the GET /objects route for the cursor.
 func listObjectsRoute(cursor slabs.Cursor, limit int, expandSlabs bool) string {
 	values := url.Values{}
 	values.Set("limit", fmt.Sprintf("%d", limit))
 	values.Set("after", cursor.After.Format(time.RFC3339Nano))
 	values.Set("key", cursor.Key.String())
-	if !expandSlabs {
-		values.Set("expandslabs", "false")
-	}
+	values.Set("expandslabs", strconv.FormatBool(expandSlabs))
 	return "/objects?" + values.Encode()
 }
 
@@ -338,8 +335,7 @@ func (c *Client) ListObjects(ctx context.Context, appKey types.PrivateKey, curso
 	return
 }
 
-// ListObjectReferences lists object events without expanding their slabs. It
-// requires an indexer that supports GET /objects?expandslabs=false.
+// ListObjectReferences lists object events without expanding their slabs.
 func (c *Client) ListObjectReferences(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEventReference, err error) {
 	err = c.signedRequestBinary(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, false), nil, (*slabs.ObjectEventReferences)(&resp))
 	return
