@@ -12,7 +12,6 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
-	"go.uber.org/zap"
 )
 
 const sqlObjectsByKey = `
@@ -139,7 +138,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 		rows, err := tx.Query(ctx, `
 			SELECT object_key, was_deleted, published_at
 			FROM object_events oe
-			WHERE oe.account_id = $1 AND oe.published_at IS NOT NULL
+			WHERE oe.account_id = $1
 			  AND (oe.published_at, oe.object_key) > ($2, $3)
 			  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = oe.object_key)
 			ORDER BY oe.published_at ASC, oe.object_key ASC
@@ -404,14 +403,13 @@ func (s *Store) PublishObjectEvents() error {
 		if errors.Is(err, sql.ErrNoRows) {
 			// the guard also fails when the last published second is ahead of
 			// the database clock, which stalls publishing until it catches up
-			var lastPublished string
 			var stalled bool
 			if err := tx.QueryRow(ctx, `
-				SELECT object_events_last_published::TEXT, object_events_last_published > date_trunc('second', NOW())
-				FROM global_settings`).Scan(&lastPublished, &stalled); err != nil {
+				SELECT object_events_last_published > date_trunc('second', NOW())
+				FROM global_settings`).Scan(&stalled); err != nil {
 				return fmt.Errorf("failed to get publish state: %w", err)
 			} else if stalled {
-				s.log.Warn("object events are not being published, the last published second is ahead of the database clock", zap.String("lastPublished", lastPublished))
+				s.log.Warn("object events are not being published, the last published second is ahead of the database clock")
 			}
 			return nil
 		} else if err != nil {

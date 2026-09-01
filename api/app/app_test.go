@@ -141,11 +141,18 @@ func uploadRandomSlab(t testing.TB, client *client.Client, sk types.PrivateKey, 
 }
 
 // publishEvents publishes the events written so far, waiting out the current
-// second first since at most one batch is published per second.
+// second first if a publish already claimed it, since at most one batch is
+// published per second.
 func publishEvents(t testing.TB, indexer *testutils.Indexer) {
 	t.Helper()
-	now := time.Now()
-	time.Sleep(now.Truncate(time.Second).Add(time.Second).Sub(now) + 20*time.Millisecond)
+	var claimed bool
+	if err := indexer.Store().QueryRow(t.Context(), `SELECT object_events_last_published >= date_trunc('second', NOW()) FROM global_settings`).Scan(&claimed); err != nil {
+		t.Fatal(err)
+	}
+	if claimed {
+		now := time.Now()
+		time.Sleep(now.Truncate(time.Second).Add(time.Second).Sub(now) + 20*time.Millisecond)
+	}
 	if err := indexer.Store().PublishObjectEvents(); err != nil {
 		t.Fatal(err)
 	}
