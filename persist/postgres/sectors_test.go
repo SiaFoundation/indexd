@@ -123,20 +123,6 @@ func TestMigrateSector(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sectorUploadedAt := func(root types.Hash256) (uploadedAt time.Time) {
-		t.Helper()
-
-		err := store.pool.QueryRow(t.Context(), `
-            SELECT uploaded_at
-            FROM sectors
-            WHERE sector_root = $1
-        `, sqlHash256(root)).Scan(&uploadedAt)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-
 	// helper to assert sector state
 	assertSector := func(root types.Hash256, expectedHostKey types.PublicKey, expectedContractID types.FileContractID, expectedFailures, expectedMigrated int) {
 		t.Helper()
@@ -179,7 +165,7 @@ func TestMigrateSector(t *testing.T) {
 	migrate := func(root types.Hash256, hostKey types.PublicKey, expectedMigrated bool) {
 		t.Helper()
 
-		beforeUploadedAt := sectorUploadedAt(root)
+		beforeUploadedAt := store.sectorUploadedAt(t, root)
 		if migrated, err := store.MigrateSector(root, hostKey); err != nil {
 			t.Fatal(err)
 		} else if migrated != expectedMigrated {
@@ -191,7 +177,7 @@ func TestMigrateSector(t *testing.T) {
 			}
 		}
 
-		afterUploadedAt := sectorUploadedAt(root)
+		afterUploadedAt := store.sectorUploadedAt(t, root)
 
 		if expectedMigrated && afterUploadedAt.Compare(beforeUploadedAt) != 1 {
 			t.Fatal("expected after uploaded at timestamp to be greater than before timestamp")
@@ -1462,6 +1448,89 @@ func TestPinSlabsRebindLostSector(t *testing.T) {
 		t.Fatal(err)
 	} else if _, err := store.PinSlabs(account, nextCheck, slab2); !errors.Is(err, slabs.ErrBadHosts) {
 		t.Fatalf("expected ErrBadHosts re-pinning onto a bad host, got %v", err)
+	}
+}
+
+// TestPinSlabsUploadedAt asserts that a sector's reported upload time becomes
+// its uploaded_at and that a re-pin can't move it backwards.
+func TestPinSlabsUploadedAt(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	setUploadedAt := func(params slabs.SlabPinParams, ts *time.Time) slabs.SlabPinParams {
+		params.Sectors = slices.Clone(params.Sectors)
+		for i := range params.Sectors {
+			params.Sectors[i].UploadedAt = ts
+		}
+		return params
+	}
+
+	assertUploadedAt := func(sectors []slabs.PinnedSector, expected time.Time) {
+		t.Helper()
+
+		for _, sector := range sectors {
+			if ts := store.sectorUploadedAt(t, sector.Root); !ts.Equal(expected) {
+				t.Fatalf("expected uploaded_at %v, got %v", expected, ts)
+			}
+		}
+	}
+
+	// a sector without an upload time falls back to now
+	before := time.Now().Add(-time.Second)
+	fresh := newTestSlab(hk)
+	store.pinTestSlabs(t, account, fresh)
+	if ts := store.sectorUploadedAt(t, fresh.Sectors[0].Root); ts.Before(before) {
+		t.Fatalf("expected uploaded_at at or after %v, got %v", before, ts)
+	}
+
+	// an upload time is persisted
+	uploadedAt := time.Now().Add(-40 * time.Hour).Round(time.Microsecond)
+	stale := setUploadedAt(newTestSlab(hk), &uploadedAt)
+	store.pinTestSlabs(t, account, stale)
+	assertUploadedAt(stale.Sectors, uploadedAt)
+
+	// sectors of one slab keep their own upload times
+	mixed := newTestSlab(hk)
+	earlier := uploadedAt.Add(-time.Hour)
+	mixed.Sectors[0].UploadedAt = &earlier
+	mixed.Sectors[1].UploadedAt = &uploadedAt
+	store.pinTestSlabs(t, account, mixed)
+	assertUploadedAt(mixed.Sectors[:1], earlier)
+	assertUploadedAt(mixed.Sectors[1:], uploadedAt)
+
+	// an upload time in the future is capped at now
+	future := time.Now().Add(time.Hour)
+	ahead := setUploadedAt(newTestSlab(hk), &future)
+	store.pinTestSlabs(t, account, ahead)
+	if ts := store.sectorUploadedAt(t, ahead.Sectors[0].Root); !ts.Before(future) {
+		t.Fatalf("expected uploaded_at before %v, got %v", future, ts)
+	}
+
+	// re-pinning existing sectors keeps their upload time
+	repin := setUploadedAt(newTestSlab(hk, stale.Sectors...), &uploadedAt)
+	store.pinTestSlabs(t, account, repin)
+	assertUploadedAt(stale.Sectors, uploadedAt)
+
+	// and can not move it backwards
+	older := uploadedAt.Add(-7 * time.Hour)
+	store.pinTestSlabs(t, account, setUploadedAt(repin, &older))
+	assertUploadedAt(stale.Sectors, uploadedAt)
+
+	// re-uploading them does move it forward
+	refreshed := time.Now().Add(-time.Minute).Round(time.Microsecond)
+	store.pinTestSlabs(t, account, setUploadedAt(repin, &refreshed))
+	assertUploadedAt(stale.Sectors, refreshed)
+
+	// a re-pin without an upload time still falls back to now
+	store.pinTestSlabs(t, account, setUploadedAt(repin, nil))
+	for _, sector := range stale.Sectors {
+		if ts := store.sectorUploadedAt(t, sector.Root); !ts.After(refreshed) {
+			t.Fatalf("expected uploaded_at after %v, got %v", refreshed, ts)
+		}
 	}
 }
 
@@ -3916,4 +3985,19 @@ func setScannedHeight(t *testing.T, store *Store, height uint64) {
 	if _, err := store.pool.Exec(t.Context(), `UPDATE global_settings SET scanned_height = $1`, height); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// sectorUploadedAt returns the sector's uploaded_at timestamp.
+func (s *Store) sectorUploadedAt(t testing.TB, root types.Hash256) (uploadedAt time.Time) {
+	t.Helper()
+
+	err := s.pool.QueryRow(t.Context(), `
+		SELECT uploaded_at
+		FROM sectors
+		WHERE sector_root = $1
+	`, sqlHash256(root)).Scan(&uploadedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return
 }

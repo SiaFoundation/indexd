@@ -9,6 +9,7 @@ import (
 
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/contracts"
 )
 
 const (
@@ -22,6 +23,17 @@ const (
 
 	// maxSlabVersion is the maximum slab version supported by the indexer
 	maxSlabVersion = 1
+)
+
+const (
+	// MaxSlabUploadAge is the oldest upload time accepted when pinning a slab,
+	// leaving a day to pin its sectors before hosts delete them from temporary
+	// storage.
+	MaxSlabUploadAge = contracts.UnpinnableSectorThreshold - 24*time.Hour
+
+	// MaxSlabUploadSkew is the furthest a slab's upload time may be ahead of
+	// the indexer's clock.
+	MaxSlabUploadSkew = 5 * time.Minute
 )
 
 var (
@@ -47,6 +59,19 @@ var (
 	// ErrUnsupportedSlabVersion is returned when attempting to pin a slab with
 	// a version that is not yet supported.
 	ErrUnsupportedSlabVersion = errors.New("unsupported slab version")
+
+	// ErrInvalidPinParams is returned when the params of a slab to pin are
+	// invalid. It wraps the underlying reason.
+	ErrInvalidPinParams = errors.New("invalid slab pin params")
+
+	// ErrSlabUploadTooOld is returned when pinning a sector that may already
+	// have been deleted from temporary storage. Clients match these two by
+	// message, so keep the thresholds out of them.
+	ErrSlabUploadTooOld = errors.New("slab upload is too old")
+
+	// ErrSlabUploadInFuture is returned when a sector's upload time is ahead of
+	// the indexer's clock.
+	ErrSlabUploadInFuture = errors.New("slab upload time is in the future")
 )
 
 type (
@@ -78,10 +103,12 @@ type (
 		PinnedAt      time.Time     `json:"pinnedAt"`
 	}
 
-	// A PinnedSector is a sector that has been pinned to a host.
+	// A PinnedSector is a sector that has been pinned to a host. UploadedAt is
+	// when it was written, if reported.
 	PinnedSector struct {
-		Root    types.Hash256   `json:"root"`
-		HostKey types.PublicKey `json:"hostKey"`
+		Root       types.Hash256   `json:"root"`
+		HostKey    types.PublicKey `json:"hostKey"`
+		UploadedAt *time.Time      `json:"uploadedAt,omitempty"`
 	}
 
 	// SlabPinParams is the input to PinSlabs
@@ -170,9 +197,9 @@ func (s SlabPinParams) DataSize() uint64 {
 }
 
 // Validate checks if the SlabPinParams are valid. It ensures that the
-// encryption key is set, the minimum number of shards is met, and that there
-// are no duplicate host keys or empty roots in the sectors.
-func (s SlabPinParams) Validate() error {
+// encryption key is set, the minimum number of shards is met, and that the
+// sectors have unique host keys, non-empty roots and recent upload times.
+func (s SlabPinParams) Validate(now time.Time) error {
 	if s.Version > maxSlabVersion {
 		return fmt.Errorf("%w: %d", ErrUnsupportedSlabVersion, s.Version)
 	} else if s.EncryptionKey == ([32]byte{}) {
@@ -189,6 +216,12 @@ func (s SlabPinParams) Validate() error {
 			return fmt.Errorf("sector %d invalid: host key is empty", i)
 		} else if _, exists := hks[sector.HostKey]; exists {
 			return fmt.Errorf("sector %d is invalid: duplicate host key %q", i, sector.HostKey)
+		} else if sector.UploadedAt != nil {
+			if sector.UploadedAt.Before(now.Add(-MaxSlabUploadAge)) {
+				return fmt.Errorf("sector %d invalid: %w (max %v)", i, ErrSlabUploadTooOld, MaxSlabUploadAge)
+			} else if sector.UploadedAt.After(now.Add(MaxSlabUploadSkew)) {
+				return fmt.Errorf("sector %d invalid: %w (max %v ahead)", i, ErrSlabUploadInFuture, MaxSlabUploadSkew)
+			}
 		}
 		hks[sector.HostKey] = struct{}{}
 	}
@@ -199,9 +232,10 @@ func (s SlabPinParams) Validate() error {
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
 // with the provided account.
 func (m *SlabManager) PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error) {
+	now := time.Now()
 	for i := range toPin {
-		if err := toPin[i].Validate(); err != nil {
-			return nil, fmt.Errorf("slab %d invalid: %w", i, err)
+		if err := toPin[i].Validate(now); err != nil {
+			return nil, fmt.Errorf("%w: slab %d: %w", ErrInvalidPinParams, i, err)
 		}
 	}
 	return m.store.PinSlabs(account, nextIntegrityCheck, toPin...)

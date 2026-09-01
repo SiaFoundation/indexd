@@ -609,55 +609,79 @@ paths:
     post:
       tags:
         - slabs
-      summary: Pin a slab to the indexer
-      operationId: pinSlab
+      summary: Pin slabs to the indexer
+      operationId: pinSlabs
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                version:
-                  type: integer
-                  format: uint8
-                  maximum: 1
-                  default: 0
-                  description: The slab encoding version.
-                encryptionKey:
-                  allOf:
-                    - $ref: "#/components/schemas/EncryptionKey"
-                    - description: The encryption key used to encrypt the shards
-                minShards:
-                  type: integer
-                  minimum: 1
-                  format: uint
-                  description: The number of data shards a piece gets erasure-coded into
-                sectors:
-                  type: array
-                  items:
-                    type: object
-                    properties:
-                      root:
-                        allOf:
-                          - $ref: "#/components/schemas/Hash256"
-                          - description: The root of the sector
-                      hostKey:
-                        allOf:
-                          - $ref: "#/components/schemas/PublicKey"
-                          - description: The public key of the host that stores the sector
+              type: array
+              items:
+                type: object
+                properties:
+                  version:
+                    type: integer
+                    format: uint8
+                    maximum: 1
+                    default: 0
+                    description: The slab encoding version.
+                  encryptionKey:
+                    allOf:
+                      - $ref: "#/components/schemas/EncryptionKey"
+                      - description: The encryption key used to encrypt the shards
+                  minShards:
+                    type: integer
+                    minimum: 1
+                    format: uint
+                    description: The number of data shards a piece gets erasure-coded into
+                  sectors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        root:
+                          allOf:
+                            - $ref: "#/components/schemas/Hash256"
+                            - description: The root of the sector
+                        hostKey:
+                          allOf:
+                            - $ref: "#/components/schemas/PublicKey"
+                            - description: The public key of the host that stores the sector
+                        uploadedAt:
+                          type: string
+                          format: date-time
+                          description: >-
+                            When the sector was written to the host. If
+                            provided, it must be no more than 48 hours old and
+                            no more than 5 minutes ahead of the indexer's clock,
+                            leaving enough time to pin the sector before
+                            temporary storage expires.
       responses:
-        "201":
-          description: Slab pinned successfully
+        "200":
+          description: Slabs pinned successfully
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  slabID:
-                    allOf:
-                      - $ref: "#/components/schemas/SlabID"
-                      - description: The ID of the pinned slab
+                type: array
+                description: The IDs of the pinned slabs, in request order
+                items:
+                  $ref: "#/components/schemas/SlabID"
+        "400":
+          description: >-
+            Invalid slab parameters. The stable "slab upload is too old" text
+            in the response body identifies a sector that must be re-uploaded
+            and names its index. "slab upload time is in the future" means the
+            client's clock is more than 5 minutes ahead.
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                tooOld:
+                  value: "invalid slab pin params: slab 0: sector 3 invalid: slab upload is too old (max 48h0m0s)"
+                inFuture:
+                  value: "invalid slab pin params: slab 0: sector 3 invalid: slab upload time is in the future (max 5m0s ahead)"
 
       x-codeSamples:
         - lang: Go
@@ -667,16 +691,16 @@ paths:
 
             import (
               "context"
-              "go.sia.tech/indexd/app"
-              "go.sia.tech/indexd/slabs"
               "go.sia.tech/core/types"
+              "go.sia.tech/indexd/api/app"
+              "go.sia.tech/indexd/slabs"
             )
 
             func main() {
               var appKey types.PrivateKey
-              client, err := app.NewClient("http://localhost:9982", appKey)
-              var params slabs.SlabPinParams
-              id, err := client.PinSlab(context.Background(), params)
+              client := app.NewClient("http://localhost:9982")
+              var params []slabs.SlabPinParams
+              ids, err := client.PinSlabs(context.Background(), appKey, params...)
               // ...
             }
 

@@ -421,13 +421,18 @@ func (s SlabSlice) Pin() SlabPinParams {
 	}
 }
 
-// Slice creates a SlabSlice from the SlabPinParams.
+// Slice creates a SlabSlice from the SlabPinParams. Upload times are dropped;
+// they describe the upload, not the stored slab.
 func (s SlabPinParams) Slice(offset, length uint32) SlabSlice {
+	sectors := slices.Clone(s.Sectors)
+	for i := range sectors {
+		sectors[i].UploadedAt = nil
+	}
 	return SlabSlice{
 		Version:       s.Version,
 		EncryptionKey: s.EncryptionKey,
 		MinShards:     s.MinShards,
-		Sectors:       slices.Clone(s.Sectors),
+		Sectors:       sectors,
 		Offset:        offset,
 		Length:        length,
 	}

@@ -72,6 +72,12 @@ func (e *HTTPError) Error() string {
 	return fmt.Sprintf("HTTP %d: %s", e.StatusCode, msg)
 }
 
+// Is matches target if its message is contained in the response body.
+func (e *HTTPError) Is(target error) bool {
+	msg := target.Error()
+	return msg != "" && strings.Contains(e.Body, msg)
+}
+
 // sign signs the request with the appropriate headers and returns the signed URL
 // and request body.
 func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL string, requestBuf []byte) (*url.URL, io.Reader, error) {
@@ -270,7 +276,8 @@ func (c *Client) Hosts(ctx context.Context, appKey types.PrivateKey, opts ...api
 	return
 }
 
-// PinSlabs pins slabs to the indexer.
+// PinSlabs pins slabs to the indexer. A sector with an unacceptable upload time
+// is rejected with slabs.ErrSlabUploadTooOld or slabs.ErrSlabUploadInFuture.
 func (c *Client) PinSlabs(ctx context.Context, appKey types.PrivateKey, params ...slabs.SlabPinParams) (slabIDs []slabs.SlabID, err error) {
 	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/slabs", params, &slabIDs)
 	return

@@ -26,11 +26,14 @@ const (
 	pinTimeout   = 2 * time.Minute
 	pruneTimeout = 2 * time.Minute
 
-	unpinnableSectorThreshold = 3 * 24 * time.Hour
-
 	pruneIntervalSuccess = 24 * time.Hour
 	pruneIntervalFailure = 3 * time.Hour
 )
+
+// UnpinnableSectorThreshold is how long a sector may stay unpinned before it is
+// marked unpinnable, matching the duration hosts keep sectors in temporary
+// storage.
+const UnpinnableSectorThreshold = 3 * 24 * time.Hour
 
 var (
 	// DefaultMaintenanceSettings are the default settings for contract

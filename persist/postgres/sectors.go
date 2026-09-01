@@ -268,7 +268,8 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 }
 
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
-// with the provided account.
+// with the provided account. A sector's reported upload time, capped at now,
+// becomes its uploaded_at.
 func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
 	var digests []slabs.SlabID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
@@ -371,21 +372,23 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 
 			// insert the slab's sectors. For a slab that already
 			// exists this may rebind any sectors that were marked
-			// lost since it was pinned.
+			// lost since it was pinned. An existing sector keeps the
+			// later upload time.
 			batch := &pgx.Batch{}
 			for _, sector := range slab.Sectors {
 				batch.Queue(`
-				INSERT INTO sectors (sector_root, host_id, next_integrity_check)
-				SELECT $1, h.id, $3
+				INSERT INTO sectors (sector_root, host_id, next_integrity_check, uploaded_at)
+				SELECT $1, h.id, $3, LEAST(NOW(), $4::timestamptz)
 				FROM hosts h
 				WHERE h.public_key = $2
 				ON CONFLICT (sector_root) DO UPDATE SET
-					uploaded_at = NOW(),
+					uploaded_at = GREATEST(sectors.uploaded_at, EXCLUDED.uploaded_at),
 					host_id = COALESCE(sectors.host_id, EXCLUDED.host_id)
 				RETURNING id, host_id, (OLD.id IS NULL) AS inserted, (OLD.id IS NOT NULL AND OLD.host_id IS NULL) AS rebound`,
 					sqlHash256(sector.Root),
 					sqlPublicKey(sector.HostKey),
-					nextIntegrityCheck)
+					nextIntegrityCheck,
+					sector.UploadedAt)
 			}
 
 			var badHosts int

@@ -125,12 +125,14 @@ func uploadRandomSlab(t testing.TB, client *client.Client, sk types.PrivateKey, 
 
 		// upload sector
 		hk := h.PublicKey
+		uploadedAt := time.Now()
 		if result, err := client.WriteSector(context.Background(), sk, hk, sector[:]); err != nil {
 			t.Fatal(err)
 		} else {
 			sectors = append(sectors, slabs.PinnedSector{
-				Root:    result.Root,
-				HostKey: hk,
+				Root:       result.Root,
+				HostKey:    hk,
+				UploadedAt: &uploadedAt,
 			})
 		}
 	}
@@ -225,8 +227,21 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("failed to unpin slab:", err)
 	}
 
-	// assert minimum redundancy is enforced
+	// assert upload times outside the accepted range are rejected
 	p := uploadRandomSlab(t, hc, sk, hosts)
+	tooOld := time.Now().Add(-slabs.MaxSlabUploadAge - time.Hour)
+	p.Sectors[3].UploadedAt = &tooOld
+	if _, err := client.PinSlabs(context.Background(), sk, p); !errors.Is(err, slabs.ErrSlabUploadTooOld) {
+		t.Fatal("expected stale upload error, got:", err)
+	}
+	inFuture := time.Now().Add(slabs.MaxSlabUploadSkew + time.Minute)
+	p.Sectors[3].UploadedAt = &inFuture
+	if _, err := client.PinSlabs(context.Background(), sk, p); !errors.Is(err, slabs.ErrSlabUploadInFuture) {
+		t.Fatal("expected future upload error, got:", err)
+	}
+
+	// assert minimum redundancy is enforced
+	p.Sectors[3].UploadedAt = nil
 	p.Sectors = p.Sectors[:5]
 	_, err = client.PinSlabs(context.Background(), sk, p)
 	if err == nil || !strings.Contains(err.Error(), "too low") {

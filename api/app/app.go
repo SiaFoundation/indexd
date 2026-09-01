@@ -564,15 +564,8 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	if !ok {
 		return
 	}
-	for _, param := range params {
-		if err := param.Validate(); err != nil {
-			jc.Error(fmt.Errorf("invalid slab pin params: %w", err), http.StatusBadRequest)
-			return
-		}
-	}
-
 	slabIDs, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), time.Now().Add(6*time.Hour), params...)
-	if errors.Is(err, slabs.ErrBadHosts) || errors.Is(err, slabs.ErrMinShards) {
+	if errors.Is(err, slabs.ErrInvalidPinParams) || errors.Is(err, slabs.ErrBadHosts) || errors.Is(err, slabs.ErrMinShards) {
 		jc.Error(err, http.StatusBadRequest)
 		return
 	} else if jc.Check("failed to pin slab", err) != nil {
