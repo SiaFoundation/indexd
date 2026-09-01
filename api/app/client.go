@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"net/url"
@@ -28,6 +29,8 @@ import (
 const (
 	defaultValidity          = 10 * time.Minute
 	maxConcurrentSlabBatches = 8
+	maxListRetries           = 3
+	listRetryDelay           = 100 * time.Millisecond
 )
 
 // Client is an HTTP client for the application API of the indexer.
@@ -189,7 +192,7 @@ func (c *Client) signedRequestBinary(ctx context.Context, appKey types.PrivateKe
 // listObjectsRoute builds the GET /objects route for the cursor.
 func listObjectsRoute(cursor slabs.Cursor, limit int, expandSlabs bool) string {
 	values := url.Values{}
-	values.Set("limit", fmt.Sprintf("%d", limit))
+	values.Set("limit", strconv.Itoa(limit))
 	values.Set("after", cursor.After.Format(time.RFC3339Nano))
 	values.Set("key", cursor.Key.String())
 	values.Set("expandslabs", strconv.FormatBool(expandSlabs))
@@ -213,11 +216,11 @@ func (c *Client) fetchSlabs(ctx context.Context, appKey types.PrivateKey, slabID
 	sema := make(chan struct{}, maxConcurrentSlabBatches)
 	var mu sync.Mutex
 	var fetchErr error
-top:
+batchLoop:
 	for batch := range slices.Chunk(slabIDs, batchSize) {
 		select {
 		case <-ctx.Done():
-			break top
+			break batchLoop
 		case sema <- struct{}{}:
 		}
 		wg.Go(func() {
@@ -352,35 +355,49 @@ func (c *Client) ListObjectReferences(ctx context.Context, appKey types.PrivateK
 // references and fetches their slabs in concurrent batches, which is
 // considerably faster for pages of large objects. If an object is deleted
 // between the two steps the page is fetched again, so a page shorter than
-// limit still marks the end of the results.
+// limit still marks the end of the results. Slabs already fetched are reused
+// across retries, so their sectors may predate the final listing.
 func (c *Client) ListObjectsBatched(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error) {
-	for {
+	slabsByID := make(map[slabs.SlabID]slabs.PinnedSlab)
+	for attempts := 0; ; attempts++ {
 		refs, err := c.ListObjectReferences(ctx, appKey, cursor, limit)
 		if err != nil {
 			return nil, err
 		}
 
 		seen := make(map[slabs.SlabID]struct{})
-		var slabIDs []slabs.SlabID
+		var missing []slabs.SlabID
 		for _, event := range refs {
 			if event.Object == nil {
 				continue
 			}
 			for _, slab := range event.Object.Slabs {
-				if _, ok := seen[slab.ID]; ok {
+				if _, ok := slabsByID[slab.ID]; ok {
+					continue
+				} else if _, ok := seen[slab.ID]; ok {
 					continue
 				}
 				seen[slab.ID] = struct{}{}
-				slabIDs = append(slabIDs, slab.ID)
+				missing = append(missing, slab.ID)
 			}
 		}
-		slabsByID, err := c.fetchSlabs(ctx, appKey, slabIDs)
+		fetched, err := c.fetchSlabs(ctx, appKey, missing)
 		if err != nil {
 			return nil, err
-		} else if len(slabsByID) != len(slabIDs) {
-			continue // an object was deleted between the two steps
 		}
-		return expandEvents(refs, slabsByID), nil
+		maps.Copy(slabsByID, fetched)
+		if len(fetched) == len(missing) {
+			return expandEvents(refs, slabsByID), nil
+		} else if attempts >= maxListRetries {
+			return nil, fmt.Errorf("failed to fetch all referenced slabs: got %d/%d", len(fetched), len(missing))
+		}
+		// an object was deleted between the two steps; back off before
+		// fetching the page again
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(listRetryDelay << attempts):
+		}
 	}
 }
 

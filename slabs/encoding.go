@@ -169,8 +169,8 @@ func (so SealedObject) EncodeTo(e *types.Encoder) {
 	e.WriteBytes(so.EncryptedMetadataKey)
 	e.WriteBytes(so.EncryptedMetadata)
 	so.MetadataSignature.EncodeTo(e)
-	e.WriteTime(so.CreatedAt)
-	e.WriteTime(so.UpdatedAt)
+	encodeTime(e, so.CreatedAt)
+	encodeTime(e, so.UpdatedAt)
 }
 
 // DecodeFrom implements types.DecoderFrom.
@@ -181,8 +181,34 @@ func (so *SealedObject) DecodeFrom(d *types.Decoder) {
 	so.EncryptedMetadataKey = decodeOptionalBytes(d)
 	so.EncryptedMetadata = decodeOptionalBytes(d)
 	so.MetadataSignature.DecodeFrom(d)
-	so.CreatedAt = d.ReadTime()
-	so.UpdatedAt = d.ReadTime()
+	so.CreatedAt = decodeTime(d)
+	so.UpdatedAt = decodeTime(d)
+}
+
+// EncodeTo implements types.EncoderTo.
+func (oe ObjectEvent) EncodeTo(e *types.Encoder) {
+	oe.Key.EncodeTo(e)
+	e.WriteBool(oe.Deleted)
+	encodeTime(e, oe.UpdatedAt)
+	types.EncodePtr(e, oe.Object)
+}
+
+// DecodeFrom implements types.DecoderFrom.
+func (oe *ObjectEvent) DecodeFrom(d *types.Decoder) {
+	oe.Key.DecodeFrom(d)
+	oe.Deleted = d.ReadBool()
+	oe.UpdatedAt = decodeTime(d)
+	types.DecodePtr(d, &oe.Object)
+}
+
+// EncodeTo implements types.EncoderTo.
+func (oes ObjectEvents) EncodeTo(e *types.Encoder) {
+	types.EncodeSlice(e, oes)
+}
+
+// DecodeFrom implements types.DecoderFrom.
+func (oes *ObjectEvents) DecodeFrom(d *types.Decoder) {
+	types.DecodeSlice(d, (*[]ObjectEvent)(oes))
 }
 
 // MarshalSia is a convenience method to encode the object metadata into bytes

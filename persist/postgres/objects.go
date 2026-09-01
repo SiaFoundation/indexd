@@ -133,7 +133,6 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 // writes would lose any later event in it with a smaller object_key.
 func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		events = events[:0] // reuse same slice if transaction retries
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
 			return err
@@ -203,7 +202,7 @@ func listObjectPage(ctx context.Context, tx *txn, accountID int64, cursor slabs.
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to query object events: %w", err)
 	}
-	events, err = pgx.AppendRows(events, rows, scanObjectEvent)
+	events, err = pgx.CollectRows(rows, scanObjectEvent)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to scan object events: %w", err)
 	}
@@ -275,6 +274,8 @@ func loadObjectSlabReferences(ctx context.Context, tx *txn, objectIDs []int64) (
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan object slab references: %w", err)
+	} else if len(slabsByObjectID) != len(objectIDs) {
+		return nil, fmt.Errorf("failed to query object slab references: expected %d objects, got %d", len(objectIDs), len(slabsByObjectID))
 	}
 	return slabsByObjectID, nil
 }

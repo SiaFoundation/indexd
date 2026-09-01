@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -201,17 +202,52 @@ func TestListObjectsBatched(t *testing.T) {
 		t.Fatalf("unexpected third event: %+v", events[2])
 	} else if len(events[0].Object.Slabs) != numSlabs {
 		t.Fatalf("expected %d slabs, got %d", numSlabs, len(events[0].Object.Slabs))
-	} else if requests.Load() != 6 || requested.Load() != 2*numSlabs+2 {
-		t.Fatalf("expected 6 requests fetching %d slabs, got %d requests fetching %d", 2*numSlabs+2, requests.Load(), requested.Load())
+	} else if requests.Load() != 4 || requested.Load() != numSlabs+2 {
+		t.Fatalf("expected 4 requests fetching %d slabs, got %d requests fetching %d", numSlabs+2, requests.Load(), requested.Load())
 	} else if !concurrent.Load() {
 		t.Fatal("expected slabs to be fetched concurrently")
 	}
 	for i, slab := range events[0].Object.Slabs {
 		if slab.Digest() != refs[i].ID || slab.Offset != refs[i].Offset || slab.Length != refs[i].Length {
 			t.Fatalf("unexpected slab %d: %+v", i, slab)
-		} else if slab.Sectors[0].HostKey != (types.PublicKey{2}) {
-			t.Fatalf("expected slab %d to reflect the migration, got host %v", i, slab.Sectors[0].HostKey)
+		} else if slab.Sectors[0].HostKey != (types.PublicKey{1}) {
+			t.Fatalf("expected slab %d to be reused from the first attempt, got host %v", i, slab.Sectors[0].HostKey)
 		}
+	}
+	// only the slab missing from the cache was fetched after the retry, so it
+	// alone reflects the migration
+	if hk := events[2].Object.Slabs[0].Sectors[0].HostKey; hk != (types.PublicKey{2}) {
+		t.Fatalf("expected the slab fetched after the retry to reflect the migration, got host %v", hk)
+	}
+}
+
+func TestListObjectsBatchedMissingSlabs(t *testing.T) {
+	var listings atomic.Int64
+	missing := slabs.ObjectSlab{ID: slabs.SlabID(frand.Entropy256()), Length: 1}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/objects":
+			listings.Add(1)
+			writeBinary(w, slabs.ObjectEventReferences{{
+				Key:    types.Hash256{1},
+				Object: &slabs.SealedObjectReference{Slabs: []slabs.ObjectSlab{missing}},
+			}})
+		case "/slabs/batch":
+			writeBinary(w, slabs.PinnedSlabs(nil))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	start := time.Now()
+	_, err := NewClient(srv.URL).ListObjectsBatched(t.Context(), types.GeneratePrivateKey(), slabs.Cursor{}, 1)
+	if err == nil || !strings.Contains(err.Error(), "failed to fetch all referenced slabs") {
+		t.Fatalf("expected missing slabs error, got %v", err)
+	} else if listings.Load() != 4 {
+		t.Fatalf("expected 4 listing attempts, got %d", listings.Load())
+	} else if elapsed := time.Since(start); elapsed < 700*time.Millisecond {
+		t.Fatalf("expected the retries to back off, got %v", elapsed)
 	}
 }
 

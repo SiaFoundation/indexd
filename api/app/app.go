@@ -378,7 +378,7 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(objs)
+	encodeResponse(jc, slabs.ObjectEvents(objs))
 }
 
 func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {

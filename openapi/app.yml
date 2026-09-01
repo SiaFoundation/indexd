@@ -143,15 +143,15 @@ paths:
           in: query
           description: >
             Whether to expand each object's slabs into their sectors. When false, slabs are
-            referenced by ID and can be fetched in batches with `POST /slabs/batch`, and the
-            Accept header may be set to application/octet-stream to receive the events in the
-            Sia binary encoding instead of JSON.
+            referenced by ID and can be fetched in batches with `POST /slabs/batch`.
           schema:
             type: boolean
             default: true
       responses:
         "200":
-          description: A list of object events. The binary encoding is only available for expandslabs=false.
+          description: >
+            A list of object events. Set the Accept header to application/octet-stream to
+            receive the events in the Sia binary encoding instead of JSON.
           content:
             application/json:
               schema:

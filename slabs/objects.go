@@ -65,6 +65,10 @@ type (
 		Object *SealedObject `json:"object,omitempty"`
 	}
 
+	// ObjectEvents is a list of object events. It implements the binary
+	// encoding used by the application API.
+	ObjectEvents []ObjectEvent
+
 	// An ObjectEventReference is an object event whose object references its
 	// slabs by ID instead of expanding them into sectors. The slabs can be
 	// fetched with PinnedSlabs.

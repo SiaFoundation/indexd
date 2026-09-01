@@ -448,6 +448,13 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatalf("expected batched listing %+v, got %+v", objs, batched)
 	}
 
+	binaryEvents, err := client.ListObjectsBinary(context.Background(), sk, slabs.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(binaryEvents, inUTC(objs)) {
+		t.Fatalf("expected binary listing %+v, got %+v", inUTC(objs), binaryEvents)
+	}
+
 	refs, err := client.ListObjectReferences(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
