@@ -276,10 +276,7 @@ func TestPinnedSlab(t *testing.T) {
 		ID:            pinned.Digest(),
 		EncryptionKey: pinned.EncryptionKey,
 		MinShards:     pinned.MinShards,
-		Sectors:       make([]slabs.PinnedSector, len(pinned.Sectors)),
-	}
-	for i, sector := range pinned.Sectors {
-		expected.Sectors[i] = slabs.PinnedSector(sector)
+		Sectors:       slices.Clone(pinned.Sectors),
 	}
 
 	slabIDs, err := store.PinSlabs(account, time.Time{}, pinned)
@@ -296,25 +293,28 @@ func TestPinnedSlab(t *testing.T) {
 	}
 
 	// mark some of the sectors as lost
-	for i := range slab.Sectors[:10] {
-		if err := store.MarkSectorsLost(slab.Sectors[i].HostKey, []types.Hash256{slab.Sectors[i].Root}); err != nil {
+	const numLostSectors = 10
+	for _, sector := range slab.Sectors[:numLostSectors] {
+		if err := store.MarkSectorsLost(sector.HostKey, []types.Hash256{sector.Root}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// assert the slab no longer contains the lost sectors
+	// assert the lost sectors are kept in place with a zero host key
 	slab, err = store.PinnedSlab(account, slabID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected.Sectors = expected.Sectors[10:] // first 10 sectors are lost
+	for i := range expected.Sectors[:numLostSectors] {
+		expected.Sectors[i].HostKey = types.PublicKey{}
+	}
 	if !reflect.DeepEqual(slab, expected) {
 		t.Fatalf("expected slab %v, got %v", expected, slab)
 	}
 
 	// mark the remaining sectors as lost
-	for i := range slab.Sectors {
-		if err := store.MarkSectorsLost(slab.Sectors[i].HostKey, []types.Hash256{slab.Sectors[i].Root}); err != nil {
+	for _, sector := range slab.Sectors[numLostSectors:] {
+		if err := store.MarkSectorsLost(sector.HostKey, []types.Hash256{sector.Root}); err != nil {
 			t.Fatal(err)
 		}
 	}

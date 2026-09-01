@@ -718,7 +718,7 @@ paths:
             type: string
       responses:
         "200":
-          description: Details of the pinned slab. Lost sectors are omitted.
+          description: Details of the pinned slab
           content:
             application/json:
               schema:
@@ -811,8 +811,9 @@ paths:
       description: >
         Fetches multiple pinned slabs by ID in one request, for example the slab references
         returned by `GET /objects?expandslabs=false`. Slabs the account has not pinned are omitted.
-        Unlike `GET /slabs/{slabid}`, lost sectors are kept in place with a zero host key. Set the
-        Accept header to application/octet-stream to receive the Sia binary encoding instead of JSON.
+        Unlike `GET /slabs/{slabid}`, a slab with too few available sectors left to recover it is
+        still returned rather than rejected. Set the Accept header to application/octet-stream to
+        receive the Sia binary encoding instead of JSON.
       operationId: getSlabs
       requestBody:
         required: true

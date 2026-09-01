@@ -299,8 +299,8 @@ func (c *Client) Slab(ctx context.Context, appKey types.PrivateKey, slabID slabs
 }
 
 // Slabs retrieves up to api.MaxLimit pinned slabs in request order, omitting
-// slabs the account has not pinned. Unlike Slab, lost sectors are kept in place
-// with a zero host key.
+// slabs the account has not pinned. Unlike Slab, it does not check that the
+// slabs are still recoverable.
 func (c *Client) Slabs(ctx context.Context, appKey types.PrivateKey, slabIDs []slabs.SlabID) (resp []slabs.PinnedSlab, err error) {
 	err = c.signedRequestBinary(ctx, appKey, http.MethodPost, "/slabs/batch", slabIDs, (*slabs.PinnedSlabs)(&resp))
 	return

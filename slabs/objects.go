@@ -40,12 +40,10 @@ type (
 
 	// SlabSlice represents a slice of a slab that is part of an object.
 	SlabSlice struct {
-		Version       uint8          `json:"version"`
-		EncryptionKey EncryptionKey  `json:"encryptionKey"`
-		MinShards     uint           `json:"minShards"`
-		Sectors       []PinnedSector `json:"sectors"`
-		Offset        uint32         `json:"offset"`
-		Length        uint32         `json:"length"`
+		SlabParams
+
+		Offset uint32 `json:"offset"`
+		Length uint32 `json:"length"`
 	}
 
 	// SharedObject provides all the metadata necessary to retrieve and decrypt
@@ -417,39 +415,22 @@ func (k *EncryptionKey) UnmarshalJSON(b []byte) error {
 
 // Pin converts the SlabSlice to SlabPinParams.
 func (s SlabSlice) Pin() SlabPinParams {
-	return SlabPinParams{
-		Version:       s.Version,
-		EncryptionKey: s.EncryptionKey,
-		MinShards:     s.MinShards,
-		Sectors:       slices.Clone(s.Sectors),
-	}
+	params := SlabPinParams{SlabParams: s.SlabParams}
+	params.Sectors = slices.Clone(s.Sectors)
+	return params
 }
 
-// Slice creates a SlabSlice from the SlabPinParams. Upload times are dropped;
+// Slice creates a SlabSlice covering the given range. Upload times are dropped;
 // they describe the upload, not the stored slab.
-func (s SlabPinParams) Slice(offset, length uint32) SlabSlice {
-	sectors := slices.Clone(s.Sectors)
-	for i := range sectors {
-		sectors[i].UploadedAt = nil
+func (s SlabParams) Slice(offset, length uint32) SlabSlice {
+	slice := SlabSlice{
+		SlabParams: s,
+		Offset:     offset,
+		Length:     length,
 	}
-	return SlabSlice{
-		Version:       s.Version,
-		EncryptionKey: s.EncryptionKey,
-		MinShards:     s.MinShards,
-		Sectors:       sectors,
-		Offset:        offset,
-		Length:        length,
+	slice.Sectors = slices.Clone(s.Sectors)
+	for i := range slice.Sectors {
+		slice.Sectors[i].UploadedAt = nil
 	}
-}
-
-// Slice creates a SlabSlice from the PinnedSlab.
-func (s PinnedSlab) Slice(offset, length uint32) SlabSlice {
-	return SlabSlice{
-		Version:       s.Version,
-		EncryptionKey: s.EncryptionKey,
-		MinShards:     s.MinShards,
-		Sectors:       slices.Clone(s.Sectors),
-		Offset:        offset,
-		Length:        length,
-	}
+	return slice
 }

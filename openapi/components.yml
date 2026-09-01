@@ -428,16 +428,12 @@ components:
         hostKey:
           allOf:
             - $ref: "#/components/schemas/PublicKey"
-            - description: The public key of the host storing the sector
+            - description: The public key of the host storing the sector, or zero if the sector has been lost
 
-    PinnedSlab:
+    SlabParams:
       type: object
-      description: A slab that has been pinned to hosts
+      description: The version, encryption key, minimum shards and sectors that determine a slab's ID
       properties:
-        id:
-          allOf:
-            - $ref: "#/components/schemas/SlabID"
-            - description: The ID of the slab
         version:
           type: integer
           format: uint8
@@ -448,12 +444,26 @@ components:
             - description: The encryption key used for the slab
         minShards:
           type: integer
-          description: The minimum number of shards required for the slab
+          format: uint64
+          description: The minimum number of shards required to reconstruct the slab
         sectors:
           type: array
           items:
             $ref: "#/components/schemas/PinnedSector"
           description: The sectors of the slab in order
+
+    PinnedSlab:
+      type: object
+      description: >
+        A slab that has been pinned to hosts. Lost sectors are kept in place with a zero
+        host key so the sector roots always reproduce the slab's ID.
+      allOf:
+        - $ref: "#/components/schemas/SlabParams"
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/SlabID"
+            - description: The ID of the slab
 
     Sector:
       type: object
@@ -740,24 +750,10 @@ components:
 
     SlabSlice:
       type: object
+      description: A slice of a slab that is part of an object
+      allOf:
+        - $ref: "#/components/schemas/SlabParams"
       properties:
-        id:
-          $ref: "#/components/schemas/SlabID"
-        version:
-          type: integer
-          format: uint8
-          description: The slab encoding version
-        encryptionKey:
-          $ref: "#/components/schemas/EncryptionKey"
-        minShards:
-          type: integer
-          format: uint64
-          description: Minimum number of shards required to reconstruct the slab
-        sectors:
-          type: array
-          description: The list of sectors composing the slab
-          items:
-            $ref: "#/components/schemas/PinnedSector"
         offset:
           type: integer
           format: uint32

@@ -111,21 +111,28 @@ type (
 		UploadedAt *time.Time      `json:"uploadedAt,omitempty"`
 	}
 
-	// SlabPinParams is the input to PinSlabs
-	SlabPinParams struct {
+	// SlabParams is the version, encryption key, minimum shards and sectors
+	// that determine a slab's ID. It is shared by SlabPinParams, PinnedSlab
+	// and SlabSlice.
+	SlabParams struct {
 		Version       uint8          `json:"version"`
 		EncryptionKey EncryptionKey  `json:"encryptionKey"`
 		MinShards     uint           `json:"minShards"`
 		Sectors       []PinnedSector `json:"sectors"`
 	}
 
-	// A PinnedSlab is a slab that has been pinned to hosts.
+	// SlabPinParams is the input to PinSlabs.
+	SlabPinParams struct {
+		SlabParams
+	}
+
+	// A PinnedSlab is a slab that has been pinned to hosts. Lost sectors are
+	// kept in place with a zero host key so the sector roots always reproduce
+	// the slab's ID.
 	PinnedSlab struct {
-		ID            SlabID         `json:"id"`
-		Version       uint8          `json:"version"`
-		EncryptionKey EncryptionKey  `json:"encryptionKey"`
-		MinShards     uint           `json:"minShards"`
-		Sectors       []PinnedSector `json:"sectors"`
+		ID SlabID `json:"id"`
+
+		SlabParams
 	}
 
 	// PinnedSlabs is a list of pinned slabs. It implements the binary encoding
@@ -154,17 +161,7 @@ func (s *SlabID) UnmarshalText(b []byte) error {
 	return (*types.Hash256)(s).UnmarshalText(b)
 }
 
-// Digest computes the digest for the slab pin params.
-func (s SlabPinParams) Digest() SlabID {
-	return slabDigest(s.Version, s.MinShards, s.EncryptionKey, s.Sectors)
-}
-
-// Digest computes the digest for the slab slice.
-func (s SlabSlice) Digest() SlabID {
-	return slabDigest(s.Version, s.MinShards, s.EncryptionKey, s.Sectors)
-}
-
-// slabDigest creates a unique digest for a slab. It is important, that the same
+// Digest creates a unique digest for a slab. It is important, that the same
 // params always result in the same hash since we deduplicate slabs using it. So
 // if one user makes the mistake of pinning a slab with a different encryption
 // key, this shouldn't prevent other users from pinning the same slab with the
@@ -172,27 +169,27 @@ func (s SlabSlice) Digest() SlabID {
 //
 // The version is only included in the digest for version 1 and above so that
 // version 0 slabs retain the same ID as before versioning was introduced.
-func slabDigest(version uint8, minShards uint, ec [32]byte, sectors []PinnedSector) SlabID {
+func (s SlabParams) Digest() SlabID {
 	hasher := types.NewHasher()
-	if version > 0 {
-		hasher.E.WriteUint8(version)
+	if s.Version > 0 {
+		hasher.E.WriteUint8(s.Version)
 	}
-	hasher.E.WriteUint64(uint64(minShards))
-	hasher.E.Write(ec[:])
-	for _, sector := range sectors {
+	hasher.E.WriteUint64(uint64(s.MinShards))
+	hasher.E.Write(s.EncryptionKey[:])
+	for _, sector := range s.Sectors {
 		hasher.E.Write(sector.Root[:])
 	}
 	return SlabID(hasher.Sum())
 }
 
 // Size returns the size of the slab in bytes including redundancy.
-func (s SlabPinParams) Size() uint64 {
+func (s SlabParams) Size() uint64 {
 	return uint64(len(s.Sectors)) * proto.SectorSize
 }
 
 // DataSize returns the size of the slab's data in bytes before redundancy
 // is applied.
-func (s SlabPinParams) DataSize() uint64 {
+func (s SlabParams) DataSize() uint64 {
 	return uint64(s.MinShards) * proto.SectorSize
 }
 
@@ -262,8 +259,8 @@ func (m *SlabManager) PinnedSlab(ctx context.Context, account proto.Account, sla
 }
 
 // PinnedSlabs retrieves the slabs currently pinned by the account in request
-// order, omitting slabs the account has not pinned. Unlike PinnedSlab, lost
-// sectors are kept in place with a zero host key.
+// order, omitting slabs the account has not pinned. Unlike PinnedSlab, it does
+// not check that the slabs are still recoverable.
 func (m *SlabManager) PinnedSlabs(ctx context.Context, account proto.Account, slabIDs []SlabID) ([]PinnedSlab, error) {
 	return m.store.PinnedSlabs(account, slabIDs)
 }
