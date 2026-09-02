@@ -1,3 +1,14 @@
+## 0.5.0 (2026-09-02)
+
+### Breaking Changes
+
+- ReadSector takes an account token instead of an account key.
+
+### Fixes
+
+- Raise contract growth-rate funding bounds to 256 GiB minimum and 1 TiB maximum
+- Reject sectors that have been uploaded more than the temporary storage duration ago
+
 ## 0.4.4 (2026-08-21)
 
 ### Features
