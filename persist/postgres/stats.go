@@ -26,6 +26,8 @@ const (
 	statAccountsRegistered = "num_accounts_registered"
 	statScans              = "num_scans"
 	statScansFailed        = "num_scans_failed"
+	statUnrecoverableSlabs = "num_unrecoverable_slabs"
+	statStuckSlabs         = "num_stuck_slabs"
 )
 
 // sqlStatSelect returns a SELECT query that reads the effective values of the
@@ -118,14 +120,14 @@ func incrementHostsUnpinnedSectors(ctx context.Context, tx *txn, deltas []unpinn
 }
 
 func initStats(ctx context.Context, tx *txn) error {
-	_, err := tx.Exec(ctx, `INSERT INTO stats (stat_name) VALUES
-		($1), ($2), ($3), ($4), ($5), ($6), ($7), ($8), ($9), ($10), ($11)
-	ON CONFLICT (stat_name) DO NOTHING`,
-		statSlabs, statMigratedSectors, statPinnedSectors, statUnpinnableSectors, statUnpinnedSectors,
-		statSectorsChecked, statSectorsLost, statSectorsCheckFailed,
-		statAccountsRegistered,
-		statScans, statScansFailed,
-	)
+	_, err := tx.Exec(ctx, `INSERT INTO stats (stat_name) SELECT unnest($1::text[]) ON CONFLICT (stat_name) DO NOTHING`,
+		[]string{
+			statSlabs, statMigratedSectors, statPinnedSectors, statUnpinnableSectors, statUnpinnedSectors,
+			statSectorsChecked, statSectorsLost, statSectorsCheckFailed,
+			statAccountsRegistered,
+			statScans, statScansFailed,
+			statUnrecoverableSlabs, statStuckSlabs,
+		})
 	return err
 }
 
@@ -176,8 +178,9 @@ func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 func (s *Store) SectorStats() (slabs.SectorsStats, error) {
 	var stats slabs.SectorsStats
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, sqlStatSelect(statSlabs, statMigratedSectors, statPinnedSectors, statUnpinnableSectors, statUnpinnedSectors, statSectorsLost, statSectorsChecked, statSectorsCheckFailed)).
-			Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned, &stats.Lost, &stats.Checked, &stats.CheckFailed)
+		return tx.QueryRow(ctx, sqlStatSelect(statSlabs, statMigratedSectors, statPinnedSectors, statUnpinnableSectors, statUnpinnedSectors, statSectorsLost, statSectorsChecked, statSectorsCheckFailed, statUnrecoverableSlabs, statStuckSlabs)).
+			Scan(&stats.Slabs, &stats.Migrated, &stats.Pinned, &stats.Unpinnable, &stats.Unpinned, &stats.Lost, &stats.Checked, &stats.CheckFailed,
+				&stats.UnrecoverableSlabs, &stats.StuckSlabs)
 	})
 	return stats, err
 }

@@ -334,6 +334,14 @@ func (s SectorsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 			Name:  "indexd_num_failed_check_sectors",
 			Value: float64(s.CheckFailed),
 		},
+		{
+			Name:  "indexd_num_unrecoverable_slabs",
+			Value: float64(s.UnrecoverableSlabs),
+		},
+		{
+			Name:  "indexd_num_stuck_slabs",
+			Value: float64(s.StuckSlabs),
+		},
 	}
 }
 

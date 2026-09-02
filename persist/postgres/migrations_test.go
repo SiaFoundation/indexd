@@ -444,6 +444,66 @@ CREATE UNIQUE INDEX slab_sectors_slab_id_slab_index_idx ON slab_sectors(slab_id,
 CREATE UNIQUE INDEX slab_sectors_sector_id_slab_id_idx ON slab_sectors(sector_id, slab_id);
 `
 
+// initV1Database brings up a database at the initial schema version, seeds it
+// with seed, and returns it migrated to the current version.
+func initV1Database(t *testing.T, ci ConnectionInfo, seed string) *Store {
+	t.Helper()
+	ctx := context.Background()
+	t.Cleanup(func() {
+		pool, err := pgxpool.New(ctx, ci.String())
+		if err != nil {
+			t.Fatal(err)
+		} else if _, err := pool.Exec(ctx, `DROP SCHEMA public CASCADE;CREATE SCHEMA public;`); err != nil {
+			t.Fatal(err)
+		}
+		pool.Close()
+	})
+
+	if err := ensureDatabase(ctx, ci); err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pgxpool.New(ctx, ci.String())
+	if err != nil {
+		t.Fatal(err)
+	} else if _, err := pool.Exec(ctx, initialSchema); err != nil {
+		t.Fatal(err)
+	} else if _, err := pool.Exec(ctx, `INSERT INTO global_settings(id, db_version) VALUES (0, 1);`); err != nil {
+		t.Fatal(err)
+	} else if seed != "" {
+		if _, err := pool.Exec(ctx, seed); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pool.Close()
+
+	store, err := NewStore(ctx, ci, contracts.DefaultMaintenanceSettings, hosts.DefaultUsabilitySettings, zaptest.NewLogger(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+// TestMigrationSeedsRepairStats asserts the repair-state counters are seeded
+// from the rows an older database already has.
+func TestMigrationSeedsRepairStats(t *testing.T) {
+	ctx := context.Background()
+	store := initV1Database(t, connectionInfoFromEnv(), `
+		INSERT INTO slabs (digest, encryption_key, min_shards, consecutive_failed_repairs)
+		SELECT sha256(i::text::bytea), sha256(i::text::bytea), 1, i
+		FROM generate_series(0, 3) i`)
+	defer store.Close()
+
+	// two of the four have more than one consecutive failure
+	var stuck, unrecoverable int64
+	if err := store.pool.QueryRow(ctx, sqlStatSelect(statStuckSlabs, statUnrecoverableSlabs)).Scan(&stuck, &unrecoverable); err != nil {
+		t.Fatal(err)
+	} else if stuck != 2 {
+		t.Fatalf("expected 2 stuck slabs, got %d", stuck)
+	} else if unrecoverable != 0 {
+		t.Fatalf("expected 0 unrecoverable slabs, got %d", unrecoverable)
+	}
+}
+
 func TestMigrationConsistency(t *testing.T) {
 	// prepare 2 databases
 	ci := connectionInfoFromEnv()

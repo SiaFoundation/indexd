@@ -1,9 +1,12 @@
 package postgres
 
 import (
+	"bytes"
+	"database/sql"
 	"errors"
 	"math"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -244,6 +247,74 @@ func TestMarkSlabRepaired(t *testing.T) {
 	}
 	simulateSuccessfulRepair()
 	assertSlabState(0, oneHourAgo)
+}
+
+func TestMarkSlabUnrecoverable(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	// add account, host and contract
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	host := store.addTestHost(t)
+	store.addTestContract(t, host)
+
+	// add two slabs and lose all of their sectors so both need repair
+	slabID1 := store.pinTestSlab(t, account, 1, []types.PublicKey{host, host})
+	slabID2 := store.pinTestSlab(t, account, 1, []types.PublicKey{host, host})
+	if _, err := store.pool.Exec(t.Context(), `UPDATE sectors SET host_id = NULL`); err != nil {
+		t.Fatal(err)
+	}
+
+	assertUnhealthySlabs := func(expected ...slabs.SlabID) {
+		t.Helper()
+		resetNextRepairAttempt(t, store)
+		got := collectUnhealthySlabs(t, store)
+		byDigest := func(a, b slabs.SlabID) int { return bytes.Compare(a[:], b[:]) }
+		slices.SortFunc(got, byDigest)
+		slices.SortFunc(expected, byDigest)
+		if !slices.Equal(got, expected) {
+			t.Fatalf("expected unhealthy slabs %v, got %v", expected, got)
+		}
+	}
+
+	assertUnrecoverable := func(slabID slabs.SlabID, expected string) {
+		t.Helper()
+		var unrecoverable bool
+		var reason sql.NullString
+		if err := store.pool.QueryRow(t.Context(), `
+			SELECT unrecoverable, unrecoverable_reason
+			FROM slabs
+			WHERE digest = $1`, sqlHash256(slabID)).Scan(&unrecoverable, &reason); err != nil {
+			t.Fatal(err)
+		} else if unrecoverable != (expected != "") {
+			t.Fatalf("expected unrecoverable %v, got %v", expected != "", unrecoverable)
+		} else if reason.String != expected {
+			t.Fatalf("expected reason %q, got %q", expected, reason.String)
+		}
+	}
+
+	// both slabs need repair
+	assertUnhealthySlabs(slabID1, slabID2)
+	assertUnrecoverable(slabID1, "")
+	assertUnrecoverable(slabID2, "")
+
+	// an unrecoverable slab is not handed out again
+	if err := store.MarkSlabUnrecoverable(slabID1, "shard root mismatch"); err != nil {
+		t.Fatal(err)
+	}
+	assertUnrecoverable(slabID1, "shard root mismatch")
+	assertUnhealthySlabs(slabID2)
+
+	// marking it again keeps the original reason
+	if err := store.MarkSlabUnrecoverable(slabID1, "some other reason"); err != nil {
+		t.Fatal(err)
+	}
+	assertUnrecoverable(slabID1, "shard root mismatch")
+
+	// an unknown slab is not found
+	if err := store.MarkSlabUnrecoverable(slabs.SlabID(frand.Entropy256()), "shard root mismatch"); !errors.Is(err, slabs.ErrSlabNotFound) {
+		t.Fatalf("expected ErrSlabNotFound, got %v", err)
+	}
 }
 
 func TestPinnedSlab(t *testing.T) {
