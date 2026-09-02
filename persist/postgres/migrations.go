@@ -364,4 +364,67 @@ DROP INDEX IF EXISTS object_events_updated_at_object_key_idx;`)
 CREATE INDEX IF NOT EXISTS shared_objects_sharing_key_id_created_at_idx ON shared_objects(sharing_key_id, created_at DESC);`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE slabs
+	ADD COLUMN unrecoverable BOOLEAN NOT NULL DEFAULT FALSE,
+	ADD COLUMN unrecoverable_reason TEXT,
+	ADD CONSTRAINT slabs_unrecoverable_reason_check CHECK (unrecoverable = (unrecoverable_reason IS NOT NULL));
+
+-- maintain the slab repair-state counters; stuck means more than one
+-- consecutive failed repair
+CREATE FUNCTION slab_is_stuck(failures SMALLINT, unrecoverable BOOLEAN) RETURNS BOOLEAN
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT failures > 1 AND NOT unrecoverable $$;
+
+CREATE FUNCTION slabs_maintain_repair_stats() RETURNS TRIGGER AS $$
+DECLARE
+    old_unrecoverable INT := 0;
+    old_stuck INT := 0;
+    new_unrecoverable INT := 0;
+    new_stuck INT := 0;
+BEGIN
+    IF (TG_OP <> 'INSERT') THEN
+        old_unrecoverable := OLD.unrecoverable::int;
+        old_stuck := slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable)::int;
+    END IF;
+    IF (TG_OP <> 'DELETE') THEN
+        new_unrecoverable := NEW.unrecoverable::int;
+        new_stuck := slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable)::int;
+    END IF;
+
+    INSERT INTO stats_deltas (stat_name, stat_delta)
+    SELECT * FROM (
+        SELECT 'num_unrecoverable_slabs', new_unrecoverable - old_unrecoverable
+        UNION ALL
+        SELECT 'num_stuck_slabs', new_stuck - old_stuck
+    ) v(stat_name, stat_delta) WHERE stat_delta <> 0;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- the WHEN clauses keep the repair loop's next_repair_attempt bumps and the
+-- pin upsert from reaching the function at all
+CREATE TRIGGER slabs_maintain_repair_stats_insert
+AFTER INSERT ON slabs FOR EACH ROW
+WHEN (NEW.unrecoverable OR slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable))
+EXECUTE FUNCTION slabs_maintain_repair_stats();
+
+CREATE TRIGGER slabs_maintain_repair_stats_update
+AFTER UPDATE OF unrecoverable, consecutive_failed_repairs ON slabs FOR EACH ROW
+WHEN (OLD.unrecoverable IS DISTINCT FROM NEW.unrecoverable
+   OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable)
+      IS DISTINCT FROM slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable))
+EXECUTE FUNCTION slabs_maintain_repair_stats();
+
+CREATE TRIGGER slabs_maintain_repair_stats_delete
+AFTER DELETE ON slabs FOR EACH ROW
+WHEN (OLD.unrecoverable OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable))
+EXECUTE FUNCTION slabs_maintain_repair_stats();
+
+INSERT INTO stats (stat_name, stat_value) VALUES
+	('num_unrecoverable_slabs', 0),
+	('num_stuck_slabs', (SELECT COUNT(*) FROM slabs WHERE slab_is_stuck(consecutive_failed_repairs, unrecoverable)))
+ON CONFLICT (stat_name) DO NOTHING;`)
+		return err
+	},
 }

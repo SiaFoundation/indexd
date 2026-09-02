@@ -1054,7 +1054,7 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 // and returns the next cursor to resume from, or 0 once the end is reached.
 //
 // The condition for such a sector is that it's either not stored on a host or
-// it's not pinned to a good contract.
+// it's not pinned to a good contract. Slabs marked unrecoverable are skipped.
 //
 // NOTE: Subsequent calls to this function do not return the same slabs because
 // a minimum of 1 hour must pass between consecutive migration attempts. The
@@ -1094,7 +1094,7 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 				UPDATE slabs SET next_repair_attempt = $3
 				WHERE id IN (
 					SELECT id FROM slabs
-					WHERE id IN (SELECT id FROM unhealthy) AND next_repair_attempt < NOW()
+					WHERE id IN (SELECT id FROM unhealthy) AND next_repair_attempt < NOW() AND NOT unrecoverable
 					FOR UPDATE SKIP LOCKED
 				)
 				RETURNING id, digest

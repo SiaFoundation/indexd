@@ -118,6 +118,7 @@ type (
 		MarkFailingSectorsLost(hostKey types.PublicKey, maxFailedIntegrityChecks uint) error
 		MarkSectorsLost(hostKey types.PublicKey, roots []types.Hash256) error
 		MarkSlabRepaired(slabID SlabID, success bool) error
+		MarkSlabUnrecoverable(slabID SlabID, reason string) error
 		MigrateSector(root types.Hash256, hostKey types.PublicKey) (bool, error)
 		RecordSlabMigrated(slabID SlabID) error
 		PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error)

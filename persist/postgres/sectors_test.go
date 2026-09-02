@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -1891,6 +1892,64 @@ func collectUnhealthySlabs(t testing.TB, store *Store) []slabs.SlabID {
 	return all
 }
 
+// TestUnhealthySlabsUnrecoverable covers the liveness property that an
+// unrecoverable slab filling an entire page does not end the walk: the cursor
+// is derived from the sectors examined, not from the slabs returned, so later
+// unhealthy slabs are still reached.
+func TestUnhealthySlabsUnrecoverable(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// three slabs of two sectors each; the first pinned slab holds the lowest
+	// sector ids and so is walked first
+	unrecoverable := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
+	slabID2 := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
+	slabID3 := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
+
+	// lose every sector so all three slabs need repair
+	if _, err := store.pool.Exec(t.Context(), `UPDATE sectors SET host_id = NULL`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkSlabUnrecoverable(unrecoverable, "shard root mismatch"); err != nil {
+		t.Fatal(err)
+	}
+
+	// a page covering exactly the unrecoverable slab's sectors yields no slabs
+	// but must still advance the cursor
+	batch, nextCursor, err := store.UnhealthySlabs(0, 2)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(batch) != 0 {
+		t.Fatalf("expected no slabs, got %d", len(batch))
+	} else if nextCursor == 0 {
+		t.Fatal("cursor ended the walk while unhealthy slabs remain")
+	}
+
+	// the remaining slabs are still reached, the unrecoverable one is not
+	resetNextRepairAttempt(t, store)
+	got := collectUnhealthySlabs(t, store)
+	byDigest := func(a, b slabs.SlabID) int { return bytes.Compare(a[:], b[:]) }
+	expected := []slabs.SlabID{slabID2, slabID3}
+	slices.SortFunc(got, byDigest)
+	slices.SortFunc(expected, byDigest)
+	if !slices.Equal(got, expected) {
+		t.Fatalf("expected slabs %v, got %v", expected, got)
+	}
+}
+
+// resetNextRepairAttempt marks every slab as due for repair again, undoing the
+// backoff UnhealthySlabs claims them with.
+func resetNextRepairAttempt(t testing.TB, store *Store) {
+	t.Helper()
+	if _, err := store.pool.Exec(t.Context(), `UPDATE slabs SET next_repair_attempt = NOW() - INTERVAL '1 hour'`); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestUnhealthySlabs(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
@@ -1910,18 +1969,6 @@ func TestUnhealthySlabs(t *testing.T) {
 		return unhealthy
 	}
 
-	// resetNextRepairAttemptTime sets the next_repair_attempt to an hour
-	// ago for all slabs to allow them to be returned again should they still be
-	// unhealthy
-	resetNextRepairAttemptTime := func() {
-		t.Helper()
-
-		_, err := store.pool.Exec(t.Context(), "UPDATE slabs SET next_repair_attempt = NOW() - INTERVAL '1 hour'")
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-
 	// add an account
 	account := proto.Account{1}
 	store.addTestAccount(t, types.PublicKey(account))
@@ -1933,7 +1980,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	// add two slabs
 	slabID1 := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
 	slabID2 := store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 
 	// pin all sectors to the contract
 	_, err := store.pool.Exec(t.Context(), "UPDATE sectors SET contract_sectors_map_id = 1")
@@ -1968,7 +2015,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	assertUnhealthySlabs(0)
 
 	// reset and assert both slabs come back
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 	unhealthy := assertUnhealthySlabs(2)
 	got := make(map[slabs.SlabID]bool)
 	for _, id := range unhealthy {
@@ -1977,7 +2024,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if !got[slabID1] || !got[slabID2] {
 		t.Fatal("expected both slab1 and slab2", unhealthy)
 	}
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 
 	// make the contract good again and assert no unhealthy slabs
 	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET good = TRUE")
@@ -1992,7 +2039,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertUnhealthySlabs(2)
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 
 	// resolved state is also unhealthy
 	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateResolved))
@@ -2000,7 +2047,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertUnhealthySlabs(2)
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 
 	// rejected state is also unhealthy
 	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateRejected))
@@ -2008,7 +2055,7 @@ func TestUnhealthySlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertUnhealthySlabs(2)
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 
 	// set the state back to active
 	_, err = store.pool.Exec(t.Context(), "UPDATE contracts SET state = $1", sqlContractState(contracts.ContractStateActive))
@@ -2027,7 +2074,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if unhealthy[0] != slabID1 {
 		t.Fatalf("expected slab ID %v, got %v", slabID1, unhealthy[0])
 	}
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 
 	// add the sector back - the unhealthy slab should be gone
 	_, err = store.pool.Exec(t.Context(), "UPDATE sectors SET host_id = 1, contract_sectors_map_id = NULL WHERE id = 1")
@@ -2062,7 +2109,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	// pruning detaches the pruned sectors from their host, so both slabs are
 	// now reported as needing repair
 	assertUnhealthySlabs(2)
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 
 	// re-attach the sectors to a host without pinning them to a contract. They
 	// are then considered uploaded to a host but not yet pinned, which is
@@ -2094,7 +2141,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 
 	// assert no unhealthy slabs
 	assertUnhealthySlabs(0)
@@ -2171,7 +2218,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 	assertUnhealthySlabs(bulkSlabs + 1)
 
 	// mark every contract bad. collecting again returns nothing since the first
@@ -2180,7 +2227,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 	unhealthy = collectUnhealthySlabs(t, store)
 	if len(unhealthy) < bulkSlabs+1 {
 		t.Fatalf("expected at least %d unhealthy slabs, got %d", bulkSlabs+1, len(unhealthy))
@@ -2200,7 +2247,7 @@ func TestUnhealthySlabs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resetNextRepairAttemptTime()
+	resetNextRepairAttempt(t, store)
 	assertUnhealthySlabs(0)
 
 	// a lost sector that does belong to a slab is still found
@@ -2250,9 +2297,7 @@ func TestUnhealthySlabsConcurrent(t *testing.T) {
 	if _, err := store.pool.Exec(t.Context(), "UPDATE contracts SET good = FALSE"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.pool.Exec(t.Context(), "UPDATE slabs SET next_repair_attempt = NOW() - INTERVAL '1 hour'"); err != nil {
-		t.Fatal(err)
-	}
+	resetNextRepairAttempt(t, store)
 
 	// run several concurrent walkers, each advancing its own cursor.
 	const workers = 8
@@ -2970,14 +3015,6 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 		b.Fatal(err)
 	}
 
-	// resetNextRepairAttempt is a helper to mark all slabs as due for repair again
-	resetNextRepairAttempt := func() {
-		b.Helper()
-		if _, err := store.pool.Exec(b.Context(), `UPDATE slabs SET next_repair_attempt = NOW() - INTERVAL '1 hour'`); err != nil {
-			b.Fatal(err)
-		}
-	}
-
 	// vacuumAnalyze is a helper to analyze tables and ensure the query planner has up-to-date statistics
 	vacuumAnalyze := func() {
 		b.Helper()
@@ -3049,7 +3086,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 	}
 
 	for _, bm := range benchmarks {
-		resetNextRepairAttempt()
+		resetNextRepairAttempt(b, store)
 		bm.setup()
 		vacuumAnalyze()
 
@@ -3058,7 +3095,7 @@ func BenchmarkUnhealthySlabs(b *testing.B) {
 			for b.Loop() {
 				if bm.unhealthy {
 					b.StopTimer()
-					resetNextRepairAttempt()
+					resetNextRepairAttempt(b, store)
 					b.StartTimer()
 				}
 				slabIDs, _, err := store.UnhealthySlabs(0, batchSize)

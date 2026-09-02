@@ -539,6 +539,9 @@ components:
         success:
           type: boolean
           description: Whether every required sector was migrated; only meaningful when recovered is true
+        unrecoverableReason:
+          type: string
+          description: Set when the slab can never be fully repaired, taking it out of the repair rotation
 
     ObjectSlab:
       type: object
@@ -1465,6 +1468,14 @@ components:
           type: integer
           format: int64
           description: Number of sectors that have had failed integrity checks.
+        unrecoverableSlabs:
+          type: integer
+          format: int64
+          description: Number of slabs that were taken out of the repair rotation because they can never be fully repaired.
+        stuckSlabs:
+          type: integer
+          format: int64
+          description: Number of slabs that failed more than one consecutive repair attempt and are still being retried.
 
     QuotaKey:
       type: string
