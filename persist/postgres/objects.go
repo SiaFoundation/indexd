@@ -136,12 +136,12 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT object_key, was_deleted, published_at
+			SELECT object_key, was_deleted, updated_at
 			FROM object_events oe
 			WHERE oe.account_id = $1
-			  AND (oe.published_at, oe.object_key) > ($2, $3)
+			  AND (oe.updated_at, oe.object_key) > ($2, $3)
 			  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = oe.object_key)
-			ORDER BY oe.published_at ASC, oe.object_key ASC
+			ORDER BY oe.updated_at ASC, oe.object_key ASC
 			LIMIT $4
 		`, accountID, cursor.After, sqlHash256(cursor.Key), limit)
 		if err != nil {
@@ -232,7 +232,7 @@ INNER JOIN deleted d ON (d.slab_digest = s.digest)`, objectID)
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
 		_, err = tx.Exec(ctx, `
-                       UPDATE object_events SET was_deleted = TRUE, published_at = NULL
+                       UPDATE object_events SET was_deleted = TRUE, updated_at = NULL
                        WHERE account_id = $1 AND object_key = $2`,
 			accountID, sqlHash256(objectKey))
 		if err != nil {
@@ -314,7 +314,7 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 
 		_, err = tx.Exec(ctx, `
 			INSERT INTO object_events (object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, published_at) = (FALSE, NULL)`,
+			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, NULL)`,
 			sqlHash256(obj.ID), accountID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object event: %w", err)
@@ -386,7 +386,7 @@ func (s *Store) PublishObjectEvents() error {
 		// an idle tick skips the settings row entirely, the partial index on
 		// unpublished events makes the probe cheap
 		var pending bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM object_events WHERE published_at IS NULL)`).Scan(&pending); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM object_events WHERE updated_at IS NULL)`).Scan(&pending); err != nil {
 			return fmt.Errorf("failed to check for unpublished object events: %w", err)
 		} else if !pending {
 			return nil
@@ -419,10 +419,10 @@ func (s *Store) PublishObjectEvents() error {
 		// events locked by an in-flight writer are skipped here and take a
 		// position in a later batch
 		_, err = tx.Exec(ctx, `
-			UPDATE object_events SET published_at = $1
+			UPDATE object_events SET updated_at = $1
 			WHERE (account_id, object_key) IN (
 				SELECT account_id, object_key FROM object_events
-				WHERE published_at IS NULL
+				WHERE updated_at IS NULL
 				ORDER BY account_id, object_key
 				FOR UPDATE SKIP LOCKED
 				LIMIT $2)`, published, objectEventPublishBatchSize)

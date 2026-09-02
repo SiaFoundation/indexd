@@ -390,15 +390,15 @@ CREATE TABLE object_events (
     object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32), -- not a FK since deletions need to hang around
     account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     was_deleted BOOLEAN NOT NULL, -- true if deleted, false otherwise
-    published_at TIMESTAMP WITH TIME ZONE,
+    updated_at TIMESTAMP WITH TIME ZONE, -- the event's position in the stream rather than the time the object changed, NULL until a publisher stamps it, truncated to second precision so a client cursor can express it exactly
     PRIMARY KEY (account_id, object_key)
 );
 
--- fast per account events cursor pagination sorted by publish time and object key
-CREATE INDEX object_events_account_id_published_at_object_key_idx ON object_events(account_id, published_at ASC, object_key ASC);
+-- fast per-account events cursor pagination sorted by update time and object key
+CREATE INDEX object_events_account_id_updated_at_object_key_idx ON object_events(account_id, updated_at ASC, object_key ASC);
 
 -- fast lookup of events awaiting publication
-CREATE INDEX object_events_unpublished_idx ON object_events(account_id, object_key) WHERE published_at IS NULL;
+CREATE INDEX object_events_unpublished_idx ON object_events(account_id, object_key) WHERE updated_at IS NULL;
 
 -- probe by object_key alone since the PK leads with account_id
 CREATE INDEX object_events_object_key_idx ON object_events(object_key);

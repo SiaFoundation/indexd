@@ -366,12 +366,10 @@ CREATE INDEX IF NOT EXISTS shared_objects_sharing_key_id_created_at_idx ON share
 	},
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
 		_, err := tx.Exec(ctx, `
-ALTER TABLE object_events RENAME COLUMN updated_at TO published_at;
-ALTER TABLE object_events ALTER COLUMN published_at DROP DEFAULT;
-ALTER INDEX object_events_account_id_updated_at_object_key_idx RENAME TO object_events_account_id_published_at_object_key_idx;
-CREATE INDEX object_events_unpublished_idx ON object_events(account_id, object_key) WHERE published_at IS NULL;
+ALTER TABLE object_events ALTER COLUMN updated_at DROP DEFAULT;
+CREATE INDEX object_events_unpublished_idx ON object_events(account_id, object_key) WHERE updated_at IS NULL;
 ALTER TABLE global_settings ADD COLUMN object_events_last_published TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '-infinity';
-UPDATE global_settings SET object_events_last_published = COALESCE((SELECT date_trunc('second', MAX(published_at)) FROM object_events), '-infinity');`)
+UPDATE global_settings SET object_events_last_published = COALESCE((SELECT date_trunc('second', MAX(updated_at)) FROM object_events), '-infinity');`)
 		return err
 	},
 }

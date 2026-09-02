@@ -263,7 +263,7 @@ func TestRecordSlabMigrated(t *testing.T) {
 	// publish the event, then set its position in the past
 	store.publishEvents(t)
 	ts := time.Now().Add(-time.Hour).Round(time.Second)
-	if _, err := store.pool.Exec(t.Context(), `UPDATE object_events SET published_at = $1`, ts); err != nil {
+	if _, err := store.pool.Exec(t.Context(), `UPDATE object_events SET updated_at = $1`, ts); err != nil {
 		t.Fatal(err)
 	}
 
@@ -281,13 +281,13 @@ func TestRecordSlabMigrated(t *testing.T) {
 		t.Fatalf("expected 1 object events, got %d", count)
 	}
 
-	// assert published_at has been updated
-	var publishedAt time.Time
-	err = store.pool.QueryRow(t.Context(), `SELECT published_at FROM object_events LIMIT 1`).Scan(&publishedAt)
+	// assert the event took a new position
+	var updatedAt time.Time
+	err = store.pool.QueryRow(t.Context(), `SELECT updated_at FROM object_events LIMIT 1`).Scan(&updatedAt)
 	if err != nil {
 		t.Fatal(err)
-	} else if !publishedAt.After(ts) {
-		t.Fatalf("expected published_at to be updated, got %v", publishedAt)
+	} else if !updatedAt.After(ts) {
+		t.Fatalf("expected updated_at to be updated, got %v", updatedAt)
 	}
 
 	// unknown slab is a no-op

@@ -609,7 +609,7 @@ func (s *Store) eventPosition(t testing.TB, obj types.Hash256) *time.Time {
 	t.Helper()
 
 	var position *time.Time
-	if err := s.pool.QueryRow(t.Context(), `SELECT published_at FROM object_events WHERE object_key = $1`, sqlHash256(obj)).Scan(&position); err != nil {
+	if err := s.pool.QueryRow(t.Context(), `SELECT updated_at FROM object_events WHERE object_key = $1`, sqlHash256(obj)).Scan(&position); err != nil {
 		t.Fatal(err)
 	}
 	return position
@@ -771,17 +771,17 @@ func TestObjectEventTimestampPrecision(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// read published_at straight from the db to make sure nothing rounds it on
+	// read updated_at straight from the db to make sure nothing rounds it on
 	// the way out
 	assertPublished := func(context string) time.Time {
 		t.Helper()
 		store.publishEvents(t)
 
-		var publishedAt time.Time
-		if err := store.pool.QueryRow(t.Context(), `SELECT published_at FROM object_events`).Scan(&publishedAt); err != nil {
+		var updatedAt time.Time
+		if err := store.pool.QueryRow(t.Context(), `SELECT updated_at FROM object_events`).Scan(&updatedAt); err != nil {
 			t.Fatal(err)
-		} else if publishedAt.Nanosecond() != 0 {
-			t.Fatalf("expected %s to truncate published_at to second precision, got %v", context, publishedAt.Format(time.RFC3339Nano))
+		} else if updatedAt.Nanosecond() != 0 {
+			t.Fatalf("expected %s to truncate updated_at to second precision, got %v", context, updatedAt.Format(time.RFC3339Nano))
 		}
 
 		// a cursor built from a listed event, with the precision a client is
@@ -801,7 +801,7 @@ func TestObjectEventTimestampPrecision(t *testing.T) {
 		} else if len(events) != 0 {
 			t.Fatalf("expected cursor to advance past the %s event, got %d events", context, len(events))
 		}
-		return publishedAt
+		return updatedAt
 	}
 
 	// pin the object, inserting the event
@@ -825,7 +825,7 @@ func TestObjectEventTimestampPrecision(t *testing.T) {
 	}
 	updated := assertPublished("update")
 	if !updated.After(inserted) {
-		t.Fatalf("expected published_at to advance, got %v after %v", updated, inserted)
+		t.Fatalf("expected updated_at to advance, got %v after %v", updated, inserted)
 	}
 
 	// delete the object, updating the event once more
@@ -834,7 +834,7 @@ func TestObjectEventTimestampPrecision(t *testing.T) {
 	}
 	deleted := assertPublished("delete")
 	if !deleted.After(updated) {
-		t.Fatalf("expected published_at to advance, got %v after %v", deleted, updated)
+		t.Fatalf("expected updated_at to advance, got %v after %v", deleted, updated)
 	}
 }
 

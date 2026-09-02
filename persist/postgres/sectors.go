@@ -1132,7 +1132,7 @@ func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 			UPDATE object_events
-			SET published_at = NULL
+			SET updated_at = NULL
 			WHERE object_key IN (
 				SELECT DISTINCT o.object_key
 				FROM object_slabs os
