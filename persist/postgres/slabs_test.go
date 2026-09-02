@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -275,10 +276,7 @@ func TestPinnedSlab(t *testing.T) {
 		ID:            pinned.Digest(),
 		EncryptionKey: pinned.EncryptionKey,
 		MinShards:     pinned.MinShards,
-		Sectors:       make([]slabs.PinnedSector, len(pinned.Sectors)),
-	}
-	for i, sector := range pinned.Sectors {
-		expected.Sectors[i] = slabs.PinnedSector(sector)
+		Sectors:       slices.Clone(pinned.Sectors),
 	}
 
 	slabIDs, err := store.PinSlabs(account, time.Time{}, pinned)
@@ -295,25 +293,28 @@ func TestPinnedSlab(t *testing.T) {
 	}
 
 	// mark some of the sectors as lost
-	for i := range slab.Sectors[:10] {
-		if err := store.MarkSectorsLost(slab.Sectors[i].HostKey, []types.Hash256{slab.Sectors[i].Root}); err != nil {
+	const numLostSectors = 10
+	for _, sector := range slab.Sectors[:numLostSectors] {
+		if err := store.MarkSectorsLost(sector.HostKey, []types.Hash256{sector.Root}); err != nil {
 			t.Fatal(err)
 		}
 	}
 
-	// assert the slab no longer contains the lost sectors
+	// assert the lost sectors are kept in place with a zero host key
 	slab, err = store.PinnedSlab(account, slabID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	expected.Sectors = expected.Sectors[10:] // first 10 sectors are lost
+	for i := range expected.Sectors[:numLostSectors] {
+		expected.Sectors[i].HostKey = types.PublicKey{}
+	}
 	if !reflect.DeepEqual(slab, expected) {
 		t.Fatalf("expected slab %v, got %v", expected, slab)
 	}
 
 	// mark the remaining sectors as lost
-	for i := range slab.Sectors {
-		if err := store.MarkSectorsLost(slab.Sectors[i].HostKey, []types.Hash256{slab.Sectors[i].Root}); err != nil {
+	for _, sector := range slab.Sectors[numLostSectors:] {
+		if err := store.MarkSectorsLost(sector.HostKey, []types.Hash256{sector.Root}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -367,6 +368,102 @@ func TestPinnedSlabUnpinned(t *testing.T) {
 	// a slab the account never pinned is also not found
 	if _, err := store.PinnedSlab(proto.Account{3}, slabID); !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatalf("expected ErrSlabNotFound for unknown account, got %v", err)
+	}
+}
+
+func TestPinnedSlabs(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	acc1, acc2 := proto.Account{1}, proto.Account{2}
+	store.addTestAccount(t, types.PublicKey(acc1))
+	store.addTestAccount(t, types.PublicKey(acc2))
+
+	hosts := make([]types.PublicKey, 3)
+	for i := range hosts {
+		hosts[i] = store.addTestHost(t)
+		store.addTestContract(t, hosts[i])
+	}
+
+	// acc1 pins two slabs, acc2 only the first
+	params := make([]slabs.SlabPinParams, 2)
+	for i := range params {
+		params[i] = slabs.SlabPinParams{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors:       make([]slabs.PinnedSector, len(hosts)),
+		}
+		for j, host := range hosts {
+			params[i].Sectors[j] = slabs.PinnedSector{Root: frand.Entropy256(), HostKey: host}
+		}
+	}
+	store.pinTestSlabs(t, acc1, params...)
+	store.pinTestSlabs(t, acc2, params[0])
+
+	slabIDs := make([]slabs.SlabID, len(params))
+	expected := make([]slabs.PinnedSlab, len(params))
+	for i, p := range params {
+		slabIDs[i] = p.Digest()
+		expected[i] = slabs.PinnedSlab{
+			ID:            slabIDs[i],
+			EncryptionKey: p.EncryptionKey,
+			MinShards:     p.MinShards,
+			Sectors:       slices.Clone(p.Sectors),
+		}
+	}
+
+	// assert slabs are returned in request order, duplicates included, and
+	// unknown IDs are omitted
+	want := []slabs.PinnedSlab{expected[1], expected[0], expected[1]}
+	pinned, err := store.PinnedSlabs(acc1, []slabs.SlabID{slabIDs[1], slabs.SlabID(frand.Entropy256()), slabIDs[0], slabIDs[1]})
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(pinned, want) {
+		t.Fatalf("expected slabs %v, got %v", want, pinned)
+	}
+
+	// assert a slab the account never pinned is omitted
+	pinned, err = store.PinnedSlabs(acc2, slabIDs)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(pinned, expected[:1]) {
+		t.Fatalf("expected slabs %v, got %v", expected[:1], pinned)
+	}
+
+	// assert an unpinned slab is omitted even though its row is still queued
+	// for deletion
+	if err := store.UnpinSlab(acc1, slabIDs[1]); err != nil {
+		t.Fatal(err)
+	}
+	pinned, err = store.PinnedSlabs(acc1, slabIDs)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(pinned, expected[:1]) {
+		t.Fatalf("expected slabs %v, got %v", expected[:1], pinned)
+	}
+
+	// assert lost sectors are kept in place with a zero host key so the roots
+	// still reproduce the slab ID, even once the slab is unrecoverable
+	for i, sector := range expected[0].Sectors {
+		if err := store.MarkSectorsLost(sector.HostKey, []types.Hash256{sector.Root}); err != nil {
+			t.Fatal(err)
+		}
+		expected[0].Sectors[i].HostKey = types.PublicKey{}
+	}
+	if _, err := store.PinnedSlab(acc1, slabIDs[0]); !errors.Is(err, slabs.ErrUnrecoverable) {
+		t.Fatalf("expected ErrUnrecoverable, got %v", err)
+	}
+	pinned, err = store.PinnedSlabs(acc1, slabIDs[:1])
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(pinned, expected[:1]) {
+		t.Fatalf("expected slabs %v, got %v", expected[:1], pinned)
+	}
+
+	// assert an empty request returns nothing
+	if pinned, err := store.PinnedSlabs(acc1, nil); err != nil {
+		t.Fatal(err)
+	} else if len(pinned) != 0 {
+		t.Fatalf("expected no slabs, got %v", pinned)
 	}
 }
 
