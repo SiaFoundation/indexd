@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	proto "go.sia.tech/core/rhp/v4"
@@ -125,10 +126,8 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 	return obj, err
 }
 
-// ListObjects lists objects for the given account that were updated after the
-// the given 'after' time. The in-progress second is withheld: updated_at has
-// second precision, so a cursor resting inside a second that can still receive
-// writes would lose any later event in it with a smaller object_key.
+// ListObjects lists object events for the given account that were published
+// after the given cursor.
 func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
@@ -139,8 +138,8 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 		rows, err := tx.Query(ctx, `
 			SELECT object_key, was_deleted, updated_at
 			FROM object_events oe
-			WHERE oe.account_id = $1 AND (oe.updated_at, oe.object_key) > ($2, $3)
-			  AND oe.updated_at < date_trunc('second', NOW())
+			WHERE oe.account_id = $1
+			  AND (oe.updated_at, oe.object_key) > ($2, $3)
 			  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = oe.object_key)
 			ORDER BY oe.updated_at ASC, oe.object_key ASC
 			LIMIT $4
@@ -233,7 +232,7 @@ INNER JOIN deleted d ON (d.slab_digest = s.digest)`, objectID)
 			return fmt.Errorf("failed to delete object: %w", err)
 		}
 		_, err = tx.Exec(ctx, `
-                       UPDATE object_events SET was_deleted = TRUE, updated_at = date_trunc('second', NOW())
+                       UPDATE object_events SET was_deleted = TRUE, updated_at = NULL
                        WHERE account_id = $1 AND object_key = $2`,
 			accountID, sqlHash256(objectKey))
 		if err != nil {
@@ -315,7 +314,7 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 
 		_, err = tx.Exec(ctx, `
 			INSERT INTO object_events (object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, date_trunc('second', NOW()))`,
+			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, NULL)`,
 			sqlHash256(obj.ID), accountID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object event: %w", err)
@@ -371,6 +370,64 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 		res := tx.SendBatch(ctx, batch)
 		if err := res.Close(); err != nil {
 			return fmt.Errorf("failed to insert slabs for object: %w", err)
+		}
+		return nil
+	})
+}
+
+// objectEventPublishBatchSize bounds how many events take a position in one
+// publish so a backlog cannot hold the settings row for a full table scan.
+const objectEventPublishBatchSize = 5000
+
+// PublishObjectEvents assigns stream positions to object events that do not
+// have one yet. At most one batch of events is published per wall clock second.
+func (s *Store) PublishObjectEvents() error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		// an idle tick skips the settings row entirely, the partial index on
+		// unpublished events makes the probe cheap
+		var pending bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM object_events WHERE updated_at IS NULL)`).Scan(&pending); err != nil {
+			return fmt.Errorf("failed to check for unpublished object events: %w", err)
+		} else if !pending {
+			return nil
+		}
+
+		// the row lock serializes publishers, so a batch's second is unique
+		// and every event in it sorts after all existing cursors
+		var published time.Time
+		err := tx.QueryRow(ctx, `
+			UPDATE global_settings
+			SET object_events_last_published = date_trunc('second', NOW())
+			WHERE date_trunc('second', NOW()) > object_events_last_published
+			RETURNING object_events_last_published`).Scan(&published)
+		if errors.Is(err, sql.ErrNoRows) {
+			// the guard also fails when the last published second is ahead of
+			// the database clock, which stalls publishing until it catches up
+			var stalled bool
+			if err := tx.QueryRow(ctx, `
+				SELECT object_events_last_published > date_trunc('second', NOW())
+				FROM global_settings`).Scan(&stalled); err != nil {
+				return fmt.Errorf("failed to get publish state: %w", err)
+			} else if stalled {
+				s.log.Warn("object events are not being published, the last published second is ahead of the database clock")
+			}
+			return nil
+		} else if err != nil {
+			return fmt.Errorf("failed to advance publish state: %w", err)
+		}
+
+		// events locked by an in-flight writer are skipped here and take a
+		// position in a later batch
+		_, err = tx.Exec(ctx, `
+			UPDATE object_events SET updated_at = $1
+			WHERE (account_id, object_key) IN (
+				SELECT account_id, object_key FROM object_events
+				WHERE updated_at IS NULL
+				ORDER BY account_id, object_key
+				FOR UPDATE SKIP LOCKED
+				LIMIT $2)`, published, objectEventPublishBatchSize)
+		if err != nil {
+			return fmt.Errorf("failed to publish object events: %w", err)
 		}
 		return nil
 	})
