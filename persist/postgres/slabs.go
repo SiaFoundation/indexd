@@ -13,6 +13,26 @@ import (
 	"go.sia.tech/indexd/slabs"
 )
 
+// MarkSlabUnrecoverable flags a slab as unrecoverable, permanently excluding it
+// from [Store.UnhealthySlabs] so it is never handed out for repair again, and
+// records the reason we gave up on it. No-op if the slab is already marked
+// unrecoverable.
+func (s *Store) MarkSlabUnrecoverable(slabID slabs.SlabID, reason string) error {
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		// COALESCE keeps the original reason if the slab is already marked
+		res, err := tx.Exec(ctx, `
+			UPDATE slabs
+			SET unrecoverable = TRUE, unrecoverable_reason = COALESCE(unrecoverable_reason, $2)
+			WHERE digest = $1`, sqlHash256(slabID), reason)
+		if err != nil {
+			return fmt.Errorf("failed to mark slab unrecoverable: %w", err)
+		} else if res.RowsAffected() == 0 {
+			return slabs.ErrSlabNotFound
+		}
+		return nil
+	})
+}
+
 // MarkSlabRepaired marks the slab as repaired or increments the failed repair
 // count. If the repair was successful, the consecutive_failed_repairs counter
 // is reset to zero. If the repair failed, the counter is incremented and the

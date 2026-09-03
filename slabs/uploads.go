@@ -20,14 +20,12 @@ type Shard struct {
 // no error is returned. The given shards must not be nil and
 // the given hosts must all be good and be sufficiently spaced apart. It returns
 // the (root, host) pairs that were successfully migrated; the caller is
-// responsible for persisting them.
-func (m *Migrator) uploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) ([]Shard, error) {
+// responsible for persisting them. Shards that didn't hash to their pinned root
+// can never be migrated and are only counted; the rest are still uploaded.
+func (m *Migrator) uploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) ([]Shard, int, error) {
 	if len(slab.Sectors) != len(shards) {
 		panic(fmt.Sprintf("slab %s has %d sectors but %d shards", slab.ID, len(slab.Sectors), len(shards))) // developer error
 	}
-
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
 
 	// defensive programming to ensure shards are
 	// never uploaded to the same host twice.
@@ -55,8 +53,9 @@ func (m *Migrator) uploadShards(ctx context.Context, slab Slab, shards [][]byte,
 
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, 10)
-	var migratedMu sync.Mutex
+	var resultsMu sync.Mutex
 	migrated := make([]Shard, 0, len(shards))
+	var mismatched int
 top:
 	for i := range shards {
 		if shards[i] == nil {
@@ -111,17 +110,20 @@ top:
 						// matches the data, this will only happen if the roots pinned
 						// by the client were incorrect.
 						//
-						// since there is no way to verify, log and stop migration
-						cancel()
+						// retrying on another host is pointless, the shard reconstructed
+						// from its peers is the only data we will ever have for it.
 						log.Error("shard root mismatch after upload, user data corrupt", zap.Stringer("expected", shardRoot), zap.Stringer("actual", result.Root))
+						resultsMu.Lock()
+						mismatched++
+						resultsMu.Unlock()
 						return
 					} else if _, existed := used.Swap(hostKey, struct{}{}); existed {
 						log.Panic("host already used for another shard", zap.Stringer("hostKey", hostKey)) // developer error
 					}
 
-					migratedMu.Lock()
+					resultsMu.Lock()
 					migrated = append(migrated, Shard{Root: shardRoot, HostKey: hostKey})
-					migratedMu.Unlock()
+					resultsMu.Unlock()
 					return
 				}
 			})
@@ -129,7 +131,7 @@ top:
 	}
 	wg.Wait() // wait for all inflight uploads to finish
 	if len(migrated) == 0 {
-		return nil, fmt.Errorf("no shards were uploaded during migration")
+		return nil, mismatched, fmt.Errorf("no shards were uploaded during migration")
 	}
-	return migrated, nil
+	return migrated, mismatched, nil
 }

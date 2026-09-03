@@ -22,7 +22,7 @@ var (
 	NewLostSectorsAlert = newLostSectorsAlert
 )
 
-func (m *SlabManager) UploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) ([]Shard, error) {
+func (m *SlabManager) UploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) ([]Shard, int, error) {
 	return m.migrator.uploadShards(ctx, slab, shards, available, log)
 }
 
