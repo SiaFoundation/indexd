@@ -331,7 +331,7 @@ func (m *SlabManager) PrepareMigrationBatch(cursor int64, limit int) (MigrationB
 // remote node. Per-result store failures are logged and skipped, matching the
 // local migration loop, but if every result in the batch failed to persist —
 // indicating a database problem rather than per-result staleness — an error
-// is returned so the reporting node fails its report and backs off. A
+// is returned so the reporting node fails its report and aborts its pass. A
 // destination host that was blocked after the batch was prepared is not
 // re-validated here: the sector is recorded and the next health check
 // re-flags the slab, re-migrating it away at most one batch later.
