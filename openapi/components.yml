@@ -1430,6 +1430,14 @@ components:
           format: int64
           description: Total number of failed host scans
 
+    ObjectStatsResponse:
+      type: object
+      properties:
+        unpublishedEvents:
+          type: integer
+          format: int64
+          description: Number of object events waiting for a position in the stream, a number that keeps growing when the publisher cannot keep up
+
     SectorStatsResponse:
       type: object
       properties:

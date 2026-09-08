@@ -299,6 +299,17 @@ func hostStatsMetrics(h hosts.HostStats) []prometheus.Metric {
 }
 
 // PrometheusMetric implements the prometheus.Marshaller interface for the
+// object stats response.
+func (s ObjectStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
+	return []prometheus.Metric{
+		{
+			Name:  "indexd_num_unpublished_object_events",
+			Value: float64(s.UnpublishedEvents),
+		},
+	}
+}
+
+// PrometheusMetric implements the prometheus.Marshaller interface for the
 // sector stats response.
 func (s SectorsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 	return []prometheus.Metric{

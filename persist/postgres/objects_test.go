@@ -615,6 +615,18 @@ func (s *Store) eventPosition(t testing.TB, obj types.Hash256) *time.Time {
 	return position
 }
 
+// assertUnpublishedEvents asserts how many events are waiting for a position.
+func (s *Store) assertUnpublishedEvents(t testing.TB, expected int64) {
+	t.Helper()
+
+	stats, err := s.ObjectStats()
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.UnpublishedEvents != expected {
+		t.Fatalf("expected %d unpublished events, got %d", expected, stats.UnpublishedEvents)
+	}
+}
+
 // TestPublishObjectEventsOncePerSecond asserts that an event never takes a
 // position in a second that was already published, since a cursor may have come
 // to rest on that second, and that it takes a later one instead.
@@ -627,7 +639,9 @@ func TestPublishObjectEventsOncePerSecond(t *testing.T) {
 	store.addTestContract(t, hk)
 
 	store.pinTestObject(t, acc, hk)
+	store.assertUnpublishedEvents(t, 1)
 	store.publishEvents(t)
+	store.assertUnpublishedEvents(t, 0)
 
 	obj := store.pinTestObject(t, acc, hk)
 
@@ -644,8 +658,10 @@ func TestPublishObjectEventsOncePerSecond(t *testing.T) {
 	} else if position := store.eventPosition(t, obj.ID()); position != nil {
 		t.Fatal("expected the event to stay unpublished, got", *position)
 	}
+	store.assertUnpublishedEvents(t, 1)
 
 	store.publishEvents(t)
+	store.assertUnpublishedEvents(t, 0)
 	position := store.eventPosition(t, obj.ID())
 	if position == nil {
 		t.Fatal("expected the event to be published")

@@ -140,6 +140,7 @@ type (
 		DeleteObject(account proto.Account, objectKey types.Hash256) error
 		PinObject(account proto.Account, obj PinObjectRequest) error
 		ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
+		ObjectStats() (ObjectStats, error)
 		PublishObjectEvents() error
 		SharedObject(key types.Hash256) (SharedObject, error)
 
