@@ -617,7 +617,7 @@ components:
         updatedAt:
           type: string
           format: date-time
-          description: The event's position in the stream, used as a pagination cursor. Positions increase, are truncated to second precision, and an object that changes again is given a new one. Use the object's own timestamps to tell when it was last modified.
+          description: The timestamp component of the event's position in the stream. Every event published in the same batch shares it, so pair it with the event's key to page through the stream. Positions increase, are truncated to second precision, and an object that changes again is given a new one. Use the object's own timestamps to tell when it was last modified.
         object:
           allOf:
             - $ref: "#/components/schemas/SealedObject"
