@@ -163,12 +163,21 @@ func TestUploadShards(t *testing.T) {
 			t.Fatalf("expected shard %v to be uploaded", root)
 		}
 	}
+	// the mismatching shard must not be reported as migrated, or it would be
+	// recorded as a valid location for a root the data doesn't hash to
+	if slices.ContainsFunc(uploaded, func(s slabs.Shard) bool { return s.Root == corrupted.Sectors[1].Root }) {
+		t.Fatal("mismatching shard was reported as migrated")
+	}
+	// the mismatch is only caught from the root the host returns, so the shard
+	// itself does reach a host and is left there unreferenced
+	var storedMismatch bool
 	for _, stored := range client.hostSectors {
 		for root := range stored {
-			if root == corrupted.Sectors[1].Root {
-				t.Fatalf("corrupted sector was uploaded: %v", root)
-			}
+			storedMismatch = storedMismatch || root == root2
 		}
+	}
+	if !storedMismatch {
+		t.Fatal("expected the mismatching shard to have been written to a host")
 	}
 }
 

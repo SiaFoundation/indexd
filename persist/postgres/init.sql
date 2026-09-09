@@ -603,8 +603,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- the WHEN clauses keep the repair loop's next_repair_attempt bumps and the
--- pin upsert from reaching the function at all
+-- the WHEN clauses keep the repair loop's next_repair_attempt bumps and pin
+-- upserts that leave both counters alone from reaching the function
 CREATE TRIGGER slabs_maintain_repair_stats_insert
 AFTER INSERT ON slabs FOR EACH ROW
 WHEN (NEW.unrecoverable OR slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable))
