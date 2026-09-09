@@ -1,9 +1,12 @@
 package postgres
 
 import (
+	"bytes"
+	"database/sql"
 	"errors"
 	"math"
 	"reflect"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -244,6 +247,114 @@ func TestMarkSlabRepaired(t *testing.T) {
 	}
 	simulateSuccessfulRepair()
 	assertSlabState(0, oneHourAgo)
+}
+
+func TestMarkSlabUnrecoverable(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	// add account, host and contract
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	host := store.addTestHost(t)
+	store.addTestContract(t, host)
+
+	// add two slabs and lose all of their sectors so both need repair
+	slab1 := newTestSlab(host)
+	slabID1 := store.pinTestSlabs(t, account, slab1)[0]
+	slabID2 := store.pinTestSlab(t, account, 1, []types.PublicKey{host, host})
+	loseAllSectors := func() {
+		t.Helper()
+		if _, err := store.pool.Exec(t.Context(), `UPDATE sectors SET host_id = NULL`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loseAllSectors()
+
+	assertUnhealthySlabs := func(expected ...slabs.SlabID) {
+		t.Helper()
+		resetNextRepairAttempt(t, store)
+		got := collectUnhealthySlabs(t, store)
+		byDigest := func(a, b slabs.SlabID) int { return bytes.Compare(a[:], b[:]) }
+		slices.SortFunc(got, byDigest)
+		slices.SortFunc(expected, byDigest)
+		if !slices.Equal(got, expected) {
+			t.Fatalf("expected unhealthy slabs %v, got %v", expected, got)
+		}
+	}
+
+	assertUnrecoverable := func(slabID slabs.SlabID, expected string) {
+		t.Helper()
+		var unrecoverable bool
+		var reason sql.NullString
+		if err := store.pool.QueryRow(t.Context(), `
+			SELECT unrecoverable, unrecoverable_reason
+			FROM slabs
+			WHERE digest = $1`, sqlHash256(slabID)).Scan(&unrecoverable, &reason); err != nil {
+			t.Fatal(err)
+		} else if unrecoverable != (expected != "") {
+			t.Fatalf("expected unrecoverable %v, got %v", expected != "", unrecoverable)
+		} else if reason.String != expected {
+			t.Fatalf("expected reason %q, got %q", expected, reason.String)
+		}
+	}
+
+	assertFailedRepairs := func(slabID slabs.SlabID, expected int) {
+		t.Helper()
+		var failures int
+		if err := store.pool.QueryRow(t.Context(), `
+			SELECT consecutive_failed_repairs
+			FROM slabs
+			WHERE digest = $1`, sqlHash256(slabID)).Scan(&failures); err != nil {
+			t.Fatal(err)
+		} else if failures != expected {
+			t.Fatalf("expected %d failed repairs, got %d", expected, failures)
+		}
+	}
+
+	// both slabs need repair
+	assertUnhealthySlabs(slabID1, slabID2)
+	assertUnrecoverable(slabID1, "")
+	assertUnrecoverable(slabID2, "")
+
+	// an unrecoverable slab is not handed out again
+	if err := store.MarkSlabUnrecoverable(slabID1, "shard root mismatch"); err != nil {
+		t.Fatal(err)
+	}
+	assertUnrecoverable(slabID1, "shard root mismatch")
+	assertUnhealthySlabs(slabID2)
+
+	// marking it again keeps the original reason
+	if err := store.MarkSlabUnrecoverable(slabID1, "some other reason"); err != nil {
+		t.Fatal(err)
+	}
+	assertUnrecoverable(slabID1, "shard root mismatch")
+
+	// an unknown slab is not found
+	if err := store.MarkSlabUnrecoverable(slabs.SlabID(frand.Entropy256()), "shard root mismatch"); !errors.Is(err, slabs.ErrSlabNotFound) {
+		t.Fatalf("expected ErrSlabNotFound, got %v", err)
+	}
+
+	// re-pinning the exact same slab revives it with a clean repair state
+	if err := store.MarkSlabRepaired(slabID1, false); err != nil {
+		t.Fatal(err)
+	}
+	assertFailedRepairs(slabID1, 1)
+	if id := store.pinTestSlabs(t, account, slab1)[0]; id != slabID1 {
+		t.Fatalf("expected re-pin to return slab %v, got %v", slabID1, id)
+	}
+	assertUnrecoverable(slabID1, "")
+	assertFailedRepairs(slabID1, 0)
+
+	// the revived slab is handed out for repair again once it needs it
+	loseAllSectors()
+	assertUnhealthySlabs(slabID1, slabID2)
+
+	// stats no longer count it as unrecoverable
+	if stats, err := store.SectorStats(); err != nil {
+		t.Fatal(err)
+	} else if stats.UnrecoverableSlabs != 0 {
+		t.Fatalf("expected 0 unrecoverable slabs, got %d", stats.UnrecoverableSlabs)
+	}
 }
 
 func TestPinnedSlab(t *testing.T) {

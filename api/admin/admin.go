@@ -891,8 +891,7 @@ func (a *admin) handlePOSTMigrationBatch(jc jape.Context) {
 
 // handlePOSTMigrationResults persists the outcomes of migrations reported by a
 // remote node. A batch where every result failed to persist indicates a
-// database problem and is surfaced as an error so the reporting node backs
-// off instead of burning through fresh batches.
+// is surfaced as an error so the reporting node aborts its pass.
 func (a *admin) handlePOSTMigrationResults(jc jape.Context) {
 	var results []slabs.MigrationResult
 	if jc.Decode(&results) != nil {

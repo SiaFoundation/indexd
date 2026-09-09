@@ -227,7 +227,7 @@ func (r *slabRecovery) recoverChunk(ctx context.Context, offset, length uint64) 
 
 		start := time.Now()
 		buf := bytes.NewBuffer(make([]byte, 0, length))
-		if _, err := m.hosts.ReadSector(ctx, m.migrationAccountKey, hostKey, sector.root, buf, offset, length); err != nil {
+		if _, err := m.hosts.ReadSector(ctx, proto.NewAccountToken(m.migrationAccountKey, hostKey), sector.root, buf, offset, length); err != nil {
 			if isErrLostSector(err) {
 				log.Debug("host reports sector lost or corrupt", zap.Duration("elapsed", time.Since(start)))
 				// exclude the host from subsequent chunks and record the sector

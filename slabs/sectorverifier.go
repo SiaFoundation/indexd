@@ -119,7 +119,7 @@ func (v *SectorVerifier) VerifySectors(ctx context.Context, hostKey types.Public
 		// migrations see the verifier load on this host.
 		segment := frand.Uint64n(proto.LeavesPerSector)
 		release := v.hosts.TrackInflightRead(hostKey)
-		_, err = v.hosts.ReadSector(ctx, v.serviceAccount, hostKey, root, io.Discard, segment*proto.LeafSize, proto.LeafSize)
+		_, err = v.hosts.ReadSector(ctx, proto.NewAccountToken(v.serviceAccount, hostKey), root, io.Discard, segment*proto.LeafSize, proto.LeafSize)
 		release()
 		if err != nil && ctx.Err() != nil {
 			return results, err // interrupted

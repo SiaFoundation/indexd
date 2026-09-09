@@ -268,7 +268,8 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 }
 
 // PinSlabs adds slabs to the database for pinning. The slabs are associated
-// with the provided account.
+// with the provided account. A sector's reported upload time, capped at now,
+// becomes its uploaded_at.
 func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
 	var digests []slabs.SlabID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
@@ -340,7 +341,12 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			err = tx.QueryRow(ctx, `
 			INSERT INTO slabs (digest, encryption_key, min_shards, version)
 			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (digest) DO UPDATE SET pinned_at = NOW()
+			ON CONFLICT (digest) DO UPDATE SET
+				pinned_at = NOW(),
+				unrecoverable = FALSE,
+				unrecoverable_reason = NULL,
+				consecutive_failed_repairs = CASE WHEN slabs.unrecoverable THEN 0 ELSE slabs.consecutive_failed_repairs END,
+				next_repair_attempt = CASE WHEN slabs.unrecoverable THEN NOW() ELSE slabs.next_repair_attempt END
 			RETURNING id, (xmax <> 0)
 			`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards, slab.Version).Scan(&slabID, &existingSlab)
 			if err != nil {
@@ -371,21 +377,23 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 
 			// insert the slab's sectors. For a slab that already
 			// exists this may rebind any sectors that were marked
-			// lost since it was pinned.
+			// lost since it was pinned. An existing sector keeps the
+			// later upload time.
 			batch := &pgx.Batch{}
 			for _, sector := range slab.Sectors {
 				batch.Queue(`
-				INSERT INTO sectors (sector_root, host_id, next_integrity_check)
-				SELECT $1, h.id, $3
+				INSERT INTO sectors (sector_root, host_id, next_integrity_check, uploaded_at)
+				SELECT $1, h.id, $3, LEAST(NOW(), $4::timestamptz)
 				FROM hosts h
 				WHERE h.public_key = $2
 				ON CONFLICT (sector_root) DO UPDATE SET
-					uploaded_at = NOW(),
+					uploaded_at = GREATEST(sectors.uploaded_at, EXCLUDED.uploaded_at),
 					host_id = COALESCE(sectors.host_id, EXCLUDED.host_id)
 				RETURNING id, host_id, (OLD.id IS NULL) AS inserted, (OLD.id IS NOT NULL AND OLD.host_id IS NULL) AS rebound`,
 					sqlHash256(sector.Root),
 					sqlPublicKey(sector.HostKey),
-					nextIntegrityCheck)
+					nextIntegrityCheck,
+					sector.UploadedAt)
 			}
 
 			var badHosts int
@@ -1051,7 +1059,7 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 // and returns the next cursor to resume from, or 0 once the end is reached.
 //
 // The condition for such a sector is that it's either not stored on a host or
-// it's not pinned to a good contract.
+// it's not pinned to a good contract. Slabs marked unrecoverable are skipped.
 //
 // NOTE: Subsequent calls to this function do not return the same slabs because
 // a minimum of 1 hour must pass between consecutive migration attempts. The
@@ -1091,7 +1099,7 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 				UPDATE slabs SET next_repair_attempt = $3
 				WHERE id IN (
 					SELECT id FROM slabs
-					WHERE id IN (SELECT id FROM unhealthy) AND next_repair_attempt < NOW()
+					WHERE id IN (SELECT id FROM unhealthy) AND next_repair_attempt < NOW() AND NOT unrecoverable
 					FOR UPDATE SKIP LOCKED
 				)
 				RETURNING id, digest

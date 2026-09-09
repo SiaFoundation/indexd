@@ -116,7 +116,7 @@ func TestImportHost(t *testing.T) {
 	}
 
 	// reimport the host with a corrected address
-	now = time.Now().Truncate(time.Microsecond)
+	now = time.Now().Truncate(time.Second)
 	ha3 := chain.NetAddress{Protocol: siamux.Protocol, Address: "8.7.6.5:4321"}
 	if err := db.ImportHost(hk, []chain.NetAddress{ha3}); err != nil {
 		t.Fatal(err)
