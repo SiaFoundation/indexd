@@ -1486,6 +1486,64 @@ func TestParallelObjectDeletion(t *testing.T) {
 	}
 }
 
+// BenchmarkPublishObjectEvents reports how long one publish holds the settings
+// row at a range of batch sizes.
+func BenchmarkPublishObjectEvents(b *testing.B) {
+	const backlog = 1_000_000
+
+	for _, limit := range []int{500, 1000, 2500, 5000, 10000, 25000, 50000, 100000} {
+		b.Run(fmt.Sprintf("batch_%d", limit), func(b *testing.B) {
+			store := initPostgres(b, zap.NewNop())
+			exec := func(query string, args ...any) {
+				if _, err := store.pool.Exec(b.Context(), query, args...); err != nil {
+					b.Fatal(err)
+				}
+			}
+
+			for range 10 {
+				store.addTestAccount(b, types.PublicKey(frand.Entropy256()))
+			}
+			exec(`
+INSERT INTO object_events (account_id, object_key, was_deleted, updated_at)
+SELECT ids[1 + i % array_length(ids, 1)], sha256(int8send(i)), false, NULL
+FROM generate_series(1, $1::BIGINT) AS i,
+	(SELECT array_agg(id ORDER BY id) AS ids FROM accounts) AS a`, backlog)
+			exec(`ANALYZE object_events`)
+
+			b.ResetTimer()
+			for b.Loop() {
+				b.StopTimer()
+				// a publisher takes one batch per second, rewinding the cursor
+				// lets the next batch run without waiting it out
+				exec(`UPDATE global_settings SET object_events_last_published = '-infinity'`)
+				b.StartTimer()
+
+				if err := store.publishObjectEvents(limit); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.StopTimer()
+
+			// a drained backlog turns publishes into no-ops and understates the cost
+			if stats, err := store.ObjectStats(); err != nil {
+				b.Fatal(err)
+			} else if stats.UnpublishedEvents == 0 {
+				b.Fatal("backlog drained, raise it for this benchtime")
+			}
+
+			// the publisher takes one batch per objectEventPublishInterval, or
+			// runs back to back once a batch outlasts one, so this is the rate
+			// indexd can sustain at this batch size
+			publish := b.Elapsed() / time.Duration(b.N)
+			b.ReportMetric(float64(limit)/max(publish, time.Second).Seconds(), "events/s")
+
+			// what that rate costs, the share of the tick a publish spends
+			// holding the settings row against the chain subscriber
+			b.ReportMetric(100*min(publish, time.Second).Seconds(), "tick%")
+		})
+	}
+}
+
 func BenchmarkSaveObject(b *testing.B) {
 	store := initPostgres(b, zap.NewNop())
 
