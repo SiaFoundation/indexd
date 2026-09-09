@@ -376,12 +376,17 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 }
 
 // objectEventPublishBatchSize bounds how many events take a position in one
-// publish so a backlog cannot hold the settings row for a full table scan.
+// publish so a backlog cannot hold the settings row for the whole drain.
 const objectEventPublishBatchSize = 5000
 
 // PublishObjectEvents assigns stream positions to object events that do not
 // have one yet. At most one batch of events is published per wall clock second.
 func (s *Store) PublishObjectEvents() error {
+	return s.publishObjectEvents(objectEventPublishBatchSize)
+}
+
+// publishObjectEvents assigns stream positions to at most limit object events.
+func (s *Store) publishObjectEvents(limit int) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		// an idle tick skips the settings row entirely, the partial index on
 		// unpublished events makes the probe cheap
@@ -417,15 +422,18 @@ func (s *Store) PublishObjectEvents() error {
 		}
 
 		// events locked by an in-flight writer are skipped here and take a
-		// position in a later batch
+		// position in a later batch. Addressing the batch by ctid keeps the
+		// update off a sequential scan, a locked row cannot move.
 		_, err = tx.Exec(ctx, `
-			UPDATE object_events SET updated_at = $1
-			WHERE (account_id, object_key) IN (
-				SELECT account_id, object_key FROM object_events
+			WITH batch AS MATERIALIZED (
+				SELECT ctid FROM object_events
 				WHERE updated_at IS NULL
 				ORDER BY account_id, object_key
 				FOR UPDATE SKIP LOCKED
-				LIMIT $2)`, published, objectEventPublishBatchSize)
+				LIMIT $2
+			)
+			UPDATE object_events SET updated_at = $1
+			WHERE ctid IN (SELECT ctid FROM batch)`, published, limit)
 		if err != nil {
 			return fmt.Errorf("failed to publish object events: %w", err)
 		}
