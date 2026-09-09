@@ -20,7 +20,7 @@ const (
 	minRepairBackoff = time.Hour
 	maxRepairBackoff = 24 * time.Hour
 	// maxBadParityShards is the maximum proportion of parity shards that can be
-	// on bad hosts when pinning a slab.
+	// on bad hosts when pinning a slab that doesn't exist yet.
 	maxBadParityShards = 0.2
 	// integrityCheckClaimInterval is how far into the future
 	// SectorsForIntegrityCheck pushes the next_integrity_check of the sectors
@@ -425,10 +425,15 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			}
 			br.Close()
 
-			// if more than 20% of parity shards are on bad hosts, don't allow slab to be pinned
-			parityShards := len(slab.Sectors) - int(slab.MinShards)
-			if float64(badHosts) > maxBadParityShards*float64(parityShards) {
-				return slabs.ErrBadHosts
+			// if more than 20% of parity shards are on bad hosts, don't allow
+			// the slab to be pinned. Only a slab that doesn't exist yet is
+			// rejected; an existing slab can always be re-pinned, by any
+			// account, after its sectors end up on bad hosts.
+			if !existingSlab {
+				parityShards := len(slab.Sectors) - int(slab.MinShards)
+				if float64(badHosts) > maxBadParityShards*float64(parityShards) {
+					return slabs.ErrBadHosts
+				}
 			}
 
 			// update number of unpinned sectors
