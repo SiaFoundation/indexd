@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -148,6 +149,21 @@ func awaitEventSecond(t testing.TB) {
 	t.Helper()
 	now := time.Now()
 	time.Sleep(now.Truncate(time.Second).Add(time.Second).Sub(now) + 20*time.Millisecond)
+}
+
+// inUTC normalizes the time zones of a listing so events fetched as JSON can be
+// compared with events fetched in the binary encoding.
+func inUTC(events []slabs.ObjectEvent) []slabs.ObjectEvent {
+	events = slices.Clone(events)
+	for i := range events {
+		events[i].UpdatedAt = events[i].UpdatedAt.UTC()
+		if events[i].Object != nil {
+			obj := *events[i].Object
+			obj.CreatedAt, obj.UpdatedAt = obj.CreatedAt.UTC(), obj.UpdatedAt.UTC()
+			events[i].Object = &obj
+		}
+	}
+	return events
 }
 
 func TestApplicationAPI(t *testing.T) {
@@ -424,6 +440,36 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatalf("expected 1 object, got %d", len(objs))
 	}
 	obj1 := *objs[0].Object
+
+	batched, err := client.ListObjectsBatched(context.Background(), sk, slabs.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(inUTC(batched), inUTC(objs)) {
+		t.Fatalf("expected batched listing %+v, got %+v", objs, batched)
+	}
+
+	binaryEvents, err := client.ListObjectsBinary(context.Background(), sk, slabs.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(binaryEvents, inUTC(objs)) {
+		t.Fatalf("expected binary listing %+v, got %+v", inUTC(objs), binaryEvents)
+	}
+
+	refs, err := client.ListObjectReferences(context.Background(), sk, slabs.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(refs) != 1 || refs[0].Object == nil {
+		t.Fatalf("expected 1 object event reference, got %+v", refs)
+	} else if !reflect.DeepEqual(refs[0].Object.Slabs, obj1.PinRequest().Slabs) {
+		t.Fatalf("expected slab references %+v, got %+v", obj1.PinRequest().Slabs, refs[0].Object.Slabs)
+	}
+
+	batch, err := client.Slabs(context.Background(), sk, []slabs.SlabID{slabID2, slabs.SlabID(frand.Entropy256()), slabID1})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(batch) != 2 || batch[0].ID != slabID2 || batch[1].ID != slabID1 {
+		t.Fatalf("expected pinned slabs in request order, got %+v", batch)
+	}
 
 	if objs, err := client.ListObjects(context.Background(), sk, slabs.Cursor{
 		After: obj1.UpdatedAt,

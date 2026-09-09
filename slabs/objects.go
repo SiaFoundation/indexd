@@ -40,12 +40,10 @@ type (
 
 	// SlabSlice represents a slice of a slab that is part of an object.
 	SlabSlice struct {
-		Version       uint8          `json:"version"`
-		EncryptionKey EncryptionKey  `json:"encryptionKey"`
-		MinShards     uint           `json:"minShards"`
-		Sectors       []PinnedSector `json:"sectors"`
-		Offset        uint32         `json:"offset"`
-		Length        uint32         `json:"length"`
+		SlabParams
+
+		Offset uint32 `json:"offset"`
+		Length uint32 `json:"length"`
 	}
 
 	// SharedObject provides all the metadata necessary to retrieve and decrypt
@@ -65,6 +63,40 @@ type (
 		Object *SealedObject `json:"object,omitempty"`
 	}
 
+	// ObjectEvents is a list of object events. It implements the binary
+	// encoding used by the application API.
+	ObjectEvents []ObjectEvent
+
+	// An ObjectEventReference is an object event whose object references its
+	// slabs by ID instead of expanding them into sectors. The slabs can be
+	// fetched with PinnedSlabs.
+	ObjectEventReference struct {
+		Key       types.Hash256 `json:"key"`
+		Deleted   bool          `json:"deleted"`
+		UpdatedAt time.Time     `json:"updatedAt"`
+
+		Object *SealedObjectReference `json:"object,omitempty"`
+	}
+
+	// ObjectEventReferences is a list of object event references. It implements
+	// the binary encoding used by the application API.
+	ObjectEventReferences []ObjectEventReference
+
+	// A SealedObjectReference is a sealed object whose slabs are represented by
+	// their IDs instead of their sectors.
+	SealedObjectReference struct {
+		EncryptedDataKey []byte          `json:"encryptedDataKey"`
+		Slabs            []ObjectSlab    `json:"slabs"`
+		DataSignature    types.Signature `json:"dataSignature"`
+
+		EncryptedMetadataKey []byte          `json:"encryptedMetadataKey,omitempty"`
+		EncryptedMetadata    []byte          `json:"encryptedMetadata,omitempty"`
+		MetadataSignature    types.Signature `json:"metadataSignature"`
+
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+
 	// Cursor describes a cursor for paginating through objects. During
 	// pagination, 'After' is meant to be set to the 'UpdatedAt' value of the
 	// last object received and 'Key' is meant to be set to the 'Key' value of
@@ -80,7 +112,9 @@ type (
 		Key   types.Hash256
 	}
 
-	// ObjectSlab represents a slab that should be associated with an object. It should already be pinned to the indexer.
+	// ObjectSlab references a slab that is part of an object by its ID, offset,
+	// and length. A slab must already be pinned to the indexer before an object
+	// can reference it.
 	ObjectSlab struct {
 		ID     SlabID `json:"id"`
 		Offset uint32 `json:"offset"`
@@ -182,6 +216,11 @@ func (so *SealedObject) ID() types.Hash256 {
 	return ObjectID(so.Slabs)
 }
 
+// ID returns the object's ID, which is a hash of its slab references.
+func (so *SealedObjectReference) ID() types.Hash256 {
+	return pinnedObjectID(so.Slabs)
+}
+
 // PinRequest converts the SealedObject to a PinObjectRequest.
 func (so *SealedObject) PinRequest() PinObjectRequest {
 	os := make([]ObjectSlab, len(so.Slabs))
@@ -201,6 +240,39 @@ func (so *SealedObject) PinRequest() PinObjectRequest {
 		EncryptedMetadata:    so.EncryptedMetadata,
 		MetadataSignature:    so.MetadataSignature,
 	}
+}
+
+// Reference returns the object with its slabs replaced by the given references.
+func (so *SealedObject) Reference(slabs []ObjectSlab) *SealedObjectReference {
+	return &SealedObjectReference{
+		EncryptedDataKey:     so.EncryptedDataKey,
+		Slabs:                slabs,
+		DataSignature:        so.DataSignature,
+		EncryptedMetadataKey: so.EncryptedMetadataKey,
+		EncryptedMetadata:    so.EncryptedMetadata,
+		MetadataSignature:    so.MetadataSignature,
+		CreatedAt:            so.CreatedAt,
+		UpdatedAt:            so.UpdatedAt,
+	}
+}
+
+// Expand expands the object's slab references with the given pinned slabs,
+// which must include every referenced slab.
+func (so *SealedObjectReference) Expand(pinned map[SlabID]PinnedSlab) *SealedObject {
+	obj := &SealedObject{
+		EncryptedDataKey:     so.EncryptedDataKey,
+		Slabs:                make([]SlabSlice, len(so.Slabs)),
+		DataSignature:        so.DataSignature,
+		EncryptedMetadataKey: so.EncryptedMetadataKey,
+		EncryptedMetadata:    so.EncryptedMetadata,
+		MetadataSignature:    so.MetadataSignature,
+		CreatedAt:            so.CreatedAt,
+		UpdatedAt:            so.UpdatedAt,
+	}
+	for i, s := range so.Slabs {
+		obj.Slabs[i] = pinned[s.ID].Slice(s.Offset, s.Length)
+	}
+	return obj
 }
 
 // Sign signs the object's data and metadata signatures using the given private
@@ -309,6 +381,11 @@ func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cu
 	return m.store.ListObjects(account, cursor, limit)
 }
 
+// ListObjectReferences lists object events without expanding their slabs.
+func (m *SlabManager) ListObjectReferences(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEventReference, error) {
+	return m.store.ListObjectReferences(account, cursor, limit)
+}
+
 // SharedObject retrieves the shared object with the given key for the given account.
 func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error) {
 	return m.store.SharedObject(key)
@@ -338,39 +415,22 @@ func (k *EncryptionKey) UnmarshalJSON(b []byte) error {
 
 // Pin converts the SlabSlice to SlabPinParams.
 func (s SlabSlice) Pin() SlabPinParams {
-	return SlabPinParams{
-		Version:       s.Version,
-		EncryptionKey: s.EncryptionKey,
-		MinShards:     s.MinShards,
-		Sectors:       slices.Clone(s.Sectors),
-	}
+	params := SlabPinParams{SlabParams: s.SlabParams}
+	params.Sectors = slices.Clone(s.Sectors)
+	return params
 }
 
-// Slice creates a SlabSlice from the SlabPinParams. Upload times are dropped;
+// Slice creates a SlabSlice covering the given range. Upload times are dropped;
 // they describe the upload, not the stored slab.
-func (s SlabPinParams) Slice(offset, length uint32) SlabSlice {
-	sectors := slices.Clone(s.Sectors)
-	for i := range sectors {
-		sectors[i].UploadedAt = nil
+func (s SlabParams) Slice(offset, length uint32) SlabSlice {
+	slice := SlabSlice{
+		SlabParams: s,
+		Offset:     offset,
+		Length:     length,
 	}
-	return SlabSlice{
-		Version:       s.Version,
-		EncryptionKey: s.EncryptionKey,
-		MinShards:     s.MinShards,
-		Sectors:       sectors,
-		Offset:        offset,
-		Length:        length,
+	slice.Sectors = slices.Clone(s.Sectors)
+	for i := range slice.Sectors {
+		slice.Sectors[i].UploadedAt = nil
 	}
-}
-
-// Slice creates a SlabSlice from the PinnedSlab.
-func (s PinnedSlab) Slice(offset, length uint32) SlabSlice {
-	return SlabSlice{
-		Version:       s.Version,
-		EncryptionKey: s.EncryptionKey,
-		MinShards:     s.MinShards,
-		Sectors:       slices.Clone(s.Sectors),
-		Offset:        offset,
-		Length:        length,
-	}
+	return slice
 }
