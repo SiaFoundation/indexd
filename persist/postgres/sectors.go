@@ -341,7 +341,12 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			err = tx.QueryRow(ctx, `
 			INSERT INTO slabs (digest, encryption_key, min_shards, version)
 			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (digest) DO UPDATE SET pinned_at = NOW()
+			ON CONFLICT (digest) DO UPDATE SET
+				pinned_at = NOW(),
+				unrecoverable = FALSE,
+				unrecoverable_reason = NULL,
+				consecutive_failed_repairs = CASE WHEN slabs.unrecoverable THEN 0 ELSE slabs.consecutive_failed_repairs END,
+				next_repair_attempt = CASE WHEN slabs.unrecoverable THEN NOW() ELSE slabs.next_repair_attempt END
 			RETURNING id, (xmax <> 0)
 			`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards, slab.Version).Scan(&slabID, &existingSlab)
 			if err != nil {

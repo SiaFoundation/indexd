@@ -259,11 +259,16 @@ func TestMarkSlabUnrecoverable(t *testing.T) {
 	store.addTestContract(t, host)
 
 	// add two slabs and lose all of their sectors so both need repair
-	slabID1 := store.pinTestSlab(t, account, 1, []types.PublicKey{host, host})
+	slab1 := newTestSlab(host)
+	slabID1 := store.pinTestSlabs(t, account, slab1)[0]
 	slabID2 := store.pinTestSlab(t, account, 1, []types.PublicKey{host, host})
-	if _, err := store.pool.Exec(t.Context(), `UPDATE sectors SET host_id = NULL`); err != nil {
-		t.Fatal(err)
+	loseAllSectors := func() {
+		t.Helper()
+		if _, err := store.pool.Exec(t.Context(), `UPDATE sectors SET host_id = NULL`); err != nil {
+			t.Fatal(err)
+		}
 	}
+	loseAllSectors()
 
 	assertUnhealthySlabs := func(expected ...slabs.SlabID) {
 		t.Helper()
@@ -293,6 +298,19 @@ func TestMarkSlabUnrecoverable(t *testing.T) {
 		}
 	}
 
+	assertFailedRepairs := func(slabID slabs.SlabID, expected int) {
+		t.Helper()
+		var failures int
+		if err := store.pool.QueryRow(t.Context(), `
+			SELECT consecutive_failed_repairs
+			FROM slabs
+			WHERE digest = $1`, sqlHash256(slabID)).Scan(&failures); err != nil {
+			t.Fatal(err)
+		} else if failures != expected {
+			t.Fatalf("expected %d failed repairs, got %d", expected, failures)
+		}
+	}
+
 	// both slabs need repair
 	assertUnhealthySlabs(slabID1, slabID2)
 	assertUnrecoverable(slabID1, "")
@@ -314,6 +332,28 @@ func TestMarkSlabUnrecoverable(t *testing.T) {
 	// an unknown slab is not found
 	if err := store.MarkSlabUnrecoverable(slabs.SlabID(frand.Entropy256()), "shard root mismatch"); !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatalf("expected ErrSlabNotFound, got %v", err)
+	}
+
+	// re-pinning the exact same slab revives it with a clean repair state
+	if err := store.MarkSlabRepaired(slabID1, false); err != nil {
+		t.Fatal(err)
+	}
+	assertFailedRepairs(slabID1, 1)
+	if id := store.pinTestSlabs(t, account, slab1)[0]; id != slabID1 {
+		t.Fatalf("expected re-pin to return slab %v, got %v", slabID1, id)
+	}
+	assertUnrecoverable(slabID1, "")
+	assertFailedRepairs(slabID1, 0)
+
+	// the revived slab is handed out for repair again once it needs it
+	loseAllSectors()
+	assertUnhealthySlabs(slabID1, slabID2)
+
+	// stats no longer count it as unrecoverable
+	if stats, err := store.SectorStats(); err != nil {
+		t.Fatal(err)
+	} else if stats.UnrecoverableSlabs != 0 {
+		t.Fatalf("expected 0 unrecoverable slabs, got %d", stats.UnrecoverableSlabs)
 	}
 }
 

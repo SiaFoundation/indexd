@@ -1950,6 +1950,66 @@ func resetNextRepairAttempt(t testing.TB, store *Store) {
 	}
 }
 
+// TestPinSlabsRepairLease verifies that re-pinning a slab does not release the
+// lease UnhealthySlabs takes out when it hands the slab to a worker, but that
+// re-pinning an unrecoverable slab does put it back into the rotation.
+func TestPinSlabsRepairLease(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	host := store.addTestHost(t)
+	store.addTestContract(t, host)
+
+	slab := newTestSlab(host)
+	slabID := store.pinTestSlabs(t, account, slab)[0]
+	// re-pinning re-attaches the sectors, so the slab has to be broken again
+	// after every re-pin to stay a repair candidate
+	loseAllSectors := func() {
+		t.Helper()
+		if _, err := store.pool.Exec(t.Context(), `UPDATE sectors SET host_id = NULL`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	loseAllSectors()
+
+	// claimed reports whether our slab was handed out; the test helpers pin
+	// slabs of their own, so the batch holds more than just ours
+	claimed := func() bool {
+		t.Helper()
+		batch, _, err := store.UnhealthySlabs(0, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return slices.Contains(batch, slabID)
+	}
+
+	// a worker claims the slab, which holds it back from the next caller
+	if !claimed() {
+		t.Fatalf("expected slab %v to be claimed", slabID)
+	} else if claimed() {
+		t.Fatal("expected the claim to hold")
+	}
+
+	// a re-pin landing mid-migration must not release the claim, even once the
+	// slab needs repair again
+	store.pinTestSlabs(t, account, slab)
+	loseAllSectors()
+	if claimed() {
+		t.Fatal("re-pin released the repair claim, slab handed to a second worker")
+	}
+
+	// re-pinning an unrecoverable slab does revive it
+	if err := store.MarkSlabUnrecoverable(slabID, "shard root mismatch"); err != nil {
+		t.Fatal(err)
+	}
+	store.pinTestSlabs(t, account, slab)
+	loseAllSectors()
+	if !claimed() {
+		t.Fatalf("expected revived slab %v to be claimed", slabID)
+	}
+}
+
 func TestUnhealthySlabs(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
