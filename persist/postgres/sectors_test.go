@@ -1194,7 +1194,7 @@ func TestPinSlabsBadHost(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 	account := proto.Account{1}
 
-	// add accounts - account1 can pin 2 slabs and account2 can pin 3 slabs
+	// add account
 	store.addTestAccount(t, types.PublicKey(account))
 
 	// this host is good because it has an active good contract on it
@@ -1230,6 +1230,72 @@ func TestPinSlabsBadHost(t *testing.T) {
 
 	_, slab2 := newSlab(1, hk2)
 	if _, err := store.PinSlabs(proto.Account{1}, nextCheck, slab2); err == nil || !errors.Is(err, slabs.ErrBadHosts) {
+		t.Fatalf("expected error %v, got %v", slabs.ErrBadHosts, err)
+	}
+}
+
+// TestPinSlabsExistingSlabBadHosts asserts that a slab that already exists can
+// be re-pinned by any account after its sectors end up on bad hosts, and that
+// the bad host check still applies to a slab whose digest is new.
+func TestPinSlabsExistingSlabBadHosts(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	account := proto.Account{1}
+	account2 := proto.Account{2}
+
+	// add accounts
+	store.addTestAccount(t, types.PublicKey(account))
+	store.addTestAccount(t, types.PublicKey(account2))
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	nextCheck := time.Now().Round(time.Microsecond).Add(time.Hour)
+	root := frand.Entropy256()
+
+	slab := slabs.SlabPinParams{
+		EncryptionKey: slabs.EncryptionKey{1},
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root, HostKey: hk}},
+	}
+	slabID := slab.Digest()
+	if _, err := store.PinSlabs(account, nextCheck, slab); err != nil {
+		t.Fatal(err)
+	}
+
+	assertPinnedSlab := func(acc proto.Account) {
+		t.Helper()
+		pinned, err := store.PinnedSlab(acc, slabID)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(pinned.Sectors) != 1 {
+			t.Fatalf("expected 1 sector, got %d", len(pinned.Sectors))
+		} else if pinned.Sectors[0].Root != root {
+			t.Fatalf("expected sector root %v, got %v", root, pinned.Sectors[0].Root)
+		}
+	}
+
+	// the host is bad from here on because its only contract is no longer good
+	if _, err := store.pool.Exec(t.Context(), `UPDATE contracts SET good = FALSE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)`, sqlPublicKey(hk)); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, acc := range []proto.Account{account, account2} {
+		if slabIDs, err := store.PinSlabs(acc, nextCheck, slab); err != nil {
+			t.Fatal(err)
+		} else if len(slabIDs) != 1 || slabIDs[0] != slabID {
+			t.Fatalf("expected slab ID %v, got %v", slabID, slabIDs)
+		}
+		assertPinnedSlab(acc)
+	}
+
+	// a different encryption key results in a different digest, so the bad
+	// host check still applies even though the sector already exists
+	newKeySlab := slabs.SlabPinParams{
+		EncryptionKey: slabs.EncryptionKey{2},
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: root, HostKey: hk}},
+	}
+	if _, err := store.PinSlabs(account2, nextCheck, newKeySlab); !errors.Is(err, slabs.ErrBadHosts) {
 		t.Fatalf("expected error %v, got %v", slabs.ErrBadHosts, err)
 	}
 }
@@ -1441,9 +1507,10 @@ func TestPinSlabsRebindLostSector(t *testing.T) {
 
 	if _, err := store.pool.Exec(t.Context(), "UPDATE contracts SET good = FALSE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)", sqlPublicKey(hk)); err != nil {
 		t.Fatal(err)
-	} else if _, err := store.PinSlabs(account, nextCheck, slab2); !errors.Is(err, slabs.ErrBadHosts) {
-		t.Fatalf("expected ErrBadHosts re-pinning onto a bad host, got %v", err)
+	} else if _, err := store.PinSlabs(account, nextCheck, slab2); err != nil {
+		t.Fatalf("expected re-pinning an existing slab on a bad host to succeed, got %v", err)
 	}
+	assertStats(1, 0, 2)
 }
 
 // TestPinSlabsUploadedAt asserts that a sector's reported upload time becomes
