@@ -377,7 +377,7 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 
 // objectEventPublishBatchSize bounds how many events take a position in one
 // publish so a backlog cannot hold the settings row for the whole drain.
-const objectEventPublishBatchSize = 5000
+const objectEventPublishBatchSize = 25000
 
 // PublishObjectEvents assigns stream positions to object events that do not
 // have one yet. At most one batch of events is published per wall clock second.
