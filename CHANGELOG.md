@@ -1,3 +1,17 @@
+## 0.5.1 (2026-09-10)
+
+### Fixes
+
+- Don't validate an existing slab's bad hosts count when pinning
+
+#### Fix object events being skipped by the cursor
+
+An event now takes its position in the stream from a background publisher rather
+than from the transaction that wrote it, so a slow commit can no longer land
+behind a cursor that has already moved on. Clients need no update, though an
+event normally becomes visible within two seconds of the write instead of
+within the same second.
+
 ## 0.5.0 (2026-09-09)
 
 ### Breaking Changes
