@@ -1,3 +1,31 @@
+## 0.5.0 (2026-09-09)
+
+### Breaking Changes
+
+- ReadSector takes an account token instead of an account key.
+
+### Features
+
+#### Exclude unrecoverable slabs from repairs
+
+A shard that doesn't hash to its pinned root after being reconstructed from its
+peers can never be migrated, so the slab it belongs to is now marked
+unrecoverable with a reason and taken out of the repair rotation instead of
+being retried forever. Such a mismatch no longer interrupts the migration
+either: the slab's remaining shards finish migrating first.
+
+Two metrics were added to track slab repair health:
+`indexd_num_unrecoverable_slabs` and `indexd_num_stuck_slabs`, the latter
+counting slabs that failed more than one consecutive repair attempt and are
+still being retried. Both are maintained by a trigger and reported by
+`GET /stats/sectors`.
+
+### Fixes
+
+- Raise contract growth-rate funding bounds to 256 GiB minimum and 1 TiB maximum
+- Reject sectors that have been uploaded more than the temporary storage duration ago
+- Remove the remote migration worker's exponential backoff and pause between productive passes
+
 ## 0.4.4 (2026-08-21)
 
 ### Features
