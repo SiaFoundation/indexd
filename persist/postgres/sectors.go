@@ -416,7 +416,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 					unpinned++
 					unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hostID, delta: 1})
 
-					// only a sector this pin binds records a placement, an
+					// only a sector this pin binds records a placement. An
 					// already bound sector keeps the host it has
 					if _, ok := goodHosts[sector.HostKey]; !ok {
 						badHosts++
