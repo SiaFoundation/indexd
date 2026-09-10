@@ -1,5 +1,17 @@
 package slabs
 
+// ObjectStats reports statistics about the objects tracked by this instance.
+type ObjectStats struct {
+	// UnpublishedEvents is the number of object events still waiting for a
+	// position in the stream.
+	UnpublishedEvents int64 `json:"unpublishedEvents"`
+}
+
+// ObjectStats reports statistics about the objects tracked by this instance.
+func (m *SlabManager) ObjectStats() (ObjectStats, error) {
+	return m.store.ObjectStats()
+}
+
 // SectorsStats reports statistics about the sectors and slabs stored in the
 // database.
 type SectorsStats struct {

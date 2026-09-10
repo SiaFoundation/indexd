@@ -427,4 +427,12 @@ INSERT INTO stats (stat_name, stat_value) VALUES
 ON CONFLICT (stat_name) DO NOTHING;`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE object_events ALTER COLUMN updated_at DROP DEFAULT;
+CREATE INDEX object_events_unpublished_idx ON object_events(account_id, object_key) WHERE updated_at IS NULL;
+ALTER TABLE global_settings ADD COLUMN object_events_last_published TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '-infinity';
+UPDATE global_settings SET object_events_last_published = COALESCE((SELECT date_trunc('second', MAX(updated_at)) FROM object_events), '-infinity');`)
+		return err
+	},
 }

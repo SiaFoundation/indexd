@@ -173,6 +173,15 @@ func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 	return
 }
 
+// ObjectStats reports statistics about the objects tracked by this instance.
+func (s *Store) ObjectStats() (slabs.ObjectStats, error) {
+	var stats slabs.ObjectStats
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		return tx.QueryRow(ctx, `SELECT COUNT(*) FROM object_events WHERE updated_at IS NULL`).Scan(&stats.UnpublishedEvents)
+	})
+	return stats, err
+}
+
 // SectorStats reports statistics about the sectors and slabs stored in the
 // database.
 func (s *Store) SectorStats() (slabs.SectorsStats, error) {

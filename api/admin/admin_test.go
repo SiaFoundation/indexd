@@ -1572,6 +1572,79 @@ func TestSectorStatsAPI(t *testing.T) {
 	}
 }
 
+func TestObjectStatsAPI(t *testing.T) {
+	cluster := testutils.NewCluster(t, testutils.WithHosts(1))
+	indexer := cluster.Indexer
+	adminClient := indexer.Admin
+	store := indexer.Store()
+
+	cluster.WaitForContracts(t)
+
+	// assert no events are waiting for a position
+	stats, err := adminClient.StatsObjects(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.UnpublishedEvents != 0 {
+		t.Fatalf("expected no unpublished events, got %d", stats.UnpublishedEvents)
+	}
+
+	// stall the publisher, otherwise the background loop drains the event
+	// before it can be observed
+	if _, err := store.Exec(t.Context(), `
+		UPDATE global_settings
+		SET object_events_last_published = date_trunc('second', NOW()) + INTERVAL '1 hour'`); err != nil {
+		t.Fatal(err)
+	}
+
+	// pin an object
+	account := types.GeneratePrivateKey().PublicKey()
+	store.AddTestAccount(t, account)
+	acc := proto.Account(account)
+	slab := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: cluster.Hosts[0].PublicKey(),
+		}},
+	}
+	if _, err := store.PinSlabs(acc, time.Time{}, slab); err != nil {
+		t.Fatal(err)
+	}
+	obj := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		Slabs:                []slabs.SlabSlice{slab.Slice(0, 100)},
+		DataSignature:        types.Signature(frand.Bytes(64)),
+		MetadataSignature:    types.Signature(frand.Bytes(64)),
+	}
+	if err := store.PinObject(acc, obj.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err = adminClient.StatsObjects(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.UnpublishedEvents != 1 {
+		t.Fatalf("expected 1 unpublished event, got %d", stats.UnpublishedEvents)
+	}
+
+	// let the publisher give the event its position
+	if _, err := store.Exec(t.Context(), `UPDATE global_settings SET object_events_last_published = '-infinity'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.PublishObjectEvents(); err != nil {
+		t.Fatal(err)
+	}
+
+	stats, err = adminClient.StatsObjects(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	} else if stats.UnpublishedEvents != 0 {
+		t.Fatalf("expected no unpublished events after publishing, got %d", stats.UnpublishedEvents)
+	}
+}
+
 func TestAccountStatsAPI(t *testing.T) {
 	// create cluster with three hosts
 	logger := newTestLogger(false)
