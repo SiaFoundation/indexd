@@ -47,9 +47,9 @@ var (
 	// ErrUnrecoverable is returned when a slab is unrecoverable, meaning it cannot be repaired or migrated.
 	ErrUnrecoverable = errors.New("slab is unrecoverable")
 
-	// ErrBadHosts is returned when attempting to pin a slab with too many
-	// sectors on bad hosts. It is only returned for a slab that doesn't exist
-	// yet; an existing slab can always be re-pinned.
+	// ErrBadHosts is returned when attempting to pin a slab that would place
+	// too many sectors on bad hosts. Only sectors the pin binds to a host
+	// count towards the limit.
 	ErrBadHosts = errors.New("slab has too many sectors on bad hosts")
 
 	// ErrMinShards is returned when attempting to pin a slab with an invalid
