@@ -19,8 +19,9 @@ import (
 const (
 	minRepairBackoff = time.Hour
 	maxRepairBackoff = 24 * time.Hour
-	// maxBadParityShards is the maximum proportion of parity shards that can be
-	// on bad hosts when pinning a slab that doesn't exist yet.
+	// maxBadParityShards is the maximum proportion of parity shards that a
+	// single pin may place on bad hosts. Only sectors the pin actually binds
+	// to a host count towards it.
 	maxBadParityShards = 0.2
 	// integrityCheckClaimInterval is how far into the future
 	// SectorsForIntegrityCheck pushes the next_integrity_check of the sectors
@@ -402,10 +403,6 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			br := tx.SendBatch(ctx, batch)
 			sectorIDs := make([]int64, len(slab.Sectors))
 			for i, sector := range slab.Sectors {
-				if _, ok := goodHosts[sector.HostKey]; !ok {
-					badHosts++
-				}
-
 				var inserted, isRebound bool
 				var hostID int64
 				if err := br.QueryRow().Scan(&sectorIDs[i], &hostID, &inserted, &isRebound); err != nil {
@@ -418,6 +415,12 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				if inserted || isRebound {
 					unpinned++
 					unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hostID, delta: 1})
+
+					// only a sector this pin binds records a placement. An
+					// already bound sector keeps the host it has
+					if _, ok := goodHosts[sector.HostKey]; !ok {
+						badHosts++
+					}
 				}
 				if isRebound {
 					rebound++
@@ -425,15 +428,11 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			}
 			br.Close()
 
-			// if more than 20% of parity shards are on bad hosts, don't allow
-			// the slab to be pinned. Only a slab that doesn't exist yet is
-			// rejected; an existing slab can always be re-pinned, by any
-			// account, after its sectors end up on bad hosts.
-			if !existingSlab {
-				parityShards := len(slab.Sectors) - int(slab.MinShards)
-				if float64(badHosts) > maxBadParityShards*float64(parityShards) {
-					return slabs.ErrBadHosts
-				}
+			// if the pin would place more than 20% of the parity shards on bad
+			// hosts, don't allow the slab to be pinned
+			parityShards := len(slab.Sectors) - int(slab.MinShards)
+			if float64(badHosts) > maxBadParityShards*float64(parityShards) {
+				return slabs.ErrBadHosts
 			}
 
 			// update number of unpinned sectors
