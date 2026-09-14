@@ -435,6 +435,29 @@ func TestApplicationAPI(t *testing.T) {
 	}
 	obj1 := *objs[0].Object
 
+	batched, err := client.ListObjectsBatched(context.Background(), sk, slabs.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(batched, objs) {
+		t.Fatalf("expected batched listing %+v, got %+v", objs, batched)
+	}
+
+	refs, err := client.ListObjectReferences(context.Background(), sk, slabs.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(refs) != 1 || refs[0].Object == nil {
+		t.Fatalf("expected 1 object event reference, got %+v", refs)
+	} else if !reflect.DeepEqual(refs[0].Object.Slabs, obj1.PinRequest().Slabs) {
+		t.Fatalf("expected slab references %+v, got %+v", obj1.PinRequest().Slabs, refs[0].Object.Slabs)
+	}
+
+	batch, err := client.Slabs(context.Background(), sk, []slabs.SlabID{slabID2, slabs.SlabID(frand.Entropy256()), slabID1})
+	if err != nil {
+		t.Fatal(err)
+	} else if len(batch) != 2 || batch[0].ID != slabID2 || batch[1].ID != slabID1 {
+		t.Fatalf("expected pinned slabs in request order, got %+v", batch)
+	}
+
 	if objs, err := client.ListObjects(context.Background(), sk, slabs.Cursor{
 		After: objs[0].UpdatedAt,
 		Key:   objs[0].Key,

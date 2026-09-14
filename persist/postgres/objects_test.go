@@ -476,6 +476,75 @@ func TestListObjectsRegression(t *testing.T) {
 	}
 }
 
+func TestListObjectReferences(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	acc := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	params := []slabs.SlabPinParams{
+		{
+			Version:       1,
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors: []slabs.PinnedSector{
+				{Root: frand.Entropy256(), HostKey: hk},
+				{Root: frand.Entropy256(), HostKey: hk},
+			},
+		},
+		{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors: []slabs.PinnedSector{
+				{Root: frand.Entropy256(), HostKey: hk},
+			},
+		},
+	}
+	store.pinTestSlabs(t, acc, params...)
+	obj := store.pinRandomObject(t, acc, []slabs.SlabSlice{
+		params[0].Slice(10, 100),
+		params[1].Slice(20, 200),
+	})
+
+	store.publishEvents(t)
+
+	events, err := store.ListObjectReferences(acc, slabs.Cursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 {
+		t.Fatalf("expected 1 object event, got %d", len(events))
+	} else if events[0].Key != obj.ID() || events[0].Deleted || events[0].UpdatedAt.IsZero() {
+		t.Fatalf("unexpected event: %+v", events[0])
+	} else if events[0].Object == nil {
+		t.Fatal("expected an object reference")
+	}
+
+	ref := events[0].Object
+	if ref.ID() != obj.ID() {
+		t.Fatalf("expected object ID %v, got %v", obj.ID(), ref.ID())
+	} else if !reflect.DeepEqual(ref.Slabs, obj.PinRequest().Slabs) {
+		t.Fatalf("expected slab references %+v, got %+v", obj.PinRequest().Slabs, ref.Slabs)
+	} else if !bytes.Equal(ref.EncryptedDataKey, obj.EncryptedDataKey) ||
+		!bytes.Equal(ref.EncryptedMetadataKey, obj.EncryptedMetadataKey) ||
+		!bytes.Equal(ref.EncryptedMetadata, obj.EncryptedMetadata) ||
+		ref.DataSignature != obj.DataSignature || ref.MetadataSignature != obj.MetadataSignature {
+		t.Fatal("expected object reference to preserve the object's metadata")
+	}
+
+	if err := store.DeleteObject(acc, obj.ID()); err != nil {
+		t.Fatal(err)
+	}
+	store.publishEvents(t)
+
+	events, err = store.ListObjectReferences(acc, slabs.Cursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 || !events[0].Deleted || events[0].Object != nil {
+		t.Fatalf("expected a deletion event, got %+v", events)
+	}
+}
+
 // TestListObjectsWithholdsUnpublished checks that an event is only listed once
 // it has been published, so a cursor cannot come to rest on a position that is
 // still going to be filled.
