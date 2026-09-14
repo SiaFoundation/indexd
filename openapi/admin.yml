@@ -2142,6 +2142,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/HostsStatsResponse"
 
+  /stats/objects:
+    get:
+      tags:
+        - stats
+      summary: Get stats about objects
+      operationId: getStatsObjects
+      responses:
+        "200":
+          description: Stats about the objects tracked by this instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ObjectStatsResponse"
+
   /stats/sectors:
     get:
       tags:
@@ -2164,8 +2178,8 @@ paths:
       description: >
         Returns all available indexer metrics in a single response using the
         Prometheus text-based exposition format. Aggregates state, wallet,
-        account, connect key, contracts, aggregated host, sector, per-app, and
-        per-host metrics.
+        account, connect key, contracts, aggregated host, sector, object,
+        per-app, and per-host metrics.
       operationId: getPrometheusMetrics
       responses:
         "200":
@@ -2545,6 +2559,8 @@ components:
       $ref: "./components.yml#/components/schemas/HostsStatsResponse"
     AggregatedHostStatsResponse:
       $ref: "./components.yml#/components/schemas/AggregatedHostStatsResponse"
+    ObjectStatsResponse:
+      $ref: "./components.yml#/components/schemas/ObjectStatsResponse"
     SectorStatsResponse:
       $ref: "./components.yml#/components/schemas/SectorStatsResponse"
     AuthConnectStatusResponse:

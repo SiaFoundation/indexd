@@ -138,6 +138,7 @@ type (
 	// SlabManager defines the slab-related interface used by the admin API.
 	SlabManager interface {
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
+		ObjectStats() (slabs.ObjectStats, error)
 		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
 		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
 		SectorStats() (slabs.SectorsStats, error)
@@ -327,6 +328,7 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"GET /stats/contracts":      a.handleGETStatsContracts,
 		"GET /stats/hosts":          a.handleGETStatsHostsAggregated,
 		"GET /stats/hosts/detailed": a.handleGETStatsHostsDetailed,
+		"GET /stats/objects":        a.handleGETStatsObjects,
 		"GET /stats/sectors":        a.handleGETStatsSectors,
 
 		// prometheus metrics endpoint
@@ -889,8 +891,7 @@ func (a *admin) handlePOSTMigrationBatch(jc jape.Context) {
 
 // handlePOSTMigrationResults persists the outcomes of migrations reported by a
 // remote node. A batch where every result failed to persist indicates a
-// database problem and is surfaced as an error so the reporting node backs
-// off instead of burning through fresh batches.
+// is surfaced as an error so the reporting node aborts its pass.
 func (a *admin) handlePOSTMigrationResults(jc jape.Context) {
 	var results []slabs.MigrationResult
 	if jc.Decode(&results) != nil {
@@ -1474,6 +1475,14 @@ func (a *admin) handleGETStatsHostsAggregated(jc jape.Context) {
 	writeResponse(jc, AggregatedHostStatsResponse(stats))
 }
 
+func (a *admin) handleGETStatsObjects(jc jape.Context) {
+	stats, err := a.slabs.ObjectStats()
+	if jc.Check("failed to retrieve object stats", err) != nil {
+		return
+	}
+	writeResponse(jc, ObjectStatsResponse(stats))
+}
+
 func (a *admin) handleGETStatsSectors(jc jape.Context) {
 	stats, err := a.slabs.SectorStats()
 	if jc.Check("failed to retrieve sector stats", err) != nil {
@@ -1542,6 +1551,11 @@ func (a *admin) handleGETPrometheusMetrics(jc jape.Context) {
 		return
 	}
 
+	objectStats, err := a.slabs.ObjectStats()
+	if jc.Check("failed to retrieve object stats", err) != nil {
+		return
+	}
+
 	apps, err := a.accounts.AppStats(0, 1000)
 	if jc.Check("failed to retrieve app stats", err) != nil {
 		return
@@ -1562,6 +1576,7 @@ func (a *admin) handleGETPrometheusMetrics(jc jape.Context) {
 		ContractsStatsResponse(contractsStats),
 		AggregatedHostStatsResponse(aggHostStats),
 		SectorsStatsResponse(sectorStats),
+		ObjectStatsResponse(objectStats),
 		AppStatsResponse(apps),
 		HostStatsResponse(hosts),
 	} {

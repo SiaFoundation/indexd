@@ -85,6 +85,76 @@ func TestSectorStatsNumSlabs(t *testing.T) {
 	}
 }
 
+func TestSlabRepairStats(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account and host
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	assertStats := func(unrecoverable, stuck int64) {
+		t.Helper()
+		stats, err := store.SectorStats()
+		if err != nil {
+			t.Fatal(err)
+		} else if stats.UnrecoverableSlabs != unrecoverable {
+			t.Fatalf("expected %d unrecoverable slabs, got %d", unrecoverable, stats.UnrecoverableSlabs)
+		} else if stats.StuckSlabs != stuck {
+			t.Fatalf("expected %d stuck slabs, got %d", stuck, stats.StuckSlabs)
+		}
+	}
+
+	// a freshly pinned slab is neither stuck nor unrecoverable
+	slabIDs := make([]slabs.SlabID, 3)
+	for i := range slabIDs {
+		slabIDs[i] = store.pinTestSlab(t, account, 1, []types.PublicKey{hk, hk})
+	}
+	assertStats(0, 0)
+
+	// a single failed repair is not enough to count as stuck
+	for _, slabID := range slabIDs[:2] {
+		if err := store.MarkSlabRepaired(slabID, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertStats(0, 0)
+
+	// a second one does
+	for _, slabID := range slabIDs[:2] {
+		if err := store.MarkSlabRepaired(slabID, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertStats(0, 2)
+
+	// an unrecoverable slab isn't stuck, even with failed repairs on record
+	if err := store.MarkSlabUnrecoverable(slabIDs[0], "shard root mismatch"); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(1, 1)
+
+	// a successful repair clears the stuck state
+	if err := store.MarkSlabRepaired(slabIDs[1], true); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(1, 0)
+
+	// a slab can become unrecoverable without any failed repairs
+	if err := store.MarkSlabUnrecoverable(slabIDs[2], "shard root mismatch"); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(2, 0)
+
+	// deleting a slab drops it from the counts
+	if err := store.UnpinSlab(account, slabIDs[2]); err != nil {
+		t.Fatal(err)
+	}
+	store.pruneAllDeletedSlabs(t)
+	assertStats(1, 0)
+}
+
 func TestFlushStatsDelta(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

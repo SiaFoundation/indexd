@@ -15,16 +15,9 @@ import (
 )
 
 const (
-	// remoteMigrationInterval is how long a remote node waits between passes
-	// once it has worked through all currently-unhealthy slabs.
+	// remoteMigrationInterval is how long a remote node waits before polling
+	// the primary again after a pass that found nothing to migrate or failed.
 	remoteMigrationInterval = time.Minute
-
-	// maxBackoffShift bounds the exponent of the exponential backoff applied
-	// when consecutive passes migrate nothing, which points at a systemic
-	// problem such as a recovery phrase that doesn't match the primary's. It
-	// caps the pause at 2^5 = 32x the base interval and keeps the shift from
-	// overflowing.
-	maxBackoffShift = 5
 
 	// resultReportTimeout bounds the single report of a batch's results. The
 	// report runs on its own context so a shutdown mid-report doesn't abort
@@ -84,7 +77,8 @@ func WithRemoteWorkers(n int) RemoteMigratorOption {
 	}
 }
 
-// WithRemoteInterval sets how long a RemoteMigrator waits between passes. The
+// WithRemoteInterval sets how long a RemoteMigrator waits before polling the
+// primary again after a pass that found nothing to migrate or failed. The
 // default is one minute.
 func WithRemoteInterval(d time.Duration) RemoteMigratorOption {
 	return func(rm *RemoteMigrator) {
@@ -117,52 +111,31 @@ func NewRemoteMigrator(primary Primary, migrationAccountKey types.PrivateKey, lo
 	return rm
 }
 
-// Run repeatedly works through all currently-unhealthy slabs, pausing between
-// passes, until the context is cancelled. When a pass attempts migrations but
-// doesn't migrate a single sector the pause grows exponentially: a worker that
-// can never succeed (e.g. its recovery phrase doesn't match the primary's, so
-// its account is unfunded, or its uploads never reach any host) would otherwise
-// claim and burn a fresh batch of slabs every interval, parking them for the
-// claim duration with nothing to show.
+// Run repeatedly works through all currently-unhealthy slabs until the context
+// is cancelled. A pass that attempted migrations is followed immediately by
+// the next one, since slabs flagged while it ran may already be waiting; after
+// a pass that found nothing to migrate or failed, the worker waits the
+// configured interval before polling the primary again.
 func (rm *RemoteMigrator) Run(ctx context.Context) {
 	store := newCachedHostStore()
 	hostClient := client.New(client.NewProvider(store), rm.log.Named("client"))
 	defer hostClient.Close()
 	migrator := NewMigrator(hostClient, rm.migrationAccountKey, rm.log)
 
-	failedPasses := 0
 	for {
-		executed, migrated, err := rm.runPass(ctx, store, migrator)
+		executed, err := rm.runPass(ctx, store, migrator)
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
 			rm.log.Error("migration pass failed", zap.Error(err))
-		}
-		// a pass makes progress only when at least one migrated sector was
-		// durably persisted by the primary. migrated only counts successfully
-		// reported sectors, so a late report failure neither masks earlier
-		// persisted groups nor lets unpersisted uploads count as progress —
-		// a worker that can never persist (failing uploads or a persistently
-		// failing primary) backs off either way.
-		if executed > 0 {
-			if migrated > 0 {
-				failedPasses = 0
-			} else {
-				failedPasses++
-			}
-		}
-
-		interval := rm.interval
-		if failedPasses > 0 {
-			interval = rm.interval << min(failedPasses, maxBackoffShift)
-			rm.log.Warn("pass didn't persist a single migrated sector, backing off",
-				zap.Int("consecutivePasses", failedPasses), zap.Duration("interval", interval))
+		} else if executed > 0 {
+			continue
 		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(interval):
+		case <-time.After(rm.interval):
 		}
 	}
 }
@@ -174,9 +147,8 @@ func (rm *RemoteMigrator) Run(ctx context.Context) {
 // instead of waiting behind the slowest slab of a batch. Results are reported
 // back in groups as migrations complete, with at most one report in flight so
 // a slow primary never stalls the workers. It returns how many migrations
-// were attempted and how many migrated sectors were durably reported to the
-// primary.
-func (rm *RemoteMigrator) runPass(ctx context.Context, store *cachedHostStore, migrator *Migrator) (executed, migrated int, _ error) {
+// were attempted.
+func (rm *RemoteMigrator) runPass(ctx context.Context, store *cachedHostStore, migrator *Migrator) (executed int, _ error) {
 	// fetch a multiple of the number of workers per batch, like the local
 	// migration loop does; the primary clamps the limit to its maximum.
 	batchSize := migrationSlabsPerWorker * rm.workers
@@ -264,40 +236,29 @@ func (rm *RemoteMigrator) runPass(ctx context.Context, store *cachedHostStore, m
 	// collect results as migrations complete and report them to the primary
 	// in groups. Reports run on their own goroutine — at most one in flight —
 	// so a slow report never stalls result collection and with it the
-	// workers. migrated only counts sectors whose report succeeded.
+	// workers.
 	var reportErr error
 	reporting := false                  // a report goroutine is in flight
 	reportDoneCh := make(chan error, 1) // its outcome
-	inFlightSectors := 0                // migrated sectors it carries
 	pending := make([]MigrationResult, 0, resultReportGroupSize)
 
-	countSectors := func(results []MigrationResult) (n int) {
-		for _, res := range results {
-			n += len(res.Migrated)
-		}
-		return
-	}
 	startReport := func() {
 		if len(pending) == 0 || reporting || reportErr != nil {
 			return
 		}
 		group := pending
 		pending = nil
-		reporting, inFlightSectors = true, countSectors(group)
+		reporting = true
 		go func() {
 			reportDoneCh <- rm.reportResults(group)
 		}()
 	}
 	finishReport := func(err error) {
 		reporting = false
-		if err != nil {
-			if reportErr == nil {
-				reportErr = fmt.Errorf("failed to report migration results: %w", err)
-				cancelPass()
-			}
-			return
+		if err != nil && reportErr == nil {
+			reportErr = fmt.Errorf("failed to report migration results: %w", err)
+			cancelPass()
 		}
-		migrated += inFlightSectors
 	}
 
 	flushTicker := time.NewTicker(resultReportInterval)
@@ -335,19 +296,17 @@ collect:
 			} else {
 				rm.log.Error("dropping unreported migration results", zap.Int("results", len(pending)), zap.Error(err))
 			}
-		} else {
-			migrated += countSectors(pending)
 		}
 	}
 
 	if reportErr != nil {
-		return executed, migrated, reportErr
+		return executed, reportErr
 	}
 	if producerErr != nil {
-		return executed, migrated, producerErr
+		return executed, producerErr
 	}
 	// surface the interruption if we were cancelled
-	return executed, migrated, ctx.Err()
+	return executed, ctx.Err()
 }
 
 // reportResults reports a batch of migration results to the primary node. It

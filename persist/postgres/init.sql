@@ -244,7 +244,9 @@ CREATE TABLE global_settings (
     pins_min_collateral DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_min_collateral >= 0),
     pins_max_storage_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_storage_price >= 0),
     pins_max_ingress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_ingress_price >= 0),
-    pins_max_egress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_egress_price >= 0)
+    pins_max_egress_price DOUBLE PRECISION NOT NULL DEFAULT 0 CHECK (pins_max_egress_price >= 0),
+
+    object_events_last_published TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT '-infinity' -- last second claimed by a publisher
 );
 
 CREATE TABLE contracts (
@@ -347,8 +349,10 @@ CREATE TABLE slabs (
     version SMALLINT NOT NULL DEFAULT 0 CHECK(version >= 0), -- slab encoding version, folded into digest for version > 0
 
     consecutive_failed_repairs SMALLINT NOT NULL DEFAULT 0 CHECK (consecutive_failed_repairs >= 0),
-    next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
-
+    next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    unrecoverable BOOLEAN NOT NULL DEFAULT FALSE,
+    unrecoverable_reason TEXT,
+    CONSTRAINT slabs_unrecoverable_reason_check CHECK (unrecoverable = (unrecoverable_reason IS NOT NULL))
 );
 CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
 
@@ -388,12 +392,15 @@ CREATE TABLE object_events (
     object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32), -- not a FK since deletions need to hang around
     account_id BIGINT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     was_deleted BOOLEAN NOT NULL, -- true if deleted, false otherwise
-    updated_at TIMESTAMP WITH TIME ZONE DEFAULT date_trunc('second', NOW()), -- last time the object was created/updated/deleted, truncated to second precision so a client cursor can express it exactly
+    updated_at TIMESTAMP WITH TIME ZONE, -- the event's position in the stream rather than the time the object changed, NULL until a publisher stamps it, truncated to second precision so a client cursor can express it exactly
     PRIMARY KEY (account_id, object_key)
 );
 
 -- fast per-account events cursor pagination sorted by update time and object key
 CREATE INDEX object_events_account_id_updated_at_object_key_idx ON object_events(account_id, updated_at ASC, object_key ASC);
+
+-- fast lookup of events awaiting publication
+CREATE INDEX object_events_unpublished_idx ON object_events(account_id, object_key) WHERE updated_at IS NULL;
 
 -- probe by object_key alone since the PK leads with account_id
 CREATE INDEX object_events_object_key_idx ON object_events(object_key);
@@ -569,6 +576,56 @@ CREATE TABLE stats_deltas (
 
 -- speed up summing pending stats deltas for a particular stat
 CREATE INDEX stats_deltas_stat_name_idx ON stats_deltas(stat_name);
+
+-- maintain the slab repair-state counters; stuck means more than one
+-- consecutive failed repair
+CREATE FUNCTION slab_is_stuck(failures SMALLINT, unrecoverable BOOLEAN) RETURNS BOOLEAN
+    LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$ SELECT failures > 1 AND NOT unrecoverable $$;
+
+CREATE FUNCTION slabs_maintain_repair_stats() RETURNS TRIGGER AS $$
+DECLARE
+    old_unrecoverable INT := 0;
+    old_stuck INT := 0;
+    new_unrecoverable INT := 0;
+    new_stuck INT := 0;
+BEGIN
+    IF (TG_OP <> 'INSERT') THEN
+        old_unrecoverable := OLD.unrecoverable::int;
+        old_stuck := slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable)::int;
+    END IF;
+    IF (TG_OP <> 'DELETE') THEN
+        new_unrecoverable := NEW.unrecoverable::int;
+        new_stuck := slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable)::int;
+    END IF;
+
+    INSERT INTO stats_deltas (stat_name, stat_delta)
+    SELECT * FROM (
+        SELECT 'num_unrecoverable_slabs', new_unrecoverable - old_unrecoverable
+        UNION ALL
+        SELECT 'num_stuck_slabs', new_stuck - old_stuck
+    ) v(stat_name, stat_delta) WHERE stat_delta <> 0;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- the WHEN clauses keep the repair loop's next_repair_attempt bumps and pin
+-- upserts that leave both counters alone from reaching the function
+CREATE TRIGGER slabs_maintain_repair_stats_insert
+AFTER INSERT ON slabs FOR EACH ROW
+WHEN (NEW.unrecoverable OR slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable))
+EXECUTE FUNCTION slabs_maintain_repair_stats();
+
+CREATE TRIGGER slabs_maintain_repair_stats_update
+AFTER UPDATE OF unrecoverable, consecutive_failed_repairs ON slabs FOR EACH ROW
+WHEN (OLD.unrecoverable IS DISTINCT FROM NEW.unrecoverable
+   OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable)
+      IS DISTINCT FROM slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable))
+EXECUTE FUNCTION slabs_maintain_repair_stats();
+
+CREATE TRIGGER slabs_maintain_repair_stats_delete
+AFTER DELETE ON slabs FOR EACH ROW
+WHEN (OLD.unrecoverable OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable))
+EXECUTE FUNCTION slabs_maintain_repair_stats();
 
 -- quick lookup of sectors that failed the integrity checks too many times
 CREATE INDEX sectors_consecutive_failed_checks_idx ON sectors(host_id, consecutive_failed_checks) WHERE consecutive_failed_checks > 0;

@@ -151,10 +151,11 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		objs[i] = store.pinTestObject(t, acc, hk)
 	}
 
-	// listAll pages through every event two at a time
+	// listAll publishes pending events and pages through them two at a time
 	listAll := func() []slabs.ObjectEvent {
 		t.Helper()
-		awaitEventSecond(t)
+		store.publishEvents(t)
+
 		var all []slabs.ObjectEvent
 		var cursor slabs.Cursor
 		for {
@@ -200,9 +201,8 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		}
 	}
 
-	// unblocking bumps the event timestamps so a caught-up client sees the
-	// objects again. The bump has to advance even when the unblock lands in the
-	// same second as the last event.
+	// unblocking republishes the events so a caught-up client sees the objects
+	// again, at positions past the one its cursor rests on
 	for _, b := range blocked {
 		if err := store.UnblockObject(b); err != nil {
 			t.Fatal(err)
@@ -247,11 +247,8 @@ func TestUnblockObjectVisibleToLiveCursor(t *testing.T) {
 	}
 
 	// park a cursor on the live object, all a client can see for now
-	awaitEventSecond(t)
-	events, err := store.ListObjects(acc, slabs.Cursor{}, 10)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(events) != 1 {
+	events := store.listEvents(t, acc, slabs.Cursor{})
+	if len(events) != 1 {
 		t.Fatalf("expected 1 visible object, got %d", len(events))
 	} else if events[0].Key != live {
 		t.Fatalf("expected live object %v, got %v", live, events[0].Key)
@@ -262,11 +259,8 @@ func TestUnblockObjectVisibleToLiveCursor(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	awaitEventSecond(t)
-	events, err = store.ListObjects(acc, cursor, 10)
-	if err != nil {
-		t.Fatal(err)
-	} else if len(events) != 1 {
+	events = store.listEvents(t, acc, cursor)
+	if len(events) != 1 {
 		t.Fatalf("expected unblocked object %v to be visible from the parked cursor, got %d events", blocked, len(events))
 	} else if events[0].Key != blocked {
 		t.Fatalf("expected unblocked object %v, got %v", blocked, events[0].Key)

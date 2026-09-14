@@ -19,9 +19,9 @@ const (
 	// minContractGrowthRate is the minimum expected growth rate
 	// for contracts used when calculating funding. Lowering
 	// this value will mean contracts will need to be refreshed
-	// more frequently. 32 GiB is a good trade off between initial
+	// more frequently. 256 GiB is a good trade off between initial
 	// cost to both parties and the frequency of refreshes.
-	minContractGrowthRate = 32 << 30
+	minContractGrowthRate = 256 << 30
 
 	// maxContractGrowthRate is the maximum additional data
 	// allowed when adding funds for refresh or renews. This
@@ -29,10 +29,10 @@ const (
 	// is uploaded. Decreasing this will mean contracts
 	// will need to be refreshed more frequently. Increasing
 	// this will mean large contracts will be more expensive.
-	// 256 GiB is a good trade off between cost and frequency of
+	// 1 TiB is a good trade off between cost and frequency of
 	// refreshes due to how long it would take to reasonably upload
 	// that amount of data with a 10 Gbps connection.
-	maxContractGrowthRate = 256 << 30
+	maxContractGrowthRate = 1 << 40
 )
 
 var (
@@ -473,7 +473,7 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 // that go into forming, refreshing or renewing a contract.
 func contractFunding(settings proto.HostSettings, existingData uint64, minAllowance types.Currency, duration uint64) (allowance, collateral types.Currency) {
 	multiplier := 1 + (existingData / minContractGrowthRate)
-	contractGrowth := min(minContractGrowthRate*multiplier, maxContractGrowthRate) / proto.SectorSize // 100% growth clamped to [32GiB, 256GiB]
+	contractGrowth := min(minContractGrowthRate*multiplier, maxContractGrowthRate) / proto.SectorSize // 100% growth clamped to [256GiB, 1TiB]
 	uploadCost := settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost().Mul64(contractGrowth)
 	downloadCost := settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(contractGrowth)
 	storeCost := settings.Prices.RPCAppendSectorsCost(contractGrowth, duration).RenterCost()

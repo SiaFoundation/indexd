@@ -574,6 +574,9 @@ components:
         success:
           type: boolean
           description: Whether every required sector was migrated; only meaningful when recovered is true
+        unrecoverableReason:
+          type: string
+          description: Set when the slab can never be fully repaired, taking it out of the repair rotation
 
     ObjectSlab:
       type: object
@@ -649,7 +652,7 @@ components:
         updatedAt:
           type: string
           format: date-time
-          description: Last time the object was created, updated, or deleted.
+          description: The timestamp component of the event's position in the stream. Every event published in the same batch shares it, so pair it with the event's key to page through the stream. Positions increase, are truncated to second precision, and an object that changes again is given a new one. Use the object's own timestamps to tell when it was last modified.
         object:
           allOf:
             - $ref: "#/components/schemas/SealedObject"
@@ -1505,6 +1508,14 @@ components:
           format: int64
           description: Total number of failed host scans
 
+    ObjectStatsResponse:
+      type: object
+      properties:
+        unpublishedEvents:
+          type: integer
+          format: int64
+          description: Number of object events waiting for a position in the stream, a number that keeps growing when the publisher cannot keep up
+
     SectorStatsResponse:
       type: object
       properties:
@@ -1540,6 +1551,14 @@ components:
           type: integer
           format: int64
           description: Number of sectors that have had failed integrity checks.
+        unrecoverableSlabs:
+          type: integer
+          format: int64
+          description: Number of slabs that were taken out of the repair rotation because they can never be fully repaired.
+        stuckSlabs:
+          type: integer
+          format: int64
+          description: Number of slabs that failed more than one consecutive repair attempt and are still being retried.
 
     QuotaKey:
       type: string

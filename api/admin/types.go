@@ -50,6 +50,9 @@ type (
 		Addresses []chain.NetAddress `json:"addresses"`
 	}
 
+	// ObjectStatsResponse is the response body for the [GET] /stats/objects.
+	ObjectStatsResponse slabs.ObjectStats
+
 	// SectorsStatsResponse is the response body for the [GET] /stats/sectors
 	SectorsStatsResponse slabs.SectorsStats
 

@@ -55,7 +55,7 @@ which will automatically open the admin UI in your default browser if
 
 ## Instant Syncing (Experimental)
 
-New users can sync instantly using `indexd --instant`. When instant syncing, the
+New users can sync instantly using `indexd -instant`. When instant syncing, the
 `indexd` node initializes using a Utreexo-based checkpoint and can immediately
 validate blocks from that point forward without replaying the whole chain state.
 The state is extremely compact and committed in block headers, making this

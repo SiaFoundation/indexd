@@ -143,12 +143,22 @@ func uploadRandomSlab(t testing.TB, client *client.Client, sk types.PrivateKey, 
 	}
 }
 
-// awaitEventSecond waits out the current second so events written in it become
-// listable; ListObjects withholds the second still in progress.
-func awaitEventSecond(t testing.TB) {
+// publishEvents publishes the events written so far, waiting out the current
+// second first if a publish already claimed it, since at most one batch is
+// published per second.
+func publishEvents(t testing.TB, indexer *testutils.Indexer) {
 	t.Helper()
-	now := time.Now()
-	time.Sleep(now.Truncate(time.Second).Add(time.Second).Sub(now) + 20*time.Millisecond)
+	var claimed bool
+	if err := indexer.Store().QueryRow(t.Context(), `SELECT object_events_last_published >= date_trunc('second', NOW()) FROM global_settings`).Scan(&claimed); err != nil {
+		t.Fatal(err)
+	}
+	if claimed {
+		now := time.Now()
+		time.Sleep(now.Truncate(time.Second).Add(time.Second).Sub(now) + 20*time.Millisecond)
+	}
+	if err := indexer.Store().PublishObjectEvents(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // inUTC normalizes the time zones of a listing so events fetched as JSON can be
@@ -432,7 +442,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	awaitEventSecond(t)
+	publishEvents(t, indexer)
 	objs, err = client.ListObjects(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
@@ -472,8 +482,8 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	if objs, err := client.ListObjects(context.Background(), sk, slabs.Cursor{
-		After: obj1.UpdatedAt,
-		Key:   obj1.ID(),
+		After: objs[0].UpdatedAt,
+		Key:   objs[0].Key,
 	}, 100); err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 0 {
@@ -500,7 +510,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
 	}
 
-	awaitEventSecond(t)
+	publishEvents(t, indexer)
 	objs, err = client.ListObjects(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)

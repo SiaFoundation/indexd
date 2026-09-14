@@ -20,7 +20,7 @@ const (
 	minRepairBackoff = time.Hour
 	maxRepairBackoff = 24 * time.Hour
 	// maxBadParityShards is the maximum proportion of parity shards that can be
-	// on bad hosts when pinning a slab.
+	// on bad hosts when pinning a slab that doesn't exist yet.
 	maxBadParityShards = 0.2
 	// integrityCheckClaimInterval is how far into the future
 	// SectorsForIntegrityCheck pushes the next_integrity_check of the sectors
@@ -341,7 +341,12 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			err = tx.QueryRow(ctx, `
 			INSERT INTO slabs (digest, encryption_key, min_shards, version)
 			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (digest) DO UPDATE SET pinned_at = NOW()
+			ON CONFLICT (digest) DO UPDATE SET
+				pinned_at = NOW(),
+				unrecoverable = FALSE,
+				unrecoverable_reason = NULL,
+				consecutive_failed_repairs = CASE WHEN slabs.unrecoverable THEN 0 ELSE slabs.consecutive_failed_repairs END,
+				next_repair_attempt = CASE WHEN slabs.unrecoverable THEN NOW() ELSE slabs.next_repair_attempt END
 			RETURNING id, (xmax <> 0)
 			`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards, slab.Version).Scan(&slabID, &existingSlab)
 			if err != nil {
@@ -420,10 +425,15 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			}
 			br.Close()
 
-			// if more than 20% of parity shards are on bad hosts, don't allow slab to be pinned
-			parityShards := len(slab.Sectors) - int(slab.MinShards)
-			if float64(badHosts) > maxBadParityShards*float64(parityShards) {
-				return slabs.ErrBadHosts
+			// if more than 20% of parity shards are on bad hosts, don't allow
+			// the slab to be pinned. Only a slab that doesn't exist yet is
+			// rejected; an existing slab can always be re-pinned, by any
+			// account, after its sectors end up on bad hosts.
+			if !existingSlab {
+				parityShards := len(slab.Sectors) - int(slab.MinShards)
+				if float64(badHosts) > maxBadParityShards*float64(parityShards) {
+					return slabs.ErrBadHosts
+				}
 			}
 
 			// update number of unpinned sectors
@@ -1054,7 +1064,7 @@ func (s *Store) UnpinnedSectors(hostKey types.PublicKey, limit int) ([]types.Has
 // and returns the next cursor to resume from, or 0 once the end is reached.
 //
 // The condition for such a sector is that it's either not stored on a host or
-// it's not pinned to a good contract.
+// it's not pinned to a good contract. Slabs marked unrecoverable are skipped.
 //
 // NOTE: Subsequent calls to this function do not return the same slabs because
 // a minimum of 1 hour must pass between consecutive migration attempts. The
@@ -1094,7 +1104,7 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 				UPDATE slabs SET next_repair_attempt = $3
 				WHERE id IN (
 					SELECT id FROM slabs
-					WHERE id IN (SELECT id FROM unhealthy) AND next_repair_attempt < NOW()
+					WHERE id IN (SELECT id FROM unhealthy) AND next_repair_attempt < NOW() AND NOT unrecoverable
 					FOR UPDATE SKIP LOCKED
 				)
 				RETURNING id, digest
@@ -1135,7 +1145,7 @@ func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 			UPDATE object_events
-			SET updated_at = date_trunc('second', NOW())
+			SET updated_at = NULL
 			WHERE object_key IN (
 				SELECT DISTINCT o.object_key
 				FROM object_slabs os
@@ -1155,8 +1165,8 @@ func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 // ID since a freshly migrated sector isn't pinned yet. To pin a sector
 // 'PinSectors' is used. If the host is not found, e.g. due to being deleted in
 // the meantime, this operation is a no-op. The caller is responsible for
-// invoking RecordSlabMigrated once per slab after the batch completes to bump
-// the corresponding object_events rows.
+// invoking RecordSlabMigrated once per slab after the batch completes to
+// republish the corresponding object_events rows.
 func (s *Store) MigrateSector(root types.Hash256, hostKey types.PublicKey) (migrated bool, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		var oldHostID sql.NullInt64

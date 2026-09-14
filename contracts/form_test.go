@@ -755,18 +755,18 @@ func TestContractFunding(t *testing.T) {
 			},
 		},
 		{
-			name:            "data close to min growth rate",
-			initialDataSize: 100 << 30, // 100 GiB
+			name:            "data above min growth rate",
+			initialDataSize: 300 << 30, // 300 GiB
 			modSettings: func(settings *proto.HostSettings) {
 				settings.Prices.Collateral = types.Siacoins(1) // need to raise prices to be above minHostCollateral
 			},
 			calc: func(settings proto.HostSettings) (expectedAllowance types.Currency, expectedCollateral types.Currency) {
-				return calcCost(settings, (128<<30)/proto.SectorSize) // value should be closest multiple of 32 GiB
+				return calcCost(settings, (512<<30)/proto.SectorSize) // value should scale in 256 GiB increments
 			},
 		},
 		{
 			name:            "data over max growth rate",
-			initialDataSize: 500 << 30, // 500 GiB
+			initialDataSize: 2 << 40, // 2 TiB
 			modSettings: func(settings *proto.HostSettings) {
 				settings.Prices.Collateral = types.Siacoins(1) // need to raise prices to be above minHostCollateral
 			},

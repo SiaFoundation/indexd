@@ -107,23 +107,27 @@ func TestUploadShards(t *testing.T) {
 	}
 
 	// assert passing in no hosts returns an error and no uploads
-	_, err := sm.UploadShards(context.Background(), slab, shards, nil, zap.NewNop())
+	_, mismatched, err := sm.UploadShards(context.Background(), slab, shards, nil, zap.NewNop())
 	if err == nil {
 		t.Fatalf("expected error, got nil")
+	} else if mismatched != 0 {
+		t.Fatalf("expected no mismatching shards, got %d", mismatched)
 	}
 	assertSectors(t, nil, 0, nil)
 
 	// assert passing in enough hosts uploads all shards
-	uploaded, err := sm.UploadShards(context.Background(), slab, shards, availableHosts[:3], log)
+	uploaded, mismatched, err := sm.UploadShards(context.Background(), slab, shards, availableHosts[:3], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
+	} else if mismatched != 0 {
+		t.Fatalf("expected no mismatching shards, got %d", mismatched)
 	} else if len(uploaded) != 3 {
 		t.Fatalf("expected 3 uploaded shards, got %d", len(uploaded))
 	}
 	assertSectors(t, []types.Hash256{root1, root2, root3}, 3, nil)
 
 	// assert passing in too few hosts returns the uploaded shards and no error
-	uploaded, err = sm.UploadShards(context.Background(), slab, shards, availableHosts[:2], log)
+	uploaded, _, err = sm.UploadShards(context.Background(), slab, shards, availableHosts[:2], log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if len(uploaded) != 2 {
@@ -133,7 +137,7 @@ func TestUploadShards(t *testing.T) {
 
 	// assert hosts are tried until one succeeds
 	client.slowHosts[hosts[0].PublicKey] = time.Second
-	uploaded, err = sm.UploadShards(context.Background(), slab, shards, availableHosts, log)
+	uploaded, _, err = sm.UploadShards(context.Background(), slab, shards, availableHosts, log)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	} else if len(uploaded) != 3 {
@@ -141,22 +145,39 @@ func TestUploadShards(t *testing.T) {
 	}
 	assertSectors(t, []types.Hash256{root1, root2, root3}, 3, nil)
 
-	// assert migrations are not successful if sector roots
-	// do not match
+	// assert a shard whose root doesn't match is reported as unrecoverable
+	// without holding back the remaining shards
+	client.resetStorage()
 	corrupted := slabs.Slab{Sectors: slices.Clone(slab.Sectors)}
 	corrupted.Sectors[1].Root = frand.Entropy256()
-	uploaded, err = sm.UploadShards(context.Background(), corrupted, shards, availableHosts, log)
+	uploaded, mismatched, err = sm.UploadShards(context.Background(), corrupted, shards, availableHosts, log)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(uploaded) >= 3 {
-		t.Fatalf("expected fewer uploaded shards, got %d", len(uploaded))
+	} else if len(uploaded) != 2 {
+		t.Fatalf("expected 2 uploaded shards, got %d", len(uploaded))
+	} else if mismatched != 1 {
+		t.Fatalf("expected 1 mismatching shard, got %d", mismatched)
 	}
+	for _, root := range []types.Hash256{root1, root3} {
+		if !slices.ContainsFunc(uploaded, func(s slabs.Shard) bool { return s.Root == root }) {
+			t.Fatalf("expected shard %v to be uploaded", root)
+		}
+	}
+	// the mismatching shard must not be reported as migrated, or it would be
+	// recorded as a valid location for a root the data doesn't hash to
+	if slices.ContainsFunc(uploaded, func(s slabs.Shard) bool { return s.Root == corrupted.Sectors[1].Root }) {
+		t.Fatal("mismatching shard was reported as migrated")
+	}
+	// the mismatch is only caught from the root the host returns, so the shard
+	// itself does reach a host and is left there unreferenced
+	var storedMismatch bool
 	for _, stored := range client.hostSectors {
 		for root := range stored {
-			if root == corrupted.Sectors[1].Root {
-				t.Fatalf("corrupted sector was uploaded: %v", root)
-			}
+			storedMismatch = storedMismatch || root == root2
 		}
+	}
+	if !storedMismatch {
+		t.Fatal("expected the mismatching shard to have been written to a host")
 	}
 }
 
@@ -202,7 +223,7 @@ func TestUploadShardsDemotion(t *testing.T) {
 	// hs[2] is healthy -> succeeds, not demoted.
 
 	synctest.Test(t, func(t *testing.T) {
-		uploaded, err := sm.UploadShards(context.Background(), slab, shards, available, log)
+		uploaded, _, err := sm.UploadShards(context.Background(), slab, shards, available, log)
 		if err != nil {
 			t.Fatal(err)
 		} else if len(uploaded) != 1 {
