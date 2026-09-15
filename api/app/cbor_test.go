@@ -12,6 +12,7 @@ import (
 
 	"github.com/fxamacker/cbor/v2"
 	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/jape"
 	"lukechampine.com/frand"
@@ -36,8 +37,8 @@ func TestEncodeResponseNegotiation(t *testing.T) {
 		accept string
 	}{
 		{"no accept header", ""},
-		{"json", applicationJSON},
-		{"cbor", applicationCBOR},
+		{"json", api.ApplicationJSON},
+		{"cbor", api.ApplicationCBOR},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -58,9 +59,9 @@ func TestEncodeResponseNegotiation(t *testing.T) {
 			}
 
 			var decoded slabs.PinnedSlab
-			if accept == applicationCBOR {
-				if ct := resp.Header.Get(contentTypeHeader); ct != applicationCBOR {
-					t.Fatalf("expected %s, got %s", applicationCBOR, ct)
+			if accept == api.ApplicationCBOR {
+				if ct := resp.Header.Get(contentTypeHeader); ct != api.ApplicationCBOR {
+					t.Fatalf("expected %s, got %s", api.ApplicationCBOR, ct)
 				} else if err := cbor.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 					t.Fatal(err)
 				}
@@ -81,8 +82,8 @@ func TestAcceptsCBOR(t *testing.T) {
 		want   bool
 	}{
 		{"empty", "", false},
-		{"json", applicationJSON, false},
-		{"cbor", applicationCBOR, true},
+		{"json", api.ApplicationJSON, false},
+		{"cbor", api.ApplicationCBOR, true},
 		{"cbor with quality and space", "  application/cbor;q=1 ", true},
 		{"cbor uppercase", "APPLICATION/CBOR", true},
 		{"cbor after json", "application/json;q=0.5, application/cbor", true},

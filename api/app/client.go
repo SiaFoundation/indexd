@@ -156,7 +156,7 @@ func (c *Client) signedRequestCustom(ctx context.Context, appKey types.PrivateKe
 }
 
 func (c *Client) signedRequestJSON(ctx context.Context, appKey types.PrivateKey, method, route string, data, resp any) error {
-	body, err := c.signedRequestCustom(ctx, appKey, applicationJSON, method, route, data)
+	body, err := c.signedRequestCustom(ctx, appKey, api.ApplicationJSON, method, route, data)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (c *Client) signedRequestJSON(ctx context.Context, appKey types.PrivateKey,
 }
 
 func (c *Client) signedGetCBOR(ctx context.Context, appKey types.PrivateKey, route string, resp any) error {
-	body, err := c.signedRequestCustom(ctx, appKey, applicationCBOR, http.MethodGet, route, nil)
+	body, err := c.signedRequestCustom(ctx, appKey, api.ApplicationCBOR, http.MethodGet, route, nil)
 	if err != nil {
 		return err
 	}
@@ -422,7 +422,7 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 
 	u.Fragment = ""
 	var obj slabs.SharedObject
-	resp, err := doRequest(ctx, http.MethodGet, u, nil, applicationJSON)
+	resp, err := doRequest(ctx, http.MethodGet, u, nil, api.ApplicationJSON)
 	if err != nil {
 		return slabs.SharedObject{}, nil, fmt.Errorf("failed to fetch shared object: %w", err)
 	}
@@ -461,7 +461,7 @@ func (c *Client) RequestAppConnection(ctx context.Context, ephemeralKey types.Pr
 		return RegisterAppResponse{}, fmt.Errorf("failed to sign request: %w", err)
 	}
 
-	respBody, err := doRequest(ctx, http.MethodPost, u, reqBody, applicationJSON)
+	respBody, err := doRequest(ctx, http.MethodPost, u, reqBody, api.ApplicationJSON)
 	if err != nil {
 		return RegisterAppResponse{}, err
 	}
@@ -533,7 +533,7 @@ func (c *Client) RegisterApp(ctx context.Context, registerURL string, ephemeralK
 		return fmt.Errorf("failed to sign request: %w", err)
 	}
 
-	_, err = doRequest(ctx, http.MethodPost, u, body, applicationJSON)
+	_, err = doRequest(ctx, http.MethodPost, u, body, api.ApplicationJSON)
 	return err
 }
 

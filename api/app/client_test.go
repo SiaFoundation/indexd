@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"testing"
+
+	"go.sia.tech/indexd/api"
 )
 
 func TestDoRequestHTTPError(t *testing.T) {
@@ -21,7 +23,7 @@ func TestDoRequestHTTPError(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err = doRequest(context.Background(), http.MethodGet, u, nil, applicationJSON)
+		_, err = doRequest(context.Background(), http.MethodGet, u, nil, api.ApplicationJSON)
 		return err
 	}
 
