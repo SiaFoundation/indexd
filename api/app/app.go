@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -10,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -206,10 +206,13 @@ var (
 )
 
 const (
-	acceptHeader = "Accept"
+	acceptHeader        = "Accept"
+	contentTypeHeader   = "Content-Type"
+	contentLengthHeader = "Content-Length"
+	varyHeader          = "Vary"
 
-	applicationJSON        = "application/json"
-	applicationOctetStream = "application/octet-stream"
+	applicationJSON = "application/json"
+	applicationCBOR = "application/cbor"
 
 	// field size limits for RegisterAppRequest
 	maxNameLen        = 128
@@ -340,7 +343,7 @@ func (a *app) handleGETObjectSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	jc.Encode(page)
+	encodeResponse(jc, page)
 }
 
 func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
@@ -395,7 +398,7 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 			jc.Error(err, http.StatusInternalServerError)
 			return
 		}
-		jc.Encode(withoutSlabs)
+		encodeResponse(jc, withoutSlabs)
 		return
 	}
 
@@ -404,7 +407,7 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(objs)
+	encodeResponse(jc, objs)
 }
 
 func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
@@ -619,15 +622,34 @@ func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(nil)
 }
 
-func encodeBinary(jc jape.Context, resp types.EncoderTo) {
-	var buf bytes.Buffer
-	e := types.NewEncoder(&buf)
-	resp.EncodeTo(e)
-	e.Flush()
+// acceptsCBOR reports whether the Accept header names application/cbor. A
+// wildcard range does not match, so JSON stays the default.
+func acceptsCBOR(header string) bool {
+	for _, entry := range strings.Split(header, ",") {
+		mediaType, _, _ := strings.Cut(entry, ";")
+		if strings.EqualFold(strings.TrimSpace(mediaType), applicationCBOR) {
+			return true
+		}
+	}
+	return false
+}
 
-	jc.ResponseWriter.Header().Set("Content-Type", applicationOctetStream)
-	jc.ResponseWriter.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
-	buf.WriteTo(jc.ResponseWriter)
+// encodeResponse writes resp as CBOR if the client accepts it, JSON otherwise.
+func encodeResponse(jc jape.Context, resp any) {
+	// the body depends on Accept, so caches must key on it
+	jc.ResponseWriter.Header().Add(varyHeader, acceptHeader)
+	if !acceptsCBOR(jc.Request.Header.Get(acceptHeader)) {
+		jc.Encode(resp)
+		return
+	}
+
+	buf, err := encodeCBOR(resp)
+	if jc.Check("failed to encode response", err) != nil {
+		return
+	}
+	jc.ResponseWriter.Header().Set(contentTypeHeader, applicationCBOR)
+	jc.ResponseWriter.Header().Set(contentLengthHeader, strconv.Itoa(len(buf)))
+	jc.ResponseWriter.Write(buf)
 }
 
 func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
@@ -644,11 +666,7 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	if accept := jc.Request.Header.Get(acceptHeader); accept == applicationOctetStream {
-		encodeBinary(jc, slab)
-		return
-	}
-	jc.Encode(slab)
+	encodeResponse(jc, slab)
 }
 
 func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
