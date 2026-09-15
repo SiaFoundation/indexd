@@ -6,6 +6,7 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
 	github.com/jackc/pgx/v5 v5.11.0
+	github.com/klauspost/compress v1.20.0
 	github.com/klauspost/reedsolomon v1.14.2
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0

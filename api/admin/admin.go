@@ -342,7 +342,7 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		routes["POST /debug/slabs/prune"] = a.handlePOSTPruneAccounts
 	}
 
-	return jape.Mux(routes)
+	return api.CompressMiddleware(jape.Mux(routes))
 }
 
 func (a *admin) checkServerError(jc jape.Context, context string, err error) bool {
