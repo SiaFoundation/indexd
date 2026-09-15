@@ -39,7 +39,6 @@ type (
 		PinSlabs(ctx context.Context, account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error)
 		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
 		PinnedSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) (slabs.PinnedSlab, error)
-		PinnedSlabs(ctx context.Context, account proto.Account, slabIDs []slabs.SlabID) ([]slabs.PinnedSlab, error)
 		SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]slabs.SlabID, error)
 		UnpinSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) error
 
@@ -47,7 +46,8 @@ type (
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		PinObject(ctx context.Context, account proto.Account, obj slabs.PinObjectRequest) error
 		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
-		ListObjectReferences(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventReference, error)
+		ListObjectsWithoutSlabs(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventWithoutSlabs, error)
+		ObjectSlabs(ctx context.Context, account proto.Account, key types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
 		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
 
@@ -317,6 +317,32 @@ func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(obj)
 }
 
+func (a *app) handleGETObjectSlabs(jc jape.Context, pk types.PublicKey) {
+	var key types.Hash256
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	cursor, limit, ok := api.ParseCursorLimit(jc)
+	if !ok {
+		return
+	}
+
+	page, err := a.slabs.ObjectSlabs(jc.Request.Context(), proto.Account(pk), key, cursor, limit)
+	if errors.Is(err, slabs.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, slabs.ErrObjectBlocked) {
+		jc.Error(err, http.StatusUnavailableForLegalReasons)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(page)
+}
+
 func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
 	var key types.Hash256
 	if jc.DecodeParam("key", &key) != nil {
@@ -358,18 +384,18 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 		After: after,
 		Key:   key,
 	}
-	expandSlabs := true
-	if jc.DecodeForm("expandslabs", &expandSlabs) != nil {
+	includeSlabs := true
+	if jc.DecodeForm("includeslabs", &includeSlabs) != nil {
 		return
 	}
 
-	if !expandSlabs {
-		refs, err := a.slabs.ListObjectReferences(jc.Request.Context(), proto.Account(pk), cursor, limit)
+	if !includeSlabs {
+		withoutSlabs, err := a.slabs.ListObjectsWithoutSlabs(jc.Request.Context(), proto.Account(pk), cursor, limit)
 		if err != nil {
 			jc.Error(err, http.StatusInternalServerError)
 			return
 		}
-		jc.Encode(refs)
+		jc.Encode(withoutSlabs)
 		return
 	}
 
@@ -591,22 +617,6 @@ func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
 	}
 
 	jc.Encode(nil)
-}
-
-func (a *app) handlePOSTSlabsBatch(jc jape.Context, pk types.PublicKey) {
-	slabIDs, ok := decodeRequest[[]slabs.SlabID](jc)
-	if !ok {
-		return
-	} else if len(slabIDs) > api.MaxLimit {
-		jc.Error(fmt.Errorf("request exceeds maximum of %d slab IDs", api.MaxLimit), http.StatusBadRequest)
-		return
-	}
-
-	pinned, err := a.slabs.PinnedSlabs(jc.Request.Context(), proto.Account(pk), slabIDs)
-	if jc.Check("failed to get slabs", err) != nil {
-		return
-	}
-	jc.Encode(pinned)
 }
 
 func encodeBinary(jc jape.Context, resp types.EncoderTo) {
@@ -1093,6 +1103,7 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		"GET /objects":             wrapSignedAuth(a.handleGETObjects),
 		"GET /objects/:key":        wrapSignedAuth(a.handleGETObject),
 		"GET /objects/:key/shared": wrapSignedAuth(a.handleGETObjectShared),
+		"GET /objects/:key/slabs":  wrapSignedAuth(a.handleGETObjectSlabs),
 		"POST /objects":            wrapSignedAuth(a.handlePOSTObjects),
 		"DELETE /objects/:key":     wrapSignedAuth(a.handleDELETEObjects),
 
@@ -1112,7 +1123,6 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 
 		"GET /slabs":            wrapSignedAuth(a.handleGETSlabs),
 		"POST /slabs":           wrapSignedAuth(a.handlePOSTSlabs),
-		"POST /slabs/batch":     wrapSignedAuth(a.handlePOSTSlabsBatch),
 		"POST /slabs/prune":     wrapSignedAuth(a.handlePOSTSlabsPrune),
 		"GET /slabs/:slabid":    wrapSignedAuth(a.handleGETSlab),
 		"DELETE /slabs/:slabid": wrapSignedAuth(a.handleDELETESlab),

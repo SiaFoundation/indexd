@@ -9,12 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"maps"
 	"math"
 	"net/http"
 	"net/url"
-	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -27,10 +24,21 @@ import (
 )
 
 const (
-	defaultValidity          = 10 * time.Minute
-	maxConcurrentSlabBatches = 8
-	maxListRetries           = 3
-	listRetryDelay           = 100 * time.Millisecond
+	defaultValidity      = 10 * time.Minute
+	maxConcurrentObjects = 8
+	maxListRetries       = 3
+	listRetryDelay       = 100 * time.Millisecond
+)
+
+var (
+	// errObjectUnavailable is returned when an object is deleted or blocked
+	// while its slab slices are being fetched. Listing the events again
+	// returns a deletion event or omits the blocked object.
+	errObjectUnavailable = errors.New("object deleted or blocked while fetching its slab slices")
+
+	// errObjectSlabsMismatch is returned when the fetched slab slices do not
+	// match the listed object ID. Retrying the listing cannot resolve it.
+	errObjectSlabsMismatch = errors.New("fetched slab slices do not match the object ID")
 )
 
 // Client is an HTTP client for the application API of the indexer.
@@ -190,56 +198,76 @@ func (c *Client) signedRequestBinary(ctx context.Context, appKey types.PrivateKe
 }
 
 // listObjectsRoute builds the GET /objects route for the cursor.
-func listObjectsRoute(cursor slabs.Cursor, limit int, expandSlabs bool) string {
+func listObjectsRoute(cursor slabs.Cursor, limit int, includeSlabs bool) string {
 	values := url.Values{}
-	values.Set("limit", strconv.Itoa(limit))
+	values.Set("limit", fmt.Sprint(limit))
 	values.Set("after", cursor.After.Format(time.RFC3339Nano))
 	values.Set("key", cursor.Key.String())
-	values.Set("expandslabs", strconv.FormatBool(expandSlabs))
+	values.Set("includeslabs", fmt.Sprint(includeSlabs))
 	return "/objects?" + values.Encode()
 }
 
-// fetchSlabs fetches the slabs in evenly sized concurrent batches. Slabs the
-// account no longer pins are omitted.
-func (c *Client) fetchSlabs(ctx context.Context, appKey types.PrivateKey, slabIDs []slabs.SlabID) (map[slabs.SlabID]slabs.PinnedSlab, error) {
-	slabsByID := make(map[slabs.SlabID]slabs.PinnedSlab, len(slabIDs))
-	if len(slabIDs) == 0 {
-		return slabsByID, nil
+// fetchObjectSlabs fetches all of the object's slab slices and checks their
+// ordered slab IDs, offsets, and lengths against the object ID. Host keys are
+// current locations and are not part of the object ID.
+func (c *Client) fetchObjectSlabs(ctx context.Context, appKey types.PrivateKey, key types.Hash256) ([]slabs.SlabSlice, error) {
+	var fetched []slabs.SlabSlice
+	for {
+		page, err := c.ObjectSlabs(ctx, appKey, key, int64(len(fetched)), api.MaxLimit)
+		var httpErr *HTTPError
+		if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusUnavailableForLegalReasons) {
+			return nil, errObjectUnavailable
+		} else if err != nil {
+			return nil, err
+		}
+		fetched = append(fetched, page...)
+		if len(page) < api.MaxLimit {
+			if id := slabs.ObjectID(fetched); id != key {
+				return nil, fmt.Errorf("%w: assembled %v from %d slab slices", errObjectSlabsMismatch, id, len(fetched))
+			}
+			return fetched, nil
+		}
 	}
-	numBatches := (len(slabIDs) + api.MaxLimit - 1) / api.MaxLimit
-	batchSize := (len(slabIDs) + numBatches - 1) / numBatches
+}
 
+// fetchEventSlabs fetches each listed object's slab slices concurrently.
+func (c *Client) fetchEventSlabs(ctx context.Context, appKey types.PrivateKey, withoutSlabs []slabs.ObjectEventWithoutSlabs) ([]slabs.ObjectEvent, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
+	events := make([]slabs.ObjectEvent, len(withoutSlabs))
 	var wg sync.WaitGroup
-	sema := make(chan struct{}, maxConcurrentSlabBatches)
-	var mu sync.Mutex
+	sema := make(chan struct{}, maxConcurrentObjects)
 	var fetchErr error
-batchLoop:
-	for batch := range slices.Chunk(slabIDs, batchSize) {
+	var errOnce sync.Once
+eventLoop:
+	for i, event := range withoutSlabs {
+		events[i] = slabs.ObjectEvent{
+			Key:       event.Key,
+			Deleted:   event.Deleted,
+			UpdatedAt: event.UpdatedAt,
+		}
+		if event.Object == nil {
+			continue
+		}
 		select {
 		case <-ctx.Done():
-			break batchLoop
+			break eventLoop
 		case sema <- struct{}{}:
 		}
 		wg.Go(func() {
 			defer func() {
 				<-sema
 			}()
-			fetched, err := c.Slabs(ctx, appKey, batch)
-			mu.Lock()
-			defer mu.Unlock()
+			objectSlabs, err := c.fetchObjectSlabs(ctx, appKey, event.Key)
 			if err != nil {
-				if fetchErr == nil {
-					fetchErr = fmt.Errorf("failed to fetch slabs: %w", err)
-					cancel() // abort the remaining batches
-				}
+				errOnce.Do(func() {
+					fetchErr = fmt.Errorf("failed to fetch slab slices of object %q: %w", event.Key, err)
+					cancel()
+				})
 				return
 			}
-			for _, slab := range fetched {
-				slabsByID[slab.ID] = slab
-			}
+			events[i].Object = event.Object.WithSlabs(objectSlabs)
 		})
 	}
 	wg.Wait()
@@ -248,24 +276,7 @@ batchLoop:
 	} else if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return slabsByID, nil
-}
-
-// expandEvents expands the slab references of the events. Every referenced
-// slab must be present in slabsByID.
-func expandEvents(refs []slabs.ObjectEventReference, slabsByID map[slabs.SlabID]slabs.PinnedSlab) []slabs.ObjectEvent {
-	events := make([]slabs.ObjectEvent, len(refs))
-	for i, ref := range refs {
-		events[i] = slabs.ObjectEvent{
-			Key:       ref.Key,
-			Deleted:   ref.Deleted,
-			UpdatedAt: ref.UpdatedAt,
-		}
-		if ref.Object != nil {
-			events[i].Object = ref.Object.Expand(slabsByID)
-		}
-	}
-	return events
+	return events, nil
 }
 
 // Hosts returns all usable hosts.
@@ -295,14 +306,6 @@ func (c *Client) UnpinSlab(ctx context.Context, appKey types.PrivateKey, slabID 
 // Slab retrieves a slab from the indexer by its ID.
 func (c *Client) Slab(ctx context.Context, appKey types.PrivateKey, slabID slabs.SlabID) (s slabs.PinnedSlab, err error) {
 	err = c.signedRequestBinary(ctx, appKey, http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil, &s)
-	return
-}
-
-// Slabs retrieves up to api.MaxLimit pinned slabs in request order, omitting
-// slabs the account has not pinned. Unlike Slab, it does not check that the
-// slabs are still recoverable.
-func (c *Client) Slabs(ctx context.Context, appKey types.PrivateKey, slabIDs []slabs.SlabID) (resp []slabs.PinnedSlab, err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/slabs/batch", slabIDs, &resp)
 	return
 }
 
@@ -345,54 +348,41 @@ func (c *Client) ListObjects(ctx context.Context, appKey types.PrivateKey, curso
 	return
 }
 
-// ListObjectReferences lists object events without expanding their slabs.
-func (c *Client) ListObjectReferences(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEventReference, err error) {
+// ListObjectsWithoutSlabs lists published object events after the cursor,
+// omitting each object's slab slices. Fetch the slices with ObjectSlabs.
+func (c *Client) ListObjectsWithoutSlabs(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEventWithoutSlabs, err error) {
 	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, false), nil, &resp)
 	return
 }
 
-// ListObjectsBatched returns the same events as ListObjects but lists object
-// references and fetches their slabs in concurrent batches, which is
-// considerably faster for pages of large objects. If an object is deleted
-// between the two steps the page is fetched again, so a page shorter than
-// limit still marks the end of the results. Slabs already fetched are reused
-// across retries, so their sectors may predate the final listing.
-func (c *Client) ListObjectsBatched(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error) {
-	slabsByID := make(map[slabs.SlabID]slabs.PinnedSlab)
+// ObjectSlabs returns a page of the object's slab slices, starting at slice
+// index cursor. A page shorter than limit is the last one.
+func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objectID types.Hash256, cursor int64, limit int) (resp []slabs.SlabSlice, err error) {
+	values := url.Values{}
+	values.Set("cursor", fmt.Sprint(cursor))
+	values.Set("limit", fmt.Sprint(limit))
+	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, fmt.Sprintf("/objects/%s/slabs?%s", objectID, values.Encode()), nil, &resp)
+	return
+}
+
+// ListObjectsWithSlabPagination returns one page of object events, fetching
+// each object's slab slices in separate requests. Objects are fetched
+// concurrently. If an object is deleted or blocked during fetching, the event
+// page is listed again. A page shorter than limit marks the end of the results.
+func (c *Client) ListObjectsWithSlabPagination(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error) {
 	for attempts := 0; ; attempts++ {
-		refs, err := c.ListObjectReferences(ctx, appKey, cursor, limit)
+		withoutSlabs, err := c.ListObjectsWithoutSlabs(ctx, appKey, cursor, limit)
 		if err != nil {
 			return nil, err
 		}
 
-		seen := make(map[slabs.SlabID]struct{})
-		var missing []slabs.SlabID
-		for _, event := range refs {
-			if event.Object == nil {
-				continue
-			}
-			for _, slab := range event.Object.Slabs {
-				if _, ok := slabsByID[slab.ID]; ok {
-					continue
-				} else if _, ok := seen[slab.ID]; ok {
-					continue
-				}
-				seen[slab.ID] = struct{}{}
-				missing = append(missing, slab.ID)
-			}
-		}
-		fetched, err := c.fetchSlabs(ctx, appKey, missing)
-		if err != nil {
+		events, err := c.fetchEventSlabs(ctx, appKey, withoutSlabs)
+		if err == nil {
+			return events, nil
+		} else if !errors.Is(err, errObjectUnavailable) || attempts >= maxListRetries {
 			return nil, err
 		}
-		maps.Copy(slabsByID, fetched)
-		if len(fetched) == len(missing) {
-			return expandEvents(refs, slabsByID), nil
-		} else if attempts >= maxListRetries {
-			return nil, fmt.Errorf("failed to fetch all referenced slabs: got %d/%d", len(fetched), len(missing))
-		}
-		// an object was deleted between the two steps; back off before
-		// fetching the page again
+		// back off before listing the page again
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()

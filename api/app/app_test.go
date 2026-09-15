@@ -435,27 +435,31 @@ func TestApplicationAPI(t *testing.T) {
 	}
 	obj1 := *objs[0].Object
 
-	batched, err := client.ListObjectsBatched(context.Background(), sk, slabs.Cursor{}, 100)
+	paginated, err := client.ListObjectsWithSlabPagination(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
-	} else if !reflect.DeepEqual(batched, objs) {
-		t.Fatalf("expected batched listing %+v, got %+v", objs, batched)
+	} else if !reflect.DeepEqual(paginated, objs) {
+		t.Fatalf("expected listing with slab pagination %+v, got %+v", objs, paginated)
 	}
 
-	refs, err := client.ListObjectReferences(context.Background(), sk, slabs.Cursor{}, 100)
+	withoutSlabs, err := client.ListObjectsWithoutSlabs(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(refs) != 1 || refs[0].Object == nil {
-		t.Fatalf("expected 1 object event reference, got %+v", refs)
-	} else if !reflect.DeepEqual(refs[0].Object.Slabs, obj1.PinRequest().Slabs) {
-		t.Fatalf("expected slab references %+v, got %+v", obj1.PinRequest().Slabs, refs[0].Object.Slabs)
+	} else if len(withoutSlabs) != 1 || withoutSlabs[0].Object == nil {
+		t.Fatalf("expected 1 object event, got %+v", withoutSlabs)
+	} else if !withoutSlabs[0].Object.UpdatedAt.Equal(obj1.UpdatedAt) {
+		t.Fatalf("expected update time %v, got %v", obj1.UpdatedAt, withoutSlabs[0].Object.UpdatedAt)
 	}
 
-	batch, err := client.Slabs(context.Background(), sk, []slabs.SlabID{slabID2, slabs.SlabID(frand.Entropy256()), slabID1})
+	page, err := client.ObjectSlabs(context.Background(), sk, withoutSlabs[0].Key, 0, 100)
 	if err != nil {
 		t.Fatal(err)
-	} else if len(batch) != 2 || batch[0].ID != slabID2 || batch[1].ID != slabID1 {
-		t.Fatalf("expected pinned slabs in request order, got %+v", batch)
+	} else if !reflect.DeepEqual(page, obj1.Slabs) {
+		t.Fatalf("expected slabs %+v, got %+v", obj1.Slabs, page)
+	} else if page, err := client.ObjectSlabs(context.Background(), sk, withoutSlabs[0].Key, int64(len(obj1.Slabs)), 100); err != nil {
+		t.Fatal(err)
+	} else if len(page) != 0 {
+		t.Fatalf("expected no slabs past the end, got %+v", page)
 	}
 
 	if objs, err := client.ListObjects(context.Background(), sk, slabs.Cursor{

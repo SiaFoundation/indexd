@@ -126,107 +126,52 @@ func (s *Store) Slab(slabID slabs.SlabID) (slab slabs.Slab, err error) {
 
 // PinnedSlab retrieves a slab currently pinned by the account by its ID. A slab
 // the account has unpinned is not returned, even if its row still exists pending
-// the background prune. It returns ErrUnrecoverable if fewer sectors are still
-// available than the slab's minimum shards.
+// the background prune.
 func (s *Store) PinnedSlab(account proto.Account, slabID slabs.SlabID) (slab slabs.PinnedSlab, err error) {
+	slab.ID = slabID
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		result, err := loadPinnedSlabs(ctx, tx, account, []slabs.SlabID{slabID})
-		if err != nil {
-			return err
-		} else if len(result) == 0 {
-			return slabs.ErrSlabNotFound
-		}
-		slab = result[0]
+		slab.Sectors = slab.Sectors[:0] // reuse same slice if transaction retries
 
-		available := 0
-		for _, sector := range slab.Sectors {
-			if sector.HostKey != (types.PublicKey{}) {
-				available++
-			}
-		}
-		if available < int(slab.MinShards) {
-			return fmt.Errorf("recovery requires at least %d sectors, slab has %d available sectors: %w", slab.MinShards, available, slabs.ErrUnrecoverable)
-		}
-		return nil
-	})
-	return
-}
-
-// PinnedSlabs retrieves the slabs currently pinned by the account in request
-// order, omitting slabs the account has not pinned. Unlike PinnedSlab, it does
-// not check that the slabs are still recoverable.
-func (s *Store) PinnedSlabs(account proto.Account, slabIDs []slabs.SlabID) (result []slabs.PinnedSlab, err error) {
-	if len(slabIDs) == 0 {
-		return nil, nil
-	}
-	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		pinned, err := loadPinnedSlabs(ctx, tx, account, slabIDs)
-		if err != nil {
-			return err
-		}
-		result = pinned
-		return nil
-	})
-	return
-}
-
-// loadPinnedSlabs returns the slabs the account has pinned, in request order.
-func loadPinnedSlabs(ctx context.Context, tx *txn, account proto.Account, slabIDs []slabs.SlabID) ([]slabs.PinnedSlab, error) {
-	sqlSlabIDs := make([]sqlHash256, len(slabIDs))
-	for i, slabID := range slabIDs {
-		sqlSlabIDs[i] = sqlHash256(slabID)
-	}
-
-	// require an account_slabs association so an unpinned slab is omitted
-	slabsByID := make(map[slabs.SlabID]*slabs.PinnedSlab, len(slabIDs))
-	slabsByDBID := make(map[int64]*slabs.PinnedSlab, len(slabIDs))
-	dbIDs := make([]int64, 0, len(slabIDs))
-	rows, err := tx.Query(ctx, `
-		SELECT s.id, s.digest, s.encryption_key, s.min_shards, s.version
-		FROM slabs s
-		JOIN account_slabs a ON a.slab_id = s.id
-		JOIN accounts acc ON acc.id = a.account_id
-		WHERE acc.public_key = $1 AND s.digest = ANY($2::bytea[])
-	`, sqlPublicKey(account), sqlSlabIDs)
-	if err != nil {
-		return nil, fmt.Errorf("failed to query pinned slabs: %w", err)
-	}
-	err = forEachRow(rows, func(row pgx.CollectableRow) error {
+		// require an account_slabs association so an unpinned slab reads as not found
 		var dbID int64
-		var slab slabs.PinnedSlab
-		if err := row.Scan(&dbID, (*sqlHash256)(&slab.ID), (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Version); err != nil {
-			return err
+		err = tx.QueryRow(ctx, `SELECT s.id, s.encryption_key, s.min_shards, s.version
+FROM slabs s
+JOIN account_slabs a ON a.slab_id = s.id
+JOIN accounts acc ON acc.id = a.account_id
+WHERE s.digest = $1 AND acc.public_key = $2`, sqlHash256(slabID), sqlPublicKey(account)).Scan(
+			&dbID, (*sqlHash256)(&slab.EncryptionKey), &slab.MinShards, &slab.Version)
+		if errors.Is(err, sql.ErrNoRows) {
+			return slabs.ErrSlabNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to get slab %q: %w", slabID, err)
 		}
-		slabsByID[slab.ID] = &slab
-		slabsByDBID[dbID] = &slab
-		dbIDs = append(dbIDs, dbID)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan pinned slabs: %w", err)
-	} else if len(dbIDs) == 0 {
-		return nil, nil
-	}
 
-	err = forEachSlabSector(ctx, tx, dbIDs, func(dbID int64, sector slabs.PinnedSector) error {
-		slab, ok := slabsByDBID[dbID]
-		if !ok {
-			return fmt.Errorf("queried sector for unknown slab (developer error): %d", dbID)
+		rows, err := tx.Query(ctx, `SELECT s.sector_root, h.public_key
+FROM slab_sectors ss
+INNER JOIN sectors s ON (s.id = ss.sector_id)
+LEFT JOIN hosts h ON (h.id = s.host_id)
+WHERE ss.slab_id = $1 AND s.host_id IS NOT NULL
+ORDER BY ss.slab_index ASC`, dbID)
+		if err != nil {
+			return fmt.Errorf("failed to get slab sectors: %w", err)
 		}
-		slab.Sectors = append(slab.Sectors, sector)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
+		defer rows.Close()
 
-	result := make([]slabs.PinnedSlab, 0, len(slabIDs))
-	for _, slabID := range slabIDs {
-		if slab, ok := slabsByID[slabID]; ok {
-			result = append(result, *slab)
+		for rows.Next() {
+			var sector slabs.PinnedSector
+
+			if err := rows.Scan((*sqlHash256)(&sector.Root), (*sqlPublicKey)(&sector.HostKey)); err != nil {
+				return fmt.Errorf("failed to scan sector: %w", err)
+			}
+			slab.Sectors = append(slab.Sectors, sector)
 		}
-	}
-	return result, nil
+
+		if len(slab.Sectors) < int(slab.MinShards) {
+			return fmt.Errorf("recovery requires at least %d sectors, slab has %d sectors: %w", slab.MinShards, len(slab.Sectors), slabs.ErrUnrecoverable)
+		}
+		return rows.Err()
+	})
+	return
 }
 
 // PruneSlabs unpins all of a user's slabs that are not currently connected to

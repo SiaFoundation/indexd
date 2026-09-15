@@ -476,7 +476,7 @@ func TestListObjectsRegression(t *testing.T) {
 	}
 }
 
-func TestListObjectReferences(t *testing.T) {
+func TestListObjectsWithoutSlabs(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 	acc := proto.Account{1}
 	store.addTestAccount(t, types.PublicKey(acc))
@@ -509,7 +509,7 @@ func TestListObjectReferences(t *testing.T) {
 
 	store.publishEvents(t)
 
-	events, err := store.ListObjectReferences(acc, slabs.Cursor{}, 10)
+	events, err := store.ListObjectsWithoutSlabs(acc, slabs.Cursor{}, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(events) != 1 {
@@ -517,19 +517,17 @@ func TestListObjectReferences(t *testing.T) {
 	} else if events[0].Key != obj.ID() || events[0].Deleted || events[0].UpdatedAt.IsZero() {
 		t.Fatalf("unexpected event: %+v", events[0])
 	} else if events[0].Object == nil {
-		t.Fatal("expected an object reference")
+		t.Fatal("expected an object without slabs")
 	}
 
-	ref := events[0].Object
-	if ref.ID() != obj.ID() {
-		t.Fatalf("expected object ID %v, got %v", obj.ID(), ref.ID())
-	} else if !reflect.DeepEqual(ref.Slabs, obj.PinRequest().Slabs) {
-		t.Fatalf("expected slab references %+v, got %+v", obj.PinRequest().Slabs, ref.Slabs)
-	} else if !bytes.Equal(ref.EncryptedDataKey, obj.EncryptedDataKey) ||
-		!bytes.Equal(ref.EncryptedMetadataKey, obj.EncryptedMetadataKey) ||
-		!bytes.Equal(ref.EncryptedMetadata, obj.EncryptedMetadata) ||
-		ref.DataSignature != obj.DataSignature || ref.MetadataSignature != obj.MetadataSignature {
-		t.Fatal("expected object reference to preserve the object's metadata")
+	withoutSlabs := events[0].Object
+	if withoutSlabs.UpdatedAt.IsZero() || withoutSlabs.CreatedAt.IsZero() {
+		t.Fatalf("expected the object's timestamps, got %+v", withoutSlabs)
+	} else if !bytes.Equal(withoutSlabs.EncryptedDataKey, obj.EncryptedDataKey) ||
+		!bytes.Equal(withoutSlabs.EncryptedMetadataKey, obj.EncryptedMetadataKey) ||
+		!bytes.Equal(withoutSlabs.EncryptedMetadata, obj.EncryptedMetadata) ||
+		withoutSlabs.DataSignature != obj.DataSignature || withoutSlabs.MetadataSignature != obj.MetadataSignature {
+		t.Fatal("expected the object without slabs to preserve keys, signatures, and metadata")
 	}
 
 	if err := store.DeleteObject(acc, obj.ID()); err != nil {
@@ -537,11 +535,93 @@ func TestListObjectReferences(t *testing.T) {
 	}
 	store.publishEvents(t)
 
-	events, err = store.ListObjectReferences(acc, slabs.Cursor{}, 10)
+	events, err = store.ListObjectsWithoutSlabs(acc, slabs.Cursor{}, 10)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(events) != 1 || !events[0].Deleted || events[0].Object != nil {
 		t.Fatalf("expected a deletion event, got %+v", events)
+	}
+}
+
+func TestObjectSlabs(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	acc := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+	other := proto.Account{2}
+	store.addTestAccount(t, types.PublicKey(other))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	params := []slabs.SlabPinParams{
+		{
+			Version:       1,
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors: []slabs.PinnedSector{
+				{Root: frand.Entropy256(), HostKey: hk},
+				{Root: frand.Entropy256(), HostKey: hk},
+			},
+		},
+		{
+			EncryptionKey: frand.Entropy256(),
+			MinShards:     1,
+			Sectors: []slabs.PinnedSector{
+				{Root: frand.Entropy256(), HostKey: hk},
+			},
+		},
+	}
+	store.pinTestSlabs(t, acc, params...)
+
+	// the first slab is referenced twice in a row, which the cursor must
+	// distinguish by position rather than by slab ID
+	expected := []slabs.SlabSlice{
+		params[0].Slice(0, 10),
+		params[0].Slice(10, 20),
+		params[1].Slice(20, 30),
+	}
+	obj := store.pinRandomObject(t, acc, expected)
+
+	// the whole object in one page
+	page, err := store.ObjectSlabs(acc, obj.ID(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(page, expected) {
+		t.Fatalf("expected slabs %+v, got %+v", expected, page)
+	}
+
+	// page through the object, asserting the cursor picks up where the last
+	// page left off
+	var paged []slabs.SlabSlice
+	for {
+		page, err = store.ObjectSlabs(acc, obj.ID(), int64(len(paged)), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		paged = append(paged, page...)
+		if len(page) < 2 {
+			break
+		}
+	}
+	if !reflect.DeepEqual(paged, expected) {
+		t.Fatalf("expected slabs %+v, got %+v", expected, paged)
+	}
+
+	// a cursor past the end returns nothing
+	if page, err := store.ObjectSlabs(acc, obj.ID(), int64(len(expected)), 10); err != nil {
+		t.Fatal(err)
+	} else if len(page) != 0 {
+		t.Fatalf("expected no slabs, got %+v", page)
+	}
+
+	// another account's object is not visible
+	if _, err := store.ObjectSlabs(other, obj.ID(), 0, 10); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+
+	if err := store.DeleteObject(acc, obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.ObjectSlabs(acc, obj.ID(), 0, 10); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
 }
 

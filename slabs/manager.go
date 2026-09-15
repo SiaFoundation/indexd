@@ -128,7 +128,6 @@ type (
 		RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error
 		SectorsForIntegrityCheck(hostKey types.PublicKey, limit int) ([]types.Hash256, error)
 		PinnedSlab(account proto.Account, slabID SlabID) (PinnedSlab, error)
-		PinnedSlabs(account proto.Account, slabIDs []SlabID) ([]PinnedSlab, error)
 		Slab(slabID SlabID) (slab Slab, err error)
 		Slabs(account proto.Account, slabIDs []SlabID) ([]Slab, error)
 		SlabIDs(account proto.Account, offset, limit int) ([]SlabID, error)
@@ -142,7 +141,8 @@ type (
 		DeleteObject(account proto.Account, objectKey types.Hash256) error
 		PinObject(account proto.Account, obj PinObjectRequest) error
 		ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
-		ListObjectReferences(account proto.Account, cursor Cursor, limit int) ([]ObjectEventReference, error)
+		ListObjectsWithoutSlabs(account proto.Account, cursor Cursor, limit int) ([]ObjectEventWithoutSlabs, error)
+		ObjectSlabs(account proto.Account, key types.Hash256, cursor int64, limit int) ([]SlabSlice, error)
 		ObjectStats() (ObjectStats, error)
 		PublishObjectEvents() error
 		SharedObject(key types.Hash256) (SharedObject, error)

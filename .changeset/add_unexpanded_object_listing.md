@@ -2,5 +2,4 @@
 default: minor
 ---
 
-# Add unexpanded object listing and batch slab fetching
-
+# Add object listing without slab slices and object slab-slice pagination

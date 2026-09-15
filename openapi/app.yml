@@ -139,11 +139,12 @@ paths:
           schema:
             type: string
             format: date-time
-        - name: expandslabs
+        - name: includeslabs
           in: query
           description: >
-            Whether to expand each object's slabs into their sectors. When false, slabs are
-            referenced by ID and can be fetched in batches with `POST /slabs/batch`.
+            Whether to include each object's slab slices. When false, the objects
+            are returned without their slabs, which are paginated separately with
+            `GET /objects/{key}/slabs`.
           schema:
             type: boolean
             default: true
@@ -155,13 +156,13 @@ paths:
               schema:
                 anyOf:
                   - type: array
-                    description: Object events with expanded slabs (expandslabs=true)
+                    description: Object events with slab slices (includeslabs=true)
                     items:
                       $ref: "#/components/schemas/ObjectEvent"
                   - type: array
-                    description: Object events with slab references (expandslabs=false)
+                    description: Object events without their slabs (includeslabs=false)
                     items:
-                      $ref: "#/components/schemas/ObjectEventReference"
+                      $ref: "#/components/schemas/ObjectEventWithoutSlabs"
     post:
       tags:
         - objects
@@ -220,6 +221,53 @@ paths:
           description: Object deleted successfully
         "404":
           description: Object not found
+  /objects/{key}/slabs:
+    get:
+      tags:
+        - objects
+      summary: List an object's slab slices
+      description: >
+        Returns a page of the object's slab slices. The cursor is the index of the first
+        slice to return, so repeated references to the same slab paginate correctly.
+        A page shorter than the limit is the last one. The object ID commits to the
+        ordered slab IDs, offsets, and lengths. Sector host keys may change as sectors
+        are migrated or lost.
+      operationId: listObjectSlabs
+      parameters:
+        - name: key
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hash256"
+        - name: cursor
+          in: query
+          description: The index of the first slab slice to return
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: The maximum number of slab slices to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: A page of the object's slab slices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabSlice"
+        "404":
+          description: Object not found
+        "451":
+          description: The object is on the indexer's blocklist
+
   /objects/{key}/shared:
     get:
       tags:
@@ -797,39 +845,6 @@ paths:
         "200":
           description: Slabs pruned successfully
 
-  /slabs/batch:
-    post:
-      tags:
-        - slabs
-      summary: Get details of multiple pinned slabs
-      description: >
-        Fetches multiple pinned slabs by ID in one request, for example the slab references
-        returned by `GET /objects?expandslabs=false`. Slabs the account has not pinned are omitted.
-        Unlike `GET /slabs/{slabid}`, a slab with too few available sectors left to recover it is
-        still returned rather than rejected.
-      operationId: getSlabs
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: array
-              maxItems: 500
-              items:
-                $ref: "#/components/schemas/SlabID"
-      responses:
-        "200":
-          description: The pinned slabs in request order, or null if none of the requested slabs are pinned
-          content:
-            application/json:
-              schema:
-                type: array
-                nullable: true
-                items:
-                  $ref: "#/components/schemas/PinnedSlab"
-        "400":
-          description: Too many slab IDs requested
-
   /auth/connect:
     post:
       tags:
@@ -1115,10 +1130,10 @@ components:
       $ref: "./components.yml#/components/schemas/SealedObject"
     ObjectEvent:
       $ref: "./components.yml#/components/schemas/ObjectEvent"
-    ObjectEventReference:
-      $ref: "./components.yml#/components/schemas/ObjectEventReference"
-    SealedObjectReference:
-      $ref: "./components.yml#/components/schemas/SealedObjectReference"
+    ObjectEventWithoutSlabs:
+      $ref: "./components.yml#/components/schemas/ObjectEventWithoutSlabs"
+    SealedObjectWithoutSlabs:
+      $ref: "./components.yml#/components/schemas/SealedObjectWithoutSlabs"
     PinnedSlab:
       $ref: "./components.yml#/components/schemas/PinnedSlab"
     PublicKey:

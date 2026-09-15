@@ -428,12 +428,16 @@ components:
         hostKey:
           allOf:
             - $ref: "#/components/schemas/PublicKey"
-            - description: The public key of the host storing the sector, or zero if the sector has been lost
+            - description: The public key of the host storing the sector
 
-    SlabParams:
+    PinnedSlab:
       type: object
-      description: The version, encryption key, minimum shards and sectors that determine a slab's ID
+      description: A slab that has been pinned to hosts
       properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/SlabID"
+            - description: The ID of the slab
         version:
           type: integer
           format: uint8
@@ -451,19 +455,6 @@ components:
           items:
             $ref: "#/components/schemas/PinnedSector"
           description: The sectors of the slab in order
-
-    PinnedSlab:
-      type: object
-      description: >
-        A slab that has been pinned to hosts. Lost sectors are kept in place with a zero
-        host key so the sector roots always reproduce the slab's ID.
-      allOf:
-        - $ref: "#/components/schemas/SlabParams"
-      properties:
-        id:
-          allOf:
-            - $ref: "#/components/schemas/SlabID"
-            - description: The ID of the slab
 
     Sector:
       type: object
@@ -658,19 +649,16 @@ components:
             - $ref: "#/components/schemas/SealedObject"
             - description: The object, if it exists
 
-    SealedObjectReference:
+    SealedObjectWithoutSlabs:
       type: object
-      description: A sealed object whose slabs are referenced by ID instead of being expanded into their sectors
+      description: >
+        A sealed object without its slabs, which are paginated separately with
+        `GET /objects/{key}/slabs`
       properties:
         encryptedDataKey:
           type: string
           format: byte
           description: The encrypted data key used to encrypt and decrypt the object's data
-        slabs:
-          type: array
-          items:
-            $ref: "#/components/schemas/ObjectSlab"
-          description: The slabs that make up the object, which can be fetched with `POST /slabs/batch`
         dataSignature:
           $ref: "#/components/schemas/Signature"
         encryptedMetadataKey:
@@ -692,9 +680,9 @@ components:
           format: date-time
           description: The time the object was last updated
 
-    ObjectEventReference:
+    ObjectEventWithoutSlabs:
       type: object
-      description: An object event whose object references its slabs by ID
+      description: An object event whose object is returned without its slabs
       properties:
         key:
           allOf:
@@ -706,10 +694,10 @@ components:
         updatedAt:
           type: string
           format: date-time
-          description: Last time the object was created, updated, or deleted.
+          description: The timestamp component of the event's position in the stream. Pair it with the event's key to paginate. Use the nested object's updatedAt for its modification time.
         object:
           allOf:
-            - $ref: "#/components/schemas/SealedObjectReference"
+            - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
             - description: The object, if it exists
 
     BlockedObject:
@@ -754,9 +742,24 @@ components:
     SlabSlice:
       type: object
       description: A slice of a slab that is part of an object
-      allOf:
-        - $ref: "#/components/schemas/SlabParams"
       properties:
+        version:
+          type: integer
+          format: uint8
+          description: The slab encoding version, folded into the slab ID for versions greater than 0
+        encryptionKey:
+          allOf:
+            - $ref: "#/components/schemas/EncryptionKey"
+            - description: The encryption key used for the slab
+        minShards:
+          type: integer
+          format: uint64
+          description: The minimum number of shards required to reconstruct the slab
+        sectors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PinnedSector"
+          description: The sectors of the slab in order
         offset:
           type: integer
           format: uint32

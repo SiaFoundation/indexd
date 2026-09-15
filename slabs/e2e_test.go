@@ -170,11 +170,6 @@ func assertSectorMigrated(t *testing.T, cluster *testutils.Cluster, sk types.Pri
 		} else if pinned.Sectors[0].Root != roots[0] || pinned.Sectors[0].HostKey != cluster.Hosts[14].PublicKey() {
 			return fmt.Errorf("expected sector %s on host %s, got %s on host %s", roots[0], cluster.Hosts[14].PublicKey(), pinned.Sectors[0].Root, pinned.Sectors[0].HostKey)
 		}
-		for i, sector := range pinned.Sectors {
-			if sector.HostKey == (types.PublicKey{}) {
-				return fmt.Errorf("sector %d is not pinned", i)
-			}
-		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)

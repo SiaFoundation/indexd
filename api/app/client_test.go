@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -83,193 +87,276 @@ func TestDoRequestHTTPError(t *testing.T) {
 	}
 }
 
-func TestListObjectsBatched(t *testing.T) {
-	const numSlabs = 2*api.MaxLimit + 1
-	pinned := make(map[slabs.SlabID]slabs.PinnedSlab, numSlabs+1)
-	newSlab := func() slabs.PinnedSlab {
-		slab := slabs.PinnedSlab{
-			EncryptionKey: frand.Entropy256(),
-			MinShards:     1,
-			Sectors: []slabs.PinnedSector{{
-				Root:    frand.Entropy256(),
-				HostKey: types.PublicKey{1},
-			}},
-		}
-		slab.ID = slab.Slice(0, 1).Digest()
-		pinned[slab.ID] = slab
-		return slab
-	}
-	refs := make([]slabs.ObjectSlab, numSlabs)
-	for i := range refs {
-		refs[i] = slabs.ObjectSlab{
-			ID:     newSlab().ID,
-			Offset: uint32(i),
-			Length: uint32(i + 1),
-		}
-	}
-	// unpinned between listing the references and fetching the slabs
-	unpinned := slabs.ObjectSlab{ID: slabs.SlabID(frand.Entropy256()), Length: 1}
-	// replaces the deleted object when the page is fetched again
-	extra := slabs.ObjectSlab{ID: newSlab().ID, Length: 1}
+// objectSlabsResponse describes a response from the object slab-slice endpoint.
+type objectSlabsResponse struct {
+	key    types.Hash256
+	slabs  []slabs.SlabSlice
+	status int // served instead of the slabs when non-zero
+}
 
-	var listings, requests, requested, inflight atomic.Int64
-	var concurrent atomic.Bool
-	overlap := make(chan struct{}) // closed once two slab requests are in flight at the same time
-	var closeOverlap sync.Once
+// newObjectSlabsResponse builds n slab slices and computes their object ID.
+func newObjectSlabsResponse(n int) *objectSlabsResponse {
+	obj := new(objectSlabsResponse)
+	for i := range n {
+		obj.slabs = append(obj.slabs, newTestSlabSlice(i))
+	}
+	obj.key = slabs.ObjectID(obj.slabs)
+	return obj
+}
+
+func newTestSlabSlice(i int) slabs.SlabSlice {
+	return slabs.SlabSlice{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: types.PublicKey{1},
+		}},
+		Offset: uint32(i),
+		Length: uint32(i + 1),
+	}
+}
+
+// slabsRoute is the route the client uses to page through an object's slabs.
+func slabsRoute(key types.Hash256) string {
+	return fmt.Sprintf("/objects/%s/slabs", key)
+}
+
+// serveObjectSlabs serves a page of the object's slabs, mirroring the handler.
+func serveObjectSlabs(t *testing.T, w http.ResponseWriter, r *http.Request, obj *objectSlabsResponse) {
+	t.Helper()
+	if obj == nil {
+		http.Error(w, "object not found", http.StatusNotFound)
+		return
+	} else if obj.status != 0 {
+		http.Error(w, http.StatusText(obj.status), obj.status)
+		return
+	}
+	cursor, err := strconv.Atoi(r.URL.Query().Get("cursor"))
+	if err != nil || cursor < 0 {
+		t.Errorf("invalid cursor %q: %v", r.URL.Query().Get("cursor"), err)
+		http.Error(w, "invalid cursor", http.StatusBadRequest)
+		return
+	}
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil || limit < 1 || limit > api.MaxLimit {
+		t.Errorf("unexpected limit %q: %v", r.URL.Query().Get("limit"), err)
+		http.Error(w, "bad limit", http.StatusBadRequest)
+		return
+	}
+	page := []slabs.SlabSlice{}
+	if cursor < len(obj.slabs) {
+		page = obj.slabs[cursor:min(cursor+limit, len(obj.slabs))]
+	}
+	w.Header().Set("Content-Type", applicationJSON)
+	json.NewEncoder(w).Encode(page)
+}
+
+func TestListObjectsWithSlabPagination(t *testing.T) {
+	// the large object's slab slices span three pages
+	large := newObjectSlabsResponse(2*api.MaxLimit + 1)
+	// deleted between listing the events and fetching its slab slices
+	deleted := &objectSlabsResponse{key: types.Hash256{2}, status: http.StatusNotFound}
+	// replaces the deleted object when the page is listed again
+	extra := newObjectSlabsResponse(1)
+
+	// keys[2] is a deletion event, so its slabs are never fetched
+	keys := []types.Hash256{large.key, deleted.key, {3}, extra.key}
+	objects := map[string]*objectSlabsResponse{
+		slabsRoute(large.key):   large,
+		slabsRoute(deleted.key): deleted,
+		slabsRoute(extra.key):   extra,
+	}
+
+	var listings atomic.Int64
+	// hold the not-found response until the large object's last page to
+	// verify that object slab slices are fetched concurrently
+	largeDone := make(chan struct{})
+	var closeLargeDone sync.Once
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", applicationJSON)
-		switch r.URL.Path {
-		case "/objects":
-			if got := r.URL.Query().Get("expandslabs"); got != "false" {
-				t.Errorf("expected expandslabs=false, got %q", got)
+		switch {
+		case r.URL.Path == "/objects":
+			if got := r.URL.Query().Get("includeslabs"); got != "false" {
+				t.Errorf("expected includeslabs=false, got %q", got)
 			}
-			events := []slabs.ObjectEventReference{
-				{Key: types.Hash256{1}, Object: &slabs.SealedObjectReference{Slabs: refs}},
-				{Key: types.Hash256{2}, Object: &slabs.SealedObjectReference{Slabs: []slabs.ObjectSlab{unpinned}}},
-				{Key: types.Hash256{3}, Deleted: true},
+			events := []slabs.ObjectEventWithoutSlabs{
+				{Key: keys[0], Object: new(slabs.SealedObjectWithoutSlabs)},
+				{Key: keys[1], Object: new(slabs.SealedObjectWithoutSlabs)},
+				{Key: keys[2], Deleted: true},
 			}
 			if listings.Add(1) > 1 {
-				events = []slabs.ObjectEventReference{
+				events = []slabs.ObjectEventWithoutSlabs{
 					events[0],
 					events[2],
-					{Key: types.Hash256{4}, Object: &slabs.SealedObjectReference{Slabs: []slabs.ObjectSlab{extra}}},
+					{Key: keys[3], Object: new(slabs.SealedObjectWithoutSlabs)},
 				}
 			}
+			w.Header().Set("Content-Type", applicationJSON)
 			json.NewEncoder(w).Encode(events)
-		case "/slabs/batch":
-			var ids []slabs.SlabID
-			if err := json.NewDecoder(r.Body).Decode(&ids); err != nil {
-				t.Errorf("failed to decode slab IDs: %v", err)
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			} else if len(ids) > api.MaxLimit {
-				t.Errorf("too many slab IDs: %d", len(ids))
-				w.WriteHeader(http.StatusBadRequest)
-				return
-			}
-			requests.Add(1)
-			requested.Add(int64(len(ids)))
-			if inflight.Add(1) > 1 {
-				closeOverlap.Do(func() {
-					concurrent.Store(true)
-					close(overlap)
-				})
-			}
-			// hold the response until another slab request overlaps this one
-			select {
-			case <-overlap:
-			case <-time.After(time.Second):
-			}
-			inflight.Add(-1)
-
-			var resp []slabs.PinnedSlab
-			for _, id := range ids {
-				if slab, ok := pinned[id]; ok {
-					if listings.Load() > 1 {
-						// migrated after the first page was listed
-						slab.Sectors = []slabs.PinnedSector{{Root: slab.Sectors[0].Root, HostKey: types.PublicKey{2}}}
-					}
-					resp = append(resp, slab)
+		case strings.HasSuffix(r.URL.Path, "/slabs"):
+			obj := objects[r.URL.Path]
+			if obj == deleted {
+				// hold the deletion back until the large object has been
+				// paged so the two objects are known to overlap
+				select {
+				case <-largeDone:
+				case <-time.After(time.Second):
+					t.Error("expected objects to be fetched concurrently")
 				}
 			}
-			json.NewEncoder(w).Encode(resp)
+			serveObjectSlabs(t, w, r, obj)
+			if obj == large && r.URL.Query().Get("cursor") == strconv.Itoa(2*api.MaxLimit) {
+				closeLargeDone.Do(func() { close(largeDone) })
+			}
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer srv.Close()
 
-	client := NewClient(srv.URL)
-	events, err := client.ListObjectsBatched(t.Context(), types.GeneratePrivateKey(), slabs.Cursor{}, 3)
+	events, err := NewClient(srv.URL).ListObjectsWithSlabPagination(t.Context(), types.GeneratePrivateKey(), slabs.Cursor{}, 3)
 	if err != nil {
 		t.Fatal(err)
 	} else if listings.Load() != 2 {
 		t.Fatalf("expected 2 listings, got %d", listings.Load())
 	} else if len(events) != 3 {
 		t.Fatalf("expected a full page, got %+v", events)
-	} else if events[0].Key != (types.Hash256{1}) || events[0].Object == nil {
+	} else if events[0].Key != keys[0] || events[0].Object == nil {
 		t.Fatalf("unexpected first event: %+v", events[0])
-	} else if events[1].Key != (types.Hash256{3}) || !events[1].Deleted || events[1].Object != nil {
+	} else if events[1].Key != keys[2] || !events[1].Deleted || events[1].Object != nil {
 		t.Fatalf("unexpected second event: %+v", events[1])
-	} else if events[2].Key != (types.Hash256{4}) || events[2].Object == nil || len(events[2].Object.Slabs) != 1 || events[2].Object.Slabs[0].Digest() != extra.ID {
+	} else if events[2].Key != keys[3] || events[2].Object == nil {
 		t.Fatalf("unexpected third event: %+v", events[2])
-	} else if len(events[0].Object.Slabs) != numSlabs {
-		t.Fatalf("expected %d slabs, got %d", numSlabs, len(events[0].Object.Slabs))
-	} else if requests.Load() != 4 || requested.Load() != numSlabs+2 {
-		t.Fatalf("expected 4 requests fetching %d slabs, got %d requests fetching %d", numSlabs+2, requests.Load(), requested.Load())
-	} else if !concurrent.Load() {
-		t.Fatal("expected slabs to be fetched concurrently")
-	}
-	for i, slab := range events[0].Object.Slabs {
-		if slab.Digest() != refs[i].ID || slab.Offset != refs[i].Offset || slab.Length != refs[i].Length {
-			t.Fatalf("unexpected slab %d: %+v", i, slab)
-		} else if slab.Sectors[0].HostKey != (types.PublicKey{1}) {
-			t.Fatalf("expected slab %d to be reused from the first attempt, got host %v", i, slab.Sectors[0].HostKey)
-		}
-	}
-	// only the slab missing from the cache was fetched after the retry, so it
-	// alone reflects the migration
-	if hk := events[2].Object.Slabs[0].Sectors[0].HostKey; hk != (types.PublicKey{2}) {
-		t.Fatalf("expected the slab fetched after the retry to reflect the migration, got host %v", hk)
+	} else if !reflect.DeepEqual(events[0].Object.Slabs, large.slabs) {
+		t.Fatalf("expected %d slabs, got %d", len(large.slabs), len(events[0].Object.Slabs))
+	} else if !reflect.DeepEqual(events[2].Object.Slabs, extra.slabs) {
+		t.Fatalf("unexpected slabs for the third event: %+v", events[2].Object.Slabs)
 	}
 }
 
-func TestListObjectsBatchedMissingSlabs(t *testing.T) {
-	var listings atomic.Int64
-	missing := slabs.ObjectSlab{ID: slabs.SlabID(frand.Entropy256()), Length: 1}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", applicationJSON)
-		switch r.URL.Path {
-		case "/objects":
-			listings.Add(1)
-			json.NewEncoder(w).Encode([]slabs.ObjectEventReference{{
-				Key:    types.Hash256{1},
-				Object: &slabs.SealedObjectReference{Slabs: []slabs.ObjectSlab{missing}},
-			}})
-		case "/slabs/batch":
-			json.NewEncoder(w).Encode([]slabs.PinnedSlab(nil))
-		default:
-			http.NotFound(w, r)
-		}
-	}))
-	defer srv.Close()
+// handlerTransport serves requests in memory so retry tests can use fake time.
+type handlerTransport struct {
+	http.Handler
+}
 
-	start := time.Now()
-	_, err := NewClient(srv.URL).ListObjectsBatched(t.Context(), types.GeneratePrivateKey(), slabs.Cursor{}, 1)
-	if err == nil || !strings.Contains(err.Error(), "failed to fetch all referenced slabs") {
-		t.Fatalf("expected missing slabs error, got %v", err)
-	} else if listings.Load() != 4 {
-		t.Fatalf("expected 4 listing attempts, got %d", listings.Load())
-	} else if elapsed := time.Since(start); elapsed < 700*time.Millisecond {
-		t.Fatalf("expected the retries to back off, got %v", elapsed)
+func (tr handlerTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	w := httptest.NewRecorder()
+	tr.ServeHTTP(w, r)
+	return w.Result(), nil
+}
+
+func TestListObjectsWithSlabPaginationObjectUnavailable(t *testing.T) {
+	statuses := map[string]int{
+		"deleted": http.StatusNotFound,
+		"blocked": http.StatusUnavailableForLegalReasons,
+	}
+	for name, status := range statuses {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				key := types.Hash256{1}
+				var listings []time.Time
+				handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch r.URL.Path {
+					case "/objects":
+						listings = append(listings, time.Now())
+						w.Header().Set("Content-Type", applicationJSON)
+						json.NewEncoder(w).Encode([]slabs.ObjectEventWithoutSlabs{{
+							Key:    key,
+							Object: new(slabs.SealedObjectWithoutSlabs),
+						}})
+					case slabsRoute(key):
+						serveObjectSlabs(t, w, r, &objectSlabsResponse{status: status})
+					default:
+						http.NotFound(w, r)
+					}
+				})
+				previous := http.DefaultClient
+				http.DefaultClient = &http.Client{Transport: handlerTransport{handler}}
+				defer func() { http.DefaultClient = previous }()
+
+				_, err := NewClient("http://indexer.test").ListObjectsWithSlabPagination(t.Context(), types.GeneratePrivateKey(), slabs.Cursor{}, 1)
+				if !errors.Is(err, errObjectUnavailable) {
+					t.Fatalf("expected errObjectUnavailable, got %v", err)
+				} else if len(listings) != maxListRetries+1 {
+					t.Fatalf("expected %d listing attempts, got %d", maxListRetries+1, len(listings))
+				}
+				for i := 1; i < len(listings); i++ {
+					expected := listRetryDelay << (i - 1)
+					if elapsed := listings[i].Sub(listings[i-1]); elapsed != expected {
+						t.Fatalf("expected retry delay %v, got %v", expected, elapsed)
+					}
+				}
+			})
+		})
 	}
 }
 
-func TestListObjectsBatchedConcurrentDeletes(t *testing.T) {
+// TestListObjectsWithSlabPaginationSlabMismatch checks that incomplete or incorrect
+// slab slices are rejected when they do not match the listed object ID.
+func TestListObjectsWithSlabPaginationSlabMismatch(t *testing.T) {
+	obj := newObjectSlabsResponse(3)
+	served := map[string]*objectSlabsResponse{
+		// a dropped slab must not silently shorten the object
+		"truncated": {key: obj.key, slabs: obj.slabs[:len(obj.slabs)-1]},
+		// another object's slabs must not be served under this key
+		"wrong object": {key: obj.key, slabs: newObjectSlabsResponse(3).slabs},
+	}
+	for name, served := range served {
+		t.Run(name, func(t *testing.T) {
+			var listings atomic.Int64
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/objects":
+					listings.Add(1)
+					w.Header().Set("Content-Type", applicationJSON)
+					json.NewEncoder(w).Encode([]slabs.ObjectEventWithoutSlabs{{
+						Key:    obj.key,
+						Object: new(slabs.SealedObjectWithoutSlabs),
+					}})
+				case slabsRoute(obj.key):
+					serveObjectSlabs(t, w, r, served)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			_, err := NewClient(srv.URL).ListObjectsWithSlabPagination(t.Context(), types.GeneratePrivateKey(), slabs.Cursor{}, 1)
+			if !errors.Is(err, errObjectSlabsMismatch) {
+				t.Fatalf("expected errObjectSlabsMismatch, got %v", err)
+			} else if listings.Load() != 1 {
+				t.Fatalf("expected the mismatch not to be retried, got %d listings", listings.Load())
+			}
+		})
+	}
+}
+
+func TestListObjectsWithSlabPaginationConcurrentDeletes(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
+	key := types.Hash256{1}
 	var listings atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", applicationJSON)
 		switch r.URL.Path {
 		case "/objects":
 			if listings.Add(1) == 2 {
 				cancel()
 			}
-			json.NewEncoder(w).Encode([]slabs.ObjectEventReference{{
-				Key:    types.Hash256{1},
-				Object: &slabs.SealedObjectReference{Slabs: []slabs.ObjectSlab{{ID: slabs.SlabID(frand.Entropy256()), Length: 1}}},
+			w.Header().Set("Content-Type", applicationJSON)
+			json.NewEncoder(w).Encode([]slabs.ObjectEventWithoutSlabs{{
+				Key:    key,
+				Object: new(slabs.SealedObjectWithoutSlabs),
 			}})
-		case "/slabs/batch":
-			json.NewEncoder(w).Encode([]slabs.PinnedSlab(nil))
+		case slabsRoute(key):
+			serveObjectSlabs(t, w, r, &objectSlabsResponse{status: http.StatusNotFound})
 		default:
 			http.NotFound(w, r)
 		}
 	}))
 	defer srv.Close()
 
-	_, err := NewClient(srv.URL).ListObjectsBatched(ctx, types.GeneratePrivateKey(), slabs.Cursor{}, 1)
+	_, err := NewClient(srv.URL).ListObjectsWithSlabPagination(ctx, types.GeneratePrivateKey(), slabs.Cursor{}, 1)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("expected context.Canceled, got %v", err)
 	} else if listings.Load() != 2 {
