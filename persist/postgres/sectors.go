@@ -19,8 +19,8 @@ import (
 const (
 	minRepairBackoff = time.Hour
 	maxRepairBackoff = 24 * time.Hour
-	// maxBadParityShards is the maximum proportion of parity shards that can be
-	// on bad hosts when pinning a slab that doesn't exist yet.
+	// maxBadParityShards is the maximum proportion of parity shards that a
+	// single pin may place on bad hosts.
 	maxBadParityShards = 0.2
 	// integrityCheckClaimInterval is how far into the future
 	// SectorsForIntegrityCheck pushes the next_integrity_check of the sectors
@@ -376,11 +376,12 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			}
 
 			// insert the slab's sectors. For a slab that already
-			// exists this may rebind any sectors that were marked
-			// lost since it was pinned. An existing sector keeps the
-			// later upload time.
+			// exists this may rebind sectors that were marked lost
+			// since it was pinned, but only to a host with a good
+			// contract. An existing sector keeps the later upload time.
 			batch := &pgx.Batch{}
 			for _, sector := range slab.Sectors {
+				_, goodHost := goodHosts[sector.HostKey]
 				batch.Queue(`
 				INSERT INTO sectors (sector_root, host_id, next_integrity_check, uploaded_at)
 				SELECT $1, h.id, $3, LEAST(NOW(), $4::timestamptz)
@@ -388,12 +389,13 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				WHERE h.public_key = $2
 				ON CONFLICT (sector_root) DO UPDATE SET
 					uploaded_at = GREATEST(sectors.uploaded_at, EXCLUDED.uploaded_at),
-					host_id = COALESCE(sectors.host_id, EXCLUDED.host_id)
-				RETURNING id, host_id, (OLD.id IS NULL) AS inserted, (OLD.id IS NOT NULL AND OLD.host_id IS NULL) AS rebound`,
+					host_id = COALESCE(sectors.host_id, CASE WHEN $5::boolean THEN EXCLUDED.host_id END)
+				RETURNING id, host_id, (OLD.id IS NULL) AS inserted, (OLD.id IS NOT NULL AND OLD.host_id IS NULL AND NEW.host_id IS NOT NULL) AS rebound`,
 					sqlHash256(sector.Root),
 					sqlPublicKey(sector.HostKey),
 					nextIntegrityCheck,
-					sector.UploadedAt)
+					sector.UploadedAt,
+					goodHost)
 			}
 
 			var badHosts int
@@ -402,12 +404,8 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			br := tx.SendBatch(ctx, batch)
 			sectorIDs := make([]int64, len(slab.Sectors))
 			for i, sector := range slab.Sectors {
-				if _, ok := goodHosts[sector.HostKey]; !ok {
-					badHosts++
-				}
-
 				var inserted, isRebound bool
-				var hostID int64
+				var hostID sql.NullInt64
 				if err := br.QueryRow().Scan(&sectorIDs[i], &hostID, &inserted, &isRebound); err != nil {
 					br.Close()
 					if errors.Is(err, sql.ErrNoRows) {
@@ -417,7 +415,13 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				}
 				if inserted || isRebound {
 					unpinned++
-					unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hostID, delta: 1})
+					unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hostID.Int64, delta: 1})
+				}
+				// the upsert refuses to bind a sector that lost its host to a
+				// host without a good contract, so only a sector this pin adds
+				// can record a placement on one
+				if _, ok := goodHosts[sector.HostKey]; inserted && !ok {
+					badHosts++
 				}
 				if isRebound {
 					rebound++
@@ -425,15 +429,11 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			}
 			br.Close()
 
-			// if more than 20% of parity shards are on bad hosts, don't allow
-			// the slab to be pinned. Only a slab that doesn't exist yet is
-			// rejected; an existing slab can always be re-pinned, by any
-			// account, after its sectors end up on bad hosts.
-			if !existingSlab {
-				parityShards := len(slab.Sectors) - int(slab.MinShards)
-				if float64(badHosts) > maxBadParityShards*float64(parityShards) {
-					return slabs.ErrBadHosts
-				}
+			// if the pin would place more than 20% of the parity shards it adds
+			// on bad hosts, don't allow the slab to be pinned
+			parityShards := len(slab.Sectors) - int(slab.MinShards)
+			if float64(badHosts) > maxBadParityShards*float64(parityShards) {
+				return slabs.ErrBadHosts
 			}
 
 			// update number of unpinned sectors
