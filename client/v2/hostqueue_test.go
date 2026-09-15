@@ -27,7 +27,7 @@ const (
 )
 
 var goodSettings = proto.HostSettings{
-	ProtocolVersion:     [3]uint8{5, 0, 2},
+	ProtocolVersion:     [3]uint8{5, 1, 0},
 	AcceptingContracts:  true,
 	MaxCollateral:       types.Siacoins(10000),
 	MaxContractDuration: 10000,
