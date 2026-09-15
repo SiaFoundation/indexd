@@ -24,7 +24,7 @@ import (
 
 var (
 	goodSettings = proto.HostSettings{
-		ProtocolVersion:    rhp.ProtocolVersion502,
+		ProtocolVersion:    rhp.ProtocolVersion510,
 		AcceptingContracts: true,
 		RemainingStorage:   contracts.MinRemainingStorage,
 		Prices: proto.HostPrices{
