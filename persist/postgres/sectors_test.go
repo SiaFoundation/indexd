@@ -1511,6 +1511,38 @@ func TestPinSlabsRebindLostSector(t *testing.T) {
 		t.Fatalf("expected re-pinning an existing slab on a bad host to succeed, got %v", err)
 	}
 	assertStats(1, 0, 2)
+
+	// a lost sector is not rebound to a bad host, but the pin still succeeds
+	if err := store.MarkSectorsLost(hk, []types.Hash256{root}); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(0, 1, 3)
+	if _, err := store.PinSlabs(account, nextCheck, slab2); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(0, 1, 3)
+
+	fetched, err = store.Slabs(account, slab2IDs)
+	if err != nil {
+		t.Fatal(err)
+	} else if fetched[0].Sectors[0].HostKey != nil {
+		t.Fatalf("expected sector to stay lost, got host %v", fetched[0].Sectors[0].HostKey)
+	}
+
+	// once hk is good again the pin rebinds it
+	if _, err := store.pool.Exec(t.Context(), "UPDATE contracts SET good = TRUE WHERE host_id = (SELECT id FROM hosts WHERE public_key = $1)", sqlPublicKey(hk)); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.PinSlabs(account, nextCheck, slab2); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(1, 0, 3)
+
+	fetched, err = store.Slabs(account, slab2IDs)
+	if err != nil {
+		t.Fatal(err)
+	} else if fetched[0].Sectors[0].HostKey == nil || *fetched[0].Sectors[0].HostKey != hk {
+		t.Fatalf("expected sector rebound to host %x, got %v", hk, fetched[0].Sectors[0].HostKey)
+	}
 }
 
 // TestPinSlabsUploadedAt asserts that a sector's reported upload time becomes
