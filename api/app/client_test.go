@@ -34,7 +34,7 @@ func TestDoRequestHTTPError(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		_, err = doRequest(context.Background(), http.MethodGet, u, nil, applicationJSON)
+		_, err = doRequest(context.Background(), http.MethodGet, u, nil, api.ApplicationJSON)
 		return err
 	}
 
@@ -130,7 +130,7 @@ func writeCBOR(t *testing.T, w http.ResponseWriter, v any) {
 		http.Error(w, "failed to encode response", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set(contentTypeHeader, applicationCBOR)
+	w.Header().Set(contentTypeHeader, api.ApplicationCBOR)
 	w.Write(buf)
 }
 

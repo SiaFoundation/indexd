@@ -222,7 +222,7 @@ func TestPreAuthorizationBoundToEphemeralKey(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, err = doRequest(t.Context(), http.MethodPost, u, body, applicationJSON)
+	_, err = doRequest(t.Context(), http.MethodPost, u, body, api.ApplicationJSON)
 	var httpErr *HTTPError
 	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusUnauthorized {
 		t.Fatalf("expected unauthorized response, got %v", err)
