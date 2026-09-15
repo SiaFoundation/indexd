@@ -435,6 +435,33 @@ func TestApplicationAPI(t *testing.T) {
 	}
 	obj1 := *objs[0].Object
 
+	paginated, err := client.ListObjectsWithSlabPagination(context.Background(), sk, slabs.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(paginated, objs) {
+		t.Fatalf("expected listing with slab pagination %+v, got %+v", objs, paginated)
+	}
+
+	withoutSlabs, err := client.ListObjectsWithoutSlabs(context.Background(), sk, slabs.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(withoutSlabs) != 1 || withoutSlabs[0].Object == nil {
+		t.Fatalf("expected 1 object event, got %+v", withoutSlabs)
+	} else if !withoutSlabs[0].Object.UpdatedAt.Equal(obj1.UpdatedAt) {
+		t.Fatalf("expected update time %v, got %v", obj1.UpdatedAt, withoutSlabs[0].Object.UpdatedAt)
+	}
+
+	page, err := client.ObjectSlabs(context.Background(), sk, withoutSlabs[0].Key, 0, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(page, obj1.Slabs) {
+		t.Fatalf("expected slabs %+v, got %+v", obj1.Slabs, page)
+	} else if page, err := client.ObjectSlabs(context.Background(), sk, withoutSlabs[0].Key, int64(len(obj1.Slabs)), 100); err != nil {
+		t.Fatal(err)
+	} else if len(page) != 0 {
+		t.Fatalf("expected no slabs past the end, got %+v", page)
+	}
+
 	if objs, err := client.ListObjects(context.Background(), sk, slabs.Cursor{
 		After: objs[0].UpdatedAt,
 		Key:   objs[0].Key,

@@ -99,6 +99,18 @@ func TestBlockedObjects(t *testing.T) {
 		} else if len(events) != want {
 			t.Fatalf("expected %d objects, got %d", want, len(events))
 		}
+		if withoutSlabs, err := appClient.ListObjectsWithoutSlabs(ctx, sk, slabs.Cursor{}, 100); err != nil {
+			t.Fatal(err)
+		} else if len(withoutSlabs) != want {
+			t.Fatalf("expected %d object events, got %d", want, len(withoutSlabs))
+		}
+		// fetching slab slices for every listed object also checks that blocked
+		// objects are excluded from the listing without slabs
+		if events, err := appClient.ListObjectsWithSlabPagination(ctx, sk, slabs.Cursor{}, 100); err != nil {
+			t.Fatal(err)
+		} else if len(events) != want {
+			t.Fatalf("expected %d object events, got %d", want, len(events))
+		}
 		if objs, err := appClient.SharingKeyObjects(ctx, sk, shareKey); err != nil {
 			t.Fatal(err)
 		} else if len(objs) != want {
@@ -132,6 +144,11 @@ func TestBlockedObjects(t *testing.T) {
 
 	if _, err := appClient.Object(ctx, sk, blockedObj.ID()); err == nil {
 		t.Fatal("expected error fetching a blocked object")
+	} else {
+		assertStatus(t, err, http.StatusUnavailableForLegalReasons)
+	}
+	if _, err := appClient.ObjectSlabs(ctx, sk, blockedObj.ID(), 0, 100); err == nil {
+		t.Fatal("expected error fetching a blocked object's slabs")
 	} else {
 		assertStatus(t, err, http.StatusUnavailableForLegalReasons)
 	}
@@ -200,6 +217,10 @@ func TestBlockedObjects(t *testing.T) {
 		t.Fatal(err)
 	} else if got.ID() != blockedObj.ID() {
 		t.Fatalf("expected object %v, got %v", blockedObj.ID(), got.ID())
+	} else if page, err := appClient.ObjectSlabs(ctx, sk, blockedObj.ID(), 0, 100); err != nil {
+		t.Fatal(err)
+	} else if slabs.ObjectID(page) != blockedObj.ID() {
+		t.Fatalf("expected the object's slabs, got %+v", page)
 	}
 	if _, _, err := appClient.SharedObject(ctx, shareURL); err != nil {
 		t.Fatal(err)

@@ -192,42 +192,19 @@ components:
           description: The protocol used by the host
 
     SealedObject:
-      type: object
-      properties:
-        id:
-          allOf:
-            - $ref: "#/components/schemas/Hash256"
-            - description: The object's unique ID
-        encryptedDataKey:
-          type: string
-          format: byte
-          description: The encrypted data key used to encrypt and decrypt the object's data
-        slabs:
-          type: array
-          items:
-            $ref: "#/components/schemas/SlabSlice"
-          description: The list of slabs that make up the object
-        dataSignature:
-          $ref: "#/components/schemas/Signature"
-          description: The signature of the object's data
-        encryptedMetadataKey:
-          type: string
-          format: byte
-          description: The encrypted metadata key used to encrypt and decrypt the object's metadata
-        encryptedMetadata:
-          type: string
-          format: byte
-          description: Optional metadata stored on the object
-        metadataSignature:
-          $ref: "#/components/schemas/Signature"
-        createdAt:
-          type: string
-          format: date-time
-          description: The time the object was created
-        updatedAt:
-          type: string
-          format: date-time
-          description: The time the object was last updated
+      allOf:
+        - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
+        - type: object
+          properties:
+            id:
+              allOf:
+                - $ref: "#/components/schemas/Hash256"
+                - description: The object's unique ID
+            slabs:
+              type: array
+              items:
+                $ref: "#/components/schemas/SlabSlice"
+              description: The list of slabs that make up the object
 
     # A shared object contains all information required to retrieve
     # and decrypt an object without additional account context.
@@ -430,6 +407,32 @@ components:
             - $ref: "#/components/schemas/PublicKey"
             - description: The public key of the host storing the sector
 
+    PinnedSlab:
+      type: object
+      description: A slab that has been pinned to hosts
+      properties:
+        id:
+          allOf:
+            - $ref: "#/components/schemas/SlabID"
+            - description: The ID of the slab
+        version:
+          type: integer
+          format: uint8
+          description: The slab encoding version, folded into the slab ID for versions greater than 0
+        encryptionKey:
+          allOf:
+            - $ref: "#/components/schemas/EncryptionKey"
+            - description: The encryption key used for the slab
+        minShards:
+          type: integer
+          format: uint64
+          description: The minimum number of shards required to reconstruct the slab
+        sectors:
+          type: array
+          items:
+            $ref: "#/components/schemas/PinnedSector"
+          description: The sectors of the slab in order
+
     Sector:
       type: object
       description: A 4MiB sector of a slab stored on a host.
@@ -623,6 +626,58 @@ components:
             - $ref: "#/components/schemas/SealedObject"
             - description: The object, if it exists
 
+    SealedObjectWithoutSlabs:
+      type: object
+      description: >
+        A sealed object without its slabs, which are paginated separately with
+        `GET /objects/{key}/slabs`
+      properties:
+        encryptedDataKey:
+          type: string
+          format: byte
+          description: The encrypted data key used to encrypt and decrypt the object's data
+        dataSignature:
+          $ref: "#/components/schemas/Signature"
+          description: The signature of the object's data
+        encryptedMetadataKey:
+          type: string
+          format: byte
+          description: The encrypted metadata key used to encrypt and decrypt the object's metadata
+        encryptedMetadata:
+          type: string
+          format: byte
+          description: Optional metadata stored on the object
+        metadataSignature:
+          $ref: "#/components/schemas/Signature"
+        createdAt:
+          type: string
+          format: date-time
+          description: The time the object was created
+        updatedAt:
+          type: string
+          format: date-time
+          description: The time the object was last updated
+
+    ObjectEventWithoutSlabs:
+      type: object
+      description: An object event whose object is returned without its slabs
+      properties:
+        key:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The object's unique ID
+        deleted:
+          type: boolean
+          description: Whether the object was deleted or not
+        updatedAt:
+          type: string
+          format: date-time
+          description: The timestamp component of the event's position in the stream. Pair it with the event's key to paginate. Use the nested object's updatedAt for its modification time.
+        object:
+          allOf:
+            - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
+            - description: The object, if it exists
+
     BlockedObject:
       type: object
       description: An object key on the blocklist
@@ -664,24 +719,25 @@ components:
 
     SlabSlice:
       type: object
+      description: A slice of a slab that is part of an object
       properties:
-        id:
-          $ref: "#/components/schemas/SlabID"
         version:
           type: integer
           format: uint8
-          description: The slab encoding version
+          description: The slab encoding version, folded into the slab ID for versions greater than 0
         encryptionKey:
-          $ref: "#/components/schemas/EncryptionKey"
+          allOf:
+            - $ref: "#/components/schemas/EncryptionKey"
+            - description: The encryption key used for the slab
         minShards:
           type: integer
           format: uint64
-          description: Minimum number of shards required to reconstruct the slab
+          description: The minimum number of shards required to reconstruct the slab
         sectors:
           type: array
-          description: The list of sectors composing the slab
           items:
             $ref: "#/components/schemas/PinnedSector"
+          description: The sectors of the slab in order
         offset:
           type: integer
           format: uint32

@@ -67,6 +67,31 @@ type (
 		Object *SealedObject `json:"object,omitempty"`
 	}
 
+	// An ObjectEventWithoutSlabs is an object event whose object is returned
+	// without its slabs. The slabs are paginated separately with ObjectSlabs.
+	ObjectEventWithoutSlabs struct {
+		Key     types.Hash256 `json:"key"`
+		Deleted bool          `json:"deleted"`
+		// UpdatedAt is the event's position in the stream. The nested object's
+		// UpdatedAt records when the object was last modified.
+		UpdatedAt time.Time `json:"updatedAt"`
+
+		Object *SealedObjectWithoutSlabs `json:"object,omitempty"`
+	}
+
+	// A SealedObjectWithoutSlabs is a sealed object without its slabs.
+	SealedObjectWithoutSlabs struct {
+		EncryptedDataKey []byte          `json:"encryptedDataKey"`
+		DataSignature    types.Signature `json:"dataSignature"`
+
+		EncryptedMetadataKey []byte          `json:"encryptedMetadataKey,omitempty"`
+		EncryptedMetadata    []byte          `json:"encryptedMetadata,omitempty"`
+		MetadataSignature    types.Signature `json:"metadataSignature"`
+
+		CreatedAt time.Time `json:"createdAt"`
+		UpdatedAt time.Time `json:"updatedAt"`
+	}
+
 	// Cursor describes a cursor for paginating through objects. During
 	// pagination, 'After' is meant to be set to the 'UpdatedAt' value of the
 	// last object received and 'Key' is meant to be set to the 'Key' value of
@@ -82,7 +107,9 @@ type (
 		Key   types.Hash256
 	}
 
-	// ObjectSlab represents a slab that should be associated with an object. It should already be pinned to the indexer.
+	// ObjectSlab references a slab that is part of an object by its ID, offset,
+	// and length. A slab must already be pinned to the indexer before an object
+	// can reference it.
 	ObjectSlab struct {
 		ID     SlabID `json:"id"`
 		Offset uint32 `json:"offset"`
@@ -205,6 +232,34 @@ func (so *SealedObject) PinRequest() PinObjectRequest {
 	}
 }
 
+// WithoutSlabs returns the sealed object without its slab slices.
+func (so *SealedObject) WithoutSlabs() *SealedObjectWithoutSlabs {
+	return &SealedObjectWithoutSlabs{
+		EncryptedDataKey:     so.EncryptedDataKey,
+		DataSignature:        so.DataSignature,
+		EncryptedMetadataKey: so.EncryptedMetadataKey,
+		EncryptedMetadata:    so.EncryptedMetadata,
+		MetadataSignature:    so.MetadataSignature,
+		CreatedAt:            so.CreatedAt,
+		UpdatedAt:            so.UpdatedAt,
+	}
+}
+
+// WithSlabs returns the sealed object with the given slab slices, which must
+// include every slice in object order.
+func (so *SealedObjectWithoutSlabs) WithSlabs(slabs []SlabSlice) *SealedObject {
+	return &SealedObject{
+		EncryptedDataKey:     so.EncryptedDataKey,
+		Slabs:                slabs,
+		DataSignature:        so.DataSignature,
+		EncryptedMetadataKey: so.EncryptedMetadataKey,
+		EncryptedMetadata:    so.EncryptedMetadata,
+		MetadataSignature:    so.MetadataSignature,
+		CreatedAt:            so.CreatedAt,
+		UpdatedAt:            so.UpdatedAt,
+	}
+}
+
 // Sign signs the object's data and metadata signatures using the given private
 // key.
 func (so *SealedObject) Sign(pk types.PrivateKey) {
@@ -309,6 +364,18 @@ func (m *SlabManager) PinObject(ctx context.Context, account proto.Account, obj 
 // the given 'after' time.
 func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error) {
 	return m.store.ListObjects(account, cursor, limit)
+}
+
+// ListObjectsWithoutSlabs lists object events without their slabs.
+func (m *SlabManager) ListObjectsWithoutSlabs(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEventWithoutSlabs, error) {
+	return m.store.ListObjectsWithoutSlabs(account, cursor, limit)
+}
+
+// ObjectSlabs returns a page of the object's slab slices, starting at slice
+// index cursor. The object ID commits to the ordered slab IDs, offsets, and
+// lengths. Sector host keys may change as sectors are migrated or lost.
+func (m *SlabManager) ObjectSlabs(ctx context.Context, account proto.Account, key types.Hash256, cursor int64, limit int) ([]SlabSlice, error) {
+	return m.store.ObjectSlabs(account, key, cursor, limit)
 }
 
 // SharedObject retrieves the shared object with the given key for the given account.
