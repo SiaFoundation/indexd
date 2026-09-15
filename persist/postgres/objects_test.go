@@ -483,24 +483,8 @@ func TestListObjectsWithoutSlabs(t *testing.T) {
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 
-	params := []slabs.SlabPinParams{
-		{
-			Version:       1,
-			EncryptionKey: frand.Entropy256(),
-			MinShards:     1,
-			Sectors: []slabs.PinnedSector{
-				{Root: frand.Entropy256(), HostKey: hk},
-				{Root: frand.Entropy256(), HostKey: hk},
-			},
-		},
-		{
-			EncryptionKey: frand.Entropy256(),
-			MinShards:     1,
-			Sectors: []slabs.PinnedSector{
-				{Root: frand.Entropy256(), HostKey: hk},
-			},
-		},
-	}
+	params := newTestPinParams(2, hk)
+	params[0].Version = 1
 	store.pinTestSlabs(t, acc, params...)
 	obj := store.pinRandomObject(t, acc, []slabs.SlabSlice{
 		params[0].Slice(10, 100),
@@ -552,24 +536,8 @@ func TestObjectSlabs(t *testing.T) {
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 
-	params := []slabs.SlabPinParams{
-		{
-			Version:       1,
-			EncryptionKey: frand.Entropy256(),
-			MinShards:     1,
-			Sectors: []slabs.PinnedSector{
-				{Root: frand.Entropy256(), HostKey: hk},
-				{Root: frand.Entropy256(), HostKey: hk},
-			},
-		},
-		{
-			EncryptionKey: frand.Entropy256(),
-			MinShards:     1,
-			Sectors: []slabs.PinnedSector{
-				{Root: frand.Entropy256(), HostKey: hk},
-			},
-		},
-	}
+	params := newTestPinParams(2, hk)
+	params[0].Version = 1
 	store.pinTestSlabs(t, acc, params...)
 
 	// the first slab is referenced twice in a row, which the cursor must

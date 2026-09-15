@@ -192,42 +192,19 @@ components:
           description: The protocol used by the host
 
     SealedObject:
-      type: object
-      properties:
-        id:
-          allOf:
-            - $ref: "#/components/schemas/Hash256"
-            - description: The object's unique ID
-        encryptedDataKey:
-          type: string
-          format: byte
-          description: The encrypted data key used to encrypt and decrypt the object's data
-        slabs:
-          type: array
-          items:
-            $ref: "#/components/schemas/SlabSlice"
-          description: The list of slabs that make up the object
-        dataSignature:
-          $ref: "#/components/schemas/Signature"
-          description: The signature of the object's data
-        encryptedMetadataKey:
-          type: string
-          format: byte
-          description: The encrypted metadata key used to encrypt and decrypt the object's metadata
-        encryptedMetadata:
-          type: string
-          format: byte
-          description: Optional metadata stored on the object
-        metadataSignature:
-          $ref: "#/components/schemas/Signature"
-        createdAt:
-          type: string
-          format: date-time
-          description: The time the object was created
-        updatedAt:
-          type: string
-          format: date-time
-          description: The time the object was last updated
+      allOf:
+        - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
+        - type: object
+          properties:
+            id:
+              allOf:
+                - $ref: "#/components/schemas/Hash256"
+                - description: The object's unique ID
+            slabs:
+              type: array
+              items:
+                $ref: "#/components/schemas/SlabSlice"
+              description: The list of slabs that make up the object
 
     # A shared object contains all information required to retrieve
     # and decrypt an object without additional account context.
@@ -661,6 +638,7 @@ components:
           description: The encrypted data key used to encrypt and decrypt the object's data
         dataSignature:
           $ref: "#/components/schemas/Signature"
+          description: The signature of the object's data
         encryptedMetadataKey:
           type: string
           format: byte

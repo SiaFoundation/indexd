@@ -230,8 +230,9 @@ func (c *Client) fetchObjectSlabs(ctx context.Context, appKey types.PrivateKey, 
 	}
 }
 
-// fetchEventSlabs fetches each listed object's slab slices concurrently.
-func (c *Client) fetchEventSlabs(ctx context.Context, appKey types.PrivateKey, withoutSlabs []slabs.ObjectEventWithoutSlabs) ([]slabs.ObjectEvent, error) {
+// fetchEventSlabs fetches each listed object's slab slices concurrently. Slices
+// already present in fetched are reused, and those fetched here are added to it.
+func (c *Client) fetchEventSlabs(ctx context.Context, appKey types.PrivateKey, withoutSlabs []slabs.ObjectEventWithoutSlabs, fetched map[types.Hash256][]slabs.SlabSlice) ([]slabs.ObjectEvent, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -248,6 +249,9 @@ eventLoop:
 			UpdatedAt: event.UpdatedAt,
 		}
 		if event.Object == nil {
+			continue
+		} else if objectSlabs, ok := fetched[event.Key]; ok {
+			events[i].Object = event.Object.WithSlabs(objectSlabs)
 			continue
 		}
 		select {
@@ -271,6 +275,11 @@ eventLoop:
 		})
 	}
 	wg.Wait()
+	for _, event := range events {
+		if event.Object != nil {
+			fetched[event.Key] = event.Object.Slabs
+		}
+	}
 	if fetchErr != nil {
 		return nil, fetchErr
 	} else if err := ctx.Err(); err != nil {
@@ -370,13 +379,16 @@ func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objec
 // concurrently. If an object is deleted or blocked during fetching, the event
 // page is listed again. A page shorter than limit marks the end of the results.
 func (c *Client) ListObjectsWithSlabPagination(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error) {
+	// an object ID commits to its slab slices, so slices fetched during an
+	// earlier attempt are still current after the page is listed again
+	fetched := make(map[types.Hash256][]slabs.SlabSlice)
 	for attempts := 0; ; attempts++ {
 		withoutSlabs, err := c.ListObjectsWithoutSlabs(ctx, appKey, cursor, limit)
 		if err != nil {
 			return nil, err
 		}
 
-		events, err := c.fetchEventSlabs(ctx, appKey, withoutSlabs)
+		events, err := c.fetchEventSlabs(ctx, appKey, withoutSlabs, fetched)
 		if err == nil {
 			return events, nil
 		} else if !errors.Is(err, errObjectUnavailable) || attempts >= maxListRetries {

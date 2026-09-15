@@ -122,6 +122,18 @@ func slabsRoute(key types.Hash256) string {
 	return fmt.Sprintf("/objects/%s/slabs", key)
 }
 
+// serveObjectEvents serves a page of object events without their slabs.
+func serveObjectEvents(w http.ResponseWriter, events ...slabs.ObjectEventWithoutSlabs) {
+	w.Header().Set("Content-Type", applicationJSON)
+	json.NewEncoder(w).Encode(events)
+}
+
+// newObjectEvent builds a listed event whose object's slabs are fetched
+// separately.
+func newObjectEvent(key types.Hash256) slabs.ObjectEventWithoutSlabs {
+	return slabs.ObjectEventWithoutSlabs{Key: key, Object: new(slabs.SealedObjectWithoutSlabs)}
+}
+
 // serveObjectSlabs serves a page of the object's slabs, mirroring the handler.
 func serveObjectSlabs(t *testing.T, w http.ResponseWriter, r *http.Request, obj *objectSlabsResponse) {
 	t.Helper()
@@ -180,19 +192,14 @@ func TestListObjectsWithSlabPagination(t *testing.T) {
 				t.Errorf("expected includeslabs=false, got %q", got)
 			}
 			events := []slabs.ObjectEventWithoutSlabs{
-				{Key: keys[0], Object: new(slabs.SealedObjectWithoutSlabs)},
-				{Key: keys[1], Object: new(slabs.SealedObjectWithoutSlabs)},
+				newObjectEvent(keys[0]),
+				newObjectEvent(keys[1]),
 				{Key: keys[2], Deleted: true},
 			}
 			if listings.Add(1) > 1 {
-				events = []slabs.ObjectEventWithoutSlabs{
-					events[0],
-					events[2],
-					{Key: keys[3], Object: new(slabs.SealedObjectWithoutSlabs)},
-				}
+				events = []slabs.ObjectEventWithoutSlabs{events[0], events[2], newObjectEvent(keys[3])}
 			}
-			w.Header().Set("Content-Type", applicationJSON)
-			json.NewEncoder(w).Encode(events)
+			serveObjectEvents(w, events...)
 		case strings.HasSuffix(r.URL.Path, "/slabs"):
 			obj := objects[r.URL.Path]
 			if obj == deleted {
@@ -259,11 +266,7 @@ func TestListObjectsWithSlabPaginationObjectUnavailable(t *testing.T) {
 					switch r.URL.Path {
 					case "/objects":
 						listings = append(listings, time.Now())
-						w.Header().Set("Content-Type", applicationJSON)
-						json.NewEncoder(w).Encode([]slabs.ObjectEventWithoutSlabs{{
-							Key:    key,
-							Object: new(slabs.SealedObjectWithoutSlabs),
-						}})
+						serveObjectEvents(w, newObjectEvent(key))
 					case slabsRoute(key):
 						serveObjectSlabs(t, w, r, &objectSlabsResponse{status: status})
 					default:
@@ -308,11 +311,7 @@ func TestListObjectsWithSlabPaginationSlabMismatch(t *testing.T) {
 				switch r.URL.Path {
 				case "/objects":
 					listings.Add(1)
-					w.Header().Set("Content-Type", applicationJSON)
-					json.NewEncoder(w).Encode([]slabs.ObjectEventWithoutSlabs{{
-						Key:    obj.key,
-						Object: new(slabs.SealedObjectWithoutSlabs),
-					}})
+					serveObjectEvents(w, newObjectEvent(obj.key))
 				case slabsRoute(obj.key):
 					serveObjectSlabs(t, w, r, served)
 				default:
@@ -343,11 +342,7 @@ func TestListObjectsWithSlabPaginationConcurrentDeletes(t *testing.T) {
 			if listings.Add(1) == 2 {
 				cancel()
 			}
-			w.Header().Set("Content-Type", applicationJSON)
-			json.NewEncoder(w).Encode([]slabs.ObjectEventWithoutSlabs{{
-				Key:    key,
-				Object: new(slabs.SealedObjectWithoutSlabs),
-			}})
+			serveObjectEvents(w, newObjectEvent(key))
 		case slabsRoute(key):
 			serveObjectSlabs(t, w, r, &objectSlabsResponse{status: http.StatusNotFound})
 		default:
