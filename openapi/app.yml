@@ -150,9 +150,23 @@ paths:
             default: true
       responses:
         "200":
-          description: A list of object events
+          description: >
+            A list of object events. Set the Accept header to application/cbor to
+            receive the events as CBOR instead of JSON. The response sets
+            Vary: Accept.
           content:
             application/json:
+              schema:
+                anyOf:
+                  - type: array
+                    description: Object events with slab slices (includeslabs=true)
+                    items:
+                      $ref: "#/components/schemas/ObjectEvent"
+                  - type: array
+                    description: Object events without their slabs (includeslabs=false)
+                    items:
+                      $ref: "#/components/schemas/ObjectEventWithoutSlabs"
+            application/cbor:
               schema:
                 anyOf:
                   - type: array
@@ -256,9 +270,17 @@ paths:
             default: 100
       responses:
         "200":
-          description: A page of the object's slab slices
+          description: >
+            A page of the object's slab slices. Set the Accept header to
+            application/cbor to receive CBOR instead of JSON. The response sets
+            Vary: Accept.
           content:
             application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabSlice"
+            application/cbor:
               schema:
                 type: array
                 items:
@@ -751,6 +773,9 @@ paths:
       tags:
         - slabs
       summary: Get details of a pinned slab
+      description: >
+        Set the Accept header to application/cbor to receive CBOR instead of
+        JSON. The response sets Vary: Accept.
       operationId: getSlab
       parameters:
         - name: slabid
@@ -763,6 +788,9 @@ paths:
           description: Details of the pinned slab
           content:
             application/json:
+              schema:
+                $ref: "#/components/schemas/PinnedSlab"
+            application/cbor:
               schema:
                 $ref: "#/components/schemas/PinnedSlab"
         "404":

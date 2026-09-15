@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,6 +27,10 @@ const (
 	maxConcurrentObjects = 8
 	maxListRetries       = 3
 	listRetryDelay       = 100 * time.Millisecond
+
+	// maxObjectSlabSlices is a safety valve against an indexer that never
+	// returns a short page rather than a protocol limit
+	maxObjectSlabSlices = 1 << 20
 )
 
 var (
@@ -133,7 +136,7 @@ func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, a
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
-	req.Header.Set("Accept", accept)
+	req.Header.Set(acceptHeader, accept)
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -145,7 +148,7 @@ func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, a
 		defer io.Copy(io.Discard, r.Body)
 		b, _ := io.ReadAll(io.LimitReader(r.Body, 1024))
 		return nil, &HTTPError{StatusCode: r.StatusCode, Body: strings.TrimSpace(string(b))}
-	} else if contentType := r.Header.Get("Content-Type"); r.StatusCode != http.StatusNoContent && accept != contentType {
+	} else if contentType := r.Header.Get(contentTypeHeader); r.StatusCode != http.StatusNoContent && accept != contentType {
 		defer r.Body.Close()
 		defer io.Copy(io.Discard, r.Body)
 		return nil, fmt.Errorf("expected content type %s, got %s", accept, contentType)
@@ -184,17 +187,15 @@ func (c *Client) signedRequestJSON(ctx context.Context, appKey types.PrivateKey,
 	return json.NewDecoder(body).Decode(resp)
 }
 
-func (c *Client) signedRequestBinary(ctx context.Context, appKey types.PrivateKey, method, route string, data any, resp types.DecoderFrom) error {
-	body, err := c.signedRequestCustom(ctx, appKey, applicationOctetStream, method, route, data)
+func (c *Client) signedGetCBOR(ctx context.Context, appKey types.PrivateKey, route string, resp any) error {
+	body, err := c.signedRequestCustom(ctx, appKey, applicationCBOR, http.MethodGet, route, nil)
 	if err != nil {
 		return err
 	}
 	defer io.Copy(io.Discard, body)
 	defer body.Close()
 
-	d := types.NewDecoder(io.LimitedReader{R: body, N: math.MaxInt64})
-	resp.DecodeFrom(d)
-	return d.Err()
+	return decodeCBOR(body, resp)
 }
 
 // listObjectsRoute builds the GET /objects route for the cursor.
@@ -219,6 +220,8 @@ func (c *Client) fetchObjectSlabs(ctx context.Context, appKey types.PrivateKey, 
 			return nil, errObjectUnavailable
 		} else if err != nil {
 			return nil, err
+		} else if len(page) > api.MaxLimit {
+			return nil, fmt.Errorf("indexer returned %d slab slices for a limit of %d", len(page), api.MaxLimit)
 		}
 		fetched = append(fetched, page...)
 		if len(page) < api.MaxLimit {
@@ -226,6 +229,8 @@ func (c *Client) fetchObjectSlabs(ctx context.Context, appKey types.PrivateKey, 
 				return nil, fmt.Errorf("%w: assembled %v from %d slab slices", errObjectSlabsMismatch, id, len(fetched))
 			}
 			return fetched, nil
+		} else if len(fetched) > maxObjectSlabSlices {
+			return nil, fmt.Errorf("object %q has more than %d slab slices", key, maxObjectSlabSlices)
 		}
 	}
 }
@@ -314,7 +319,7 @@ func (c *Client) UnpinSlab(ctx context.Context, appKey types.PrivateKey, slabID 
 
 // Slab retrieves a slab from the indexer by its ID.
 func (c *Client) Slab(ctx context.Context, appKey types.PrivateKey, slabID slabs.SlabID) (s slabs.PinnedSlab, err error) {
-	err = c.signedRequestBinary(ctx, appKey, http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil, &s)
+	err = c.signedGetCBOR(ctx, appKey, fmt.Sprintf("/slabs/%s", slabID), &s)
 	return
 }
 
@@ -353,14 +358,14 @@ func (c *Client) Object(ctx context.Context, appKey types.PrivateKey, objectID t
 // ListObjects lists object events for the given account that were published
 // after the given cursor.
 func (c *Client) ListObjects(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEvent, err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, true), nil, &resp)
+	err = c.signedGetCBOR(ctx, appKey, listObjectsRoute(cursor, limit, true), &resp)
 	return
 }
 
 // ListObjectsWithoutSlabs lists published object events after the cursor,
 // omitting each object's slab slices. Fetch the slices with ObjectSlabs.
 func (c *Client) ListObjectsWithoutSlabs(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEventWithoutSlabs, err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, false), nil, &resp)
+	err = c.signedGetCBOR(ctx, appKey, listObjectsRoute(cursor, limit, false), &resp)
 	return
 }
 
@@ -370,7 +375,7 @@ func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objec
 	values := url.Values{}
 	values.Set("cursor", fmt.Sprint(cursor))
 	values.Set("limit", fmt.Sprint(limit))
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, fmt.Sprintf("/objects/%s/slabs?%s", objectID, values.Encode()), nil, &resp)
+	err = c.signedGetCBOR(ctx, appKey, fmt.Sprintf("/objects/%s/slabs?%s", objectID, values.Encode()), &resp)
 	return
 }
 
