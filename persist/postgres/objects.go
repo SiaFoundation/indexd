@@ -146,8 +146,17 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 		events, objectsByID, err = listObjectEvents(ctx, tx, accountID, cursor, limit)
 		if err != nil {
 			return err
+		} else if err := loadObjectSlabs(ctx, tx, objectsByID); err != nil {
+			return err
 		}
-		return loadObjectSlabs(ctx, tx, objectsByID)
+		// an object always has at least one slab, so one that lost its slab
+		// rows was deleted after its row was read
+		for i := range events {
+			if events[i].Object != nil && len(events[i].Object.Slabs) == 0 {
+				events[i].Object, events[i].Deleted = nil, true
+			}
+		}
+		return nil
 	})
 	return
 }
@@ -237,7 +246,11 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to scan objects: %w", err)
 	} else if len(objectsByID) != len(objectKeys) {
-		return nil, nil, fmt.Errorf("failed to query objects: expected %d objects, got %d", len(objectKeys), len(objectsByID))
+		for _, i := range eventByKey {
+			if events[i].Object == nil {
+				events[i].Deleted = true
+			}
+		}
 	}
 	return events, objectsByID, nil
 }
