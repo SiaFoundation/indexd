@@ -16,6 +16,9 @@ const (
 
 	// TextHTML is the content type of the HTML served by the application API.
 	TextHTML = "text/html"
+
+	// TextPlain is the content type of the Prometheus metrics exposition.
+	TextPlain = "text/plain"
 )
 
 // compressibleContentTypes are the response content types worth compressing.
@@ -24,6 +27,7 @@ var compressibleContentTypes = []string{
 	ApplicationJSON,
 	ApplicationCBOR,
 	TextHTML,
+	TextPlain,
 }
 
 var compressWrapper = newCompressWrapper()
