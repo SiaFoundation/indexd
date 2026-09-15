@@ -586,6 +586,16 @@ func TestObjectSlabs(t *testing.T) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
 
+	// dropping only the slab rows reproduces the torn view left by a concurrent
+	// delete, which must read as deleted rather than as an exhausted cursor
+	if _, err := store.pool.Exec(t.Context(),
+		`DELETE FROM object_slabs WHERE object_id = (SELECT id FROM objects WHERE object_key = $1)`,
+		sqlHash256(obj.ID())); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.ObjectSlabs(acc, obj.ID(), 0, 10); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+
 	if err := store.DeleteObject(acc, obj.ID()); err != nil {
 		t.Fatal(err)
 	} else if _, err := store.ObjectSlabs(acc, obj.ID(), 0, 10); !errors.Is(err, slabs.ErrObjectNotFound) {
