@@ -168,8 +168,8 @@ func (c *Client) signedRequestJSON(ctx context.Context, appKey types.PrivateKey,
 	return json.NewDecoder(body).Decode(resp)
 }
 
-func (c *Client) signedRequestCBOR(ctx context.Context, appKey types.PrivateKey, method, route string, data, resp any) error {
-	body, err := c.signedRequestCustom(ctx, appKey, applicationCBOR, method, route, data)
+func (c *Client) signedGetCBOR(ctx context.Context, appKey types.PrivateKey, route string, resp any) error {
+	body, err := c.signedRequestCustom(ctx, appKey, applicationCBOR, http.MethodGet, route, nil)
 	if err != nil {
 		return err
 	}
@@ -215,7 +215,7 @@ func (c *Client) UnpinSlab(ctx context.Context, appKey types.PrivateKey, slabID 
 
 // Slab retrieves a slab from the indexer by its ID.
 func (c *Client) Slab(ctx context.Context, appKey types.PrivateKey, slabID slabs.SlabID) (s slabs.PinnedSlab, err error) {
-	err = c.signedRequestCBOR(ctx, appKey, http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil, &s)
+	err = c.signedGetCBOR(ctx, appKey, fmt.Sprintf("/slabs/%s", slabID), &s)
 	return
 }
 
@@ -254,14 +254,14 @@ func (c *Client) Object(ctx context.Context, appKey types.PrivateKey, objectID t
 // ListObjects lists object events for the given account that were published
 // after the given cursor.
 func (c *Client) ListObjects(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEvent, err error) {
-	err = c.signedRequestCBOR(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, true), nil, &resp)
+	err = c.signedGetCBOR(ctx, appKey, listObjectsRoute(cursor, limit, true), &resp)
 	return
 }
 
 // ListObjectsWithoutSlabs lists published object events after the cursor,
 // omitting each object's slab slices. Fetch the slices with ObjectSlabs.
 func (c *Client) ListObjectsWithoutSlabs(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEventWithoutSlabs, err error) {
-	err = c.signedRequestCBOR(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, false), nil, &resp)
+	err = c.signedGetCBOR(ctx, appKey, listObjectsRoute(cursor, limit, false), &resp)
 	return
 }
 
@@ -271,7 +271,7 @@ func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objec
 	values := url.Values{}
 	values.Set("cursor", fmt.Sprint(cursor))
 	values.Set("limit", fmt.Sprint(limit))
-	err = c.signedRequestCBOR(ctx, appKey, http.MethodGet, fmt.Sprintf("/objects/%s/slabs?%s", objectID, values.Encode()), nil, &resp)
+	err = c.signedGetCBOR(ctx, appKey, fmt.Sprintf("/objects/%s/slabs?%s", objectID, values.Encode()), &resp)
 	return
 }
 
