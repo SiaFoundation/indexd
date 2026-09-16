@@ -256,7 +256,8 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 }
 
 // ObjectSlabs returns a page of the object's slab slices in slab_index order,
-// starting at slice index cursor.
+// starting at slice index cursor. It returns slabs.ErrObjectNotFound if the
+// object does not exist or was deleted while the page was being read.
 func (s *Store) ObjectSlabs(account proto.Account, key types.Hash256, cursor int64, limit int) (objectSlabs []slabs.SlabSlice, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		objectSlabs = []slabs.SlabSlice{} // reset if the transaction retries
@@ -288,8 +289,25 @@ func (s *Store) ObjectSlabs(account proto.Account, key types.Hash256, cursor int
 		`, objectID, cursor, limit)
 		if err != nil {
 			return fmt.Errorf("failed to query object slabs: %w", err)
+		} else if err := collectObjectSlabs(ctx, tx, rows, map[int64]*[]slabs.SlabSlice{objectID: &objectSlabs}); err != nil {
+			return err
+		} else if len(objectSlabs) > 0 {
+			return nil
 		}
-		return collectObjectSlabs(ctx, tx, rows, map[int64]*[]slabs.SlabSlice{objectID: &objectSlabs})
+
+		// an object always has at least one slab slice, so an empty first page
+		// means it was deleted rather than that the cursor ran past the end
+		if cursor == 0 {
+			return slabs.ErrObjectNotFound
+		}
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM objects WHERE account_id = $1 AND object_key = $2)`,
+			accountID, sqlHash256(key)).Scan(&exists); err != nil {
+			return fmt.Errorf("failed to check object: %w", err)
+		} else if !exists {
+			return slabs.ErrObjectNotFound
+		}
+		return nil
 	})
 	return
 }
