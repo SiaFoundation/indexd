@@ -277,23 +277,22 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 
 	// recorded independently of the upload, so a partial repair still breaks
 	// a run of recovery failures
-	unrecoverableReason := res.UnrecoverableReason
-	failures, err := m.store.RecordSlabRecovery(res.SlabID, res.Recovered, m.maxFailedRecoveries)
+	limitReason := fmt.Sprintf("failed to recover the slab's shards %d consecutive times", m.maxFailedRecoveries)
+	failures, err := m.store.RecordSlabRecovery(res.SlabID, res.Recovered, m.maxFailedRecoveries, limitReason)
 	if errors.Is(err, ErrSlabNotFound) {
 		log.Debug("recovered slab no longer exists", zap.Error(err))
 	} else if err != nil {
 		log.Error("failed to record slab recovery", zap.Error(err))
 		errs = append(errs, fmt.Errorf("failed to record slab recovery: %w", err))
-	} else if failures >= m.maxFailedRecoveries && unrecoverableReason == "" {
-		// no proof the shards are gone, but we've spent enough on them
-		unrecoverableReason = fmt.Sprintf("failed to recover the slab's shards %d consecutive times", failures)
+	} else if !res.Recovered && failures >= m.maxFailedRecoveries {
+		log.Warn("marked slab unrecoverable", zap.String("reason", limitReason))
 	}
 
 	// if recovery failed, leave the repair state untouched so the slab is
 	// retried without incurring a repair-failure backoff
 	if !res.Recovered {
-		if unrecoverableReason != "" {
-			if _, err := m.markSlabUnrecoverable(res.SlabID, unrecoverableReason, log); err != nil {
+		if res.UnrecoverableReason != "" {
+			if _, err := m.markSlabUnrecoverable(res.SlabID, res.UnrecoverableReason, log); err != nil {
 				errs = append(errs, err)
 			}
 		}
@@ -325,8 +324,8 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 	}
 	// a slab that can never be fully repaired leaves the repair rotation for
 	// good
-	if unrecoverableReason != "" {
-		if marked, err := m.markSlabUnrecoverable(res.SlabID, unrecoverableReason, log); err != nil {
+	if res.UnrecoverableReason != "" {
+		if marked, err := m.markSlabUnrecoverable(res.SlabID, res.UnrecoverableReason, log); err != nil {
 			errs = append(errs, err)
 		} else if marked {
 			return errors.Join(errs...)
