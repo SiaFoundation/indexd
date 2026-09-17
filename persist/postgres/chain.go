@@ -13,8 +13,9 @@ type updateTx struct {
 }
 
 // ResetChainState resets the chain state in the store, clearing all
-// wallet-related data and resetting the scanned height and block ID in the
-// global settings. This is typically used to force a resync of consensus.
+// wallet-related data, zeroing the stats derived from it, and resetting the
+// scanned height and block ID in the global settings. This is typically used to
+// force a resync of consensus.
 func (s *Store) ResetChainState() error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		if _, err := tx.Exec(ctx, `TRUNCATE wallet_siacoin_elements`); err != nil {
@@ -23,6 +24,10 @@ func (s *Store) ResetChainState() error {
 			return fmt.Errorf("failed to clear wallet_broadcasted_sets: %w", err)
 		} else if _, err := tx.Exec(ctx, `TRUNCATE wallet_events`); err != nil {
 			return fmt.Errorf("failed to clear wallet_events: %w", err)
+		} else if _, err := tx.Exec(ctx, `DELETE FROM stats_deltas WHERE stat_name = $1`, statContractTax); err != nil {
+			return fmt.Errorf("failed to clear contract tax deltas: %w", err)
+		} else if _, err := tx.Exec(ctx, `UPDATE stats SET stat_value = 0 WHERE stat_name = $1`, statContractTax); err != nil {
+			return fmt.Errorf("failed to reset contract tax: %w", err)
 		} else if res, err := tx.Exec(ctx, `UPDATE global_settings SET scanned_height = 0, scanned_block_id = '\x0000000000000000000000000000000000000000000000000000000000000000'`); err != nil {
 			return fmt.Errorf("failed to reset global_settings: %w", err)
 		} else if rowsAffected := res.RowsAffected(); rowsAffected != 1 {

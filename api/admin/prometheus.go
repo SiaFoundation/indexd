@@ -136,6 +136,10 @@ func (s ContractsStatsResponse) PrometheusMetric() (metrics []prometheus.Metric)
 			Value: float64(s.Renewing),
 		},
 		{
+			Name:  "indexd_contracts_tax",
+			Value: s.ContractTax.Siacoins(),
+		},
+		{
 			Name:  "indexd_contracts_locked_allowance",
 			Value: s.LockedAllowance.Siacoins(),
 		},

@@ -87,11 +87,18 @@ func (s *Store) ContractsStats() (resp contracts.Stats, _ error) {
 			return err
 		}
 
+		var contractTax types.Currency
+		err = tx.QueryRow(ctx, sqlStatSelect(statContractTax)).Scan((*sqlCurrency)(&contractTax))
+		if err != nil {
+			return err
+		}
+
 		resp = contracts.Stats{
 			Contracts:    numContracts,
 			BadContracts: numContracts - numGood,
 			Renewing:     numRenewing,
 
+			ContractTax:        contractTax,
 			LockedAllowance:    lockedAllowance,
 			RemainingAllowance: remainingAllowance,
 			TotalCapacity:      totalCapacity,
