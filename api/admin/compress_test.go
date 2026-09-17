@@ -9,10 +9,43 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap"
 )
+
+// decompress decodes body, which was compressed with the given
+// Content-Encoding.
+func decompress(t *testing.T, encoding string, body []byte) []byte {
+	t.Helper()
+
+	var r io.Reader
+	switch encoding {
+	case "gzip":
+		zr, err := gzip.NewReader(bytes.NewReader(body))
+		if err != nil {
+			t.Fatal("failed to create gzip reader:", err)
+		}
+		defer zr.Close()
+		r = zr
+	case "zstd":
+		zr, err := zstd.NewReader(bytes.NewReader(body))
+		if err != nil {
+			t.Fatal("failed to create zstd reader:", err)
+		}
+		defer zr.Close()
+		r = zr
+	default:
+		t.Fatal("unexpected content encoding:", encoding)
+	}
+
+	decompressed, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal("failed to decompress response:", err)
+	}
+	return decompressed
+}
 
 func TestCompressedResponses(t *testing.T) {
 	c := testutils.NewConsensusNode(t, zap.NewNop())
@@ -41,10 +74,12 @@ func TestCompressedResponses(t *testing.T) {
 	tests := []struct {
 		name           string
 		acceptEncoding string
-		compressed     bool
+		encoding       string
 	}{
-		{"gzip", "gzip", true},
-		{"no accept-encoding", "", false},
+		{"gzip", "gzip", "gzip"},
+		{"zstd", "zstd", "zstd"},
+		{"zstd preferred over gzip", "gzip, deflate, br, zstd", "zstd"},
+		{"no accept-encoding", "", ""},
 	}
 
 	for _, tt := range tests {
@@ -71,8 +106,8 @@ func TestCompressedResponses(t *testing.T) {
 			}
 
 			enc := resp.Header.Get("Content-Encoding")
-			if tt.compressed != (enc == "gzip") {
-				t.Fatalf("expected compressed=%t, got Content-Encoding %q", tt.compressed, enc)
+			if enc != tt.encoding {
+				t.Fatalf("expected Content-Encoding %q, got %q", tt.encoding, enc)
 			}
 
 			sent, err := io.ReadAll(resp.Body)
@@ -80,23 +115,15 @@ func TestCompressedResponses(t *testing.T) {
 				t.Fatal("failed to read response:", err)
 			}
 
-			body := sent
-			if tt.compressed {
-				zr, err := gzip.NewReader(bytes.NewReader(sent))
-				if err != nil {
-					t.Fatal("failed to create gzip reader:", err)
-				}
-				defer zr.Close()
-
-				if body, err = io.ReadAll(zr); err != nil {
-					t.Fatal("failed to decompress response:", err)
-				} else if len(sent) >= len(body) {
-					t.Fatalf("expected compressed response to be smaller, got %d >= %d", len(sent), len(body))
+			decoded := sent
+			if tt.encoding != "" {
+				if decoded = decompress(t, enc, sent); len(sent) >= len(decoded) {
+					t.Fatalf("expected compressed response to be smaller, got %d >= %d", len(sent), len(decoded))
 				}
 			}
 
 			var keys []accounts.ConnectKey
-			if err := json.Unmarshal(body, &keys); err != nil {
+			if err := json.Unmarshal(decoded, &keys); err != nil {
 				t.Fatal("failed to unmarshal app connect keys:", err)
 			} else if !reflect.DeepEqual(keys, expected) {
 				t.Fatal("response does not match the app connect keys")

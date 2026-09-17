@@ -41,7 +41,8 @@ func newCompressWrapper() func(http.Handler) http.HandlerFunc {
 }
 
 // CompressMiddleware wraps next so its responses are compressed for clients
-// that advertise support for it.
+// that advertise support for it. Both zstd and gzip are supported, with zstd
+// preferred when a client accepts either.
 func CompressMiddleware(next http.Handler) http.Handler {
 	return compressWrapper(next)
 }
