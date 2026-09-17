@@ -1386,7 +1386,7 @@ components:
         contractTax:
           allOf:
             - $ref: "#/components/schemas/Currency"
-            - description: The file contract tax paid by every confirmed wallet transaction so far, not just the ones funding active contracts
+            - description: Total tax paid by the wallet for every contract it has ever formed or renewed
         lockedAllowance:
           allOf:
             - $ref: "#/components/schemas/Currency"

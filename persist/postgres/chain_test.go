@@ -37,7 +37,7 @@ func TestResetChainState(t *testing.T) {
 	// prepare test elements and events
 	index := newTestChainIndex()
 	created := []types.SiacoinElement{newTestSiacoinElement()}
-	events := []wallet.Event{taxTestEvent()}
+	events := []wallet.Event{newTestContractEvent()}
 	events[0].Index = index
 	set := wallet.BroadcastedSet{
 		Basis:         index,
@@ -61,7 +61,7 @@ func TestResetChainState(t *testing.T) {
 	if _, err := store.FlushStatsDelta(100); err != nil {
 		t.Fatal(err)
 	}
-	event := taxTestEvent()
+	event := newTestContractEvent()
 	event.ID = types.Hash256{2}
 	event.Index = index
 	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
@@ -110,7 +110,7 @@ func TestUpdateChainState(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	sces := []types.SiacoinElement{newTestSiacoinElement()}
-	events := []wallet.Event{taxTestEvent()}
+	events := []wallet.Event{newTestContractEvent()}
 	events[0].Index = types.ChainIndex{Height: 1}
 
 	assertTax := func(want types.Currency) {
