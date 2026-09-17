@@ -822,3 +822,143 @@ func TestMigrateSlabUnrecoverable(t *testing.T) {
 		t.Fatalf("expected no slabs to need repair, got %v", unhealthy)
 	}
 }
+
+// TestApplyMigrationResultRecoveryFailures covers the recovery failure limit
+// and resetting the run after a recovery, even when uploading the recovered
+// shards failed.
+func TestApplyMigrationResultRecoveryFailures(t *testing.T) {
+	// maxFailedRecoveries is the limit set on the slab manager below, gaveUp
+	// the reason it records once a slab reaches it
+	const (
+		maxFailedRecoveries = 3
+		gaveUp              = "failed to recover the slab's shards"
+	)
+
+	log := zaptest.NewLogger(t)
+	db := newMockStore(t)
+	client := newMockHostClient()
+
+	a1 := types.PublicKey{1}
+	db.AddTestAccount(t, a1)
+
+	host := client.addTestHost(types.GeneratePrivateKey())
+	db.AddTestHost(t, host)
+	db.addTestContract(t, host.PublicKey)
+
+	pin := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: host.PublicKey}},
+	}
+	slabIDs, err := db.PinSlabs(proto.Account(a1), time.Now(), pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slabID := slabIDs[0]
+
+	mgr := slabs.NewSlabManager(newMockAccountManager(), newMockContractManager(), newMockHostManager(), db, client, alerts.NewManager(), types.GeneratePrivateKey(), types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
+	mgr.SetMaxFailedRecoveries(maxFailedRecoveries)
+
+	apply := func(recovered bool) {
+		t.Helper()
+		if err := mgr.ApplyMigrationResults([]slabs.MigrationResult{{SlabID: slabID, Recovered: recovered}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// assertState checks the slab's recovery state; an expected reason of ""
+	// asserts the slab is still recoverable.
+	assertState := func(failures int, reason string) {
+		t.Helper()
+		var gotFailures int
+		var gotUnrecoverable bool
+		var gotReason sql.NullString
+		if err := db.QueryRow(t.Context(), `
+			SELECT consecutive_failed_recoveries, unrecoverable, unrecoverable_reason
+			FROM slabs WHERE digest = $1`, sqlHash256(slabID)).Scan(&gotFailures, &gotUnrecoverable, &gotReason); err != nil {
+			t.Fatal(err)
+		} else if gotFailures != failures {
+			t.Fatalf("expected %d failed recoveries, got %d", failures, gotFailures)
+		} else if gotUnrecoverable != (reason != "") {
+			t.Fatalf("expected unrecoverable %v, got %v", reason != "", gotUnrecoverable)
+		} else if !strings.Contains(gotReason.String, reason) {
+			t.Fatalf("expected reason containing %q, got %q", reason, gotReason.String)
+		}
+	}
+
+	// a recovery breaks the run even though nothing was uploaded
+	for i := 1; i < maxFailedRecoveries; i++ {
+		apply(false)
+		assertState(i, "")
+	}
+	apply(true)
+	assertState(0, "")
+
+	// the slab leaves the repair rotation once the run reaches the limit
+	for i := 1; i <= maxFailedRecoveries; i++ {
+		apply(false)
+		reason := ""
+		if i == maxFailedRecoveries {
+			reason = gaveUp
+		}
+		assertState(i, reason)
+	}
+	resetNextRepair(t, db)
+	if unhealthy := collectUnhealthy(t, db); len(unhealthy) != 0 {
+		t.Fatalf("expected no slabs to need repair, got %v", unhealthy)
+	}
+
+	// the counter saturates and a late recovery cannot revive the slab
+	apply(false)
+	assertState(maxFailedRecoveries, gaveUp)
+	apply(true)
+	assertState(0, gaveUp)
+
+	// re-pinning the exact same slab revives it with a clean recovery state
+	apply(false)
+	if _, err := db.PinSlabs(proto.Account(a1), time.Now(), pin); err != nil {
+		t.Fatal(err)
+	}
+	assertState(0, "")
+
+	// a stale result for a slab that no longer exists is not an error
+	if err := mgr.ApplyMigrationResults([]slabs.MigrationResult{{SlabID: slabs.SlabID(frand.Entropy256())}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestMigrateSlabRecoveryCanceled ensures shutdown during recovery does not
+// produce a failed recovery result.
+func TestMigrateSlabRecoveryCanceled(t *testing.T) {
+	client := newMockHostClient()
+	source := client.addTestHost(types.GeneratePrivateKey())
+	dest := client.addTestHost(types.GeneratePrivateKey())
+
+	key, shards, roots := testutils.NewTestShards(t, 1, 0)
+	if _, err := client.WriteSector(t.Context(), types.GeneratePrivateKey(), source.PublicKey, shards[0]); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	client.readHooks[roots[0]] = cancel
+	client.integrityErrors[roots[0]] = context.Canceled
+	migrator := slabs.NewMigrator(client, types.GeneratePrivateKey(), zap.NewNop())
+
+	slab := slabs.Slab{
+		EncryptionKey: key,
+		MinShards:     1,
+		Sectors:       []slabs.Sector{{Root: roots[0], HostKey: &source.PublicKey}},
+	}
+	state := slabs.MigrationState{
+		Hosts:            []hosts.Host{dest},
+		HealthyContracts: []contracts.Contract{newTestContract(dest.PublicKey)},
+	}
+
+	if _, attempted := migrator.MigrateSlab(ctx, slab, state); attempted {
+		t.Fatal("canceled recovery should not count as an attempt")
+	} else if ctx.Err() == nil {
+		t.Fatal("expected cancellation during recovery")
+	}
+}

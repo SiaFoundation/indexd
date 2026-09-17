@@ -64,3 +64,7 @@ func (m *SlabManager) MigrationAccount() proto.Account {
 func (m *SlabManager) MaxFailedIntegrityChecks() uint {
 	return m.maxFailedIntegrityChecks
 }
+
+func (m *SlabManager) SetMaxFailedRecoveries(n uint) {
+	m.maxFailedRecoveries = n
+}

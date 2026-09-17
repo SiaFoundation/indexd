@@ -33,6 +33,26 @@ func (s *Store) MarkSlabUnrecoverable(slabID slabs.SlabID, reason string) error 
 	})
 }
 
+// RecordSlabRecovery resets the slab's consecutive recovery failure count if
+// its shards were recovered and increments it otherwise, saturating at
+// maxFailedRecoveries, and returns the updated count.
+func (s *Store) RecordSlabRecovery(slabID slabs.SlabID, recovered bool, maxFailedRecoveries uint) (failures uint, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		err := tx.QueryRow(ctx, `
+			UPDATE slabs
+			SET consecutive_failed_recoveries = CASE WHEN $2 THEN 0 ELSE LEAST(consecutive_failed_recoveries + 1, $3) END
+			WHERE digest = $1
+			RETURNING consecutive_failed_recoveries`, sqlHash256(slabID), recovered, maxFailedRecoveries).Scan(&failures)
+		if errors.Is(err, sql.ErrNoRows) {
+			return slabs.ErrSlabNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to record slab recovery: %w", err)
+		}
+		return nil
+	})
+	return
+}
+
 // MarkSlabRepaired marks the slab as repaired or increments the failed repair
 // count. If the repair was successful, the consecutive_failed_repairs counter
 // is reset to zero. If the repair failed, the counter is incremented and the

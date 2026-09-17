@@ -74,13 +74,16 @@ type (
 		Migrated []Shard `json:"migrated"`
 		Lost     []Shard `json:"lost"`
 		// Recovered reports whether the slab's shards were successfully
-		// recovered. If false, the repair state is left untouched.
+		// recovered. If false, the repair state is left untouched and the
+		// slab's recovery failure count is incremented instead; exhausting
+		// it makes the slab unrecoverable.
 		Recovered bool `json:"recovered"`
 		// Success reports whether every required sector was migrated. Only
 		// meaningful when Recovered is true.
 		Success bool `json:"success"`
 		// UnrecoverableReason is set when the migration proved the slab can
-		// never be fully repaired.
+		// never be fully repaired. A slab is also given up on after too many
+		// failed recoveries, without such proof.
 		UnrecoverableReason string `json:"unrecoverableReason,omitempty"`
 	}
 )
@@ -180,9 +183,8 @@ func NewMigrator(hosts HostClient, migrationAccount types.PrivateKey, log *zap.L
 // executeMigration recovers the required shards of a slab, re-encrypts them and
 // uploads them to the candidate hosts. The result holds the migrated and lost
 // (root, host) pairs for the caller to persist. A non-nil error indicates
-// recovery failed, in which case the slab's repair state should be left
-// untouched; Lost is still populated so the caller can persist any sectors
-// discovered lost during the failed recovery.
+// recovery failed; Lost is still populated so the caller can persist any
+// sectors discovered lost during the failed recovery.
 func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []int, candidates []types.PublicKey, log *zap.Logger) (res MigrationResult, downloadElapsed, uploadElapsed time.Duration, err error) {
 	res.SlabID = slab.ID
 	// indicate what shards are required
@@ -234,10 +236,26 @@ func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []in
 	return res, downloadElapsed, uploadElapsed, nil
 }
 
+// markSlabUnrecoverable takes a slab out of the repair rotation for good and
+// reports whether it was marked. A slab deleted in the meantime is staleness,
+// not a store failure.
+func (m *SlabManager) markSlabUnrecoverable(slabID SlabID, reason string, log *zap.Logger) (marked bool, err error) {
+	if err := m.store.MarkSlabUnrecoverable(slabID, reason); errors.Is(err, ErrSlabNotFound) {
+		log.Debug("unrecoverable slab no longer exists", zap.Error(err))
+		return false, nil
+	} else if err != nil {
+		log.Error("failed to mark slab unrecoverable", zap.Error(err))
+		return false, fmt.Errorf("failed to mark slab unrecoverable: %w", err)
+	}
+	log.Warn("marked slab unrecoverable", zap.String("reason", reason))
+	return true, nil
+}
+
 // applyMigrationResult persists the outcome of migrating a single slab: it
 // records lost sectors, the new locations of migrated sectors and updates the
-// slab's repair state, or takes it out of the repair rotation for good if the
-// migration proved it can never be fully repaired. It is shared by the local
+// slab's repair and recovery state, or takes it out of the repair rotation for
+// good if the migration proved it can never be fully repaired or its shards
+// have failed to recover too many times in a row. It is shared by the local
 // migration loop and the remote result-reporting endpoint. All failures are
 // logged; the returned error reports store failures only, so a stale result
 // (e.g. a sector that no longer needs migrating) is not an error.
@@ -257,9 +275,28 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 		}
 	}
 
+	// recorded independently of the upload, so a partial repair still breaks
+	// a run of recovery failures
+	unrecoverableReason := res.UnrecoverableReason
+	failures, err := m.store.RecordSlabRecovery(res.SlabID, res.Recovered, m.maxFailedRecoveries)
+	if errors.Is(err, ErrSlabNotFound) {
+		log.Debug("recovered slab no longer exists", zap.Error(err))
+	} else if err != nil {
+		log.Error("failed to record slab recovery", zap.Error(err))
+		errs = append(errs, fmt.Errorf("failed to record slab recovery: %w", err))
+	} else if failures >= m.maxFailedRecoveries && unrecoverableReason == "" {
+		// no proof the shards are gone, but we've spent enough on them
+		unrecoverableReason = fmt.Sprintf("failed to recover the slab's shards %d consecutive times", failures)
+	}
+
 	// if recovery failed, leave the repair state untouched so the slab is
-	// retried without incurring a repair-failure backoff.
+	// retried without incurring a repair-failure backoff
 	if !res.Recovered {
+		if unrecoverableReason != "" {
+			if _, err := m.markSlabUnrecoverable(res.SlabID, unrecoverableReason, log); err != nil {
+				errs = append(errs, err)
+			}
+		}
 		return errors.Join(errs...)
 	}
 
@@ -288,15 +325,10 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 	}
 	// a slab that can never be fully repaired leaves the repair rotation for
 	// good
-	if res.UnrecoverableReason != "" {
-		if err := m.store.MarkSlabUnrecoverable(res.SlabID, res.UnrecoverableReason); errors.Is(err, ErrSlabNotFound) {
-			// slab was deleted in the meantime
-			log.Debug("unrecoverable slab no longer exists", zap.Error(err))
-		} else if err != nil {
-			log.Error("failed to mark slab unrecoverable", zap.Error(err))
-			errs = append(errs, fmt.Errorf("failed to mark slab unrecoverable: %w", err))
-		} else {
-			log.Warn("marked slab unrecoverable", zap.String("reason", res.UnrecoverableReason))
+	if unrecoverableReason != "" {
+		if marked, err := m.markSlabUnrecoverable(res.SlabID, unrecoverableReason, log); err != nil {
+			errs = append(errs, err)
+		} else if marked {
 			return errors.Join(errs...)
 		}
 	}
@@ -382,12 +414,12 @@ func (m *SlabManager) ApplyMigrationResults(results []MigrationResult) error {
 // writes; the returned result is persisted by the primary node. attempted
 // reports whether a migration was actually performed: a slab that needs no
 // migration or has no candidate hosts is skipped and its result must not be
-// applied.
+// applied. Recovery interrupted by context cancellation is also skipped.
 func (m *Migrator) MigrateSlab(ctx context.Context, slab Slab, state MigrationState) (res MigrationResult, attempted bool) {
 	res = MigrationResult{SlabID: slab.ID}
 	// a caller whose context is already dead gets no attempt: queued work
 	// drained during shutdown must not produce doomed results that would be
-	// recorded as failed repair attempts
+	// recorded as failed recoveries
 	if ctx.Err() != nil {
 		return res, false
 	}
@@ -406,9 +438,11 @@ func (m *Migrator) MigrateSlab(ctx context.Context, slab Slab, state MigrationSt
 	res, downloadElapsed, uploadElapsed, err := m.executeMigration(ctx, slab, indices, candidates, log)
 	log = log.With(zap.Duration("downloadElapsed", downloadElapsed), zap.Duration("uploadElapsed", uploadElapsed), zap.Int("migrated", len(res.Migrated)))
 	if err != nil {
-		if ctx.Err() == nil {
-			log.Error("failed to recover slab", zap.Error(err))
+		if ctx.Err() != nil {
+			// shutdown is not evidence that the slab cannot be recovered
+			return res, false
 		}
+		log.Error("failed to recover slab", zap.Error(err))
 		return res, true
 	}
 	res.Recovered = true
