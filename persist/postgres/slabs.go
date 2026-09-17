@@ -33,23 +33,25 @@ func (s *Store) MarkSlabUnrecoverable(slabID slabs.SlabID, reason string) error 
 	})
 }
 
-// RecordSlabRecovery resets the slab's consecutive recovery failure count if
-// its shards were recovered and increments it otherwise, saturating at
-// maxFailedRecoveries, and returns the updated count.
-func (s *Store) RecordSlabRecovery(slabID slabs.SlabID, recovered bool, maxFailedRecoveries uint, reason string) (failures uint, err error) {
+// RecordFailedSlabRecovery increments the slab's consecutive recovery failure
+// count, saturating at maxFailedRecoveries, and returns the updated count. The
+// slab is marked unrecoverable with the given reason once the count reaches
+// maxFailedRecoveries. The count is reset by [Store.MarkSlabRepaired], which
+// runs whenever the slab's shards were recovered.
+func (s *Store) RecordFailedSlabRecovery(slabID slabs.SlabID, maxFailedRecoveries uint, reason string) (failures uint, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		failures = 0 // reset on retry
 		err := tx.QueryRow(ctx, `
 			UPDATE slabs
-			SET consecutive_failed_recoveries = CASE WHEN $2 THEN 0 ELSE LEAST(consecutive_failed_recoveries + 1, $3) END,
-				unrecoverable = unrecoverable OR (NOT $2 AND consecutive_failed_recoveries + 1 >= $3),
-				unrecoverable_reason = CASE WHEN NOT $2 AND consecutive_failed_recoveries + 1 >= $3 THEN COALESCE(unrecoverable_reason, $4) ELSE unrecoverable_reason END
+			SET consecutive_failed_recoveries = LEAST(consecutive_failed_recoveries + 1, $2),
+				unrecoverable = unrecoverable OR consecutive_failed_recoveries + 1 >= $2,
+				unrecoverable_reason = CASE WHEN consecutive_failed_recoveries + 1 >= $2 THEN COALESCE(unrecoverable_reason, $3) ELSE unrecoverable_reason END
 			WHERE digest = $1
-			RETURNING consecutive_failed_recoveries`, sqlHash256(slabID), recovered, maxFailedRecoveries, reason).Scan(&failures)
+			RETURNING consecutive_failed_recoveries`, sqlHash256(slabID), maxFailedRecoveries, reason).Scan(&failures)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrSlabNotFound
 		} else if err != nil {
-			return fmt.Errorf("failed to record slab recovery: %w", err)
+			return fmt.Errorf("failed to record failed slab recovery: %w", err)
 		}
 		return nil
 	})
@@ -63,7 +65,7 @@ func (s *Store) RecordSlabRecovery(slabID slabs.SlabID, recovered bool, maxFaile
 func (s *Store) MarkSlabRepaired(slabID slabs.SlabID, success bool) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		if success {
-			if res, err := tx.Exec(ctx, `UPDATE slabs SET consecutive_failed_repairs = 0 WHERE digest = $1`, sqlHash256(slabID)); err != nil {
+			if res, err := tx.Exec(ctx, `UPDATE slabs SET consecutive_failed_repairs = 0, consecutive_failed_recoveries = 0 WHERE digest = $1`, sqlHash256(slabID)); err != nil {
 				return fmt.Errorf("failed to mark slab as repaired: %w", err)
 			} else if res.RowsAffected() == 0 {
 				return slabs.ErrSlabNotFound
@@ -87,7 +89,7 @@ func (s *Store) MarkSlabRepaired(slabID slabs.SlabID, success bool) error {
 		nextRepairBackoff := min(minRepairBackoff*time.Duration(1<<(currentFailures)), maxRepairBackoff)
 		_, err = tx.Exec(ctx, `
 			UPDATE slabs
-			SET consecutive_failed_repairs = $2, next_repair_attempt = $3
+			SET consecutive_failed_repairs = $2, consecutive_failed_recoveries = 0, next_repair_attempt = $3
 			WHERE digest = $1`, sqlHash256(slabID), currentFailures+1, time.Now().Add(nextRepairBackoff))
 		if err != nil {
 			return fmt.Errorf("failed to update repair state: %w", err)

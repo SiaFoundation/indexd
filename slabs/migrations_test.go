@@ -859,9 +859,13 @@ func TestApplyMigrationResultRecoveryFailures(t *testing.T) {
 	mgr := slabs.NewSlabManager(newMockAccountManager(), newMockContractManager(), newMockHostManager(), db, client, alerts.NewManager(), types.GeneratePrivateKey(), types.GeneratePrivateKey(), slabs.WithLogger(log.Named("slabs")))
 	mgr.SetMaxFailedRecoveries(maxFailedRecoveries)
 
-	apply := func(recovered bool) {
+	var (
+		failed    = slabs.MigrationResult{SlabID: slabID}
+		recovered = slabs.MigrationResult{SlabID: slabID, Recovered: true}
+	)
+	apply := func(res slabs.MigrationResult) {
 		t.Helper()
-		if err := mgr.ApplyMigrationResults([]slabs.MigrationResult{{SlabID: slabID, Recovered: recovered}}); err != nil {
+		if err := mgr.ApplyMigrationResults([]slabs.MigrationResult{res}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -888,15 +892,15 @@ func TestApplyMigrationResultRecoveryFailures(t *testing.T) {
 
 	// a recovery breaks the run even though nothing was uploaded
 	for i := 1; i < maxFailedRecoveries; i++ {
-		apply(false)
+		apply(failed)
 		assertState(i, "")
 	}
-	apply(true)
+	apply(recovered)
 	assertState(0, "")
 
 	// the slab leaves the repair rotation once the run reaches the limit
 	for i := 1; i <= maxFailedRecoveries; i++ {
-		apply(false)
+		apply(failed)
 		reason := ""
 		if i == maxFailedRecoveries {
 			reason = gaveUp
@@ -909,13 +913,13 @@ func TestApplyMigrationResultRecoveryFailures(t *testing.T) {
 	}
 
 	// the counter saturates and a late recovery cannot revive the slab
-	apply(false)
+	apply(failed)
 	assertState(maxFailedRecoveries, gaveUp)
-	apply(true)
+	apply(recovered)
 	assertState(0, gaveUp)
 
 	// re-pinning the exact same slab revives it with a clean recovery state
-	apply(false)
+	apply(failed)
 	if _, err := db.PinSlabs(proto.Account(a1), time.Now(), pin); err != nil {
 		t.Fatal(err)
 	}
@@ -927,8 +931,9 @@ func TestApplyMigrationResultRecoveryFailures(t *testing.T) {
 	}
 }
 
-// TestMigrateSlabRecoveryCanceled ensures shutdown during recovery does not
-// produce a failed recovery result.
+// TestMigrateSlabRecoveryCanceled ensures a recovery cut short by shutdown
+// still reports the sectors found lost before it, so the caller can persist
+// them.
 func TestMigrateSlabRecoveryCanceled(t *testing.T) {
 	client := newMockHostClient()
 	source := client.addTestHost(types.GeneratePrivateKey())
@@ -942,8 +947,9 @@ func TestMigrateSlabRecoveryCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
+	// the host reports the sector lost as the migration is shut down
 	client.readHooks[roots[0]] = cancel
-	client.integrityErrors[roots[0]] = context.Canceled
+	client.integrityErrors[roots[0]] = deserializeRPCErr(proto.ErrSectorNotFound)
 	migrator := slabs.NewMigrator(client, types.GeneratePrivateKey(), zap.NewNop())
 
 	slab := slabs.Slab{
@@ -956,9 +962,14 @@ func TestMigrateSlabRecoveryCanceled(t *testing.T) {
 		HealthyContracts: []contracts.Contract{newTestContract(dest.PublicKey)},
 	}
 
-	if _, attempted := migrator.MigrateSlab(ctx, slab, state); attempted {
-		t.Fatal("canceled recovery should not count as an attempt")
-	} else if ctx.Err() == nil {
+	res, attempted := migrator.MigrateSlab(ctx, slab, state)
+	if ctx.Err() == nil {
 		t.Fatal("expected cancellation during recovery")
+	} else if !attempted {
+		t.Fatal("expected the canceled recovery to be reported")
+	} else if res.Recovered {
+		t.Fatal("expected the slab not to be recovered")
+	} else if len(res.Lost) != 1 || res.Lost[0].Root != roots[0] || res.Lost[0].HostKey != source.PublicKey {
+		t.Fatalf("expected the lost sector to be reported, got %v", res.Lost)
 	}
 }
