@@ -449,7 +449,7 @@ ALTER TABLE stats_deltas ALTER COLUMN stat_delta TYPE NUMERIC(50,0);`); err != n
 		if err != nil {
 			return fmt.Errorf("failed to backfill contract tax: %w", err)
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO stats (stat_name, stat_value) VALUES ($1, $2) ON CONFLICT (stat_name) DO NOTHING`, statContractTax, sqlCurrency(tax))
+		_, err = tx.Exec(ctx, `INSERT INTO stats (stat_name, stat_value) VALUES ('contract_tax', $1) ON CONFLICT (stat_name) DO NOTHING`, sqlCurrency(tax))
 		return err
 	},
 }

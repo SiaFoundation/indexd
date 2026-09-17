@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
@@ -46,6 +47,25 @@ func incrementStat(ctx context.Context, tx *txn, name string, delta int64) error
 		return nil
 	}
 	_, err := tx.Exec(ctx, "INSERT INTO stats_deltas (stat_name, stat_delta) VALUES ($1, $2)", name, delta)
+	return err
+}
+
+// incrementContractTax adds delta to the accumulated file contract tax.
+func incrementContractTax(ctx context.Context, tx *txn, delta types.Currency) error {
+	if delta.IsZero() {
+		return nil
+	}
+	_, err := tx.Exec(ctx, "INSERT INTO stats_deltas (stat_name, stat_delta) VALUES ($1, $2)", statContractTax, sqlCurrency(delta))
+	return err
+}
+
+// decrementContractTax subtracts delta from the accumulated file contract tax.
+// Currency is unsigned, so the delta is negated by the database.
+func decrementContractTax(ctx context.Context, tx *txn, delta types.Currency) error {
+	if delta.IsZero() {
+		return nil
+	}
+	_, err := tx.Exec(ctx, "INSERT INTO stats_deltas (stat_name, stat_delta) VALUES ($1, -$2::NUMERIC)", statContractTax, sqlCurrency(delta))
 	return err
 }
 

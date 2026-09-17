@@ -294,7 +294,7 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 	tax, err := walletEventsContractTax(rows)
 	if err != nil {
 		return fmt.Errorf("failed to calculate reverted contract tax: %w", err)
-	} else if err := incrementContractTax(u.ctx, u.tx, tax, true); err != nil {
+	} else if err := decrementContractTax(u.ctx, u.tx, tax); err != nil {
 		return fmt.Errorf("failed to subtract reverted contract tax: %w", err)
 	}
 	return nil
@@ -322,11 +322,7 @@ func insertWalletEvent(ctx context.Context, tx *txn, event wallet.Event) error {
 		sqlChainIndex(event.Index), event.MaturityHeight, sqlHash256(event.ID), event.Type, (*sqlWalletEvent)(&event))
 	if err != nil {
 		return err
-	}
-	tax, err := walletEventContractTax(event)
-	if err != nil {
-		return fmt.Errorf("failed to calculate contract tax: %w", err)
-	} else if err := incrementContractTax(ctx, tx, tax, false); err != nil {
+	} else if err := incrementContractTax(ctx, tx, walletEventContractTax(event)); err != nil {
 		return fmt.Errorf("failed to add contract tax: %w", err)
 	}
 	return nil
@@ -344,40 +340,24 @@ func (s *Store) ContractTax() (tax types.Currency, err error) {
 	return
 }
 
-// walletEventContractTax counts tax only for transactions spending wallet funds.
-func walletEventContractTax(event wallet.Event) (types.Currency, error) {
-	var tax types.Currency
-	if event.SiacoinOutflow().IsZero() {
-		return tax, nil
+// walletEventContractTax returns the file contract tax paid by an event. Only
+// transactions spending wallet funds are counted, and only v2 contracts, since
+// indexd never forms v1 contracts.
+func walletEventContractTax(event wallet.Event) (tax types.Currency) {
+	data, ok := event.Data.(wallet.EventV2Transaction)
+	if !ok || event.SiacoinOutflow().IsZero() {
+		return
 	}
-	switch data := event.Data.(type) {
-	case wallet.EventV1Transaction:
-		for _, fc := range data.Transaction.FileContracts {
-			// the payout includes tax; valid proof outputs contain the net payout
-			net := types.ZeroCurrency
-			for _, output := range fc.ValidProofOutputs {
-				net = net.Add(output.Value)
-			}
-			// consensus guarantees payout == net + tax, but Currency.Sub panics
-			// on underflow, so never trust a decoded event with that
-			fcTax, underflow := fc.Payout.SubWithUnderflow(net)
-			if underflow {
-				return types.ZeroCurrency, fmt.Errorf("file contract in event %q has valid proof outputs (%v) exceeding its payout (%v)", event.ID, net, fc.Payout)
-			}
-			tax = tax.Add(fcTax)
-		}
-	case wallet.EventV2Transaction:
-		var cs consensus.State // v2 tax is independent of height and network
-		for _, fc := range data.FileContracts {
-			tax = tax.Add(cs.V2FileContractTax(fc))
-		}
-		for _, resolution := range data.FileContractResolutions {
-			if renewal, ok := resolution.Resolution.(*types.V2FileContractRenewal); ok {
-				tax = tax.Add(cs.V2FileContractTax(renewal.NewContract))
-			}
+	var cs consensus.State // v2 tax is independent of height and network
+	for _, fc := range data.FileContracts {
+		tax = tax.Add(cs.V2FileContractTax(fc))
+	}
+	for _, resolution := range data.FileContractResolutions {
+		if renewal, ok := resolution.Resolution.(*types.V2FileContractRenewal); ok {
+			tax = tax.Add(cs.V2FileContractTax(renewal.NewContract))
 		}
 	}
-	return tax, nil
+	return
 }
 
 func walletEventsContractTax(rows pgx.Rows) (tax types.Currency, err error) {
@@ -387,25 +367,9 @@ func walletEventsContractTax(rows pgx.Rows) (tax types.Currency, err error) {
 		if err := rows.Scan((*sqlWalletEvent)(&event)); err != nil {
 			return types.ZeroCurrency, fmt.Errorf("failed to scan wallet event: %w", err)
 		}
-		eventTax, err := walletEventContractTax(event)
-		if err != nil {
-			return types.ZeroCurrency, err
-		}
-		tax = tax.Add(eventTax)
+		tax = tax.Add(walletEventContractTax(event))
 	}
 	return tax, rows.Err()
-}
-
-func incrementContractTax(ctx context.Context, tx *txn, tax types.Currency, revert bool) error {
-	if tax.IsZero() {
-		return nil
-	}
-	delta := tax.ExactString()
-	if revert {
-		delta = "-" + delta
-	}
-	_, err := tx.Exec(ctx, `INSERT INTO stats_deltas (stat_name, stat_delta) VALUES ($1, $2)`, statContractTax, delta)
-	return err
 }
 
 func validateOffsetLimit(offset, limit int) error {
