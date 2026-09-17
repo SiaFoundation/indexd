@@ -622,12 +622,29 @@ func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(nil)
 }
 
-// acceptsCBOR reports whether the Accept header names application/cbor. A
-// wildcard range does not match, so JSON stays the default.
+// acceptsCBOR reports whether the Accept header names application/cbor with a
+// non-zero quality factor. A wildcard range does not match, so JSON stays the
+// default.
 func acceptsCBOR(header string) bool {
 	for _, entry := range strings.Split(header, ",") {
-		mediaType, _, _ := strings.Cut(entry, ";")
-		if strings.EqualFold(strings.TrimSpace(mediaType), applicationCBOR) {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		mediaType, params, _ := strings.Cut(entry, ";")
+		if !strings.EqualFold(strings.TrimSpace(mediaType), applicationCBOR) {
+			continue
+		}
+		q := 1.0
+		for _, p := range strings.Split(params, ";") {
+			k, v, ok := strings.Cut(strings.TrimSpace(p), "=")
+			if ok && strings.EqualFold(k, "q") {
+				if f, err := strconv.ParseFloat(v, 64); err == nil {
+					q = f
+				}
+			}
+		}
+		if q > 0 {
 			return true
 		}
 	}
