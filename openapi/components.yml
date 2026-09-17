@@ -1383,6 +1383,10 @@ components:
           type: integer
           format: int64
           description: Number of contracts currently within their renew window
+        contractTax:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The file contract tax paid by every confirmed wallet transaction so far, not just the ones funding active contracts
         lockedAllowance:
           allOf:
             - $ref: "#/components/schemas/Currency"

@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	statContractTax        = "contract_tax"
 	statSlabs              = "num_slabs"
 	statMigratedSectors    = "num_migrated_sectors"
 	statPinnedSectors      = "num_pinned_sectors"
@@ -126,7 +127,7 @@ func initStats(ctx context.Context, tx *txn) error {
 			statSectorsChecked, statSectorsLost, statSectorsCheckFailed,
 			statAccountsRegistered,
 			statScans, statScansFailed,
-			statUnrecoverableSlabs, statStuckSlabs,
+			statUnrecoverableSlabs, statStuckSlabs, statContractTax,
 		})
 	return err
 }

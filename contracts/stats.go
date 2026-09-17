@@ -8,6 +8,7 @@ type Stats struct {
 	BadContracts uint64 `json:"badContracts"`
 	Renewing     uint64 `json:"renewing"`
 
+	ContractTax        types.Currency `json:"contractTax"`
 	LockedAllowance    types.Currency `json:"lockedAllowance"`
 	RemainingAllowance types.Currency `json:"remainingAllowance"`
 	TotalCapacity      uint64         `json:"totalCapacity"`
