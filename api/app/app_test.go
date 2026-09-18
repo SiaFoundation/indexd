@@ -478,8 +478,16 @@ func TestApplicationAPI(t *testing.T) {
 	obj, err = client.Object(context.Background(), sk, obj1.ID())
 	if err != nil {
 		t.Fatal(err)
-	} else if !reflect.DeepEqual(obj, *objs[0].Object) {
-		t.Fatal("objects not equal", obj, *objs[0].Object)
+	}
+	// the CBOR listing decodes timestamps in UTC while the JSON object keeps
+	// the local offset, so compare them by instant and the rest structurally
+	listed := *objs[0].Object
+	if !obj.CreatedAt.Equal(listed.CreatedAt) || !obj.UpdatedAt.Equal(listed.UpdatedAt) {
+		t.Fatal("object timestamps not equal", obj, listed)
+	}
+	obj.CreatedAt, obj.UpdatedAt = listed.CreatedAt, listed.UpdatedAt
+	if !reflect.DeepEqual(obj, listed) {
+		t.Fatal("objects not equal", obj, listed)
 	}
 
 	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err != nil {
