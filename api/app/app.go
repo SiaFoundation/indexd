@@ -626,7 +626,7 @@ func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
 // non-zero quality factor. A wildcard range does not match, so JSON stays the
 // default.
 func acceptsCBOR(header string) bool {
-	for _, entry := range strings.Split(header, ",") {
+	for entry := range strings.SplitSeq(header, ",") {
 		entry = strings.TrimSpace(entry)
 		if entry == "" {
 			continue
@@ -636,7 +636,7 @@ func acceptsCBOR(header string) bool {
 			continue
 		}
 		q := 1.0
-		for _, p := range strings.Split(params, ";") {
+		for p := range strings.SplitSeq(params, ";") {
 			k, v, ok := strings.Cut(strings.TrimSpace(p), "=")
 			if ok && strings.EqualFold(k, "q") {
 				if f, err := strconv.ParseFloat(v, 64); err == nil {

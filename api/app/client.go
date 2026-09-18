@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/api"
 	"go.sia.tech/indexd/hosts"
@@ -176,7 +177,7 @@ func (c *Client) signedGetCBOR(ctx context.Context, appKey types.PrivateKey, rou
 	defer io.Copy(io.Discard, body)
 	defer body.Close()
 
-	return decodeCBOR(body, resp)
+	return cbor.NewDecoder(body).Decode(resp)
 }
 
 // listObjectsRoute builds the GET /objects route for the cursor.

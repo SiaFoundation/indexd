@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fxamacker/cbor/v2"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/jape"
@@ -60,7 +61,7 @@ func TestEncodeResponseNegotiation(t *testing.T) {
 			if accept == applicationCBOR {
 				if ct := resp.Header.Get(contentTypeHeader); ct != applicationCBOR {
 					t.Fatalf("expected %s, got %s", applicationCBOR, ct)
-				} else if err := decodeCBOR(resp.Body, &decoded); err != nil {
+				} else if err := cbor.NewDecoder(resp.Body).Decode(&decoded); err != nil {
 					t.Fatal(err)
 				}
 			} else if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
@@ -141,7 +142,7 @@ func TestCBORObjectEventRoundTrip(t *testing.T) {
 	}
 
 	var decoded []slabs.ObjectEvent
-	if err := decodeCBOR(bytes.NewReader(buf), &decoded); err != nil {
+	if err := cbor.NewDecoder(bytes.NewReader(buf)).Decode(&decoded); err != nil {
 		t.Fatal(err)
 	} else if !reflect.DeepEqual(decoded, events) {
 		t.Fatalf("expected %+v, got %+v", events, decoded)
