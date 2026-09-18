@@ -390,7 +390,8 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				WHERE h.public_key = $2
 				ON CONFLICT (sector_root) DO UPDATE SET
 					uploaded_at = GREATEST(sectors.uploaded_at, EXCLUDED.uploaded_at),
-					host_id = COALESCE(sectors.host_id, CASE WHEN $5::boolean THEN EXCLUDED.host_id END)
+					host_id = COALESCE(sectors.host_id, CASE WHEN $5::boolean THEN EXCLUDED.host_id END),
+					consecutive_failed_checks = CASE WHEN sectors.host_id IS NULL THEN 0 ELSE sectors.consecutive_failed_checks END
 				RETURNING id, host_id, (OLD.host_id IS NULL AND NEW.host_id IS NOT NULL) AS bound, (OLD.id IS NOT NULL) AS existed`,
 					sqlHash256(sector.Root),
 					sqlPublicKey(sector.HostKey),
@@ -931,7 +932,7 @@ func (s *Store) PinSectors(contractID types.FileContractID, roots []types.Hash25
 			return nil
 		}
 
-		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = $1, contract_sectors_map_id = $2 WHERE id = ANY($3)`, hostID, contractMapID, sectorIDs); err != nil {
+		if _, err := tx.Exec(ctx, `UPDATE sectors SET host_id = $1, contract_sectors_map_id = $2, consecutive_failed_checks = CASE WHEN host_id IS NULL THEN 0 ELSE consecutive_failed_checks END WHERE id = ANY($3)`, hostID, contractMapID, sectorIDs); err != nil {
 			return fmt.Errorf("failed to pin sectors: %w", err)
 		}
 

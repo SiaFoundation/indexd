@@ -1451,6 +1451,11 @@ func TestPinSlabsRebindLostSector(t *testing.T) {
 	}
 	assertStats(0, 1, 1)
 
+	// give the detached sector a failure history
+	if _, err := store.pool.Exec(t.Context(), `UPDATE sectors SET consecutive_failed_checks = 5 WHERE sector_root = $1`, sqlHash256(root)); err != nil {
+		t.Fatal(err)
+	}
+
 	slab2 := slabs.SlabPinParams{
 		EncryptionKey: slabs.EncryptionKey{2},
 		MinShards:     1,
@@ -1461,6 +1466,13 @@ func TestPinSlabsRebindLostSector(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertStats(1, 0, 1)
+
+	var consecutiveFailedChecks int
+	if err := store.pool.QueryRow(t.Context(), `SELECT consecutive_failed_checks FROM sectors WHERE sector_root = $1`, sqlHash256(root)).Scan(&consecutiveFailedChecks); err != nil {
+		t.Fatal(err)
+	} else if consecutiveFailedChecks != 0 {
+		t.Fatalf("expected 0 consecutive failed checks, got %d", consecutiveFailedChecks)
+	}
 
 	fetched, err := store.Slabs(account, slab2IDs)
 	if err != nil {
