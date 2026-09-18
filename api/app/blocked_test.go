@@ -104,13 +104,6 @@ func TestBlockedObjects(t *testing.T) {
 		} else if len(withoutSlabs) != want {
 			t.Fatalf("expected %d object events, got %d", want, len(withoutSlabs))
 		}
-		// fetching slab slices for every listed object also checks that blocked
-		// objects are excluded from the listing without slabs
-		if events, err := appClient.ListObjectsWithSlabPagination(ctx, sk, slabs.Cursor{}, 100); err != nil {
-			t.Fatal(err)
-		} else if len(events) != want {
-			t.Fatalf("expected %d object events, got %d", want, len(events))
-		}
 		if objs, err := appClient.SharingKeyObjects(ctx, sk, shareKey); err != nil {
 			t.Fatal(err)
 		} else if len(objs) != want {

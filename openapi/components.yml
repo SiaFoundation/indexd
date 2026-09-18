@@ -196,10 +196,6 @@ components:
         - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
         - type: object
           properties:
-            id:
-              allOf:
-                - $ref: "#/components/schemas/Hash256"
-                - description: The object's unique ID
             slabs:
               type: array
               items:

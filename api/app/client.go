@@ -13,7 +13,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"sync"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -24,21 +23,7 @@ import (
 )
 
 const (
-	defaultValidity      = 10 * time.Minute
-	maxConcurrentObjects = 8
-	maxListRetries       = 3
-	listRetryDelay       = 100 * time.Millisecond
-)
-
-var (
-	// errObjectUnavailable is returned when an object is deleted or blocked
-	// while its slab slices are being fetched. Listing the events again
-	// returns a deletion event or omits the blocked object.
-	errObjectUnavailable = errors.New("object deleted or blocked while fetching its slab slices")
-
-	// errObjectSlabsMismatch is returned when the fetched slab slices do not
-	// match the listed object ID. Retrying the listing cannot resolve it.
-	errObjectSlabsMismatch = errors.New("fetched slab slices do not match the object ID")
+	defaultValidity = 10 * time.Minute
 )
 
 // Client is an HTTP client for the application API of the indexer.
@@ -207,87 +192,6 @@ func listObjectsRoute(cursor slabs.Cursor, limit int, includeSlabs bool) string 
 	return "/objects?" + values.Encode()
 }
 
-// fetchObjectSlabs fetches all of the object's slab slices and checks their
-// ordered slab IDs, offsets, and lengths against the object ID. Host keys are
-// current locations and are not part of the object ID.
-func (c *Client) fetchObjectSlabs(ctx context.Context, appKey types.PrivateKey, key types.Hash256) ([]slabs.SlabSlice, error) {
-	var fetched []slabs.SlabSlice
-	for {
-		page, err := c.ObjectSlabs(ctx, appKey, key, int64(len(fetched)), api.MaxLimit)
-		var httpErr *HTTPError
-		if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusUnavailableForLegalReasons) {
-			return nil, errObjectUnavailable
-		} else if err != nil {
-			return nil, err
-		}
-		fetched = append(fetched, page...)
-		if len(page) < api.MaxLimit {
-			if id := slabs.ObjectID(fetched); id != key {
-				return nil, fmt.Errorf("%w: assembled %v from %d slab slices", errObjectSlabsMismatch, id, len(fetched))
-			}
-			return fetched, nil
-		}
-	}
-}
-
-// fetchEventSlabs fetches each listed object's slab slices concurrently. Slices
-// already present in fetched are reused, and those fetched here are added to it.
-func (c *Client) fetchEventSlabs(ctx context.Context, appKey types.PrivateKey, withoutSlabs []slabs.ObjectEventWithoutSlabs, fetched map[types.Hash256][]slabs.SlabSlice) ([]slabs.ObjectEvent, error) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	events := make([]slabs.ObjectEvent, len(withoutSlabs))
-	var wg sync.WaitGroup
-	sema := make(chan struct{}, maxConcurrentObjects)
-	var fetchErr error
-	var errOnce sync.Once
-eventLoop:
-	for i, event := range withoutSlabs {
-		events[i] = slabs.ObjectEvent{
-			Key:       event.Key,
-			Deleted:   event.Deleted,
-			UpdatedAt: event.UpdatedAt,
-		}
-		if event.Object == nil {
-			continue
-		} else if objectSlabs, ok := fetched[event.Key]; ok {
-			events[i].Object = event.Object.WithSlabs(objectSlabs)
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			break eventLoop
-		case sema <- struct{}{}:
-		}
-		wg.Go(func() {
-			defer func() {
-				<-sema
-			}()
-			objectSlabs, err := c.fetchObjectSlabs(ctx, appKey, event.Key)
-			if err != nil {
-				errOnce.Do(func() {
-					fetchErr = fmt.Errorf("failed to fetch slab slices of object %q: %w", event.Key, err)
-					cancel()
-				})
-				return
-			}
-			events[i].Object = event.Object.WithSlabs(objectSlabs)
-		})
-	}
-	wg.Wait()
-	for _, event := range events {
-		if event.Object != nil {
-			fetched[event.Key] = event.Object.Slabs
-		}
-	}
-	if fetchErr != nil {
-		return nil, fetchErr
-	} else if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	return events, nil
-}
-
 // Hosts returns all usable hosts.
 func (c *Client) Hosts(ctx context.Context, appKey types.PrivateKey, opts ...api.URLQueryParameterOption) (hosts []hosts.HostInfo, err error) {
 	values := url.Values{}
@@ -372,35 +276,6 @@ func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objec
 	values.Set("limit", fmt.Sprint(limit))
 	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, fmt.Sprintf("/objects/%s/slabs?%s", objectID, values.Encode()), nil, &resp)
 	return
-}
-
-// ListObjectsWithSlabPagination returns one page of object events, fetching
-// each object's slab slices in separate requests. Objects are fetched
-// concurrently. If an object is deleted or blocked during fetching, the event
-// page is listed again. A page shorter than limit marks the end of the results.
-func (c *Client) ListObjectsWithSlabPagination(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error) {
-	// an object ID commits to its slab slices, so slices fetched during an
-	// earlier attempt are still current after the page is listed again
-	fetched := make(map[types.Hash256][]slabs.SlabSlice)
-	for attempts := 0; ; attempts++ {
-		withoutSlabs, err := c.ListObjectsWithoutSlabs(ctx, appKey, cursor, limit)
-		if err != nil {
-			return nil, err
-		}
-
-		events, err := c.fetchEventSlabs(ctx, appKey, withoutSlabs, fetched)
-		if err == nil {
-			return events, nil
-		} else if !errors.Is(err, errObjectUnavailable) || attempts >= maxListRetries {
-			return nil, err
-		}
-		// back off before listing the page again
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(listRetryDelay << attempts):
-		}
-	}
 }
 
 // PinObject pins the object to the given account. If an object with

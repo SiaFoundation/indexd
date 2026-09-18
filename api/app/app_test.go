@@ -435,31 +435,35 @@ func TestApplicationAPI(t *testing.T) {
 	}
 	obj1 := *objs[0].Object
 
-	paginated, err := client.ListObjectsWithSlabPagination(context.Background(), sk, slabs.Cursor{}, 100)
-	if err != nil {
-		t.Fatal(err)
-	} else if !reflect.DeepEqual(paginated, objs) {
-		t.Fatalf("expected listing with slab pagination %+v, got %+v", objs, paginated)
-	}
-
+	// list the object without its slabs and check the rest of the event matches
 	withoutSlabs, err := client.ListObjectsWithoutSlabs(context.Background(), sk, slabs.Cursor{}, 100)
 	if err != nil {
 		t.Fatal(err)
 	} else if len(withoutSlabs) != 1 || withoutSlabs[0].Object == nil {
 		t.Fatalf("expected 1 object event, got %+v", withoutSlabs)
-	} else if !withoutSlabs[0].Object.UpdatedAt.Equal(obj1.UpdatedAt) {
-		t.Fatalf("expected update time %v, got %v", obj1.UpdatedAt, withoutSlabs[0].Object.UpdatedAt)
+	} else if !reflect.DeepEqual(withoutSlabs[0].Object, obj1.WithoutSlabs()) {
+		t.Fatalf("expected object %+v, got %+v", obj1.WithoutSlabs(), withoutSlabs[0].Object)
+	} else if withoutSlabs[0].Key != objs[0].Key || withoutSlabs[0].Deleted != objs[0].Deleted || !withoutSlabs[0].UpdatedAt.Equal(objs[0].UpdatedAt) {
+		t.Fatalf("expected event %+v, got %+v", objs[0], withoutSlabs[0])
 	}
 
-	page, err := client.ObjectSlabs(context.Background(), sk, withoutSlabs[0].Key, 0, 100)
-	if err != nil {
-		t.Fatal(err)
-	} else if !reflect.DeepEqual(page, obj1.Slabs) {
-		t.Fatalf("expected slabs %+v, got %+v", obj1.Slabs, page)
-	} else if page, err := client.ObjectSlabs(context.Background(), sk, withoutSlabs[0].Key, int64(len(obj1.Slabs)), 100); err != nil {
-		t.Fatal(err)
-	} else if len(page) != 0 {
-		t.Fatalf("expected no slabs past the end, got %+v", page)
+	// paginate over the object's slabs one at a time
+	var slices []slabs.SlabSlice
+	for {
+		page, err := client.ObjectSlabs(context.Background(), sk, withoutSlabs[0].Key, int64(len(slices)), 1)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(page) > 1 {
+			t.Fatalf("expected at most 1 slab per page, got %d", len(page))
+		} else if len(page) == 0 {
+			break
+		}
+		slices = append(slices, page...)
+	}
+	if len(slices) != len(obj1.Slabs) {
+		t.Fatalf("expected %d slabs, got %d", len(obj1.Slabs), len(slices))
+	} else if reassembled := withoutSlabs[0].Object.WithSlabs(slices); !reflect.DeepEqual(*reassembled, obj1) {
+		t.Fatalf("expected reassembled object %+v, got %+v", obj1, *reassembled)
 	}
 
 	if objs, err := client.ListObjects(context.Background(), sk, slabs.Cursor{
