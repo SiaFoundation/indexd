@@ -342,7 +342,7 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		routes["POST /debug/slabs/prune"] = a.handlePOSTPruneAccounts
 	}
 
-	return jape.Mux(routes)
+	return api.CompressMiddleware(jape.Mux(routes))
 }
 
 func (a *admin) checkServerError(jc jape.Context, context string, err error) bool {
@@ -1566,7 +1566,7 @@ func (a *admin) handleGETPrometheusMetrics(jc jape.Context) {
 		return
 	}
 
-	jc.ResponseWriter.Header().Set("Content-Type", "text/plain; version=0.0.4")
+	jc.ResponseWriter.Header().Set("Content-Type", api.TextPlain+"; version=0.0.4")
 	enc := prometheus.NewEncoder(jc.ResponseWriter)
 	for _, m := range []prometheus.Marshaller{
 		state,
@@ -1598,7 +1598,7 @@ func writeResponse(jc jape.Context, resp prometheus.Marshaller) {
 	}
 	switch responseFormat {
 	case "prometheus":
-		jc.ResponseWriter.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		jc.ResponseWriter.Header().Set("Content-Type", api.TextPlain+"; version=0.0.4")
 		enc := prometheus.NewEncoder(jc.ResponseWriter)
 		if jc.Check("failed to marshal prometheus response", enc.Append(resp)) != nil {
 			return

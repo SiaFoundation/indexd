@@ -4,6 +4,9 @@ info:
   description: >
     The Admin API lets you monitor and manage the Indexd service. It provides access to system status, accounts, contracts, host settings, pricing, and wallet functions. This API is meant for internal use by operators who need to keep the service running smoothly.
 
+
+    Responses are compressed when the client advertises support for it in the Accept-Encoding header. Both zstd and gzip are accepted; zstd is preferred when a client accepts either. Clients that do not send an Accept-Encoding header receive uncompressed responses.
+
   version: 0.5.0
 servers:
   - url: http://localhost:9980/api

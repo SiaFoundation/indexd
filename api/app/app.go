@@ -211,9 +211,6 @@ const (
 	contentLengthHeader = "Content-Length"
 	varyHeader          = "Vary"
 
-	applicationJSON = "application/json"
-	applicationCBOR = "application/cbor"
-
 	// field size limits for RegisterAppRequest
 	maxNameLen        = 128
 	maxDescriptionLen = 1024
@@ -632,7 +629,7 @@ func acceptsCBOR(header string) bool {
 			continue
 		}
 		mediaType, params, _ := strings.Cut(entry, ";")
-		if !strings.EqualFold(strings.TrimSpace(mediaType), applicationCBOR) {
+		if !strings.EqualFold(strings.TrimSpace(mediaType), api.ApplicationCBOR) {
 			continue
 		}
 		q := 1.0
@@ -664,7 +661,7 @@ func encodeResponse(jc jape.Context, resp any) {
 	if jc.Check("failed to encode response", err) != nil {
 		return
 	}
-	jc.ResponseWriter.Header().Set(contentTypeHeader, applicationCBOR)
+	jc.ResponseWriter.Header().Set(contentTypeHeader, api.ApplicationCBOR)
 	jc.ResponseWriter.Header().Set(contentLengthHeader, strconv.Itoa(len(buf)))
 	jc.ResponseWriter.Write(buf)
 }
@@ -831,7 +828,7 @@ func (a *app) handleGETAuthCheck(jc jape.Context, _ types.PublicKey) {
 func (a *app) handleGETAuthConnectUI(jc jape.Context) {
 	var requestID string
 	jc.DecodeParam("requestID", &requestID)
-	jc.ResponseWriter.Header().Set("Content-Type", "text/html")
+	jc.ResponseWriter.Header().Set("Content-Type", api.TextHTML)
 
 	a.mu.Lock()
 	authReq, ok := a.authRequests[requestID]
@@ -1116,7 +1113,7 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		}
 	}
 
-	return maxBytesMiddleware(corsMux(map[string]jape.Handler{
+	return api.CompressMiddleware(maxBytesMiddleware(corsMux(map[string]jape.Handler{
 		"GET /account": wrapSignedAuth(a.handleGETAccount),
 
 		// auth is a multi-step process designed to protect privacy while allowing arbitrary apps to connect:
@@ -1166,5 +1163,5 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		// blocked entirely, but it's less convenient without CORS support.
 		"GET /auth/connect/:requestID":  a.handleGETAuthConnectUI,               // UI for accept/reject connection requests
 		"POST /auth/connect/:requestID": wrapBasicAuth(a.handlePOSTAuthConnect), // API for accept/reject connection requests
-	})), nil
+	}))), nil
 }
