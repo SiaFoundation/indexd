@@ -33,6 +33,7 @@ type (
 		integrityCheckInterval       time.Duration
 		failedIntegrityCheckInterval time.Duration
 		maxFailedIntegrityChecks     uint
+		maxFailedRecoveries          uint
 		minHostDistanceKm            float64
 
 		numIntegrityCheckGoroutines int
@@ -123,6 +124,7 @@ type (
 		MarkSlabUnrecoverable(slabID SlabID, reason string) error
 		MigrateSector(root types.Hash256, hostKey types.PublicKey) (bool, error)
 		RecordSlabMigrated(slabID SlabID) error
+		RecordFailedSlabRecovery(slabID SlabID, maxFailedRecoveries uint, unrecoverableReason string) (uint, error)
 		PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error)
 		UnpinSlab(proto.Account, SlabID) error
 		RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error
@@ -296,6 +298,7 @@ func newSlabManager(am AccountManager, cm ContractManager, hm HostManager, store
 		integrityCheckInterval:       14 * 24 * time.Hour,
 		failedIntegrityCheckInterval: 12 * time.Hour,
 		maxFailedIntegrityChecks:     5,
+		maxFailedRecoveries:          100,
 		minHostDistanceKm:            10,
 
 		integrityCheckTimeout:       5 * time.Minute,

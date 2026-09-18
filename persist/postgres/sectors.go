@@ -345,6 +345,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				pinned_at = NOW(),
 				unrecoverable = FALSE,
 				unrecoverable_reason = NULL,
+				consecutive_failed_recoveries = CASE WHEN slabs.unrecoverable THEN 0 ELSE slabs.consecutive_failed_recoveries END,
 				consecutive_failed_repairs = CASE WHEN slabs.unrecoverable THEN 0 ELSE slabs.consecutive_failed_repairs END,
 				next_repair_attempt = CASE WHEN slabs.unrecoverable THEN NOW() ELSE slabs.next_repair_attempt END
 			RETURNING id, (xmax <> 0)
