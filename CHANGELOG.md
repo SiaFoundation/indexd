@@ -1,3 +1,24 @@
+## 0.5.1 (2026-09-18)
+
+### Fixes
+
+- Don't validate an existing slab's bad hosts count when pinning
+- Only rebind a lost sector to a host with a good contract
+
+#### Fix object events being skipped by the cursor
+
+An event now takes its position in the stream from a background publisher rather
+than from the transaction that wrote it, so a slow commit can no longer land
+behind a cursor that has already moved on. Clients need no update, though an
+event normally becomes visible within two seconds of the write instead of
+within the same second.
+
+#### Require RHP 5.1.0 hosts by default
+
+A new deployment initializes `MinProtocolVersion` at 5.1.0 rather than 5.0.2, so
+a host needs balance pool support to pass the default usability check. Existing
+deployments keep the minimum already stored in their settings.
+
 ## 0.5.0 (2026-09-09)
 
 ### Breaking Changes
