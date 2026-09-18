@@ -37,7 +37,7 @@ func TestResetChainState(t *testing.T) {
 	// prepare test elements and events
 	index := newTestChainIndex()
 	created := []types.SiacoinElement{newTestSiacoinElement()}
-	events := []wallet.Event{newTestEvent()}
+	events := []wallet.Event{newTestContractEvent()}
 	events[0].Index = index
 	set := wallet.BroadcastedSet{
 		Basis:         index,
@@ -57,6 +57,23 @@ func TestResetChainState(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// keep both a checkpoint and an unflushed tax delta to exercise reset
+	if _, err := store.FlushStatsDelta(100); err != nil {
+		t.Fatal(err)
+	}
+	event := newTestContractEvent()
+	event.ID = types.Hash256{2}
+	event.Index = index
+	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
+		return tx.WalletApplyIndex(index, nil, nil, []wallet.Event{event}, time.Now())
+	}); err != nil {
+		t.Fatal(err)
+	} else if tax, err := store.ContractTax(); err != nil {
+		t.Fatal(err)
+	} else if tax != types.Siacoins(12) {
+		t.Fatal("unexpected contract tax before reset", tax)
+	}
+
 	// assert chain state before reset
 	if ci, err := store.LastScannedIndex(); err != nil {
 		t.Fatal(err)
@@ -66,7 +83,7 @@ func TestResetChainState(t *testing.T) {
 
 	assertTableCount("wallet_siacoin_elements", 1)
 	assertTableCount("wallet_broadcasted_sets", 1)
-	assertTableCount("wallet_events", 1)
+	assertTableCount("wallet_events", 2)
 
 	if err := store.ResetChainState(); err != nil {
 		t.Fatal(err)
@@ -82,14 +99,29 @@ func TestResetChainState(t *testing.T) {
 	assertTableCount("wallet_siacoin_elements", 0)
 	assertTableCount("wallet_broadcasted_sets", 0)
 	assertTableCount("wallet_events", 0)
+	if tax, err := store.ContractTax(); err != nil {
+		t.Fatal(err)
+	} else if !tax.IsZero() {
+		t.Fatal("expected contract tax to be reset", tax)
+	}
 }
 
 func TestUpdateChainState(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 
 	sces := []types.SiacoinElement{newTestSiacoinElement()}
-	events := []wallet.Event{newTestEvent()}
+	events := []wallet.Event{newTestContractEvent()}
 	events[0].Index = types.ChainIndex{Height: 1}
+
+	assertTax := func(want types.Currency) {
+		t.Helper()
+		tax, err := store.ContractTax()
+		if err != nil {
+			t.Fatal(err)
+		} else if tax != want {
+			t.Fatalf("expected contract tax %v, got %v", want, tax)
+		}
+	}
 
 	// assert err when spending non-existing output
 	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
@@ -116,6 +148,12 @@ func TestUpdateChainState(t *testing.T) {
 	} else if tip != expectedTip {
 		t.Fatal("unexpected tip", tip, expectedTip)
 	}
+
+	assertTax(types.Siacoins(6))
+	if _, err := store.FlushStatsDelta(100); err != nil {
+		t.Fatal(err)
+	}
+	assertTax(types.Siacoins(6))
 
 	// spend it
 	if err := store.UpdateChainState(func(tx subscriber.UpdateTx) error {
@@ -192,6 +230,11 @@ func TestUpdateChainState(t *testing.T) {
 	} else if tip != expectedTip {
 		t.Fatal("unexpected tip", tip, expectedTip)
 	}
+	assertTax(types.ZeroCurrency)
+	if _, err := store.FlushStatsDelta(100); err != nil {
+		t.Fatal(err)
+	}
+	assertTax(types.ZeroCurrency)
 }
 
 func BenchmarkUpdateWalletSiacoinElementProofs(b *testing.B) {

@@ -226,6 +226,77 @@ func TestSingleAddressWalletStoreBroadcastedSets(t *testing.T) {
 	}
 }
 
+func TestWalletEventContractTax(t *testing.T) {
+	// v2Event applies fn to the data of a contract formation event
+	v2Event := func(fn func(*wallet.EventV2Transaction)) wallet.Event {
+		event := newTestContractEvent()
+		data := event.Data.(wallet.EventV2Transaction)
+		fn(&data)
+		event.Data = data
+		return event
+	}
+
+	v1Event := newTestContractEvent()
+	v1Event.Type = wallet.EventTypeV1Transaction
+	v1Event.Data = wallet.EventV1Transaction{
+		Transaction: types.Transaction{FileContracts: []types.FileContract{{
+			Payout:            types.Siacoins(156),
+			ValidProofOutputs: []types.SiacoinOutput{{Value: types.Siacoins(100)}, {Value: types.Siacoins(50)}},
+		}}},
+		SpentSiacoinElements: []types.SiacoinElement{{
+			SiacoinOutput: types.SiacoinOutput{Address: types.Address{1}, Value: types.Siacoins(1000)},
+		}},
+	}
+
+	tests := []struct {
+		name  string
+		event wallet.Event
+		want  types.Currency
+	}{
+		{
+			name:  "formation",
+			event: newTestContractEvent(),
+			want:  types.Siacoins(6),
+		},
+		{
+			name: "renewal",
+			event: v2Event(func(data *wallet.EventV2Transaction) {
+				data.FileContractResolutions = []types.V2FileContractResolution{{Resolution: &types.V2FileContractRenewal{NewContract: data.FileContracts[0]}}}
+				data.FileContracts = nil
+			}),
+			want: types.Siacoins(6),
+		},
+		{
+			name: "expiration",
+			event: v2Event(func(data *wallet.EventV2Transaction) {
+				data.FileContractResolutions = []types.V2FileContractResolution{{Resolution: &types.V2FileContractExpiration{}}}
+				data.FileContracts = nil
+			}),
+		},
+		{
+			// a contract funded by someone else is not taxed to this wallet
+			name: "no outflow",
+			event: v2Event(func(data *wallet.EventV2Transaction) {
+				data.SiacoinInputs[0].Parent.SiacoinOutput.Address = types.Address{2}
+				data.SiacoinOutputs = []types.SiacoinOutput{{Address: types.Address{1}, Value: types.Siacoins(1)}}
+			}),
+		},
+		{
+			// indexd never forms v1 contracts, so their tax is not tracked
+			name:  "v1",
+			event: v1Event,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := walletEventContractTax(test.event); got != test.want {
+				t.Fatalf("expected tax %v, got %v", test.want, got)
+			}
+		})
+	}
+}
+
 func newTestEvent() wallet.Event {
 	return wallet.Event{
 		ID:             types.Hash256{1},
@@ -235,6 +306,27 @@ func newTestEvent() wallet.Event {
 		Timestamp:      time.Unix(int64(frand.Intn(int(time.Now().Unix()))), 0),
 		MaturityHeight: 4,
 		Relevant:       []types.Address{frand.Entropy256()},
+	}
+}
+
+// newTestContractEvent returns an event spending wallet funds to form a single
+// v2 contract with a 6 SC tax.
+func newTestContractEvent() wallet.Event {
+	return wallet.Event{
+		ID:        types.Hash256{1},
+		Index:     types.ChainIndex{Height: 1, ID: types.BlockID{1}},
+		Type:      wallet.EventTypeV2Transaction,
+		Timestamp: time.Now(),
+		Relevant:  []types.Address{{1}},
+		Data: wallet.EventV2Transaction{
+			SiacoinInputs: []types.V2SiacoinInput{{SatisfiedPolicy: types.SatisfiedPolicy{Policy: types.PolicyAbove(0)}, Parent: types.SiacoinElement{
+				SiacoinOutput: types.SiacoinOutput{Address: types.Address{1}, Value: types.Siacoins(1000)},
+			}}},
+			FileContracts: []types.V2FileContract{{
+				RenterOutput: types.SiacoinOutput{Value: types.Siacoins(100)},
+				HostOutput:   types.SiacoinOutput{Value: types.Siacoins(50)},
+			}},
+		},
 	}
 }
 

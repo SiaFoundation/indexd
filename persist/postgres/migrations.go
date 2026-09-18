@@ -435,4 +435,21 @@ ALTER TABLE global_settings ADD COLUMN object_events_last_published TIMESTAMP WI
 UPDATE global_settings SET object_events_last_published = COALESCE((SELECT date_trunc('second', MAX(updated_at)) FROM object_events), '-infinity');`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		if _, err := tx.Exec(ctx, `
+ALTER TABLE stats ALTER COLUMN stat_value TYPE NUMERIC(50,0);
+ALTER TABLE stats_deltas ALTER COLUMN stat_delta TYPE NUMERIC(50,0);`); err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT event_data FROM wallet_events`)
+		if err != nil {
+			return err
+		}
+		tax, err := walletEventsContractTax(rows)
+		if err != nil {
+			return fmt.Errorf("failed to backfill contract tax: %w", err)
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO stats (stat_name, stat_value) VALUES ('contract_tax', $1) ON CONFLICT (stat_name) DO NOTHING`, sqlCurrency(tax))
+		return err
+	},
 }

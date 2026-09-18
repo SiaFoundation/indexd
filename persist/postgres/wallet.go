@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"go.sia.tech/core/consensus"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/wallet"
 )
@@ -286,9 +287,15 @@ func (u *updateTx) WalletRevertIndex(index types.ChainIndex, removed, unspent []
 		}
 	}
 
-	_, err := u.tx.Exec(u.ctx, `DELETE FROM wallet_events WHERE chain_index = $1`, sqlChainIndex(index))
+	rows, err := u.tx.Query(u.ctx, `DELETE FROM wallet_events WHERE chain_index = $1 RETURNING event_data`, sqlChainIndex(index))
 	if err != nil {
 		return fmt.Errorf("failed to delete events: %w", err)
+	}
+	tax, err := walletEventsContractTax(rows)
+	if err != nil {
+		return fmt.Errorf("failed to calculate reverted contract tax: %w", err)
+	} else if err := decrementContractTax(u.ctx, u.tx, tax); err != nil {
+		return fmt.Errorf("failed to subtract reverted contract tax: %w", err)
 	}
 	return nil
 }
@@ -313,7 +320,56 @@ func insertWalletEvent(ctx context.Context, tx *txn, event wallet.Event) error {
 		INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data)
 		VALUES ($1, $2, $3, $4, $5)`,
 		sqlChainIndex(event.Index), event.MaturityHeight, sqlHash256(event.ID), event.Type, (*sqlWalletEvent)(&event))
-	return err
+	if err != nil {
+		return err
+	} else if err := incrementContractTax(ctx, tx, walletEventContractTax(event)); err != nil {
+		return fmt.Errorf("failed to add contract tax: %w", err)
+	}
+	return nil
+}
+
+// ContractTax returns the accumulated file contract tax paid by confirmed
+// wallet transactions.
+func (s *Store) ContractTax() (tax types.Currency, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		if err := tx.QueryRow(ctx, sqlStatSelect(statContractTax)).Scan((*sqlCurrency)(&tax)); err != nil {
+			return fmt.Errorf("failed to query contract tax: %w", err)
+		}
+		return nil
+	})
+	return
+}
+
+// walletEventContractTax returns the file contract tax paid by an event. Only
+// transactions spending wallet funds are counted, and only v2 contracts, since
+// indexd never forms v1 contracts.
+func walletEventContractTax(event wallet.Event) (tax types.Currency) {
+	data, ok := event.Data.(wallet.EventV2Transaction)
+	if !ok || event.SiacoinOutflow().IsZero() {
+		return
+	}
+	var cs consensus.State // v2 tax is independent of height and network
+	for _, fc := range data.FileContracts {
+		tax = tax.Add(cs.V2FileContractTax(fc))
+	}
+	for _, resolution := range data.FileContractResolutions {
+		if renewal, ok := resolution.Resolution.(*types.V2FileContractRenewal); ok {
+			tax = tax.Add(cs.V2FileContractTax(renewal.NewContract))
+		}
+	}
+	return
+}
+
+func walletEventsContractTax(rows pgx.Rows) (tax types.Currency, err error) {
+	defer rows.Close()
+	for rows.Next() {
+		var event wallet.Event
+		if err := rows.Scan((*sqlWalletEvent)(&event)); err != nil {
+			return types.ZeroCurrency, fmt.Errorf("failed to scan wallet event: %w", err)
+		}
+		tax = tax.Add(walletEventContractTax(event))
+	}
+	return tax, rows.Err()
 }
 
 func validateOffsetLimit(offset, limit int) error {

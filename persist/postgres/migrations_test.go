@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
 	"go.uber.org/zap/zaptest"
@@ -501,6 +502,32 @@ func TestMigrationSeedsRepairStats(t *testing.T) {
 		t.Fatalf("expected 2 stuck slabs, got %d", stuck)
 	} else if unrecoverable != 0 {
 		t.Fatalf("expected 0 unrecoverable slabs, got %d", unrecoverable)
+	}
+}
+
+// TestMigrationBackfillsContractTax asserts the contract tax is seeded from the
+// wallet events an older database already has.
+func TestMigrationBackfillsContractTax(t *testing.T) {
+	ctx := context.Background()
+	event := newTestContractEvent()
+	encoded, err := (*sqlWalletEvent)(&event).Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := sqlChainIndex(event.Index).Value()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := initV1Database(t, connectionInfoFromEnv(), fmt.Sprintf(`
+		INSERT INTO wallet_events (chain_index, maturity_height, event_id, event_type, event_data)
+		VALUES ('\x%x', 1, '\x%x', '%s', '\x%x')`, index, event.ID[:], event.Type, encoded))
+	defer store.Close()
+
+	var tax types.Currency
+	if err := store.pool.QueryRow(ctx, sqlStatSelect(statContractTax)).Scan((*sqlCurrency)(&tax)); err != nil {
+		t.Fatal(err)
+	} else if tax != types.Siacoins(6) {
+		t.Fatalf("expected tax %v, got %v", types.Siacoins(6), tax)
 	}
 }
 
