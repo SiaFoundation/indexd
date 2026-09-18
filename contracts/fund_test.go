@@ -191,6 +191,16 @@ func TestPerformAccountFunding(t *testing.T) {
 	hmMock := newHostManagerMock(store)
 	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, funderMock, nil, store, nil, nil, nil, contracts.NewContractLocker(), hmMock, nil, nil)
 
+	// per-account funding only applies to hosts without pool support, so lower
+	// the protocol floor to keep a pre-5.1.0 host usable
+	us := hosts.DefaultUsabilitySettings
+	us.MinProtocolVersion = rhp.ProtocolVersion502
+	if err := store.UpdateUsabilitySettings(us); err != nil {
+		t.Fatal(err)
+	}
+	legacySettings := goodSettings
+	legacySettings.ProtocolVersion = rhp.ProtocolVersion502
+
 	// fund accounts
 	err := cm.PerformAccountFunding(context.Background(), zap.NewNop())
 	if err != nil {
@@ -207,10 +217,10 @@ func TestPerformAccountFunding(t *testing.T) {
 	h1 := hosts.Host{
 		PublicKey: hk1,
 		Usability: hosts.GoodUsability,
-		Settings:  goodSettings,
+		Settings:  legacySettings,
 	}
 	store.addTestHost(t, h1)
-	hmMock.settings[hk1] = goodSettings
+	hmMock.settings[hk1] = legacySettings
 
 	c1 := store.addTestContract(t, hk1, true, types.FileContractID{1})
 	c2 := store.addTestContract(t, hk1, true, types.FileContractID{2})
@@ -222,10 +232,10 @@ func TestPerformAccountFunding(t *testing.T) {
 	h2 := hosts.Host{
 		PublicKey: hk2,
 		Usability: hosts.GoodUsability,
-		Settings:  goodSettings,
+		Settings:  legacySettings,
 	}
 	store.addTestHost(t, h2)
-	hmMock.settings[hk2] = goodSettings
+	hmMock.settings[hk2] = legacySettings
 
 	c3 := store.addTestContract(t, hk2, true, types.FileContractID{3})
 	store.setContractRemainingAllowance(t, c3, types.Siacoins(1))
@@ -235,7 +245,7 @@ func TestPerformAccountFunding(t *testing.T) {
 	h3 := hosts.Host{
 		PublicKey: hk3,
 		Usability: hosts.Usability{}, // not usable
-		Settings:  goodSettings,
+		Settings:  legacySettings,
 	}
 	store.addTestHost(t, h3)
 	// intentionally not setting hmMock.settings[hk3] so the host fails the scan
@@ -248,10 +258,10 @@ func TestPerformAccountFunding(t *testing.T) {
 	h4 := hosts.Host{
 		PublicKey: hk4,
 		Usability: hosts.GoodUsability,
-		Settings:  goodSettings,
+		Settings:  legacySettings,
 	}
 	store.addTestHost(t, h4)
-	hmMock.settings[hk4] = goodSettings
+	hmMock.settings[hk4] = legacySettings
 
 	// block h4
 	if err := store.BlockHosts([]types.PublicKey{hk4}, []string{"test"}); err != nil {
@@ -384,9 +394,18 @@ func TestPerformAccountFundingFullStorage(t *testing.T) {
 	hmMock := newHostManagerMock(store)
 	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, funderMock, nil, store, nil, nil, nil, contracts.NewContractLocker(), hmMock, nil, nil)
 
+	// per-account funding only applies to hosts without pool support, so lower
+	// the protocol floor to keep a pre-5.1.0 host usable
+	us := hosts.DefaultUsabilitySettings
+	us.MinProtocolVersion = rhp.ProtocolVersion502
+	if err := store.UpdateUsabilitySettings(us); err != nil {
+		t.Fatal(err)
+	}
+
 	// use settings with non-zero egress/ingress so read and write targets
 	// differ
 	settings := goodSettings
+	settings.ProtocolVersion = rhp.ProtocolVersion502
 	settings.Prices.EgressPrice = types.Siacoins(1).Div64(1e12)
 	settings.Prices.IngressPrice = types.Siacoins(1).Div64(1e12)
 

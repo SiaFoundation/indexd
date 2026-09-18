@@ -2,13 +2,11 @@ openapi: "3.0.0"
 info:
   title: Indexd Application API
   description: >
-    The Application API allows developers to pin and unpin slabs—collections of erasure-coded data shards—on the Sia network using Indexd.
-    Once pinned, Indexd ensures the data remains healthy and available by monitoring and maintaining the underlying storage.
-  version: 1.0.0
+    The Application API allows developers to pin and unpin slabs—collections of erasure-coded data shards—on the Sia network using Indexd. Once pinned, Indexd ensures the data remains healthy and available by monitoring and maintaining the underlying storage.
 
+  version: 0.5.0
 servers:
   - url: http://localhost:9982/api
-
 tags:
   - name: hosts
     description: Fetch usable hosts
@@ -22,9 +20,7 @@ tags:
     description: Create, list and delete sharing keys and the objects attached to them
   - name: shared
     description: >
-      Recipient endpoints authenticated with a sharing key. The request URL must be
-      signed with the sharing key's private key instead of an app key; the signer must
-      resolve to an existing, unexpired sharing key.
+      Recipient endpoints authenticated with a sharing key. The request URL must be signed with the sharing key's private key instead of an app key; the signer must resolve to an existing, unexpired sharing key.
 
 paths:
   /account:
@@ -41,7 +37,6 @@ paths:
                 $ref: "#/components/schemas/AppAccountResponse"
         "404":
           description: Account not found
-
   /hosts:
     get:
       tags:
@@ -92,7 +87,6 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/HostInfo"
-
       x-codeSamples:
         - lang: Go
           label: Go
@@ -111,7 +105,6 @@ paths:
               hosts, err := client.Hosts(context.Background())
               // ...
             }
-
   /objects:
     get:
       tags:
@@ -207,9 +200,8 @@ paths:
         - objects
       summary: Delete an object
       description: >
-        Deletes the object. Slabs that were referenced by the object and are no
-        longer referenced by any of the account's objects are unpinned and
-        queued for deletion by a background process.
+        Deletes the object. Slabs that were referenced by the object and are no longer referenced by any of the account's objects are unpinned and queued for deletion by a background process.
+
       parameters:
         - name: key
           in: path
@@ -290,7 +282,6 @@ paths:
           description: Object not found
         "451":
           description: The object is on the indexer's blocklist
-
   /sharing:
     get:
       tags:
@@ -629,7 +620,6 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/SlabID"
-
       x-codeSamples:
         - lang: Go
           label: Go
@@ -694,11 +684,7 @@ paths:
                           type: string
                           format: date-time
                           description: >-
-                            When the sector was written to the host. If
-                            provided, it must be no more than 48 hours old and
-                            no more than 5 minutes ahead of the indexer's clock,
-                            leaving enough time to pin the sector before
-                            temporary storage expires.
+                            When the sector was written to the host. If provided, it must be no more than 48 hours old and no more than 5 minutes ahead of the indexer's clock, leaving enough time to pin the sector before temporary storage expires.
       responses:
         "200":
           description: Slabs pinned successfully
@@ -711,10 +697,7 @@ paths:
                   $ref: "#/components/schemas/SlabID"
         "400":
           description: >-
-            Invalid slab parameters. The stable "slab upload is too old" text
-            in the response body identifies a sector that must be re-uploaded
-            and names its index. "slab upload time is in the future" means the
-            client's clock is more than 5 minutes ahead.
+            Invalid slab parameters. The stable "slab upload is too old" text in the response body identifies a sector that must be re-uploaded and names its index. "slab upload time is in the future" means the client's clock is more than 5 minutes ahead.
           content:
             text/plain:
               schema:
@@ -724,7 +707,6 @@ paths:
                   value: "invalid slab pin params: slab 0: sector 3 invalid: slab upload is too old (max 48h0m0s)"
                 inFuture:
                   value: "invalid slab pin params: slab 0: sector 3 invalid: slab upload time is in the future (max 5m0s ahead)"
-
       x-codeSamples:
         - lang: Go
           label: Go
@@ -745,7 +727,6 @@ paths:
               ids, err := client.PinSlabs(context.Background(), appKey, params...)
               // ...
             }
-
   /slabs/{slabid}:
     get:
       tags:
@@ -767,7 +748,6 @@ paths:
                 $ref: "#/components/schemas/PinnedSlab"
         "404":
           description: Slab not found
-
       x-codeSamples:
         - lang: Go
           label: Go
@@ -806,7 +786,6 @@ paths:
           description: Slab not found
         "409":
           description: Slab is still referenced by one of the account's objects
-
       x-codeSamples:
         - lang: Go
           label: Go
@@ -827,7 +806,6 @@ paths:
               err = client.UnpinSlab(context.Background(), id)
               // ...
             }
-
   /slabs/prune:
     post:
       tags:
@@ -844,18 +822,14 @@ paths:
       responses:
         "200":
           description: Slabs pruned successfully
-
   /auth/connect:
     post:
       tags:
         - auth
       summary: Request application connection to the indexer
       description: >
-        Initiates a connection request. The request must be signed with an ephemeral ed25519 key
-        using the signed URL scheme. The server binds the connection flow to that ephemeral key —
-        subsequent calls to the status and register endpoints must be signed with the same key.
-        When a valid pre-authorization proof is supplied, the request is approved immediately. The
-        proof signs the exact request and ephemeral key; the private pre-authorized key is never sent.
+        Initiates a connection request. The request must be signed with an ephemeral ed25519 key using the signed URL scheme. The server binds the connection flow to that ephemeral key — subsequent calls to the status and register endpoints must be signed with the same key. When a valid pre-authorization proof is supplied, the request is approved immediately. The proof signs the exact request and ephemeral key; the private pre-authorized key is never sent.
+
       operationId: requestAppConnection
       requestBody:
         required: true
@@ -918,7 +892,6 @@ paths:
           description: Application already connected
         "429":
           description: Too many requests — per-IP rate limit exceeded
-
       x-codeSamples:
         - lang: Go
           label: Go
@@ -948,7 +921,6 @@ paths:
               }, app.WithPreAuthorizedKey(preAuthorizedKey)) // optional
               ...
             }
-
   /auth/check:
     get:
       tags:
@@ -962,7 +934,6 @@ paths:
           description: Application is not authenticated
         "400":
           description: Invalid signature
-
       x-codeSamples:
         - lang: Go
           label: Go
@@ -981,7 +952,6 @@ paths:
               ok, err := client.CheckAppAuth(context.Background(), appKey)
               ...
             }
-
   /auth/connect/{requestID}:
     get:
       tags:
@@ -1001,7 +971,6 @@ paths:
             text/html: {}
         "404":
           description: Unknown request ID
-
     post:
       tags:
         - auth
@@ -1032,16 +1001,14 @@ paths:
           description: Connect key exhausted
         "404":
           description: Request invalid or expired
-
   /auth/connect/{requestID}/status:
     get:
       tags:
         - auth
       summary: Check the status of a connection request
       description: >
-        Returns whether the user has approved or rejected the connection request. Must be signed
-        with the same ephemeral key used in the initial `POST /auth/connect` request. If approved,
-        the response includes the `userSecret` used to derive the application key.
+        Returns whether the user has approved or rejected the connection request. Must be signed with the same ephemeral key used in the initial `POST /auth/connect` request. If approved, the response includes the `userSecret` used to derive the application key.
+
       operationId: authConnectStatus
       parameters:
         - name: requestID
@@ -1060,19 +1027,14 @@ paths:
           description: Signed with a different ephemeral key than the one used to initiate the request
         "404":
           description: Request invalid or expired
-
   /auth/connect/{requestID}/register:
     post:
       tags:
         - auth
       summary: Finalize application registration after approval
       description: >
-        Registers the application key. The request URL must be signed with the ephemeral key from
-        the initial connect request. The body contains the application public key and a
-        proof-of-possession signature: `appKey.Sign(hash("registerAppKey" + ephemeralPubKey + requestID))`.
-        This proves the caller both controls the ephemeral key and knows the private key of the app
-        key being registered. Registering consumes the connection request, so it only ever registers
-        one app key; any further attempt returns `404`.
+        Registers the application key. The request URL must be signed with the ephemeral key from the initial connect request. The body contains the application public key and a proof-of-possession signature: `appKey.Sign(hash("registerAppKey" + ephemeralPubKey + requestID))`. This proves the caller both controls the ephemeral key and knows the private key of the app key being registered. Registering consumes the connection request, so it only ever registers one app key; any further attempt returns `404`.
+
       operationId: authRegister
       parameters:
         - name: requestID
@@ -1098,8 +1060,8 @@ paths:
                   type: string
                   format: byte
                   description: >
-                    ed25519 signature by `appKey` over `hash("registerAppKey" + ephemeralPubKey + requestID)`,
-                    proving ownership of the application key
+                    ed25519 signature by `appKey` over `hash("registerAppKey" + ephemeralPubKey + requestID)`, proving ownership of the application key
+
       responses:
         "204":
           description: Application registered successfully
@@ -1111,7 +1073,6 @@ paths:
           description: Unknown request ID, or the request was already used to register an app key
         "410":
           description: Request expired
-
 components:
   schemas:
     AuthConnectStatusResponse:

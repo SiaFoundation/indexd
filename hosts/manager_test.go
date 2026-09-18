@@ -134,7 +134,7 @@ func TestUnblockUsableHostsAfterScanning(t *testing.T) {
 
 	goodSettings := proto4.HostSettings{
 		Release:             "test",
-		ProtocolVersion:     rhp.ProtocolVersion502,
+		ProtocolVersion:     rhp.ProtocolVersion510,
 		AcceptingContracts:  true,
 		RemainingStorage:    100 * proto4.SectorSize,
 		TotalStorage:        100 * proto4.SectorSize,

@@ -375,12 +375,14 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				}
 			}
 
-			// insert the slab's sectors. For a slab that already
-			// exists this may rebind any sectors that were marked
-			// lost since it was pinned. An existing sector keeps the
-			// later upload time.
+			// insert the slab's sectors. For a slab that already exists this
+			// may rebind sectors that were marked lost since it was pinned,
+			// but only to a host with a good contract. An existing sector
+			// keeps the later upload time.
 			batch := &pgx.Batch{}
-			for _, sector := range slab.Sectors {
+			goodHost := make([]bool, len(slab.Sectors))
+			for i, sector := range slab.Sectors {
+				_, goodHost[i] = goodHosts[sector.HostKey]
 				batch.Queue(`
 				INSERT INTO sectors (sector_root, host_id, next_integrity_check, uploaded_at)
 				SELECT $1, h.id, $3, LEAST(NOW(), $4::timestamptz)
@@ -388,12 +390,13 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				WHERE h.public_key = $2
 				ON CONFLICT (sector_root) DO UPDATE SET
 					uploaded_at = GREATEST(sectors.uploaded_at, EXCLUDED.uploaded_at),
-					host_id = COALESCE(sectors.host_id, EXCLUDED.host_id)
-				RETURNING id, host_id, (OLD.id IS NULL) AS inserted, (OLD.id IS NOT NULL AND OLD.host_id IS NULL) AS rebound`,
+					host_id = COALESCE(sectors.host_id, CASE WHEN $5::boolean THEN EXCLUDED.host_id END)
+				RETURNING id, host_id, (OLD.host_id IS NULL AND NEW.host_id IS NOT NULL) AS bound, (OLD.id IS NOT NULL) AS existed`,
 					sqlHash256(sector.Root),
 					sqlPublicKey(sector.HostKey),
 					nextIntegrityCheck,
-					sector.UploadedAt)
+					sector.UploadedAt,
+					goodHost[i])
 			}
 
 			var badHosts int
@@ -402,24 +405,24 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			br := tx.SendBatch(ctx, batch)
 			sectorIDs := make([]int64, len(slab.Sectors))
 			for i, sector := range slab.Sectors {
-				if _, ok := goodHosts[sector.HostKey]; !ok {
+				if !goodHost[i] {
 					badHosts++
 				}
 
-				var inserted, isRebound bool
-				var hostID int64
-				if err := br.QueryRow().Scan(&sectorIDs[i], &hostID, &inserted, &isRebound); err != nil {
+				var bound, existed bool
+				var hostID sql.NullInt64
+				if err := br.QueryRow().Scan(&sectorIDs[i], &hostID, &bound, &existed); err != nil {
 					br.Close()
 					if errors.Is(err, sql.ErrNoRows) {
 						return fmt.Errorf("unknown host %q for sector", sector.HostKey)
 					}
 					return fmt.Errorf("failed to insert sector %q: %w", sector.Root, err)
+				} else if !bound {
+					continue
 				}
-				if inserted || isRebound {
-					unpinned++
-					unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hostID, delta: 1})
-				}
-				if isRebound {
+				unpinned++
+				unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hostID.Int64, delta: 1})
+				if existed {
 					rebound++
 				}
 			}
