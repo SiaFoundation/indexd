@@ -46,6 +46,8 @@ type (
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
 		PinObject(ctx context.Context, account proto.Account, obj slabs.PinObjectRequest) error
 		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
+		ListObjectsWithoutSlabs(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventWithoutSlabs, error)
+		ObjectSlabs(ctx context.Context, account proto.Account, key types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
 		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
 
@@ -315,6 +317,32 @@ func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(obj)
 }
 
+func (a *app) handleGETObjectSlabs(jc jape.Context, pk types.PublicKey) {
+	var key types.Hash256
+	if jc.DecodeParam("key", &key) != nil {
+		return
+	}
+
+	cursor, limit, ok := api.ParseCursorLimit(jc)
+	if !ok {
+		return
+	}
+
+	page, err := a.slabs.ObjectSlabs(jc.Request.Context(), proto.Account(pk), key, cursor, limit)
+	if errors.Is(err, slabs.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if errors.Is(err, slabs.ErrObjectBlocked) {
+		jc.Error(err, http.StatusUnavailableForLegalReasons)
+		return
+	} else if err != nil {
+		jc.Error(err, http.StatusInternalServerError)
+		return
+	}
+
+	jc.Encode(page)
+}
+
 func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
 	var key types.Hash256
 	if jc.DecodeParam("key", &key) != nil {
@@ -352,15 +380,30 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	objs, err := a.slabs.ListObjects(jc.Request.Context(), proto.Account(pk), slabs.Cursor{
+	cursor := slabs.Cursor{
 		After: after,
 		Key:   key,
-	}, limit)
+	}
+	includeSlabs := true
+	if jc.DecodeForm("includeslabs", &includeSlabs) != nil {
+		return
+	}
+
+	if !includeSlabs {
+		withoutSlabs, err := a.slabs.ListObjectsWithoutSlabs(jc.Request.Context(), proto.Account(pk), cursor, limit)
+		if err != nil {
+			jc.Error(err, http.StatusInternalServerError)
+			return
+		}
+		jc.Encode(withoutSlabs)
+		return
+	}
+
+	objs, err := a.slabs.ListObjects(jc.Request.Context(), proto.Account(pk), cursor, limit)
 	if err != nil {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-
 	jc.Encode(objs)
 }
 
@@ -1060,6 +1103,7 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		"GET /objects":             wrapSignedAuth(a.handleGETObjects),
 		"GET /objects/:key":        wrapSignedAuth(a.handleGETObject),
 		"GET /objects/:key/shared": wrapSignedAuth(a.handleGETObjectShared),
+		"GET /objects/:key/slabs":  wrapSignedAuth(a.handleGETObjectSlabs),
 		"POST /objects":            wrapSignedAuth(a.handlePOSTObjects),
 		"DELETE /objects/:key":     wrapSignedAuth(a.handleDELETEObjects),
 
