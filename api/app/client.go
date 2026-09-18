@@ -160,8 +160,8 @@ func (c *Client) signedRequestJSON(ctx context.Context, appKey types.PrivateKey,
 	if err != nil {
 		return err
 	}
-	defer io.Copy(io.Discard, body)
 	defer body.Close()
+	defer io.Copy(io.Discard, body)
 
 	if resp == nil {
 		return nil
@@ -174,8 +174,8 @@ func (c *Client) signedGetCBOR(ctx context.Context, appKey types.PrivateKey, rou
 	if err != nil {
 		return err
 	}
-	defer io.Copy(io.Discard, body)
 	defer body.Close()
+	defer io.Copy(io.Discard, body)
 
 	return cbor.NewDecoder(body).Decode(resp)
 }
@@ -426,8 +426,8 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 	if err != nil {
 		return slabs.SharedObject{}, nil, fmt.Errorf("failed to fetch shared object: %w", err)
 	}
-	defer io.Copy(io.Discard, resp)
 	defer resp.Close()
+	defer io.Copy(io.Discard, resp)
 
 	dec := json.NewDecoder(resp)
 	err = dec.Decode(&obj)
@@ -465,8 +465,8 @@ func (c *Client) RequestAppConnection(ctx context.Context, ephemeralKey types.Pr
 	if err != nil {
 		return RegisterAppResponse{}, err
 	}
-	defer io.Copy(io.Discard, respBody)
 	defer respBody.Close()
+	defer io.Copy(io.Discard, respBody)
 	err = json.NewDecoder(respBody).Decode(&resp)
 	return
 }
