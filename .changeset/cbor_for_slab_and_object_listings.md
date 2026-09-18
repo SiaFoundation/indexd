@@ -1,5 +1,5 @@
 ---
-default: minor
+default: major
 ---
 
 # Support CBOR for slab and object listing responses
