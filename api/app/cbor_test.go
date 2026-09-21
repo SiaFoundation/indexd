@@ -11,7 +11,13 @@ import (
 	"time"
 
 	"github.com/fxamacker/cbor/v2"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
+	"go.sia.tech/coreutils/chain"
+	"go.sia.tech/coreutils/rhp/v4/siamux"
+	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/jape"
 	"lukechampine.com/frand"
@@ -98,6 +104,88 @@ func TestAcceptsCBOR(t *testing.T) {
 			}
 		})
 	}
+}
+
+// assertCBORRoundTrip checks that v survives a CBOR encode and decode. CBOR
+// ignores the JSON marshalers some of these types define, so the encoding has
+// to be symmetric on its own.
+func assertCBORRoundTrip[T any](t *testing.T, v T) {
+	t.Helper()
+
+	buf, err := encodeCBOR(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded T
+	if err := cbor.Unmarshal(buf, &decoded); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(decoded, v) {
+		t.Fatalf("expected %+v, got %+v", v, decoded)
+	}
+}
+
+func TestCBORResponseRoundTrip(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Nanosecond)
+	expiration := now.Add(time.Hour)
+
+	t.Run("sharing key", func(t *testing.T) {
+		assertCBORRoundTrip(t, []sharing.Key{{
+			Account:     types.GeneratePrivateKey().PublicKey(),
+			PublicKey:   types.GeneratePrivateKey().PublicKey(),
+			Nonce:       sharing.Nonce(frand.Bytes(len(sharing.Nonce{}))),
+			Description: "shared",
+			ObjectCount: 3,
+			ExpiresAt:   &expiration,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		}})
+	})
+
+	t.Run("shared host", func(t *testing.T) {
+		hostKey := types.GeneratePrivateKey().PublicKey()
+		assertCBORRoundTrip(t, []SharedHost{{
+			HostInfo: hosts.HostInfo{
+				PublicKey:     hostKey,
+				Addresses:     []chain.NetAddress{{Protocol: siamux.Protocol, Address: "host.example.com:9984"}},
+				CountryCode:   "US",
+				GoodForUpload: true,
+			},
+			Token: proto.AccountToken{
+				HostKey:    hostKey,
+				Account:    proto.Account(types.GeneratePrivateKey().PublicKey()),
+				ValidUntil: expiration,
+				Signature:  types.Signature(frand.Bytes(64)),
+			},
+		}})
+	})
+
+	t.Run("object", func(t *testing.T) {
+		assertCBORRoundTrip(t, slabs.SealedObject{
+			EncryptedDataKey: frand.Bytes(48),
+			Slabs: []slabs.SlabSlice{{
+				Version:       1,
+				EncryptionKey: frand.Entropy256(),
+				MinShards:     10,
+				Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: types.GeneratePrivateKey().PublicKey()}},
+				Length:        100,
+			}},
+			DataSignature:     types.Signature(frand.Bytes(64)),
+			MetadataSignature: types.Signature(frand.Bytes(64)),
+			CreatedAt:         now,
+			UpdatedAt:         now,
+		})
+	})
+
+	t.Run("account", func(t *testing.T) {
+		assertCBORRoundTrip(t, AccountResponse{
+			AccountKey:       proto.Account(types.GeneratePrivateKey().PublicKey()),
+			MaxPinnedData:    1 << 40,
+			RemainingStorage: 1 << 30,
+			Ready:            true,
+			App:              accounts.AppMeta{ID: types.Hash256(frand.Entropy256()), Name: "app"},
+			LastUsed:         now,
+		})
+	})
 }
 
 func TestCBORObjectEventRoundTrip(t *testing.T) {

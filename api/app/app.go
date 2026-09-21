@@ -251,7 +251,7 @@ func WrapRateLimit(rl RateLimiter, next jape.Handler) jape.Handler {
 
 func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 	if h, ok := a.usableHosts(jc); ok {
-		jc.Encode(h)
+		encodeResponse(jc, h)
 	}
 }
 
@@ -317,7 +317,7 @@ func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	jc.Encode(obj)
+	encodeResponse(jc, obj)
 }
 
 func (a *app) handleGETObjectSlabs(jc jape.Context, pk types.PublicKey) {
@@ -364,7 +364,7 @@ func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
 		return
 	}
 
-	jc.Encode(obj)
+	encodeResponse(jc, obj)
 }
 
 func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
@@ -464,7 +464,7 @@ func (a *app) handlePOSTSharing(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(key)
+	encodeResponse(jc, key)
 }
 
 func (a *app) handleGETSharing(jc jape.Context, pk types.PublicKey) {
@@ -477,7 +477,7 @@ func (a *app) handleGETSharing(jc jape.Context, pk types.PublicKey) {
 	if jc.Check("failed to list sharing keys", err) != nil {
 		return
 	}
-	jc.Encode(keys)
+	encodeResponse(jc, keys)
 }
 
 func (a *app) handleGETSharingKey(jc jape.Context, pk types.PublicKey) {
@@ -494,7 +494,7 @@ func (a *app) handleGETSharingKey(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(sk)
+	encodeResponse(jc, sk)
 }
 
 func (a *app) handleDELETESharing(jc jape.Context, pk types.PublicKey) {
@@ -564,7 +564,7 @@ func (a *app) handleGETSharingObjects(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(objects)
+	encodeResponse(jc, objects)
 }
 
 func (a *app) handleDELETESharingObject(jc jape.Context, pk types.PublicKey) {
@@ -604,7 +604,7 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	jc.Encode(slabIDs)
+	encodeResponse(jc, slabIDs)
 }
 
 func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
@@ -702,7 +702,7 @@ func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	jc.Encode(slabIDs)
+	encodeResponse(jc, slabIDs)
 }
 
 func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
@@ -818,7 +818,7 @@ func (a *app) handleAuthRequest(jc jape.Context) {
 		delete(a.authRequests, requestID)
 		a.mu.Unlock()
 	})
-	jc.Encode(RegisterAppResponse{
+	encodeResponse(jc, RegisterAppResponse{
 		ResponseURL: fmt.Sprintf("%s/auth/connect/%s", a.advertiseURL, requestID),
 		StatusURL:   fmt.Sprintf("%s/auth/connect/%s/status", a.advertiseURL, requestID),
 		RegisterURL: fmt.Sprintf("%s/auth/connect/%s/register", a.advertiseURL, requestID),
@@ -929,7 +929,7 @@ func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
 		jc.Error(fmt.Errorf("invalid request signature"), http.StatusUnauthorized)
 		return
 	}
-	jc.Encode(AuthConnectStatusResponse{
+	encodeResponse(jc, AuthConnectStatusResponse{
 		Approved:     authReq.Approved,
 		Reconnecting: authReq.Reconnecting,
 		UserSecret:   authReq.UserSecret,
@@ -1022,7 +1022,7 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(AccountResponse{
+	encodeResponse(jc, AccountResponse{
 		AccountKey:       account.AccountKey,
 		MaxPinnedData:    min(account.MaxPinnedData, account.QuotaMaxPinnedData),
 		RemainingStorage: remainingStorage(account),
