@@ -638,8 +638,13 @@ func acceptsCBOR(header string) bool {
 		q := 1.0
 		for p := range strings.SplitSeq(params, ";") {
 			k, v, ok := strings.Cut(strings.TrimSpace(p), "=")
+			k = strings.TrimSpace(k)
+			v = strings.TrimSpace(v)
 			if ok && strings.EqualFold(k, "q") {
-				if f, err := strconv.ParseFloat(v, 64); err == nil {
+				f, err := strconv.ParseFloat(v, 64)
+				if err != nil || f < 0 || f > 1 {
+					q = 0
+				} else {
 					q = f
 				}
 			}
