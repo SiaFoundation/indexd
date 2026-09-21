@@ -182,6 +182,16 @@ func (c *Client) signedRequestBinary(ctx context.Context, appKey types.PrivateKe
 	return d.Err()
 }
 
+// listObjectsRoute builds the GET /objects route for the cursor.
+func listObjectsRoute(cursor slabs.Cursor, limit int, includeSlabs bool) string {
+	values := url.Values{}
+	values.Set("limit", fmt.Sprint(limit))
+	values.Set("after", cursor.After.Format(time.RFC3339Nano))
+	values.Set("key", cursor.Key.String())
+	values.Set("includeslabs", fmt.Sprint(includeSlabs))
+	return "/objects?" + values.Encode()
+}
+
 // Hosts returns all usable hosts.
 func (c *Client) Hosts(ctx context.Context, appKey types.PrivateKey, opts ...api.URLQueryParameterOption) (hosts []hosts.HostInfo, err error) {
 	values := url.Values{}
@@ -247,12 +257,24 @@ func (c *Client) Object(ctx context.Context, appKey types.PrivateKey, objectID t
 // ListObjects lists object events for the given account that were published
 // after the given cursor.
 func (c *Client) ListObjects(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEvent, err error) {
-	values := url.Values{}
-	values.Set("limit", fmt.Sprintf("%d", limit))
-	values.Set("after", cursor.After.Format(time.RFC3339Nano))
-	values.Set("key", cursor.Key.String())
+	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, true), nil, &resp)
+	return
+}
 
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, "/objects?"+values.Encode(), nil, &resp)
+// ListObjectsWithoutSlabs lists published object events after the cursor,
+// omitting each object's slab slices. Fetch the slices with ObjectSlabs.
+func (c *Client) ListObjectsWithoutSlabs(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEventWithoutSlabs, err error) {
+	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, false), nil, &resp)
+	return
+}
+
+// ObjectSlabs returns a page of the object's slab slices, starting at slice
+// index cursor. A page shorter than limit is the last one.
+func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objectID types.Hash256, cursor int64, limit int) (resp []slabs.SlabSlice, err error) {
+	values := url.Values{}
+	values.Set("cursor", fmt.Sprint(cursor))
+	values.Set("limit", fmt.Sprint(limit))
+	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, fmt.Sprintf("/objects/%s/slabs?%s", objectID, values.Encode()), nil, &resp)
 	return
 }
 

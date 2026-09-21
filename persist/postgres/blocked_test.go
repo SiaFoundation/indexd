@@ -3,6 +3,7 @@ package postgres
 import (
 	"errors"
 	"math"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -105,6 +106,10 @@ func TestBlockedObjectAccess(t *testing.T) {
 		t.Fatal(err)
 	} else if _, err := store.SharedObject(key); err != nil {
 		t.Fatal(err)
+	} else if page, err := store.ObjectSlabs(acc, key, 0, 10); err != nil {
+		t.Fatal(err)
+	} else if len(page) == 0 {
+		t.Fatal("expected the object's slabs")
 	}
 
 	if err := store.BlockObject(key, "dmca"); err != nil {
@@ -114,6 +119,8 @@ func TestBlockedObjectAccess(t *testing.T) {
 	if _, err := store.Object(acc, key); !errors.Is(err, slabs.ErrObjectBlocked) {
 		t.Fatalf("expected ErrObjectBlocked, got %v", err)
 	} else if _, err := store.SharedObject(key); !errors.Is(err, slabs.ErrObjectBlocked) {
+		t.Fatalf("expected ErrObjectBlocked, got %v", err)
+	} else if _, err := store.ObjectSlabs(acc, key, 0, 10); !errors.Is(err, slabs.ErrObjectBlocked) {
 		t.Fatalf("expected ErrObjectBlocked, got %v", err)
 	}
 
@@ -134,6 +141,10 @@ func TestBlockedObjectAccess(t *testing.T) {
 		t.Fatal(err)
 	} else if got.ID() != key {
 		t.Fatalf("expected object %v, got %v", key, got.ID())
+	} else if page, err := store.ObjectSlabs(acc, key, 0, 10); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(page, got.Slabs) {
+		t.Fatalf("expected slabs %+v, got %+v", got.Slabs, page)
 	}
 }
 
@@ -151,7 +162,8 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		objs[i] = store.pinTestObject(t, acc, hk)
 	}
 
-	// listAll publishes pending events and pages through them two at a time
+	// listAll publishes pending events and pages through them two at a time,
+	// asserting the listing without slabs selects the same events
 	listAll := func() []slabs.ObjectEvent {
 		t.Helper()
 		store.publishEvents(t)
@@ -162,7 +174,19 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 			events, err := store.ListObjects(acc, cursor, 2)
 			if err != nil {
 				t.Fatal(err)
-			} else if len(events) == 0 {
+			}
+			withoutSlabs, err := store.ListObjectsWithoutSlabs(acc, cursor, 2)
+			if err != nil {
+				t.Fatal(err)
+			} else if len(withoutSlabs) != len(events) {
+				t.Fatalf("expected %d object events, got %d", len(events), len(withoutSlabs))
+			}
+			for i, event := range withoutSlabs {
+				if event.Key != events[i].Key {
+					t.Fatalf("expected object key %v, got %v", events[i].Key, event.Key)
+				}
+			}
+			if len(events) == 0 {
 				return all
 			}
 			all = append(all, events...)

@@ -476,6 +476,133 @@ func TestListObjectsRegression(t *testing.T) {
 	}
 }
 
+func TestListObjectsWithoutSlabs(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	acc := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	params := newTestPinParams(2, hk)
+	params[0].Version = 1
+	store.pinTestSlabs(t, acc, params...)
+	obj := store.pinRandomObject(t, acc, []slabs.SlabSlice{
+		params[0].Slice(10, 100),
+		params[1].Slice(20, 200),
+	})
+
+	store.publishEvents(t)
+
+	events, err := store.ListObjectsWithoutSlabs(acc, slabs.Cursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 {
+		t.Fatalf("expected 1 object event, got %d", len(events))
+	} else if events[0].Key != obj.ID() || events[0].Deleted || events[0].UpdatedAt.IsZero() {
+		t.Fatalf("unexpected event: %+v", events[0])
+	} else if events[0].Object == nil {
+		t.Fatal("expected an object without slabs")
+	}
+
+	withoutSlabs := events[0].Object
+	if withoutSlabs.UpdatedAt.IsZero() || withoutSlabs.CreatedAt.IsZero() {
+		t.Fatalf("expected the object's timestamps, got %+v", withoutSlabs)
+	} else if !bytes.Equal(withoutSlabs.EncryptedDataKey, obj.EncryptedDataKey) ||
+		!bytes.Equal(withoutSlabs.EncryptedMetadataKey, obj.EncryptedMetadataKey) ||
+		!bytes.Equal(withoutSlabs.EncryptedMetadata, obj.EncryptedMetadata) ||
+		withoutSlabs.DataSignature != obj.DataSignature || withoutSlabs.MetadataSignature != obj.MetadataSignature {
+		t.Fatal("expected the object without slabs to preserve keys, signatures, and metadata")
+	}
+
+	if err := store.DeleteObject(acc, obj.ID()); err != nil {
+		t.Fatal(err)
+	}
+	store.publishEvents(t)
+
+	events, err = store.ListObjectsWithoutSlabs(acc, slabs.Cursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 || !events[0].Deleted || events[0].Object != nil {
+		t.Fatalf("expected a deletion event, got %+v", events)
+	}
+}
+
+func TestObjectSlabs(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	acc := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+	other := proto.Account{2}
+	store.addTestAccount(t, types.PublicKey(other))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	params := newTestPinParams(2, hk)
+	params[0].Version = 1
+	store.pinTestSlabs(t, acc, params...)
+
+	// the first slab is referenced twice in a row, which the cursor must
+	// distinguish by position rather than by slab ID
+	expected := []slabs.SlabSlice{
+		params[0].Slice(0, 10),
+		params[0].Slice(10, 20),
+		params[1].Slice(20, 30),
+	}
+	obj := store.pinRandomObject(t, acc, expected)
+
+	// the whole object in one page
+	page, err := store.ObjectSlabs(acc, obj.ID(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(page, expected) {
+		t.Fatalf("expected slabs %+v, got %+v", expected, page)
+	}
+
+	// page through the object, asserting the cursor picks up where the last
+	// page left off
+	var paged []slabs.SlabSlice
+	for {
+		page, err = store.ObjectSlabs(acc, obj.ID(), int64(len(paged)), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		paged = append(paged, page...)
+		if len(page) < 2 {
+			break
+		}
+	}
+	if !reflect.DeepEqual(paged, expected) {
+		t.Fatalf("expected slabs %+v, got %+v", expected, paged)
+	}
+
+	// a cursor past the end returns nothing
+	if page, err := store.ObjectSlabs(acc, obj.ID(), int64(len(expected)), 10); err != nil {
+		t.Fatal(err)
+	} else if len(page) != 0 {
+		t.Fatalf("expected no slabs, got %+v", page)
+	}
+
+	// another account's object is not visible
+	if _, err := store.ObjectSlabs(other, obj.ID(), 0, 10); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+
+	// dropping only the slab rows reproduces the torn view left by a concurrent
+	// delete, which must read as deleted rather than as an exhausted cursor
+	if _, err := store.pool.Exec(t.Context(),
+		`DELETE FROM object_slabs WHERE object_id = (SELECT id FROM objects WHERE object_key = $1)`,
+		sqlHash256(obj.ID())); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.ObjectSlabs(acc, obj.ID(), 0, 10); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+
+	if err := store.DeleteObject(acc, obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.ObjectSlabs(acc, obj.ID(), 0, 10); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected ErrObjectNotFound, got %v", err)
+	}
+}
+
 // TestListObjectsWithholdsUnpublished checks that an event is only listed once
 // it has been published, so a cursor cannot come to rest on a position that is
 // still going to be filled.
