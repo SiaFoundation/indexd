@@ -148,7 +148,7 @@ syncer:
 consensus:
     network: mainnet # mainnet | zen
     indexBatchSize: 1000
-    pruneTarget: 64 # number of blocks to keep when pruning (0 to disable, minimum 6 hours of blocks)
+    pruneTarget: 1008 # number of blocks to keep when pruning (0 to disable, minimum 6 hours of blocks)
 explorer:
     enabled: true
     url: https://api.siascan.com

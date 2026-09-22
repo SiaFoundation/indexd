@@ -49,6 +49,9 @@ var cfg = config.Config{
 	Consensus: config.Consensus{
 		Network:        "mainnet",
 		IndexBatchSize: 1000,
+		// keep a week of blocks by default. Explicitly setting this to 0 in
+		// the config file disables pruning.
+		PruneTarget: 7 * 144,
 	},
 	Explorer: config.Explorer{
 		Enabled: true,
