@@ -78,11 +78,9 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	}
 
 	var dbstore *chain.DBStore
+	// a prune target of 0 explicitly disables pruning
 	minPruneTarget := uint64(6 * time.Hour / network.BlockInterval)
-	if instantSync && cfg.Consensus.PruneTarget == 0 {
-		// default to 6 hours of blocks
-		cfg.Consensus.PruneTarget = minPruneTarget
-	} else if cfg.Consensus.PruneTarget > 0 && cfg.Consensus.PruneTarget < minPruneTarget {
+	if cfg.Consensus.PruneTarget > 0 && cfg.Consensus.PruneTarget < minPruneTarget {
 		return fmt.Errorf("prune target must be at least %d blocks (6 hours)", minPruneTarget)
 	}
 
