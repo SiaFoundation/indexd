@@ -328,18 +328,6 @@ func insertWalletEvent(ctx context.Context, tx *txn, event wallet.Event) error {
 	return nil
 }
 
-// ContractTax returns the accumulated file contract tax paid by confirmed
-// wallet transactions.
-func (s *Store) ContractTax() (tax types.Currency, err error) {
-	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		if err := tx.QueryRow(ctx, sqlStatSelect(statContractTax)).Scan((*sqlCurrency)(&tax)); err != nil {
-			return fmt.Errorf("failed to query contract tax: %w", err)
-		}
-		return nil
-	})
-	return
-}
-
 // walletEventContractTax returns the file contract tax paid by an event. Only
 // transactions spending wallet funds are counted, and only v2 contracts, since
 // indexd never forms v1 contracts.

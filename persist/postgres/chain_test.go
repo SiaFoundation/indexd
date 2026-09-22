@@ -1,7 +1,9 @@
 package postgres
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -18,6 +20,18 @@ type testProofUpdater struct{ fn func(*types.StateElement) }
 
 func (u testProofUpdater) UpdateElementProof(se *types.StateElement) {
 	u.fn(se)
+}
+
+// ContractTax returns the accumulated file contract tax paid by confirmed
+// wallet transactions.
+func (s *Store) ContractTax() (tax types.Currency, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		if err := tx.QueryRow(ctx, sqlStatSelect(statContractTax)).Scan((*sqlCurrency)(&tax)); err != nil {
+			return fmt.Errorf("failed to query contract tax: %w", err)
+		}
+		return nil
+	})
+	return
 }
 
 func TestResetChainState(t *testing.T) {
