@@ -17,9 +17,10 @@ var (
 )
 
 var (
-	SectorsToMigrate    = sectorsToMigrate
-	NewSlabManager      = newSlabManager
-	NewLostSectorsAlert = newLostSectorsAlert
+	SectorsToMigrate     = sectorsToMigrate
+	NewSlabManager       = newSlabManager
+	NewLostSectorsAlert  = newLostSectorsAlert
+	RecoveryFailedReason = recoveryFailedReason
 )
 
 func (m *SlabManager) UploadShards(ctx context.Context, slab Slab, shards [][]byte, available []types.PublicKey, log *zap.Logger) ([]Shard, int, error) {
