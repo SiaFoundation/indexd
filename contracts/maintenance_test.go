@@ -48,7 +48,7 @@ func TestWalletMaintenance(t *testing.T) {
 	}
 	defer w.Close()
 
-	hm, err := hosts.NewManager(s, nil, nil, store, alerts.NewManager(), hosts.WithLogger(log.Named("hosts")))
+	hm, err := hosts.NewManager(nil, nil, store, alerts.NewManager(), hosts.WithLogger(log.Named("hosts")))
 	if err != nil {
 		t.Fatal(err)
 	}

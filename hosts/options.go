@@ -18,6 +18,13 @@ func WithLogger(l *zap.Logger) Option {
 	}
 }
 
+// WithOnlineChecker sets the connectivity checker for the HostManager.
+func WithOnlineChecker(checker OnlineChecker) Option {
+	return func(m *HostManager) {
+		m.onlineChecker = checker
+	}
+}
+
 // WithScanner sets the scanner for the HostManager.
 func WithScanner(scanner Scanner) Option {
 	return func(m *HostManager) {

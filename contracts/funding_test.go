@@ -74,7 +74,7 @@ func TestFundingLegacy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hm, err := hosts.NewManager(nil, nil, nil, s, alerts.NewManager(), hosts.WithLogger(log.Named("hosts")))
+	hm, err := hosts.NewManager(nil, nil, s, alerts.NewManager(), hosts.WithLogger(log.Named("hosts")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestFundingPools(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	hm, err := hosts.NewManager(nil, nil, nil, s, alerts.NewManager(), hosts.WithLogger(log.Named("hosts")))
+	hm, err := hosts.NewManager(nil, nil, s, alerts.NewManager(), hosts.WithLogger(log.Named("hosts")))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -26,3 +26,9 @@ func (m *Locator) Close() error {
 func (m *Locator) Locate(addr net.IP) (geoip.Location, error) {
 	return Location, nil
 }
+
+// OnlineChecker is a connectivity checker that always reports online.
+type OnlineChecker struct{}
+
+// IsOnline always returns true.
+func (OnlineChecker) IsOnline() bool { return true }

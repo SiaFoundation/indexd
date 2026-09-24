@@ -13,7 +13,6 @@ import (
 	"go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
-	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
@@ -23,16 +22,12 @@ import (
 	"go.uber.org/zap/zaptest"
 )
 
-type mockSyncer struct{ peers []*syncer.Peer }
-
-func (s *mockSyncer) Peers() []*syncer.Peer { return s.peers }
-
 func TestHostManager(t *testing.T) {
 	db := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
 	defer db.Close()
 
 	// create host manager
-	mgr, err := hosts.NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mock.Locator{}, nil, db, alerts.NewManager(), hosts.WithAnnouncementMaxAge(time.Minute))
+	mgr, err := hosts.NewManager(&mock.Locator{}, nil, db, alerts.NewManager(), hosts.WithAnnouncementMaxAge(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +159,6 @@ func TestUnblockUsableHostsAfterScanning(t *testing.T) {
 	}
 
 	mgr, err := hosts.NewManager(
-		&mockSyncer{peers: []*syncer.Peer{{}}},
 		&mock.Locator{},
 		nil,
 		db,
@@ -220,7 +214,7 @@ func TestScanTimeout(t *testing.T) {
 		}
 
 		// create host manager
-		mgr, err := hosts.NewManager(&mockSyncer{peers: []*syncer.Peer{{}}}, &mock.Locator{}, nil, db, alerts.NewManager(), hosts.WithScanner(scanner))
+		mgr, err := hosts.NewManager(&mock.Locator{}, nil, db, alerts.NewManager(), hosts.WithOnlineChecker(mock.OnlineChecker{}), hosts.WithScanner(scanner))
 		if err != nil {
 			t.Fatal(err)
 		}

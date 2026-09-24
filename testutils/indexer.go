@@ -29,6 +29,7 @@ import (
 	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/stats"
 	"go.sia.tech/indexd/subscriber"
+	"go.sia.tech/indexd/testutils/mock"
 	"go.sia.tech/jape"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
@@ -175,7 +176,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 
 	alerter := alerts.NewManager()
 
-	hm, err := hosts.NewManager(syncer, locator, client, store, alerter, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(200*time.Millisecond), hosts.WithScanInterval(time.Second), hosts.WithScanner(insecureScanner{}))
+	hm, err := hosts.NewManager(locator, client, store, alerter, hosts.WithLogger(log.Named("hosts")), hosts.WithScanFrequency(200*time.Millisecond), hosts.WithScanInterval(time.Second), hosts.WithScanner(insecureScanner{}), hosts.WithOnlineChecker(mock.OnlineChecker{}))
 	if err != nil {
 		t.Fatalf("failed to create host manager: %v", err)
 	}

@@ -226,7 +226,7 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 	client := client.New(client.NewProvider(hosts.NewHostStore(store)), log.Named("client"))
 
 	alerter := alerts.NewManager()
-	hm, err := hosts.NewManager(s, locator, client, store, alerter, hosts.WithLogger(log.Named("hosts")))
+	hm, err := hosts.NewManager(locator, client, store, alerter, hosts.WithLogger(log.Named("hosts")))
 	if err != nil {
 		return fmt.Errorf("failed to create host manager: %w", err)
 	}

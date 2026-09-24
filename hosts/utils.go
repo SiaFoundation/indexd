@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"slices"
@@ -63,21 +64,31 @@ func (c *scanner) ScanQuic(ctx context.Context, hk types.PublicKey, addr string)
 	return rhp.RPCSettings(ctx, t)
 }
 
-var fallbackSites = []string{
+var connectivitySites = []string{
 	"1.1.1.1:443", // Cloudflare
 	"www.google.com:443",
 	"www.amazon.com:443",
 }
 
 type onlineChecker struct {
-	syncer    Syncer
 	addresses []string
+
+	mu          sync.Mutex
+	online      bool
+	lastChecked time.Time
 }
 
-// IsOnline returns true if the syncer has peers or if any of the fallback sites
-// are reachable.
+// IsOnline reports whether any of the connectivity sites are reachable. Results
+// are cached for onlineCheckInterval.
 func (p *onlineChecker) IsOnline() bool {
-	return len(p.syncer.Peers()) > 0 || slices.ContainsFunc(p.addresses, isReachable)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if time.Since(p.lastChecked) >= onlineCheckInterval {
+		p.online = slices.ContainsFunc(p.addresses, isReachable)
+		p.lastChecked = time.Now()
+	}
+	return p.online
 }
 
 // isReachable attempts to establish a TCP connection to the given host with a short timeout.
