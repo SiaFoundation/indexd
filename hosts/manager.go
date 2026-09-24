@@ -15,7 +15,6 @@ import (
 	"go.sia.tech/coreutils/chain"
 	"go.sia.tech/coreutils/rhp/v4/quic"
 	"go.sia.tech/coreutils/rhp/v4/siamux"
-	"go.sia.tech/coreutils/syncer"
 	"go.sia.tech/coreutils/threadgroup"
 	"go.sia.tech/indexd/alerts"
 	"go.sia.tech/indexd/geoip"
@@ -33,6 +32,10 @@ const (
 	// stuckFrequency represents how often we check for stuck hosts and
 	// register an alert if there are any
 	stuckFrequency = time.Hour
+
+	// onlineCheckInterval is how long the result of a connectivity check is
+	// cached
+	onlineCheckInterval = 30 * time.Second
 
 	scanThreads                    = 50
 	scanTimeout                    = time.Minute
@@ -199,11 +202,6 @@ type (
 		DismissAlerts(ids ...types.Hash256)
 	}
 
-	// Syncer defines an interface that exposes the Peers method.
-	Syncer interface {
-		Peers() []*syncer.Peer
-	}
-
 	// UpdateTx defines what the host manager needs to atomically process a
 	// chain update in the database.
 	UpdateTx interface {
@@ -308,7 +306,7 @@ func (hm *HostManager) ResetLostSectors(ctx context.Context, hk types.PublicKey)
 }
 
 // NewManager creates a new host manager.
-func NewManager(syncer Syncer, locator Locator, client HostClient, store Store, alerter AlertsManager, opts ...Option) (*HostManager, error) {
+func NewManager(locator Locator, client HostClient, store Store, alerter AlertsManager, opts ...Option) (*HostManager, error) {
 	// uses Cloudflare 1.1.1.1 for when OS resolver fails
 	fallbackResolver := &net.Resolver{
 		// PreferGo allows us to use our own dialer
@@ -324,7 +322,7 @@ func NewManager(syncer Syncer, locator Locator, client HostClient, store Store, 
 		scanFrequency:      5 * time.Minute,
 		scanInterval:       time.Hour * 24,
 
-		onlineChecker: &onlineChecker{addresses: fallbackSites, syncer: syncer},
+		onlineChecker: &onlineChecker{addresses: connectivitySites},
 		resolver:      &resolver{main: &net.Resolver{}, fallback: fallbackResolver},
 		scanner:       &scanner{},
 		locator:       locator,

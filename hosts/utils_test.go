@@ -7,43 +7,61 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"testing"
-
-	"go.sia.tech/coreutils/syncer"
+	"time"
 )
-
-type mockSyncer struct{ peers []*syncer.Peer }
-
-func (s *mockSyncer) Peers() []*syncer.Peer { return s.peers }
 
 func TestOnlineChecker(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
 	defer server.Close()
 
-	// assert offline if no peers or fallback sites
-	s := &mockSyncer{}
-	c := &onlineChecker{syncer: s}
+	for _, tt := range []struct {
+		name      string
+		addresses []string
+		want      bool
+	}{
+		{"unreachable sites", []string{"invalid-address"}, false},
+		{"reachable site", []string{"invalid-address", server.Listener.Addr().String()}, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &onlineChecker{addresses: tt.addresses}
+			if got := c.IsOnline(); got != tt.want {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestOnlineCheckerCache(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	defer server.Close()
+	c := &onlineChecker{}
 	if c.IsOnline() {
-		t.Fatal("unexpected")
+		t.Fatal("expected offline without any sites")
 	}
-
-	// assert offline if unreachable fallback site
-	c.addresses = []string{"192.0.2.1:443"}
+	c.addresses = []string{server.Listener.Addr().String()}
 	if c.IsOnline() {
-		t.Fatal("unexpected")
+		t.Fatal("expected cached offline result")
+	}
+	c.lastChecked = time.Now().Add(-onlineCheckInterval)
+	if !c.IsOnline() {
+		t.Fatal("expected online after cache expires")
 	}
 
-	// assert online if reachable fallback site
-	c.addresses = append(c.addresses, server.Listener.Addr().String())
-	if !c.IsOnline() {
-		t.Fatal("expected")
+	server.Close()
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Go(func() {
+			if !c.IsOnline() {
+				t.Error("expected cached online result")
+			}
+		})
 	}
-	c.addresses = []string{"192.0.2.1:443"} // reset
-
-	// assert online if peers
-	s.peers = append(s.peers, &syncer.Peer{})
-	if !c.IsOnline() {
-		t.Fatal("expected")
+	wg.Wait()
+	c.lastChecked = time.Now().Add(-onlineCheckInterval)
+	if c.IsOnline() {
+		t.Fatal("expected offline after cache expires")
 	}
 }
 
