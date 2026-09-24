@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -30,7 +31,8 @@ const (
 type Client struct {
 	baseURL string
 
-	validity time.Duration
+	validity   time.Duration
+	enableCBOR bool
 }
 
 type requestAppConnectionOptions struct {
@@ -110,7 +112,7 @@ func sign(appKey types.PrivateKey, validUntil time.Time, method, endpointURL str
 	return u, body, nil
 }
 
-func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, accept string) (io.ReadCloser, error) {
+func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, accept string) (*http.Response, error) {
 	if u == nil {
 		return nil, errors.New("nil URL")
 	}
@@ -130,54 +132,54 @@ func doRequest(ctx context.Context, method string, u *url.URL, body io.Reader, a
 		defer io.Copy(io.Discard, r.Body)
 		b, _ := io.ReadAll(io.LimitReader(r.Body, 1024))
 		return nil, &HTTPError{StatusCode: r.StatusCode, Body: strings.TrimSpace(string(b))}
-	} else if contentType := r.Header.Get(contentTypeHeader); r.StatusCode != http.StatusNoContent && accept != contentType {
-		defer r.Body.Close()
-		defer io.Copy(io.Discard, r.Body)
-		return nil, fmt.Errorf("expected content type %s, got %s", accept, contentType)
 	}
-
-	return r.Body, nil
+	return r, nil
 }
 
-func (c *Client) signedRequestCustom(ctx context.Context, appKey types.PrivateKey, accept, method, route string, request any) (io.ReadCloser, error) {
+// decodeResponse decodes the body into resp based on the response's content
+// type and closes it. Anything but CBOR is decoded as JSON, so indexers that
+// predate CBOR keep working.
+func decodeResponse(r *http.Response, resp any) error {
+	defer r.Body.Close()
+	defer io.Copy(io.Discard, r.Body)
+
+	if resp == nil || r.StatusCode == http.StatusNoContent {
+		return nil
+	}
+	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get(contentTypeHeader)); mediaType == applicationCBOR {
+		return cbor.NewDecoder(r.Body).Decode(resp)
+	}
+	return json.NewDecoder(r.Body).Decode(resp)
+}
+
+// accept returns the Accept header for the client's encoding.
+func (c *Client) accept() string {
+	if c.enableCBOR {
+		return applicationCBOR + ", " + applicationJSON + ";q=0.9"
+	}
+	return applicationJSON
+}
+
+// signedRequest sends a signed request with a JSON encoded body and decodes the
+// response into resp.
+func (c *Client) signedRequest(ctx context.Context, appKey types.PrivateKey, method, route string, request, resp any) error {
 	var requestBuf []byte
 	if request != nil {
 		var err error
 		requestBuf, err = json.Marshal(request)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal request data: %w", err)
+			return fmt.Errorf("failed to marshal request data: %w", err)
 		}
 	}
 	u, body, err := sign(appKey, time.Now().Add(c.validity), method, fmt.Sprintf("%s%s", c.baseURL, route), requestBuf)
 	if err != nil {
-		return nil, fmt.Errorf("failed to sign request: %w", err)
+		return fmt.Errorf("failed to sign request: %w", err)
 	}
-	return doRequest(ctx, method, u, body, accept)
-}
-
-func (c *Client) signedRequestJSON(ctx context.Context, appKey types.PrivateKey, method, route string, data, resp any) error {
-	body, err := c.signedRequestCustom(ctx, appKey, applicationJSON, method, route, data)
+	r, err := doRequest(ctx, method, u, body, c.accept())
 	if err != nil {
 		return err
 	}
-	defer body.Close()
-	defer io.Copy(io.Discard, body)
-
-	if resp == nil {
-		return nil
-	}
-	return json.NewDecoder(body).Decode(resp)
-}
-
-func (c *Client) signedGetCBOR(ctx context.Context, appKey types.PrivateKey, route string, resp any) error {
-	body, err := c.signedRequestCustom(ctx, appKey, applicationCBOR, http.MethodGet, route, nil)
-	if err != nil {
-		return err
-	}
-	defer body.Close()
-	defer io.Copy(io.Discard, body)
-
-	return cbor.NewDecoder(body).Decode(resp)
+	return decodeResponse(r, resp)
 }
 
 // listObjectsRoute builds the GET /objects route for the cursor.
@@ -197,26 +199,26 @@ func (c *Client) Hosts(ctx context.Context, appKey types.PrivateKey, opts ...api
 		opt(values)
 	}
 
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, "/hosts?"+values.Encode(), nil, &hosts)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, "/hosts?"+values.Encode(), nil, &hosts)
 	return
 }
 
 // PinSlabs pins slabs to the indexer. A sector with an unacceptable upload time
 // is rejected with slabs.ErrSlabUploadTooOld or slabs.ErrSlabUploadInFuture.
 func (c *Client) PinSlabs(ctx context.Context, appKey types.PrivateKey, params ...slabs.SlabPinParams) (slabIDs []slabs.SlabID, err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/slabs", params, &slabIDs)
+	err = c.signedRequest(ctx, appKey, http.MethodPost, "/slabs", params, &slabIDs)
 	return
 }
 
 // UnpinSlab unpins a slab from the indexer. A slab that is still referenced by
 // one of the account's objects can not be unpinned.
 func (c *Client) UnpinSlab(ctx context.Context, appKey types.PrivateKey, slabID slabs.SlabID) error {
-	return c.signedRequestJSON(ctx, appKey, http.MethodDelete, fmt.Sprintf("/slabs/%s", slabID), nil, nil)
+	return c.signedRequest(ctx, appKey, http.MethodDelete, fmt.Sprintf("/slabs/%s", slabID), nil, nil)
 }
 
 // Slab retrieves a slab from the indexer by its ID.
 func (c *Client) Slab(ctx context.Context, appKey types.PrivateKey, slabID slabs.SlabID) (s slabs.PinnedSlab, err error) {
-	err = c.signedGetCBOR(ctx, appKey, fmt.Sprintf("/slabs/%s", slabID), &s)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, fmt.Sprintf("/slabs/%s", slabID), nil, &s)
 	return
 }
 
@@ -231,7 +233,7 @@ func (c *Client) PruneSlabs(ctx context.Context, appKey types.PrivateKey, opts .
 	if q := values.Encode(); q != "" {
 		path += "?" + q
 	}
-	return c.signedRequestJSON(ctx, appKey, http.MethodPost, path, nil, nil)
+	return c.signedRequest(ctx, appKey, http.MethodPost, path, nil, nil)
 }
 
 // SlabIDs fetches the digests of slabs associated with the account. It supports
@@ -242,27 +244,27 @@ func (c *Client) SlabIDs(ctx context.Context, appKey types.PrivateKey, opts ...a
 		opt(values)
 	}
 
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, "/slabs?"+values.Encode(), nil, &resp)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, "/slabs?"+values.Encode(), nil, &resp)
 	return
 }
 
 // Object retrieves the object with the given key for the given account.
 func (c *Client) Object(ctx context.Context, appKey types.PrivateKey, objectID types.Hash256) (resp slabs.SealedObject, err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, fmt.Sprintf("/objects/%s", objectID), nil, &resp)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, fmt.Sprintf("/objects/%s", objectID), nil, &resp)
 	return
 }
 
 // ListObjects lists object events for the given account that were published
 // after the given cursor.
 func (c *Client) ListObjects(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEvent, err error) {
-	err = c.signedGetCBOR(ctx, appKey, listObjectsRoute(cursor, limit, true), &resp)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, true), nil, &resp)
 	return
 }
 
 // ListObjectsWithoutSlabs lists published object events after the cursor,
 // omitting each object's slab slices. Fetch the slices with ObjectSlabs.
 func (c *Client) ListObjectsWithoutSlabs(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEventWithoutSlabs, err error) {
-	err = c.signedGetCBOR(ctx, appKey, listObjectsRoute(cursor, limit, false), &resp)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, false), nil, &resp)
 	return
 }
 
@@ -272,14 +274,14 @@ func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objec
 	values := url.Values{}
 	values.Set("cursor", fmt.Sprint(cursor))
 	values.Set("limit", fmt.Sprint(limit))
-	err = c.signedGetCBOR(ctx, appKey, fmt.Sprintf("/objects/%s/slabs?%s", objectID, values.Encode()), &resp)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, fmt.Sprintf("/objects/%s/slabs?%s", objectID, values.Encode()), nil, &resp)
 	return
 }
 
 // PinObject pins the object to the given account. If an object with
 // the given key exists for an account, it is overwritten.
 func (c *Client) PinObject(ctx context.Context, appKey types.PrivateKey, obj slabs.SealedObject) (err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/objects", obj.PinRequest(), nil)
+	err = c.signedRequest(ctx, appKey, http.MethodPost, "/objects", obj.PinRequest(), nil)
 	return
 }
 
@@ -287,26 +289,26 @@ func (c *Client) PinObject(ctx context.Context, appKey types.PrivateKey, obj sla
 // Slabs that were referenced by the object and are no longer referenced by any
 // of the account's objects are unpinned and queued for deletion.
 func (c *Client) DeleteObject(ctx context.Context, appKey types.PrivateKey, key types.Hash256) (err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodDelete, fmt.Sprintf("/objects/%s", key), nil, nil)
+	err = c.signedRequest(ctx, appKey, http.MethodDelete, fmt.Sprintf("/objects/%s", key), nil, nil)
 	return
 }
 
 // Account retrieves the account of the current user.
 func (c *Client) Account(ctx context.Context, appKey types.PrivateKey) (resp AccountResponse, err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, "/account", nil, &resp)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, "/account", nil, &resp)
 	return
 }
 
 // AddSharingKey creates a sharing key for the account. The request must be
 // signed by the sharing key.
 func (c *Client) AddSharingKey(ctx context.Context, appKey types.PrivateKey, req sharing.KeyRequest) (key sharing.Key, err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodPost, "/sharing", req, &key)
+	err = c.signedRequest(ctx, appKey, http.MethodPost, "/sharing", req, &key)
 	return
 }
 
 // SharingKey retrieves one of the account's sharing keys by its public key.
 func (c *Client) SharingKey(ctx context.Context, appKey types.PrivateKey, publicKey types.PublicKey) (key sharing.Key, err error) {
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, fmt.Sprintf("/sharing/%s", publicKey), nil, &key)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, fmt.Sprintf("/sharing/%s", publicKey), nil, &key)
 	return
 }
 
@@ -318,24 +320,24 @@ func (c *Client) SharingKeys(ctx context.Context, appKey types.PrivateKey, opts 
 		opt(values)
 	}
 
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, "/sharing?"+values.Encode(), nil, &keys)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, "/sharing?"+values.Encode(), nil, &keys)
 	return
 }
 
 // DeleteSharingKey deletes one of the account's sharing keys.
 func (c *Client) DeleteSharingKey(ctx context.Context, appKey types.PrivateKey, publicKey types.PublicKey) error {
-	return c.signedRequestJSON(ctx, appKey, http.MethodDelete, fmt.Sprintf("/sharing/%s", publicKey), nil, nil)
+	return c.signedRequest(ctx, appKey, http.MethodDelete, fmt.Sprintf("/sharing/%s", publicKey), nil, nil)
 }
 
 // AddSharedObject attaches an object the account owns to one of its sharing
 // keys.
 func (c *Client) AddSharedObject(ctx context.Context, appKey types.PrivateKey, sharingKey types.PublicKey, req sharing.SharedObjectRequest) error {
-	return c.signedRequestJSON(ctx, appKey, http.MethodPost, fmt.Sprintf("/sharing/%s/objects", sharingKey), req, nil)
+	return c.signedRequest(ctx, appKey, http.MethodPost, fmt.Sprintf("/sharing/%s/objects", sharingKey), req, nil)
 }
 
 // DeleteSharedObject detaches an object from one of the account's sharing keys.
 func (c *Client) DeleteSharedObject(ctx context.Context, appKey types.PrivateKey, sharingKey types.PublicKey, objectKey types.Hash256) error {
-	return c.signedRequestJSON(ctx, appKey, http.MethodDelete, fmt.Sprintf("/sharing/%s/objects/%s", sharingKey, objectKey), nil, nil)
+	return c.signedRequest(ctx, appKey, http.MethodDelete, fmt.Sprintf("/sharing/%s/objects/%s", sharingKey, objectKey), nil, nil)
 }
 
 // SharingKeyObjects lists the objects attached to one of the account's sharing
@@ -345,14 +347,14 @@ func (c *Client) SharingKeyObjects(ctx context.Context, appKey types.PrivateKey,
 	for _, opt := range opts {
 		opt(values)
 	}
-	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, fmt.Sprintf("/sharing/%s/objects?%s", sharingKey, values.Encode()), nil, &objects)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, fmt.Sprintf("/sharing/%s/objects?%s", sharingKey, values.Encode()), nil, &objects)
 	return
 }
 
 // SharedStats returns the sharing key's aggregate totals. The request is signed
 // with the sharing key's private key.
 func (c *Client) SharedStats(ctx context.Context, sharingKey types.PrivateKey) (stats sharing.KeyStats, err error) {
-	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared", nil, &stats)
+	err = c.signedRequest(ctx, sharingKey, http.MethodGet, "/shared", nil, &stats)
 	return
 }
 
@@ -363,14 +365,14 @@ func (c *Client) SharedObjects(ctx context.Context, sharingKey types.PrivateKey,
 	for _, opt := range opts {
 		opt(values)
 	}
-	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared/objects?"+values.Encode(), nil, &objects)
+	err = c.signedRequest(ctx, sharingKey, http.MethodGet, "/shared/objects?"+values.Encode(), nil, &objects)
 	return
 }
 
 // SharedObjectByID retrieves a single object the sharing key grants access to.
 // The request is signed with the sharing key's private key.
 func (c *Client) SharedObjectByID(ctx context.Context, sharingKey types.PrivateKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
-	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, fmt.Sprintf("/shared/objects/%s", objectKey), nil, &obj)
+	err = c.signedRequest(ctx, sharingKey, http.MethodGet, fmt.Sprintf("/shared/objects/%s", objectKey), nil, &obj)
 	return
 }
 
@@ -382,7 +384,7 @@ func (c *Client) SharedHosts(ctx context.Context, sharingKey types.PrivateKey, o
 	for _, opt := range opts {
 		opt(values)
 	}
-	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared/hosts?"+values.Encode(), nil, &sharedHosts)
+	err = c.signedRequest(ctx, sharingKey, http.MethodGet, "/shared/hosts?"+values.Encode(), nil, &sharedHosts)
 	return
 }
 
@@ -422,15 +424,11 @@ func (c *Client) SharedObject(ctx context.Context, sharedURL string) (slabs.Shar
 
 	u.Fragment = ""
 	var obj slabs.SharedObject
-	resp, err := doRequest(ctx, http.MethodGet, u, nil, applicationJSON)
+	resp, err := doRequest(ctx, http.MethodGet, u, nil, c.accept())
 	if err != nil {
 		return slabs.SharedObject{}, nil, fmt.Errorf("failed to fetch shared object: %w", err)
 	}
-	defer resp.Close()
-	defer io.Copy(io.Discard, resp)
-
-	dec := json.NewDecoder(resp)
-	err = dec.Decode(&obj)
+	err = decodeResponse(resp, &obj)
 	return obj, encryptionKey, err
 }
 
@@ -461,13 +459,11 @@ func (c *Client) RequestAppConnection(ctx context.Context, ephemeralKey types.Pr
 		return RegisterAppResponse{}, fmt.Errorf("failed to sign request: %w", err)
 	}
 
-	respBody, err := doRequest(ctx, http.MethodPost, u, reqBody, applicationJSON)
+	r, err := doRequest(ctx, http.MethodPost, u, reqBody, c.accept())
 	if err != nil {
 		return RegisterAppResponse{}, err
 	}
-	defer respBody.Close()
-	defer io.Copy(io.Discard, respBody)
-	err = json.NewDecoder(respBody).Decode(&resp)
+	err = decodeResponse(r, &resp)
 	return
 }
 
@@ -483,6 +479,7 @@ func (c *Client) RequestStatus(ctx context.Context, ephemeralKey types.PrivateKe
 	if err != nil {
 		return AuthConnectStatusResponse{}, fmt.Errorf("failed to create request: %w", err)
 	}
+	req.Header.Set(acceptHeader, c.accept())
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return AuthConnectStatusResponse{}, fmt.Errorf("failed to check app auth: %w", err)
@@ -493,7 +490,7 @@ func (c *Client) RequestStatus(ctx context.Context, ephemeralKey types.PrivateKe
 	case http.StatusNotFound:
 		return AuthConnectStatusResponse{}, ErrUserRejected
 	case http.StatusOK:
-		err = json.NewDecoder(resp.Body).Decode(&status)
+		err = decodeResponse(resp, &status)
 		return
 	default:
 		buf, err := io.ReadAll(io.LimitReader(resp.Body, 1024))
@@ -533,8 +530,11 @@ func (c *Client) RegisterApp(ctx context.Context, registerURL string, ephemeralK
 		return fmt.Errorf("failed to sign request: %w", err)
 	}
 
-	_, err = doRequest(ctx, http.MethodPost, u, body, applicationJSON)
-	return err
+	r, err := doRequest(ctx, http.MethodPost, u, body, c.accept())
+	if err != nil {
+		return err
+	}
+	return decodeResponse(r, nil)
 }
 
 // CheckAppAuth checks if the application is authenticated with the indexer.
@@ -580,13 +580,24 @@ func WithValidity(validity time.Duration) ClientOption {
 	}
 }
 
+// WithEnableCBOR sets whether the client asks the indexer for CBOR responses.
+// It is enabled by default. Responses are decoded by their content type, so
+// JSON responses from indexers without CBOR support are still understood.
+// Requests are always JSON.
+func WithEnableCBOR(enable bool) ClientOption {
+	return func(client *Client) {
+		client.enableCBOR = enable
+	}
+}
+
 // NewClient creates a new AppClient that can be used to interact with the
 // application API of the indexer. The address should be the full URL to the
 // application API, including the scheme (e.g., "http://indexer.sia.tech").
 func NewClient(address string, opts ...ClientOption) *Client {
 	c := &Client{
-		baseURL:  address,
-		validity: defaultValidity,
+		baseURL:    address,
+		validity:   defaultValidity,
+		enableCBOR: true,
 	}
 
 	for _, opt := range opts {
