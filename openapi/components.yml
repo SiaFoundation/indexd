@@ -534,7 +534,7 @@ components:
             $ref: "#/components/schemas/Shard"
         recovered:
           type: boolean
-          description: Whether the slab's shards were recovered; if false the repair state is left untouched
+          description: Whether the slab's shards were recovered; if false the repair state is left untouched, but the failure counts towards the slab's 30-day recovery window, after which the slab is marked unrecoverable
         success:
           type: boolean
           description: Whether every required sector was migrated; only meaningful when recovered is true
