@@ -350,9 +350,9 @@ CREATE TABLE slabs (
 
     consecutive_failed_repairs SMALLINT NOT NULL DEFAULT 0 CHECK (consecutive_failed_repairs >= 0),
     next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    unrecoverable BOOLEAN NOT NULL DEFAULT FALSE,
-    unrecoverable_reason TEXT,
-    CONSTRAINT slabs_unrecoverable_reason_check CHECK (unrecoverable = (unrecoverable_reason IS NOT NULL))
+    unrecoverable_since TIMESTAMP WITH TIME ZONE, -- start of the recovery window, the Unix epoch if the slab can never be fully repaired
+    unrecoverable_reason TEXT, -- set once the slab is taken out of the repair rotation
+    CONSTRAINT slabs_unrecoverable_reason_check CHECK (unrecoverable_reason IS NULL OR unrecoverable_since IS NOT NULL)
 );
 CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
 
@@ -590,12 +590,12 @@ DECLARE
     new_stuck INT := 0;
 BEGIN
     IF (TG_OP <> 'INSERT') THEN
-        old_unrecoverable := OLD.unrecoverable::int;
-        old_stuck := slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable)::int;
+        old_unrecoverable := (OLD.unrecoverable_reason IS NOT NULL)::int;
+        old_stuck := slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable_reason IS NOT NULL)::int;
     END IF;
     IF (TG_OP <> 'DELETE') THEN
-        new_unrecoverable := NEW.unrecoverable::int;
-        new_stuck := slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable)::int;
+        new_unrecoverable := (NEW.unrecoverable_reason IS NOT NULL)::int;
+        new_stuck := slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable_reason IS NOT NULL)::int;
     END IF;
 
     INSERT INTO stats_deltas (stat_name, stat_delta)
@@ -612,19 +612,19 @@ $$ LANGUAGE plpgsql;
 -- upserts that leave both counters alone from reaching the function
 CREATE TRIGGER slabs_maintain_repair_stats_insert
 AFTER INSERT ON slabs FOR EACH ROW
-WHEN (NEW.unrecoverable OR slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable))
+WHEN (NEW.unrecoverable_reason IS NOT NULL OR slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable_reason IS NOT NULL))
 EXECUTE FUNCTION slabs_maintain_repair_stats();
 
 CREATE TRIGGER slabs_maintain_repair_stats_update
-AFTER UPDATE OF unrecoverable, consecutive_failed_repairs ON slabs FOR EACH ROW
-WHEN (OLD.unrecoverable IS DISTINCT FROM NEW.unrecoverable
-   OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable)
-      IS DISTINCT FROM slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable))
+AFTER UPDATE OF unrecoverable_reason, consecutive_failed_repairs ON slabs FOR EACH ROW
+WHEN ((OLD.unrecoverable_reason IS NULL) IS DISTINCT FROM (NEW.unrecoverable_reason IS NULL)
+   OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable_reason IS NOT NULL)
+      IS DISTINCT FROM slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable_reason IS NOT NULL))
 EXECUTE FUNCTION slabs_maintain_repair_stats();
 
 CREATE TRIGGER slabs_maintain_repair_stats_delete
 AFTER DELETE ON slabs FOR EACH ROW
-WHEN (OLD.unrecoverable OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable))
+WHEN (OLD.unrecoverable_reason IS NOT NULL OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable_reason IS NOT NULL))
 EXECUTE FUNCTION slabs_maintain_repair_stats();
 
 -- quick lookup of sectors that failed the integrity checks too many times

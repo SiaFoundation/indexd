@@ -452,4 +452,65 @@ ALTER TABLE stats_deltas ALTER COLUMN stat_delta TYPE NUMERIC(50,0);`); err != n
 		_, err = tx.Exec(ctx, `INSERT INTO stats (stat_name, stat_value) VALUES ('contract_tax', $1) ON CONFLICT (stat_name) DO NOTHING`, sqlCurrency(tax))
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+DROP TRIGGER slabs_maintain_repair_stats_insert ON slabs;
+DROP TRIGGER slabs_maintain_repair_stats_update ON slabs;
+DROP TRIGGER slabs_maintain_repair_stats_delete ON slabs;
+ALTER TABLE slabs
+	DROP CONSTRAINT slabs_unrecoverable_reason_check,
+	ADD COLUMN unrecoverable_since TIMESTAMP WITH TIME ZONE;
+
+-- existing unrecoverable slabs can never be fully repaired
+UPDATE slabs SET unrecoverable_since = 'epoch' WHERE unrecoverable;
+ALTER TABLE slabs
+	DROP COLUMN unrecoverable,
+	ADD CONSTRAINT slabs_unrecoverable_reason_check CHECK (unrecoverable_reason IS NULL OR unrecoverable_since IS NOT NULL);
+
+CREATE OR REPLACE FUNCTION slabs_maintain_repair_stats() RETURNS TRIGGER AS $$
+DECLARE
+    old_unrecoverable INT := 0;
+    old_stuck INT := 0;
+    new_unrecoverable INT := 0;
+    new_stuck INT := 0;
+BEGIN
+    IF (TG_OP <> 'INSERT') THEN
+        old_unrecoverable := (OLD.unrecoverable_reason IS NOT NULL)::int;
+        old_stuck := slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable_reason IS NOT NULL)::int;
+    END IF;
+    IF (TG_OP <> 'DELETE') THEN
+        new_unrecoverable := (NEW.unrecoverable_reason IS NOT NULL)::int;
+        new_stuck := slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable_reason IS NOT NULL)::int;
+    END IF;
+
+    INSERT INTO stats_deltas (stat_name, stat_delta)
+    SELECT * FROM (
+        SELECT 'num_unrecoverable_slabs', new_unrecoverable - old_unrecoverable
+        UNION ALL
+        SELECT 'num_stuck_slabs', new_stuck - old_stuck
+    ) v(stat_name, stat_delta) WHERE stat_delta <> 0;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+-- the WHEN clauses keep the repair loop's next_repair_attempt bumps and the
+-- pin upsert from reaching the function at all
+CREATE TRIGGER slabs_maintain_repair_stats_insert
+AFTER INSERT ON slabs FOR EACH ROW
+WHEN (NEW.unrecoverable_reason IS NOT NULL OR slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable_reason IS NOT NULL))
+EXECUTE FUNCTION slabs_maintain_repair_stats();
+
+CREATE TRIGGER slabs_maintain_repair_stats_update
+AFTER UPDATE OF unrecoverable_reason, consecutive_failed_repairs ON slabs FOR EACH ROW
+WHEN ((OLD.unrecoverable_reason IS NULL) IS DISTINCT FROM (NEW.unrecoverable_reason IS NULL)
+   OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable_reason IS NOT NULL)
+      IS DISTINCT FROM slab_is_stuck(NEW.consecutive_failed_repairs, NEW.unrecoverable_reason IS NOT NULL))
+EXECUTE FUNCTION slabs_maintain_repair_stats();
+
+CREATE TRIGGER slabs_maintain_repair_stats_delete
+AFTER DELETE ON slabs FOR EACH ROW
+WHEN (OLD.unrecoverable_reason IS NOT NULL OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable_reason IS NOT NULL))
+EXECUTE FUNCTION slabs_maintain_repair_stats();`)
+		return err
+	},
 }

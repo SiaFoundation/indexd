@@ -343,10 +343,10 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 			VALUES ($1, $2, $3, $4)
 			ON CONFLICT (digest) DO UPDATE SET
 				pinned_at = NOW(),
-				unrecoverable = FALSE,
+				unrecoverable_since = NULL,
 				unrecoverable_reason = NULL,
-				consecutive_failed_repairs = CASE WHEN slabs.unrecoverable THEN 0 ELSE slabs.consecutive_failed_repairs END,
-				next_repair_attempt = CASE WHEN slabs.unrecoverable THEN NOW() ELSE slabs.next_repair_attempt END
+				consecutive_failed_repairs = CASE WHEN slabs.unrecoverable_reason IS NOT NULL THEN 0 ELSE slabs.consecutive_failed_repairs END,
+				next_repair_attempt = CASE WHEN slabs.unrecoverable_reason IS NOT NULL THEN NOW() ELSE slabs.next_repair_attempt END
 			RETURNING id, (xmax <> 0)
 			`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards, slab.Version).Scan(&slabID, &existingSlab)
 			if err != nil {
@@ -1108,7 +1108,7 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 				UPDATE slabs SET next_repair_attempt = $3
 				WHERE id IN (
 					SELECT id FROM slabs
-					WHERE id IN (SELECT id FROM unhealthy) AND next_repair_attempt < NOW() AND NOT unrecoverable
+					WHERE id IN (SELECT id FROM unhealthy) AND next_repair_attempt < NOW() AND unrecoverable_reason IS NULL
 					FOR UPDATE SKIP LOCKED
 				)
 				RETURNING id, digest

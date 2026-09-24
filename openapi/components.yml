@@ -1535,7 +1535,7 @@ components:
         unrecoverableSlabs:
           type: integer
           format: int64
-          description: Number of slabs that were taken out of the repair rotation because they can never be fully repaired.
+          description: Number of slabs that were taken out of the repair rotation because they can never be fully repaired or their shards failed to recover for 30 days.
         stuckSlabs:
           type: integer
           format: int64
