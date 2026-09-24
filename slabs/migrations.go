@@ -78,7 +78,8 @@ type (
 		Migrated []Shard `json:"migrated"`
 		Lost     []Shard `json:"lost"`
 		// Recovered reports whether the slab's shards were successfully
-		// recovered. If false, the repair state is left untouched.
+		// recovered. If false, the repair state is left untouched, but the
+		// failure counts towards the slab's recovery window.
 		Recovered bool `json:"recovered"`
 		// Success reports whether every required sector was migrated. Only
 		// meaningful when Recovered is true.
