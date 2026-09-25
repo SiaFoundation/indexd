@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -195,6 +196,12 @@ func TestPruneExpiredSharingKeys(t *testing.T) {
 		t.Fatalf("expected expired key to be filtered, got %v", err)
 	}
 
+	if _, err := store.SharedObjectsWithoutSlabs(expiredPK, 0, 10); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		t.Fatalf("expected expired key to be filtered from listing without slabs, got %v", err)
+	} else if _, err := store.SharingKeyObjectSlabs(expiredPK, types.Hash256(frand.Entropy256()), 0, 10); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		t.Fatalf("expected expired key to be filtered from slab listing, got %v", err)
+	}
+
 	if err := store.PruneExpiredSharingKeys(time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -249,6 +256,9 @@ func TestSharingKeyDeletedAccount(t *testing.T) {
 	if _, err := store.SharingKeyObject(pk, obj.ID()); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.SharingKeyObjectSlabs(pk, obj.ID(), 0, 10); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.SharingAccountKey(pk); err != nil {
 		t.Fatal(err)
 	}
@@ -263,8 +273,14 @@ func TestSharingKeyDeletedAccount(t *testing.T) {
 	if _, err := store.SharedObjects(pk, 0, 10); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
 		t.Fatalf("expected ErrSharingKeyNotFound from SharedObjects, got %v", err)
 	}
+	if _, err := store.SharedObjectsWithoutSlabs(pk, 0, 10); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		t.Fatalf("expected ErrSharingKeyNotFound from SharedObjectsWithoutSlabs, got %v", err)
+	}
 	if _, err := store.SharingKeyObject(pk, obj.ID()); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
 		t.Fatalf("expected ErrSharingKeyNotFound from SharingKeyObject, got %v", err)
+	}
+	if _, err := store.SharingKeyObjectSlabs(pk, obj.ID(), 0, 10); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		t.Fatalf("expected ErrSharingKeyNotFound from SharingKeyObjectSlabs, got %v", err)
 	}
 	if _, err := store.SharingAccountKey(pk); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
 		t.Fatalf("expected ErrSharingKeyNotFound from SharingAccountKey, got %v", err)
@@ -457,6 +473,122 @@ func TestSharingKeyObjects(t *testing.T) {
 		} else if len(obj.Slabs) != 1 || len(obj.Slabs[0].Sectors) != 1 {
 			t.Fatalf("unexpected slabs for object %v: %+v", obj.ID(), obj.Slabs)
 		}
+	}
+}
+
+func TestSharedObjectsWithoutSlabs(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	obj := store.pinTestObject(t, acc, hk)
+	sharingKey := store.addTestSharingKey(t, acc, "objects")
+	attachTestObject(t, store, acc, sharingKey, obj.ID())
+
+	if objects, err := store.SharedObjectsWithoutSlabs(sharingKey, 0, 10); err != nil {
+		t.Fatal(err)
+	} else if len(objects) != 1 || objects[0].ObjectID != obj.ID() {
+		t.Fatalf("expected object %v, got %+v", obj.ID(), objects)
+	}
+
+	if err := store.DeleteObject(acc, obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if objects, err := store.SharedObjectsWithoutSlabs(sharingKey, 0, 10); err != nil {
+		t.Fatal(err)
+	} else if len(objects) != 0 {
+		t.Fatalf("expected 0 objects, got %d", len(objects))
+	}
+}
+
+func TestSharingKeyObjectSlabs(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	acc := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(acc))
+	other := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(other))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	params := newTestPinParams(2, hk)
+	params[0].Version = 1
+	store.pinTestSlabs(t, acc, params...)
+
+	// the first slab is referenced twice in a row, which the cursor must
+	// distinguish by position rather than by slab ID
+	expected := []slabs.SlabSlice{
+		params[0].Slice(0, 10),
+		params[0].Slice(10, 20),
+		params[1].Slice(20, 30),
+	}
+	obj := store.pinRandomObject(t, acc, expected)
+	unattached := store.pinRandomObject(t, acc, []slabs.SlabSlice{params[1].Slice(0, 10)})
+	sharingKey := store.addTestSharingKey(t, acc, "slabs")
+	attachTestObject(t, store, acc, sharingKey, obj.ID())
+
+	// the whole object in one page
+	page, err := store.SharingKeyObjectSlabs(sharingKey, obj.ID(), 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(page, expected) {
+		t.Fatalf("expected slabs %+v, got %+v", expected, page)
+	}
+
+	// page through the object, asserting the cursor picks up where the last
+	// page left off
+	var paged []slabs.SlabSlice
+	for {
+		page, err = store.SharingKeyObjectSlabs(sharingKey, obj.ID(), int64(len(paged)), 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		paged = append(paged, page...)
+		if len(page) < 2 {
+			break
+		}
+	}
+	if !reflect.DeepEqual(paged, expected) {
+		t.Fatalf("expected slabs %+v, got %+v", expected, paged)
+	}
+
+	// a cursor past the end returns nothing
+	if page, err := store.SharingKeyObjectSlabs(sharingKey, obj.ID(), int64(len(expected)), 10); err != nil {
+		t.Fatal(err)
+	} else if len(page) != 0 {
+		t.Fatalf("expected no slabs, got %+v", page)
+	}
+
+	// an object the account owns but did not attach is not visible
+	if _, err := store.SharingKeyObjectSlabs(sharingKey, unattached.ID(), 0, 10); !errors.Is(err, sharing.ErrSharedObjectNotFound) {
+		t.Fatalf("expected ErrSharedObjectNotFound, got %v", err)
+	}
+
+	// another account's sharing key cannot see the object
+	otherKey := store.addTestSharingKey(t, other, "other")
+	if _, err := store.SharingKeyObjectSlabs(otherKey, obj.ID(), 0, 10); !errors.Is(err, sharing.ErrSharedObjectNotFound) {
+		t.Fatalf("expected ErrSharedObjectNotFound, got %v", err)
+	}
+
+	// an unknown sharing key is rejected
+	if _, err := store.SharingKeyObjectSlabs(types.GeneratePrivateKey().PublicKey(), obj.ID(), 0, 10); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+		t.Fatalf("expected ErrSharingKeyNotFound, got %v", err)
+	}
+
+	// dropping only the slab rows reproduces the torn view left by a concurrent
+	// delete, which must read as deleted rather than as an exhausted cursor
+	if _, err := store.pool.Exec(t.Context(),
+		`DELETE FROM object_slabs WHERE object_id = (SELECT id FROM objects WHERE object_key = $1)`,
+		sqlHash256(obj.ID())); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.SharingKeyObjectSlabs(sharingKey, obj.ID(), 0, 10); !errors.Is(err, sharing.ErrSharedObjectNotFound) {
+		t.Fatalf("expected ErrSharedObjectNotFound, got %v", err)
+	}
+
+	if err := store.DeleteObject(acc, obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.SharingKeyObjectSlabs(sharingKey, obj.ID(), 0, 10); !errors.Is(err, sharing.ErrSharedObjectNotFound) {
+		t.Fatalf("expected ErrSharedObjectNotFound, got %v", err)
 	}
 }
 

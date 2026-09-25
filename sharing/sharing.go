@@ -99,6 +99,14 @@ type (
 		EncryptedMetadata    []byte          `json:"encryptedMetadata,omitempty"`
 		MetadataSignature    types.Signature `json:"metadataSignature"`
 	}
+
+	// An ObjectWithoutSlabs is an object attached to a sharing key without its
+	// slabs, which are paginated separately. The object ID can not be derived
+	// without the slabs, so it is returned alongside the object.
+	ObjectWithoutSlabs struct {
+		ObjectID types.Hash256 `json:"objectID"`
+		slabs.SealedObjectWithoutSlabs
+	}
 )
 
 // SigHash returns the domain-separated hash signed when creating a sharing

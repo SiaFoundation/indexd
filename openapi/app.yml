@@ -400,15 +400,30 @@ paths:
             type: integer
             minimum: 0
             default: 0
+        - name: includeslabs
+          in: query
+          description: >
+            Whether to include each object's slab slices. When false, the objects
+            are returned with their IDs but without their slabs, which are
+            paginated separately with `GET /objects/{key}/slabs`.
+          schema:
+            type: boolean
+            default: true
       responses:
         "200":
           description: A list of objects with their re-sealed keys, most recently attached first
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/SealedObject"
+                anyOf:
+                  - type: array
+                    description: Objects with slab slices (includeslabs=true)
+                    items:
+                      $ref: "#/components/schemas/SealedObject"
+                  - type: array
+                    description: Objects without their slabs (includeslabs=false)
+                    items:
+                      $ref: "#/components/schemas/SharingKeyObjectWithoutSlabs"
         "404":
           description: Sharing key not found
     post:
@@ -499,15 +514,30 @@ paths:
             type: integer
             minimum: 0
             default: 0
+        - name: includeslabs
+          in: query
+          description: >
+            Whether to include each object's slab slices. When false, the objects
+            are returned with their IDs but without their slabs, which are
+            paginated separately with `GET /shared/objects/{id}/slabs`.
+          schema:
+            type: boolean
+            default: true
       responses:
         "200":
           description: A list of objects with their re-sealed keys, most recently attached first
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/SealedObject"
+                anyOf:
+                  - type: array
+                    description: Objects with slab slices (includeslabs=true)
+                    items:
+                      $ref: "#/components/schemas/SealedObject"
+                  - type: array
+                    description: Objects without their slabs (includeslabs=false)
+                    items:
+                      $ref: "#/components/schemas/SharingKeyObjectWithoutSlabs"
         "401":
           description: The request is not signed by a valid, unexpired sharing key
   /shared/objects/{id}:
@@ -529,6 +559,54 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/SealedObject"
+        "401":
+          description: The request is not signed by a valid, unexpired sharing key
+        "404":
+          description: Object not attached to the sharing key
+        "451":
+          description: The object is on the indexer's blocklist
+  /shared/objects/{id}/slabs:
+    get:
+      tags:
+        - shared
+      summary: List the slab slices of an object the sharing key grants access to
+      description: >
+        Returns a page of the object's slab slices. The cursor is the index of the first
+        slice to return, so repeated references to the same slab paginate correctly.
+        A page shorter than the limit is the last one. The object ID commits to the
+        ordered slab IDs, offsets, and lengths. Sector host keys may change as sectors
+        are migrated or lost.
+      operationId: getSharedObjectSlabs
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hash256"
+        - name: cursor
+          in: query
+          description: The index of the first slab slice to return
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: The maximum number of slab slices to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: A page of the object's slab slices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabSlice"
         "401":
           description: The request is not signed by a valid, unexpired sharing key
         "404":
@@ -1095,6 +1173,8 @@ components:
       $ref: "./components.yml#/components/schemas/ObjectEventWithoutSlabs"
     SealedObjectWithoutSlabs:
       $ref: "./components.yml#/components/schemas/SealedObjectWithoutSlabs"
+    SharingKeyObjectWithoutSlabs:
+      $ref: "./components.yml#/components/schemas/SharingKeyObjectWithoutSlabs"
     PinnedSlab:
       $ref: "./components.yml#/components/schemas/PinnedSlab"
     PublicKey:

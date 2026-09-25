@@ -62,8 +62,11 @@ type (
 		AddSharedObject(account proto.Account, sharingKey types.PublicKey, req sharing.SharedObjectRequest) error
 		DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey types.Hash256) error
 		OwnedSharedObjects(account proto.Account, sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
+		OwnedSharedObjectsWithoutSlabs(account proto.Account, sharingKey types.PublicKey, offset, limit int) ([]sharing.ObjectWithoutSlabs, error)
 		SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
+		SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, limit int) ([]sharing.ObjectWithoutSlabs, error)
 		SharedObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
+		SharedObjectSlabs(sharingKey types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
 		AccountTokens(sharingKey types.PublicKey, hostKeys []types.PublicKey) ([]proto.AccountToken, error)
 	}
 
@@ -550,6 +553,24 @@ func (a *app) handleGETSharingObjects(jc jape.Context, pk types.PublicKey) {
 
 	offset, limit, ok := api.ParseOffsetLimit(jc)
 	if !ok {
+		return
+	}
+
+	includeSlabs := true
+	if jc.DecodeForm("includeslabs", &includeSlabs) != nil {
+		return
+	}
+
+	if !includeSlabs {
+		withoutSlabs, err := a.sharing.OwnedSharedObjectsWithoutSlabs(proto.Account(pk), key, offset, limit)
+		if errors.Is(err, sharing.ErrSharingKeyNotFound) {
+			jc.Error(err, http.StatusNotFound)
+			return
+		} else if err != nil {
+			jc.Error(err, http.StatusInternalServerError)
+			return
+		}
+		jc.Encode(withoutSlabs)
 		return
 	}
 
@@ -1116,10 +1137,11 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		"DELETE /sharing/:key/objects/:objectkey": wrapSignedAuth(a.handleDELETESharingObject),
 
 		// shared-key endpoints, authenticated with a sharing key
-		"GET /shared":             wrapSharedAuth(a.handleGETShared),
-		"GET /shared/objects":     wrapSharedAuth(a.handleGETSharedObjects),
-		"GET /shared/objects/:id": wrapSharedAuth(a.handleGETSharedObject),
-		"GET /shared/hosts":       wrapSharedAuth(a.handleGETSharedHosts),
+		"GET /shared":                   wrapSharedAuth(a.handleGETShared),
+		"GET /shared/objects":           wrapSharedAuth(a.handleGETSharedObjects),
+		"GET /shared/objects/:id":       wrapSharedAuth(a.handleGETSharedObject),
+		"GET /shared/objects/:id/slabs": wrapSharedAuth(a.handleGETSharedObjectSlabs),
+		"GET /shared/hosts":             wrapSharedAuth(a.handleGETSharedHosts),
 
 		"GET /slabs":            wrapSignedAuth(a.handleGETSlabs),
 		"POST /slabs":           wrapSignedAuth(a.handlePOSTSlabs),

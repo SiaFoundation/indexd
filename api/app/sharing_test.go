@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"net/http"
+	"reflect"
 	"testing"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -57,7 +58,10 @@ func TestSharingKeys(t *testing.T) {
 	obj := slabs.SealedObject{
 		EncryptedDataKey:     frand.Bytes(sharing.EncryptionKeySize),
 		EncryptedMetadataKey: frand.Bytes(sharing.EncryptionKeySize),
-		Slabs:                []slabs.SlabSlice{slabParams.Slice(0, 256)},
+		Slabs: []slabs.SlabSlice{
+			slabParams.Slice(0, 128),
+			slabParams.Slice(128, 128),
+		},
 	}
 	obj.Sign(sk1)
 	if err := appClient.PinObject(ctx, sk1, obj); err != nil {
@@ -163,10 +167,23 @@ func TestSharingKeys(t *testing.T) {
 		t.Fatalf("unexpected totals: %+v", key)
 	}
 
-	if objs, err := appClient.SharingKeyObjects(ctx, sk1, shareKey); err != nil {
+	objs, err := appClient.SharingKeyObjects(ctx, sk1, shareKey)
+	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 || objs[0].ID() != obj.ID() {
 		t.Fatalf("unexpected shared objects: %v", objs)
+	}
+
+	// list the object without its slabs and check the rest of the object matches
+	withoutSlabs, err := appClient.SharingKeyObjectsWithoutSlabs(ctx, sk1, shareKey)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(withoutSlabs) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(withoutSlabs))
+	} else if withoutSlabs[0].ObjectID != obj.ID() {
+		t.Fatalf("expected object ID %v, got %v", obj.ID(), withoutSlabs[0].ObjectID)
+	} else if !reflect.DeepEqual(&withoutSlabs[0].SealedObjectWithoutSlabs, objs[0].WithoutSlabs()) {
+		t.Fatalf("expected object %+v, got %+v", objs[0].WithoutSlabs(), withoutSlabs[0])
 	}
 
 	if objs, err := appClient.SharingKeyObjects(ctx, sk1, shareKey, api.WithOffset(1)); err != nil {
@@ -187,6 +204,18 @@ func TestSharingKeys(t *testing.T) {
 		assertStatus(t, err, http.StatusNotFound)
 	}
 
+	if _, err := appClient.SharingKeyObjectsWithoutSlabs(ctx, sk1, types.GeneratePrivateKey().PublicKey()); err == nil {
+		t.Fatal("expected error listing objects of unknown key without slabs")
+	} else {
+		assertStatus(t, err, http.StatusNotFound)
+	}
+
+	if _, err := appClient.SharingKeyObjectsWithoutSlabs(ctx, sk2, shareKey); err == nil {
+		t.Fatal("expected error listing another account's key objects without slabs")
+	} else {
+		assertStatus(t, err, http.StatusNotFound)
+	}
+
 	// the following requests are authenticated with the sharing key itself
 	if stats, err := appClient.SharedStats(ctx, shareKeyPriv); err != nil {
 		t.Fatal(err)
@@ -196,10 +225,60 @@ func TestSharingKeys(t *testing.T) {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}
 
-	if objs, err := appClient.SharedObjects(ctx, shareKeyPriv); err != nil {
+	objs, err = appClient.SharedObjects(ctx, shareKeyPriv)
+	if err != nil {
 		t.Fatal(err)
 	} else if len(objs) != 1 || objs[0].ID() != obj.ID() || !bytes.Equal(objs[0].EncryptedDataKey, sharedReq.EncryptedDataKey) {
 		t.Fatalf("unexpected shared objects: %+v", objs)
+	}
+
+	// list the object without its slabs and check the rest of the object matches
+	withoutSlabs, err = appClient.SharedObjectsWithoutSlabs(ctx, shareKeyPriv)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(withoutSlabs) != 1 {
+		t.Fatalf("expected 1 object, got %d", len(withoutSlabs))
+	} else if withoutSlabs[0].ObjectID != obj.ID() {
+		t.Fatalf("expected object ID %v, got %v", obj.ID(), withoutSlabs[0].ObjectID)
+	} else if !reflect.DeepEqual(&withoutSlabs[0].SealedObjectWithoutSlabs, objs[0].WithoutSlabs()) {
+		t.Fatalf("expected object %+v, got %+v", objs[0].WithoutSlabs(), withoutSlabs[0])
+	}
+
+	// paginate over the shared object's slabs one at a time and reassemble it
+	var slices []slabs.SlabSlice
+	for {
+		page, err := appClient.SharedObjectSlabs(ctx, shareKeyPriv, withoutSlabs[0].ObjectID, int64(len(slices)), 1)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(page) > 1 {
+			t.Fatalf("expected at most 1 slab per page, got %d", len(page))
+		} else if len(page) == 0 {
+			break
+		}
+		slices = append(slices, page...)
+	}
+	if len(slices) != len(objs[0].Slabs) {
+		t.Fatalf("expected %d slabs, got %d", len(objs[0].Slabs), len(slices))
+	} else if reassembled := withoutSlabs[0].WithSlabs(slices); !reflect.DeepEqual(*reassembled, objs[0]) {
+		t.Fatalf("expected reassembled object %+v, got %+v", objs[0], *reassembled)
+	} else if reassembled.ID() != withoutSlabs[0].ObjectID {
+		t.Fatalf("expected reassembled object ID %v, got %v", withoutSlabs[0].ObjectID, reassembled.ID())
+	}
+
+	if _, err := appClient.SharedObjectSlabs(ctx, shareKeyPriv, types.Hash256(frand.Entropy256()), 0, 1); err == nil {
+		t.Fatal("expected error fetching slabs of an object not attached to the sharing key")
+	} else {
+		assertStatus(t, err, http.StatusNotFound)
+	}
+	if _, err := appClient.SharedObjectSlabs(ctx, shareKeyPriv, obj.ID(), -1, 1); err == nil {
+		t.Fatal("expected error fetching slabs with a negative cursor")
+	} else {
+		assertStatus(t, err, http.StatusBadRequest)
+	}
+	if _, err := appClient.SharedObjectSlabs(ctx, types.GeneratePrivateKey(), obj.ID(), 0, 1); err == nil {
+		t.Fatal("expected unauthorized for a non-sharing key")
+	} else {
+		assertStatus(t, err, http.StatusUnauthorized)
 	}
 
 	if got, err := appClient.SharedObjectByID(ctx, shareKeyPriv, obj.ID()); err != nil {
