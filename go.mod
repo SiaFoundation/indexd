@@ -3,6 +3,7 @@ module go.sia.tech/indexd // v0.5.0
 go 1.27.0
 
 require (
+	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/klauspost/reedsolomon v1.14.2
@@ -41,6 +42,7 @@ require (
 	github.com/quic-go/webtransport-go v0.13.0 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	go.etcd.io/bbolt v1.5.0 // indirect
 	go.sia.tech/web v0.0.0-20240422221546-c1709d16b6ef // indirect
 	go.uber.org/multierr v1.11.0 // indirect
