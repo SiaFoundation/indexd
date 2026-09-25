@@ -351,6 +351,19 @@ func (c *Client) SharingKeyObjects(ctx context.Context, appKey types.PrivateKey,
 	return
 }
 
+// SharingKeyObjectsWithoutSlabs lists the objects attached to one of the
+// account's sharing keys, omitting each object's slab slices. It supports
+// pagination through the provided options. Fetch the slices with ObjectSlabs.
+func (c *Client) SharingKeyObjectsWithoutSlabs(ctx context.Context, appKey types.PrivateKey, sharingKey types.PublicKey, opts ...api.URLQueryParameterOption) (objects []sharing.ObjectWithoutSlabs, err error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	values.Set("includeslabs", "false")
+	err = c.signedRequestJSON(ctx, appKey, http.MethodGet, fmt.Sprintf("/sharing/%s/objects?%s", sharingKey, values.Encode()), nil, &objects)
+	return
+}
+
 // SharedStats returns the sharing key's aggregate totals. The request is signed
 // with the sharing key's private key.
 func (c *Client) SharedStats(ctx context.Context, sharingKey types.PrivateKey) (stats sharing.KeyStats, err error) {
@@ -369,10 +382,35 @@ func (c *Client) SharedObjects(ctx context.Context, sharingKey types.PrivateKey,
 	return
 }
 
+// SharedObjectsWithoutSlabs lists the objects the sharing key grants access to,
+// omitting each object's slab slices. Fetch the slices with SharedObjectSlabs.
+// The request is signed with the sharing key's private key.
+func (c *Client) SharedObjectsWithoutSlabs(ctx context.Context, sharingKey types.PrivateKey, opts ...api.URLQueryParameterOption) (objects []sharing.ObjectWithoutSlabs, err error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	values.Set("includeslabs", "false")
+	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, "/shared/objects?"+values.Encode(), nil, &objects)
+	return
+}
+
 // SharedObjectByID retrieves a single object the sharing key grants access to.
 // The request is signed with the sharing key's private key.
 func (c *Client) SharedObjectByID(ctx context.Context, sharingKey types.PrivateKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
 	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, fmt.Sprintf("/shared/objects/%s", objectKey), nil, &obj)
+	return
+}
+
+// SharedObjectSlabs returns a page of the slab slices of an object the sharing
+// key grants access to, starting at slice index cursor. A page shorter than
+// limit is the last one. The request is signed with the sharing key's private
+// key.
+func (c *Client) SharedObjectSlabs(ctx context.Context, sharingKey types.PrivateKey, objectID types.Hash256, cursor int64, limit int) (resp []slabs.SlabSlice, err error) {
+	values := url.Values{}
+	values.Set("cursor", fmt.Sprint(cursor))
+	values.Set("limit", fmt.Sprint(limit))
+	err = c.signedRequestJSON(ctx, sharingKey, http.MethodGet, fmt.Sprintf("/shared/objects/%s/slabs?%s", objectID, values.Encode()), nil, &resp)
 	return
 }
 

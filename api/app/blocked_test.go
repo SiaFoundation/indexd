@@ -114,6 +114,16 @@ func TestBlockedObjects(t *testing.T) {
 		} else if len(objs) != want {
 			t.Fatalf("expected %d shared objects, got %d", want, len(objs))
 		}
+		if objs, err := appClient.SharingKeyObjectsWithoutSlabs(ctx, sk, shareKey); err != nil {
+			t.Fatal(err)
+		} else if len(objs) != want {
+			t.Fatalf("expected %d sharing key objects without slabs, got %d", want, len(objs))
+		}
+		if objs, err := appClient.SharedObjectsWithoutSlabs(ctx, shareKeyPriv); err != nil {
+			t.Fatal(err)
+		} else if len(objs) != want {
+			t.Fatalf("expected %d shared objects without slabs, got %d", want, len(objs))
+		}
 	}
 	assertVisible(2)
 
@@ -147,6 +157,11 @@ func TestBlockedObjects(t *testing.T) {
 	}
 	if _, err := appClient.SharedObjectByID(ctx, shareKeyPriv, blockedObj.ID()); err == nil {
 		t.Fatal("expected error fetching a blocked shared object")
+	} else {
+		assertStatus(t, err, http.StatusUnavailableForLegalReasons)
+	}
+	if _, err := appClient.SharedObjectSlabs(ctx, shareKeyPriv, blockedObj.ID(), 0, 100); err == nil {
+		t.Fatal("expected error fetching a blocked shared object's slabs")
 	} else {
 		assertStatus(t, err, http.StatusUnavailableForLegalReasons)
 	}
@@ -214,6 +229,11 @@ func TestBlockedObjects(t *testing.T) {
 		t.Fatal(err)
 	} else if slabs.ObjectID(page) != blockedObj.ID() {
 		t.Fatalf("expected the object's slabs, got %+v", page)
+	}
+	if page, err := appClient.SharedObjectSlabs(ctx, shareKeyPriv, blockedObj.ID(), 0, 100); err != nil {
+		t.Fatal(err)
+	} else if slabs.ObjectID(page) != blockedObj.ID() {
+		t.Fatalf("expected the shared object's slabs, got %+v", page)
 	}
 	if _, _, err := appClient.SharedObject(ctx, shareURL); err != nil {
 		t.Fatal(err)

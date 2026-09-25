@@ -260,8 +260,6 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 // object does not exist or was deleted while the page was being read.
 func (s *Store) ObjectSlabs(account proto.Account, key types.Hash256, cursor int64, limit int) (objectSlabs []slabs.SlabSlice, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		objectSlabs = []slabs.SlabSlice{} // reset if the transaction retries
-
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
 			return err
@@ -280,36 +278,48 @@ func (s *Store) ObjectSlabs(account proto.Account, key types.Hash256, cursor int
 			return fmt.Errorf("failed to query object: %w", err)
 		}
 
-		// the cursor is a position within the object rather than a slab ID so
-		// an object referencing the same slab more than once still paginates
-		rows, err := tx.Query(ctx, sqlObjectSlabs+`
-			WHERE object_slabs.object_id = $1 AND object_slabs.slab_index >= $2
-			ORDER BY object_slabs.slab_index ASC
-			LIMIT $3
-		`, objectID, cursor, limit)
-		if err != nil {
-			return fmt.Errorf("failed to query object slabs: %w", err)
-		} else if err := collectObjectSlabs(ctx, tx, rows, map[int64]*[]slabs.SlabSlice{objectID: &objectSlabs}); err != nil {
-			return err
-		} else if len(objectSlabs) > 0 {
-			return nil
-		}
-
-		// an object always has at least one slab slice, so an empty first page
-		// means it was deleted rather than that the cursor ran past the end
-		if cursor == 0 {
-			return slabs.ErrObjectNotFound
-		}
 		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM objects WHERE account_id = $1 AND object_key = $2)`,
-			accountID, sqlHash256(key)).Scan(&exists); err != nil {
-			return fmt.Errorf("failed to check object: %w", err)
+		objectSlabs, exists, err = listObjectSlabs(ctx, tx, objectID, cursor, limit)
+		if err != nil {
+			return err
 		} else if !exists {
 			return slabs.ErrObjectNotFound
 		}
 		return nil
 	})
 	return
+}
+
+// listObjectSlabs returns a page of the object's slab slices in slab_index
+// order, starting at slice index cursor. It reports false if the object was
+// deleted before the page was read.
+func listObjectSlabs(ctx context.Context, tx *txn, objectID, cursor int64, limit int) ([]slabs.SlabSlice, bool, error) {
+	// the cursor is a position within the object rather than a slab ID so
+	// an object referencing the same slab more than once still paginates
+	objectSlabs := []slabs.SlabSlice{}
+	rows, err := tx.Query(ctx, sqlObjectSlabs+`
+		WHERE object_slabs.object_id = $1 AND object_slabs.slab_index >= $2
+		ORDER BY object_slabs.slab_index ASC
+		LIMIT $3
+	`, objectID, cursor, limit)
+	if err != nil {
+		return nil, false, fmt.Errorf("failed to query object slabs: %w", err)
+	} else if err := collectObjectSlabs(ctx, tx, rows, map[int64]*[]slabs.SlabSlice{objectID: &objectSlabs}); err != nil {
+		return nil, false, err
+	} else if len(objectSlabs) > 0 {
+		return objectSlabs, true, nil
+	}
+
+	// an object always has at least one slab slice, so an empty first page
+	// means it was deleted rather than that the cursor ran past the end
+	if cursor == 0 {
+		return nil, false, nil
+	}
+	var exists bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM objects WHERE id = $1)`, objectID).Scan(&exists); err != nil {
+		return nil, false, fmt.Errorf("failed to check object: %w", err)
+	}
+	return objectSlabs, exists, nil
 }
 
 // DeleteObject deletes the object with the given key for the given account.

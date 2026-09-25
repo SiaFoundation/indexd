@@ -303,6 +303,35 @@ func TestBlockedSharedObjects(t *testing.T) {
 
 	sharingKey := store.addTestSharingKey(t, acc, "share")
 
+	// listAll pages through the sharing key's objects two at a time, asserting
+	// the listing without slabs selects the same objects
+	listAll := func() []slabs.SealedObject {
+		t.Helper()
+
+		var all []slabs.SealedObject
+		for {
+			objects, err := store.SharedObjects(sharingKey, len(all), 2)
+			if err != nil {
+				t.Fatal(err)
+			}
+			withoutSlabs, err := store.SharedObjectsWithoutSlabs(sharingKey, len(all), 2)
+			if err != nil {
+				t.Fatal(err)
+			} else if len(withoutSlabs) != len(objects) {
+				t.Fatalf("expected %d shared objects, got %d", len(objects), len(withoutSlabs))
+			}
+			for i, obj := range withoutSlabs {
+				if obj.ObjectID != objects[i].ID() {
+					t.Fatalf("expected object ID %v, got %v", objects[i].ID(), obj.ObjectID)
+				}
+			}
+			if len(objects) == 0 {
+				return all
+			}
+			all = append(all, objects...)
+		}
+	}
+
 	const n = 4
 	objs := make([]slabs.SealedObject, n)
 	for i := range objs {
@@ -335,13 +364,13 @@ func TestBlockedSharedObjects(t *testing.T) {
 	}
 
 	// paging to the end returns one object fewer than before
-	if shared, err := store.SharedObjects(sharingKey, 0, math.MaxInt16); err != nil {
-		t.Fatal(err)
-	} else if len(shared) != n-1 {
+	if shared := listAll(); len(shared) != n-1 {
 		t.Fatalf("expected %d shared objects, got %d", n-1, len(shared))
 	}
 
 	if _, err := store.SharingKeyObject(sharingKey, blockedKey); !errors.Is(err, slabs.ErrObjectBlocked) {
+		t.Fatalf("expected ErrObjectBlocked, got %v", err)
+	} else if _, err := store.SharingKeyObjectSlabs(sharingKey, blockedKey, 0, 10); !errors.Is(err, slabs.ErrObjectBlocked) {
 		t.Fatalf("expected ErrObjectBlocked, got %v", err)
 	}
 
@@ -359,12 +388,14 @@ func TestBlockedSharedObjects(t *testing.T) {
 	// blocking does not touch the key's totals
 	assertKeyTotals(t, store, sharingKey, total.ObjectCount, total.ObjectSize, total.PinnedData, total.PinnedSize)
 
-	// unblocking restores the listing
+	// unblocking restores the listing and the object's slabs
 	if err := store.UnblockObject(blockedKey); err != nil {
 		t.Fatal(err)
-	} else if shared, err := store.SharedObjects(sharingKey, 0, math.MaxInt16); err != nil {
-		t.Fatal(err)
-	} else if len(shared) != n {
+	} else if shared := listAll(); len(shared) != n {
 		t.Fatalf("expected %d shared objects, got %d", n, len(shared))
+	} else if page, err := store.SharingKeyObjectSlabs(sharingKey, blockedKey, 0, 10); err != nil {
+		t.Fatal(err)
+	} else if slabs.ObjectID(page) != blockedKey {
+		t.Fatalf("expected the object's slabs, got %+v", page)
 	}
 }

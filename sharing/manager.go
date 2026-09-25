@@ -24,7 +24,9 @@ type (
 		PruneExpiredSharingKeys(cutoff time.Time) error
 
 		SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
+		SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, limit int) ([]ObjectWithoutSlabs, error)
 		SharingKeyObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
+		SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
 		SharingAccountKey(sharingKey types.PublicKey) (types.PrivateKey, error)
 	}
 
@@ -140,6 +142,29 @@ func (m *Manager) OwnedSharedObjects(account proto.Account, sharingKey types.Pub
 // sharing key itself, so no ownership check is required.
 func (m *Manager) SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error) {
 	return m.store.SharedObjects(sharingKey, offset, limit)
+}
+
+// OwnedSharedObjectsWithoutSlabs returns a paginated list of the objects
+// attached to a sharing key owned by the account, without their slabs.
+func (m *Manager) OwnedSharedObjectsWithoutSlabs(account proto.Account, sharingKey types.PublicKey, offset, limit int) ([]ObjectWithoutSlabs, error) {
+	if _, err := m.OwnedSharingKey(account, sharingKey); err != nil {
+		return nil, err
+	}
+	return m.store.SharedObjectsWithoutSlabs(sharingKey, offset, limit)
+}
+
+// SharedObjectsWithoutSlabs returns a paginated list of the objects attached to
+// the sharing key, without their slabs. Like SharedObjects, it is the
+// recipient-facing view, so no ownership check is required.
+func (m *Manager) SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, limit int) ([]ObjectWithoutSlabs, error) {
+	return m.store.SharedObjectsWithoutSlabs(sharingKey, offset, limit)
+}
+
+// SharedObjectSlabs returns a page of the slab slices of an object attached to
+// the sharing key, starting at slice index cursor. It is the recipient-facing
+// counterpart of paginating an owned object's slabs.
+func (m *Manager) SharedObjectSlabs(sharingKey types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error) {
+	return m.store.SharingKeyObjectSlabs(sharingKey, objectKey, cursor, limit)
 }
 
 // SharedObject returns a single object attached to the sharing key.
