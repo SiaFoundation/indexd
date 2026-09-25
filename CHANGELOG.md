@@ -1,3 +1,42 @@
+## 0.5.1 (2026-09-25)
+
+### Features
+
+- Add object listing without slab slices and object slab-slice pagination
+- Track file contract tax
+
+#### Prune node by default
+
+The consensus prune target now defaults to a week of blocks (1008) when it is
+not set in the config file. Setting `consensus.pruneTarget` to 0 explicitly
+disables pruning.
+
+### Fixes
+
+- Don't validate an existing slab's bad hosts count when pinning
+- Only rebind a lost sector to a host with a good contract
+- Reset a sector's failed integrity checks when it is rebound to a host
+
+#### Fix object events being skipped by the cursor
+
+An event now takes its position in the stream from a background publisher rather
+than from the transaction that wrote it, so a slow commit can no longer land
+behind a cursor that has already moved on. Clients need no update, though an
+event normally becomes visible within two seconds of the write instead of
+within the same second.
+
+#### Fix offline detection
+
+Determine indexer connectivity by probing known external sites instead of relying
+on syncer peers, which can remain connected while offline. Cache connectivity
+results for 30 seconds to avoid excessive probes during host scans.
+
+#### Require RHP 5.1.0 hosts by default
+
+A new deployment initializes `MinProtocolVersion` at 5.1.0 rather than 5.0.2, so
+a host needs balance pool support to pass the default usability check. Existing
+deployments keep the minimum already stored in their settings.
+
 ## 0.5.0 (2026-09-09)
 
 ### Breaking Changes
