@@ -13,16 +13,18 @@ import (
 	"go.sia.tech/indexd/slabs"
 )
 
-// MarkSlabUnrecoverable flags a slab as unrecoverable, permanently excluding it
-// from [Store.UnhealthySlabs] so it is never handed out for repair again, and
-// records the reason we gave up on it. No-op if the slab is already marked
-// unrecoverable.
+// MarkSlabUnrecoverable flags a slab that can never be fully repaired as
+// unrecoverable, excluding it from [Store.UnhealthySlabs] until it is
+// re-pinned, and records the reason we gave up on it. The original reason is
+// kept if the slab was already marked by a previous call.
 func (s *Store) MarkSlabUnrecoverable(slabID slabs.SlabID, reason string) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		// COALESCE keeps the original reason if the slab is already marked
+		// the epoch marks a slab that can never be fully repaired, keep the
+		// original reason if the slab is already marked
 		res, err := tx.Exec(ctx, `
 			UPDATE slabs
-			SET unrecoverable = TRUE, unrecoverable_reason = COALESCE(unrecoverable_reason, $2)
+			SET unrecoverable_since = 'epoch',
+				unrecoverable_reason = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_reason ELSE $2 END
 			WHERE digest = $1`, sqlHash256(slabID), reason)
 		if err != nil {
 			return fmt.Errorf("failed to mark slab unrecoverable: %w", err)
@@ -33,14 +35,57 @@ func (s *Store) MarkSlabUnrecoverable(slabID slabs.SlabID, reason string) error 
 	})
 }
 
+// RecordFailedSlabRecovery records a failed recovery of the slab's shards and
+// reports whether it marked the slab unrecoverable. Failures only count while
+// fewer than MinShards of the slab's sectors are stored on a host, and mark
+// the slab unrecoverable once they have for [slabs.RecoveryWindow].
+func (s *Store) RecordFailedSlabRecovery(slabID slabs.SlabID, reason string) (unrecoverable bool, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		unrecoverable = false // reset on retry
+		err := tx.QueryRow(ctx, `
+			WITH slab AS (
+				SELECT s.id, (
+					SELECT COUNT(*)
+					FROM slab_sectors ss
+					INNER JOIN sectors sec ON sec.id = ss.sector_id
+					WHERE ss.slab_id = s.id AND sec.host_id IS NOT NULL
+				) < s.min_shards AS below_min_shards
+				FROM slabs s
+				WHERE s.digest = $1
+			), updated AS (
+				UPDATE slabs s
+				SET unrecoverable_since = CASE WHEN slab.below_min_shards THEN COALESCE(s.unrecoverable_since, NOW()) END,
+					unrecoverable_reason = CASE WHEN slab.below_min_shards AND s.unrecoverable_since <= $2 THEN $3 END
+				FROM slab
+				WHERE s.id = slab.id AND s.unrecoverable_reason IS NULL AND (slab.below_min_shards OR s.unrecoverable_since IS NOT NULL)
+				RETURNING s.unrecoverable_reason IS NOT NULL AS unrecoverable
+			)
+			SELECT COALESCE((SELECT unrecoverable FROM updated), FALSE) FROM slab`,
+			sqlHash256(slabID), time.Now().Add(-slabs.RecoveryWindow), reason).Scan(&unrecoverable)
+		if errors.Is(err, sql.ErrNoRows) {
+			return slabs.ErrSlabNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to record failed slab recovery: %w", err)
+		}
+		return nil
+	})
+	return
+}
+
 // MarkSlabRepaired marks the slab as repaired or increments the failed repair
 // count. If the repair was successful, the consecutive_failed_repairs counter
 // is reset to zero. If the repair failed, the counter is incremented and the
-// next repair attempt time is set using exponential backoff.
+// next repair attempt time is set using exponential backoff. Either way, the
+// slab's recovery window is reset.
 func (s *Store) MarkSlabRepaired(slabID slabs.SlabID, success bool) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		if success {
-			if res, err := tx.Exec(ctx, `UPDATE slabs SET consecutive_failed_repairs = 0 WHERE digest = $1`, sqlHash256(slabID)); err != nil {
+			if res, err := tx.Exec(ctx, `
+				UPDATE slabs
+				SET consecutive_failed_repairs = 0,
+					unrecoverable_since = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_since END,
+					unrecoverable_reason = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_reason END
+				WHERE digest = $1`, sqlHash256(slabID)); err != nil {
 				return fmt.Errorf("failed to mark slab as repaired: %w", err)
 			} else if res.RowsAffected() == 0 {
 				return slabs.ErrSlabNotFound
@@ -64,7 +109,9 @@ func (s *Store) MarkSlabRepaired(slabID slabs.SlabID, success bool) error {
 		nextRepairBackoff := min(minRepairBackoff*time.Duration(1<<(currentFailures)), maxRepairBackoff)
 		_, err = tx.Exec(ctx, `
 			UPDATE slabs
-			SET consecutive_failed_repairs = $2, next_repair_attempt = $3
+			SET consecutive_failed_repairs = $2, next_repair_attempt = $3,
+				unrecoverable_since = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_since END,
+				unrecoverable_reason = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_reason END
 			WHERE digest = $1`, sqlHash256(slabID), currentFailures+1, time.Now().Add(nextRepairBackoff))
 		if err != nil {
 			return fmt.Errorf("failed to update repair state: %w", err)

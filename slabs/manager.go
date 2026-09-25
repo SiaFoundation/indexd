@@ -123,6 +123,7 @@ type (
 		MarkSlabUnrecoverable(slabID SlabID, reason string) error
 		MigrateSector(root types.Hash256, hostKey types.PublicKey) (bool, error)
 		RecordSlabMigrated(slabID SlabID) error
+		RecordFailedSlabRecovery(slabID SlabID, reason string) (bool, error)
 		PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...SlabPinParams) ([]SlabID, error)
 		UnpinSlab(proto.Account, SlabID) error
 		RecordIntegrityCheck(success bool, nextCheck time.Time, hostKey types.PublicKey, roots []types.Hash256) error

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.sia.tech/core/types"
@@ -446,8 +447,8 @@ CREATE UNIQUE INDEX slab_sectors_sector_id_slab_id_idx ON slab_sectors(sector_id
 `
 
 // initV1Database brings up a database at the initial schema version, seeds it
-// with seed, and returns it migrated to the current version.
-func initV1Database(t *testing.T, ci ConnectionInfo, seed string) *Store {
+// with seed, runs beforeOpen and returns it migrated to the current version.
+func initV1Database(t *testing.T, ci ConnectionInfo, seed string, beforeOpen ...func(*pgxpool.Pool)) *Store {
 	t.Helper()
 	ctx := context.Background()
 	t.Cleanup(func() {
@@ -475,6 +476,9 @@ func initV1Database(t *testing.T, ci ConnectionInfo, seed string) *Store {
 			t.Fatal(err)
 		}
 	}
+	for _, fn := range beforeOpen {
+		fn(pool)
+	}
 	pool.Close()
 
 	store, err := NewStore(ctx, ci, contracts.DefaultMaintenanceSettings, hosts.DefaultUsabilitySettings, zaptest.NewLogger(t))
@@ -482,6 +486,67 @@ func initV1Database(t *testing.T, ci ConnectionInfo, seed string) *Store {
 		t.Fatal(err)
 	}
 	return store
+}
+
+// TestMigrationCarriesOverUnrecoverableSlabs asserts unrecoverable slabs stay
+// unrecoverable after the migration.
+func TestMigrationCarriesOverUnrecoverableSlabs(t *testing.T) {
+	ctx := context.Background()
+	const previousVersion = 25 // last schema with the unrecoverable flag
+	store := initV1Database(t, connectionInfoFromEnv(), "", func(pool *pgxpool.Pool) {
+		old := &Store{pool: pool, log: zaptest.NewLogger(t)}
+		if err := old.upgradeDatabase(1, previousVersion); err != nil {
+			t.Fatal(err)
+		} else if _, err := pool.Exec(ctx, `
+			INSERT INTO slabs (digest, encryption_key, min_shards, consecutive_failed_repairs, unrecoverable, unrecoverable_reason)
+			VALUES
+				(sha256('healthy'), sha256('healthy'), 1, 0, FALSE, NULL),
+				(sha256('stuck'), sha256('stuck'), 1, 2, FALSE, NULL),
+				(sha256('unrecoverable'), sha256('unrecoverable'), 1, 2, TRUE, 'shard root mismatch')`); err != nil {
+			t.Fatal(err)
+		}
+	})
+	defer store.Close()
+
+	tests := []struct {
+		name   string
+		since  sql.NullTime
+		reason sql.NullString
+	}{
+		{name: "healthy"},
+		{name: "stuck"},
+		{name: "unrecoverable", since: sql.NullTime{Time: time.Unix(0, 0), Valid: true}, reason: sql.NullString{String: "shard root mismatch", Valid: true}},
+	}
+	for _, test := range tests {
+		var since sql.NullTime
+		var reason sql.NullString
+		if err := store.pool.QueryRow(ctx, `SELECT unrecoverable_since, unrecoverable_reason FROM slabs WHERE digest = sha256($1::bytea)`, []byte(test.name)).Scan(&since, &reason); err != nil {
+			t.Fatal(err)
+		} else if since.Valid != test.since.Valid || !since.Time.Equal(test.since.Time) {
+			t.Fatalf("expected %s slab unrecoverable since %v, got %v", test.name, test.since, since)
+		} else if reason != test.reason {
+			t.Fatalf("expected %s slab reason %v, got %v", test.name, test.reason, reason)
+		}
+	}
+
+	assertStats := func(unrecoverable, stuck int64) {
+		t.Helper()
+		var gotUnrecoverable, gotStuck int64
+		if err := store.pool.QueryRow(ctx, sqlStatSelect(statUnrecoverableSlabs, statStuckSlabs)).Scan(&gotUnrecoverable, &gotStuck); err != nil {
+			t.Fatal(err)
+		} else if gotUnrecoverable != unrecoverable {
+			t.Fatalf("expected %d unrecoverable slabs, got %d", unrecoverable, gotUnrecoverable)
+		} else if gotStuck != stuck {
+			t.Fatalf("expected %d stuck slabs, got %d", stuck, gotStuck)
+		}
+	}
+	assertStats(1, 1)
+
+	// the recreated triggers continue from the carried over counters
+	if _, err := store.pool.Exec(ctx, `DELETE FROM slabs`); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(0, 0)
 }
 
 // TestMigrationSeedsRepairStats asserts the repair-state counters are seeded
