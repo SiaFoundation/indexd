@@ -15,8 +15,8 @@ import (
 
 // MarkSlabUnrecoverable flags a slab that can never be fully repaired as
 // unrecoverable, excluding it from [Store.UnhealthySlabs] until it is
-// re-pinned, and records the reason we gave up on it. No-op if the slab is
-// already marked unrecoverable.
+// re-pinned, and records the reason we gave up on it. The original reason is
+// kept if the slab was already marked by a previous call.
 func (s *Store) MarkSlabUnrecoverable(slabID slabs.SlabID, reason string) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		// the epoch marks a slab that can never be fully repaired, keep the
