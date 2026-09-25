@@ -161,8 +161,7 @@ func (m *Manager) SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, 
 }
 
 // SharedObjectSlabs returns a page of the slab slices of an object attached to
-// the sharing key, starting at slice index cursor. It is the recipient-facing
-// counterpart of paginating an owned object's slabs.
+// the sharing key, starting at slice index cursor.
 func (m *Manager) SharedObjectSlabs(sharingKey types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error) {
 	return m.store.SharingKeyObjectSlabs(sharingKey, objectKey, cursor, limit)
 }

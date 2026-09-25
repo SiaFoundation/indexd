@@ -279,8 +279,7 @@ func (s *Store) SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, li
 	return
 }
 
-// A sharedObject is an object attached to a sharing key, sealed under the
-// sharing key, along with its database ID and object ID.
+// A sharedObject is an object attached to a sharing key and its IDs.
 type sharedObject struct {
 	id     int64
 	key    types.Hash256
@@ -401,6 +400,7 @@ func (s *Store) SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey type
 
 		// an object can only be attached to its owner's sharing keys, so scoping
 		// the lookup to the owner lets it use the (account_id, object_key) index
+		// rather than scanning every object attached to the key
 		var objectID int64
 		err = tx.QueryRow(ctx, `
 			SELECT o.id
