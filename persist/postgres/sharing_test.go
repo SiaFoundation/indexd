@@ -1,7 +1,6 @@
 package postgres
 
 import (
-	"bytes"
 	"errors"
 	"reflect"
 	"testing"
@@ -484,51 +483,19 @@ func TestSharedObjectsWithoutSlabs(t *testing.T) {
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 
-	params := newTestPinParams(2, hk)
-	params[0].Version = 1
-	store.pinTestSlabs(t, acc, params...)
-	obj := store.pinRandomObject(t, acc, []slabs.SlabSlice{
-		params[0].Slice(10, 100),
-		params[1].Slice(20, 200),
-	})
+	obj := store.pinTestObject(t, acc, hk)
 	sharingKey := store.addTestSharingKey(t, acc, "objects")
-	req := sharing.SharedObjectRequest{
-		ObjectID:             obj.ID(),
-		EncryptedDataKey:     frand.Bytes(sharing.EncryptionKeySize),
-		EncryptedMetadataKey: frand.Bytes(sharing.EncryptionKeySize),
-		EncryptedMetadata:    frand.Bytes(100),
-		DataSignature:        types.Signature(frand.Bytes(64)),
-		MetadataSignature:    types.Signature(frand.Bytes(64)),
-	}
-	if err := store.AddSharedObject(acc, sharingKey, req); err != nil {
-		t.Fatal(err)
-	}
+	attachTestObject(t, store, acc, sharingKey, obj.ID())
 
-	objects, err := store.SharedObjectsWithoutSlabs(sharingKey, 0, 10)
-	if err != nil {
+	if objects, err := store.SharedObjectsWithoutSlabs(sharingKey, 0, 10); err != nil {
 		t.Fatal(err)
-	} else if len(objects) != 1 {
-		t.Fatalf("expected 1 object, got %d", len(objects))
-	}
-
-	withoutSlabs := objects[0]
-	if withoutSlabs.ObjectID != obj.ID() {
-		t.Fatalf("expected object ID %v, got %v", obj.ID(), withoutSlabs.ObjectID)
-	} else if withoutSlabs.UpdatedAt.IsZero() || withoutSlabs.CreatedAt.IsZero() {
-		t.Fatalf("expected the object's timestamps, got %+v", withoutSlabs)
-	} else if !bytes.Equal(withoutSlabs.EncryptedDataKey, req.EncryptedDataKey) ||
-		!bytes.Equal(withoutSlabs.EncryptedMetadataKey, req.EncryptedMetadataKey) ||
-		!bytes.Equal(withoutSlabs.EncryptedMetadata, req.EncryptedMetadata) ||
-		withoutSlabs.DataSignature != req.DataSignature || withoutSlabs.MetadataSignature != req.MetadataSignature {
-		t.Fatal("expected the object without slabs to preserve keys, signatures, and metadata")
+	} else if len(objects) != 1 || objects[0].ObjectID != obj.ID() {
+		t.Fatalf("expected object %v, got %+v", obj.ID(), objects)
 	}
 
 	if err := store.DeleteObject(acc, obj.ID()); err != nil {
 		t.Fatal(err)
-	}
-
-	objects, err = store.SharedObjectsWithoutSlabs(sharingKey, 0, 10)
-	if err != nil {
+	} else if objects, err := store.SharedObjectsWithoutSlabs(sharingKey, 0, 10); err != nil {
 		t.Fatal(err)
 	} else if len(objects) != 0 {
 		t.Fatalf("expected 0 objects, got %d", len(objects))

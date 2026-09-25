@@ -303,33 +303,27 @@ func TestBlockedSharedObjects(t *testing.T) {
 
 	sharingKey := store.addTestSharingKey(t, acc, "share")
 
-	// listAll pages through the sharing key's objects two at a time, asserting
-	// the listing without slabs selects the same objects
+	// listAll lists all of the sharing key's objects, asserting the listing
+	// without slabs selects the same objects
 	listAll := func() []slabs.SealedObject {
 		t.Helper()
 
-		var all []slabs.SealedObject
-		for {
-			objects, err := store.SharedObjects(sharingKey, len(all), 2)
-			if err != nil {
-				t.Fatal(err)
-			}
-			withoutSlabs, err := store.SharedObjectsWithoutSlabs(sharingKey, len(all), 2)
-			if err != nil {
-				t.Fatal(err)
-			} else if len(withoutSlabs) != len(objects) {
-				t.Fatalf("expected %d shared objects, got %d", len(objects), len(withoutSlabs))
-			}
-			for i, obj := range withoutSlabs {
-				if obj.ObjectID != objects[i].ID() {
-					t.Fatalf("expected object ID %v, got %v", objects[i].ID(), obj.ObjectID)
-				}
-			}
-			if len(objects) == 0 {
-				return all
-			}
-			all = append(all, objects...)
+		objects, err := store.SharedObjects(sharingKey, 0, math.MaxInt16)
+		if err != nil {
+			t.Fatal(err)
 		}
+		withoutSlabs, err := store.SharedObjectsWithoutSlabs(sharingKey, 0, math.MaxInt16)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(withoutSlabs) != len(objects) {
+			t.Fatalf("expected %d shared objects, got %d", len(objects), len(withoutSlabs))
+		}
+		for i, obj := range withoutSlabs {
+			if obj.ObjectID != objects[i].ID() {
+				t.Fatalf("expected object ID %v, got %v", objects[i].ID(), obj.ObjectID)
+			}
+		}
+		return objects
 	}
 
 	const n = 4

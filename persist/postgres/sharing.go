@@ -344,40 +344,11 @@ func sharingKeyID(ctx context.Context, tx *txn, sharingKey types.PublicKey) (key
 // sectors.
 func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		obj = slabs.SealedObject{} // reset if the transaction retries
-
-		sharingKeyID, ownerID, err := sharingKeyID(ctx, tx, sharingKey)
+		objectID, o, err := sharingKeyObject(ctx, tx, sharingKey, objectKey)
 		if err != nil {
 			return err
 		}
-
-		if err := assertObjectNotBlocked(ctx, tx, objectKey); err != nil {
-			return err
-		}
-
-		// an object can only be attached to its owner's sharing keys, so scoping
-		// the lookup to the owner lets it use the (account_id, object_key) index
-		// rather than scanning every object attached to the key
-		rows, err := tx.Query(ctx, `
-			SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at
-			FROM objects o
-			INNER JOIN shared_objects so ON so.object_id = o.id
-			WHERE so.sharing_key_id = $1 AND o.account_id = $2 AND o.object_key = $3
-		`, sharingKeyID, ownerID, sqlHash256(objectKey))
-		if err != nil {
-			return fmt.Errorf("failed to get shared object: %w", err)
-		}
-		objectID, err := pgx.CollectOneRow(rows, func(row pgx.CollectableRow) (int64, error) {
-			id, _, o, err := scanObject(row)
-			obj = o
-			return id, err
-		})
-		if errors.Is(err, sql.ErrNoRows) {
-			return sharing.ErrSharedObjectNotFound
-		} else if err != nil {
-			return fmt.Errorf("failed to get shared object: %w", err)
-		}
-
+		obj = o
 		return loadObjectSlabs(ctx, tx, map[int64]*slabs.SealedObject{objectID: &obj})
 	})
 	return
@@ -389,29 +360,9 @@ func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey types.Has
 // sharing key or was deleted while the page was being read.
 func (s *Store) SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey types.Hash256, cursor int64, limit int) (objectSlabs []slabs.SlabSlice, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		sharingKeyID, ownerID, err := sharingKeyID(ctx, tx, sharingKey)
+		objectID, _, err := sharingKeyObject(ctx, tx, sharingKey, objectKey)
 		if err != nil {
 			return err
-		}
-
-		if err := assertObjectNotBlocked(ctx, tx, objectKey); err != nil {
-			return err
-		}
-
-		// an object can only be attached to its owner's sharing keys, so scoping
-		// the lookup to the owner lets it use the (account_id, object_key) index
-		// rather than scanning every object attached to the key
-		var objectID int64
-		err = tx.QueryRow(ctx, `
-			SELECT o.id
-			FROM objects o
-			INNER JOIN shared_objects so ON so.object_id = o.id
-			WHERE so.sharing_key_id = $1 AND o.account_id = $2 AND o.object_key = $3
-		`, sharingKeyID, ownerID, sqlHash256(objectKey)).Scan(&objectID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return sharing.ErrSharedObjectNotFound
-		} else if err != nil {
-			return fmt.Errorf("failed to get shared object: %w", err)
 		}
 
 		var exists bool
@@ -424,6 +375,43 @@ func (s *Store) SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey type
 		return nil
 	})
 	return
+}
+
+// sharingKeyObject returns an object attached to the sharing key and its
+// database ID, without loading its slabs.
+func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, objectKey types.Hash256) (objectID int64, obj slabs.SealedObject, err error) {
+	sharingKeyID, ownerID, err := sharingKeyID(ctx, tx, sharingKey)
+	if err != nil {
+		return 0, slabs.SealedObject{}, err
+	}
+
+	if err := assertObjectNotBlocked(ctx, tx, objectKey); err != nil {
+		return 0, slabs.SealedObject{}, err
+	}
+
+	// an object can only be attached to its owner's sharing keys, so scoping
+	// the lookup to the owner lets it use the (account_id, object_key) index
+	// rather than scanning every object attached to the key
+	rows, err := tx.Query(ctx, `
+		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at
+		FROM objects o
+		INNER JOIN shared_objects so ON so.object_id = o.id
+		WHERE so.sharing_key_id = $1 AND o.account_id = $2 AND o.object_key = $3
+	`, sharingKeyID, ownerID, sqlHash256(objectKey))
+	if err != nil {
+		return 0, slabs.SealedObject{}, fmt.Errorf("failed to get shared object: %w", err)
+	}
+	objectID, err = pgx.CollectOneRow(rows, func(row pgx.CollectableRow) (int64, error) {
+		id, _, o, err := scanObject(row)
+		obj = o
+		return id, err
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, slabs.SealedObject{}, sharing.ErrSharedObjectNotFound
+	} else if err != nil {
+		return 0, slabs.SealedObject{}, fmt.Errorf("failed to get shared object: %w", err)
+	}
+	return objectID, obj, nil
 }
 
 // SharingAccountKey returns the sharing account key derived from the owner of
