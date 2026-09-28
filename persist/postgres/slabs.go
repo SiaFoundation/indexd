@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -72,6 +73,15 @@ func (s *Store) RecordFailedSlabRecovery(slabID slabs.SlabID, reason string) (un
 	return
 }
 
+// repairBackoff returns minRepairBackoff * 2^n capped at maxRepairBackoff.
+func repairBackoff(n int) time.Duration {
+	// return the cap before the shift can overflow
+	if n < 0 || n >= 63 || minRepairBackoff > maxRepairBackoff>>n {
+		return maxRepairBackoff
+	}
+	return minRepairBackoff << n
+}
+
 // MarkSlabRepaired marks the slab as repaired or increments the failed repair
 // count. If the repair was successful, the consecutive_failed_repairs counter
 // is reset to zero. If the repair failed, the counter is incremented and the
@@ -106,13 +116,12 @@ func (s *Store) MarkSlabRepaired(slabID slabs.SlabID, success bool) error {
 			return fmt.Errorf("failed to fetch repair state: %w", err)
 		}
 
-		nextRepairBackoff := min(minRepairBackoff*time.Duration(1<<(currentFailures)), maxRepairBackoff)
 		_, err = tx.Exec(ctx, `
 			UPDATE slabs
 			SET consecutive_failed_repairs = $2, next_repair_attempt = $3,
 				unrecoverable_since = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_since END,
 				unrecoverable_reason = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_reason END
-			WHERE digest = $1`, sqlHash256(slabID), currentFailures+1, time.Now().Add(nextRepairBackoff))
+			WHERE digest = $1`, sqlHash256(slabID), min(currentFailures+1, math.MaxInt16), time.Now().Add(repairBackoff(currentFailures)))
 		if err != nil {
 			return fmt.Errorf("failed to update repair state: %w", err)
 		}
