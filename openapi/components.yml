@@ -635,6 +635,10 @@ components:
         dataSignature:
           $ref: "#/components/schemas/Signature"
           description: The signature of the object's data
+        size:
+          type: integer
+          format: uint64
+          description: The total size of the object in bytes, the sum of its slab slices' lengths
         encryptedMetadataKey:
           type: string
           format: byte

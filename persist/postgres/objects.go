@@ -170,9 +170,28 @@ func (s *Store) ListObjectsWithoutSlabs(account proto.Account, cursor slabs.Curs
 			return err
 		}
 
-		page, _, err := listObjectEvents(ctx, tx, accountID, cursor, limit)
+		page, objectsByID, err := listObjectEvents(ctx, tx, accountID, cursor, limit)
 		if err != nil {
 			return err
+		}
+
+		sizes := make(map[*slabs.SealedObject]uint64, len(objectsByID))
+		if len(objectsByID) > 0 {
+			rows, err := tx.Query(ctx, `SELECT object_id, SUM(slab_length) FROM object_slabs WHERE object_id = ANY($1) GROUP BY object_id`, slices.Collect(maps.Keys(objectsByID)))
+			if err != nil {
+				return fmt.Errorf("failed to query object sizes: %w", err)
+			}
+			err = forEachRow(rows, func(row pgx.CollectableRow) error {
+				var objectID, size int64
+				if err := row.Scan(&objectID, &size); err != nil {
+					return err
+				}
+				sizes[objectsByID[objectID]] = uint64(size)
+				return nil
+			})
+			if err != nil {
+				return fmt.Errorf("failed to scan object sizes: %w", err)
+			}
 		}
 
 		events = make([]slabs.ObjectEventWithoutSlabs, len(page))
@@ -182,9 +201,18 @@ func (s *Store) ListObjectsWithoutSlabs(account proto.Account, cursor slabs.Curs
 				Deleted:   event.Deleted,
 				UpdatedAt: event.UpdatedAt,
 			}
-			if event.Object != nil {
-				events[i].Object = event.Object.WithoutSlabs()
+			if event.Object == nil {
+				continue
 			}
+			// an object always has at least one slab, so one that lost its
+			// slab rows was deleted after its row was read
+			size, ok := sizes[event.Object]
+			if !ok {
+				events[i].Deleted = true
+				continue
+			}
+			events[i].Object = event.Object.WithoutSlabs()
+			events[i].Object.Size = size
 		}
 		return nil
 	})

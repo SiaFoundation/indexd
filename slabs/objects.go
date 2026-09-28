@@ -83,6 +83,9 @@ type (
 	SealedObjectWithoutSlabs struct {
 		EncryptedDataKey []byte          `json:"encryptedDataKey"`
 		DataSignature    types.Signature `json:"dataSignature"`
+		// Size is the total size of the object in bytes, the sum of its
+		// slab slices' lengths.
+		Size uint64 `json:"size"`
 
 		EncryptedMetadataKey []byte          `json:"encryptedMetadataKey,omitempty"`
 		EncryptedMetadata    []byte          `json:"encryptedMetadata,omitempty"`
@@ -234,9 +237,14 @@ func (so *SealedObject) PinRequest() PinObjectRequest {
 
 // WithoutSlabs returns the sealed object without its slab slices.
 func (so *SealedObject) WithoutSlabs() *SealedObjectWithoutSlabs {
+	var size uint64
+	for _, ss := range so.Slabs {
+		size += uint64(ss.Length)
+	}
 	return &SealedObjectWithoutSlabs{
 		EncryptedDataKey:     so.EncryptedDataKey,
 		DataSignature:        so.DataSignature,
+		Size:                 size,
 		EncryptedMetadataKey: so.EncryptedMetadataKey,
 		EncryptedMetadata:    so.EncryptedMetadata,
 		MetadataSignature:    so.MetadataSignature,
