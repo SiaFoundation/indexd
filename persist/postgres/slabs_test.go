@@ -239,6 +239,15 @@ func TestMarkSlabRepaired(t *testing.T) {
 		}
 	}
 
+	// assert the backoff doesn't overflow and the counter saturates
+	for _, n := range []int{21, 22, 62, 63, math.MaxInt16 - 1, math.MaxInt16} {
+		if _, err := store.pool.Exec(t.Context(), "UPDATE slabs SET consecutive_failed_repairs = $1", n); err != nil {
+			t.Fatal(err)
+		}
+		simulateFailedRepair()
+		assertSlabState(min(n+1, math.MaxInt16), time.Now().Add(maxRepairBackoff))
+	}
+
 	// assert state after successful repair
 	oneHourAgo := time.Now().Add(-1 * time.Hour)
 	_, err = store.pool.Exec(t.Context(), "UPDATE slabs SET next_repair_attempt = $1", oneHourAgo)
