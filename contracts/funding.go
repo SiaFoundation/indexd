@@ -161,6 +161,9 @@ OUTER:
 
 		var exhausted bool
 		for !exhausted {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			accs, err := cm.accounts.AccountsForFunding(host.PublicKey, quota.Key, threshold, accounts.AccountFundBatch)
 			if err != nil {
 				return fmt.Errorf("failed to fetch accounts for funding: %w", err)
@@ -273,6 +276,9 @@ OUTER:
 
 		var exhausted bool
 		for !exhausted {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			pools, err := cm.accounts.PoolsForFunding(host.PublicKey, quota.Key, threshold, proto.MaxAccountBatchSize)
 			if err != nil {
 				return fmt.Errorf("failed to fetch pools for funding: %w", err)
