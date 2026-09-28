@@ -217,8 +217,12 @@ func (m *AccountManager) ServiceAccounts(hk types.PublicKey) []HostAccount {
 
 // fundingBackoff returns 2^n minutes capped at maxBackoff.
 func fundingBackoff(n int, maxBackoff time.Duration) time.Duration {
-	// 2^27 minutes is the largest power of two that fits in a time.Duration
-	return min(time.Minute<<min(n, 27), maxBackoff)
+	// 2^27 minutes is the largest power of two that fits in a time.Duration,
+	// n < 0 means the counter itself overflowed
+	if n < 0 || n > 27 {
+		return maxBackoff
+	}
+	return min(time.Minute<<n, maxBackoff)
 }
 
 // UpdateFundedAccounts marks in-place the first `n` accounts as having a

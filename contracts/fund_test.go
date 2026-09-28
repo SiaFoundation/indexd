@@ -555,13 +555,13 @@ type failingFunderMock struct {
 	n      int
 }
 
-func (f *failingFunderMock) FundAccounts(context.Context, hosts.Host, []types.FileContractID, []accounts.HostAccount, types.Currency, *zap.Logger) (int, int, error) {
+func (f *failingFunderMock) FundAccounts(context.Context, hosts.Host, []types.FileContractID, []accounts.HostAccount, types.Currency, *zap.Logger) (funded, drained int, _ error) {
 	f.n++
 	f.cancel()
 	return 0, 0, nil
 }
 
-func (f *failingFunderMock) FundPools(context.Context, hosts.Host, []types.FileContractID, []accounts.HostPool, types.Currency, *zap.Logger) (int, int, error) {
+func (f *failingFunderMock) FundPools(context.Context, hosts.Host, []types.FileContractID, []accounts.HostPool, types.Currency, *zap.Logger) (funded, drained int, _ error) {
 	f.n++
 	f.cancel()
 	return 0, 0, nil
