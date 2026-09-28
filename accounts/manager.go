@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 	"sync"
 	"time"
 
@@ -216,6 +215,12 @@ func (m *AccountManager) ServiceAccounts(hk types.PublicKey) []HostAccount {
 	return result
 }
 
+// fundingBackoff returns 2^n minutes capped at maxBackoff.
+func fundingBackoff(n int, maxBackoff time.Duration) time.Duration {
+	// 2^27 minutes is the largest power of two that fits in a time.Duration
+	return min(time.Minute<<min(n, 27), maxBackoff)
+}
+
 // UpdateFundedAccounts marks in-place the first `n` accounts as having a
 // successful funding and applies the exponential backoff penalty to the
 // accounts after the first `n`.
@@ -229,7 +234,7 @@ func UpdateFundedAccounts(accounts []HostAccount, n int, maxBackoff time.Duratio
 	}
 	for i := n; i < len(accounts); i++ {
 		accounts[i].ConsecutiveFailedFunds++
-		accounts[i].NextFund = time.Now().Add(min(time.Duration(math.Pow(2, float64(accounts[i].ConsecutiveFailedFunds)))*time.Minute, maxBackoff))
+		accounts[i].NextFund = time.Now().Add(fundingBackoff(accounts[i].ConsecutiveFailedFunds, maxBackoff))
 	}
 }
 
@@ -246,7 +251,7 @@ func UpdateFundedPools(pools []HostPool, n int, maxBackoff time.Duration) {
 	}
 	for i := n; i < len(pools); i++ {
 		pools[i].ConsecutiveFailedFunds++
-		pools[i].NextFund = time.Now().Add(min(time.Duration(math.Pow(2, float64(pools[i].ConsecutiveFailedFunds)))*time.Minute, maxBackoff))
+		pools[i].NextFund = time.Now().Add(fundingBackoff(pools[i].ConsecutiveFailedFunds, maxBackoff))
 	}
 }
 
