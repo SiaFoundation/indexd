@@ -174,24 +174,9 @@ func (s *Store) ListObjectsWithoutSlabs(account proto.Account, cursor slabs.Curs
 		if err != nil {
 			return err
 		}
-
-		sizes := make(map[*slabs.SealedObject]uint64, len(objectsByID))
-		if len(objectsByID) > 0 {
-			rows, err := tx.Query(ctx, `SELECT object_id, SUM(slab_length) FROM object_slabs WHERE object_id = ANY($1) GROUP BY object_id`, slices.Collect(maps.Keys(objectsByID)))
-			if err != nil {
-				return fmt.Errorf("failed to query object sizes: %w", err)
-			}
-			err = forEachRow(rows, func(row pgx.CollectableRow) error {
-				var objectID, size int64
-				if err := row.Scan(&objectID, &size); err != nil {
-					return err
-				}
-				sizes[objectsByID[objectID]] = uint64(size)
-				return nil
-			})
-			if err != nil {
-				return fmt.Errorf("failed to scan object sizes: %w", err)
-			}
+		sizes, err := loadObjectSizes(ctx, tx, objectsByID)
+		if err != nil {
+			return err
 		}
 
 		events = make([]slabs.ObjectEventWithoutSlabs, len(page))
@@ -206,7 +191,7 @@ func (s *Store) ListObjectsWithoutSlabs(account proto.Account, cursor slabs.Curs
 			}
 			// an object always has at least one slab, so one that lost its
 			// slab rows was deleted after its row was read
-			size, ok := sizes[event.Object]
+			size, ok := sizes[event.Key]
 			if !ok {
 				events[i].Deleted = true
 				continue
@@ -667,6 +652,39 @@ func loadObjectSlabs(ctx context.Context, tx *txn, objects map[int64]*slabs.Seal
 		return fmt.Errorf("failed to query slabs: %w", err)
 	}
 	return collectObjectSlabs(ctx, tx, rows, objectSlabs)
+}
+
+// loadObjectSizes returns each object's logical size (sum of slab slice
+// lengths) keyed by its object key. Objects without slab slices are omitted.
+func loadObjectSizes(ctx context.Context, tx *txn, objects map[int64]*slabs.SealedObject) (map[types.Hash256]uint64, error) {
+	if len(objects) == 0 {
+		return nil, nil
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT o.object_key, SUM(os.slab_length)::bigint
+		FROM object_slabs os
+		JOIN objects o ON o.id = os.object_id
+		WHERE os.object_id = ANY($1)
+		GROUP BY o.object_key
+	`, slices.Collect(maps.Keys(objects)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query object sizes: %w", err)
+	}
+	sizes := make(map[types.Hash256]uint64, len(objects))
+	err = forEachRow(rows, func(row pgx.CollectableRow) error {
+		var key types.Hash256
+		var size int64
+		if err := row.Scan((*sqlHash256)(&key), &size); err != nil {
+			return err
+		}
+		sizes[key] = uint64(size)
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan object sizes: %w", err)
+	}
+	return sizes, nil
 }
 
 // collectObjectSlabs scans slab slices selected by a sqlObjectSlabs query,

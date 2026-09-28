@@ -2,7 +2,8 @@
 default: minor
 ---
 
-# Report object size when listing objects without slabs
+# Report the logical size of objects in object listings without slab slices
 
-`GET /objects?includeslabs=false` now includes each object's `size` in bytes, so
-callers no longer need to fetch every slab slice to learn how large an object is.
+`GET /objects?includeslabs=false` now includes each object's logical `size` in
+bytes, so callers no longer need to page through every slab slice to learn how
+large an object is.

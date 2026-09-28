@@ -638,7 +638,7 @@ components:
         size:
           type: integer
           format: uint64
-          description: The total size of the object in bytes, the sum of its slab slices' lengths
+          description: The logical size of the object in bytes (sum of slab slice lengths)
         encryptedMetadataKey:
           type: string
           format: byte
