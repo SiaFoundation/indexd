@@ -4,6 +4,10 @@ info:
   description: >
     The Application API allows developers to pin and unpin slabs—collections of erasure-coded data shards—on the Sia network using Indexd. Once pinned, Indexd ensures the data remains healthy and available by monitoring and maintaining the underlying storage.
 
+    Responses are JSON by default. Set the Accept header to application/cbor to
+    receive the same response as CBOR instead; negotiated responses set
+    Vary: Accept.
+
   version: 0.5.0
 servers:
   - url: http://localhost:9982/api
@@ -33,6 +37,9 @@ paths:
           description: Details of the account
           content:
             application/json:
+              schema:
+                $ref: "#/components/schemas/AppAccountResponse"
+            application/cbor:
               schema:
                 $ref: "#/components/schemas/AppAccountResponse"
         "404":
@@ -81,12 +88,14 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  hosts:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/HostInfo"
+                type: array
+                items:
+                  $ref: "#/components/schemas/HostInfo"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/HostInfo"
       x-codeSamples:
         - lang: Go
           label: Go
@@ -156,6 +165,17 @@ paths:
                     description: Object events without their slabs (includeslabs=false)
                     items:
                       $ref: "#/components/schemas/ObjectEventWithoutSlabs"
+            application/cbor:
+              schema:
+                anyOf:
+                  - type: array
+                    description: Object events with slab slices (includeslabs=true)
+                    items:
+                      $ref: "#/components/schemas/ObjectEvent"
+                  - type: array
+                    description: Object events without their slabs (includeslabs=false)
+                    items:
+                      $ref: "#/components/schemas/ObjectEventWithoutSlabs"
     post:
       tags:
         - objects
@@ -189,6 +209,9 @@ paths:
           description: Details of the object
           content:
             application/json:
+              schema:
+                $ref: "#/components/schemas/SealedObject"
+            application/cbor:
               schema:
                 $ref: "#/components/schemas/SealedObject"
         "404":
@@ -255,6 +278,11 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SlabSlice"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabSlice"
         "404":
           description: Object not found
         "451":
@@ -276,6 +304,9 @@ paths:
           description: The shared object
           content:
             application/json:
+              schema:
+                $ref: "#/components/schemas/SharedObject"
+            application/cbor:
               schema:
                 $ref: "#/components/schemas/SharedObject"
         "404":
@@ -313,6 +344,11 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SharingKey"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SharingKey"
     post:
       tags:
         - sharing
@@ -329,6 +365,9 @@ paths:
           description: The created sharing key
           content:
             application/json:
+              schema:
+                $ref: "#/components/schemas/SharingKey"
+            application/cbor:
               schema:
                 $ref: "#/components/schemas/SharingKey"
         "400":
@@ -352,6 +391,9 @@ paths:
           description: The sharing key
           content:
             application/json:
+              schema:
+                $ref: "#/components/schemas/SharingKey"
+            application/cbor:
               schema:
                 $ref: "#/components/schemas/SharingKey"
         "404":
@@ -405,6 +447,11 @@ paths:
           description: A list of objects with their re-sealed keys, most recently attached first
           content:
             application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SealedObject"
+            application/cbor:
               schema:
                 type: array
                 items:
@@ -474,6 +521,9 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/KeyStats"
+            application/cbor:
+              schema:
+                $ref: "#/components/schemas/KeyStats"
         "401":
           description: The request is not signed by a valid, unexpired sharing key
   /shared/objects:
@@ -508,6 +558,11 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SealedObject"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SealedObject"
         "401":
           description: The request is not signed by a valid, unexpired sharing key
   /shared/objects/{id}:
@@ -527,6 +582,9 @@ paths:
           description: The object with its re-sealed keys and slabs
           content:
             application/json:
+              schema:
+                $ref: "#/components/schemas/SealedObject"
+            application/cbor:
               schema:
                 $ref: "#/components/schemas/SealedObject"
         "401":
@@ -582,6 +640,11 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SharedHost"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SharedHost"
         "400":
           description: Invalid protocol or location parameter
         "401":
@@ -614,12 +677,14 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                properties:
-                  slabs:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/SlabID"
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabID"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabID"
       x-codeSamples:
         - lang: Go
           label: Go
@@ -695,6 +760,12 @@ paths:
                 description: The IDs of the pinned slabs, in request order
                 items:
                   $ref: "#/components/schemas/SlabID"
+            application/cbor:
+              schema:
+                type: array
+                description: The IDs of the pinned slabs, in request order
+                items:
+                  $ref: "#/components/schemas/SlabID"
         "400":
           description: >-
             Invalid slab parameters. The stable "slab upload is too old" text in the response body identifies a sector that must be re-uploaded and names its index. "slab upload time is in the future" means the client's clock is more than 5 minutes ahead.
@@ -744,6 +815,9 @@ paths:
           description: Details of the pinned slab
           content:
             application/json:
+              schema:
+                $ref: "#/components/schemas/PinnedSlab"
+            application/cbor:
               schema:
                 $ref: "#/components/schemas/PinnedSlab"
         "404":
@@ -884,6 +958,9 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/RegisterAppResponse"
+            application/cbor:
+              schema:
+                $ref: "#/components/schemas/RegisterAppResponse"
         "400":
           description: Invalid request (missing required fields or field exceeds maximum length)
         "401":
@@ -1021,6 +1098,9 @@ paths:
           description: Connection request status
           content:
             application/json:
+              schema:
+                $ref: "#/components/schemas/AuthConnectStatusResponse"
+            application/cbor:
               schema:
                 $ref: "#/components/schemas/AuthConnectStatusResponse"
         "401":
