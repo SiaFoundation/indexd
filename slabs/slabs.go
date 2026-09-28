@@ -34,6 +34,10 @@ const (
 	// MaxSlabUploadSkew is the furthest a slab's upload time may be ahead of
 	// the indexer's clock.
 	MaxSlabUploadSkew = 5 * time.Minute
+
+	// RecoveryWindow is how long a slab's shards may fail to recover before
+	// the slab is marked unrecoverable.
+	RecoveryWindow = 30 * 24 * time.Hour
 )
 
 var (

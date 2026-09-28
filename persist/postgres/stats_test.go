@@ -155,6 +155,129 @@ func TestSlabRepairStats(t *testing.T) {
 	assertStats(1, 0)
 }
 
+// TestSlabRecoveryStats asserts the repair stats track the recovery window.
+func TestSlabRecoveryStats(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	// add account, host, contract and slab
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	slab := newTestSlab(hk)
+	id := store.pinTestSlabs(t, account, slab)[0]
+
+	assertStats := func(unrecoverable, stuck int64) {
+		t.Helper()
+		stats, err := store.SectorStats()
+		if err != nil {
+			t.Fatal(err)
+		} else if stats.UnrecoverableSlabs != unrecoverable {
+			t.Fatalf("expected %d unrecoverable slabs, got %d", unrecoverable, stats.UnrecoverableSlabs)
+		} else if stats.StuckSlabs != stuck {
+			t.Fatalf("expected %d stuck slabs, got %d", stuck, stats.StuckSlabs)
+		}
+	}
+	recordFailure := func() {
+		t.Helper()
+		if _, err := store.RecordFailedSlabRecovery(id, "shard recovery failed"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// loseAllSectors marks the slab's sectors lost so failed recoveries count
+	loseAllSectors := func() {
+		t.Helper()
+		roots := make([]types.Hash256, 0, len(slab.Sectors))
+		for _, sector := range slab.Sectors {
+			roots = append(roots, sector.Root)
+		}
+		if err := store.MarkSectorsLost(hk, roots); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nextRepairAttempt := func() (next time.Time) {
+		t.Helper()
+		if err := store.pool.QueryRow(t.Context(), `SELECT next_repair_attempt FROM slabs WHERE digest = $1`, sqlHash256(id)).Scan(&next); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	// exhaustRecoveryWindow records failed recoveries spanning the whole
+	// recovery window
+	exhaustRecoveryWindow := func() {
+		t.Helper()
+		recordFailure()
+		store.backdateRecoveryWindow(t, id, slabs.RecoveryWindow)
+		recordFailure()
+	}
+
+	// the slab is stuck after two failed repairs
+	for range 2 {
+		if err := store.MarkSlabRepaired(id, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	assertStats(0, 1)
+
+	// failures within the recovery window leave the slab stuck, even after
+	// flushing
+	loseAllSectors()
+	for range 2 {
+		recordFailure()
+		assertStats(0, 1)
+	}
+	if _, err := store.FlushStatsDelta(1000); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(0, 1)
+
+	// re-pinning a slab that is still in the repair rotation leaves its repair
+	// state alone, so a claimed slab isn't handed out again
+	before := nextRepairAttempt()
+	store.pinTestSlabs(t, account, slab)
+	assertStats(0, 1)
+	if after := nextRepairAttempt(); !after.Equal(before) {
+		t.Fatalf("expected next repair attempt %v to be kept, got %v", before, after)
+	}
+	loseAllSectors()
+
+	// the first failure after the recovery window has passed marks the slab
+	// unrecoverable
+	exhaustRecoveryWindow()
+	assertStats(1, 0)
+	recordFailure()
+	assertStats(1, 0)
+
+	// a later repair, even a failed one, puts it back into the repair rotation
+	if err := store.MarkSlabRepaired(id, false); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(0, 1)
+
+	// a slab that can never be fully repaired counts immediately
+	recordFailure()
+	if err := store.MarkSlabUnrecoverable(id, "shard root mismatch"); err != nil {
+		t.Fatal(err)
+	}
+	assertStats(1, 0)
+	recordFailure()
+	assertStats(1, 0)
+
+	// re-pinning revives the slab
+	store.pinTestSlabs(t, account, slab)
+	assertStats(0, 0)
+
+	// deleting an unrecoverable slab removes it from the count
+	loseAllSectors()
+	exhaustRecoveryWindow()
+	assertStats(1, 0)
+	if err := store.UnpinSlab(account, id); err != nil {
+		t.Fatal(err)
+	}
+	store.pruneAllDeletedSlabs(t)
+	assertStats(0, 0)
+}
+
 func TestFlushStatsDelta(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

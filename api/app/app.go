@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/hex"
 	"errors"
@@ -10,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -209,10 +209,13 @@ var (
 )
 
 const (
-	acceptHeader = "Accept"
+	acceptHeader        = "Accept"
+	contentTypeHeader   = "Content-Type"
+	contentLengthHeader = "Content-Length"
+	varyHeader          = "Vary"
 
-	applicationJSON        = "application/json"
-	applicationOctetStream = "application/octet-stream"
+	applicationJSON = "application/json"
+	applicationCBOR = "application/cbor"
 
 	// field size limits for RegisterAppRequest
 	maxNameLen        = 128
@@ -251,7 +254,7 @@ func WrapRateLimit(rl RateLimiter, next jape.Handler) jape.Handler {
 
 func (a *app) handleGETHosts(jc jape.Context, _ types.PublicKey) {
 	if h, ok := a.usableHosts(jc); ok {
-		jc.Encode(h)
+		encodeResponse(jc, h)
 	}
 }
 
@@ -317,7 +320,7 @@ func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	jc.Encode(obj)
+	encodeResponse(jc, obj)
 }
 
 func (a *app) handleGETObjectSlabs(jc jape.Context, pk types.PublicKey) {
@@ -343,7 +346,7 @@ func (a *app) handleGETObjectSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	jc.Encode(page)
+	encodeResponse(jc, page)
 }
 
 func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
@@ -364,7 +367,7 @@ func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
 		return
 	}
 
-	jc.Encode(obj)
+	encodeResponse(jc, obj)
 }
 
 func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
@@ -398,7 +401,7 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 			jc.Error(err, http.StatusInternalServerError)
 			return
 		}
-		jc.Encode(withoutSlabs)
+		encodeResponse(jc, withoutSlabs)
 		return
 	}
 
@@ -407,7 +410,7 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(objs)
+	encodeResponse(jc, objs)
 }
 
 func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
@@ -464,7 +467,7 @@ func (a *app) handlePOSTSharing(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(key)
+	encodeResponse(jc, key)
 }
 
 func (a *app) handleGETSharing(jc jape.Context, pk types.PublicKey) {
@@ -477,7 +480,7 @@ func (a *app) handleGETSharing(jc jape.Context, pk types.PublicKey) {
 	if jc.Check("failed to list sharing keys", err) != nil {
 		return
 	}
-	jc.Encode(keys)
+	encodeResponse(jc, keys)
 }
 
 func (a *app) handleGETSharingKey(jc jape.Context, pk types.PublicKey) {
@@ -494,7 +497,7 @@ func (a *app) handleGETSharingKey(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(sk)
+	encodeResponse(jc, sk)
 }
 
 func (a *app) handleDELETESharing(jc jape.Context, pk types.PublicKey) {
@@ -570,7 +573,7 @@ func (a *app) handleGETSharingObjects(jc jape.Context, pk types.PublicKey) {
 			jc.Error(err, http.StatusInternalServerError)
 			return
 		}
-		jc.Encode(withoutSlabs)
+		encodeResponse(jc, withoutSlabs)
 		return
 	}
 
@@ -582,7 +585,7 @@ func (a *app) handleGETSharingObjects(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(objects)
+	encodeResponse(jc, objects)
 }
 
 func (a *app) handleDELETESharingObject(jc jape.Context, pk types.PublicKey) {
@@ -622,7 +625,7 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	jc.Encode(slabIDs)
+	encodeResponse(jc, slabIDs)
 }
 
 func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
@@ -640,15 +643,56 @@ func (a *app) handlePOSTSlabsPrune(jc jape.Context, pk types.PublicKey) {
 	jc.Encode(nil)
 }
 
-func encodeBinary(jc jape.Context, resp types.EncoderTo) {
-	var buf bytes.Buffer
-	e := types.NewEncoder(&buf)
-	resp.EncodeTo(e)
-	e.Flush()
+// acceptsCBOR reports whether the Accept header names application/cbor with a
+// non-zero quality factor. A wildcard range does not match, so JSON stays the
+// default.
+func acceptsCBOR(header string) bool {
+	for entry := range strings.SplitSeq(header, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		mediaType, params, _ := strings.Cut(entry, ";")
+		if !strings.EqualFold(strings.TrimSpace(mediaType), applicationCBOR) {
+			continue
+		}
+		q := 1.0
+		for p := range strings.SplitSeq(params, ";") {
+			k, v, ok := strings.Cut(strings.TrimSpace(p), "=")
+			k = strings.TrimSpace(k)
+			v = strings.TrimSpace(v)
+			if ok && strings.EqualFold(k, "q") {
+				f, err := strconv.ParseFloat(v, 64)
+				if err != nil || f < 0 || f > 1 {
+					q = 0
+				} else {
+					q = f
+				}
+			}
+		}
+		if q > 0 {
+			return true
+		}
+	}
+	return false
+}
 
-	jc.ResponseWriter.Header().Set("Content-Type", applicationOctetStream)
-	jc.ResponseWriter.Header().Set("Content-Length", strconv.Itoa(buf.Len()))
-	buf.WriteTo(jc.ResponseWriter)
+// encodeResponse writes resp as CBOR if the client accepts it, JSON otherwise.
+func encodeResponse(jc jape.Context, resp any) {
+	// the body depends on Accept, so caches must key on it
+	jc.ResponseWriter.Header().Add(varyHeader, acceptHeader)
+	if !acceptsCBOR(jc.Request.Header.Get(acceptHeader)) {
+		jc.Encode(resp)
+		return
+	}
+
+	buf, err := encodeCBOR(resp)
+	if jc.Check("failed to encode response", err) != nil {
+		return
+	}
+	jc.ResponseWriter.Header().Set(contentTypeHeader, applicationCBOR)
+	jc.ResponseWriter.Header().Set(contentLengthHeader, strconv.Itoa(len(buf)))
+	jc.ResponseWriter.Write(buf)
 }
 
 func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
@@ -665,11 +709,7 @@ func (a *app) handleGETSlab(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	if accept := jc.Request.Header.Get(acceptHeader); accept == applicationOctetStream {
-		encodeBinary(jc, slab)
-		return
-	}
-	jc.Encode(slab)
+	encodeResponse(jc, slab)
 }
 
 func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
@@ -683,7 +723,7 @@ func (a *app) handleGETSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	jc.Encode(slabIDs)
+	encodeResponse(jc, slabIDs)
 }
 
 func (a *app) handleDELETESlab(jc jape.Context, pk types.PublicKey) {
@@ -799,7 +839,7 @@ func (a *app) handleAuthRequest(jc jape.Context) {
 		delete(a.authRequests, requestID)
 		a.mu.Unlock()
 	})
-	jc.Encode(RegisterAppResponse{
+	encodeResponse(jc, RegisterAppResponse{
 		ResponseURL: fmt.Sprintf("%s/auth/connect/%s", a.advertiseURL, requestID),
 		StatusURL:   fmt.Sprintf("%s/auth/connect/%s/status", a.advertiseURL, requestID),
 		RegisterURL: fmt.Sprintf("%s/auth/connect/%s/register", a.advertiseURL, requestID),
@@ -910,7 +950,7 @@ func (a *app) handleGETAuthConnectStatus(jc jape.Context) {
 		jc.Error(fmt.Errorf("invalid request signature"), http.StatusUnauthorized)
 		return
 	}
-	jc.Encode(AuthConnectStatusResponse{
+	encodeResponse(jc, AuthConnectStatusResponse{
 		Approved:     authReq.Approved,
 		Reconnecting: authReq.Reconnecting,
 		UserSecret:   authReq.UserSecret,
@@ -1003,7 +1043,7 @@ func (a *app) handleGETAccount(jc jape.Context, pk types.PublicKey) {
 		jc.Error(err, http.StatusInternalServerError)
 		return
 	}
-	jc.Encode(AccountResponse{
+	encodeResponse(jc, AccountResponse{
 		AccountKey:       account.AccountKey,
 		MaxPinnedData:    min(account.MaxPinnedData, account.QuotaMaxPinnedData),
 		RemainingStorage: remainingStorage(account),

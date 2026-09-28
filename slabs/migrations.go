@@ -19,6 +19,10 @@ import (
 // migration loop and remote migration workers.
 const migrationSlabsPerWorker = 10
 
+// recoveryFailedReason is recorded for slabs whose shards failed to recover for
+// RecoveryWindow.
+var recoveryFailedReason = fmt.Sprintf("failed to recover the slab's shards for %d days", RecoveryWindow/(24*time.Hour))
+
 // MigrationState holds the hosts, contracts, and chain state needed to
 // determine which sectors of a slab require migration and which hosts can
 // receive them. It is shipped to remote nodes alongside a batch of unhealthy
@@ -74,7 +78,8 @@ type (
 		Migrated []Shard `json:"migrated"`
 		Lost     []Shard `json:"lost"`
 		// Recovered reports whether the slab's shards were successfully
-		// recovered. If false, the repair state is left untouched.
+		// recovered. If false, the repair state is left untouched, but the
+		// failure counts towards the slab's recovery window.
 		Recovered bool `json:"recovered"`
 		// Success reports whether every required sector was migrated. Only
 		// meaningful when Recovered is true.
@@ -180,9 +185,8 @@ func NewMigrator(hosts HostClient, migrationAccount types.PrivateKey, log *zap.L
 // executeMigration recovers the required shards of a slab, re-encrypts them and
 // uploads them to the candidate hosts. The result holds the migrated and lost
 // (root, host) pairs for the caller to persist. A non-nil error indicates
-// recovery failed, in which case the slab's repair state should be left
-// untouched; Lost is still populated so the caller can persist any sectors
-// discovered lost during the failed recovery.
+// recovery failed; Lost is still populated so the caller can persist any
+// sectors discovered lost during the failed recovery.
 func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []int, candidates []types.PublicKey, log *zap.Logger) (res MigrationResult, downloadElapsed, uploadElapsed time.Duration, err error) {
 	res.SlabID = slab.ID
 	// indicate what shards are required
@@ -236,9 +240,8 @@ func (m *Migrator) executeMigration(ctx context.Context, slab Slab, indices []in
 
 // applyMigrationResult persists the outcome of migrating a single slab: it
 // records lost sectors, the new locations of migrated sectors and updates the
-// slab's repair state, or takes it out of the repair rotation for good if the
-// migration proved it can never be fully repaired. It is shared by the local
-// migration loop and the remote result-reporting endpoint. All failures are
+// slab's repair and recovery state. It is shared by the local migration loop
+// and the remote result-reporting endpoint. All failures are
 // logged; the returned error reports store failures only, so a stale result
 // (e.g. a sector that no longer needs migrating) is not an error.
 func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger) error {
@@ -257,35 +260,32 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 		}
 	}
 
-	// if recovery failed, leave the repair state untouched so the slab is
-	// retried without incurring a repair-failure backoff.
-	if !res.Recovered {
-		return errors.Join(errs...)
-	}
-
 	// a migrated sector only counts as repaired once its new location is
 	// persisted; a store failure or no-op here must not mark the slab
 	// successfully repaired or the uploaded sector is orphaned and the slab's
 	// failure counter is reset even though it still needs repair.
 	persisted := 0
-	for _, s := range res.Migrated {
-		if migrated, err := m.store.MigrateSector(s.Root, s.HostKey); err != nil {
-			log.Error("failed to record migrated sector", zap.Stringer("root", s.Root), zap.Error(err))
-			errs = append(errs, fmt.Errorf("failed to record migrated sector: %w", err))
-			continue
-		} else if !migrated {
-			// the sector or the destination host no longer exists
-			log.Warn("migrated sector no longer applicable", zap.Stringer("root", s.Root), zap.Stringer("host", s.HostKey))
-			continue
+	if res.Recovered {
+		for _, s := range res.Migrated {
+			if migrated, err := m.store.MigrateSector(s.Root, s.HostKey); err != nil {
+				log.Error("failed to record migrated sector", zap.Stringer("root", s.Root), zap.Error(err))
+				errs = append(errs, fmt.Errorf("failed to record migrated sector: %w", err))
+				continue
+			} else if !migrated {
+				// the sector or the destination host no longer exists
+				log.Warn("migrated sector no longer applicable", zap.Stringer("root", s.Root), zap.Stringer("host", s.HostKey))
+				continue
+			}
+			persisted++
 		}
-		persisted++
-	}
-	if persisted > 0 {
-		// record the slab got migrated so object events get updated
-		if err := m.store.RecordSlabMigrated(res.SlabID); err != nil {
-			log.Debug("failed to record slab migration", zap.Error(err))
+		if persisted > 0 {
+			// record the slab got migrated so object events get updated
+			if err := m.store.RecordSlabMigrated(res.SlabID); err != nil {
+				log.Debug("failed to record slab migration", zap.Error(err))
+			}
 		}
 	}
+
 	// a slab that can never be fully repaired leaves the repair rotation for
 	// good
 	if res.UnrecoverableReason != "" {
@@ -297,8 +297,23 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 			errs = append(errs, fmt.Errorf("failed to mark slab unrecoverable: %w", err))
 		} else {
 			log.Warn("marked slab unrecoverable", zap.String("reason", res.UnrecoverableReason))
-			return errors.Join(errs...)
 		}
+		return errors.Join(errs...)
+	}
+
+	// a failed recovery counts towards the recovery window instead of
+	// incurring a repair-failure backoff
+	if !res.Recovered {
+		if unrecoverable, err := m.store.RecordFailedSlabRecovery(res.SlabID, recoveryFailedReason); errors.Is(err, ErrSlabNotFound) {
+			// slab was deleted in the meantime
+			log.Debug("unrecovered slab no longer exists", zap.Error(err))
+		} else if err != nil {
+			log.Error("failed to record failed slab recovery", zap.Error(err))
+			errs = append(errs, fmt.Errorf("failed to record failed slab recovery: %w", err))
+		} else if unrecoverable {
+			log.Warn("marked slab unrecoverable", zap.String("reason", recoveryFailedReason))
+		}
+		return errors.Join(errs...)
 	}
 
 	success := res.Success && persisted == len(res.Migrated)
@@ -387,7 +402,7 @@ func (m *Migrator) MigrateSlab(ctx context.Context, slab Slab, state MigrationSt
 	res = MigrationResult{SlabID: slab.ID}
 	// a caller whose context is already dead gets no attempt: queued work
 	// drained during shutdown must not produce doomed results that would be
-	// recorded as failed repair attempts
+	// recorded as failed repairs or recoveries
 	if ctx.Err() != nil {
 		return res, false
 	}

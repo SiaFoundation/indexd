@@ -21,7 +21,7 @@ type SharedHost struct {
 }
 
 func (a *app) handleGETShared(jc jape.Context, key sharing.Key) {
-	jc.Encode(key.Stats())
+	encodeResponse(jc, key.Stats())
 }
 
 func (a *app) handleGETSharedObjects(jc jape.Context, key sharing.Key) {
@@ -43,7 +43,7 @@ func (a *app) handleGETSharedObjects(jc jape.Context, key sharing.Key) {
 		} else if jc.Check("failed to list shared objects", err) != nil {
 			return
 		}
-		jc.Encode(withoutSlabs)
+		encodeResponse(jc, withoutSlabs)
 		return
 	}
 
@@ -54,7 +54,7 @@ func (a *app) handleGETSharedObjects(jc jape.Context, key sharing.Key) {
 	} else if jc.Check("failed to list shared objects", err) != nil {
 		return
 	}
-	jc.Encode(objects)
+	encodeResponse(jc, objects)
 }
 
 func (a *app) handleGETSharedObject(jc jape.Context, key sharing.Key) {
@@ -76,7 +76,7 @@ func (a *app) handleGETSharedObject(jc jape.Context, key sharing.Key) {
 	} else if jc.Check("failed to get shared object", err) != nil {
 		return
 	}
-	jc.Encode(obj)
+	encodeResponse(jc, obj)
 }
 
 func (a *app) handleGETSharedObjectSlabs(jc jape.Context, key sharing.Key) {
@@ -103,7 +103,7 @@ func (a *app) handleGETSharedObjectSlabs(jc jape.Context, key sharing.Key) {
 	} else if jc.Check("failed to get shared object slabs", err) != nil {
 		return
 	}
-	jc.Encode(page)
+	encodeResponse(jc, page)
 }
 
 func (a *app) handleGETSharedHosts(jc jape.Context, key sharing.Key) {
@@ -129,5 +129,5 @@ func (a *app) handleGETSharedHosts(jc jape.Context, key sharing.Key) {
 	for i, h := range usable {
 		sharedHosts[i] = SharedHost{HostInfo: h, Token: tokens[i]}
 	}
-	jc.Encode(sharedHosts)
+	encodeResponse(jc, sharedHosts)
 }
