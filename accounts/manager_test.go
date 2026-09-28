@@ -205,7 +205,7 @@ func TestUpdateFundedPools(t *testing.T) {
 // pools immediately eligible for funding again.
 func TestFundingBackoffOverflow(t *testing.T) {
 	const maxBackoff = 2 * time.Hour
-	for _, n := range []int{26, 27, 28, 29, 52, 53, 63, 64, 1000, math.MaxInt - 1} {
+	for _, n := range []int{26, 27, 28, 29, 52, 53, 63, 64, 1000, math.MaxInt - 1, math.MaxInt} {
 		accs := []accounts.HostAccount{{ConsecutiveFailedFunds: n}}
 		accounts.UpdateFundedAccounts(accs, 0, maxBackoff)
 		if want := time.Now().Add(maxBackoff); !approxEqual(accs[0].NextFund, want) {
