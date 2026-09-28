@@ -2,11 +2,13 @@ package contracts_test
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	rhp "go.sia.tech/coreutils/rhp/v4"
 	"go.sia.tech/indexd/accounts"
@@ -542,5 +544,85 @@ func TestPerformPoolFundingFullStorage(t *testing.T) {
 		t.Fatal("expected full storage pool call")
 	} else if !fullStorageCall.target.Equals(readTarget) {
 		t.Fatalf("full storage target mismatch: got %v, want %v", fullStorageCall.target, readTarget)
+	}
+}
+
+// failingFunderMock fails every funding attempt and cancels the context on the
+// first call, simulating an unreachable host outliving the funding timeout.
+type failingFunderMock struct {
+	accountFunderMock
+	cancel context.CancelFunc
+	n      int
+}
+
+func (f *failingFunderMock) FundAccounts(context.Context, hosts.Host, []types.FileContractID, []accounts.HostAccount, types.Currency, *zap.Logger) (int, int, error) {
+	f.n++
+	f.cancel()
+	return 0, 0, nil
+}
+
+func (f *failingFunderMock) FundPools(context.Context, hosts.Host, []types.FileContractID, []accounts.HostPool, types.Currency, *zap.Logger) (int, int, error) {
+	f.n++
+	f.cancel()
+	return 0, 0, nil
+}
+
+// TestFundingStopsOnCancel is a regression test for the funding loops spinning
+// forever on an unreachable host when there is always a full batch to fund.
+func TestFundingStopsOnCancel(t *testing.T) {
+	amMock := newAccountsManagerMock()
+	amMock.accountsToFund = make([]accounts.HostAccount, accounts.AccountFundBatch)
+	for i := range amMock.accountsToFund {
+		amMock.accountsToFund[i].AccountKey = proto.Account(types.GeneratePrivateKey().PublicKey())
+	}
+	amMock.poolsToFund = make([]accounts.HostPool, proto.MaxAccountBatchSize)
+	for i := range amMock.poolsToFund {
+		amMock.poolsToFund[i].PoolKey = types.GeneratePrivateKey()
+	}
+	funder := &failingFunderMock{}
+	store := newTestStore(t)
+	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, funder, nil, store, nil, nil, nil, contracts.NewContractLocker(), newHostManagerMock(store), nil, nil)
+
+	quotas := []accounts.Quota{{Key: "default", FundTargetBytes: testFundTargetBytes}}
+	contractIDs := []types.FileContractID{{1}}
+	legacySettings := goodSettings
+	legacySettings.ProtocolVersion = rhp.ProtocolVersion502
+	poolSettings := goodSettings
+	poolSettings.ProtocolVersion = rhp.ProtocolVersion510
+
+	for _, tc := range []struct {
+		name string
+		fund func(context.Context) error
+	}{
+		{"accounts", func(ctx context.Context) error {
+			h := hosts.Host{PublicKey: types.PublicKey{1}, Usability: hosts.GoodUsability, Settings: legacySettings}
+			return cm.FundAccounts(ctx, h, contractIDs, quotas, zap.NewNop())
+		}},
+		{"pools", func(ctx context.Context) error {
+			h := hosts.Host{PublicKey: types.PublicKey{1}, Usability: hosts.GoodUsability, Settings: poolSettings}
+			return cm.FundPools(ctx, h, contractIDs, quotas, zap.NewNop())
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// an already cancelled context should not fund anything
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			funder.n, funder.cancel = 0, cancel
+			if err := tc.fund(ctx); !errors.Is(err, context.Canceled) {
+				t.Fatalf("expected context.Canceled, got %v", err)
+			} else if funder.n != 0 {
+				t.Fatalf("expected no funding attempts, got %d", funder.n)
+			}
+
+			// a context cancelled mid-funding should stop after the current batch
+			ctx, cancel = context.WithCancel(context.Background())
+			defer cancel()
+			funder.n, funder.cancel = 0, cancel
+			if err := tc.fund(ctx); !errors.Is(err, context.Canceled) {
+				t.Fatalf("expected context.Canceled, got %v", err)
+			} else if funder.n != 1 {
+				t.Fatalf("expected 1 funding attempt, got %d", funder.n)
+			}
+		})
 	}
 }
