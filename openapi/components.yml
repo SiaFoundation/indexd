@@ -193,7 +193,7 @@ components:
 
     SealedObject:
       allOf:
-        - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
+        - $ref: "#/components/schemas/SealedObjectBase"
         - type: object
           properties:
             slabs:
@@ -622,11 +622,9 @@ components:
             - $ref: "#/components/schemas/SealedObject"
             - description: The object, if it exists
 
-    SealedObjectWithoutSlabs:
+    # The fields shared by SealedObject and SealedObjectWithoutSlabs.
+    SealedObjectBase:
       type: object
-      description: >
-        A sealed object without its slabs, which are paginated separately with
-        `GET /objects/{key}/slabs`
       properties:
         encryptedDataKey:
           type: string
@@ -635,10 +633,6 @@ components:
         dataSignature:
           $ref: "#/components/schemas/Signature"
           description: The signature of the object's data
-        size:
-          type: integer
-          format: uint64
-          description: The logical size of the object in bytes (sum of slab slice lengths)
         encryptedMetadataKey:
           type: string
           format: byte
@@ -657,6 +651,19 @@ components:
           type: string
           format: date-time
           description: The time the object was last updated
+
+    SealedObjectWithoutSlabs:
+      description: >
+        A sealed object without its slabs, which are paginated separately with
+        `GET /objects/{key}/slabs`
+      allOf:
+        - $ref: "#/components/schemas/SealedObjectBase"
+        - type: object
+          properties:
+            size:
+              type: integer
+              format: uint64
+              description: The logical size of the object in bytes (sum of slab slice lengths)
 
     ObjectEventWithoutSlabs:
       type: object
