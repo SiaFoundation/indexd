@@ -360,7 +360,7 @@ func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey types.Has
 // sharing key or was deleted while the page was being read.
 func (s *Store) SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey types.Hash256, cursor int64, limit int) (objectSlabs []slabs.SlabSlice, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		objectID, _, err := sharingKeyObject(ctx, tx, sharingKey, objectKey)
+		objectID, err := sharingKeyObjectID(ctx, tx, sharingKey, objectKey)
 		if err != nil {
 			return err
 		}
@@ -412,6 +412,30 @@ func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, 
 		return 0, slabs.SealedObject{}, fmt.Errorf("failed to get shared object: %w", err)
 	}
 	return objectID, obj, nil
+}
+
+// sharingKeyObjectID returns the database ID of an object attached to the
+// sharing key.
+func sharingKeyObjectID(ctx context.Context, tx *txn, sharingKey types.PublicKey, objectKey types.Hash256) (objectID int64, err error) {
+	sharingKeyID, ownerID, err := sharingKeyID(ctx, tx, sharingKey)
+	if err != nil {
+		return 0, err
+	} else if err := assertObjectNotBlocked(ctx, tx, objectKey); err != nil {
+		return 0, err
+	}
+
+	err = tx.QueryRow(ctx, `
+		SELECT so.object_id
+		FROM objects o
+		INNER JOIN shared_objects so ON so.object_id = o.id
+		WHERE so.sharing_key_id = $1 AND o.account_id = $2 AND o.object_key = $3
+	`, sharingKeyID, ownerID, sqlHash256(objectKey)).Scan(&objectID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, sharing.ErrSharedObjectNotFound
+	} else if err != nil {
+		return 0, fmt.Errorf("failed to get shared object: %w", err)
+	}
+	return objectID, nil
 }
 
 // SharingAccountKey returns the sharing account key derived from the owner of
