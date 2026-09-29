@@ -3,6 +3,7 @@ package hosts_test
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -285,4 +286,146 @@ func TestIsBadQUICAddress(t *testing.T) {
 			}
 		})
 	}
+}
+
+type toggleScanner struct {
+	fail     atomic.Bool
+	scans    atomic.Int64
+	settings proto4.HostSettings
+}
+
+func (ts *toggleScanner) ScanSiamux(ctx context.Context, hk types.PublicKey, addr string) (proto4.HostSettings, error) {
+	return ts.scan()
+}
+
+func (ts *toggleScanner) ScanQuic(ctx context.Context, hk types.PublicKey, addr string) (proto4.HostSettings, error) {
+	return ts.scan()
+}
+
+func (ts *toggleScanner) scan() (proto4.HostSettings, error) {
+	ts.scans.Add(1)
+	if ts.fail.Load() {
+		return proto4.HostSettings{}, errors.New("host unreachable")
+	}
+	return ts.settings, nil
+}
+
+func TestWithScannedHostFailedScanBackoff(t *testing.T) {
+	db := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
+	defer db.Close()
+
+	settings := proto4.HostSettings{
+		Release:             "test",
+		ProtocolVersion:     rhp.ProtocolVersion510,
+		AcceptingContracts:  true,
+		RemainingStorage:    100 * proto4.SectorSize,
+		TotalStorage:        100 * proto4.SectorSize,
+		MaxContractDuration: 90 * 144,
+		MaxCollateral:       types.Siacoins(1000),
+		Prices: proto4.HostPrices{
+			ContractPrice: types.Siacoins(1),
+			Collateral:    types.Siacoins(100).Div64(1e12).Div64(4320),
+			StoragePrice:  types.NewCurrency64(1),
+			ValidUntil:    time.Now().Add(24 * time.Hour),
+		},
+	}
+
+	hostKey := types.PublicKey{1}
+	db.AddTestHost(t, hosts.Host{
+		PublicKey: hostKey,
+		Addresses: []chain.NetAddress{
+			{Protocol: siamux.Protocol, Address: "1.1.1.1:9983"},
+			{Protocol: quic.Protocol, Address: "1.1.1.1:9984"},
+		},
+		Settings: settings,
+	})
+
+	// a long-lived host stays usable across a few failed scans
+	if _, err := db.Exec(t.Context(), `UPDATE hosts SET recent_uptime = 0.99 WHERE public_key = $1`, hostKey[:]); err != nil {
+		t.Fatal(err)
+	}
+
+	scanner := &toggleScanner{settings: settings}
+	mgr, err := hosts.NewManager(&mock.Locator{}, nil, db, alerts.NewManager(), hosts.WithScanner(scanner), hosts.WithOnlineChecker(mock.OnlineChecker{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	// fn always reports expired prices to force a scan
+	withScannedHost := func() error {
+		return mgr.WithScannedHost(t.Context(), hostKey, func(hosts.Host) error {
+			return proto4.ErrPricesExpired
+		})
+	}
+
+	assertScans := func(t *testing.T, want int64, consecutive int) {
+		t.Helper()
+		if got := scanner.scans.Swap(0); got != want {
+			t.Fatalf("expected %d dials, got %d", want, got)
+		} else if host, err := db.Host(hostKey); err != nil {
+			t.Fatal(err)
+		} else if host.ConsecutiveFailedScans != consecutive {
+			t.Fatalf("expected %d consecutive failed scans, got %d", consecutive, host.ConsecutiveFailedScans)
+		}
+	}
+
+	backdateFailedScan := func(t *testing.T) {
+		t.Helper()
+		if _, err := db.Exec(t.Context(), `UPDATE hosts SET last_failed_scan = NOW() - INTERVAL '2 hours' WHERE public_key = $1`, hostKey[:]); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// failures are scanned until the cooldown threshold is exceeded
+	scanner.fail.Store(true)
+	cooldown := hosts.MinConsecutiveScansBeforeCooldown + 1
+	for i := 1; i <= cooldown; i++ {
+		if err := withScannedHost(); err == nil {
+			t.Fatal("expected error")
+		}
+		assertScans(t, 1, i)
+	}
+
+	// further calls within the cooldown don't scan
+	for range 3 {
+		if err := withScannedHost(); err == nil {
+			t.Fatal("expected error")
+		}
+		assertScans(t, 0, cooldown)
+	}
+
+	// once the cooldown has passed the host is scanned again
+	backdateFailedScan(t)
+	if err := withScannedHost(); err == nil {
+		t.Fatal("expected error")
+	}
+	assertScans(t, 1, cooldown+1)
+
+	// and immediately cools down again
+	if err := withScannedHost(); err == nil {
+		t.Fatal("expected error")
+	}
+	assertScans(t, 0, cooldown+1)
+
+	// a successful scan resets the cooldown
+	backdateFailedScan(t)
+	scanner.fail.Store(false)
+	if err := withScannedHost(); !errors.Is(err, proto4.ErrPricesExpired) {
+		t.Fatalf("expected %v, got %v", proto4.ErrPricesExpired, err)
+	}
+	assertScans(t, 2, 0)
+
+	// so the host needs to exceed the threshold again
+	scanner.fail.Store(true)
+	for i := 1; i <= cooldown; i++ {
+		if err := withScannedHost(); err == nil {
+			t.Fatal("expected error")
+		}
+		assertScans(t, 1, i)
+	}
+	if err := withScannedHost(); err == nil {
+		t.Fatal("expected error")
+	}
+	assertScans(t, 0, cooldown)
 }
