@@ -4,7 +4,7 @@ info:
   description: >
     The Admin API lets you monitor and manage the Indexd service. It provides access to system status, accounts, contracts, host settings, pricing, and wallet functions. This API is meant for internal use by operators who need to keep the service running smoothly.
 
-  version: 0.5.0
+  version: 0.6.0
 servers:
   - url: http://localhost:9980/api
 tags:
