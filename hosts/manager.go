@@ -25,6 +25,16 @@ import (
 const (
 	announcementMaxAddressesPerProtocol = 2
 
+	// minTimeBetweenFailedScans is the minimum time that must pass between two
+	// failed scans of the same host. This is to avoid hammering a host that is
+	// down or unreachable.
+	minTimeBetweenFailedScans = time.Hour
+
+	// minConsecutiveScansBeforeCooldown is the minimum number of consecutive
+	// failed scans before a host is put on a minTimeBetweenFailedScans
+	// cooldown.
+	minConsecutiveScansBeforeCooldown = 10
+
 	pruneFrequency                  = time.Hour * 24
 	pruneMinConsecutiveScanFailures = 10
 	pruneMinDowntime                = time.Hour * 24 * 365 // 1 year
@@ -478,6 +488,12 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 		} else if err == nil {
 			return nil // 'fn' succeeded so we're done
 		}
+	}
+
+	// if a host has failed scans repeatedly we avoid scanning them again for a
+	// while
+	if host.ConsecutiveFailedScans > minConsecutiveScansBeforeCooldown && time.Since(host.LastFailedScan) < minTimeBetweenFailedScans {
+		return fmt.Errorf("host has failed scans %d times and won't be scanned again before %v", host.ConsecutiveFailedScans, host.LastFailedScan.Add(minTimeBetweenFailedScans))
 	}
 
 	// scan the host if the prices were outdated

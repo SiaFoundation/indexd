@@ -22,6 +22,10 @@ var cancelledCtx = func() context.Context {
 	return ctx
 }()
 
+// MinConsecutiveScansBeforeCooldown exposes minConsecutiveScansBeforeCooldown
+// for external tests.
+const MinConsecutiveScansBeforeCooldown = minConsecutiveScansBeforeCooldown
+
 // ScanHosts synchronously scans the provided hosts for external tests.
 func (m *HostManager) ScanHosts(ctx context.Context, hostKeys []types.PublicKey) {
 	m.scanHosts(ctx, hostKeys)
