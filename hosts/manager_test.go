@@ -3,6 +3,7 @@ package hosts_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -290,6 +291,7 @@ func TestIsBadQUICAddress(t *testing.T) {
 
 type toggleScanner struct {
 	fail     atomic.Bool
+	timeout  atomic.Bool
 	scans    atomic.Int64
 	settings proto4.HostSettings
 }
@@ -304,7 +306,9 @@ func (ts *toggleScanner) ScanQuic(ctx context.Context, hk types.PublicKey, addr 
 
 func (ts *toggleScanner) scan() (proto4.HostSettings, error) {
 	ts.scans.Add(1)
-	if ts.fail.Load() {
+	if ts.timeout.Load() {
+		return proto4.HostSettings{}, fmt.Errorf("failed to connect: %w", context.DeadlineExceeded)
+	} else if ts.fail.Load() {
 		return proto4.HostSettings{}, errors.New("host unreachable")
 	}
 	return ts.settings, nil
@@ -377,9 +381,9 @@ func TestWithScannedHostFailedScanBackoff(t *testing.T) {
 		}
 	}
 
-	// failures are scanned until the cooldown threshold is exceeded
+	// failures are scanned until the cooldown threshold is reached
 	scanner.fail.Store(true)
-	cooldown := hosts.MinConsecutiveScansBeforeCooldown + 1
+	cooldown := hosts.MinConsecutiveScansBeforeCooldown
 	for i := 1; i <= cooldown; i++ {
 		if err := withScannedHost(); err == nil {
 			t.Fatal("expected error")
@@ -416,7 +420,7 @@ func TestWithScannedHostFailedScanBackoff(t *testing.T) {
 	}
 	assertScans(t, 2, 0)
 
-	// so the host needs to exceed the threshold again
+	// so the host needs to reach the threshold again
 	scanner.fail.Store(true)
 	for i := 1; i <= cooldown; i++ {
 		if err := withScannedHost(); err == nil {
@@ -428,4 +432,46 @@ func TestWithScannedHostFailedScanBackoff(t *testing.T) {
 		t.Fatal("expected error")
 	}
 	assertScans(t, 0, cooldown)
+}
+
+func TestScanHostTimeout(t *testing.T) {
+	db := testutils.NewDB(t, contracts.DefaultMaintenanceSettings, zaptest.NewLogger(t))
+	defer db.Close()
+
+	hostKey := types.PublicKey{1}
+	db.AddTestHost(t, hosts.Host{
+		PublicKey: hostKey,
+		Addresses: []chain.NetAddress{{Protocol: siamux.Protocol, Address: "1.1.1.1:9983"}},
+	})
+
+	scanner := &toggleScanner{}
+	scanner.timeout.Store(true)
+	mgr, err := hosts.NewManager(&mock.Locator{}, nil, db, alerts.NewManager(), hosts.WithScanner(scanner), hosts.WithOnlineChecker(mock.OnlineChecker{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mgr.Close()
+
+	assertFailures := func(t *testing.T, want int) {
+		t.Helper()
+		if host, err := db.Host(hostKey); err != nil {
+			t.Fatal(err)
+		} else if host.ConsecutiveFailedScans != want {
+			t.Fatalf("expected %d consecutive failed scans, got %d", want, host.ConsecutiveFailedScans)
+		}
+	}
+
+	// a scan that times out counts as a failure
+	if _, err := mgr.ScanHost(t.Context(), hostKey); err != nil {
+		t.Fatal(err)
+	}
+	assertFailures(t, 1)
+
+	// the caller giving up doesn't
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if _, err := mgr.ScanHost(ctx, hostKey); !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context error, got %v", err)
+	}
+	assertFailures(t, 1)
 }
