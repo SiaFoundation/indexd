@@ -655,7 +655,8 @@ components:
     SealedObjectWithoutSlabs:
       description: >
         A sealed object without its slabs, which are paginated separately with
-        `GET /objects/{key}/slabs`
+        `GET /objects/{key}/slabs`, or `GET /shared/objects/{id}/slabs` when
+        authenticated with a sharing key
       allOf:
         - $ref: "#/components/schemas/SealedObjectBase"
         - type: object
@@ -664,6 +665,19 @@ components:
               type: integer
               format: uint64
               description: The logical size of the object in bytes (sum of slab slice lengths)
+
+    SharingKeyObjectWithoutSlabs:
+      description: >
+        An object attached to a sharing key without its slabs. The object ID can
+        not be derived without the slabs, so it is returned alongside the object.
+      allOf:
+        - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
+        - type: object
+          properties:
+            objectID:
+              allOf:
+                - $ref: "#/components/schemas/Hash256"
+                - description: The object's unique ID
 
     ObjectEventWithoutSlabs:
       type: object

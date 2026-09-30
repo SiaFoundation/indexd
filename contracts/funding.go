@@ -161,6 +161,9 @@ OUTER:
 
 		var exhausted bool
 		for !exhausted {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			accs, err := cm.accounts.AccountsForFunding(host.PublicKey, quota.Key, threshold, accounts.AccountFundBatch)
 			if err != nil {
 				return fmt.Errorf("failed to fetch accounts for funding: %w", err)
@@ -189,7 +192,17 @@ OUTER:
 				{uploadAccs, fundTarget},
 				{fullStorageAccs, readFundTarget},
 			} {
-				if len(batch.accs) == 0 || batch.target.IsZero() {
+				if len(batch.accs) == 0 {
+					continue
+				} else if batch.target.IsZero() {
+					// nothing to fund, push the accounts back so they don't
+					// keep filling the batch
+					for i := range batch.accs {
+						batch.accs[i].NextFund = time.Now().Add(accounts.AccountFundInterval)
+					}
+					if err := cm.accounts.UpdateHostAccounts(batch.accs); err != nil {
+						return fmt.Errorf("failed to update accounts: %w", err)
+					}
 					continue
 				}
 
@@ -206,6 +219,9 @@ OUTER:
 				contractIDs = contractIDs[drained:]
 				if len(contractIDs) == 0 {
 					log.Debug("not all accounts could be funded, no more contracts available", zap.String("quota", quota.Key))
+					break OUTER
+				} else if funded == 0 {
+					log.Debug("no accounts could be funded, skipping host", zap.String("quota", quota.Key))
 					break OUTER
 				}
 			}
@@ -273,6 +289,9 @@ OUTER:
 
 		var exhausted bool
 		for !exhausted {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
 			pools, err := cm.accounts.PoolsForFunding(host.PublicKey, quota.Key, threshold, proto.MaxAccountBatchSize)
 			if err != nil {
 				return fmt.Errorf("failed to fetch pools for funding: %w", err)
@@ -300,7 +319,17 @@ OUTER:
 				{uploadPools, fundTarget},
 				{fullStoragePools, readFundTarget},
 			} {
-				if len(batch.pools) == 0 || batch.target.IsZero() {
+				if len(batch.pools) == 0 {
+					continue
+				} else if batch.target.IsZero() {
+					// nothing to fund, push the pools back so they don't keep
+					// filling the batch
+					for i := range batch.pools {
+						batch.pools[i].NextFund = time.Now().Add(accounts.PoolFundInterval)
+					}
+					if err := cm.accounts.UpdateHostPools(batch.pools); err != nil {
+						return fmt.Errorf("failed to update pools: %w", err)
+					}
 					continue
 				}
 
@@ -317,6 +346,9 @@ OUTER:
 				contractIDs = contractIDs[drained:]
 				if len(contractIDs) == 0 {
 					log.Debug("not all pools could be funded, no more contracts available", zap.String("quota", quota.Key))
+					break OUTER
+				} else if funded == 0 {
+					log.Debug("no pools could be funded, skipping host", zap.String("quota", quota.Key))
 					break OUTER
 				}
 			}

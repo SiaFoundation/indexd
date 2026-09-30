@@ -1,3 +1,64 @@
+## 0.6.0 (2026-09-28)
+
+### Breaking Changes
+
+#### Negotiate CBOR responses on every app endpoint
+
+Every application API endpoint that returns a body now returns CBOR when the
+request's `Accept` header names `application/cbor`, and JSON otherwise. The
+negotiated responses set `Vary: Accept`. The Sia binary encoding previously
+served for `Accept: application/octet-stream` has been replaced, so
+`slabs.PinnedSlab` no longer implements `types.EncoderTo` and
+`types.DecoderFrom`.
+
+### Features
+
+- Add object listing without slab slices and object slab-slice pagination
+- Track file contract tax
+
+#### Prune node by default
+
+The consensus prune target now defaults to a week of blocks (1008) when it is
+not set in the config file. Setting `consensus.pruneTarget` to 0 explicitly
+disables pruning.
+
+### Fixes
+
+- Don't validate an existing slab's bad hosts count when pinning
+- Only rebind a lost sector to a host with a good contract
+- Reset a sector's failed integrity checks when it is rebound to a host
+
+#### Fix funding backoff overflow
+
+Fixed the account and pool funding backoff overflowing after ~28 consecutive failures, which caused funding to spin on a single failing host and stall funding for all other hosts.
+
+#### Fix object events being skipped by the cursor
+
+An event now takes its position in the stream from a background publisher rather
+than from the transaction that wrote it, so a slow commit can no longer land
+behind a cursor that has already moved on. Clients need no update, though an
+event normally becomes visible within two seconds of the write instead of
+within the same second.
+
+#### Fix offline detection
+
+Determine indexer connectivity by probing known external sites instead of relying
+on syncer peers, which can remain connected while offline. Cache connectivity
+results for 30 seconds to avoid excessive probes during host scans.
+
+#### Mark slabs unrecoverable after 30 days of failed recovery
+
+A slab is marked unrecoverable once its shards have failed to recover for 30
+days while fewer than MinShards of its sectors are stored on a host. A
+successful recovery resets the window, even if uploading the recovered shards
+fails.
+
+#### Require RHP 5.1.0 hosts by default
+
+A new deployment initializes `MinProtocolVersion` at 5.1.0 rather than 5.0.2, so
+a host needs balance pool support to pass the default usability check. Existing
+deployments keep the minimum already stored in their settings.
+
 ## 0.5.0 (2026-09-09)
 
 ### Breaking Changes

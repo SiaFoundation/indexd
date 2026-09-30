@@ -25,6 +25,16 @@ import (
 const (
 	announcementMaxAddressesPerProtocol = 2
 
+	// minTimeBetweenFailedScans is the minimum time that must pass between two
+	// failed scans of the same host. This is to avoid hammering a host that is
+	// down or unreachable.
+	minTimeBetweenFailedScans = time.Hour
+
+	// minConsecutiveScansBeforeCooldown is the minimum number of consecutive
+	// failed scans before a host is put on a minTimeBetweenFailedScans
+	// cooldown.
+	minConsecutiveScansBeforeCooldown = 10
+
 	pruneFrequency                  = time.Hour * 24
 	pruneMinConsecutiveScanFailures = 10
 	pruneMinDowntime                = time.Hour * 24 * 365 // 1 year
@@ -480,6 +490,12 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 		}
 	}
 
+	// if a host has failed scans repeatedly we avoid scanning them again for a
+	// while
+	if host.ConsecutiveFailedScans >= minConsecutiveScansBeforeCooldown && time.Since(host.LastFailedScan) < minTimeBetweenFailedScans {
+		return fmt.Errorf("host has failed scans %d times and won't be scanned again before %v", host.ConsecutiveFailedScans, host.LastFailedScan.Add(minTimeBetweenFailedScans))
+	}
+
 	// scan the host if the prices were outdated
 	host, err = m.ScanHost(ctx, hk)
 	if err != nil {
@@ -504,6 +520,7 @@ func (m *HostManager) WithScannedHost(ctx context.Context, hk types.PublicKey, f
 func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, error) {
 	logger := m.log.With(zap.Stringer("hk", hk))
 
+	parentCtx := ctx
 	ctx, cancel := context.WithTimeout(ctx, scanTimeout)
 	defer cancel()
 
@@ -517,9 +534,13 @@ func (m *HostManager) ScanHost(ctx context.Context, hk types.PublicKey) (Host, e
 		return Host{}, fmt.Errorf("failed to resolve host, %w", err)
 	}
 
+	// hitting scanTimeout counts as a failed scan, only the caller giving up
+	// doesn't
 	settings, err := fetchSettings(ctx, m.scanner, hk, addrs, logger)
-	if err != nil {
+	if err != nil && parentCtx.Err() != nil {
 		return Host{}, fmt.Errorf("failed to fetch settings, %w", err)
+	} else if err != nil {
+		logger.Debug("scan timed out", zap.Error(err))
 	}
 
 	consecutiveFailures := host.ConsecutiveFailedScans
