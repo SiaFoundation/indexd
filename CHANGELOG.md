@@ -1,3 +1,13 @@
+## 0.6.1 (2026-09-30)
+
+### Features
+
+- Implement sparse object listing for sharing API
+
+### Fixes
+
+- Don't scan offline hosts more than once per hour after enough consecutive failures
+
 ## 0.6.0 (2026-09-28)
 
 ### Breaking Changes
