@@ -449,6 +449,90 @@ func TestHostPoolsForFundingFullStorage(t *testing.T) {
 	}
 }
 
+func TestPendingPoolAttachmentsSequence(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	hk := store.addTestHost(t)
+	apk1, _ := store.addTestAppConnectKey(t)
+	apk2, _ := store.addTestAppConnectKey(t)
+	store.addTestAccountForKey(t, apk1, types.GeneratePrivateKey().PublicKey())
+	store.addTestAccountForKey(t, apk2, types.GeneratePrivateKey().PublicKey())
+
+	// fund both pools
+	pools, err := store.HostPoolsForFunding(hk, "default", time.Time{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(pools) != 2 {
+		t.Fatal("expected two pools", len(pools))
+	}
+	for i := range pools {
+		pools[i].NextFund = time.Now().Add(time.Hour)
+	}
+	if err := store.UpdateHostPools(pools); err != nil {
+		t.Fatal(err)
+	}
+
+	caughtUp := func() (n int) {
+		t.Helper()
+		if err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM pool_hosts ph INNER JOIN pools p ON p.id = ph.pool_id WHERE ph.attached_seq = p.accounts_seq`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	// truncated scan catches nothing up
+	pending, err := store.PendingPoolAttachments(hk, 1)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(pending) != 1 {
+		t.Fatal("expected one pending attachment", len(pending))
+	} else if n := caughtUp(); n != 0 {
+		t.Fatal("expected no caught up pools", n)
+	}
+
+	// empty scan catches both pools up
+	pending, err = store.PendingPoolAttachments(hk, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(pending) != 2 {
+		t.Fatal("expected two pending attachments", len(pending))
+	} else if err := store.InsertPoolAttachments(hk, pending); err != nil {
+		t.Fatal(err)
+	} else if pending, err = store.PendingPoolAttachments(hk, 10); err != nil {
+		t.Fatal(err)
+	} else if len(pending) != 0 {
+		t.Fatal("expected no pending attachments", len(pending))
+	} else if n := caughtUp(); n != 2 {
+		t.Fatal("expected two caught up pools", n)
+	}
+
+	// pool in backoff is skipped
+	if _, err := store.pool.Exec(t.Context(), `UPDATE pool_hosts SET consecutive_failed_funds = 3 WHERE pool_id = (SELECT p.id FROM pools p INNER JOIN app_connect_keys ack ON ack.id = p.connect_key_id WHERE ack.app_key = $1)`, apk1); err != nil {
+		t.Fatal(err)
+	}
+	ak := types.GeneratePrivateKey().PublicKey()
+	store.addTestAccountForKey(t, apk1, ak)
+	if pending, err = store.PendingPoolAttachments(hk, 10); err != nil {
+		t.Fatal(err)
+	} else if len(pending) != 0 {
+		t.Fatal("expected no pending attachments", len(pending))
+	} else if n := caughtUp(); n != 1 {
+		t.Fatal("expected one caught up pool", n)
+	}
+
+	// resumes once funding succeeds
+	if _, err := store.pool.Exec(t.Context(), `UPDATE pool_hosts SET consecutive_failed_funds = 0`); err != nil {
+		t.Fatal(err)
+	}
+	if pending, err = store.PendingPoolAttachments(hk, 10); err != nil {
+		t.Fatal(err)
+	} else if len(pending) != 1 {
+		t.Fatal("expected one pending attachment", len(pending))
+	} else if types.PublicKey(pending[0].AccountKey) != ak {
+		t.Fatal("unexpected account key")
+	}
+}
+
 func TestPendingPoolAttachmentsDeletedAccount(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

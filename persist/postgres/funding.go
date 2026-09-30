@@ -304,30 +304,82 @@ func (s *Store) PendingPoolAttachments(hk types.PublicKey, limit int) ([]account
 		// row can exist for hosts where funding failed and the pool was never
 		// actually created. Pools currently in backoff are temporarily skipped
 		// and resume once funding succeeds again, which resets the counter.
+		type pendingPool struct {
+			id      int64
+			seq     int64
+			poolKey []byte
+		}
+		var hostID int64
+		var pools []pendingPool
 		rows, err := tx.Query(ctx, `
-SELECT a.public_key, p.pool_key
+SELECT ph.host_id, ph.pool_id, p.accounts_seq, p.pool_key
 FROM pool_hosts ph
 INNER JOIN pools p ON p.id = ph.pool_id
-INNER JOIN app_connect_keys ack ON ack.id = p.connect_key_id
 INNER JOIN hosts h ON h.id = ph.host_id
-INNER JOIN accounts a ON a.connect_key_id = ack.id AND a.deleted_at IS NULL
-LEFT JOIN pool_attachments pa ON pa.pool_id = p.id AND pa.host_id = ph.host_id AND pa.account_id = a.id
-WHERE h.public_key = $1 AND pa.pool_id IS NULL AND ph.consecutive_failed_funds = 0
-ORDER BY a.id
-LIMIT $2`, sqlPublicKey(hk), limit)
+WHERE h.public_key = $1 AND ph.consecutive_failed_funds = 0 AND ph.attached_seq < p.accounts_seq`, sqlPublicKey(hk))
 		if err != nil {
+			return fmt.Errorf("failed to query pools with pending attachments: %w", err)
+		}
+		for rows.Next() {
+			var pp pendingPool
+			if err := rows.Scan(&hostID, &pp.id, &pp.seq, &pp.poolKey); err != nil {
+				rows.Close()
+				return fmt.Errorf("failed to scan pool with pending attachments: %w", err)
+			}
+			pools = append(pools, pp)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
 			return err
 		}
-		defer rows.Close()
 
-		for rows.Next() {
-			var pa accounts.PendingAttachment
-			if err := rows.Scan((*sqlPublicKey)(&pa.AccountKey), (*[]byte)(&pa.PoolKey)); err != nil {
-				return fmt.Errorf("failed to scan pending attachment: %w", err)
+		// query pools one at a time, a single query over many pools of
+		// varying size can plan into a full scan of the host's attachments
+		var donePools, doneSeqs []int64
+		for _, pp := range pools {
+			if len(pending) == limit {
+				break
 			}
-			pending = append(pending, pa)
+			rows, err := tx.Query(ctx, `
+SELECT a.public_key
+FROM accounts a
+WHERE a.connect_key_id = (SELECT connect_key_id FROM pools WHERE id = $2) AND a.deleted_at IS NULL AND NOT EXISTS (
+	SELECT 1 FROM pool_attachments pa
+	WHERE pa.pool_id = $2 AND pa.host_id = $1 AND pa.account_id = a.id
+)
+LIMIT $3`, hostID, pp.id, limit-len(pending))
+			if err != nil {
+				return fmt.Errorf("failed to query pending attachments: %w", err)
+			}
+			n := len(pending)
+			for rows.Next() {
+				pa := accounts.PendingAttachment{PoolKey: pp.poolKey}
+				if err := rows.Scan((*sqlPublicKey)(&pa.AccountKey)); err != nil {
+					rows.Close()
+					return fmt.Errorf("failed to scan pending attachment: %w", err)
+				}
+				pending = append(pending, pa)
+			}
+			rows.Close()
+			if err := rows.Err(); err != nil {
+				return err
+			} else if len(pending) == n {
+				donePools = append(donePools, pp.id)
+				doneSeqs = append(doneSeqs, pp.seq)
+			}
 		}
-		return rows.Err()
+		if len(donePools) == 0 {
+			return nil
+		}
+		_, err = tx.Exec(ctx, `
+UPDATE pool_hosts ph
+SET attached_seq = v.seq
+FROM unnest($2::bigint[], $3::bigint[]) AS v(pool_id, seq)
+WHERE ph.host_id = $1 AND ph.pool_id = v.pool_id AND ph.attached_seq < v.seq`, hostID, donePools, doneSeqs)
+		if err != nil {
+			return fmt.Errorf("failed to update attached sequence: %w", err)
+		}
+		return nil
 	}); err != nil {
 		return nil, err
 	}
