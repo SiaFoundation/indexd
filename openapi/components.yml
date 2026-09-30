@@ -626,7 +626,8 @@ components:
       type: object
       description: >
         A sealed object without its slabs, which are paginated separately with
-        `GET /objects/{key}/slabs`
+        `GET /objects/{key}/slabs`, or `GET /shared/objects/{id}/slabs` when
+        authenticated with a sharing key
       properties:
         encryptedDataKey:
           type: string
@@ -653,6 +654,19 @@ components:
           type: string
           format: date-time
           description: The time the object was last updated
+
+    SharingKeyObjectWithoutSlabs:
+      description: >
+        An object attached to a sharing key without its slabs. The object ID can
+        not be derived without the slabs, so it is returned alongside the object.
+      allOf:
+        - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
+        - type: object
+          properties:
+            objectID:
+              allOf:
+                - $ref: "#/components/schemas/Hash256"
+                - description: The object's unique ID
 
     ObjectEventWithoutSlabs:
       type: object
