@@ -176,11 +176,12 @@ func (s *Store) AddSharedObject(account proto.Account, sharingKey types.PublicKe
 		}
 
 		// capture the object's sizes at attach time so the trigger can
-		// maintain the sharing key's totals: size is the object's logical size
-		// (sum of slab slice lengths), pinned_data/pinned_size are its storage
-		// footprint before and after redundancy. a slab referenced by more than
-		// one slice is only stored once, so it only counts once towards them.
-		var objectSize, minShards, sectorCount int64
+		// maintain the sharing key's totals: size is the object's logical size,
+		// pinned_data/pinned_size are its storage footprint before and after
+		// redundancy. a slab referenced by more than one slice is only stored
+		// once, so it only counts once towards them.
+		var size uint64
+		var minShards, sectorCount int64
 		err = tx.QueryRow(ctx, `
 			WITH object_slab_ids AS (
 				SELECT DISTINCT s.id, s.min_shards
@@ -189,14 +190,13 @@ func (s *Store) AddSharedObject(account proto.Account, sharingKey types.PublicKe
 				WHERE os.object_id = $1
 			)
 			SELECT
-				(SELECT COALESCE(SUM(slab_length), 0)::bigint FROM object_slabs WHERE object_id = $1),
+				(SELECT size FROM objects WHERE id = $1),
 				(SELECT COALESCE(SUM(min_shards), 0)::bigint FROM object_slab_ids),
 				(SELECT COUNT(*)::bigint FROM slab_sectors WHERE slab_id IN (SELECT id FROM object_slab_ids))
-		`, objectID).Scan(&objectSize, &minShards, &sectorCount)
+		`, objectID).Scan(&size, &minShards, &sectorCount)
 		if err != nil {
 			return fmt.Errorf("failed to compute object size: %w", err)
 		}
-		size := uint64(objectSize)
 		pinnedData := uint64(minShards) * proto.SectorSize
 		pinnedSize := uint64(sectorCount) * proto.SectorSize
 
@@ -273,17 +273,20 @@ func (s *Store) SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, li
 				ObjectID:                 so.key,
 				SealedObjectWithoutSlabs: *so.object.WithoutSlabs(),
 			}
+			objects[i].Size = so.size
 		}
 		return nil
 	})
 	return
 }
 
-// A sharedObject is an object attached to a sharing key and its IDs.
+// A sharedObject is an object attached to a sharing key, its IDs and its
+// size.
 type sharedObject struct {
 	id     int64
 	key    types.Hash256
 	object slabs.SealedObject
+	size   uint64
 }
 
 // listSharedObjects returns the page of objects attached to the sharing key,
@@ -296,7 +299,7 @@ func listSharedObjects(ctx context.Context, tx *txn, sharingKey types.PublicKey,
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at
+		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at, o.size
 		FROM shared_objects so
 		INNER JOIN objects o ON o.id = so.object_id
 		WHERE so.sharing_key_id = $1
@@ -309,11 +312,11 @@ func listSharedObjects(ctx context.Context, tx *txn, sharingKey types.PublicKey,
 	}
 	var objects []sharedObject
 	err = forEachRow(rows, func(row pgx.CollectableRow) error {
-		id, key, obj, err := scanObject(row)
+		id, key, obj, size, err := scanObject(row)
 		if err != nil {
 			return err
 		}
-		objects = append(objects, sharedObject{id: id, key: key, object: obj})
+		objects = append(objects, sharedObject{id: id, key: key, object: obj, size: size})
 		return nil
 	})
 	if err != nil {
@@ -393,7 +396,7 @@ func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, 
 	// the lookup to the owner lets it use the (account_id, object_key) index
 	// rather than scanning every object attached to the key
 	rows, err := tx.Query(ctx, `
-		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at
+		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at, o.size
 		FROM objects o
 		INNER JOIN shared_objects so ON so.object_id = o.id
 		WHERE so.sharing_key_id = $1 AND o.account_id = $2 AND o.object_key = $3
@@ -402,7 +405,7 @@ func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, 
 		return 0, slabs.SealedObject{}, fmt.Errorf("failed to get shared object: %w", err)
 	}
 	objectID, err = pgx.CollectOneRow(rows, func(row pgx.CollectableRow) (int64, error) {
-		id, _, o, err := scanObject(row)
+		id, _, o, _, err := scanObject(row)
 		obj = o
 		return id, err
 	})

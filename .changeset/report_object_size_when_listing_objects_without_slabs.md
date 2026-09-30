@@ -2,8 +2,11 @@
 default: minor
 ---
 
-# Report the logical size of objects in object listings without slab slices
+# Report object size when listing objects without slabs
 
-`GET /objects?includeslabs=false` now includes each object's logical `size` in
-bytes, so callers no longer need to page through every slab slice to learn how
-large an object is.
+Object events from `GET /objects?includeslabs=false` and objects attached to a
+sharing key from `GET /sharing/{key}/objects?includeslabs=false` and
+`GET /shared/objects?includeslabs=false` now include each object's logical
+`size` in bytes, so callers no longer need to page through every slab slice to
+learn how large an object is. The size is stored on the object when it is
+pinned, and existing objects are backfilled by a database migration.

@@ -512,8 +512,7 @@ func TestListObjectsWithoutSlabs(t *testing.T) {
 		!bytes.Equal(withoutSlabs.EncryptedMetadata, obj.EncryptedMetadata) ||
 		withoutSlabs.DataSignature != obj.DataSignature || withoutSlabs.MetadataSignature != obj.MetadataSignature {
 		t.Fatal("expected the object without slabs to preserve keys, signatures, and metadata")
-	}
-	if withoutSlabs.Size != obj.Size() {
+	} else if withoutSlabs.Size != obj.Size() {
 		t.Fatalf("expected size %d, got %d", obj.Size(), withoutSlabs.Size)
 	}
 

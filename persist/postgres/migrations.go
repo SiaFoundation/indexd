@@ -513,4 +513,51 @@ WHEN (OLD.unrecoverable_reason IS NOT NULL OR slab_is_stuck(OLD.consecutive_fail
 EXECUTE FUNCTION slabs_maintain_repair_stats();`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		// backfilling the size with an UPDATE writes a new version of every
+		// row into every index, so the table is rebuilt with the size and its
+		// indices and constraints are recreated afterwards instead. that is
+		// several times faster on large tables.
+		//
+		// the constraints are named explicitly since objects_old still holds
+		// the default names, so generated names would get a numeric suffix
+		// and no longer match a fresh database.
+		_, err := tx.Exec(ctx, `
+ALTER TABLE objects RENAME TO objects_old;
+CREATE TABLE objects (
+    id BIGINT CONSTRAINT objects_id_not_null NOT NULL DEFAULT nextval('objects_id_seq'),
+    object_key BYTEA CONSTRAINT objects_object_key_not_null NOT NULL CONSTRAINT objects_object_key_check CHECK(LENGTH(object_key) = 32),
+    encrypted_data_key BYTEA CONSTRAINT objects_encrypted_data_key_not_null NOT NULL CONSTRAINT objects_encrypted_data_key_check CHECK(LENGTH(encrypted_data_key) = 72),
+    encrypted_meta_key BYTEA CONSTRAINT objects_encrypted_meta_key_check CHECK(LENGTH(encrypted_meta_key) = 72),
+    account_id INTEGER CONSTRAINT objects_account_id_not_null NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE CONSTRAINT objects_created_at_not_null NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE CONSTRAINT objects_updated_at_not_null NOT NULL DEFAULT NOW(),
+    encrypted_metadata BYTEA,
+    data_signature BYTEA CONSTRAINT objects_data_signature_not_null NOT NULL CONSTRAINT objects_data_signature_check CHECK(LENGTH(data_signature) = 64),
+    meta_signature BYTEA CONSTRAINT objects_meta_signature_not_null NOT NULL CONSTRAINT objects_meta_signature_check CHECK(LENGTH(meta_signature) = 64),
+    size BIGINT CONSTRAINT objects_size_not_null NOT NULL
+);
+INSERT INTO objects (id, object_key, encrypted_data_key, encrypted_meta_key, account_id, created_at, updated_at, encrypted_metadata, data_signature, meta_signature, size)
+SELECT o.id, o.object_key, o.encrypted_data_key, o.encrypted_meta_key, o.account_id, o.created_at, o.updated_at, o.encrypted_metadata, o.data_signature, o.meta_signature, COALESCE(s.size, 0)
+FROM objects_old o
+LEFT JOIN (SELECT object_id, SUM(slab_length)::bigint AS size FROM object_slabs GROUP BY object_id) s ON s.object_id = o.id;
+
+ALTER SEQUENCE objects_id_seq OWNED BY objects.id;
+ALTER TABLE object_slabs DROP CONSTRAINT object_slabs_object_id_fkey;
+ALTER TABLE shared_objects DROP CONSTRAINT shared_objects_object_id_fkey;
+DROP TABLE objects_old;
+
+ALTER TABLE objects
+	ADD CONSTRAINT objects_pkey PRIMARY KEY (id),
+	ADD CONSTRAINT objects_encrypted_data_key_key UNIQUE (encrypted_data_key),
+	ADD CONSTRAINT objects_encrypted_meta_key_key UNIQUE (encrypted_meta_key),
+	ADD CONSTRAINT objects_data_signature_key UNIQUE (data_signature),
+	ADD CONSTRAINT objects_meta_signature_key UNIQUE (meta_signature),
+	ADD CONSTRAINT objects_account_id_fkey FOREIGN KEY (account_id) REFERENCES accounts(id);
+CREATE UNIQUE INDEX objects_account_id_object_key_idx ON objects(account_id, object_key);
+ALTER TABLE object_slabs ADD CONSTRAINT object_slabs_object_id_fkey FOREIGN KEY (object_id) REFERENCES objects(id) ON DELETE CASCADE;
+ALTER TABLE shared_objects ADD CONSTRAINT shared_objects_object_id_fkey FOREIGN KEY (object_id) REFERENCES objects(id) ON DELETE CASCADE;
+ANALYZE objects;`)
+		return err
+	},
 }

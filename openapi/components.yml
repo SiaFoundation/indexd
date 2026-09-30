@@ -622,9 +622,9 @@ components:
             - $ref: "#/components/schemas/SealedObject"
             - description: The object, if it exists
 
-    # The fields shared by SealedObject and SealedObjectWithoutSlabs.
     SealedObjectBase:
       type: object
+      description: The fields shared by SealedObject and SealedObjectWithoutSlabs
       properties:
         encryptedDataKey:
           type: string
@@ -664,7 +664,7 @@ components:
             size:
               type: integer
               format: uint64
-              description: The logical size of the object in bytes (sum of slab slice lengths)
+              description: The logical size of the object in bytes
 
     SharingKeyObjectWithoutSlabs:
       description: >

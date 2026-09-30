@@ -17,7 +17,7 @@ import (
 )
 
 const sqlObjectsByKey = `
-	SELECT id, object_key, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at
+	SELECT id, object_key, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at, size
 	FROM objects
 	WHERE account_id = $1 AND object_key = ANY($2::bytea[])`
 
@@ -118,7 +118,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 			return fmt.Errorf("failed to query object: %w", err)
 		}
 		objID, err := pgx.CollectExactlyOneRow(rows, func(row pgx.CollectableRow) (int64, error) {
-			id, _, o, err := scanObject(row)
+			id, _, o, _, err := scanObject(row)
 			obj = o
 			return id, err
 		})
@@ -143,7 +143,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 		}
 
 		var objectsByID map[int64]*slabs.SealedObject
-		events, objectsByID, err = listObjectEvents(ctx, tx, accountID, cursor, limit)
+		events, objectsByID, _, err = listObjectEvents(ctx, tx, accountID, cursor, limit)
 		if err != nil {
 			return err
 		} else if err := loadObjectSlabs(ctx, tx, objectsByID); err != nil {
@@ -170,11 +170,7 @@ func (s *Store) ListObjectsWithoutSlabs(account proto.Account, cursor slabs.Curs
 			return err
 		}
 
-		page, objectsByID, err := listObjectEvents(ctx, tx, accountID, cursor, limit)
-		if err != nil {
-			return err
-		}
-		sizes, err := loadObjectSizes(ctx, tx, objectsByID)
+		page, _, sizes, err := listObjectEvents(ctx, tx, accountID, cursor, limit)
 		if err != nil {
 			return err
 		}
@@ -186,28 +182,20 @@ func (s *Store) ListObjectsWithoutSlabs(account proto.Account, cursor slabs.Curs
 				Deleted:   event.Deleted,
 				UpdatedAt: event.UpdatedAt,
 			}
-			if event.Object == nil {
-				continue
+			if event.Object != nil {
+				events[i].Object = event.Object.WithoutSlabs()
+				events[i].Object.Size = sizes[i]
 			}
-			// an object always has at least one slab, so one that lost its
-			// slab rows was deleted after its row was read
-			size, ok := sizes[event.Key]
-			if !ok {
-				events[i].Deleted = true
-				continue
-			}
-			events[i].Object = event.Object.WithoutSlabs()
-			events[i].Object.Size = size
 		}
 		return nil
 	})
 	return
 }
 
-// listObjectEvents returns the page of object events selected by the cursor and
-// each non-deleted event's object keyed by its database ID. The objects' slabs
-// are not loaded.
-func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, objectsByID map[int64]*slabs.SealedObject, err error) {
+// listObjectEvents returns the page of object events selected by the cursor,
+// each non-deleted event's object keyed by its database ID and each event's
+// object size by event index. The objects' slabs are not loaded.
+func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, objectsByID map[int64]*slabs.SealedObject, sizes []uint64, err error) {
 	rows, err := tx.Query(ctx, `
 		SELECT object_key, was_deleted, updated_at
 		FROM object_events oe
@@ -218,11 +206,11 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 		LIMIT $4
 	`, accountID, cursor.After, sqlHash256(cursor.Key), limit)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to query object events: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to query object events: %w", err)
 	}
 	events, err = pgx.CollectRows(rows, scanObjectEvent)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to scan object events: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to scan object events: %w", err)
 	}
 
 	objectKeys := make([]sqlHash256, 0, len(events))
@@ -235,16 +223,17 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 		eventByKey[events[i].Key] = i
 	}
 	if len(objectKeys) == 0 {
-		return events, nil, nil
+		return events, nil, nil, nil
 	}
 
 	rows, err = tx.Query(ctx, sqlObjectsByKey, accountID, objectKeys)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to query objects: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to query objects: %w", err)
 	}
 	objectsByID = make(map[int64]*slabs.SealedObject, len(objectKeys))
+	sizes = make([]uint64, len(events))
 	err = forEachRow(rows, func(row pgx.CollectableRow) error {
-		id, key, obj, err := scanObject(row)
+		id, key, obj, size, err := scanObject(row)
 		if err != nil {
 			return err
 		}
@@ -254,10 +243,11 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 		}
 		events[eventIndex].Object = &obj
 		objectsByID[id] = &obj
+		sizes[eventIndex] = size
 		return nil
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to scan objects: %w", err)
+		return nil, nil, nil, fmt.Errorf("failed to scan objects: %w", err)
 	} else if len(objectsByID) != len(objectKeys) {
 		for _, i := range eventByKey {
 			if events[i].Object == nil {
@@ -265,7 +255,7 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 			}
 		}
 	}
-	return events, objectsByID, nil
+	return events, objectsByID, sizes, nil
 }
 
 // ObjectSlabs returns a page of the object's slab slices in slab_index order,
@@ -446,10 +436,10 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 
 		var objectID int64
 		err = tx.QueryRow(ctx, `
-			INSERT INTO objects (object_key, account_id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature) VALUES ($1, $2, $3, $4, $5, $6, $7)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, updated_at) = (EXCLUDED.encrypted_data_key, EXCLUDED.encrypted_meta_key, EXCLUDED.encrypted_metadata, EXCLUDED.data_signature, EXCLUDED.meta_signature, NOW())
+			INSERT INTO objects (object_key, account_id, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, size) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			ON CONFLICT (account_id, object_key) DO UPDATE SET (encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, size, updated_at) = (EXCLUDED.encrypted_data_key, EXCLUDED.encrypted_meta_key, EXCLUDED.encrypted_metadata, EXCLUDED.data_signature, EXCLUDED.meta_signature, EXCLUDED.size, NOW())
 			RETURNING id`,
-			sqlHash256(obj.ID), accountID, obj.EncryptedDataKey, encryptedMetaKey, encryptedMeta, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature)).Scan(&objectID)
+			sqlHash256(obj.ID), accountID, obj.EncryptedDataKey, encryptedMetaKey, encryptedMeta, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature), obj.Size()).Scan(&objectID)
 		if err != nil {
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
@@ -595,9 +585,9 @@ func accountID(ctx context.Context, tx *txn, account proto.Account) (int64, bool
 	return accountID, deleted, nil
 }
 
-func scanObject(row pgx.CollectableRow) (id int64, key types.Hash256, obj slabs.SealedObject, err error) {
+func scanObject(row pgx.CollectableRow) (id int64, key types.Hash256, obj slabs.SealedObject, size uint64, err error) {
 	var metaKey sql.Null[[]byte]
-	if err = row.Scan(&id, (*sqlHash256)(&key), &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt); err != nil {
+	if err = row.Scan(&id, (*sqlHash256)(&key), &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt, &size); err != nil {
 		return
 	}
 	if metaKey.Valid {
@@ -662,39 +652,6 @@ func loadObjectSlabs(ctx context.Context, tx *txn, objects map[int64]*slabs.Seal
 		return fmt.Errorf("failed to query slabs: %w", err)
 	}
 	return collectObjectSlabs(ctx, tx, rows, objectSlabs)
-}
-
-// loadObjectSizes returns each object's logical size (sum of slab slice
-// lengths) keyed by its object key. Objects without slab slices are omitted.
-func loadObjectSizes(ctx context.Context, tx *txn, objects map[int64]*slabs.SealedObject) (map[types.Hash256]uint64, error) {
-	if len(objects) == 0 {
-		return nil, nil
-	}
-
-	rows, err := tx.Query(ctx, `
-		SELECT o.object_key, SUM(os.slab_length)::bigint
-		FROM object_slabs os
-		JOIN objects o ON o.id = os.object_id
-		WHERE os.object_id = ANY($1)
-		GROUP BY o.object_key
-	`, slices.Collect(maps.Keys(objects)))
-	if err != nil {
-		return nil, fmt.Errorf("failed to query object sizes: %w", err)
-	}
-	sizes := make(map[types.Hash256]uint64, len(objects))
-	err = forEachRow(rows, func(row pgx.CollectableRow) error {
-		var key types.Hash256
-		var size int64
-		if err := row.Scan((*sqlHash256)(&key), &size); err != nil {
-			return err
-		}
-		sizes[key] = uint64(size)
-		return nil
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to scan object sizes: %w", err)
-	}
-	return sizes, nil
 }
 
 // collectObjectSlabs scans slab slices selected by a sqlObjectSlabs query,
