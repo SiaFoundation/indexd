@@ -342,6 +342,9 @@ func addAccount(ctx context.Context, tx *txn, connectKey string, account types.P
 	} else if res.RowsAffected() == 0 {
 		return accounts.ErrExists
 	}
+	if _, err := tx.Exec(ctx, `UPDATE pools SET accounts_seq = accounts_seq + 1 WHERE connect_key_id = $1`, connectKeyID); err != nil {
+		return fmt.Errorf("failed to bump pool accounts sequence: %w", err)
+	}
 	if err := incrementNumAccounts(ctx, tx, 1); err != nil {
 		return fmt.Errorf("failed to increment registered accounts: %w", err)
 	}

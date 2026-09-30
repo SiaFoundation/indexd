@@ -513,4 +513,10 @@ WHEN (OLD.unrecoverable_reason IS NOT NULL OR slab_is_stuck(OLD.consecutive_fail
 EXECUTE FUNCTION slabs_maintain_repair_stats();`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE pools ADD COLUMN accounts_seq BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE pool_hosts ADD COLUMN attached_seq BIGINT NOT NULL DEFAULT 0;`)
+		return err
+	},
 }
