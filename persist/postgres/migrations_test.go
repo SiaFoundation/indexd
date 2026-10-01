@@ -620,7 +620,11 @@ func TestMigrationBackfillsObjectSizes(t *testing.T) {
 				(1, sha256('a'), 0, 0, 10),
 				(1, sha256('b'), 1, 0, 20),
 				(1, sha256('a'), 2, 10, 30),
-				(2, sha256('b'), 0, 20, 5)`); err != nil {
+				(2, sha256('b'), 0, 20, 5);
+			INSERT INTO sharing_keys (account_id, public_key, nonce, use_description, object_count, size, pinned_data, pinned_size)
+			VALUES (1, sha256('sharing key'), sha256('nonce'), 'test', 0, 0, 0, 0);
+			INSERT INTO shared_objects (object_id, sharing_key_id, encrypted_data_key, data_signature, meta_signature, size, pinned_data, pinned_size)
+			VALUES (1, 1, substring(sha512('shared') || sha256('shared') FROM 1 FOR 72), sha512('shared'), sha512('metashared'), 60, 0, 0)`); err != nil {
 			t.Fatal(err)
 		}
 	})
@@ -639,7 +643,7 @@ func TestMigrationBackfillsObjectSizes(t *testing.T) {
 		if err := store.pool.QueryRow(ctx, `SELECT size FROM objects WHERE object_key = sha256($1::bytea)`, []byte(test.name)).Scan(&size); err != nil {
 			t.Fatal(err)
 		} else if size != test.size {
-			t.Fatalf("expected object %q to have size %d, got %d", test.name, test.size, size)
+			t.Fatalf("expected %s object to have size %d, got %d", test.name, test.size, size)
 		}
 	}
 
@@ -654,14 +658,23 @@ func TestMigrationBackfillsObjectSizes(t *testing.T) {
 		t.Fatalf("expected new object to have ID 4, got %d", id)
 	}
 
-	// deleting an object still cascades to its slab slices
-	var slices int64
+	// deleting an object still cascades to its slab slices and to the sharing
+	// keys it is attached to, which releases the sharing key's totals
+	var slices, shared, sharedCount, sharedSize int64
 	if _, err := store.pool.Exec(ctx, `DELETE FROM objects WHERE id = 1`); err != nil {
 		t.Fatal(err)
 	} else if err := store.pool.QueryRow(ctx, `SELECT COUNT(*) FROM object_slabs`).Scan(&slices); err != nil {
 		t.Fatal(err)
 	} else if slices != 1 {
 		t.Fatalf("expected 1 slab slice after deleting the object, got %d", slices)
+	} else if err := store.pool.QueryRow(ctx, `SELECT COUNT(*) FROM shared_objects`).Scan(&shared); err != nil {
+		t.Fatal(err)
+	} else if shared != 0 {
+		t.Fatalf("expected no shared objects after deleting the object, got %d", shared)
+	} else if err := store.pool.QueryRow(ctx, `SELECT object_count, size FROM sharing_keys WHERE id = 1`).Scan(&sharedCount, &sharedSize); err != nil {
+		t.Fatal(err)
+	} else if sharedCount != 0 || sharedSize != 0 {
+		t.Fatalf("expected empty sharing key totals after deleting the object, got %d objects of %d bytes", sharedCount, sharedSize)
 	}
 }
 

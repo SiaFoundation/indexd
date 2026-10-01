@@ -168,7 +168,8 @@ func (s *Store) AddSharedObject(account proto.Account, sharingKey types.PublicKe
 		}
 
 		var objectID int64
-		err = tx.QueryRow(ctx, `SELECT id FROM objects WHERE object_key = $1 AND account_id = $2`, sqlHash256(req.ObjectID), accountID).Scan(&objectID)
+		var size uint64
+		err = tx.QueryRow(ctx, `SELECT id, size FROM objects WHERE object_key = $1 AND account_id = $2`, sqlHash256(req.ObjectID), accountID).Scan(&objectID, &size)
 		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrObjectNotFound
 		} else if err != nil {
@@ -180,7 +181,6 @@ func (s *Store) AddSharedObject(account proto.Account, sharingKey types.PublicKe
 		// pinned_data/pinned_size are its storage footprint before and after
 		// redundancy. a slab referenced by more than one slice is only stored
 		// once, so it only counts once towards them.
-		var size uint64
 		var minShards, sectorCount int64
 		err = tx.QueryRow(ctx, `
 			WITH object_slab_ids AS (
@@ -190,12 +190,11 @@ func (s *Store) AddSharedObject(account proto.Account, sharingKey types.PublicKe
 				WHERE os.object_id = $1
 			)
 			SELECT
-				(SELECT size FROM objects WHERE id = $1),
 				(SELECT COALESCE(SUM(min_shards), 0)::bigint FROM object_slab_ids),
 				(SELECT COUNT(*)::bigint FROM slab_sectors WHERE slab_id IN (SELECT id FROM object_slab_ids))
-		`, objectID).Scan(&size, &minShards, &sectorCount)
+		`, objectID).Scan(&minShards, &sectorCount)
 		if err != nil {
-			return fmt.Errorf("failed to compute object size: %w", err)
+			return fmt.Errorf("failed to compute object storage footprint: %w", err)
 		}
 		pinnedData := uint64(minShards) * proto.SectorSize
 		pinnedSize := uint64(sectorCount) * proto.SectorSize
@@ -245,13 +244,20 @@ func (s *Store) SharedObjects(sharingKey types.PublicKey, offset, limit int) (ob
 			return err
 		}
 
-		objects = make([]slabs.SealedObject, len(page))
-		objectsByID := make(map[int64]*slabs.SealedObject, len(page))
+		pageSlabs := make([][]slabs.SlabSlice, len(page))
+		objectSlabs := make(map[int64]*[]slabs.SlabSlice, len(page))
 		for i, so := range page {
-			objects[i] = so.object
-			objectsByID[so.id] = &objects[i]
+			objectSlabs[so.id] = &pageSlabs[i]
 		}
-		return loadObjectSlabs(ctx, tx, objectsByID)
+		if err := loadObjectSlabs(ctx, tx, objectSlabs); err != nil {
+			return err
+		}
+
+		objects = make([]slabs.SealedObject, len(page))
+		for i, so := range page {
+			objects[i] = *so.WithSlabs(pageSlabs[i])
+		}
+		return nil
 	})
 	return
 }
@@ -271,28 +277,18 @@ func (s *Store) SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, li
 		for i, so := range page {
 			objects[i] = sharing.ObjectWithoutSlabs{
 				ObjectID:                 so.key,
-				SealedObjectWithoutSlabs: *so.object.WithoutSlabs(),
+				SealedObjectWithoutSlabs: so.SealedObjectWithoutSlabs,
 			}
-			objects[i].Size = so.size
 		}
 		return nil
 	})
 	return
 }
 
-// A sharedObject is an object attached to a sharing key, its IDs and its
-// size.
-type sharedObject struct {
-	id     int64
-	key    types.Hash256
-	object slabs.SealedObject
-	size   uint64
-}
-
 // listSharedObjects returns the page of objects attached to the sharing key,
 // most recently attached first. Blocked objects are omitted and the objects'
 // slabs are not loaded.
-func listSharedObjects(ctx context.Context, tx *txn, sharingKey types.PublicKey, offset, limit int) ([]sharedObject, error) {
+func listSharedObjects(ctx context.Context, tx *txn, sharingKey types.PublicKey, offset, limit int) ([]dbObject, error) {
 	sharingKeyID, _, err := sharingKeyID(ctx, tx, sharingKey)
 	if err != nil {
 		return nil, err
@@ -310,15 +306,7 @@ func listSharedObjects(ctx context.Context, tx *txn, sharingKey types.PublicKey,
 	if err != nil {
 		return nil, fmt.Errorf("failed to query shared objects: %w", err)
 	}
-	var objects []sharedObject
-	err = forEachRow(rows, func(row pgx.CollectableRow) error {
-		id, key, obj, size, err := scanObject(row)
-		if err != nil {
-			return err
-		}
-		objects = append(objects, sharedObject{id: id, key: key, object: obj, size: size})
-		return nil
-	})
+	objects, err := pgx.CollectRows(rows, scanObject)
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan shared objects: %w", err)
 	}
@@ -347,12 +335,16 @@ func sharingKeyID(ctx context.Context, tx *txn, sharingKey types.PublicKey) (key
 // sectors.
 func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		objectID, o, err := sharingKeyObject(ctx, tx, sharingKey, objectKey)
+		o, err := sharingKeyObject(ctx, tx, sharingKey, objectKey)
 		if err != nil {
 			return err
 		}
-		obj = o
-		return loadObjectSlabs(ctx, tx, map[int64]*slabs.SealedObject{objectID: &obj})
+		var objectSlabs []slabs.SlabSlice
+		if err := loadObjectSlabs(ctx, tx, map[int64]*[]slabs.SlabSlice{o.id: &objectSlabs}); err != nil {
+			return err
+		}
+		obj = *o.WithSlabs(objectSlabs)
+		return nil
 	})
 	return
 }
@@ -382,14 +374,14 @@ func (s *Store) SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey type
 
 // sharingKeyObject returns an object attached to the sharing key and its
 // database ID, without loading its slabs.
-func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, objectKey types.Hash256) (objectID int64, obj slabs.SealedObject, err error) {
+func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, objectKey types.Hash256) (dbObject, error) {
 	sharingKeyID, ownerID, err := sharingKeyID(ctx, tx, sharingKey)
 	if err != nil {
-		return 0, slabs.SealedObject{}, err
+		return dbObject{}, err
 	}
 
 	if err := assertObjectNotBlocked(ctx, tx, objectKey); err != nil {
-		return 0, slabs.SealedObject{}, err
+		return dbObject{}, err
 	}
 
 	// an object can only be attached to its owner's sharing keys, so scoping
@@ -402,19 +394,15 @@ func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, 
 		WHERE so.sharing_key_id = $1 AND o.account_id = $2 AND o.object_key = $3
 	`, sharingKeyID, ownerID, sqlHash256(objectKey))
 	if err != nil {
-		return 0, slabs.SealedObject{}, fmt.Errorf("failed to get shared object: %w", err)
+		return dbObject{}, fmt.Errorf("failed to get shared object: %w", err)
 	}
-	objectID, err = pgx.CollectOneRow(rows, func(row pgx.CollectableRow) (int64, error) {
-		id, _, o, _, err := scanObject(row)
-		obj = o
-		return id, err
-	})
+	obj, err := pgx.CollectOneRow(rows, scanObject)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, slabs.SealedObject{}, sharing.ErrSharedObjectNotFound
+		return dbObject{}, sharing.ErrSharedObjectNotFound
 	} else if err != nil {
-		return 0, slabs.SealedObject{}, fmt.Errorf("failed to get shared object: %w", err)
+		return dbObject{}, fmt.Errorf("failed to get shared object: %w", err)
 	}
-	return objectID, obj, nil
+	return obj, nil
 }
 
 // sharingKeyObjectID returns the database ID of an object attached to the

@@ -516,12 +516,12 @@ EXECUTE FUNCTION slabs_maintain_repair_stats();`)
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
 		// backfilling the size with an UPDATE writes a new version of every
 		// row into every index, so the table is rebuilt with the size and its
-		// indices and constraints are recreated afterwards instead. that is
-		// several times faster on large tables.
+		// indices and constraints are recreated afterwards instead.
 		//
 		// the constraints are named explicitly since objects_old still holds
 		// the default names, so generated names would get a numeric suffix
-		// and no longer match a fresh database.
+		// and no longer match a fresh database. named NOT NULL constraints
+		// only exist from PostgreSQL 18, older versions ignore their names.
 		_, err := tx.Exec(ctx, `
 ALTER TABLE objects RENAME TO objects_old;
 CREATE TABLE objects (
@@ -535,7 +535,7 @@ CREATE TABLE objects (
     encrypted_metadata BYTEA,
     data_signature BYTEA CONSTRAINT objects_data_signature_not_null NOT NULL CONSTRAINT objects_data_signature_check CHECK(LENGTH(data_signature) = 64),
     meta_signature BYTEA CONSTRAINT objects_meta_signature_not_null NOT NULL CONSTRAINT objects_meta_signature_check CHECK(LENGTH(meta_signature) = 64),
-    size BIGINT CONSTRAINT objects_size_not_null NOT NULL
+    size BIGINT CONSTRAINT objects_size_not_null NOT NULL CONSTRAINT objects_size_check CHECK(size >= 0)
 );
 INSERT INTO objects (id, object_key, encrypted_data_key, encrypted_meta_key, account_id, created_at, updated_at, encrypted_metadata, data_signature, meta_signature, size)
 SELECT o.id, o.object_key, o.encrypted_data_key, o.encrypted_meta_key, o.account_id, o.created_at, o.updated_at, o.encrypted_metadata, o.data_signature, o.meta_signature, COALESCE(s.size, 0)
