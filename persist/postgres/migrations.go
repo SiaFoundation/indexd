@@ -514,6 +514,12 @@ EXECUTE FUNCTION slabs_maintain_repair_stats();`)
 		return err
 	},
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE pools ADD COLUMN accounts_seq BIGINT NOT NULL DEFAULT 1;
+ALTER TABLE pool_hosts ADD COLUMN attached_seq BIGINT NOT NULL DEFAULT 0;`)
+		return err
+	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
 		// backfilling the size with an UPDATE writes a new version of every
 		// row into every index, so the table is rebuilt with the size and its
 		// indices and constraints are recreated afterwards instead.

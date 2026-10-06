@@ -128,7 +128,8 @@ CREATE INDEX account_hosts_account_id_consecutive_failed_funds_idx ON account_ho
 CREATE TABLE pools (
     id SERIAL PRIMARY KEY,
     connect_key_id INTEGER UNIQUE NOT NULL REFERENCES app_connect_keys(id) ON DELETE CASCADE,
-    pool_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(pool_key) = 64)
+    pool_key BYTEA UNIQUE NOT NULL CHECK (LENGTH(pool_key) = 64),
+    accounts_seq BIGINT NOT NULL DEFAULT 1 -- bumped on every new account for the pool
 );
 
 CREATE TABLE pool_hosts (
@@ -137,6 +138,7 @@ CREATE TABLE pool_hosts (
     next_fund TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     consecutive_failed_funds INTEGER NOT NULL DEFAULT 0,
     sharing_attached BOOLEAN NOT NULL DEFAULT FALSE, -- whether the pool's derived sharing account has been attached on this host
+    attached_seq BIGINT NOT NULL DEFAULT 0, -- sequence of latest attached account
     CONSTRAINT pool_hosts_pk PRIMARY KEY (pool_id, host_id)
 );
 CREATE INDEX pool_hosts_host_id_next_fund_idx ON pool_hosts (host_id, next_fund);

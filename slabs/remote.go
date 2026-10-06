@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.sia.tech/core/types"
@@ -36,7 +37,7 @@ const (
 	// resultReportInterval is how often buffered migration results are
 	// flushed to the primary while migrations are still running, so results
 	// are persisted promptly even when slow slabs trickle in.
-	resultReportInterval = 30 * time.Second
+	resultReportInterval = 10 * time.Second
 )
 
 type (
@@ -111,11 +112,12 @@ func NewRemoteMigrator(primary Primary, migrationAccountKey types.PrivateKey, lo
 	return rm
 }
 
-// Run repeatedly works through all currently-unhealthy slabs until the context
-// is cancelled. A pass that attempted migrations is followed immediately by
-// the next one, since slabs flagged while it ran may already be waiting; after
-// a pass that found nothing to migrate or failed, the worker waits the
-// configured interval before polling the primary again.
+// Run migrates the primary node's unhealthy slabs until the context is
+// cancelled. Passes over the unhealthy slabs run back-to-back on a shared
+// pool of workers; after a pass that found nothing to migrate or failed, the
+// worker waits the configured interval before polling the primary again. If
+// reporting results fails, in-flight migrations are aborted and the worker
+// waits the configured interval before starting over.
 func (rm *RemoteMigrator) Run(ctx context.Context) {
 	store := newCachedHostStore()
 	hostClient := client.New(client.NewProvider(store), rm.log.Named("client"))
@@ -123,15 +125,11 @@ func (rm *RemoteMigrator) Run(ctx context.Context) {
 	migrator := NewMigrator(hostClient, rm.migrationAccountKey, rm.log)
 
 	for {
-		executed, err := rm.runPass(ctx, store, migrator)
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			rm.log.Error("migration pass failed", zap.Error(err))
-		} else if executed > 0 {
-			continue
+		err := rm.runMigrations(ctx, store, migrator)
+		if ctx.Err() != nil {
+			return
 		}
+		rm.log.Error("migrations aborted", zap.Error(err))
 		select {
 		case <-ctx.Done():
 			return
@@ -140,48 +138,65 @@ func (rm *RemoteMigrator) Run(ctx context.Context) {
 	}
 }
 
-// runPass pages through all unhealthy slabs the primary node has and migrates
-// them. Mirroring the primary's own migration loop, a producer goroutine
-// fetches batches from the primary and feeds them to the workers through a
-// channel, so fetching the next batch overlaps with ongoing migrations
-// instead of waiting behind the slowest slab of a batch. Results are reported
-// back in groups as migrations complete, with at most one report in flight so
-// a slow primary never stalls the workers. It returns how many migrations
-// were attempted.
-func (rm *RemoteMigrator) runPass(ctx context.Context, store *cachedHostStore, migrator *Migrator) (executed int, _ error) {
-	// fetch a multiple of the number of workers per batch, like the local
-	// migration loop does; the primary clamps the limit to its maximum.
+// queuePass pages through all unhealthy slabs the primary node has and queues
+// them for the workers. It returns once the last batch of the pass is queued,
+// without waiting for its migrations to finish, so the next pass overlaps
+// with the tail of this one.
+func (rm *RemoteMigrator) queuePass(ctx context.Context, store *cachedHostStore, batchSize int, slabCh chan<- migrationJob) (queued int, _ error) {
+	var cursor int64
+	for {
+		rm.log.Debug("fetching migration batch", zap.Int64("cursor", cursor), zap.Int("limit", batchSize))
+		fetchCtx, cancel := context.WithTimeout(ctx, remoteRequestTimeout)
+		batch, err := rm.primary.MigrationBatch(fetchCtx, cursor, batchSize)
+		cancel()
+		if err != nil {
+			return queued, fmt.Errorf("failed to fetch migration batch: %w", err)
+		}
+		rm.log.Debug("fetched migration batch", zap.Int("slabs", len(batch.Slabs)), zap.Int64("cursor", cursor), zap.Int64("nextCursor", batch.NextCursor))
+
+		if len(batch.Slabs) > 0 {
+			bh := store.acquire(batch.State.Hosts, len(batch.Slabs))
+			for i, slab := range batch.Slabs {
+				select {
+				case slabCh <- migrationJob{slab: slab, state: batch.State, hosts: bh}:
+					queued++
+				case <-ctx.Done():
+					bh.done(len(batch.Slabs) - i)
+					return queued, ctx.Err()
+				}
+			}
+		}
+
+		if batch.NextCursor == 0 {
+			return queued, nil
+		}
+		cursor = batch.NextCursor
+	}
+}
+
+func (rm *RemoteMigrator) runMigrations(ctx context.Context, store *cachedHostStore, migrator *Migrator) error {
 	batchSize := migrationSlabsPerWorker * rm.workers
 
-	// the pass starts with nothing in flight, so it is safe to drop hosts
-	// cached by previous passes; within a pass the store only ever merges,
-	// so in-flight migrations never lose their hosts.
-	store.clear()
-
-	// passCtx aborts the producer and in-flight migrations when reporting
+	// runCtx aborts the producer and in-flight migrations when reporting
 	// results fails: without persistence any further migration is wasted
 	// work.
-	passCtx, cancelPass := context.WithCancel(ctx)
-	defer cancelPass()
+	runCtx, cancelRun := context.WithCancel(ctx)
+	defer cancelRun()
 
 	// fetching a batch claims its slabs on the primary for the repair
 	// backoff, so the job queue is kept shallow: the producer claims the
 	// next batch only once the workers are close to running dry, keeping
 	// the time a claimed slab sits queued well below the claim window.
-	type migrationJob struct {
-		slab  Slab
-		state MigrationState
-	}
 	slabCh := make(chan migrationJob, rm.workers)
 
-	// the result channel is buffered so workers can hand off a result and
-	// pick up the next slab even while the collector is busy
 	resultCh := make(chan MigrationResult, batchSize)
 	var wg sync.WaitGroup
 	for range rm.workers {
 		wg.Go(func() {
 			for job := range slabCh {
-				if res, attempted := migrator.MigrateSlab(passCtx, job.slab, job.state); attempted {
+				res, attempted := migrator.MigrateSlab(runCtx, job.slab, job.state)
+				job.hosts.done(1)
+				if attempted {
 					resultCh <- res
 				}
 			}
@@ -192,44 +207,22 @@ func (rm *RemoteMigrator) runPass(ctx context.Context, store *cachedHostStore, m
 		close(resultCh)
 	}()
 
-	// fetch unhealthy slabs and feed them to the workers. producerErr is
-	// read only after the collect loop below, which the close chain
-	// (slabCh -> workers -> resultCh) sequences after the producer's return.
-	var producerErr error
 	go func() {
 		defer close(slabCh)
-		var cursor int64
 		for {
-			rm.log.Debug("fetching migration batch", zap.Int64("cursor", cursor), zap.Int("limit", batchSize))
-			fetchCtx, cancel := context.WithTimeout(passCtx, remoteRequestTimeout)
-			batch, err := rm.primary.MigrationBatch(fetchCtx, cursor, batchSize)
-			cancel()
-			if err != nil {
-				if passCtx.Err() == nil {
-					producerErr = fmt.Errorf("failed to fetch migration batch: %w", err)
-				}
+			queued, err := rm.queuePass(runCtx, store, batchSize, slabCh)
+			if runCtx.Err() != nil {
 				return
+			} else if err != nil {
+				rm.log.Error("migration pass failed", zap.Error(err))
+			} else if queued > 0 {
+				continue
 			}
-			rm.log.Debug("fetched migration batch", zap.Int("slabs", len(batch.Slabs)), zap.Int64("cursor", cursor), zap.Int64("nextCursor", batch.NextCursor))
-			// merge rather than replace: migrations from earlier batches may
-			// still be in flight and must not lose their hosts. This also
-			// makes batches without claimable slabs — which carry no
-			// migration state at all — inherently harmless.
-			store.merge(batch.State.Hosts)
-
-			for _, slab := range batch.Slabs {
-				select {
-				case slabCh <- migrationJob{slab: slab, state: batch.State}:
-				case <-passCtx.Done():
-					return
-				}
-			}
-
-			// a next cursor of 0 means there are no more unhealthy slabs
-			if batch.NextCursor == 0 {
+			select {
+			case <-runCtx.Done():
 				return
+			case <-time.After(rm.interval):
 			}
-			cursor = batch.NextCursor
 		}
 	}()
 
@@ -238,8 +231,8 @@ func (rm *RemoteMigrator) runPass(ctx context.Context, store *cachedHostStore, m
 	// so a slow report never stalls result collection and with it the
 	// workers.
 	var reportErr error
-	reporting := false                  // a report goroutine is in flight
-	reportDoneCh := make(chan error, 1) // its outcome
+	reporting := false
+	reportDoneCh := make(chan error, 1)
 	pending := make([]MigrationResult, 0, resultReportGroupSize)
 
 	startReport := func() {
@@ -257,7 +250,7 @@ func (rm *RemoteMigrator) runPass(ctx context.Context, store *cachedHostStore, m
 		reporting = false
 		if err != nil && reportErr == nil {
 			reportErr = fmt.Errorf("failed to report migration results: %w", err)
-			cancelPass()
+			cancelRun()
 		}
 	}
 
@@ -270,14 +263,13 @@ collect:
 			if !ok {
 				break collect
 			}
-			executed++
 			pending = append(pending, res)
 			if len(pending) >= resultReportGroupSize {
 				startReport()
 			}
 		case err := <-reportDoneCh:
 			finishReport(err)
-			startReport() // flush any backlog that accumulated meanwhile
+			startReport()
 		case <-flushTicker.C:
 			startReport()
 		}
@@ -300,17 +292,13 @@ collect:
 	}
 
 	if reportErr != nil {
-		return executed, reportErr
+		return reportErr
 	}
-	if producerErr != nil {
-		return executed, producerErr
-	}
-	// surface the interruption if we were cancelled
-	return executed, ctx.Err()
+	return ctx.Err()
 }
 
 // reportResults reports a batch of migration results to the primary node. It
-// deliberately runs on its own context rather than the pass context: the
+// deliberately runs on its own context rather than the run context: the
 // results represent completed downloads and uploads, so a shutdown that
 // interrupts the report would orphan the uploaded sectors on their new hosts
 // and lose any lost-sector discoveries. The batch is not retried on failure;
@@ -324,44 +312,79 @@ func (rm *RemoteMigrator) reportResults(results []MigrationResult) error {
 	return rm.primary.ApplyMigrationResults(ctx, results)
 }
 
-// cachedHostStore is the client.Store a RemoteMigrator backs its RHP client
-// with. Every fetched batch merges its state's hosts in; the store is only
-// cleared between passes, when no migrations are in flight, so a host never
-// vanishes from under an in-flight migration.
+// cachedHostStore is the client.Store a RemoteMigrator backs its RHP
+// client with. Every fetched batch acquires its state's hosts and
+// releases them once all of its slabs are done, so a host never vanishes
+// from under an in-flight migration while hosts no in-flight batch
+// references are dropped.
 type cachedHostStore struct {
 	mu    sync.RWMutex
-	hosts map[types.PublicKey]hosts.Host
+	hosts map[types.PublicKey]cachedHost
+}
+
+type cachedHost struct {
+	hosts.Host
+	refs int
+}
+
+type batchHosts struct {
+	store     *cachedHostStore
+	hosts     []hosts.Host
+	remaining atomic.Int64
+}
+
+type migrationJob struct {
+	slab  Slab
+	state MigrationState
+	hosts *batchHosts
 }
 
 func newCachedHostStore() *cachedHostStore {
-	return &cachedHostStore{hosts: make(map[types.PublicKey]hosts.Host)}
-}
-
-// merge upserts the usable hosts carried by a migration batch's state. Hosts
-// absent from the batch are deliberately kept: migrations from earlier
-// batches may still be reading from them. Stale entries are dropped by clear
-// between passes.
-func (s *cachedHostStore) merge(usableHosts []hosts.Host) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, host := range usableHosts {
-		s.hosts[host.PublicKey] = host
+	return &cachedHostStore{
+		hosts: make(map[types.PublicKey]cachedHost),
 	}
 }
 
-// clear empties the store. It must only be called while no migrations are in
-// flight.
-func (s *cachedHostStore) clear() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	clear(s.hosts)
+func (b *batchHosts) done(n int) {
+	if b.remaining.Add(-int64(n)) == 0 {
+		b.store.release(b.hosts)
+	}
 }
 
-// Addresses implements client.Store. It errors for hosts absent from the
-// current batch's state — matching hosts.HostStore.Addresses — so a dial
-// against an unknown host fails with a clear cause rather than a generic "no
-// addresses found". The stored slices are never mutated (merge replaces
-// entries wholesale) so the slice is returned directly.
+// acquire upserts the usable hosts carried by a migration batch's state and
+// holds them until all of the batch's slabs are done. Hosts absent from the
+// batch are deliberately kept while referenced: migrations from earlier
+// batches may still be reading from them.
+func (s *cachedHostStore) acquire(usableHosts []hosts.Host, slabs int) *batchHosts {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, host := range usableHosts {
+		h := s.hosts[host.PublicKey]
+		h.Host = host
+		h.refs++
+		s.hosts[host.PublicKey] = h
+	}
+	b := &batchHosts{store: s, hosts: usableHosts}
+	b.remaining.Store(int64(slabs))
+	return b
+}
+
+func (s *cachedHostStore) release(usableHosts []hosts.Host) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, host := range usableHosts {
+		h := s.hosts[host.PublicKey]
+		h.refs--
+		if h.refs <= 0 {
+			delete(s.hosts, host.PublicKey)
+		} else {
+			s.hosts[host.PublicKey] = h
+		}
+	}
+}
+
+// Addresses implements client.Store.
+// The stored slices are never mutated, so the slice is returned directly.
 func (s *cachedHostStore) Addresses(hostKey types.PublicKey) ([]chain.NetAddress, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -372,10 +395,7 @@ func (s *cachedHostStore) Addresses(hostKey types.PublicKey) ([]chain.NetAddress
 	return h.Addresses, nil
 }
 
-// Usable implements client.Store. It mirrors the primary node's DB-backed
-// store: the host must be known (the state only carries unblocked hosts) and
-// pass its usability checks, so recovery skips hosts the primary's own
-// recovery would skip.
+// Usable implements client.Store.
 func (s *cachedHostStore) Usable(hostKey types.PublicKey) (bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

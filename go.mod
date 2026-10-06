@@ -3,15 +3,15 @@ module go.sia.tech/indexd // v0.6.0
 go 1.27.0
 
 require (
-	github.com/fxamacker/cbor/v2 v2.9.3
+	github.com/fxamacker/cbor/v2 v2.9.4
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/klauspost/reedsolomon v1.14.2
 	github.com/oschwald/geoip2-golang v1.13.0
 	github.com/shopspring/decimal v1.4.0
 	go.sia.tech/core v0.21.7
-	go.sia.tech/coreutils v0.24.2-0.20260928153335-720128aa73aa
-	go.sia.tech/jape v0.14.4-0.20260925150222-12f19b877458
+	go.sia.tech/coreutils v0.25.0
+	go.sia.tech/jape v0.14.4
 	go.sia.tech/mux v1.5.3
 	go.sia.tech/web/indexd v0.18.0
 	go.uber.org/goleak v1.3.0
@@ -35,7 +35,7 @@ require (
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/julienschmidt/httprouter v1.3.0 // indirect
-	github.com/klauspost/compress v1.20.0 // indirect
+	github.com/klauspost/compress v1.20.1 // indirect
 	github.com/klauspost/cpuid/v2 v2.3.0 // indirect
 	github.com/oschwald/maxminddb-golang v1.13.1 // indirect
 	github.com/quic-go/qpack v0.6.0 // indirect
