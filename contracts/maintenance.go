@@ -70,11 +70,22 @@ func (cm *ContractManager) performAccountFunding(ctx context.Context, log *zap.L
 
 	// fund accounts on all hosts
 	var wg sync.WaitGroup
+	sema := make(chan struct{}, 10)
+	defer close(sema)
+
+loop:
 	for _, hk := range hostsToFund {
+		select {
+		case <-ctx.Done():
+			break loop
+		case sema <- struct{}{}:
+		}
+
 		wg.Add(1)
 		go func(ctx context.Context, hostKey types.PublicKey, log *zap.Logger) {
 			ctx, cancel := context.WithTimeout(ctx, fundTimeout)
 			defer func() {
+				<-sema
 				wg.Done()
 				cancel()
 			}()
