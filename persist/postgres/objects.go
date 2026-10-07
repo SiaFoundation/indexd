@@ -582,9 +582,12 @@ func accountID(ctx context.Context, tx *txn, account proto.Account) (int64, bool
 	return accountID, deleted, nil
 }
 
-func scanObject(row pgx.CollectableRow) (id int64, key types.Hash256, obj slabs.SealedObject, err error) {
+// scanObject scans an object row. Any extra destinations receive the columns
+// selected after the object's own.
+func scanObject(row pgx.CollectableRow, extra ...any) (id int64, key types.Hash256, obj slabs.SealedObject, err error) {
 	var metaKey sql.Null[[]byte]
-	if err = row.Scan(&id, (*sqlHash256)(&key), &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt); err != nil {
+	dest := append([]any{&id, (*sqlHash256)(&key), &obj.EncryptedDataKey, &metaKey, &obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt}, extra...)
+	if err = row.Scan(dest...); err != nil {
 		return
 	}
 	if metaKey.Valid {

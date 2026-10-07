@@ -667,6 +667,10 @@ components:
               allOf:
                 - $ref: "#/components/schemas/Hash256"
                 - description: The object's unique ID
+            size:
+              type: integer
+              format: uint64
+              description: The object's size in bytes, the sum of its slab lengths
 
     ObjectEventWithoutSlabs:
       type: object

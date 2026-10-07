@@ -483,7 +483,12 @@ func TestSharedObjectsWithoutSlabs(t *testing.T) {
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 
-	obj := store.pinTestObject(t, acc, hk)
+	params := newTestPinParams(2, hk)
+	store.pinTestSlabs(t, acc, params...)
+	obj := store.pinRandomObject(t, acc, []slabs.SlabSlice{
+		params[0].Slice(0, 100),
+		params[1].Slice(50, 30),
+	})
 	sharingKey := store.addTestSharingKey(t, acc, "objects")
 	attachTestObject(t, store, acc, sharingKey, obj.ID())
 
@@ -491,6 +496,8 @@ func TestSharedObjectsWithoutSlabs(t *testing.T) {
 		t.Fatal(err)
 	} else if len(objects) != 1 || objects[0].ObjectID != obj.ID() {
 		t.Fatalf("expected object %v, got %+v", obj.ID(), objects)
+	} else if objects[0].Size != 130 {
+		t.Fatalf("expected size 130, got %d", objects[0].Size)
 	}
 
 	if err := store.DeleteObject(acc, obj.ID()); err != nil {

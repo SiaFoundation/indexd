@@ -271,6 +271,7 @@ func (s *Store) SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, li
 		for i, so := range page {
 			objects[i] = sharing.ObjectWithoutSlabs{
 				ObjectID:                 so.key,
+				Size:                     so.size,
 				SealedObjectWithoutSlabs: *so.object.WithoutSlabs(),
 			}
 		}
@@ -283,12 +284,18 @@ func (s *Store) SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, li
 type sharedObject struct {
 	id     int64
 	key    types.Hash256
+	size   uint64
 	object slabs.SealedObject
 }
 
 // listSharedObjects returns the page of objects attached to the sharing key,
 // most recently attached first. Blocked objects are omitted and the objects'
 // slabs are not loaded.
+//
+// Each object's size is the sum of its slab lengths, read from the copy stored
+// on the attachment. That copy can not go stale because the object key commits
+// to every slab's offset and length, so re-pinning the same key can not change
+// the size.
 func listSharedObjects(ctx context.Context, tx *txn, sharingKey types.PublicKey, offset, limit int) ([]sharedObject, error) {
 	sharingKeyID, _, err := sharingKeyID(ctx, tx, sharingKey)
 	if err != nil {
@@ -296,7 +303,7 @@ func listSharedObjects(ctx context.Context, tx *txn, sharingKey types.PublicKey,
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at
+		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at, so.size
 		FROM shared_objects so
 		INNER JOIN objects o ON o.id = so.object_id
 		WHERE so.sharing_key_id = $1
@@ -309,11 +316,12 @@ func listSharedObjects(ctx context.Context, tx *txn, sharingKey types.PublicKey,
 	}
 	var objects []sharedObject
 	err = forEachRow(rows, func(row pgx.CollectableRow) error {
-		id, key, obj, err := scanObject(row)
+		var size int64
+		id, key, obj, err := scanObject(row, &size)
 		if err != nil {
 			return err
 		}
-		objects = append(objects, sharedObject{id: id, key: key, object: obj})
+		objects = append(objects, sharedObject{id: id, key: key, size: uint64(size), object: obj})
 		return nil
 	})
 	if err != nil {
