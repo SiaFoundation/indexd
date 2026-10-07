@@ -182,6 +182,8 @@ func TestSharingKeys(t *testing.T) {
 		t.Fatalf("expected 1 object, got %d", len(withoutSlabs))
 	} else if withoutSlabs[0].ObjectID != obj.ID() {
 		t.Fatalf("expected object ID %v, got %v", obj.ID(), withoutSlabs[0].ObjectID)
+	} else if withoutSlabs[0].Size != 256 {
+		t.Fatalf("expected size 256, got %d", withoutSlabs[0].Size)
 	} else if !reflect.DeepEqual(&withoutSlabs[0].SealedObjectWithoutSlabs, objs[0].WithoutSlabs()) {
 		t.Fatalf("expected object %+v, got %+v", objs[0].WithoutSlabs(), withoutSlabs[0])
 	}
@@ -240,6 +242,8 @@ func TestSharingKeys(t *testing.T) {
 		t.Fatalf("expected 1 object, got %d", len(withoutSlabs))
 	} else if withoutSlabs[0].ObjectID != obj.ID() {
 		t.Fatalf("expected object ID %v, got %v", obj.ID(), withoutSlabs[0].ObjectID)
+	} else if withoutSlabs[0].Size != 256 {
+		t.Fatalf("expected size 256, got %d", withoutSlabs[0].Size)
 	} else if !reflect.DeepEqual(&withoutSlabs[0].SealedObjectWithoutSlabs, objs[0].WithoutSlabs()) {
 		t.Fatalf("expected object %+v, got %+v", objs[0].WithoutSlabs(), withoutSlabs[0])
 	}
