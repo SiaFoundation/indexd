@@ -291,11 +291,6 @@ type sharedObject struct {
 // listSharedObjects returns the page of objects attached to the sharing key,
 // most recently attached first. Blocked objects are omitted and the objects'
 // slabs are not loaded.
-//
-// Each object's size is the sum of its slab lengths, read from the copy stored
-// on the attachment. That copy can not go stale because the object key commits
-// to every slab's offset and length, so re-pinning the same key can not change
-// the size.
 func listSharedObjects(ctx context.Context, tx *txn, sharingKey types.PublicKey, offset, limit int) ([]sharedObject, error) {
 	sharingKeyID, _, err := sharingKeyID(ctx, tx, sharingKey)
 	if err != nil {
