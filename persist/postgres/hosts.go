@@ -606,6 +606,17 @@ WHERE public_key = $10 AND settings_valid_until < $8`
 // UpdateHostScan updates a host in the database, the given parameters are the result of scanning the host.
 func (s *Store) UpdateHostScan(hk types.PublicKey, hs proto4.HostSettings, loc geoip.Location, scanSucceeded bool, nextScan time.Time) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
+		// lock the host's row before computing the decay factor so concurrent
+		// updates can't count the same elapsed time twice, STATEMENT_TIMESTAMP()
+		// below records the scan time after the lock is acquired rather than
+		// when the transaction started
+		var hostID int64
+		if err := tx.QueryRow(ctx, `SELECT id FROM hosts WHERE public_key = $1 FOR UPDATE`, sqlPublicKey(hk)).Scan(&hostID); errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("host %q: %w", hk, hosts.ErrNotFound)
+		} else if err != nil {
+			return fmt.Errorf("failed to lock host: %w", err)
+		}
+
 		if !scanSucceeded {
 			if res, err := tx.Exec(ctx, `
 WITH computed AS (
@@ -618,7 +629,7 @@ WITH computed AS (
 			CASE
 				WHEN GREATEST(last_failed_scan, last_successful_scan) IS NULL
 				THEN 0
-				ELSE EXTRACT(EPOCH FROM (NOW() - GREATEST(last_successful_scan, last_failed_scan)))
+				ELSE EXTRACT(EPOCH FROM (STATEMENT_TIMESTAMP() - GREATEST(last_successful_scan, last_failed_scan)))
 			END AS elapsed_time
 		FROM hosts
 		WHERE public_key = $1
@@ -630,7 +641,7 @@ SET
 	consecutive_failed_scans = consecutive_failed_scans + 1,
 	scans = scans + 1,
 	scans_failed = scans_failed + 1,
-	last_failed_scan = NOW(),
+	last_failed_scan = STATEMENT_TIMESTAMP(),
 	next_scan = $3
 FROM computed
 WHERE hosts.id = computed.id`, sqlPublicKey(hk), uptimeHalfLife, nextScan); err != nil {
@@ -645,7 +656,6 @@ WHERE hosts.id = computed.id`, sqlPublicKey(hk), uptimeHalfLife, nextScan); err 
 			return nil
 		}
 
-		var hostID int64
 		err := tx.QueryRow(ctx, `
 WITH computed AS (
 	SELECT
@@ -657,7 +667,7 @@ WITH computed AS (
 			CASE
 				WHEN GREATEST(last_failed_scan, last_successful_scan) IS NULL
 				THEN 0
-				ELSE EXTRACT(EPOCH FROM (NOW() - GREATEST(last_successful_scan, last_failed_scan)))
+				ELSE EXTRACT(EPOCH FROM (STATEMENT_TIMESTAMP() - GREATEST(last_successful_scan, last_failed_scan)))
 			END AS elapsed_time
 		FROM hosts
 		WHERE public_key = $1
@@ -668,7 +678,7 @@ SET
 	recent_uptime = 1 * (1 - decay_factor) + recent_uptime * decay_factor,
 	consecutive_failed_scans = 0,
 	scans = scans + 1,
-	last_successful_scan = NOW(),
+	last_successful_scan = STATEMENT_TIMESTAMP(),
 	next_scan = $3,
 
 	country_code = CASE WHEN $4 <> '' THEN $4 ELSE country_code END,

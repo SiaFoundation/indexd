@@ -295,7 +295,7 @@ func listSharedObjects(ctx context.Context, tx *txn, sharingKey types.PublicKey,
 	}
 
 	rows, err := tx.Query(ctx, `
-		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at, o.size
+		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at, so.size
 		FROM shared_objects so
 		INNER JOIN objects o ON o.id = so.object_id
 		WHERE so.sharing_key_id = $1
@@ -388,7 +388,7 @@ func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, 
 	// the lookup to the owner lets it use the (account_id, object_key) index
 	// rather than scanning every object attached to the key
 	rows, err := tx.Query(ctx, `
-		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at, o.size
+		SELECT so.object_id, o.object_key, so.encrypted_data_key, so.encrypted_meta_key, so.encrypted_metadata, so.data_signature, so.meta_signature, so.created_at, so.updated_at, so.size
 		FROM objects o
 		INNER JOIN shared_objects so ON so.object_id = o.id
 		WHERE so.sharing_key_id = $1 AND o.account_id = $2 AND o.object_key = $3
