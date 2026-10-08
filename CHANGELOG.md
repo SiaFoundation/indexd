@@ -1,3 +1,32 @@
+## 0.6.1 (2026-10-08)
+
+### Features
+
+- Implement sparse object listing for sharing API
+
+#### Report object size when listing objects without slabs
+
+Object events and objects listed without their slabs (`includeslabs=false` on
+`GET /objects`, `GET /sharing/:key/objects`, and `GET /shared/objects`) now
+include the object's logical `size` in bytes, so callers no longer need to page
+through every slab slice to learn how large an object is. The size is stored
+when the object is pinned and existing objects are backfilled by a database
+migration.
+
+`SealedObjectWithoutSlabs` gains a `Size` field, and `SealedObject` and
+`PinObjectRequest` gain a `Size()` method that sums their slab slice lengths.
+
+### Fixes
+
+- Don't scan offline hosts more than once per hour after enough consecutive failures
+- Fix parallel host scanning
+- Interleave remote migration passes so workers don't idle behind the slowest slab of a pass
+- Limit concurrent account funding to 10 hosts
+
+#### Skip fully attached pools when looking for pending pool attachments
+
+Funding no longer rescans every account of every pool on every host each cycle, only pools that gained accounts since they were last fully attached.
+
 ## 0.6.0 (2026-09-28)
 
 ### Breaking Changes
