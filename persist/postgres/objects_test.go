@@ -164,6 +164,69 @@ func TestObject(t *testing.T) {
 	}
 }
 
+// TestObjectSize asserts every object read reports the sum of the object's
+// slab slice lengths, including listings without slabs, which read the size
+// stored when the object was pinned.
+func TestObjectSize(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	acc := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	params := newTestPinParams(2, hk)
+	store.pinTestSlabs(t, acc, params...)
+
+	// a slab referenced by more than one slice counts once per slice
+	obj := store.pinRandomObject(t, acc, []slabs.SlabSlice{
+		params[0].Slice(0, 100),
+		params[1].Slice(10, 50),
+		params[0].Slice(100, 25),
+	})
+	const size = 175
+
+	store.publishEvents(t)
+	sharingKey := store.addTestSharingKey(t, acc, "size")
+	attachTestObject(t, store, acc, sharingKey, obj.ID())
+
+	var stored uint64
+	if err := store.pool.QueryRow(t.Context(), `SELECT size FROM objects WHERE object_key = $1`, sqlHash256(obj.ID())).Scan(&stored); err != nil {
+		t.Fatal(err)
+	} else if stored != size {
+		t.Fatalf("expected stored size %d, got %d", size, stored)
+	}
+
+	if got, err := store.Object(acc, obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if got.Size() != size {
+		t.Fatalf("expected object size %d, got %d", size, got.Size())
+	}
+	if events, err := store.ListObjects(acc, slabs.Cursor{}, 10); err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 || events[0].Object == nil || events[0].Object.Size() != size {
+		t.Fatalf("expected one listed object of size %d, got %+v", size, events)
+	}
+	if events, err := store.ListObjectsWithoutSlabs(acc, slabs.Cursor{}, 10); err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 || events[0].Object == nil || events[0].Object.Size != size {
+		t.Fatalf("expected one listed object without slabs of size %d, got %+v", size, events)
+	}
+	if got, err := store.SharingKeyObject(sharingKey, obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if got.Size() != size {
+		t.Fatalf("expected sharing key object size %d, got %d", size, got.Size())
+	}
+	if objects, err := store.SharedObjects(sharingKey, 0, 10); err != nil {
+		t.Fatal(err)
+	} else if len(objects) != 1 || objects[0].Size() != size {
+		t.Fatalf("expected one sharing key object of size %d, got %+v", size, objects)
+	}
+	if objects, err := store.SharedObjectsWithoutSlabs(sharingKey, 0, 10); err != nil {
+		t.Fatal(err)
+	} else if len(objects) != 1 || objects[0].Size != size {
+		t.Fatalf("expected one sharing key object without slabs of size %d, got %+v", size, objects)
+	}
+}
+
 func TestObjectSlabVersion(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 	acc := proto.Account{1}
@@ -512,6 +575,8 @@ func TestListObjectsWithoutSlabs(t *testing.T) {
 		!bytes.Equal(withoutSlabs.EncryptedMetadata, obj.EncryptedMetadata) ||
 		withoutSlabs.DataSignature != obj.DataSignature || withoutSlabs.MetadataSignature != obj.MetadataSignature {
 		t.Fatal("expected the object without slabs to preserve keys, signatures, and metadata")
+	} else if withoutSlabs.Size != obj.Size() {
+		t.Fatalf("expected size %d, got %d", obj.Size(), withoutSlabs.Size)
 	}
 
 	if err := store.DeleteObject(acc, obj.ID()); err != nil {
@@ -548,6 +613,14 @@ func TestObjectSlabs(t *testing.T) {
 		params[1].Slice(20, 30),
 	}
 	obj := store.pinRandomObject(t, acc, expected)
+
+	// signed URL reads use the same loader and must decorate every slice,
+	// including multiple slices of the same slab, with its sectors
+	if shared, err := store.SharedObject(obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(shared.Slabs, expected) {
+		t.Fatalf("expected shared slabs %+v, got %+v", expected, shared.Slabs)
+	}
 
 	// the whole object in one page
 	page, err := store.ObjectSlabs(acc, obj.ID(), 0, 10)

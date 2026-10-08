@@ -368,7 +368,8 @@ CREATE TABLE objects (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(), -- allow sorting by update time
     encrypted_metadata BYTEA, -- user provided, encrypted metadata
     data_signature BYTEA UNIQUE NOT NULL CHECK(LENGTH(data_signature) = 64), -- signature of blake2b(object_key || encrypted_data_key)
-    meta_signature BYTEA UNIQUE NOT NULL CHECK(LENGTH(meta_signature) = 64) -- signature of blake2b(object ID || metadata key || encrypted_metadata)
+    meta_signature BYTEA UNIQUE NOT NULL CHECK(LENGTH(meta_signature) = 64), -- signature of blake2b(object ID || metadata key || encrypted_metadata)
+    size BIGINT NOT NULL CHECK(size >= 0) -- logical size of the object (object.Size())
 );
 
 -- object_key is unique per account

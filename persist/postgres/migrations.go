@@ -519,4 +519,12 @@ ALTER TABLE pools ADD COLUMN accounts_seq BIGINT NOT NULL DEFAULT 1;
 ALTER TABLE pool_hosts ADD COLUMN attached_seq BIGINT NOT NULL DEFAULT 0;`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+ALTER TABLE objects ADD COLUMN size BIGINT CHECK(size >= 0) DEFAULT 0;
+UPDATE objects o SET size = s.size FROM (SELECT object_id, SUM(slab_length)::bigint AS size FROM object_slabs GROUP BY object_id) s WHERE s.object_id = o.id;
+ALTER TABLE objects ALTER COLUMN size DROP DEFAULT;
+ALTER TABLE objects ALTER COLUMN size SET NOT NULL;`)
+		return err
+	},
 }

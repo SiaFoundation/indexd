@@ -105,9 +105,6 @@ type (
 	// without the slabs, so it is returned alongside the object.
 	ObjectWithoutSlabs struct {
 		ObjectID types.Hash256 `json:"objectID"`
-		// Size is the object's length in bytes, the sum of its slab
-		// lengths.
-		Size uint64 `json:"size"`
 		slabs.SealedObjectWithoutSlabs
 	}
 )

@@ -84,6 +84,10 @@ type (
 		EncryptedDataKey []byte          `json:"encryptedDataKey"`
 		DataSignature    types.Signature `json:"dataSignature"`
 
+		// Size is the logical size of the object in bytes, the sum of its
+		// slab slices' lengths.
+		Size uint64 `json:"size"`
+
 		EncryptedMetadataKey []byte          `json:"encryptedMetadataKey,omitempty"`
 		EncryptedMetadata    []byte          `json:"encryptedMetadata,omitempty"`
 		MetadataSignature    types.Signature `json:"metadataSignature"`
@@ -180,11 +184,22 @@ func (pr *PinObjectRequest) VerifySignatures(pk types.PublicKey) error {
 	return errors.Join(pr.VerifyDataSignature(pk), pr.VerifyMetadataSignature(pk))
 }
 
-// Size returns the total size of the object in bytes.
+// Size returns the logical size of the object in bytes, the sum of its slab
+// slices' lengths.
 func (o *SharedObject) Size() uint64 {
 	var size uint64
-	for _, ss := range o.Slabs {
-		size += uint64(ss.Length)
+	for _, slab := range o.Slabs {
+		size += uint64(slab.Length)
+	}
+	return size
+}
+
+// Size returns the logical size of the object in bytes, the sum of its slab
+// slices' lengths.
+func (pr *PinObjectRequest) Size() uint64 {
+	var size uint64
+	for _, slab := range pr.Slabs {
+		size += uint64(slab.Length)
 	}
 	return size
 }
@@ -232,11 +247,23 @@ func (so *SealedObject) PinRequest() PinObjectRequest {
 	}
 }
 
-// WithoutSlabs returns the sealed object without its slab slices.
+// Size returns the logical size of the object in bytes, the sum of its slab
+// slices' lengths.
+func (so *SealedObject) Size() uint64 {
+	var size uint64
+	for _, slab := range so.Slabs {
+		size += uint64(slab.Length)
+	}
+	return size
+}
+
+// WithoutSlabs returns the sealed object without its slab slices. The size is
+// derived from the slabs, so they must all be present.
 func (so *SealedObject) WithoutSlabs() *SealedObjectWithoutSlabs {
 	return &SealedObjectWithoutSlabs{
 		EncryptedDataKey:     so.EncryptedDataKey,
 		DataSignature:        so.DataSignature,
+		Size:                 so.Size(),
 		EncryptedMetadataKey: so.EncryptedMetadataKey,
 		EncryptedMetadata:    so.EncryptedMetadata,
 		MetadataSignature:    so.MetadataSignature,

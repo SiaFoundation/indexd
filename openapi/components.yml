@@ -192,8 +192,11 @@ components:
           description: The protocol used by the host
 
     SealedObject:
+      description: >
+        A sealed object with its slabs. Its logical size is the sum of its slab
+        slices' lengths.
       allOf:
-        - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
+        - $ref: "#/components/schemas/SealedObjectBase"
         - type: object
           properties:
             slabs:
@@ -201,6 +204,36 @@ components:
               items:
                 $ref: "#/components/schemas/SlabSlice"
               description: The list of slabs that make up the object
+
+    # The fields shared by a sealed object with and without its slabs.
+    SealedObjectBase:
+      type: object
+      properties:
+        encryptedDataKey:
+          type: string
+          format: byte
+          description: The encrypted data key used to encrypt and decrypt the object's data
+        dataSignature:
+          $ref: "#/components/schemas/Signature"
+          description: The signature of the object's data
+        encryptedMetadataKey:
+          type: string
+          format: byte
+          description: The encrypted metadata key used to encrypt and decrypt the object's metadata
+        encryptedMetadata:
+          type: string
+          format: byte
+          description: Optional metadata stored on the object
+        metadataSignature:
+          $ref: "#/components/schemas/Signature"
+        createdAt:
+          type: string
+          format: date-time
+          description: The time the object was created
+        updatedAt:
+          type: string
+          format: date-time
+          description: The time the object was last updated
 
     # A shared object contains all information required to retrieve
     # and decrypt an object without additional account context.
@@ -623,37 +656,18 @@ components:
             - description: The object, if it exists
 
     SealedObjectWithoutSlabs:
-      type: object
       description: >
         A sealed object without its slabs, which are paginated separately with
         `GET /objects/{key}/slabs`, or `GET /shared/objects/{id}/slabs` when
         authenticated with a sharing key
-      properties:
-        encryptedDataKey:
-          type: string
-          format: byte
-          description: The encrypted data key used to encrypt and decrypt the object's data
-        dataSignature:
-          $ref: "#/components/schemas/Signature"
-          description: The signature of the object's data
-        encryptedMetadataKey:
-          type: string
-          format: byte
-          description: The encrypted metadata key used to encrypt and decrypt the object's metadata
-        encryptedMetadata:
-          type: string
-          format: byte
-          description: Optional metadata stored on the object
-        metadataSignature:
-          $ref: "#/components/schemas/Signature"
-        createdAt:
-          type: string
-          format: date-time
-          description: The time the object was created
-        updatedAt:
-          type: string
-          format: date-time
-          description: The time the object was last updated
+      allOf:
+        - $ref: "#/components/schemas/SealedObjectBase"
+        - type: object
+          properties:
+            size:
+              type: integer
+              format: uint64
+              description: The logical size of the object in bytes, the sum of its slab slices' lengths
 
     SharingKeyObjectWithoutSlabs:
       description: >
@@ -667,10 +681,6 @@ components:
               allOf:
                 - $ref: "#/components/schemas/Hash256"
                 - description: The object's unique ID
-            size:
-              type: integer
-              format: uint64
-              description: The object's size in bytes, the sum of its slab lengths
 
     ObjectEventWithoutSlabs:
       type: object
