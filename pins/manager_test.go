@@ -15,7 +15,9 @@ import (
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/testutils"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap/zaptest/observer"
 	"lukechampine.com/frand"
 )
 
@@ -261,4 +263,50 @@ func checkSettings(settings hosts.UsabilitySettings, ps pins.PinnedSettings, exp
 		}
 	}
 	return nil
+}
+
+type mockStore struct {
+	mu sync.Mutex
+	ps pins.PinnedSettings
+}
+
+func (s *mockStore) PinnedSettings() (pins.PinnedSettings, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ps, nil
+}
+
+func (s *mockStore) UpdatePinnedSettings(ps pins.PinnedSettings) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ps = ps
+	return nil
+}
+
+func TestPinManagerNoExplorer(t *testing.T) {
+	core, logs := observer.New(zap.WarnLevel)
+	h := &mockHostManager{us: testUsabilitySettings}
+
+	pm, err := pins.NewManager(nil, h, &mockStore{}, pins.WithLogger(zap.New(core)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pm.Close()
+
+	// enabling pinning without an explorer should not fail or panic
+	err = pm.UpdatePinnedSettings(context.Background(), pins.PinnedSettings{
+		Currency:        "usd",
+		MaxStoragePrice: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	} else if n := logs.FilterMessage("price pinning requires an explorer").Len(); n != 1 {
+		t.Fatalf("expected 1 warning, got %d", n)
+	}
+
+	// usability settings should be unchanged
+	us, _ := h.UsabilitySettings(context.Background())
+	if us != testUsabilitySettings {
+		t.Fatal("usability settings should not have changed")
+	}
 }

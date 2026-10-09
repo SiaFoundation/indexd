@@ -293,7 +293,13 @@ func runRootCmd(ctx context.Context, cfg config.Config, walletKey types.PrivateK
 		adminAPIOpts = append(adminAPIOpts, admin.WithExplorer(e))
 	}
 
-	pm, err := pins.NewManager(e, hm, store, pins.WithLogger(log.Named("pins")))
+	// only pass the explorer if it is enabled, otherwise the nil pointer would
+	// be wrapped in a non-nil interface
+	var pinExplorer pins.Explorer
+	if e != nil {
+		pinExplorer = e
+	}
+	pm, err := pins.NewManager(pinExplorer, hm, store, pins.WithLogger(log.Named("pins")))
 	if err != nil {
 		return fmt.Errorf("failed to create pins manager: %w", err)
 	}
