@@ -1,3 +1,9 @@
+## 0.6.2 (2026-10-09)
+
+### Fixes
+
+- Fix panic when updating pinned settings with the explorer disabled
+
 ## 0.6.1 (2026-10-08)
 
 ### Features
