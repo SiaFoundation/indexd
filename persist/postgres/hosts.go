@@ -350,10 +350,12 @@ func (s *Store) BlockedHosts(offset, limit int) ([]types.PublicKey, error) {
 func (s *Store) BlockHosts(hks []types.PublicKey, reasons []string) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		for _, hk := range hks {
+			// the host might not be in the hosts table, so look up the existing
+			// reasons independently of it
 			var hostID int64
 			var updated []string
-			err := tx.QueryRow(ctx, `SELECT h.id, COALESCE(hb.reasons, '{}') FROM hosts h LEFT JOIN hosts_blocklist hb ON hb.public_key = h.public_key WHERE h.public_key = $1`, sqlPublicKey(hk)).Scan(&hostID, &updated)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			err := tx.QueryRow(ctx, `SELECT COALESCE((SELECT id FROM hosts WHERE public_key = $1), 0), COALESCE((SELECT reasons FROM hosts_blocklist WHERE public_key = $1), '{}')`, sqlPublicKey(hk)).Scan(&hostID, &updated)
+			if err != nil {
 				return fmt.Errorf("failed to check existing blocklist entry for host %q: %w", hk, err)
 			}
 
