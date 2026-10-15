@@ -262,6 +262,62 @@ func TestBlockHosts(t *testing.T) {
 	}
 }
 
+func TestBlockUnknownHostNoReasons(t *testing.T) {
+	log := zaptest.NewLogger(t)
+	store := initPostgres(t, log.Named("postgres"))
+
+	// assert blocking a host that is not in the database without any reasons
+	// works and doesn't error
+	for i, test := range []struct {
+		name    string
+		reasons []string
+	}{
+		{"nil", nil},
+		{"empty", []string{}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			hk := types.PublicKey{byte(i + 1)}
+			if err := store.BlockHosts([]types.PublicKey{hk}, test.reasons); err != nil {
+				t.Fatal(err)
+			}
+
+			var reasons []string
+			if err := store.pool.QueryRow(t.Context(), `SELECT reasons FROM hosts_blocklist WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&reasons); err != nil {
+				t.Fatal(err)
+			} else if len(reasons) != 0 {
+				t.Fatal("expected no reasons, got", reasons)
+			}
+		})
+	}
+
+	if hks, err := store.BlockedHosts(0, 10); err != nil {
+		t.Fatal(err)
+	} else if len(hks) != 2 {
+		t.Fatal("expected 2 blocked hosts, got", len(hks))
+	}
+}
+
+func TestBlockUnknownHostMergeReasons(t *testing.T) {
+	log := zaptest.NewLogger(t)
+	store := initPostgres(t, log.Named("postgres"))
+
+	// assert blocking a host that is not in the database again merges the
+	// reasons with the existing ones
+	hk := types.PublicKey{1}
+	if err := store.BlockHosts([]types.PublicKey{hk}, []string{"a"}); err != nil {
+		t.Fatal(err)
+	} else if err := store.BlockHosts([]types.PublicKey{hk}, []string{"b"}); err != nil {
+		t.Fatal(err)
+	}
+
+	var reasons []string
+	if err := store.pool.QueryRow(t.Context(), `SELECT reasons FROM hosts_blocklist WHERE public_key = $1`, sqlPublicKey(hk)).Scan(&reasons); err != nil {
+		t.Fatal(err)
+	} else if !reflect.DeepEqual(reasons, []string{"a", "b"}) {
+		t.Fatal("expected reasons to be merged, got", reasons)
+	}
+}
+
 func TestRemoveBlocklistReasons(t *testing.T) {
 	log := zaptest.NewLogger(t)
 	store := initPostgres(t, log.Named("postgres"))
