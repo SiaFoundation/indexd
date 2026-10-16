@@ -8,7 +8,9 @@ on:
     types:
       - opened
 
+permissions: {} # the shared workflow authenticates with PAT_ADD_TO_PROJECT
+
 jobs:
   add-to-project:
-    uses: SiaFoundation/workflows/.github/workflows/project-add.yml@b42741de5798fcb1881143d714a923501ec4ff89 # master
+    uses: SiaFoundation/workflows/.github/workflows/project-add.yml@95130e8c532eb275d3e359b4c4ae97083ae96c8f # master
     secrets: inherit

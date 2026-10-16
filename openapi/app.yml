@@ -6,7 +6,7 @@ info:
 
     Responses are JSON by default. Set the Accept header to application/cbor to receive the same response as CBOR instead; negotiated responses set Vary: Accept.
 
-  version: 0.6.0
+  version: 0.6.1
 servers:
   - url: http://localhost:9982/api
 tags:
