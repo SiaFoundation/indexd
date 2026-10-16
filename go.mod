@@ -1,4 +1,4 @@
-module go.sia.tech/indexd // v0.6.1
+module go.sia.tech/indexd // v0.6.2
 
 go 1.27.0
 
