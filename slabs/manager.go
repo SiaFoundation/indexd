@@ -144,6 +144,7 @@ type (
 		ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
 		ListObjectsWithoutSlabs(account proto.Account, cursor Cursor, limit int) ([]ObjectEventWithoutSlabs, error)
 		ObjectSlabs(account proto.Account, key types.Hash256, cursor int64, limit int) ([]SlabSlice, error)
+		RepackableObjects(account proto.Account, cutoff time.Time, limit int, maxSize uint64) ([]RepackableObject, error)
 		ObjectStats() (ObjectStats, error)
 		PublishObjectEvents() error
 		SharedObject(key types.Hash256) (SharedObject, error)
