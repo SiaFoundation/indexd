@@ -1,4 +1,4 @@
-# [![Indexd](https://sia.tech/api/media/file/banner-indexd.png)](http://sia.tech)
+# [![Indexd](.github/assets/banner.png)](http://sia.tech)
 
 [![GoDoc](https://godoc.org/go.sia.tech/indexd?status.svg)](https://godoc.org/go.sia.tech/indexd)
 
