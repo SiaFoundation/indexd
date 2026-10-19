@@ -1888,6 +1888,41 @@ func TestRepackableObjects(t *testing.T) {
 	}
 	assertKeys(t, objects, small, medium, large)
 
+	// an object with several slices of the same slab is stored in one slab
+	// and is only returned once
+	multi := newTestSlab(hk)
+	store.pinTestSlabs(t, acc, multi)
+	sliced := store.pinRandomObject(t, acc, []slabs.SlabSlice{multi.Slice(0, 200), multi.Slice(200, 200)})
+	objects, err = store.RepackableObjects(acc, future, 10, slabSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, small, medium, large, sliced)
+	if err := store.DeleteObject(acc, sliced.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	// ranges referenced by multiple accounts only count once
+	shared := proto.Account{3}
+	store.addTestAccount(t, types.PublicKey(shared))
+	identical, overlapping := newTestSlab(hk), newTestSlab(hk)
+	store.pinTestSlabs(t, acc, identical, overlapping)
+	store.pinTestSlabs(t, shared, identical, overlapping)
+	sharedIdentical := store.pinRandomObject(t, acc, []slabs.SlabSlice{identical.Slice(0, slabSize/4+1)})
+	store.pinRandomObject(t, shared, []slabs.SlabSlice{identical.Slice(0, slabSize/4+1)})
+	sharedOverlapping := store.pinRandomObject(t, acc, []slabs.SlabSlice{overlapping.Slice(0, slabSize/4+2)})
+	store.pinRandomObject(t, shared, []slabs.SlabSlice{overlapping.Slice(slabSize/8, slabSize/4)})
+	objects, err = store.RepackableObjects(acc, future, 10, slabSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, small, medium, large, sharedIdentical, sharedOverlapping)
+	for _, obj := range []slabs.SealedObject{sharedIdentical, sharedOverlapping} {
+		if err := store.DeleteObject(acc, obj.ID()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
 	// blocked objects are hidden
 	if err := store.BlockObject(small.ID(), "test"); err != nil {
 		t.Fatal(err)

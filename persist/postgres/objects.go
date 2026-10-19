@@ -226,17 +226,47 @@ func (s *Store) RepackableObjects(account proto.Account, cutoff time.Time, limit
 		}
 
 		rows, err := tx.Query(ctx, `
-			WITH candidates AS (
-				SELECT o.id, o.object_key, o.encrypted_data_key, o.encrypted_meta_key, o.encrypted_metadata, o.data_signature, o.meta_signature, o.created_at, o.updated_at, o.size,
-					SUM(o.size) OVER (ORDER BY o.size ASC, o.id ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_size
+			WITH single_slab_objects AS (
+				SELECT o.id, MIN(os.slab_digest) AS slab_digest
 				FROM objects o
 				JOIN object_slabs os ON os.object_id = o.id
-				JOIN slabs s ON s.digest = os.slab_digest
 				WHERE o.account_id = $1
-				  AND s.pinned_at < $2
 				  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = o.object_key)
-				  AND (SELECT COUNT(*) FROM object_slabs os2 WHERE os2.object_id = o.id) = 1
-				  AND (SELECT SUM(os3.slab_length) FROM object_slabs os3 WHERE os3.slab_digest = s.digest) * 2 < s.min_shards::bigint * $3
+				GROUP BY o.id
+				HAVING COUNT(DISTINCT os.slab_digest) = 1
+			),
+			-- slices may overlap, including across accounts, so a slab's used
+			-- bytes are the union of its referenced ranges. A range starts a
+			-- new island when it begins past the end of every earlier range.
+			ranges AS (
+				SELECT os.slab_digest, os.slab_offset::bigint AS range_start, (os.slab_offset + os.slab_length)::bigint AS range_end,
+					MAX(os.slab_offset + os.slab_length) OVER (PARTITION BY os.slab_digest ORDER BY os.slab_offset, os.slab_length ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_end
+				FROM object_slabs os
+				WHERE os.slab_digest IN (SELECT slab_digest FROM single_slab_objects)
+			),
+			islands AS (
+				SELECT slab_digest, range_start, range_end,
+					COUNT(*) FILTER (WHERE prev_end IS NULL OR range_start > prev_end) OVER (PARTITION BY slab_digest ORDER BY range_start, range_end ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS island
+				FROM ranges
+			),
+			slab_usage AS (
+				SELECT slab_digest, SUM(island_end - island_start) AS used
+				FROM (
+					SELECT slab_digest, MIN(range_start) AS island_start, MAX(range_end) AS island_end
+					FROM islands
+					GROUP BY slab_digest, island
+				) merged
+				GROUP BY slab_digest
+			),
+			candidates AS (
+				SELECT o.id, o.object_key, o.encrypted_data_key, o.encrypted_meta_key, o.encrypted_metadata, o.data_signature, o.meta_signature, o.created_at, o.updated_at, o.size,
+					SUM(o.size) OVER (ORDER BY o.size ASC, o.id ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_size
+				FROM single_slab_objects sso
+				JOIN objects o ON o.id = sso.id
+				JOIN slabs s ON s.digest = sso.slab_digest
+				JOIN slab_usage u ON u.slab_digest = sso.slab_digest
+				WHERE s.pinned_at < $2
+				  AND u.used * 2 < s.min_shards::bigint * $3
 			)
 			SELECT id, object_key, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at, size
 			FROM candidates
