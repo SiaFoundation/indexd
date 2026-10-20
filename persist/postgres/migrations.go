@@ -540,6 +540,15 @@ CREATE TABLE spaces (
 );
 CREATE INDEX spaces_owner_account_id_idx ON spaces(owner_account_id);
 
+CREATE TABLE space_slabs (
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL,
+    slab_id BIGINT NOT NULL,
+    PRIMARY KEY (space_id, slab_id),
+    FOREIGN KEY (account_id, slab_id) REFERENCES account_slabs(account_id, slab_id) ON DELETE CASCADE
+);
+CREATE INDEX space_slabs_account_id_slab_id_idx ON space_slabs(account_id, slab_id);
+
 CREATE TABLE space_invitations (
     space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,

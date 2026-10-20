@@ -544,6 +544,7 @@ WHERE a.account_id = $1
 		WHERE o.account_id = a.account_id
 		AND os.slab_digest = s.digest
 	)
+	AND NOT EXISTS (SELECT 1 FROM space_slabs p WHERE p.account_id = a.account_id AND p.slab_id = s.id)
 	AND NOT EXISTS (
 		SELECT 1 FROM spaces sp
 		JOIN space_objects o ON o.space_id = sp.id
@@ -773,7 +774,7 @@ func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 				FROM objects o
 				JOIN object_slabs os ON o.id = os.object_id
 				WHERE o.account_id = $1 AND os.slab_digest = $3
-			) OR EXISTS (
+			) OR EXISTS (SELECT 1 FROM space_slabs WHERE account_id = $1 AND slab_id = $2) OR EXISTS (
 				SELECT 1 FROM spaces sp
 				JOIN space_objects o ON o.space_id = sp.id
 				JOIN space_object_slabs os ON os.object_id = o.id

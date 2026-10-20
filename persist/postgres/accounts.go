@@ -223,6 +223,9 @@ WHERE o.id = d.id;`,
  WHERE s.owner_account_id = $1 OR m.account_id = $1
  ORDER BY m.space_id, m.account_id LIMIT $2
 )`,
+			`DELETE FROM space_slabs WHERE (space_id, slab_id) IN (
+ SELECT space_id, slab_id FROM space_slabs WHERE account_id = $1 ORDER BY space_id, slab_id LIMIT $2
+)`,
 			`DELETE FROM spaces WHERE id IN (
  SELECT id FROM spaces WHERE owner_account_id = $1 ORDER BY id LIMIT $2
 )`,

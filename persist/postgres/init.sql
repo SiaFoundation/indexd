@@ -613,6 +613,15 @@ CREATE TABLE account_slabs (
 -- speed up query used when unpinning slabs
 CREATE INDEX account_slabs_slab_id_idx ON account_slabs(slab_id);
 
+CREATE TABLE space_slabs (
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL,
+    slab_id BIGINT NOT NULL,
+    PRIMARY KEY (space_id, slab_id),
+    FOREIGN KEY (account_id, slab_id) REFERENCES account_slabs(account_id, slab_id) ON DELETE CASCADE
+);
+CREATE INDEX space_slabs_account_id_slab_id_idx ON space_slabs(account_id, slab_id);
+
 CREATE TABLE slab_deletion_queue (
     id BIGSERIAL PRIMARY KEY,
     slab_id BIGINT NOT NULL

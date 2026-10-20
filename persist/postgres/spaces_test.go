@@ -378,6 +378,11 @@ func TestSpaceStorageLifecycle(t *testing.T) {
 		MetadataSignature: types.Signature(frand.Bytes(64)),
 		Slabs:             []slabs.SlabSlice{slab.Slice(0, 100)},
 	}
+	if err := store.PinSpaceObject(member, keys[1], obj.PinRequest()); !errors.Is(err, slabs.ErrObjectUnpinnedSlab) {
+		t.Fatalf("used another space's pin: %v", err)
+	} else if _, err := store.PinSpaceSlabs(member, keys[1], time.Time{}, slab); err != nil {
+		t.Fatal(err)
+	}
 	for _, key := range keys {
 		if err := store.PinSpaceObject(member, key, obj.PinRequest()); err != nil {
 			t.Fatal(err)
@@ -523,5 +528,61 @@ func TestSpaceInvitationExpiration(t *testing.T) {
 		t.Fatal(err)
 	} else if err := store.AcceptSpaceInvitation(member, key, frand.Bytes(72)); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestSpaceSlabIsolation(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	writer := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	store.addTestAccount(t, types.PublicKey(writer))
+	key := types.Hash256(frand.Entropy256())
+	if err := store.AddSpace(owner, key, frand.Entropy256(), nil); err != nil {
+		t.Fatal(err)
+	} else if err := store.InviteSpaceMember(owner, key, writer, spaces.Write, frand.Bytes(72), time.Now(), time.Now().Add(time.Hour), types.Signature(frand.Bytes(64))); err != nil {
+		t.Fatal(err)
+	} else if err := store.AcceptSpaceInvitation(writer, key, frand.Bytes(72)); err != nil {
+		t.Fatal(err)
+	}
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	obj := store.pinTestObject(t, owner, hk)
+	if err := store.PinSpaceObject(writer, key, obj.PinRequest()); !errors.Is(err, slabs.ErrObjectUnpinnedSlab) {
+		t.Fatalf("used owner's personal pin: %v", err)
+	} else if _, err := store.PinSpaceSlabs(writer, key, time.Time{}, obj.Slabs[0].Pin()); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteObject(owner, obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if err := store.PruneSlabs(owner, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	} else if err := store.UnpinSlab(owner, obj.Slabs[0].Digest()); !errors.Is(err, slabs.ErrSlabInUse) {
+		t.Fatalf("unpinned staged space slab: %v", err)
+	}
+	store.assertPinnedSlabs(t, owner, obj.Slabs[0].Digest())
+	store.assertPinnedSlabs(t, writer)
+	if err := store.PinSpaceObject(writer, key, obj.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	other := types.Hash256(frand.Entropy256())
+	if err := store.AddSpace(owner, other, frand.Entropy256(), nil); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.PinSpaceSlabs(owner, other, time.Time{}, obj.Slabs[0].Pin()); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteSpaceObject(owner, key, obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteSpace(owner, key); err != nil {
+		t.Fatal(err)
+	}
+	store.assertPinnedSlabs(t, owner, obj.Slabs[0].Digest())
+	if err := store.DeleteSpace(owner, other); err != nil {
+		t.Fatal(err)
+	}
+	store.assertPinnedSlabs(t, owner)
+	var remaining int
+	if err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM space_slabs`).Scan(&remaining); err != nil {
+		t.Fatal(err)
+	} else if remaining != 0 {
+		t.Fatalf("space pins remain after deletion: %d", remaining)
 	}
 }

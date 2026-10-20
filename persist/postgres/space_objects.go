@@ -15,7 +15,7 @@ import (
 
 // PinSpaceObject adds or replaces an object in a space, charging storage to the
 // owner. Account must have write permission, and the object's slabs must already
-// be pinned by account or the owner. An existing object's encrypted data key cannot change.
+// be pinned by account or to this space. An existing object's encrypted data key cannot change.
 func (s *Store) PinSpaceObject(account proto.Account, key types.Hash256, obj slabs.PinObjectRequest) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, spaces.Write, false)
@@ -35,11 +35,12 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.Hash256, obj sla
 		}
 		var count int
 		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM slabs s WHERE digest = ANY($1)
-   AND EXISTS (SELECT 1 FROM account_slabs a WHERE a.slab_id = s.id AND a.account_id IN ($2, $3))`, digests, callerID, ownerID).Scan(&count); err != nil {
+   AND (EXISTS (SELECT 1 FROM space_slabs p WHERE p.slab_id = s.id AND p.space_id = $2)
+   OR EXISTS (SELECT 1 FROM account_slabs a WHERE a.slab_id = s.id AND a.account_id = $3))`, digests, id, callerID).Scan(&count); err != nil {
 			return err
 		} else if count != len(unique) {
 			return slabs.ErrObjectUnpinnedSlab
-		} else if err := pinSpaceObjectSlabs(ctx, tx, ownerID, digests); err != nil {
+		} else if err := pinSpaceObjectSlabs(ctx, tx, id, ownerID, digests); err != nil {
 			return err
 		}
 		var metaKey []byte
@@ -72,7 +73,7 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.Hash256, obj sla
 		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 			return err
 		}
-		return s.unpinUnreferencedSlabs(ctx, tx, ownerID, oldSlabs, nil)
+		return s.unpinSpaceSlabs(ctx, tx, id, ownerID, oldSlabs)
 	})
 }
 
@@ -97,7 +98,7 @@ func (s *Store) DeleteSpaceObject(account proto.Account, key, objectKey types.Ha
 		} else if _, err := tx.Exec(ctx, `DELETE FROM space_objects WHERE id = $1`, objectID); err != nil {
 			return err
 		}
-		return s.unpinUnreferencedSlabs(ctx, tx, ownerID, slabIDs, nil)
+		return s.unpinSpaceSlabs(ctx, tx, id, ownerID, slabIDs)
 	})
 }
 
@@ -159,7 +160,7 @@ func (s *Store) SpaceObject(account proto.Account, key, objectKey types.Hash256)
 // Account must have write permission.
 func (s *Store) PinSpaceSlabs(account proto.Account, key types.Hash256, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) (digests []slabs.SlabID, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		_, ownerID, _, err := spaceAccess(ctx, tx, account, key, spaces.Write, false)
+		id, ownerID, _, err := spaceAccess(ctx, tx, account, key, spaces.Write, false)
 		if err != nil {
 			return err
 		}
@@ -168,12 +169,31 @@ func (s *Store) PinSpaceSlabs(account proto.Account, key types.Hash256, nextInte
 			return err
 		}
 		digests, err = s.pinSlabs(ctx, tx, owner, nextIntegrityCheck, toPin...)
+		if err != nil {
+			return err
+		}
+		keys := make([]sqlHash256, len(digests))
+		for i, digest := range digests {
+			keys[i] = sqlHash256(digest)
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO space_slabs (space_id, account_id, slab_id)
+ SELECT $1, $2, id FROM slabs WHERE digest = ANY($3) ON CONFLICT DO NOTHING`, id, ownerID, keys)
 		return err
 	})
 	return
 }
 
-func pinSpaceObjectSlabs(ctx context.Context, tx *txn, ownerID int64, digests []sqlHash256) error {
+func (s *Store) unpinSpaceSlabs(ctx context.Context, tx *txn, spaceID, ownerID int64, slabIDs []int64) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM space_slabs p USING slabs s
+ WHERE p.space_id = $1 AND p.slab_id = s.id AND p.slab_id = ANY($2)
+ AND NOT EXISTS (SELECT 1 FROM space_objects o JOIN space_object_slabs os ON os.object_id = o.id
+ WHERE o.space_id = p.space_id AND os.slab_digest = s.digest)`, spaceID, slabIDs); err != nil {
+		return err
+	}
+	return s.unpinUnreferencedSlabs(ctx, tx, ownerID, slabIDs, nil)
+}
+
+func pinSpaceObjectSlabs(ctx context.Context, tx *txn, spaceID, ownerID int64, digests []sqlHash256) error {
 	var data, size uint64
 	err := tx.QueryRow(ctx, `WITH pinned AS (
   INSERT INTO account_slabs (account_id, slab_id) SELECT $1, id FROM slabs WHERE digest = ANY($2)
@@ -202,13 +222,15 @@ func pinSpaceObjectSlabs(ctx context.Context, tx *txn, ownerID int64, digests []
 	} else if pinned > limit {
 		return accounts.ErrAppKeyStorageLimitExceeded
 	}
-	return nil
+	_, err = tx.Exec(ctx, `INSERT INTO space_slabs (space_id, account_id, slab_id)
+ SELECT $1, $2, id FROM slabs WHERE digest = ANY($3) ON CONFLICT DO NOTHING`, spaceID, ownerID, digests)
+	return err
 }
 
 func spaceSlabIDs(ctx context.Context, tx *txn, spaceID int64, objectID *int64) ([]int64, error) {
-	rows, err := tx.Query(ctx, `SELECT DISTINCT s.id FROM slabs s
-  JOIN space_object_slabs os ON os.slab_digest = s.digest JOIN space_objects o ON o.id = os.object_id
-  WHERE o.space_id = $1 AND ($2::bigint IS NULL OR o.id = $2)`, spaceID, objectID)
+	rows, err := tx.Query(ctx, `SELECT p.slab_id FROM space_slabs p JOIN slabs s ON s.id = p.slab_id
+ WHERE p.space_id = $1 AND ($2::bigint IS NULL OR EXISTS (
+ SELECT 1 FROM space_object_slabs os WHERE os.object_id = $2 AND os.slab_digest = s.digest))`, spaceID, objectID)
 	if err != nil {
 		return nil, err
 	}
