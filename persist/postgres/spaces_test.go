@@ -2,12 +2,15 @@ package postgres
 
 import (
 	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
@@ -201,6 +204,8 @@ func TestSpaceInvitations(t *testing.T) {
 		t.Fatal(err)
 	} else if err := store.DeleteAccount(admin); err != nil {
 		t.Fatal(err)
+	} else if err := store.AcceptSpaceInvitation(recipient, key, frand.Bytes(72)); !errors.Is(err, ErrSpaceInvitationNotFound) {
+		t.Fatalf("expected missing invitation from deleted inviter, got %v", err)
 	} else if err := store.PruneAccounts(100); err != nil {
 		t.Fatal(err)
 	} else if err := store.AcceptSpaceInvitation(recipient, key, frand.Bytes(72)); !errors.Is(err, ErrSpaceInvitationNotFound) {
@@ -415,5 +420,52 @@ func TestSpaceInvitationRace(t *testing.T) {
 	}
 	if accepted != 1 || missing != 1 {
 		t.Fatalf("accepted %d, missing %d", accepted, missing)
+	}
+}
+
+func TestSpaceConcurrentReads(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	key := types.Hash256(frand.Entropy256())
+	obj := slabs.SealedObject{EncryptedDataKey: frand.Bytes(72), DataSignature: types.Signature(frand.Bytes(64)), MetadataSignature: types.Signature(frand.Bytes(64))}
+	if err := store.AddSpace(owner, key, frand.Entropy256(), nil); err != nil {
+		t.Fatal(err)
+	} else if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.transaction(func(ctx context.Context, tx *txn) error {
+		if _, _, _, err := spaceAccess(ctx, tx, owner, key, SpaceRead, true); err != nil {
+			return err
+		}
+		result := make(chan error, 1)
+		go func() {
+			if _, err := store.Space(owner, key); err != nil {
+				result <- err
+			} else if _, err := store.SpaceMembers(owner, key, 0, 10); err != nil {
+				result <- err
+			} else if _, err := store.SpaceObjects(owner, key, 0, 10); err != nil {
+				result <- err
+			} else {
+				_, err := store.SpaceObject(owner, key, obj.ID())
+				result <- err
+			}
+		}()
+		select {
+		case err := <-result:
+			if err != nil {
+				return err
+			}
+		case <-time.After(5 * time.Second):
+			return errors.New("space reads blocked each other")
+		}
+		_, err := store.pool.Exec(ctx, `SELECT id FROM spaces WHERE space_key = $1 FOR UPDATE NOWAIT`, sqlHash256(key))
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "55P03" {
+			return fmt.Errorf("expected read to block exclusive lock, got %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
 	}
 }

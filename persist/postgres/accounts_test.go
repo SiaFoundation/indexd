@@ -1420,3 +1420,48 @@ func BenchmarkAccountReady(b *testing.B) {
 		}
 	})
 }
+
+func TestPruneAccountSpaceObjects(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	key := types.Hash256(frand.Entropy256())
+	if err := store.AddSpace(owner, key, frand.Entropy256(), nil); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		obj := store.pinTestObject(t, owner, hk)
+		if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
+			t.Fatal(err)
+		} else if err := store.DeleteObject(owner, obj.ID()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.DeleteAccount(owner); err != nil {
+		t.Fatal(err)
+	}
+	for _, limit := range []int{0, 2} {
+		if err := store.PruneAccounts(limit); err != nil {
+			t.Fatal(err)
+		}
+		var objects, spaces int
+		if err := store.pool.QueryRow(t.Context(), `SELECT (SELECT COUNT(*) FROM space_objects), (SELECT COUNT(*) FROM spaces)`).Scan(&objects, &spaces); err != nil {
+			t.Fatal(err)
+		} else if objects != 3-limit || spaces != 1 {
+			t.Fatalf("pruning limit %d: got %d objects and %d spaces", limit, objects, spaces)
+		}
+	}
+	if err := store.PruneAccounts(10); err != nil {
+		t.Fatal(err)
+	}
+	for table, want := range map[string]int{"accounts": 0, "spaces": 0, "space_objects": 0, "account_slabs": 0, "slab_deletion_queue": 3} {
+		var got int
+		if err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM `+table).Scan(&got); err != nil {
+			t.Fatal(err)
+		} else if got != want {
+			t.Fatalf("expected %d %s, got %d", want, table, got)
+		}
+	}
+}

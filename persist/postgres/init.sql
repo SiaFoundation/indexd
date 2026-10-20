@@ -547,7 +547,6 @@ CREATE INDEX spaces_owner_account_id_idx ON spaces(owner_account_id);
 
 -- Permissions are additive: 0 = read, 1 = read + write,
 -- 2 = read + write + delete, 3 = read + write + delete + admin.
--- Admins may remove users except themselves, other admins, or the owner.
 CREATE TABLE space_invitations (
     space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -561,8 +560,6 @@ CREATE TABLE space_invitations (
 CREATE INDEX space_invitations_account_id_idx ON space_invitations(account_id);
 CREATE INDEX space_invitations_inviter_account_id_idx ON space_invitations(inviter_account_id);
 
--- The owner has full access without a membership row. Other accounts must have
--- accepted and not been revoked before the API allows space operations.
 CREATE TABLE space_members (
     space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
@@ -575,8 +572,6 @@ CREATE TABLE space_members (
 );
 CREATE INDEX space_members_account_id_idx ON space_members(account_id);
 
--- Space objects are independent of personal objects and survive member revocation.
--- Pinning must attach their slabs to the owner's account for quota accounting.
 CREATE TABLE space_objects (
     id BIGSERIAL PRIMARY KEY,
     space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,

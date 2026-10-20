@@ -105,7 +105,7 @@ func (s *Store) Spaces(account proto.Account, offset, limit int) (spaces []Space
 // for accepted members.
 func (s *Store) Space(account proto.Account, key types.Hash256) (space Space, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		_, _, callerID, err := spaceAccess(ctx, tx, account, key, SpaceRead)
+		_, _, callerID, err := spaceAccess(ctx, tx, account, key, SpaceRead, true)
 		if err != nil {
 			return err
 		}
@@ -122,7 +122,7 @@ func (s *Store) Space(account proto.Account, key types.Hash256) (space Space, er
 // UpdateSpace replaces a space's encrypted metadata. The owner and admins may update it.
 func (s *Store) UpdateSpace(account proto.Account, key types.Hash256, metadata []byte) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceAdmin)
+		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceAdmin, false)
 		if err != nil {
 			return err
 		}
@@ -136,7 +136,7 @@ func (s *Store) UpdateSpace(account proto.Account, key types.Hash256, metadata [
 // invite accounts registered with the same app ID as the owner.
 func (s *Store) InviteSpaceMember(account proto.Account, key types.Hash256, recipient proto.Account, permission SpacePermission, encryptedKey []byte) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceAdmin)
+		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceAdmin, false)
 		if err != nil {
 			return err
 		}
@@ -194,12 +194,14 @@ func (s *Store) SpaceInvitations(account proto.Account, offset, limit int) (invi
 // re-encrypted with its app key. The invitation can only be accepted once.
 func (s *Store) AcceptSpaceInvitation(account proto.Account, key types.Hash256, encryptedKey []byte) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, callerID, err := spaceAccess(ctx, tx, account, key, SpaceRead)
+		id, _, callerID, err := spaceAccess(ctx, tx, account, key, SpaceRead, false)
 		if err != nil && !errors.Is(err, ErrSpacePermission) {
 			return err
 		}
 		res, err := tx.Exec(ctx, `WITH invitation AS (
-   DELETE FROM space_invitations WHERE space_id = $1 AND account_id = $2 RETURNING permission_level
+   DELETE FROM space_invitations WHERE space_id = $1 AND account_id = $2
+   AND EXISTS (SELECT 1 FROM accounts WHERE id = inviter_account_id AND deleted_at IS NULL)
+   RETURNING permission_level
   ) INSERT INTO space_members (space_id, account_id, permission_level, encrypted_key)
   SELECT $1, $2, permission_level, $3 FROM invitation
   ON CONFLICT (space_id, account_id) DO UPDATE SET permission_level = EXCLUDED.permission_level,
@@ -217,7 +219,7 @@ func (s *Store) AcceptSpaceInvitation(account proto.Account, key types.Hash256, 
 // or the recipient may cancel it.
 func (s *Store) DeleteSpaceInvitation(account proto.Account, key types.Hash256, recipient proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceRead)
+		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceRead, false)
 		if err != nil && !errors.Is(err, ErrSpacePermission) {
 			return err
 		} else if callerID != ownerID && account != recipient {
@@ -236,7 +238,7 @@ func (s *Store) DeleteSpaceInvitation(account proto.Account, key types.Hash256, 
 // SpaceMembers returns a page of active members. Account must have read permission.
 func (s *Store) SpaceMembers(account proto.Account, key types.Hash256, offset, limit int) (members []SpaceMember, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceRead)
+		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceRead, true)
 		if err != nil {
 			return err
 		}
@@ -259,7 +261,7 @@ func (s *Store) SpaceMembers(account proto.Account, key types.Hash256, offset, l
 // UpdateSpaceMember changes an active member's permission. Only the owner may do so.
 func (s *Store) UpdateSpaceMember(account proto.Account, key types.Hash256, member proto.Account, permission SpacePermission) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, _, err := spaceAccess(ctx, tx, account, key, spaceOwner)
+		id, _, _, err := spaceAccess(ctx, tx, account, key, spaceOwner, false)
 		if err != nil {
 			return err
 		}
@@ -278,7 +280,7 @@ func (s *Store) UpdateSpaceMember(account proto.Account, key types.Hash256, memb
 // admins may revoke other non-admin members. Neither may revoke themselves or the owner.
 func (s *Store) DeleteSpaceMember(account proto.Account, key types.Hash256, member proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceAdmin)
+		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceAdmin, false)
 		if err != nil {
 			return err
 		}
@@ -302,7 +304,7 @@ func (s *Store) DeleteSpaceMember(account proto.Account, key types.Hash256, memb
 	})
 }
 
-func spaceAccess(ctx context.Context, tx *txn, account proto.Account, key types.Hash256, permission SpacePermission) (id, ownerID, callerID int64, err error) {
+func spaceAccess(ctx context.Context, tx *txn, account proto.Account, key types.Hash256, permission SpacePermission, readOnly bool) (id, ownerID, callerID int64, err error) {
 	var deleted bool
 	callerID, deleted, err = accountID(ctx, tx, account)
 	if err != nil {
@@ -311,9 +313,13 @@ func spaceAccess(ctx context.Context, tx *txn, account proto.Account, key types.
 		err = accounts.ErrNotFound
 		return
 	}
+	lock := " FOR UPDATE OF s"
+	if readOnly {
+		lock = " FOR SHARE OF s"
+	}
 	err = tx.QueryRow(ctx, `SELECT s.id, s.owner_account_id FROM spaces s
  JOIN accounts a ON a.id = s.owner_account_id
- WHERE s.space_key = $1 AND a.deleted_at IS NULL FOR UPDATE OF s`, sqlHash256(key)).Scan(&id, &ownerID)
+ WHERE s.space_key = $1 AND a.deleted_at IS NULL`+lock, sqlHash256(key)).Scan(&id, &ownerID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = ErrSpaceNotFound
 	}

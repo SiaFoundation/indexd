@@ -24,7 +24,7 @@ type SpaceObject struct {
 // be pinned by account or the owner.
 func (s *Store) PinSpaceObject(account proto.Account, key types.Hash256, obj slabs.PinObjectRequest) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceWrite)
+		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceWrite, false)
 		if err != nil {
 			return err
 		} else if err := assertObjectNotBlocked(ctx, tx, obj.ID); err != nil {
@@ -83,7 +83,7 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.Hash256, obj sla
 // used by the owner's objects. Account must have delete permission.
 func (s *Store) DeleteSpaceObject(account proto.Account, key, objectKey types.Hash256) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, _, err := spaceAccess(ctx, tx, account, key, SpaceDelete)
+		id, ownerID, _, err := spaceAccess(ctx, tx, account, key, SpaceDelete, false)
 		if err != nil {
 			return err
 		}
@@ -108,7 +108,7 @@ func (s *Store) DeleteSpaceObject(account proto.Account, key, objectKey types.Ha
 // Only the owner may delete it.
 func (s *Store) DeleteSpace(account proto.Account, key types.Hash256) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, _, err := spaceAccess(ctx, tx, account, key, spaceOwner)
+		id, ownerID, _, err := spaceAccess(ctx, tx, account, key, spaceOwner, false)
 		if err != nil {
 			return err
 		}
@@ -126,7 +126,7 @@ func (s *Store) DeleteSpace(account proto.Account, key types.Hash256) error {
 // blocked objects. Account must have read permission.
 func (s *Store) SpaceObjects(account proto.Account, key types.Hash256, offset, limit int) (objects []SpaceObject, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceRead)
+		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceRead, true)
 		if err != nil {
 			return err
 		}
@@ -140,7 +140,7 @@ func (s *Store) SpaceObjects(account proto.Account, key types.Hash256, offset, l
 // and the object must not be blocked.
 func (s *Store) SpaceObject(account proto.Account, key, objectKey types.Hash256) (object SpaceObject, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceRead)
+		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceRead, true)
 		if err != nil {
 			return err
 		} else if err := assertObjectNotBlocked(ctx, tx, objectKey); err != nil {
@@ -162,7 +162,7 @@ func (s *Store) SpaceObject(account proto.Account, key, objectKey types.Hash256)
 // Account must have write permission.
 func (s *Store) PinSpaceSlabs(account proto.Account, key types.Hash256, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) (digests []slabs.SlabID, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		_, ownerID, _, err := spaceAccess(ctx, tx, account, key, SpaceWrite)
+		_, ownerID, _, err := spaceAccess(ctx, tx, account, key, SpaceWrite, false)
 		if err != nil {
 			return err
 		}

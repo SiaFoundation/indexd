@@ -177,8 +177,9 @@ func (s *Store) UpdateAccount(ak types.PublicKey, updates accounts.UpdateAccount
 	})
 }
 
-// PruneAccounts deletes up to `limit` combined objects and slab associations
-// from a soft-deleted account. Once no objects remain, the slab associations are
+// PruneAccounts deletes up to `limit` combined objects, spaces, invitations,
+// memberships, and slab associations from one soft-deleted account.
+// Once no objects remain, the slab associations are
 // removed and the slabs queued for background deletion by PruneDeletedSlabs.
 // Once no slab associations remain the account is hard deleted. Returns
 // accounts.ErrNotFound when no soft-deleted accounts are pending.
@@ -196,13 +197,10 @@ func (s *Store) PruneAccounts(limit int) error {
 			return accounts.ErrNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to find an account to delete: %w", err)
-		} else if _, err := tx.Exec(ctx, `DELETE FROM spaces WHERE owner_account_id = $1`, accountID); err != nil {
-			return err
-		} else if _, err := tx.Exec(ctx, `DELETE FROM space_invitations WHERE inviter_account_id = $1`, accountID); err != nil {
-			return err
 		}
 
-		rows, err := tx.Query(ctx, `DELETE FROM objects o
+		for _, query := range []string{
+			`DELETE FROM objects o
 USING (
 	SELECT id
 	FROM objects
@@ -210,31 +208,25 @@ USING (
 	ORDER BY id
 	LIMIT $2
 ) d
-WHERE o.id = d.id
-RETURNING o.object_key;`, accountID, remaining)
-		if err != nil {
-			return fmt.Errorf("failed to delete objects: %w", err)
-		}
-
-		var objKeys []sqlHash256
-		for rows.Next() {
-			var objKey sqlHash256
-			if err := rows.Scan(&objKey); err != nil {
-				return fmt.Errorf("failed to scan object key: %w", err)
-			}
-			objKeys = append(objKeys, objKey)
-		}
-		if err := rows.Err(); err != nil {
-			return fmt.Errorf("failed to get rows: %w", err)
-		}
-
-		remaining -= len(objKeys)
-		if remaining == 0 {
-			return nil
-		}
-
-		// queue up to `remaining` slab associations for background deletion
-		res, err := tx.Exec(ctx, `
+WHERE o.id = d.id;`,
+			`DELETE FROM space_objects WHERE id IN (
+ SELECT o.id FROM space_objects o JOIN spaces s ON s.id = o.space_id
+ WHERE s.owner_account_id = $1 ORDER BY o.id LIMIT $2
+)`,
+			`DELETE FROM space_invitations WHERE (space_id, account_id) IN (
+ SELECT i.space_id, i.account_id FROM space_invitations i JOIN spaces s ON s.id = i.space_id
+ WHERE s.owner_account_id = $1 OR i.inviter_account_id = $1 OR i.account_id = $1
+ ORDER BY i.space_id, i.account_id LIMIT $2
+)`,
+			`DELETE FROM space_members WHERE (space_id, account_id) IN (
+ SELECT m.space_id, m.account_id FROM space_members m JOIN spaces s ON s.id = m.space_id
+ WHERE s.owner_account_id = $1 OR m.account_id = $1
+ ORDER BY m.space_id, m.account_id LIMIT $2
+)`,
+			`DELETE FROM spaces WHERE id IN (
+ SELECT id FROM spaces WHERE owner_account_id = $1 ORDER BY id LIMIT $2
+)`,
+			`
 			WITH deleted AS (
 				DELETE FROM account_slabs
 				WHERE account_id = $1 AND slab_id IN (
@@ -246,12 +238,16 @@ RETURNING o.object_key;`, accountID, remaining)
 				RETURNING slab_id
 			)
 			INSERT INTO slab_deletion_queue (slab_id)
-			SELECT slab_id FROM deleted;`, accountID, remaining)
-		if err != nil {
-			return fmt.Errorf("failed to queue account slabs for deletion: %w", err)
-		} else if res.RowsAffected() == int64(remaining) {
-			// filled the batch, so more may remain
-			return nil
+			SELECT slab_id FROM deleted;`,
+		} {
+			res, err := tx.Exec(ctx, query, accountID, remaining)
+			if err != nil {
+				return fmt.Errorf("failed to prune account data: %w", err)
+			}
+			remaining -= int(res.RowsAffected())
+			if remaining == 0 {
+				return nil
+			}
 		}
 
 		// no slabs left; hard delete the account. its connect key's pinned
