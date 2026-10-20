@@ -9,15 +9,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
-)
-
-// Space permissions grant read, write, delete, and admin access cumulatively.
-const (
-	SpaceRead SpacePermission = iota
-	SpaceWrite
-	SpaceDelete
-	SpaceAdmin
-	spaceOwner
+	"go.sia.tech/indexd/spaces"
 )
 
 const sqlSpaces = `SELECT s.space_key, a.public_key, s.seed, s.encrypted_metadata, m.encrypted_key,
@@ -25,47 +17,6 @@ const sqlSpaces = `SELECT s.space_key, a.public_key, s.seed, s.encrypted_metadat
  FROM spaces s JOIN accounts a ON a.id = s.owner_account_id
  LEFT JOIN space_members m ON m.space_id = s.id AND m.account_id = $1 AND m.revoked_at IS NULL
  WHERE a.deleted_at IS NULL AND (s.owner_account_id = $1 OR m.account_id IS NOT NULL)`
-
-// Errors returned by space operations.
-var (
-	ErrSpaceNotFound           = errors.New("space not found")
-	ErrSpacePermission         = errors.New("insufficient space permission")
-	ErrSpaceInvitationNotFound = errors.New("space invitation not found")
-	ErrSpaceMemberNotFound     = errors.New("space member not found")
-)
-
-// SpacePermission is a member's level of access to a space.
-type SpacePermission uint8
-
-// Space describes a space and the requesting account's access to it.
-type Space struct {
-	Key               types.Hash256
-	Owner             proto.Account
-	Seed              types.Hash256
-	EncryptedMetadata []byte
-	EncryptedKey      []byte
-	Permission        SpacePermission
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-}
-
-// SpaceInvitation is a pending invitation to join a space.
-type SpaceInvitation struct {
-	SpaceKey     types.Hash256
-	Inviter      proto.Account
-	Permission   SpacePermission
-	EncryptedKey []byte
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
-}
-
-// SpaceMember is an active member of a space.
-type SpaceMember struct {
-	Account    proto.Account
-	Permission SpacePermission
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
-}
 
 // AddSpace creates a space owned by account with the given key, derivation seed,
 // and encrypted metadata.
@@ -83,7 +34,7 @@ func (s *Store) AddSpace(account proto.Account, key, seed types.Hash256, metadat
 }
 
 // Spaces returns a page of spaces owned by or shared with account, newest first.
-func (s *Store) Spaces(account proto.Account, offset, limit int) (spaces []Space, err error) {
+func (s *Store) Spaces(account proto.Account, offset, limit int) (result []spaces.Space, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		id, deleted, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -95,7 +46,7 @@ func (s *Store) Spaces(account proto.Account, offset, limit int) (spaces []Space
 		if err != nil {
 			return err
 		}
-		spaces, err = pgx.CollectRows(rows, scanSpace)
+		result, err = pgx.CollectRows(rows, scanSpace)
 		return err
 	})
 	return
@@ -103,9 +54,9 @@ func (s *Store) Spaces(account proto.Account, offset, limit int) (spaces []Space
 
 // Space returns a space accessible to account, including its encrypted key
 // for accepted members.
-func (s *Store) Space(account proto.Account, key types.Hash256) (space Space, err error) {
+func (s *Store) Space(account proto.Account, key types.Hash256) (space spaces.Space, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		_, _, callerID, err := spaceAccess(ctx, tx, account, key, SpaceRead, true)
+		_, _, callerID, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
 		if err != nil {
 			return err
 		}
@@ -122,7 +73,7 @@ func (s *Store) Space(account proto.Account, key types.Hash256) (space Space, er
 // UpdateSpace replaces a space's encrypted metadata. The owner and admins may update it.
 func (s *Store) UpdateSpace(account proto.Account, key types.Hash256, metadata []byte) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceAdmin, false)
+		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Admin, false)
 		if err != nil {
 			return err
 		}
@@ -133,10 +84,17 @@ func (s *Store) UpdateSpace(account proto.Account, key types.Hash256, metadata [
 
 // InviteSpaceMember invites a registered account with the given permission and
 // encrypted space key, replacing any pending invitation. Owners and admins may
-// invite accounts registered with the same app ID as the owner.
-func (s *Store) InviteSpaceMember(account proto.Account, key types.Hash256, recipient proto.Account, permission SpacePermission, encryptedKey []byte) error {
+// invite accounts registered with the same app ID as the owner. The creation
+// time must be no more than five minutes behind server time, and expiration must
+// be in the future.
+func (s *Store) InviteSpaceMember(account proto.Account, key types.Hash256, recipient proto.Account, permission spaces.Permission, encryptedKey []byte, createdAt, expiresAt time.Time, signature types.Signature) error {
+	if time.Since(createdAt) > 5*time.Minute {
+		return spaces.ErrInvitationTimestampTooOld
+	} else if !expiresAt.After(time.Now()) {
+		return spaces.ErrInvitationExpired
+	}
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceAdmin, false)
+		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, spaces.Admin, false)
 		if err != nil {
 			return err
 		}
@@ -146,7 +104,7 @@ func (s *Store) InviteSpaceMember(account proto.Account, key types.Hash256, reci
 		} else if deleted {
 			return accounts.ErrNotFound
 		} else if recipientID == ownerID {
-			return ErrSpacePermission
+			return spaces.ErrPermission
 		}
 		var sameApp, member bool
 		if err := tx.QueryRow(ctx, `SELECT recipient.app_id = owner.app_id,
@@ -154,18 +112,19 @@ func (s *Store) InviteSpaceMember(account proto.Account, key types.Hash256, reci
    FROM accounts recipient, accounts owner WHERE recipient.id = $2 AND owner.id = $3`, id, recipientID, ownerID).Scan(&sameApp, &member); err != nil {
 			return err
 		} else if !sameApp || member {
-			return ErrSpacePermission
+			return spaces.ErrPermission
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO space_invitations (space_id, account_id, inviter_account_id, permission_level, encrypted_key)
-   VALUES ($1, $2, $3, $4, $5)
+		_, err = tx.Exec(ctx, `INSERT INTO space_invitations (space_id, account_id, inviter_account_id, permission_level, encrypted_key, created_at, expires_at, signature)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
    ON CONFLICT (space_id, account_id) DO UPDATE SET inviter_account_id = EXCLUDED.inviter_account_id,
-   permission_level = EXCLUDED.permission_level, encrypted_key = EXCLUDED.encrypted_key, updated_at = NOW()`, id, recipientID, callerID, permission, encryptedKey)
+   permission_level = EXCLUDED.permission_level, encrypted_key = EXCLUDED.encrypted_key,
+   created_at = EXCLUDED.created_at, expires_at = EXCLUDED.expires_at, signature = EXCLUDED.signature, updated_at = NOW()`, id, recipientID, callerID, permission, encryptedKey, createdAt.Truncate(time.Microsecond), expiresAt.Truncate(time.Microsecond), sqlSignature(signature))
 		return err
 	})
 }
 
-// SpaceInvitations returns a page of pending invitations for account, newest first.
-func (s *Store) SpaceInvitations(account proto.Account, offset, limit int) (invitations []SpaceInvitation, err error) {
+// SpaceInvitations returns a page of unexpired pending invitations for account, newest first.
+func (s *Store) SpaceInvitations(account proto.Account, offset, limit int) (invitations []spaces.Invitation, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		id, deleted, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -173,16 +132,17 @@ func (s *Store) SpaceInvitations(account proto.Account, offset, limit int) (invi
 		} else if deleted {
 			return accounts.ErrNotFound
 		}
-		rows, err := tx.Query(ctx, `SELECT s.space_key, a.public_key, i.permission_level, i.encrypted_key, i.created_at, i.updated_at
+		rows, err := tx.Query(ctx, `SELECT s.space_key, a.public_key, i.permission_level, i.encrypted_key, i.signature, i.expires_at, i.created_at, i.updated_at
    FROM space_invitations i JOIN spaces s ON s.id = i.space_id
    JOIN accounts a ON a.id = i.inviter_account_id JOIN accounts owner ON owner.id = s.owner_account_id
-   WHERE i.account_id = $1 AND a.deleted_at IS NULL AND owner.deleted_at IS NULL
+   WHERE i.account_id = $1 AND i.expires_at > clock_timestamp() AND a.deleted_at IS NULL AND owner.deleted_at IS NULL
    ORDER BY i.created_at DESC, i.space_id DESC LIMIT $2 OFFSET $3`, id, limit, offset)
 		if err != nil {
 			return err
 		}
-		invitations, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (v SpaceInvitation, err error) {
-			err = row.Scan((*sqlHash256)(&v.SpaceKey), (*sqlPublicKey)(&v.Inviter), &v.Permission, &v.EncryptedKey, &v.CreatedAt, &v.UpdatedAt)
+		invitations, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (v spaces.Invitation, err error) {
+			v.Recipient = account
+			err = row.Scan((*sqlHash256)(&v.SpaceKey), (*sqlPublicKey)(&v.Inviter), &v.Permission, &v.EncryptedKey, (*sqlSignature)(&v.Signature), &v.ExpiresAt, &v.CreatedAt, &v.UpdatedAt)
 			return
 		})
 		return err
@@ -191,25 +151,26 @@ func (s *Store) SpaceInvitations(account proto.Account, offset, limit int) (invi
 }
 
 // AcceptSpaceInvitation accepts account's invitation using the space key
-// re-encrypted with its app key. The invitation can only be accepted once.
+// re-encrypted with its app key. The invitation must be unexpired and can only be accepted once.
 func (s *Store) AcceptSpaceInvitation(account proto.Account, key types.Hash256, encryptedKey []byte) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, callerID, err := spaceAccess(ctx, tx, account, key, SpaceRead, false)
-		if err != nil && !errors.Is(err, ErrSpacePermission) {
+		id, _, callerID, err := spaceAccess(ctx, tx, account, key, spaces.Read, false)
+		if err != nil && !errors.Is(err, spaces.ErrPermission) {
 			return err
 		}
 		res, err := tx.Exec(ctx, `WITH invitation AS (
-   DELETE FROM space_invitations WHERE space_id = $1 AND account_id = $2
+   DELETE FROM space_invitations WHERE space_id = $1 AND account_id = $2 AND expires_at > clock_timestamp()
    AND EXISTS (SELECT 1 FROM accounts WHERE id = inviter_account_id AND deleted_at IS NULL)
-   RETURNING permission_level
-  ) INSERT INTO space_members (space_id, account_id, permission_level, encrypted_key)
-  SELECT $1, $2, permission_level, $3 FROM invitation
+   RETURNING permission_level, inviter_account_id, created_at
+  ) INSERT INTO space_members (space_id, account_id, permission_level, encrypted_key, invited_by, invited_at)
+  SELECT $1, $2, permission_level, $3, a.public_key, i.created_at FROM invitation i JOIN accounts a ON a.id = i.inviter_account_id
   ON CONFLICT (space_id, account_id) DO UPDATE SET permission_level = EXCLUDED.permission_level,
-  encrypted_key = EXCLUDED.encrypted_key, revoked_at = NULL, created_at = NOW(), updated_at = NOW()`, id, callerID, encryptedKey)
+  encrypted_key = EXCLUDED.encrypted_key, invited_by = EXCLUDED.invited_by,
+  invited_at = EXCLUDED.invited_at, revoked_at = NULL, created_at = NOW(), updated_at = NOW()`, id, callerID, encryptedKey)
 		if err != nil {
 			return err
 		} else if res.RowsAffected() == 0 {
-			return ErrSpaceInvitationNotFound
+			return spaces.ErrInvitationNotFound
 		}
 		return nil
 	})
@@ -219,38 +180,38 @@ func (s *Store) AcceptSpaceInvitation(account proto.Account, key types.Hash256, 
 // or the recipient may cancel it.
 func (s *Store) DeleteSpaceInvitation(account proto.Account, key types.Hash256, recipient proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceRead, false)
-		if err != nil && !errors.Is(err, ErrSpacePermission) {
+		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, spaces.Read, false)
+		if err != nil && !errors.Is(err, spaces.ErrPermission) {
 			return err
 		} else if callerID != ownerID && account != recipient {
-			return ErrSpacePermission
+			return spaces.ErrPermission
 		}
 		res, err := tx.Exec(ctx, `DELETE FROM space_invitations i USING accounts a WHERE i.space_id = $1 AND i.account_id = a.id AND a.public_key = $2`, id, sqlPublicKey(recipient))
 		if err != nil {
 			return err
 		} else if res.RowsAffected() == 0 {
-			return ErrSpaceInvitationNotFound
+			return spaces.ErrInvitationNotFound
 		}
 		return nil
 	})
 }
 
 // SpaceMembers returns a page of active members. Account must have read permission.
-func (s *Store) SpaceMembers(account proto.Account, key types.Hash256, offset, limit int) (members []SpaceMember, err error) {
+func (s *Store) SpaceMembers(account proto.Account, key types.Hash256, offset, limit int) (members []spaces.Member, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceRead, true)
+		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
 		if err != nil {
 			return err
 		}
-		rows, err := tx.Query(ctx, `SELECT a.public_key, m.permission_level, m.created_at, m.updated_at
+		rows, err := tx.Query(ctx, `SELECT a.public_key, m.invited_by, m.invited_at, m.permission_level, m.created_at, m.updated_at
    FROM space_members m JOIN accounts a ON a.id = m.account_id
    WHERE m.space_id = $1 AND m.revoked_at IS NULL AND a.deleted_at IS NULL
    ORDER BY m.account_id LIMIT $2 OFFSET $3`, id, limit, offset)
 		if err != nil {
 			return err
 		}
-		members, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (v SpaceMember, err error) {
-			err = row.Scan((*sqlPublicKey)(&v.Account), &v.Permission, &v.CreatedAt, &v.UpdatedAt)
+		members, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (v spaces.Member, err error) {
+			err = row.Scan((*sqlPublicKey)(&v.Account), (*sqlPublicKey)(&v.InvitedBy), &v.InvitedAt, &v.Permission, &v.CreatedAt, &v.UpdatedAt)
 			return
 		})
 		return err
@@ -259,9 +220,9 @@ func (s *Store) SpaceMembers(account proto.Account, key types.Hash256, offset, l
 }
 
 // UpdateSpaceMember changes an active member's permission. Only the owner may do so.
-func (s *Store) UpdateSpaceMember(account proto.Account, key types.Hash256, member proto.Account, permission SpacePermission) error {
+func (s *Store) UpdateSpaceMember(account proto.Account, key types.Hash256, member proto.Account, permission spaces.Permission) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, _, err := spaceAccess(ctx, tx, account, key, spaceOwner, false)
+		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Owner, false)
 		if err != nil {
 			return err
 		}
@@ -270,7 +231,7 @@ func (s *Store) UpdateSpaceMember(account proto.Account, key types.Hash256, memb
 		if err != nil {
 			return err
 		} else if res.RowsAffected() == 0 {
-			return ErrSpaceMemberNotFound
+			return spaces.ErrMemberNotFound
 		}
 		return nil
 	})
@@ -280,7 +241,7 @@ func (s *Store) UpdateSpaceMember(account proto.Account, key types.Hash256, memb
 // admins may revoke other non-admin members. Neither may revoke themselves or the owner.
 func (s *Store) DeleteSpaceMember(account proto.Account, key types.Hash256, member proto.Account) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceAdmin, false)
+		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, spaces.Admin, false)
 		if err != nil {
 			return err
 		}
@@ -288,23 +249,23 @@ func (s *Store) DeleteSpaceMember(account proto.Account, key types.Hash256, memb
 		if err != nil {
 			return err
 		} else if memberID == ownerID || memberID == callerID {
-			return ErrSpacePermission
+			return spaces.ErrPermission
 		}
-		var permission SpacePermission
+		var permission spaces.Permission
 		err = tx.QueryRow(ctx, `SELECT permission_level FROM space_members WHERE space_id = $1 AND account_id = $2 AND revoked_at IS NULL`, id, memberID).Scan(&permission)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrSpaceMemberNotFound
+			return spaces.ErrMemberNotFound
 		} else if err != nil {
 			return err
-		} else if callerID != ownerID && permission == SpaceAdmin {
-			return ErrSpacePermission
+		} else if callerID != ownerID && permission == spaces.Admin {
+			return spaces.ErrPermission
 		}
 		_, err = tx.Exec(ctx, `UPDATE space_members SET revoked_at = NOW(), updated_at = NOW() WHERE space_id = $1 AND account_id = $2`, id, memberID)
 		return err
 	})
 }
 
-func spaceAccess(ctx context.Context, tx *txn, account proto.Account, key types.Hash256, permission SpacePermission, readOnly bool) (id, ownerID, callerID int64, err error) {
+func spaceAccess(ctx context.Context, tx *txn, account proto.Account, key types.Hash256, permission spaces.Permission, readOnly bool) (id, ownerID, callerID int64, err error) {
 	var deleted bool
 	callerID, deleted, err = accountID(ctx, tx, account)
 	if err != nil {
@@ -321,22 +282,22 @@ func spaceAccess(ctx context.Context, tx *txn, account proto.Account, key types.
  JOIN accounts a ON a.id = s.owner_account_id
  WHERE s.space_key = $1 AND a.deleted_at IS NULL`+lock, sqlHash256(key)).Scan(&id, &ownerID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = ErrSpaceNotFound
+		err = spaces.ErrNotFound
 	}
 	if err != nil || callerID == ownerID {
 		return
 	}
-	var level SpacePermission
+	var level spaces.Permission
 	err = tx.QueryRow(ctx, `SELECT permission_level FROM space_members WHERE space_id = $1 AND account_id = $2 AND revoked_at IS NULL`, id, callerID).Scan(&level)
 	if errors.Is(err, pgx.ErrNoRows) {
-		err = ErrSpacePermission
+		err = spaces.ErrPermission
 	} else if err == nil && level < permission {
-		err = ErrSpacePermission
+		err = spaces.ErrPermission
 	}
 	return
 }
 
-func scanSpace(row pgx.CollectableRow) (v Space, err error) {
+func scanSpace(row pgx.CollectableRow) (v spaces.Space, err error) {
 	err = row.Scan((*sqlHash256)(&v.Key), (*sqlPublicKey)(&v.Owner), (*sqlHash256)(&v.Seed), &v.EncryptedMetadata, &v.EncryptedKey, &v.Permission, &v.CreatedAt, &v.UpdatedAt)
 	return
 }

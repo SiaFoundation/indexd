@@ -10,21 +10,15 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/spaces"
 )
-
-// SpaceObject is an encrypted object in a space and the account that signed it.
-type SpaceObject struct {
-	Key     types.Hash256
-	Account proto.Account
-	slabs.SealedObject
-}
 
 // PinSpaceObject adds or replaces an object in a space, charging storage to the
 // owner. Account must have write permission, and the object's slabs must already
-// be pinned by account or the owner.
+// be pinned by account or the owner. An existing object's encrypted data key cannot change.
 func (s *Store) PinSpaceObject(account proto.Account, key types.Hash256, obj slabs.PinObjectRequest) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, SpaceWrite, false)
+		id, ownerID, callerID, err := spaceAccess(ctx, tx, account, key, spaces.Write, false)
 		if err != nil {
 			return err
 		} else if err := assertObjectNotBlocked(ctx, tx, obj.ID); err != nil {
@@ -56,11 +50,14 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.Hash256, obj sla
 		err = tx.QueryRow(ctx, `INSERT INTO space_objects (space_id, object_key, account_key, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, size)
    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
    ON CONFLICT (space_id, object_key) DO UPDATE SET account_key = EXCLUDED.account_key,
-   encrypted_data_key = EXCLUDED.encrypted_data_key, encrypted_meta_key = EXCLUDED.encrypted_meta_key,
+   encrypted_meta_key = EXCLUDED.encrypted_meta_key,
    encrypted_metadata = EXCLUDED.encrypted_metadata, data_signature = EXCLUDED.data_signature,
-   meta_signature = EXCLUDED.meta_signature, size = EXCLUDED.size, updated_at = NOW() RETURNING id`,
+   meta_signature = EXCLUDED.meta_signature, size = EXCLUDED.size, updated_at = NOW()
+   WHERE space_objects.encrypted_data_key = EXCLUDED.encrypted_data_key RETURNING id`,
 			id, sqlHash256(obj.ID), sqlPublicKey(account), obj.EncryptedDataKey, metaKey, obj.EncryptedMetadata, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature), obj.Size()).Scan(&objectID)
-		if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return spaces.ErrObjectKeyMismatch
+		} else if err != nil {
 			return err
 		}
 		oldSlabs, err := spaceSlabIDs(ctx, tx, id, &objectID)
@@ -83,7 +80,7 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.Hash256, obj sla
 // used by the owner's objects. Account must have delete permission.
 func (s *Store) DeleteSpaceObject(account proto.Account, key, objectKey types.Hash256) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, _, err := spaceAccess(ctx, tx, account, key, SpaceDelete, false)
+		id, ownerID, _, err := spaceAccess(ctx, tx, account, key, spaces.Delete, false)
 		if err != nil {
 			return err
 		}
@@ -108,7 +105,7 @@ func (s *Store) DeleteSpaceObject(account proto.Account, key, objectKey types.Ha
 // Only the owner may delete it.
 func (s *Store) DeleteSpace(account proto.Account, key types.Hash256) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		id, ownerID, _, err := spaceAccess(ctx, tx, account, key, spaceOwner, false)
+		id, ownerID, _, err := spaceAccess(ctx, tx, account, key, spaces.Owner, false)
 		if err != nil {
 			return err
 		}
@@ -124,9 +121,9 @@ func (s *Store) DeleteSpace(account proto.Account, key types.Hash256) error {
 
 // SpaceObjects returns a page of objects in a space, newest first, excluding
 // blocked objects. Account must have read permission.
-func (s *Store) SpaceObjects(account proto.Account, key types.Hash256, offset, limit int) (objects []SpaceObject, err error) {
+func (s *Store) SpaceObjects(account proto.Account, key types.Hash256, offset, limit int) (objects []spaces.Object, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceRead, true)
+		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
 		if err != nil {
 			return err
 		}
@@ -138,9 +135,9 @@ func (s *Store) SpaceObjects(account proto.Account, key types.Hash256, offset, l
 
 // SpaceObject returns an object in a space. Account must have read permission,
 // and the object must not be blocked.
-func (s *Store) SpaceObject(account proto.Account, key, objectKey types.Hash256) (object SpaceObject, err error) {
+func (s *Store) SpaceObject(account proto.Account, key, objectKey types.Hash256) (object spaces.Object, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		id, _, _, err := spaceAccess(ctx, tx, account, key, SpaceRead, true)
+		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
 		if err != nil {
 			return err
 		} else if err := assertObjectNotBlocked(ctx, tx, objectKey); err != nil {
@@ -162,7 +159,7 @@ func (s *Store) SpaceObject(account proto.Account, key, objectKey types.Hash256)
 // Account must have write permission.
 func (s *Store) PinSpaceSlabs(account proto.Account, key types.Hash256, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) (digests []slabs.SlabID, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
-		_, ownerID, _, err := spaceAccess(ctx, tx, account, key, SpaceWrite, false)
+		_, ownerID, _, err := spaceAccess(ctx, tx, account, key, spaces.Write, false)
 		if err != nil {
 			return err
 		}
@@ -218,7 +215,7 @@ func spaceSlabIDs(ctx context.Context, tx *txn, spaceID int64, objectID *int64) 
 	return pgx.CollectRows(rows, pgx.RowTo[int64])
 }
 
-func spaceObjects(ctx context.Context, tx *txn, spaceID int64, key *types.Hash256, offset, limit int) ([]SpaceObject, error) {
+func spaceObjects(ctx context.Context, tx *txn, spaceID int64, key *types.Hash256, offset, limit int) ([]spaces.Object, error) {
 	var objectKey any
 	if key != nil {
 		objectKey = sqlHash256(*key)
@@ -232,10 +229,10 @@ func spaceObjects(ctx context.Context, tx *txn, spaceID int64, key *types.Hash25
 	if err != nil {
 		return nil, err
 	}
-	var objects []SpaceObject
+	var objects []spaces.Object
 	var ids []int64
 	err = forEachRow(rows, func(row pgx.CollectableRow) error {
-		var o SpaceObject
+		var o spaces.Object
 		var id int64
 		if err := row.Scan(&id, (*sqlHash256)(&o.Key), (*sqlPublicKey)(&o.Account), &o.EncryptedDataKey, &o.EncryptedMetadataKey,
 			&o.EncryptedMetadata, (*sqlSignature)(&o.DataSignature), (*sqlSignature)(&o.MetadataSignature), &o.CreatedAt, &o.UpdatedAt); err != nil {
