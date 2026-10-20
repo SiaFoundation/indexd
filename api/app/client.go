@@ -269,11 +269,12 @@ func (c *Client) ListObjectsWithoutSlabs(ctx context.Context, appKey types.Priva
 }
 
 // RepackableObjects returns objects stored in a single slab that is more than
-// half empty, at most one slab of data at the given erasure coding parameters.
+// minWaste percent empty, at most one slab of data at the given erasure coding parameters.
 // Use api.WithLimit to cap the number of objects and api.WithBefore to
-// override the default 72 hour cutoff.
-func (c *Client) RepackableObjects(ctx context.Context, appKey types.PrivateKey, dataShards, parityShards int, opts ...api.URLQueryParameterOption) (resp []slabs.RepackableObject, err error) {
+// override the default 72 hour cutoff. minWaste must be between 0 and 100.
+func (c *Client) RepackableObjects(ctx context.Context, appKey types.PrivateKey, dataShards, parityShards, minWaste int, opts ...api.URLQueryParameterOption) (resp []slabs.RepackableObject, err error) {
 	values := url.Values{}
+	values.Set("minwaste", fmt.Sprint(minWaste))
 	values.Set("datashards", fmt.Sprint(dataShards))
 	values.Set("parityshards", fmt.Sprint(parityShards))
 	for _, opt := range opts {

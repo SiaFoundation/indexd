@@ -239,7 +239,7 @@ paths:
         - objects
       summary: List small objects that could be repacked
       description: >
-        Returns objects stored in a single slab whose data fills less than half of that slab, so the object could be repacked with other small objects to reclaim the unused space. Only objects whose slab was pinned before the cutoff are returned, matching `POST /slabs/prune`. Objects are returned smallest first, at most `limit` of them, and only while their combined size fits in one slab of data at the given erasure coding parameters (`datashards` × 4 MiB). Objects on the indexer's blocklist are hidden.
+        Returns objects stored in a single slab whose unused space exceeds `minwaste` percent of that slab, so the object could be repacked with other small objects to reclaim the unused space. Only objects whose slab was pinned before the cutoff are returned, matching `POST /slabs/prune`. Objects are returned smallest first, at most `limit` of them, and only while their combined size fits in one slab of data at the given erasure coding parameters (`datashards` × 4 MiB). Objects on the indexer's blocklist are hidden.
 
       operationId: listRepackableObjects
       parameters:
@@ -259,6 +259,14 @@ paths:
             type: integer
             minimum: 0
             maximum: 255
+        - name: minwaste
+          in: query
+          required: true
+          description: Minimum percentage of unused slab space. Slabs must exceed this percentage; lower values repack more aggressively.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 100
         - name: limit
           in: query
           description: The maximum number of objects to return

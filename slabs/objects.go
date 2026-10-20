@@ -406,12 +406,12 @@ func (m *SlabManager) ListObjectsWithoutSlabs(ctx context.Context, account proto
 }
 
 // RepackableObjects returns objects stored in a single slab that is more than
-// half empty, following the same cutoff as PruneSlabs: only objects whose
+// minWaste percent empty, following the same cutoff as PruneSlabs: only objects whose
 // slab was pinned before cutoff are returned. At most limit objects are
 // returned, and their combined size is at most one slab of data with
 // dataShards data shards.
-func (m *SlabManager) RepackableObjects(ctx context.Context, account proto.Account, cutoff time.Time, limit, dataShards int) ([]RepackableObject, error) {
-	return m.store.RepackableObjects(account, cutoff, limit, uint64(dataShards)*proto.SectorSize)
+func (m *SlabManager) RepackableObjects(ctx context.Context, account proto.Account, cutoff time.Time, limit, dataShards, minWaste int) ([]RepackableObject, error) {
+	return m.store.RepackableObjects(account, cutoff, limit, uint64(dataShards)*proto.SectorSize, minWaste)
 }
 
 // ObjectSlabs returns a page of the object's slab slices, starting at slice

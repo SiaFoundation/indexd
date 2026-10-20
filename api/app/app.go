@@ -47,7 +47,7 @@ type (
 		PinObject(ctx context.Context, account proto.Account, obj slabs.PinObjectRequest) error
 		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
 		ListObjectsWithoutSlabs(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventWithoutSlabs, error)
-		RepackableObjects(ctx context.Context, account proto.Account, cutoff time.Time, limit, dataShards int) ([]slabs.RepackableObject, error)
+		RepackableObjects(ctx context.Context, account proto.Account, cutoff time.Time, limit, dataShards, minWaste int) ([]slabs.RepackableObject, error)
 		ObjectSlabs(ctx context.Context, account proto.Account, key types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
 		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
@@ -373,7 +373,19 @@ func (a *app) handleGETRepackableObjects(jc jape.Context, pk types.PublicKey) {
 		}
 	}
 
-	objects, err := a.slabs.RepackableObjects(jc.Request.Context(), proto.Account(pk), cutoff, limit, dataShards)
+	var minWaste int
+	if jc.Request.FormValue("minwaste") == "" {
+		jc.Error(errors.New("minwaste is required"), http.StatusBadRequest)
+		return
+	}
+	if jc.DecodeForm("minwaste", &minWaste) != nil {
+		return
+	} else if minWaste < 0 || minWaste > 100 {
+		jc.Error(errors.New("minwaste must be between 0 and 100"), http.StatusBadRequest)
+		return
+	}
+
+	objects, err := a.slabs.RepackableObjects(jc.Request.Context(), proto.Account(pk), cutoff, limit, dataShards, minWaste)
 	if jc.Check("failed to get repackable objects", err) != nil {
 		return
 	}
