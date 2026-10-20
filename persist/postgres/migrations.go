@@ -534,6 +534,8 @@ CREATE TABLE spaces (
     space_key BYTEA UNIQUE NOT NULL CHECK(LENGTH(space_key) = 32),
     owner_account_id INTEGER NOT NULL REFERENCES accounts(id),
     seed BYTEA UNIQUE NOT NULL CHECK(LENGTH(seed) = 32),
+    signature BYTEA NOT NULL CHECK(LENGTH(signature) = 64),
+    encrypted_name BYTEA,
     encrypted_metadata BYTEA,
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()

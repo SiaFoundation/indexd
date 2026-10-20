@@ -32,3 +32,28 @@ func TestInvitationSigHash(t *testing.T) {
 		t.Fatal("signature rejected timestamp normalization")
 	}
 }
+
+func TestSpaceSignature(t *testing.T) {
+	ownerKey := types.GeneratePrivateKey()
+	req := AddSpaceRequest{Key: frand.Entropy256(), Seed: frand.Entropy256()}
+	req.Sign(ownerKey)
+	space := Space{Key: req.Key, Seed: req.Seed, Owner: [32]byte(ownerKey.PublicKey()), Signature: req.Signature}
+	if !ownerKey.PublicKey().VerifyHash(space.SigHash(), space.Signature) {
+		t.Fatal("space signature rejected")
+	}
+	for _, change := range []func(*Space){
+		func(s *Space) { s.Key[0] ^= 1 },
+		func(s *Space) { s.Owner[0] ^= 1 },
+		func(s *Space) { s.Seed[0] ^= 1 },
+	} {
+		modified := space
+		change(&modified)
+		if ownerKey.PublicKey().VerifyHash(modified.SigHash(), modified.Signature) {
+			t.Fatal("signature accepted a modified space identity")
+		}
+	}
+	space.EncryptedName, space.EncryptedMetadata = frand.Bytes(40), frand.Bytes(60)
+	if !ownerKey.PublicKey().VerifyHash(space.SigHash(), space.Signature) {
+		t.Fatal("metadata update invalidated space identity signature")
+	}
+}

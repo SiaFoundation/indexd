@@ -539,7 +539,9 @@ CREATE TABLE spaces (
     space_key BYTEA UNIQUE NOT NULL CHECK(LENGTH(space_key) = 32), -- public identifier, not the encryption key
     owner_account_id INTEGER NOT NULL REFERENCES accounts(id), -- pins count against this account's quota
     seed BYTEA UNIQUE NOT NULL CHECK(LENGTH(seed) = 32), -- public seed; space encryption key = HKDF(owner app key, seed, "space key")
-    encrypted_metadata BYTEA, -- user provided, encrypted space name and metadata
+    signature BYTEA NOT NULL CHECK(LENGTH(signature) = 64),
+    encrypted_name BYTEA,
+    encrypted_metadata BYTEA, -- user provided, encrypted space metadata
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );

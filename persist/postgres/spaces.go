@@ -12,15 +12,18 @@ import (
 	"go.sia.tech/indexd/spaces"
 )
 
-const sqlSpaces = `SELECT s.space_key, a.public_key, s.seed, s.encrypted_metadata, m.encrypted_key,
+const sqlSpaces = `SELECT s.space_key, a.public_key, s.seed, s.signature, s.encrypted_name, s.encrypted_metadata, m.encrypted_key,
  COALESCE(m.permission_level, 3), s.created_at, s.updated_at
  FROM spaces s JOIN accounts a ON a.id = s.owner_account_id
  LEFT JOIN space_members m ON m.space_id = s.id AND m.account_id = $1 AND m.revoked_at IS NULL
  WHERE a.deleted_at IS NULL AND (s.owner_account_id = $1 OR m.account_id IS NOT NULL)`
 
 // AddSpace creates a space owned by account with the given key, derivation seed,
-// and encrypted metadata.
-func (s *Store) AddSpace(account proto.Account, key, seed types.Hash256, metadata []byte) error {
+// encrypted name, and encrypted metadata. The owner must sign the space identity.
+func (s *Store) AddSpace(account proto.Account, req spaces.AddSpaceRequest) error {
+	if !types.PublicKey(account).VerifyHash(req.SigHash(account), req.Signature) {
+		return spaces.ErrInvalidSignature
+	}
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		id, deleted, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -28,7 +31,7 @@ func (s *Store) AddSpace(account proto.Account, key, seed types.Hash256, metadat
 		} else if deleted {
 			return accounts.ErrNotFound
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO spaces (space_key, owner_account_id, seed, encrypted_metadata) VALUES ($1, $2, $3, $4)`, sqlHash256(key), id, sqlHash256(seed), metadata)
+		_, err = tx.Exec(ctx, `INSERT INTO spaces (space_key, owner_account_id, seed, signature, encrypted_name, encrypted_metadata) VALUES ($1, $2, $3, $4, $5, $6)`, sqlHash256(req.Key), id, sqlHash256(req.Seed), sqlSignature(req.Signature), req.EncryptedName, req.EncryptedMetadata)
 		return err
 	})
 }
@@ -70,14 +73,14 @@ func (s *Store) Space(account proto.Account, key types.Hash256) (space spaces.Sp
 	return
 }
 
-// UpdateSpace replaces a space's encrypted metadata. The owner and admins may update it.
-func (s *Store) UpdateSpace(account proto.Account, key types.Hash256, metadata []byte) error {
+// UpdateSpace replaces a space's encrypted name and metadata. The owner and admins may update it.
+func (s *Store) UpdateSpace(account proto.Account, key types.Hash256, name, metadata []byte) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Admin, false)
 		if err != nil {
 			return err
 		}
-		_, err = tx.Exec(ctx, `UPDATE spaces SET encrypted_metadata = $2, updated_at = NOW() WHERE id = $1`, id, metadata)
+		_, err = tx.Exec(ctx, `UPDATE spaces SET encrypted_name = $2, encrypted_metadata = $3, updated_at = NOW() WHERE id = $1`, id, name, metadata)
 		return err
 	})
 }
@@ -298,6 +301,6 @@ func spaceAccess(ctx context.Context, tx *txn, account proto.Account, key types.
 }
 
 func scanSpace(row pgx.CollectableRow) (v spaces.Space, err error) {
-	err = row.Scan((*sqlHash256)(&v.Key), (*sqlPublicKey)(&v.Owner), (*sqlHash256)(&v.Seed), &v.EncryptedMetadata, &v.EncryptedKey, &v.Permission, &v.CreatedAt, &v.UpdatedAt)
+	err = row.Scan((*sqlHash256)(&v.Key), (*sqlPublicKey)(&v.Owner), (*sqlHash256)(&v.Seed), (*sqlSignature)(&v.Signature), &v.EncryptedName, &v.EncryptedMetadata, &v.EncryptedKey, &v.Permission, &v.CreatedAt, &v.UpdatedAt)
 	return
 }

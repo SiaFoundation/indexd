@@ -20,6 +20,7 @@ const (
 
 // Errors returned by space operations.
 var (
+	ErrInvalidSignature          = errors.New("invalid space signature")
 	ErrNotFound                  = errors.New("space not found")
 	ErrPermission                = errors.New("insufficient space permission")
 	ErrInvitationNotFound        = errors.New("space invitation not found")
@@ -32,16 +33,47 @@ var (
 // Permission is a member's level of access to a space.
 type Permission uint8
 
+// AddSpaceRequest creates a space with an encrypted name and metadata.
+type AddSpaceRequest struct {
+	Key               types.Hash256   `json:"key"`
+	Seed              types.Hash256   `json:"seed"`
+	EncryptedName     []byte          `json:"encryptedName"`
+	EncryptedMetadata []byte          `json:"encryptedMetadata"`
+	Signature         types.Signature `json:"signature"`
+}
+
+// SigHash returns the hash of the space key, owner's app key, and derivation seed.
+func (r AddSpaceRequest) SigHash(owner proto.Account) types.Hash256 {
+	return (Space{Key: r.Key, Owner: owner, Seed: r.Seed}).SigHash()
+}
+
+// Sign signs the space identity with the owner's app key.
+func (r *AddSpaceRequest) Sign(ownerKey types.PrivateKey) {
+	r.Signature = ownerKey.SignHash(r.SigHash(proto.Account(ownerKey.PublicKey())))
+}
+
 // Space describes a space and the requesting account's access to it.
 type Space struct {
 	Key               types.Hash256
 	Owner             proto.Account
 	Seed              types.Hash256
+	EncryptedName     []byte
 	EncryptedMetadata []byte
 	EncryptedKey      []byte
 	Permission        Permission
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	Signature         types.Signature
+}
+
+// SigHash returns the hash of the space key, owner's app key, and derivation seed.
+func (s Space) SigHash() types.Hash256 {
+	h := types.NewHasher()
+	h.E.WriteString("indexd/space/v1")
+	s.Key.EncodeTo(h.E)
+	types.PublicKey(s.Owner).EncodeTo(h.E)
+	s.Seed.EncodeTo(h.E)
+	return h.Sum()
 }
 
 // Invitation is a pending invitation to join a space.

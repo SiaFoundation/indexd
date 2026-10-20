@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/spaces"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
@@ -1425,10 +1426,11 @@ func TestPruneAccountSpaceObjects(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
-	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	ownerKey := types.GeneratePrivateKey()
+	owner := proto.Account(ownerKey.PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
 	key := types.Hash256(frand.Entropy256())
-	if err := store.AddSpace(owner, key, frand.Entropy256(), nil); err != nil {
+	if err := store.AddSpace(owner, signedSpaceRequest(ownerKey, spaces.AddSpaceRequest{Key: key, Seed: frand.Entropy256()})); err != nil {
 		t.Fatal(err)
 	}
 	for range 3 {
