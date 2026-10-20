@@ -18,6 +18,7 @@ import (
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/spaces"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
@@ -238,6 +239,33 @@ func TestRecordSlabMigrated(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	privateKey, otherPrivateKey := types.GeneratePrivateKey(), types.GeneratePrivateKey()
+	spaceKey, otherSpaceKey := privateKey.PublicKey(), otherPrivateKey.PublicKey()
+	for _, signer := range []types.PrivateKey{privateKey, otherPrivateKey} {
+		key := signer.PublicKey()
+		if err := store.AddSpace(account, signedSpaceRequest(signer, account, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
+			t.Fatal(err)
+		} else if err := store.PinSpaceObject(account, key, so.PinRequest()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.DeleteSpaceObject(account, otherSpaceKey, so.ID()); err != nil {
+		t.Fatal(err)
+	}
+	unrelatedSlab := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}},
+	}
+	if _, err := store.PinSlabs(account, time.Time{}, unrelatedSlab); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := so
+	unrelated.Slabs = []slabs.SlabSlice{unrelatedSlab.Slice(0, 100)}
+	if err := store.PinSpaceObject(account, spaceKey, unrelated.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+
 	// assert object events count
 	var count int
 	err = store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM object_events`).Scan(&count)
@@ -249,6 +277,16 @@ func TestRecordSlabMigrated(t *testing.T) {
 
 	// publish the event, then set its position in the past
 	store.publishEvents(t)
+	events, err := store.ListSpaceObjects(account, spaceKey, slabs.Cursor{}, 10)
+	if err != nil || len(events) != 2 {
+		t.Fatalf("unexpected space events: %+v, %v", events, err)
+	}
+	cursor := slabs.Cursor{After: events[1].UpdatedAt, Key: events[1].Key}
+	events, err = store.ListSpaceObjects(account, otherSpaceKey, slabs.Cursor{}, 10)
+	if err != nil || len(events) != 1 || !events[0].Deleted {
+		t.Fatalf("unexpected tombstone: %+v, %v", events, err)
+	}
+	otherCursor := slabs.Cursor{After: events[0].UpdatedAt, Key: events[0].Key}
 	ts := time.Now().Add(-time.Hour).Round(time.Second)
 	if _, err := store.pool.Exec(t.Context(), `UPDATE object_events SET updated_at = $1`, ts); err != nil {
 		t.Fatal(err)
@@ -259,6 +297,12 @@ func TestRecordSlabMigrated(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.publishEvents(t)
+	if events, err := store.ListSpaceObjects(account, spaceKey, cursor, 10); err != nil || len(events) != 1 || events[0].Key != so.ID() || events[0].Deleted || events[0].Object == nil {
+		t.Fatalf("unexpected migrated space events: %+v, %v", events, err)
+	}
+	if events, err := store.ListSpaceObjects(account, otherSpaceKey, otherCursor, 10); err != nil || len(events) != 0 {
+		t.Fatalf("unrelated tombstone republished: %+v, %v", events, err)
+	}
 
 	// assert count has not changed
 	err = store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM object_events`).Scan(&count)

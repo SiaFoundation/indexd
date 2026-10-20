@@ -512,13 +512,13 @@ func (s *Store) PublishObjectEvents() error {
 	return s.publishObjectEvents(objectEventPublishBatchSize)
 }
 
-// publishObjectEvents assigns stream positions to at most limit object events.
+// publishObjectEvents assigns stream positions to at most limit events per object table.
 func (s *Store) publishObjectEvents(limit int) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		// an idle tick skips the settings row entirely, the partial index on
 		// unpublished events makes the probe cheap
 		var pending bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM object_events WHERE updated_at IS NULL)`).Scan(&pending); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM object_events WHERE updated_at IS NULL) OR EXISTS (SELECT 1 FROM space_object_events WHERE updated_at IS NULL)`).Scan(&pending); err != nil {
 			return fmt.Errorf("failed to check for unpublished object events: %w", err)
 		} else if !pending {
 			return nil
@@ -564,7 +564,11 @@ func (s *Store) publishObjectEvents(limit int) error {
 		if err != nil {
 			return fmt.Errorf("failed to publish object events: %w", err)
 		}
-		return nil
+		_, err = tx.Exec(ctx, `WITH batch AS MATERIALIZED (
+ SELECT ctid FROM space_object_events WHERE updated_at IS NULL
+ ORDER BY space_id, object_key FOR UPDATE SKIP LOCKED LIMIT $2
+) UPDATE space_object_events SET updated_at = $1 WHERE ctid IN (SELECT ctid FROM batch)`, published, limit)
+		return err
 	})
 }
 

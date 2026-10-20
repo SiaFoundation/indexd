@@ -58,7 +58,8 @@ func (s *Store) UnblockObject(objectKey types.Hash256) error {
 		`, sqlHash256(objectKey)); err != nil {
 			return fmt.Errorf("failed to unpublish object events: %w", err)
 		}
-		return nil
+		_, err = tx.Exec(ctx, `UPDATE space_object_events SET updated_at = NULL WHERE object_key = $1`, sqlHash256(objectKey))
+		return err
 	})
 }
 
