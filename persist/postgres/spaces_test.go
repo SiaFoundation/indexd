@@ -1,0 +1,419 @@
+package postgres
+
+import (
+	"bytes"
+	"errors"
+	"reflect"
+	"sync"
+	"testing"
+	"time"
+
+	proto "go.sia.tech/core/rhp/v4"
+	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/accounts"
+	"go.sia.tech/indexd/slabs"
+	"go.uber.org/zap"
+	"lukechampine.com/frand"
+)
+
+func TestSpaces(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	member := proto.Account(types.GeneratePrivateKey().PublicKey())
+	outsider := proto.Account(types.GeneratePrivateKey().PublicKey())
+	for _, a := range []proto.Account{owner, member, outsider} {
+		store.addTestAccount(t, types.PublicKey(a))
+	}
+	key, seed := types.Hash256(frand.Entropy256()), types.Hash256(frand.Entropy256())
+	metadata, invitedKey, acceptedKey := frand.Bytes(50), frand.Bytes(72), frand.Bytes(72)
+	if err := store.AddSpace(owner, key, seed, metadata); err != nil {
+		t.Fatal(err)
+	}
+	space, err := store.Space(owner, key)
+	if err != nil {
+		t.Fatal(err)
+	} else if space.Key != key || space.Seed != seed || space.Owner != owner || !bytes.Equal(space.EncryptedMetadata, metadata) || space.CreatedAt.IsZero() {
+		t.Fatalf("unexpected space: %+v", space)
+	} else if err := store.InviteSpaceMember(owner, key, member, SpaceWrite, invitedKey); err != nil {
+		t.Fatal(err)
+	}
+	invitations, err := store.SpaceInvitations(member, 0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(invitations) != 1 || invitations[0].Inviter != owner || invitations[0].SpaceKey != key || invitations[0].Permission != SpaceWrite || !bytes.Equal(invitations[0].EncryptedKey, invitedKey) {
+		t.Fatalf("unexpected invitations: %+v", invitations)
+	} else if _, err := store.Space(member, key); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("pending member access: %v", err)
+	} else if err := store.AcceptSpaceInvitation(outsider, key, acceptedKey); !errors.Is(err, ErrSpaceInvitationNotFound) {
+		t.Fatalf("uninvited acceptance: %v", err)
+	} else if err := store.AcceptSpaceInvitation(member, key, nil); err == nil {
+		t.Fatal("accepted without a key")
+	} else if err := store.AcceptSpaceInvitation(member, key, acceptedKey); err != nil {
+		t.Fatal(err)
+	} else if invitations, err := store.SpaceInvitations(member, 0, 10); err != nil || len(invitations) != 0 {
+		t.Fatalf("invitation not consumed: %v, %v", invitations, err)
+	} else if spaces, err := store.Spaces(member, 0, 10); err != nil || len(spaces) != 1 || !bytes.Equal(spaces[0].EncryptedKey, acceptedKey) || spaces[0].Permission != SpaceWrite {
+		t.Fatalf("unexpected member spaces: %+v, %v", spaces, err)
+	} else if spaces, err := store.Spaces(outsider, 0, 10); err != nil || len(spaces) != 0 {
+		t.Fatalf("outsider spaces: %+v, %v", spaces, err)
+	} else if err := store.UpdateSpace(member, key, nil); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("member updated metadata: %v", err)
+	} else if err := store.UpdateSpace(owner, key, []byte("updated")); err != nil {
+		t.Fatal(err)
+	} else if err := store.UpdateSpaceMember(member, key, member, SpaceAdmin); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("member promoted themselves: %v", err)
+	} else if err := store.UpdateSpaceMember(owner, key, member, SpaceDelete); err != nil {
+		t.Fatal(err)
+	}
+	members, err := store.SpaceMembers(owner, key, 0, 10)
+	if err != nil || len(members) != 1 || members[0].Account != member || members[0].Permission != SpaceDelete {
+		t.Fatalf("unexpected members: %+v, %v", members, err)
+	} else if err := store.DeleteSpaceMember(owner, key, member); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.Space(member, key); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("revoked member access: %v", err)
+	} else if spaces, err := store.Spaces(member, 0, 10); err != nil || len(spaces) != 0 {
+		t.Fatalf("revoked spaces: %+v, %v", spaces, err)
+	} else if err := store.AcceptSpaceInvitation(member, key, acceptedKey); !errors.Is(err, ErrSpaceInvitationNotFound) {
+		t.Fatalf("replayed invitation: %v", err)
+	} else if err := store.InviteSpaceMember(owner, key, member, SpaceRead, invitedKey); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteSpaceInvitation(owner, key, member); err != nil {
+		t.Fatal(err)
+	} else if err := store.AcceptSpaceInvitation(member, key, acceptedKey); !errors.Is(err, ErrSpaceInvitationNotFound) {
+		t.Fatalf("cancelled invitation: %v", err)
+	} else if err := store.InviteSpaceMember(owner, key, member, SpaceRead, invitedKey); err != nil {
+		t.Fatal(err)
+	} else if err := store.AcceptSpaceInvitation(member, key, acceptedKey); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteSpace(member, key); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("member deleted space: %v", err)
+	} else if err := store.DeleteSpace(owner, key); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.Space(member, key); !errors.Is(err, ErrSpaceNotFound) {
+		t.Fatalf("deleted space: %v", err)
+	}
+}
+
+func TestSpacePermissions(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	key := types.Hash256(frand.Entropy256())
+	if err := store.AddSpace(owner, key, frand.Entropy256(), nil); err != nil {
+		t.Fatal(err)
+	}
+	members := make([]proto.Account, 5)
+	for i := range members {
+		members[i] = proto.Account(types.GeneratePrivateKey().PublicKey())
+		store.addTestAccount(t, types.PublicKey(members[i]))
+		permission := SpacePermission(min(i, 3))
+		if err := store.InviteSpaceMember(owner, key, members[i], permission, frand.Bytes(72)); err != nil {
+			t.Fatal(err)
+		} else if err := store.AcceptSpaceInvitation(members[i], key, frand.Bytes(72)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.UpdateSpace(members[2], key, []byte("denied")); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("non-admin updated metadata: %v", err)
+	}
+	metadata := []byte("admin metadata")
+	if err := store.UpdateSpace(members[3], key, metadata); err != nil {
+		t.Fatal(err)
+	} else if space, err := store.Space(owner, key); err != nil || !bytes.Equal(space.EncryptedMetadata, metadata) {
+		t.Fatalf("admin metadata update: %+v, %v", space, err)
+	}
+	for _, target := range []proto.Account{owner, members[3], members[4]} {
+		if err := store.DeleteSpaceMember(members[3], key, target); !errors.Is(err, ErrSpacePermission) {
+			t.Fatalf("admin removed protected account: %v", err)
+		}
+	}
+	if err := store.DeleteSpaceMember(members[2], key, members[0]); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("non-admin removed member: %v", err)
+	} else if err := store.DeleteSpaceMember(members[3], key, members[0]); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteSpaceMember(owner, key, members[4]); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.SpaceMembers(members[0], key, 0, 10); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("revoked member listed members: %v", err)
+	} else if err := store.DeleteAccount(owner); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.Space(members[1], key); !errors.Is(err, ErrSpaceNotFound) {
+		t.Fatalf("deleted owner access: %v", err)
+	}
+}
+
+func TestSpaceInvitations(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	admin := proto.Account(types.GeneratePrivateKey().PublicKey())
+	member := proto.Account(types.GeneratePrivateKey().PublicKey())
+	recipient := proto.Account(types.GeneratePrivateKey().PublicKey())
+	otherApp := proto.Account(types.GeneratePrivateKey().PublicKey())
+	appID := types.Hash256(frand.Entropy256())
+	for _, account := range []proto.Account{owner, admin, member, recipient, otherApp} {
+		store.addTestAccount(t, types.PublicKey(account))
+		id := appID
+		if account == otherApp {
+			id = frand.Entropy256()
+		}
+		if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET app_id = $1 WHERE public_key = $2`, sqlHash256(id), sqlPublicKey(account)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key := types.Hash256(frand.Entropy256())
+	if err := store.AddSpace(owner, key, frand.Entropy256(), nil); err != nil {
+		t.Fatal(err)
+	}
+	for i, account := range []proto.Account{member, admin} {
+		if err := store.InviteSpaceMember(owner, key, account, SpacePermission(i+2), frand.Bytes(72)); err != nil {
+			t.Fatal(err)
+		} else if err := store.AcceptSpaceInvitation(account, key, frand.Bytes(72)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.InviteSpaceMember(member, key, recipient, SpaceRead, frand.Bytes(72)); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("non-admin invited member: %v", err)
+	}
+	for _, inviter := range []proto.Account{owner, admin} {
+		if err := store.InviteSpaceMember(inviter, key, otherApp, SpaceRead, frand.Bytes(72)); !errors.Is(err, ErrSpacePermission) {
+			t.Fatalf("invited account from another app: %v", err)
+		}
+	}
+	if invitations, err := store.SpaceInvitations(otherApp, 0, 10); err != nil || len(invitations) != 0 {
+		t.Fatalf("cross-app invitation persisted: %+v, %v", invitations, err)
+	}
+	for _, inviter := range []proto.Account{owner, admin} {
+		if err := store.InviteSpaceMember(inviter, key, recipient, SpaceWrite, frand.Bytes(72)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	invitations, err := store.SpaceInvitations(recipient, 0, 10)
+	if err != nil || len(invitations) != 1 || invitations[0].Inviter != admin || invitations[0].Permission != SpaceWrite {
+		t.Fatalf("unexpected admin invitation: %+v, %v", invitations, err)
+	} else if err := store.AcceptSpaceInvitation(recipient, key, frand.Bytes(72)); err != nil {
+		t.Fatal(err)
+	} else if space, err := store.Space(recipient, key); err != nil || space.Permission != SpaceWrite {
+		t.Fatalf("accepted admin invitation: %+v, %v", space, err)
+	} else if err := store.DeleteSpaceMember(owner, key, recipient); err != nil {
+		t.Fatal(err)
+	} else if err := store.InviteSpaceMember(admin, key, recipient, SpaceRead, frand.Bytes(72)); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteAccount(admin); err != nil {
+		t.Fatal(err)
+	} else if err := store.PruneAccounts(100); err != nil {
+		t.Fatal(err)
+	} else if err := store.AcceptSpaceInvitation(recipient, key, frand.Bytes(72)); !errors.Is(err, ErrSpaceInvitationNotFound) {
+		t.Fatalf("accepted pruned inviter's invitation: %v", err)
+	}
+}
+
+func TestSpaceObjects(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	writer := proto.Account(types.GeneratePrivateKey().PublicKey())
+	reader := proto.Account(types.GeneratePrivateKey().PublicKey())
+	for _, a := range []proto.Account{owner, writer, reader} {
+		store.addTestAccount(t, types.PublicKey(a))
+	}
+	key := types.Hash256(frand.Entropy256())
+	if err := store.AddSpace(owner, key, frand.Entropy256(), nil); err != nil {
+		t.Fatal(err)
+	}
+	for i, a := range []proto.Account{reader, writer} {
+		if err := store.InviteSpaceMember(owner, key, a, SpacePermission(i), frand.Bytes(72)); err != nil {
+			t.Fatal(err)
+		} else if err := store.AcceptSpaceInvitation(a, key, frand.Bytes(72)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hk := types.GeneratePrivateKey().PublicKey()
+	store.addTestHost(t, hk)
+	store.addTestContract(t, hk)
+	obj := store.pinTestObject(t, writer, hk)
+	if err := store.PinSpaceObject(reader, key, obj.PinRequest()); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("reader pinned object: %v", err)
+	} else if err := store.PinSpaceObject(writer, key, obj.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.SpaceObject(reader, key, obj.ID())
+	if err != nil {
+		t.Fatal(err)
+	} else if got.Account != writer || got.Key != obj.ID() || !reflect.DeepEqual(got.Slabs, obj.Slabs) || !bytes.Equal(got.EncryptedDataKey, obj.EncryptedDataKey) {
+		t.Fatalf("object mismatch: %+v", got)
+	} else if _, err := store.Object(owner, obj.ID()); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("object in personal scope: %v", err)
+	} else if objects, err := store.SpaceObjects(reader, key, 0, 10); err != nil || len(objects) != 1 {
+		t.Fatalf("unexpected objects: %+v, %v", objects, err)
+	}
+	assertUsage := func(want uint64) {
+		t.Helper()
+		var data, size, connectData, connectSize uint64
+		err := store.pool.QueryRow(t.Context(), `SELECT a.pinned_data, a.pinned_size, c.pinned_data, c.pinned_size FROM accounts a JOIN app_connect_keys c ON c.id = a.connect_key_id WHERE a.public_key = $1`, sqlPublicKey(owner)).Scan(&data, &size, &connectData, &connectSize)
+		if err != nil {
+			t.Fatal(err)
+		} else if data != want || size != want || connectData != want || connectSize != want {
+			t.Fatalf("usage: %d %d %d %d, want %d", data, size, connectData, connectSize, want)
+		}
+	}
+	assertUsage(proto.SectorSize)
+	if err := store.PinSpaceObject(writer, key, obj.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	assertUsage(proto.SectorSize)
+	if err := store.DeleteObject(writer, obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if err := store.UnpinSlab(owner, obj.Slabs[0].Digest()); !errors.Is(err, slabs.ErrSlabInUse) {
+		t.Fatalf("unpinned space slab: %v", err)
+	} else if err := store.PruneSlabs(owner, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	assertUsage(proto.SectorSize)
+	if _, err := store.PruneDeletedSlabs(100); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteSpaceObject(writer, key, obj.ID()); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("writer deleted object: %v", err)
+	} else if err := store.UpdateSpaceMember(owner, key, writer, SpaceDelete); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteSpaceObject(writer, key, obj.ID()); err != nil {
+		t.Fatal(err)
+	}
+	assertUsage(0)
+	if objects, err := store.SpaceObjects(reader, key, 0, 10); err != nil || len(objects) != 0 {
+		t.Fatalf("deleted object listed: %+v, %v", objects, err)
+	}
+}
+
+func TestSpaceQuotaRollback(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	member := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner), accounts.WithMaxPinnedData(0))
+	store.addTestAccount(t, types.PublicKey(member))
+	key := types.Hash256(frand.Entropy256())
+	if err := store.AddSpace(owner, key, frand.Entropy256(), nil); err != nil {
+		t.Fatal(err)
+	} else if err := store.InviteSpaceMember(owner, key, member, SpaceWrite, frand.Bytes(72)); err != nil {
+		t.Fatal(err)
+	} else if err := store.AcceptSpaceInvitation(member, key, frand.Bytes(72)); err != nil {
+		t.Fatal(err)
+	}
+	hk := types.GeneratePrivateKey().PublicKey()
+	store.addTestHost(t, hk)
+	store.addTestContract(t, hk)
+	obj := store.pinTestObject(t, member, hk)
+	if _, err := store.PinSpaceSlabs(member, key, time.Time{}, obj.Slabs[0].Pin()); !errors.Is(err, accounts.ErrAccountStorageLimitExceeded) {
+		t.Fatalf("upload quota failure: %v", err)
+	} else if err := store.PinSpaceObject(member, key, obj.PinRequest()); !errors.Is(err, accounts.ErrAccountStorageLimitExceeded) {
+		t.Fatalf("quota failure: %v", err)
+	}
+	store.assertPinnedSlabs(t, owner)
+	if objects, err := store.SpaceObjects(owner, key, 0, 10); err != nil || len(objects) != 0 {
+		t.Fatalf("failed pin persisted: %+v, %v", objects, err)
+	}
+}
+
+func TestSpaceStorageLifecycle(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	member := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	store.addTestAccount(t, types.PublicKey(member))
+	keys := []types.Hash256{frand.Entropy256(), frand.Entropy256()}
+	for _, key := range keys {
+		if err := store.AddSpace(owner, key, frand.Entropy256(), nil); err != nil {
+			t.Fatal(err)
+		} else if err := store.InviteSpaceMember(owner, key, member, SpaceWrite, frand.Bytes(72)); err != nil {
+			t.Fatal(err)
+		} else if err := store.AcceptSpaceInvitation(member, key, frand.Bytes(72)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hk := types.GeneratePrivateKey().PublicKey()
+	store.addTestHost(t, hk)
+	store.addTestContract(t, hk)
+	slab := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}},
+	}
+	if _, err := store.PinSpaceSlabs(member, keys[0], time.Time{}, slab); err != nil {
+		t.Fatal(err)
+	}
+	store.assertPinnedSlabs(t, owner, slab.Digest())
+	store.assertPinnedSlabs(t, member)
+	obj := slabs.SealedObject{
+		EncryptedDataKey:  frand.Bytes(72),
+		DataSignature:     types.Signature(frand.Bytes(64)),
+		MetadataSignature: types.Signature(frand.Bytes(64)),
+		Slabs:             []slabs.SlabSlice{slab.Slice(0, 100)},
+	}
+	for _, key := range keys {
+		if err := store.PinSpaceObject(member, key, obj.PinRequest()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.DeleteSpace(owner, keys[0]); err != nil {
+		t.Fatal(err)
+	}
+	store.assertPinnedSlabs(t, owner, slab.Digest())
+	if err := store.DeleteSpaceMember(owner, keys[1], member); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.SpaceObject(member, keys[1], obj.ID()); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("revoked member read: %v", err)
+	} else if _, err := store.PinSpaceSlabs(member, keys[1], time.Time{}, slab); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("revoked member upload: %v", err)
+	} else if err := store.PinSpaceObject(member, keys[1], obj.PinRequest()); !errors.Is(err, ErrSpacePermission) {
+		t.Fatalf("revoked member pin: %v", err)
+	} else if err := store.DeleteAccount(member); err != nil {
+		t.Fatal(err)
+	} else if err := store.PruneAccounts(100); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.SpaceObject(owner, keys[1], obj.ID())
+	if err != nil || got.Account != member {
+		t.Fatalf("object lost with member: %+v, %v", got, err)
+	} else if err := store.DeleteAccount(owner); err != nil {
+		t.Fatal(err)
+	} else if err := store.PruneAccounts(100); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.PruneDeletedSlabs(100); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.Slab(slab.Digest()); !errors.Is(err, slabs.ErrSlabNotFound) {
+		t.Fatalf("space slab not cleaned up: %v", err)
+	}
+}
+
+func TestSpaceInvitationRace(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	member := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	store.addTestAccount(t, types.PublicKey(member))
+	key := types.Hash256(frand.Entropy256())
+	if err := store.AddSpace(owner, key, frand.Entropy256(), nil); err != nil {
+		t.Fatal(err)
+	} else if err := store.InviteSpaceMember(owner, key, member, SpaceRead, frand.Bytes(72)); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	results := make(chan error, 2)
+	for range 2 {
+		wg.Go(func() { results <- store.AcceptSpaceInvitation(member, key, frand.Bytes(72)) })
+	}
+	wg.Wait()
+	close(results)
+	var accepted, missing int
+	for err := range results {
+		if err == nil {
+			accepted++
+		} else if errors.Is(err, ErrSpaceInvitationNotFound) {
+			missing++
+		} else {
+			t.Fatal(err)
+		}
+	}
+	if accepted != 1 || missing != 1 {
+		t.Fatalf("accepted %d, missing %d", accepted, missing)
+	}
+}

@@ -527,4 +527,71 @@ ALTER TABLE objects ALTER COLUMN size DROP DEFAULT;
 ALTER TABLE objects ALTER COLUMN size SET NOT NULL;`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+CREATE TABLE spaces (
+    id BIGSERIAL PRIMARY KEY,
+    space_key BYTEA UNIQUE NOT NULL CHECK(LENGTH(space_key) = 32),
+    owner_account_id INTEGER NOT NULL REFERENCES accounts(id),
+    seed BYTEA UNIQUE NOT NULL CHECK(LENGTH(seed) = 32),
+    encrypted_metadata BYTEA,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX spaces_owner_account_id_idx ON spaces(owner_account_id);
+
+CREATE TABLE space_invitations (
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    inviter_account_id INTEGER NOT NULL REFERENCES accounts(id),
+    permission_level SMALLINT NOT NULL DEFAULT 0 CHECK(permission_level BETWEEN 0 AND 3),
+    encrypted_key BYTEA NOT NULL CHECK(LENGTH(encrypted_key) = 72),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (space_id, account_id)
+);
+CREATE INDEX space_invitations_account_id_idx ON space_invitations(account_id);
+CREATE INDEX space_invitations_inviter_account_id_idx ON space_invitations(inviter_account_id);
+
+CREATE TABLE space_members (
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    permission_level SMALLINT NOT NULL DEFAULT 0 CHECK(permission_level BETWEEN 0 AND 3),
+    encrypted_key BYTEA NOT NULL CHECK(LENGTH(encrypted_key) = 72),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMP WITH TIME ZONE,
+    PRIMARY KEY (space_id, account_id)
+);
+CREATE INDEX space_members_account_id_idx ON space_members(account_id);
+
+CREATE TABLE space_objects (
+    id BIGSERIAL PRIMARY KEY,
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32),
+    encrypted_data_key BYTEA NOT NULL CHECK(LENGTH(encrypted_data_key) = 72),
+    encrypted_meta_key BYTEA CHECK(LENGTH(encrypted_meta_key) = 72),
+    encrypted_metadata BYTEA,
+    data_signature BYTEA NOT NULL CHECK(LENGTH(data_signature) = 64),
+    meta_signature BYTEA NOT NULL CHECK(LENGTH(meta_signature) = 64),
+    account_key BYTEA NOT NULL CHECK(LENGTH(account_key) = 32),
+    size BIGINT NOT NULL CHECK(size >= 0),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (space_id, object_key)
+);
+CREATE INDEX space_objects_space_id_created_at_idx ON space_objects(space_id, created_at DESC, id DESC);
+
+CREATE TABLE space_object_slabs (
+    object_id BIGINT NOT NULL REFERENCES space_objects(id) ON DELETE CASCADE,
+    slab_digest BYTEA NOT NULL REFERENCES slabs(digest) ON DELETE RESTRICT,
+    slab_index INTEGER NOT NULL,
+    slab_offset INTEGER NOT NULL,
+    slab_length INTEGER NOT NULL,
+    PRIMARY KEY (object_id, slab_digest, slab_index)
+);
+CREATE INDEX space_object_slabs_slab_digest_idx ON space_object_slabs(slab_digest);
+CREATE INDEX space_object_slabs_object_id_slab_index_idx ON space_object_slabs(object_id, slab_index ASC);`)
+		return err
+	},
 }

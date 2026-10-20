@@ -196,6 +196,10 @@ func (s *Store) PruneAccounts(limit int) error {
 			return accounts.ErrNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to find an account to delete: %w", err)
+		} else if _, err := tx.Exec(ctx, `DELETE FROM spaces WHERE owner_account_id = $1`, accountID); err != nil {
+			return err
+		} else if _, err := tx.Exec(ctx, `DELETE FROM space_invitations WHERE inviter_account_id = $1`, accountID); err != nil {
+			return err
 		}
 
 		rows, err := tx.Query(ctx, `DELETE FROM objects o
