@@ -47,6 +47,7 @@ type (
 		PinObject(ctx context.Context, account proto.Account, obj slabs.PinObjectRequest) error
 		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
 		ListObjectsWithoutSlabs(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventWithoutSlabs, error)
+		RepackableObjects(ctx context.Context, account proto.Account, cutoff time.Time, limit, dataShards, minWaste int) ([]slabs.RepackableObject, error)
 		ObjectSlabs(ctx context.Context, account proto.Account, key types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
 		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
 	}
@@ -349,6 +350,48 @@ func (a *app) handleGETObjectSlabs(jc jape.Context, pk types.PublicKey) {
 	encodeResponse(jc, page)
 }
 
+func (a *app) handleGETRepackableObjects(jc jape.Context, pk types.PublicKey) {
+	_, limit, ok := api.ParseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+
+	var dataShards, parityShards int
+	if jc.DecodeForm("datashards", &dataShards) != nil {
+		return
+	} else if jc.DecodeForm("parityshards", &parityShards) != nil {
+		return
+	} else if err := slabs.ValidateECParams(dataShards, dataShards+parityShards); err != nil {
+		jc.Error(fmt.Errorf("invalid erasure coding parameters: %w", err), http.StatusBadRequest)
+		return
+	}
+
+	cutoff := time.Now().Add(-api.DefaultSlabPruneCutoff)
+	if jc.Request.FormValue("before") != "" {
+		if jc.DecodeForm("before", &cutoff) != nil {
+			return
+		}
+	}
+
+	var minWaste int
+	if jc.Request.FormValue("minwaste") == "" {
+		jc.Error(errors.New("minwaste is required"), http.StatusBadRequest)
+		return
+	}
+	if jc.DecodeForm("minwaste", &minWaste) != nil {
+		return
+	} else if minWaste < 0 || minWaste > 100 {
+		jc.Error(errors.New("minwaste must be between 0 and 100"), http.StatusBadRequest)
+		return
+	}
+
+	objects, err := a.slabs.RepackableObjects(jc.Request.Context(), proto.Account(pk), cutoff, limit, dataShards, minWaste)
+	if jc.Check("failed to get repackable objects", err) != nil {
+		return
+	}
+	encodeResponse(jc, objects)
+}
+
 func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
 	var key types.Hash256
 	if jc.DecodeParam("key", &key) != nil {
@@ -615,10 +658,18 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 	slabIDs, err := a.slabs.PinSlabs(jc.Request.Context(), proto.Account(pk), time.Now().Add(6*time.Hour), params...)
-	if errors.Is(err, slabs.ErrInvalidPinParams) || errors.Is(err, slabs.ErrBadHosts) || errors.Is(err, slabs.ErrMinShards) {
+	switch {
+	case errors.Is(err, slabs.ErrInvalidPinParams),
+		errors.Is(err, slabs.ErrBadHosts),
+		errors.Is(err, slabs.ErrMinShards),
+		errors.Is(err, hosts.ErrNotFound),
+		errors.Is(err, accounts.ErrNotFound),
+		errors.Is(err, accounts.ErrAccountStorageLimitExceeded),
+		errors.Is(err, accounts.ErrAppKeyStorageLimitExceeded):
 		jc.Error(err, http.StatusBadRequest)
 		return
-	} else if jc.Check("failed to pin slab", err) != nil {
+	}
+	if jc.Check("failed to pin slab", err) != nil {
 		return
 	} else if len(slabIDs) == 0 {
 		jc.Error(fmt.Errorf("PinSlabs did not return any slab IDs"), http.StatusInternalServerError)
@@ -1162,6 +1213,7 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		"GET /hosts": wrapSignedAuth(a.handleGETHosts),
 
 		"GET /objects":             wrapSignedAuth(a.handleGETObjects),
+		"GET /repackable/objects":  wrapSignedAuth(a.handleGETRepackableObjects),
 		"GET /objects/:key":        wrapSignedAuth(a.handleGETObject),
 		"GET /objects/:key/shared": wrapSignedAuth(a.handleGETObjectShared),
 		"GET /objects/:key/slabs":  wrapSignedAuth(a.handleGETObjectSlabs),

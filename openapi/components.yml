@@ -655,6 +655,17 @@ components:
             - $ref: "#/components/schemas/SealedObject"
             - description: The object, if it exists
 
+    RepackableObject:
+      type: object
+      description: An object stored in a single slab that is more than half empty
+      properties:
+        key:
+          allOf:
+            - $ref: "#/components/schemas/Hash256"
+            - description: The object's unique ID
+        object:
+          $ref: "#/components/schemas/SealedObject"
+
     SealedObjectWithoutSlabs:
       description: >
         A sealed object without its slabs, which are paginated separately with

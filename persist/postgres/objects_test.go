@@ -1814,3 +1814,156 @@ func BenchmarkSaveObject(b *testing.B) {
 		}
 	}
 }
+
+func TestRepackableObjects(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	acc := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(acc))
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// every test slab is 1-of-2, so it holds one sector of data
+	const slabSize = proto.SectorSize
+	params := newTestPinParams(6, hk)
+	store.pinTestSlabs(t, acc, params...)
+
+	small := store.pinRandomObject(t, acc, []slabs.SlabSlice{params[0].Slice(0, 100)})
+	medium := store.pinRandomObject(t, acc, []slabs.SlabSlice{params[1].Slice(0, 200)})
+	large := store.pinRandomObject(t, acc, []slabs.SlabSlice{params[2].Slice(0, 300)})
+	// more than half full
+	halfFull := store.pinRandomObject(t, acc, []slabs.SlabSlice{params[3].Slice(0, slabSize/2)})
+	// spans two slabs
+	store.pinRandomObject(t, acc, []slabs.SlabSlice{params[4].Slice(0, 10), params[5].Slice(0, 10)})
+
+	future := time.Now().Add(time.Hour)
+	assertKeys := func(t *testing.T, got []slabs.RepackableObject, want ...slabs.SealedObject) {
+		t.Helper()
+		if len(got) != len(want) {
+			t.Fatalf("expected %d objects, got %d", len(want), len(got))
+		}
+		for i := range want {
+			if got[i].Key != want[i].ID() {
+				t.Fatalf("object %d: expected %v, got %v", i, want[i].ID(), got[i].Key)
+			} else if got[i].Object.ID() != want[i].ID() {
+				t.Fatalf("object %d: expected slabs of %v, got %v", i, want[i].ID(), got[i].Object.ID())
+			}
+		}
+	}
+
+	objects, err := store.RepackableObjects(acc, future, 10, slabSize, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, small, medium, large)
+
+	for _, threshold := range []int{0, 49, 100} {
+		objects, err := store.RepackableObjects(acc, future, 10, slabSize, threshold)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if threshold == 100 {
+			assertKeys(t, objects)
+		} else {
+			assertKeys(t, objects, small, medium, large, halfFull)
+		}
+	}
+
+	// limit caps the count
+	objects, err = store.RepackableObjects(acc, future, 2, slabSize, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, small, medium)
+
+	// the combined size must fit in maxSize
+	objects, err = store.RepackableObjects(acc, future, 10, 350, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, small, medium)
+
+	// slabs pinned after the cutoff are ignored
+	objects, err = store.RepackableObjects(acc, time.Now().Add(-time.Hour), 10, slabSize, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects)
+
+	// two small objects packed into the same slab are counted together
+	packed := newTestSlab(hk)
+	store.pinTestSlabs(t, acc, packed)
+	store.pinRandomObject(t, acc, []slabs.SlabSlice{packed.Slice(0, slabSize/4)})
+	store.pinRandomObject(t, acc, []slabs.SlabSlice{packed.Slice(slabSize/4, slabSize/4)})
+	objects, err = store.RepackableObjects(acc, future, 10, slabSize, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, small, medium, large)
+
+	// an object with several slices of the same slab is stored in one slab
+	// and is only returned once
+	multi := newTestSlab(hk)
+	store.pinTestSlabs(t, acc, multi)
+	sliced := store.pinRandomObject(t, acc, []slabs.SlabSlice{multi.Slice(0, 200), multi.Slice(200, 200)})
+	objects, err = store.RepackableObjects(acc, future, 10, slabSize, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, small, medium, large, sliced)
+	if err := store.DeleteObject(acc, sliced.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	// ranges referenced by multiple accounts only count once
+	shared := proto.Account{3}
+	store.addTestAccount(t, types.PublicKey(shared))
+	identical, overlapping := newTestSlab(hk), newTestSlab(hk)
+	store.pinTestSlabs(t, acc, identical, overlapping)
+	store.pinTestSlabs(t, shared, identical, overlapping)
+	sharedIdentical := store.pinRandomObject(t, acc, []slabs.SlabSlice{identical.Slice(0, slabSize/4+1)})
+	store.pinRandomObject(t, shared, []slabs.SlabSlice{identical.Slice(0, slabSize/4+1)})
+	sharedOverlapping := store.pinRandomObject(t, acc, []slabs.SlabSlice{overlapping.Slice(0, slabSize/4+2)})
+	store.pinRandomObject(t, shared, []slabs.SlabSlice{overlapping.Slice(slabSize/8, slabSize/4)})
+	objects, err = store.RepackableObjects(acc, future, 10, slabSize, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, small, medium, large, sharedIdentical, sharedOverlapping)
+	for _, obj := range []slabs.SealedObject{sharedIdentical, sharedOverlapping} {
+		if err := store.DeleteObject(acc, obj.ID()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// slice ends past the INTEGER range do not overflow
+	edge := newTestSlab(hk)
+	store.pinTestSlabs(t, acc, edge)
+	edgeObj := store.pinRandomObject(t, acc, []slabs.SlabSlice{edge.Slice(math.MaxInt32, 1)})
+	objects, err = store.RepackableObjects(acc, future, 10, slabSize, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, edgeObj, small, medium, large)
+	if err := store.DeleteObject(acc, edgeObj.ID()); err != nil {
+		t.Fatal(err)
+	}
+
+	// blocked objects are hidden
+	if err := store.BlockObject(small.ID(), "test"); err != nil {
+		t.Fatal(err)
+	}
+	objects, err = store.RepackableObjects(acc, future, 10, slabSize, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, medium, large)
+
+	// other accounts see nothing
+	other := proto.Account{2}
+	store.addTestAccount(t, types.PublicKey(other))
+	objects, err = store.RepackableObjects(other, future, 10, slabSize, 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects)
+}
