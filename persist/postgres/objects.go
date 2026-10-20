@@ -239,14 +239,14 @@ func (s *Store) RepackableObjects(account proto.Account, cutoff time.Time, limit
 			-- bytes are the union of its referenced ranges. A range starts a
 			-- new island when it begins past the end of every earlier range.
 			ranges AS (
-				SELECT os.slab_digest, os.slab_offset::bigint AS range_start, (os.slab_offset + os.slab_length)::bigint AS range_end,
-					MAX(os.slab_offset + os.slab_length) OVER (PARTITION BY os.slab_digest ORDER BY os.slab_offset, os.slab_length ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_end
+				SELECT os.slab_digest, os.slab_offset::bigint AS range_start, os.slab_offset::bigint + os.slab_length AS range_end,
+					MAX(os.slab_offset::bigint + os.slab_length) OVER (PARTITION BY os.slab_digest ORDER BY os.slab_offset, os.slab_length ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_end
 				FROM object_slabs os
 				WHERE os.slab_digest IN (SELECT slab_digest FROM single_slab_objects)
 			),
 			islands AS (
 				SELECT slab_digest, range_start, range_end,
-					COUNT(*) FILTER (WHERE prev_end IS NULL OR range_start > prev_end) OVER (PARTITION BY slab_digest ORDER BY range_start, range_end ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS island
+					COUNT(*) FILTER (WHERE prev_end IS NULL OR range_start > prev_end) OVER (PARTITION BY slab_digest ORDER BY range_start, range_end RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS island
 				FROM ranges
 			),
 			slab_usage AS (

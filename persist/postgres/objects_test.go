@@ -1923,6 +1923,19 @@ func TestRepackableObjects(t *testing.T) {
 		}
 	}
 
+	// slice ends past the INTEGER range do not overflow
+	edge := newTestSlab(hk)
+	store.pinTestSlabs(t, acc, edge)
+	edgeObj := store.pinRandomObject(t, acc, []slabs.SlabSlice{edge.Slice(math.MaxInt32, 1)})
+	objects, err = store.RepackableObjects(acc, future, 10, slabSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertKeys(t, objects, edgeObj, small, medium, large)
+	if err := store.DeleteObject(acc, edgeObj.ID()); err != nil {
+		t.Fatal(err)
+	}
+
 	// blocked objects are hidden
 	if err := store.BlockObject(small.ID(), "test"); err != nil {
 		t.Fatal(err)
