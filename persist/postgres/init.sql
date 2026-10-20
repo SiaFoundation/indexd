@@ -534,6 +534,89 @@ AFTER DELETE ON shared_objects
 REFERENCING OLD TABLE AS old_rows
 FOR EACH STATEMENT EXECUTE FUNCTION shared_objects_maintain_totals();
 
+CREATE TABLE spaces (
+    id BIGSERIAL PRIMARY KEY,
+    space_key BYTEA UNIQUE NOT NULL CHECK(LENGTH(space_key) = 32), -- public identifier, not the encryption key
+    owner_account_id INTEGER NOT NULL REFERENCES accounts(id), -- pins count against this account's quota
+    seed BYTEA UNIQUE NOT NULL CHECK(LENGTH(seed) = 32), -- public seed; space encryption key = HKDF(owner app key, seed, "space key")
+    signature BYTEA NOT NULL CHECK(LENGTH(signature) = 64),
+    encrypted_name BYTEA,
+    encrypted_metadata BYTEA, -- user provided, encrypted space metadata
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+CREATE INDEX spaces_owner_account_id_idx ON spaces(owner_account_id);
+
+-- Permissions are additive: 0 = read, 1 = read + write,
+-- 2 = read + write + delete, 3 = read + write + delete + admin.
+CREATE TABLE space_invitations (
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    inviter_account_id INTEGER NOT NULL REFERENCES accounts(id),
+    permission_level SMALLINT NOT NULL DEFAULT 0 CHECK(permission_level BETWEEN 0 AND 3),
+    encrypted_key BYTEA NOT NULL CHECK(LENGTH(encrypted_key) = 72), -- space key wrapped with the client-derived owner/recipient shared secret
+    signature BYTEA NOT NULL CHECK(LENGTH(signature) = 64),
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (space_id, account_id)
+);
+CREATE INDEX space_invitations_account_id_idx ON space_invitations(account_id);
+CREATE INDEX space_invitations_inviter_account_id_idx ON space_invitations(inviter_account_id);
+
+CREATE TABLE space_members (
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    invited_by BYTEA NOT NULL CHECK(LENGTH(invited_by) = 32),
+    invited_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    permission_level SMALLINT NOT NULL DEFAULT 0 CHECK(permission_level BETWEEN 0 AND 3),
+    encrypted_key BYTEA NOT NULL CHECK(LENGTH(encrypted_key) = 72), -- accepted space key rewrapped with the recipient's app key
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    revoked_at TIMESTAMP WITH TIME ZONE, -- rejects further API access
+    PRIMARY KEY (space_id, account_id)
+);
+CREATE INDEX space_members_account_id_idx ON space_members(account_id);
+
+CREATE TABLE space_objects (
+    id BIGSERIAL PRIMARY KEY,
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32),
+    encrypted_data_key BYTEA NOT NULL CHECK(LENGTH(encrypted_data_key) = 72), -- data encryption key wrapped with the space encryption key
+    encrypted_meta_key BYTEA CHECK(LENGTH(encrypted_meta_key) = 72), -- metadata encryption key wrapped with the space encryption key
+    encrypted_metadata BYTEA,
+    data_signature BYTEA NOT NULL CHECK(LENGTH(data_signature) = 64),
+    meta_signature BYTEA NOT NULL CHECK(LENGTH(meta_signature) = 64),
+    account_key BYTEA NOT NULL CHECK(LENGTH(account_key) = 32), -- app account that signed the object
+    size BIGINT NOT NULL CHECK(size >= 0), -- logical size of the object (object.Size())
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    UNIQUE (space_id, object_key)
+);
+CREATE INDEX space_objects_space_id_created_at_idx ON space_objects(space_id, created_at DESC, id DESC);
+
+CREATE TABLE space_object_events (
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32),
+    was_deleted BOOLEAN NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE,
+    PRIMARY KEY (space_id, object_key)
+);
+CREATE INDEX space_object_events_cursor_idx ON space_object_events(space_id, updated_at, object_key);
+CREATE INDEX space_object_events_unpublished_idx ON space_object_events(space_id, object_key) WHERE updated_at IS NULL;
+CREATE INDEX space_object_events_object_key_idx ON space_object_events(object_key);
+
+CREATE TABLE space_object_slabs (
+    object_id BIGINT NOT NULL REFERENCES space_objects(id) ON DELETE CASCADE,
+    slab_digest BYTEA NOT NULL REFERENCES slabs(digest) ON DELETE RESTRICT,
+    slab_index INTEGER NOT NULL, -- index within corresponding object to retrieve slabs in right order
+    slab_offset INTEGER NOT NULL, -- offset within slab
+    slab_length INTEGER NOT NULL, -- length of object data within slab
+    PRIMARY KEY (object_id, slab_digest, slab_index)
+);
+CREATE INDEX space_object_slabs_slab_digest_idx ON space_object_slabs(slab_digest);
+CREATE INDEX space_object_slabs_object_id_slab_index_idx ON space_object_slabs(object_id, slab_index ASC);
+
 CREATE TABLE account_slabs (
     account_id INTEGER REFERENCES accounts(id) NOT NULL, -- account that owns slab
     slab_id BIGSERIAL REFERENCES slabs(id) NOT NULL,
@@ -542,6 +625,15 @@ CREATE TABLE account_slabs (
 
 -- speed up query used when unpinning slabs
 CREATE INDEX account_slabs_slab_id_idx ON account_slabs(slab_id);
+
+CREATE TABLE space_slabs (
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL,
+    slab_id BIGINT NOT NULL,
+    PRIMARY KEY (space_id, slab_id),
+    FOREIGN KEY (account_id, slab_id) REFERENCES account_slabs(account_id, slab_id) ON DELETE CASCADE
+);
+CREATE INDEX space_slabs_account_id_slab_id_idx ON space_slabs(account_id, slab_id);
 
 CREATE TABLE slab_deletion_queue (
     id BIGSERIAL PRIMARY KEY,

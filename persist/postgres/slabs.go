@@ -262,6 +262,13 @@ WHERE a.account_id = $1
 		WHERE o.account_id = a.account_id
 		AND os.slab_digest = s.digest
 	)
+	AND NOT EXISTS (SELECT 1 FROM space_slabs p WHERE p.account_id = a.account_id AND p.slab_id = s.id)
+	AND NOT EXISTS (
+		SELECT 1 FROM spaces sp
+		JOIN space_objects o ON o.space_id = sp.id
+		JOIN space_object_slabs os ON os.object_id = o.id
+		WHERE sp.owner_account_id = a.account_id AND os.slab_digest = s.digest
+	)
 ORDER BY a.slab_id
 LIMIT $4
 `, id, cursor, cutoff, limit)
