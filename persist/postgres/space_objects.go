@@ -3,6 +3,8 @@ package postgres
 import (
 	"context"
 	"errors"
+	"maps"
+	"slices"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -73,6 +75,10 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.Hash256, obj sla
 		if err := tx.SendBatch(ctx, batch).Close(); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `INSERT INTO space_object_events (space_id, object_key, was_deleted)
+ VALUES ($1, $2, FALSE) ON CONFLICT (space_id, object_key) DO UPDATE SET was_deleted = FALSE, updated_at = NULL`, id, sqlHash256(obj.ID)); err != nil {
+			return err
+		}
 		return s.unpinSpaceSlabs(ctx, tx, id, ownerID, oldSlabs)
 	})
 }
@@ -98,6 +104,10 @@ func (s *Store) DeleteSpaceObject(account proto.Account, key, objectKey types.Ha
 		} else if _, err := tx.Exec(ctx, `DELETE FROM space_objects WHERE id = $1`, objectID); err != nil {
 			return err
 		}
+		if _, err := tx.Exec(ctx, `UPDATE space_object_events SET was_deleted = TRUE, updated_at = NULL
+ WHERE space_id = $1 AND object_key = $2`, id, sqlHash256(objectKey)); err != nil {
+			return err
+		}
 		return s.unpinSpaceSlabs(ctx, tx, id, ownerID, slabIDs)
 	})
 }
@@ -120,16 +130,79 @@ func (s *Store) DeleteSpace(account proto.Account, key types.Hash256) error {
 	})
 }
 
-// SpaceObjects returns a page of objects in a space, newest first, excluding
-// blocked objects. Account must have read permission.
-func (s *Store) SpaceObjects(account proto.Account, key types.Hash256, offset, limit int) (objects []spaces.Object, err error) {
+// ListSpaceObjects returns published object changes after cursor. Read access is required.
+func (s *Store) ListSpaceObjects(account proto.Account, key types.Hash256, cursor slabs.Cursor, limit int) (events []spaces.ObjectEvent, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
 		if err != nil {
 			return err
 		}
-		objects, err = spaceObjects(ctx, tx, id, nil, offset, limit)
+		page, ids, err := listSpaceObjectEvents(ctx, tx, id, cursor, limit)
+		if err != nil {
+			return err
+		}
+		events = make([]spaces.ObjectEvent, len(page))
+		objectSlabs := make(map[int64]*[]slabs.SlabSlice, len(ids))
+		for i, event := range page {
+			events[i] = spaces.ObjectEvent{Key: event.Key, Deleted: event.Deleted, UpdatedAt: event.UpdatedAt}
+			if event.Object != nil {
+				events[i].Object = &spaces.Object{Key: event.Key, Account: event.Object.Account, SealedObject: *event.Object.WithSlabs(nil)}
+			}
+		}
+		for id, i := range ids {
+			objectSlabs[id] = &events[i].Object.Slabs
+		}
+		if err := loadSpaceObjectSlabs(ctx, tx, objectSlabs); err != nil {
+			return err
+		}
+		for i := range events {
+			if events[i].Object != nil && len(events[i].Object.Slabs) == 0 {
+				events[i].Deleted, events[i].Object = true, nil
+			}
+		}
+		return nil
+	})
+	return
+}
+
+// ListSpaceObjectsWithoutSlabs returns published object changes without slab slices. Read access is required.
+func (s *Store) ListSpaceObjectsWithoutSlabs(account proto.Account, key types.Hash256, cursor slabs.Cursor, limit int) (events []spaces.ObjectEventWithoutSlabs, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
+		if err != nil {
+			return err
+		}
+		events, _, err = listSpaceObjectEvents(ctx, tx, id, cursor, limit)
 		return err
+	})
+	return
+}
+
+// SpaceObjectSlabs returns slab slices starting at cursor. Read access is required.
+func (s *Store) SpaceObjectSlabs(account proto.Account, key, objectKey types.Hash256, cursor int64, limit int) (result []slabs.SlabSlice, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
+		if err != nil {
+			return err
+		}
+		if err := assertObjectNotBlocked(ctx, tx, objectKey); err != nil {
+			return err
+		}
+		var objectID int64
+		err = tx.QueryRow(ctx, `SELECT id FROM space_objects WHERE space_id = $1 AND object_key = $2`, id, sqlHash256(objectKey)).Scan(&objectID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return slabs.ErrObjectNotFound
+		} else if err != nil {
+			return err
+		}
+		rows, err := tx.Query(ctx, `SELECT os.object_id, s.id, os.slab_offset, os.slab_length, s.encryption_key, s.min_shards, s.version
+ FROM space_object_slabs os JOIN slabs s ON s.digest = os.slab_digest
+ WHERE os.object_id = $1 AND os.slab_index >= $2 ORDER BY os.slab_index LIMIT $3`, objectID, cursor, limit)
+		if err != nil {
+			return err
+		}
+		result = []slabs.SlabSlice{}
+		return collectObjectSlabs(ctx, tx, rows, map[int64]*[]slabs.SlabSlice{objectID: &result})
 	})
 	return
 }
@@ -273,13 +346,71 @@ func spaceObjects(ctx context.Context, tx *txn, spaceID int64, key *types.Hash25
 	for i, id := range ids {
 		objectSlabs[id] = &objects[i].Slabs
 	}
-	rows, err = tx.Query(ctx, `SELECT os.object_id, s.id, os.slab_offset, os.slab_length, s.encryption_key, s.min_shards, s.version
-  FROM space_object_slabs os JOIN slabs s ON s.digest = os.slab_digest
-  WHERE os.object_id = ANY($1) ORDER BY os.object_id, os.slab_index`, ids)
-	if err != nil {
-		return nil, err
-	} else if err := collectObjectSlabs(ctx, tx, rows, objectSlabs); err != nil {
-		return nil, err
+	return objects, loadSpaceObjectSlabs(ctx, tx, objectSlabs)
+}
+
+func loadSpaceObjectSlabs(ctx context.Context, tx *txn, objects map[int64]*[]slabs.SlabSlice) error {
+	if len(objects) == 0 {
+		return nil
 	}
-	return objects, nil
+	rows, err := tx.Query(ctx, `SELECT os.object_id, s.id, os.slab_offset, os.slab_length, s.encryption_key, s.min_shards, s.version
+ FROM space_object_slabs os JOIN slabs s ON s.digest = os.slab_digest
+ WHERE os.object_id = ANY($1) ORDER BY os.object_id, os.slab_index`, slices.Collect(maps.Keys(objects)))
+	if err != nil {
+		return err
+	}
+	return collectObjectSlabs(ctx, tx, rows, objects)
+}
+
+func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor slabs.Cursor, limit int) (events []spaces.ObjectEventWithoutSlabs, ids map[int64]int, err error) {
+	rows, err := tx.Query(ctx, `SELECT object_key, was_deleted, updated_at FROM space_object_events e
+ WHERE space_id = $1 AND (updated_at, object_key) > ($2, $3)
+ AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = e.object_key)
+ ORDER BY updated_at, object_key LIMIT $4`, spaceID, cursor.After, sqlHash256(cursor.Key), limit)
+	if err != nil {
+		return nil, nil, err
+	}
+	events, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (event spaces.ObjectEventWithoutSlabs, err error) {
+		err = row.Scan((*sqlHash256)(&event.Key), &event.Deleted, &event.UpdatedAt)
+		return
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	keys := make([]sqlHash256, 0, len(events))
+	byKey := make(map[types.Hash256]int, len(events))
+	for i, event := range events {
+		if !event.Deleted {
+			keys = append(keys, sqlHash256(event.Key))
+			byKey[event.Key] = i
+		}
+	}
+	ids = make(map[int64]int, len(keys))
+	if len(keys) == 0 {
+		return events, ids, nil
+	}
+	rows, err = tx.Query(ctx, `SELECT id, object_key, account_key, encrypted_data_key, encrypted_meta_key,
+ encrypted_metadata, data_signature, meta_signature, created_at, updated_at, size
+ FROM space_objects WHERE space_id = $1 AND object_key = ANY($2)`, spaceID, keys)
+	if err != nil {
+		return nil, nil, err
+	}
+	err = forEachRow(rows, func(row pgx.CollectableRow) error {
+		var id int64
+		var obj spaces.ObjectWithoutSlabs
+		if err := row.Scan(&id, (*sqlHash256)(&obj.Key), (*sqlPublicKey)(&obj.Account), &obj.EncryptedDataKey, &obj.EncryptedMetadataKey,
+			&obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt, &obj.Size); err != nil {
+			return err
+		}
+		i := byKey[obj.Key]
+		events[i].Object = &obj
+		ids[id] = i
+		return nil
+	})
+	for i := range events {
+		if events[i].Object == nil {
+			events[i].Deleted = true
+		}
+	}
+	return events, ids, err
 }

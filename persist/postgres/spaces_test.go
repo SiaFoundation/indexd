@@ -255,6 +255,7 @@ func TestSpaceObjects(t *testing.T) {
 	} else if err := store.PinSpaceObject(writer, key, obj.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
+	store.publishEvents(t)
 	got, err := store.SpaceObject(reader, key, obj.ID())
 	if err != nil {
 		t.Fatal(err)
@@ -262,7 +263,7 @@ func TestSpaceObjects(t *testing.T) {
 		t.Fatalf("object mismatch: %+v", got)
 	} else if _, err := store.Object(owner, obj.ID()); !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("object in personal scope: %v", err)
-	} else if objects, err := store.SpaceObjects(reader, key, 0, 10); err != nil || len(objects) != 1 {
+	} else if objects, err := store.ListSpaceObjects(reader, key, slabs.Cursor{}, 10); err != nil || len(objects) != 1 {
 		t.Fatalf("unexpected objects: %+v, %v", objects, err)
 	}
 	assertUsage := func(want uint64) {
@@ -309,8 +310,9 @@ func TestSpaceObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertUsage(0)
-	if objects, err := store.SpaceObjects(reader, key, 0, 10); err != nil || len(objects) != 0 {
-		t.Fatalf("deleted object listed: %+v, %v", objects, err)
+	store.publishEvents(t)
+	if events, err := store.ListSpaceObjects(reader, key, slabs.Cursor{}, 10); err != nil || len(events) != 1 || !events[0].Deleted || events[0].Object != nil {
+		t.Fatalf("unexpected deletion event: %+v, %v", events, err)
 	}
 }
 
@@ -338,7 +340,7 @@ func TestSpaceQuotaRollback(t *testing.T) {
 		t.Fatalf("quota failure: %v", err)
 	}
 	store.assertPinnedSlabs(t, owner)
-	if objects, err := store.SpaceObjects(owner, key, 0, 10); err != nil || len(objects) != 0 {
+	if objects, err := store.ListSpaceObjects(owner, key, slabs.Cursor{}, 10); err != nil || len(objects) != 0 {
 		t.Fatalf("failed pin persisted: %+v, %v", objects, err)
 	}
 }
@@ -474,7 +476,7 @@ func TestSpaceConcurrentReads(t *testing.T) {
 				result <- err
 			} else if _, err := store.SpaceMembers(owner, key, 0, 10); err != nil {
 				result <- err
-			} else if _, err := store.SpaceObjects(owner, key, 0, 10); err != nil {
+			} else if _, err := store.ListSpaceObjects(owner, key, slabs.Cursor{}, 10); err != nil {
 				result <- err
 			} else {
 				_, err := store.SpaceObject(owner, key, obj.ID())
@@ -584,5 +586,103 @@ func TestSpaceSlabIsolation(t *testing.T) {
 		t.Fatal(err)
 	} else if remaining != 0 {
 		t.Fatalf("space pins remain after deletion: %d", remaining)
+	}
+}
+
+func TestSpaceObjectEvents(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	key, other := types.Hash256(frand.Entropy256()), types.Hash256(frand.Entropy256())
+	for _, k := range []types.Hash256{key, other} {
+		if err := store.AddSpace(owner, k, frand.Entropy256(), nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	first, second := store.pinTestObject(t, owner, hk), store.pinTestObject(t, owner, hk)
+	for _, obj := range []slabs.SealedObject{first, second} {
+		if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if events, err := store.ListSpaceObjects(owner, key, slabs.Cursor{}, 10); err != nil || len(events) != 0 {
+		t.Fatalf("unpublished events: %+v, %v", events, err)
+	}
+	lock, err := store.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Rollback(t.Context())
+	if _, err := lock.Exec(t.Context(), `SELECT object_key FROM space_object_events WHERE object_key = $1 FOR UPDATE`, sqlHash256(first.ID())); err != nil {
+		t.Fatal(err)
+	}
+	store.publishEvents(t)
+	page, err := store.ListSpaceObjects(owner, key, slabs.Cursor{}, 1)
+	if err != nil || len(page) != 1 || page[0].Key != second.ID() || page[0].Object == nil || page[0].Object.Account != owner {
+		t.Fatalf("unexpected page: %+v, %v", page, err)
+	}
+	cursor := slabs.Cursor{After: page[0].UpdatedAt, Key: page[0].Key}
+	if err := lock.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	store.publishEvents(t)
+	page, err = store.ListSpaceObjects(owner, key, cursor, 1)
+	if err != nil || len(page) != 1 || page[0].Key != first.ID() || !reflect.DeepEqual(page[0].Object.Slabs, first.Slabs) {
+		t.Fatalf("skipped event: %+v, %v", page, err)
+	}
+	cursor = slabs.Cursor{After: page[0].UpdatedAt, Key: page[0].Key}
+	if events, err := store.ListSpaceObjects(owner, other, slabs.Cursor{}, 10); err != nil || len(events) != 0 {
+		t.Fatalf("events leaked to another space: %+v, %v", events, err)
+	}
+	update := first.PinRequest()
+	update.EncryptedMetadata = frand.Bytes(40)
+	if err := store.PinSpaceObject(owner, key, update); err != nil {
+		t.Fatal(err)
+	}
+	store.publishEvents(t)
+	without, err := store.ListSpaceObjectsWithoutSlabs(owner, key, cursor, 10)
+	if err != nil || len(without) != 1 || without[0].Object == nil || without[0].Object.Size != first.Size() || !bytes.Equal(without[0].Object.EncryptedMetadata, update.EncryptedMetadata) {
+		t.Fatalf("unexpected update: %+v, %v", without, err)
+	}
+	cursor = slabs.Cursor{After: without[0].UpdatedAt, Key: without[0].Key}
+	parts, err := store.SpaceObjectSlabs(owner, key, first.ID(), 0, 1)
+	if err != nil || !reflect.DeepEqual(parts, first.Slabs[:1]) {
+		t.Fatalf("unexpected slabs: %+v, %v", parts, err)
+	}
+	if parts, err := store.SpaceObjectSlabs(owner, key, first.ID(), int64(len(first.Slabs)), 1); err != nil || len(parts) != 0 {
+		t.Fatalf("unexpected final page: %+v, %v", parts, err)
+	}
+	if err := store.DeleteSpaceObject(owner, key, first.ID()); err != nil {
+		t.Fatal(err)
+	}
+	store.publishEvents(t)
+	page, err = store.ListSpaceObjects(owner, key, cursor, 10)
+	if err != nil || len(page) != 1 || !page[0].Deleted || page[0].Object != nil {
+		t.Fatalf("unexpected tombstone: %+v, %v", page, err)
+	}
+	cursor = slabs.Cursor{After: page[0].UpdatedAt, Key: page[0].Key}
+	if err := store.PinSpaceObject(owner, key, first.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	store.publishEvents(t)
+	page, err = store.ListSpaceObjects(owner, key, cursor, 10)
+	if err != nil || len(page) != 1 || page[0].Deleted || page[0].Object == nil {
+		t.Fatalf("unexpected repin: %+v, %v", page, err)
+	}
+	cursor = slabs.Cursor{After: page[0].UpdatedAt, Key: page[0].Key}
+	if err := store.BlockObject(first.ID(), "test"); err != nil {
+		t.Fatal(err)
+	}
+	if events, err := store.ListSpaceObjects(owner, key, slabs.Cursor{}, 10); err != nil || len(events) != 1 || events[0].Key != second.ID() {
+		t.Fatalf("blocked event: %+v, %v", events, err)
+	}
+	if err := store.UnblockObject(first.ID()); err != nil {
+		t.Fatal(err)
+	}
+	store.publishEvents(t)
+	if events, err := store.ListSpaceObjects(owner, key, cursor, 10); err != nil || len(events) != 1 || events[0].Key != first.ID() {
+		t.Fatalf("unblocked event: %+v, %v", events, err)
 	}
 }

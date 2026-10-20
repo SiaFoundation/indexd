@@ -595,6 +595,17 @@ CREATE TABLE space_objects (
 );
 CREATE INDEX space_objects_space_id_created_at_idx ON space_objects(space_id, created_at DESC, id DESC);
 
+CREATE TABLE space_object_events (
+    space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+    object_key BYTEA NOT NULL CHECK(LENGTH(object_key) = 32),
+    was_deleted BOOLEAN NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE,
+    PRIMARY KEY (space_id, object_key)
+);
+CREATE INDEX space_object_events_cursor_idx ON space_object_events(space_id, updated_at, object_key);
+CREATE INDEX space_object_events_unpublished_idx ON space_object_events(space_id, object_key) WHERE updated_at IS NULL;
+CREATE INDEX space_object_events_object_key_idx ON space_object_events(object_key);
+
 CREATE TABLE space_object_slabs (
     object_id BIGINT NOT NULL REFERENCES space_objects(id) ON DELETE CASCADE,
     slab_digest BYTEA NOT NULL REFERENCES slabs(digest) ON DELETE RESTRICT,
