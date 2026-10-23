@@ -155,6 +155,7 @@ type (
 		BlockedObjects(offset, limit int) ([]BlockedObject, error)
 
 		ObjectsForSlab(slabID SlabID) ([]SlabObject, error)
+		ObjectAccounts(objectKey types.Hash256, offset, limit int) ([]ObjectAccount, error)
 		SectorStats() (SectorsStats, error)
 	}
 

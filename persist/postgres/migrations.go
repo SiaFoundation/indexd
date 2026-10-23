@@ -527,4 +527,8 @@ ALTER TABLE objects ALTER COLUMN size DROP DEFAULT;
 ALTER TABLE objects ALTER COLUMN size SET NOT NULL;`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX objects_object_key_idx ON objects(object_key)`)
+		return err
+	},
 }
