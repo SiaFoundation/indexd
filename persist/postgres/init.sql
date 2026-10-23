@@ -374,6 +374,8 @@ CREATE TABLE objects (
 
 -- object_key is unique per account
 CREATE UNIQUE INDEX objects_account_id_object_key_idx ON objects(account_id, object_key);
+-- speed up looking up which accounts pinned an object
+CREATE INDEX objects_object_key_idx ON objects(object_key);
 
 CREATE TABLE object_slabs (
     object_id BIGINT REFERENCES objects(id) ON DELETE CASCADE,

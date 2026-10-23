@@ -365,6 +365,37 @@ func (s *Store) ObjectsForSlab(slabID slabs.SlabID) (objects []slabs.SlabObject,
 	return objects, err
 }
 
+// ObjectAccounts returns a paginated list of the accounts that have pinned an
+// object with the given key, along with their connect keys.
+func (s *Store) ObjectAccounts(objectKey types.Hash256, offset, limit int) (objectAccounts []slabs.ObjectAccount, _ error) {
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		objectAccounts = objectAccounts[:0] // reuse same slice if transaction retries
+
+		rows, err := tx.Query(ctx, `
+			SELECT a.public_key, ack.app_key
+			FROM objects o
+			INNER JOIN accounts a ON a.id = o.account_id
+			INNER JOIN app_connect_keys ack ON ack.id = a.connect_key_id
+			WHERE o.object_key = $1
+			ORDER BY o.id ASC
+			LIMIT $2 OFFSET $3`, sqlHash256(objectKey), limit, offset)
+		if err != nil {
+			return fmt.Errorf("failed to query object accounts: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var oa slabs.ObjectAccount
+			if err := rows.Scan((*sqlPublicKey)(&oa.AccountKey), &oa.ConnectKey); err != nil {
+				return fmt.Errorf("failed to scan object account: %w", err)
+			}
+			objectAccounts = append(objectAccounts, oa)
+		}
+		return rows.Err()
+	})
+	return objectAccounts, err
+}
+
 // PinObject saves the given object for the given account. If an object with
 // the given key exists for an account, it is overwritten.
 func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) error {
