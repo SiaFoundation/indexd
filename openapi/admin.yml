@@ -85,7 +85,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -517,7 +517,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -736,7 +736,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -888,7 +888,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1009,7 +1009,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1057,7 +1057,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1184,7 +1184,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1262,7 +1262,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1312,7 +1312,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1358,7 +1358,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1458,7 +1458,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1507,7 +1507,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1554,7 +1554,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1609,7 +1609,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1654,7 +1654,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1696,7 +1696,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1736,7 +1736,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/indexd/contracts"
             )
 
@@ -1778,7 +1778,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1818,7 +1818,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/indexd/hosts"
             )
 
@@ -1859,7 +1859,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1899,7 +1899,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/indexd/pins"
             )
 
@@ -1942,7 +1942,7 @@ paths:
             package main
 
             import (
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -2179,7 +2179,7 @@ paths:
             package main
 
             import (
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -2239,7 +2239,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -2297,7 +2297,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -2339,7 +2339,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -2401,7 +2401,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
