@@ -418,7 +418,8 @@ func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (Shar
 }
 
 // ObjectAccounts returns a paginated list of the accounts that have pinned an
-// object with the given key, along with their connect keys.
+// object with the given key, along with their connect keys. It returns
+// ErrObjectNotFound if no account has pinned an object with the key.
 func (m *SlabManager) ObjectAccounts(ctx context.Context, objectKey types.Hash256, offset, limit int) ([]ObjectAccount, error) {
 	return m.store.ObjectAccounts(objectKey, offset, limit)
 }

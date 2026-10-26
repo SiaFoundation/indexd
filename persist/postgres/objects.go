@@ -366,10 +366,18 @@ func (s *Store) ObjectsForSlab(slabID slabs.SlabID) (objects []slabs.SlabObject,
 }
 
 // ObjectAccounts returns a paginated list of the accounts that have pinned an
-// object with the given key, along with their connect keys.
+// object with the given key, along with their connect keys. It returns
+// slabs.ErrObjectNotFound if no account has pinned an object with the key.
 func (s *Store) ObjectAccounts(objectKey types.Hash256, offset, limit int) (objectAccounts []slabs.ObjectAccount, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		objectAccounts = objectAccounts[:0] // reuse same slice if transaction retries
+
+		var exists bool
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM objects WHERE object_key = $1)`, sqlHash256(objectKey)).Scan(&exists); err != nil {
+			return fmt.Errorf("failed to check if object exists: %w", err)
+		} else if !exists {
+			return slabs.ErrObjectNotFound
+		}
 
 		rows, err := tx.Query(ctx, `
 			SELECT a.public_key, ack.app_key

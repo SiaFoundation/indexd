@@ -1389,7 +1389,10 @@ func TestObjectAccounts(t *testing.T) {
 	assertObjectAccounts(obj1.ID(), 1, 1, []proto.Account{acc2})
 	assertObjectAccounts(obj1.ID(), 2, 1, nil)
 	assertObjectAccounts(obj2.ID(), 0, 10, []proto.Account{acc3})
-	assertObjectAccounts(frand.Entropy256(), 0, 10, nil)
+
+	if _, err := store.ObjectAccounts(frand.Entropy256(), 0, 10); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
+	}
 
 	// blocked objects stay pinned, so their accounts are still returned
 	if err := store.BlockObject(obj1.ID(), "tos violation"); err != nil {

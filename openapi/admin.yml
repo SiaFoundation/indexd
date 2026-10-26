@@ -1450,6 +1450,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ObjectAccount"
+        "404":
+          description: Object not found
       x-codeSamples:
         - lang: Go
           label: Go

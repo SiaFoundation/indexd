@@ -1221,7 +1221,10 @@ func (a *admin) handleGETObjectAccounts(jc jape.Context) {
 		return
 	}
 	objectAccounts, err := a.slabs.ObjectAccounts(jc.Request.Context(), objectKey, offset, limit)
-	if jc.Check("failed to get object accounts", err) != nil {
+	if errors.Is(err, slabs.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get object accounts", err) != nil {
 		return
 	}
 	jc.Encode(objectAccounts)

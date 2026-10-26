@@ -224,6 +224,11 @@ func TestBlockedObjects(t *testing.T) {
 	} else if len(objectAccounts) != 1 || objectAccounts[0].AccountKey != proto.Account(sk.PublicKey()) || objectAccounts[0].ConnectKey != ck.Key {
 		t.Fatalf("unexpected object accounts: %+v", objectAccounts)
 	}
+	if _, err := adminClient.ObjectAccounts(ctx, frand.Entropy256()); err == nil {
+		t.Fatal("expected error fetching the accounts of an unknown object")
+	} else {
+		assertStatus(t, err, http.StatusNotFound)
+	}
 
 	// unblocking restores access
 	if err := adminClient.ObjectBlocklistRemove(ctx, blockedObj.ID()); err != nil {
