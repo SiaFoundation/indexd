@@ -65,6 +65,8 @@ func TestPerformContractRenewals(t *testing.T) {
 			t.Fatalf("expected renewedFrom %v, got %v", renewedFrom, call.params.Contract.ID)
 		} else if call.params.ProofHeight != proofHeight {
 			t.Fatalf("expected proof height %v, got %v", proofHeight, call.params.ProofHeight)
+		} else if call.params.Prices.SigHash() != goodSettings.Prices.SigHash() {
+			t.Fatal("expected renewal to use the scanned host prices")
 		}
 	}
 

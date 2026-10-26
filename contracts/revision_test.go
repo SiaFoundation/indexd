@@ -10,6 +10,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/contracts"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
@@ -19,7 +20,7 @@ type latestRevisionMock struct {
 	fn func(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
 }
 
-func (m *latestRevisionMock) LatestRevision(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+func (m *latestRevisionMock) LatestRevision(ctx context.Context, chain client.ChainManager, hostKey, renterKey types.PublicKey, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 	return m.fn(ctx, hostKey, contractID)
 }
 
@@ -41,15 +42,17 @@ func TestWithRevision(t *testing.T) {
 	store := newTestStore(t)
 	chain := newChainManagerMock()
 	revisionSubmissionBuffer := uint64(10)
-	hk := types.PublicKey{1}
-	store.addTestHost(t, goodHost(1))
+	renterKey, hk := types.GeneratePrivateKey().PublicKey(), types.GeneratePrivateKey().PublicKey()
+	h := goodHost(1)
+	h.PublicKey = hk
+	store.addTestHost(t, h)
 
 	latest := &latestRevisionMock{}
 	rm := contracts.NewRevisionManager(latest, chain, store, revisionSubmissionBuffer, zaptest.NewLogger(t))
 
 	addContract := func(fcid types.FileContractID) {
 		t.Helper()
-		if err := store.AddFormedContract(hk, fcid, types.V2FileContract{HostPublicKey: hk, ProofHeight: 200, RevisionNumber: 1, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(10)}, HostOutput: types.SiacoinOutput{Value: types.Siacoins(110)}, MissedHostValue: types.Siacoins(5), TotalCollateral: types.Siacoins(100)}, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+		if err := store.AddFormedContract(hk, fcid, types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, ProofHeight: 200, RevisionNumber: 1, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(10)}, HostOutput: types.SiacoinOutput{Value: types.Siacoins(110)}, MissedHostValue: types.Siacoins(5), TotalCollateral: types.Siacoins(100)}, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -171,6 +174,10 @@ func TestWithRevision(t *testing.T) {
 	err = rm.WithRevision(context.Background(), lock(types.FileContractID{6}), invalidSigFn)
 	if err == nil || !strings.Contains(err.Error(), "latest revision not found") {
 		t.Fatal("unexpected error", err)
+	} else if contract, err := store.Contract(types.FileContractID{6}); err != nil {
+		t.Fatal(err)
+	} else if !contract.Good {
+		t.Fatal("fetch failure should not mark the contract as bad")
 	}
 
 	// assert withRevision returns an error if the local revision is newer than
@@ -182,7 +189,7 @@ func TestWithRevision(t *testing.T) {
 
 	latest.fn = func(context.Context, types.PublicKey, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
-			Contract:  types.V2FileContract{HostPublicKey: hk, RevisionNumber: 1},
+			Contract:  types.V2FileContract{HostPublicKey: hk, ProofHeight: 200, RevisionNumber: 1, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(1)}},
 			Revisable: true,
 			Renewed:   false,
 		}, nil
@@ -198,7 +205,7 @@ func TestWithRevision(t *testing.T) {
 
 	// assert withRevision updates the revision in the database after syncing it with the host
 	fcid8 := types.FileContractID{8}
-	if err := store.AddFormedContract(hk, fcid8, types.V2FileContract{HostPublicKey: hk, ProofHeight: 200, RevisionNumber: 1, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(2)}}, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
+	if err := store.AddFormedContract(hk, fcid8, types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, ProofHeight: 200, RevisionNumber: 1, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(2)}}, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 		t.Fatal(err)
 	}
 	revision, _, _ := store.ContractRevision(fcid8)
@@ -206,7 +213,7 @@ func TestWithRevision(t *testing.T) {
 	remaining.Value = remaining.Value.Div64(2)
 	latest.fn = func(context.Context, types.PublicKey, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
-			Contract:  types.V2FileContract{HostPublicKey: hk, RevisionNumber: update, ProofHeight: 200, RenterOutput: remaining},
+			Contract:  types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, RevisionNumber: update, ProofHeight: 200, RenterOutput: remaining, HostOutput: types.SiacoinOutput{Value: remaining.Value}},
 			Revisable: true,
 			Renewed:   false,
 		}, nil
@@ -240,7 +247,7 @@ func TestWithRevision(t *testing.T) {
 	// assert withRevision returns an error if it turns out the contract was renewed
 	latest.fn = func(context.Context, types.PublicKey, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
-			Contract:  types.V2FileContract{HostPublicKey: hk, RevisionNumber: 1},
+			Contract:  types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, ProofHeight: 200, RevisionNumber: 1, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(10)}, HostOutput: types.SiacoinOutput{Value: types.Siacoins(110)}, MissedHostValue: types.Siacoins(5), TotalCollateral: types.Siacoins(100)},
 			Revisable: false,
 			Renewed:   true,
 		}, nil
@@ -252,10 +259,10 @@ func TestWithRevision(t *testing.T) {
 		t.Fatalf("expected ErrContractRenewed, got: %v", err)
 	}
 
-	// assert withRevision returns an error if it turns out the contract is not revisable
+	// assert withRevision rejects a host revision that changes the proof height
 	latest.fn = func(context.Context, types.PublicKey, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
-			Contract:  types.V2FileContract{HostPublicKey: hk, ProofHeight: revisionSubmissionBuffer + 1, RevisionNumber: 1},
+			Contract:  types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, ProofHeight: revisionSubmissionBuffer + 1, RevisionNumber: 1},
 			Revisable: false,
 			Renewed:   false,
 		}, nil
@@ -263,8 +270,8 @@ func TestWithRevision(t *testing.T) {
 	fcid10 := types.FileContractID{10}
 	addContract(fcid10)
 	err = rm.WithRevision(context.Background(), lock(fcid10), invalidSigFn)
-	if !errors.Is(err, contracts.ErrContractNotRevisable) {
-		t.Fatalf("expected ErrContractNotRevisable, got: %v", err)
+	if err == nil || !strings.Contains(err.Error(), "proof height mismatch") {
+		t.Fatalf("expected proof height mismatch, got: %v", err)
 	}
 
 	// assert withRevision doesn't persist the revision if the revise function renewed the contract
@@ -308,6 +315,37 @@ func TestWithRevision(t *testing.T) {
 	}
 	if !hostAfter.TotalSpent.Equals(hostBefore.TotalSpent.Add(types.NewCurrency64(1))) {
 		t.Fatalf("expected funds spent to be updated, got: %v", hostAfter.TotalSpent)
+	}
+
+	// assert a revision rejected by the client is neither persisted nor used
+	// to retry the operation, and the contract is marked as bad
+	fcid13 := types.FileContractID{13}
+	addContract(fcid13)
+	local, _, err := store.ContractRevision(fcid13)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest.fn = func(context.Context, types.PublicKey, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+		return proto.RPCLatestRevisionResponse{}, errors.Join(errors.New("failed to validate renter signature"), proto.ErrInvalidSignature)
+	}
+	var calls int
+	err = rm.WithRevision(t.Context(), lock(fcid13), func(rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		calls++
+		return rhp.ContractRevision{}, proto.Usage{}, proto.ErrInvalidSignature
+	})
+	if !errors.Is(err, proto.ErrInvalidSignature) {
+		t.Fatalf("expected invalid signature error, got %v", err)
+	} else if calls != 1 {
+		t.Fatalf("expected revise function to be called once, got %d", calls)
+	}
+	if rev, _, err := store.ContractRevision(fcid13); err != nil {
+		t.Fatal(err)
+	} else if rev.Revision != local.Revision {
+		t.Fatal("expected local revision to remain unchanged")
+	} else if contract, err := store.Contract(fcid13); err != nil {
+		t.Fatal(err)
+	} else if contract.Good {
+		t.Fatal("expected contract to be marked as bad")
 	}
 }
 

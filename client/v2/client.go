@@ -501,8 +501,6 @@ func (c *Client) refreshSettings(ctx context.Context, hostKey types.PublicKey, t
 	settings, err := rhp.RPCSettings(ctx, transport)
 	if err != nil {
 		return proto.HostSettings{}, err
-	} else if err := settings.Prices.Validate(hostKey); err != nil {
-		return proto.HostSettings{}, fmt.Errorf("host returned invalid prices: %w", err)
 	}
 
 	c.mu.Lock()

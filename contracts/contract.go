@@ -203,7 +203,10 @@ func (c Contract) GoodForRefresh(settings proto.HostSettings, fundTarget types.C
 	}
 
 	duration := c.ExpirationHeight - height
-	_, collateral := contractFunding(settings, c.Size, fundTarget, duration)
+	_, collateral, err := contractFunding(settings, c.Size, fundTarget, duration)
+	if err != nil {
+		return err // already describes what is too high
+	}
 	var totalCollateral types.Currency
 	if settings.ProtocolVersion.Cmp(rhp.ProtocolVersion502) >= 0 {
 		totalCollateral = c.UsedCollateral.Add(collateral)
@@ -285,10 +288,9 @@ func maxRenewableContractSize(hostSettings proto.HostSettings, period uint64) ui
 		sectorCollateral = types.NewCurrency64(1)
 	}
 	maxSectors := maxCollateral.Div(sectorCollateral)
-	maxSectorsSize := maxSectors.Mul64(proto.SectorSize).Big()
 	maxSize := uint64(maxContractSize)
-	if maxSectorsSize.IsUint64() {
-		maxSize = min(maxSize, maxSectorsSize.Uint64())
+	if maxSectorsSize, overflow := maxSectors.Mul64WithOverflow(proto.SectorSize); !overflow && maxSectorsSize.Big().IsUint64() {
+		maxSize = min(maxSize, maxSectorsSize.Big().Uint64())
 	}
 
 	// 20% safety margin

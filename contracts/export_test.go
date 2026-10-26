@@ -18,6 +18,7 @@ var (
 	MaxContractGrowthRate uint64         = maxContractGrowthRate
 	MinAllowance          types.Currency = minAllowance
 	MinHostCollateral     types.Currency = minHostCollateral
+	MaxContractAmount     types.Currency = maxContractAmount
 	PruneIntervalSuccess                 = pruneIntervalSuccess
 	PruneIntervalFailure                 = pruneIntervalFailure
 )

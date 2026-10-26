@@ -89,7 +89,10 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		duration := proofHeight + proto.ProofWindow - settings.Prices.TipHeight
 
 		// allowance is doubled to allow for two account funding cycles before next refresh
-		allowance, collateral := contractFunding(settings, contract.Size, minAllowance.Mul64(2), duration)
+		allowance, collateral, err := contractFunding(settings, contract.Size, minAllowance.Mul64(2), duration)
+		if err != nil {
+			return fmt.Errorf("failed to calculate contract funding: %w", err)
+		}
 		renewCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
 
@@ -115,6 +118,7 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 
 			var err error
 			res, err = cm.client.RenewContract(renewCtx, cm.chain, cm.signer, client.RenewContractParams{
+				Prices:      settings.Prices,
 				Contract:    rev,
 				Allowance:   allowance,
 				Collateral:  cappedCollateral,

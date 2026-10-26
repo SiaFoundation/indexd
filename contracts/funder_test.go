@@ -28,7 +28,7 @@ type (
 	}
 )
 
-func (h *funderHostClientMock) LatestRevision(_ context.Context, _ types.PublicKey, _ types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+func (h *funderHostClientMock) LatestRevision(_ context.Context, _ client.ChainManager, _, _ types.PublicKey, _ types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 	return proto.RPCLatestRevisionResponse{}, nil
 }
 func (h *funderHostClientMock) ReplenishAccounts(ctx context.Context, signer rhp.ContractSigner, chain client.ChainManager, params rhp.RPCReplenishAccountsParams) (rhp.RPCReplenishAccountsResult, error) {

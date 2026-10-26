@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -334,7 +335,7 @@ func (c *clientMock) FreeSectors(_ context.Context, _ rhp.ContractSigner, _ clie
 	}, nil
 }
 
-func (c *clientMock) LatestRevision(_ context.Context, _ types.PublicKey, _ types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+func (c *clientMock) LatestRevision(_ context.Context, _ client.ChainManager, _, _ types.PublicKey, _ types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 	return proto.RPCLatestRevisionResponse{}, nil
 }
 
@@ -529,6 +530,16 @@ func TestPerformContractFormation(t *testing.T) {
 		for _, calls := range mock.hosts {
 			formCalls += len(calls.formCalls)
 			refreshCalls += len(calls.refreshCalls)
+			for _, call := range calls.formCalls {
+				if call.params.Prices.SigHash() != goodSettings.Prices.SigHash() {
+					t.Fatal("expected formation to use the scanned host prices")
+				}
+			}
+			for _, call := range calls.refreshCalls {
+				if call.params.Prices.SigHash() != goodSettings.Prices.SigHash() {
+					t.Fatal("expected refresh to use the scanned host prices")
+				}
+			}
 		}
 		switch {
 		case formCalls != formations:
@@ -796,12 +807,137 @@ func TestContractFunding(t *testing.T) {
 				test.modSettings(&settings)
 			}
 			expectedAllowance, expectedCollateral := test.calc(settings)
-			allowance, collateral := contracts.ContractFunding(settings, test.initialDataSize, test.minAllowance, 1)
-			if !allowance.Equals(expectedAllowance) {
+			allowance, collateral, err := contracts.ContractFunding(settings, test.initialDataSize, test.minAllowance, 1)
+			if err != nil {
+				t.Fatal(err)
+			} else if !allowance.Equals(expectedAllowance) {
 				t.Errorf("expected allowance %v but got %v", expectedAllowance, allowance)
 			}
 			if !collateral.Equals(expectedCollateral) {
 				t.Errorf("expected collateral %v but got %v", expectedCollateral, collateral)
+			}
+		})
+	}
+}
+
+// TestContractFundingOverflow asserts that host prices that would overflow the
+// funding calculation either result in an error or capped collateral instead
+// of a panic.
+func TestContractFundingOverflow(t *testing.T) {
+	period := contracts.DefaultMaintenanceSettings.Period
+	duration := period + proto.ProofWindow
+
+	tests := []struct {
+		name               string
+		initialDataSize    uint64
+		minAllowance       types.Currency
+		settings           proto.HostSettings
+		expectedErr        string
+		expectedCollateral types.Currency
+	}{
+		{
+			name: "contract price too high",
+			settings: proto.HostSettings{
+				Prices: proto.HostPrices{ContractPrice: types.MaxCurrency},
+			},
+			expectedErr: "contract price",
+		},
+		{
+			name: "contract price just above bound",
+			settings: proto.HostSettings{
+				Prices: proto.HostPrices{ContractPrice: contracts.MaxContractAmount.Add(types.NewCurrency64(1))},
+			},
+			expectedErr: "contract price",
+		},
+		{
+			name: "contract price and fund target at bound",
+			settings: proto.HostSettings{
+				Prices: proto.HostPrices{ContractPrice: contracts.MaxContractAmount},
+			},
+			minAllowance:       contracts.MaxContractAmount,
+			expectedCollateral: contracts.MinHostCollateral,
+		},
+		{
+			name:         "fund target too high",
+			minAllowance: types.MaxCurrency,
+			expectedErr:  "fund target",
+		},
+		{
+			name: "collateral to storage price ratio overflows",
+			settings: proto.HostSettings{
+				MaxCollateral: types.Siacoins(1000),
+				Prices: proto.HostPrices{
+					StoragePrice: types.NewCurrency64(1),
+					IngressPrice: types.Siacoins(1).Div64(1e9),
+					Collateral:   types.NewCurrency64(1e18), // ingress cost / storage price * collateral overflows
+				},
+			},
+			expectedCollateral: types.Siacoins(1000), // clamped to the host's max collateral
+		},
+		{
+			name: "zero storage price and unbounded max collateral",
+			settings: proto.HostSettings{
+				MaxCollateral: types.MaxCurrency,
+				Prices: proto.HostPrices{
+					Collateral: types.NewCurrency64(1),
+				},
+			},
+			expectedCollateral: contracts.MaxContractAmount,
+		},
+		{
+			name:            "collateral too high for existing data",
+			initialDataSize: 1 << 40,
+			settings: proto.HostSettings{
+				MaxCollateral: types.MaxCurrency,
+				Prices: proto.HostPrices{
+					StoragePrice: types.NewCurrency64(1),
+					Collateral:   types.MaxCurrency.Div64(1e12).Div64(period), // highest collateral that passes the usability check
+				},
+			},
+			expectedErr: "collateral",
+		},
+		{
+			name: "storage price too high",
+			settings: proto.HostSettings{
+				MaxCollateral: types.MaxCurrency,
+				Prices: proto.HostPrices{
+					StoragePrice: types.MaxCurrency.Div64(1 << 20),
+					Collateral:   types.MaxCurrency.Div64(1 << 20),
+				},
+			},
+			expectedErr: "storage price",
+		},
+		{
+			name: "ingress price too high",
+			settings: proto.HostSettings{
+				Prices: proto.HostPrices{
+					IngressPrice: types.MaxCurrency.Div64(1 << 20),
+				},
+			},
+			expectedErr: "ingress price",
+		},
+		{
+			name: "egress price too high",
+			settings: proto.HostSettings{
+				Prices: proto.HostPrices{
+					EgressPrice: types.MaxCurrency.Div64(1 << 20),
+				},
+			},
+			expectedErr: "egress price",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, collateral, err := contracts.ContractFunding(test.settings, test.initialDataSize, test.minAllowance, duration)
+			if test.expectedErr != "" {
+				if err == nil || !strings.Contains(err.Error(), test.expectedErr) {
+					t.Fatalf("expected %q error, got %v", test.expectedErr, err)
+				}
+			} else if err != nil {
+				t.Fatal(err)
+			} else if !collateral.Equals(test.expectedCollateral) {
+				t.Errorf("expected collateral %v but got %v", test.expectedCollateral, collateral)
 			}
 		})
 	}
