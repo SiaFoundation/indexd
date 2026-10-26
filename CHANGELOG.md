@@ -1,3 +1,14 @@
+## 0.6.2 (2026-10-26)
+
+### Fixes
+
+- Fix panic when updating pinned settings with the explorer disabled
+- The app authorization page draws its logo itself instead of loading it from sia.tech
+
+#### Fix blocking hosts that are not in the hosts table
+
+Blocking a host that indexd has not seen yet no longer fails when no reasons are given, and blocking it again now merges the new reasons with the existing ones instead of replacing them.
+
 ## 0.6.1 (2026-10-08)
 
 ### Features
