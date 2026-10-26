@@ -26,13 +26,18 @@ type ChainManager interface {
 type (
 	// FormContractParams contains the parameters for forming a new contract.
 	FormContractParams struct {
-		HostKey     types.PublicKey
-		HostAddress types.Address
+		// Prices must be the same prices used to calculate the allowance and
+		// collateral.
+		Prices  proto.HostPrices
+		HostKey types.PublicKey
 		proto.RPCFormContractParams
 	}
 
 	// RefreshContractParams contains the parameters for refreshing an existing contract.
 	RefreshContractParams struct {
+		// Prices must be the same prices used to calculate the allowance and
+		// collateral.
+		Prices     proto.HostPrices
 		Contract   rhp.ContractRevision
 		Allowance  types.Currency
 		Collateral types.Currency
@@ -40,6 +45,9 @@ type (
 
 	// RenewContractParams contains the parameters for renewing an existing contract.
 	RenewContractParams struct {
+		// Prices must be the same prices used to calculate the allowance and
+		// collateral.
+		Prices      proto.HostPrices
 		Contract    rhp.ContractRevision
 		Allowance   types.Currency
 		Collateral  types.Currency
@@ -49,6 +57,12 @@ type (
 
 // FormContract forms a new contract with the specified host.
 func (c *Client) FormContract(ctx context.Context, chain ChainManager, signer rhp.FormContractSigner, params FormContractParams) (result rhp.RPCFormContractResult, err error) {
+	// validate before dialing so expired or invalidly signed prices don't
+	// count as a failed RPC
+	if err := params.Prices.Validate(params.HostKey); err != nil {
+		return rhp.RPCFormContractResult{}, fmt.Errorf("invalid host prices: %w", err)
+	}
+
 	done, err := c.tg.Add()
 	if err != nil {
 		return rhp.RPCFormContractResult{}, err
@@ -56,11 +70,14 @@ func (c *Client) FormContract(ctx context.Context, chain ChainManager, signer rh
 	defer done()
 
 	err = c.rpcFn(ctx, params.HostKey, func(ctx context.Context, transport rhp.TransportClient) error {
+		// the wallet address isn't covered by the prices and doesn't affect
+		// the allowance or collateral, use the host's current one so both
+		// sides build the same contract
 		settings, _, err := c.settings(ctx, params.HostKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		result, err = rhp.RPCFormContract(ctx, transport, chain, signer, chain.TipState(), settings.Prices, params.HostKey, params.HostAddress, params.RPCFormContractParams)
+		result, err = rhp.RPCFormContract(ctx, transport, chain, signer, chain.TipState(), params.Prices, params.HostKey, settings.WalletAddress, params.RPCFormContractParams)
 		return err
 	})
 	return
@@ -68,13 +85,19 @@ func (c *Client) FormContract(ctx context.Context, chain ChainManager, signer rh
 
 // RefreshContract refreshes an existing contract with the specified host.
 func (c *Client) RefreshContract(ctx context.Context, chain ChainManager, signer rhp.FormContractSigner, params RefreshContractParams) (result rhp.RPCRefreshContractResult, err error) {
+	// validate before dialing so expired or invalidly signed prices don't
+	// count as a failed RPC
+	revision := params.Contract.Revision
+	if err := params.Prices.Validate(revision.HostPublicKey); err != nil {
+		return rhp.RPCRefreshContractResult{}, fmt.Errorf("invalid host prices: %w", err)
+	}
+
 	done, err := c.tg.Add()
 	if err != nil {
 		return rhp.RPCRefreshContractResult{}, err
 	}
 	defer done()
 
-	revision := params.Contract.Revision
 	rpcParams := proto.RPCRefreshContractParams{
 		ContractID: params.Contract.ID,
 		Allowance:  params.Allowance,
@@ -82,11 +105,14 @@ func (c *Client) RefreshContract(ctx context.Context, chain ChainManager, signer
 	}
 
 	err = c.rpcFn(ctx, revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
+		// the wallet address isn't covered by the prices and doesn't affect
+		// the allowance or collateral, use the host's current one so both
+		// sides build the same contract
 		settings, _, err := c.settings(ctx, revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		result, err = rhp.RPCRefreshContractPartialRollover(ctx, transport, chain, signer, chain.TipState(), settings.Prices, settings.WalletAddress, revision, rpcParams)
+		result, err = rhp.RPCRefreshContractPartialRollover(ctx, transport, chain, signer, chain.TipState(), params.Prices, settings.WalletAddress, revision, rpcParams)
 		return err
 	})
 	return
@@ -94,13 +120,19 @@ func (c *Client) RefreshContract(ctx context.Context, chain ChainManager, signer
 
 // RenewContract renews an existing contract with the specified host.
 func (c *Client) RenewContract(ctx context.Context, chain ChainManager, signer rhp.FormContractSigner, params RenewContractParams) (result rhp.RPCRenewContractResult, err error) {
+	// validate before dialing so expired or invalidly signed prices don't
+	// count as a failed RPC
+	revision := params.Contract.Revision
+	if err := params.Prices.Validate(revision.HostPublicKey); err != nil {
+		return rhp.RPCRenewContractResult{}, fmt.Errorf("invalid host prices: %w", err)
+	}
+
 	done, err := c.tg.Add()
 	if err != nil {
 		return rhp.RPCRenewContractResult{}, err
 	}
 	defer done()
 
-	revision := params.Contract.Revision
 	rpcParams := proto.RPCRenewContractParams{
 		ContractID:  params.Contract.ID,
 		Allowance:   params.Allowance,
@@ -109,11 +141,14 @@ func (c *Client) RenewContract(ctx context.Context, chain ChainManager, signer r
 	}
 
 	err = c.rpcFn(ctx, revision.HostPublicKey, func(ctx context.Context, transport rhp.TransportClient) error {
+		// the wallet address isn't covered by the prices and doesn't affect
+		// the allowance or collateral, use the host's current one so both
+		// sides build the same contract
 		settings, _, err := c.settings(ctx, revision.HostPublicKey, transport)
 		if err != nil {
 			return fmt.Errorf("failed to get host prices: %w", err)
 		}
-		result, err = rhp.RPCRenewContract(ctx, transport, chain, signer, chain.TipState(), settings.Prices, settings.WalletAddress, revision, rpcParams)
+		result, err = rhp.RPCRenewContract(ctx, transport, chain, signer, chain.TipState(), params.Prices, settings.WalletAddress, revision, rpcParams)
 		return err
 	})
 	return

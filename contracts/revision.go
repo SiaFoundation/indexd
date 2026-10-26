@@ -107,6 +107,24 @@ func (rm *RevisionManager) syncRevision(ctx context.Context, contractID types.Fi
 		return types.V2FileContract{}, false, errors.New("local revision is newer than host revision")
 	}
 
+	// only accept the host revision if both signatures are valid for the
+	// renter and host keys of the local revision, otherwise the host could
+	// hand us a revision with arbitrary outputs and have us sign a revision
+	// derived from it
+	sigHash := rm.chain.TipState().ContractSigHash(resp.Contract)
+	if !revision.RenterPublicKey.VerifyHash(sigHash, resp.Contract.RenterSignature) || !revision.HostPublicKey.VerifyHash(sigHash, resp.Contract.HostSignature) {
+		rm.log.Warn("host returned a revision with invalid signatures, marking contract as bad",
+			zap.Stringer("contractID", contractID),
+			zap.Stringer("hostKey", revision.HostPublicKey),
+			zap.Uint64("hostRevisionNumber", resp.Contract.RevisionNumber),
+			zap.Uint64("localRevisionNumber", revision.RevisionNumber),
+		)
+		if err := rm.store.MarkContractBad(contractID); err != nil {
+			rm.log.Error("failed to mark contract as bad", zap.Stringer("contractID", contractID), zap.Error(err))
+		}
+		return types.V2FileContract{}, false, errors.New("host revision has invalid signatures")
+	}
+
 	// attribute a lower remaining allowance to the usage, note: we don't know
 	// what it was spent on, we track it as storage so it comes up in total
 	// spending but not in account funding

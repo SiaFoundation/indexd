@@ -45,6 +45,12 @@ var (
 	// renter will request when forming, refreshing, or renewing a
 	// contract.
 	minHostCollateral = types.Siacoins(1)
+	// maxContractAmount bounds the costs and collateral the renter
+	// calculates when forming, refreshing, or renewing a contract.
+	// It is far above the siacoin supply, so it never limits a
+	// contract that can actually be funded, but it is low enough
+	// that summing a contract's outputs can't overflow.
+	maxContractAmount = types.Siacoins(1).Mul64(1e13) // 10 trillion SC
 )
 
 type (
@@ -84,8 +90,14 @@ func (s *formContractSigner) SignV2Inputs(txn *types.V2Transaction, toSign []int
 }
 
 func withinGougingLeeway(cost, limit types.Currency) bool {
-	// cost must be 20% lower than the limit
-	return cost.Mul64(10).Cmp(limit.Mul64(8)) > 0
+	// cost must be 20% lower than the limit, a cost that overflows is
+	// considered too high and a limit that overflows can't be reached
+	scaledCost, overflow := cost.Mul64WithOverflow(10)
+	if overflow {
+		return true
+	}
+	scaledLimit, overflow := limit.Mul64WithOverflow(8)
+	return !overflow && scaledCost.Cmp(scaledLimit) > 0
 }
 
 type candidateContract struct {
@@ -101,13 +113,16 @@ func (cm *ContractManager) formContract(ctx context.Context, host types.PublicKe
 		if !host.IsGood() {
 			return errors.New("host is not good")
 		}
-		allowance, collateral := contractFunding(host.Settings, 0, fundTarget, period+proto.ProofWindow) // duration should be extended until expiration height
-		formationCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)                                  // note: broadcasting on the host-side can block for up to a minute by default
+		allowance, collateral, err := contractFunding(host.Settings, 0, fundTarget, period+proto.ProofWindow) // duration should be extended until expiration height
+		if err != nil {
+			return fmt.Errorf("failed to calculate contract funding: %w", err)
+		}
+		formationCtx, cancel := context.WithTimeout(ctx, 5*time.Minute) // note: broadcasting on the host-side can block for up to a minute by default
 		defer cancel()
 
 		res, err := cm.client.FormContract(formationCtx, cm.chain, cm.signer, client.FormContractParams{
-			HostKey:     host.PublicKey,
-			HostAddress: host.Settings.WalletAddress,
+			HostKey: host.PublicKey,
+			Prices:  host.Settings.Prices,
 			RPCFormContractParams: proto.RPCFormContractParams{
 				RenterPublicKey: cm.renterKey,
 				RenterAddress:   cm.wallet.Address(),
@@ -165,7 +180,10 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 				return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("host does not support contract refresh, protocol version %s < %s", host.Settings.ProtocolVersion, rhp.ProtocolVersion500)
 			}
 
-			allowance, collateral := contractFunding(host.Settings, rev.Revision.Filesize, fundTarget, duration)
+			allowance, collateral, err := contractFunding(host.Settings, rev.Revision.Filesize, fundTarget, duration)
+			if err != nil {
+				return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("failed to calculate contract funding: %w", err)
+			}
 
 			cappedCollateral := collateral
 			var totalCollateral types.Currency
@@ -182,8 +200,8 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 				cappedCollateral = capped
 			}
 
-			var err error
 			res, err = cm.client.RefreshContract(refreshCtx, cm.chain, cm.signer, client.RefreshContractParams{
+				Prices:     host.Settings.Prices,
 				Contract:   rev,
 				Allowance:  allowance,
 				Collateral: cappedCollateral,
@@ -469,22 +487,71 @@ func (cm *ContractManager) performContractFormation(ctx context.Context, setting
 	return nil
 }
 
+// exceedsMaxContractAmount returns true if the price multiplied by all factors
+// exceeds maxContractAmount.
+func exceedsMaxContractAmount(price types.Currency, factors ...uint64) bool {
+	amount := price
+	for _, f := range factors {
+		var overflow bool
+		if amount, overflow = amount.Mul64WithOverflow(f); overflow {
+			return true
+		}
+	}
+	return amount.Cmp(maxContractAmount) > 0
+}
+
 // contractFunding is a helper that calculates the funding and collateral
-// that go into forming, refreshing or renewing a contract.
-func contractFunding(settings proto.HostSettings, existingData uint64, minAllowance types.Currency, duration uint64) (allowance, collateral types.Currency) {
+// that go into forming, refreshing or renewing a contract. It returns an
+// error if the host's prices are too high to fund the contract.
+func contractFunding(settings proto.HostSettings, existingData uint64, minAllowance types.Currency, duration uint64) (allowance, collateral types.Currency, err error) {
 	multiplier := 1 + (existingData / minContractGrowthRate)
 	contractGrowth := min(minContractGrowthRate*multiplier, maxContractGrowthRate) / proto.SectorSize // 100% growth clamped to [256GiB, 1TiB]
-	uploadCost := settings.Prices.RPCWriteSectorCost(proto.SectorSize).RenterCost().Mul64(contractGrowth)
-	downloadCost := settings.Prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(contractGrowth)
-	storeCost := settings.Prices.RPCAppendSectorsCost(contractGrowth, duration).RenterCost()
+
+	// the host's prices are untrusted and the proto cost helpers panic on
+	// overflow, so make sure the cost of the existing data plus the growth
+	// is within bounds before using them, this also covers the risked
+	// collateral of the existing data when renewing
+	prices := settings.Prices
+	size := existingData + contractGrowth*proto.SectorSize
+	storageDuration := max(duration, proto.TempSectorDuration) // writing a sector stores it for at least the temp sector duration
+	switch {
+	case exceedsMaxContractAmount(prices.ContractPrice):
+		return types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("contract price %s is too high", prices.ContractPrice)
+	case exceedsMaxContractAmount(minAllowance):
+		return types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("fund target %s is too high", minAllowance)
+	case exceedsMaxContractAmount(prices.StoragePrice, size, storageDuration):
+		return types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("storage price %s is too high to store %d bytes for %d blocks", prices.StoragePrice, size, storageDuration)
+	case exceedsMaxContractAmount(prices.Collateral, size, duration):
+		return types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("collateral %s is too high to store %d bytes for %d blocks", prices.Collateral, size, duration)
+	case exceedsMaxContractAmount(prices.IngressPrice, size):
+		return types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("ingress price %s is too high to upload %d bytes", prices.IngressPrice, size)
+	case exceedsMaxContractAmount(prices.EgressPrice, size):
+		return types.ZeroCurrency, types.ZeroCurrency, fmt.Errorf("egress price %s is too high to download %d bytes", prices.EgressPrice, size)
+	}
+
+	uploadCost := prices.RPCWriteSectorCost(proto.SectorSize).RenterCost().Mul64(contractGrowth)
+	downloadCost := prices.RPCReadSectorCost(proto.SectorSize).RenterCost().Mul64(contractGrowth)
+	storeCost := prices.RPCAppendSectorsCost(contractGrowth, duration).RenterCost()
 	allowance = uploadCost.Add(storeCost).Add(downloadCost)
 	if allowance.Cmp(minAllowance) < 0 {
 		allowance = minAllowance // ensure we have at least the minimum allowance
 	}
 
-	collateral = proto.MaxHostCollateral(settings.Prices, storeCost) // based on store cost because uploads do not require collateral
-	if collateral.Cmp(settings.MaxCollateral) > 0 {
-		collateral = settings.MaxCollateral
+	// hosts can announce an arbitrarily high max collateral, so it is capped
+	// to avoid overflows when the contract's outputs are summed up
+	maxCollateral := settings.MaxCollateral
+	if maxCollateral.Cmp(maxContractAmount) > 0 {
+		maxCollateral = maxContractAmount
+	}
+
+	// collateral is based on store cost because uploads do not require
+	// collateral, it's calculated like proto.MaxHostCollateral but without
+	// panicking if the host's collateral to storage price ratio overflows it
+	collateral = maxCollateral
+	if !prices.StoragePrice.IsZero() {
+		if c, overflow := prices.Collateral.MulWithOverflow(storeCost.Div(prices.StoragePrice)); !overflow && c.Cmp(maxCollateral) < 0 {
+			collateral = c
+		}
 	}
 	if collateral.Cmp(minHostCollateral) < 0 {
 		collateral = minHostCollateral // ensure we have at least the minimum collateral

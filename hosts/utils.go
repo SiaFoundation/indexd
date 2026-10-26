@@ -49,7 +49,7 @@ func (c *scanner) ScanSiamux(ctx context.Context, hk types.PublicKey, addr strin
 	}
 	defer t.Close()
 
-	return rhp.RPCSettings(ctx, t)
+	return fetchSignedSettings(ctx, t, hk)
 }
 
 // ScanQuic executes the RPCSettings RPC on the host and returns its settings
@@ -61,7 +61,21 @@ func (c *scanner) ScanQuic(ctx context.Context, hk types.PublicKey, addr string)
 	}
 	defer t.Close()
 
-	return rhp.RPCSettings(ctx, t)
+	return fetchSignedSettings(ctx, t, hk)
+}
+
+// fetchSignedSettings executes the RPCSettings RPC and verifies the returned
+// prices are signed by the host. Contracts are formed with the scanned prices,
+// so a host returning prices with an invalid signature can't be used. Expiry is
+// left to the PriceValidity usability check.
+func fetchSignedSettings(ctx context.Context, t rhp.TransportClient, hk types.PublicKey) (proto4.HostSettings, error) {
+	hs, err := rhp.RPCSettings(ctx, t)
+	if err != nil {
+		return proto4.HostSettings{}, err
+	} else if !hk.VerifyHash(hs.Prices.SigHash(), hs.Prices.Signature) {
+		return proto4.HostSettings{}, fmt.Errorf("host returned invalid prices: %w", proto4.ErrInvalidSignature)
+	}
+	return hs, nil
 }
 
 var connectivitySites = []string{
