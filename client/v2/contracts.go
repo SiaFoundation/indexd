@@ -73,9 +73,9 @@ func (c *Client) FormContract(ctx context.Context, chain ChainManager, signer rh
 		// the wallet address isn't covered by the prices and doesn't affect
 		// the allowance or collateral, use the host's current one so both
 		// sides build the same contract
-		settings, _, err := c.settings(ctx, params.HostKey, transport)
+		settings, err := c.refreshSettings(ctx, params.HostKey, transport)
 		if err != nil {
-			return fmt.Errorf("failed to get host prices: %w", err)
+			return fmt.Errorf("failed to refresh host settings: %w", err)
 		}
 		result, err = rhp.RPCFormContract(ctx, transport, chain, signer, chain.TipState(), params.Prices, params.HostKey, settings.WalletAddress, params.RPCFormContractParams)
 		return err
@@ -108,9 +108,9 @@ func (c *Client) RefreshContract(ctx context.Context, chain ChainManager, signer
 		// the wallet address isn't covered by the prices and doesn't affect
 		// the allowance or collateral, use the host's current one so both
 		// sides build the same contract
-		settings, _, err := c.settings(ctx, revision.HostPublicKey, transport)
+		settings, err := c.refreshSettings(ctx, revision.HostPublicKey, transport)
 		if err != nil {
-			return fmt.Errorf("failed to get host prices: %w", err)
+			return fmt.Errorf("failed to refresh host settings: %w", err)
 		}
 		result, err = rhp.RPCRefreshContractPartialRollover(ctx, transport, chain, signer, chain.TipState(), params.Prices, settings.WalletAddress, revision, rpcParams)
 		return err
@@ -144,9 +144,9 @@ func (c *Client) RenewContract(ctx context.Context, chain ChainManager, signer r
 		// the wallet address isn't covered by the prices and doesn't affect
 		// the allowance or collateral, use the host's current one so both
 		// sides build the same contract
-		settings, _, err := c.settings(ctx, revision.HostPublicKey, transport)
+		settings, err := c.refreshSettings(ctx, revision.HostPublicKey, transport)
 		if err != nil {
-			return fmt.Errorf("failed to get host prices: %w", err)
+			return fmt.Errorf("failed to refresh host settings: %w", err)
 		}
 		result, err = rhp.RPCRenewContract(ctx, transport, chain, signer, chain.TipState(), params.Prices, settings.WalletAddress, revision, rpcParams)
 		return err
