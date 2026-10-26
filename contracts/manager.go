@@ -90,7 +90,7 @@ type (
 		AppendSectors(ctx context.Context, signer rhp.ContractSigner, chain client.ChainManager, revision rhp.ContractRevision, sectors []types.Hash256) (rhp.RPCAppendSectorsResult, error)
 		SectorRoots(ctx context.Context, signer rhp.ContractSigner, chain client.ChainManager, contract rhp.ContractRevision, offset, length uint64) (rhp.RPCSectorRootsResult, error)
 		FreeSectors(ctx context.Context, signer rhp.ContractSigner, chain client.ChainManager, contract rhp.ContractRevision, indices []uint64) (rhp.RPCFreeSectorsResult, error)
-		LatestRevision(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
+		LatestRevision(ctx context.Context, chain client.ChainManager, hostKey, renterKey types.PublicKey, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
 		Prices(ctx context.Context, hostKey types.PublicKey) (proto.HostPrices, error)
 	}
 

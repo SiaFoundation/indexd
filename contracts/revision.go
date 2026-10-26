@@ -10,6 +10,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/client/v2"
 	"go.uber.org/zap"
 )
 
@@ -50,9 +51,9 @@ var (
 
 type (
 	// LatestRevisionClient defines the interface for fetching the latest
-	// revision from a host.
+	// revision from a host, verifying its renter and host keys and signatures.
 	LatestRevisionClient interface {
-		LatestRevision(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
+		LatestRevision(ctx context.Context, chain client.ChainManager, hostKey, renterKey types.PublicKey, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
 	}
 
 	// RevisionStore defines an interface that allows fetching and updating a
@@ -91,8 +92,18 @@ func (rm *RevisionManager) syncRevision(ctx context.Context, contractID types.Fi
 	defer cancel()
 
 	// fetch latest revision
-	resp, err := rm.client.LatestRevision(ctx, revision.HostPublicKey, contractID)
+	resp, err := rm.client.LatestRevision(ctx, rm.chain, revision.HostPublicKey, revision.RenterPublicKey, contractID)
 	if err != nil {
+		if errors.Is(err, proto.ErrInvalidSignature) {
+			rm.log.Warn("host returned a revision with invalid signatures, marking contract as bad",
+				zap.Stringer("contractID", contractID),
+				zap.Stringer("hostKey", revision.HostPublicKey),
+				zap.Error(err),
+			)
+			if err := rm.store.MarkContractBad(contractID); err != nil {
+				rm.log.Error("failed to mark contract as bad", zap.Stringer("contractID", contractID), zap.Error(err))
+			}
+		}
 		rm.log.Debug("failed to fetch latest revision", zap.Error(err))
 		return types.V2FileContract{}, false, fmt.Errorf("%w; failed to fetch latest revision", err)
 	} else if resp.Contract.RevisionNumber < revision.RevisionNumber {
@@ -105,24 +116,6 @@ func (rm *RevisionManager) syncRevision(ctx context.Context, contractID types.Fi
 			rm.log.Error("failed to mark contract as bad", zap.Stringer("contractID", contractID), zap.Error(err))
 		}
 		return types.V2FileContract{}, false, errors.New("local revision is newer than host revision")
-	}
-
-	// only accept the host revision if both signatures are valid for the
-	// renter and host keys of the local revision, otherwise the host could
-	// hand us a revision with arbitrary outputs and have us sign a revision
-	// derived from it
-	sigHash := rm.chain.TipState().ContractSigHash(resp.Contract)
-	if !revision.RenterPublicKey.VerifyHash(sigHash, resp.Contract.RenterSignature) || !revision.HostPublicKey.VerifyHash(sigHash, resp.Contract.HostSignature) {
-		rm.log.Warn("host returned a revision with invalid signatures, marking contract as bad",
-			zap.Stringer("contractID", contractID),
-			zap.Stringer("hostKey", revision.HostPublicKey),
-			zap.Uint64("hostRevisionNumber", resp.Contract.RevisionNumber),
-			zap.Uint64("localRevisionNumber", revision.RevisionNumber),
-		)
-		if err := rm.store.MarkContractBad(contractID); err != nil {
-			rm.log.Error("failed to mark contract as bad", zap.Stringer("contractID", contractID), zap.Error(err))
-		}
-		return types.V2FileContract{}, false, errors.New("host revision has invalid signatures")
 	}
 
 	// attribute a lower remaining allowance to the usage, note: we don't know

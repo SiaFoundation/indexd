@@ -335,7 +335,7 @@ func (c *clientMock) FreeSectors(_ context.Context, _ rhp.ContractSigner, _ clie
 	}, nil
 }
 
-func (c *clientMock) LatestRevision(_ context.Context, _ types.PublicKey, _ types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+func (c *clientMock) LatestRevision(_ context.Context, _ client.ChainManager, _, _ types.PublicKey, _ types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 	return proto.RPCLatestRevisionResponse{}, nil
 }
 

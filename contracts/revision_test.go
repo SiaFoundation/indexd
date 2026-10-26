@@ -10,6 +10,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/coreutils/rhp/v4"
+	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/contracts"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
@@ -19,7 +20,7 @@ type latestRevisionMock struct {
 	fn func(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error)
 }
 
-func (m *latestRevisionMock) LatestRevision(ctx context.Context, hostKey types.PublicKey, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+func (m *latestRevisionMock) LatestRevision(ctx context.Context, chain client.ChainManager, hostKey, renterKey types.PublicKey, contractID types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 	return m.fn(ctx, hostKey, contractID)
 }
 
@@ -41,8 +42,7 @@ func TestWithRevision(t *testing.T) {
 	store := newTestStore(t)
 	chain := newChainManagerMock()
 	revisionSubmissionBuffer := uint64(10)
-	renterSK, hostSK := types.GeneratePrivateKey(), types.GeneratePrivateKey()
-	renterKey, hk := renterSK.PublicKey(), hostSK.PublicKey()
+	renterKey, hk := types.GeneratePrivateKey().PublicKey(), types.GeneratePrivateKey().PublicKey()
 	h := goodHost(1)
 	h.PublicKey = hk
 	store.addTestHost(t, h)
@@ -55,14 +55,6 @@ func TestWithRevision(t *testing.T) {
 		if err := store.AddFormedContract(hk, fcid, types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, ProofHeight: 200, RevisionNumber: 1, RenterOutput: types.SiacoinOutput{Value: types.Siacoins(10)}, HostOutput: types.SiacoinOutput{Value: types.Siacoins(110)}, MissedHostValue: types.Siacoins(5), TotalCollateral: types.Siacoins(100)}, types.ZeroCurrency, types.ZeroCurrency, types.ZeroCurrency, proto.Usage{}); err != nil {
 			t.Fatal(err)
 		}
-	}
-
-	// sign signs the revision with both the renter and host key
-	sign := func(fc types.V2FileContract) types.V2FileContract {
-		sigHash := chain.TipState().ContractSigHash(fc)
-		fc.RenterSignature = renterSK.SignHash(sigHash)
-		fc.HostSignature = hostSK.SignHash(sigHash)
-		return fc
 	}
 
 	fcid1 := types.FileContractID{1}
@@ -217,7 +209,7 @@ func TestWithRevision(t *testing.T) {
 	remaining.Value = remaining.Value.Div64(2)
 	latest.fn = func(context.Context, types.PublicKey, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
-			Contract:  sign(types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, RevisionNumber: update, ProofHeight: 200, RenterOutput: remaining}),
+			Contract:  types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, RevisionNumber: update, ProofHeight: 200, RenterOutput: remaining},
 			Revisable: true,
 			Renewed:   false,
 		}, nil
@@ -251,7 +243,7 @@ func TestWithRevision(t *testing.T) {
 	// assert withRevision returns an error if it turns out the contract was renewed
 	latest.fn = func(context.Context, types.PublicKey, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
-			Contract:  sign(types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, RevisionNumber: 1}),
+			Contract:  types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, RevisionNumber: 1},
 			Revisable: false,
 			Renewed:   true,
 		}, nil
@@ -266,7 +258,7 @@ func TestWithRevision(t *testing.T) {
 	// assert withRevision returns an error if it turns out the contract is not revisable
 	latest.fn = func(context.Context, types.PublicKey, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
 		return proto.RPCLatestRevisionResponse{
-			Contract:  sign(types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, ProofHeight: revisionSubmissionBuffer + 1, RevisionNumber: 1}),
+			Contract:  types.V2FileContract{RenterPublicKey: renterKey, HostPublicKey: hk, ProofHeight: revisionSubmissionBuffer + 1, RevisionNumber: 1},
 			Revisable: false,
 			Renewed:   false,
 		}, nil
@@ -321,69 +313,36 @@ func TestWithRevision(t *testing.T) {
 		t.Fatalf("expected funds spent to be updated, got: %v", hostAfter.TotalSpent)
 	}
 
-	// assertForgedRevisionRejected asserts withRevision refuses to revise on
-	// top of a host revision that wasn't signed by the renter, otherwise the
-	// host could move funds from the renter output to the host output and have
-	// us sign a revision derived from it, the contract should also be marked
-	// as bad
-	assertForgedRevisionRejected := func(fcid types.FileContractID, forge func(fc *types.V2FileContract)) {
-		t.Helper()
-		local, _, err := store.ContractRevision(fcid)
-		if err != nil {
-			t.Fatal(err)
-		}
-
-		forged := local.Revision
-		forged.RevisionNumber++
-		forged.HostOutput.Value = forged.HostOutput.Value.Add(forged.RenterOutput.Value)
-		forged.RenterOutput.Value = types.ZeroCurrency
-		forge(&forged)
-		latest.fn = func(context.Context, types.PublicKey, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
-			return proto.RPCLatestRevisionResponse{Contract: forged, Revisable: true}, nil
-		}
-
-		var retried bool
-		err = rm.WithRevision(context.Background(), lock(fcid), func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
-			if contract.Revision.RevisionNumber != local.Revision.RevisionNumber {
-				retried = true
-			}
-			return rhp.ContractRevision{}, proto.Usage{}, proto.ErrInvalidSignature
-		})
-		if err == nil || !strings.Contains(err.Error(), "host revision has invalid signatures") {
-			t.Fatalf("expected invalid signatures error, got: %v", err)
-		} else if retried {
-			t.Fatal("expected revise function not to be retried with the forged revision")
-		}
-
-		if rev, _, err := store.ContractRevision(fcid); err != nil {
-			t.Fatal(err)
-		} else if rev.Revision.RevisionNumber != local.Revision.RevisionNumber || !rev.Revision.RenterOutput.Value.Equals(local.Revision.RenterOutput.Value) {
-			t.Fatal("expected forged revision not to be persisted")
-		} else if contract, err := store.Contract(fcid); err != nil {
-			t.Fatal(err)
-		} else if contract.Good {
-			t.Fatal("expected contract to be marked as bad")
-		}
-	}
-
-	// assert withRevision rejects a host revision that is only signed by the host
+	// assert a revision rejected by the client is neither persisted nor used
+	// to retry the operation, and the contract is marked as bad
 	fcid13 := types.FileContractID{13}
 	addContract(fcid13)
-	assertForgedRevisionRejected(fcid13, func(fc *types.V2FileContract) {
-		fc.HostSignature = hostSK.SignHash(chain.TipState().ContractSigHash(*fc))
+	local, _, err := store.ContractRevision(fcid13)
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest.fn = func(context.Context, types.PublicKey, types.FileContractID) (proto.RPCLatestRevisionResponse, error) {
+		return proto.RPCLatestRevisionResponse{}, errors.Join(errors.New("failed to validate renter signature"), proto.ErrInvalidSignature)
+	}
+	var calls int
+	err = rm.WithRevision(t.Context(), lock(fcid13), func(rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		calls++
+		return rhp.ContractRevision{}, proto.Usage{}, proto.ErrInvalidSignature
 	})
-
-	// assert withRevision rejects a host revision that swapped the renter key
-	// for one the host controls
-	fcid14 := types.FileContractID{14}
-	addContract(fcid14)
-	forgedRenterSK := types.GeneratePrivateKey()
-	assertForgedRevisionRejected(fcid14, func(fc *types.V2FileContract) {
-		fc.RenterPublicKey = forgedRenterSK.PublicKey()
-		sigHash := chain.TipState().ContractSigHash(*fc)
-		fc.RenterSignature = forgedRenterSK.SignHash(sigHash)
-		fc.HostSignature = hostSK.SignHash(sigHash)
-	})
+	if !errors.Is(err, proto.ErrInvalidSignature) {
+		t.Fatalf("expected invalid signature error, got %v", err)
+	} else if calls != 1 {
+		t.Fatalf("expected revise function to be called once, got %d", calls)
+	}
+	if rev, _, err := store.ContractRevision(fcid13); err != nil {
+		t.Fatal(err)
+	} else if rev.Revision != local.Revision {
+		t.Fatal("expected local revision to remain unchanged")
+	} else if contract, err := store.Contract(fcid13); err != nil {
+		t.Fatal(err)
+	} else if contract.Good {
+		t.Fatal("expected contract to be marked as bad")
+	}
 }
 
 func TestIsBeyondMaxRevisionHeight(t *testing.T) {
