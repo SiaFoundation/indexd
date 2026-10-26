@@ -10,7 +10,81 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	proto4 "go.sia.tech/core/rhp/v4"
+	"go.sia.tech/core/types"
 )
+
+// fakeSettingsTransport is a TransportClient that serves RPCSettings with a fixed
+// set of settings.
+type fakeSettingsTransport struct {
+	hostKey  types.PublicKey
+	settings proto4.HostSettings
+}
+
+func (t *fakeSettingsTransport) DialStream(context.Context) (net.Conn, error) {
+	client, server := net.Pipe()
+	go func() {
+		defer server.Close()
+		if id, err := proto4.ReadID(server); err != nil || id != proto4.RPCSettingsID {
+			return
+		}
+		_ = proto4.WriteResponse(server, &proto4.RPCSettingsResponse{Settings: t.settings})
+	}()
+	return client, nil
+}
+
+func (t *fakeSettingsTransport) FrameSize() int           { return 1440 }
+func (t *fakeSettingsTransport) PeerKey() types.PublicKey { return t.hostKey }
+func (t *fakeSettingsTransport) Close() error             { return nil }
+
+func TestFetchSignedSettings(t *testing.T) {
+	hostKey := types.GeneratePrivateKey()
+	hk := hostKey.PublicKey()
+
+	signPrices := func(sk types.PrivateKey, validUntil time.Time) proto4.HostPrices {
+		prices := proto4.HostPrices{
+			ContractPrice: types.Siacoins(1),
+			Collateral:    types.Siacoins(2),
+			StoragePrice:  types.Siacoins(3),
+			TipHeight:     100,
+			ValidUntil:    validUntil,
+		}
+		prices.Signature = sk.SignHash(prices.SigHash())
+		return prices
+	}
+
+	valid := signPrices(hostKey, time.Now().Add(time.Hour))
+	unsigned := valid
+	unsigned.Signature = types.Signature{}
+	tampered := valid
+	tampered.StoragePrice = types.ZeroCurrency
+
+	for _, tt := range []struct {
+		name    string
+		prices  proto4.HostPrices
+		wantErr error
+	}{
+		{"valid signature", valid, nil},
+		// expiry is left to the PriceValidity usability check
+		{"expired prices with valid signature", signPrices(hostKey, time.Now().Add(-time.Hour)), nil},
+		{"unsigned prices", unsigned, proto4.ErrInvalidSignature},
+		{"tampered prices", tampered, proto4.ErrInvalidSignature},
+		{"prices signed by a different host key", signPrices(types.GeneratePrivateKey(), time.Now().Add(time.Hour)), proto4.ErrInvalidSignature},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			transport := &fakeSettingsTransport{hostKey: hk, settings: proto4.HostSettings{Prices: tt.prices}}
+			hs, err := fetchSignedSettings(t.Context(), transport, hk)
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("got error %v, want %v", err, tt.wantErr)
+			} else if err != nil {
+				return
+			} else if hs.Prices.SigHash() != tt.prices.SigHash() || hs.Prices.Signature != tt.prices.Signature {
+				t.Fatal("expected the host's prices to be returned")
+			}
+		})
+	}
+}
 
 func TestOnlineChecker(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
