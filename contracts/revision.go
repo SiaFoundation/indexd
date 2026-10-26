@@ -86,6 +86,43 @@ func NewRevisionManager(client LatestRevisionClient, chain ChainManager, store R
 	}
 }
 
+func validateLatestRevision(revision, latest types.V2FileContract) error {
+	// Signatures do not bind the revision to a contract ID, so also check the
+	// fields that must match the local contract before accepting it.
+	outputSum, overflow := latest.RenterOutput.Value.AddWithOverflow(latest.HostOutput.Value)
+	switch {
+	case latest.RenterPublicKey != revision.RenterPublicKey:
+		return errors.New("host revision renter key mismatch")
+	case latest.HostPublicKey != revision.HostPublicKey:
+		return errors.New("host revision host key mismatch")
+	case latest.RenterOutput.Address != revision.RenterOutput.Address:
+		return errors.New("host revision renter address mismatch")
+	case latest.HostOutput.Address != revision.HostOutput.Address:
+		return errors.New("host revision host address mismatch")
+	case latest.ProofHeight != revision.ProofHeight:
+		return errors.New("host revision proof height mismatch")
+	case latest.ExpirationHeight != revision.ExpirationHeight:
+		return errors.New("host revision expiration height mismatch")
+	case latest.TotalCollateral != revision.TotalCollateral:
+		return errors.New("host revision total collateral mismatch")
+	case overflow || outputSum != revision.RenterOutput.Value.Add(revision.HostOutput.Value):
+		return errors.New("host revision output sum mismatch")
+	case latest.Capacity < revision.Capacity:
+		return errors.New("host revision decreases capacity")
+	case latest.RevisionNumber < revision.RevisionNumber:
+		return errors.New("local revision is newer than host revision")
+	default:
+		return nil
+	}
+}
+
+func (rm *RevisionManager) markContractBad(contractID types.FileContractID, reason error) {
+	rm.log.Warn("host returned an invalid revision, marking contract as bad", zap.Stringer("contractID", contractID), zap.Error(reason))
+	if err := rm.store.MarkContractBad(contractID); err != nil {
+		rm.log.Error("failed to mark contract as bad", zap.Stringer("contractID", contractID), zap.Error(err))
+	}
+}
+
 func (rm *RevisionManager) syncRevision(ctx context.Context, contractID types.FileContractID, revision types.V2FileContract) (types.V2FileContract, bool, error) {
 	// apply a sane timeout for syncing the revision
 	ctx, cancel := context.WithTimeout(ctx, time.Minute)
@@ -94,28 +131,15 @@ func (rm *RevisionManager) syncRevision(ctx context.Context, contractID types.Fi
 	// fetch latest revision
 	resp, err := rm.client.LatestRevision(ctx, rm.chain, revision.HostPublicKey, revision.RenterPublicKey, contractID)
 	if err != nil {
-		if errors.Is(err, proto.ErrInvalidSignature) {
-			rm.log.Warn("host returned a revision with invalid signatures, marking contract as bad",
-				zap.Stringer("contractID", contractID),
-				zap.Stringer("hostKey", revision.HostPublicKey),
-				zap.Error(err),
-			)
-			if err := rm.store.MarkContractBad(contractID); err != nil {
-				rm.log.Error("failed to mark contract as bad", zap.Stringer("contractID", contractID), zap.Error(err))
-			}
+		if errors.Is(err, proto.ErrInvalidSignature) || proto.ErrorCode(err) == proto.ErrorCodeClientError {
+			rm.markContractBad(contractID, err)
 		}
 		rm.log.Debug("failed to fetch latest revision", zap.Error(err))
 		return types.V2FileContract{}, false, fmt.Errorf("%w; failed to fetch latest revision", err)
-	} else if resp.Contract.RevisionNumber < revision.RevisionNumber {
-		rm.log.Warn("contract is out of sync, marking it as bad since this situation can not be recovered from",
-			zap.Stringer("contractID", contractID),
-			zap.Uint64("hostRevisionNumber", resp.Contract.RevisionNumber),
-			zap.Uint64("localRevisionNumber", revision.RevisionNumber),
-		)
-		if err := rm.store.MarkContractBad(contractID); err != nil {
-			rm.log.Error("failed to mark contract as bad", zap.Stringer("contractID", contractID), zap.Error(err))
-		}
-		return types.V2FileContract{}, false, errors.New("local revision is newer than host revision")
+	}
+	if err := validateLatestRevision(revision, resp.Contract); err != nil {
+		rm.markContractBad(contractID, err)
+		return types.V2FileContract{}, false, err
 	}
 
 	// attribute a lower remaining allowance to the usage, note: we don't know
