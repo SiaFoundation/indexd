@@ -8,7 +8,7 @@ require (
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/klauspost/reedsolomon v1.14.2
 	github.com/oschwald/geoip2-golang v1.13.0
-	github.com/shopspring/decimal v1.5.0
+	github.com/shopspring/decimal v1.6.0
 	go.sia.tech/core v0.21.8
 	go.sia.tech/coreutils v0.25.2
 	go.sia.tech/jape v0.14.4
