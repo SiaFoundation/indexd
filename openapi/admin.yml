@@ -74,6 +74,10 @@ paths:
                     type: integer
                     format: uint64
                     description: The height up until which the wallet is synced
+                  syncHeight:
+                    type: integer
+                    format: uint64
+                    description: The height of the chain tip the indexer is synced to
                   synced:
                     type: boolean
                     description: Whether we have seen a block from the past three hours.
@@ -1292,7 +1296,7 @@ paths:
             schema:
               type: object
               properties:
-                hostkeys:
+                hostKeys:
                   type: array
                   items:
                     $ref: "#/components/schemas/PublicKey"
@@ -1319,7 +1323,7 @@ paths:
             func main() {
               c := admin.NewClient("http://localhost:9980", "your-admin-password")
               var a, b types.PublicKey
-              err := c.HostsBlocklistAdd(context.Background(), []types.PublicKey{a, b}, "maintenance")
+              err := c.HostsBlocklistAdd(context.Background(), []types.PublicKey{a, b}, []string{"maintenance"})
               // ...
             }
         - lang: JavaScript
@@ -1332,7 +1336,7 @@ paths:
               password: "your-admin-password"
             })
             await admin.hostsBlocklistUpdate({
-              hostkeys: ["ed25519:host-key-a", "ed25519:host-key-b"],
+              hostKeys: ["ed25519:host-key-a", "ed25519:host-key-b"],
               reasons: ["maintenance"]
             })
   /hosts/blocklist/{hostkey}:
@@ -1395,7 +1399,7 @@ paths:
       responses:
         "204":
           description: Host scanning triggered successfully
-  /hosts/{hostkey}/lostsectors/reset:
+  /host/{hostkey}/lostsectors/reset:
     post:
       tags:
         - hosts

@@ -733,16 +733,10 @@ components:
       description: A ed25519 public key
 
     SemVer:
-      type: array
-      description: "Represents a semantic version as an array of three unsigned 8-bit integers: [major, minor, patch]"
-      minItems: 3
-      maxItems: 3
-      items:
-        type: integer
-        format: uint8
-        minimum: 0
-        maximum: 255
-      example: [1, 2, 3]
+      type: string
+      description: "Represents a semantic version as a string in the form v<major>.<minor>.<patch>"
+      pattern: '^v[0-9]+\.[0-9]+\.[0-9]+$'
+      example: "v1.2.3"
 
     Signature:
       type: string
@@ -1087,8 +1081,8 @@ components:
           format: uint64
           description: The number of consecutive failed scans
         recentUptime:
-          type: string
-          format: float64
+          type: number
+          format: double
           description: The recent uptime of the host as a number between 0 and 1, where 1 means 100% uptime
         addresses:
           type: array
@@ -1115,10 +1109,18 @@ components:
           type: integer
           format: uint64
           description: The number of unpinned sectors on the host
-        fundsSpent:
+        accountFunding:
           allOf:
             - $ref: "#/components/schemas/Currency"
-            - description: The total amount of funds spent on this host
+            - description: The total amount spent on funding ephemeral accounts on this host
+        totalSpent:
+          allOf:
+            - $ref: "#/components/schemas/Currency"
+            - description: The total amount spent on this host, including account funding
+        stuckSince:
+          type: string
+          format: date-time
+          description: The time the host became stuck. The zero time if the host is not stuck.
         countryCode:
           type: string
           description: The ISO 3166-1 A-2 country code of the host inferred from its IP address.
@@ -1297,7 +1299,7 @@ components:
         minProtocolVersion:
           allOf:
             - $ref: "#/components/schemas/SemVer"
-            - description: "The minimum protocol version the host must have to be considered usable. The version is represented as an array of three unsigned 8-bit integers: [major, minor, patch]"
+            - description: The minimum protocol version the host must have to be considered usable
 
     RegisterAppResponse:
       type: object
@@ -1344,6 +1346,14 @@ components:
           type: integer
           format: uint64
           description: Number of accounts active in the last week.
+        pinnedData:
+          type: integer
+          format: uint64
+          description: Total pinned data in bytes before redundancy across all accounts
+        pinnedSize:
+          type: integer
+          format: uint64
+          description: Total pinned data in bytes including redundancy across all accounts
 
     ConnectKeyQuotaStats:
       type: object
@@ -1478,6 +1488,13 @@ components:
             allOf:
               - $ref: "#/components/schemas/Currency"
               - description: Total amount spent on this host
+          protocolVersion:
+            allOf:
+              - $ref: "#/components/schemas/SemVer"
+              - description: The protocol version reported by the host
+          release:
+            type: string
+            description: The release reported by the host
           scans:
             type: integer
             format: int64
