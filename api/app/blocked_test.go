@@ -2,9 +2,11 @@ package app_test
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/indexd/client/v2"
 	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/sharing"
@@ -35,7 +37,7 @@ func TestBlockedObjects(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sk, _ := newAccount(t, cluster)
+	sk, ck := newAccount(t, cluster)
 
 	// pin two objects so hiding one is distinguishable from a broken listing
 	pin := func() slabs.SealedObject {
@@ -214,6 +216,17 @@ func TestBlockedObjects(t *testing.T) {
 	}
 	if _, err := adminClient.ObjectBlocklistEntry(ctx, otherObj.ID()); err == nil {
 		t.Fatal("expected error fetching an unblocked object")
+	}
+
+	// a blocked object stays pinned, so the account that pinned it can still
+	// be traced
+	if objectAccounts, err := adminClient.ObjectAccounts(ctx, blockedObj.ID()); err != nil {
+		t.Fatal(err)
+	} else if len(objectAccounts) != 1 || objectAccounts[0].AccountKey != proto.Account(sk.PublicKey()) || objectAccounts[0].ConnectKey != ck.Key {
+		t.Fatalf("unexpected object accounts: %+v", objectAccounts)
+	}
+	if _, err := adminClient.ObjectAccounts(ctx, frand.Entropy256()); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
+		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
 	}
 
 	// unblocking restores access

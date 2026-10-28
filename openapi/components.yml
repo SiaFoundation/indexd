@@ -718,6 +718,15 @@ components:
           format: date-time
           description: When the object was blocked
 
+    ObjectAccount:
+      type: object
+      description: An account that has pinned an object
+      properties:
+        accountKey:
+          $ref: "#/components/schemas/Account/properties/accountKey"
+        connectKey:
+          $ref: "#/components/schemas/Account/properties/connectKey"
+
     PublicKey:
       type: string
       pattern: "^ed25519:[0-9a-fA-F]{64}$"

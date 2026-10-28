@@ -138,6 +138,7 @@ type (
 	// SlabManager defines the slab-related interface used by the admin API.
 	SlabManager interface {
 		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
+		ObjectAccounts(ctx context.Context, objectKey types.Hash256, offset, limit int) ([]slabs.ObjectAccount, error)
 		ObjectStats() (slabs.ObjectStats, error)
 		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
 		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
@@ -267,6 +268,9 @@ func NewAPI(chain ChainManager, accounts Accounts, contracts ContractManager, ho
 		"PUT    /hosts/blocklist":          a.handlePUTHostsBlocklist,
 		"DELETE /hosts/blocklist/:hostkey": a.handleDELETEHostsBlocklist,
 		"POST   /hosts/scan":               a.handlePOSTHostsScan,
+
+		// object endpoints
+		"GET /object/:objectkey/accounts": a.handleGETObjectAccounts,
 
 		// object blocklist endpoints
 		"GET    /objects/blocklist":            a.handleGETObjectsBlocklist,
@@ -1205,6 +1209,25 @@ func (a *admin) handleDELETEHostsBlocklist(jc jape.Context) {
 		return
 	}
 	jc.Encode(nil)
+}
+
+func (a *admin) handleGETObjectAccounts(jc jape.Context) {
+	var objectKey types.Hash256
+	if jc.DecodeParam("objectkey", &objectKey) != nil {
+		return
+	}
+	offset, limit, ok := api.ParseOffsetLimit(jc)
+	if !ok {
+		return
+	}
+	objectAccounts, err := a.slabs.ObjectAccounts(jc.Request.Context(), objectKey, offset, limit)
+	if errors.Is(err, slabs.ErrObjectNotFound) {
+		jc.Error(err, http.StatusNotFound)
+		return
+	} else if jc.Check("failed to get object accounts", err) != nil {
+		return
+	}
+	jc.Encode(objectAccounts)
 }
 
 func (a *admin) handleGETObjectsBlocklist(jc jape.Context) {

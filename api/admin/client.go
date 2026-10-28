@@ -342,6 +342,17 @@ func (c *Client) HostsBlocklistRemove(ctx context.Context, hostKey types.PublicK
 	return
 }
 
+// ObjectAccounts returns the accounts that have pinned an object with the given
+// key, along with their connect keys.
+func (c *Client) ObjectAccounts(ctx context.Context, objectKey types.Hash256, opts ...api.URLQueryParameterOption) (objectAccounts []slabs.ObjectAccount, err error) {
+	values := url.Values{}
+	for _, opt := range opts {
+		opt(values)
+	}
+	err = c.c.GET(ctx, fmt.Sprintf("/object/%s/accounts?%s", objectKey, values.Encode()), &objectAccounts)
+	return
+}
+
 // ObjectsBlocklist returns the objects on the blocklist.
 func (c *Client) ObjectsBlocklist(ctx context.Context, opts ...api.URLQueryParameterOption) (blocklist []slabs.BlockedObject, err error) {
 	values := url.Values{}

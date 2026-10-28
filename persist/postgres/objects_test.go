@@ -1309,6 +1309,98 @@ func TestObjectsForSlab(t *testing.T) {
 	}
 }
 
+// TestObjectAccounts asserts that ObjectAccounts returns every account that
+// pinned an object with the given key, along with its connect key, and that
+// blocking the object does not hide them.
+func TestObjectAccounts(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+
+	// create 3 accounts, acc1 and acc3 share a connect key
+	ck1, _ := store.addTestAppConnectKey(t)
+	ck2, _ := store.addTestAppConnectKey(t)
+	acc1, acc2, acc3 := proto.Account{1}, proto.Account{2}, proto.Account{3}
+	connectKeys := map[proto.Account]string{
+		acc1: ck1,
+		acc2: ck2,
+		acc3: ck1,
+	}
+	for _, acc := range []proto.Account{acc1, acc2, acc3} {
+		store.addTestAccountForKey(t, connectKeys[acc], types.PublicKey(acc))
+	}
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	// create a shared slab pinned to acc1 and acc2
+	sharedSlab := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	for _, acc := range []proto.Account{acc1, acc2} {
+		if _, err := store.PinSlabs(acc, time.Time{}, sharedSlab); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// create a second slab only pinned to acc3
+	slab2 := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{{
+			Root:    frand.Entropy256(),
+			HostKey: hk,
+		}},
+	}
+	if _, err := store.PinSlabs(acc3, time.Time{}, slab2); err != nil {
+		t.Fatal(err)
+	}
+
+	// the object key is derived from its slabs, so pinning an object with
+	// the same slabs on acc1 and acc2 gives both the same key
+	obj1 := store.pinRandomObject(t, acc1, []slabs.SlabSlice{sharedSlab.Slice(0, 100)})
+	store.pinRandomObject(t, acc2, []slabs.SlabSlice{sharedSlab.Slice(0, 100)})
+
+	// create an object on acc3 referencing only slab2
+	obj2 := store.pinRandomObject(t, acc3, []slabs.SlabSlice{slab2.Slice(0, 100)})
+
+	assertObjectAccounts := func(objectKey types.Hash256, offset, limit int, expected []proto.Account) {
+		t.Helper()
+		objectAccounts, err := store.ObjectAccounts(objectKey, offset, limit)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(objectAccounts) != len(expected) {
+			t.Fatalf("expected %d accounts, got %d", len(expected), len(objectAccounts))
+		}
+		for i, oa := range objectAccounts {
+			if oa.AccountKey != expected[i] {
+				t.Fatalf("expected account %v, got %v", expected[i], oa.AccountKey)
+			} else if oa.ConnectKey != connectKeys[oa.AccountKey] {
+				t.Fatalf("expected connect key %q, got %q", connectKeys[oa.AccountKey], oa.ConnectKey)
+			}
+		}
+	}
+
+	assertObjectAccounts(obj1.ID(), 0, 10, []proto.Account{acc1, acc2})
+	assertObjectAccounts(obj1.ID(), 0, 1, []proto.Account{acc1})
+	assertObjectAccounts(obj1.ID(), 1, 1, []proto.Account{acc2})
+	assertObjectAccounts(obj1.ID(), 2, 1, nil)
+	assertObjectAccounts(obj2.ID(), 0, 10, []proto.Account{acc3})
+
+	if _, err := store.ObjectAccounts(frand.Entropy256(), 0, 10); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
+	}
+
+	// blocked objects stay pinned, so their accounts are still returned
+	if err := store.BlockObject(obj1.ID(), "tos violation"); err != nil {
+		t.Fatal(err)
+	}
+	assertObjectAccounts(obj1.ID(), 0, 10, []proto.Account{acc1, acc2})
+}
+
 // TestDeleteObjectUnpinsSlabs asserts that deleting an object unpins the slabs
 // that are no longer referenced by any of the account's objects and queues
 // them for deletion, while slabs referenced by other objects or pinned by

@@ -138,6 +138,13 @@ type (
 		// tampered with.
 		MetadataSignature types.Signature `json:"metadataSignature"`
 	}
+
+	// An ObjectAccount is an account that has pinned an object, along with
+	// the connect key associated with the account.
+	ObjectAccount struct {
+		AccountKey proto.Account `json:"accountKey"`
+		ConnectKey string        `json:"connectKey"`
+	}
 )
 
 // DataSigHash returns the hash used for signing/verifying the data signature.
@@ -408,6 +415,13 @@ func (m *SlabManager) ObjectSlabs(ctx context.Context, account proto.Account, ke
 // SharedObject retrieves the shared object with the given key for the given account.
 func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (SharedObject, error) {
 	return m.store.SharedObject(key)
+}
+
+// ObjectAccounts returns a paginated list of the accounts that have pinned an
+// object with the given key, along with their connect keys. It returns
+// ErrObjectNotFound if no account has pinned an object with the key.
+func (m *SlabManager) ObjectAccounts(ctx context.Context, objectKey types.Hash256, offset, limit int) ([]ObjectAccount, error) {
+	return m.store.ObjectAccounts(objectKey, offset, limit)
 }
 
 // EncryptionKey is a helper type for JSON marshalling of 32-byte encryption

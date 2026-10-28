@@ -85,7 +85,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -517,7 +517,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -736,7 +736,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -888,7 +888,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1009,7 +1009,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1057,7 +1057,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1184,7 +1184,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1262,7 +1262,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1312,7 +1312,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1358,7 +1358,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1412,6 +1412,64 @@ paths:
           description: Lost sectors count reset successfully
         "404":
           description: Host does not exist
+  /object/{objectkey}/accounts:
+    get:
+      tags:
+        - objects
+      summary: Get the accounts that pinned an object
+      description: >
+        Returns the accounts that have pinned an object with the given key, along with the connect key associated with each account. Blocked objects are included since their data stays pinned.
+      operationId: getObjectAccounts
+      parameters:
+        - name: objectkey
+          in: path
+          required: true
+          schema:
+            $ref: "#/components/schemas/Hash256"
+        - name: limit
+          in: query
+          description: The maximum number of accounts to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: offset
+          in: query
+          description: The number of accounts to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+      responses:
+        "200":
+          description: A list of accounts that pinned the object
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ObjectAccount"
+        "404":
+          description: Object not found
+      x-codeSamples:
+        - lang: Go
+          label: Go
+          source: |
+            package main
+
+            import (
+              "context"
+              admin "go.sia.tech/indexd/api/admin"
+              "go.sia.tech/core/types"
+            )
+
+            func main() {
+              c := admin.NewClient("http://localhost:9980", "your-admin-password")
+              var k types.Hash256
+              accounts, err := c.ObjectAccounts(context.Background(), k)
+              // ...
+            }
   /objects/blocklist:
     get:
       tags:
@@ -1451,7 +1509,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1498,7 +1556,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1553,7 +1611,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1598,7 +1656,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -1640,7 +1698,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1680,7 +1738,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/indexd/contracts"
             )
 
@@ -1722,7 +1780,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1762,7 +1820,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/indexd/hosts"
             )
 
@@ -1803,7 +1861,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -1843,7 +1901,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/indexd/pins"
             )
 
@@ -1886,7 +1944,7 @@ paths:
             package main
 
             import (
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -2123,7 +2181,7 @@ paths:
             package main
 
             import (
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -2183,7 +2241,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -2241,7 +2299,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -2283,7 +2341,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
             )
 
             func main() {
@@ -2345,7 +2403,7 @@ paths:
 
             import (
               "context"
-              admin "go.sia.tech/indexd/admin"
+              admin "go.sia.tech/indexd/api/admin"
               "go.sia.tech/core/types"
             )
 
@@ -2415,6 +2473,8 @@ components:
       $ref: "./components.yml#/components/schemas/Contract"
     BlockedObject:
       $ref: "./components.yml#/components/schemas/BlockedObject"
+    ObjectAccount:
+      $ref: "./components.yml#/components/schemas/ObjectAccount"
     Host:
       $ref: "./components.yml#/components/schemas/Host"
     HostImportRequest:
