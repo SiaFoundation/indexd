@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 )
@@ -415,7 +416,7 @@ func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, to
 				if err := br.QueryRow().Scan(&sectorIDs[i], &hostID, &bound, &existed); err != nil {
 					br.Close()
 					if errors.Is(err, sql.ErrNoRows) {
-						return fmt.Errorf("unknown host %q for sector", sector.HostKey)
+						return fmt.Errorf("%w: unknown host %q for sector", hosts.ErrNotFound, sector.HostKey)
 					}
 					return fmt.Errorf("failed to insert sector %q: %w", sector.Root, err)
 				} else if !bound {

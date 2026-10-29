@@ -214,6 +214,104 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 	return events, eventByID, nil
 }
 
+// RepackableObjects returns objects stored in a single slab whose
+// unused space exceeds minWaste percent, excluding blocked objects and slabs
+// pinned at or after cutoff. Objects are returned smallest first, at most
+// limit of them, and only while their combined size stays within maxSize.
+func (s *Store) RepackableObjects(account proto.Account, cutoff time.Time, limit int, maxSize uint64, minWaste int) (objects []slabs.RepackableObject, err error) {
+	err = s.transaction(func(ctx context.Context, tx *txn) error {
+		accountID, _, err := accountID(ctx, tx, account)
+		if err != nil {
+			return err
+		}
+
+		rows, err := tx.Query(ctx, `
+			WITH single_slab_objects AS (
+				SELECT o.id, MIN(os.slab_digest) AS slab_digest
+				FROM objects o
+				JOIN object_slabs os ON os.object_id = o.id
+				WHERE o.account_id = $1
+				  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = o.object_key)
+				GROUP BY o.id
+				HAVING COUNT(DISTINCT os.slab_digest) = 1
+			),
+			eligible_slabs AS (
+				SELECT DISTINCT sso.slab_digest, s.min_shards
+				FROM single_slab_objects sso
+				JOIN slabs s ON s.digest = sso.slab_digest
+				WHERE s.pinned_at < $2
+			),
+			-- slices may overlap, including across accounts, so a slab's used
+			-- bytes are the union of its referenced ranges. A range starts a
+			-- new island when it begins past the end of every earlier range.
+			ranges AS (
+				SELECT os.slab_digest, os.slab_offset::bigint AS range_start, os.slab_offset::bigint + os.slab_length AS range_end,
+					MAX(os.slab_offset::bigint + os.slab_length) OVER (PARTITION BY os.slab_digest ORDER BY os.slab_offset, os.slab_length ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING) AS prev_end
+				FROM object_slabs os
+				WHERE os.slab_digest IN (SELECT slab_digest FROM eligible_slabs)
+			),
+			islands AS (
+				SELECT slab_digest, range_start, range_end,
+					COUNT(*) FILTER (WHERE prev_end IS NULL OR range_start > prev_end) OVER (PARTITION BY slab_digest ORDER BY range_start, range_end RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS island
+				FROM ranges
+			),
+			slab_usage AS (
+				SELECT slab_digest, SUM(island_end - island_start) AS used
+				FROM (
+					SELECT slab_digest, MIN(range_start) AS island_start, MAX(range_end) AS island_end
+					FROM islands
+					GROUP BY slab_digest, island
+				) merged
+				GROUP BY slab_digest
+			),
+			candidates AS (
+				SELECT o.id, o.object_key, o.encrypted_data_key, o.encrypted_meta_key, o.encrypted_metadata, o.data_signature, o.meta_signature, o.created_at, o.updated_at, o.size,
+					SUM(o.size) OVER (ORDER BY o.size ASC, o.id ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_size
+				FROM single_slab_objects sso
+				JOIN objects o ON o.id = sso.id
+				JOIN eligible_slabs e ON e.slab_digest = sso.slab_digest
+				JOIN slab_usage u ON u.slab_digest = sso.slab_digest
+				WHERE u.used * 100 < e.min_shards::bigint * $3 * (100 - $6::integer)
+			)
+			SELECT id, object_key, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, created_at, updated_at, size
+			FROM candidates
+			WHERE running_size <= $4::bigint
+			ORDER BY size ASC, id ASC
+			LIMIT $5
+		`, accountID, cutoff, int64(proto.SectorSize), int64(maxSize), limit, minWaste)
+		if err != nil {
+			return fmt.Errorf("failed to query repackable objects: %w", err)
+		}
+		page, err := pgx.CollectRows(rows, scanObject)
+		if err != nil {
+			return fmt.Errorf("failed to scan repackable objects: %w", err)
+		}
+
+		pageSlabs := make([][]slabs.SlabSlice, len(page))
+		objectSlabs := make(map[int64]*[]slabs.SlabSlice, len(page))
+		for i := range page {
+			objectSlabs[page[i].id] = &pageSlabs[i]
+		}
+		if err := loadObjectSlabs(ctx, tx, objectSlabs); err != nil {
+			return err
+		}
+
+		objects = make([]slabs.RepackableObject, 0, len(page))
+		for i, o := range page {
+			if len(pageSlabs[i]) == 0 {
+				// the object was deleted after its row was read
+				continue
+			}
+			objects = append(objects, slabs.RepackableObject{
+				Key:    o.key,
+				Object: *o.WithSlabs(pageSlabs[i]),
+			})
+		}
+		return nil
+	})
+	return
+}
+
 // ObjectSlabs returns a page of the object's slab slices in slab_index order,
 // starting at slice index cursor. It returns slabs.ErrObjectNotFound if the
 // object does not exist or was deleted while the page was being read.
