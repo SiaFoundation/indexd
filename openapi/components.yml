@@ -212,14 +212,14 @@ components:
         encryptedDataKey:
           type: string
           format: byte
-          description: The encrypted data key used to encrypt and decrypt the object's data
+          description: The encrypted data key used to encrypt and decrypt the object's data; exactly 72 bytes before base64 encoding in JSON
         dataSignature:
           $ref: "#/components/schemas/Signature"
           description: The signature of the object's data
         encryptedMetadataKey:
           type: string
           format: byte
-          description: The encrypted metadata key used to encrypt and decrypt the object's metadata
+          description: The optional encrypted metadata key used to encrypt and decrypt the object's metadata; omitted, empty, or exactly 72 bytes before base64 encoding in JSON
         encryptedMetadata:
           type: string
           format: byte
@@ -249,6 +249,267 @@ components:
           description: The list of slabs that make up the shared object
           items:
             $ref: "#/components/schemas/SlabSlice"
+
+    SpacePermission:
+      type: integer
+      format: uint8
+      enum: [1, 2, 3, 4, 5]
+      description: >
+        Cumulative permission levels: 1 read, 2 write, 3 delete, 4 admin, and 5 owner.
+        Owner is assigned when the space is created and cannot be granted to another member.
+
+    AddSpaceRequest:
+      type: object
+      required:
+        - key
+        - encryptedKey
+        - signature
+      properties:
+        key:
+          $ref: "#/components/schemas/PublicKey"
+        encryptedKey:
+          type: string
+          format: byte
+          description: The random space seed wrapped with DeriveMemberKey(ownerAppPrivateKey, spacePublicKey); exactly 72 bytes before base64 encoding in JSON
+        encryptedName:
+          type: string
+          format: byte
+          nullable: true
+          description: Encrypted space name, at most 1024 bytes before base64 encoding
+        encryptedMetadata:
+          type: string
+          format: byte
+          nullable: true
+          description: Encrypted space metadata, at most 1024 bytes before base64 encoding
+        signature:
+          allOf:
+            - $ref: "#/components/schemas/Signature"
+            - description: Space.SigHash signed with the space private key; covers key, owner, encryptedName, and encryptedMetadata
+
+    UpdateSpaceRequest:
+      type: object
+      required:
+        - signature
+      properties:
+        encryptedName:
+          type: string
+          format: byte
+          nullable: true
+          description: Replacement encrypted name, at most 1024 bytes before base64 encoding
+        encryptedMetadata:
+          type: string
+          format: byte
+          nullable: true
+          description: Replacement encrypted metadata, at most 1024 bytes before base64 encoding
+        signature:
+          allOf:
+            - $ref: "#/components/schemas/Signature"
+            - description: The updated Space.SigHash signed with the space private key
+
+    Space:
+      type: object
+      description: Shared space fields and the requesting member's access. The shared signature is the same for every member; encryptedKey is specific to the caller.
+      properties:
+        key:
+          $ref: "#/components/schemas/PublicKey"
+        owner:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The owner's app account key
+        encryptedName:
+          type: string
+          format: byte
+          nullable: true
+        encryptedMetadata:
+          type: string
+          format: byte
+          nullable: true
+        encryptedKey:
+          type: string
+          format: byte
+          description: The space seed wrapped with DeriveMemberKey for the requesting account; exactly 72 bytes before base64 encoding in JSON
+        permission:
+          $ref: "#/components/schemas/SpacePermission"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        signature:
+          allOf:
+            - $ref: "#/components/schemas/Signature"
+            - description: Verified using the space public key. Covers key, owner, encryptedName, and encryptedMetadata; excludes member-specific fields and server timestamps.
+
+    SpaceInvitation:
+      type: object
+      required:
+        - spaceKey
+        - inviter
+        - recipient
+        - permission
+        - encryptedKey
+        - createdAt
+        - expiresAt
+        - signature
+      properties:
+        spaceKey:
+          $ref: "#/components/schemas/PublicKey"
+        inviter:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The inviter's app account key, matching the request signer
+        recipient:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The invited app account key
+        permission:
+          type: integer
+          format: uint8
+          enum: [1, 2, 3, 4]
+          description: Cumulative read, write, delete, or admin permission; only the owner may grant admin
+        encryptedKey:
+          type: string
+          format: byte
+          description: The space seed wrapped with DeriveInvitationKey; 72 bytes before base64 encoding
+        expiresAt:
+          type: string
+          format: date-time
+          description: Must be later than createdAt and the server's current time
+        createdAt:
+          type: string
+          format: date-time
+          description: Must be within five minutes of the server's current time
+        signature:
+          allOf:
+            - $ref: "#/components/schemas/Signature"
+            - description: Invitation.SigHash signed with the inviter's app key; binds the space, both accounts, permission, encryptedKey, and creation and expiration times in Unix microseconds
+
+    AcceptSpaceInvitationRequest:
+      type: object
+      required:
+        - encryptedKey
+      properties:
+        encryptedKey:
+          type: string
+          format: byte
+          description: The decrypted space seed rewrapped with DeriveMemberKey(recipientAppPrivateKey, spacePublicKey); exactly 72 bytes before base64 encoding in JSON
+
+    UpdateSpaceMemberRequest:
+      type: object
+      required:
+        - permission
+      properties:
+        permission:
+          type: integer
+          format: uint8
+          enum: [1, 2, 3, 4]
+          description: Cumulative read, write, delete, or admin permission; only the owner may grant or change admin access
+
+    SpaceMember:
+      type: object
+      properties:
+        account:
+          $ref: "#/components/schemas/PublicKey"
+        invitedBy:
+          $ref: "#/components/schemas/PublicKey"
+        invitedAt:
+          type: string
+          format: date-time
+        permission:
+          $ref: "#/components/schemas/SpacePermission"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SpaceObject:
+      description: An encrypted space object and the account key used to verify its signatures
+      allOf:
+        - $ref: "#/components/schemas/SealedObject"
+        - type: object
+          properties:
+            key:
+              $ref: "#/components/schemas/Hash256"
+            account:
+              $ref: "#/components/schemas/PublicKey"
+
+    SpaceObjectWithoutSlabs:
+      description: A space object without its slab slices, which are paginated with GET /spaces/{key}/objects/{objectkey}/slabs
+      allOf:
+        - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
+        - type: object
+          properties:
+            key:
+              $ref: "#/components/schemas/Hash256"
+            account:
+              $ref: "#/components/schemas/PublicKey"
+
+    SpaceObjectEvent:
+      type: object
+      properties:
+        key:
+          $ref: "#/components/schemas/Hash256"
+        deleted:
+          type: boolean
+        updatedAt:
+          type: string
+          format: date-time
+          description: The event's stream position. Pair it with key when requesting the next page; use the nested object's updatedAt for its modification time.
+        object:
+          allOf:
+            - $ref: "#/components/schemas/SpaceObject"
+            - description: The current object, omitted for deletion tombstones
+
+    SpaceObjectEventWithoutSlabs:
+      type: object
+      properties:
+        key:
+          $ref: "#/components/schemas/Hash256"
+        deleted:
+          type: boolean
+        updatedAt:
+          type: string
+          format: date-time
+          description: The event's stream position. Pair it with key when requesting the next page; use the nested object's updatedAt for its modification time.
+        object:
+          allOf:
+            - $ref: "#/components/schemas/SpaceObjectWithoutSlabs"
+            - description: The current object without slab slices, omitted for deletion tombstones
+
+    SlabPinParams:
+      type: object
+      required:
+        - encryptionKey
+        - minShards
+        - sectors
+      properties:
+        version:
+          type: integer
+          format: uint8
+          minimum: 0
+          maximum: 1
+          default: 0
+        encryptionKey:
+          $ref: "#/components/schemas/EncryptionKey"
+        minShards:
+          type: integer
+          format: uint
+          minimum: 1
+          description: The number of data shards required to reconstruct the slab
+        sectors:
+          type: array
+          items:
+            allOf:
+              - $ref: "#/components/schemas/PinnedSector"
+              - type: object
+                properties:
+                  uploadedAt:
+                    type: string
+                    format: date-time
+                    description: When the sector was uploaded; if supplied, no more than 48 hours old or five minutes ahead of the server's clock
 
     SharingKeyNonce:
       type: string
@@ -613,7 +874,7 @@ components:
         encryptedDataKey:
           type: string
           format: byte
-          description: The encrypted data key used to encrypt and decrypt the object's data (base64-encoded in JSON)
+          description: The encrypted data key used to encrypt and decrypt the object's data; exactly 72 bytes before base64 encoding in JSON
         slabs:
           type: array
           items:
@@ -626,7 +887,7 @@ components:
         encryptedMetadataKey:
           type: string
           format: byte
-          description: The encrypted metadata key used to encrypt and decrypt the object's metadata (base64-encoded in JSON)
+          description: The optional encrypted metadata key used to encrypt and decrypt the object's metadata; omitted, empty, or exactly 72 bytes before base64 encoding in JSON
         encryptedMetadata:
           type: string
           format: byte

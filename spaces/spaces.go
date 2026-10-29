@@ -23,6 +23,7 @@ const (
 var (
 	ErrInvalidSignature            = errors.New("invalid space signature")
 	ErrNotFound                    = errors.New("space not found")
+	ErrExists                      = errors.New("space already exists")
 	ErrPermission                  = errors.New("insufficient space permission")
 	ErrInvitationNotFound          = errors.New("space invitation not found")
 	ErrMemberNotFound              = errors.New("space member not found")
@@ -58,15 +59,15 @@ func (r *AddSpaceRequest) Sign(spaceKey types.PrivateKey, owner proto.Account) {
 
 // Space describes a space and the requesting account's access to it.
 type Space struct {
-	Key               types.PublicKey
-	Owner             proto.Account
-	EncryptedName     []byte
-	EncryptedMetadata []byte
-	EncryptedKey      []byte
-	Permission        Permission
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	Signature         types.Signature
+	Key               types.PublicKey `json:"key"`
+	Owner             proto.Account   `json:"owner"`
+	EncryptedName     []byte          `json:"encryptedName"`
+	EncryptedMetadata []byte          `json:"encryptedMetadata"`
+	EncryptedKey      []byte          `json:"encryptedKey"`
+	Permission        Permission      `json:"permission"`
+	CreatedAt         time.Time       `json:"createdAt"`
+	UpdatedAt         time.Time       `json:"updatedAt"`
+	Signature         types.Signature `json:"signature"`
 }
 
 // SigHash returns the hash of the space key, owner's app key, encrypted name,
@@ -83,15 +84,15 @@ func (s Space) SigHash() types.Hash256 {
 
 // Invitation is a pending invitation to join a space.
 type Invitation struct {
-	SpaceKey     types.PublicKey
-	Inviter      proto.Account
-	Recipient    proto.Account
-	Permission   Permission
-	EncryptedKey []byte
-	ExpiresAt    time.Time
-	CreatedAt    time.Time
+	SpaceKey     types.PublicKey `json:"spaceKey"`
+	Inviter      proto.Account   `json:"inviter"`
+	Recipient    proto.Account   `json:"recipient"`
+	Permission   Permission      `json:"permission"`
+	EncryptedKey []byte          `json:"encryptedKey"`
+	ExpiresAt    time.Time       `json:"expiresAt"`
+	CreatedAt    time.Time       `json:"createdAt"`
 
-	Signature types.Signature
+	Signature types.Signature `json:"signature"`
 }
 
 // Validate checks the invitation fields and signature.
@@ -139,18 +140,18 @@ func (i Invitation) SigHash() types.Hash256 {
 
 // Member is an active member of a space.
 type Member struct {
-	Account    proto.Account
-	InvitedBy  proto.Account
-	InvitedAt  time.Time
-	Permission Permission
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	Account    proto.Account `json:"account"`
+	InvitedBy  proto.Account `json:"invitedBy"`
+	InvitedAt  time.Time     `json:"invitedAt"`
+	Permission Permission    `json:"permission"`
+	CreatedAt  time.Time     `json:"createdAt"`
+	UpdatedAt  time.Time     `json:"updatedAt"`
 }
 
 // Object is an encrypted object in a space and the account that signed it.
 type Object struct {
-	Key     types.Hash256
-	Account proto.Account
+	Key     types.Hash256 `json:"key"`
+	Account proto.Account `json:"account"`
 	slabs.SealedObject
 }
 

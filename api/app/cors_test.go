@@ -49,7 +49,7 @@ func TestCORSOptions(t *testing.T) {
 
 	expectedCORSHeaders := map[string]string{
 		"Access-Control-Allow-Origin":  "*",
-		"Access-Control-Allow-Methods": "GET, POST, DELETE",
+		"Access-Control-Allow-Methods": "GET, POST, PUT, DELETE",
 		"Access-Control-Allow-Headers": "*",
 	}
 
