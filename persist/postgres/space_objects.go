@@ -63,10 +63,6 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.PublicKey, obj s
 		} else if err != nil {
 			return err
 		}
-		oldSlabs, err := spaceSlabIDs(ctx, tx, id, &objectID)
-		if err != nil {
-			return err
-		}
 		batch := &pgx.Batch{}
 		batch.Queue(`DELETE FROM space_object_slabs WHERE object_id = $1`, objectID)
 		for i, slab := range obj.Slabs {
@@ -79,7 +75,7 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.PublicKey, obj s
  VALUES ($1, $2, FALSE) ON CONFLICT (space_id, object_key) DO UPDATE SET was_deleted = FALSE, updated_at = NULL`, id, sqlHash256(obj.ID)); err != nil {
 			return err
 		}
-		return s.unpinSpaceSlabs(ctx, tx, id, ownerID, oldSlabs)
+		return nil
 	})
 }
 
@@ -91,25 +87,31 @@ func (s *Store) DeleteSpaceObject(account proto.Account, key types.PublicKey, ob
 		if err != nil {
 			return err
 		}
-		var objectID int64
-		err = tx.QueryRow(ctx, `SELECT id FROM space_objects WHERE space_id = $1 AND object_key = $2`, id, sqlHash256(objectKey)).Scan(&objectID)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return slabs.ErrObjectNotFound
-		} else if err != nil {
-			return err
-		}
-		slabIDs, err := spaceSlabIDs(ctx, tx, id, &objectID)
-		if err != nil {
-			return err
-		} else if _, err := tx.Exec(ctx, `DELETE FROM space_objects WHERE id = $1`, objectID); err != nil {
-			return err
-		}
-		if _, err := tx.Exec(ctx, `UPDATE space_object_events SET was_deleted = TRUE, updated_at = NULL
- WHERE space_id = $1 AND object_key = $2`, id, sqlHash256(objectKey)); err != nil {
-			return err
-		}
-		return s.unpinSpaceSlabs(ctx, tx, id, ownerID, slabIDs)
+		return s.deleteSpaceObject(ctx, tx, id, ownerID, objectKey)
 	})
+}
+
+func (s *Store) deleteSpaceObject(ctx context.Context, tx *txn, id, ownerID int64, objectKey types.Hash256) error {
+	var objectID int64
+	err := tx.QueryRow(ctx, `SELECT id FROM space_objects WHERE space_id = $1 AND object_key = $2 FOR UPDATE`, id, sqlHash256(objectKey)).Scan(&objectID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return slabs.ErrObjectNotFound
+	} else if err != nil {
+		return err
+	}
+	slabIDs, err := spaceSlabIDs(ctx, tx, id, &objectID)
+	if err != nil {
+		return err
+	} else if err := lockSlabs(ctx, tx, slabIDs); err != nil {
+		return err
+	} else if _, err := tx.Exec(ctx, `DELETE FROM space_objects WHERE id = $1`, objectID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `UPDATE space_object_events SET was_deleted = TRUE, updated_at = NULL
+ WHERE space_id = $1 AND object_key = $2`, id, sqlHash256(objectKey)); err != nil {
+		return err
+	}
+	return s.unpinSpaceSlabs(ctx, tx, id, ownerID, slabIDs)
 }
 
 // DeleteSpace removes a space, its objects, memberships, and invitations.
@@ -122,6 +124,8 @@ func (s *Store) DeleteSpace(account proto.Account, key types.PublicKey) error {
 		}
 		slabIDs, err := spaceSlabIDs(ctx, tx, id, nil)
 		if err != nil {
+			return err
+		} else if err := lockSlabs(ctx, tx, slabIDs); err != nil {
 			return err
 		} else if _, err := tx.Exec(ctx, `DELETE FROM spaces WHERE id = $1`, id); err != nil {
 			return err

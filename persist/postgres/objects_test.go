@@ -14,6 +14,7 @@ import (
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/spaces"
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
@@ -1399,6 +1400,100 @@ func TestObjectAccounts(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertObjectAccounts(obj1.ID(), 0, 10, []proto.Account{acc1, acc2})
+}
+
+func TestSpaceObjectLookups(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner, writer := proto.Account{1}, proto.Account{2}
+	ownerConnectKey, _ := store.addTestAppConnectKey(t)
+	writerConnectKey, _ := store.addTestAppConnectKey(t)
+	store.addTestAccountForKey(t, ownerConnectKey, types.PublicKey(owner))
+	store.addTestAccountForKey(t, writerConnectKey, types.PublicKey(writer))
+	spaceKeys := []types.PublicKey{
+		store.addTestSpace(t, owner).PublicKey(),
+		store.addTestSpace(t, owner).PublicKey(),
+	}
+	for _, key := range spaceKeys {
+		if err := store.InviteSpaceMember(testSpaceInvitation(owner, writer, key, spaces.Write)); err != nil {
+			t.Fatal(err)
+		} else if err := store.AcceptSpaceInvitation(writer, key, frand.Bytes(72)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	params := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}},
+	}
+	if _, err := store.PinSlabs(writer, time.Time{}, params); err != nil {
+		t.Fatal(err)
+	}
+	obj := store.pinRandomObject(t, writer, []slabs.SlabSlice{params.Slice(0, 100), params.Slice(100, 100)})
+	for _, key := range spaceKeys {
+		if err := store.PinSpaceObject(writer, key, obj.PinRequest()); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	assertLookups := func(expected []slabs.ObjectAccount) {
+		t.Helper()
+		if got, err := store.ObjectAccounts(obj.ID(), 0, 10); err != nil {
+			t.Fatal(err)
+		} else if !slices.Equal(got, expected) {
+			t.Fatalf("object accounts: got %+v, want %+v", got, expected)
+		}
+		objects, err := store.ObjectsForSlab(params.Digest())
+		if err != nil {
+			t.Fatal(err)
+		} else if len(objects) != len(expected) {
+			t.Fatalf("expected %d slab objects, got %+v", len(expected), objects)
+		}
+		want := make(map[slabs.SlabObject]bool)
+		for _, account := range expected {
+			want[slabs.SlabObject{Account: account.AccountKey, ObjectID: obj.ID(), SpaceKey: account.SpaceKey}] = true
+		}
+		for _, object := range objects {
+			if !want[object] {
+				t.Fatalf("unexpected or duplicate slab object: %+v", object)
+			}
+			delete(want, object)
+		}
+	}
+	expected := []slabs.ObjectAccount{
+		{AccountKey: writer, ConnectKey: writerConnectKey},
+		{AccountKey: owner, ConnectKey: ownerConnectKey, SpaceKey: spaceKeys[0]},
+		{AccountKey: owner, ConnectKey: ownerConnectKey, SpaceKey: spaceKeys[1]},
+	}
+	assertLookups(expected)
+	for _, page := range []struct{ offset, limit int }{{0, 1}, {0, 2}, {1, 2}, {3, 1}} {
+		got, err := store.ObjectAccounts(obj.ID(), page.offset, page.limit)
+		if err != nil {
+			t.Fatal(err)
+		} else if want := expected[page.offset:min(page.offset+page.limit, len(expected))]; !slices.Equal(got, want) {
+			t.Fatalf("object accounts at offset %d, limit %d: got %+v, want %+v", page.offset, page.limit, got, want)
+		}
+	}
+	if err := store.BlockObject(obj.ID(), "tos violation"); err != nil {
+		t.Fatal(err)
+	}
+	assertLookups(expected)
+	if err := store.DeleteObject(writer, obj.ID()); err != nil {
+		t.Fatal(err)
+	}
+	assertLookups(expected[1:])
+	if err := store.DeleteSpaceObject(owner, spaceKeys[0], obj.ID()); err != nil {
+		t.Fatal(err)
+	}
+	assertLookups(expected[2:])
+	if err := store.DeleteSpaceObject(owner, spaceKeys[1], obj.ID()); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.ObjectAccounts(obj.ID(), 0, 10); !errors.Is(err, slabs.ErrObjectNotFound) {
+		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
+	} else if objects, err := store.ObjectsForSlab(params.Digest()); err != nil || len(objects) != 0 {
+		t.Fatalf("expected no slab objects, got %+v, %v", objects, err)
+	}
 }
 
 // TestDeleteObjectUnpinsSlabs asserts that deleting an object unpins the slabs

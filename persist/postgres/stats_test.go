@@ -21,6 +21,36 @@ import (
 	"lukechampine.com/frand"
 )
 
+func TestObjectStats(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	key := store.addTestSpace(t, owner).PublicKey()
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	store.assertUnpublishedEvents(t, 0)
+	obj := store.pinTestObject(t, owner, hk)
+	store.assertUnpublishedEvents(t, 1)
+	if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	store.assertUnpublishedEvents(t, 2)
+	store.publishEvents(t)
+	store.assertUnpublishedEvents(t, 0)
+
+	if err := store.DeleteSpaceObject(owner, key, obj.ID()); err != nil {
+		t.Fatal(err)
+	}
+	store.assertUnpublishedEvents(t, 1)
+	if err := store.PinObject(owner, obj.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	store.assertUnpublishedEvents(t, 2)
+	store.publishEvents(t)
+	store.assertUnpublishedEvents(t, 0)
+}
+
 func TestSectorStatsNumSlabs(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

@@ -560,7 +560,7 @@ CREATE TABLE space_invitations (
     space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     inviter_account_id INTEGER NOT NULL REFERENCES accounts(id),
-    permission_level SMALLINT NOT NULL DEFAULT 0 CHECK(permission_level BETWEEN 0 AND 3),
+    permission_level SMALLINT NOT NULL DEFAULT 1 CHECK(permission_level BETWEEN 1 AND 4),
     encrypted_key BYTEA NOT NULL CHECK(LENGTH(encrypted_key) = 72),
     signature BYTEA NOT NULL CHECK(LENGTH(signature) = 64),
     expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -575,11 +575,10 @@ CREATE TABLE space_members (
     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
     invited_by BYTEA NOT NULL CHECK(LENGTH(invited_by) = 32),
     invited_at TIMESTAMP WITH TIME ZONE NOT NULL,
-    permission_level SMALLINT NOT NULL DEFAULT 0 CHECK(permission_level BETWEEN 0 AND 4),
+    permission_level SMALLINT NOT NULL DEFAULT 1 CHECK(permission_level BETWEEN 1 AND 5),
     encrypted_key BYTEA NOT NULL CHECK(LENGTH(encrypted_key) = 72),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
-    revoked_at TIMESTAMP WITH TIME ZONE,
     PRIMARY KEY (space_id, account_id)
 );
 CREATE INDEX space_members_account_id_idx ON space_members(account_id);
@@ -599,6 +598,7 @@ CREATE TABLE space_objects (
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     UNIQUE (space_id, object_key)
 );
+CREATE INDEX space_objects_object_key_idx ON space_objects(object_key);
 
 CREATE TABLE space_object_events (
     space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,

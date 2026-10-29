@@ -1422,7 +1422,7 @@ paths:
         - objects
       summary: Get the accounts that pinned an object
       description: >
-        Returns the accounts that have pinned an object with the given key, along with the connect key associated with each account. Blocked objects are included since their data stays pinned.
+        Returns personal and space pins for an object with the given key, along with the connect key associated with each account. Space pins identify the space and its owner's account. Each personal or space pin is a separate entry, with personal pins listed first. Blocked objects are included since their data stays pinned.
       operationId: getObjectAccounts
       parameters:
         - name: objectkey
@@ -1432,7 +1432,7 @@ paths:
             $ref: "#/components/schemas/Hash256"
         - name: limit
           in: query
-          description: The maximum number of accounts to return
+          description: The maximum number of pins to return
           schema:
             type: integer
             minimum: 1
@@ -1440,7 +1440,7 @@ paths:
             default: 100
         - name: offset
           in: query
-          description: The number of accounts to skip
+          description: The number of pins to skip
           schema:
             type: integer
             minimum: 0

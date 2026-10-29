@@ -317,18 +317,27 @@ WHERE (p.account_id = $1 OR p.uploader_account_id = $1) AND p.slab_id = s.id AND
 		SELECT 1 FROM space_objects o
 		JOIN space_object_slabs os ON os.object_id = o.id
 		WHERE o.space_id = p.space_id AND os.slab_digest = s.digest
-	) RETURNING p.account_id`, id, candidates, cutoff)
+	) RETURNING p.account_id, p.slab_id`, id, candidates, cutoff)
 			if err != nil {
 				return fmt.Errorf("failed to prune unused space slabs: %w", err)
 			}
-			owners, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+			slabsByOwner := make(map[int64][]int64)
+			owners, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (int64, error) {
+				var ownerID, slabID int64
+				if err := row.Scan(&ownerID, &slabID); err != nil {
+					return 0, err
+				}
+				slabsByOwner[ownerID] = append(slabsByOwner[ownerID], slabID)
+				return ownerID, nil
+			})
 			if err != nil {
 				return fmt.Errorf("failed to collect space slab owners: %w", err)
 			}
+			slabsByOwner[id] = candidates
 			owners = append(owners, id)
 			slices.Sort(owners)
 			for _, ownerID := range slices.Compact(owners) {
-				if err := s.unpinUnreferencedSlabs(ctx, tx, ownerID, candidates, &cutoff); err != nil {
+				if err := s.unpinUnreferencedSlabs(ctx, tx, ownerID, slabsByOwner[ownerID], &cutoff); err != nil {
 					return err
 				}
 			}

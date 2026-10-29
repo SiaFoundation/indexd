@@ -343,7 +343,8 @@ func (c *Client) HostsBlocklistRemove(ctx context.Context, hostKey types.PublicK
 }
 
 // ObjectAccounts returns the accounts that have pinned an object with the given
-// key, along with their connect keys.
+// key, along with their connect keys. Space pins include the space key and its
+// owner's account.
 func (c *Client) ObjectAccounts(ctx context.Context, objectKey types.Hash256, opts ...api.URLQueryParameterOption) (objectAccounts []slabs.ObjectAccount, err error) {
 	values := url.Values{}
 	for _, opt := range opts {

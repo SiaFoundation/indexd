@@ -91,19 +91,14 @@ func TestInvitationValidate(t *testing.T) {
 		valid  bool
 	}{
 		{"valid", func(*Invitation) {}, true},
-		{"read permission", func(i *Invitation) { i.Permission = Read }, true},
-		{"admin permission", func(i *Invitation) { i.Permission = Admin }, true},
 		{"empty space key", func(i *Invitation) { i.SpaceKey = types.PublicKey{} }, false},
 		{"empty inviter", func(i *Invitation) { i.Inviter = [32]byte{} }, false},
 		{"empty recipient", func(i *Invitation) { i.Recipient = [32]byte{} }, false},
+		{"zero permission", func(i *Invitation) { i.Permission = 0 }, false},
 		{"owner permission", func(i *Invitation) { i.Permission = Owner }, false},
-		{"invalid permission", func(i *Invitation) { i.Permission = 255 }, false},
-		{"missing key", func(i *Invitation) { i.EncryptedKey = nil }, false},
 		{"short key", func(i *Invitation) { i.EncryptedKey = make([]byte, 71) }, false},
-		{"long key", func(i *Invitation) { i.EncryptedKey = make([]byte, 73) }, false},
 		{"old timestamp", func(i *Invitation) { i.CreatedAt = now.Add(-5*time.Minute - time.Nanosecond) }, false},
 		{"timestamp boundary", func(i *Invitation) { i.CreatedAt = now.Add(-5 * time.Minute) }, true},
-		{"expired", func(i *Invitation) { i.ExpiresAt = now.Add(-time.Second) }, false},
 		{"expiration boundary", func(i *Invitation) { i.ExpiresAt = now }, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

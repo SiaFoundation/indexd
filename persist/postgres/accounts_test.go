@@ -1446,14 +1446,9 @@ func TestPruneAccountSpaceObjects(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
-	ownerKey := types.GeneratePrivateKey()
-	owner := proto.Account(ownerKey.PublicKey())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
-	spaceKey := types.GeneratePrivateKey()
-	key := spaceKey.PublicKey()
-	if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-		t.Fatal(err)
-	}
+	key := store.addTestSpace(t, owner).PublicKey()
 	for i := range 4 {
 		obj := store.pinTestObject(t, owner, hk)
 		if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
@@ -1506,4 +1501,52 @@ func TestPruneAccountSpaceObjects(t *testing.T) {
 			t.Fatalf("expected %d %s, got %d", want, table, got)
 		}
 	}
+}
+
+func TestPruneAccountSpaceUploaders(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	member := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	store.addTestAccount(t, types.PublicKey(member))
+	key := store.addTestSpace(t, owner).PublicKey()
+	if err := store.InviteSpaceMember(testSpaceInvitation(owner, member, key, spaces.Write)); err != nil {
+		t.Fatal(err)
+	} else if err := store.AcceptSpaceInvitation(member, key, frand.Bytes(72)); err != nil {
+		t.Fatal(err)
+	}
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	var slabIDs []slabs.SlabID
+	for range 3 {
+		slab := slabs.SlabPinParams{EncryptionKey: frand.Entropy256(), MinShards: 1, Sectors: []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}}}
+		if _, err := store.PinSpaceSlabs(member, key, time.Time{}, slab); err != nil {
+			t.Fatal(err)
+		}
+		slabIDs = append(slabIDs, slab.Digest())
+	}
+	if err := store.DeleteAccount(member); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct{ limit, uploaders int }{{0, 3}, {2, 2}, {1, 1}, {1, 0}} {
+		if err := store.PruneAccounts(tt.limit); err != nil {
+			t.Fatal(err)
+		}
+		var uploaders, pins, accounts int
+		if err := store.pool.QueryRow(t.Context(), `SELECT
+ (SELECT COUNT(*) FROM space_slabs WHERE uploader_account_id IS NOT NULL),
+ (SELECT COUNT(*) FROM space_slabs),
+ (SELECT COUNT(*) FROM accounts WHERE public_key = $1)`, sqlPublicKey(member)).Scan(&uploaders, &pins, &accounts); err != nil {
+			t.Fatal(err)
+		} else if uploaders != tt.uploaders || pins != 3 || accounts != 1 {
+			t.Fatalf("pruning limit %d: got %d uploader references, %d pins, and %d accounts; want %d, 3, and 1", tt.limit, uploaders, pins, accounts, tt.uploaders)
+		}
+		store.assertPinnedSlabs(t, owner, slabIDs...)
+	}
+	if err := store.PruneAccounts(1); err != nil {
+		t.Fatal(err)
+	} else if err := store.PruneAccounts(1); !errors.Is(err, accounts.ErrNotFound) {
+		t.Fatalf("expected account to be pruned, got %v", err)
+	}
+	store.assertPinnedSlabs(t, owner, slabIDs...)
 }

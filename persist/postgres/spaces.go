@@ -15,7 +15,7 @@ import (
 const sqlSpaces = `SELECT s.space_key, a.public_key, s.signature, s.encrypted_name, s.encrypted_metadata, m.encrypted_key,
  m.permission_level, s.created_at, s.updated_at
  FROM spaces s JOIN accounts a ON a.id = s.owner_account_id
- JOIN space_members m ON m.space_id = s.id AND m.account_id = $1 AND m.revoked_at IS NULL
+ JOIN space_members m ON m.space_id = s.id AND m.account_id = $1
  WHERE a.deleted_at IS NULL`
 
 // AddSpace creates a space and its owner membership with the encrypted space
@@ -99,7 +99,7 @@ func (s *Store) UpdateSpace(account proto.Account, key types.PublicKey, name, me
 // encrypted space key, replacing any pending invitation. Owners and admins may
 // invite accounts registered with the same app ID as the owner.
 func (s *Store) InviteSpaceMember(invite spaces.Invitation) error {
-	if invite.Permission > spaces.Admin {
+	if invite.Permission < spaces.Read || invite.Permission > spaces.Admin {
 		return spaces.ErrPermission
 	}
 	return s.transaction(func(ctx context.Context, tx *txn) error {
@@ -119,7 +119,7 @@ func (s *Store) InviteSpaceMember(invite spaces.Invitation) error {
 		}
 		var sameApp, member bool
 		if err := tx.QueryRow(ctx, `SELECT recipient.app_id = owner.app_id,
-   EXISTS (SELECT 1 FROM space_members WHERE space_id = $1 AND account_id = $2 AND revoked_at IS NULL)
+   EXISTS (SELECT 1 FROM space_members WHERE space_id = $1 AND account_id = $2)
    FROM accounts recipient, accounts owner WHERE recipient.id = $2 AND owner.id = $3`, id, recipientID, ownerID).Scan(&sameApp, &member); err != nil {
 			return err
 		} else if !sameApp || member {
@@ -174,14 +174,11 @@ func (s *Store) AcceptSpaceInvitation(account proto.Account, key types.PublicKey
    AND EXISTS (SELECT 1 FROM accounts WHERE id = inviter_account_id AND deleted_at IS NULL)
    AND (inviter_account_id = $4 OR EXISTS (
     SELECT 1 FROM space_members m WHERE m.space_id = $1 AND m.account_id = space_invitations.inviter_account_id
-    AND m.permission_level = $5 AND m.revoked_at IS NULL
+    AND m.permission_level = $5
    ))
    RETURNING permission_level, inviter_account_id, created_at
   ) INSERT INTO space_members (space_id, account_id, permission_level, encrypted_key, invited_by, invited_at)
-  SELECT $1, $2, permission_level, $3, a.public_key, i.created_at FROM invitation i JOIN accounts a ON a.id = i.inviter_account_id
-  ON CONFLICT (space_id, account_id) DO UPDATE SET permission_level = EXCLUDED.permission_level,
-  encrypted_key = EXCLUDED.encrypted_key, invited_by = EXCLUDED.invited_by,
-  invited_at = EXCLUDED.invited_at, revoked_at = NULL, created_at = NOW(), updated_at = NOW()`, id, callerID, encryptedKey, ownerID, spaces.Admin)
+  SELECT $1, $2, permission_level, $3, a.public_key, i.created_at FROM invitation i JOIN accounts a ON a.id = i.inviter_account_id`, id, callerID, encryptedKey, ownerID, spaces.Admin)
 		if err != nil {
 			return err
 		} else if res.RowsAffected() == 0 {
@@ -220,7 +217,7 @@ func (s *Store) SpaceMembers(account proto.Account, key types.PublicKey, offset,
 		}
 		rows, err := tx.Query(ctx, `SELECT a.public_key, m.invited_by, m.invited_at, m.permission_level, m.created_at, m.updated_at
    FROM space_members m JOIN accounts a ON a.id = m.account_id
-   WHERE m.space_id = $1 AND m.revoked_at IS NULL AND a.deleted_at IS NULL
+   WHERE m.space_id = $1 AND a.deleted_at IS NULL
    ORDER BY m.account_id LIMIT $2 OFFSET $3`, id, limit, offset)
 		if err != nil {
 			return err
@@ -237,7 +234,7 @@ func (s *Store) SpaceMembers(account proto.Account, key types.PublicKey, offset,
 // UpdateSpaceMember changes an active member's permission. Admins may change
 // non-admin members' permissions; only the owner may grant or change admin access.
 func (s *Store) UpdateSpaceMember(account proto.Account, key types.PublicKey, member proto.Account, permission spaces.Permission) error {
-	if permission > spaces.Admin {
+	if permission < spaces.Read || permission > spaces.Admin {
 		return spaces.ErrPermission
 	}
 	return s.transaction(func(ctx context.Context, tx *txn) error {
@@ -258,7 +255,7 @@ func (s *Store) UpdateSpaceMember(account proto.Account, key types.PublicKey, me
 				return spaces.ErrPermission
 			}
 			var current spaces.Permission
-			err = tx.QueryRow(ctx, `SELECT permission_level FROM space_members WHERE space_id = $1 AND account_id = $2 AND revoked_at IS NULL`, id, memberID).Scan(&current)
+			err = tx.QueryRow(ctx, `SELECT permission_level FROM space_members WHERE space_id = $1 AND account_id = $2`, id, memberID).Scan(&current)
 			if errors.Is(err, pgx.ErrNoRows) {
 				return spaces.ErrMemberNotFound
 			} else if err != nil {
@@ -268,7 +265,7 @@ func (s *Store) UpdateSpaceMember(account proto.Account, key types.PublicKey, me
 			}
 		}
 		res, err := tx.Exec(ctx, `UPDATE space_members m SET permission_level = $3, updated_at = NOW()
-   FROM accounts a WHERE m.space_id = $1 AND m.account_id = a.id AND a.public_key = $2 AND m.revoked_at IS NULL`, id, sqlPublicKey(member), permission)
+   FROM accounts a WHERE m.space_id = $1 AND m.account_id = a.id AND a.public_key = $2`, id, sqlPublicKey(member), permission)
 		if err != nil {
 			return err
 		} else if res.RowsAffected() == 0 {
@@ -303,7 +300,7 @@ func (s *Store) DeleteSpaceMember(account proto.Account, key types.PublicKey, me
 			return spaces.ErrPermission
 		}
 		var permission spaces.Permission
-		err = tx.QueryRow(ctx, `SELECT permission_level FROM space_members WHERE space_id = $1 AND account_id = $2 AND revoked_at IS NULL`, id, memberID).Scan(&permission)
+		err = tx.QueryRow(ctx, `SELECT permission_level FROM space_members WHERE space_id = $1 AND account_id = $2`, id, memberID).Scan(&permission)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return spaces.ErrMemberNotFound
 		} else if err != nil {
@@ -311,7 +308,7 @@ func (s *Store) DeleteSpaceMember(account proto.Account, key types.PublicKey, me
 		} else if callerID != ownerID && callerID != memberID && permission == spaces.Admin {
 			return spaces.ErrPermission
 		}
-		if _, err := tx.Exec(ctx, `UPDATE space_members SET revoked_at = NOW(), updated_at = NOW() WHERE space_id = $1 AND account_id = $2`, id, memberID); err != nil {
+		if _, err := tx.Exec(ctx, `DELETE FROM space_members WHERE space_id = $1 AND account_id = $2`, id, memberID); err != nil {
 			return err
 		}
 		_, err = tx.Exec(ctx, `DELETE FROM space_invitations WHERE space_id = $1 AND inviter_account_id = $2`, id, memberID)
@@ -342,7 +339,7 @@ func spaceAccess(ctx context.Context, tx *txn, account proto.Account, key types.
 		return
 	}
 	var level spaces.Permission
-	err = tx.QueryRow(ctx, `SELECT permission_level FROM space_members WHERE space_id = $1 AND account_id = $2 AND revoked_at IS NULL`, id, callerID).Scan(&level)
+	err = tx.QueryRow(ctx, `SELECT permission_level FROM space_members WHERE space_id = $1 AND account_id = $2`, id, callerID).Scan(&level)
 	if errors.Is(err, pgx.ErrNoRows) {
 		err = spaces.ErrPermission
 	} else if err == nil && level < permission {
