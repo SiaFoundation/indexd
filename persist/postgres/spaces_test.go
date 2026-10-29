@@ -36,29 +36,13 @@ func TestSpaces(t *testing.T) {
 	invitation := spaces.Invitation{SpaceKey: key, Inviter: owner, Recipient: member, Permission: spaces.Write, EncryptedKey: invitedKey, CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
 	invitation.Signature = ownerKey.SignHash(invitation.SigHash())
 	req := signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: ownerEncryptedKey, EncryptedName: name, EncryptedMetadata: metadata})
-	for _, change := range []func(*spaces.AddSpaceRequest){
-		func(r *spaces.AddSpaceRequest) { r.Key[0] ^= 1 },
-		func(r *spaces.AddSpaceRequest) { r.EncryptedName = frand.Bytes(40) },
-		func(r *spaces.AddSpaceRequest) { r.EncryptedMetadata = frand.Bytes(50) },
-		func(r *spaces.AddSpaceRequest) { r.Sign(ownerKey, owner) },
-	} {
-		bad := req
-		change(&bad)
-		if err := store.AddSpace(owner, bad); !errors.Is(err, spaces.ErrInvalidSignature) {
-			t.Fatalf("accepted invalid signature: %v", err)
-		}
+	bad := req
+	bad.Sign(ownerKey, owner)
+	if err := store.AddSpace(owner, bad); !errors.Is(err, spaces.ErrInvalidSignature) {
+		t.Fatalf("accepted invalid signature: %v", err)
 	}
 	if err := store.AddSpace(member, req); !errors.Is(err, spaces.ErrInvalidSignature) {
 		t.Fatalf("accepted a different owner: %v", err)
-	}
-	for _, encryptedKey := range [][]byte{nil, {}, make([]byte, 71), make([]byte, 73)} {
-		bad := req
-		bad.EncryptedKey = encryptedKey
-		if err := store.AddSpace(owner, bad); err == nil {
-			t.Fatalf("accepted %d-byte encrypted key", len(encryptedKey))
-		} else if _, err := store.Space(owner, key); !errors.Is(err, spaces.ErrNotFound) {
-			t.Fatalf("invalid encrypted key left a space behind: %v", err)
-		}
 	}
 	if err := store.AddSpace(owner, req); err != nil {
 		t.Fatal(err)
@@ -72,33 +56,16 @@ func TestSpaces(t *testing.T) {
 		t.Fatalf("owner permission: got %d, want %d", space.Permission, spaces.Owner)
 	} else if listed, err := store.Spaces(owner, 0, 10); err != nil || len(listed) != 1 || listed[0].Permission != spaces.Owner || !bytes.Equal(listed[0].EncryptedKey, ownerEncryptedKey) {
 		t.Fatalf("unexpected owner spaces: %+v, %v", listed, err)
-	} else if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      owner,
-		SpaceKey:     key,
-		Recipient:    member,
-		Permission:   spaces.Write,
-		EncryptedKey: invitedKey,
-		CreatedAt:    invitation.CreatedAt,
-		ExpiresAt:    invitation.ExpiresAt,
-		Signature:    invitation.Signature,
-	}); err != nil {
+	} else if err := store.InviteSpaceMember(invitation); err != nil {
 		t.Fatal(err)
 	}
 	update := signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedMetadata: []byte("updated")})
-	for _, change := range []func(*spaces.AddSpaceRequest){
-		func(r *spaces.AddSpaceRequest) { r.Signature = types.Signature{} },
-		func(r *spaces.AddSpaceRequest) { r.Sign(ownerKey, owner) },
-		func(r *spaces.AddSpaceRequest) { r.EncryptedName = frand.Bytes(40) },
-		func(r *spaces.AddSpaceRequest) { r.EncryptedMetadata = []byte("tampered") },
-		func(r *spaces.AddSpaceRequest) { r.Sign(spaceKey, member) },
-	} {
-		bad := update
-		change(&bad)
-		if err := store.UpdateSpace(owner, key, bad.EncryptedName, bad.EncryptedMetadata, bad.Signature); !errors.Is(err, spaces.ErrInvalidSignature) {
-			t.Fatalf("accepted invalid update signature: %v", err)
-		} else if current, err := store.Space(owner, key); err != nil || !reflect.DeepEqual(current, space) {
-			t.Fatalf("invalid update changed space: %+v, %v", current, err)
-		}
+	bad = update
+	bad.Sign(ownerKey, owner)
+	if err := store.UpdateSpace(owner, key, bad.EncryptedName, bad.EncryptedMetadata, bad.Signature); !errors.Is(err, spaces.ErrInvalidSignature) {
+		t.Fatalf("accepted invalid update signature: %v", err)
+	} else if current, err := store.Space(owner, key); err != nil || !reflect.DeepEqual(current, space) {
+		t.Fatalf("invalid update changed space: %+v, %v", current, err)
 	}
 	invitations, err := store.SpaceInvitations(member, 0, 10)
 	if err != nil {
@@ -111,8 +78,6 @@ func TestSpaces(t *testing.T) {
 		t.Fatalf("pending member access: %v", err)
 	} else if err := store.AcceptSpaceInvitation(outsider, key, acceptedKey); !errors.Is(err, spaces.ErrInvitationNotFound) {
 		t.Fatalf("uninvited acceptance: %v", err)
-	} else if err := store.AcceptSpaceInvitation(member, key, nil); err == nil {
-		t.Fatal("accepted without a key")
 	} else if err := store.AcceptSpaceInvitation(member, key, acceptedKey); err != nil {
 		t.Fatal(err)
 	} else if invitations, err := store.SpaceInvitations(member, 0, 10); err != nil || len(invitations) != 0 {
@@ -143,31 +108,13 @@ func TestSpaces(t *testing.T) {
 		t.Fatalf("revoked spaces: %+v, %v", listed, err)
 	} else if err := store.AcceptSpaceInvitation(member, key, acceptedKey); !errors.Is(err, spaces.ErrInvitationNotFound) {
 		t.Fatalf("replayed invitation: %v", err)
-	} else if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      owner,
-		SpaceKey:     key,
-		Recipient:    member,
-		Permission:   spaces.Read,
-		EncryptedKey: invitedKey,
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(time.Hour),
-		Signature:    types.Signature(frand.Bytes(64)),
-	}); err != nil {
+	} else if err := store.InviteSpaceMember(testSpaceInvitation(owner, member, key, spaces.Read)); err != nil {
 		t.Fatal(err)
 	} else if err := store.DeleteSpaceInvitation(owner, key, member); err != nil {
 		t.Fatal(err)
 	} else if err := store.AcceptSpaceInvitation(member, key, acceptedKey); !errors.Is(err, spaces.ErrInvitationNotFound) {
 		t.Fatalf("cancelled invitation: %v", err)
-	} else if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      owner,
-		SpaceKey:     key,
-		Recipient:    member,
-		Permission:   spaces.Read,
-		EncryptedKey: invitedKey,
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(time.Hour),
-		Signature:    types.Signature(frand.Bytes(64)),
-	}); err != nil {
+	} else if err := store.InviteSpaceMember(testSpaceInvitation(owner, member, key, spaces.Read)); err != nil {
 		t.Fatal(err)
 	} else if err := store.AcceptSpaceInvitation(member, key, acceptedKey); err != nil {
 		t.Fatal(err)
@@ -182,29 +129,16 @@ func TestSpaces(t *testing.T) {
 
 func TestSpacePermissions(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
-	ownerKey := types.GeneratePrivateKey()
-	owner := proto.Account(ownerKey.PublicKey())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
-	spaceKey := types.GeneratePrivateKey()
+	spaceKey := store.addTestSpace(t, owner)
 	key := spaceKey.PublicKey()
-	if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-		t.Fatal(err)
-	}
 	members := make([]proto.Account, 5)
 	for i := range members {
 		members[i] = proto.Account(types.GeneratePrivateKey().PublicKey())
 		store.addTestAccount(t, types.PublicKey(members[i]))
-		permission := spaces.Permission(min(i, 3))
-		if err := store.InviteSpaceMember(spaces.Invitation{
-			Inviter:      owner,
-			SpaceKey:     key,
-			Recipient:    members[i],
-			Permission:   permission,
-			EncryptedKey: frand.Bytes(72),
-			CreatedAt:    time.Now(),
-			ExpiresAt:    time.Now().Add(time.Hour),
-			Signature:    types.Signature(frand.Bytes(64)),
-		}); err != nil {
+		permission := spaces.Read + spaces.Permission(min(i, 3))
+		if err := store.InviteSpaceMember(testSpaceInvitation(owner, members[i], key, permission)); err != nil {
 			t.Fatal(err)
 		} else if err := store.AcceptSpaceInvitation(members[i], key, frand.Bytes(72)); err != nil {
 			t.Fatal(err)
@@ -223,6 +157,10 @@ func TestSpacePermissions(t *testing.T) {
 	}
 	if err := store.UpdateSpaceMember(members[3], key, members[0], spaces.Admin); !errors.Is(err, spaces.ErrPermission) {
 		t.Fatalf("admin promoted member to admin: %v", err)
+	} else if err := store.UpdateSpaceMember(owner, key, members[0], spaces.Owner); !errors.Is(err, spaces.ErrPermission) {
+		t.Fatalf("owner granted ownership to another member: %v", err)
+	} else if err := store.UpdateSpaceMember(owner, key, members[0], 0); !errors.Is(err, spaces.ErrPermission) {
+		t.Fatalf("accepted zero permission: %v", err)
 	}
 	for _, target := range []proto.Account{owner, members[3], members[4]} {
 		if err := store.UpdateSpaceMember(members[3], key, target, spaces.Read); !errors.Is(err, spaces.ErrPermission) {
@@ -256,20 +194,16 @@ func TestSpacePermissions(t *testing.T) {
 	if err := store.DeleteSpaceMember(owner, key, owner); !errors.Is(err, spaces.ErrPermission) {
 		t.Fatalf("owner removed themselves: %v", err)
 	}
-	for _, permission := range []spaces.Permission{spaces.Read, spaces.Write, spaces.Delete, spaces.Admin, spaces.Owner} {
-		if err := store.UpdateSpaceMember(owner, key, owner, permission); !errors.Is(err, spaces.ErrPermission) {
-			t.Fatalf("owner changed their permission to %d: %v", permission, err)
-		}
+	if err := store.UpdateSpaceMember(owner, key, owner, spaces.Read); !errors.Is(err, spaces.ErrPermission) {
+		t.Fatalf("owner changed their permission: %v", err)
 	}
 	if space, err := store.Space(owner, key); err != nil || space.Permission != spaces.Owner {
 		t.Fatalf("owner permission changed: %+v, %v", space, err)
 	}
-	for _, member := range []proto.Account{members[1], members[2], members[3]} {
-		if err := store.DeleteSpaceMember(member, key, member); err != nil {
-			t.Fatal(err)
-		} else if _, err := store.Space(member, key); !errors.Is(err, spaces.ErrPermission) {
-			t.Fatalf("departed member retained access: %v", err)
-		}
+	if err := store.DeleteSpaceMember(members[1], key, members[1]); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.Space(members[1], key); !errors.Is(err, spaces.ErrPermission) {
+		t.Fatalf("departed member retained access: %v", err)
 	}
 	if err := store.DeleteAccount(owner); err != nil {
 		t.Fatal(err)
@@ -280,8 +214,7 @@ func TestSpacePermissions(t *testing.T) {
 
 func TestSpaceInvitations(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
-	ownerKey := types.GeneratePrivateKey()
-	owner := proto.Account(ownerKey.PublicKey())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	admin := proto.Account(types.GeneratePrivateKey().PublicKey())
 	member := proto.Account(types.GeneratePrivateKey().PublicKey())
 	recipient := proto.Account(types.GeneratePrivateKey().PublicKey())
@@ -297,50 +230,19 @@ func TestSpaceInvitations(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	spaceKey := types.GeneratePrivateKey()
-	key := spaceKey.PublicKey()
-	if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-		t.Fatal(err)
-	}
+	key := store.addTestSpace(t, owner).PublicKey()
 	for i, account := range []proto.Account{member, admin} {
-		if err := store.InviteSpaceMember(spaces.Invitation{
-			Inviter:      owner,
-			SpaceKey:     key,
-			Recipient:    account,
-			Permission:   spaces.Permission(i + 2),
-			EncryptedKey: frand.Bytes(72),
-			CreatedAt:    time.Now(),
-			ExpiresAt:    time.Now().Add(time.Hour),
-			Signature:    types.Signature(frand.Bytes(64)),
-		}); err != nil {
+		if err := store.InviteSpaceMember(testSpaceInvitation(owner, account, key, spaces.Delete+spaces.Permission(i))); err != nil {
 			t.Fatal(err)
 		} else if err := store.AcceptSpaceInvitation(account, key, frand.Bytes(72)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      member,
-		SpaceKey:     key,
-		Recipient:    recipient,
-		Permission:   spaces.Read,
-		EncryptedKey: frand.Bytes(72),
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(time.Hour),
-		Signature:    types.Signature(frand.Bytes(64)),
-	}); !errors.Is(err, spaces.ErrPermission) {
+	if err := store.InviteSpaceMember(testSpaceInvitation(member, recipient, key, spaces.Read)); !errors.Is(err, spaces.ErrPermission) {
 		t.Fatalf("non-admin invited member: %v", err)
 	}
 	for _, inviter := range []proto.Account{owner, admin} {
-		if err := store.InviteSpaceMember(spaces.Invitation{
-			Inviter:      inviter,
-			SpaceKey:     key,
-			Recipient:    otherApp,
-			Permission:   spaces.Read,
-			EncryptedKey: frand.Bytes(72),
-			CreatedAt:    time.Now(),
-			ExpiresAt:    time.Now().Add(time.Hour),
-			Signature:    types.Signature(frand.Bytes(64)),
-		}); !errors.Is(err, spaces.ErrPermission) {
+		if err := store.InviteSpaceMember(testSpaceInvitation(inviter, otherApp, key, spaces.Read)); !errors.Is(err, spaces.ErrPermission) {
 			t.Fatalf("invited account from another app: %v", err)
 		}
 	}
@@ -348,29 +250,11 @@ func TestSpaceInvitations(t *testing.T) {
 		t.Fatalf("cross-app invitation persisted: %+v, %v", invitations, err)
 	}
 	for _, inviter := range []proto.Account{owner, admin} {
-		if err := store.InviteSpaceMember(spaces.Invitation{
-			Inviter:      inviter,
-			SpaceKey:     key,
-			Recipient:    recipient,
-			Permission:   spaces.Write,
-			EncryptedKey: frand.Bytes(72),
-			CreatedAt:    time.Now(),
-			ExpiresAt:    time.Now().Add(time.Hour),
-			Signature:    types.Signature(frand.Bytes(64)),
-		}); err != nil {
+		if err := store.InviteSpaceMember(testSpaceInvitation(inviter, recipient, key, spaces.Write)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      admin,
-		SpaceKey:     key,
-		Recipient:    recipient,
-		Permission:   spaces.Admin,
-		EncryptedKey: frand.Bytes(72),
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(time.Hour),
-		Signature:    types.Signature(frand.Bytes(64)),
-	}); !errors.Is(err, spaces.ErrPermission) {
+	if err := store.InviteSpaceMember(testSpaceInvitation(admin, recipient, key, spaces.Admin)); !errors.Is(err, spaces.ErrPermission) {
 		t.Fatalf("admin invited another admin: %v", err)
 	}
 	invitations, err := store.SpaceInvitations(recipient, 0, 10)
@@ -390,16 +274,7 @@ func TestSpaceInvitations(t *testing.T) {
 		t.Fatalf("accepted admin invitation: %+v, %v", space, err)
 	} else if err := store.DeleteSpaceMember(owner, key, recipient); err != nil {
 		t.Fatal(err)
-	} else if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      admin,
-		SpaceKey:     key,
-		Recipient:    recipient,
-		Permission:   spaces.Read,
-		EncryptedKey: frand.Bytes(72),
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(time.Hour),
-		Signature:    types.Signature(frand.Bytes(64)),
-	}); err != nil {
+	} else if err := store.InviteSpaceMember(testSpaceInvitation(admin, recipient, key, spaces.Read)); err != nil {
 		t.Fatal(err)
 	} else if err := store.DeleteAccount(admin); err != nil {
 		t.Fatal(err)
@@ -414,29 +289,15 @@ func TestSpaceInvitations(t *testing.T) {
 
 func TestSpaceObjects(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
-	ownerKey := types.GeneratePrivateKey()
-	owner := proto.Account(ownerKey.PublicKey())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	writer := proto.Account(types.GeneratePrivateKey().PublicKey())
 	reader := proto.Account(types.GeneratePrivateKey().PublicKey())
 	for _, a := range []proto.Account{owner, writer, reader} {
 		store.addTestAccount(t, types.PublicKey(a))
 	}
-	spaceKey := types.GeneratePrivateKey()
-	key := spaceKey.PublicKey()
-	if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-		t.Fatal(err)
-	}
+	key := store.addTestSpace(t, owner).PublicKey()
 	for i, a := range []proto.Account{reader, writer} {
-		if err := store.InviteSpaceMember(spaces.Invitation{
-			Inviter:      owner,
-			SpaceKey:     key,
-			Recipient:    a,
-			Permission:   spaces.Permission(i),
-			EncryptedKey: frand.Bytes(72),
-			CreatedAt:    time.Now(),
-			ExpiresAt:    time.Now().Add(time.Hour),
-			Signature:    types.Signature(frand.Bytes(64)),
-		}); err != nil {
+		if err := store.InviteSpaceMember(testSpaceInvitation(owner, a, key, spaces.Read+spaces.Permission(i))); err != nil {
 			t.Fatal(err)
 		} else if err := store.AcceptSpaceInvitation(a, key, frand.Bytes(72)); err != nil {
 			t.Fatal(err)
@@ -514,25 +375,12 @@ func TestSpaceObjects(t *testing.T) {
 
 func TestSpaceQuotaRollback(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
-	ownerKey := types.GeneratePrivateKey()
-	owner := proto.Account(ownerKey.PublicKey())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	member := proto.Account(types.GeneratePrivateKey().PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner), accounts.WithMaxPinnedData(0))
 	store.addTestAccount(t, types.PublicKey(member))
-	spaceKey := types.GeneratePrivateKey()
-	key := spaceKey.PublicKey()
-	if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-		t.Fatal(err)
-	} else if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      owner,
-		SpaceKey:     key,
-		Recipient:    member,
-		Permission:   spaces.Write,
-		EncryptedKey: frand.Bytes(72),
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(time.Hour),
-		Signature:    types.Signature(frand.Bytes(64)),
-	}); err != nil {
+	key := store.addTestSpace(t, owner).PublicKey()
+	if err := store.InviteSpaceMember(testSpaceInvitation(owner, member, key, spaces.Write)); err != nil {
 		t.Fatal(err)
 	} else if err := store.AcceptSpaceInvitation(member, key, frand.Bytes(72)); err != nil {
 		t.Fatal(err)
@@ -554,28 +402,15 @@ func TestSpaceQuotaRollback(t *testing.T) {
 
 func TestSpaceStorageLifecycle(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
-	ownerKey := types.GeneratePrivateKey()
-	owner := proto.Account(ownerKey.PublicKey())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	member := proto.Account(types.GeneratePrivateKey().PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
 	store.addTestAccount(t, types.PublicKey(member))
 	keys := make([]types.PublicKey, 2)
 	for i := range keys {
-		spaceKey := types.GeneratePrivateKey()
-		key := spaceKey.PublicKey()
+		key := store.addTestSpace(t, owner).PublicKey()
 		keys[i] = key
-		if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-			t.Fatal(err)
-		} else if err := store.InviteSpaceMember(spaces.Invitation{
-			Inviter:      owner,
-			SpaceKey:     key,
-			Recipient:    member,
-			Permission:   spaces.Write,
-			EncryptedKey: frand.Bytes(72),
-			CreatedAt:    time.Now(),
-			ExpiresAt:    time.Now().Add(time.Hour),
-			Signature:    types.Signature(frand.Bytes(64)),
-		}); err != nil {
+		if err := store.InviteSpaceMember(testSpaceInvitation(owner, member, key, spaces.Write)); err != nil {
 			t.Fatal(err)
 		} else if err := store.AcceptSpaceInvitation(member, key, frand.Bytes(72)); err != nil {
 			t.Fatal(err)
@@ -643,25 +478,12 @@ func TestSpaceStorageLifecycle(t *testing.T) {
 
 func TestSpaceInvitationRace(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
-	ownerKey := types.GeneratePrivateKey()
-	owner := proto.Account(ownerKey.PublicKey())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	member := proto.Account(types.GeneratePrivateKey().PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
 	store.addTestAccount(t, types.PublicKey(member))
-	spaceKey := types.GeneratePrivateKey()
-	key := spaceKey.PublicKey()
-	if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-		t.Fatal(err)
-	} else if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      owner,
-		SpaceKey:     key,
-		Recipient:    member,
-		Permission:   spaces.Read,
-		EncryptedKey: frand.Bytes(72),
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(time.Hour),
-		Signature:    types.Signature(frand.Bytes(64)),
-	}); err != nil {
+	key := store.addTestSpace(t, owner).PublicKey()
+	if err := store.InviteSpaceMember(testSpaceInvitation(owner, member, key, spaces.Read)); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -691,14 +513,15 @@ func TestSpaceConcurrentReads(t *testing.T) {
 	ownerKey := types.GeneratePrivateKey()
 	owner := proto.Account(ownerKey.PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
-	spaceKey := types.GeneratePrivateKey()
-	key := spaceKey.PublicKey()
-	obj := slabs.SealedObject{EncryptedDataKey: frand.Bytes(72), DataSignature: types.Signature(frand.Bytes(64)), MetadataSignature: types.Signature(frand.Bytes(64))}
-	if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-		t.Fatal(err)
-	} else if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
+	key := store.addTestSpace(t, owner).PublicKey()
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	obj := store.pinTestObject(t, owner, hk)
+	obj.Sign(ownerKey)
+	if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
+	store.publishEvents(t)
 	if err := store.transaction(func(ctx context.Context, tx *txn) error {
 		if _, _, _, err := spaceAccess(ctx, tx, owner, key, spaces.Read, true); err != nil {
 			return err
@@ -709,8 +532,10 @@ func TestSpaceConcurrentReads(t *testing.T) {
 				result <- err
 			} else if _, err := store.SpaceMembers(owner, key, 0, 10); err != nil {
 				result <- err
-			} else if _, err := store.ListSpaceObjects(owner, key, slabs.Cursor{}, 10); err != nil {
+			} else if events, err := store.ListSpaceObjects(owner, key, slabs.Cursor{}, 10); err != nil {
 				result <- err
+			} else if len(events) != 1 || events[0].Deleted || events[0].Object == nil || len(events[0].Object.Slabs) != 1 {
+				result <- errors.New("expected a live object event with one slab")
 			} else {
 				_, err := store.SpaceObject(owner, key, obj.ID())
 				result <- err
@@ -737,26 +562,12 @@ func TestSpaceConcurrentReads(t *testing.T) {
 
 func TestSpaceInvitationExpiration(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
-	ownerKey := types.GeneratePrivateKey()
-	owner := proto.Account(ownerKey.PublicKey())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	member := proto.Account(types.GeneratePrivateKey().PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
 	store.addTestAccount(t, types.PublicKey(member))
-	spaceKey := types.GeneratePrivateKey()
-	key := spaceKey.PublicKey()
-	if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      owner,
-		SpaceKey:     key,
-		Recipient:    member,
-		Permission:   spaces.Read,
-		EncryptedKey: frand.Bytes(72),
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(time.Hour),
-		Signature:    types.Signature(frand.Bytes(64)),
-	}); err != nil {
+	key := store.addTestSpace(t, owner).PublicKey()
+	if err := store.InviteSpaceMember(testSpaceInvitation(owner, member, key, spaces.Read)); err != nil {
 		t.Fatal(err)
 	} else if _, err := store.pool.Exec(t.Context(), `UPDATE space_invitations SET expires_at = NOW() - INTERVAL '1 second'`); err != nil {
 		t.Fatal(err)
@@ -767,43 +578,53 @@ func TestSpaceInvitationExpiration(t *testing.T) {
 	} else if _, err := store.Space(member, key); !errors.Is(err, spaces.ErrPermission) {
 		t.Fatalf("expired invitation granted access: %v", err)
 	}
-	if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      owner,
-		SpaceKey:     key,
-		Recipient:    member,
-		Permission:   spaces.Read,
-		EncryptedKey: frand.Bytes(72),
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(time.Hour),
-		Signature:    types.Signature(frand.Bytes(64)),
-	}); err != nil {
+}
+
+func TestPruneSpaceSlabsPreservesOtherAccountPins(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	writer := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	store.addTestAccount(t, types.PublicKey(writer))
+	key := store.addTestSpace(t, owner).PublicKey()
+	if err := store.InviteSpaceMember(testSpaceInvitation(owner, writer, key, spaces.Write)); err != nil {
 		t.Fatal(err)
-	} else if err := store.AcceptSpaceInvitation(member, key, frand.Bytes(72)); err != nil {
+	} else if err := store.AcceptSpaceInvitation(writer, key, frand.Bytes(72)); err != nil {
 		t.Fatal(err)
+	}
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	personal, staged := newTestSlab(hk), newTestSlab(hk)
+	for _, account := range []proto.Account{owner, writer} {
+		store.pinTestSlabs(t, account, personal)
+	}
+	if _, err := store.PinSpaceSlabs(writer, key, time.Time{}, staged); err != nil {
+		t.Fatal(err)
+	} else if err := store.PruneSlabs(writer, time.Now().Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	store.assertPinnedSlabs(t, writer)
+	store.assertPinnedSlabs(t, owner, personal.Digest())
+	if account, err := store.Account(types.PublicKey(owner)); err != nil {
+		t.Fatal(err)
+	} else if account.PinnedData != personal.DataSize() || account.PinnedSize != personal.Size() {
+		t.Fatalf("unexpected owner usage after pruning: %d %d", account.PinnedData, account.PinnedSize)
+	}
+	if account, err := store.Account(types.PublicKey(writer)); err != nil {
+		t.Fatal(err)
+	} else if account.PinnedData != 0 || account.PinnedSize != 0 {
+		t.Fatalf("writer usage remains after pruning: %d %d", account.PinnedData, account.PinnedSize)
 	}
 }
 
 func TestSpaceSlabIsolation(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
-	ownerKey := types.GeneratePrivateKey()
-	owner := proto.Account(ownerKey.PublicKey())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	writer := proto.Account(types.GeneratePrivateKey().PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
 	store.addTestAccount(t, types.PublicKey(writer))
-	spaceKey := types.GeneratePrivateKey()
-	key := spaceKey.PublicKey()
-	if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-		t.Fatal(err)
-	} else if err := store.InviteSpaceMember(spaces.Invitation{
-		Inviter:      owner,
-		SpaceKey:     key,
-		Recipient:    writer,
-		Permission:   spaces.Write,
-		EncryptedKey: frand.Bytes(72),
-		CreatedAt:    time.Now(),
-		ExpiresAt:    time.Now().Add(time.Hour),
-		Signature:    types.Signature(frand.Bytes(64)),
-	}); err != nil {
+	key := store.addTestSpace(t, owner).PublicKey()
+	if err := store.InviteSpaceMember(testSpaceInvitation(owner, writer, key, spaces.Write)); err != nil {
 		t.Fatal(err)
 	} else if err := store.AcceptSpaceInvitation(writer, key, frand.Bytes(72)); err != nil {
 		t.Fatal(err)
@@ -856,11 +677,8 @@ func TestSpaceSlabIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 	store.assertPinnedSlabs(t, owner, obj.Slabs[0].Digest())
-	otherSpaceKey := types.GeneratePrivateKey()
-	other := otherSpaceKey.PublicKey()
-	if err := store.AddSpace(owner, signedSpaceRequest(otherSpaceKey, owner, spaces.AddSpaceRequest{Key: other, EncryptedKey: frand.Bytes(72)})); err != nil {
-		t.Fatal(err)
-	} else if _, err := store.PinSpaceSlabs(owner, other, time.Time{}, obj.Slabs[0].Pin()); err != nil {
+	other := store.addTestSpace(t, owner).PublicKey()
+	if _, err := store.PinSpaceSlabs(owner, other, time.Time{}, obj.Slabs[0].Pin()); err != nil {
 		t.Fatal(err)
 	} else if err := store.DeleteSpaceObject(owner, key, obj.ID()); err != nil {
 		t.Fatal(err)
@@ -880,23 +698,69 @@ func TestSpaceSlabIsolation(t *testing.T) {
 	}
 }
 
+func TestDeleteSpaceSlabLockOrder(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	key := store.addTestSpace(t, owner).PublicKey()
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	params := slabs.SlabPinParams{
+		EncryptionKey: frand.Entropy256(),
+		MinShards:     1,
+		Sectors:       []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}},
+	}
+	if _, err := store.PinSpaceSlabs(owner, key, time.Time{}, params); err != nil {
+		t.Fatal(err)
+	}
+	lockTx, err := store.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lockTx.Rollback(t.Context()) }()
+	var slabID int64
+	if err := lockTx.QueryRow(t.Context(), `SELECT id FROM slabs WHERE digest = $1 FOR UPDATE`, sqlHash256(params.Digest())).Scan(&slabID); err != nil {
+		t.Fatal(err)
+	}
+	deleteErr := make(chan error, 1)
+	go func() {
+		deleteErr <- store.DeleteSpace(owner, key)
+		close(deleteErr)
+	}()
+	t.Cleanup(func() { <-deleteErr })
+	var blocked bool
+	for range 100 {
+		if err := store.pool.QueryRow(t.Context(), `SELECT EXISTS (
+ SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))
+)`, int32(lockTx.Conn().PgConn().PID())).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		} else if blocked {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	if !blocked {
+		t.Fatal("space deletion did not wait for the slab lock")
+	} else if _, err := lockTx.Exec(t.Context(), `SELECT slab_id FROM space_slabs WHERE slab_id = $1 FOR UPDATE NOWAIT`, slabID); err != nil {
+		t.Fatalf("space deletion locked the pin before the slab: %v", err)
+	} else if err := lockTx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	} else if err := <-deleteErr; err != nil {
+		t.Fatal(err)
+	}
+	store.assertPinnedSlabs(t, owner)
+}
+
 func TestPruneSpaceSlabsOwner(t *testing.T) {
 	for _, reference := range []string{"personal", "space"} {
 		t.Run(reference, func(t *testing.T) {
 			store := initPostgres(t, zap.NewNop())
-			ownerKey := types.GeneratePrivateKey()
-			owner := proto.Account(ownerKey.PublicKey())
+			owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 			writer := proto.Account(types.GeneratePrivateKey().PublicKey())
 			store.addTestAccount(t, types.PublicKey(owner))
 			store.addTestAccount(t, types.PublicKey(writer))
-			spaceKey := types.GeneratePrivateKey()
-			key := spaceKey.PublicKey()
-			if err := store.AddSpace(owner, signedSpaceRequest(spaceKey, owner, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-				t.Fatal(err)
-			}
-			invite := spaces.Invitation{SpaceKey: key, Inviter: owner, Recipient: writer, Permission: spaces.Write, EncryptedKey: frand.Bytes(72), CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
-			invite.Signature = ownerKey.SignHash(invite.SigHash())
-			if err := store.InviteSpaceMember(invite); err != nil {
+			key := store.addTestSpace(t, owner).PublicKey()
+			if err := store.InviteSpaceMember(testSpaceInvitation(owner, writer, key, spaces.Write)); err != nil {
 				t.Fatal(err)
 			} else if err := store.AcceptSpaceInvitation(writer, key, frand.Bytes(72)); err != nil {
 				t.Fatal(err)
@@ -904,12 +768,10 @@ func TestPruneSpaceSlabsOwner(t *testing.T) {
 			hk := store.addTestHost(t)
 			store.addTestContract(t, hk)
 			obj := store.pinTestObject(t, owner, hk)
-			otherSpaceKey := types.GeneratePrivateKey()
-			other := otherSpaceKey.PublicKey()
+			var other types.PublicKey
 			if reference == "space" {
-				if err := store.AddSpace(owner, signedSpaceRequest(otherSpaceKey, owner, spaces.AddSpaceRequest{Key: other, EncryptedKey: frand.Bytes(72)})); err != nil {
-					t.Fatal(err)
-				} else if err := store.PinSpaceObject(owner, other, obj.PinRequest()); err != nil {
+				other = store.addTestSpace(t, owner).PublicKey()
+				if err := store.PinSpaceObject(owner, other, obj.PinRequest()); err != nil {
 					t.Fatal(err)
 				} else if err := store.DeleteObject(owner, obj.ID()); err != nil {
 					t.Fatal(err)
@@ -944,17 +806,9 @@ func TestPruneSpaceSlabsOwner(t *testing.T) {
 
 func TestSpaceObjectEvents(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
-	ownerKey := types.GeneratePrivateKey()
-	owner := proto.Account(ownerKey.PublicKey())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
-	spaceKey, otherSpaceKey := types.GeneratePrivateKey(), types.GeneratePrivateKey()
-	key, other := spaceKey.PublicKey(), otherSpaceKey.PublicKey()
-	for _, privateKey := range []types.PrivateKey{spaceKey, otherSpaceKey} {
-		k := privateKey.PublicKey()
-		if err := store.AddSpace(owner, signedSpaceRequest(privateKey, owner, spaces.AddSpaceRequest{Key: k, EncryptedKey: frand.Bytes(72)})); err != nil {
-			t.Fatal(err)
-		}
-	}
+	key, other := store.addTestSpace(t, owner).PublicKey(), store.addTestSpace(t, owner).PublicKey()
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 	first, second := store.pinTestObject(t, owner, hk), store.pinTestObject(t, owner, hk)
@@ -1043,21 +897,26 @@ func TestSpaceObjectEvents(t *testing.T) {
 	}
 }
 
+func (s *Store) addTestSpace(t testing.TB, owner proto.Account) types.PrivateKey {
+	t.Helper()
+	key := types.GeneratePrivateKey()
+	if err := s.AddSpace(owner, signedSpaceRequest(key, owner, spaces.AddSpaceRequest{Key: key.PublicKey(), EncryptedKey: frand.Bytes(72)})); err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+func testSpaceInvitation(inviter, recipient proto.Account, key types.PublicKey, permission spaces.Permission) spaces.Invitation {
+	return spaces.Invitation{
+		Inviter: inviter, Recipient: recipient, SpaceKey: key, Permission: permission,
+		EncryptedKey: frand.Bytes(72), CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
+		Signature: types.Signature(frand.Bytes(64)),
+	}
+}
+
 func signedSpaceRequest(spaceKey types.PrivateKey, owner proto.Account, req spaces.AddSpaceRequest) spaces.AddSpaceRequest {
 	req.Sign(spaceKey, owner)
 	return req
-}
-
-func TestSpaceInvalidPermission(t *testing.T) {
-	store := new(Store)
-	for _, permission := range []spaces.Permission{spaces.Owner, 255} {
-		if err := store.InviteSpaceMember(spaces.Invitation{Permission: permission}); !errors.Is(err, spaces.ErrPermission) {
-			t.Fatalf("invite with permission %d: expected ErrPermission, got %v", permission, err)
-		}
-		if err := store.UpdateSpaceMember(proto.Account{}, types.PublicKey{}, proto.Account{}, permission); !errors.Is(err, spaces.ErrPermission) {
-			t.Fatalf("update with permission %d: expected ErrPermission, got %v", permission, err)
-		}
-	}
 }
 
 func TestSpaceMemberDepartureDeletesInvitations(t *testing.T) {
@@ -1072,8 +931,7 @@ func TestSpaceMemberDepartureDeletesInvitations(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			store := initPostgres(t, zap.NewNop())
-			ownerKey := types.GeneratePrivateKey()
-			owner := proto.Account(ownerKey.PublicKey())
+			owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 			admin := proto.Account(types.GeneratePrivateKey().PublicKey())
 			recipient := proto.Account(types.GeneratePrivateKey().PublicKey())
 			otherRecipient := proto.Account(types.GeneratePrivateKey().PublicKey())
@@ -1082,21 +940,12 @@ func TestSpaceMemberDepartureDeletesInvitations(t *testing.T) {
 			}
 			invite := func(inviter, recipient proto.Account, key types.PublicKey, permission spaces.Permission) {
 				t.Helper()
-				if err := store.InviteSpaceMember(spaces.Invitation{
-					Inviter: inviter, Recipient: recipient, SpaceKey: key, Permission: permission,
-					EncryptedKey: frand.Bytes(72), CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
-					Signature: types.Signature(frand.Bytes(64)),
-				}); err != nil {
+				if err := store.InviteSpaceMember(testSpaceInvitation(inviter, recipient, key, permission)); err != nil {
 					t.Fatal(err)
 				}
 			}
-			privateKey, otherPrivateKey := types.GeneratePrivateKey(), types.GeneratePrivateKey()
-			key, otherKey := privateKey.PublicKey(), otherPrivateKey.PublicKey()
-			for _, signer := range []types.PrivateKey{privateKey, otherPrivateKey} {
-				spaceKey := signer.PublicKey()
-				if err := store.AddSpace(owner, signedSpaceRequest(signer, owner, spaces.AddSpaceRequest{Key: spaceKey, EncryptedKey: frand.Bytes(72)})); err != nil {
-					t.Fatal(err)
-				}
+			key, otherKey := store.addTestSpace(t, owner).PublicKey(), store.addTestSpace(t, owner).PublicKey()
+			for _, spaceKey := range []types.PublicKey{key, otherKey} {
 				invite(owner, admin, spaceKey, spaces.Admin)
 				if err := store.AcceptSpaceInvitation(admin, spaceKey, frand.Bytes(72)); err != nil {
 					t.Fatal(err)

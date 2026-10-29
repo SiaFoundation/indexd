@@ -423,7 +423,7 @@ func (s *Store) pinSlabs(ctx context.Context, tx *txn, account proto.Account, ne
 			if err := br.QueryRow().Scan(&sectorIDs[i], &hostID, &bound, &existed); err != nil {
 				br.Close()
 				if errors.Is(err, sql.ErrNoRows) {
-					return nil, fmt.Errorf("unknown host %q for sector", sector.HostKey)
+					return nil, fmt.Errorf("unknown host %q for sector: %w", sector.HostKey, slabs.ErrBadHosts)
 				}
 				return nil, fmt.Errorf("failed to insert sector %q: %w", sector.Root, err)
 			} else if !bound {

@@ -123,6 +123,8 @@ func (s *Store) DeleteSpace(account proto.Account, key types.PublicKey) error {
 		slabIDs, err := spaceSlabIDs(ctx, tx, id, nil)
 		if err != nil {
 			return err
+		} else if err := lockSlabs(ctx, tx, slabIDs); err != nil {
+			return err
 		} else if _, err := tx.Exec(ctx, `DELETE FROM spaces WHERE id = $1`, id); err != nil {
 			return err
 		}

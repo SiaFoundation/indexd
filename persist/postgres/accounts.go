@@ -226,6 +226,9 @@ WHERE o.id = d.id;`,
 			`DELETE FROM space_slabs WHERE (space_id, slab_id) IN (
  SELECT space_id, slab_id FROM space_slabs WHERE account_id = $1 ORDER BY space_id, slab_id LIMIT $2
 )`,
+			`UPDATE space_slabs SET uploader_account_id = NULL WHERE (space_id, slab_id) IN (
+ SELECT space_id, slab_id FROM space_slabs WHERE uploader_account_id = $1 ORDER BY space_id, slab_id LIMIT $2
+)`,
 			`DELETE FROM space_object_events WHERE (space_id, object_key) IN (
  SELECT e.space_id, e.object_key FROM space_object_events e JOIN spaces s ON s.id = e.space_id
  WHERE s.owner_account_id = $1 ORDER BY e.space_id, e.object_key LIMIT $2

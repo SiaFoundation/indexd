@@ -99,7 +99,7 @@ func (s *Store) UpdateSpace(account proto.Account, key types.PublicKey, name, me
 // encrypted space key, replacing any pending invitation. Owners and admins may
 // invite accounts registered with the same app ID as the owner.
 func (s *Store) InviteSpaceMember(invite spaces.Invitation) error {
-	if invite.Permission > spaces.Admin {
+	if invite.Permission < spaces.Read || invite.Permission > spaces.Admin {
 		return spaces.ErrPermission
 	}
 	return s.transaction(func(ctx context.Context, tx *txn) error {
@@ -237,7 +237,7 @@ func (s *Store) SpaceMembers(account proto.Account, key types.PublicKey, offset,
 // UpdateSpaceMember changes an active member's permission. Admins may change
 // non-admin members' permissions; only the owner may grant or change admin access.
 func (s *Store) UpdateSpaceMember(account proto.Account, key types.PublicKey, member proto.Account, permission spaces.Permission) error {
-	if permission > spaces.Admin {
+	if permission < spaces.Read || permission > spaces.Admin {
 		return spaces.ErrPermission
 	}
 	return s.transaction(func(ctx context.Context, tx *txn) error {

@@ -11,7 +11,7 @@ import (
 
 // Space permissions grant read, write, delete, and admin access cumulatively.
 const (
-	Read Permission = iota
+	Read Permission = iota + 1
 	Write
 	Delete
 	Admin
@@ -100,7 +100,7 @@ func (i Invitation) Validate(now time.Time) error {
 		return errors.New("inviter is empty")
 	} else if i.Recipient == (proto.Account{}) {
 		return errors.New("recipient is empty")
-	} else if i.Permission > Admin {
+	} else if i.Permission < Read || i.Permission > Admin {
 		return errors.New("invalid invitation permission")
 	} else if len(i.EncryptedKey) != 72 {
 		return errors.New("encrypted key must be 72 bytes")

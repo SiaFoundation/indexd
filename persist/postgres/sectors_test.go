@@ -18,7 +18,6 @@ import (
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/slabs"
-	"go.sia.tech/indexd/spaces"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
@@ -239,13 +238,9 @@ func TestRecordSlabMigrated(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	privateKey, otherPrivateKey := types.GeneratePrivateKey(), types.GeneratePrivateKey()
-	spaceKey, otherSpaceKey := privateKey.PublicKey(), otherPrivateKey.PublicKey()
-	for _, signer := range []types.PrivateKey{privateKey, otherPrivateKey} {
-		key := signer.PublicKey()
-		if err := store.AddSpace(account, signedSpaceRequest(signer, account, spaces.AddSpaceRequest{Key: key, EncryptedKey: frand.Bytes(72)})); err != nil {
-			t.Fatal(err)
-		} else if err := store.PinSpaceObject(account, key, so.PinRequest()); err != nil {
+	spaceKey, otherSpaceKey := store.addTestSpace(t, account).PublicKey(), store.addTestSpace(t, account).PublicKey()
+	for _, key := range []types.PublicKey{spaceKey, otherSpaceKey} {
+		if err := store.PinSpaceObject(account, key, so.PinRequest()); err != nil {
 			t.Fatal(err)
 		}
 	}
