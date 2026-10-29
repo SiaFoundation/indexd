@@ -5,7 +5,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
@@ -36,6 +38,10 @@ func (s *Store) AddSpace(account proto.Account, req spaces.AddSpaceRequest) erro
  VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at
 ) INSERT INTO space_members (space_id, account_id, permission_level, encrypted_key, invited_by, invited_at)
  SELECT id, $2, $6, $7, $8, created_at FROM space`, sqlPublicKey(req.Key), id, sqlSignature(req.Signature), req.EncryptedName, req.EncryptedMetadata, spaces.Owner, req.EncryptedKey, sqlPublicKey(account))
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+			return spaces.ErrExists
+		}
 		return err
 	})
 }

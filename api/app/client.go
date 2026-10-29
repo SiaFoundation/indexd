@@ -182,14 +182,14 @@ func (c *Client) signedRequest(ctx context.Context, appKey types.PrivateKey, met
 	return decodeResponse(r, resp)
 }
 
-// listObjectsRoute builds the GET /objects route for the cursor.
-func listObjectsRoute(cursor slabs.Cursor, limit int, includeSlabs bool) string {
+// listObjectsRoute builds the GET route for the base and cursor.
+func listObjectsRoute(base string, cursor slabs.Cursor, limit int, includeSlabs bool) string {
 	values := url.Values{}
 	values.Set("limit", fmt.Sprint(limit))
 	values.Set("after", cursor.After.Format(time.RFC3339Nano))
 	values.Set("key", cursor.Key.String())
 	values.Set("includeslabs", fmt.Sprint(includeSlabs))
-	return "/objects?" + values.Encode()
+	return base + "?" + values.Encode()
 }
 
 // Hosts returns all usable hosts.
@@ -257,14 +257,14 @@ func (c *Client) Object(ctx context.Context, appKey types.PrivateKey, objectID t
 // ListObjects lists object events for the given account that were published
 // after the given cursor.
 func (c *Client) ListObjects(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEvent, err error) {
-	err = c.signedRequest(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, true), nil, &resp)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, listObjectsRoute("/objects", cursor, limit, true), nil, &resp)
 	return
 }
 
 // ListObjectsWithoutSlabs lists published object events after the cursor,
 // omitting each object's slab slices. Fetch the slices with ObjectSlabs.
 func (c *Client) ListObjectsWithoutSlabs(ctx context.Context, appKey types.PrivateKey, cursor slabs.Cursor, limit int) (resp []slabs.ObjectEventWithoutSlabs, err error) {
-	err = c.signedRequest(ctx, appKey, http.MethodGet, listObjectsRoute(cursor, limit, false), nil, &resp)
+	err = c.signedRequest(ctx, appKey, http.MethodGet, listObjectsRoute("/objects", cursor, limit, false), nil, &resp)
 	return
 }
 
