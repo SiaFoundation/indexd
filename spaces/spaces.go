@@ -2,6 +2,7 @@ package spaces
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -20,14 +21,15 @@ const (
 
 // Errors returned by space operations.
 var (
-	ErrInvalidSignature          = errors.New("invalid space signature")
-	ErrNotFound                  = errors.New("space not found")
-	ErrPermission                = errors.New("insufficient space permission")
-	ErrInvitationNotFound        = errors.New("space invitation not found")
-	ErrMemberNotFound            = errors.New("space member not found")
-	ErrObjectKeyMismatch         = errors.New("space object encrypted data key cannot change")
-	ErrInvitationTimestampTooOld = errors.New("space invitation timestamp is more than five minutes old")
-	ErrInvitationExpired         = errors.New("space invitation has expired")
+	ErrInvalidSignature            = errors.New("invalid space signature")
+	ErrNotFound                    = errors.New("space not found")
+	ErrPermission                  = errors.New("insufficient space permission")
+	ErrInvitationNotFound          = errors.New("space invitation not found")
+	ErrMemberNotFound              = errors.New("space member not found")
+	ErrObjectKeyMismatch           = errors.New("space object encrypted data key cannot change")
+	ErrInvitationTimestampTooOld   = errors.New("space invitation timestamp is more than five minutes old")
+	ErrInvitationTimestampInFuture = errors.New("space invitation timestamp is more than five minutes in the future")
+	ErrInvitationExpired           = errors.New("space invitation has expired")
 )
 
 // Permission is a member's level of access to a space.
@@ -92,22 +94,30 @@ type Invitation struct {
 	Signature types.Signature
 }
 
-// Validate checks the space key, inviter, recipient, permission, encrypted key, and timestamps.
+// Validate checks the invitation fields and signature.
 func (i Invitation) Validate(now time.Time) error {
-	if i.SpaceKey == (types.PublicKey{}) {
-		return errors.New("space key is empty")
-	} else if i.Inviter == (proto.Account{}) {
-		return errors.New("inviter is empty")
-	} else if i.Recipient == (proto.Account{}) {
-		return errors.New("recipient is empty")
-	} else if i.Permission < Read || i.Permission > Admin {
-		return errors.New("invalid invitation permission")
-	} else if len(i.EncryptedKey) != 72 {
-		return errors.New("encrypted key must be 72 bytes")
-	} else if now.Sub(i.CreatedAt) > 5*time.Minute {
+	if err := validateAccountAndSpaceKeys(i.Inviter, i.SpaceKey); err != nil {
+		return err
+	} else if err := validatePublicKey("recipient", types.PublicKey(i.Recipient)); err != nil {
+		return err
+	}
+	switch {
+	case i.Inviter == i.Recipient:
+		return fmt.Errorf("%w: inviter and recipient must be different", ErrInvalidRequest)
+	case i.Permission < Read || i.Permission > Admin:
+		return fmt.Errorf("%w: invalid invitation permission", ErrInvalidRequest)
+	case len(i.EncryptedKey) != 72:
+		return fmt.Errorf("%w: encrypted key must be 72 bytes", ErrInvalidRequest)
+	case now.Sub(i.CreatedAt) > 5*time.Minute:
 		return ErrInvitationTimestampTooOld
-	} else if !i.ExpiresAt.After(now) {
+	case i.CreatedAt.Sub(now) > 5*time.Minute:
+		return ErrInvitationTimestampInFuture
+	case !i.ExpiresAt.After(now):
 		return ErrInvitationExpired
+	case !i.ExpiresAt.After(i.CreatedAt):
+		return fmt.Errorf("%w: expiration must be after creation", ErrInvalidRequest)
+	case !types.PublicKey(i.Inviter).VerifyHash(i.SigHash(), i.Signature):
+		return ErrInvalidSignature
 	}
 	return nil
 }
