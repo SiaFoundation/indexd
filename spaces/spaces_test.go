@@ -1,6 +1,7 @@
 package spaces
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -8,6 +9,47 @@ import (
 	"go.sia.tech/core/types"
 	"lukechampine.com/frand"
 )
+
+func TestPermissionJSON(t *testing.T) {
+	for _, tt := range []struct {
+		permission Permission
+		name       string
+	}{
+		{Read, "read"},
+		{Write, "write"},
+		{Delete, "delete"},
+		{Admin, "admin"},
+		{Owner, "owner"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := json.Marshal(tt.permission)
+			if err != nil {
+				t.Fatal(err)
+			} else if string(encoded) != `"`+tt.name+`"` {
+				t.Fatalf("unexpected permission encoding: %s", encoded)
+			}
+			var decoded Permission
+			if err := json.Unmarshal(encoded, &decoded); err != nil {
+				t.Fatal(err)
+			} else if decoded != tt.permission {
+				t.Fatalf("expected %v, got %v", tt.permission, decoded)
+			}
+		})
+	}
+	for _, invalid := range []Permission{0, Owner + 1, 255} {
+		if _, err := json.Marshal(invalid); err == nil {
+			t.Fatalf("accepted invalid permission %d", invalid)
+		}
+	}
+	for _, invalid := range []string{`""`, `"unknown"`, `"READ"`, `1`} {
+		permission := Write
+		if err := json.Unmarshal([]byte(invalid), &permission); err == nil {
+			t.Fatalf("accepted invalid permission %s", invalid)
+		} else if permission != Write {
+			t.Fatalf("invalid permission changed value to %v", permission)
+		}
+	}
+}
 
 func TestInvitationSigHash(t *testing.T) {
 	key := types.GeneratePrivateKey()

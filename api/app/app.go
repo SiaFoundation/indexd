@@ -182,6 +182,7 @@ type (
 		contracts Contracts
 		slabs     Slabs
 		sharing   Sharing
+		spaces    Spaces
 		log       *zap.Logger
 		rl        RateLimiter
 
@@ -1081,7 +1082,7 @@ func decodeRequest[T any](jc jape.Context) (T, bool) {
 // users, or rather their applications, to pin slabs to the indexer.
 // Authentication happens through presigned URLs that are signed with a private
 // key that corresponds to a previously registered public key.
-func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, slabs Slabs, sharing Sharing, opts ...Option) (http.Handler, error) {
+func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, slabs Slabs, sharing Sharing, spaces Spaces, opts ...Option) (http.Handler, error) {
 	u, err := url.Parse(advertiseURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse advertise URL %q: %w", advertiseURL, err)
@@ -1092,6 +1093,7 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		contracts: contracts,
 		slabs:     slabs,
 		sharing:   sharing,
+		spaces:    spaces,
 		log:       zap.NewNop(),
 
 		hostname:     u.Host,
@@ -1160,6 +1162,25 @@ func NewAPI(advertiseURL string, hm Hosts, am Accounts, contracts Contracts, sla
 		"GET /auth/check":                        wrapSignedAuth(a.handleGETAuthCheck),
 
 		"GET /hosts": wrapSignedAuth(a.handleGETHosts),
+
+		"POST /spaces":                               wrapSignedAuth(a.handlePOSTSpaces),
+		"GET /spaces":                                wrapSignedAuth(a.handleGETSpaces),
+		"GET /spaces/:key":                           wrapSignedAuth(a.handleGETSpace),
+		"PUT /spaces/:key":                           wrapSignedAuth(a.handlePUTSpace),
+		"DELETE /spaces/:key":                        wrapSignedAuth(a.handleDELETESpace),
+		"GET /account/spaces/invitations":            wrapSignedAuth(a.handleGETSpaceInvitations),
+		"POST /spaces/:key/invitations":              wrapSignedAuth(a.handlePOSTSpaceInvitations),
+		"POST /spaces/:key/invitations/accept":       wrapSignedAuth(a.handlePOSTSpaceInvitationAccept),
+		"DELETE /spaces/:key/invitations/:recipient": wrapSignedAuth(a.handleDELETESpaceInvitation),
+		"GET /spaces/:key/members":                   wrapSignedAuth(a.handleGETSpaceMembers),
+		"PUT /spaces/:key/members/:member":           wrapSignedAuth(a.handlePUTSpaceMember),
+		"DELETE /spaces/:key/members/:member":        wrapSignedAuth(a.handleDELETESpaceMember),
+		"POST /spaces/:key/slabs":                    wrapSignedAuth(a.handlePOSTSpaceSlabs),
+		"POST /spaces/:key/objects":                  wrapSignedAuth(a.handlePOSTSpaceObjects),
+		"GET /spaces/:key/objects":                   wrapSignedAuth(a.handleGETSpaceObjects),
+		"GET /spaces/:key/objects/:objectkey":        wrapSignedAuth(a.handleGETSpaceObject),
+		"GET /spaces/:key/objects/:objectkey/slabs":  wrapSignedAuth(a.handleGETSpaceObjectSlabs),
+		"DELETE /spaces/:key/objects/:objectkey":     wrapSignedAuth(a.handleDELETESpaceObject),
 
 		"GET /objects":             wrapSignedAuth(a.handleGETObjects),
 		"GET /objects/:key":        wrapSignedAuth(a.handleGETObject),
