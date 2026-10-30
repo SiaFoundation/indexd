@@ -1,0 +1,168 @@
+package spaces
+
+import (
+	"errors"
+	"time"
+
+	proto "go.sia.tech/core/rhp/v4"
+	"go.sia.tech/core/types"
+	"go.sia.tech/indexd/slabs"
+)
+
+// Space permissions grant read, write, delete, and admin access cumulatively.
+const (
+	Read Permission = iota + 1
+	Write
+	Delete
+	Admin
+	Owner
+)
+
+// Errors returned by space operations.
+var (
+	ErrInvalidSignature          = errors.New("invalid space signature")
+	ErrNotFound                  = errors.New("space not found")
+	ErrPermission                = errors.New("insufficient space permission")
+	ErrInvitationNotFound        = errors.New("space invitation not found")
+	ErrMemberNotFound            = errors.New("space member not found")
+	ErrObjectKeyMismatch         = errors.New("space object encrypted data key cannot change")
+	ErrInvitationTimestampTooOld = errors.New("space invitation timestamp is more than five minutes old")
+	ErrInvitationExpired         = errors.New("space invitation has expired")
+)
+
+// Permission is a member's level of access to a space.
+type Permission uint8
+
+// AddSpaceRequest creates a space with an encrypted name, metadata, and the
+// random space encryption key wrapped for the owner.
+type AddSpaceRequest struct {
+	Key               types.PublicKey `json:"key"`
+	EncryptedKey      []byte          `json:"encryptedKey"`
+	EncryptedName     []byte          `json:"encryptedName"`
+	EncryptedMetadata []byte          `json:"encryptedMetadata"`
+	Signature         types.Signature `json:"signature"`
+}
+
+// SigHash returns the hash of the space key, owner's app key, encrypted name,
+// and encrypted metadata.
+func (r AddSpaceRequest) SigHash(owner proto.Account) types.Hash256 {
+	return (Space{Key: r.Key, Owner: owner, EncryptedName: r.EncryptedName, EncryptedMetadata: r.EncryptedMetadata}).SigHash()
+}
+
+// Sign signs the space's shared fields with the space private key.
+func (r *AddSpaceRequest) Sign(spaceKey types.PrivateKey, owner proto.Account) {
+	r.Signature = spaceKey.SignHash(r.SigHash(owner))
+}
+
+// Space describes a space and the requesting account's access to it.
+type Space struct {
+	Key               types.PublicKey
+	Owner             proto.Account
+	EncryptedName     []byte
+	EncryptedMetadata []byte
+	EncryptedKey      []byte
+	Permission        Permission
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Signature         types.Signature
+}
+
+// SigHash returns the hash of the space key, owner's app key, encrypted name,
+// and encrypted metadata.
+func (s Space) SigHash() types.Hash256 {
+	h := types.NewHasher()
+	h.E.WriteString("indexd/space/v1")
+	s.Key.EncodeTo(h.E)
+	types.PublicKey(s.Owner).EncodeTo(h.E)
+	h.E.WriteBytes(s.EncryptedName)
+	h.E.WriteBytes(s.EncryptedMetadata)
+	return h.Sum()
+}
+
+// Invitation is a pending invitation to join a space.
+type Invitation struct {
+	SpaceKey     types.PublicKey
+	Inviter      proto.Account
+	Recipient    proto.Account
+	Permission   Permission
+	EncryptedKey []byte
+	ExpiresAt    time.Time
+	CreatedAt    time.Time
+
+	Signature types.Signature
+}
+
+// Validate checks the space key, inviter, recipient, permission, encrypted key, and timestamps.
+func (i Invitation) Validate(now time.Time) error {
+	if i.SpaceKey == (types.PublicKey{}) {
+		return errors.New("space key is empty")
+	} else if i.Inviter == (proto.Account{}) {
+		return errors.New("inviter is empty")
+	} else if i.Recipient == (proto.Account{}) {
+		return errors.New("recipient is empty")
+	} else if i.Permission < Read || i.Permission > Admin {
+		return errors.New("invalid invitation permission")
+	} else if len(i.EncryptedKey) != 72 {
+		return errors.New("encrypted key must be 72 bytes")
+	} else if now.Sub(i.CreatedAt) > 5*time.Minute {
+		return ErrInvitationTimestampTooOld
+	} else if !i.ExpiresAt.After(now) {
+		return ErrInvitationExpired
+	}
+	return nil
+}
+
+// SigHash returns the hash of the invitation's space, inviter, recipient,
+// permission, encrypted key, and creation and expiration times in Unix microseconds.
+func (i Invitation) SigHash() types.Hash256 {
+	h := types.NewHasher()
+	h.E.WriteString("indexd/space/invitation/v1")
+	i.SpaceKey.EncodeTo(h.E)
+	types.PublicKey(i.Inviter).EncodeTo(h.E)
+	types.PublicKey(i.Recipient).EncodeTo(h.E)
+	h.E.WriteUint8(uint8(i.Permission))
+	h.E.WriteBytes(i.EncryptedKey)
+	h.E.WriteUint64(uint64(i.CreatedAt.UnixMicro()))
+	h.E.WriteUint64(uint64(i.ExpiresAt.UnixMicro()))
+	return h.Sum()
+}
+
+// Member is an active member of a space.
+type Member struct {
+	Account    proto.Account
+	InvitedBy  proto.Account
+	InvitedAt  time.Time
+	Permission Permission
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+// Object is an encrypted object in a space and the account that signed it.
+type Object struct {
+	Key     types.Hash256
+	Account proto.Account
+	slabs.SealedObject
+}
+
+// ObjectWithoutSlabs is a space object without its slab slices.
+type ObjectWithoutSlabs struct {
+	Key     types.Hash256 `json:"key"`
+	Account proto.Account `json:"account"`
+	slabs.SealedObjectWithoutSlabs
+}
+
+// ObjectEvent is a published object change, including a deletion tombstone.
+type ObjectEvent struct {
+	Key       types.Hash256 `json:"key"`
+	Deleted   bool          `json:"deleted"`
+	UpdatedAt time.Time     `json:"updatedAt"`
+	Object    *Object       `json:"object,omitempty"`
+}
+
+// ObjectEventWithoutSlabs is a published object change without slab slices.
+type ObjectEventWithoutSlabs struct {
+	Key       types.Hash256       `json:"key"`
+	Deleted   bool                `json:"deleted"`
+	UpdatedAt time.Time           `json:"updatedAt"`
+	Object    *ObjectWithoutSlabs `json:"object,omitempty"`
+}
