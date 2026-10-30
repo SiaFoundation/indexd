@@ -187,7 +187,7 @@ paths:
         "200":
           description: Object created or updated successfully
         "400":
-          description: Object has no slabs, metadata exceeds size limit, or object contains unpinned slab
+          description: Object has no slabs, metadata exceeds size limit, or object contains a duplicate or unpinned slab
         "451":
           description: The object is on the indexer's blocklist
   /objects/{key}:

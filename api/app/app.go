@@ -420,7 +420,7 @@ func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
 	}
 
 	err := a.slabs.PinObject(jc.Request.Context(), proto.Account(pk), obj)
-	if errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) || errors.Is(err, slabs.ErrObjectUnpinnedSlab) || errors.Is(err, slabs.ErrInvalidObjectSignature) {
+	if errors.Is(err, slabs.ErrObjectMetadataLimitExceeded) || errors.Is(err, slabs.ErrObjectMinimumSlabs) || errors.Is(err, slabs.ErrObjectDuplicateSlab) || errors.Is(err, slabs.ErrObjectUnpinnedSlab) || errors.Is(err, slabs.ErrInvalidObjectSignature) {
 		jc.Error(err, http.StatusBadRequest)
 		return
 	} else if errors.Is(err, slabs.ErrObjectBlocked) {

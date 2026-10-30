@@ -420,6 +420,20 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatalf("expected %v, got %v", slabs.ErrInvalidObjectSignature, err)
 	}
 
+	// try to save an object that references the same slab twice
+	dupObj := slabs.SealedObject{
+		EncryptedDataKey:     frand.Bytes(72),
+		EncryptedMetadataKey: frand.Bytes(72),
+		Slabs: []slabs.SlabSlice{
+			slab1.Slice(0, 256),
+			slab1.Slice(256, 256),
+		},
+	}
+	dupObj.Sign(sk)
+	if err := client.PinObject(context.Background(), sk, dupObj); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectDuplicateSlab.Error()) {
+		t.Fatalf("expected %v, got %v", slabs.ErrObjectDuplicateSlab, err)
+	}
+
 	// sign and save the object
 	obj.Sign(sk)
 	if err := client.PinObject(context.Background(), sk, obj); err != nil {
