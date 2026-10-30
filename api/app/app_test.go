@@ -419,6 +419,27 @@ func TestApplicationAPI(t *testing.T) {
 	if err := client.PinObject(context.Background(), sk, obj); err == nil || !strings.Contains(err.Error(), slabs.ErrInvalidObjectSignature.Error()) {
 		t.Fatalf("expected %v, got %v", slabs.ErrInvalidObjectSignature, err)
 	}
+	for _, tt := range []struct {
+		name   string
+		change func(*slabs.SealedObject)
+		body   string
+	}{
+		{"no slabs", func(o *slabs.SealedObject) { o.Slabs = nil }, "object must have at least one slab"},
+		{"large metadata", func(o *slabs.SealedObject) { o.EncryptedMetadata = make([]byte, slabs.MaxMetadataSize+1) }, "object metadata size limit (1024) exceeded: got 1025 bytes"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			invalid := obj
+			invalid.Slabs = append([]slabs.SlabSlice(nil), obj.Slabs...)
+			tt.change(&invalid)
+			invalid.Sign(sk)
+			var httpErr *app.HTTPError
+			if err := client.PinObject(t.Context(), sk, invalid); !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusBadRequest {
+				t.Fatalf("expected HTTP 400 for invalid object, got %v", err)
+			} else if httpErr.Body != tt.body {
+				t.Fatalf("expected response %q, got %q", tt.body, httpErr.Body)
+			}
+		})
+	}
 
 	// sign and save the object
 	obj.Sign(sk)

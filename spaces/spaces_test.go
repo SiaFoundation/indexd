@@ -1,6 +1,7 @@
 package spaces
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -76,10 +77,11 @@ func TestSpaceSignature(t *testing.T) {
 
 func TestInvitationValidate(t *testing.T) {
 	now := time.Now()
+	inviterKey := types.GeneratePrivateKey()
 	valid := Invitation{
-		Inviter:      frand.Entropy256(),
-		SpaceKey:     frand.Entropy256(),
-		Recipient:    frand.Entropy256(),
+		Inviter:      [32]byte(inviterKey.PublicKey()),
+		SpaceKey:     types.GeneratePrivateKey().PublicKey(),
+		Recipient:    [32]byte(types.GeneratePrivateKey().PublicKey()),
 		Permission:   Write,
 		EncryptedKey: frand.Bytes(72),
 		CreatedAt:    now,
@@ -95,18 +97,37 @@ func TestInvitationValidate(t *testing.T) {
 		{"empty inviter", func(i *Invitation) { i.Inviter = [32]byte{} }, false},
 		{"empty recipient", func(i *Invitation) { i.Recipient = [32]byte{} }, false},
 		{"zero permission", func(i *Invitation) { i.Permission = 0 }, false},
+		{"off-curve recipient", func(i *Invitation) { i.Recipient = [32]byte{2} }, false},
+		{"low-order recipient", func(i *Invitation) { i.Recipient = [32]byte{1} }, false},
+		{"self invitation", func(i *Invitation) { i.Recipient = i.Inviter }, false},
 		{"owner permission", func(i *Invitation) { i.Permission = Owner }, false},
 		{"short key", func(i *Invitation) { i.EncryptedKey = make([]byte, 71) }, false},
 		{"old timestamp", func(i *Invitation) { i.CreatedAt = now.Add(-5*time.Minute - time.Nanosecond) }, false},
 		{"timestamp boundary", func(i *Invitation) { i.CreatedAt = now.Add(-5 * time.Minute) }, true},
+		{"future timestamp", func(i *Invitation) { i.CreatedAt = now.Add(5*time.Minute + time.Nanosecond) }, false},
+		{"future timestamp boundary", func(i *Invitation) { i.CreatedAt = now.Add(5 * time.Minute) }, true},
 		{"expiration boundary", func(i *Invitation) { i.ExpiresAt = now }, false},
+		{"expiration before creation", func(i *Invitation) {
+			i.CreatedAt = now.Add(2 * time.Minute)
+			i.ExpiresAt = now.Add(time.Minute)
+		}, false},
+		{"expiration at creation", func(i *Invitation) {
+			i.CreatedAt = now.Add(time.Minute)
+			i.ExpiresAt = i.CreatedAt
+		}, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			invite := valid
 			tt.change(&invite)
+			invite.Signature = inviterKey.SignHash(invite.SigHash())
 			if err := invite.Validate(now); (err == nil) != tt.valid {
 				t.Fatalf("Validate returned %v, want valid=%v", err, tt.valid)
+			} else if errors.Is(err, ErrInvalidSignature) {
+				t.Fatal("invalid field was only rejected by signature verification")
 			}
 		})
+	}
+	if err := valid.Validate(now); !errors.Is(err, ErrInvalidSignature) {
+		t.Fatalf("expected invalid signature, got %v", err)
 	}
 }
