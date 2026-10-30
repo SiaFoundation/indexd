@@ -20,6 +20,9 @@ tags:
     description: Retrieve current account
   - name: sharing
     description: Create, list and delete sharing keys and the objects attached to them
+  - name: spaces
+    description: >
+      Create and manage shared spaces, invitations, memberships, and objects. Requests use the normal app-key signed URL authentication.
   - name: shared
     description: >
       Recipient endpoints authenticated with a sharing key. The request URL must be signed with the sharing key's private key instead of an app key; the signer must resolve to an existing, unexpired sharing key.
@@ -304,6 +307,688 @@ paths:
                 $ref: "#/components/schemas/SharedObject"
         "404":
           description: Object not found
+        "451":
+          description: The object is on the indexer's blocklist
+  /spaces:
+    get:
+      tags:
+        - spaces
+      summary: List spaces accessible to the caller
+      operationId: listSpaces
+      description: >-
+        Returns owned and joined spaces, newest first. Each space includes the key wrapped for the authenticated
+        member.
+      parameters:
+        - name: offset
+          in: query
+          description: The number of entries to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: The maximum number of entries to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: A page of spaces
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Space"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Space"
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+    post:
+      tags:
+        - spaces
+      summary: Create a space
+      operationId: addSpace
+      description: >-
+        Generate a random Ed25519 key pair for the space. Wrap its seed with DeriveMemberKey(appPrivateKey,
+        spacePublicKey) for the owner, and sign the public key, owner account, encrypted name, and encrypted
+        metadata with the space private key. The owner membership is created with the space.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddSpaceRequest"
+      responses:
+        "204":
+          description: Space and owner membership created
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "409":
+          description: A space with this public key already exists
+  /spaces/{key}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The public key identifying the space
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+    get:
+      tags:
+        - spaces
+      summary: Get a space
+      operationId: getSpace
+      description: >-
+        Requires read permission. Returns the shared fields and the authenticated member's wrapped space key.
+      responses:
+        "200":
+          description: Space and caller access
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Space"
+            application/cbor:
+              schema:
+                $ref: "#/components/schemas/Space"
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space not found
+    put:
+      tags:
+        - spaces
+      summary: Update a space
+      operationId: updateSpace
+      description: >-
+        Requires admin permission. Replaces the encrypted name, metadata, and shared signature. Sign the space
+        public key, existing owner account, new encrypted name, and new encrypted metadata with the space private
+        key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSpaceRequest"
+      responses:
+        "204":
+          description: Space updated
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space not found
+    delete:
+      tags:
+        - spaces
+      summary: Delete a space
+      operationId: deleteSpace
+      description: >-
+        Only the owner may delete a space. Removes its objects, memberships, invitations, and slab pins. Slabs no
+        longer referenced by the owner are queued for deletion.
+      responses:
+        "204":
+          description: Space deleted
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space not found
+  /account/spaces/invitations:
+    get:
+      tags:
+        - spaces
+      summary: List invitations addressed to the caller
+      operationId: listSpaceInvitations
+      description: Returns unexpired pending invitations, newest first.
+      parameters:
+        - name: offset
+          in: query
+          description: The number of entries to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: The maximum number of entries to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: A page of pending invitations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SpaceInvitation"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SpaceInvitation"
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+  /spaces/{key}/invitations:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The public key identifying the space
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+    post:
+      tags:
+        - spaces
+      summary: Invite an account to a space
+      operationId: inviteSpaceMember
+      description: >-
+        Requires admin permission, and inviter must match the authenticated app account. The invitation body
+        spaceKey must equal the key path parameter. The recipient must be
+        registered with the same app ID as the owner. Only the owner may grant admin permission.
+        DeriveInvitationKey(inviterPrivateKey, recipientPublicKey, spacePublicKey) derives the wrapping key using
+        Ed25519-to-X25519 Diffie-Hellman and HKDF-BLAKE2b-256 with the space public key as salt and invitationKey as
+        context. Wrap the space seed, then sign the invitation with the inviter app key. Replaces any pending
+        invitation for this recipient.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SpaceInvitation"
+      responses:
+        "204":
+          description: Invitation recorded
+        "400":
+          description: Invalid invitation fields, signature, timestamps, or a spaceKey that does not match the path
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space or recipient account not found
+  /spaces/{key}/invitations/{recipient}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The public key identifying the space
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+      - name: recipient
+        in: path
+        required: true
+        description: The invited account's public key
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+    delete:
+      tags:
+        - spaces
+      summary: Cancel or decline a space invitation
+      operationId: deleteSpaceInvitation
+      description: The space owner may cancel any invitation. A recipient may decline their own invitation.
+      responses:
+        "204":
+          description: Invitation deleted
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space or invitation not found
+  /spaces/{key}/invitations/accept:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The public key identifying the space
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+    post:
+      tags:
+        - spaces
+      summary: Accept a space invitation
+      operationId: acceptSpaceInvitation
+      description: >-
+        DeriveInvitationKey(recipientPrivateKey, inviterPublicKey, spacePublicKey) yields the invitation wrapping
+        key. Verify the invitation signature, decrypt the space seed, and rewrap it with
+        DeriveMemberKey(recipientPrivateKey, spacePublicKey) before submitting encryptedKey. The invitation must
+        remain unexpired and its inviter must still have owner or admin access. Acceptance consumes the invitation
+        and creates or restores the caller's membership.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AcceptSpaceInvitationRequest"
+      responses:
+        "204":
+          description: Invitation accepted
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "404":
+          description: Space or valid pending invitation not found
+  /spaces/{key}/members:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The public key identifying the space
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+    get:
+      tags:
+        - spaces
+      summary: List active space members
+      operationId: listSpaceMembers
+      description: Requires read permission. Members are ordered by account registration order.
+      parameters:
+        - name: offset
+          in: query
+          description: The number of entries to skip
+          schema:
+            type: integer
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          description: The maximum number of entries to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: A page of members
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SpaceMember"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SpaceMember"
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space not found
+  /spaces/{key}/members/{member}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The public key identifying the space
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+      - name: member
+        in: path
+        required: true
+        description: The member account's public key
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+    put:
+      tags:
+        - spaces
+      summary: Change a member's permission
+      operationId: updateSpaceMember
+      description: >-
+        Requires admin permission. Only the owner may grant or change admin access. The owner's permission cannot be
+        changed. Demoting an admin cancels invitations they issued.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSpaceMemberRequest"
+      responses:
+        "204":
+          description: Member permission updated
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space or member not found
+    delete:
+      tags:
+        - spaces
+      summary: Revoke membership or leave a space
+      operationId: deleteSpaceMember
+      description: >-
+        The owner may revoke any other member. Admins may revoke other non-admin members. Members may leave by
+        specifying their own account. The owner cannot leave or be revoked. Revocation also cancels invitations
+        issued by the member.
+      responses:
+        "204":
+          description: Membership revoked
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space or member not found
+  /spaces/{key}/slabs:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The public key identifying the space
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+    post:
+      tags:
+        - spaces
+      summary: Pin slabs to a space
+      operationId: pinSpaceSlabs
+      description: >-
+        Requires write permission. Storage is charged to the space owner. Pin slabs before creating objects that
+        reference them. Unused staged pins can be removed with POST /slabs/prune.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              minItems: 1
+              items:
+                $ref: "#/components/schemas/SlabPinParams"
+      responses:
+        "200":
+          description: Pinned slab IDs in request order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabID"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabID"
+        "400":
+          description: Invalid slab parameters, host keys, or upload timestamps
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space not found
+        "413":
+          description: The space owner has insufficient remaining storage
+  /spaces/{key}/objects:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The public key identifying the space
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+    get:
+      tags:
+        - spaces
+      summary: List space object changes
+      operationId: listSpaceObjects
+      description: >-
+        Requires read permission. Lists published object events and deletion tombstones in stream order. Continue
+        with both key and after from the last event. Objects on the blocklist are hidden.
+      parameters:
+        - name: limit
+          in: query
+          description: The maximum number of entries to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: key
+          in: query
+          description: The last event's key when continuing a page
+          schema:
+            $ref: "#/components/schemas/Hash256"
+        - name: after
+          in: query
+          description: The last event's updatedAt stream position when continuing a page
+          schema:
+            type: string
+            format: date-time
+        - name: includeslabs
+          in: query
+          description: >-
+            Include slab slices. When false, fetch them separately with GET /spaces/{key}/objects/{objectkey}/slabs.
+          schema:
+            type: boolean
+            default: true
+      responses:
+        "200":
+          description: A page of object events
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/SpaceObjectEvent"
+                    description: Events with slab slices (includeslabs=true)
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/SpaceObjectEventWithoutSlabs"
+                    description: Events without slab slices (includeslabs=false)
+            application/cbor:
+              schema:
+                anyOf:
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/SpaceObjectEvent"
+                    description: Events with slab slices (includeslabs=true)
+                  - type: array
+                    items:
+                      $ref: "#/components/schemas/SpaceObjectEventWithoutSlabs"
+                    description: Events without slab slices (includeslabs=false)
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space not found
+    post:
+      tags:
+        - spaces
+      summary: Create or update a space object
+      operationId: pinSpaceObject
+      description: >-
+        Requires write permission. Sign both object signatures with the authenticated app key. Each slab must
+        already be pinned by the caller or to this space. Storage is charged to the owner, and an existing object's
+        encrypted data key cannot change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PinObjectRequest"
+      responses:
+        "204":
+          description: Object created or updated
+        "400":
+          description: Invalid object fields, signatures, or unpinned slabs
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space not found
+        "409":
+          description: The existing object has a different encrypted data key
+        "413":
+          description: The space owner has insufficient remaining storage
+        "451":
+          description: The object is on the indexer's blocklist
+  /spaces/{key}/objects/{objectkey}:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The public key identifying the space
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+      - name: objectkey
+        in: path
+        required: true
+        description: The object ID
+        schema:
+          $ref: "#/components/schemas/Hash256"
+    get:
+      tags:
+        - spaces
+      summary: Get a space object
+      operationId: getSpaceObject
+      description: >-
+        Requires read permission. The account field identifies the app key used to verify the object signatures.
+      responses:
+        "200":
+          description: The space object
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SpaceObject"
+            application/cbor:
+              schema:
+                $ref: "#/components/schemas/SpaceObject"
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space or object not found
+        "451":
+          description: The object is on the indexer's blocklist
+    delete:
+      tags:
+        - spaces
+      summary: Delete a space object
+      operationId: deleteSpaceObject
+      description: >-
+        Requires delete permission. Publishes a deletion tombstone and releases slab pins no longer used by the
+        space. Slabs still referenced by the owner's other objects or spaces remain pinned.
+      responses:
+        "204":
+          description: Object deleted
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space or object not found
+  /spaces/{key}/objects/{objectkey}/slabs:
+    parameters:
+      - name: key
+        in: path
+        required: true
+        description: The public key identifying the space
+        schema:
+          $ref: "#/components/schemas/PublicKey"
+      - name: objectkey
+        in: path
+        required: true
+        description: The object ID
+        schema:
+          $ref: "#/components/schemas/Hash256"
+    get:
+      tags:
+        - spaces
+      summary: List a space object's slab slices
+      operationId: listSpaceObjectSlabs
+      description: >-
+        Requires read permission. The cursor is the index of the first slice to return. A page shorter than the
+        limit is the last one.
+      parameters:
+        - name: cursor
+          in: query
+          description: The index of the first slab slice to return
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            maximum: 2147483647
+            default: 0
+        - name: limit
+          in: query
+          description: The maximum number of entries to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        "200":
+          description: A page of slab slices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabSlice"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlabSlice"
+        "400":
+          description: Invalid request fields or signature
+        "401":
+          description: Missing or invalid app authentication
+        "403":
+          description: Insufficient space permission
+        "404":
+          description: Space or object not found
         "451":
           description: The object is on the indexer's blocklist
   /sharing:
@@ -972,7 +1657,9 @@ paths:
     post:
       tags:
         - slabs
-      summary: Unpin all slabs not used by an object currently pinned by the user
+      summary: Unpin unused personal and staged space slabs
+      description: >
+        Space owners may prune any unused staged slabs in their spaces. Members may prune unused slabs they uploaded. Slabs referenced by live objects remain pinned.
       operationId: pruneSlabs
       parameters:
         - name: before
@@ -1297,3 +1984,29 @@ components:
       $ref: "./components.yml#/components/schemas/AccountToken"
     SharedHost:
       $ref: "./components.yml#/components/schemas/SharedHost"
+    SpacePermission:
+      $ref: "./components.yml#/components/schemas/SpacePermission"
+    AddSpaceRequest:
+      $ref: "./components.yml#/components/schemas/AddSpaceRequest"
+    UpdateSpaceRequest:
+      $ref: "./components.yml#/components/schemas/UpdateSpaceRequest"
+    Space:
+      $ref: "./components.yml#/components/schemas/Space"
+    SpaceInvitation:
+      $ref: "./components.yml#/components/schemas/SpaceInvitation"
+    AcceptSpaceInvitationRequest:
+      $ref: "./components.yml#/components/schemas/AcceptSpaceInvitationRequest"
+    UpdateSpaceMemberRequest:
+      $ref: "./components.yml#/components/schemas/UpdateSpaceMemberRequest"
+    SpaceMember:
+      $ref: "./components.yml#/components/schemas/SpaceMember"
+    SpaceObject:
+      $ref: "./components.yml#/components/schemas/SpaceObject"
+    SpaceObjectWithoutSlabs:
+      $ref: "./components.yml#/components/schemas/SpaceObjectWithoutSlabs"
+    SpaceObjectEvent:
+      $ref: "./components.yml#/components/schemas/SpaceObjectEvent"
+    SpaceObjectEventWithoutSlabs:
+      $ref: "./components.yml#/components/schemas/SpaceObjectEventWithoutSlabs"
+    SlabPinParams:
+      $ref: "./components.yml#/components/schemas/SlabPinParams"

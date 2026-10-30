@@ -27,6 +27,7 @@ import (
 	"go.sia.tech/indexd/pins"
 	"go.sia.tech/indexd/sharing"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/spaces"
 	"go.sia.tech/indexd/stats"
 	"go.sia.tech/indexd/subscriber"
 	"go.sia.tech/indexd/testutils/mock"
@@ -206,6 +207,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	if err != nil {
 		t.Fatalf("failed to create sharing manager: %v", err)
 	}
+	spaces := spaces.NewManager(store)
 
 	subscriber, err := subscriber.New(c.cm, hm, contracts, wm, store, subscriber.WithLogger(log.Named("subscriber")))
 	if err != nil {
@@ -267,7 +269,7 @@ func NewIndexer(t testing.TB, c *ConsensusNode, log *zap.Logger, opts ...Indexer
 	if cfg.advertiseURL == "" {
 		cfg.advertiseURL = appAPIAddr
 	}
-	appHandler, err := app.NewAPI(cfg.advertiseURL, hm, am, contracts, slabs, sharing, appAPIOpts...)
+	appHandler, err := app.NewAPI(cfg.advertiseURL, hm, am, contracts, slabs, sharing, spaces, appAPIOpts...)
 	if err != nil {
 		t.Fatalf("failed to create application API: %v", err)
 	}

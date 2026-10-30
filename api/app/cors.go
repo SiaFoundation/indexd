@@ -137,7 +137,7 @@ func corsMux(enabledRoutes map[string]jape.Handler, disabledRoutes map[string]ja
 	corsMiddleware := func(h jape.Handler) jape.Handler {
 		return func(jc jape.Context) {
 			jc.ResponseWriter.Header().Set("Access-Control-Allow-Origin", "*")
-			jc.ResponseWriter.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE")
+			jc.ResponseWriter.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE")
 			jc.ResponseWriter.Header().Set("Access-Control-Allow-Headers", "*")
 			h(jc)
 		}
