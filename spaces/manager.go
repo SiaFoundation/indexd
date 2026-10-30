@@ -80,14 +80,6 @@ func (m *Manager) UpdateSpace(account proto.Account, key types.PublicKey, name, 
 	} else if signature == (types.Signature{}) {
 		return ErrInvalidSignature
 	}
-	space, err := m.store.Space(account, key)
-	if err != nil {
-		return err
-	}
-	updated := Space{Key: key, Owner: space.Owner, EncryptedName: name, EncryptedMetadata: metadata}
-	if !key.VerifyHash(updated.SigHash(), signature) {
-		return ErrInvalidSignature
-	}
 	return m.store.UpdateSpace(account, key, name, metadata, signature)
 }
 
@@ -123,8 +115,8 @@ func (m *Manager) SpaceInvitations(account proto.Account, offset, limit int) ([]
 func (m *Manager) AcceptSpaceInvitation(account proto.Account, key types.PublicKey, encryptedKey []byte) error {
 	if err := validateAccountAndSpaceKeys(account, key); err != nil {
 		return err
-	} else if len(encryptedKey) != 72 {
-		return fmt.Errorf("%w: encrypted key must be 72 bytes", ErrInvalidRequest)
+	} else if len(encryptedKey) != slabs.EncryptionKeySize {
+		return fmt.Errorf("%w: encrypted key must be %d bytes", ErrInvalidRequest, slabs.EncryptionKeySize)
 	}
 	return m.store.AcceptSpaceInvitation(account, key, encryptedKey)
 }

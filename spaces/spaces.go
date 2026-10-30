@@ -106,8 +106,8 @@ func (i Invitation) Validate(now time.Time) error {
 		return fmt.Errorf("%w: inviter and recipient must be different", ErrInvalidRequest)
 	case i.Permission < Read || i.Permission > Admin:
 		return fmt.Errorf("%w: invalid invitation permission", ErrInvalidRequest)
-	case len(i.EncryptedKey) != 72:
-		return fmt.Errorf("%w: encrypted key must be 72 bytes", ErrInvalidRequest)
+	case len(i.EncryptedKey) != slabs.EncryptionKeySize:
+		return fmt.Errorf("%w: encrypted key must be %d bytes", ErrInvalidRequest, slabs.EncryptionKeySize)
 	case now.Sub(i.CreatedAt) > 5*time.Minute:
 		return ErrInvitationTimestampTooOld
 	case i.CreatedAt.Sub(now) > 5*time.Minute:

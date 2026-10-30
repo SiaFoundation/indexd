@@ -16,15 +16,6 @@ type noSpaceStore struct {
 	spaces.Store
 }
 
-type spaceLookupStore struct {
-	spaces.Store
-	space spaces.Space
-}
-
-func (s *spaceLookupStore) Space(proto.Account, types.PublicKey) (spaces.Space, error) {
-	return s.space, nil
-}
-
 func TestManagerValidatesSpace(t *testing.T) {
 	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
 	spaceKey := types.GeneratePrivateKey()
@@ -64,8 +55,7 @@ func TestManagerValidatesSpace(t *testing.T) {
 	if err := m.AddSpace(owner, req); !errors.Is(err, spaces.ErrInvalidSignature) {
 		t.Fatalf("expected invalid space signature, got %v", err)
 	}
-	store := &spaceLookupStore{space: spaces.Space{Key: req.Key, Owner: owner}}
-	if err := spaces.NewManager(store).UpdateSpace(owner, req.Key, req.EncryptedName, req.EncryptedMetadata, req.Signature); !errors.Is(err, spaces.ErrInvalidSignature) {
+	if err := m.UpdateSpace(owner, req.Key, req.EncryptedName, req.EncryptedMetadata, types.Signature{}); !errors.Is(err, spaces.ErrInvalidSignature) {
 		t.Fatalf("expected invalid update signature, got %v", err)
 	}
 }
