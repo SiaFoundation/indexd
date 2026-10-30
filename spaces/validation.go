@@ -75,8 +75,8 @@ func (r AddSpaceRequest) Validate(owner proto.Account) error {
 		return err
 	}
 	switch {
-	case len(r.EncryptedKey) != 72:
-		return fmt.Errorf("%w: encrypted key must be 72 bytes", ErrInvalidRequest)
+	case len(r.EncryptedKey) != slabs.EncryptionKeySize:
+		return fmt.Errorf("%w: encrypted key must be %d bytes", ErrInvalidRequest, slabs.EncryptionKeySize)
 	case !r.Key.VerifyHash(r.SigHash(owner), r.Signature):
 		return ErrInvalidSignature
 	}

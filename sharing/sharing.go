@@ -17,7 +17,7 @@ const (
 	NonceSize = 32
 	// EncryptionKeySize is the length of a sealed encryption key (xchacha20
 	// nonce + key + tag).
-	EncryptionKeySize = 72
+	EncryptionKeySize = slabs.EncryptionKeySize
 	// MaxDescriptionSize is the maximum length of a sharing key description.
 	MaxDescriptionSize = 1024
 	// MaxMetadataSize is the maximum length of a shared object's encrypted

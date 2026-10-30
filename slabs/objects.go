@@ -157,10 +157,10 @@ func (pr *PinObjectRequest) Validate() error {
 		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(pr.EncryptedMetadata))
 	case pinnedObjectID(pr.Slabs) != pr.ID:
 		return fmt.Errorf("%w: object ID does not match slabs", ErrInvalidObjectSignature)
-	case len(pr.EncryptedDataKey) != 72:
-		return fmt.Errorf("%w: encrypted data key must be 72 bytes", ErrInvalidObjectRequest)
-	case len(pr.EncryptedMetadataKey) != 0 && len(pr.EncryptedMetadataKey) != 72:
-		return fmt.Errorf("%w: encrypted metadata key must be 72 bytes", ErrInvalidObjectRequest)
+	case len(pr.EncryptedDataKey) != EncryptionKeySize:
+		return fmt.Errorf("%w: encrypted data key must be %d bytes", ErrInvalidObjectRequest, EncryptionKeySize)
+	case len(pr.EncryptedMetadataKey) != 0 && len(pr.EncryptedMetadataKey) != EncryptionKeySize:
+		return fmt.Errorf("%w: encrypted metadata key must be %d bytes", ErrInvalidObjectRequest, EncryptionKeySize)
 	}
 	for i, slab := range pr.Slabs {
 		switch {
@@ -236,6 +236,10 @@ func (pr *PinObjectRequest) Size() uint64 {
 	}
 	return size
 }
+
+// EncryptionKeySize is the length of a sealed encryption key (xchacha20
+// nonce + key + tag).
+const EncryptionKeySize = 72
 
 // MaxMetadataSize is the maximum size of object metadata that may be stored.
 const MaxMetadataSize = 1024
