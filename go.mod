@@ -3,7 +3,7 @@ module go.sia.tech/indexd // v0.6.3
 go 1.27.0
 
 require (
-	github.com/fxamacker/cbor/v2 v2.9.6
+	github.com/fxamacker/cbor/v2 v2.10.0
 	github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/klauspost/reedsolomon v1.14.2

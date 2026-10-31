@@ -11,8 +11,8 @@ github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dunglas/httpsfv v1.1.1 h1:HoSs101zIE9I23DlqlmljJ/OIi7ILwrH347pXhRZdxI=
 github.com/dunglas/httpsfv v1.1.1/go.mod h1:zID2mqw9mFsnt7YC3vYQ9/cjq30q41W+1AnDwH8TiMg=
-github.com/fxamacker/cbor/v2 v2.9.6 h1:NHZPxuUjJXQjX9itA785y/5NKSlI4HQ+S7noZsmI7hs=
-github.com/fxamacker/cbor/v2 v2.9.6/go.mod h1:4EaZp6ClVunETjQ4GHmGNzysDK91Lr+r6Yz6tJqzVCw=
+github.com/fxamacker/cbor/v2 v2.10.0 h1:HVF3T5vYwLqO81ebPirWEPNv2SMrUMD3HLnKgEr6uWE=
+github.com/fxamacker/cbor/v2 v2.10.0/go.mod h1:uSwlToFuT9BZAKRxxVm3qQC8DR4tlWl7D6pf20iRYH4=
 github.com/google/go-cmp v0.6.0 h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=
 github.com/google/go-cmp v0.6.0/go.mod h1:17dUlkBOakJ0+DkrSSNjCkIjxS6bF9zb3elmeNGIjoY=
 github.com/jackc/pgerrcode v0.0.0-20240316143900-6e2875d9b438 h1:Dj0L5fhJ9F82ZJyVOmBx6msDp/kfd1t9GRfny/mfJA0=
