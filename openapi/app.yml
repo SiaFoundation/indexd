@@ -233,6 +233,74 @@ paths:
           description: Object deleted successfully
         "404":
           description: Object not found
+  /repackable/objects:
+    get:
+      tags:
+        - objects
+      summary: List small objects that could be repacked
+      description: >
+        Returns objects stored in a single slab whose unused space exceeds `minwaste` percent of that slab, so the object could be repacked with other small objects to reclaim the unused space. Only objects whose slab was pinned before the cutoff are returned, matching `POST /slabs/prune`. Objects are returned smallest first, at most `limit` of them, and only while their combined size fits in one slab of data at the given erasure coding parameters (`datashards` × 4 MiB). Objects on the indexer's blocklist are hidden.
+
+      operationId: listRepackableObjects
+      parameters:
+        - name: datashards
+          in: query
+          required: true
+          description: The number of data shards the objects will be repacked into
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 255
+        - name: parityshards
+          in: query
+          required: true
+          description: The number of parity shards the objects will be repacked into
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 255
+        - name: minwaste
+          in: query
+          required: true
+          description: Minimum percentage of unused slab space. Slabs must exceed this percentage; lower values repack more aggressively.
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 100
+        - name: limit
+          in: query
+          description: The maximum number of objects to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+        - name: before
+          in: query
+          description: Only objects whose slab was pinned before this timestamp are returned. Defaults to 72 hours ago.
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: The repackable objects, smallest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RepackableObject"
+            application/cbor:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RepackableObject"
+        "400":
+          description: Invalid limit, cutoff, or erasure coding parameters
+          content:
+            text/plain:
+              schema:
+                type: string
   /objects/{key}/slabs:
     get:
       tags:
@@ -856,7 +924,7 @@ paths:
                   $ref: "#/components/schemas/SlabID"
         "400":
           description: >-
-            Invalid slab parameters. The stable "slab upload is too old" text in the response body identifies a sector that must be re-uploaded and names its index. "slab upload time is in the future" means the client's clock is more than 5 minutes ahead.
+            Invalid slab parameters, a sector on an unknown host, too many sectors on bad hosts, or pinning would exceed the account's or app key's storage limit. The stable "slab upload is too old" text in the response body identifies a sector that must be re-uploaded and names its index. "slab upload time is in the future" means the client's clock is more than 5 minutes ahead.
           content:
             text/plain:
               schema:
@@ -866,6 +934,14 @@ paths:
                   value: "invalid slab pin params: slab 0: sector 3 invalid: slab upload is too old (max 48h0m0s)"
                 inFuture:
                   value: "invalid slab pin params: slab 0: sector 3 invalid: slab upload time is in the future (max 5m0s ahead)"
+                unknownHost:
+                  value: "host not found: unknown host \"ed25519:...\" for sector"
+                badHosts:
+                  value: "slab has too many sectors on bad hosts"
+                accountStorageLimit:
+                  value: "app storage limit exceeded"
+                appKeyStorageLimit:
+                  value: "account storage limit exceeded"
       x-codeSamples:
         - lang: Go
           label: Go
@@ -1257,6 +1333,8 @@ components:
       $ref: "./components.yml#/components/schemas/AppAccountResponse"
     SealedObject:
       $ref: "./components.yml#/components/schemas/SealedObject"
+    RepackableObject:
+      $ref: "./components.yml#/components/schemas/RepackableObject"
     ObjectEvent:
       $ref: "./components.yml#/components/schemas/ObjectEvent"
     ObjectEventWithoutSlabs:

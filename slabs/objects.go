@@ -67,6 +67,13 @@ type (
 		Object *SealedObject `json:"object,omitempty"`
 	}
 
+	// A RepackableObject is an object stored in a single slab that is more
+	// than half empty.
+	RepackableObject struct {
+		Key    types.Hash256 `json:"key"`
+		Object SealedObject  `json:"object"`
+	}
+
 	// An ObjectEventWithoutSlabs is an object event whose object is returned
 	// without its slabs. The slabs are paginated separately with ObjectSlabs.
 	ObjectEventWithoutSlabs struct {
@@ -403,6 +410,15 @@ func (m *SlabManager) ListObjects(ctx context.Context, account proto.Account, cu
 // ListObjectsWithoutSlabs lists object events without their slabs.
 func (m *SlabManager) ListObjectsWithoutSlabs(ctx context.Context, account proto.Account, cursor Cursor, limit int) ([]ObjectEventWithoutSlabs, error) {
 	return m.store.ListObjectsWithoutSlabs(account, cursor, limit)
+}
+
+// RepackableObjects returns objects stored in a single slab that is more than
+// minWaste percent empty, following the same cutoff as PruneSlabs: only objects whose
+// slab was pinned before cutoff are returned. At most limit objects are
+// returned, and their combined size is at most one slab of data with
+// dataShards data shards.
+func (m *SlabManager) RepackableObjects(ctx context.Context, account proto.Account, cutoff time.Time, limit, dataShards, minWaste int) ([]RepackableObject, error) {
+	return m.store.RepackableObjects(account, cutoff, limit, uint64(dataShards)*proto.SectorSize, minWaste)
 }
 
 // ObjectSlabs returns a page of the object's slab slices, starting at slice

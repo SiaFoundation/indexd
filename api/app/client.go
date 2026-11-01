@@ -268,6 +268,23 @@ func (c *Client) ListObjectsWithoutSlabs(ctx context.Context, appKey types.Priva
 	return
 }
 
+// RepackableObjects returns objects stored in a single slab that is more than
+// minWaste percent empty, at most one slab of data at the given erasure coding parameters.
+// Use api.WithLimit to cap the number of objects and api.WithBefore to
+// override the default 72 hour cutoff. minWaste must be between 0 and 100.
+func (c *Client) RepackableObjects(ctx context.Context, appKey types.PrivateKey, dataShards, parityShards, minWaste int, opts ...api.URLQueryParameterOption) (resp []slabs.RepackableObject, err error) {
+	values := url.Values{}
+	values.Set("minwaste", fmt.Sprint(minWaste))
+	values.Set("datashards", fmt.Sprint(dataShards))
+	values.Set("parityshards", fmt.Sprint(parityShards))
+	for _, opt := range opts {
+		opt(values)
+	}
+	path := "/repackable/objects?" + values.Encode()
+	err = c.signedRequest(ctx, appKey, http.MethodGet, path, nil, &resp)
+	return
+}
+
 // ObjectSlabs returns a page of the object's slab slices, starting at slice
 // index cursor. A page shorter than limit is the last one.
 func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objectID types.Hash256, cursor int64, limit int) (resp []slabs.SlabSlice, err error) {

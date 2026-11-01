@@ -17,6 +17,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
@@ -4202,4 +4203,25 @@ func (s *Store) sectorUploadedAt(t testing.TB, root types.Hash256) (uploadedAt t
 		t.Fatal(err)
 	}
 	return
+}
+
+func TestPinSlabsUnknownHost(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+
+	slab := slabs.SlabPinParams{
+		EncryptionKey: [32]byte{1},
+		MinShards:     1,
+		Sectors: []slabs.PinnedSector{
+			{Root: frand.Entropy256(), HostKey: hk},
+			{Root: frand.Entropy256(), HostKey: frand.Entropy256()},
+		},
+	}
+	if _, err := store.PinSlabs(account, time.Now().Add(time.Hour), slab); !errors.Is(err, hosts.ErrNotFound) {
+		t.Fatalf("expected error %v, got %v", hosts.ErrNotFound, err)
+	}
 }
