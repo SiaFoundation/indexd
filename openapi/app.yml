@@ -866,6 +866,18 @@ paths:
                   value: "invalid slab pin params: slab 0: sector 3 invalid: slab upload is too old (max 48h0m0s)"
                 inFuture:
                   value: "invalid slab pin params: slab 0: sector 3 invalid: slab upload time is in the future (max 5m0s ahead)"
+        "403":
+          description: >-
+            Pinning the slabs would exceed a storage limit. "account storage limit exceeded" means the connect key's quota is full, "app storage limit exceeded" means the app's own limit is full. The request will keep failing until data is unpinned or the limit is raised.
+          content:
+            text/plain:
+              schema:
+                type: string
+              examples:
+                quota:
+                  value: "account storage limit exceeded"
+                app:
+                  value: "app storage limit exceeded"
       x-codeSamples:
         - lang: Go
           label: Go
