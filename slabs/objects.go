@@ -395,12 +395,12 @@ func (m *SlabManager) PinObject(ctx context.Context, account proto.Account, obj 
 		return err
 	}
 
-	seen := make(map[SlabID]bool, len(obj.Slabs))
+	seen := make(map[SlabID]struct{}, len(obj.Slabs))
 	for _, slab := range obj.Slabs {
-		if seen[slab.ID] {
+		if _, ok := seen[slab.ID]; ok {
 			return fmt.Errorf("%w: %v", ErrObjectDuplicateSlab, slab.ID)
 		}
-		seen[slab.ID] = true
+		seen[slab.ID] = struct{}{}
 	}
 	return m.store.PinObject(account, obj)
 }
