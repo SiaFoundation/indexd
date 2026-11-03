@@ -242,6 +242,47 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("expected redundancy error, got:", err)
 	}
 
+	// assert pinning past the app's storage limit is rejected, a rejected pin
+	// leaves nothing behind so the same slab serves both limits
+	rejected := uploadRandomSlab(t, hc, sk, hosts)
+	acc, err := adminClient.Account(ctx, sk.PublicKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	limit := uint64(1)
+	if err := adminClient.UpdateAccount(ctx, sk.PublicKey(), accounts.UpdateAccountRequest{MaxPinnedData: &limit}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.PinSlabs(ctx, sk, rejected)
+	assertStatus(t, err, http.StatusForbidden)
+	if !errors.Is(err, accounts.ErrAccountStorageLimitExceeded) {
+		t.Fatalf("expected error %v, got %v", accounts.ErrAccountStorageLimitExceeded, err)
+	}
+	if err := adminClient.UpdateAccount(ctx, sk.PublicKey(), accounts.UpdateAccountRequest{MaxPinnedData: &acc.MaxPinnedData}); err != nil {
+		t.Fatal(err)
+	}
+
+	// assert pinning past the connect key's quota is rejected
+	if err := adminClient.PutQuota(ctx, "tiny", accounts.PutQuotaRequest{
+		Description:     "tiny quota",
+		MaxPinnedData:   1,
+		TotalUses:       2,
+		FundTargetBytes: &testutils.TestQuotaFundTargetBytes,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := adminClient.UpdateAppConnectKey(ctx, accounts.AppConnectKeyRequest{Key: key.Key, Description: key.Description, Quota: "tiny"}); err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.PinSlabs(ctx, sk, rejected)
+	assertStatus(t, err, http.StatusForbidden)
+	if !errors.Is(err, accounts.ErrAppKeyStorageLimitExceeded) {
+		t.Fatalf("expected error %v, got %v", accounts.ErrAppKeyStorageLimitExceeded, err)
+	}
+	if err := adminClient.UpdateAppConnectKey(ctx, accounts.AppConnectKeyRequest{Key: key.Key, Description: key.Description, Quota: key.Quota}); err != nil {
+		t.Fatal(err)
+	}
+
 	// assert hosts returns all usable hosts
 	time.Sleep(time.Second) // allow some time to form contracts
 	usableHosts, err := client.Hosts(context.Background(), sk)

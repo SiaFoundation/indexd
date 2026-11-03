@@ -618,6 +618,9 @@ func (a *app) handlePOSTSlabs(jc jape.Context, pk types.PublicKey) {
 	if errors.Is(err, slabs.ErrInvalidPinParams) || errors.Is(err, slabs.ErrBadHosts) || errors.Is(err, slabs.ErrMinShards) {
 		jc.Error(err, http.StatusBadRequest)
 		return
+	} else if errors.Is(err, accounts.ErrAccountStorageLimitExceeded) || errors.Is(err, accounts.ErrAppKeyStorageLimitExceeded) {
+		jc.Error(err, http.StatusForbidden)
+		return
 	} else if jc.Check("failed to pin slab", err) != nil {
 		return
 	} else if len(slabIDs) == 0 {
