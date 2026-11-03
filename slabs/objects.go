@@ -140,10 +140,12 @@ type (
 	}
 
 	// An ObjectAccount is an account that has pinned an object, along with
-	// the connect key associated with the account.
+	// the connect key associated with the account. For space pins, it identifies
+	// the space and its owner.
 	ObjectAccount struct {
-		AccountKey proto.Account `json:"accountKey"`
-		ConnectKey string        `json:"connectKey"`
+		AccountKey proto.Account   `json:"accountKey"`
+		ConnectKey string          `json:"connectKey"`
+		SpaceKey   types.PublicKey `json:"spaceKey,omitzero"`
 	}
 )
 
@@ -379,6 +381,12 @@ func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, o
 	return m.store.DeleteObject(account, objectKey)
 }
 
+// DeleteSlabObject administratively deletes a personal or space object returned
+// by ObjectsForSlab, including objects belonging to deleted accounts.
+func (m *SlabManager) DeleteSlabObject(ctx context.Context, obj SlabObject) error {
+	return m.store.DeleteSlabObject(obj)
+}
+
 // PinObject pin the given object for the given account. If an object with
 // the same ID already exists for the account, it is overwritten.
 func (m *SlabManager) PinObject(ctx context.Context, account proto.Account, obj PinObjectRequest) error {
@@ -418,8 +426,9 @@ func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (Shar
 }
 
 // ObjectAccounts returns a paginated list of the accounts that have pinned an
-// object with the given key, along with their connect keys. It returns
-// ErrObjectNotFound if no account has pinned an object with the key.
+// object with the given key, along with their connect keys. Space pins include
+// the space key and its owner's account. It returns ErrObjectNotFound if no
+// account or space has pinned an object with the key.
 func (m *SlabManager) ObjectAccounts(ctx context.Context, objectKey types.Hash256, offset, limit int) ([]ObjectAccount, error) {
 	return m.store.ObjectAccounts(objectKey, offset, limit)
 }

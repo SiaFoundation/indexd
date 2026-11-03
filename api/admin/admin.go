@@ -137,7 +137,7 @@ type (
 
 	// SlabManager defines the slab-related interface used by the admin API.
 	SlabManager interface {
-		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
+		DeleteSlabObject(ctx context.Context, obj slabs.SlabObject) error
 		ObjectAccounts(ctx context.Context, objectKey types.Hash256, offset, limit int) ([]slabs.ObjectAccount, error)
 		ObjectStats() (slabs.ObjectStats, error)
 		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
@@ -399,7 +399,7 @@ func (a *admin) handleDELETESlab(jc jape.Context) {
 
 	// delete each object
 	for _, obj := range objects {
-		err := a.slabs.DeleteObject(jc.Request.Context(), obj.Account, obj.ObjectID)
+		err := a.slabs.DeleteSlabObject(jc.Request.Context(), obj)
 		if errors.Is(err, slabs.ErrObjectNotFound) {
 			continue
 		} else if err != nil {

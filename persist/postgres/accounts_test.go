@@ -13,6 +13,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/slabs"
+	"go.sia.tech/indexd/spaces"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
@@ -930,6 +931,10 @@ func TestPruneAccount(t *testing.T) {
 	if err := store.PinObject(acc2, obj2Acc2.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
+	tombstone := store.pinRandomObject(t, acc1, pinSlabs(acc1, obj1Slabs[:1]))
+	if err := store.DeleteObject(acc1, tombstone.ID()); err != nil {
+		t.Fatal(err)
+	}
 
 	assertObjects := func(acc proto.Account, expected int) {
 		t.Helper()
@@ -986,6 +991,21 @@ func TestPruneAccount(t *testing.T) {
 	}
 	assertObjects(acc1, 0)
 
+	for want := 2; want >= 0; want-- {
+		if err := store.PruneAccounts(1); err != nil {
+			t.Fatal(err)
+		}
+		var events1, events2 int
+		if err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FILTER (WHERE a.public_key = $1), COUNT(*) FILTER (WHERE a.public_key = $2)
+FROM object_events e JOIN accounts a ON a.id = e.account_id`, sqlPublicKey(acc1), sqlPublicKey(acc2)).Scan(&events1, &events2); err != nil {
+			t.Fatal(err)
+		} else if events1 != want || events2 != 2 {
+			t.Fatalf("pruning events: got %d and %d events, want %d and 2", events1, events2, want)
+		}
+		assertCount("accounts", 2)
+		assertCount("slab_deletion_queue", 0)
+	}
+
 	// acc1 has no objects left; this pass queues its slabs and, because fewer
 	// than the batch limit remained, hard deletes the account in the same pass
 	if err := store.PruneAccounts(10); err != nil {
@@ -1026,6 +1046,7 @@ func TestPruneAccount(t *testing.T) {
 	store.pruneAllDeletedSlabs(t)
 	assertCount("slabs", 0)
 	assertCount("sectors", 0)
+	assertCount("object_events", 0)
 }
 
 func TestAccountFundingInfo(t *testing.T) {
@@ -1419,4 +1440,113 @@ func BenchmarkAccountReady(b *testing.B) {
 			}
 		}
 	})
+}
+
+func TestPruneAccountSpaceObjects(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	key := store.addTestSpace(t, owner).PublicKey()
+	for i := range 4 {
+		obj := store.pinTestObject(t, owner, hk)
+		if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
+			t.Fatal(err)
+		} else if err := store.DeleteObject(owner, obj.ID()); err != nil {
+			t.Fatal(err)
+		}
+		if i == 3 {
+			if err := store.DeleteSpaceObject(owner, key, obj.ID()); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := store.DeleteAccount(owner); err != nil {
+		t.Fatal(err)
+	}
+	for _, limit := range []int{0, 2} {
+		if err := store.PruneAccounts(limit); err != nil {
+			t.Fatal(err)
+		}
+		var objects, spaces, events int
+		if err := store.pool.QueryRow(t.Context(), `SELECT (SELECT COUNT(*) FROM space_objects), (SELECT COUNT(*) FROM spaces), (SELECT COUNT(*) FROM space_object_events)`).Scan(&objects, &spaces, &events); err != nil {
+			t.Fatal(err)
+		} else if objects != 3-limit || spaces != 1 || events != 4 {
+			t.Fatalf("pruning limit %d: got %d objects, %d spaces, and %d events", limit, objects, spaces, events)
+		}
+	}
+	if err := store.PruneAccounts(5); err != nil {
+		t.Fatal(err)
+	}
+	for want := 3; want >= 0; want-- {
+		if err := store.PruneAccounts(1); err != nil {
+			t.Fatal(err)
+		}
+		var events, spaces int
+		if err := store.pool.QueryRow(t.Context(), `SELECT (SELECT COUNT(*) FROM space_object_events), (SELECT COUNT(*) FROM spaces)`).Scan(&events, &spaces); err != nil {
+			t.Fatal(err)
+		} else if events != want || spaces != 1 {
+			t.Fatalf("pruning events: got %d events and %d spaces, want %d events and 1 space", events, spaces, want)
+		}
+	}
+	if err := store.PruneAccounts(10); err != nil {
+		t.Fatal(err)
+	}
+	for table, want := range map[string]int{"accounts": 0, "spaces": 0, "space_objects": 0, "space_object_events": 0, "object_events": 0, "account_slabs": 0, "slab_deletion_queue": 4} {
+		var got int
+		if err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM `+table).Scan(&got); err != nil {
+			t.Fatal(err)
+		} else if got != want {
+			t.Fatalf("expected %d %s, got %d", want, table, got)
+		}
+	}
+}
+
+func TestPruneAccountSpaceUploaders(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	member := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	store.addTestAccount(t, types.PublicKey(member))
+	key := store.addTestSpace(t, owner).PublicKey()
+	if err := store.InviteSpaceMember(testSpaceInvitation(owner, member, key, spaces.Write)); err != nil {
+		t.Fatal(err)
+	} else if err := store.AcceptSpaceInvitation(member, key, frand.Bytes(72)); err != nil {
+		t.Fatal(err)
+	}
+	hk := store.addTestHost(t)
+	store.addTestContract(t, hk)
+	var slabIDs []slabs.SlabID
+	for range 3 {
+		slab := slabs.SlabPinParams{EncryptionKey: frand.Entropy256(), MinShards: 1, Sectors: []slabs.PinnedSector{{Root: frand.Entropy256(), HostKey: hk}}}
+		if _, err := store.PinSpaceSlabs(member, key, time.Time{}, slab); err != nil {
+			t.Fatal(err)
+		}
+		slabIDs = append(slabIDs, slab.Digest())
+	}
+	if err := store.DeleteAccount(member); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct{ limit, uploaders int }{{0, 3}, {2, 2}, {1, 1}, {1, 0}} {
+		if err := store.PruneAccounts(tt.limit); err != nil {
+			t.Fatal(err)
+		}
+		var uploaders, pins, accounts int
+		if err := store.pool.QueryRow(t.Context(), `SELECT
+ (SELECT COUNT(*) FROM space_slabs WHERE uploader_account_id IS NOT NULL),
+ (SELECT COUNT(*) FROM space_slabs),
+ (SELECT COUNT(*) FROM accounts WHERE public_key = $1)`, sqlPublicKey(member)).Scan(&uploaders, &pins, &accounts); err != nil {
+			t.Fatal(err)
+		} else if uploaders != tt.uploaders || pins != 3 || accounts != 1 {
+			t.Fatalf("pruning limit %d: got %d uploader references, %d pins, and %d accounts; want %d, 3, and 1", tt.limit, uploaders, pins, accounts, tt.uploaders)
+		}
+		store.assertPinnedSlabs(t, owner, slabIDs...)
+	}
+	if err := store.PruneAccounts(1); err != nil {
+		t.Fatal(err)
+	} else if err := store.PruneAccounts(1); !errors.Is(err, accounts.ErrNotFound) {
+		t.Fatalf("expected account to be pruned, got %v", err)
+	}
+	store.assertPinnedSlabs(t, owner, slabIDs...)
 }

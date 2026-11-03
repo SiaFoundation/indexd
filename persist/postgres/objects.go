@@ -336,17 +336,46 @@ INNER JOIN deleted d ON (d.slab_digest = s.digest)`, objectID)
 	})
 }
 
-// ObjectsForSlab returns all (account, object key) pairs for objects that
-// reference the given slab.
+// DeleteSlabObject administratively deletes a personal or space object returned
+// by ObjectsForSlab, including objects belonging to deleted accounts.
+func (s *Store) DeleteSlabObject(obj slabs.SlabObject) error {
+	if obj.SpaceKey == (types.PublicKey{}) {
+		if err := s.DeleteObject(obj.Account, obj.ObjectID); errors.Is(err, accounts.ErrNotFound) {
+			return slabs.ErrObjectNotFound
+		} else {
+			return err
+		}
+	}
+	return s.transaction(func(ctx context.Context, tx *txn) error {
+		var id, ownerID int64
+		err := tx.QueryRow(ctx, `SELECT id, owner_account_id FROM spaces WHERE space_key = $1 FOR UPDATE`, sqlPublicKey(obj.SpaceKey)).Scan(&id, &ownerID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return slabs.ErrObjectNotFound
+		} else if err != nil {
+			return err
+		}
+		return s.deleteSpaceObject(ctx, tx, id, ownerID, obj.ObjectID)
+	})
+}
+
+// ObjectsForSlab returns all personal and space objects that reference the given
+// slab. Space objects include the space key and its owner's account.
 func (s *Store) ObjectsForSlab(slabID slabs.SlabID) (objects []slabs.SlabObject, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		objects = objects[:0] // reuse same slice if transaction retries
 
 		rows, err := tx.Query(ctx, `
-			SELECT DISTINCT a.public_key, o.object_key
+			SELECT a.public_key, o.object_key, NULL AS space_key
 			FROM objects o
 			JOIN object_slabs os ON o.id = os.object_id
 			JOIN accounts a ON o.account_id = a.id
+			WHERE os.slab_digest = $1
+			UNION
+			SELECT a.public_key, o.object_key, s.space_key
+			FROM space_objects o
+			JOIN space_object_slabs os ON o.id = os.object_id
+			JOIN spaces s ON o.space_id = s.id
+			JOIN accounts a ON s.owner_account_id = a.id
 			WHERE os.slab_digest = $1`, sqlHash256(slabID))
 		if err != nil {
 			return fmt.Errorf("failed to query objects for slab: %w", err)
@@ -355,7 +384,7 @@ func (s *Store) ObjectsForSlab(slabID slabs.SlabID) (objects []slabs.SlabObject,
 
 		for rows.Next() {
 			var obj slabs.SlabObject
-			if err := rows.Scan((*sqlPublicKey)(&obj.Account), (*sqlHash256)(&obj.ObjectID)); err != nil {
+			if err := rows.Scan((*sqlPublicKey)(&obj.Account), (*sqlHash256)(&obj.ObjectID), asNullable((*sqlPublicKey)(&obj.SpaceKey))); err != nil {
 				return fmt.Errorf("failed to scan object for slab: %w", err)
 			}
 			objects = append(objects, obj)
@@ -366,26 +395,36 @@ func (s *Store) ObjectsForSlab(slabID slabs.SlabID) (objects []slabs.SlabObject,
 }
 
 // ObjectAccounts returns a paginated list of the accounts that have pinned an
-// object with the given key, along with their connect keys. It returns
-// slabs.ErrObjectNotFound if no account has pinned an object with the key.
+// object with the given key, along with their connect keys. Space pins include
+// the space key and its owner's account. It returns slabs.ErrObjectNotFound if
+// no account or space has pinned an object with the key.
 func (s *Store) ObjectAccounts(objectKey types.Hash256, offset, limit int) (objectAccounts []slabs.ObjectAccount, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		objectAccounts = objectAccounts[:0] // reuse same slice if transaction retries
 
 		var exists bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM objects WHERE object_key = $1)`, sqlHash256(objectKey)).Scan(&exists); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM objects WHERE object_key = $1)
+			OR EXISTS(SELECT 1 FROM space_objects WHERE object_key = $1)`, sqlHash256(objectKey)).Scan(&exists); err != nil {
 			return fmt.Errorf("failed to check if object exists: %w", err)
 		} else if !exists {
 			return slabs.ErrObjectNotFound
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT a.public_key, ack.app_key
-			FROM objects o
+			SELECT a.public_key, ack.app_key, o.space_key
+			FROM (
+				SELECT account_id, NULL AS space_key, id, 0 AS kind
+				FROM objects
+				WHERE object_key = $1
+				UNION ALL
+				SELECT s.owner_account_id, s.space_key, o.id, 1 AS kind
+				FROM space_objects o
+				INNER JOIN spaces s ON s.id = o.space_id
+				WHERE o.object_key = $1
+			) o
 			INNER JOIN accounts a ON a.id = o.account_id
 			INNER JOIN app_connect_keys ack ON ack.id = a.connect_key_id
-			WHERE o.object_key = $1
-			ORDER BY o.id ASC
+			ORDER BY o.kind ASC, o.id ASC
 			LIMIT $2 OFFSET $3`, sqlHash256(objectKey), limit, offset)
 		if err != nil {
 			return fmt.Errorf("failed to query object accounts: %w", err)
@@ -394,7 +433,7 @@ func (s *Store) ObjectAccounts(objectKey types.Hash256, offset, limit int) (obje
 
 		for rows.Next() {
 			var oa slabs.ObjectAccount
-			if err := rows.Scan((*sqlPublicKey)(&oa.AccountKey), &oa.ConnectKey); err != nil {
+			if err := rows.Scan((*sqlPublicKey)(&oa.AccountKey), &oa.ConnectKey, asNullable((*sqlPublicKey)(&oa.SpaceKey))); err != nil {
 				return fmt.Errorf("failed to scan object account: %w", err)
 			}
 			objectAccounts = append(objectAccounts, oa)
@@ -512,13 +551,13 @@ func (s *Store) PublishObjectEvents() error {
 	return s.publishObjectEvents(objectEventPublishBatchSize)
 }
 
-// publishObjectEvents assigns stream positions to at most limit object events.
+// publishObjectEvents assigns stream positions to at most limit events per object table.
 func (s *Store) publishObjectEvents(limit int) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		// an idle tick skips the settings row entirely, the partial index on
 		// unpublished events makes the probe cheap
 		var pending bool
-		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM object_events WHERE updated_at IS NULL)`).Scan(&pending); err != nil {
+		if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM object_events WHERE updated_at IS NULL) OR EXISTS (SELECT 1 FROM space_object_events WHERE updated_at IS NULL)`).Scan(&pending); err != nil {
 			return fmt.Errorf("failed to check for unpublished object events: %w", err)
 		} else if !pending {
 			return nil
@@ -564,7 +603,11 @@ func (s *Store) publishObjectEvents(limit int) error {
 		if err != nil {
 			return fmt.Errorf("failed to publish object events: %w", err)
 		}
-		return nil
+		_, err = tx.Exec(ctx, `WITH batch AS MATERIALIZED (
+ SELECT ctid FROM space_object_events WHERE updated_at IS NULL
+ ORDER BY space_id, object_key FOR UPDATE SKIP LOCKED LIMIT $2
+) UPDATE space_object_events SET updated_at = $1 WHERE ctid IN (SELECT ctid FROM batch)`, published, limit)
+		return err
 	})
 }
 

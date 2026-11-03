@@ -198,7 +198,9 @@ func (s *Store) FlushStatsDelta(limit int) (more bool, err error) {
 func (s *Store) ObjectStats() (slabs.ObjectStats, error) {
 	var stats slabs.ObjectStats
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		return tx.QueryRow(ctx, `SELECT COUNT(*) FROM object_events WHERE updated_at IS NULL`).Scan(&stats.UnpublishedEvents)
+		return tx.QueryRow(ctx, `SELECT
+	(SELECT COUNT(*) FROM object_events WHERE updated_at IS NULL) +
+	(SELECT COUNT(*) FROM space_object_events WHERE updated_at IS NULL)`).Scan(&stats.UnpublishedEvents)
 	})
 	return stats, err
 }

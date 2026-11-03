@@ -273,229 +273,237 @@ func (s *Store) markFailingSectorsLostBatch(hostKey types.PublicKey, maxChecks, 
 func (s *Store) PinSlabs(account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
 	var digests []slabs.SlabID
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
-		digests = digests[:0] // reuse same slice if transaction retries
-
-		var accountID int64
-		var connectKeyID int64
-		err := tx.QueryRow(ctx, "SELECT id, connect_key_id FROM accounts WHERE public_key = $1", sqlPublicKey(account)).Scan(&accountID, &connectKeyID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return accounts.ErrNotFound
-		} else if err != nil {
-			return err
-		}
-
-		hostRows, err := tx.Query(ctx, `WITH globals AS (SELECT scanned_height FROM global_settings) SELECT h.public_key FROM contracts c INNER JOIN hosts h ON c.host_id = h.id CROSS JOIN globals WHERE state IN (0,1) AND renewed_to IS NULL AND good AND proof_height > globals.scanned_height`)
-		if err != nil {
-			return fmt.Errorf("failed to get good hosts: %w", err)
-		}
-		defer hostRows.Close()
-
-		goodHosts := make(map[types.PublicKey]struct{})
-		for hostRows.Next() {
-			var hk types.PublicKey
-			if err := hostRows.Scan((*sqlPublicKey)(&hk)); err != nil {
-				return fmt.Errorf("failed to scan host key: %w", err)
-			}
-			goodHosts[hk] = struct{}{}
-		}
-		if err := hostRows.Err(); err != nil {
-			return fmt.Errorf("failed to get good host rows: %w", err)
-		}
-
-		// validate the slabs and compute their digests
-		digestArgs := make([]any, 0, len(toPin))
-		rootArgs := make([]any, 0, len(toPin))
-		for _, slab := range toPin {
-			if slab.MinShards <= 0 || uint(len(slab.Sectors)) < slab.MinShards {
-				return slabs.ErrMinShards
-			}
-			digest := slab.Digest()
-			digests = append(digests, digest)
-			digestArgs = append(digestArgs, sqlHash256(digest))
-			for _, sector := range slab.Sectors {
-				rootArgs = append(rootArgs, sqlHash256(sector.Root))
-			}
-		}
-
-		// lock the slabs and sectors that already exist up front, in the
-		// same order the other lockers use (slabs by digest, then sectors by
-		// root), so the row locks the upserts below take can't deadlock with
-		// concurrent deletions and prunes. Rows the upserts insert are
-		// invisible to concurrent lockers, so the upserts themselves may run
-		// in the caller's order, which also determines the order sectors are
-		// pinned to contracts in.
-		if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE digest = ANY($1) ORDER BY digest FOR NO KEY UPDATE`, digestArgs); err != nil {
-			return fmt.Errorf("failed to lock slabs: %w", err)
-		}
-		if _, err := tx.Exec(ctx, `SELECT sector_root FROM sectors WHERE sector_root = ANY($1) ORDER BY sector_root FOR NO KEY UPDATE`, rootArgs); err != nil {
-			return fmt.Errorf("failed to lock sectors: %w", err)
-		}
-
-		var newPinnedData, newPinnedSize uint64
-		for idx, slab := range toPin {
-			digest := digests[idx]
-
-			// insert slab
-			var slabID int64
-			var existingSlab bool
-			err = tx.QueryRow(ctx, `
-			INSERT INTO slabs (digest, encryption_key, min_shards, version)
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (digest) DO UPDATE SET
-				pinned_at = NOW(),
-				unrecoverable_since = NULL,
-				unrecoverable_reason = NULL,
-				consecutive_failed_repairs = CASE WHEN slabs.unrecoverable_reason IS NOT NULL THEN 0 ELSE slabs.consecutive_failed_repairs END,
-				next_repair_attempt = CASE WHEN slabs.unrecoverable_reason IS NOT NULL THEN NOW() ELSE slabs.next_repair_attempt END
-			RETURNING id, (xmax <> 0)
-			`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards, slab.Version).Scan(&slabID, &existingSlab)
-			if err != nil {
-				return err
-			}
-
-			// insert slab into join table
-			res, err := tx.Exec(ctx, `
-			INSERT INTO account_slabs (account_id, slab_id) VALUES ($1, $2)
-			ON CONFLICT (account_id, slab_id) DO NOTHING
-		`, accountID, slabID)
-			if err != nil {
-				return fmt.Errorf("failed to insert slab into account_slabs: %w", err)
-			}
-
-			// track amount of data from newly pinned slabs so we can check later
-			// that we didn't exceed account and connect key storage limits
-			if res.RowsAffected() > 0 {
-				newPinnedData += slab.DataSize()
-				newPinnedSize += slab.Size()
-			}
-
-			if !existingSlab {
-				if err := incrementNumSlabs(ctx, tx, 1); err != nil {
-					return fmt.Errorf("failed to increment number of slabs: %w", err)
-				}
-			}
-
-			// insert the slab's sectors. For a slab that already exists this
-			// may rebind sectors that were marked lost since it was pinned,
-			// but only to a host with a good contract. An existing sector
-			// keeps the later upload time.
-			batch := &pgx.Batch{}
-			goodHost := make([]bool, len(slab.Sectors))
-			for i, sector := range slab.Sectors {
-				_, goodHost[i] = goodHosts[sector.HostKey]
-				batch.Queue(`
-				INSERT INTO sectors (sector_root, host_id, next_integrity_check, uploaded_at)
-				SELECT $1, h.id, $3, LEAST(NOW(), $4::timestamptz)
-				FROM hosts h
-				WHERE h.public_key = $2
-				ON CONFLICT (sector_root) DO UPDATE SET
-					uploaded_at = GREATEST(sectors.uploaded_at, EXCLUDED.uploaded_at),
-					host_id = COALESCE(sectors.host_id, CASE WHEN $5::boolean THEN EXCLUDED.host_id END),
-					consecutive_failed_checks = CASE WHEN sectors.host_id IS NULL THEN 0 ELSE sectors.consecutive_failed_checks END
-				RETURNING id, host_id, (OLD.host_id IS NULL AND NEW.host_id IS NOT NULL) AS bound, (OLD.id IS NOT NULL) AS existed`,
-					sqlHash256(sector.Root),
-					sqlPublicKey(sector.HostKey),
-					nextIntegrityCheck,
-					sector.UploadedAt,
-					goodHost[i])
-			}
-
-			var badHosts int
-			var unpinned, rebound int64
-			var unpinnedDeltas []unpinnedDelta
-			br := tx.SendBatch(ctx, batch)
-			sectorIDs := make([]int64, len(slab.Sectors))
-			for i, sector := range slab.Sectors {
-				if !goodHost[i] {
-					badHosts++
-				}
-
-				var bound, existed bool
-				var hostID sql.NullInt64
-				if err := br.QueryRow().Scan(&sectorIDs[i], &hostID, &bound, &existed); err != nil {
-					br.Close()
-					if errors.Is(err, sql.ErrNoRows) {
-						return fmt.Errorf("unknown host %q for sector", sector.HostKey)
-					}
-					return fmt.Errorf("failed to insert sector %q: %w", sector.Root, err)
-				} else if !bound {
-					continue
-				}
-				unpinned++
-				unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hostID.Int64, delta: 1})
-				if existed {
-					rebound++
-				}
-			}
-			br.Close()
-
-			// if more than 20% of parity shards are on bad hosts, don't allow
-			// the slab to be pinned. Only a slab that doesn't exist yet is
-			// rejected; an existing slab can always be re-pinned, by any
-			// account, after its sectors end up on bad hosts.
-			if !existingSlab {
-				parityShards := len(slab.Sectors) - int(slab.MinShards)
-				if float64(badHosts) > maxBadParityShards*float64(parityShards) {
-					return slabs.ErrBadHosts
-				}
-			}
-
-			// update number of unpinned sectors
-			if unpinned > 0 {
-				if err := incrementNumUnpinnedSectors(ctx, tx, unpinned); err != nil {
-					return fmt.Errorf("failed to increment number of unpinned sectors: %w", err)
-				} else if err := incrementHostsUnpinnedSectors(ctx, tx, unpinnedDeltas); err != nil {
-					return fmt.Errorf("failed to update hosts unpinned sectors: %w", err)
-				}
-			}
-
-			// a hostless sector is counted as unpinnable; rebinding clears that.
-			if rebound > 0 {
-				if err := incrementNumUnpinnableSectors(ctx, tx, -rebound); err != nil {
-					return fmt.Errorf("failed to decrement number of unpinnable sectors: %w", err)
-				}
-			}
-
-			// insert slab sectors into join table
-			batch = &pgx.Batch{}
-			for i, sectorID := range sectorIDs {
-				batch.Queue(`
-				INSERT INTO slab_sectors (slab_id, slab_index, sector_id)
-				VALUES ($1, $2, $3)
-				ON CONFLICT (slab_id, slab_index) DO NOTHING
-			`, slabID, i, sectorID)
-			}
-			if err = tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
-				return fmt.Errorf("failed to insert slab sectors: %w", err)
-			}
-		}
-
-		// check whether adding the newly pinned data would exceed the account's
-		// storage limit and if not, update the account's pinned data
-		var pinnedData, maxPinnedData uint64
-		err = tx.QueryRow(ctx, `UPDATE accounts SET pinned_data = pinned_data + $1, pinned_size = pinned_size + $2 WHERE id = $3 RETURNING pinned_data, max_pinned_data`, newPinnedData, newPinnedSize, accountID).Scan(&pinnedData, &maxPinnedData)
-		if err != nil {
-			return fmt.Errorf("failed to update account's pinned data: %w", err)
-		} else if pinnedData > maxPinnedData {
-			return accounts.ErrAccountStorageLimitExceeded
-		}
-
-		// check whether adding the newly pinned data would exceed the connect
-		// key's storage limit and if not, update the connect key's pinned data
-		err = tx.QueryRow(ctx, `
-			UPDATE app_connect_keys ack SET pinned_data = pinned_data + $1, pinned_size = pinned_size + $2
-			FROM quotas q
-			WHERE ack.id = $3 AND q.name = ack.quota_name
-			RETURNING ack.pinned_data, q.max_pinned_data`, newPinnedData, newPinnedSize, connectKeyID).Scan(&pinnedData, &maxPinnedData)
-		if err != nil {
-			return fmt.Errorf("failed to update connect key's pinned data: %w", err)
-		} else if pinnedData > maxPinnedData {
-			return accounts.ErrAppKeyStorageLimitExceeded
-		}
-
-		return nil
+		var err error
+		digests, err = s.pinSlabs(ctx, tx, account, nextIntegrityCheck, toPin...)
+		return err
 	})
 	return digests, err
+}
+
+func (s *Store) pinSlabs(ctx context.Context, tx *txn, account proto.Account, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error) {
+	var digests []slabs.SlabID
+
+	var accountID int64
+	var connectKeyID int64
+	err := tx.QueryRow(ctx, "SELECT id, connect_key_id FROM accounts WHERE public_key = $1", sqlPublicKey(account)).Scan(&accountID, &connectKeyID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, accounts.ErrNotFound
+	} else if err != nil {
+		return nil, err
+	}
+
+	hostRows, err := tx.Query(ctx, `WITH globals AS (SELECT scanned_height FROM global_settings) SELECT h.public_key FROM contracts c INNER JOIN hosts h ON c.host_id = h.id CROSS JOIN globals WHERE state IN (0,1) AND renewed_to IS NULL AND good AND proof_height > globals.scanned_height`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get good hosts: %w", err)
+	}
+	defer hostRows.Close()
+
+	goodHosts := make(map[types.PublicKey]struct{})
+	for hostRows.Next() {
+		var hk types.PublicKey
+		if err := hostRows.Scan((*sqlPublicKey)(&hk)); err != nil {
+			return nil, fmt.Errorf("failed to scan host key: %w", err)
+		}
+		goodHosts[hk] = struct{}{}
+	}
+	if err := hostRows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to get good host rows: %w", err)
+	}
+
+	// validate the slabs and compute their digests
+	digestArgs := make([]any, 0, len(toPin))
+	rootArgs := make([]any, 0, len(toPin))
+	for _, slab := range toPin {
+		if slab.MinShards <= 0 || uint(len(slab.Sectors)) < slab.MinShards {
+			return nil, slabs.ErrMinShards
+		}
+		digest := slab.Digest()
+		digests = append(digests, digest)
+		digestArgs = append(digestArgs, sqlHash256(digest))
+		for _, sector := range slab.Sectors {
+			rootArgs = append(rootArgs, sqlHash256(sector.Root))
+		}
+	}
+
+	// lock the slabs and sectors that already exist up front, in the
+	// same order the other lockers use (slabs by digest, then sectors by
+	// root), so the row locks the upserts below take can't deadlock with
+	// concurrent deletions and prunes. Rows the upserts insert are
+	// invisible to concurrent lockers, so the upserts themselves may run
+	// in the caller's order, which also determines the order sectors are
+	// pinned to contracts in.
+	if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE digest = ANY($1) ORDER BY digest FOR NO KEY UPDATE`, digestArgs); err != nil {
+		return nil, fmt.Errorf("failed to lock slabs: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `SELECT sector_root FROM sectors WHERE sector_root = ANY($1) ORDER BY sector_root FOR NO KEY UPDATE`, rootArgs); err != nil {
+		return nil, fmt.Errorf("failed to lock sectors: %w", err)
+	}
+
+	var newPinnedData, newPinnedSize uint64
+	for idx, slab := range toPin {
+		digest := digests[idx]
+
+		// insert slab
+		var slabID int64
+		var existingSlab bool
+		err = tx.QueryRow(ctx, `
+		INSERT INTO slabs (digest, encryption_key, min_shards, version)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (digest) DO UPDATE SET
+			pinned_at = NOW(),
+			unrecoverable_since = NULL,
+			unrecoverable_reason = NULL,
+			consecutive_failed_repairs = CASE WHEN slabs.unrecoverable_reason IS NOT NULL THEN 0 ELSE slabs.consecutive_failed_repairs END,
+			next_repair_attempt = CASE WHEN slabs.unrecoverable_reason IS NOT NULL THEN NOW() ELSE slabs.next_repair_attempt END
+		RETURNING id, (xmax <> 0)
+		`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards, slab.Version).Scan(&slabID, &existingSlab)
+		if err != nil {
+			return nil, err
+		}
+
+		// insert slab into join table
+		res, err := tx.Exec(ctx, `
+		INSERT INTO account_slabs (account_id, slab_id) VALUES ($1, $2)
+		ON CONFLICT (account_id, slab_id) DO NOTHING
+	`, accountID, slabID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to insert slab into account_slabs: %w", err)
+		}
+
+		// track amount of data from newly pinned slabs so we can check later
+		// that we didn't exceed account and connect key storage limits
+		if res.RowsAffected() > 0 {
+			newPinnedData += slab.DataSize()
+			newPinnedSize += slab.Size()
+		}
+
+		if !existingSlab {
+			if err := incrementNumSlabs(ctx, tx, 1); err != nil {
+				return nil, fmt.Errorf("failed to increment number of slabs: %w", err)
+			}
+		}
+
+		// insert the slab's sectors. For a slab that already exists this
+		// may rebind sectors that were marked lost since it was pinned,
+		// but only to a host with a good contract. An existing sector
+		// keeps the later upload time.
+		batch := &pgx.Batch{}
+		goodHost := make([]bool, len(slab.Sectors))
+		for i, sector := range slab.Sectors {
+			_, goodHost[i] = goodHosts[sector.HostKey]
+			batch.Queue(`
+			INSERT INTO sectors (sector_root, host_id, next_integrity_check, uploaded_at)
+			SELECT $1, h.id, $3, LEAST(NOW(), $4::timestamptz)
+			FROM hosts h
+			WHERE h.public_key = $2
+			ON CONFLICT (sector_root) DO UPDATE SET
+				uploaded_at = GREATEST(sectors.uploaded_at, EXCLUDED.uploaded_at),
+				host_id = COALESCE(sectors.host_id, CASE WHEN $5::boolean THEN EXCLUDED.host_id END),
+				consecutive_failed_checks = CASE WHEN sectors.host_id IS NULL THEN 0 ELSE sectors.consecutive_failed_checks END
+			RETURNING id, host_id, (OLD.host_id IS NULL AND NEW.host_id IS NOT NULL) AS bound, (OLD.id IS NOT NULL) AS existed`,
+				sqlHash256(sector.Root),
+				sqlPublicKey(sector.HostKey),
+				nextIntegrityCheck,
+				sector.UploadedAt,
+				goodHost[i])
+		}
+
+		var badHosts int
+		var unpinned, rebound int64
+		var unpinnedDeltas []unpinnedDelta
+		br := tx.SendBatch(ctx, batch)
+		sectorIDs := make([]int64, len(slab.Sectors))
+		for i, sector := range slab.Sectors {
+			if !goodHost[i] {
+				badHosts++
+			}
+
+			var bound, existed bool
+			var hostID sql.NullInt64
+			if err := br.QueryRow().Scan(&sectorIDs[i], &hostID, &bound, &existed); err != nil {
+				br.Close()
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, fmt.Errorf("unknown host %q for sector: %w", sector.HostKey, slabs.ErrBadHosts)
+				}
+				return nil, fmt.Errorf("failed to insert sector %q: %w", sector.Root, err)
+			} else if !bound {
+				continue
+			}
+			unpinned++
+			unpinnedDeltas = append(unpinnedDeltas, unpinnedDelta{hostID: hostID.Int64, delta: 1})
+			if existed {
+				rebound++
+			}
+		}
+		br.Close()
+
+		// if more than 20% of parity shards are on bad hosts, don't allow
+		// the slab to be pinned. Only a slab that doesn't exist yet is
+		// rejected; an existing slab can always be re-pinned, by any
+		// account, after its sectors end up on bad hosts.
+		if !existingSlab {
+			parityShards := len(slab.Sectors) - int(slab.MinShards)
+			if float64(badHosts) > maxBadParityShards*float64(parityShards) {
+				return nil, slabs.ErrBadHosts
+			}
+		}
+
+		// update number of unpinned sectors
+		if unpinned > 0 {
+			if err := incrementNumUnpinnedSectors(ctx, tx, unpinned); err != nil {
+				return nil, fmt.Errorf("failed to increment number of unpinned sectors: %w", err)
+			} else if err := incrementHostsUnpinnedSectors(ctx, tx, unpinnedDeltas); err != nil {
+				return nil, fmt.Errorf("failed to update hosts unpinned sectors: %w", err)
+			}
+		}
+
+		// a hostless sector is counted as unpinnable; rebinding clears that.
+		if rebound > 0 {
+			if err := incrementNumUnpinnableSectors(ctx, tx, -rebound); err != nil {
+				return nil, fmt.Errorf("failed to decrement number of unpinnable sectors: %w", err)
+			}
+		}
+
+		// insert slab sectors into join table
+		batch = &pgx.Batch{}
+		for i, sectorID := range sectorIDs {
+			batch.Queue(`
+			INSERT INTO slab_sectors (slab_id, slab_index, sector_id)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (slab_id, slab_index) DO NOTHING
+		`, slabID, i, sectorID)
+		}
+		if err = tx.Tx.SendBatch(ctx, batch).Close(); err != nil {
+			return nil, fmt.Errorf("failed to insert slab sectors: %w", err)
+		}
+	}
+
+	// check whether adding the newly pinned data would exceed the account's
+	// storage limit and if not, update the account's pinned data
+	var pinnedData, maxPinnedData uint64
+	err = tx.QueryRow(ctx, `UPDATE accounts SET pinned_data = pinned_data + $1, pinned_size = pinned_size + $2 WHERE id = $3 AND deleted_at IS NULL RETURNING pinned_data, max_pinned_data`, newPinnedData, newPinnedSize, accountID).Scan(&pinnedData, &maxPinnedData)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, accounts.ErrNotFound
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to update account's pinned data: %w", err)
+	} else if pinnedData > maxPinnedData {
+		return nil, accounts.ErrAccountStorageLimitExceeded
+	}
+
+	// check whether adding the newly pinned data would exceed the connect
+	// key's storage limit and if not, update the connect key's pinned data
+	err = tx.QueryRow(ctx, `
+		UPDATE app_connect_keys ack SET pinned_data = pinned_data + $1, pinned_size = pinned_size + $2
+		FROM quotas q
+		WHERE ack.id = $3 AND q.name = ack.quota_name
+		RETURNING ack.pinned_data, q.max_pinned_data`, newPinnedData, newPinnedSize, connectKeyID).Scan(&pinnedData, &maxPinnedData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to update connect key's pinned data: %w", err)
+	} else if pinnedData > maxPinnedData {
+		return nil, accounts.ErrAppKeyStorageLimitExceeded
+	}
+
+	return digests, nil
 }
 
 // lockSlabs locks the given slabs FOR UPDATE. Locks are always acquired in
@@ -535,6 +543,13 @@ WHERE a.account_id = $1
 		JOIN object_slabs os ON o.id = os.object_id
 		WHERE o.account_id = a.account_id
 		AND os.slab_digest = s.digest
+	)
+	AND NOT EXISTS (SELECT 1 FROM space_slabs p WHERE p.account_id = a.account_id AND p.slab_id = s.id)
+	AND NOT EXISTS (
+		SELECT 1 FROM spaces sp
+		JOIN space_objects o ON o.space_id = sp.id
+		JOIN space_object_slabs os ON os.object_id = o.id
+		WHERE sp.owner_account_id = a.account_id AND os.slab_digest = s.digest
 	)`, accountID, sIDs, cutoff)
 	if err != nil {
 		return fmt.Errorf("failed to query unreferenced slabs: %w", err)
@@ -625,7 +640,8 @@ func (s *Store) deleteOrphanedSlabs(ctx context.Context, tx *txn, sIDs []int64) 
 	rows, err := tx.Query(ctx, `SELECT s.id FROM slabs s
 WHERE s.id = ANY($1)
 	AND NOT EXISTS (SELECT 1 FROM account_slabs a WHERE a.slab_id = s.id)
-	AND NOT EXISTS (SELECT 1 FROM object_slabs os WHERE os.slab_digest = s.digest)`, sIDs)
+	AND NOT EXISTS (SELECT 1 FROM object_slabs os WHERE os.slab_digest = s.digest)
+	AND NOT EXISTS (SELECT 1 FROM space_object_slabs os WHERE os.slab_digest = s.digest)`, sIDs)
 	if err != nil {
 		return fmt.Errorf("failed to query deletable slabs: %w", err)
 	}
@@ -758,6 +774,11 @@ func (s *Store) UnpinSlab(account proto.Account, slabID slabs.SlabID) error {
 				FROM objects o
 				JOIN object_slabs os ON o.id = os.object_id
 				WHERE o.account_id = $1 AND os.slab_digest = $3
+			) OR EXISTS (SELECT 1 FROM space_slabs WHERE account_id = $1 AND slab_id = $2) OR EXISTS (
+				SELECT 1 FROM spaces sp
+				JOIN space_objects o ON o.space_id = sp.id
+				JOIN space_object_slabs os ON os.object_id = o.id
+				WHERE sp.owner_account_id = $1 AND os.slab_digest = $3
 			)`, id, sID, sqlHash256(slabID)).Scan(&pinned, &inUse)
 		if err != nil {
 			return fmt.Errorf("failed to check slab pin state: %w", err)
@@ -1159,6 +1180,19 @@ func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 		`, sqlHash256(slabID))
 		if err != nil {
 			return fmt.Errorf("failed to update affected object events: %w", err)
+		}
+		_, err = tx.Exec(ctx, `
+			UPDATE space_object_events
+			SET updated_at = NULL
+			WHERE (space_id, object_key) IN (
+				SELECT o.space_id, o.object_key
+				FROM space_object_slabs os
+				INNER JOIN space_objects o ON os.object_id = o.id
+				WHERE os.slab_digest = $1
+			)
+		`, sqlHash256(slabID))
+		if err != nil {
+			return fmt.Errorf("failed to update affected space object events: %w", err)
 		}
 		return nil
 	})
