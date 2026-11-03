@@ -137,6 +137,7 @@ type (
 	SlabObject struct {
 		Account  proto.Account
 		ObjectID types.Hash256
+		SpaceKey types.PublicKey `json:"spaceKey,omitzero"`
 	}
 )
 

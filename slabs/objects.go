@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -140,12 +141,39 @@ type (
 	}
 
 	// An ObjectAccount is an account that has pinned an object, along with
-	// the connect key associated with the account.
+	// the connect key associated with the account. For space pins, it identifies
+	// the space and its owner.
 	ObjectAccount struct {
-		AccountKey proto.Account `json:"accountKey"`
-		ConnectKey string        `json:"connectKey"`
+		AccountKey proto.Account   `json:"accountKey"`
+		ConnectKey string          `json:"connectKey"`
+		SpaceKey   types.PublicKey `json:"spaceKey,omitzero"`
 	}
 )
+
+// Validate checks the object's fields and that its ID matches its slab slices.
+func (pr *PinObjectRequest) Validate() error {
+	switch {
+	case len(pr.Slabs) == 0:
+		return ErrObjectMinimumSlabs
+	case len(pr.EncryptedMetadata) > MaxMetadataSize:
+		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(pr.EncryptedMetadata))
+	case pinnedObjectID(pr.Slabs) != pr.ID:
+		return fmt.Errorf("%w: object ID does not match slabs", ErrInvalidObjectSignature)
+	case len(pr.EncryptedDataKey) != EncryptionKeySize:
+		return fmt.Errorf("%w: encrypted data key must be %d bytes", ErrInvalidObjectRequest, EncryptionKeySize)
+	case len(pr.EncryptedMetadataKey) != 0 && len(pr.EncryptedMetadataKey) != EncryptionKeySize:
+		return fmt.Errorf("%w: encrypted metadata key must be %d bytes", ErrInvalidObjectRequest, EncryptionKeySize)
+	}
+	for i, slab := range pr.Slabs {
+		switch {
+		case slab.ID == (SlabID{}):
+			return fmt.Errorf("%w: slab %d: ID is empty", ErrInvalidObjectRequest, i)
+		case slab.Offset > math.MaxInt32 || slab.Length > math.MaxInt32:
+			return fmt.Errorf("%w: slab %d: offset or length exceeds the maximum value", ErrInvalidObjectRequest, i)
+		}
+	}
+	return nil
+}
 
 // DataSigHash returns the hash used for signing/verifying the data signature.
 // It covers the slabs through the object ID and the encrypted data key.
@@ -211,10 +239,16 @@ func (pr *PinObjectRequest) Size() uint64 {
 	return size
 }
 
+// EncryptionKeySize is the length of a sealed encryption key (xchacha20
+// nonce + key + tag).
+const EncryptionKeySize = 72
+
 // MaxMetadataSize is the maximum size of object metadata that may be stored.
 const MaxMetadataSize = 1024
 
 var (
+	// ErrInvalidObjectRequest is returned when an object's fields fail validation.
+	ErrInvalidObjectRequest = errors.New("invalid object request")
 	// ErrInvalidObjectSignature is returned when an object's signature is invalid.
 	ErrInvalidObjectSignature = errors.New("invalid object signature")
 	// ErrObjectNotFound is returned when an object is not found in the database.
@@ -382,15 +416,17 @@ func (m *SlabManager) DeleteObject(ctx context.Context, account proto.Account, o
 	return m.store.DeleteObject(account, objectKey)
 }
 
+// DeleteSlabObject administratively deletes a personal or space object returned
+// by ObjectsForSlab, including objects belonging to deleted accounts.
+func (m *SlabManager) DeleteSlabObject(ctx context.Context, obj SlabObject) error {
+	return m.store.DeleteSlabObject(obj)
+}
+
 // PinObject pin the given object for the given account. If an object with
 // the same ID already exists for the account, it is overwritten.
 func (m *SlabManager) PinObject(ctx context.Context, account proto.Account, obj PinObjectRequest) error {
-	if len(obj.Slabs) == 0 {
-		return ErrObjectMinimumSlabs
-	} else if len(obj.EncryptedMetadata) > MaxMetadataSize {
-		return fmt.Errorf("%w: got %d bytes", ErrObjectMetadataLimitExceeded, len(obj.EncryptedMetadata))
-	} else if pinnedObjectID(obj.Slabs) != obj.ID {
-		return fmt.Errorf("%w: object ID does not match slabs", ErrInvalidObjectSignature)
+	if err := obj.Validate(); err != nil {
+		return err
 	} else if err := obj.VerifySignatures(types.PublicKey(account)); err != nil {
 		return err
 	}
@@ -429,8 +465,9 @@ func (m *SlabManager) SharedObject(ctx context.Context, key types.Hash256) (Shar
 }
 
 // ObjectAccounts returns a paginated list of the accounts that have pinned an
-// object with the given key, along with their connect keys. It returns
-// ErrObjectNotFound if no account has pinned an object with the key.
+// object with the given key, along with their connect keys. Space pins include
+// the space key and its owner's account. It returns ErrObjectNotFound if no
+// account or space has pinned an object with the key.
 func (m *SlabManager) ObjectAccounts(ctx context.Context, objectKey types.Hash256, offset, limit int) ([]ObjectAccount, error) {
 	return m.store.ObjectAccounts(objectKey, offset, limit)
 }

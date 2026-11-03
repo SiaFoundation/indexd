@@ -155,6 +155,7 @@ type (
 		BlockedObjects(offset, limit int) ([]BlockedObject, error)
 
 		ObjectsForSlab(slabID SlabID) ([]SlabObject, error)
+		DeleteSlabObject(obj SlabObject) error
 		ObjectAccounts(objectKey types.Hash256, offset, limit int) ([]ObjectAccount, error)
 		SectorStats() (SectorsStats, error)
 	}
@@ -336,8 +337,8 @@ func (m *SlabManager) Close() error {
 	return nil
 }
 
-// ObjectsForSlab returns all (account, object key) pairs for objects that
-// reference the given slab.
+// ObjectsForSlab returns all personal and space objects that reference the given
+// slab. Space objects include the space key and its owner's account.
 func (m *SlabManager) ObjectsForSlab(slabID SlabID) ([]SlabObject, error) {
 	return m.store.ObjectsForSlab(slabID)
 }

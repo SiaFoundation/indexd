@@ -720,12 +720,16 @@ components:
 
     ObjectAccount:
       type: object
-      description: An account that has pinned an object
+      description: An account that has pinned an object, either personally or through a space it owns
       properties:
         accountKey:
           $ref: "#/components/schemas/Account/properties/accountKey"
         connectKey:
           $ref: "#/components/schemas/Account/properties/connectKey"
+        spaceKey:
+          allOf:
+            - $ref: "#/components/schemas/PublicKey"
+            - description: The space that pins the object; omitted for personal pins
 
     PublicKey:
       type: string
