@@ -422,6 +422,28 @@ func TestAuth(t *testing.T) {
 			ok: false,
 		},
 		{
+			name:       "oversized credential",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, u *url.URL, _ []byte) {
+				values := u.Query()
+				values.Set(queryParamCredential, base64.URLEncoding.EncodeToString(frand.Bytes(64)))
+				u.RawQuery = values.Encode()
+			},
+			ok: false,
+		},
+		{
+			name:       "oversized signature",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, u *url.URL, _ []byte) {
+				values := u.Query()
+				values.Set(queryParamSignature, base64.URLEncoding.EncodeToString(frand.Bytes(128)))
+				u.RawQuery = values.Encode()
+			},
+			ok: false,
+		},
+		{
 			name:       "invalid timestamp",
 			method:     "GET",
 			validUntil: time.Now().Add(time.Hour),
