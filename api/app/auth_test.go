@@ -427,7 +427,7 @@ func TestAuth(t *testing.T) {
 			validUntil: time.Now().Add(time.Hour),
 			modify: func(_ *string, u *url.URL, _ []byte) {
 				values := u.Query()
-				values.Set(queryParamCredential, base64.URLEncoding.EncodeToString(frand.Bytes(64)))
+				values.Set(queryParamCredential, base64.URLEncoding.EncodeToString(frand.Bytes(33)))
 				u.RawQuery = values.Encode()
 			},
 			ok: false,
@@ -438,7 +438,7 @@ func TestAuth(t *testing.T) {
 			validUntil: time.Now().Add(time.Hour),
 			modify: func(_ *string, u *url.URL, _ []byte) {
 				values := u.Query()
-				values.Set(queryParamSignature, base64.URLEncoding.EncodeToString(frand.Bytes(128)))
+				values.Set(queryParamSignature, base64.URLEncoding.EncodeToString(frand.Bytes(65)))
 				u.RawQuery = values.Encode()
 			},
 			ok: false,
