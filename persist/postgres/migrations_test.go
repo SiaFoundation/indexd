@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
@@ -641,6 +642,71 @@ func TestMigrationBackfillsObjectSizes(t *testing.T) {
 			t.Fatalf("expected %s object to have size %d, got %d", test.name, test.size, size)
 		}
 	}
+}
+
+func TestMigrationBackfillsSpaceTotals(t *testing.T) {
+	ctx := context.Background()
+	const previousVersion = 30 // last schema without space totals
+	store := initV1Database(t, connectionInfoFromEnv(), "", func(pool *pgxpool.Pool) {
+		old := &Store{pool: pool, log: zaptest.NewLogger(t)}
+		if err := old.upgradeDatabase(1, previousVersion); err != nil {
+			t.Fatal(err)
+		} else if _, err := pool.Exec(ctx, `
+			INSERT INTO quotas (name, description, max_pinned_data, total_uses, fund_target_bytes) VALUES ('test', 'test', 0, 0, 0);
+			INSERT INTO app_connect_keys (user_secret, app_key, use_description, quota_name) VALUES (sha256('secret'), 'key', 'test', 'test');
+			INSERT INTO accounts (public_key, connect_key_id, max_pinned_data) VALUES (sha256('account'), 1, 0);
+			INSERT INTO slabs (digest, encryption_key, min_shards)
+			VALUES (sha256('a'), sha256('a'), 2), (sha256('b'), sha256('b'), 1);
+			INSERT INTO sectors (sector_root, next_integrity_check)
+			SELECT sha256(n::text::bytea), NOW() FROM generate_series(1, 5) n;
+			INSERT INTO slab_sectors (slab_id, sector_id, slab_index)
+			VALUES (1, 1, 0), (1, 2, 1), (1, 3, 2), (2, 4, 0), (2, 5, 1);
+			INSERT INTO spaces (space_key, owner_account_id, signature)
+			VALUES (sha256('space'), 1, sha512('space')), (sha256('empty'), 1, sha512('empty'));
+			INSERT INTO space_objects (space_id, object_key, encrypted_data_key, data_signature, meta_signature, account_key, size)
+			SELECT 1, sha256(k::bytea), substring(sha512(k::bytea) || sha256(k::bytea) FROM 1 FOR 72), sha512(k::bytea), sha512(('meta' || k)::bytea), sha256('account'), size
+			FROM (VALUES ('one', 60), ('two', 5), ('three', 0)) v(k, size);
+			INSERT INTO space_object_slabs (object_id, slab_digest, slab_index, slab_offset, slab_length)
+			VALUES
+				(1, sha256('a'), 0, 0, 10),
+				(1, sha256('b'), 1, 0, 20),
+				(1, sha256('a'), 2, 10, 30),
+				(2, sha256('a'), 0, 40, 5)`); err != nil {
+			t.Fatal(err)
+		}
+	})
+	defer store.Close()
+
+	for _, test := range []struct {
+		name       string
+		data, size uint64
+	}{
+		{"one", 3 * proto.SectorSize, 5 * proto.SectorSize},
+		{"two", 2 * proto.SectorSize, 3 * proto.SectorSize},
+		{"three", 0, 0},
+	} {
+		var data, size uint64
+		if err := store.pool.QueryRow(ctx, `SELECT pinned_data, pinned_size FROM space_objects WHERE object_key = sha256($1::bytea)`, []byte(test.name)).Scan(&data, &size); err != nil {
+			t.Fatal(err)
+		} else if data != test.data || size != test.size {
+			t.Fatalf("object %s footprint: got %d %d, want %d %d", test.name, data, size, test.data, test.size)
+		}
+	}
+	assertTotals := func(name string, count, size, data, disk uint64) {
+		t.Helper()
+		var gotCount, gotSize, gotData, gotDisk uint64
+		if err := store.pool.QueryRow(ctx, `SELECT object_count, size, pinned_data, pinned_size FROM spaces WHERE space_key = sha256($1::bytea)`, []byte(name)).Scan(&gotCount, &gotSize, &gotData, &gotDisk); err != nil {
+			t.Fatal(err)
+		} else if gotCount != count || gotSize != size || gotData != data || gotDisk != disk {
+			t.Fatalf("space %s totals: got %d %d %d %d, want %d %d %d %d", name, gotCount, gotSize, gotData, gotDisk, count, size, data, disk)
+		}
+	}
+	assertTotals("space", 3, 65, 5*proto.SectorSize, 8*proto.SectorSize)
+	assertTotals("empty", 0, 0, 0, 0)
+	if _, err := store.pool.Exec(ctx, `DELETE FROM space_objects WHERE object_key = sha256('one')`); err != nil {
+		t.Fatal(err)
+	}
+	assertTotals("space", 2, 5, 2*proto.SectorSize, 3*proto.SectorSize)
 }
 
 func TestMigrationConsistency(t *testing.T) {

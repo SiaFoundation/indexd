@@ -329,6 +329,22 @@ components:
           description: The space seed wrapped with DeriveMemberKey for the requesting account; exactly 72 bytes before base64 encoding in JSON
         permission:
           $ref: "#/components/schemas/SpacePermission"
+        objectCount:
+          type: integer
+          format: uint64
+          description: The total number of objects in the space
+        objectSize:
+          type: integer
+          format: uint64
+          description: The logical size of all objects in the space, in bytes
+        pinnedData:
+          type: integer
+          format: uint64
+          description: The sum of each object's slab size, excluding redundancy, in bytes; repeated slabs count once per object
+        pinnedSize:
+          type: integer
+          format: uint64
+          description: The sum of each object's slab size, including redundancy, in bytes; repeated slabs count once per object
         createdAt:
           type: string
           format: date-time
@@ -338,7 +354,7 @@ components:
         signature:
           allOf:
             - $ref: "#/components/schemas/Signature"
-            - description: Verified using the space public key. Covers key, owner, encryptedName, and encryptedMetadata; excludes member-specific fields and server timestamps.
+            - description: Verified using the space public key. Covers key, owner, encryptedName, and encryptedMetadata; excludes member-specific fields, server timestamps, and storage statistics.
 
     SpaceInvitation:
       type: object

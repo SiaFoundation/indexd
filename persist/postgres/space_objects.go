@@ -36,9 +36,14 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.PublicKey, obj s
 			return err
 		}
 		var count int
-		if err := tx.QueryRow(ctx, `SELECT COUNT(*) FROM slabs s WHERE digest = ANY($1)
+		var minShards, sectorCount int64
+		if err := tx.QueryRow(ctx, `WITH pinned_slabs AS (
+   SELECT s.id, s.min_shards FROM slabs s WHERE digest = ANY($1)
    AND (EXISTS (SELECT 1 FROM space_slabs p WHERE p.slab_id = s.id AND p.space_id = $2)
-   OR EXISTS (SELECT 1 FROM account_slabs a WHERE a.slab_id = s.id AND a.account_id = $3))`, digests, id, callerID).Scan(&count); err != nil {
+   OR EXISTS (SELECT 1 FROM account_slabs a WHERE a.slab_id = s.id AND a.account_id = $3))
+   ) SELECT COUNT(*), COALESCE(SUM(min_shards), 0),
+   (SELECT COUNT(*) FROM slab_sectors WHERE slab_id IN (SELECT id FROM pinned_slabs))
+   FROM pinned_slabs`, digests, id, callerID).Scan(&count, &minShards, &sectorCount); err != nil {
 			return err
 		} else if count != len(unique) {
 			return slabs.ErrObjectUnpinnedSlab
@@ -50,14 +55,15 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.PublicKey, obj s
 			metaKey = obj.EncryptedMetadataKey
 		}
 		var objectID int64
-		err = tx.QueryRow(ctx, `INSERT INTO space_objects (space_id, object_key, account_key, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, size)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		err = tx.QueryRow(ctx, `INSERT INTO space_objects (space_id, object_key, account_key, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, size, pinned_data, pinned_size)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
    ON CONFLICT (space_id, object_key) DO UPDATE SET account_key = EXCLUDED.account_key,
    encrypted_meta_key = EXCLUDED.encrypted_meta_key,
    encrypted_metadata = EXCLUDED.encrypted_metadata, data_signature = EXCLUDED.data_signature,
-   meta_signature = EXCLUDED.meta_signature, size = EXCLUDED.size, updated_at = NOW()
+   meta_signature = EXCLUDED.meta_signature, size = EXCLUDED.size,
+   pinned_data = EXCLUDED.pinned_data, pinned_size = EXCLUDED.pinned_size, updated_at = NOW()
    WHERE space_objects.encrypted_data_key = EXCLUDED.encrypted_data_key RETURNING id`,
-			id, sqlHash256(obj.ID), sqlPublicKey(account), obj.EncryptedDataKey, metaKey, obj.EncryptedMetadata, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature), obj.Size()).Scan(&objectID)
+			id, sqlHash256(obj.ID), sqlPublicKey(account), obj.EncryptedDataKey, metaKey, obj.EncryptedMetadata, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature), obj.Size(), uint64(minShards)*proto.SectorSize, uint64(sectorCount)*proto.SectorSize).Scan(&objectID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return spaces.ErrObjectKeyMismatch
 		} else if err != nil {
