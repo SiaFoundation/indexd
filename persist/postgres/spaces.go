@@ -15,7 +15,7 @@ import (
 )
 
 const sqlSpaces = `SELECT s.space_key, a.public_key, s.signature, s.encrypted_name, s.encrypted_metadata, m.encrypted_key,
- m.permission_level, s.created_at, s.updated_at
+ m.permission_level, s.created_at, s.updated_at, s.object_count, s.size, s.pinned_data, s.pinned_size
  FROM spaces s JOIN accounts a ON a.id = s.owner_account_id
  JOIN space_members m ON m.space_id = s.id AND m.account_id = $1
  WHERE a.deleted_at IS NULL`
@@ -355,6 +355,6 @@ func spaceAccess(ctx context.Context, tx *txn, account proto.Account, key types.
 }
 
 func scanSpace(row pgx.CollectableRow) (v spaces.Space, err error) {
-	err = row.Scan((*sqlPublicKey)(&v.Key), (*sqlPublicKey)(&v.Owner), (*sqlSignature)(&v.Signature), &v.EncryptedName, &v.EncryptedMetadata, &v.EncryptedKey, &v.Permission, &v.CreatedAt, &v.UpdatedAt)
+	err = row.Scan((*sqlPublicKey)(&v.Key), (*sqlPublicKey)(&v.Owner), (*sqlSignature)(&v.Signature), &v.EncryptedName, &v.EncryptedMetadata, &v.EncryptedKey, &v.Permission, &v.CreatedAt, &v.UpdatedAt, &v.ObjectCount, &v.ObjectSize, &v.PinnedData, &v.PinnedSize)
 	return
 }

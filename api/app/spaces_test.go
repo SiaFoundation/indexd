@@ -174,6 +174,19 @@ func TestSpacesAPI(t *testing.T) {
 			if err := client.PinSpaceObject(ctx, memberKey, key, object); err != nil {
 				t.Fatal(err)
 			}
+			space, err := client.Space(ctx, ownerKey, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			listed, err = client.Spaces(ctx, ownerKey)
+			if err != nil || len(listed) != 1 {
+				t.Fatalf("unexpected spaces: %+v, %v", listed, err)
+			}
+			for _, got := range []spaces.Space{space, listed[0]} {
+				if got.ObjectCount != 1 || got.ObjectSize != 96 || got.PinnedData != 3*proto.SectorSize || got.PinnedSize != 12*proto.SectorSize {
+					t.Fatalf("unexpected space stats: %+v", got)
+				}
+			}
 			assertStatus(t, client.DeleteSpaceObject(ctx, memberKey, key, object.ID()), http.StatusForbidden)
 			got, err := client.SpaceObject(ctx, ownerKey, key, object.ID())
 			if err != nil {

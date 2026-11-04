@@ -114,6 +114,12 @@ type Space struct {
 	CreatedAt         time.Time       `json:"createdAt"`
 	UpdatedAt         time.Time       `json:"updatedAt"`
 	Signature         types.Signature `json:"signature"`
+	ObjectCount       uint64          `json:"objectCount"`
+	ObjectSize        uint64          `json:"objectSize"`
+	// PinnedData sums each object's unique slab sizes, excluding redundancy, in bytes.
+	PinnedData uint64 `json:"pinnedData"`
+	// PinnedSize sums each object's unique slab sizes, including redundancy, in bytes.
+	PinnedSize uint64 `json:"pinnedSize"`
 }
 
 // SigHash returns the hash of the space key, owner's app key, encrypted name,
