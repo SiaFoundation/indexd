@@ -747,4 +747,10 @@ REFERENCING OLD TABLE AS old_rows
 FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		// Existing space objects are broken with this migration. Since we
+		// haven't released shared spaces yet, this shouldn't affect anything.
+		_, err := tx.Exec(ctx, `ALTER TABLE space_objects DROP COLUMN account_key`)
+		return err
+	},
 }

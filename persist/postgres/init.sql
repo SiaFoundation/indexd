@@ -590,7 +590,6 @@ CREATE TABLE space_objects (
     encrypted_metadata BYTEA,
     data_signature BYTEA NOT NULL CHECK(LENGTH(data_signature) = 64),
     meta_signature BYTEA NOT NULL CHECK(LENGTH(meta_signature) = 64),
-    account_key BYTEA NOT NULL CHECK(LENGTH(account_key) = 32), -- app account that signed the object
     size BIGINT NOT NULL CHECK(size >= 0), -- logical size of the object (object.Size())
     pinned_data BIGINT NOT NULL CHECK(pinned_data >= 0),
     pinned_size BIGINT NOT NULL CHECK(pinned_size >= 0),

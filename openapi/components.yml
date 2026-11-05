@@ -438,60 +438,6 @@ components:
           type: string
           format: date-time
 
-    SpaceObject:
-      description: An encrypted space object and the account key used to verify its signatures
-      allOf:
-        - $ref: "#/components/schemas/SealedObject"
-        - type: object
-          properties:
-            key:
-              $ref: "#/components/schemas/Hash256"
-            account:
-              $ref: "#/components/schemas/PublicKey"
-
-    SpaceObjectWithoutSlabs:
-      description: A space object without its slab slices, which are paginated with GET /spaces/{key}/objects/{objectkey}/slabs
-      allOf:
-        - $ref: "#/components/schemas/SealedObjectWithoutSlabs"
-        - type: object
-          properties:
-            key:
-              $ref: "#/components/schemas/Hash256"
-            account:
-              $ref: "#/components/schemas/PublicKey"
-
-    SpaceObjectEvent:
-      type: object
-      properties:
-        key:
-          $ref: "#/components/schemas/Hash256"
-        deleted:
-          type: boolean
-        updatedAt:
-          type: string
-          format: date-time
-          description: The event's stream position. Pair it with key when requesting the next page; use the nested object's updatedAt for its modification time.
-        object:
-          allOf:
-            - $ref: "#/components/schemas/SpaceObject"
-            - description: The current object, omitted for deletion tombstones
-
-    SpaceObjectEventWithoutSlabs:
-      type: object
-      properties:
-        key:
-          $ref: "#/components/schemas/Hash256"
-        deleted:
-          type: boolean
-        updatedAt:
-          type: string
-          format: date-time
-          description: The event's stream position. Pair it with key when requesting the next page; use the nested object's updatedAt for its modification time.
-        object:
-          allOf:
-            - $ref: "#/components/schemas/SpaceObjectWithoutSlabs"
-            - description: The current object without slab slices, omitted for deletion tombstones
-
     SlabPinParams:
       type: object
       required:

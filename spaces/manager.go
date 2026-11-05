@@ -28,10 +28,10 @@ type (
 		PinSpaceSlabs(account proto.Account, key types.PublicKey, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error)
 		PinSpaceObject(account proto.Account, key types.PublicKey, obj slabs.PinObjectRequest) error
 		DeleteSpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) error
-		SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (Object, error)
+		SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
 		SpaceObjectSlabs(account proto.Account, key types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
-		ListSpaceObjects(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]ObjectEvent, error)
-		ListSpaceObjectsWithoutSlabs(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]ObjectEventWithoutSlabs, error)
+		ListSpaceObjects(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
+		ListSpaceObjectsWithoutSlabs(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventWithoutSlabs, error)
 	}
 
 	// Manager validates requests for spaces, memberships, and objects.
@@ -184,13 +184,13 @@ func (m *Manager) PinSpaceSlabs(account proto.Account, key types.PublicKey, next
 	return m.store.PinSpaceSlabs(account, key, nextIntegrityCheck, toPin...)
 }
 
-// PinSpaceObject adds or replaces an object signed by account.
+// PinSpaceObject adds or replaces an object signed by the space key.
 func (m *Manager) PinSpaceObject(account proto.Account, key types.PublicKey, obj slabs.PinObjectRequest) error {
 	if err := validateAccountAndSpaceKeys(account, key); err != nil {
 		return err
 	} else if err := obj.Validate(); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidRequest, err)
-	} else if err := obj.VerifySignatures(types.PublicKey(account)); err != nil {
+	} else if err := obj.VerifySignatures(key); err != nil {
 		return err
 	}
 	return m.store.PinSpaceObject(account, key, obj)
@@ -207,11 +207,11 @@ func (m *Manager) DeleteSpaceObject(account proto.Account, key types.PublicKey, 
 }
 
 // SpaceObject returns an object accessible to account.
-func (m *Manager) SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (Object, error) {
+func (m *Manager) SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error) {
 	if err := validateAccountAndSpaceKeys(account, key); err != nil {
-		return Object{}, err
+		return slabs.SealedObject{}, err
 	} else if err := validateObjectKey(objectKey); err != nil {
-		return Object{}, err
+		return slabs.SealedObject{}, err
 	}
 	return m.store.SpaceObject(account, key, objectKey)
 }
@@ -231,7 +231,7 @@ func (m *Manager) SpaceObjectSlabs(account proto.Account, key types.PublicKey, o
 }
 
 // ListSpaceObjects returns published object changes after cursor.
-func (m *Manager) ListSpaceObjects(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]ObjectEvent, error) {
+func (m *Manager) ListSpaceObjects(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error) {
 	if err := validateAccountAndSpaceKeys(account, key); err != nil {
 		return nil, err
 	} else if err := validatePagination(0, limit); err != nil {
@@ -241,7 +241,7 @@ func (m *Manager) ListSpaceObjects(account proto.Account, key types.PublicKey, c
 }
 
 // ListSpaceObjectsWithoutSlabs returns published changes without slab slices.
-func (m *Manager) ListSpaceObjectsWithoutSlabs(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]ObjectEventWithoutSlabs, error) {
+func (m *Manager) ListSpaceObjectsWithoutSlabs(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventWithoutSlabs, error) {
 	if err := validateAccountAndSpaceKeys(account, key); err != nil {
 		return nil, err
 	} else if err := validatePagination(0, limit); err != nil {

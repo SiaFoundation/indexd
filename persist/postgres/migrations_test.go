@@ -12,6 +12,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/hosts"
+	"go.sia.tech/indexd/slabs"
 	"go.uber.org/zap/zaptest"
 )
 
@@ -707,6 +708,75 @@ func TestMigrationBackfillsSpaceTotals(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertTotals("space", 2, 5, 2*proto.SectorSize, 3*proto.SectorSize)
+}
+
+func TestMigrationPreservesAccountSignedSpaceObjects(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t))
+	ownerKey := types.GeneratePrivateKey()
+	owner := proto.Account(ownerKey.PublicKey())
+	store.addTestAccount(t, ownerKey.PublicKey())
+	keys := []types.PublicKey{store.addTestSpace(t, owner).PublicKey(), store.addTestSpace(t, owner).PublicKey()}
+	host := store.addTestHost(t)
+	store.addTestContract(t, host)
+	personal := store.pinTestObject(t, owner, host)
+	spaceOnly := store.pinTestObject(t, owner, host)
+	for _, key := range keys {
+		for _, obj := range []slabs.SealedObject{personal, spaceOnly} {
+			obj.Sign(ownerKey)
+			if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := store.DeleteObject(owner, spaceOnly.ID()); err != nil {
+		t.Fatal(err)
+	}
+	store.publishEvents(t)
+	if _, err := store.pool.Exec(t.Context(), `
+ALTER TABLE space_objects ADD COLUMN account_key BYTEA CHECK(LENGTH(account_key) = 32);
+UPDATE space_objects o SET account_key = a.public_key
+FROM spaces s JOIN accounts a ON a.id = s.owner_account_id WHERE s.id = o.space_id;
+ALTER TABLE space_objects ALTER COLUMN account_key SET NOT NULL;`); err != nil {
+		t.Fatal(err)
+	} else if err := store.upgradeDatabase(31, 32); err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range []string{"space_objects", "space_object_slabs", "space_slabs"} {
+		var count int
+		if err := store.pool.QueryRow(t.Context(), `SELECT COUNT(*) FROM `+table).Scan(&count); err != nil {
+			t.Fatal(err)
+		} else if count != 4 {
+			t.Fatalf("expected %s to retain four rows, got %d", table, count)
+		}
+	}
+	if _, err := store.Object(owner, personal.ID()); err != nil {
+		t.Fatalf("personal object lost: %v", err)
+	}
+	store.assertPinnedSlabs(t, owner, personal.Slabs[0].Digest(), spaceOnly.Slabs[0].Digest())
+	store.publishEvents(t)
+	for _, key := range keys {
+		space, err := store.Space(owner, key)
+		if err != nil {
+			t.Fatal(err)
+		} else if space.ObjectCount != 2 || space.ObjectSize != 200 || space.PinnedData != 2*proto.SectorSize || space.PinnedSize != 2*proto.SectorSize {
+			t.Fatalf("space totals changed: %+v", space)
+		}
+		events, err := store.ListSpaceObjects(owner, key, slabs.Cursor{}, 10)
+		if err != nil {
+			t.Fatal(err)
+		} else if len(events) != 2 {
+			t.Fatalf("expected two object events, got %d", len(events))
+		}
+		for _, event := range events {
+			if event.Deleted || event.Object == nil {
+				t.Fatalf("expected live object event, got %+v", event)
+			} else if err := event.Object.VerifySignatures(ownerKey.PublicKey()); err != nil {
+				t.Fatalf("account signatures changed: %v", err)
+			} else if err := event.Object.VerifySignatures(key); err == nil {
+				t.Fatal("old object unexpectedly verifies with the space key")
+			}
+		}
+	}
 }
 
 func TestMigrationConsistency(t *testing.T) {
