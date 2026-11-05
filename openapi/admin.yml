@@ -157,6 +157,12 @@ paths:
             type: integer
             minimum: 0
             default: 0
+        - name: exceedsquota
+          in: query
+          description: Only return connect keys whose pinned data or number of apps exceeds their quota
+          schema:
+            type: boolean
+            default: false
       responses:
         "200":
           description: A list of app connect keys

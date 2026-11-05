@@ -82,6 +82,14 @@ type (
 		PinnedSize    uint64    `json:"pinnedSize"`
 	}
 
+	// QueryConnectKeysOptions holds options for querying connect keys.
+	QueryConnectKeysOptions struct {
+		ExceedsQuota bool
+	}
+
+	// QueryConnectKeysOpt is a functional option for querying connect keys.
+	QueryConnectKeysOpt func(o *QueryConnectKeysOptions)
+
 	// AppConnectKeyRequest represents a request to add or update
 	// an app connect key.
 	AppConnectKeyRequest struct {
@@ -197,8 +205,8 @@ func (m *AccountManager) AppConnectKey(ctx context.Context, key string) (Connect
 }
 
 // AppConnectKeys returns a list of app connect keys.
-func (m *AccountManager) AppConnectKeys(ctx context.Context, offset, limit int) ([]ConnectKey, error) {
-	return m.store.AppConnectKeys(offset, limit)
+func (m *AccountManager) AppConnectKeys(ctx context.Context, offset, limit int, opts ...QueryConnectKeysOpt) ([]ConnectKey, error) {
+	return m.store.AppConnectKeys(offset, limit, opts...)
 }
 
 // AddPreAuthorizedKey creates a limited-use authorization for bypassing the
@@ -297,4 +305,12 @@ func DeriveSharingAccountKey(userSecret types.Hash256) types.PrivateKey {
 	seed := keys.Derive(userSecret[:], []byte("sharing"), nil, 32)
 	defer clear(seed)
 	return types.NewPrivateKeyFromSeed(seed)
+}
+
+// WithExceedsQuota filters connect keys to those exceeding their quota's pinned
+// data or app limit.
+func WithExceedsQuota() QueryConnectKeysOpt {
+	return func(o *QueryConnectKeysOptions) {
+		o.ExceedsQuota = true
+	}
 }

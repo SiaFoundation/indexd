@@ -155,7 +155,12 @@ func (s *Store) AppConnectKey(key string) (connectKey accounts.ConnectKey, err e
 }
 
 // AppConnectKeys retrieves a list of application connection keys from the database.
-func (s *Store) AppConnectKeys(offset, limit int) (keys []accounts.ConnectKey, err error) {
+func (s *Store) AppConnectKeys(offset, limit int, opts ...accounts.QueryConnectKeysOpt) (keys []accounts.ConnectKey, err error) {
+	var queryOpts accounts.QueryConnectKeysOptions
+	for _, opt := range opts {
+		opt(&queryOpts)
+	}
+
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		keys = keys[:0] // reuse same slice if transaction retries
 
@@ -171,9 +176,10 @@ func (s *Store) AppConnectKeys(offset, limit int) (keys []accounts.ConnectKey, e
 				WHERE deleted_at IS NULL
 				GROUP BY connect_key_id
 			) ac ON ac.connect_key_id = ack.id
+			WHERE NOT $3 OR ack.pinned_data > q.max_pinned_data OR COALESCE(ac.cnt, 0) > q.total_uses
 			ORDER BY ack.created_at DESC
 			LIMIT $1 OFFSET $2
-		`, limit, offset)
+		`, limit, offset, queryOpts.ExceedsQuota)
 		if err != nil {
 			return err
 		}

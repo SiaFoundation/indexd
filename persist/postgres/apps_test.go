@@ -472,3 +472,48 @@ func TestPreAuthorizedKeys(t *testing.T) {
 		t.Fatalf("expected missing delete error, got %v", err)
 	}
 }
+
+func TestAppConnectKeysExceedsQuota(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+
+	store.addTestQuota(t, "one-app", 10, 1)
+	store.addTestQuota(t, "no-apps", 10, 0)
+
+	for _, key := range []string{"within", "data", "apps"} {
+		if _, err := store.AddAppConnectKey(accounts.AppConnectKeyRequest{Key: key, Quota: "one-app"}); err != nil {
+			t.Fatal(err)
+		} else if err := store.RegisterAppKey(key, types.GeneratePrivateKey().PublicKey(), accounts.AppMeta{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// exceed the pinned data limit
+	if _, err := store.pool.Exec(t.Context(), `UPDATE app_connect_keys SET pinned_data = 11 WHERE app_key = 'data'`); err != nil {
+		t.Fatal(err)
+	} else if _, err := store.pool.Exec(t.Context(), `UPDATE app_connect_keys SET pinned_data = 10 WHERE app_key = 'within'`); err != nil {
+		t.Fatal(err)
+	}
+	// exceed the app limit
+	if _, err := store.UpdateAppConnectKey(accounts.AppConnectKeyRequest{Key: "apps", Quota: "no-apps"}); err != nil {
+		t.Fatal(err)
+	}
+
+	keys, err := store.AppConnectKeys(0, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(keys) != 3 {
+		t.Fatalf("expected 3 keys, got %d", len(keys))
+	}
+
+	keys, err = store.AppConnectKeys(0, 10, accounts.WithExceedsQuota())
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make(map[string]bool)
+	for _, k := range keys {
+		got[k.Key] = true
+	}
+	if len(got) != 2 || !got["data"] || !got["apps"] {
+		t.Fatalf("expected keys data and apps, got %v", got)
+	}
+}

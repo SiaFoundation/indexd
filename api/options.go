@@ -68,6 +68,13 @@ func WithConnectKey(connectKey string) URLQueryParameterOption {
 	}
 }
 
+// WithExceedsQuota sets the 'exceedsquota' parameter.
+func WithExceedsQuota() URLQueryParameterOption {
+	return func(q url.Values) {
+		q.Set("exceedsquota", "true")
+	}
+}
+
 // WithProtocol sets the 'protocol' parameter in Hosts
 func WithProtocol(protocol chain.Protocol) URLQueryParameterOption {
 	return func(q url.Values) {

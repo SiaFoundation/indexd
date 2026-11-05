@@ -54,7 +54,7 @@ type (
 		UpdateAppConnectKey(AppConnectKeyRequest) (ConnectKey, error)
 		DeleteAppConnectKey(string) error
 		AppConnectKey(key string) (ConnectKey, error)
-		AppConnectKeys(offset, limit int) ([]ConnectKey, error)
+		AppConnectKeys(offset, limit int, opts ...QueryConnectKeysOpt) ([]ConnectKey, error)
 		AddPreAuthorizedKey(PreAuthorizedKeyRequest) (PreAuthorizedKey, error)
 		DeletePreAuthorizedKey(types.PublicKey) error
 		PreAuthorizedKey(types.PublicKey) (PreAuthorizedKey, error)
