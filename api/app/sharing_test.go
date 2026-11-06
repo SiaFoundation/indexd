@@ -51,16 +51,17 @@ func TestSharingKeys(t *testing.T) {
 	sk2, _ := newAccount(t, cluster)
 	appClient := indexer.App
 
-	slabParams := uploadRandomSlab(t, hc, sk1, hostList)
-	if _, err := appClient.PinSlabs(ctx, sk1, slabParams); err != nil {
+	slab1Params := uploadRandomSlab(t, hc, sk1, hostList)
+	slab2Params := uploadRandomSlab(t, hc, sk1, hostList)
+	if _, err := appClient.PinSlabs(ctx, sk1, slab1Params, slab2Params); err != nil {
 		t.Fatal(err)
 	}
 	obj := slabs.SealedObject{
 		EncryptedDataKey:     frand.Bytes(sharing.EncryptionKeySize),
 		EncryptedMetadataKey: frand.Bytes(sharing.EncryptionKeySize),
 		Slabs: []slabs.SlabSlice{
-			slabParams.Slice(0, 128),
-			slabParams.Slice(128, 128),
+			slab1Params.Slice(0, 128),
+			slab2Params.Slice(0, 128),
 		},
 	}
 	obj.Sign(sk1)
@@ -162,8 +163,8 @@ func TestSharingKeys(t *testing.T) {
 	if key, err := appClient.SharingKey(ctx, sk1, shareKey); err != nil {
 		t.Fatal(err)
 	} else if key.ObjectCount != 1 || key.ObjectSize != 256 ||
-		key.PinnedData != 4*uint64(proto.SectorSize) ||
-		key.PinnedSize != uint64(len(hostList))*uint64(proto.SectorSize) {
+		key.PinnedData != 2*4*uint64(proto.SectorSize) ||
+		key.PinnedSize != 2*uint64(len(hostList))*uint64(proto.SectorSize) {
 		t.Fatalf("unexpected totals: %+v", key)
 	}
 
@@ -222,8 +223,8 @@ func TestSharingKeys(t *testing.T) {
 	if stats, err := appClient.SharedStats(ctx, shareKeyPriv); err != nil {
 		t.Fatal(err)
 	} else if stats.ObjectCount != 1 || stats.ObjectSize != 256 ||
-		stats.PinnedData != 4*uint64(proto.SectorSize) ||
-		stats.PinnedSize != uint64(len(hostList))*uint64(proto.SectorSize) {
+		stats.PinnedData != 2*4*uint64(proto.SectorSize) ||
+		stats.PinnedSize != 2*uint64(len(hostList))*uint64(proto.SectorSize) {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}
 

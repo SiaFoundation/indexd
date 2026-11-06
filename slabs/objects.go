@@ -255,6 +255,9 @@ var (
 	ErrObjectNotFound = errors.New("object not found")
 	// ErrObjectMinimumSlabs is returned when the object has no slabs.
 	ErrObjectMinimumSlabs = errors.New("object must have at least one slab")
+	// ErrObjectDuplicateSlab is returned when the object references the same
+	// slab more than once.
+	ErrObjectDuplicateSlab = errors.New("object contains duplicate slab")
 	// ErrObjectMetadataLimitExceeded is returned when the provided metadata is too large.
 	ErrObjectMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", MaxMetadataSize)
 	// ErrObjectUnpinnedSlab is returned when an user attempts to save an
@@ -426,6 +429,14 @@ func (m *SlabManager) PinObject(ctx context.Context, account proto.Account, obj 
 		return err
 	} else if err := obj.VerifySignatures(types.PublicKey(account)); err != nil {
 		return err
+	}
+
+	seen := make(map[SlabID]struct{}, len(obj.Slabs))
+	for _, slab := range obj.Slabs {
+		if _, ok := seen[slab.ID]; ok {
+			return fmt.Errorf("%w: %v", ErrObjectDuplicateSlab, slab.ID)
+		}
+		seen[slab.ID] = struct{}{}
 	}
 	return m.store.PinObject(account, obj)
 }
