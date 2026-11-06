@@ -316,7 +316,7 @@ func TestSpaceObjects(t *testing.T) {
 	got, err := store.SpaceObject(reader, key, obj.ID())
 	if err != nil {
 		t.Fatal(err)
-	} else if got.Account != writer || got.Key != obj.ID() || !reflect.DeepEqual(got.Slabs, obj.Slabs) || !bytes.Equal(got.EncryptedDataKey, obj.EncryptedDataKey) {
+	} else if got.ID() != obj.ID() || !reflect.DeepEqual(got.Slabs, obj.Slabs) || !bytes.Equal(got.EncryptedDataKey, obj.EncryptedDataKey) {
 		t.Fatalf("object mismatch: %+v", got)
 	} else if _, err := store.Object(owner, obj.ID()); !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("object in personal scope: %v", err)
@@ -558,7 +558,7 @@ func TestSpaceStorageLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := store.SpaceObject(owner, keys[1], obj.ID())
-	if err != nil || got.Account != member {
+	if err != nil || got.ID() != obj.ID() || !reflect.DeepEqual(got.Slabs, obj.Slabs) {
 		t.Fatalf("object lost with member: %+v, %v", got, err)
 	} else if err := store.DeleteAccount(owner); err != nil {
 		t.Fatal(err)
@@ -608,11 +608,12 @@ func TestSpaceConcurrentReads(t *testing.T) {
 	ownerKey := types.GeneratePrivateKey()
 	owner := proto.Account(ownerKey.PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
-	key := store.addTestSpace(t, owner).PublicKey()
+	spaceKey := store.addTestSpace(t, owner)
+	key := spaceKey.PublicKey()
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 	obj := store.pinTestObject(t, owner, hk)
-	obj.Sign(ownerKey)
+	obj.Sign(spaceKey)
 	if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
@@ -925,7 +926,7 @@ func TestSpaceObjectEvents(t *testing.T) {
 	}
 	store.publishEvents(t)
 	page, err := store.ListSpaceObjects(owner, key, slabs.Cursor{}, 1)
-	if err != nil || len(page) != 1 || page[0].Key != second.ID() || page[0].Object == nil || page[0].Object.Account != owner {
+	if err != nil || len(page) != 1 || page[0].Key != second.ID() || page[0].Object == nil {
 		t.Fatalf("unexpected page: %+v, %v", page, err)
 	}
 	cursor := slabs.Cursor{After: page[0].UpdatedAt, Key: page[0].Key}

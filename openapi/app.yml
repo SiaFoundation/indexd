@@ -810,22 +810,22 @@ paths:
                 anyOf:
                   - type: array
                     items:
-                      $ref: "#/components/schemas/SpaceObjectEvent"
+                      $ref: "#/components/schemas/ObjectEvent"
                     description: Events with slab slices (includeslabs=true)
                   - type: array
                     items:
-                      $ref: "#/components/schemas/SpaceObjectEventWithoutSlabs"
+                      $ref: "#/components/schemas/ObjectEventWithoutSlabs"
                     description: Events without slab slices (includeslabs=false)
             application/cbor:
               schema:
                 anyOf:
                   - type: array
                     items:
-                      $ref: "#/components/schemas/SpaceObjectEvent"
+                      $ref: "#/components/schemas/ObjectEvent"
                     description: Events with slab slices (includeslabs=true)
                   - type: array
                     items:
-                      $ref: "#/components/schemas/SpaceObjectEventWithoutSlabs"
+                      $ref: "#/components/schemas/ObjectEventWithoutSlabs"
                     description: Events without slab slices (includeslabs=false)
         "400":
           description: Invalid request fields or signature
@@ -841,7 +841,8 @@ paths:
       summary: Create or update a space object
       operationId: pinSpaceObject
       description: >-
-        Requires write permission. Sign both object signatures with the authenticated app key. Each slab must
+        Requires write permission. Sign both object signatures with the space private key. The request URL is
+        authenticated with the caller's app key, and the indexer enforces the caller's space permissions. Each slab must
         already be pinned by the caller or to this space. Storage is charged to the owner, and an existing object's
         encrypted data key cannot change.
       requestBody:
@@ -887,17 +888,17 @@ paths:
       summary: Get a space object
       operationId: getSpaceObject
       description: >-
-        Requires read permission. The account field identifies the app key used to verify the object signatures.
+        Requires read permission. Verify both object signatures with the space public key from the path.
       responses:
         "200":
           description: The space object
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/SpaceObject"
+                $ref: "#/components/schemas/SealedObject"
             application/cbor:
               schema:
-                $ref: "#/components/schemas/SpaceObject"
+                $ref: "#/components/schemas/SealedObject"
         "400":
           description: Invalid request fields or signature
         "401":
@@ -1978,13 +1979,5 @@ components:
       $ref: "./components.yml#/components/schemas/UpdateSpaceMemberRequest"
     SpaceMember:
       $ref: "./components.yml#/components/schemas/SpaceMember"
-    SpaceObject:
-      $ref: "./components.yml#/components/schemas/SpaceObject"
-    SpaceObjectWithoutSlabs:
-      $ref: "./components.yml#/components/schemas/SpaceObjectWithoutSlabs"
-    SpaceObjectEvent:
-      $ref: "./components.yml#/components/schemas/SpaceObjectEvent"
-    SpaceObjectEventWithoutSlabs:
-      $ref: "./components.yml#/components/schemas/SpaceObjectEventWithoutSlabs"
     SlabPinParams:
       $ref: "./components.yml#/components/schemas/SlabPinParams"

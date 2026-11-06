@@ -151,7 +151,7 @@ func TestManagerClientWorkflow(t *testing.T) {
 		EncryptedMetadata:    sealSpaceTest(t, metadataKey, []byte(`{"name":"notes.txt"}`)),
 		Slabs:                []slabs.SlabSlice{params.Slice(0, 32), params.Slice(32, 64)},
 	}
-	object.Sign(writerKey)
+	object.Sign(writerSpaceKey)
 	if err := m.PinSpaceObject(writer, key, object.PinRequest()); err != nil {
 		t.Fatal(err)
 	} else if err := m.DeleteSpaceObject(writer, key, object.ID()); !errors.Is(err, spaces.ErrPermission) {
@@ -178,7 +178,7 @@ func TestManagerClientWorkflow(t *testing.T) {
 		t.Fatalf("unexpected members: %+v, %v", members, err)
 	}
 	readerObject := object
-	readerObject.Sign(readerKey)
+	readerObject.Sign(readerSpaceKey)
 	if err := m.PinSpaceObject(reader, key, readerObject.PinRequest()); !errors.Is(err, spaces.ErrPermission) {
 		t.Fatalf("reader pinned an object: %v", err)
 	} else if _, err := m.PinSpaceSlabs(reader, key, time.Now().Add(time.Hour), params); !errors.Is(err, spaces.ErrPermission) {
@@ -187,7 +187,7 @@ func TestManagerClientWorkflow(t *testing.T) {
 	got, err := m.SpaceObject(reader, key, object.ID())
 	if err != nil {
 		t.Fatal(err)
-	} else if got.Account != writer || got.Key != object.ID() || got.VerifySignatures(types.PublicKey(got.Account)) != nil {
+	} else if got.ID() != object.ID() || got.VerifySignatures(key) != nil {
 		t.Fatal("reader received an invalid object")
 	} else if recoveredDataKey := openSpaceTest(t, readerSeed, got.EncryptedDataKey); !bytes.Equal(recoveredDataKey, dataKey[:]) {
 		t.Fatal("reader recovered a different data key")
@@ -219,7 +219,7 @@ func TestManagerClientWorkflow(t *testing.T) {
 	}
 	publish()
 	events, err := m.ListSpaceObjects(reader, key, slabs.Cursor{}, 1)
-	if err != nil || len(events) != 1 || events[0].Object == nil || events[0].Key != object.ID() || events[0].Object.VerifySignatures(writerKey.PublicKey()) != nil {
+	if err != nil || len(events) != 1 || events[0].Object == nil || events[0].Key != object.ID() || events[0].Object.VerifySignatures(key) != nil {
 		t.Fatalf("unexpected object event: %+v, %v", events, err)
 	}
 	cursor := slabs.Cursor{After: events[0].UpdatedAt, Key: events[0].Key}
@@ -227,7 +227,7 @@ func TestManagerClientWorkflow(t *testing.T) {
 		t.Fatalf("unexpected events after cursor: %+v, %v", events, err)
 	}
 	object.EncryptedMetadata = sealSpaceTest(t, metadataKey, []byte(`{"name":"renamed.txt"}`))
-	object.Sign(writerKey)
+	object.Sign(writerSpaceKey)
 	if err := m.PinSpaceObject(writer, key, object.PinRequest()); err != nil {
 		t.Fatal(err)
 	}

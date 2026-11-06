@@ -55,15 +55,14 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.PublicKey, obj s
 			metaKey = obj.EncryptedMetadataKey
 		}
 		var objectID int64
-		err = tx.QueryRow(ctx, `INSERT INTO space_objects (space_id, object_key, account_key, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, size, pinned_data, pinned_size)
-   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-   ON CONFLICT (space_id, object_key) DO UPDATE SET account_key = EXCLUDED.account_key,
-   encrypted_meta_key = EXCLUDED.encrypted_meta_key,
+		err = tx.QueryRow(ctx, `INSERT INTO space_objects (space_id, object_key, encrypted_data_key, encrypted_meta_key, encrypted_metadata, data_signature, meta_signature, size, pinned_data, pinned_size)
+   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+   ON CONFLICT (space_id, object_key) DO UPDATE SET encrypted_meta_key = EXCLUDED.encrypted_meta_key,
    encrypted_metadata = EXCLUDED.encrypted_metadata, data_signature = EXCLUDED.data_signature,
    meta_signature = EXCLUDED.meta_signature, size = EXCLUDED.size,
    pinned_data = EXCLUDED.pinned_data, pinned_size = EXCLUDED.pinned_size, updated_at = NOW()
    WHERE space_objects.encrypted_data_key = EXCLUDED.encrypted_data_key RETURNING id`,
-			id, sqlHash256(obj.ID), sqlPublicKey(account), obj.EncryptedDataKey, metaKey, obj.EncryptedMetadata, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature), obj.Size(), uint64(minShards)*proto.SectorSize, uint64(sectorCount)*proto.SectorSize).Scan(&objectID)
+			id, sqlHash256(obj.ID), obj.EncryptedDataKey, metaKey, obj.EncryptedMetadata, sqlSignature(obj.DataSignature), sqlSignature(obj.MetadataSignature), obj.Size(), uint64(minShards)*proto.SectorSize, uint64(sectorCount)*proto.SectorSize).Scan(&objectID)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return spaces.ErrObjectKeyMismatch
 		} else if err != nil {
@@ -141,7 +140,7 @@ func (s *Store) DeleteSpace(account proto.Account, key types.PublicKey) error {
 }
 
 // ListSpaceObjects returns published object changes after cursor. Read access is required.
-func (s *Store) ListSpaceObjects(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) (events []spaces.ObjectEvent, err error) {
+func (s *Store) ListSpaceObjects(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
 		if err != nil {
@@ -151,12 +150,12 @@ func (s *Store) ListSpaceObjects(account proto.Account, key types.PublicKey, cur
 		if err != nil {
 			return err
 		}
-		events = make([]spaces.ObjectEvent, len(page))
+		events = make([]slabs.ObjectEvent, len(page))
 		objectSlabs := make(map[int64]*[]slabs.SlabSlice, len(ids))
 		for i, event := range page {
-			events[i] = spaces.ObjectEvent{Key: event.Key, Deleted: event.Deleted, UpdatedAt: event.UpdatedAt}
+			events[i] = slabs.ObjectEvent{Key: event.Key, Deleted: event.Deleted, UpdatedAt: event.UpdatedAt}
 			if event.Object != nil {
-				events[i].Object = &spaces.Object{Key: event.Key, Account: event.Object.Account, SealedObject: *event.Object.WithSlabs(nil)}
+				events[i].Object = event.Object.WithSlabs(nil)
 			}
 		}
 		for id, i := range ids {
@@ -176,7 +175,7 @@ func (s *Store) ListSpaceObjects(account proto.Account, key types.PublicKey, cur
 }
 
 // ListSpaceObjectsWithoutSlabs returns published object changes without slab slices. Read access is required.
-func (s *Store) ListSpaceObjectsWithoutSlabs(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) (events []spaces.ObjectEventWithoutSlabs, err error) {
+func (s *Store) ListSpaceObjectsWithoutSlabs(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) (events []slabs.ObjectEventWithoutSlabs, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
 		if err != nil {
@@ -219,7 +218,7 @@ func (s *Store) SpaceObjectSlabs(account proto.Account, key types.PublicKey, obj
 
 // SpaceObject returns an object in a space. Account must have read permission,
 // and the object must not be blocked.
-func (s *Store) SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (object spaces.Object, err error) {
+func (s *Store) SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (object slabs.SealedObject, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
 		if err != nil {
@@ -227,13 +226,13 @@ func (s *Store) SpaceObject(account proto.Account, key types.PublicKey, objectKe
 		} else if err := assertObjectNotBlocked(ctx, tx, objectKey); err != nil {
 			return err
 		}
-		var o spaces.Object
+		var o slabs.SealedObject
 		var objectID int64
-		err = tx.QueryRow(ctx, `SELECT o.id, o.object_key, o.account_key, o.encrypted_data_key, o.encrypted_meta_key,
+		err = tx.QueryRow(ctx, `SELECT o.id, o.encrypted_data_key, o.encrypted_meta_key,
  o.encrypted_metadata, o.data_signature, o.meta_signature, o.created_at, o.updated_at
  FROM space_objects o WHERE o.space_id = $1 AND o.object_key = $2
  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = o.object_key)`, id, sqlHash256(objectKey)).Scan(
-			&objectID, (*sqlHash256)(&o.Key), (*sqlPublicKey)(&o.Account), &o.EncryptedDataKey, &o.EncryptedMetadataKey,
+			&objectID, &o.EncryptedDataKey, &o.EncryptedMetadataKey,
 			&o.EncryptedMetadata, (*sqlSignature)(&o.DataSignature), (*sqlSignature)(&o.MetadataSignature), &o.CreatedAt, &o.UpdatedAt)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return slabs.ErrObjectNotFound
@@ -343,7 +342,7 @@ func loadSpaceObjectSlabs(ctx context.Context, tx *txn, objects map[int64]*[]sla
 	return collectObjectSlabs(ctx, tx, rows, objects)
 }
 
-func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor slabs.Cursor, limit int) (events []spaces.ObjectEventWithoutSlabs, ids map[int64]int, err error) {
+func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor slabs.Cursor, limit int) (events []slabs.ObjectEventWithoutSlabs, ids map[int64]int, err error) {
 	rows, err := tx.Query(ctx, `SELECT object_key, was_deleted, updated_at FROM space_object_events e
  WHERE space_id = $1 AND (updated_at, object_key) > ($2, $3)
  AND NOT EXISTS (SELECT 1 FROM blocked_objects b WHERE b.object_key = e.object_key)
@@ -351,7 +350,7 @@ func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor s
 	if err != nil {
 		return nil, nil, err
 	}
-	events, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (event spaces.ObjectEventWithoutSlabs, err error) {
+	events, err = pgx.CollectRows(rows, func(row pgx.CollectableRow) (event slabs.ObjectEventWithoutSlabs, err error) {
 		err = row.Scan((*sqlHash256)(&event.Key), &event.Deleted, &event.UpdatedAt)
 		return
 	})
@@ -370,7 +369,7 @@ func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor s
 	if len(keys) == 0 {
 		return events, ids, nil
 	}
-	rows, err = tx.Query(ctx, `SELECT id, object_key, account_key, encrypted_data_key, encrypted_meta_key,
+	rows, err = tx.Query(ctx, `SELECT id, object_key, encrypted_data_key, encrypted_meta_key,
  encrypted_metadata, data_signature, meta_signature, created_at, updated_at, size
  FROM space_objects WHERE space_id = $1 AND object_key = ANY($2)`, spaceID, keys)
 	if err != nil {
@@ -378,12 +377,13 @@ func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor s
 	}
 	err = forEachRow(rows, func(row pgx.CollectableRow) error {
 		var id int64
-		var obj spaces.ObjectWithoutSlabs
-		if err := row.Scan(&id, (*sqlHash256)(&obj.Key), (*sqlPublicKey)(&obj.Account), &obj.EncryptedDataKey, &obj.EncryptedMetadataKey,
+		var obj slabs.SealedObjectWithoutSlabs
+		var key types.Hash256
+		if err := row.Scan(&id, (*sqlHash256)(&key), &obj.EncryptedDataKey, &obj.EncryptedMetadataKey,
 			&obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt, &obj.Size); err != nil {
 			return err
 		}
-		i := byKey[obj.Key]
+		i := byKey[key]
 		events[i].Object = &obj
 		ids[id] = i
 		return nil

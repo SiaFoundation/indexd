@@ -199,33 +199,3 @@ type Member struct {
 	CreatedAt  time.Time     `json:"createdAt"`
 	UpdatedAt  time.Time     `json:"updatedAt"`
 }
-
-// Object is an encrypted object in a space and the account that signed it.
-type Object struct {
-	Key     types.Hash256 `json:"key"`
-	Account proto.Account `json:"account"`
-	slabs.SealedObject
-}
-
-// ObjectWithoutSlabs is a space object without its slab slices.
-type ObjectWithoutSlabs struct {
-	Key     types.Hash256 `json:"key"`
-	Account proto.Account `json:"account"`
-	slabs.SealedObjectWithoutSlabs
-}
-
-// ObjectEvent is a published object change, including a deletion tombstone.
-type ObjectEvent struct {
-	Key       types.Hash256 `json:"key"`
-	Deleted   bool          `json:"deleted"`
-	UpdatedAt time.Time     `json:"updatedAt"`
-	Object    *Object       `json:"object,omitempty"`
-}
-
-// ObjectEventWithoutSlabs is a published object change without slab slices.
-type ObjectEventWithoutSlabs struct {
-	Key       types.Hash256       `json:"key"`
-	Deleted   bool                `json:"deleted"`
-	UpdatedAt time.Time           `json:"updatedAt"`
-	Object    *ObjectWithoutSlabs `json:"object,omitempty"`
-}

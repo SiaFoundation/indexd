@@ -171,6 +171,9 @@ func TestSpacesAPI(t *testing.T) {
 				Slabs:                []slabs.SlabSlice{params.Slice(0, 32), params.Slice(32, 64)},
 			}
 			object.Sign(memberKey)
+			assertStatus(t, client.PinSpaceObject(ctx, memberKey, key, object), http.StatusBadRequest)
+			object.Sign(memberSpaceKey)
+			assertStatus(t, client.PinSpaceObject(ctx, outsiderKey, key, object), http.StatusForbidden)
 			if err := client.PinSpaceObject(ctx, memberKey, key, object); err != nil {
 				t.Fatal(err)
 			}
@@ -191,7 +194,7 @@ func TestSpacesAPI(t *testing.T) {
 			got, err := client.SpaceObject(ctx, ownerKey, key, object.ID())
 			if err != nil {
 				t.Fatal(err)
-			} else if got.Key != object.ID() || got.Account != member || got.VerifySignatures(memberKey.PublicKey()) != nil {
+			} else if got.ID() != object.ID() || got.VerifySignatures(key) != nil {
 				t.Fatalf("invalid object response: %+v", got)
 			} else if recovered := openSpaceAPI(t, seed, got.EncryptedDataKey); !bytes.Equal(recovered, dataKey[:]) {
 				t.Fatal("owner could not decrypt the member's object key")
@@ -217,7 +220,7 @@ func TestSpacesAPI(t *testing.T) {
 			}
 			publish()
 			events, err := client.ListSpaceObjects(ctx, ownerKey, key, slabs.Cursor{}, 1)
-			if err != nil || len(events) != 1 || events[0].Object == nil || events[0].Object.VerifySignatures(memberKey.PublicKey()) != nil {
+			if err != nil || len(events) != 1 || events[0].Object == nil || events[0].Object.VerifySignatures(key) != nil {
 				t.Fatalf("unexpected object events: %+v, %v", events, err)
 			}
 			cursor := slabs.Cursor{After: events[0].UpdatedAt, Key: events[0].Key}
@@ -225,7 +228,7 @@ func TestSpacesAPI(t *testing.T) {
 				t.Fatalf("unexpected events after cursor: %+v, %v", page, err)
 			}
 			object.EncryptedMetadata = sealSpaceAPI(t, metadataKey, []byte(`{"name":"renamed.txt"}`))
-			object.Sign(memberKey)
+			object.Sign(memberSpaceKey)
 			if err := client.PinSpaceObject(ctx, memberKey, key, object); err != nil {
 				t.Fatal(err)
 			}

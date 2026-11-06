@@ -32,10 +32,10 @@ type (
 		PinSpaceSlabs(account proto.Account, key types.PublicKey, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error)
 		PinSpaceObject(account proto.Account, key types.PublicKey, obj slabs.PinObjectRequest) error
 		DeleteSpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) error
-		SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (spaces.Object, error)
+		SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
 		SpaceObjectSlabs(account proto.Account, key types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
-		ListSpaceObjects(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]spaces.ObjectEvent, error)
-		ListSpaceObjectsWithoutSlabs(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]spaces.ObjectEventWithoutSlabs, error)
+		ListSpaceObjects(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
+		ListSpaceObjectsWithoutSlabs(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventWithoutSlabs, error)
 	}
 
 	// UpdateSpaceRequest replaces the encrypted fields and their space-key signature.

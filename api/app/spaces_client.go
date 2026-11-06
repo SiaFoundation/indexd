@@ -96,7 +96,7 @@ func (c *Client) PinSpaceSlabs(ctx context.Context, appKey types.PrivateKey, key
 	return
 }
 
-// PinSpaceObject adds or replaces an object signed by the account.
+// PinSpaceObject adds or replaces an object signed by the space key.
 func (c *Client) PinSpaceObject(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, obj slabs.SealedObject) error {
 	return c.signedRequest(ctx, appKey, http.MethodPost, fmt.Sprintf("/spaces/%s/objects", key), obj.PinRequest(), nil)
 }
@@ -107,7 +107,7 @@ func (c *Client) DeleteSpaceObject(ctx context.Context, appKey types.PrivateKey,
 }
 
 // SpaceObject retrieves an object accessible to the account.
-func (c *Client) SpaceObject(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, objectKey types.Hash256) (obj spaces.Object, err error) {
+func (c *Client) SpaceObject(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
 	err = c.signedRequest(ctx, appKey, http.MethodGet, fmt.Sprintf("/spaces/%s/objects/%s", key, objectKey), nil, &obj)
 	return
 }
@@ -122,13 +122,13 @@ func (c *Client) SpaceObjectSlabs(ctx context.Context, appKey types.PrivateKey, 
 }
 
 // ListSpaceObjects lists published object changes after the cursor.
-func (c *Client) ListSpaceObjects(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, cursor slabs.Cursor, limit int) (events []spaces.ObjectEvent, err error) {
+func (c *Client) ListSpaceObjects(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, err error) {
 	err = c.signedRequest(ctx, appKey, http.MethodGet, listObjectsRoute(fmt.Sprintf("/spaces/%s/objects", key), cursor, limit, true), nil, &events)
 	return
 }
 
 // ListSpaceObjectsWithoutSlabs lists published changes without slab slices.
-func (c *Client) ListSpaceObjectsWithoutSlabs(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, cursor slabs.Cursor, limit int) (events []spaces.ObjectEventWithoutSlabs, err error) {
+func (c *Client) ListSpaceObjectsWithoutSlabs(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, cursor slabs.Cursor, limit int) (events []slabs.ObjectEventWithoutSlabs, err error) {
 	err = c.signedRequest(ctx, appKey, http.MethodGet, listObjectsRoute(fmt.Sprintf("/spaces/%s/objects", key), cursor, limit, false), nil, &events)
 	return
 }

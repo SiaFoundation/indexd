@@ -80,19 +80,32 @@ func TestManagerValidatesInvitation(t *testing.T) {
 func TestManagerValidatesObject(t *testing.T) {
 	appKey := types.GeneratePrivateKey()
 	account := proto.Account(appKey.PublicKey())
-	spaceKey := types.GeneratePrivateKey().PublicKey()
+	spaceKey := types.GeneratePrivateKey()
 	m := spaces.NewManager(noSpaceStore{})
 	obj := validationObject()
 	invalid := obj
 	invalid.Slabs = nil
-	invalid.Sign(appKey)
-	if err := m.PinSpaceObject(account, spaceKey, invalid.PinRequest()); !errors.Is(err, spaces.ErrInvalidRequest) {
+	invalid.Sign(spaceKey)
+	if err := m.PinSpaceObject(account, spaceKey.PublicKey(), invalid.PinRequest()); !errors.Is(err, spaces.ErrInvalidRequest) {
 		t.Fatalf("expected invalid object request, got %v", err)
 	}
-	obj.Sign(appKey)
-	obj.DataSignature[0] ^= 1
-	if err := m.PinSpaceObject(account, spaceKey, obj.PinRequest()); !errors.Is(err, slabs.ErrInvalidObjectSignature) {
-		t.Fatalf("expected invalid object signature, got %v", err)
+	for _, tt := range []struct {
+		name   string
+		change func(*slabs.SealedObject)
+	}{
+		{"account signature", func(obj *slabs.SealedObject) { obj.Sign(appKey) }},
+		{"other space signature", func(obj *slabs.SealedObject) { obj.Sign(types.GeneratePrivateKey()) }},
+		{"invalid data signature", func(obj *slabs.SealedObject) { obj.DataSignature[0] ^= 1 }},
+		{"invalid metadata signature", func(obj *slabs.SealedObject) { obj.MetadataSignature[0] ^= 1 }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			obj := obj
+			obj.Sign(spaceKey)
+			tt.change(&obj)
+			if err := m.PinSpaceObject(account, spaceKey.PublicKey(), obj.PinRequest()); !errors.Is(err, slabs.ErrInvalidObjectSignature) {
+				t.Fatalf("expected invalid object signature, got %v", err)
+			}
+		})
 	}
 }
 
