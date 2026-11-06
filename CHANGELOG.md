@@ -1,3 +1,24 @@
+## 0.6.4 (2026-11-06)
+
+### Features
+
+- Added `exceedsquota` query parameter to `GET /apps/connect/keys`
+
+#### Added support for shared spaces
+
+Spaces are private collections of encrypted objects shared with registered accounts. Owners can invite additional members with read, write, delete, or admin access. Space objects are listed separately from personal objects. Pins count against the owner's storage quota. Objects are retained when members leave. Owners and admins can revoke access at any time.
+
+Unlike sharing keys, this enables apps to implement shared folders or drives while data stays encrypted, private, and access is limited to invited members.
+Apps can synchronize space objects through a cursor-based event stream that includes updates and deletions.
+
+#### Return 403 when pinning slabs exceeds a storage limit
+
+`POST /slabs` now responds with `403 Forbidden` instead of `500` when the account's quota or the app's storage limit is full, with the stable body `account storage limit exceeded` or `app storage limit exceeded`.
+
+### Fixes
+
+- Reject oversized signed URL credentials instead of panicking
+
 ## 0.6.3 (2026-10-30)
 
 ### Fixes
