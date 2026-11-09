@@ -26,6 +26,12 @@ const sqlObjectSlabs = `
 	FROM object_slabs
 	JOIN slabs ON slabs.digest = object_slabs.slab_digest`
 
+const sqlUnrecoverableObjects = `
+	SELECT DISTINCT os.object_id
+	FROM object_slabs os
+	JOIN slabs s ON s.digest = os.slab_digest
+	WHERE os.object_id = ANY($1) AND s.unrecoverable_reason IS NOT NULL`
+
 // A dbObject is an object row and its IDs. The row holds everything but the
 // slabs, which are loaded separately.
 type dbObject struct {
@@ -116,9 +122,10 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 		events = make([]slabs.ObjectEvent, len(page))
 		for i, event := range page {
 			events[i] = slabs.ObjectEvent{
-				Key:       event.Key,
-				Deleted:   event.Deleted,
-				UpdatedAt: event.UpdatedAt,
+				Key:           event.Key,
+				Deleted:       event.Deleted,
+				Unrecoverable: event.Unrecoverable,
+				UpdatedAt:     event.UpdatedAt,
 			}
 			if event.Object == nil {
 				continue
@@ -126,6 +133,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 				// an object always has at least one slab, so one that lost
 				// its slab rows was deleted after its row was read
 				events[i].Deleted = true
+				events[i].Unrecoverable = false
 				continue
 			}
 			events[i].Object = event.Object.WithSlabs(pageSlabs[i])
@@ -210,6 +218,21 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 				events[i].Deleted = true
 			}
 		}
+	}
+	if len(eventByID) == 0 {
+		return events, eventByID, nil
+	}
+
+	rows, err = tx.Query(ctx, sqlUnrecoverableObjects, slices.Collect(maps.Keys(eventByID)))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query unrecoverable objects: %w", err)
+	}
+	unrecoverable, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to scan unrecoverable objects: %w", err)
+	}
+	for _, id := range unrecoverable {
+		events[eventByID[id]].Unrecoverable = true
 	}
 	return events, eventByID, nil
 }
@@ -300,19 +323,18 @@ func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) err
 			return fmt.Errorf("failed to get object id: %w", err)
 		}
 
-		// delete the object's slab references, remembering the slabs so the
-		// now unreferenced ones can be unpinned after the object is deleted
-		rows, err := tx.Query(ctx, `WITH deleted AS (
-	DELETE FROM object_slabs WHERE object_id = $1 RETURNING slab_digest
-)
-SELECT DISTINCT s.id FROM slabs s
-INNER JOIN deleted d ON (d.slab_digest = s.digest)`, objectID)
+		// lock the object's slabs before touching its event row
+		rows, err := tx.Query(ctx, `SELECT DISTINCT s.id FROM slabs s
+INNER JOIN object_slabs os ON (os.slab_digest = s.digest)
+WHERE os.object_id = $1`, objectID)
 		if err != nil {
-			return fmt.Errorf("failed to delete object slabs: %w", err)
+			return fmt.Errorf("failed to query object slabs: %w", err)
 		}
 		objectSlabIDs, err := pgx.CollectRows(rows, pgx.RowTo[int64])
 		if err != nil {
 			return fmt.Errorf("failed to collect object slab ids: %w", err)
+		} else if err := lockSlabs(ctx, tx, objectSlabIDs); err != nil {
+			return err
 		}
 
 		_, err = tx.Exec(ctx, `DELETE FROM objects WHERE id = $1`, objectID)
@@ -328,7 +350,7 @@ INNER JOIN deleted d ON (d.slab_digest = s.digest)`, objectID)
 		}
 
 		// unpin the object's slabs that are no longer referenced by any of
-		// the account's objects; the locking inside serializes concurrent
+		// the account's objects; the slab locks serialize concurrent
 		// deletions of objects sharing a slab, which could otherwise each
 		// still see the other's object and leave the shared slab pinned
 		// forever

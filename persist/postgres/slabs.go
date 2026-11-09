@@ -23,15 +23,19 @@ func (s *Store) MarkSlabUnrecoverable(slabID slabs.SlabID, reason string) error 
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		// the epoch marks a slab that can never be fully repaired, keep the
 		// original reason if the slab is already marked
-		res, err := tx.Exec(ctx, `
+		var marked bool
+		err := tx.QueryRow(ctx, `
 			UPDATE slabs
 			SET unrecoverable_since = 'epoch',
 				unrecoverable_reason = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_reason ELSE $2 END
-			WHERE digest = $1`, sqlHash256(slabID), reason)
-		if err != nil {
-			return fmt.Errorf("failed to mark slab unrecoverable: %w", err)
-		} else if res.RowsAffected() == 0 {
+			WHERE digest = $1
+			RETURNING OLD.unrecoverable_reason IS NULL`, sqlHash256(slabID), reason).Scan(&marked)
+		if errors.Is(err, sql.ErrNoRows) {
 			return slabs.ErrSlabNotFound
+		} else if err != nil {
+			return fmt.Errorf("failed to mark slab unrecoverable: %w", err)
+		} else if marked {
+			return republishSlabObjectEvents(ctx, tx, slabID)
 		}
 		return nil
 	})
@@ -68,6 +72,8 @@ func (s *Store) RecordFailedSlabRecovery(slabID slabs.SlabID, reason string) (un
 			return slabs.ErrSlabNotFound
 		} else if err != nil {
 			return fmt.Errorf("failed to record failed slab recovery: %w", err)
+		} else if unrecoverable {
+			return republishSlabObjectEvents(ctx, tx, slabID)
 		}
 		return nil
 	})
@@ -91,15 +97,20 @@ func repairBackoff(n int) time.Duration {
 func (s *Store) MarkSlabRepaired(slabID slabs.SlabID, success bool) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		if success {
-			if res, err := tx.Exec(ctx, `
+			var unmarked bool
+			err := tx.QueryRow(ctx, `
 				UPDATE slabs
 				SET consecutive_failed_repairs = 0,
 					unrecoverable_since = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_since END,
 					unrecoverable_reason = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_reason END
-				WHERE digest = $1`, sqlHash256(slabID)); err != nil {
-				return fmt.Errorf("failed to mark slab as repaired: %w", err)
-			} else if res.RowsAffected() == 0 {
+				WHERE digest = $1
+				RETURNING OLD.unrecoverable_reason IS NOT NULL AND NEW.unrecoverable_reason IS NULL`, sqlHash256(slabID)).Scan(&unmarked)
+			if errors.Is(err, sql.ErrNoRows) {
 				return slabs.ErrSlabNotFound
+			} else if err != nil {
+				return fmt.Errorf("failed to mark slab as repaired: %w", err)
+			} else if unmarked {
+				return republishSlabObjectEvents(ctx, tx, slabID)
 			}
 			return nil
 		}
@@ -117,14 +128,19 @@ func (s *Store) MarkSlabRepaired(slabID slabs.SlabID, success bool) error {
 			return fmt.Errorf("failed to fetch repair state: %w", err)
 		}
 
-		_, err = tx.Exec(ctx, `
+		var unmarked bool
+		err = tx.QueryRow(ctx, `
 			UPDATE slabs
 			SET consecutive_failed_repairs = $2, next_repair_attempt = $3,
 				unrecoverable_since = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_since END,
 				unrecoverable_reason = CASE WHEN unrecoverable_since = 'epoch' THEN unrecoverable_reason END
-			WHERE digest = $1`, sqlHash256(slabID), min(currentFailures+1, math.MaxInt16), time.Now().Add(repairBackoff(currentFailures)))
+			WHERE digest = $1
+			RETURNING OLD.unrecoverable_reason IS NOT NULL AND NEW.unrecoverable_reason IS NULL`,
+			sqlHash256(slabID), min(currentFailures+1, math.MaxInt16), time.Now().Add(repairBackoff(currentFailures))).Scan(&unmarked)
 		if err != nil {
 			return fmt.Errorf("failed to update repair state: %w", err)
+		} else if unmarked {
+			return republishSlabObjectEvents(ctx, tx, slabID)
 		}
 
 		return nil

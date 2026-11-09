@@ -753,4 +753,8 @@ FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();`)
 		_, err := tx.Exec(ctx, `ALTER TABLE space_objects DROP COLUMN account_key`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `CREATE INDEX slabs_unrecoverable_idx ON slabs(digest) WHERE unrecoverable_reason IS NOT NULL`)
+		return err
+	},
 }

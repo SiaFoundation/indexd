@@ -21,6 +21,11 @@ import (
 	"lukechampine.com/frand"
 )
 
+type eventCursors struct {
+	personal slabs.Cursor
+	space    slabs.Cursor
+}
+
 func TestSlab(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 	account := proto.Account{1}
@@ -258,6 +263,105 @@ func TestMarkSlabRepaired(t *testing.T) {
 	assertSlabState(0, oneHourAgo)
 }
 
+// assertNoObjectEvent publishes pending events and asserts the four listings return nothing
+// after the cursors.
+func (s *Store) assertNoObjectEvent(t testing.TB, account proto.Account, space types.PublicKey, cursors *eventCursors) {
+	t.Helper()
+	s.publishEvents(t)
+
+	if events, err := s.ListObjects(account, cursors.personal, 10); err != nil {
+		t.Fatal(err)
+	} else if len(events) != 0 {
+		t.Fatal("objects: unexpected", len(events))
+	}
+
+	if events, err := s.ListObjectsWithoutSlabs(account, cursors.personal, 10); err != nil {
+		t.Fatal(err)
+	} else if len(events) != 0 {
+		t.Fatal("objects without slabs: unexpected", len(events))
+	}
+
+	if events, err := s.ListSpaceObjects(account, space, cursors.space, 10); err != nil {
+		t.Fatal(err)
+	} else if len(events) != 0 {
+		t.Fatal("space objects: unexpected", len(events))
+	}
+
+	if events, err := s.ListSpaceObjectsWithoutSlabs(account, space, cursors.space, 10); err != nil {
+		t.Fatal(err)
+	} else if len(events) != 0 {
+		t.Fatal("space objects without slabs: unexpected", len(events))
+	}
+}
+
+// assertObjectEvent publishes pending events and asserts that key is the only event after the
+// cursors in each of the four listings, with the expected flag, then moves the cursors past it.
+func (s *Store) assertObjectEvent(t testing.TB, account proto.Account, space types.PublicKey, key types.Hash256, cursors *eventCursors, unrecoverable bool) {
+	t.Helper()
+	s.publishEvents(t)
+
+	objectEvents, err := s.ListObjects(account, cursors.personal, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(objectEvents) != 1 {
+		t.Fatal("objects: unexpected", len(objectEvents))
+	} else if e := objectEvents[0]; e.Key != key || e.Deleted || e.Object == nil || e.Unrecoverable != unrecoverable {
+		t.Fatal("objects: unexpected", e.Key, e.Deleted, e.Object == nil, e.Unrecoverable)
+	}
+
+	slablessEvents, err := s.ListObjectsWithoutSlabs(account, cursors.personal, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(slablessEvents) != 1 {
+		t.Fatal("objects without slabs: unexpected", len(slablessEvents))
+	} else if e := slablessEvents[0]; e.Key != key || e.Deleted || e.Object == nil || e.Unrecoverable != unrecoverable {
+		t.Fatal("objects without slabs: unexpected", e.Key, e.Deleted, e.Object == nil, e.Unrecoverable)
+	}
+
+	spaceEvents, err := s.ListSpaceObjects(account, space, cursors.space, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(spaceEvents) != 1 {
+		t.Fatal("space objects: unexpected", len(spaceEvents))
+	} else if e := spaceEvents[0]; e.Key != key || e.Deleted || e.Object == nil || e.Unrecoverable != unrecoverable {
+		t.Fatal("space objects: unexpected", e.Key, e.Deleted, e.Object == nil, e.Unrecoverable)
+	}
+
+	slablessSpaceEvents, err := s.ListSpaceObjectsWithoutSlabs(account, space, cursors.space, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(slablessSpaceEvents) != 1 {
+		t.Fatal("space objects without slabs: unexpected", len(slablessSpaceEvents))
+	} else if e := slablessSpaceEvents[0]; e.Key != key || e.Deleted || e.Object == nil || e.Unrecoverable != unrecoverable {
+		t.Fatal("space objects without slabs: unexpected", e.Key, e.Deleted, e.Object == nil, e.Unrecoverable)
+	}
+
+	cursors.personal = slabs.Cursor{After: objectEvents[0].UpdatedAt, Key: objectEvents[0].Key}
+	cursors.space = slabs.Cursor{After: spaceEvents[0].UpdatedAt, Key: spaceEvents[0].Key}
+}
+
+// latestEventCursors publishes pending events and returns cursors past every event in the
+// account's and the space's streams.
+func (s *Store) latestEventCursors(t testing.TB, account proto.Account, space types.PublicKey) (cursors eventCursors) {
+	t.Helper()
+	s.publishEvents(t)
+
+	if events, err := s.ListObjects(account, slabs.Cursor{}, 10); err != nil {
+		t.Fatal(err)
+	} else if len(events) > 0 {
+		last := events[len(events)-1]
+		cursors.personal = slabs.Cursor{After: last.UpdatedAt, Key: last.Key}
+	}
+
+	if events, err := s.ListSpaceObjects(account, space, slabs.Cursor{}, 10); err != nil {
+		t.Fatal(err)
+	} else if len(events) > 0 {
+		last := events[len(events)-1]
+		cursors.space = slabs.Cursor{After: last.UpdatedAt, Key: last.Key}
+	}
+	return
+}
+
 func TestMarkSlabUnrecoverable(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
@@ -270,7 +374,32 @@ func TestMarkSlabUnrecoverable(t *testing.T) {
 	// add two slabs and lose all of their sectors so both need repair
 	slab1 := newTestSlab(host)
 	slabID1 := store.pinTestSlabs(t, account, slab1)[0]
-	slabID2 := store.pinTestSlab(t, account, 1, []types.PublicKey{host, host})
+	slab2 := newTestSlab(host)
+	slabID2 := store.pinTestSlabs(t, account, slab2)[0]
+
+	// pin objects referencing the slabs, both personally and into a space
+	space := store.addTestSpace(t, account).PublicKey()
+	pinObject := func(account proto.Account, space types.PublicKey, ss ...slabs.SlabSlice) slabs.SealedObject {
+		t.Helper()
+		obj := store.pinRandomObject(t, account, ss)
+		if err := store.PinSpaceObject(account, space, obj.PinRequest()); err != nil {
+			t.Fatal(err)
+		}
+		return obj
+	}
+	objectA := pinObject(account, space, slab1.Slice(0, 100))
+	objectB := pinObject(account, space, slab2.Slice(0, 100))
+
+	// a second account pins the same slab and the same object
+	other := proto.Account{2}
+	store.addTestAccount(t, types.PublicKey(other))
+	otherSpace := store.addTestSpace(t, other).PublicKey()
+	store.pinTestSlabs(t, other, slab1)
+	pinObject(other, otherSpace, objectA.Slabs...)
+
+	cursors := store.latestEventCursors(t, account, space)
+	otherCursors := store.latestEventCursors(t, other, otherSpace)
+
 	loseAllSectors := func() {
 		t.Helper()
 		if _, err := store.pool.Exec(t.Context(), `UPDATE sectors SET host_id = NULL`); err != nil {
@@ -320,6 +449,73 @@ func TestMarkSlabUnrecoverable(t *testing.T) {
 		}
 	}
 
+	assertPageFlags := func(expected map[types.Hash256]bool) {
+		t.Helper()
+		store.publishEvents(t)
+
+		assertFlags := func(listing string, total int, flags map[types.Hash256]bool) {
+			t.Helper()
+			if total != len(expected) {
+				t.Fatal(listing+": unexpected", total)
+			}
+			for key, unrecoverable := range expected {
+				if got, ok := flags[key]; !ok {
+					t.Fatal(listing+": missing", key)
+				} else if got != unrecoverable {
+					t.Fatal(listing+": unexpected", key, got)
+				}
+			}
+		}
+
+		objectEvents, err := store.ListObjects(account, slabs.Cursor{}, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		flags := make(map[types.Hash256]bool, len(objectEvents))
+		for _, e := range objectEvents {
+			if !e.Deleted {
+				flags[e.Key] = e.Unrecoverable
+			}
+		}
+		assertFlags("objects", len(objectEvents), flags)
+
+		slablessEvents, err := store.ListObjectsWithoutSlabs(account, slabs.Cursor{}, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		flags = make(map[types.Hash256]bool, len(slablessEvents))
+		for _, e := range slablessEvents {
+			if !e.Deleted {
+				flags[e.Key] = e.Unrecoverable
+			}
+		}
+		assertFlags("objects without slabs", len(slablessEvents), flags)
+
+		spaceEvents, err := store.ListSpaceObjects(account, space, slabs.Cursor{}, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		flags = make(map[types.Hash256]bool, len(spaceEvents))
+		for _, e := range spaceEvents {
+			if !e.Deleted {
+				flags[e.Key] = e.Unrecoverable
+			}
+		}
+		assertFlags("space objects", len(spaceEvents), flags)
+
+		slablessSpaceEvents, err := store.ListSpaceObjectsWithoutSlabs(account, space, slabs.Cursor{}, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		flags = make(map[types.Hash256]bool, len(slablessSpaceEvents))
+		for _, e := range slablessSpaceEvents {
+			if !e.Deleted {
+				flags[e.Key] = e.Unrecoverable
+			}
+		}
+		assertFlags("space objects without slabs", len(slablessSpaceEvents), flags)
+	}
+
 	// both slabs need repair
 	assertUnhealthySlabs(slabID1, slabID2)
 	assertUnrecoverable(slabID1, "")
@@ -331,28 +527,67 @@ func TestMarkSlabUnrecoverable(t *testing.T) {
 	}
 	assertUnrecoverable(slabID1, "shard root mismatch")
 	assertUnhealthySlabs(slabID2)
+	store.assertObjectEvent(t, account, space, objectA.ID(), &cursors, true)
+	store.assertObjectEvent(t, other, otherSpace, objectA.ID(), &otherCursors, true)
+	assertPageFlags(map[types.Hash256]bool{objectA.ID(): true, objectB.ID(): false})
 
-	// marking it again keeps the original reason
+	// marking it again keeps the original reason and republishes nothing
 	if err := store.MarkSlabUnrecoverable(slabID1, "some other reason"); err != nil {
 		t.Fatal(err)
 	}
 	assertUnrecoverable(slabID1, "shard root mismatch")
+	store.assertNoObjectEvent(t, account, space, &cursors)
+	store.assertNoObjectEvent(t, other, otherSpace, &otherCursors)
+
+	// an object pinned after the slab was marked is flagged too
+	objectC := pinObject(account, space, slab1.Slice(0, 50))
+	store.assertObjectEvent(t, account, space, objectC.ID(), &cursors, true)
+	assertPageFlags(map[types.Hash256]bool{objectA.ID(): true, objectB.ID(): false, objectC.ID(): true})
 
 	// an unknown slab is not found
 	if err := store.MarkSlabUnrecoverable(slabs.SlabID(frand.Entropy256()), "shard root mismatch"); !errors.Is(err, slabs.ErrSlabNotFound) {
 		t.Fatalf("expected ErrSlabNotFound, got %v", err)
 	}
 
-	// re-pinning the exact same slab revives it with a clean repair state
+	// a failed repair keeps the epoch mark
 	if err := store.MarkSlabRepaired(slabID1, false); err != nil {
 		t.Fatal(err)
 	}
 	assertFailedRepairs(slabID1, 1)
+	store.assertNoObjectEvent(t, account, space, &cursors)
+
+	// re-pinning the exact same slab revives it with a clean repair state
 	if id := store.pinTestSlabs(t, account, slab1)[0]; id != slabID1 {
 		t.Fatalf("expected re-pin to return slab %v, got %v", slabID1, id)
 	}
 	assertUnrecoverable(slabID1, "")
 	assertFailedRepairs(slabID1, 0)
+
+	// the second pin republishes both of the account's objects on the slab
+	store.publishEvents(t)
+	objectEvents, err := store.ListObjects(account, cursors.personal, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(objectEvents) != 2 {
+		t.Fatal("unexpected", len(objectEvents))
+	} else if keys := []types.Hash256{objectEvents[0].Key, objectEvents[1].Key}; !slices.Contains(keys, objectA.ID()) || !slices.Contains(keys, objectC.ID()) {
+		t.Fatal("unexpected", keys)
+	} else if objectEvents[0].Unrecoverable || objectEvents[1].Unrecoverable {
+		t.Fatal("unexpected")
+	}
+	spaceEvents, err := store.ListSpaceObjects(account, space, cursors.space, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(spaceEvents) != 2 {
+		t.Fatal("unexpected", len(spaceEvents))
+	} else if keys := []types.Hash256{spaceEvents[0].Key, spaceEvents[1].Key}; !slices.Contains(keys, objectA.ID()) || !slices.Contains(keys, objectC.ID()) {
+		t.Fatal("unexpected", keys)
+	} else if spaceEvents[0].Unrecoverable || spaceEvents[1].Unrecoverable {
+		t.Fatal("unexpected")
+	}
+	cursors.personal = slabs.Cursor{After: objectEvents[1].UpdatedAt, Key: objectEvents[1].Key}
+	cursors.space = slabs.Cursor{After: spaceEvents[1].UpdatedAt, Key: spaceEvents[1].Key}
+	store.assertObjectEvent(t, other, otherSpace, objectA.ID(), &otherCursors, false)
 
 	// the revived slab is handed out for repair again once it needs it
 	loseAllSectors()
@@ -364,6 +599,23 @@ func TestMarkSlabUnrecoverable(t *testing.T) {
 	} else if stats.UnrecoverableSlabs != 0 {
 		t.Fatalf("expected 0 unrecoverable slabs, got %d", stats.UnrecoverableSlabs)
 	}
+
+	// tombstones are not republished, the other account's live object is
+	if err := store.DeleteObject(account, objectC.ID()); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteSpaceObject(account, space, objectC.ID()); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteObject(account, objectA.ID()); err != nil {
+		t.Fatal(err)
+	} else if err := store.DeleteSpaceObject(account, space, objectA.ID()); err != nil {
+		t.Fatal(err)
+	}
+	cursors = store.latestEventCursors(t, account, space)
+	if err := store.MarkSlabUnrecoverable(slabID1, "shard root mismatch"); err != nil {
+		t.Fatal(err)
+	}
+	store.assertNoObjectEvent(t, account, space, &cursors)
+	store.assertObjectEvent(t, other, otherSpace, objectA.ID(), &otherCursors, true)
 }
 
 // backdateRecoveryWindow starts the slab's recovery window age ago.
@@ -384,7 +636,16 @@ func TestRecordFailedSlabRecovery(t *testing.T) {
 	store.addTestAccount(t, types.PublicKey(account))
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
-	slabID := store.pinTestSlab(t, account, 1, []types.PublicKey{hk})
+	params := newTestSlab(hk)
+	slabID := store.pinTestSlabs(t, account, params)[0]
+
+	// pin an object referencing the slab, both personally and into a space
+	space := store.addTestSpace(t, account).PublicKey()
+	object := store.pinRandomObject(t, account, []slabs.SlabSlice{params.Slice(0, 100)})
+	if err := store.PinSpaceObject(account, space, object.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	cursors := store.latestEventCursors(t, account, space)
 
 	assertUnhealthySlabs := func(expected ...slabs.SlabID) {
 		t.Helper()
@@ -440,6 +701,7 @@ func TestRecordFailedSlabRecovery(t *testing.T) {
 		t.Fatalf("expected no reason, got %q", reason.String)
 	}
 	assertUnhealthySlabs(slabID)
+	store.assertNoObjectEvent(t, account, space, &cursors)
 
 	// failures within the recovery window continue it
 	store.backdateRecoveryWindow(t, slabID, slabs.RecoveryWindow-time.Hour)
@@ -450,6 +712,7 @@ func TestRecordFailedSlabRecovery(t *testing.T) {
 		t.Fatalf("expected no reason, got %q", reason.String)
 	}
 	assertUnhealthySlabs(slabID)
+	store.assertNoObjectEvent(t, account, space, &cursors)
 
 	// a failed recovery once its sectors are stored on a host again resets the
 	// recovery window
@@ -475,6 +738,7 @@ func TestRecordFailedSlabRecovery(t *testing.T) {
 		t.Fatalf("expected reason %q, got %q", reason, got.String)
 	}
 	assertUnhealthySlabs()
+	store.assertObjectEvent(t, account, space, object.ID(), &cursors, true)
 
 	// later failures don't report the slab as newly unrecoverable, and it
 	// stays unrecoverable even once its sectors are stored on a host again
@@ -484,19 +748,39 @@ func TestRecordFailedSlabRecovery(t *testing.T) {
 	if since, got := recoveryState(); !since.Valid || got.String != reason {
 		t.Fatalf("expected reason %q, got %q", reason, got.String)
 	}
+	store.assertNoObjectEvent(t, account, space, &cursors)
 	loseAllSectors()
 	assertUnhealthySlabs()
+
+	// a successful repair clears a window mark
+	if err := store.MarkSlabRepaired(slabID, true); err != nil {
+		t.Fatal(err)
+	} else if since, got := recoveryState(); since.Valid || got.Valid {
+		t.Fatal("unexpected", since, got)
+	}
+	store.assertObjectEvent(t, account, space, object.ID(), &cursors, false)
+	assertUnhealthySlabs(slabID)
 
 	// a failed recovery keeps the reason of a slab that can never be fully
 	// repaired
 	if err := store.MarkSlabUnrecoverable(slabID, "shard root mismatch"); err != nil {
 		t.Fatal(err)
 	}
+	store.assertObjectEvent(t, account, space, object.ID(), &cursors, true)
 	recordFailure(false)
 	if _, got := recoveryState(); got.String != "shard root mismatch" {
 		t.Fatalf("expected reason %q, got %q", "shard root mismatch", got.String)
 	}
+	store.assertNoObjectEvent(t, account, space, &cursors)
 	assertUnhealthySlabs()
+
+	// a successful repair keeps an epoch mark
+	if err := store.MarkSlabRepaired(slabID, true); err != nil {
+		t.Fatal(err)
+	} else if _, got := recoveryState(); got.String != "shard root mismatch" {
+		t.Fatalf("expected reason %q, got %q", "shard root mismatch", got.String)
+	}
+	store.assertNoObjectEvent(t, account, space, &cursors)
 
 	// an unknown slab is not found
 	if _, err := store.RecordFailedSlabRecovery(slabs.SlabID(frand.Entropy256()), reason); !errors.Is(err, slabs.ErrSlabNotFound) {
