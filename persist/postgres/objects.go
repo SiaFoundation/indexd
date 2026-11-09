@@ -500,14 +500,6 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
 
-		_, err = tx.Exec(ctx, `
-			INSERT INTO object_events (object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, NULL)`,
-			sqlHash256(obj.ID), accountID)
-		if err != nil {
-			return fmt.Errorf("failed to insert object event: %w", err)
-		}
-
 		slabIDs := make([]slabs.SlabID, 0, len(obj.Slabs))
 		for _, slab := range obj.Slabs {
 			slabIDs = append(slabIDs, slab.ID)
@@ -558,6 +550,16 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 		res := tx.SendBatch(ctx, batch)
 		if err := res.Close(); err != nil {
 			return fmt.Errorf("failed to insert slabs for object: %w", err)
+		}
+
+		// the event row is written after the slab locks because a republish of
+		// the slab's events takes the slab lock first and the event rows second
+		_, err = tx.Exec(ctx, `
+			INSERT INTO object_events (object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)
+			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, NULL)`,
+			sqlHash256(obj.ID), accountID)
+		if err != nil {
+			return fmt.Errorf("failed to insert object event: %w", err)
 		}
 		return nil
 	})
