@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
 	"time"
@@ -153,7 +154,7 @@ func (s *Store) ListSpaceObjects(account proto.Account, key types.PublicKey, cur
 		events = make([]slabs.ObjectEvent, len(page))
 		objectSlabs := make(map[int64]*[]slabs.SlabSlice, len(ids))
 		for i, event := range page {
-			events[i] = slabs.ObjectEvent{Key: event.Key, Deleted: event.Deleted, UpdatedAt: event.UpdatedAt}
+			events[i] = slabs.ObjectEvent{Key: event.Key, Deleted: event.Deleted, Unrecoverable: event.Unrecoverable, UpdatedAt: event.UpdatedAt}
 			if event.Object != nil {
 				events[i].Object = event.Object.WithSlabs(nil)
 			}
@@ -167,6 +168,7 @@ func (s *Store) ListSpaceObjects(account proto.Account, key types.PublicKey, cur
 		for i := range events {
 			if events[i].Object != nil && len(events[i].Object.Slabs) == 0 {
 				events[i].Deleted, events[i].Object = true, nil
+				events[i].Unrecoverable = false
 			}
 		}
 		return nil
@@ -388,10 +390,30 @@ func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor s
 		ids[id] = i
 		return nil
 	})
+	if err != nil {
+		return nil, nil, err
+	}
 	for i := range events {
 		if events[i].Object == nil {
 			events[i].Deleted = true
 		}
 	}
-	return events, ids, err
+	if len(ids) == 0 {
+		return events, ids, nil
+	}
+
+	rows, err = tx.Query(ctx, `SELECT DISTINCT os.object_id FROM space_object_slabs os
+ JOIN slabs s ON s.digest = os.slab_digest
+ WHERE os.object_id = ANY($1) AND s.unrecoverable_reason IS NOT NULL`, slices.Collect(maps.Keys(ids)))
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to query unrecoverable objects: %w", err)
+	}
+	unrecoverable, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to scan unrecoverable objects: %w", err)
+	}
+	for _, id := range unrecoverable {
+		events[ids[id]].Unrecoverable = true
+	}
+	return events, ids, nil
 }

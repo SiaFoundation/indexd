@@ -357,6 +357,8 @@ CREATE TABLE slabs (
     CONSTRAINT slabs_unrecoverable_reason_check CHECK (unrecoverable_reason IS NULL OR unrecoverable_since IS NOT NULL)
 );
 CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
+-- fast lookup of the marked slabs an object references
+CREATE INDEX slabs_unrecoverable_idx ON slabs(digest) WHERE unrecoverable_reason IS NOT NULL;
 
 CREATE TABLE objects (
     id BIGSERIAL PRIMARY KEY,
