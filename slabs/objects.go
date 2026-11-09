@@ -164,7 +164,12 @@ func (pr *PinObjectRequest) Validate() error {
 	case len(pr.EncryptedMetadataKey) != 0 && len(pr.EncryptedMetadataKey) != EncryptionKeySize:
 		return fmt.Errorf("%w: encrypted metadata key must be %d bytes", ErrInvalidObjectRequest, EncryptionKeySize)
 	}
+	seen := make(map[SlabID]struct{}, len(pr.Slabs))
 	for i, slab := range pr.Slabs {
+		if _, ok := seen[slab.ID]; ok {
+			return fmt.Errorf("%w: slab %d: %v", ErrObjectDuplicateSlab, i, slab.ID)
+		}
+		seen[slab.ID] = struct{}{}
 		switch {
 		case slab.ID == (SlabID{}):
 			return fmt.Errorf("%w: slab %d: ID is empty", ErrInvalidObjectRequest, i)
@@ -429,14 +434,6 @@ func (m *SlabManager) PinObject(ctx context.Context, account proto.Account, obj 
 		return err
 	} else if err := obj.VerifySignatures(types.PublicKey(account)); err != nil {
 		return err
-	}
-
-	seen := make(map[SlabID]struct{}, len(obj.Slabs))
-	for _, slab := range obj.Slabs {
-		if _, ok := seen[slab.ID]; ok {
-			return fmt.Errorf("%w: %v", ErrObjectDuplicateSlab, slab.ID)
-		}
-		seen[slab.ID] = struct{}{}
 	}
 	return m.store.PinObject(account, obj)
 }

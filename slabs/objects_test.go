@@ -93,6 +93,17 @@ func TestPinObjectRequestValidateIntegerBounds(t *testing.T) {
 	}
 }
 
+func TestPinObjectRequestValidateDuplicateSlabs(t *testing.T) {
+	req := PinObjectRequest{
+		EncryptedDataKey: frand.Bytes(72),
+		Slabs:            []ObjectSlab{{ID: SlabID{1}, Length: 1}, {ID: SlabID{1}, Offset: 1, Length: 1}},
+	}
+	req.ID = pinnedObjectID(req.Slabs)
+	if err := req.Validate(); !errors.Is(err, ErrObjectDuplicateSlab) {
+		t.Fatalf("expected %v, got %v", ErrObjectDuplicateSlab, err)
+	}
+}
+
 func TestPinObjectRequestValidateOpaqueFields(t *testing.T) {
 	obj := SealedObject{
 		EncryptedMetadata: []byte("opaque metadata"),
