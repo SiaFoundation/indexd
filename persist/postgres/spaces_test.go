@@ -316,7 +316,7 @@ func TestSpaceObjects(t *testing.T) {
 	got, err := store.SpaceObject(reader, key, obj.ID())
 	if err != nil {
 		t.Fatal(err)
-	} else if got.Account != writer || got.Key != obj.ID() || !reflect.DeepEqual(got.Slabs, obj.Slabs) || !bytes.Equal(got.EncryptedDataKey, obj.EncryptedDataKey) {
+	} else if got.ID() != obj.ID() || !reflect.DeepEqual(got.Slabs, obj.Slabs) || !bytes.Equal(got.EncryptedDataKey, obj.EncryptedDataKey) {
 		t.Fatalf("object mismatch: %+v", got)
 	} else if _, err := store.Object(owner, obj.ID()); !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("object in personal scope: %v", err)
@@ -373,6 +373,97 @@ func TestSpaceObjects(t *testing.T) {
 	}
 }
 
+func TestSpaceTotals(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
+	store.addTestAccount(t, types.PublicKey(owner))
+	key := store.addTestSpace(t, owner).PublicKey()
+	otherKey := store.addTestSpace(t, owner).PublicKey()
+	slab := slabs.SlabPinParams{EncryptionKey: frand.Entropy256(), MinShards: 1}
+	for range 2 {
+		hk := store.addTestHost(t)
+		store.addTestContract(t, hk)
+		slab.Sectors = append(slab.Sectors, slabs.PinnedSector{Root: frand.Entropy256(), HostKey: hk})
+	}
+	if _, err := store.PinSlabs(owner, time.Time{}, slab); err != nil {
+		t.Fatal(err)
+	}
+	a := store.pinRandomObject(t, owner, []slabs.SlabSlice{slab.Slice(0, 100), slab.Slice(100, 100)})
+	b := store.pinRandomObject(t, owner, []slabs.SlabSlice{slab.Slice(200, 50)})
+	assertTotals := func(key types.PublicKey, count, size, slabCount uint64) {
+		t.Helper()
+		space, err := store.Space(owner, key)
+		if err != nil {
+			t.Fatal(err)
+		} else if space.ObjectCount != count || space.ObjectSize != size || space.PinnedData != slabCount*slab.DataSize() || space.PinnedSize != slabCount*slab.Size() {
+			t.Fatalf("unexpected totals: %+v; want count=%d size=%d data=%d disk=%d", space, count, size, slabCount*slab.DataSize(), slabCount*slab.Size())
+		}
+	}
+	assertTotals(key, 0, 0, 0)
+	if err := store.PinSpaceObject(owner, key, a.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	assertTotals(key, 1, 200, 1)
+	update := a.PinRequest()
+	update.EncryptedMetadata = frand.Bytes(32)
+	if err := store.PinSpaceObject(owner, key, update); err != nil {
+		t.Fatal(err)
+	}
+	assertTotals(key, 1, 200, 1)
+	update.EncryptedDataKey = frand.Bytes(72)
+	if err := store.PinSpaceObject(owner, key, update); !errors.Is(err, spaces.ErrObjectKeyMismatch) {
+		t.Fatalf("expected data key mismatch, got %v", err)
+	}
+	assertTotals(key, 1, 200, 1)
+	if err := store.PinSpaceObject(owner, key, b.PinRequest()); err != nil {
+		t.Fatal(err)
+	}
+	assertTotals(key, 2, 250, 2)
+	if err := store.DeleteSpaceObject(owner, key, a.ID()); err != nil {
+		t.Fatal(err)
+	}
+	assertTotals(key, 1, 50, 1)
+	if err := store.DeleteSlabObject(slabs.SlabObject{Account: owner, SpaceKey: key, ObjectID: b.ID()}); err != nil {
+		t.Fatal(err)
+	}
+	assertTotals(key, 0, 0, 0)
+
+	for _, key := range []types.PublicKey{key, otherKey} {
+		for _, obj := range []slabs.SealedObject{a, b} {
+			if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		assertTotals(key, 2, 250, 2)
+	}
+	tx, err := store.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(t.Context())
+	if _, err := tx.Exec(t.Context(), `DELETE FROM space_objects`); err != nil {
+		t.Fatal(err)
+	} else if err := tx.Rollback(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	assertTotals(key, 2, 250, 2)
+	assertTotals(otherKey, 2, 250, 2)
+	if _, err := store.pool.Exec(t.Context(), `DELETE FROM space_objects`); err != nil {
+		t.Fatal(err)
+	}
+	assertTotals(key, 0, 0, 0)
+	assertTotals(otherKey, 0, 0, 0)
+	for _, key := range []types.PublicKey{key, otherKey} {
+		if err := store.PinSpaceObject(owner, key, a.PinRequest()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.DeleteSpace(owner, key); err != nil {
+		t.Fatal(err)
+	}
+	assertTotals(otherKey, 1, 200, 1)
+}
+
 func TestSpaceQuotaRollback(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 	owner := proto.Account(types.GeneratePrivateKey().PublicKey())
@@ -397,6 +488,10 @@ func TestSpaceQuotaRollback(t *testing.T) {
 	store.assertPinnedSlabs(t, owner)
 	if _, err := store.SpaceObject(owner, key, obj.ID()); !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("failed pin persisted: %v", err)
+	} else if space, err := store.Space(owner, key); err != nil {
+		t.Fatal(err)
+	} else if space.ObjectCount != 0 || space.ObjectSize != 0 || space.PinnedData != 0 || space.PinnedSize != 0 {
+		t.Fatalf("failed pin changed totals: %+v", space)
 	}
 }
 
@@ -463,7 +558,7 @@ func TestSpaceStorageLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := store.SpaceObject(owner, keys[1], obj.ID())
-	if err != nil || got.Account != member {
+	if err != nil || got.ID() != obj.ID() || !reflect.DeepEqual(got.Slabs, obj.Slabs) {
 		t.Fatalf("object lost with member: %+v, %v", got, err)
 	} else if err := store.DeleteAccount(owner); err != nil {
 		t.Fatal(err)
@@ -513,11 +608,12 @@ func TestSpaceConcurrentReads(t *testing.T) {
 	ownerKey := types.GeneratePrivateKey()
 	owner := proto.Account(ownerKey.PublicKey())
 	store.addTestAccount(t, types.PublicKey(owner))
-	key := store.addTestSpace(t, owner).PublicKey()
+	spaceKey := store.addTestSpace(t, owner)
+	key := spaceKey.PublicKey()
 	hk := store.addTestHost(t)
 	store.addTestContract(t, hk)
 	obj := store.pinTestObject(t, owner, hk)
-	obj.Sign(ownerKey)
+	obj.Sign(spaceKey)
 	if err := store.PinSpaceObject(owner, key, obj.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
@@ -830,7 +926,7 @@ func TestSpaceObjectEvents(t *testing.T) {
 	}
 	store.publishEvents(t)
 	page, err := store.ListSpaceObjects(owner, key, slabs.Cursor{}, 1)
-	if err != nil || len(page) != 1 || page[0].Key != second.ID() || page[0].Object == nil || page[0].Object.Account != owner {
+	if err != nil || len(page) != 1 || page[0].Key != second.ID() || page[0].Object == nil {
 		t.Fatalf("unexpected page: %+v, %v", page, err)
 	}
 	cursor := slabs.Cursor{After: page[0].UpdatedAt, Key: page[0].Key}

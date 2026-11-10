@@ -543,6 +543,10 @@ CREATE TABLE spaces (
     signature BYTEA NOT NULL CHECK(LENGTH(signature) = 64),
     encrypted_name BYTEA,
     encrypted_metadata BYTEA, -- user provided, encrypted space metadata
+    object_count BIGINT NOT NULL DEFAULT 0 CHECK(object_count >= 0),
+    size BIGINT NOT NULL DEFAULT 0 CHECK(size >= 0),
+    pinned_data BIGINT NOT NULL DEFAULT 0 CHECK(pinned_data >= 0),
+    pinned_size BIGINT NOT NULL DEFAULT 0 CHECK(pinned_size >= 0),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
 );
@@ -586,13 +590,91 @@ CREATE TABLE space_objects (
     encrypted_metadata BYTEA,
     data_signature BYTEA NOT NULL CHECK(LENGTH(data_signature) = 64),
     meta_signature BYTEA NOT NULL CHECK(LENGTH(meta_signature) = 64),
-    account_key BYTEA NOT NULL CHECK(LENGTH(account_key) = 32), -- app account that signed the object
     size BIGINT NOT NULL CHECK(size >= 0), -- logical size of the object (object.Size())
+    pinned_data BIGINT NOT NULL CHECK(pinned_data >= 0),
+    pinned_size BIGINT NOT NULL CHECK(pinned_size >= 0),
     created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     UNIQUE (space_id, object_key)
 );
 CREATE INDEX space_objects_object_key_idx ON space_objects(object_key);
+
+CREATE FUNCTION space_objects_maintain_totals() RETURNS TRIGGER AS $$
+BEGIN
+    IF (TG_OP = 'INSERT') THEN
+        UPDATE spaces SET
+            object_count = spaces.object_count + agg.object_count,
+            size = spaces.size + agg.size,
+            pinned_data = spaces.pinned_data + agg.pinned_data,
+            pinned_size = spaces.pinned_size + agg.pinned_size,
+            updated_at = NOW()
+        FROM (
+            SELECT space_id,
+                COUNT(*) AS object_count,
+                SUM(size) AS size,
+                SUM(pinned_data) AS pinned_data,
+                SUM(pinned_size) AS pinned_size
+            FROM new_rows
+            GROUP BY space_id
+        ) agg
+        WHERE spaces.id = agg.space_id;
+    ELSIF (TG_OP = 'UPDATE') THEN
+        UPDATE spaces SET
+            object_count = spaces.object_count + agg.object_count,
+            size = spaces.size + agg.size,
+            pinned_data = spaces.pinned_data + agg.pinned_data,
+            pinned_size = spaces.pinned_size + agg.pinned_size,
+            updated_at = NOW()
+        FROM (
+            SELECT space_id,
+                SUM(object_count) AS object_count,
+                SUM(size) AS size,
+                SUM(pinned_data) AS pinned_data,
+                SUM(pinned_size) AS pinned_size
+            FROM (
+                SELECT space_id, 1 AS object_count, size, pinned_data, pinned_size FROM new_rows
+                UNION ALL
+                SELECT space_id, -1, -size, -pinned_data, -pinned_size FROM old_rows
+            ) deltas
+            GROUP BY space_id
+        ) agg
+        WHERE spaces.id = agg.space_id;
+    ELSIF (TG_OP = 'DELETE') THEN
+        UPDATE spaces SET
+            object_count = spaces.object_count - agg.object_count,
+            size = spaces.size - agg.size,
+            pinned_data = spaces.pinned_data - agg.pinned_data,
+            pinned_size = spaces.pinned_size - agg.pinned_size,
+            updated_at = NOW()
+        FROM (
+            SELECT space_id,
+                COUNT(*) AS object_count,
+                SUM(size) AS size,
+                SUM(pinned_data) AS pinned_data,
+                SUM(pinned_size) AS pinned_size
+            FROM old_rows
+            GROUP BY space_id
+        ) agg
+        WHERE spaces.id = agg.space_id;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER space_objects_maintain_totals_insert
+AFTER INSERT ON space_objects
+REFERENCING NEW TABLE AS new_rows
+FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();
+
+CREATE TRIGGER space_objects_maintain_totals_update
+AFTER UPDATE ON space_objects
+REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
+FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();
+
+CREATE TRIGGER space_objects_maintain_totals_delete
+AFTER DELETE ON space_objects
+REFERENCING OLD TABLE AS old_rows
+FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();
 
 CREATE TABLE space_object_events (
     space_id BIGINT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,

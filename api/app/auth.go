@@ -145,22 +145,24 @@ func validateSharedURLAuth(jc jape.Context, hostname string, store Sharing) (sha
 }
 
 func parseCredential(req *http.Request) (pk types.PublicKey, _ error) {
-	n, err := base64.URLEncoding.Decode(pk[:], []byte(req.URL.Query().Get(queryParamCredential)))
+	credential, err := base64.URLEncoding.DecodeString(req.URL.Query().Get(queryParamCredential))
 	if err != nil {
 		return types.PublicKey{}, errors.New("invalid base64 encoding for credential")
-	} else if n != len(pk) {
+	} else if len(credential) != len(pk) {
 		return types.PublicKey{}, fmt.Errorf("invalid credential length: expected %d bytes", len(pk))
 	}
+	copy(pk[:], credential)
 	return
 }
 
 func parseSignature(req *http.Request) (sig types.Signature, _ error) {
-	n, err := base64.URLEncoding.Decode(sig[:], []byte(req.URL.Query().Get(queryParamSignature)))
+	signature, err := base64.URLEncoding.DecodeString(req.URL.Query().Get(queryParamSignature))
 	if err != nil {
 		return types.Signature{}, errors.New("invalid base64 encoding for signature")
-	} else if n != len(sig) {
+	} else if len(signature) != len(sig) {
 		return types.Signature{}, fmt.Errorf("invalid signature length: expected %d bytes", len(sig))
 	}
+	copy(sig[:], signature)
 	return
 }
 

@@ -16,9 +16,9 @@ import (
 )
 
 type (
-	// A SealedObject is an object that has been locked with an app key.
+	// A SealedObject is an object that has been locked with an app or space key.
 	// It can be safely serialized and shared, but cannot be used to access
-	// the underlying data until it has been unlocked with the app key.
+	// the underlying data until it has been unlocked with the corresponding key.
 	SealedObject struct {
 		EncryptedDataKey []byte      `json:"encryptedDataKey"`
 		Slabs            []SlabSlice `json:"slabs"`

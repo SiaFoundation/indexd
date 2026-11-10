@@ -158,6 +158,14 @@ func TestAppConnectKeys(t *testing.T) {
 	} else if !reflect.DeepEqual(keys[0], key) {
 		t.Fatal("unexpected key", keys[0], key)
 	}
+
+	// no key exceeds its quota
+	keys, err = adminClient.AppConnectKeys(context.Background(), 0, 10, api.WithExceedsQuota())
+	if err != nil {
+		t.Fatal(err)
+	} else if len(keys) != 0 {
+		t.Fatalf("expected no keys exceeding their quota, got %d", len(keys))
+	}
 }
 
 func TestPreAuthorizedKeys(t *testing.T) {

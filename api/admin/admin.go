@@ -118,7 +118,7 @@ type (
 		UpdateAppConnectKey(context.Context, accounts.AppConnectKeyRequest) (accounts.ConnectKey, error)
 		DeleteAppConnectKey(context.Context, string) error
 		AppConnectKey(ctx context.Context, key string) (accounts.ConnectKey, error)
-		AppConnectKeys(ctx context.Context, offset, limit int) ([]accounts.ConnectKey, error)
+		AppConnectKeys(ctx context.Context, offset, limit int, opts ...accounts.QueryConnectKeysOpt) ([]accounts.ConnectKey, error)
 		AddPreAuthorizedKey(context.Context, accounts.PreAuthorizedKeyRequest) (accounts.PreAuthorizedKey, error)
 		DeletePreAuthorizedKey(context.Context, types.PublicKey) error
 		PreAuthorizedKey(context.Context, types.PublicKey) (accounts.PreAuthorizedKey, error)
@@ -449,7 +449,16 @@ func (a *admin) handleGETAppConnectKeys(jc jape.Context) {
 		return
 	}
 
-	keys, err := a.accounts.AppConnectKeys(jc.Request.Context(), offset, limit)
+	var exceedsQuota bool
+	if jc.DecodeForm("exceedsquota", &exceedsQuota) != nil {
+		return
+	}
+	var opts []accounts.QueryConnectKeysOpt
+	if exceedsQuota {
+		opts = append(opts, accounts.WithExceedsQuota())
+	}
+
+	keys, err := a.accounts.AppConnectKeys(jc.Request.Context(), offset, limit, opts...)
 	if jc.Check("failed to get app connect keys", err) != nil {
 		return
 	}

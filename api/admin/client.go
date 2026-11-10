@@ -42,10 +42,13 @@ func NewClient(addr, password string) *Client {
 }
 
 // AppConnectKeys retrieves a paginated list of application connection keys.
-func (c *Client) AppConnectKeys(ctx context.Context, offset, limit int) (keys []accounts.ConnectKey, err error) {
+func (c *Client) AppConnectKeys(ctx context.Context, offset, limit int, opts ...api.URLQueryParameterOption) (keys []accounts.ConnectKey, err error) {
 	values := url.Values{}
 	values.Set("offset", fmt.Sprintf("%d", offset))
 	values.Set("limit", fmt.Sprintf("%d", limit))
+	for _, opt := range opts {
+		opt(values)
+	}
 	err = c.c.GET(ctx, "/apps/connect/keys?"+values.Encode(), &keys)
 	return
 }

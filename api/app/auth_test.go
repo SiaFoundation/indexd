@@ -135,7 +135,7 @@ func TestPreAuthorizedAuth(t *testing.T) {
 	}
 	defer l.Close()
 	appAPIAddr := fmt.Sprintf("http://%s", l.Addr())
-	handler, err := NewAPI(appAPIAddr, nil, s, &mockContracts{}, nil, nil)
+	handler, err := NewAPI(appAPIAddr, nil, s, &mockContracts{}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestPreAuthorizationBoundToEphemeralKey(t *testing.T) {
 	}
 	defer l.Close()
 	appAPIAddr := fmt.Sprintf("http://%s", l.Addr())
-	handler, err := NewAPI(appAPIAddr, nil, s, &mockContracts{}, nil, nil)
+	handler, err := NewAPI(appAPIAddr, nil, s, &mockContracts{}, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -240,7 +240,7 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 	defer l.Close()
 
 	appAPIAddr := fmt.Sprintf("http://%s", l.Addr().String())
-	handler, err := NewAPI(appAPIAddr, nil, s, nil, nil, nil)
+	handler, err := NewAPI(appAPIAddr, nil, s, nil, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestAuthConnectRateLimit(t *testing.T) {
 	defer l.Close()
 
 	appAPIAddr := fmt.Sprintf("http://%s", l.Addr().String())
-	handler, err := NewAPI(appAPIAddr, nil, s, nil, nil, nil, WithRateLimiter(rl))
+	handler, err := NewAPI(appAPIAddr, nil, s, nil, nil, nil, nil, WithRateLimiter(rl))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,6 +417,28 @@ func TestAuth(t *testing.T) {
 			modify: func(_ *string, u *url.URL, _ []byte) {
 				values := u.Query()
 				values.Set(queryParamSignature, "invalid")
+				u.RawQuery = values.Encode()
+			},
+			ok: false,
+		},
+		{
+			name:       "oversized credential",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, u *url.URL, _ []byte) {
+				values := u.Query()
+				values.Set(queryParamCredential, base64.URLEncoding.EncodeToString(frand.Bytes(33)))
+				u.RawQuery = values.Encode()
+			},
+			ok: false,
+		},
+		{
+			name:       "oversized signature",
+			method:     "GET",
+			validUntil: time.Now().Add(time.Hour),
+			modify: func(_ *string, u *url.URL, _ []byte) {
+				values := u.Query()
+				values.Set(queryParamSignature, base64.URLEncoding.EncodeToString(frand.Bytes(65)))
 				u.RawQuery = values.Encode()
 			},
 			ok: false,

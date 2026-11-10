@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.uber.org/zap"
 )
@@ -621,6 +622,135 @@ CREATE TABLE space_object_slabs (
 );
 CREATE INDEX space_object_slabs_slab_digest_idx ON space_object_slabs(slab_digest);
 CREATE INDEX space_object_slabs_object_id_slab_index_idx ON space_object_slabs(object_id, slab_index ASC);`)
+		return err
+	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		if _, err := tx.Exec(ctx, `
+ALTER TABLE spaces
+    ADD COLUMN object_count BIGINT NOT NULL DEFAULT 0 CHECK(object_count >= 0),
+    ADD COLUMN size BIGINT NOT NULL DEFAULT 0 CHECK(size >= 0),
+    ADD COLUMN pinned_data BIGINT NOT NULL DEFAULT 0 CHECK(pinned_data >= 0),
+    ADD COLUMN pinned_size BIGINT NOT NULL DEFAULT 0 CHECK(pinned_size >= 0);
+ALTER TABLE space_objects
+    ADD COLUMN pinned_data BIGINT NOT NULL DEFAULT 0 CHECK(pinned_data >= 0),
+    ADD COLUMN pinned_size BIGINT NOT NULL DEFAULT 0 CHECK(pinned_size >= 0);`); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(ctx, `
+WITH object_slabs AS (
+    SELECT DISTINCT os.object_id, s.id AS slab_id, s.min_shards
+    FROM space_object_slabs os
+    JOIN slabs s ON s.digest = os.slab_digest
+), totals AS (
+    SELECT object_id,
+        SUM(min_shards::bigint) * $1::bigint AS pinned_data,
+        SUM((SELECT COUNT(*) FROM slab_sectors ss WHERE ss.slab_id = object_slabs.slab_id)) * $1::bigint AS pinned_size
+    FROM object_slabs
+    GROUP BY object_id
+)
+UPDATE space_objects o SET pinned_data = totals.pinned_data, pinned_size = totals.pinned_size
+FROM totals WHERE o.id = totals.object_id`, proto.SectorSize); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `
+UPDATE spaces SET
+    object_count = totals.object_count,
+    size = totals.size,
+    pinned_data = totals.pinned_data,
+    pinned_size = totals.pinned_size
+FROM (
+    SELECT space_id, COUNT(*) AS object_count, SUM(size) AS size,
+        SUM(pinned_data) AS pinned_data, SUM(pinned_size) AS pinned_size
+    FROM space_objects
+    GROUP BY space_id
+) totals
+WHERE spaces.id = totals.space_id;
+ALTER TABLE space_objects
+    ALTER COLUMN pinned_data DROP DEFAULT,
+    ALTER COLUMN pinned_size DROP DEFAULT;
+
+CREATE FUNCTION space_objects_maintain_totals() RETURNS TRIGGER AS $$
+BEGIN
+    IF (TG_OP = 'INSERT') THEN
+        UPDATE spaces SET
+            object_count = spaces.object_count + agg.object_count,
+            size = spaces.size + agg.size,
+            pinned_data = spaces.pinned_data + agg.pinned_data,
+            pinned_size = spaces.pinned_size + agg.pinned_size,
+            updated_at = NOW()
+        FROM (
+            SELECT space_id,
+                COUNT(*) AS object_count,
+                SUM(size) AS size,
+                SUM(pinned_data) AS pinned_data,
+                SUM(pinned_size) AS pinned_size
+            FROM new_rows
+            GROUP BY space_id
+        ) agg
+        WHERE spaces.id = agg.space_id;
+    ELSIF (TG_OP = 'UPDATE') THEN
+        UPDATE spaces SET
+            object_count = spaces.object_count + agg.object_count,
+            size = spaces.size + agg.size,
+            pinned_data = spaces.pinned_data + agg.pinned_data,
+            pinned_size = spaces.pinned_size + agg.pinned_size,
+            updated_at = NOW()
+        FROM (
+            SELECT space_id,
+                SUM(object_count) AS object_count,
+                SUM(size) AS size,
+                SUM(pinned_data) AS pinned_data,
+                SUM(pinned_size) AS pinned_size
+            FROM (
+                SELECT space_id, 1 AS object_count, size, pinned_data, pinned_size FROM new_rows
+                UNION ALL
+                SELECT space_id, -1, -size, -pinned_data, -pinned_size FROM old_rows
+            ) deltas
+            GROUP BY space_id
+        ) agg
+        WHERE spaces.id = agg.space_id;
+    ELSIF (TG_OP = 'DELETE') THEN
+        UPDATE spaces SET
+            object_count = spaces.object_count - agg.object_count,
+            size = spaces.size - agg.size,
+            pinned_data = spaces.pinned_data - agg.pinned_data,
+            pinned_size = spaces.pinned_size - agg.pinned_size,
+            updated_at = NOW()
+        FROM (
+            SELECT space_id,
+                COUNT(*) AS object_count,
+                SUM(size) AS size,
+                SUM(pinned_data) AS pinned_data,
+                SUM(pinned_size) AS pinned_size
+            FROM old_rows
+            GROUP BY space_id
+        ) agg
+        WHERE spaces.id = agg.space_id;
+    END IF;
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER space_objects_maintain_totals_insert
+AFTER INSERT ON space_objects
+REFERENCING NEW TABLE AS new_rows
+FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();
+
+CREATE TRIGGER space_objects_maintain_totals_update
+AFTER UPDATE ON space_objects
+REFERENCING OLD TABLE AS old_rows NEW TABLE AS new_rows
+FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();
+
+CREATE TRIGGER space_objects_maintain_totals_delete
+AFTER DELETE ON space_objects
+REFERENCING OLD TABLE AS old_rows
+FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();`)
+		return err
+	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		// Existing space objects are broken with this migration. Since we
+		// haven't released shared spaces yet, this shouldn't affect anything.
+		_, err := tx.Exec(ctx, `ALTER TABLE space_objects DROP COLUMN account_key`)
 		return err
 	},
 }
