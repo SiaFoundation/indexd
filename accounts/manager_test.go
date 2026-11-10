@@ -8,9 +8,11 @@ import (
 	"testing/synctest"
 	"time"
 
+	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/accounts"
 	"go.sia.tech/indexd/contracts"
+	"go.sia.tech/indexd/hosts"
 	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap/zaptest"
 )
@@ -277,4 +279,35 @@ func approxEqual(t1, t2 time.Time) bool {
 		diff = -diff
 	}
 	return diff <= tol
+}
+
+// TestHostFundTarget asserts the fund targets cover the full read and write
+// cost of every sector.
+func TestHostFundTarget(t *testing.T) {
+	host := hosts.Host{Settings: proto.HostSettings{Prices: proto.HostPrices{
+		StoragePrice: types.NewCurrency64(3),
+		IngressPrice: types.NewCurrency64(5),
+		EgressPrice:  types.NewCurrency64(7),
+	}}}
+
+	// write costs temporary storage plus ingress, read costs egress
+	write := types.NewCurrency64(3*proto.TempSectorDuration + 5).Mul64(proto.SectorSize)
+	read := types.NewCurrency64(7).Mul64(proto.SectorSize)
+
+	for _, tc := range []struct {
+		bytes   uint64
+		sectors uint64
+	}{
+		{0, 0},
+		{1, 1},
+		{proto.SectorSize, 1},
+		{proto.SectorSize + 1, 2},
+		{10 * proto.SectorSize, 10},
+	} {
+		if got, want := accounts.HostFundTarget(host, tc.bytes), write.Add(read).Mul64(tc.sectors); !got.Equals(want) {
+			t.Fatalf("%d bytes: expected fund target %v, got %v", tc.bytes, want, got)
+		} else if got, want := accounts.HostReadFundTarget(host, tc.bytes), read.Mul64(tc.sectors); !got.Equals(want) {
+			t.Fatalf("%d bytes: expected read fund target %v, got %v", tc.bytes, want, got)
+		}
+	}
 }
