@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -206,21 +207,27 @@ OUTER:
 					continue
 				}
 
-				funded, drained, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, batch.accs, batch.target, log)
+				res, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, batch.accs, batch.target, log)
 				if err != nil {
 					return fmt.Errorf("failed to fund accounts: %w", err)
+				} else if res.ContractsLocked {
+					// only record successful funding, the remainder stays
+					// eligible for retry without a failure or backoff
+					batch.accs = batch.accs[:res.Funded]
 				}
 
-				accounts.UpdateFundedAccounts(batch.accs, funded, cm.maxAccountFundingBackoff)
+				accounts.UpdateFundedAccounts(batch.accs, res.Funded, cm.maxAccountFundingBackoff)
 				if err := cm.accounts.UpdateHostAccounts(batch.accs); err != nil {
 					return fmt.Errorf("failed to update accounts: %w", err)
 				}
 
-				contractIDs = contractIDs[drained:]
+				// locked contracts are skipped without being drained, so the
+				// drained contracts aren't necessarily a prefix of contractIDs
+				contractIDs = withoutContracts(contractIDs, res.Drained)
 				if len(contractIDs) == 0 {
 					log.Debug("not all accounts could be funded, no more contracts available", zap.String("quota", quota.Key))
 					break OUTER
-				} else if funded == 0 {
+				} else if res.Funded == 0 {
 					log.Debug("no accounts could be funded, skipping host", zap.String("quota", quota.Key))
 					break OUTER
 				}
@@ -248,12 +255,12 @@ func (cm *ContractManager) FundServiceAccounts(ctx context.Context, host hosts.H
 	serviceAccounts := cm.accounts.ServiceAccounts(host.PublicKey)
 	if len(serviceAccounts) > 0 {
 		fundTarget := accounts.HostFundTarget(host, serviceAccountFundTargetBytes)
-		funded, _, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
+		res, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
 		if err != nil {
 			return fmt.Errorf("failed to fund service accounts: %w", err)
 		}
 
-		if err := cm.accounts.UpdateServiceAccounts(serviceAccounts[:funded], fundTarget); err != nil {
+		if err := cm.accounts.UpdateServiceAccounts(serviceAccounts[:res.Funded], fundTarget); err != nil {
 			cm.log.Warn("failed to update service account balances", zap.Error(err))
 		}
 	}
@@ -333,21 +340,27 @@ OUTER:
 					continue
 				}
 
-				funded, drained, err := cm.accountFunder.FundPools(ctx, host, contractIDs, batch.pools, batch.target, log)
+				res, err := cm.accountFunder.FundPools(ctx, host, contractIDs, batch.pools, batch.target, log)
 				if err != nil {
 					return fmt.Errorf("failed to fund pools: %w", err)
+				} else if res.ContractsLocked {
+					// only record successful funding, the remainder stays
+					// eligible for retry without a failure or backoff
+					batch.pools = batch.pools[:res.Funded]
 				}
 
-				accounts.UpdateFundedPools(batch.pools, funded, cm.maxAccountFundingBackoff)
+				accounts.UpdateFundedPools(batch.pools, res.Funded, cm.maxAccountFundingBackoff)
 				if err := cm.accounts.UpdateHostPools(batch.pools); err != nil {
 					return fmt.Errorf("failed to update pools: %w", err)
 				}
 
-				contractIDs = contractIDs[drained:]
+				// locked contracts are skipped without being drained, so the
+				// drained contracts aren't necessarily a prefix of contractIDs
+				contractIDs = withoutContracts(contractIDs, res.Drained)
 				if len(contractIDs) == 0 {
 					log.Debug("not all pools could be funded, no more contracts available", zap.String("quota", quota.Key))
 					break OUTER
-				} else if funded == 0 {
+				} else if res.Funded == 0 {
 					log.Debug("no pools could be funded, skipping host", zap.String("quota", quota.Key))
 					break OUTER
 				}
@@ -356,4 +369,11 @@ OUTER:
 	}
 
 	return nil
+}
+
+// withoutContracts returns a copy of ids without the contract IDs in remove.
+func withoutContracts(ids, remove []types.FileContractID) []types.FileContractID {
+	return slices.DeleteFunc(slices.Clone(ids), func(id types.FileContractID) bool {
+		return slices.Contains(remove, id)
+	})
 }

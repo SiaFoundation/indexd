@@ -157,7 +157,7 @@ func (f *accountFunderMock) AttachPools(_ context.Context, _ types.PublicKey, in
 	return nil
 }
 
-func (f *accountFunderMock) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accs []accounts.HostAccount, target types.Currency, log *zap.Logger) (funded int, drained int, err error) {
+func (f *accountFunderMock) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accs []accounts.HostAccount, target types.Currency, log *zap.Logger) (contracts.FundResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	accsCopy := make([]accounts.HostAccount, len(accs))
@@ -168,10 +168,10 @@ func (f *accountFunderMock) FundAccounts(ctx context.Context, host hosts.Host, c
 		accounts:    accsCopy,
 		target:      target,
 	})
-	return len(accs), 0, nil
+	return contracts.FundResult{Funded: len(accs)}, nil
 }
 
-func (f *accountFunderMock) FundPools(_ context.Context, host hosts.Host, contractIDs []types.FileContractID, pools []accounts.HostPool, target types.Currency, _ *zap.Logger) (funded int, drained int, err error) {
+func (f *accountFunderMock) FundPools(_ context.Context, host hosts.Host, contractIDs []types.FileContractID, pools []accounts.HostPool, target types.Currency, _ *zap.Logger) (contracts.FundResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	poolsCopy := make([]accounts.HostPool, len(pools))
@@ -182,7 +182,7 @@ func (f *accountFunderMock) FundPools(_ context.Context, host hosts.Host, contra
 		pools:       poolsCopy,
 		target:      target,
 	})
-	return len(pools), 0, nil
+	return contracts.FundResult{Funded: len(pools)}, nil
 }
 
 func TestPerformAccountFunding(t *testing.T) {
@@ -567,12 +567,30 @@ func (f *stuckFunderMock) fund(n int) int {
 	return n
 }
 
-func (f *stuckFunderMock) FundAccounts(_ context.Context, _ hosts.Host, _ []types.FileContractID, accs []accounts.HostAccount, _ types.Currency, _ *zap.Logger) (funded, drained int, _ error) {
-	return f.fund(len(accs)), 0, nil
+func (f *stuckFunderMock) FundAccounts(_ context.Context, _ hosts.Host, _ []types.FileContractID, accs []accounts.HostAccount, _ types.Currency, _ *zap.Logger) (contracts.FundResult, error) {
+	return contracts.FundResult{Funded: f.fund(len(accs))}, nil
 }
 
-func (f *stuckFunderMock) FundPools(_ context.Context, _ hosts.Host, _ []types.FileContractID, pools []accounts.HostPool, _ types.Currency, _ *zap.Logger) (funded, drained int, _ error) {
-	return f.fund(len(pools)), 0, nil
+func (f *stuckFunderMock) FundPools(_ context.Context, _ hosts.Host, _ []types.FileContractID, pools []accounts.HostPool, _ types.Currency, _ *zap.Logger) (contracts.FundResult, error) {
+	return contracts.FundResult{Funded: f.fund(len(pools))}, nil
+}
+
+// fundKinds funds either accounts or pools on a good host with a protocol
+// version that supports them.
+var fundKinds = []struct {
+	name string
+	fund func(ctx context.Context, cm *contracts.ContractManager, contractIDs []types.FileContractID) error
+}{
+	{"accounts", func(ctx context.Context, cm *contracts.ContractManager, contractIDs []types.FileContractID) error {
+		h := hosts.Host{PublicKey: types.PublicKey{1}, Usability: hosts.GoodUsability, Settings: goodSettings}
+		h.Settings.ProtocolVersion = rhp.ProtocolVersion502
+		return cm.FundAccounts(ctx, h, contractIDs, []accounts.Quota{{Key: "default", FundTargetBytes: testFundTargetBytes}}, zap.NewNop())
+	}},
+	{"pools", func(ctx context.Context, cm *contracts.ContractManager, contractIDs []types.FileContractID) error {
+		h := hosts.Host{PublicKey: types.PublicKey{1}, Usability: hosts.GoodUsability, Settings: goodSettings}
+		h.Settings.ProtocolVersion = rhp.ProtocolVersion510
+		return cm.FundPools(ctx, h, contractIDs, []accounts.Quota{{Key: "default", FundTargetBytes: testFundTargetBytes}}, zap.NewNop())
+	}},
 }
 
 // TestFundingLoopTerminates is a regression test for the funding loops
@@ -591,32 +609,14 @@ func TestFundingLoopTerminates(t *testing.T) {
 	store := newTestStore(t)
 	cm := contracts.NewTestContractManager(types.PublicKey{}, amMock, funder, nil, store, nil, nil, nil, contracts.NewContractLocker(), newHostManagerMock(store), nil, nil)
 
-	quotas := []accounts.Quota{{Key: "default", FundTargetBytes: testFundTargetBytes}}
 	contractIDs := []types.FileContractID{{1}}
-	legacySettings := goodSettings
-	legacySettings.ProtocolVersion = rhp.ProtocolVersion502
-	poolSettings := goodSettings
-	poolSettings.ProtocolVersion = rhp.ProtocolVersion510
-
-	for _, tc := range []struct {
-		name string
-		fund func(context.Context) error
-	}{
-		{"accounts", func(ctx context.Context) error {
-			h := hosts.Host{PublicKey: types.PublicKey{1}, Usability: hosts.GoodUsability, Settings: legacySettings}
-			return cm.FundAccounts(ctx, h, contractIDs, quotas, zap.NewNop())
-		}},
-		{"pools", func(ctx context.Context) error {
-			h := hosts.Host{PublicKey: types.PublicKey{1}, Usability: hosts.GoodUsability, Settings: poolSettings}
-			return cm.FundPools(ctx, h, contractIDs, quotas, zap.NewNop())
-		}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, kind := range fundKinds {
+		t.Run(kind.name, func(t *testing.T) {
 			// an already cancelled context should not fund anything
 			ctx, cancel := context.WithCancel(context.Background())
 			cancel()
 			*funder = stuckFunderMock{cancel: cancel}
-			if err := tc.fund(ctx); !errors.Is(err, context.Canceled) {
+			if err := kind.fund(ctx, cm, contractIDs); !errors.Is(err, context.Canceled) {
 				t.Fatalf("expected context.Canceled, got %v", err)
 			} else if funder.n != 0 {
 				t.Fatalf("expected no funding attempts, got %d", funder.n)
@@ -626,7 +626,7 @@ func TestFundingLoopTerminates(t *testing.T) {
 			ctx, cancel = context.WithCancel(context.Background())
 			defer cancel()
 			*funder = stuckFunderMock{cancel: cancel}
-			if err := tc.fund(ctx); !errors.Is(err, context.Canceled) {
+			if err := kind.fund(ctx, cm, contractIDs); !errors.Is(err, context.Canceled) {
 				t.Fatalf("expected context.Canceled, got %v", err)
 			} else if funder.n != 1 {
 				t.Fatalf("expected 1 funding attempt, got %d", funder.n)
@@ -634,7 +634,7 @@ func TestFundingLoopTerminates(t *testing.T) {
 
 			// an unreachable host should be skipped after the first batch
 			*funder = stuckFunderMock{fail: true}
-			if err := tc.fund(context.Background()); err != nil {
+			if err := kind.fund(context.Background(), cm, contractIDs); err != nil {
 				t.Fatal(err)
 			} else if funder.n != 1 {
 				t.Fatalf("expected 1 funding attempt, got %d", funder.n)
@@ -643,10 +643,20 @@ func TestFundingLoopTerminates(t *testing.T) {
 	}
 }
 
-// nextFundMock only returns accounts and pools that are due for funding.
+// nextFundMock only returns accounts and pools that are due for funding. It
+// records the next fund time and failed funds of every update.
 type nextFundMock struct {
 	*accountsManagerMock
-	nextFund map[types.PublicKey]time.Time
+	nextFund    map[types.PublicKey]time.Time
+	failedFunds map[types.PublicKey]int
+}
+
+func newNextFundMock() *nextFundMock {
+	return &nextFundMock{
+		accountsManagerMock: newAccountsManagerMock(),
+		nextFund:            make(map[types.PublicKey]time.Time),
+		failedFunds:         make(map[types.PublicKey]int),
+	}
 }
 
 func (m *nextFundMock) AccountsForFunding(_ types.PublicKey, _ string, _ time.Time, limit int) (due []accounts.HostAccount, _ error) {
@@ -661,6 +671,7 @@ func (m *nextFundMock) AccountsForFunding(_ types.PublicKey, _ string, _ time.Ti
 func (m *nextFundMock) UpdateHostAccounts(accs []accounts.HostAccount) error {
 	for _, acc := range accs {
 		m.nextFund[types.PublicKey(acc.AccountKey)] = acc.NextFund
+		m.failedFunds[types.PublicKey(acc.AccountKey)] = acc.ConsecutiveFailedFunds
 	}
 	return nil
 }
@@ -677,6 +688,7 @@ func (m *nextFundMock) PoolsForFunding(_ types.PublicKey, _ string, _ time.Time,
 func (m *nextFundMock) UpdateHostPools(pools []accounts.HostPool) error {
 	for _, pool := range pools {
 		m.nextFund[pool.PoolKey.PublicKey()] = pool.NextFund
+		m.failedFunds[pool.PoolKey.PublicKey()] = pool.ConsecutiveFailedFunds
 	}
 	return nil
 }
@@ -684,7 +696,7 @@ func (m *nextFundMock) UpdateHostPools(pools []accounts.HostPool) error {
 // TestFundingZeroReadTarget asserts that full storage accounts and pools on a
 // host with free egress don't block the upload accounts and pools behind them.
 func TestFundingZeroReadTarget(t *testing.T) {
-	am := &nextFundMock{accountsManagerMock: newAccountsManagerMock(), nextFund: make(map[types.PublicKey]time.Time)}
+	am := newNextFundMock()
 	for range accounts.AccountFundBatch {
 		am.accountsToFund = append(am.accountsToFund, accounts.HostAccount{AccountKey: proto.Account(types.GeneratePrivateKey().PublicKey()), FullStorage: true})
 		am.poolsToFund = append(am.poolsToFund, accounts.HostPool{PoolKey: types.GeneratePrivateKey(), FullStorage: true})
@@ -734,5 +746,104 @@ func TestFundingZeroReadTarget(t *testing.T) {
 		if !am.nextFund[pool.PoolKey.PublicKey()].After(time.Now()) {
 			t.Fatal("expected skipped pool to be pushed back")
 		}
+	}
+}
+
+// lockedFunderMock simulates a funder that skips locked contracts. It returns
+// the given results in order and records the contract IDs of every call.
+type lockedFunderMock struct {
+	accountFunderMock
+	results     []contracts.FundResult
+	contractIDs [][]types.FileContractID
+}
+
+func (f *lockedFunderMock) next(contractIDs []types.FileContractID) contracts.FundResult {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.results) == 0 {
+		panic("unexpected funding call")
+	}
+	f.contractIDs = append(f.contractIDs, slices.Clone(contractIDs))
+	res := f.results[0]
+	f.results = f.results[1:]
+	return res
+}
+
+func (f *lockedFunderMock) FundAccounts(_ context.Context, _ hosts.Host, contractIDs []types.FileContractID, _ []accounts.HostAccount, _ types.Currency, _ *zap.Logger) (contracts.FundResult, error) {
+	return f.next(contractIDs), nil
+}
+
+func (f *lockedFunderMock) FundPools(_ context.Context, _ hosts.Host, contractIDs []types.FileContractID, _ []accounts.HostPool, _ types.Currency, _ *zap.Logger) (contracts.FundResult, error) {
+	return f.next(contractIDs), nil
+}
+
+// TestFundingLockedContracts asserts that accounts and pools that were left
+// unfunded because of locked contracts don't count a failure, while those left
+// unfunded because of a failure do. It is also a regression test for a locked
+// contract being dropped from the contract IDs in place of a drained one.
+func TestFundingLockedContracts(t *testing.T) {
+	for _, kind := range fundKinds {
+		t.Run(kind.name, func(t *testing.T) {
+			// fill a full batch so the rest is fetched again
+			newMock := func() *nextFundMock {
+				am := newNextFundMock()
+				for range accounts.AccountFundBatch {
+					am.accountsToFund = append(am.accountsToFund, accounts.HostAccount{AccountKey: proto.Account(types.GeneratePrivateKey().PublicKey())})
+					am.poolsToFund = append(am.poolsToFund, accounts.HostPool{PoolKey: types.GeneratePrivateKey()})
+				}
+				return am
+			}
+			contractIDs := []types.FileContractID{{1}, {2}}
+
+			// contract 1 is locked, contract 2 funds a single account or pool
+			// and is drained
+			am := newMock()
+			funder := &lockedFunderMock{results: []contracts.FundResult{
+				{Funded: 1, Drained: []types.FileContractID{{2}}, ContractsLocked: true},
+				{ContractsLocked: true},
+			}}
+			cm := contracts.NewTestContractManager(types.PublicKey{}, am, funder, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
+			if err := kind.fund(context.Background(), cm, contractIDs); err != nil {
+				t.Fatal(err)
+			}
+
+			// assert only the drained contract was removed and the caller's
+			// contract IDs were not modified
+			if len(funder.contractIDs) != 2 {
+				t.Fatalf("expected 2 funding calls, got %d", len(funder.contractIDs))
+			} else if !slices.Equal(funder.contractIDs[1], []types.FileContractID{{1}}) {
+				t.Fatalf("expected the locked contract to be kept, got %v", funder.contractIDs[1])
+			} else if !slices.Equal(contractIDs, []types.FileContractID{{1}, {2}}) {
+				t.Fatalf("expected contract IDs to be unmodified, got %v", contractIDs)
+			}
+
+			// assert only the funded account or pool was updated
+			if len(am.failedFunds) != 1 {
+				t.Fatalf("expected 1 update, got %d", len(am.failedFunds))
+			}
+			for _, failedFunds := range am.failedFunds {
+				if failedFunds != 0 {
+					t.Fatalf("expected no failed funds, got %d", failedFunds)
+				}
+			}
+
+			// without locked contracts the unfunded accounts or pools are
+			// penalized
+			am = newMock()
+			funder = &lockedFunderMock{results: []contracts.FundResult{{Funded: 1}}}
+			cm = contracts.NewTestContractManager(types.PublicKey{}, am, funder, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
+			if err := kind.fund(context.Background(), cm, contractIDs); err != nil {
+				t.Fatal(err)
+			} else if len(am.failedFunds) != accounts.AccountFundBatch {
+				t.Fatalf("expected %d updates, got %d", accounts.AccountFundBatch, len(am.failedFunds))
+			}
+			var penalized int
+			for _, failedFunds := range am.failedFunds {
+				penalized += failedFunds
+			}
+			if penalized != accounts.AccountFundBatch-1 {
+				t.Fatalf("expected %d failed funds, got %d", accounts.AccountFundBatch-1, penalized)
+			}
+		})
 	}
 }
