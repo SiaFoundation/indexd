@@ -754,7 +754,26 @@ FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();`)
 		return err
 	},
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
-		_, err := tx.Exec(ctx, `CREATE INDEX slabs_unrecoverable_idx ON slabs(digest) WHERE unrecoverable_reason IS NOT NULL`)
+		// republish the events of objects on slabs marked before the flag
+		// existed so clients with a cursor past them fetch the flag
+		_, err := tx.Exec(ctx, `
+CREATE INDEX slabs_unrecoverable_idx ON slabs(digest) WHERE unrecoverable_reason IS NOT NULL;
+UPDATE object_events SET updated_at = NULL
+WHERE (account_id, object_key) IN (
+	SELECT o.account_id, o.object_key
+	FROM object_slabs os
+	INNER JOIN objects o ON os.object_id = o.id
+	INNER JOIN slabs s ON s.digest = os.slab_digest
+	WHERE s.unrecoverable_reason IS NOT NULL
+);
+UPDATE space_object_events SET updated_at = NULL
+WHERE (space_id, object_key) IN (
+	SELECT o.space_id, o.object_key
+	FROM space_object_slabs os
+	INNER JOIN space_objects o ON os.object_id = o.id
+	INNER JOIN slabs s ON s.digest = os.slab_digest
+	WHERE s.unrecoverable_reason IS NOT NULL
+);`)
 		return err
 	},
 }
