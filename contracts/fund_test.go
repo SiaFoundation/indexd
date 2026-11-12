@@ -778,16 +778,17 @@ func (f *lockedFunderMock) FundPools(_ context.Context, _ hosts.Host, contractID
 }
 
 // TestFundingLockedContracts asserts that accounts and pools that were left
-// unfunded because of locked contracts don't count a failure, while those left
-// unfunded because of a failure do. It is also a regression test for a locked
-// contract being dropped from the contract IDs in place of a drained one.
+// unfunded because of locked contracts are pushed back without counting a
+// failure, while those left unfunded for any other reason do count one. It is
+// also a regression test for a locked contract being dropped from the contract
+// IDs in place of a drained one.
 func TestFundingLockedContracts(t *testing.T) {
 	for _, kind := range fundKinds {
 		t.Run(kind.name, func(t *testing.T) {
-			// fill a full batch so the rest is fetched again
-			newMock := func() *nextFundMock {
+			// fill full batches so the rest is fetched again
+			newMock := func(n int) *nextFundMock {
 				am := newNextFundMock()
-				for range accounts.AccountFundBatch {
+				for range n {
 					am.accountsToFund = append(am.accountsToFund, accounts.HostAccount{AccountKey: proto.Account(types.GeneratePrivateKey().PublicKey())})
 					am.poolsToFund = append(am.poolsToFund, accounts.HostPool{PoolKey: types.GeneratePrivateKey()})
 				}
@@ -795,9 +796,10 @@ func TestFundingLockedContracts(t *testing.T) {
 			}
 			contractIDs := []types.FileContractID{{1}, {2}}
 
-			// contract 1 is locked, contract 2 funds a single account or pool
-			// and is drained
-			am := newMock()
+			// contract 1 is locked and contract 2 funds a single account or
+			// pool before it is drained, which leaves only the locked contract
+			// for the second batch
+			am := newMock(2 * accounts.AccountFundBatch)
 			funder := &lockedFunderMock{results: []contracts.FundResult{
 				{Funded: 1, Drained: []types.FileContractID{{2}}, ContractsLocked: true},
 				{ContractsLocked: true},
@@ -817,19 +819,22 @@ func TestFundingLockedContracts(t *testing.T) {
 				t.Fatalf("expected contract IDs to be unmodified, got %v", contractIDs)
 			}
 
-			// assert only the funded account or pool was updated
-			if len(am.failedFunds) != 1 {
-				t.Fatalf("expected 1 update, got %d", len(am.failedFunds))
+			// assert every account or pool was pushed back without counting a
+			// failure
+			if len(am.failedFunds) != 2*accounts.AccountFundBatch {
+				t.Fatalf("expected %d updates, got %d", 2*accounts.AccountFundBatch, len(am.failedFunds))
 			}
-			for _, failedFunds := range am.failedFunds {
+			for key, failedFunds := range am.failedFunds {
 				if failedFunds != 0 {
 					t.Fatalf("expected no failed funds, got %d", failedFunds)
+				} else if !am.nextFund[key].After(time.Now()) {
+					t.Fatal("expected next fund to be pushed back")
 				}
 			}
 
-			// without locked contracts the unfunded accounts or pools are
-			// penalized
-			am = newMock()
+			// without locked contracts the unfunded accounts or pools count a
+			// failure
+			am = newMock(accounts.AccountFundBatch)
 			funder = &lockedFunderMock{results: []contracts.FundResult{{Funded: 1}}}
 			cm = contracts.NewTestContractManager(types.PublicKey{}, am, funder, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
 			if err := kind.fund(context.Background(), cm, contractIDs); err != nil {
