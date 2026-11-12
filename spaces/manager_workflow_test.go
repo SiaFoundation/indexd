@@ -130,6 +130,7 @@ func TestManagerClientWorkflow(t *testing.T) {
 	writerSpaceKey := join(ownerKey, writerKey, spaceKey, spaces.Write)
 
 	params := slabs.SlabPinParams{Version: 1, MinShards: 3, EncryptionKey: frand.Entropy256()}
+	params2 := slabs.SlabPinParams{Version: 1, MinShards: 3, EncryptionKey: frand.Entropy256()}
 	for range 12 {
 		hostKey := types.GeneratePrivateKey().PublicKey()
 		store.AddTestHost(t, hosts.Host{PublicKey: hostKey})
@@ -139,8 +140,9 @@ func TestManagerClientWorkflow(t *testing.T) {
 			t.Fatal(err)
 		}
 		params.Sectors = append(params.Sectors, slabs.PinnedSector{HostKey: hostKey, Root: frand.Entropy256()})
+		params2.Sectors = append(params2.Sectors, slabs.PinnedSector{HostKey: hostKey, Root: frand.Entropy256()})
 	}
-	if ids, err := m.PinSpaceSlabs(writer, key, time.Now().Add(time.Hour), params); err != nil || len(ids) != 1 || ids[0] != params.Digest() {
+	if ids, err := m.PinSpaceSlabs(writer, key, time.Now().Add(time.Hour), params, params2); err != nil || len(ids) != 2 || ids[0] != params.Digest() || ids[1] != params2.Digest() {
 		t.Fatalf("pinning space slab: %v, %v", ids, err)
 	}
 	dataKey, metadataKey := frand.Entropy256(), frand.Entropy256()
@@ -149,7 +151,7 @@ func TestManagerClientWorkflow(t *testing.T) {
 		EncryptedDataKey:     sealSpaceTest(t, writerSeed, dataKey[:]),
 		EncryptedMetadataKey: sealSpaceTest(t, writerSeed, metadataKey[:]),
 		EncryptedMetadata:    sealSpaceTest(t, metadataKey, []byte(`{"name":"notes.txt"}`)),
-		Slabs:                []slabs.SlabSlice{params.Slice(0, 32), params.Slice(32, 64)},
+		Slabs:                []slabs.SlabSlice{params.Slice(0, 32), params2.Slice(32, 64)},
 	}
 	object.Sign(writerSpaceKey)
 	if err := m.PinSpaceObject(writer, key, object.PinRequest()); err != nil {

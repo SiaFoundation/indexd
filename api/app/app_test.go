@@ -467,6 +467,7 @@ func TestApplicationAPI(t *testing.T) {
 	}{
 		{"no slabs", func(o *slabs.SealedObject) { o.Slabs = nil }, "object must have at least one slab"},
 		{"large metadata", func(o *slabs.SealedObject) { o.EncryptedMetadata = make([]byte, slabs.MaxMetadataSize+1) }, "object metadata size limit (1024) exceeded: got 1025 bytes"},
+		{"duplicate slabs", func(o *slabs.SealedObject) { o.Slabs = []slabs.SlabSlice{slab1.Slice(0, 256), slab1.Slice(256, 256)} }, fmt.Sprintf("%v: slab 1: %v", slabs.ErrObjectDuplicateSlab, slab1.ID)},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			invalid := obj

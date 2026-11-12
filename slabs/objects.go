@@ -164,7 +164,12 @@ func (pr *PinObjectRequest) Validate() error {
 	case len(pr.EncryptedMetadataKey) != 0 && len(pr.EncryptedMetadataKey) != EncryptionKeySize:
 		return fmt.Errorf("%w: encrypted metadata key must be %d bytes", ErrInvalidObjectRequest, EncryptionKeySize)
 	}
+	seen := make(map[SlabID]struct{}, len(pr.Slabs))
 	for i, slab := range pr.Slabs {
+		if _, ok := seen[slab.ID]; ok {
+			return fmt.Errorf("%w: slab %d: %v", ErrObjectDuplicateSlab, i, slab.ID)
+		}
+		seen[slab.ID] = struct{}{}
 		switch {
 		case slab.ID == (SlabID{}):
 			return fmt.Errorf("%w: slab %d: ID is empty", ErrInvalidObjectRequest, i)
@@ -255,6 +260,9 @@ var (
 	ErrObjectNotFound = errors.New("object not found")
 	// ErrObjectMinimumSlabs is returned when the object has no slabs.
 	ErrObjectMinimumSlabs = errors.New("object must have at least one slab")
+	// ErrObjectDuplicateSlab is returned when the object references the same
+	// slab more than once.
+	ErrObjectDuplicateSlab = errors.New("object contains duplicate slab")
 	// ErrObjectMetadataLimitExceeded is returned when the provided metadata is too large.
 	ErrObjectMetadataLimitExceeded = fmt.Errorf("object metadata size limit (%d) exceeded", MaxMetadataSize)
 	// ErrObjectUnpinnedSlab is returned when an user attempts to save an

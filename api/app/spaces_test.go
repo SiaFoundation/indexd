@@ -146,6 +146,7 @@ func TestSpacesAPI(t *testing.T) {
 				t.Fatalf("unexpected members: %+v, %v", members, err)
 			}
 			params := slabs.SlabPinParams{Version: 1, MinShards: 3, EncryptionKey: frand.Entropy256()}
+			params2 := slabs.SlabPinParams{Version: 1, MinShards: 3, EncryptionKey: frand.Entropy256()}
 			for range 12 {
 				hostKey := types.GeneratePrivateKey().PublicKey()
 				store.AddTestHost(t, hosts.Host{PublicKey: hostKey})
@@ -155,12 +156,13 @@ func TestSpacesAPI(t *testing.T) {
 					t.Fatal(err)
 				}
 				params.Sectors = append(params.Sectors, slabs.PinnedSector{HostKey: hostKey, Root: frand.Entropy256()})
+				params2.Sectors = append(params2.Sectors, slabs.PinnedSector{HostKey: hostKey, Root: frand.Entropy256()})
 			}
 			_, err = client.PinSpaceSlabs(ctx, memberKey, key, params)
 			assertStatus(t, err, http.StatusForbidden)
 			if err := client.UpdateSpaceMember(ctx, ownerKey, key, member, spaces.Write); err != nil {
 				t.Fatal(err)
-			} else if ids, err := client.PinSpaceSlabs(ctx, memberKey, key, params); err != nil || len(ids) != 1 || ids[0] != params.Digest() {
+			} else if ids, err := client.PinSpaceSlabs(ctx, memberKey, key, params, params2); err != nil || len(ids) != 2 || ids[0] != params.Digest() || ids[1] != params2.Digest() {
 				t.Fatalf("unexpected slab IDs: %v, %v", ids, err)
 			}
 			dataKey, metadataKey := frand.Entropy256(), frand.Entropy256()
@@ -168,7 +170,7 @@ func TestSpacesAPI(t *testing.T) {
 				EncryptedDataKey:     sealSpaceAPI(t, [32]byte(memberSeed), dataKey[:]),
 				EncryptedMetadataKey: sealSpaceAPI(t, [32]byte(memberSeed), metadataKey[:]),
 				EncryptedMetadata:    sealSpaceAPI(t, metadataKey, []byte(`{"name":"notes.txt"}`)),
-				Slabs:                []slabs.SlabSlice{params.Slice(0, 32), params.Slice(32, 64)},
+				Slabs:                []slabs.SlabSlice{params.Slice(0, 32), params2.Slice(32, 64)},
 			}
 			object.Sign(memberKey)
 			assertStatus(t, client.PinSpaceObject(ctx, memberKey, key, object), http.StatusBadRequest)
@@ -186,7 +188,7 @@ func TestSpacesAPI(t *testing.T) {
 				t.Fatalf("unexpected spaces: %+v, %v", listed, err)
 			}
 			for _, got := range []spaces.Space{space, listed[0]} {
-				if got.ObjectCount != 1 || got.ObjectSize != 96 || got.PinnedData != 3*proto.SectorSize || got.PinnedSize != 12*proto.SectorSize {
+				if got.ObjectCount != 1 || got.ObjectSize != 96 || got.PinnedData != 6*proto.SectorSize || got.PinnedSize != 24*proto.SectorSize {
 					t.Fatalf("unexpected space stats: %+v", got)
 				}
 			}
