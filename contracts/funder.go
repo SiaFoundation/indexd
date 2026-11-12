@@ -39,7 +39,7 @@ type (
 		// ContractsLocked indicates that funding is incomplete only because
 		// one or more contracts were locked by another operation. It is false
 		// if replenishing failed on any contract. Accounts or pools that were
-		// not funded should be retried without counting a failure.
+		// not funded should be pushed back without counting a failure.
 		ContractsLocked bool
 	}
 

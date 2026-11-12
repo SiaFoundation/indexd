@@ -198,9 +198,7 @@ OUTER:
 				} else if batch.target.IsZero() {
 					// nothing to fund, push the accounts back so they don't
 					// keep filling the batch
-					for i := range batch.accs {
-						batch.accs[i].NextFund = time.Now().Add(accounts.AccountFundInterval)
-					}
+					accounts.UpdateSkippedAccounts(batch.accs)
 					if err := cm.accounts.UpdateHostAccounts(batch.accs); err != nil {
 						return fmt.Errorf("failed to update accounts: %w", err)
 					}
@@ -210,13 +208,17 @@ OUTER:
 				res, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, batch.accs, batch.target, log)
 				if err != nil {
 					return fmt.Errorf("failed to fund accounts: %w", err)
-				} else if res.ContractsLocked {
-					// only record successful funding, the remainder stays
-					// eligible for retry without a failure or backoff
-					batch.accs = batch.accs[:res.Funded]
 				}
 
-				accounts.UpdateFundedAccounts(batch.accs, res.Funded, cm.maxAccountFundingBackoff)
+				// accounts left unfunded only because of locked contracts are
+				// pushed back without counting a failure, retrying them right
+				// away would likely run into the same locked contracts
+				if res.ContractsLocked {
+					accounts.UpdateFundedAccounts(batch.accs[:res.Funded], res.Funded, cm.maxAccountFundingBackoff)
+					accounts.UpdateSkippedAccounts(batch.accs[res.Funded:])
+				} else {
+					accounts.UpdateFundedAccounts(batch.accs, res.Funded, cm.maxAccountFundingBackoff)
+				}
 				if err := cm.accounts.UpdateHostAccounts(batch.accs); err != nil {
 					return fmt.Errorf("failed to update accounts: %w", err)
 				}
@@ -331,9 +333,7 @@ OUTER:
 				} else if batch.target.IsZero() {
 					// nothing to fund, push the pools back so they don't keep
 					// filling the batch
-					for i := range batch.pools {
-						batch.pools[i].NextFund = time.Now().Add(accounts.PoolFundInterval)
-					}
+					accounts.UpdateSkippedPools(batch.pools)
 					if err := cm.accounts.UpdateHostPools(batch.pools); err != nil {
 						return fmt.Errorf("failed to update pools: %w", err)
 					}
@@ -343,13 +343,17 @@ OUTER:
 				res, err := cm.accountFunder.FundPools(ctx, host, contractIDs, batch.pools, batch.target, log)
 				if err != nil {
 					return fmt.Errorf("failed to fund pools: %w", err)
-				} else if res.ContractsLocked {
-					// only record successful funding, the remainder stays
-					// eligible for retry without a failure or backoff
-					batch.pools = batch.pools[:res.Funded]
 				}
 
-				accounts.UpdateFundedPools(batch.pools, res.Funded, cm.maxAccountFundingBackoff)
+				// pools left unfunded only because of locked contracts are
+				// pushed back without counting a failure, retrying them right
+				// away would likely run into the same locked contracts
+				if res.ContractsLocked {
+					accounts.UpdateFundedPools(batch.pools[:res.Funded], res.Funded, cm.maxAccountFundingBackoff)
+					accounts.UpdateSkippedPools(batch.pools[res.Funded:])
+				} else {
+					accounts.UpdateFundedPools(batch.pools, res.Funded, cm.maxAccountFundingBackoff)
+				}
 				if err := cm.accounts.UpdateHostPools(batch.pools); err != nil {
 					return fmt.Errorf("failed to update pools: %w", err)
 				}
