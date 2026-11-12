@@ -193,8 +193,9 @@ func TestCBORObjectEventRoundTrip(t *testing.T) {
 	key := types.Hash256(frand.Entropy256())
 	events := []slabs.ObjectEvent{
 		{
-			Key:       key,
-			UpdatedAt: now,
+			Key:           key,
+			Unrecoverable: true,
+			UpdatedAt:     now,
 			Object: &slabs.SealedObject{
 				EncryptedDataKey: frand.Bytes(48),
 				Slabs: []slabs.SlabSlice{{

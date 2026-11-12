@@ -59,8 +59,9 @@ type (
 	// updated, or deleted.  The object itself is included if it has not been
 	// deleted.
 	ObjectEvent struct {
-		Key     types.Hash256 `json:"key"`
-		Deleted bool          `json:"deleted"`
+		Key           types.Hash256 `json:"key"`
+		Deleted       bool          `json:"deleted"`
+		Unrecoverable bool          `json:"unrecoverable"`
 		// UpdatedAt is the event's position in the stream rather than the time
 		// the object was last modified, which the object itself carries.
 		UpdatedAt time.Time `json:"updatedAt"`
@@ -71,8 +72,9 @@ type (
 	// An ObjectEventWithoutSlabs is an object event whose object is returned
 	// without its slabs. The slabs are paginated separately with ObjectSlabs.
 	ObjectEventWithoutSlabs struct {
-		Key     types.Hash256 `json:"key"`
-		Deleted bool          `json:"deleted"`
+		Key           types.Hash256 `json:"key"`
+		Deleted       bool          `json:"deleted"`
+		Unrecoverable bool          `json:"unrecoverable"`
 		// UpdatedAt is the event's position in the stream. The nested object's
 		// UpdatedAt records when the object was last modified.
 		UpdatedAt time.Time `json:"updatedAt"`

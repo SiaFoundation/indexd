@@ -866,6 +866,9 @@ components:
         deleted:
           type: boolean
           description: Whether the object was deleted or not
+        unrecoverable:
+          type: boolean
+          description: Whether one of the object's slabs was marked unrecoverable. The event is republished when this changes.
         updatedAt:
           type: string
           format: date-time
@@ -913,6 +916,9 @@ components:
         deleted:
           type: boolean
           description: Whether the object was deleted or not
+        unrecoverable:
+          type: boolean
+          description: Whether one of the object's slabs was marked unrecoverable. The event is republished when this changes.
         updatedAt:
           type: string
           format: date-time

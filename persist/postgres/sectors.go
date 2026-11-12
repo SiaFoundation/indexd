@@ -346,6 +346,7 @@ func (s *Store) pinSlabs(ctx context.Context, tx *txn, account proto.Account, ne
 		// insert slab
 		var slabID int64
 		var existingSlab bool
+		var revived bool
 		err = tx.QueryRow(ctx, `
 		INSERT INTO slabs (digest, encryption_key, min_shards, version)
 		VALUES ($1, $2, $3, $4)
@@ -355,10 +356,14 @@ func (s *Store) pinSlabs(ctx context.Context, tx *txn, account proto.Account, ne
 			unrecoverable_reason = NULL,
 			consecutive_failed_repairs = CASE WHEN slabs.unrecoverable_reason IS NOT NULL THEN 0 ELSE slabs.consecutive_failed_repairs END,
 			next_repair_attempt = CASE WHEN slabs.unrecoverable_reason IS NOT NULL THEN NOW() ELSE slabs.next_repair_attempt END
-		RETURNING id, (xmax <> 0)
-		`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards, slab.Version).Scan(&slabID, &existingSlab)
+		RETURNING id, (xmax <> 0), (OLD.unrecoverable_reason IS NOT NULL)
+		`, sqlHash256(digest), sqlHash256(slab.EncryptionKey), slab.MinShards, slab.Version).Scan(&slabID, &existingSlab, &revived)
 		if err != nil {
 			return nil, err
+		} else if revived {
+			if err := republishSlabObjectEvents(ctx, tx, digest); err != nil {
+				return nil, err
+			}
 		}
 
 		// insert slab into join table
@@ -1163,38 +1168,42 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 	return
 }
 
+func republishSlabObjectEvents(ctx context.Context, tx *txn, slabID slabs.SlabID) error {
+	_, err := tx.Exec(ctx, `
+		UPDATE object_events
+		SET updated_at = NULL
+		WHERE (account_id, object_key) IN (
+			SELECT o.account_id, o.object_key
+			FROM object_slabs os
+			INNER JOIN objects o ON os.object_id = o.id
+			WHERE os.slab_digest = $1
+		)
+	`, sqlHash256(slabID))
+	if err != nil {
+		return fmt.Errorf("failed to update affected object events: %w", err)
+	}
+	_, err = tx.Exec(ctx, `
+		UPDATE space_object_events
+		SET updated_at = NULL
+		WHERE (space_id, object_key) IN (
+			SELECT o.space_id, o.object_key
+			FROM space_object_slabs os
+			INNER JOIN space_objects o ON os.object_id = o.id
+			WHERE os.slab_digest = $1
+		)
+	`, sqlHash256(slabID))
+	if err != nil {
+		return fmt.Errorf("failed to update affected space object events: %w", err)
+	}
+	return nil
+}
+
 // RecordSlabMigrated updates the database to reflect that a slab was migrated.
 // This should be called after a slab was migrated and one or more of its
 // sectors were updated.
 func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
-			UPDATE object_events
-			SET updated_at = NULL
-			WHERE object_key IN (
-				SELECT DISTINCT o.object_key
-				FROM object_slabs os
-				INNER JOIN objects o ON os.object_id = o.id
-				WHERE os.slab_digest = $1
-			)
-		`, sqlHash256(slabID))
-		if err != nil {
-			return fmt.Errorf("failed to update affected object events: %w", err)
-		}
-		_, err = tx.Exec(ctx, `
-			UPDATE space_object_events
-			SET updated_at = NULL
-			WHERE (space_id, object_key) IN (
-				SELECT o.space_id, o.object_key
-				FROM space_object_slabs os
-				INNER JOIN space_objects o ON os.object_id = o.id
-				WHERE os.slab_digest = $1
-			)
-		`, sqlHash256(slabID))
-		if err != nil {
-			return fmt.Errorf("failed to update affected space object events: %w", err)
-		}
-		return nil
+		return republishSlabObjectEvents(ctx, tx, slabID)
 	})
 }
 
