@@ -179,7 +179,7 @@ func (c *Client) UpdateAccount(ctx context.Context, ak types.PublicKey, updates 
 
 // PruneSlabs prunes all pinned slabs of the given account not currently
 // connected to an object. Use api.WithBefore to override the default cutoff
-// (1 hour ago).
+// (72 hours ago).
 func (c *Client) PruneSlabs(ctx context.Context, ak types.PublicKey, opts ...api.URLQueryParameterOption) error {
 	values := url.Values{}
 	for _, opt := range opts {
@@ -471,7 +471,7 @@ func (c *Client) DeleteSlab(ctx context.Context, slabID slabs.SlabID) error {
 }
 
 // PruneAccounts prunes orphaned slabs for all accounts. Only available in
-// debug mode. Use api.WithBefore to override the default cutoff (1 hour ago).
+// debug mode. Use api.WithBefore to override the default cutoff (72 hours ago).
 func (c *Client) PruneAccounts(ctx context.Context, opts ...api.URLQueryParameterOption) error {
 	values := url.Values{}
 	for _, opt := range opts {
