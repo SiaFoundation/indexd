@@ -265,12 +265,18 @@ func (s *Store) AccountStats() (accounts.AccountStats, error) {
 		}
 
 		err = tx.QueryRow(ctx,
-			`SELECT COUNT(*) FILTER (WHERE last_used >= $1), COALESCE(SUM(pinned_data), 0), COALESCE(SUM(pinned_size), 0) FROM accounts WHERE deleted_at IS NULL;`,
-			time.Now().Add(-accounts.AccountActivityThreshold),
-		).Scan(&stats.Active, &stats.PinnedData, &stats.PinnedSize)
+			`SELECT
+				COUNT(*) FILTER (WHERE a.last_used >= $1),
+				COALESCE(SUM(a.pinned_data), 0),
+				COALESCE(SUM(a.pinned_size), 0),
+				COUNT(*) FILTER (WHERE a.last_used >= $1 AND NOT `+sqlAccountReady("$2")+`)
+			FROM accounts a WHERE a.deleted_at IS NULL;`,
+			time.Now().Add(-accounts.AccountActivityThreshold), accounts.ReadyHostThreshold,
+		).Scan(&stats.Active, &stats.PinnedData, &stats.PinnedSize, &stats.PendingFunding)
 		if err != nil {
 			return fmt.Errorf("failed to get account stats: %w", err)
 		}
+		stats.Ready = stats.Active - stats.PendingFunding
 		return nil
 	})
 	return stats, err

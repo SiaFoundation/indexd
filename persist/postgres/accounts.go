@@ -12,6 +12,23 @@ import (
 	"go.sia.tech/indexd/accounts"
 )
 
+// sqlAccountReady returns a boolean expression that is true when the account
+// aliased as "a" is funded on at least the number of distinct hosts bound to
+// thresholdParam, either directly or through an attached pool.
+func sqlAccountReady(thresholdParam string) string {
+	return `((SELECT COUNT(*) FROM (
+	SELECT pa.host_id
+	FROM pool_attachments pa
+	INNER JOIN pool_hosts ph ON ph.pool_id = pa.pool_id AND ph.host_id = pa.host_id
+	WHERE pa.account_id = a.id AND ph.consecutive_failed_funds = 0
+	UNION
+	SELECT ah.host_id
+	FROM account_hosts ah
+	WHERE ah.account_id = a.id AND ah.consecutive_failed_funds = 0
+	LIMIT ` + thresholdParam + `
+) ready) >= ` + thresholdParam + `)`
+}
+
 // Accounts returns a list of account keys.
 func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (accs []accounts.Account, err error) {
 	if err := validateOffsetLimit(offset, limit); err != nil {
@@ -38,26 +55,10 @@ func (s *Store) Accounts(offset, limit int, opts ...accounts.QueryAccountsOpt) (
 		}
 
 		rows, err := tx.Query(ctx, `
-			SELECT a.public_key, ak.app_key, a.max_pinned_data, q.max_pinned_data, ak.pinned_data, a.pinned_data, a.pinned_size, COALESCE(ahr.ready_hosts, 0) >= $4, a.app_id, a.name, a.description, a.logo_url, a.service_url, a.last_used
+			SELECT a.public_key, ak.app_key, a.max_pinned_data, q.max_pinned_data, ak.pinned_data, a.pinned_data, a.pinned_size, `+sqlAccountReady("$4")+`, a.app_id, a.name, a.description, a.logo_url, a.service_url, a.last_used
 			FROM accounts a
 			INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 			INNER JOIN quotas q ON q.name = ak.quota_name
-			LEFT JOIN LATERAL (
-				SELECT COUNT(*) AS ready_hosts
-				FROM (
-					SELECT pa.host_id
-					FROM pool_attachments pa
-					INNER JOIN pool_hosts ph ON ph.pool_id = pa.pool_id AND ph.host_id = pa.host_id
-					WHERE pa.account_id = a.id
-					  AND ph.consecutive_failed_funds = 0
-					UNION
-					SELECT ah.host_id
-					FROM account_hosts ah
-					WHERE ah.account_id = a.id
-					  AND ah.consecutive_failed_funds = 0
-					LIMIT $4
-				) ready
-			) ahr ON TRUE
 			WHERE a.deleted_at IS NULL AND
 			($1::integer IS NULL OR connect_key_id = $1::integer)
 			ORDER BY a.id
@@ -88,26 +89,10 @@ func (s *Store) Account(ak types.PublicKey) (accounts.Account, error) {
 	var account accounts.Account
 	account.AccountKey = proto.Account(ak) // no need to fetch key
 	err := s.transaction(func(ctx context.Context, tx *txn) (err error) {
-		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.max_pinned_data, q.max_pinned_data, ak.pinned_data, a.pinned_data, a.pinned_size, COALESCE(ahr.ready_hosts, 0) >= $2, a.app_id, a.name, a.description, a.logo_url, a.service_url, a.last_used
+		account, err = scanAccount(tx.QueryRow(ctx, `SELECT a.public_key, ak.app_key, a.max_pinned_data, q.max_pinned_data, ak.pinned_data, a.pinned_data, a.pinned_size, `+sqlAccountReady("$2")+`, a.app_id, a.name, a.description, a.logo_url, a.service_url, a.last_used
 FROM accounts a
 INNER JOIN app_connect_keys ak ON ak.id = a.connect_key_id
 INNER JOIN quotas q ON q.name = ak.quota_name
-LEFT JOIN LATERAL (
-	SELECT COUNT(*) AS ready_hosts
-	FROM (
-		SELECT pa.host_id
-		FROM pool_attachments pa
-		INNER JOIN pool_hosts ph ON ph.pool_id = pa.pool_id AND ph.host_id = pa.host_id
-		WHERE pa.account_id = a.id
-		  AND ph.consecutive_failed_funds = 0
-		UNION
-		SELECT ah.host_id
-		FROM account_hosts ah
-		WHERE ah.account_id = a.id
-		  AND ah.consecutive_failed_funds = 0
-		LIMIT $2
-	) ready
-) ahr ON TRUE
 WHERE public_key = $1`, sqlPublicKey(ak), accounts.ReadyHostThreshold))
 		return err
 	})

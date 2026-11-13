@@ -718,6 +718,99 @@ func TestAccountStatsRegistered(t *testing.T) {
 	}
 }
 
+func TestAccountStatsFunding(t *testing.T) {
+	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
+	assertFunding := func(active, ready uint64) {
+		t.Helper()
+		stats, err := store.AccountStats()
+		if err != nil {
+			t.Fatal(err)
+		} else if stats.Active != active || stats.Ready != ready {
+			t.Fatalf("expected active=%d ready=%d, got %+v", active, ready, stats)
+		}
+	}
+	assertFunding(0, 0)
+
+	connectKey, poolKey := store.addTestAppConnectKey(t)
+	ak := types.GeneratePrivateKey().PublicKey()
+	store.addTestAccountForKey(t, connectKey, ak)
+	pending := types.GeneratePrivateKey().PublicKey()
+	store.addTestAccount(t, pending)
+	assertFunding(2, 0)
+
+	// funding the same host directly and through a pool must only count once
+	var direct []accounts.HostAccount
+	for range accounts.ReadyHostThreshold - 1 {
+		hk := store.addTestHost(t)
+		direct = append(direct, accounts.HostAccount{
+			AccountKey: proto.Account(ak),
+			HostKey:    hk,
+			NextFund:   time.Now().Add(time.Hour),
+		})
+		if err := store.UpdateHostPools([]accounts.HostPool{{
+			PoolKey:  poolKey,
+			HostKey:  hk,
+			NextFund: time.Now().Add(time.Hour),
+		}}); err != nil {
+			t.Fatal(err)
+		} else if err := store.InsertPoolAttachments(hk, []accounts.PendingAttachment{{
+			AccountKey: proto.Account(ak), PoolKey: poolKey,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.UpdateHostAccounts(direct); err != nil {
+		t.Fatal(err)
+	}
+	assertFunding(2, 0)
+
+	// a funded pool must be attached before it contributes to readiness
+	hk := store.addTestHost(t)
+	pool := []accounts.HostPool{{PoolKey: poolKey, HostKey: hk, NextFund: time.Now().Add(time.Hour)}}
+	if err := store.UpdateHostPools(pool); err != nil {
+		t.Fatal(err)
+	}
+	assertFunding(2, 0)
+	if err := store.InsertPoolAttachments(hk, []accounts.PendingAttachment{{
+		AccountKey: proto.Account(ak), PoolKey: poolKey,
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	assertFunding(2, 1)
+
+	// a failed pool funding makes the account pending again
+	pool[0].ConsecutiveFailedFunds = 1
+	if err := store.UpdateHostPools(pool); err != nil {
+		t.Fatal(err)
+	}
+	assertFunding(2, 0)
+
+	// direct funding on the remaining host restores readiness
+	if err := store.UpdateHostAccounts([]accounts.HostAccount{{
+		AccountKey: proto.Account(ak), HostKey: hk, NextFund: time.Now().Add(time.Hour),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	assertFunding(2, 1)
+
+	// inactive and soft-deleted accounts do not contribute to either gauge
+	if _, err := store.pool.Exec(t.Context(), `UPDATE accounts SET last_used = $1 WHERE public_key = $2`,
+		time.Now().Add(-accounts.AccountActivityThreshold-time.Hour), sqlPublicKey(ak)); err != nil {
+		t.Fatal(err)
+	}
+	assertFunding(1, 0)
+	if err := store.DeleteAccount(proto.Account(pending)); err != nil {
+		t.Fatal(err)
+	}
+	assertFunding(0, 0)
+	if exists, err := store.HasAccount(ak); err != nil {
+		t.Fatal(err)
+	} else if !exists {
+		t.Fatal("expected account to exist")
+	}
+	assertFunding(1, 1)
+}
+
 func TestAppStats(t *testing.T) {
 	store := initPostgres(t, zaptest.NewLogger(t).Named("postgres"))
 

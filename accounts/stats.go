@@ -10,6 +10,12 @@ type (
 	AccountStats struct {
 		Registered uint64 `json:"registered"`
 		Active     uint64 `json:"active"`
+
+		// Ready and PendingFunding partition active accounts according to
+		// whether they have at least ReadyHostThreshold funded hosts.
+		Ready          uint64 `json:"ready"`
+		PendingFunding uint64 `json:"pendingFunding"`
+
 		PinnedData uint64 `json:"pinnedData"`
 		PinnedSize uint64 `json:"pinnedSize"`
 	}
