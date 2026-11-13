@@ -801,8 +801,8 @@ func TestFundingLockedContracts(t *testing.T) {
 			// for the second batch
 			am := newMock(2 * accounts.AccountFundBatch)
 			funder := &lockedFunderMock{results: []contracts.FundResult{
-				{Funded: 1, Drained: []types.FileContractID{{2}}, ContractsLocked: true},
-				{ContractsLocked: true},
+				{Funded: 1, Drained: []types.FileContractID{{2}}, Skipped: true},
+				{Skipped: true},
 			}}
 			cm := contracts.NewTestContractManager(types.PublicKey{}, am, funder, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
 			if err := kind.fund(context.Background(), cm, contractIDs); err != nil {

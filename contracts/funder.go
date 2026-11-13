@@ -36,11 +36,11 @@ type (
 		// batches on the same host.
 		Drained []types.FileContractID
 
-		// ContractsLocked indicates that funding is incomplete only because
-		// one or more contracts were locked by another operation. It is false
-		// if replenishing failed on any contract. Accounts or pools that were
-		// not funded should be pushed back without counting a failure.
-		ContractsLocked bool
+		// Skipped indicates that the accounts or pools that were not funded
+		// should be skipped rather than counted as failed. It is true when
+		// funding was interrupted, or when contracts were locked by another
+		// operation and replenishing did not fail on any contract.
+		Skipped bool
 	}
 
 	// Funder dials a host and replenishes ephemeral accounts and balance pools.
@@ -69,8 +69,8 @@ func NewFunder(client FunderHostClient, cl *ContractLocker, rev *RevisionManager
 
 // FundAccounts tops up the provided accounts to the target balance using the
 // specified contracts in order, skipping contracts that are locked by another
-// operation. The given accounts should not exceed the batch size used in the
-// replenish RPC.
+// operation. Funding stops early if it is interrupted. The given accounts
+// should not exceed the batch size used in the replenish RPC.
 func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accs []accounts.HostAccount, target types.Currency, log *zap.Logger) (FundResult, error) {
 	// sanity check the input
 	if len(accs) > proto.MaxAccountBatchSize {
@@ -90,7 +90,7 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 	// iterate over contracts
 	var funded int
 	var drained []types.FileContractID
-	var contractsLocked, failed bool
+	var contractsLocked, interrupted, failed bool
 	for _, contractID := range contractIDs {
 		done, err := func() (bool, error) {
 			contractLog := log.With(zap.Stringer("contractID", contractID))
@@ -135,6 +135,10 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 				contractLog.Debug("contract is not revisable", zap.Error(err)) // sanity check
 				drained = append(drained, contractID)
 				return false, nil
+			} else if err != nil && ctx.Err() != nil {
+				interrupted = true
+				contractLog.Debug("replenishing accounts was interrupted", zap.Error(err))
+				return true, nil
 			} else if err != nil {
 				failed = true
 				contractLog.Debug("failed to replenish accounts", zap.Error(err))
@@ -156,9 +160,9 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 	}
 
 	return FundResult{
-		Funded:          funded,
-		Drained:         drained,
-		ContractsLocked: contractsLocked && !failed && funded < len(accs),
+		Funded:  funded,
+		Drained: drained,
+		Skipped: funded < len(accs) && (interrupted || (contractsLocked && !failed)),
 	}, nil
 }
 
@@ -169,8 +173,8 @@ func (f *Funder) AttachPools(ctx context.Context, hostKey types.PublicKey, input
 
 // FundPools tops up the provided pools to the target balance using the
 // specified contracts in order, skipping contracts that are locked by another
-// operation. The given pools should not exceed the batch size used in the
-// replenish RPC.
+// operation. Funding stops early if it is interrupted. The given pools should
+// not exceed the batch size used in the replenish RPC.
 func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, pools []accounts.HostPool, target types.Currency, log *zap.Logger) (FundResult, error) {
 	if len(pools) > proto.MaxAccountBatchSize {
 		return FundResult{}, errors.New("too many pools")
@@ -187,7 +191,7 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 
 	var funded int
 	var drained []types.FileContractID
-	var contractsLocked, failed bool
+	var contractsLocked, interrupted, failed bool
 	for _, contractID := range contractIDs {
 		done, err := func() (bool, error) {
 			contractLog := log.With(zap.Stringer("contractID", contractID))
@@ -231,6 +235,10 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 				contractLog.Debug("contract is not revisable", zap.Error(err))
 				drained = append(drained, contractID)
 				return false, nil
+			} else if err != nil && ctx.Err() != nil {
+				interrupted = true
+				contractLog.Debug("replenishing pools was interrupted", zap.Error(err))
+				return true, nil
 			} else if err != nil {
 				failed = true
 				contractLog.Debug("failed to replenish pools", zap.Error(err))
@@ -252,8 +260,8 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 	}
 
 	return FundResult{
-		Funded:          funded,
-		Drained:         drained,
-		ContractsLocked: contractsLocked && !failed && funded < len(pools),
+		Funded:  funded,
+		Drained: drained,
+		Skipped: funded < len(pools) && (interrupted || (contractsLocked && !failed)),
 	}, nil
 }

@@ -191,8 +191,8 @@ func TestFunder(t *testing.T) {
 }
 
 // TestFunderLockedContracts asserts that FundAccounts and FundPools only report
-// locked contracts when they are the only reason accounts or pools were left
-// unfunded.
+// the unfunded accounts or pools as skipped when locked contracts are the only
+// reason they were left unfunded.
 func TestFunderLockedContracts(t *testing.T) {
 	host := hosts.Host{PublicKey: types.PublicKey{1}}
 	target := types.Siacoins(1)
@@ -221,17 +221,17 @@ func TestFunderLockedContracts(t *testing.T) {
 	f := NewFunder(hc, cl, rev, nil, &mockChainManager{}, zap.NewNop())
 
 	for _, tc := range []struct {
-		name            string
-		contractIDs     []types.FileContractID
-		funded          int
-		drained         []types.FileContractID
-		contractsLocked bool
+		name        string
+		contractIDs []types.FileContractID
+		funded      int
+		drained     []types.FileContractID
+		skipped     bool
 	}{
 		{
-			name:            "funded then locked",
-			contractIDs:     []types.FileContractID{{5}, {1}},
-			funded:          1,
-			contractsLocked: true,
+			name:        "funded then locked",
+			contractIDs: []types.FileContractID{{5}, {1}},
+			funded:      1,
+			skipped:     true,
 		},
 		{
 			name:        "locked then funded",
@@ -239,11 +239,11 @@ func TestFunderLockedContracts(t *testing.T) {
 			funded:      2,
 		},
 		{
-			name:            "locked and drained",
-			contractIDs:     []types.FileContractID{{1}, {4}},
-			funded:          1,
-			drained:         []types.FileContractID{{4}},
-			contractsLocked: true,
+			name:        "locked and drained",
+			contractIDs: []types.FileContractID{{1}, {4}},
+			funded:      1,
+			drained:     []types.FileContractID{{4}},
+			skipped:     true,
 		},
 		{
 			name:        "locked and replenish failure",
@@ -257,8 +257,8 @@ func TestFunderLockedContracts(t *testing.T) {
 					t.Fatalf("expected %d funded %s, got %d", tc.funded, kind, res.Funded)
 				} else if !slices.Equal(res.Drained, tc.drained) {
 					t.Fatalf("expected drained contracts %v when funding %s, got %v", tc.drained, kind, res.Drained)
-				} else if res.ContractsLocked != tc.contractsLocked {
-					t.Fatalf("expected contracts locked to be %v when funding %s, got %v", tc.contractsLocked, kind, res.ContractsLocked)
+				} else if res.Skipped != tc.skipped {
+					t.Fatalf("expected skipped to be %v when funding %s, got %v", tc.skipped, kind, res.Skipped)
 				}
 			}
 

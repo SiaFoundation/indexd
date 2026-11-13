@@ -210,10 +210,11 @@ OUTER:
 					return fmt.Errorf("failed to fund accounts: %w", err)
 				}
 
-				// accounts left unfunded only because of locked contracts are
-				// pushed back without counting a failure, retrying them right
-				// away would likely run into the same locked contracts
-				if res.ContractsLocked {
+				// accounts left unfunded because of locked contracts or an
+				// interruption are pushed back without counting a failure,
+				// retrying them right away would likely run into the same
+				// locked contracts
+				if res.Skipped {
 					accounts.UpdateFundedAccounts(batch.accs[:res.Funded], res.Funded, cm.maxAccountFundingBackoff)
 					accounts.UpdateSkippedAccounts(batch.accs[res.Funded:])
 				} else {
@@ -345,10 +346,11 @@ OUTER:
 					return fmt.Errorf("failed to fund pools: %w", err)
 				}
 
-				// pools left unfunded only because of locked contracts are
-				// pushed back without counting a failure, retrying them right
-				// away would likely run into the same locked contracts
-				if res.ContractsLocked {
+				// pools left unfunded because of locked contracts or an
+				// interruption are pushed back without counting a failure,
+				// retrying them right away would likely run into the same
+				// locked contracts
+				if res.Skipped {
 					accounts.UpdateFundedPools(batch.pools[:res.Funded], res.Funded, cm.maxAccountFundingBackoff)
 					accounts.UpdateSkippedPools(batch.pools[res.Funded:])
 				} else {
