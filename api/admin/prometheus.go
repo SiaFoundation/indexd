@@ -22,6 +22,14 @@ func (s AccountStatsResponse) PrometheusMetric() (metrics []prometheus.Metric) {
 			Value: float64(s.Active),
 		},
 		{
+			Name:  "indexd_num_ready_accounts",
+			Value: float64(s.Ready),
+		},
+		{
+			Name:  "indexd_num_accounts_pending_funding",
+			Value: float64(s.PendingFunding),
+		},
+		{
 			Name:  "indexd_accounts_pinned_data_bytes",
 			Value: float64(s.PinnedData),
 		},
