@@ -1570,6 +1570,14 @@ components:
           type: integer
           format: uint64
           description: Number of accounts active in the last week.
+        ready:
+          type: integer
+          format: uint64
+          description: Number of active accounts funded on enough distinct hosts, through direct funding or attached pools, to be ready.
+        pendingFunding:
+          type: integer
+          format: uint64
+          description: Number of active accounts awaiting funding on enough distinct hosts to become ready.
         pinnedData:
           type: integer
           format: uint64
