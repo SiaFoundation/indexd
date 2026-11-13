@@ -3,6 +3,7 @@ package contracts
 import (
 	"context"
 	"fmt"
+	"slices"
 	"time"
 
 	proto "go.sia.tech/core/rhp/v4"
@@ -197,30 +198,39 @@ OUTER:
 				} else if batch.target.IsZero() {
 					// nothing to fund, push the accounts back so they don't
 					// keep filling the batch
-					for i := range batch.accs {
-						batch.accs[i].NextFund = time.Now().Add(accounts.AccountFundInterval)
-					}
+					accounts.UpdateSkippedAccounts(batch.accs)
 					if err := cm.accounts.UpdateHostAccounts(batch.accs); err != nil {
 						return fmt.Errorf("failed to update accounts: %w", err)
 					}
 					continue
 				}
 
-				funded, drained, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, batch.accs, batch.target, log)
+				res, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, batch.accs, batch.target, log)
 				if err != nil {
 					return fmt.Errorf("failed to fund accounts: %w", err)
 				}
 
-				accounts.UpdateFundedAccounts(batch.accs, funded, cm.maxAccountFundingBackoff)
+				// accounts left unfunded because of locked contracts or an
+				// interruption are pushed back without counting a failure,
+				// retrying them right away would likely run into the same
+				// locked contracts
+				if res.Skipped {
+					accounts.UpdateFundedAccounts(batch.accs[:res.Funded], res.Funded, cm.maxAccountFundingBackoff)
+					accounts.UpdateSkippedAccounts(batch.accs[res.Funded:])
+				} else {
+					accounts.UpdateFundedAccounts(batch.accs, res.Funded, cm.maxAccountFundingBackoff)
+				}
 				if err := cm.accounts.UpdateHostAccounts(batch.accs); err != nil {
 					return fmt.Errorf("failed to update accounts: %w", err)
 				}
 
-				contractIDs = contractIDs[drained:]
+				// locked contracts are skipped without being drained, so the
+				// drained contracts aren't necessarily a prefix of contractIDs
+				contractIDs = withoutContracts(contractIDs, res.Drained)
 				if len(contractIDs) == 0 {
 					log.Debug("not all accounts could be funded, no more contracts available", zap.String("quota", quota.Key))
 					break OUTER
-				} else if funded == 0 {
+				} else if res.Funded == 0 {
 					log.Debug("no accounts could be funded, skipping host", zap.String("quota", quota.Key))
 					break OUTER
 				}
@@ -248,12 +258,12 @@ func (cm *ContractManager) FundServiceAccounts(ctx context.Context, host hosts.H
 	serviceAccounts := cm.accounts.ServiceAccounts(host.PublicKey)
 	if len(serviceAccounts) > 0 {
 		fundTarget := accounts.HostFundTarget(host, serviceAccountFundTargetBytes)
-		funded, _, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
+		res, err := cm.accountFunder.FundAccounts(ctx, host, contractIDs, serviceAccounts, fundTarget, log)
 		if err != nil {
 			return fmt.Errorf("failed to fund service accounts: %w", err)
 		}
 
-		if err := cm.accounts.UpdateServiceAccounts(serviceAccounts[:funded], fundTarget); err != nil {
+		if err := cm.accounts.UpdateServiceAccounts(serviceAccounts[:res.Funded], fundTarget); err != nil {
 			cm.log.Warn("failed to update service account balances", zap.Error(err))
 		}
 	}
@@ -324,30 +334,39 @@ OUTER:
 				} else if batch.target.IsZero() {
 					// nothing to fund, push the pools back so they don't keep
 					// filling the batch
-					for i := range batch.pools {
-						batch.pools[i].NextFund = time.Now().Add(accounts.PoolFundInterval)
-					}
+					accounts.UpdateSkippedPools(batch.pools)
 					if err := cm.accounts.UpdateHostPools(batch.pools); err != nil {
 						return fmt.Errorf("failed to update pools: %w", err)
 					}
 					continue
 				}
 
-				funded, drained, err := cm.accountFunder.FundPools(ctx, host, contractIDs, batch.pools, batch.target, log)
+				res, err := cm.accountFunder.FundPools(ctx, host, contractIDs, batch.pools, batch.target, log)
 				if err != nil {
 					return fmt.Errorf("failed to fund pools: %w", err)
 				}
 
-				accounts.UpdateFundedPools(batch.pools, funded, cm.maxAccountFundingBackoff)
+				// pools left unfunded because of locked contracts or an
+				// interruption are pushed back without counting a failure,
+				// retrying them right away would likely run into the same
+				// locked contracts
+				if res.Skipped {
+					accounts.UpdateFundedPools(batch.pools[:res.Funded], res.Funded, cm.maxAccountFundingBackoff)
+					accounts.UpdateSkippedPools(batch.pools[res.Funded:])
+				} else {
+					accounts.UpdateFundedPools(batch.pools, res.Funded, cm.maxAccountFundingBackoff)
+				}
 				if err := cm.accounts.UpdateHostPools(batch.pools); err != nil {
 					return fmt.Errorf("failed to update pools: %w", err)
 				}
 
-				contractIDs = contractIDs[drained:]
+				// locked contracts are skipped without being drained, so the
+				// drained contracts aren't necessarily a prefix of contractIDs
+				contractIDs = withoutContracts(contractIDs, res.Drained)
 				if len(contractIDs) == 0 {
 					log.Debug("not all pools could be funded, no more contracts available", zap.String("quota", quota.Key))
 					break OUTER
-				} else if funded == 0 {
+				} else if res.Funded == 0 {
 					log.Debug("no pools could be funded, skipping host", zap.String("quota", quota.Key))
 					break OUTER
 				}
@@ -356,4 +375,11 @@ OUTER:
 	}
 
 	return nil
+}
+
+// withoutContracts returns a copy of ids without the contract IDs in remove.
+func withoutContracts(ids, remove []types.FileContractID) []types.FileContractID {
+	return slices.DeleteFunc(slices.Clone(ids), func(id types.FileContractID) bool {
+		return slices.Contains(remove, id)
+	})
 }

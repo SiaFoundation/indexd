@@ -34,7 +34,7 @@ type mockFunder struct {
 	fail  bool
 }
 
-func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accs []accounts.HostAccount, target types.Currency, log *zap.Logger) (funded int, drained int, _ error) {
+func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs []types.FileContractID, accs []accounts.HostAccount, target types.Currency, log *zap.Logger) (contracts.FundResult, error) {
 	f.calls = append(f.calls, fundingAccountCall{
 		host:        host,
 		accounts:    accs,
@@ -42,17 +42,17 @@ func (f *mockFunder) FundAccounts(ctx context.Context, host hosts.Host, contract
 		target:      target,
 	})
 	if f.fail {
-		return 0, 0, nil
+		return contracts.FundResult{}, nil
 	}
-	return len(accs), 1, nil
+	return contracts.FundResult{Funded: len(accs), Drained: contractIDs[:1]}, nil
 }
 
 func (f *mockFunder) AttachPools(_ context.Context, _ types.PublicKey, _ []rhp.PoolAttachInput, _ time.Duration) error {
 	return nil
 }
 
-func (f *mockFunder) FundPools(_ context.Context, _ hosts.Host, _ []types.FileContractID, pools []accounts.HostPool, _ types.Currency, _ *zap.Logger) (funded int, drained int, _ error) {
-	return len(pools), 0, nil
+func (f *mockFunder) FundPools(_ context.Context, _ hosts.Host, _ []types.FileContractID, pools []accounts.HostPool, _ types.Currency, _ *zap.Logger) (contracts.FundResult, error) {
+	return contracts.FundResult{Funded: len(pools)}, nil
 }
 
 // TestFundingLegacy verifies that FundAccounts funds user accounts directly

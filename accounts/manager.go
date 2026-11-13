@@ -259,6 +259,22 @@ func UpdateFundedPools(pools []HostPool, n int, maxBackoff time.Duration) {
 	}
 }
 
+// UpdateSkippedAccounts marks in-place the accounts as skipped, pushing back
+// their next funding by the funding interval without counting a failure.
+func UpdateSkippedAccounts(accounts []HostAccount) {
+	for i := range accounts {
+		accounts[i].NextFund = time.Now().Add(AccountFundInterval)
+	}
+}
+
+// UpdateSkippedPools marks in-place the pools as skipped, pushing back their
+// next funding by the funding interval without counting a failure.
+func UpdateSkippedPools(pools []HostPool) {
+	for i := range pools {
+		pools[i].NextFund = time.Now().Add(PoolFundInterval)
+	}
+}
+
 // HostFundTarget calculates the fund target for the given host. We fund
 // accounts to cover the given amount of both read and write usage.
 func HostFundTarget(host hosts.Host, fundTargetBytes uint64) types.Currency {
