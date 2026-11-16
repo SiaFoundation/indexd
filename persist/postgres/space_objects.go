@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"errors"
-	"fmt"
 	"maps"
 	"slices"
 	"time"
@@ -406,11 +405,11 @@ func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor s
  JOIN slabs s ON s.digest = os.slab_digest
  WHERE os.object_id = ANY($1) AND s.unrecoverable_reason IS NOT NULL`, pgx.QueryExecModeExec, slices.Collect(maps.Keys(ids)))
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to query unrecoverable objects: %w", err)
+		return nil, nil, err
 	}
 	unrecoverable, err := pgx.CollectRows(rows, pgx.RowTo[int64])
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to scan unrecoverable objects: %w", err)
+		return nil, nil, err
 	}
 	for _, id := range unrecoverable {
 		events[ids[id]].Unrecoverable = true
