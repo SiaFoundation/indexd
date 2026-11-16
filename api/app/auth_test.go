@@ -285,7 +285,7 @@ func TestAuthConnectFieldLimits(t *testing.T) {
 
 func TestAuthConnectRateLimit(t *testing.T) {
 	s := &mockAccounts{tokens: make(map[types.PublicKey]struct{})}
-	rl := api.NewIPRateLimiter(10*time.Millisecond, 2, time.Minute)
+	rl := api.NewIPRateLimiter(time.Hour, 2, time.Minute)
 
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
