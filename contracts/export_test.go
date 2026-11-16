@@ -92,6 +92,10 @@ func (cm *ContractManager) PerformSectorPinningOnHost(ctx context.Context, host 
 	return cm.performSectorPinningOnHost(ctx, host, log)
 }
 
+func (cm *ContractManager) PruneContractBatch(ctx context.Context, contractID types.FileContractID, offset uint64) (int, bool, error) {
+	return cm.pruneContractBatch(ctx, contractID, offset)
+}
+
 func (cm *ContractManager) PerformContractPruningOnHost(ctx context.Context, host hosts.Host, log *zap.Logger) error {
 	return cm.performContractPruningOnHost(ctx, host, log)
 }

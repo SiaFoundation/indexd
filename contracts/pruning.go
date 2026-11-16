@@ -104,79 +104,84 @@ loop:
 }
 
 func (cm *ContractManager) pruneContract(ctx context.Context, contractID types.FileContractID) (int, error) {
+	var pruned int
+	for offset := uint64(0); ; offset += cm.sectorRootsBatchSize {
+		n, done, err := cm.pruneContractBatch(ctx, contractID, offset)
+		pruned += n
+		if err != nil || done {
+			return pruned, err
+		}
+	}
+}
+
+// pruneContractBatch prunes the batch of sectors starting at offset. The
+// contract is only locked for the duration of the batch.
+func (cm *ContractManager) pruneContractBatch(ctx context.Context, contractID types.FileContractID, offset uint64) (int, bool, error) {
 	const dbRootsBatchSize = 10000
 
-	// lock contract first before doing anything else to avoid anything else
-	// modifying the contract while we loop over offsets and roots
 	lc, unlock := cm.cl.LockContract(contractID)
 	defer unlock()
 
 	contract, renewed, err := cm.store.ContractRevision(contractID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to fetch contract revision: %w", err)
+		return 0, false, fmt.Errorf("failed to fetch contract revision: %w", err)
 	} else if renewed {
 		cm.log.Debug("skipping pruning of renewed contract", zap.Stringer("contractID", contractID))
-		return 0, nil
+		return 0, true, nil
 	}
 	contractSectors := contract.Revision.Filesize / proto.SectorSize
+	if offset >= contractSectors {
+		return 0, true, nil
+	}
+	length := min(cm.sectorRootsBatchSize, contractSectors-offset)
+	done := offset+length >= contractSectors
 
-	var pruned int
-	for offset := uint64(0); offset < contractSectors; offset += cm.sectorRootsBatchSize {
-		length := min(cm.sectorRootsBatchSize, contractSectors-offset)
-
-		var roots []types.Hash256
-		err = cm.rev.WithRevision(ctx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
-			res, err := cm.client.SectorRoots(ctx, cm.signer, cm.chain, rev, offset, length)
-			if err != nil {
-				return rhp.ContractRevision{}, proto.Usage{}, err
-			}
-			roots = res.Roots
-			rev.Revision = res.Revision
-			return rev, res.Usage, nil
-		})
+	var roots []types.Hash256
+	err = cm.rev.WithRevision(ctx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		res, err := cm.client.SectorRoots(ctx, cm.signer, cm.chain, rev, offset, length)
 		if err != nil {
-			return pruned, fmt.Errorf("failed to fetch contract sectors: %w", err)
-		} else if len(roots) == 0 {
-			continue
+			return rhp.ContractRevision{}, proto.Usage{}, err
 		}
-
-		prunable := make(map[types.Hash256]struct{}, len(roots))
-		for start := 0; start < len(roots); start += dbRootsBatchSize {
-			end := min(start+dbRootsBatchSize, len(roots))
-			batch, err := cm.store.PrunableContractRoots(contractID, roots[start:end])
-			if err != nil {
-				return pruned, fmt.Errorf("failed to fetch prunable contract roots: %w", err)
-			}
-			for _, root := range batch {
-				prunable[root] = struct{}{}
-			}
-		}
-
-		var indices []uint64
-		for i, root := range roots {
-			if _, found := prunable[root]; found {
-				indices = append(indices, offset+uint64(i))
-			}
-		}
-		if len(indices) == 0 {
-			continue
-		}
-
-		err = cm.rev.WithRevision(ctx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
-			res, err := cm.client.FreeSectors(ctx, cm.signer, cm.chain, rev, indices)
-			if err != nil {
-				return rhp.ContractRevision{}, proto.Usage{}, err
-			}
-			rev.Revision = res.Revision
-			return rev, res.Usage, nil
-		})
-		if err != nil {
-			return pruned, fmt.Errorf("failed to prune contract sectors: %w", err)
-		}
-
-		pruned += len(indices)
-		contractSectors -= uint64(len(indices))
+		roots = res.Roots
+		rev.Revision = res.Revision
+		return rev, res.Usage, nil
+	})
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to fetch contract sectors: %w", err)
 	}
 
-	return pruned, nil
+	prunable := make(map[types.Hash256]struct{}, len(roots))
+	for start := 0; start < len(roots); start += dbRootsBatchSize {
+		end := min(start+dbRootsBatchSize, len(roots))
+		batch, err := cm.store.PrunableContractRoots(contractID, roots[start:end])
+		if err != nil {
+			return 0, false, fmt.Errorf("failed to fetch prunable contract roots: %w", err)
+		}
+		for _, root := range batch {
+			prunable[root] = struct{}{}
+		}
+	}
+
+	var indices []uint64
+	for i, root := range roots {
+		if _, found := prunable[root]; found {
+			indices = append(indices, offset+uint64(i))
+		}
+	}
+	if len(indices) == 0 {
+		return 0, done, nil
+	}
+
+	err = cm.rev.WithRevision(ctx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		res, err := cm.client.FreeSectors(ctx, cm.signer, cm.chain, rev, indices)
+		if err != nil {
+			return rhp.ContractRevision{}, proto.Usage{}, err
+		}
+		rev.Revision = res.Revision
+		return rev, res.Usage, nil
+	})
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to prune contract sectors: %w", err)
+	}
+	return len(indices), done, nil
 }

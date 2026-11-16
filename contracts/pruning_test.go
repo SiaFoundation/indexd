@@ -3,6 +3,7 @@ package contracts_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -321,5 +322,95 @@ func TestPruneContractBatchBoundary(t *testing.T) {
 	// positions by FreeSectors but not visited again in this pruning pass)
 	if len(hMock.sectorRoots[fcid]) != 4 {
 		t.Fatalf("expected 4 remaining sectors, got %d", len(hMock.sectorRoots[fcid]))
+	}
+}
+
+// TestPruneContractRevisedBetweenBatches asserts that pruning picks up
+// revisions made by the pinning loop in between batches.
+func TestPruneContractRevisedBetweenBatches(t *testing.T) {
+	store := newTestStore(t)
+	hmMock := newHostManagerMock(store)
+	cmMock := newChainManagerMock()
+
+	h := goodHost(1)
+	hk := h.PublicKey
+	store.addTestHost(t, h)
+	hmMock.settings[hk] = h.Settings
+
+	fcid := store.addTestContract(t, hk, true, types.FileContractID{1})
+	store.setRevisionRemainingAllowance(t, fcid, types.Siacoins(1))
+	store.setRevisionRemainingCollateral(t, fcid, types.Siacoins(1))
+
+	r1, r2, r3, r4, r5, r6, r7, r8, r9 := types.Hash256{1}, types.Hash256{2}, types.Hash256{3}, types.Hash256{4}, types.Hash256{5}, types.Hash256{6}, types.Hash256{7}, types.Hash256{8}, types.Hash256{9}
+
+	// host has r1-r7, only r1 and r4 are pinned
+	store.addPinnedSectors(t, hk, fcid, []types.Hash256{r1, r4})
+	mock := newClientMock()
+	hMock := mock.host(hk)
+	hMock.prices = h.Settings.Prices
+	hMock.sectorRoots[fcid] = []types.Hash256{r1, r2, r3, r4, r5, r6, r7}
+
+	store.setContractSize(t, fcid, proto.SectorSize*7)
+	store.setRevisionFilesize(t, fcid, proto.SectorSize*7)
+	store.setRevisionCapacity(t, fcid, proto.SectorSize*20)
+
+	rev := contracts.NewRevisionManager(mock, cmMock, store, 1, zaptest.NewLogger(t))
+	cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, mock, nil, rev, contracts.NewContractLocker(), hmMock, nil, nil, contracts.WithSectorRootsBatchSize(3))
+
+	assertFilesize := func(n int) {
+		t.Helper()
+		if len(hMock.sectorRoots[fcid]) != n {
+			t.Fatalf("expected host to have %d sectors, got %d", n, len(hMock.sectorRoots[fcid]))
+		} else if c, _, err := store.ContractRevision(fcid); err != nil {
+			t.Fatal(err)
+		} else if c.Revision.Filesize != uint64(n)*proto.SectorSize {
+			t.Fatalf("expected filesize %d, got %d", uint64(n)*proto.SectorSize, c.Revision.Filesize)
+		}
+	}
+
+	// first batch frees r2, r3 which get replaced by r7, r6
+	if n, done, err := cm.PruneContractBatch(context.Background(), fcid, 0); err != nil {
+		t.Fatal(err)
+	} else if n != 2 || done {
+		t.Fatalf("expected 2 pruned and not done, got %d %t", n, done)
+	}
+	assertFilesize(5)
+
+	// pinning loop appends r8, r9 in between batches
+	store.addUnpinnedSectors(t, hk, []types.Hash256{r8, r9})
+	if err := cm.PerformSectorPinningOnHost(context.Background(), h, zap.NewNop()); err != nil {
+		t.Fatal(err)
+	} else if len(hMock.appendSectorCalls) != 1 {
+		t.Fatalf("expected 1 append call, got %d", len(hMock.appendSectorCalls))
+	}
+	assertFilesize(7)
+
+	// second batch must see the new filesize, it covers r4, r5, r8 and frees r5
+	if n, done, err := cm.PruneContractBatch(context.Background(), fcid, 3); err != nil {
+		t.Fatal(err)
+	} else if n != 1 || done {
+		t.Fatalf("expected 1 pruned and not done, got %d %t", n, done)
+	} else if call := hMock.sectorRootsCalls[len(hMock.sectorRootsCalls)-1]; call.offset != 3 || call.length != 3 {
+		t.Fatalf("expected offset 3 and length 3, got %d %d", call.offset, call.length)
+	} else if call := hMock.freeSectorsCalls[len(hMock.freeSectorsCalls)-1]; !slices.Equal(call.indices, []uint64{4}) {
+		t.Fatalf("expected to free index 4, got %v", call.indices)
+	}
+	assertFilesize(6)
+
+	// third batch is past the end
+	if n, done, err := cm.PruneContractBatch(context.Background(), fcid, 6); err != nil {
+		t.Fatal(err)
+	} else if n != 0 || !done {
+		t.Fatalf("expected 0 pruned and done, got %d %t", n, done)
+	}
+
+	// pinned sectors are untouched
+	if expected := []types.Hash256{r1, r6, r7, r4, r9, r8}; !slices.Equal(hMock.sectorRoots[fcid], expected) {
+		t.Fatalf("expected roots %v, got %v", expected, hMock.sectorRoots[fcid])
+	}
+	for _, root := range []types.Hash256{r1, r4, r8, r9} {
+		if got := store.getSectorContractID(t, root); got == nil || *got != fcid {
+			t.Fatalf("expected %v to be pinned to %v", root, fcid)
+		}
 	}
 }
