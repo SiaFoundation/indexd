@@ -868,7 +868,7 @@ components:
           description: Whether the object was deleted or not
         unrecoverable:
           type: boolean
-          description: Whether one of the object's slabs was marked unrecoverable. The event is republished when this changes.
+          description: Whether one of the object's slabs was marked unrecoverable
         updatedAt:
           type: string
           format: date-time
@@ -918,7 +918,7 @@ components:
           description: Whether the object was deleted or not
         unrecoverable:
           type: boolean
-          description: Whether one of the object's slabs was marked unrecoverable. The event is republished when this changes.
+          description: Whether one of the object's slabs was marked unrecoverable
         updatedAt:
           type: string
           format: date-time
