@@ -247,6 +247,8 @@ func (c *clientMock) AppendSectors(_ context.Context, _ rhp.ContractSigner, _ cl
 		}
 	}
 
+	h.sectorRoots[revision.ID] = append(h.sectorRoots[revision.ID], appended...)
+
 	newRevision := revision.Revision
 	newRevision.Filesize += uint64(len(appended)) * proto.SectorSize
 	if newRevision.Capacity < newRevision.Filesize {
