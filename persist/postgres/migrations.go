@@ -754,10 +754,33 @@ FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();`)
 		return err
 	},
 	func(ctx context.Context, tx *txn, log *zap.Logger) error {
-		// republish the events of objects on slabs marked before the flag
-		// existed so clients with a cursor past them fetch the flag
 		_, err := tx.Exec(ctx, `
 CREATE INDEX slabs_unrecoverable_idx ON slabs(digest) WHERE unrecoverable_reason IS NOT NULL;
+CREATE FUNCTION slabs_republish_object_events() RETURNS TRIGGER AS $$
+BEGIN
+    UPDATE object_events
+    SET updated_at = NULL
+    WHERE (account_id, object_key) IN (
+        SELECT o.account_id, o.object_key
+        FROM object_slabs os
+        INNER JOIN objects o ON os.object_id = o.id
+        WHERE os.slab_digest = NEW.digest
+    );
+    UPDATE space_object_events
+    SET updated_at = NULL
+    WHERE (space_id, object_key) IN (
+        SELECT o.space_id, o.object_key
+        FROM space_object_slabs os
+        INNER JOIN space_objects o ON os.object_id = o.id
+        WHERE os.slab_digest = NEW.digest
+    );
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER slabs_republish_object_events
+AFTER UPDATE OF unrecoverable_reason ON slabs FOR EACH ROW
+WHEN ((OLD.unrecoverable_reason IS NULL) IS DISTINCT FROM (NEW.unrecoverable_reason IS NULL))
+EXECUTE FUNCTION slabs_republish_object_events();
 UPDATE object_events SET updated_at = NULL
 WHERE (account_id, object_key) IN (
 	SELECT o.account_id, o.object_key

@@ -223,7 +223,7 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 		return events, eventByID, nil
 	}
 
-	rows, err = tx.Query(ctx, sqlUnrecoverableObjects, slices.Collect(maps.Keys(eventByID)))
+	rows, err = tx.Query(ctx, sqlUnrecoverableObjects, pgx.QueryExecModeExec, slices.Collect(maps.Keys(eventByID)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to query unrecoverable objects: %w", err)
 	}
