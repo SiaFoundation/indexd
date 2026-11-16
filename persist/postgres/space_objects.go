@@ -404,7 +404,7 @@ func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor s
 
 	rows, err = tx.Query(ctx, `SELECT DISTINCT os.object_id FROM space_object_slabs os
  JOIN slabs s ON s.digest = os.slab_digest
- WHERE os.object_id = ANY($1) AND s.unrecoverable_reason IS NOT NULL`, slices.Collect(maps.Keys(ids)))
+ WHERE os.object_id = ANY($1) AND s.unrecoverable_reason IS NOT NULL`, pgx.QueryExecModeExec, slices.Collect(maps.Keys(ids)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to query unrecoverable objects: %w", err)
 	}
