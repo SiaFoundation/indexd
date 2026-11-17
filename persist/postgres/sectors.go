@@ -520,6 +520,15 @@ func lockSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
 	return nil
 }
 
+// lockSlab locks the slab FOR UPDATE, waiting out a pin of an object
+// referencing it that has not committed yet.
+func lockSlab(ctx context.Context, tx *txn, slabID slabs.SlabID) error {
+	if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE digest = $1 FOR UPDATE`, sqlHash256(slabID)); err != nil {
+		return fmt.Errorf("failed to lock slab: %w", err)
+	}
+	return nil
+}
+
 // unpinUnreferencedSlabs unpins the subset of the given slabs that are pinned
 // by the account but not referenced by any of the account's objects, queueing
 // them for deletion by deleteOrphanedSlabs. Only slabs pinned before cutoff
