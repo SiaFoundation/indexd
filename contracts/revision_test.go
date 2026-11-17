@@ -86,7 +86,7 @@ func TestWithRevision(t *testing.T) {
 	// assert ErrContractRenewed is returned for a renewed contract
 	lc := contracts.NewContractLocker()
 	lock := func(fcid types.FileContractID) *contracts.LockedContract {
-		lockedContract, unlock := lc.LockContract(fcid)
+		lockedContract, unlock, _ := lc.LockContract(context.Background(), fcid)
 		unlock() // immediately unlock since we don't need the lock for this test
 		return lockedContract
 	}

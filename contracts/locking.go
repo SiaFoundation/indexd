@@ -1,6 +1,7 @@
 package contracts
 
 import (
+	"context"
 	"sync"
 
 	"go.sia.tech/core/types"
@@ -14,15 +15,14 @@ type ContractLocker struct {
 }
 
 // LockedContract represents a contract that is currently locked. A locked
-// contract can be obtained by calling lockContract or tryLockContract on the
-// ContractManager. The contract is unlocked by calling the function returned by
-// those methods.
+// contract can be obtained by calling LockContract on the ContractLocker. The
+// contract is unlocked by calling the function returned by that method.
 // Methods that operate on a locked contract should accept a *LockedContract as
 // an argument to make sure it can never be called without locking the contract
 // first.
 type LockedContract struct {
-	id types.FileContractID
-	mu sync.Mutex // used to acquire contract
+	id   types.FileContractID
+	lock chan struct{} // buffered with capacity 1, acts as a mutex
 
 	refcount int // locked by ContractLocker.mu
 }
@@ -34,60 +34,39 @@ func NewContractLocker() *ContractLocker {
 	}
 }
 
+func (cl *ContractLocker) release(lc *LockedContract) {
+	cl.mu.Lock()
+	lc.refcount--
+	if lc.refcount == 0 {
+		delete(cl.lockedContracts, lc.id)
+	}
+	cl.mu.Unlock()
+}
+
 // LockContract locks the contract with the given ID and returns a function to
 // unlock it. If the contract is already locked, it blocks until it can acquire
-// the lock.
-func (cl *ContractLocker) LockContract(contractID types.FileContractID) (*LockedContract, func()) {
+// the lock or the context is done.
+func (cl *ContractLocker) LockContract(ctx context.Context, contractID types.FileContractID) (*LockedContract, func(), error) {
 	cl.mu.Lock()
 	lc, exists := cl.lockedContracts[contractID]
 	if !exists {
 		lc = &LockedContract{
-			id: contractID,
+			id:   contractID,
+			lock: make(chan struct{}, 1),
 		}
 		cl.lockedContracts[contractID] = lc
 	}
 	lc.refcount++
 	cl.mu.Unlock()
 
-	lc.mu.Lock()
+	select {
+	case lc.lock <- struct{}{}:
+	case <-ctx.Done():
+		cl.release(lc)
+		return nil, nil, ctx.Err()
+	}
 	return lc, func() {
-		lc.mu.Unlock()
-
-		cl.mu.Lock()
-		lc.refcount--
-		if lc.refcount == 0 {
-			delete(cl.lockedContracts, contractID)
-		}
-		cl.mu.Unlock()
-	}
-}
-
-// TryLockContract tries to lock the contract with the given ID and returns a
-// function to unlock it. If the contract is already locked, it returns nil and
-// does not block.
-func (cl *ContractLocker) TryLockContract(contractID types.FileContractID) (*LockedContract, func()) {
-	cl.mu.Lock()
-	_, exists := cl.lockedContracts[contractID]
-	if exists {
-		cl.mu.Unlock()
-		return nil, nil
-	}
-	lc := &LockedContract{
-		id:       contractID,
-		refcount: 1,
-	}
-	lc.mu.Lock()
-	cl.lockedContracts[contractID] = lc
-	cl.mu.Unlock()
-
-	return lc, func() {
-		lc.mu.Unlock()
-
-		cl.mu.Lock()
-		lc.refcount--
-		if lc.refcount == 0 {
-			delete(cl.lockedContracts, contractID)
-		}
-		cl.mu.Unlock()
-	}
+		<-lc.lock
+		cl.release(lc)
+	}, nil
 }

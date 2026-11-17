@@ -122,7 +122,10 @@ func (cm *ContractManager) pinSectors(ctx context.Context, hostKey types.PublicK
 		if err := func() error {
 			log := log.With(zap.Stringer("contractID", contractID))
 
-			lc, unlock := cm.cl.LockContract(contractID)
+			lc, unlock, err := cm.cl.LockContract(ctx, contractID)
+			if err != nil {
+				return fmt.Errorf("failed to lock contract: %w", err)
+			}
 			defer unlock()
 
 			prices, err := cm.client.Prices(ctx, hostKey)
