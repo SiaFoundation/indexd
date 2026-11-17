@@ -1,6 +1,8 @@
 package contracts
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +15,7 @@ func TestContractLockerLockUnlock(t *testing.T) {
 	id := types.FileContractID{1}
 
 	// lock and unlock
-	lc, unlock := cl.LockContract(id)
+	lc, unlock, _ := cl.LockContract(t.Context(), id)
 	if lc == nil {
 		t.Fatal("expected non-nil LockedContract")
 	}
@@ -31,11 +33,11 @@ func TestContractLockerLockBlocks(t *testing.T) {
 	cl := NewContractLocker()
 	id := types.FileContractID{2}
 
-	_, unlock1 := cl.LockContract(id)
+	_, unlock1, _ := cl.LockContract(t.Context(), id)
 
 	acquired := make(chan struct{})
 	go func() {
-		_, unlock2 := cl.LockContract(id)
+		_, unlock2, _ := cl.LockContract(t.Context(), id)
 		unlock2()
 		close(acquired)
 	}()
@@ -70,47 +72,11 @@ func TestContractLockerDifferentContracts(t *testing.T) {
 	id2 := types.FileContractID{2}
 
 	// locking different contracts should not block each other
-	_, unlock1 := cl.LockContract(id1)
-	_, unlock2 := cl.LockContract(id2)
+	_, unlock1, _ := cl.LockContract(t.Context(), id1)
+	_, unlock2, _ := cl.LockContract(t.Context(), id2)
 
 	unlock1()
 	unlock2()
-}
-
-func TestTryLockContract(t *testing.T) {
-	cl := NewContractLocker()
-	id := types.FileContractID{3}
-
-	// try lock on unlocked contract should succeed
-	lc, unlock := cl.TryLockContract(id)
-	if lc == nil {
-		t.Fatal("expected non-nil LockedContract")
-	}
-
-	unlock()
-
-	// map should be clean after unlock
-	cl.mu.Lock()
-	if len(cl.lockedContracts) != 0 {
-		t.Fatal("expected no locked contracts after unlock")
-	}
-	cl.mu.Unlock()
-}
-
-func TestTryLockContractAlreadyLocked(t *testing.T) {
-	cl := NewContractLocker()
-	id := types.FileContractID{4}
-
-	// lock with LockContract first
-	_, unlock := cl.LockContract(id)
-
-	// TryLockContract on same ID should fail
-	lc, tryUnlock := cl.TryLockContract(id)
-	if lc != nil || tryUnlock != nil {
-		t.Fatal("expected TryLockContract to return nil when contract is locked")
-	}
-
-	unlock()
 }
 
 func TestContractLockerConcurrent(t *testing.T) {
@@ -125,7 +91,7 @@ func TestContractLockerConcurrent(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			_, unlock := cl.LockContract(id)
+			_, unlock, _ := cl.LockContract(t.Context(), id)
 			counter++ // protected by the contract lock
 			unlock()
 		}()
@@ -144,18 +110,35 @@ func TestContractLockerConcurrent(t *testing.T) {
 	cl.mu.Unlock()
 }
 
-func TestTryLockAfterUnlock(t *testing.T) {
+func TestContractLockerContext(t *testing.T) {
 	cl := NewContractLocker()
-	id := types.FileContractID{6}
+	id := types.FileContractID{4}
 
-	// lock and unlock
-	_, unlock := cl.LockContract(id)
+	_, unlock, err := cl.LockContract(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// locking a held contract should time out
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	if _, _, err := cl.LockContract(ctx, id); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected DeadlineExceeded, got %v", err)
+	}
+
 	unlock()
 
-	// try lock should succeed after unlock
-	lc, tryUnlock := cl.TryLockContract(id)
-	if lc == nil {
-		t.Fatal("expected TryLockContract to succeed after unlock")
+	// a failed lock attempt must not leak its refcount
+	cl.mu.Lock()
+	if len(cl.lockedContracts) != 0 {
+		t.Fatal("expected no locked contracts")
 	}
-	tryUnlock()
+	cl.mu.Unlock()
+
+	// lock should succeed after unlock
+	_, unlock, err = cl.LockContract(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	unlock()
 }

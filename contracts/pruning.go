@@ -119,7 +119,10 @@ func (cm *ContractManager) pruneContract(ctx context.Context, contractID types.F
 func (cm *ContractManager) pruneContractBatch(ctx context.Context, contractID types.FileContractID, offset uint64) (int, bool, error) {
 	const dbRootsBatchSize = 10000
 
-	lc, unlock := cm.cl.LockContract(contractID)
+	lc, unlock, err := cm.cl.LockContract(ctx, contractID)
+	if err != nil {
+		return 0, false, fmt.Errorf("failed to lock contract: %w", err)
+	}
 	defer unlock()
 
 	contract, renewed, err := cm.store.ContractRevision(contractID)

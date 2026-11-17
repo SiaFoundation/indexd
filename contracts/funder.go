@@ -14,6 +14,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var fundLockTimeout = 5 * time.Second
+
 type (
 	// FunderHostClient defines the interface for the funder to interact with the
 	// host.
@@ -67,6 +69,14 @@ func NewFunder(client FunderHostClient, cl *ContractLocker, rev *RevisionManager
 	}
 }
 
+// lockContract waits up to fundLockTimeout for the contract lock, which is
+// usually enough to slip in between pinning batches.
+func (f *Funder) lockContract(ctx context.Context, contractID types.FileContractID) (*LockedContract, func(), error) {
+	ctx, cancel := context.WithTimeout(ctx, fundLockTimeout)
+	defer cancel()
+	return f.locker.LockContract(ctx, contractID)
+}
+
 // FundAccounts tops up the provided accounts to the target balance using the
 // specified contracts in order, skipping contracts that are locked by another
 // operation. Funding stops early if it is interrupted. The given accounts
@@ -95,8 +105,11 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 		done, err := func() (bool, error) {
 			contractLog := log.With(zap.Stringer("contractID", contractID))
 
-			lc, unlock := f.locker.TryLockContract(contractID)
-			if lc == nil {
+			lc, unlock, err := f.lockContract(ctx, contractID)
+			if err != nil && ctx.Err() != nil {
+				interrupted = true
+				return true, nil
+			} else if err != nil {
 				contractsLocked = true
 				contractLog.Debug("ignoring locked contract for funding")
 				return false, nil
@@ -104,7 +117,6 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 			defer unlock()
 
 			var res rhp.RPCReplenishAccountsResult
-			var err error
 			err = f.rev.WithRevision(ctx, lc, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 				if contract.Revision.RenterOutput.Value.Cmp(target) < 0 {
 					return rhp.ContractRevision{}, proto.Usage{}, ErrContractInsufficientFunds
@@ -196,8 +208,11 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 		done, err := func() (bool, error) {
 			contractLog := log.With(zap.Stringer("contractID", contractID))
 
-			lc, unlock := f.locker.TryLockContract(contractID)
-			if lc == nil {
+			lc, unlock, err := f.lockContract(ctx, contractID)
+			if err != nil && ctx.Err() != nil {
+				interrupted = true
+				return true, nil
+			} else if err != nil {
 				contractsLocked = true
 				contractLog.Debug("ignoring locked contract for funding")
 				return false, nil
@@ -205,7 +220,6 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 			defer unlock()
 
 			var res rhp.RPCReplenishPoolsResult
-			var err error
 			err = f.rev.WithRevision(ctx, lc, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 				if contract.Revision.RenterOutput.Value.Cmp(target) < 0 {
 					return rhp.ContractRevision{}, proto.Usage{}, ErrContractInsufficientFunds

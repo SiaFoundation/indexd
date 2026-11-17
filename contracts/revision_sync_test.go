@@ -121,7 +121,7 @@ func TestWithRevisionContractFields(t *testing.T) {
 				return rhp.RPCLatestRevision(ctx, transport, chain.TipState(), renterKey.PublicKey(), contractID)
 			}}
 			rm := contracts.NewRevisionManager(latest, chain, store, 10, zaptest.NewLogger(t))
-			lc, unlock := contracts.NewContractLocker().LockContract(fcid)
+			lc, unlock, _ := contracts.NewContractLocker().LockContract(t.Context(), fcid)
 			defer unlock()
 			var calls int
 			err = rm.WithRevision(t.Context(), lc, func(contract rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {

@@ -216,8 +216,11 @@ func TestFunderLockedContracts(t *testing.T) {
 	// prepare funder
 	rev := NewRevisionManager(hc, &mockChainManager{}, &mockStore{target: target}, 1, zap.NewNop())
 	cl := NewContractLocker()
-	_, unlock := cl.LockContract(types.FileContractID{1})
+	_, unlock, _ := cl.LockContract(t.Context(), types.FileContractID{1})
 	defer unlock()
+
+	defer func(d time.Duration) { fundLockTimeout = d }(fundLockTimeout)
+	fundLockTimeout = 10 * time.Millisecond
 	f := NewFunder(hc, cl, rev, nil, &mockChainManager{}, zap.NewNop())
 
 	for _, tc := range []struct {
@@ -275,4 +278,59 @@ func TestFunderLockedContracts(t *testing.T) {
 			check(t, "pools", res)
 		})
 	}
+}
+
+func TestFunderLockWait(t *testing.T) {
+	host := hosts.Host{PublicKey: types.PublicKey{1}}
+	target := types.Siacoins(1)
+	accs := []accounts.HostAccount{{AccountKey: proto.Account{1}}}
+	pools := []accounts.HostPool{{PoolKey: types.GeneratePrivateKey()}}
+
+	fcid := types.FileContractID{1}
+	hc := &funderHostClientMock{results: make(map[types.FileContractID]funderRpcResult)}
+	hc.results[fcid] = funderRpcResult{revision: types.V2FileContract{RenterOutput: types.SiacoinOutput{Value: target}}}
+
+	rev := NewRevisionManager(hc, &mockChainManager{}, &mockStore{target: target}, 1, zap.NewNop())
+	cl := NewContractLocker()
+	f := NewFunder(hc, cl, rev, nil, &mockChainManager{}, zap.NewNop())
+
+	fund := func(ctx context.Context) (accRes, poolRes FundResult) {
+		t.Helper()
+		accRes, err := f.FundAccounts(ctx, host, []types.FileContractID{fcid}, accs, target, zap.NewNop())
+		if err != nil {
+			t.Fatal(err)
+		}
+		poolRes, err = f.FundPools(ctx, host, []types.FileContractID{fcid}, pools, target, zap.NewNop())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
+	t.Run("released within timeout", func(t *testing.T) {
+		_, unlock, _ := cl.LockContract(t.Context(), fcid)
+		time.AfterFunc(50*time.Millisecond, unlock)
+
+		accRes, poolRes := fund(t.Context())
+		if accRes.Funded != len(accs) || accRes.Skipped {
+			t.Fatalf("expected all accounts to be funded, got %+v", accRes)
+		} else if poolRes.Funded != len(pools) || poolRes.Skipped {
+			t.Fatalf("expected all pools to be funded, got %+v", poolRes)
+		}
+	})
+
+	t.Run("interrupted while waiting", func(t *testing.T) {
+		_, unlock, _ := cl.LockContract(t.Context(), fcid)
+		defer unlock()
+
+		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+		defer cancel()
+
+		accRes, poolRes := fund(ctx)
+		if accRes.Funded != 0 || !accRes.Skipped {
+			t.Fatalf("expected accounts to be skipped, got %+v", accRes)
+		} else if poolRes.Funded != 0 || !poolRes.Skipped {
+			t.Fatalf("expected pools to be skipped, got %+v", poolRes)
+		}
+	})
 }

@@ -171,11 +171,14 @@ func (cm *ContractManager) refreshContract(ctx context.Context, contract Contrac
 
 		duration := contract.ExpirationHeight - host.Settings.Prices.TipHeight
 
-		lc, unlock := cm.cl.LockContract(contract.ID)
+		lc, unlock, err := cm.cl.LockContract(refreshCtx, contract.ID)
+		if err != nil {
+			return fmt.Errorf("failed to lock contract: %w", err)
+		}
 		defer unlock()
 
 		var res rhp.RPCRefreshContractResult
-		err := cm.rev.WithRevision(refreshCtx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
+		err = cm.rev.WithRevision(refreshCtx, lc, func(rev rhp.ContractRevision) (rhp.ContractRevision, proto.Usage, error) {
 			if host.Settings.ProtocolVersion.Cmp(rhp.ProtocolVersion500) < 0 {
 				return rhp.ContractRevision{}, proto.Usage{}, fmt.Errorf("host does not support contract refresh, protocol version %s < %s", host.Settings.ProtocolVersion, rhp.ProtocolVersion500)
 			}

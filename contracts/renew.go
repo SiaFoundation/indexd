@@ -96,7 +96,10 @@ func (cm *ContractManager) renewContract(ctx context.Context, contract Contract,
 		renewCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 		defer cancel()
 
-		lc, unlock := cm.cl.LockContract(contract.ID)
+		lc, unlock, err := cm.cl.LockContract(renewCtx, contract.ID)
+		if err != nil {
+			return fmt.Errorf("failed to lock contract: %w", err)
+		}
 		defer unlock()
 
 		var res rhp.RPCRenewContractResult
