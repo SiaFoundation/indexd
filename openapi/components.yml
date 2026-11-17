@@ -829,7 +829,7 @@ components:
         id:
           allOf:
             - $ref: "#/components/schemas/Hash256"
-            - description: The object's ID, computed as a hash of its slabs. The server validates this matches the computed value.
+            - description: The object's V1 or V2 ID. The server validates the ID against the ordered slab IDs, offsets, and lengths.
         encryptedDataKey:
           type: string
           format: byte

@@ -97,23 +97,23 @@ func (c *Client) PinSpaceSlabs(ctx context.Context, appKey types.PrivateKey, key
 }
 
 // PinSpaceObject adds or replaces an object signed by the space key.
-func (c *Client) PinSpaceObject(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, obj slabs.SealedObject) error {
-	return c.signedRequest(ctx, appKey, http.MethodPost, fmt.Sprintf("/spaces/%s/objects", key), obj.PinRequest(), nil)
+func (c *Client) PinSpaceObject(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, obj slabs.PinObjectRequest) error {
+	return c.signedRequest(ctx, appKey, http.MethodPost, fmt.Sprintf("/spaces/%s/objects", key), obj, nil)
 }
 
 // DeleteSpaceObject removes an object and releases unused storage.
-func (c *Client) DeleteSpaceObject(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, objectKey types.Hash256) error {
+func (c *Client) DeleteSpaceObject(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, objectKey slabs.ObjectID) error {
 	return c.signedRequest(ctx, appKey, http.MethodDelete, fmt.Sprintf("/spaces/%s/objects/%s", key, objectKey), nil, nil)
 }
 
 // SpaceObject retrieves an object accessible to the account.
-func (c *Client) SpaceObject(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
+func (c *Client) SpaceObject(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, objectKey slabs.ObjectID) (obj slabs.SealedObject, err error) {
 	err = c.signedRequest(ctx, appKey, http.MethodGet, fmt.Sprintf("/spaces/%s/objects/%s", key, objectKey), nil, &obj)
 	return
 }
 
 // SpaceObjectSlabs returns slab slices starting at the given slice index.
-func (c *Client) SpaceObjectSlabs(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, objectKey types.Hash256, cursor int64, limit int) (result []slabs.SlabSlice, err error) {
+func (c *Client) SpaceObjectSlabs(ctx context.Context, appKey types.PrivateKey, key types.PublicKey, objectKey slabs.ObjectID, cursor int64, limit int) (result []slabs.SlabSlice, err error) {
 	values := url.Values{}
 	values.Set("cursor", fmt.Sprint(cursor))
 	values.Set("limit", fmt.Sprint(limit))

@@ -92,7 +92,7 @@ type (
 	// encryption keys are re-sealed under the sharing key and re-signed so the
 	// recipient can decrypt and verify them.
 	SharedObjectRequest struct {
-		ObjectID             types.Hash256   `json:"objectID"`
+		ObjectID             slabs.ObjectID  `json:"objectID"`
 		EncryptedDataKey     []byte          `json:"encryptedDataKey"`
 		DataSignature        types.Signature `json:"dataSignature"`
 		EncryptedMetadataKey []byte          `json:"encryptedMetadataKey,omitempty"`
@@ -104,7 +104,7 @@ type (
 	// slabs, which are paginated separately. The object ID can not be derived
 	// without the slabs, so it is returned alongside the object.
 	ObjectWithoutSlabs struct {
-		ObjectID types.Hash256 `json:"objectID"`
+		ObjectID slabs.ObjectID `json:"objectID"`
 		slabs.SealedObjectWithoutSlabs
 	}
 )
@@ -168,7 +168,7 @@ func (r KeyRequest) validate() error {
 
 func (r SharedObjectRequest) validate() error {
 	switch {
-	case r.ObjectID == (types.Hash256{}):
+	case r.ObjectID == (slabs.ObjectID{}):
 		return fmt.Errorf("%w: object ID is required", ErrInvalidRequest)
 	case len(r.EncryptedDataKey) != EncryptionKeySize:
 		return fmt.Errorf("%w: encrypted data key must be %d bytes", ErrInvalidRequest, EncryptionKeySize)

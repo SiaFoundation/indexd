@@ -6,13 +6,12 @@ import (
 	"errors"
 	"fmt"
 
-	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
 )
 
 // assertObjectNotBlocked returns slabs.ErrObjectBlocked if the given object key
 // is on the blocklist.
-func assertObjectNotBlocked(ctx context.Context, tx *txn, objectKey types.Hash256) error {
+func assertObjectNotBlocked(ctx context.Context, tx *txn, objectKey slabs.ObjectID) error {
 	var blocked bool
 	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM blocked_objects WHERE object_key = $1)`, sqlHash256(objectKey)).Scan(&blocked); err != nil {
 		return fmt.Errorf("failed to check blocklist: %w", err)
@@ -24,7 +23,7 @@ func assertObjectNotBlocked(ctx context.Context, tx *txn, objectKey types.Hash25
 
 // BlockObject adds the given object key to the blocklist. If the key is already
 // blocked its reason is updated.
-func (s *Store) BlockObject(objectKey types.Hash256, reason string) error {
+func (s *Store) BlockObject(objectKey slabs.ObjectID, reason string) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		_, err := tx.Exec(ctx, `
 			INSERT INTO blocked_objects (object_key, reason)
@@ -40,7 +39,7 @@ func (s *Store) BlockObject(objectKey types.Hash256, reason string) error {
 
 // UnblockObject removes an object key from the blocklist. Unblocking a key that
 // is not blocked is a no-op.
-func (s *Store) UnblockObject(objectKey types.Hash256) error {
+func (s *Store) UnblockObject(objectKey slabs.ObjectID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		res, err := tx.Exec(ctx, `DELETE FROM blocked_objects WHERE object_key = $1`, sqlHash256(objectKey))
 		if err != nil {
@@ -64,7 +63,7 @@ func (s *Store) UnblockObject(objectKey types.Hash256) error {
 }
 
 // BlockedObject returns the blocklist entry for the given object key.
-func (s *Store) BlockedObject(objectKey types.Hash256) (obj slabs.BlockedObject, err error) {
+func (s *Store) BlockedObject(objectKey slabs.ObjectID) (obj slabs.BlockedObject, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		err := tx.QueryRow(ctx, `
 			SELECT object_key, reason, created_at
