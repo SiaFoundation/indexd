@@ -21,6 +21,10 @@ import (
 // kept if the slab was already marked by a previous call.
 func (s *Store) MarkSlabUnrecoverable(slabID slabs.SlabID, reason string) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
+		if err := lockSlab(ctx, tx, slabID); err != nil {
+			return err
+		}
+
 		// the epoch marks a slab that can never be fully repaired, keep the
 		// original reason if the slab is already marked
 		res, err := tx.Exec(ctx, `
@@ -44,6 +48,10 @@ func (s *Store) MarkSlabUnrecoverable(slabID slabs.SlabID, reason string) error 
 func (s *Store) RecordFailedSlabRecovery(slabID slabs.SlabID, reason string) (unrecoverable bool, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		unrecoverable = false // reset on retry
+		if err := lockSlab(ctx, tx, slabID); err != nil {
+			return err
+		}
+
 		err := tx.QueryRow(ctx, `
 			WITH slab AS (
 				SELECT s.id, (

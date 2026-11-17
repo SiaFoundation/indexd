@@ -573,6 +573,30 @@ func TestMarkSlabUnrecoverable(t *testing.T) {
 	}
 	store.assertNoObjectEvent(t, account, space, &cursors)
 	store.assertObjectEvents(t, other, otherSpace, &otherCursors, true, objectA.ID())
+
+	// marking waits for a pin of the slab that has not committed
+	lockTx, err := store.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lockTx.Rollback(t.Context()) }()
+	if _, err := lockTx.Exec(t.Context(), `SELECT digest FROM slabs WHERE digest = $1 FOR KEY SHARE`, sqlHash256(slabID2)); err != nil {
+		t.Fatal(err)
+	}
+
+	marked := make(chan error, 1)
+	go func() { marked <- store.MarkSlabUnrecoverable(slabID2, "shard root mismatch") }()
+	select {
+	case err := <-marked:
+		t.Fatal("marked while the slab was pinned", err)
+	case <-time.After(250 * time.Millisecond):
+	}
+	if err := lockTx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	} else if err := <-marked; err != nil {
+		t.Fatal(err)
+	}
+	store.assertObjectEvents(t, account, space, &cursors, true, objectB.ID())
 }
 
 // backdateRecoveryWindow starts the slab's recovery window age ago.
