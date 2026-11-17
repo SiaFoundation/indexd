@@ -262,6 +262,8 @@ func TestFunderLockedContracts(t *testing.T) {
 					t.Fatalf("expected drained contracts %v when funding %s, got %v", tc.drained, kind, res.Drained)
 				} else if res.Skipped != tc.skipped {
 					t.Fatalf("expected skipped to be %v when funding %s, got %v", tc.skipped, kind, res.Skipped)
+				} else if !slices.Equal(res.Locked, []types.FileContractID{{1}}) {
+					t.Fatalf("expected contract 1 to be locked when funding %s, got %v", kind, res.Locked)
 				}
 			}
 
