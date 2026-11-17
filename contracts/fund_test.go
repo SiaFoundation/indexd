@@ -794,28 +794,28 @@ func TestFundingLockedContracts(t *testing.T) {
 				}
 				return am
 			}
-			contractIDs := []types.FileContractID{{1}, {2}}
+			contractIDs := []types.FileContractID{{1}, {2}, {3}}
 
 			// contract 1 is locked and contract 2 funds a single account or
-			// pool before it is drained, which leaves only the locked contract
-			// for the second batch
+			// pool before it is drained, which leaves only contract 3 for the
+			// second batch, which is locked as well
 			am := newMock(2 * accounts.AccountFundBatch)
 			funder := &lockedFunderMock{results: []contracts.FundResult{
-				{Funded: 1, Drained: []types.FileContractID{{2}}, Skipped: true},
-				{Skipped: true},
+				{Funded: 1, Drained: []types.FileContractID{{2}}, Locked: []types.FileContractID{{1}}, Skipped: true},
+				{Locked: []types.FileContractID{{3}}, Skipped: true},
 			}}
 			cm := contracts.NewTestContractManager(types.PublicKey{}, am, funder, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
 			if err := kind.fund(context.Background(), cm, contractIDs); err != nil {
 				t.Fatal(err)
 			}
 
-			// assert only the drained contract was removed and the caller's
-			// contract IDs were not modified
+			// assert the drained and locked contracts were removed and the
+			// caller's contract IDs were not modified
 			if len(funder.contractIDs) != 2 {
 				t.Fatalf("expected 2 funding calls, got %d", len(funder.contractIDs))
-			} else if !slices.Equal(funder.contractIDs[1], []types.FileContractID{{1}}) {
-				t.Fatalf("expected the locked contract to be kept, got %v", funder.contractIDs[1])
-			} else if !slices.Equal(contractIDs, []types.FileContractID{{1}, {2}}) {
+			} else if !slices.Equal(funder.contractIDs[1], []types.FileContractID{{3}}) {
+				t.Fatalf("expected only contract 3 to be left, got %v", funder.contractIDs[1])
+			} else if !slices.Equal(contractIDs, []types.FileContractID{{1}, {2}, {3}}) {
 				t.Fatalf("expected contract IDs to be unmodified, got %v", contractIDs)
 			}
 

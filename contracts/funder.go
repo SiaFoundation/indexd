@@ -38,6 +38,11 @@ type (
 		// batches on the same host.
 		Drained []types.FileContractID
 
+		// Locked contains the contracts that stayed locked by another
+		// operation. They should be excluded when funding subsequent batches
+		// on the same host to avoid waiting on them again.
+		Locked []types.FileContractID
+
 		// Skipped indicates that the accounts or pools that were not funded
 		// should be skipped rather than counted as failed. It is true when
 		// funding was interrupted, or when contracts were locked by another
@@ -99,8 +104,8 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 
 	// iterate over contracts
 	var funded int
-	var drained []types.FileContractID
-	var contractsLocked, interrupted, failed bool
+	var drained, locked []types.FileContractID
+	var interrupted, failed bool
 	for _, contractID := range contractIDs {
 		done, err := func() (bool, error) {
 			contractLog := log.With(zap.Stringer("contractID", contractID))
@@ -110,7 +115,7 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 				interrupted = true
 				return true, nil
 			} else if err != nil {
-				contractsLocked = true
+				locked = append(locked, contractID)
 				contractLog.Debug("ignoring locked contract for funding")
 				return false, nil
 			}
@@ -174,7 +179,8 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 	return FundResult{
 		Funded:  funded,
 		Drained: drained,
-		Skipped: funded < len(accs) && (interrupted || (contractsLocked && !failed)),
+		Locked:  locked,
+		Skipped: funded < len(accs) && (interrupted || (len(locked) > 0 && !failed)),
 	}, nil
 }
 
@@ -202,8 +208,8 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 	}
 
 	var funded int
-	var drained []types.FileContractID
-	var contractsLocked, interrupted, failed bool
+	var drained, locked []types.FileContractID
+	var interrupted, failed bool
 	for _, contractID := range contractIDs {
 		done, err := func() (bool, error) {
 			contractLog := log.With(zap.Stringer("contractID", contractID))
@@ -213,7 +219,7 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 				interrupted = true
 				return true, nil
 			} else if err != nil {
-				contractsLocked = true
+				locked = append(locked, contractID)
 				contractLog.Debug("ignoring locked contract for funding")
 				return false, nil
 			}
@@ -276,6 +282,7 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 	return FundResult{
 		Funded:  funded,
 		Drained: drained,
-		Skipped: funded < len(pools) && (interrupted || (contractsLocked && !failed)),
+		Locked:  locked,
+		Skipped: funded < len(pools) && (interrupted || (len(locked) > 0 && !failed)),
 	}, nil
 }

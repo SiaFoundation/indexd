@@ -224,9 +224,8 @@ OUTER:
 					return fmt.Errorf("failed to update accounts: %w", err)
 				}
 
-				// locked contracts are skipped without being drained, so the
-				// drained contracts aren't necessarily a prefix of contractIDs
-				contractIDs = withoutContracts(contractIDs, res.Drained)
+				// drop drained and locked contracts for the remaining batches
+				contractIDs = withoutContracts(contractIDs, slices.Concat(res.Drained, res.Locked))
 				if len(contractIDs) == 0 {
 					log.Debug("not all accounts could be funded, no more contracts available", zap.String("quota", quota.Key))
 					break OUTER
@@ -360,9 +359,8 @@ OUTER:
 					return fmt.Errorf("failed to update pools: %w", err)
 				}
 
-				// locked contracts are skipped without being drained, so the
-				// drained contracts aren't necessarily a prefix of contractIDs
-				contractIDs = withoutContracts(contractIDs, res.Drained)
+				// drop drained and locked contracts for the remaining batches
+				contractIDs = withoutContracts(contractIDs, slices.Concat(res.Drained, res.Locked))
 				if len(contractIDs) == 0 {
 					log.Debug("not all pools could be funded, no more contracts available", zap.String("quota", quota.Key))
 					break OUTER
