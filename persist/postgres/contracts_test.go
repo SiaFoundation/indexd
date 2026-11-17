@@ -661,9 +661,10 @@ func TestPrunableContractRoots(t *testing.T) {
 	hk1 := store.addTestHost(t)
 	hk2 := store.addTestHost(t)
 
-	// add a contract for each host
+	// add a contract for each host and a second contract on host 1
 	fcid1 := store.addTestContract(t, hk1, types.FileContractID{1})
 	fcid2 := store.addTestContract(t, hk2, types.FileContractID{2})
+	fcid3 := store.addTestContract(t, hk1, types.FileContractID{3})
 
 	// prepare roots
 	roots := []types.Hash256{
@@ -709,6 +710,13 @@ func TestPrunableContractRoots(t *testing.T) {
 		t.Fatalf("unexpected prunable indices, %+v", indices)
 	}
 
+	// unpinned sectors on another host are prunable
+	if prunable, err := store.PrunableContractRoots(fcid1, roots[2:]); err != nil {
+		t.Fatal(err)
+	} else if len(prunable) != 2 {
+		t.Fatalf("unexpected prunable roots, %+v", prunable)
+	}
+
 	// pin sectors for h1
 	if sectors, err := store.UnpinnedSectors(hk1, 10); err != nil {
 		t.Fatal(err)
@@ -733,6 +741,17 @@ func TestPrunableContractRoots(t *testing.T) {
 		t.Fatal(err)
 	} else if len(indices) != 0 {
 		t.Fatalf("unexpected prunable indices, %+v", indices)
+	}
+
+	// sectors pinned to another contract are prunable, even on the same host
+	if prunable, err := store.PrunableContractRoots(fcid3, roots[:2]); err != nil {
+		t.Fatal(err)
+	} else if len(prunable) != 2 {
+		t.Fatalf("unexpected prunable roots, %+v", prunable)
+	} else if prunable, err := store.PrunableContractRoots(fcid1, roots[2:]); err != nil {
+		t.Fatal(err)
+	} else if len(prunable) != 2 {
+		t.Fatalf("unexpected prunable roots, %+v", prunable)
 	}
 
 	// unpin the second slab to remove sectors for both hosts
