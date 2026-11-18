@@ -190,9 +190,8 @@ func TestFunder(t *testing.T) {
 	}
 }
 
-// TestFunderLockedContracts asserts that FundAccounts and FundPools only report
-// the unfunded accounts or pools as skipped when locked contracts are the only
-// reason they were left unfunded.
+// TestFunderLockedContracts asserts that FundAccounts and FundPools report
+// locked contracts separately from drained contracts and replenish failures.
 func TestFunderLockedContracts(t *testing.T) {
 	host := hosts.Host{PublicKey: types.PublicKey{1}}
 	target := types.Siacoins(1)
@@ -224,17 +223,16 @@ func TestFunderLockedContracts(t *testing.T) {
 	f := NewFunder(hc, cl, rev, nil, &mockChainManager{}, zap.NewNop())
 
 	for _, tc := range []struct {
-		name        string
-		contractIDs []types.FileContractID
-		funded      int
-		drained     []types.FileContractID
-		skipped     bool
+		name            string
+		contractIDs     []types.FileContractID
+		funded          int
+		drained         []types.FileContractID
+		replenishFailed bool
 	}{
 		{
 			name:        "funded then locked",
 			contractIDs: []types.FileContractID{{5}, {1}},
 			funded:      1,
-			skipped:     true,
 		},
 		{
 			name:        "locked then funded",
@@ -246,11 +244,11 @@ func TestFunderLockedContracts(t *testing.T) {
 			contractIDs: []types.FileContractID{{1}, {4}},
 			funded:      1,
 			drained:     []types.FileContractID{{4}},
-			skipped:     true,
 		},
 		{
-			name:        "locked and replenish failure",
-			contractIDs: []types.FileContractID{{1}, {3}},
+			name:            "locked and replenish failure",
+			contractIDs:     []types.FileContractID{{1}, {3}},
+			replenishFailed: true,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -260,8 +258,8 @@ func TestFunderLockedContracts(t *testing.T) {
 					t.Fatalf("expected %d funded %s, got %d", tc.funded, kind, res.Funded)
 				} else if !slices.Equal(res.Drained, tc.drained) {
 					t.Fatalf("expected drained contracts %v when funding %s, got %v", tc.drained, kind, res.Drained)
-				} else if res.Skipped != tc.skipped {
-					t.Fatalf("expected skipped to be %v when funding %s, got %v", tc.skipped, kind, res.Skipped)
+				} else if res.ReplenishFailed != tc.replenishFailed {
+					t.Fatalf("expected ReplenishFailed to be %v when funding %s, got %v", tc.replenishFailed, kind, res.ReplenishFailed)
 				} else if !slices.Equal(res.Locked, []types.FileContractID{{1}}) {
 					t.Fatalf("expected contract 1 to be locked when funding %s, got %v", kind, res.Locked)
 				}
@@ -313,10 +311,11 @@ func TestFunderLockWait(t *testing.T) {
 		_, unlock, _ := cl.LockContract(t.Context(), fcid)
 		time.AfterFunc(50*time.Millisecond, unlock)
 
+		// assert the contract was waited on rather than reported as locked
 		accRes, poolRes := fund(t.Context())
-		if accRes.Funded != len(accs) || accRes.Skipped {
+		if accRes.Funded != len(accs) || len(accRes.Locked) != 0 || accRes.ReplenishFailed {
 			t.Fatalf("expected all accounts to be funded, got %+v", accRes)
-		} else if poolRes.Funded != len(pools) || poolRes.Skipped {
+		} else if poolRes.Funded != len(pools) || len(poolRes.Locked) != 0 || poolRes.ReplenishFailed {
 			t.Fatalf("expected all pools to be funded, got %+v", poolRes)
 		}
 	})
@@ -328,11 +327,13 @@ func TestFunderLockWait(t *testing.T) {
 		ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 		defer cancel()
 
+		// assert the interruption neither marked the contract as locked nor
+		// counted as a replenish failure
 		accRes, poolRes := fund(ctx)
-		if accRes.Funded != 0 || !accRes.Skipped {
-			t.Fatalf("expected accounts to be skipped, got %+v", accRes)
-		} else if poolRes.Funded != 0 || !poolRes.Skipped {
-			t.Fatalf("expected pools to be skipped, got %+v", poolRes)
+		if accRes.Funded != 0 || len(accRes.Locked) != 0 || accRes.ReplenishFailed {
+			t.Fatalf("expected no funded accounts, locked contracts or replenish failure, got %+v", accRes)
+		} else if poolRes.Funded != 0 || len(poolRes.Locked) != 0 || poolRes.ReplenishFailed {
+			t.Fatalf("expected no funded pools, locked contracts or replenish failure, got %+v", poolRes)
 		}
 	})
 }

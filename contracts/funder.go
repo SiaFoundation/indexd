@@ -43,11 +43,10 @@ type (
 		// on the same host to avoid waiting on them again.
 		Locked []types.FileContractID
 
-		// Skipped indicates that the accounts or pools that were not funded
-		// should be skipped rather than counted as failed. It is true when
-		// funding was interrupted, or when contracts were locked by another
-		// operation and replenishing did not fail on any contract.
-		Skipped bool
+		// ReplenishFailed indicates that the replenish RPC returned an error
+		// on at least one contract. Errors caused by funding being
+		// interrupted are not considered failures.
+		ReplenishFailed bool
 	}
 
 	// Funder dials a host and replenishes ephemeral accounts and balance pools.
@@ -105,14 +104,13 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 	// iterate over contracts
 	var funded int
 	var drained, locked []types.FileContractID
-	var interrupted, failed bool
+	var failed bool
 	for _, contractID := range contractIDs {
 		done, err := func() (bool, error) {
 			contractLog := log.With(zap.Stringer("contractID", contractID))
 
 			lc, unlock, err := f.lockContract(ctx, contractID)
 			if err != nil && ctx.Err() != nil {
-				interrupted = true
 				return true, nil
 			} else if err != nil {
 				locked = append(locked, contractID)
@@ -153,7 +151,6 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 				drained = append(drained, contractID)
 				return false, nil
 			} else if err != nil && ctx.Err() != nil {
-				interrupted = true
 				contractLog.Debug("replenishing accounts was interrupted", zap.Error(err))
 				return true, nil
 			} else if err != nil {
@@ -177,10 +174,10 @@ func (f *Funder) FundAccounts(ctx context.Context, host hosts.Host, contractIDs 
 	}
 
 	return FundResult{
-		Funded:  funded,
-		Drained: drained,
-		Locked:  locked,
-		Skipped: funded < len(accs) && (interrupted || (len(locked) > 0 && !failed)),
+		Funded:          funded,
+		Drained:         drained,
+		Locked:          locked,
+		ReplenishFailed: failed,
 	}, nil
 }
 
@@ -209,14 +206,13 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 
 	var funded int
 	var drained, locked []types.FileContractID
-	var interrupted, failed bool
+	var failed bool
 	for _, contractID := range contractIDs {
 		done, err := func() (bool, error) {
 			contractLog := log.With(zap.Stringer("contractID", contractID))
 
 			lc, unlock, err := f.lockContract(ctx, contractID)
 			if err != nil && ctx.Err() != nil {
-				interrupted = true
 				return true, nil
 			} else if err != nil {
 				locked = append(locked, contractID)
@@ -256,7 +252,6 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 				drained = append(drained, contractID)
 				return false, nil
 			} else if err != nil && ctx.Err() != nil {
-				interrupted = true
 				contractLog.Debug("replenishing pools was interrupted", zap.Error(err))
 				return true, nil
 			} else if err != nil {
@@ -280,9 +275,9 @@ func (f *Funder) FundPools(ctx context.Context, host hosts.Host, contractIDs []t
 	}
 
 	return FundResult{
-		Funded:  funded,
-		Drained: drained,
-		Locked:  locked,
-		Skipped: funded < len(pools) && (interrupted || (len(locked) > 0 && !failed)),
+		Funded:          funded,
+		Drained:         drained,
+		Locked:          locked,
+		ReplenishFailed: failed,
 	}, nil
 }
