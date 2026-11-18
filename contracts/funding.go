@@ -152,6 +152,8 @@ func (cm *ContractManager) FundAccounts(ctx context.Context, host hosts.Host, co
 	}
 
 	threshold := time.Now().Add(-accounts.AccountActivityThreshold)
+
+	var contractsLocked bool
 OUTER:
 	for _, quota := range quotas {
 		fundTarget := accounts.HostFundTarget(host, quota.FundTargetBytes)
@@ -210,11 +212,17 @@ OUTER:
 					return fmt.Errorf("failed to fund accounts: %w", err)
 				}
 
+				if len(res.Locked) > 0 {
+					contractsLocked = true
+				}
+
 				// accounts left unfunded because of locked contracts or an
 				// interruption are pushed back without counting a failure,
 				// retrying them right away would likely run into the same
-				// locked contracts
-				if res.Skipped {
+				// locked contracts. This also applies when contracts were
+				// dropped for being locked in an earlier batch on this host,
+				// since they might have funded the rest of this batch.
+				if ctx.Err() != nil || (contractsLocked && !res.ReplenishFailed) {
 					accounts.UpdateFundedAccounts(batch.accs[:res.Funded], res.Funded, cm.maxAccountFundingBackoff)
 					accounts.UpdateSkippedAccounts(batch.accs[res.Funded:])
 				} else {
@@ -288,6 +296,8 @@ func (cm *ContractManager) FundPools(ctx context.Context, host hosts.Host, contr
 	}
 
 	threshold := time.Now().Add(-accounts.AccountActivityThreshold)
+
+	var contractsLocked bool
 OUTER:
 	for _, quota := range quotas {
 		fundTarget := accounts.HostFundTarget(host, quota.FundTargetBytes)
@@ -345,11 +355,17 @@ OUTER:
 					return fmt.Errorf("failed to fund pools: %w", err)
 				}
 
+				if len(res.Locked) > 0 {
+					contractsLocked = true
+				}
+
 				// pools left unfunded because of locked contracts or an
 				// interruption are pushed back without counting a failure,
 				// retrying them right away would likely run into the same
-				// locked contracts
-				if res.Skipped {
+				// locked contracts. This also applies when contracts were
+				// dropped for being locked in an earlier batch on this host,
+				// since they might have funded the rest of this batch.
+				if ctx.Err() != nil || (contractsLocked && !res.ReplenishFailed) {
 					accounts.UpdateFundedPools(batch.pools[:res.Funded], res.Funded, cm.maxAccountFundingBackoff)
 					accounts.UpdateSkippedPools(batch.pools[res.Funded:])
 				} else {

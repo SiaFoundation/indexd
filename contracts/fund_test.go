@@ -779,9 +779,10 @@ func (f *lockedFunderMock) FundPools(_ context.Context, _ hosts.Host, contractID
 
 // TestFundingLockedContracts asserts that accounts and pools that were left
 // unfunded because of locked contracts are pushed back without counting a
-// failure, while those left unfunded for any other reason do count one. It is
-// also a regression test for a locked contract being dropped from the contract
-// IDs in place of a drained one.
+// failure, unless replenishing also failed on another contract. Those left
+// unfunded for any other reason do count one. It is also a regression test for
+// a locked contract being dropped from the contract IDs in place of a drained
+// one.
 func TestFundingLockedContracts(t *testing.T) {
 	for _, kind := range fundKinds {
 		t.Run(kind.name, func(t *testing.T) {
@@ -801,8 +802,8 @@ func TestFundingLockedContracts(t *testing.T) {
 			// second batch, which is locked as well
 			am := newMock(2 * accounts.AccountFundBatch)
 			funder := &lockedFunderMock{results: []contracts.FundResult{
-				{Funded: 1, Drained: []types.FileContractID{{2}}, Locked: []types.FileContractID{{1}}, Skipped: true},
-				{Locked: []types.FileContractID{{3}}, Skipped: true},
+				{Funded: 1, Drained: []types.FileContractID{{2}}, Locked: []types.FileContractID{{1}}},
+				{Locked: []types.FileContractID{{3}}},
 			}}
 			cm := contracts.NewTestContractManager(types.PublicKey{}, am, funder, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
 			if err := kind.fund(context.Background(), cm, contractIDs); err != nil {
@@ -832,22 +833,28 @@ func TestFundingLockedContracts(t *testing.T) {
 				}
 			}
 
-			// without locked contracts the unfunded accounts or pools count a
+			// without locked contracts, or with locked contracts and a
+			// replenish failure, the unfunded accounts or pools count a
 			// failure
-			am = newMock(accounts.AccountFundBatch)
-			funder = &lockedFunderMock{results: []contracts.FundResult{{Funded: 1}}}
-			cm = contracts.NewTestContractManager(types.PublicKey{}, am, funder, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
-			if err := kind.fund(context.Background(), cm, contractIDs); err != nil {
-				t.Fatal(err)
-			} else if len(am.failedFunds) != accounts.AccountFundBatch {
-				t.Fatalf("expected %d updates, got %d", accounts.AccountFundBatch, len(am.failedFunds))
-			}
-			var penalized int
-			for _, failedFunds := range am.failedFunds {
-				penalized += failedFunds
-			}
-			if penalized != accounts.AccountFundBatch-1 {
-				t.Fatalf("expected %d failed funds, got %d", accounts.AccountFundBatch-1, penalized)
+			for _, res := range []contracts.FundResult{
+				{Funded: 1},
+				{Funded: 1, Locked: []types.FileContractID{{1}}, ReplenishFailed: true},
+			} {
+				am := newMock(accounts.AccountFundBatch)
+				funder := &lockedFunderMock{results: []contracts.FundResult{res}}
+				cm := contracts.NewTestContractManager(types.PublicKey{}, am, funder, nil, nil, nil, nil, nil, contracts.NewContractLocker(), nil, nil, nil)
+				if err := kind.fund(context.Background(), cm, contractIDs); err != nil {
+					t.Fatal(err)
+				} else if len(am.failedFunds) != accounts.AccountFundBatch {
+					t.Fatalf("expected %d updates, got %d", accounts.AccountFundBatch, len(am.failedFunds))
+				}
+				var penalized int
+				for _, failedFunds := range am.failedFunds {
+					penalized += failedFunds
+				}
+				if penalized != accounts.AccountFundBatch-1 {
+					t.Fatalf("expected %d failed funds, got %d", accounts.AccountFundBatch-1, penalized)
+				}
 			}
 		})
 	}
