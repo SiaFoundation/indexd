@@ -808,6 +808,9 @@ EXECUTE FUNCTION slabs_maintain_repair_stats();
 
 CREATE FUNCTION slabs_republish_object_events() RETURNS TRIGGER AS $$
 BEGIN
+    -- wait for pins of objects referencing the slab that have not committed,
+    -- they hold KEY SHARE and the updates below cannot see their rows yet
+    PERFORM 1 FROM slabs WHERE id = NEW.id FOR UPDATE;
     UPDATE object_events
     SET updated_at = NULL
     WHERE (account_id, object_key) IN (
