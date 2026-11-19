@@ -574,29 +574,38 @@ func TestMarkSlabUnrecoverable(t *testing.T) {
 	store.assertNoObjectEvent(t, account, space, &cursors)
 	store.assertObjectEvents(t, other, otherSpace, &otherCursors, true, objectA.ID())
 
-	// marking waits for a pin of the slab that has not committed
-	lockTx, err := store.pool.Begin(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = lockTx.Rollback(t.Context()) }()
-	if _, err := lockTx.Exec(t.Context(), `SELECT digest FROM slabs WHERE digest = $1 FOR KEY SHARE`, sqlHash256(slabID2)); err != nil {
-		t.Fatal(err)
-	}
+	// flipping the mark waits for a pin of the slab that has not committed
+	assertWaitsForPin := func(flip func() error) {
+		t.Helper()
+		lockTx, err := store.pool.Begin(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = lockTx.Rollback(t.Context()) }()
+		if _, err := lockTx.Exec(t.Context(), `SELECT digest FROM slabs WHERE digest = $1 FOR KEY SHARE`, sqlHash256(slabID2)); err != nil {
+			t.Fatal(err)
+		}
 
-	marked := make(chan error, 1)
-	go func() { marked <- store.MarkSlabUnrecoverable(slabID2, "shard root mismatch") }()
-	select {
-	case err := <-marked:
-		t.Fatal("marked while the slab was pinned", err)
-	case <-time.After(250 * time.Millisecond):
+		flipped := make(chan error, 1)
+		go func() { flipped <- flip() }()
+		select {
+		case err := <-flipped:
+			t.Fatal("flipped while the slab was pinned", err)
+		case <-time.After(250 * time.Millisecond):
+		}
+		if err := lockTx.Commit(t.Context()); err != nil {
+			t.Fatal(err)
+		} else if err := <-flipped; err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := lockTx.Commit(t.Context()); err != nil {
-		t.Fatal(err)
-	} else if err := <-marked; err != nil {
-		t.Fatal(err)
-	}
+	assertWaitsForPin(func() error { return store.MarkSlabUnrecoverable(slabID2, "shard root mismatch") })
 	store.assertObjectEvents(t, account, space, &cursors, true, objectB.ID())
+	assertWaitsForPin(func() error {
+		_, err := store.PinSlabs(account, time.Time{}, slab2)
+		return err
+	})
+	store.assertObjectEvents(t, account, space, &cursors, false, objectB.ID())
 }
 
 // backdateRecoveryWindow starts the slab's recovery window age ago.
