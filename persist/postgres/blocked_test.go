@@ -19,7 +19,7 @@ import (
 func TestBlocklist(t *testing.T) {
 	store := initPostgres(t, zap.NewNop())
 
-	keys := []types.Hash256{frand.Entropy256(), frand.Entropy256(), frand.Entropy256()}
+	keys := []slabs.ObjectID{frand.Entropy256(), frand.Entropy256(), frand.Entropy256()}
 
 	if _, err := store.BlockedObject(keys[0]); !errors.Is(err, slabs.ErrObjectNotBlocked) {
 		t.Fatalf("expected ErrObjectNotBlocked, got %v", err)
@@ -195,7 +195,7 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 		}
 	}
 
-	updatedAt := make(map[types.Hash256]time.Time)
+	updatedAt := make(map[slabs.ObjectID]time.Time)
 	if events := listAll(); len(events) != n {
 		t.Fatalf("expected %d objects, got %d", n, len(events))
 	} else {
@@ -206,7 +206,7 @@ func TestBlockedObjectsHiddenFromListing(t *testing.T) {
 
 	// block a run larger than the page size: filtering after the limit would
 	// return an empty page and stop a paginating client early
-	blocked := []types.Hash256{objs[1].ID(), objs[2].ID(), objs[3].ID()}
+	blocked := []slabs.ObjectID{objs[1].ID(), objs[2].ID(), objs[3].ID()}
 	for _, key := range blocked {
 		if err := store.BlockObject(key, "dmca"); err != nil {
 			t.Fatal(err)
@@ -389,7 +389,7 @@ func TestBlockedSharedObjects(t *testing.T) {
 		t.Fatalf("expected %d shared objects, got %d", n, len(shared))
 	} else if page, err := store.SharingKeyObjectSlabs(sharingKey, blockedKey, 0, 10); err != nil {
 		t.Fatal(err)
-	} else if slabs.ObjectID(page) != blockedKey {
+	} else if slabs.V2ObjectDigest(page) != blockedKey {
 		t.Fatalf("expected the object's slabs, got %+v", page)
 	}
 }

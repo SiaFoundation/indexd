@@ -138,15 +138,15 @@ type (
 	// SlabManager defines the slab-related interface used by the admin API.
 	SlabManager interface {
 		DeleteSlabObject(ctx context.Context, obj slabs.SlabObject) error
-		ObjectAccounts(ctx context.Context, objectKey types.Hash256, offset, limit int) ([]slabs.ObjectAccount, error)
+		ObjectAccounts(ctx context.Context, objectKey slabs.ObjectID, offset, limit int) ([]slabs.ObjectAccount, error)
 		ObjectStats() (slabs.ObjectStats, error)
 		ObjectsForSlab(slabID slabs.SlabID) ([]slabs.SlabObject, error)
 		PruneSlabs(ctx context.Context, account proto.Account, cutoff time.Time) error
 		SectorStats() (slabs.SectorsStats, error)
 
-		BlockObject(ctx context.Context, objectKey types.Hash256, reason string) error
-		UnblockObject(ctx context.Context, objectKey types.Hash256) error
-		BlockedObject(ctx context.Context, objectKey types.Hash256) (slabs.BlockedObject, error)
+		BlockObject(ctx context.Context, objectKey slabs.ObjectID, reason string) error
+		UnblockObject(ctx context.Context, objectKey slabs.ObjectID) error
+		BlockedObject(ctx context.Context, objectKey slabs.ObjectID) (slabs.BlockedObject, error)
 		BlockedObjects(ctx context.Context, offset, limit int) ([]slabs.BlockedObject, error)
 
 		// migration endpoints used by remote nodes
@@ -1221,7 +1221,7 @@ func (a *admin) handleDELETEHostsBlocklist(jc jape.Context) {
 }
 
 func (a *admin) handleGETObjectAccounts(jc jape.Context) {
-	var objectKey types.Hash256
+	var objectKey slabs.ObjectID
 	if jc.DecodeParam("objectkey", &objectKey) != nil {
 		return
 	}
@@ -1252,7 +1252,7 @@ func (a *admin) handleGETObjectsBlocklist(jc jape.Context) {
 }
 
 func (a *admin) handlePUTObjectsBlocklist(jc jape.Context) {
-	var objectKey types.Hash256
+	var objectKey slabs.ObjectID
 	if jc.DecodeParam("objectkey", &objectKey) != nil {
 		return
 	}
@@ -1267,7 +1267,7 @@ func (a *admin) handlePUTObjectsBlocklist(jc jape.Context) {
 }
 
 func (a *admin) handleGETObjectsBlocklistKey(jc jape.Context) {
-	var objectKey types.Hash256
+	var objectKey slabs.ObjectID
 	if jc.DecodeParam("objectkey", &objectKey) != nil {
 		return
 	}
@@ -1282,7 +1282,7 @@ func (a *admin) handleGETObjectsBlocklistKey(jc jape.Context) {
 }
 
 func (a *admin) handleDELETEObjectsBlocklist(jc jape.Context) {
-	var objectKey types.Hash256
+	var objectKey slabs.ObjectID
 	if jc.DecodeParam("objectkey", &objectKey) != nil {
 		return
 	}

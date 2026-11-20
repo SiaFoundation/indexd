@@ -42,13 +42,13 @@ type (
 		SlabIDs(ctx context.Context, account proto.Account, offset, limit int) ([]slabs.SlabID, error)
 		UnpinSlab(ctx context.Context, account proto.Account, slabID slabs.SlabID) error
 
-		Object(ctx context.Context, account proto.Account, key types.Hash256) (slabs.SealedObject, error)
-		DeleteObject(ctx context.Context, account proto.Account, objectKey types.Hash256) error
+		Object(ctx context.Context, account proto.Account, key slabs.ObjectID) (slabs.SealedObject, error)
+		DeleteObject(ctx context.Context, account proto.Account, objectKey slabs.ObjectID) error
 		PinObject(ctx context.Context, account proto.Account, obj slabs.PinObjectRequest) error
 		ListObjects(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
 		ListObjectsWithoutSlabs(ctx context.Context, account proto.Account, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventWithoutSlabs, error)
-		ObjectSlabs(ctx context.Context, account proto.Account, key types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
-		SharedObject(ctx context.Context, key types.Hash256) (slabs.SharedObject, error)
+		ObjectSlabs(ctx context.Context, account proto.Account, key slabs.ObjectID, cursor int64, limit int) ([]slabs.SlabSlice, error)
+		SharedObject(ctx context.Context, key slabs.ObjectID) (slabs.SharedObject, error)
 	}
 
 	// Sharing defines the sharing key management interface for the application
@@ -60,13 +60,13 @@ type (
 		SharingKey(publicKey types.PublicKey) (sharing.Key, error)
 		OwnedSharingKey(account proto.Account, publicKey types.PublicKey) (sharing.Key, error)
 		AddSharedObject(account proto.Account, sharingKey types.PublicKey, req sharing.SharedObjectRequest) error
-		DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey types.Hash256) error
+		DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey slabs.ObjectID) error
 		OwnedSharedObjects(account proto.Account, sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
 		OwnedSharedObjectsWithoutSlabs(account proto.Account, sharingKey types.PublicKey, offset, limit int) ([]sharing.ObjectWithoutSlabs, error)
 		SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
 		SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, limit int) ([]sharing.ObjectWithoutSlabs, error)
-		SharedObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
-		SharedObjectSlabs(sharingKey types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
+		SharedObject(sharingKey types.PublicKey, objectKey slabs.ObjectID) (slabs.SealedObject, error)
+		SharedObjectSlabs(sharingKey types.PublicKey, objectKey slabs.ObjectID, cursor int64, limit int) ([]slabs.SlabSlice, error)
 		AccountTokens(sharingKey types.PublicKey, hostKeys []types.PublicKey) ([]proto.AccountToken, error)
 	}
 
@@ -304,7 +304,7 @@ func (a *app) usableHosts(jc jape.Context) ([]hosts.HostInfo, bool) {
 }
 
 func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
-	var key types.Hash256
+	var key slabs.ObjectID
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
@@ -325,7 +325,7 @@ func (a *app) handleGETObject(jc jape.Context, pk types.PublicKey) {
 }
 
 func (a *app) handleGETObjectSlabs(jc jape.Context, pk types.PublicKey) {
-	var key types.Hash256
+	var key slabs.ObjectID
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
@@ -351,7 +351,7 @@ func (a *app) handleGETObjectSlabs(jc jape.Context, pk types.PublicKey) {
 }
 
 func (a *app) handleGETObjectShared(jc jape.Context, _ types.PublicKey) {
-	var key types.Hash256
+	var key slabs.ObjectID
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
@@ -377,7 +377,7 @@ func (a *app) handleGETObjects(jc jape.Context, pk types.PublicKey) {
 		return
 	}
 
-	var key types.Hash256
+	var key slabs.ObjectID
 	if jc.DecodeForm("key", &key) != nil {
 		return
 	}
@@ -435,7 +435,7 @@ func (a *app) handlePOSTObjects(jc jape.Context, pk types.PublicKey) {
 }
 
 func (a *app) handleDELETEObjects(jc jape.Context, pk types.PublicKey) {
-	var key types.Hash256
+	var key slabs.ObjectID
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
@@ -594,7 +594,7 @@ func (a *app) handleDELETESharingObject(jc jape.Context, pk types.PublicKey) {
 	if jc.DecodeParam("key", &key) != nil {
 		return
 	}
-	var objectKey types.Hash256
+	var objectKey slabs.ObjectID
 	if jc.DecodeParam("objectkey", &objectKey) != nil {
 		return
 	}

@@ -48,6 +48,14 @@ func openSpaceAPI(t *testing.T, key [32]byte, ciphertext []byte) []byte {
 }
 
 func TestSpacesAPI(t *testing.T) {
+	testSpacesAPI(t, false)
+}
+
+func TestSpacesAPIV2(t *testing.T) {
+	testSpacesAPI(t, true)
+}
+
+func testSpacesAPI(t *testing.T, v2 bool) {
 	for _, encoding := range []string{"json", "cbor"} {
 		t.Run(encoding, func(t *testing.T) {
 			ctx := t.Context()
@@ -172,11 +180,11 @@ func TestSpacesAPI(t *testing.T) {
 				EncryptedMetadata:    sealSpaceAPI(t, metadataKey, []byte(`{"name":"notes.txt"}`)),
 				Slabs:                []slabs.SlabSlice{params.Slice(0, 32), params2.Slice(32, 64)},
 			}
-			object.Sign(memberKey)
-			assertStatus(t, client.PinSpaceObject(ctx, memberKey, key, object), http.StatusBadRequest)
-			object.Sign(memberSpaceKey)
-			assertStatus(t, client.PinSpaceObject(ctx, outsiderKey, key, object), http.StatusForbidden)
-			if err := client.PinSpaceObject(ctx, memberKey, key, object); err != nil {
+			signObject(&object, memberKey, v2)
+			assertStatus(t, pinSpaceObject(ctx, client, memberKey, key, object, v2), http.StatusBadRequest)
+			signObject(&object, memberSpaceKey, v2)
+			assertStatus(t, pinSpaceObject(ctx, client, outsiderKey, key, object, v2), http.StatusForbidden)
+			if err := pinSpaceObject(ctx, client, memberKey, key, object, v2); err != nil {
 				t.Fatal(err)
 			}
 			space, err := client.Space(ctx, ownerKey, key)
@@ -192,17 +200,17 @@ func TestSpacesAPI(t *testing.T) {
 					t.Fatalf("unexpected space stats: %+v", got)
 				}
 			}
-			assertStatus(t, client.DeleteSpaceObject(ctx, memberKey, key, object.ID()), http.StatusForbidden)
-			got, err := client.SpaceObject(ctx, ownerKey, key, object.ID())
+			assertStatus(t, client.DeleteSpaceObject(ctx, memberKey, key, signedObjectID(t, object, key)), http.StatusForbidden)
+			got, err := client.SpaceObject(ctx, ownerKey, key, signedObjectID(t, object, key))
 			if err != nil {
 				t.Fatal(err)
-			} else if got.ID() != object.ID() || got.VerifySignatures(key) != nil {
+			} else if signedObjectID(t, got, key) != signedObjectID(t, object, key) || got.VerifySignatures(key) != nil {
 				t.Fatalf("invalid object response: %+v", got)
 			} else if recovered := openSpaceAPI(t, seed, got.EncryptedDataKey); !bytes.Equal(recovered, dataKey[:]) {
 				t.Fatal("owner could not decrypt the member's object key")
 			}
 			for i, want := range object.Slabs {
-				page, err := client.SpaceObjectSlabs(ctx, ownerKey, key, object.ID(), int64(i), 1)
+				page, err := client.SpaceObjectSlabs(ctx, ownerKey, key, signedObjectID(t, object, key), int64(i), 1)
 				if err != nil || len(page) != 1 || !reflect.DeepEqual(page[0], want) {
 					t.Fatalf("unexpected slab page %d: %+v, %v", i, page, err)
 				}
@@ -229,17 +237,26 @@ func TestSpacesAPI(t *testing.T) {
 			if page, err := client.ListSpaceObjects(ctx, ownerKey, key, cursor, 1); err != nil || len(page) != 0 {
 				t.Fatalf("unexpected events after cursor: %+v, %v", page, err)
 			}
-			object.EncryptedMetadata = sealSpaceAPI(t, metadataKey, []byte(`{"name":"renamed.txt"}`))
-			object.Sign(memberSpaceKey)
-			if err := client.PinSpaceObject(ctx, memberKey, key, object); err != nil {
+			update := got.PinRequestForID(cursor.Key)
+			update.EncryptedMetadata = sealSpaceAPI(t, metadataKey, []byte(`{"name":"renamed.txt"}`))
+			update.Sign(memberSpaceKey)
+			if err := client.PinSpaceObject(ctx, memberKey, key, update); err != nil {
 				t.Fatal(err)
 			}
 			publish()
 			withoutSlabs, err := client.ListSpaceObjectsWithoutSlabs(ctx, ownerKey, key, cursor, 1)
-			if err != nil || len(withoutSlabs) != 1 || withoutSlabs[0].Object == nil || withoutSlabs[0].Object.Size != object.Size() {
+			if err != nil || len(withoutSlabs) != 1 || withoutSlabs[0].Key != cursor.Key || withoutSlabs[0].Object == nil || withoutSlabs[0].Object.Size != object.Size() {
 				t.Fatalf("unexpected object update: %+v, %v", withoutSlabs, err)
 			} else if metadata := openSpaceAPI(t, metadataKey, withoutSlabs[0].Object.EncryptedMetadata); string(metadata) != `{"name":"renamed.txt"}` {
 				t.Fatalf("unexpected metadata: %s", metadata)
+			}
+			if updated, err := client.SpaceObject(ctx, ownerKey, key, cursor.Key); err != nil {
+				t.Fatal(err)
+			} else if signedObjectID(t, updated, key) != cursor.Key || !updated.CreatedAt.Equal(got.CreatedAt) || !bytes.Equal(updated.EncryptedDataKey, got.EncryptedDataKey) || updated.DataSignature != got.DataSignature {
+				t.Fatal("metadata update changed the original object")
+			}
+			if all, err := client.ListSpaceObjects(ctx, ownerKey, key, slabs.Cursor{}, 10); err != nil || len(all) != 1 || all[0].Key != cursor.Key {
+				t.Fatalf("metadata update changed event identity or created another object: %+v, %v", all, err)
 			}
 			cursor = slabs.Cursor{After: withoutSlabs[0].UpdatedAt, Key: withoutSlabs[0].Key}
 			updated := spaces.AddSpaceRequest{Key: key, EncryptedName: sealSpaceAPI(t, seed, []byte("Team documents")), EncryptedMetadata: req.EncryptedMetadata}
@@ -255,15 +272,15 @@ func TestSpacesAPI(t *testing.T) {
 			} else if !key.VerifyHash(updated.SigHash(), updated.Signature) || string(openSpaceAPI(t, seed, updated.EncryptedName)) != "Team documents" {
 				t.Fatal("space update signature or encrypted name changed")
 			}
-			if err := client.DeleteSpaceObject(ctx, memberKey, key, object.ID()); err != nil {
+			if err := client.DeleteSpaceObject(ctx, memberKey, key, signedObjectID(t, object, key)); err != nil {
 				t.Fatal(err)
 			}
 			publish()
 			events, err = client.ListSpaceObjects(ctx, ownerKey, key, cursor, 1)
-			if err != nil || len(events) != 1 || !events[0].Deleted || events[0].Object != nil || events[0].Key != object.ID() {
+			if err != nil || len(events) != 1 || !events[0].Deleted || events[0].Object != nil || events[0].Key != signedObjectID(t, object, key) {
 				t.Fatalf("unexpected deletion event: %+v, %v", events, err)
 			}
-			_, err = client.SpaceObject(ctx, ownerKey, key, object.ID())
+			_, err = client.SpaceObject(ctx, ownerKey, key, signedObjectID(t, object, key))
 			assertStatus(t, err, http.StatusNotFound)
 			if err := client.DeleteSpaceMember(ctx, ownerKey, key, member); err != nil {
 				t.Fatal(err)

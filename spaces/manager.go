@@ -27,9 +27,9 @@ type (
 		DeleteSpaceMember(account proto.Account, key types.PublicKey, member proto.Account) error
 		PinSpaceSlabs(account proto.Account, key types.PublicKey, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error)
 		PinSpaceObject(account proto.Account, key types.PublicKey, obj slabs.PinObjectRequest) error
-		DeleteSpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) error
-		SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
-		SpaceObjectSlabs(account proto.Account, key types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
+		DeleteSpaceObject(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID) error
+		SpaceObject(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID) (slabs.SealedObject, error)
+		SpaceObjectSlabs(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID, cursor int64, limit int) ([]slabs.SlabSlice, error)
 		ListSpaceObjects(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
 		ListSpaceObjectsWithoutSlabs(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventWithoutSlabs, error)
 	}
@@ -188,16 +188,14 @@ func (m *Manager) PinSpaceSlabs(account proto.Account, key types.PublicKey, next
 func (m *Manager) PinSpaceObject(account proto.Account, key types.PublicKey, obj slabs.PinObjectRequest) error {
 	if err := validateAccountAndSpaceKeys(account, key); err != nil {
 		return err
-	} else if err := obj.Validate(); err != nil {
+	} else if err := obj.Validate(key); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidRequest, err)
-	} else if err := obj.VerifySignatures(key); err != nil {
-		return err
 	}
 	return m.store.PinSpaceObject(account, key, obj)
 }
 
 // DeleteSpaceObject removes an object and releases unused storage.
-func (m *Manager) DeleteSpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) error {
+func (m *Manager) DeleteSpaceObject(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID) error {
 	if err := validateAccountAndSpaceKeys(account, key); err != nil {
 		return err
 	} else if err := validateObjectKey(objectKey); err != nil {
@@ -207,7 +205,7 @@ func (m *Manager) DeleteSpaceObject(account proto.Account, key types.PublicKey, 
 }
 
 // SpaceObject returns an object accessible to account.
-func (m *Manager) SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error) {
+func (m *Manager) SpaceObject(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID) (slabs.SealedObject, error) {
 	if err := validateAccountAndSpaceKeys(account, key); err != nil {
 		return slabs.SealedObject{}, err
 	} else if err := validateObjectKey(objectKey); err != nil {
@@ -217,7 +215,7 @@ func (m *Manager) SpaceObject(account proto.Account, key types.PublicKey, object
 }
 
 // SpaceObjectSlabs returns slab slices starting at cursor.
-func (m *Manager) SpaceObjectSlabs(account proto.Account, key types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error) {
+func (m *Manager) SpaceObjectSlabs(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID, cursor int64, limit int) ([]slabs.SlabSlice, error) {
 	if err := validateAccountAndSpaceKeys(account, key); err != nil {
 		return nil, err
 	} else if err := validateObjectKey(objectKey); err != nil {

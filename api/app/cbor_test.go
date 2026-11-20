@@ -190,7 +190,7 @@ func TestCBORResponseRoundTrip(t *testing.T) {
 
 func TestCBORObjectEventRoundTrip(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Nanosecond)
-	key := types.Hash256(frand.Entropy256())
+	key := slabs.ObjectID(frand.Entropy256())
 	events := []slabs.ObjectEvent{
 		{
 			Key:       key,
@@ -216,7 +216,7 @@ func TestCBORObjectEventRoundTrip(t *testing.T) {
 				UpdatedAt:            now,
 			},
 		},
-		{Key: types.Hash256(frand.Entropy256()), Deleted: true, UpdatedAt: now},
+		{Key: slabs.ObjectID(frand.Entropy256()), Deleted: true, UpdatedAt: now},
 	}
 
 	buf, err := encodeCBOR(events)

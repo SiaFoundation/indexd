@@ -161,6 +161,14 @@ func publishEvents(t testing.TB, indexer *testutils.Indexer) {
 }
 
 func TestApplicationAPI(t *testing.T) {
+	testApplicationAPI(t, false)
+}
+
+func TestApplicationAPIV2(t *testing.T) {
+	testApplicationAPI(t, true)
+}
+
+func testApplicationAPI(t *testing.T, v2 bool) {
 	ctx := t.Context()
 	// create cluster with three hosts
 	logger := zaptest.NewLogger(t)
@@ -457,7 +465,7 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// try to save the object with an invalid signature
-	if err := client.PinObject(context.Background(), sk, obj); err == nil || !strings.Contains(err.Error(), slabs.ErrInvalidObjectSignature.Error()) {
+	if err := pinObject(context.Background(), client, sk, obj, v2); err == nil || !strings.Contains(err.Error(), slabs.ErrInvalidObjectSignature.Error()) {
 		t.Fatalf("expected %v, got %v", slabs.ErrInvalidObjectSignature, err)
 	}
 	for _, tt := range []struct {
@@ -473,9 +481,9 @@ func TestApplicationAPI(t *testing.T) {
 			invalid := obj
 			invalid.Slabs = append([]slabs.SlabSlice(nil), obj.Slabs...)
 			tt.change(&invalid)
-			invalid.Sign(sk)
+			signObject(&invalid, sk, v2)
 			var httpErr *app.HTTPError
-			if err := client.PinObject(t.Context(), sk, invalid); !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusBadRequest {
+			if err := pinObject(t.Context(), client, sk, invalid, v2); !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusBadRequest {
 				t.Fatalf("expected HTTP 400 for invalid object, got %v", err)
 			} else if httpErr.Body != tt.body {
 				t.Fatalf("expected response %q, got %q", tt.body, httpErr.Body)
@@ -484,8 +492,8 @@ func TestApplicationAPI(t *testing.T) {
 	}
 
 	// sign and save the object
-	obj.Sign(sk)
-	if err := client.PinObject(context.Background(), sk, obj); err != nil {
+	signObject(&obj, sk, v2)
+	if err := pinObject(context.Background(), client, sk, obj, v2); err != nil {
 		t.Fatal(err)
 	}
 
@@ -497,6 +505,13 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatalf("expected 1 object, got %d", len(objs))
 	}
 	obj1 := *objs[0].Object
+	wantID := slabs.ObjectDigest(obj.Slabs)
+	if v2 {
+		wantID = obj.ID()
+	}
+	if id := signedObjectID(t, obj1, sk.PublicKey()); id != wantID || objs[0].Key != wantID {
+		t.Fatalf("received object ID %v and event key %v, want %v", id, objs[0].Key, wantID)
+	}
 
 	// list the object without its slabs and check the rest of the event matches
 	withoutSlabs, err := client.ListObjectsWithoutSlabs(context.Background(), sk, slabs.Cursor{}, 100)
@@ -538,7 +553,7 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatalf("expected 0 objects, got %d", len(objs))
 	}
 
-	obj, err = client.Object(context.Background(), sk, obj1.ID())
+	obj, err = client.Object(context.Background(), sk, signedObjectID(t, obj1, sk.PublicKey()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -553,16 +568,38 @@ func TestApplicationAPI(t *testing.T) {
 		t.Fatal("objects not equal", obj, listed)
 	}
 
-	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err != nil {
+	update := obj.PinRequestForID(wantID)
+	update.EncryptedMetadata = []byte("updated metadata")
+	update.Sign(sk)
+	if err := client.PinObject(context.Background(), sk, update); err != nil {
+		t.Fatal("failed to update fetched object:", err)
+	}
+	updated, err := client.Object(context.Background(), sk, wantID)
+	if err != nil {
+		t.Fatal(err)
+	} else if signedObjectID(t, updated, sk.PublicKey()) != wantID || !bytes.Equal(updated.EncryptedMetadata, update.EncryptedMetadata) {
+		t.Fatal("metadata update changed the object's identity or lost its metadata")
+	} else if !updated.CreatedAt.Equal(obj.CreatedAt) || !bytes.Equal(updated.EncryptedDataKey, obj.EncryptedDataKey) || updated.DataSignature != obj.DataSignature {
+		t.Fatal("metadata update changed the original object")
+	}
+	publishEvents(t, indexer)
+	updatedEvents, err := client.ListObjects(context.Background(), sk, slabs.Cursor{}, 100)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(updatedEvents) != 1 || updatedEvents[0].Key != wantID || updatedEvents[0].Deleted || updatedEvents[0].Object == nil {
+		t.Fatalf("metadata update changed event identity or created another object: %+v", updatedEvents)
+	}
+
+	if err := client.DeleteObject(context.Background(), sk, signedObjectID(t, obj1, sk.PublicKey())); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = client.Object(context.Background(), sk, obj1.ID())
+	_, err = client.Object(context.Background(), sk, signedObjectID(t, obj1, sk.PublicKey()))
 	if err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
 		t.Fatal("expected object to be not found, got", err)
 	}
 
-	if err := client.DeleteObject(context.Background(), sk, obj1.ID()); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
+	if err := client.DeleteObject(context.Background(), sk, signedObjectID(t, obj1, sk.PublicKey())); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectNotFound.Error()) {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectNotFound, err)
 	}
 
@@ -592,8 +629,8 @@ func TestApplicationAPI(t *testing.T) {
 		EncryptedMetadataKey: frand.Bytes(72),
 		Slabs:                []slabs.SlabSlice{p2.Slice(0, 256)},
 	}
-	badObj.Sign(sk)
-	if err := client.PinObject(context.Background(), sk, badObj); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectUnpinnedSlab.Error()) {
+	signObject(&badObj, sk, v2)
+	if err := pinObject(context.Background(), client, sk, badObj, v2); err == nil || !strings.Contains(err.Error(), slabs.ErrObjectUnpinnedSlab.Error()) {
 		t.Fatalf("expected %v, got %v", slabs.ErrObjectUnpinnedSlab, err)
 	}
 }
@@ -1085,7 +1122,7 @@ func TestSharedObjects(t *testing.T) {
 		},
 	}
 	obj.Sign(sk1)
-	if err := appClient.PinObject(ctx, sk1, obj); err != nil {
+	if err := appClient.PinObject(ctx, sk1, obj.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1142,4 +1179,37 @@ func TestMaxRequestSize(t *testing.T) {
 	} else if resp.StatusCode != http.StatusRequestEntityTooLarge {
 		t.Fatalf("expected status %d, got %d", http.StatusRequestEntityTooLarge, resp.StatusCode)
 	}
+}
+
+func signedObjectID(t testing.TB, obj slabs.SealedObject, pk types.PublicKey) slabs.ObjectID {
+	t.Helper()
+	id, err := obj.SignedID(pk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func signObject(obj *slabs.SealedObject, key types.PrivateKey, v2 bool) {
+	if v2 {
+		obj.Sign(key)
+		return
+	}
+	id := slabs.ObjectDigest(obj.Slabs)
+	obj.DataSignature = key.SignHash(id.DataSigHash(obj.EncryptedDataKey))
+	obj.MetadataSignature = key.SignHash(id.MetaSigHash(obj.EncryptedMetadataKey, obj.EncryptedMetadata))
+}
+
+func pinObject(ctx context.Context, client *app.Client, key types.PrivateKey, obj slabs.SealedObject, v2 bool) error {
+	if v2 {
+		return client.PinObject(ctx, key, obj.PinRequest())
+	}
+	return client.PinObject(ctx, key, obj.PinRequestForID(slabs.ObjectDigest(obj.Slabs)))
+}
+
+func pinSpaceObject(ctx context.Context, client *app.Client, accountKey types.PrivateKey, spaceKey types.PublicKey, obj slabs.SealedObject, v2 bool) error {
+	if v2 {
+		return client.PinSpaceObject(ctx, accountKey, spaceKey, obj.PinRequest())
+	}
+	return client.PinSpaceObject(ctx, accountKey, spaceKey, obj.PinRequestForID(slabs.ObjectDigest(obj.Slabs)))
 }

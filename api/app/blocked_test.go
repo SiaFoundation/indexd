@@ -52,7 +52,7 @@ func TestBlockedObjects(t *testing.T) {
 			Slabs:                []slabs.SlabSlice{params.Slice(0, 256)},
 		}
 		obj.Sign(sk)
-		if err := appClient.PinObject(ctx, sk, obj); err != nil {
+		if err := appClient.PinObject(ctx, sk, obj.PinRequest()); err != nil {
 			t.Fatal(err)
 		}
 		return obj
@@ -175,7 +175,7 @@ func TestBlockedObjects(t *testing.T) {
 
 	// the key is derived from the object's slabs, so the same content can not be
 	// pinned again by any account
-	if err := appClient.PinObject(ctx, sk, blockedObj); err == nil {
+	if err := appClient.PinObject(ctx, sk, blockedObj.PinRequest()); err == nil {
 		t.Fatal("expected error re-pinning a blocked object")
 	} else {
 		assertStatus(t, err, http.StatusUnavailableForLegalReasons)
@@ -183,7 +183,7 @@ func TestBlockedObjects(t *testing.T) {
 	sk2, _ := newAccount(t, cluster)
 	otherAccountObj := blockedObj
 	otherAccountObj.Sign(sk2)
-	if err := appClient.PinObject(ctx, sk2, otherAccountObj); err == nil {
+	if err := appClient.PinObject(ctx, sk2, otherAccountObj.PinRequest()); err == nil {
 		t.Fatal("expected error pinning a blocked object from another account")
 	} else {
 		assertStatus(t, err, http.StatusUnavailableForLegalReasons)
@@ -240,12 +240,12 @@ func TestBlockedObjects(t *testing.T) {
 		t.Fatalf("expected object %v, got %v", blockedObj.ID(), got.ID())
 	} else if page, err := appClient.ObjectSlabs(ctx, sk, blockedObj.ID(), 0, 100); err != nil {
 		t.Fatal(err)
-	} else if slabs.ObjectID(page) != blockedObj.ID() {
+	} else if slabs.V2ObjectDigest(page) != blockedObj.ID() {
 		t.Fatalf("expected the object's slabs, got %+v", page)
 	}
 	if page, err := appClient.SharedObjectSlabs(ctx, shareKeyPriv, blockedObj.ID(), 0, 100); err != nil {
 		t.Fatal(err)
-	} else if slabs.ObjectID(page) != blockedObj.ID() {
+	} else if slabs.V2ObjectDigest(page) != blockedObj.ID() {
 		t.Fatalf("expected the shared object's slabs, got %+v", page)
 	}
 	if _, _, err := appClient.SharedObject(ctx, shareURL); err != nil {

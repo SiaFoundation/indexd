@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"time"
-
-	"go.sia.tech/core/types"
 )
 
 var (
@@ -18,27 +16,27 @@ var (
 
 // A BlockedObject is an object key on the blocklist.
 type BlockedObject struct {
-	Key       types.Hash256 `json:"key"`
-	Reason    string        `json:"reason"`
-	CreatedAt time.Time     `json:"createdAt"`
+	Key       ObjectID  `json:"key"`
+	Reason    string    `json:"reason"`
+	CreatedAt time.Time `json:"createdAt"`
 }
 
 // BlockObject adds the given object key to the blocklist with the given reason.
 // If the key is already blocked its reason is updated. The key does not need to
 // reference an existing object.
-func (m *SlabManager) BlockObject(ctx context.Context, objectKey types.Hash256, reason string) error {
+func (m *SlabManager) BlockObject(ctx context.Context, objectKey ObjectID, reason string) error {
 	return m.store.BlockObject(objectKey, reason)
 }
 
 // UnblockObject removes an object key from the blocklist. Unblocking a key that
 // is not blocked is a no-op.
-func (m *SlabManager) UnblockObject(ctx context.Context, objectKey types.Hash256) error {
+func (m *SlabManager) UnblockObject(ctx context.Context, objectKey ObjectID) error {
 	return m.store.UnblockObject(objectKey)
 }
 
 // BlockedObject returns the blocklist entry for the given object key. It
 // returns ErrObjectNotBlocked if the key is not blocked.
-func (m *SlabManager) BlockedObject(ctx context.Context, objectKey types.Hash256) (BlockedObject, error) {
+func (m *SlabManager) BlockedObject(ctx context.Context, objectKey ObjectID) (BlockedObject, error) {
 	return m.store.BlockedObject(objectKey)
 }
 
