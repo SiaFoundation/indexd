@@ -753,4 +753,53 @@ FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();`)
 		_, err := tx.Exec(ctx, `ALTER TABLE space_objects DROP COLUMN account_key`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+CREATE INDEX slabs_unrecoverable_idx ON slabs(digest) WHERE unrecoverable_reason IS NOT NULL;
+CREATE FUNCTION slabs_republish_object_events() RETURNS TRIGGER AS $$
+BEGIN
+    -- wait for pins of objects referencing the slab that have not committed,
+    -- they hold KEY SHARE and the updates below cannot see their rows yet
+    PERFORM 1 FROM slabs WHERE id = NEW.id FOR UPDATE;
+    UPDATE object_events
+    SET updated_at = NULL
+    WHERE (account_id, object_key) IN (
+        SELECT o.account_id, o.object_key
+        FROM object_slabs os
+        INNER JOIN objects o ON os.object_id = o.id
+        WHERE os.slab_digest = NEW.digest
+    );
+    UPDATE space_object_events
+    SET updated_at = NULL
+    WHERE (space_id, object_key) IN (
+        SELECT o.space_id, o.object_key
+        FROM space_object_slabs os
+        INNER JOIN space_objects o ON os.object_id = o.id
+        WHERE os.slab_digest = NEW.digest
+    );
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER slabs_republish_object_events
+AFTER UPDATE OF unrecoverable_reason ON slabs FOR EACH ROW
+WHEN ((OLD.unrecoverable_reason IS NULL) IS DISTINCT FROM (NEW.unrecoverable_reason IS NULL))
+EXECUTE FUNCTION slabs_republish_object_events();
+UPDATE object_events SET updated_at = NULL
+WHERE (account_id, object_key) IN (
+	SELECT o.account_id, o.object_key
+	FROM object_slabs os
+	INNER JOIN objects o ON os.object_id = o.id
+	INNER JOIN slabs s ON s.digest = os.slab_digest
+	WHERE s.unrecoverable_reason IS NOT NULL
+);
+UPDATE space_object_events SET updated_at = NULL
+WHERE (space_id, object_key) IN (
+	SELECT o.space_id, o.object_key
+	FROM space_object_slabs os
+	INNER JOIN space_objects o ON os.object_id = o.id
+	INNER JOIN slabs s ON s.digest = os.slab_digest
+	WHERE s.unrecoverable_reason IS NOT NULL
+);`)
+		return err
+	},
 }
