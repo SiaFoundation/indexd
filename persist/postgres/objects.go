@@ -32,6 +32,12 @@ const sqlUnrecoverableObjects = `
 	JOIN slabs s ON s.digest = os.slab_digest
 	WHERE os.object_id = ANY($1) AND s.unrecoverable_reason IS NOT NULL`
 
+const sqlUnrecoverableSpaceObjects = `
+	SELECT DISTINCT os.object_id
+	FROM space_object_slabs os
+	JOIN slabs s ON s.digest = os.slab_digest
+	WHERE os.object_id = ANY($1) AND s.unrecoverable_reason IS NOT NULL`
+
 // A dbObject is an object row and its IDs. The row holds everything but the
 // slabs, which are loaded separately.
 type dbObject struct {
@@ -122,10 +128,9 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 		events = make([]slabs.ObjectEvent, len(page))
 		for i, event := range page {
 			events[i] = slabs.ObjectEvent{
-				Key:           event.Key,
-				Deleted:       event.Deleted,
-				Unrecoverable: event.Unrecoverable,
-				UpdatedAt:     event.UpdatedAt,
+				Key:       event.Key,
+				Deleted:   event.Deleted,
+				UpdatedAt: event.UpdatedAt,
 			}
 			if event.Object == nil {
 				continue
@@ -133,10 +138,22 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 				// an object always has at least one slab, so one that lost
 				// its slab rows was deleted after its row was read
 				events[i].Deleted = true
-				events[i].Unrecoverable = false
 				continue
 			}
 			events[i].Object = event.Object.WithSlabs(pageSlabs[i])
+		}
+		live := make([]int64, 0, len(eventByID))
+		for id, i := range eventByID {
+			if events[i].Object != nil {
+				live = append(live, id)
+			}
+		}
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableObjects, live)
+		if err != nil {
+			return err
+		}
+		for _, id := range unrecoverable {
+			events[eventByID[id]].Unrecoverable = true
 		}
 		return nil
 	})
@@ -152,8 +169,19 @@ func (s *Store) ListObjectsWithoutSlabs(account proto.Account, cursor slabs.Curs
 			return err
 		}
 
-		events, _, err = listObjectEvents(ctx, tx, accountID, cursor, limit)
-		return err
+		var eventByID map[int64]int
+		events, eventByID, err = listObjectEvents(ctx, tx, accountID, cursor, limit)
+		if err != nil {
+			return err
+		}
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableObjects, slices.Collect(maps.Keys(eventByID)))
+		if err != nil {
+			return err
+		}
+		for _, id := range unrecoverable {
+			events[eventByID[id]].Unrecoverable = true
+		}
+		return nil
 	})
 	return
 }
@@ -219,22 +247,24 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 			}
 		}
 	}
-	if len(eventByID) == 0 {
-		return events, eventByID, nil
-	}
+	return events, eventByID, nil
+}
 
-	rows, err = tx.Query(ctx, sqlUnrecoverableObjects, pgx.QueryExecModeExec, slices.Collect(maps.Keys(eventByID)))
+// unrecoverableObjects returns the IDs of the given objects that query finds
+// to have an unrecoverable slab.
+func unrecoverableObjects(ctx context.Context, tx *txn, query string, ids []int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, query, pgx.QueryExecModeExec, ids)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to query unrecoverable objects: %w", err)
+		return nil, fmt.Errorf("failed to query unrecoverable objects: %w", err)
 	}
 	unrecoverable, err := pgx.CollectRows(rows, pgx.RowTo[int64])
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to scan unrecoverable objects: %w", err)
+		return nil, fmt.Errorf("failed to scan unrecoverable objects: %w", err)
 	}
-	for _, id := range unrecoverable {
-		events[eventByID[id]].Unrecoverable = true
-	}
-	return events, eventByID, nil
+	return unrecoverable, nil
 }
 
 // ObjectSlabs returns a page of the object's slab slices in slab_index order,
