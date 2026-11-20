@@ -606,6 +606,37 @@ func TestMarkSlabUnrecoverable(t *testing.T) {
 		return err
 	})
 	store.assertObjectEvents(t, account, space, &cursors, false, objectB.ID())
+
+	// reviving two marked slabs in one pin does not deadlock with a pin of an
+	// object that holds the second slab and still has to write its event row
+	if err := store.MarkSlabUnrecoverable(slabID2, "shard root mismatch"); err != nil {
+		t.Fatal(err)
+	}
+	pinTx, err := store.pool.Begin(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pinTx.Rollback(t.Context()) }()
+	if _, err := pinTx.Exec(t.Context(), `SELECT digest FROM slabs WHERE digest = $1 FOR KEY SHARE`, sqlHash256(slabID1)); err != nil {
+		t.Fatal(err)
+	}
+	revived := make(chan error, 1)
+	go func() {
+		_, err := store.PinSlabs(account, time.Time{}, slab2, slab1)
+		revived <- err
+	}()
+	time.Sleep(250 * time.Millisecond)
+	start := time.Now()
+	if _, err := pinTx.Exec(t.Context(), `UPDATE object_events SET updated_at = NULL WHERE object_key = $1`, sqlHash256(objectB.ID())); err != nil {
+		t.Fatal(err)
+	} else if waited := time.Since(start); waited > 500*time.Millisecond {
+		t.Fatalf("event row write waited %v for the revive", waited)
+	}
+	if err := pinTx.Commit(t.Context()); err != nil {
+		t.Fatal(err)
+	} else if err := <-revived; err != nil {
+		t.Fatal(err)
+	}
 }
 
 // backdateRecoveryWindow starts the slab's recovery window age ago.

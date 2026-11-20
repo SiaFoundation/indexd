@@ -380,7 +380,7 @@ WHERE os.object_id = $1`, objectID)
 		}
 
 		// unpin the object's slabs that are no longer referenced by any of
-		// the account's objects; the slab locks serialize concurrent
+		// the account's objects. The slab locks serialize concurrent
 		// deletions of objects sharing a slab, which could otherwise each
 		// still see the other's object and leave the shared slab pinned
 		// forever

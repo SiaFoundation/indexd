@@ -335,6 +335,13 @@ func (s *Store) pinSlabs(ctx context.Context, tx *txn, account proto.Account, ne
 	if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE digest = ANY($1) ORDER BY digest FOR NO KEY UPDATE`, digestArgs); err != nil {
 		return nil, fmt.Errorf("failed to lock slabs: %w", err)
 	}
+	// reviving an unrecoverable slab republishes its object events from a
+	// trigger that upgrades the slab lock to FOR UPDATE first. Taking that
+	// lock for every marked slab here keeps all slab locks ahead of any
+	// event row lock, which the trigger's per statement upgrade does not
+	if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE digest = ANY($1) AND unrecoverable_reason IS NOT NULL ORDER BY digest FOR UPDATE`, digestArgs); err != nil {
+		return nil, fmt.Errorf("failed to lock unrecoverable slabs: %w", err)
+	}
 	if _, err := tx.Exec(ctx, `SELECT sector_root FROM sectors WHERE sector_root = ANY($1) ORDER BY sector_root FOR NO KEY UPDATE`, rootArgs); err != nil {
 		return nil, fmt.Errorf("failed to lock sectors: %w", err)
 	}
