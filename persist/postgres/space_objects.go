@@ -153,7 +153,7 @@ func (s *Store) ListSpaceObjects(account proto.Account, key types.PublicKey, cur
 		events = make([]slabs.ObjectEvent, len(page))
 		objectSlabs := make(map[int64]*[]slabs.SlabSlice, len(ids))
 		for i, event := range page {
-			events[i] = slabs.ObjectEvent{Key: event.Key, Deleted: event.Deleted, Unrecoverable: event.Unrecoverable, UpdatedAt: event.UpdatedAt}
+			events[i] = slabs.ObjectEvent{Key: event.Key, Deleted: event.Deleted, UpdatedAt: event.UpdatedAt}
 			if event.Object != nil {
 				events[i].Object = event.Object.WithSlabs(nil)
 			}
@@ -167,8 +167,20 @@ func (s *Store) ListSpaceObjects(account proto.Account, key types.PublicKey, cur
 		for i := range events {
 			if events[i].Object != nil && len(events[i].Object.Slabs) == 0 {
 				events[i].Deleted, events[i].Object = true, nil
-				events[i].Unrecoverable = false
 			}
+		}
+		live := make([]int64, 0, len(ids))
+		for id, i := range ids {
+			if events[i].Object != nil {
+				live = append(live, id)
+			}
+		}
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableSpaceObjects, live)
+		if err != nil {
+			return err
+		}
+		for _, id := range unrecoverable {
+			events[ids[id]].Unrecoverable = true
 		}
 		return nil
 	})
@@ -182,8 +194,19 @@ func (s *Store) ListSpaceObjectsWithoutSlabs(account proto.Account, key types.Pu
 		if err != nil {
 			return err
 		}
-		events, _, err = listSpaceObjectEvents(ctx, tx, id, cursor, limit)
-		return err
+		var ids map[int64]int
+		events, ids, err = listSpaceObjectEvents(ctx, tx, id, cursor, limit)
+		if err != nil {
+			return err
+		}
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableSpaceObjects, slices.Collect(maps.Keys(ids)))
+		if err != nil {
+			return err
+		}
+		for _, id := range unrecoverable {
+			events[ids[id]].Unrecoverable = true
+		}
+		return nil
 	})
 	return
 }
@@ -396,23 +419,6 @@ func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor s
 		if events[i].Object == nil {
 			events[i].Deleted = true
 		}
-	}
-	if len(ids) == 0 {
-		return events, ids, nil
-	}
-
-	rows, err = tx.Query(ctx, `SELECT DISTINCT os.object_id FROM space_object_slabs os
- JOIN slabs s ON s.digest = os.slab_digest
- WHERE os.object_id = ANY($1) AND s.unrecoverable_reason IS NOT NULL`, pgx.QueryExecModeExec, slices.Collect(maps.Keys(ids)))
-	if err != nil {
-		return nil, nil, err
-	}
-	unrecoverable, err := pgx.CollectRows(rows, pgx.RowTo[int64])
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, id := range unrecoverable {
-		events[ids[id]].Unrecoverable = true
 	}
 	return events, ids, nil
 }
