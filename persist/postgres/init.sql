@@ -806,18 +806,17 @@ AFTER DELETE ON slabs FOR EACH ROW
 WHEN (OLD.unrecoverable_reason IS NOT NULL OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable_reason IS NOT NULL))
 EXECUTE FUNCTION slabs_maintain_repair_stats();
 
-CREATE FUNCTION slabs_republish_object_events() RETURNS TRIGGER AS $$
+-- republish the events of every personal and space object referencing the
+-- slab so their listings pick up a change in the slab's state
+CREATE FUNCTION republish_slab_object_events(slab_digest BYTEA) RETURNS VOID AS $$
 BEGIN
-    -- wait for pins of objects referencing the slab that have not committed,
-    -- they hold KEY SHARE and the updates below cannot see their rows yet
-    PERFORM 1 FROM slabs WHERE id = NEW.id FOR UPDATE;
     UPDATE object_events
     SET updated_at = NULL
     WHERE (account_id, object_key) IN (
         SELECT o.account_id, o.object_key
         FROM object_slabs os
         INNER JOIN objects o ON os.object_id = o.id
-        WHERE os.slab_digest = NEW.digest
+        WHERE os.slab_digest = republish_slab_object_events.slab_digest
     );
     UPDATE space_object_events
     SET updated_at = NULL
@@ -825,8 +824,17 @@ BEGIN
         SELECT o.space_id, o.object_key
         FROM space_object_slabs os
         INNER JOIN space_objects o ON os.object_id = o.id
-        WHERE os.slab_digest = NEW.digest
+        WHERE os.slab_digest = republish_slab_object_events.slab_digest
     );
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION slabs_republish_object_events() RETURNS TRIGGER AS $$
+BEGIN
+    -- wait for pins of objects referencing the slab that have not committed,
+    -- they hold KEY SHARE and the republish below cannot see their rows yet
+    PERFORM 1 FROM slabs WHERE id = NEW.id FOR UPDATE;
+    PERFORM republish_slab_object_events(NEW.digest);
     RETURN NULL;
 END;
 $$ LANGUAGE plpgsql;

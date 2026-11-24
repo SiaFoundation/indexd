@@ -1175,31 +1175,8 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 // sectors were updated.
 func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
-			UPDATE object_events
-			SET updated_at = NULL
-			WHERE (account_id, object_key) IN (
-				SELECT o.account_id, o.object_key
-				FROM object_slabs os
-				INNER JOIN objects o ON os.object_id = o.id
-				WHERE os.slab_digest = $1
-			)
-		`, sqlHash256(slabID))
-		if err != nil {
-			return fmt.Errorf("failed to update affected object events: %w", err)
-		}
-		_, err = tx.Exec(ctx, `
-			UPDATE space_object_events
-			SET updated_at = NULL
-			WHERE (space_id, object_key) IN (
-				SELECT o.space_id, o.object_key
-				FROM space_object_slabs os
-				INNER JOIN space_objects o ON os.object_id = o.id
-				WHERE os.slab_digest = $1
-			)
-		`, sqlHash256(slabID))
-		if err != nil {
-			return fmt.Errorf("failed to update affected space object events: %w", err)
+		if _, err := tx.Exec(ctx, `SELECT republish_slab_object_events($1)`, sqlHash256(slabID)); err != nil {
+			return fmt.Errorf("failed to republish affected object events: %w", err)
 		}
 		return nil
 	})
