@@ -335,13 +335,6 @@ func (s *Store) pinSlabs(ctx context.Context, tx *txn, account proto.Account, ne
 	if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE digest = ANY($1) ORDER BY digest FOR NO KEY UPDATE`, digestArgs); err != nil {
 		return nil, fmt.Errorf("failed to lock slabs: %w", err)
 	}
-	// reviving an unrecoverable slab republishes its object events from a
-	// trigger that upgrades the slab lock to FOR UPDATE first. Taking that
-	// lock for every marked slab here keeps all slab locks ahead of any
-	// event row lock, which the trigger's per statement upgrade does not
-	if _, err := tx.Exec(ctx, `SELECT digest FROM slabs WHERE digest = ANY($1) AND unrecoverable_reason IS NOT NULL ORDER BY digest FOR UPDATE`, digestArgs); err != nil {
-		return nil, fmt.Errorf("failed to lock unrecoverable slabs: %w", err)
-	}
 	if _, err := tx.Exec(ctx, `SELECT sector_root FROM sectors WHERE sector_root = ANY($1) ORDER BY sector_root FOR NO KEY UPDATE`, rootArgs); err != nil {
 		return nil, fmt.Errorf("failed to lock sectors: %w", err)
 	}
@@ -527,17 +520,7 @@ func lockSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
 	return nil
 }
 
-// unpinUnreferencedSlabs unpins the subset of the given slabs that are pinned
-// by the account but not referenced by any of the account's objects, queueing
-// them for deletion by deleteOrphanedSlabs. Only slabs pinned before cutoff
-// are unpinned; a nil cutoff unpins them regardless of when they were pinned.
-// The slabs are locked first so the reference check can't race a concurrent
-// PinObject or another unpinner.
-func (s *Store) unpinUnreferencedSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64, cutoff *time.Time) error {
-	if err := lockSlabs(ctx, tx, sIDs); err != nil {
-		return err
-	}
-
+func (s *Store) unpinLockedUnreferencedSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64, cutoff *time.Time) error {
 	rows, err := tx.Query(ctx, `SELECT s.id
 FROM slabs s
 JOIN account_slabs a ON s.id = a.slab_id
@@ -1175,7 +1158,7 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 // sectors were updated.
 func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		if _, err := tx.Exec(ctx, `SELECT republish_slab_object_events($1)`, sqlHash256(slabID)); err != nil {
+		if _, err := tx.Exec(ctx, `SELECT republish_slab_object_events(ARRAY[$1::bytea])`, sqlHash256(slabID)); err != nil {
 			return fmt.Errorf("failed to republish affected object events: %w", err)
 		}
 		return nil

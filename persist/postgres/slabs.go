@@ -337,7 +337,7 @@ WHERE (p.account_id = $1 OR p.uploader_account_id = $1) AND p.slab_id = s.id AND
 			owners = append(owners, id)
 			slices.Sort(owners)
 			for _, ownerID := range slices.Compact(owners) {
-				if err := s.unpinUnreferencedSlabs(ctx, tx, ownerID, slabsByOwner[ownerID], &cutoff); err != nil {
+				if err := s.unpinLockedUnreferencedSlabs(ctx, tx, ownerID, slabsByOwner[ownerID], &cutoff); err != nil {
 					return err
 				}
 			}

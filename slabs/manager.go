@@ -146,6 +146,7 @@ type (
 		ObjectSlabs(account proto.Account, key types.Hash256, cursor int64, limit int) ([]SlabSlice, error)
 		ObjectStats() (ObjectStats, error)
 		PublishObjectEvents() error
+		RepublishPendingSlabEvents(ctx context.Context) error
 		SharedObject(key types.Hash256) (SharedObject, error)
 
 		// Blocklist methods
@@ -383,6 +384,7 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 	launch("integrity checks", m.healthCheckInterval, m.performIntegrityChecks)
 	launch("prune deleted slabs", m.pruneDeletedSlabsInterval, m.performPruneDeletedSlabs)
 	launch("object event publishing", objectEventPublishInterval, m.performObjectEventPublish)
+	launch("slab event republishing", objectEventPublishInterval, m.performSlabEventRepublish)
 	if m.runMigrations {
 		launch("slab migrations", m.healthCheckInterval, m.performSlabMigrations)
 	}
@@ -393,6 +395,12 @@ func (m *SlabManager) maintenanceLoop(ctx context.Context) {
 // their position in the event stream.
 func (m *SlabManager) performObjectEventPublish(context.Context) error {
 	return m.store.PublishObjectEvents()
+}
+
+// performSlabEventRepublish republishes the events of the objects referencing
+// slabs whose recoverability changed since the last run.
+func (m *SlabManager) performSlabEventRepublish(ctx context.Context) error {
+	return m.store.RepublishPendingSlabEvents(ctx)
 }
 
 // performPruneDeletedSlabs prunes deleted slabs, removing those no longer pinned

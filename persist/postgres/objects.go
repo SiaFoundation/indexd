@@ -382,7 +382,7 @@ WHERE os.object_id = $1`, objectID)
 		// deletions of objects sharing a slab, which could otherwise each
 		// still see the other's object and leave the shared slab pinned
 		// forever
-		return s.unpinUnreferencedSlabs(ctx, tx, accountID, objectSlabIDs, nil)
+		return s.unpinLockedUnreferencedSlabs(ctx, tx, accountID, objectSlabIDs, nil)
 	})
 }
 
@@ -597,6 +597,9 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 // publish so a backlog cannot hold the settings row for the whole drain.
 const objectEventPublishBatchSize = 25000
 
+// slabRepublishBatchSize bounds how many flagged slabs one republish drains.
+const slabRepublishBatchSize = 1000
+
 // PublishObjectEvents assigns stream positions to object events that do not
 // have one yet. At most one batch of events is published per wall clock second.
 func (s *Store) PublishObjectEvents() error {
@@ -661,6 +664,37 @@ func (s *Store) publishObjectEvents(limit int) error {
 ) UPDATE space_object_events SET updated_at = $1 WHERE ctid IN (SELECT ctid FROM batch)`, published, limit)
 		return err
 	})
+}
+
+// RepublishPendingSlabEvents republishes the events of the objects referencing
+// slabs whose recoverability changed, draining at most one batch of slabs.
+func (s *Store) RepublishPendingSlabEvents(ctx context.Context) error {
+	// clearing a slab's flag and resetting the positions of its events commit
+	// together, so a drain that fails leaves the work for the next one. Only
+	// the claim skips locked rows, skipping an event row would clear the flag
+	// without republishing it
+	_, err := s.pool.Exec(ctx, `
+		WITH batch AS MATERIALIZED (
+			SELECT id
+			FROM slabs
+			WHERE republish_pending
+			ORDER BY id
+			LIMIT $1
+			FOR NO KEY UPDATE SKIP LOCKED
+		), drained AS (
+			UPDATE slabs AS s
+			SET republish_pending = NULL
+			FROM batch
+			WHERE s.id = batch.id
+			RETURNING s.digest
+		)
+		SELECT republish_slab_object_events(array_agg(digest))
+		FROM drained
+		HAVING count(*) > 0`, slabRepublishBatchSize)
+	if err != nil {
+		return fmt.Errorf("failed to republish pending slab events: %w", err)
+	}
+	return nil
 }
 
 func accountID(ctx context.Context, tx *txn, account proto.Account) (int64, bool, error) {
