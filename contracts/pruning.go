@@ -88,7 +88,7 @@ loop:
 			if updateErr := cm.store.UpdateNextPrune(contract, time.Now().Add(cm.pruneIntervalFailure)); updateErr != nil {
 				err = errors.Join(err, fmt.Errorf("failed to update contract: %w", updateErr))
 			}
-			hostLog.Debug("failed to prune contract", zap.Error(err))
+			hostLog.Debug("failed to prune contract", zap.Stringer("contractID", contract), zap.Int("sectors", n), zap.Error(err))
 			continue
 		} else if n > 0 {
 			hostLog.Debug("pruned contract", zap.Stringer("contractID", contract), zap.Int("sectors", n), zap.Int("bytes", n*proto.SectorSize))

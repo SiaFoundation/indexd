@@ -856,8 +856,14 @@ func (s *Store) PrunableContractRoots(contractID types.FileContractID, roots []t
 			return fmt.Errorf("failed to fetch contract host and sectors map ID: %w", err)
 		}
 
-		// filter in Go so the planner can only use the sector_root index
-		rows, err := tx.Query(ctx, `SELECT sector_root, contract_sectors_map_id, host_id FROM sectors WHERE sector_root = ANY($1)`, sqlRoots)
+		// scoped to the contract's index range instead of the global sector_root
+		// index; unpinned sectors on the host are few, so fetch them all rather
+		// than matching roots, which made the planner pick (host_id, sector_root)
+		rows, err := tx.Query(ctx, `
+			SELECT sector_root FROM sectors WHERE contract_sectors_map_id = $1 AND sector_root = ANY($3)
+			UNION ALL
+			SELECT sector_root FROM sectors WHERE host_id = $2 AND contract_sectors_map_id IS NULL
+		`, wantedCSMID, wantedHostID, sqlRoots)
 		if err != nil {
 			return fmt.Errorf("failed to fetch prunable contract roots: %w", err)
 		}
@@ -866,15 +872,10 @@ func (s *Store) PrunableContractRoots(contractID types.FileContractID, roots []t
 		lookup := make(map[sqlHash256]struct{})
 		for rows.Next() {
 			var root sqlHash256
-			var csmID, hostID *int64
-			if err := rows.Scan(&root, &csmID, &hostID); err != nil {
+			if err := rows.Scan(&root); err != nil {
 				return fmt.Errorf("failed to scan root: %w", err)
 			}
-			pinnedToContract := csmID != nil && *csmID == wantedCSMID
-			unpinnedOnHost := csmID == nil && hostID != nil && *hostID == wantedHostID
-			if pinnedToContract || unpinnedOnHost {
-				lookup[root] = struct{}{}
-			}
+			lookup[root] = struct{}{}
 		}
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("failed to iterate over rows: %w", err)
