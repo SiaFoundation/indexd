@@ -1,7 +1,6 @@
 package contracts_test
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"slices"
@@ -424,48 +423,40 @@ func TestPruneContractBatchSnapshot(t *testing.T) {
 	hostRoots := []types.Hash256{r1, r2, r3, r4, r5, r6}
 
 	tests := []struct {
-		name string
-		// snapshot returns the snapshot to prune with, it may change the
-		// database after taking it
-		snapshot func(t *testing.T, store testStore, hk types.PublicKey, fcid types.FileContractID) []types.Hash256
-		freed    []types.Hash256
+		name     string
+		snapshot bool
+		// afterSnapshot changes the database after the snapshot was taken
+		afterSnapshot func(t *testing.T, store testStore, hk types.PublicKey, fcid types.FileContractID)
+		freed         []types.Hash256
 	}{
 		{
-			name: "no snapshot",
-			snapshot: func(*testing.T, testStore, types.PublicKey, types.FileContractID) []types.Hash256 {
-				return nil
-			},
+			name:  "no snapshot",
 			freed: []types.Hash256{r2, r4, r5, r6},
 		},
 		{
-			name: "fresh snapshot",
-			snapshot: func(t *testing.T, store testStore, _ types.PublicKey, fcid types.FileContractID) []types.Hash256 {
-				return snapshotRoots(t, store, fcid)
-			},
-			freed: []types.Hash256{r2, r4, r5, r6},
+			name:     "fresh snapshot",
+			snapshot: true,
+			freed:    []types.Hash256{r2, r4, r5, r6},
 		},
 		{
-			name: "stale snapshot missing wanted roots",
-			snapshot: func(t *testing.T, store testStore, hk types.PublicKey, fcid types.FileContractID) []types.Hash256 {
-				keep := snapshotRoots(t, store, fcid)
-				// after the snapshot r5 is pinned to the contract and r6 is
-				// uploaded to the host, both must be kept
+			name:     "stale snapshot missing wanted roots",
+			snapshot: true,
+			afterSnapshot: func(t *testing.T, store testStore, hk types.PublicKey, fcid types.FileContractID) {
+				// r5 is pinned to the contract and r6 is uploaded to the host,
+				// both must be kept
 				store.addPinnedSectors(t, hk, fcid, []types.Hash256{r5})
 				store.addUnpinnedSectors(t, hk, []types.Hash256{r6})
-				return keep
 			},
 			freed: []types.Hash256{r2, r4},
 		},
 		{
-			name: "stale snapshot with unwanted root",
-			snapshot: func(t *testing.T, store testStore, hk types.PublicKey, fcid types.FileContractID) []types.Hash256 {
-				keep := snapshotRoots(t, store, fcid)
-				// after the snapshot r3 is lost, the snapshot still keeps it
-				// until the next pass
+			name:     "stale snapshot with unwanted root",
+			snapshot: true,
+			afterSnapshot: func(t *testing.T, store testStore, hk types.PublicKey, fcid types.FileContractID) {
+				// r3 is lost, the snapshot still keeps it until the next pass
 				if err := store.MarkSectorsLost(hk, []types.Hash256{r3}); err != nil {
 					t.Fatal(err)
 				}
-				return keep
 			},
 			freed: []types.Hash256{r2, r4, r5, r6},
 		},
@@ -500,7 +491,17 @@ func TestPruneContractBatchSnapshot(t *testing.T) {
 			rev := contracts.NewRevisionManager(mock, cmMock, store, 1, zaptest.NewLogger(t))
 			cm := contracts.NewTestContractManager(types.PublicKey{}, nil, nil, cmMock, store, mock, nil, rev, contracts.NewContractLocker(), hmMock, nil, nil)
 
-			keep := tt.snapshot(t, store, hk, fcid)
+			var keep []types.Hash256
+			if tt.snapshot {
+				var err error
+				keep, err = cm.ContractSnapshot(fcid)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tt.afterSnapshot != nil {
+				tt.afterSnapshot(t, store, hk, fcid)
+			}
 			if n, done, err := cm.PruneContractBatch(context.Background(), fcid, 0, keep); err != nil {
 				t.Fatal(err)
 			} else if !done {
@@ -515,22 +516,9 @@ func TestPruneContractBatchSnapshot(t *testing.T) {
 					freed = append(freed, hostRoots[i])
 				}
 			}
-			slices.SortFunc(freed, func(a, b types.Hash256) int { return bytes.Compare(a[:], b[:]) })
 			if !slices.Equal(freed, tt.freed) {
 				t.Fatalf("expected to free %v, got %v", tt.freed, freed)
 			}
 		})
 	}
-}
-
-// snapshotRoots returns the sorted roots the store wants to keep for the
-// contract.
-func snapshotRoots(t *testing.T, store testStore, fcid types.FileContractID) []types.Hash256 {
-	t.Helper()
-	keep, err := store.ContractRootsToKeep(fcid)
-	if err != nil {
-		t.Fatal(err)
-	}
-	slices.SortFunc(keep, func(a, b types.Hash256) int { return bytes.Compare(a[:], b[:]) })
-	return keep
 }

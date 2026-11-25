@@ -902,13 +902,11 @@ func (s *Store) PrunableContractRoots(contractID types.FileContractID, roots []t
 			return err
 		}
 
-		// scoped to the contract's index range instead of the global sector_root
-		// index; unpinned sectors on the host are few, so fetch them all rather
-		// than matching roots, which made the planner pick (host_id, sector_root)
+		// scoped to the contract's and host's index ranges, garbage roots miss without heap fetches
 		rows, err := tx.Query(ctx, `
 			SELECT sector_root FROM sectors WHERE contract_sectors_map_id = $1 AND sector_root = ANY($3)
 			UNION ALL
-			SELECT sector_root FROM sectors WHERE host_id = $2 AND contract_sectors_map_id IS NULL
+			SELECT sector_root FROM sectors WHERE host_id = $2 AND contract_sectors_map_id IS NULL AND sector_root = ANY($3)
 		`, wantedCSMID, wantedHostID, sqlRoots)
 		if err != nil {
 			return fmt.Errorf("failed to fetch prunable contract roots: %w", err)

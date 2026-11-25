@@ -107,3 +107,11 @@ func (cm *ContractManager) BlockBadHosts(ctx context.Context) error {
 func (cm *ContractManager) SetRevisionBroadcastInterval(d time.Duration) {
 	cm.revisionBroadcastInterval = d
 }
+
+func (cm *ContractManager) ContractSnapshot(contractID types.FileContractID) ([]types.Hash256, error) {
+	return cm.contractSnapshot(contractID)
+}
+
+func (cm *ContractManager) PruneContract(ctx context.Context, contractID types.FileContractID) (int, bool, error) {
+	return cm.pruneContract(ctx, contractID)
+}

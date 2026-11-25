@@ -706,8 +706,9 @@ func TestPrunableContractRoots(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		slices.SortFunc(keep, func(a, b types.Hash256) int { return bytes.Compare(a[:], b[:]) })
-		slices.SortFunc(want, func(a, b types.Hash256) int { return bytes.Compare(a[:], b[:]) })
+		cmp := func(a, b types.Hash256) int { return bytes.Compare(a[:], b[:]) }
+		slices.SortFunc(keep, cmp)
+		slices.SortFunc(want, cmp)
 		if !slices.Equal(keep, want) {
 			t.Fatalf("unexpected roots to keep for %v, got %v, want %v", fcid, keep, want)
 		}
