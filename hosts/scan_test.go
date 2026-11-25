@@ -167,6 +167,8 @@ func TestValidateAddress(t *testing.T) {
 		{"non-numeric port", chain.NetAddress{Protocol: siamux.Protocol, Address: "example.com:http"}, true},
 		{"zero port", chain.NetAddress{Protocol: siamux.Protocol, Address: "example.com:0"}, true},
 		{"port out of range", chain.NetAddress{Protocol: siamux.Protocol, Address: "example.com:65536"}, true},
+		{"nul byte", chain.NetAddress{Protocol: siamux.Protocol, Address: "exa\x00mple.com:9983"}, true},
+		{"invalid utf8", chain.NetAddress{Protocol: siamux.Protocol, Address: "exa\xffmple.com:9983"}, true},
 	}
 
 	for _, tt := range tests {
