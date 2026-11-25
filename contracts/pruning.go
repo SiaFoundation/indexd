@@ -31,7 +31,7 @@ func (cm *ContractManager) performContractPruning(ctx context.Context, log *zap.
 	}
 
 	var wg sync.WaitGroup
-	sema := make(chan struct{}, 50)
+	sema := make(chan struct{}, 10)
 	defer close(sema)
 
 loop:
@@ -44,11 +44,9 @@ loop:
 
 		wg.Add(1)
 		go func(ctx context.Context, hostKey types.PublicKey, hostLog *zap.Logger) {
-			ctx, cancel := context.WithTimeout(ctx, pruneTimeout)
 			defer func() {
 				<-sema
 				wg.Done()
-				cancel()
 			}()
 
 			if err := cm.hosts.WithScannedHost(ctx, hostKey, func(host hosts.Host) error {
@@ -77,20 +75,35 @@ func (cm *ContractManager) performContractPruningOnHost(ctx context.Context, hos
 	}
 
 	hostLog.Debug("pruning contracts on host", zap.Int("contracts", len(contracts)))
-loop:
+
 	for _, contract := range contracts {
-		select {
-		case <-ctx.Done():
-			break loop
-		default:
+		if ctx.Err() != nil {
+			break
 		}
 
-		n, err := cm.pruneContract(ctx, contract)
+		keep, err := cm.contractSnapshot(contract)
+		if err != nil {
+			if updateErr := cm.store.UpdateNextPrune(contract, time.Now().Add(cm.pruneIntervalFailure)); updateErr != nil {
+				err = errors.Join(err, fmt.Errorf("failed to update contract: %w", updateErr))
+			}
+			hostLog.Debug("failed to fetch contract snapshot", zap.Stringer("contractID", contract), zap.Error(err))
+			continue
+		}
+
+		// the timeout only covers pruning, not the snapshot; a contract that
+		// times out ends pruning on this host to make room for others
+		pruneCtx, cancel := context.WithTimeout(ctx, pruneTimeout)
+		n, err := cm.pruneContract(pruneCtx, contract, keep)
+		timedOut := pruneCtx.Err() != nil
+		cancel()
 		if err != nil {
 			if updateErr := cm.store.UpdateNextPrune(contract, time.Now().Add(cm.pruneIntervalFailure)); updateErr != nil {
 				err = errors.Join(err, fmt.Errorf("failed to update contract: %w", updateErr))
 			}
 			hostLog.Debug("failed to prune contract", zap.Stringer("contractID", contract), zap.Int("sectors", n), zap.Error(err))
+			if timedOut {
+				break
+			}
 			continue
 		} else if n > 0 {
 			hostLog.Debug("pruned contract", zap.Stringer("contractID", contract), zap.Int("sectors", n), zap.Int("bytes", n*proto.SectorSize))
@@ -105,15 +118,19 @@ loop:
 	return nil
 }
 
-func (cm *ContractManager) pruneContract(ctx context.Context, contractID types.FileContractID) (int, error) {
-	// snapshot without the lock; only roots missing from it are rechecked
-	// under the lock, so a stale snapshot can only cause roots to be kept
+// contractSnapshot returns the sorted roots the contract must keep. Only roots
+// missing from it are rechecked under the contract lock, so a stale snapshot
+// can only cause roots to be kept.
+func (cm *ContractManager) contractSnapshot(contractID types.FileContractID) ([]types.Hash256, error) {
 	keep, err := cm.store.ContractRootsToKeep(contractID)
 	if err != nil {
-		return 0, fmt.Errorf("failed to fetch contract roots: %w", err)
+		return nil, err
 	}
 	slices.SortFunc(keep, compareRoots) // required by the binary search in pruneContractBatch
+	return keep, nil
+}
 
+func (cm *ContractManager) pruneContract(ctx context.Context, contractID types.FileContractID, keep []types.Hash256) (int, error) {
 	var pruned int
 	for offset := uint64(0); ; offset += cm.sectorRootsBatchSize {
 		n, done, err := cm.pruneContractBatch(ctx, contractID, offset, keep)
