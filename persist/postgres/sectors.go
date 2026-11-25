@@ -520,6 +520,12 @@ func lockSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
 	return nil
 }
 
+// unpinLockedUnreferencedSlabs unpins the subset of the given slabs that are
+// pinned by the account but not referenced by any of the account's objects,
+// queueing them for deletion by PruneDeletedSlabs. Only slabs pinned before
+// cutoff are unpinned, a nil cutoff unpins them regardless of when they were
+// pinned. The caller must hold the slab locks so the reference check can't
+// race a concurrent PinObject or another unpinner.
 func (s *Store) unpinLockedUnreferencedSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64, cutoff *time.Time) error {
 	rows, err := tx.Query(ctx, `SELECT s.id
 FROM slabs s

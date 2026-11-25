@@ -868,7 +868,7 @@ components:
           description: Whether the object was deleted or not
         unrecoverable:
           type: boolean
-          description: Whether one of the object's slabs was marked unrecoverable
+          description: Whether any of the object's slabs is unrecoverable when the event is read. The flag clears once the slab is pinned again or repaired.
         updatedAt:
           type: string
           format: date-time
@@ -918,7 +918,7 @@ components:
           description: Whether the object was deleted or not
         unrecoverable:
           type: boolean
-          description: Whether one of the object's slabs was marked unrecoverable
+          description: Whether any of the object's slabs is unrecoverable when the event is read. The flag clears once the slab is pinned again or repaired.
         updatedAt:
           type: string
           format: date-time

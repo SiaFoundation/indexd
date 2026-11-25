@@ -715,18 +715,6 @@ func TestRepublishPendingSlabEvents(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := store.pool.Exec(t.Context(), `
-CREATE FUNCTION reject_duplicate_reset() RETURNS TRIGGER AS $$
-BEGIN
-    RAISE EXCEPTION 'event reset twice';
-END;
-$$ LANGUAGE plpgsql;
-CREATE TRIGGER reject_duplicate_reset BEFORE UPDATE ON object_events FOR EACH ROW
-WHEN (OLD.updated_at IS NULL AND NEW.updated_at IS NULL) EXECUTE FUNCTION reject_duplicate_reset();
-CREATE TRIGGER reject_duplicate_reset BEFORE UPDATE ON space_object_events FOR EACH ROW
-WHEN (OLD.updated_at IS NULL AND NEW.updated_at IS NULL) EXECUTE FUNCTION reject_duplicate_reset();`); err != nil {
-		t.Fatal(err)
-	}
 	assertPending(len(markedIDs))
 
 	// hold the object's event row, the drain has to wait for it
@@ -748,18 +736,7 @@ WHEN (OLD.updated_at IS NULL AND NEW.updated_at IS NULL) EXECUTE FUNCTION reject
 	}()
 	t.Cleanup(func() { <-drained })
 
-	var blocked bool
-	for range 100 {
-		if err := store.pool.QueryRow(t.Context(), `SELECT EXISTS (
- SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))
-)`, int32(lockTx.Conn().PgConn().PID())).Scan(&blocked); err != nil {
-			t.Fatal(err)
-		} else if blocked {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if !blocked {
+	if !store.waitBlockedBy(t, lockTx, true) {
 		t.Fatal("the drain did not wait for the event row")
 	}
 
@@ -781,6 +758,9 @@ WHEN (OLD.updated_at IS NULL AND NEW.updated_at IS NULL) EXECUTE FUNCTION reject
 		t.Fatal("unexpected", err)
 	}
 	assertPending(len(markedIDs))
+	if !store.waitBlockedBy(t, lockTx, false) {
+		t.Fatal("the cancelled drain still waits for the event row")
+	}
 
 	if err := lockTx.Commit(t.Context()); err != nil {
 		t.Fatal(err)
@@ -839,18 +819,7 @@ func TestPinObjectDuringMark(t *testing.T) {
 	}()
 	t.Cleanup(func() { <-pinned })
 
-	var blocked bool
-	for range 100 {
-		if err := store.pool.QueryRow(t.Context(), `SELECT EXISTS (
- SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))
-)`, int32(lockTx.Conn().PgConn().PID())).Scan(&blocked); err != nil {
-			t.Fatal(err)
-		} else if blocked {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if !blocked {
+	if !store.waitBlockedBy(t, lockTx, true) {
 		t.Fatal("the pin did not wait for the event row")
 	}
 

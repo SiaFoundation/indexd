@@ -132,26 +132,16 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 				Deleted:   event.Deleted,
 				UpdatedAt: event.UpdatedAt,
 			}
-			if event.Object == nil {
-				continue
-			} else if len(pageSlabs[i]) == 0 {
-				events[i].Deleted = true
-				continue
-			}
-			events[i].Object = event.Object.WithSlabs(pageSlabs[i])
-		}
-		live := make([]int64, 0, len(eventByID))
-		for id, i := range eventByID {
-			if events[i].Object != nil {
-				live = append(live, id)
+			if event.Object != nil {
+				events[i].Object = event.Object.WithSlabs(pageSlabs[i])
 			}
 		}
-		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableObjects, live)
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableObjects, eventByID)
 		if err != nil {
 			return err
 		}
-		for _, id := range unrecoverable {
-			events[eventByID[id]].Unrecoverable = true
+		for _, i := range unrecoverable {
+			events[i].Unrecoverable = true
 		}
 		return nil
 	})
@@ -172,12 +162,12 @@ func (s *Store) ListObjectsWithoutSlabs(account proto.Account, cursor slabs.Curs
 		if err != nil {
 			return err
 		}
-		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableObjects, slices.Collect(maps.Keys(eventByID)))
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableObjects, eventByID)
 		if err != nil {
 			return err
 		}
-		for _, id := range unrecoverable {
-			events[eventByID[id]].Unrecoverable = true
+		for _, i := range unrecoverable {
+			events[i].Unrecoverable = true
 		}
 		return nil
 	})
@@ -248,17 +238,21 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 	return events, eventByID, nil
 }
 
-// unrecoverableObjects returns the IDs of the given objects that query finds
-// to have an unrecoverable slab.
-func unrecoverableObjects(ctx context.Context, tx *txn, query string, ids []int64) ([]int64, error) {
-	if len(ids) == 0 {
+// unrecoverableObjects returns the event indexes of the objects in eventByID
+// that query finds to have an unrecoverable slab.
+func unrecoverableObjects(ctx context.Context, tx *txn, query string, eventByID map[int64]int) ([]int, error) {
+	if len(eventByID) == 0 {
 		return nil, nil
 	}
-	rows, err := tx.Query(ctx, query, pgx.QueryExecModeExec, ids)
+	rows, err := tx.Query(ctx, query, slices.Collect(maps.Keys(eventByID)))
 	if err != nil {
 		return nil, fmt.Errorf("failed to query unrecoverable objects: %w", err)
 	}
-	unrecoverable, err := pgx.CollectRows(rows, pgx.RowTo[int64])
+	unrecoverable, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (int, error) {
+		var id int64
+		err := row.Scan(&id)
+		return eventByID[id], err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan unrecoverable objects: %w", err)
 	}
@@ -580,8 +574,8 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 			return fmt.Errorf("failed to insert slabs for object: %w", err)
 		}
 
-		// the event row is written after the slab locks because a republish of
-		// the slab's events takes the slab lock first and the event rows second
+		// slabs are locked before event rows everywhere, a pin holding its event
+		// row while waiting for a slab could deadlock with a delete and a republish
 		_, err = tx.Exec(ctx, `
 			INSERT INTO object_events (object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)
 			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, NULL)`,
@@ -683,7 +677,7 @@ func (s *Store) RepublishPendingSlabEvents(ctx context.Context) error {
 			FOR NO KEY UPDATE SKIP LOCKED
 		), drained AS (
 			UPDATE slabs AS s
-			SET republish_pending = NULL
+			SET republish_pending = FALSE
 			FROM batch
 			WHERE s.id = batch.id
 			RETURNING s.digest

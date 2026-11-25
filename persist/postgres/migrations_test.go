@@ -593,11 +593,11 @@ func TestMigrationFlagsMarkedSlabs(t *testing.T) {
 
 	assertPending := func(slab string, expected bool) {
 		t.Helper()
-		var pending sql.NullBool
+		var pending bool
 		if err := store.pool.QueryRow(ctx, `SELECT republish_pending FROM slabs WHERE digest = sha256($1::bytea)`, []byte(slab)).Scan(&pending); err != nil {
 			t.Fatal(err)
-		} else if pending.Bool != expected {
-			t.Fatal("unexpected", slab, pending.Bool)
+		} else if pending != expected {
+			t.Fatal("unexpected", slab, pending)
 		}
 	}
 	assertPending("marked", true)

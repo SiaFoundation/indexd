@@ -354,7 +354,7 @@ CREATE TABLE slabs (
     next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     unrecoverable_since TIMESTAMP WITH TIME ZONE, -- start of the recovery window, the Unix epoch if the slab can never be fully repaired
     unrecoverable_reason TEXT, -- set once the slab is taken out of the repair rotation
-    republish_pending BOOLEAN CONSTRAINT slabs_republish_pending_check CHECK (republish_pending), -- TRUE while a republish is pending, NULL otherwise
+    republish_pending BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT slabs_unrecoverable_reason_check CHECK (unrecoverable_reason IS NULL OR unrecoverable_since IS NOT NULL)
 );
 CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
@@ -813,7 +813,7 @@ CREATE FUNCTION republish_slab_object_events(slab_digests BYTEA[]) RETURNS VOID 
 BEGIN
     UPDATE object_events
     SET updated_at = NULL
-    WHERE (account_id, object_key) IN (
+    WHERE updated_at IS NOT NULL AND (account_id, object_key) IN (
         SELECT o.account_id, o.object_key
         FROM object_slabs os
         INNER JOIN objects o ON os.object_id = o.id
@@ -821,7 +821,7 @@ BEGIN
     );
     UPDATE space_object_events
     SET updated_at = NULL
-    WHERE (space_id, object_key) IN (
+    WHERE updated_at IS NOT NULL AND (space_id, object_key) IN (
         SELECT o.space_id, o.object_key
         FROM space_object_slabs os
         INNER JOIN space_objects o ON os.object_id = o.id

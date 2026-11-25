@@ -169,18 +169,12 @@ func (s *Store) ListSpaceObjects(account proto.Account, key types.PublicKey, cur
 				events[i].Deleted, events[i].Object = true, nil
 			}
 		}
-		live := make([]int64, 0, len(ids))
-		for id, i := range ids {
-			if events[i].Object != nil {
-				live = append(live, id)
-			}
-		}
-		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableSpaceObjects, live)
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableSpaceObjects, ids)
 		if err != nil {
 			return err
 		}
-		for _, id := range unrecoverable {
-			events[ids[id]].Unrecoverable = true
+		for _, i := range unrecoverable {
+			events[i].Unrecoverable = true
 		}
 		return nil
 	})
@@ -199,12 +193,12 @@ func (s *Store) ListSpaceObjectsWithoutSlabs(account proto.Account, key types.Pu
 		if err != nil {
 			return err
 		}
-		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableSpaceObjects, slices.Collect(maps.Keys(ids)))
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableSpaceObjects, ids)
 		if err != nil {
 			return err
 		}
-		for _, id := range unrecoverable {
-			events[ids[id]].Unrecoverable = true
+		for _, i := range unrecoverable {
+			events[i].Unrecoverable = true
 		}
 		return nil
 	})
