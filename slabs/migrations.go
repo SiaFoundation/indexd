@@ -278,8 +278,9 @@ func (m *SlabManager) applyMigrationResult(res MigrationResult, log *zap.Logger)
 			}
 			persisted++
 		}
-		if persisted > 0 {
-			// record the slab got migrated so object events get updated
+		if persisted > 0 && res.UnrecoverableReason == "" {
+			// record the slab got migrated so object events get updated, the
+			// mark below republishes them itself
 			if err := m.store.RecordSlabMigrated(res.SlabID); err != nil {
 				log.Debug("failed to record slab migration", zap.Error(err))
 			}

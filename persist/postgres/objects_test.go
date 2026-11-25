@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -11,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	proto "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/slabs"
@@ -18,6 +21,70 @@ import (
 	"go.uber.org/zap"
 	"lukechampine.com/frand"
 )
+
+type beforeQuery func(string)
+
+func (f beforeQuery) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	f(data.SQL)
+	return ctx
+}
+
+func (beforeQuery) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func TestListObjectsDuringDelete(t *testing.T) {
+	store := initPostgres(t, zap.NewNop())
+	account := proto.Account{1}
+	store.addTestAccount(t, types.PublicKey(account))
+	host := store.addTestHost(t)
+	store.addTestContract(t, host)
+	slab := newTestSlab(host)
+	id := store.pinTestSlabs(t, account, slab)[0]
+	first := store.pinRandomObject(t, account, []slabs.SlabSlice{slab.Slice(0, 100)})
+	second := store.pinRandomObject(t, account, []slabs.SlabSlice{slab.Slice(100, 100)})
+	if err := store.MarkSlabUnrecoverable(id, "shard root mismatch"); err != nil {
+		t.Fatal(err)
+	}
+	store.publishEvents(t)
+
+	// delete the object after the listing loads it and before it reads the flag
+	target := first.ID()
+	cfg := store.pool.Config()
+	cfg.ConnConfig.Tracer = beforeQuery(func(query string) {
+		if query == sqlUnrecoverableObjects {
+			if err := store.DeleteObject(account, target); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	pool, err := pgxpool.NewWithConfig(t.Context(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	reader := &Store{pool: pool, log: store.log}
+
+	events, err := reader.ListObjects(account, slabs.Cursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(events) != 2 {
+		t.Fatal("unexpected", len(events))
+	}
+	for _, event := range events {
+		if event.Deleted || event.Object == nil || !event.Unrecoverable {
+			t.Fatal("unexpected", event)
+		}
+	}
+
+	target = second.ID()
+	metadata, err := reader.ListObjectsWithoutSlabs(account, slabs.Cursor{}, 10)
+	if err != nil {
+		t.Fatal(err)
+	} else if len(metadata) != 1 {
+		t.Fatal("unexpected", len(metadata))
+	} else if e := metadata[0]; e.Key != target || e.Deleted || e.Object == nil || !e.Unrecoverable {
+		t.Fatal("unexpected", e)
+	}
+}
 
 // assertPinnedSlabs asserts the account pins exactly the expected slabs,
 // ignoring order.

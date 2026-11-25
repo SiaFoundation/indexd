@@ -354,9 +354,12 @@ CREATE TABLE slabs (
     next_repair_attempt TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
     unrecoverable_since TIMESTAMP WITH TIME ZONE, -- start of the recovery window, the Unix epoch if the slab can never be fully repaired
     unrecoverable_reason TEXT, -- set once the slab is taken out of the repair rotation
+    republish_pending BOOLEAN NOT NULL DEFAULT FALSE,
     CONSTRAINT slabs_unrecoverable_reason_check CHECK (unrecoverable_reason IS NULL OR unrecoverable_since IS NOT NULL)
 );
 CREATE INDEX slabs_pinned_at_idx ON slabs(pinned_at ASC);
+CREATE INDEX slabs_unrecoverable_idx ON slabs(digest) WHERE unrecoverable_reason IS NOT NULL;
+CREATE INDEX slabs_republish_pending_idx ON slabs(id) WHERE republish_pending;
 
 CREATE TABLE objects (
     id BIGSERIAL PRIMARY KEY,
@@ -804,6 +807,42 @@ CREATE TRIGGER slabs_maintain_repair_stats_delete
 AFTER DELETE ON slabs FOR EACH ROW
 WHEN (OLD.unrecoverable_reason IS NOT NULL OR slab_is_stuck(OLD.consecutive_failed_repairs, OLD.unrecoverable_reason IS NOT NULL))
 EXECUTE FUNCTION slabs_maintain_repair_stats();
+
+-- republish the personal and space objects referencing any of these slabs
+CREATE FUNCTION republish_slab_object_events(slab_digests BYTEA[]) RETURNS VOID AS $$
+BEGIN
+    UPDATE object_events
+    SET updated_at = NULL
+    WHERE updated_at IS NOT NULL AND (account_id, object_key) IN (
+        SELECT o.account_id, o.object_key
+        FROM object_slabs os
+        INNER JOIN objects o ON os.object_id = o.id
+        WHERE os.slab_digest = ANY(slab_digests)
+    );
+    UPDATE space_object_events
+    SET updated_at = NULL
+    WHERE updated_at IS NOT NULL AND (space_id, object_key) IN (
+        SELECT o.space_id, o.object_key
+        FROM space_object_slabs os
+        INNER JOIN space_objects o ON os.object_id = o.id
+        WHERE os.slab_digest = ANY(slab_digests)
+    );
+END;
+$$ LANGUAGE plpgsql;
+
+-- the flag defers the republish to a maintenance task, which runs after the
+-- flip has committed and so sees the slab references of pins that raced it
+CREATE FUNCTION slabs_flag_republish() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.republish_pending := TRUE;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER slabs_flag_republish
+BEFORE UPDATE OF unrecoverable_reason ON slabs FOR EACH ROW
+WHEN ((OLD.unrecoverable_reason IS NULL) IS DISTINCT FROM (NEW.unrecoverable_reason IS NULL))
+EXECUTE FUNCTION slabs_flag_republish();
 
 -- quick lookup of sectors that failed the integrity checks too many times
 CREATE INDEX sectors_consecutive_failed_checks_idx ON sectors(host_id, consecutive_failed_checks) WHERE consecutive_failed_checks > 0;

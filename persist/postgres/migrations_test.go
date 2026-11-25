@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"fmt"
 	"testing"
@@ -549,6 +550,91 @@ func TestMigrationCarriesOverUnrecoverableSlabs(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertStats(0, 0)
+}
+
+// TestMigrationFlagsMarkedSlabs asserts the migration schedules a republish of
+// the objects already on an unrecoverable slab.
+func TestMigrationFlagsMarkedSlabs(t *testing.T) {
+	ctx := context.Background()
+	const previousVersion = 32 // last schema without the republish flag
+	store := initV1Database(t, connectionInfoFromEnv(), "", func(pool *pgxpool.Pool) {
+		old := &Store{pool: pool, log: zaptest.NewLogger(t)}
+		if err := old.upgradeDatabase(1, previousVersion); err != nil {
+			t.Fatal(err)
+		} else if _, err := pool.Exec(ctx, `
+			INSERT INTO quotas (name, description, max_pinned_data, total_uses, fund_target_bytes) VALUES ('test', 'test', 0, 0, 0);
+			INSERT INTO app_connect_keys (user_secret, app_key, use_description, quota_name) VALUES (sha256('secret'), 'key', 'test', 'test');
+			INSERT INTO accounts (public_key, connect_key_id, max_pinned_data) VALUES (sha256('account'), 1, 0);
+			INSERT INTO slabs (digest, encryption_key, min_shards, unrecoverable_since, unrecoverable_reason)
+			VALUES (sha256('marked'), sha256('marked'), 1, 'epoch', 'shard root mismatch'), (sha256('healthy'), sha256('healthy'), 1, NULL, NULL);
+			INSERT INTO objects (object_key, account_id, encrypted_data_key, data_signature, meta_signature, size)
+			SELECT sha256(k::bytea), 1, substring(sha512(k::bytea) || sha256(k::bytea) FROM 1 FOR 72), sha512(k::bytea), sha512(('meta' || k)::bytea), 0
+			FROM (VALUES ('affected'), ('control')) v(k);
+			INSERT INTO object_slabs (object_id, slab_digest, slab_index, slab_offset, slab_length)
+			VALUES (1, sha256('marked'), 0, 0, 10), (2, sha256('healthy'), 0, 0, 10);
+			INSERT INTO object_events (object_key, account_id, was_deleted, updated_at)
+			VALUES
+				(sha256('control'), 1, FALSE, date_trunc('second', NOW()) - INTERVAL '2 minutes'),
+				(sha256('affected'), 1, FALSE, date_trunc('second', NOW()) - INTERVAL '1 minute');
+			INSERT INTO spaces (space_key, owner_account_id, signature) VALUES (sha256('space'), 1, sha512('space'));
+			INSERT INTO space_objects (space_id, object_key, encrypted_data_key, data_signature, meta_signature, size, pinned_data, pinned_size)
+			SELECT 1, sha256(k::bytea), substring(sha512(k::bytea) || sha256(k::bytea) FROM 1 FOR 72), sha512(k::bytea), sha512(('meta' || k)::bytea), 0, 0, 0
+			FROM (VALUES ('affected'), ('control')) v(k);
+			INSERT INTO space_object_slabs (object_id, slab_digest, slab_index, slab_offset, slab_length)
+			VALUES (1, sha256('marked'), 0, 0, 10), (2, sha256('healthy'), 0, 0, 10);
+			INSERT INTO space_object_events (space_id, object_key, was_deleted, updated_at)
+			VALUES
+				(1, sha256('control'), FALSE, date_trunc('second', NOW()) - INTERVAL '2 minutes'),
+				(1, sha256('affected'), FALSE, date_trunc('second', NOW()) - INTERVAL '1 minute')`); err != nil {
+			t.Fatal(err)
+		}
+	})
+	defer store.Close()
+
+	assertPending := func(slab string, expected bool) {
+		t.Helper()
+		var pending bool
+		if err := store.pool.QueryRow(ctx, `SELECT republish_pending FROM slabs WHERE digest = sha256($1::bytea)`, []byte(slab)).Scan(&pending); err != nil {
+			t.Fatal(err)
+		} else if pending != expected {
+			t.Fatal("unexpected", slab, pending)
+		}
+	}
+	assertPending("marked", true)
+	assertPending("healthy", false)
+
+	// the positions a client consumed before the upgrade
+	var personal, inSpace time.Time
+	if err := store.pool.QueryRow(ctx, `SELECT updated_at FROM object_events WHERE object_key = sha256('affected')`).Scan(&personal); err != nil {
+		t.Fatal(err)
+	} else if err := store.pool.QueryRow(ctx, `SELECT updated_at FROM space_object_events WHERE object_key = sha256('affected')`).Scan(&inSpace); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := store.RepublishPendingSlabEvents(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertPending("marked", false)
+	store.publishEvents(t)
+
+	account := proto.Account(sha256.Sum256([]byte("account")))
+	space := types.PublicKey(sha256.Sum256([]byte("space")))
+	affected := types.Hash256(sha256.Sum256([]byte("affected")))
+	if events, err := store.ListObjects(account, slabs.Cursor{After: personal, Key: affected}, 10); err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 {
+		t.Fatal("objects: unexpected", len(events))
+	} else if events[0].Key != affected || !events[0].Unrecoverable {
+		t.Fatal("objects: unexpected", events[0].Key, events[0].Unrecoverable)
+	}
+
+	if events, err := store.ListSpaceObjects(account, space, slabs.Cursor{After: inSpace, Key: affected}, 10); err != nil {
+		t.Fatal(err)
+	} else if len(events) != 1 {
+		t.Fatal("space objects: unexpected", len(events))
+	} else if events[0].Key != affected || !events[0].Unrecoverable {
+		t.Fatal("space objects: unexpected", events[0].Key, events[0].Unrecoverable)
+	}
 }
 
 // TestMigrationSeedsRepairStats asserts the repair-state counters are seeded

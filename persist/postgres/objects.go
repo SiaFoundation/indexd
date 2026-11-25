@@ -26,6 +26,18 @@ const sqlObjectSlabs = `
 	FROM object_slabs
 	JOIN slabs ON slabs.digest = object_slabs.slab_digest`
 
+const sqlUnrecoverableObjects = `
+	SELECT DISTINCT os.object_id
+	FROM object_slabs os
+	JOIN slabs s ON s.digest = os.slab_digest
+	WHERE os.object_id = ANY($1) AND s.unrecoverable_reason IS NOT NULL`
+
+const sqlUnrecoverableSpaceObjects = `
+	SELECT DISTINCT os.object_id
+	FROM space_object_slabs os
+	JOIN slabs s ON s.digest = os.slab_digest
+	WHERE os.object_id = ANY($1) AND s.unrecoverable_reason IS NOT NULL`
+
 // A dbObject is an object row and its IDs. The row holds everything but the
 // slabs, which are loaded separately.
 type dbObject struct {
@@ -93,7 +105,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 // ListObjects lists object events for the given account that were published
 // after the given cursor.
 func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, err error) {
-	err = s.transaction(func(ctx context.Context, tx *txn) error {
+	err = s.readSnapshot(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
 			return err
@@ -120,15 +132,16 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 				Deleted:   event.Deleted,
 				UpdatedAt: event.UpdatedAt,
 			}
-			if event.Object == nil {
-				continue
-			} else if len(pageSlabs[i]) == 0 {
-				// an object always has at least one slab, so one that lost
-				// its slab rows was deleted after its row was read
-				events[i].Deleted = true
-				continue
+			if event.Object != nil {
+				events[i].Object = event.Object.WithSlabs(pageSlabs[i])
 			}
-			events[i].Object = event.Object.WithSlabs(pageSlabs[i])
+		}
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableObjects, eventByID)
+		if err != nil {
+			return err
+		}
+		for _, i := range unrecoverable {
+			events[i].Unrecoverable = true
 		}
 		return nil
 	})
@@ -138,14 +151,25 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 // ListObjectsWithoutSlabs lists object events without their slabs, which are
 // paginated separately with ObjectSlabs.
 func (s *Store) ListObjectsWithoutSlabs(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEventWithoutSlabs, err error) {
-	err = s.transaction(func(ctx context.Context, tx *txn) error {
+	err = s.readSnapshot(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
 			return err
 		}
 
-		events, _, err = listObjectEvents(ctx, tx, accountID, cursor, limit)
-		return err
+		var eventByID map[int64]int
+		events, eventByID, err = listObjectEvents(ctx, tx, accountID, cursor, limit)
+		if err != nil {
+			return err
+		}
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableObjects, eventByID)
+		if err != nil {
+			return err
+		}
+		for _, i := range unrecoverable {
+			events[i].Unrecoverable = true
+		}
+		return nil
 	})
 	return
 }
@@ -212,6 +236,27 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 		}
 	}
 	return events, eventByID, nil
+}
+
+// unrecoverableObjects returns the event indexes of the objects in eventByID
+// that query finds to have an unrecoverable slab.
+func unrecoverableObjects(ctx context.Context, tx *txn, query string, eventByID map[int64]int) ([]int, error) {
+	if len(eventByID) == 0 {
+		return nil, nil
+	}
+	rows, err := tx.Query(ctx, query, slices.Collect(maps.Keys(eventByID)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to query unrecoverable objects: %w", err)
+	}
+	unrecoverable, err := pgx.CollectRows(rows, func(row pgx.CollectableRow) (int, error) {
+		var id int64
+		err := row.Scan(&id)
+		return eventByID[id], err
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to scan unrecoverable objects: %w", err)
+	}
+	return unrecoverable, nil
 }
 
 // ObjectSlabs returns a page of the object's slab slices in slab_index order,
@@ -300,19 +345,18 @@ func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) err
 			return fmt.Errorf("failed to get object id: %w", err)
 		}
 
-		// delete the object's slab references, remembering the slabs so the
-		// now unreferenced ones can be unpinned after the object is deleted
-		rows, err := tx.Query(ctx, `WITH deleted AS (
-	DELETE FROM object_slabs WHERE object_id = $1 RETURNING slab_digest
-)
-SELECT DISTINCT s.id FROM slabs s
-INNER JOIN deleted d ON (d.slab_digest = s.digest)`, objectID)
+		// lock the object's slabs before touching its event row
+		rows, err := tx.Query(ctx, `SELECT DISTINCT s.id FROM slabs s
+INNER JOIN object_slabs os ON (os.slab_digest = s.digest)
+WHERE os.object_id = $1`, objectID)
 		if err != nil {
-			return fmt.Errorf("failed to delete object slabs: %w", err)
+			return fmt.Errorf("failed to query object slabs: %w", err)
 		}
 		objectSlabIDs, err := pgx.CollectRows(rows, pgx.RowTo[int64])
 		if err != nil {
 			return fmt.Errorf("failed to collect object slab ids: %w", err)
+		} else if err := lockSlabs(ctx, tx, objectSlabIDs); err != nil {
+			return err
 		}
 
 		_, err = tx.Exec(ctx, `DELETE FROM objects WHERE id = $1`, objectID)
@@ -328,11 +372,11 @@ INNER JOIN deleted d ON (d.slab_digest = s.digest)`, objectID)
 		}
 
 		// unpin the object's slabs that are no longer referenced by any of
-		// the account's objects; the locking inside serializes concurrent
+		// the account's objects. The slab locks serialize concurrent
 		// deletions of objects sharing a slab, which could otherwise each
 		// still see the other's object and leave the shared slab pinned
 		// forever
-		return s.unpinUnreferencedSlabs(ctx, tx, accountID, objectSlabIDs, nil)
+		return s.unpinLockedUnreferencedSlabs(ctx, tx, accountID, objectSlabIDs, nil)
 	})
 }
 
@@ -478,14 +522,6 @@ func (s *Store) PinObject(account proto.Account, obj slabs.PinObjectRequest) err
 			return fmt.Errorf("failed to insert object: %w", err)
 		}
 
-		_, err = tx.Exec(ctx, `
-			INSERT INTO object_events (object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)
-			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, NULL)`,
-			sqlHash256(obj.ID), accountID)
-		if err != nil {
-			return fmt.Errorf("failed to insert object event: %w", err)
-		}
-
 		slabIDs := make([]slabs.SlabID, 0, len(obj.Slabs))
 		for _, slab := range obj.Slabs {
 			slabIDs = append(slabIDs, slab.ID)
@@ -537,6 +573,16 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 		if err := res.Close(); err != nil {
 			return fmt.Errorf("failed to insert slabs for object: %w", err)
 		}
+
+		// slabs are locked before event rows everywhere, a pin holding its event
+		// row while waiting for a slab could deadlock with a delete and a republish
+		_, err = tx.Exec(ctx, `
+			INSERT INTO object_events (object_key, account_id, was_deleted) VALUES ($1, $2, FALSE)
+			ON CONFLICT (account_id, object_key) DO UPDATE SET (was_deleted, updated_at) = (FALSE, NULL)`,
+			sqlHash256(obj.ID), accountID)
+		if err != nil {
+			return fmt.Errorf("failed to insert object event: %w", err)
+		}
 		return nil
 	})
 }
@@ -544,6 +590,9 @@ AND slabs.digest = ANY($2)`, accountID, args).Scan(&count); err != nil {
 // objectEventPublishBatchSize bounds how many events take a position in one
 // publish so a backlog cannot hold the settings row for the whole drain.
 const objectEventPublishBatchSize = 25000
+
+// slabRepublishBatchSize bounds how many flagged slabs one republish drains.
+const slabRepublishBatchSize = 1000
 
 // PublishObjectEvents assigns stream positions to object events that do not
 // have one yet. At most one batch of events is published per wall clock second.
@@ -609,6 +658,37 @@ func (s *Store) publishObjectEvents(limit int) error {
 ) UPDATE space_object_events SET updated_at = $1 WHERE ctid IN (SELECT ctid FROM batch)`, published, limit)
 		return err
 	})
+}
+
+// RepublishPendingSlabEvents republishes the events of the objects referencing
+// slabs whose recoverability changed, draining at most one batch of slabs.
+func (s *Store) RepublishPendingSlabEvents(ctx context.Context) error {
+	// clearing a slab's flag and resetting the positions of its events commit
+	// together, so a drain that fails leaves the work for the next one. Only
+	// the claim skips locked rows, skipping an event row would clear the flag
+	// without republishing it
+	_, err := s.pool.Exec(ctx, `
+		WITH batch AS MATERIALIZED (
+			SELECT id
+			FROM slabs
+			WHERE republish_pending
+			ORDER BY id
+			LIMIT $1
+			FOR NO KEY UPDATE SKIP LOCKED
+		), drained AS (
+			UPDATE slabs AS s
+			SET republish_pending = FALSE
+			FROM batch
+			WHERE s.id = batch.id
+			RETURNING s.digest
+		)
+		SELECT republish_slab_object_events(array_agg(digest))
+		FROM drained
+		HAVING count(*) > 0`, slabRepublishBatchSize)
+	if err != nil {
+		return fmt.Errorf("failed to republish pending slab events: %w", err)
+	}
+	return nil
 }
 
 func accountID(ctx context.Context, tx *txn, account proto.Account) (int64, bool, error) {

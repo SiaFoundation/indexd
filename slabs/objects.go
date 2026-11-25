@@ -61,6 +61,9 @@ type (
 	ObjectEvent struct {
 		Key     types.Hash256 `json:"key"`
 		Deleted bool          `json:"deleted"`
+		// Unrecoverable reports whether any of the object's slabs is
+		// unrecoverable at the time the event is read.
+		Unrecoverable bool `json:"unrecoverable"`
 		// UpdatedAt is the event's position in the stream rather than the time
 		// the object was last modified, which the object itself carries.
 		UpdatedAt time.Time `json:"updatedAt"`
@@ -73,6 +76,9 @@ type (
 	ObjectEventWithoutSlabs struct {
 		Key     types.Hash256 `json:"key"`
 		Deleted bool          `json:"deleted"`
+		// Unrecoverable reports whether any of the object's slabs is
+		// unrecoverable at the time the event is read.
+		Unrecoverable bool `json:"unrecoverable"`
 		// UpdatedAt is the event's position in the stream. The nested object's
 		// UpdatedAt records when the object was last modified.
 		UpdatedAt time.Time `json:"updatedAt"`

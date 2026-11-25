@@ -520,17 +520,13 @@ func lockSlabs(ctx context.Context, tx *txn, sIDs []int64) error {
 	return nil
 }
 
-// unpinUnreferencedSlabs unpins the subset of the given slabs that are pinned
-// by the account but not referenced by any of the account's objects, queueing
-// them for deletion by deleteOrphanedSlabs. Only slabs pinned before cutoff
-// are unpinned; a nil cutoff unpins them regardless of when they were pinned.
-// The slabs are locked first so the reference check can't race a concurrent
-// PinObject or another unpinner.
-func (s *Store) unpinUnreferencedSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64, cutoff *time.Time) error {
-	if err := lockSlabs(ctx, tx, sIDs); err != nil {
-		return err
-	}
-
+// unpinLockedUnreferencedSlabs unpins the subset of the given slabs that are
+// pinned by the account but not referenced by any of the account's objects,
+// queueing them for deletion by PruneDeletedSlabs. Only slabs pinned before
+// cutoff are unpinned, a nil cutoff unpins them regardless of when they were
+// pinned. The caller must hold the slab locks so the reference check can't
+// race a concurrent PinObject or another unpinner.
+func (s *Store) unpinLockedUnreferencedSlabs(ctx context.Context, tx *txn, accountID int64, sIDs []int64, cutoff *time.Time) error {
 	rows, err := tx.Query(ctx, `SELECT s.id
 FROM slabs s
 JOIN account_slabs a ON s.id = a.slab_id
@@ -1168,31 +1164,8 @@ func (s *Store) UnhealthySlabs(cursor int64, limit int) (unhealthy []slabs.SlabI
 // sectors were updated.
 func (s *Store) RecordSlabMigrated(slabID slabs.SlabID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
-		_, err := tx.Exec(ctx, `
-			UPDATE object_events
-			SET updated_at = NULL
-			WHERE object_key IN (
-				SELECT DISTINCT o.object_key
-				FROM object_slabs os
-				INNER JOIN objects o ON os.object_id = o.id
-				WHERE os.slab_digest = $1
-			)
-		`, sqlHash256(slabID))
-		if err != nil {
-			return fmt.Errorf("failed to update affected object events: %w", err)
-		}
-		_, err = tx.Exec(ctx, `
-			UPDATE space_object_events
-			SET updated_at = NULL
-			WHERE (space_id, object_key) IN (
-				SELECT o.space_id, o.object_key
-				FROM space_object_slabs os
-				INNER JOIN space_objects o ON os.object_id = o.id
-				WHERE os.slab_digest = $1
-			)
-		`, sqlHash256(slabID))
-		if err != nil {
-			return fmt.Errorf("failed to update affected space object events: %w", err)
+		if _, err := tx.Exec(ctx, `SELECT republish_slab_object_events(ARRAY[$1::bytea])`, sqlHash256(slabID)); err != nil {
+			return fmt.Errorf("failed to republish affected object events: %w", err)
 		}
 		return nil
 	})

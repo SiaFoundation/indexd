@@ -824,18 +824,7 @@ func TestDeleteSpaceSlabLockOrder(t *testing.T) {
 		close(deleteErr)
 	}()
 	t.Cleanup(func() { <-deleteErr })
-	var blocked bool
-	for range 100 {
-		if err := store.pool.QueryRow(t.Context(), `SELECT EXISTS (
- SELECT 1 FROM pg_stat_activity WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))
-)`, int32(lockTx.Conn().PgConn().PID())).Scan(&blocked); err != nil {
-			t.Fatal(err)
-		} else if blocked {
-			break
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	if !blocked {
+	if !store.waitBlockedBy(t, lockTx, true) {
 		t.Fatal("space deletion did not wait for the slab lock")
 	} else if _, err := lockTx.Exec(t.Context(), `SELECT slab_id FROM space_slabs WHERE slab_id = $1 FOR UPDATE NOWAIT`, slabID); err != nil {
 		t.Fatalf("space deletion locked the pin before the slab: %v", err)

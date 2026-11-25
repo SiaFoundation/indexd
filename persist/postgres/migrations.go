@@ -753,4 +753,42 @@ FOR EACH STATEMENT EXECUTE FUNCTION space_objects_maintain_totals();`)
 		_, err := tx.Exec(ctx, `ALTER TABLE space_objects DROP COLUMN account_key`)
 		return err
 	},
+	func(ctx context.Context, tx *txn, log *zap.Logger) error {
+		_, err := tx.Exec(ctx, `
+CREATE INDEX slabs_unrecoverable_idx ON slabs(digest) WHERE unrecoverable_reason IS NOT NULL;
+ALTER TABLE slabs ADD COLUMN republish_pending BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX slabs_republish_pending_idx ON slabs(id) WHERE republish_pending;
+CREATE FUNCTION republish_slab_object_events(slab_digests BYTEA[]) RETURNS VOID AS $$
+BEGIN
+    UPDATE object_events
+    SET updated_at = NULL
+    WHERE updated_at IS NOT NULL AND (account_id, object_key) IN (
+        SELECT o.account_id, o.object_key
+        FROM object_slabs os
+        INNER JOIN objects o ON os.object_id = o.id
+        WHERE os.slab_digest = ANY(slab_digests)
+    );
+    UPDATE space_object_events
+    SET updated_at = NULL
+    WHERE updated_at IS NOT NULL AND (space_id, object_key) IN (
+        SELECT o.space_id, o.object_key
+        FROM space_object_slabs os
+        INNER JOIN space_objects o ON os.object_id = o.id
+        WHERE os.slab_digest = ANY(slab_digests)
+    );
+END;
+$$ LANGUAGE plpgsql;
+CREATE FUNCTION slabs_flag_republish() RETURNS TRIGGER AS $$
+BEGIN
+    NEW.republish_pending := TRUE;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER slabs_flag_republish
+BEFORE UPDATE OF unrecoverable_reason ON slabs FOR EACH ROW
+WHEN ((OLD.unrecoverable_reason IS NULL) IS DISTINCT FROM (NEW.unrecoverable_reason IS NULL))
+EXECUTE FUNCTION slabs_flag_republish();
+UPDATE slabs SET republish_pending = TRUE WHERE unrecoverable_reason IS NOT NULL;`)
+		return err
+	},
 }

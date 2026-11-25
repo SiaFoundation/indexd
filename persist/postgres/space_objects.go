@@ -135,7 +135,7 @@ func (s *Store) DeleteSpace(account proto.Account, key types.PublicKey) error {
 		} else if _, err := tx.Exec(ctx, `DELETE FROM spaces WHERE id = $1`, id); err != nil {
 			return err
 		}
-		return s.unpinUnreferencedSlabs(ctx, tx, ownerID, slabIDs, nil)
+		return s.unpinLockedUnreferencedSlabs(ctx, tx, ownerID, slabIDs, nil)
 	})
 }
 
@@ -169,6 +169,13 @@ func (s *Store) ListSpaceObjects(account proto.Account, key types.PublicKey, cur
 				events[i].Deleted, events[i].Object = true, nil
 			}
 		}
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableSpaceObjects, ids)
+		if err != nil {
+			return err
+		}
+		for _, i := range unrecoverable {
+			events[i].Unrecoverable = true
+		}
 		return nil
 	})
 	return
@@ -181,8 +188,19 @@ func (s *Store) ListSpaceObjectsWithoutSlabs(account proto.Account, key types.Pu
 		if err != nil {
 			return err
 		}
-		events, _, err = listSpaceObjectEvents(ctx, tx, id, cursor, limit)
-		return err
+		var ids map[int64]int
+		events, ids, err = listSpaceObjectEvents(ctx, tx, id, cursor, limit)
+		if err != nil {
+			return err
+		}
+		unrecoverable, err := unrecoverableObjects(ctx, tx, sqlUnrecoverableSpaceObjects, ids)
+		if err != nil {
+			return err
+		}
+		for _, i := range unrecoverable {
+			events[i].Unrecoverable = true
+		}
+		return nil
 	})
 	return
 }
@@ -282,7 +300,7 @@ func (s *Store) unpinSpaceSlabs(ctx context.Context, tx *txn, spaceID, ownerID i
  WHERE o.space_id = p.space_id AND os.slab_digest = s.digest)`, spaceID, slabIDs); err != nil {
 		return err
 	}
-	return s.unpinUnreferencedSlabs(ctx, tx, ownerID, slabIDs, nil)
+	return s.unpinLockedUnreferencedSlabs(ctx, tx, ownerID, slabIDs, nil)
 }
 
 func pinSpaceObjectSlabs(ctx context.Context, tx *txn, spaceID, ownerID int64, digests []sqlHash256) error {
@@ -388,10 +406,13 @@ func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor s
 		ids[id] = i
 		return nil
 	})
+	if err != nil {
+		return nil, nil, err
+	}
 	for i := range events {
 		if events[i].Object == nil {
 			events[i].Deleted = true
 		}
 	}
-	return events, ids, err
+	return events, ids, nil
 }
