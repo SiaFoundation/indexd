@@ -105,7 +105,7 @@ func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.Seal
 // ListObjects lists object events for the given account that were published
 // after the given cursor.
 func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEvent, err error) {
-	err = s.transaction(func(ctx context.Context, tx *txn) error {
+	err = s.readSnapshot(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
 			return err
@@ -135,8 +135,6 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 			if event.Object == nil {
 				continue
 			} else if len(pageSlabs[i]) == 0 {
-				// an object always has at least one slab, so one that lost
-				// its slab rows was deleted after its row was read
 				events[i].Deleted = true
 				continue
 			}
@@ -163,7 +161,7 @@ func (s *Store) ListObjects(account proto.Account, cursor slabs.Cursor, limit in
 // ListObjectsWithoutSlabs lists object events without their slabs, which are
 // paginated separately with ObjectSlabs.
 func (s *Store) ListObjectsWithoutSlabs(account proto.Account, cursor slabs.Cursor, limit int) (events []slabs.ObjectEventWithoutSlabs, err error) {
-	err = s.transaction(func(ctx context.Context, tx *txn) error {
+	err = s.readSnapshot(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
 			return err
