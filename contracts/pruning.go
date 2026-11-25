@@ -1,9 +1,11 @@
 package contracts
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -104,9 +106,17 @@ loop:
 }
 
 func (cm *ContractManager) pruneContract(ctx context.Context, contractID types.FileContractID) (int, error) {
+	// snapshot without the lock; only roots missing from it are rechecked
+	// under the lock, so a stale snapshot can only cause roots to be kept
+	keep, err := cm.store.ContractRootsToKeep(contractID)
+	if err != nil {
+		return 0, fmt.Errorf("failed to fetch contract roots: %w", err)
+	}
+	slices.SortFunc(keep, compareRoots) // required by the binary search in pruneContractBatch
+
 	var pruned int
 	for offset := uint64(0); ; offset += cm.sectorRootsBatchSize {
-		n, done, err := cm.pruneContractBatch(ctx, contractID, offset)
+		n, done, err := cm.pruneContractBatch(ctx, contractID, offset, keep)
 		pruned += n
 		if err != nil || done {
 			return pruned, err
@@ -114,9 +124,11 @@ func (cm *ContractManager) pruneContract(ctx context.Context, contractID types.F
 	}
 }
 
+func compareRoots(a, b types.Hash256) int { return bytes.Compare(a[:], b[:]) }
+
 // pruneContractBatch prunes the batch of sectors starting at offset. The
-// contract is only locked for the duration of the batch.
-func (cm *ContractManager) pruneContractBatch(ctx context.Context, contractID types.FileContractID, offset uint64) (int, bool, error) {
+// contract is only locked for the duration of the batch. keep must be sorted.
+func (cm *ContractManager) pruneContractBatch(ctx context.Context, contractID types.FileContractID, offset uint64, keep []types.Hash256) (int, bool, error) {
 	const dbRootsBatchSize = 10000
 
 	lc, unlock, err := cm.cl.LockContract(ctx, contractID)
@@ -153,10 +165,17 @@ func (cm *ContractManager) pruneContractBatch(ctx context.Context, contractID ty
 		return 0, false, fmt.Errorf("failed to fetch contract sectors: %w", err)
 	}
 
-	prunable := make(map[types.Hash256]struct{}, len(roots))
-	for start := 0; start < len(roots); start += dbRootsBatchSize {
-		end := min(start+dbRootsBatchSize, len(roots))
-		batch, err := cm.store.PrunableContractRoots(contractID, roots[start:end])
+	var candidates []types.Hash256
+	for _, root := range roots {
+		if _, found := slices.BinarySearchFunc(keep, root, compareRoots); !found {
+			candidates = append(candidates, root)
+		}
+	}
+
+	prunable := make(map[types.Hash256]struct{}, len(candidates))
+	for start := 0; start < len(candidates); start += dbRootsBatchSize {
+		end := min(start+dbRootsBatchSize, len(candidates))
+		batch, err := cm.store.PrunableContractRoots(contractID, candidates[start:end])
 		if err != nil {
 			return 0, false, fmt.Errorf("failed to fetch prunable contract roots: %w", err)
 		}

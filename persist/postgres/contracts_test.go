@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -699,6 +700,24 @@ func TestPrunableContractRoots(t *testing.T) {
 	}
 	slabID := slabIDs[0]
 
+	assertKeep := func(fcid types.FileContractID, want ...types.Hash256) {
+		t.Helper()
+		keep, err := store.ContractRootsToKeep(fcid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		slices.SortFunc(keep, func(a, b types.Hash256) int { return bytes.Compare(a[:], b[:]) })
+		slices.SortFunc(want, func(a, b types.Hash256) int { return bytes.Compare(a[:], b[:]) })
+		if !slices.Equal(keep, want) {
+			t.Fatalf("unexpected roots to keep for %v, got %v, want %v", fcid, keep, want)
+		}
+	}
+
+	// unpinned sectors are kept by every contract on their host
+	assertKeep(fcid1, roots[0], roots[1])
+	assertKeep(fcid2, roots[2], roots[3])
+	assertKeep(fcid3, roots[0], roots[1])
+
 	// freshly pinned slabs shouldn't have prunable roots
 	if indices, err := store.PrunableContractRoots(fcid1, roots[:2]); err != nil {
 		t.Fatal(err)
@@ -731,6 +750,10 @@ func TestPrunableContractRoots(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	assertKeep(fcid1, roots[0], roots[1])
+	assertKeep(fcid2, roots[2], roots[3])
+	assertKeep(fcid3)
+
 	// assert there are still no prunable roots for either contract after
 	// pinning
 	if indices, err := store.PrunableContractRoots(fcid1, roots[:2]); err != nil {
@@ -761,6 +784,9 @@ func TestPrunableContractRoots(t *testing.T) {
 	// unpinning queues the slab for background deletion; prune it so the
 	// sectors are actually removed and become prunable
 	store.pruneAllDeletedSlabs(t)
+
+	assertKeep(fcid1, roots[0])
+	assertKeep(fcid2, roots[2])
 
 	// assert prunable roots for both contracts
 	if prunable, err := store.PrunableContractRoots(fcid1, roots[:2]); err != nil {
@@ -2638,4 +2664,105 @@ func insertRandomContract(b *testing.B, tx *txn, hostID int64, hostKey types.Pub
 	}
 
 	return
+}
+
+// BenchmarkPruneContractBatch compares checking a 1TiB batch of host roots
+// against the database with and without a snapshot of the contract's roots.
+func BenchmarkPruneContractBatch(b *testing.B) {
+	store := initPostgres(b, zap.NewNop())
+
+	const (
+		oneTB    = 1 << 40
+		nSectors = oneTB / proto.SectorSize
+		chunk    = 10000
+	)
+
+	fundTarget := uint64(16 << 30)
+	if err := store.PutQuota("default", accounts.PutQuotaRequest{
+		Description:     "Default quota",
+		MaxPinnedData:   2 * oneTB,
+		TotalUses:       5,
+		FundTargetBytes: &fundTarget,
+	}); err != nil {
+		b.Fatal(err)
+	}
+	account := proto.Account{1}
+	store.addTestAccount(b, types.PublicKey(account))
+
+	// one contract per garbage ratio, the rest of the batch is random roots
+	// the database doesn't know about
+	cmp := func(a, b types.Hash256) int { return bytes.Compare(a[:], b[:]) }
+	for _, garbagePct := range []int{10, 99} {
+		hk := store.addTestHost(b)
+		fcid := store.addTestContract(b, hk)
+
+		nPinned := int(nSectors) * (100 - garbagePct) / 100
+		var roots []types.Hash256
+		for len(roots) < nPinned {
+			var sectors []slabs.PinnedSector
+			for range min(chunk, nPinned-len(roots)) {
+				root := frand.Entropy256()
+				sectors = append(sectors, slabs.PinnedSector{Root: root, HostKey: hk})
+				roots = append(roots, root)
+			}
+			if _, err := store.PinSlabs(account, time.Time{}, slabs.SlabPinParams{
+				MinShards:     1,
+				EncryptionKey: frand.Entropy256(),
+				Sectors:       sectors,
+			}); err != nil {
+				b.Fatal(err)
+			}
+		}
+		for i := 0; i < len(roots); i += chunk {
+			if err := store.PinSectors(fcid, roots[i:min(i+chunk, len(roots))]); err != nil {
+				b.Fatal(err)
+			}
+		}
+		for len(roots) < int(nSectors) {
+			roots = append(roots, frand.Entropy256())
+		}
+		frand.Shuffle(len(roots), func(i, j int) { roots[i], roots[j] = roots[j], roots[i] })
+
+		prunableIn := func(candidates []types.Hash256) int {
+			var n int
+			for i := 0; i < len(candidates); i += chunk {
+				prunable, err := store.PrunableContractRoots(fcid, candidates[i:min(i+chunk, len(candidates))])
+				if err != nil {
+					b.Fatal(err)
+				}
+				n += len(prunable)
+			}
+			return n
+		}
+		want := int(nSectors) - nPinned
+
+		b.Run(fmt.Sprintf("garbage_%d/snapshot", garbagePct), func(b *testing.B) {
+			b.SetBytes(oneTB)
+			for b.Loop() {
+				keep, err := store.ContractRootsToKeep(fcid)
+				if err != nil {
+					b.Fatal(err)
+				}
+				slices.SortFunc(keep, cmp)
+				var candidates []types.Hash256
+				for _, root := range roots {
+					if _, found := slices.BinarySearchFunc(keep, root, cmp); !found {
+						candidates = append(candidates, root)
+					}
+				}
+				if n := prunableIn(candidates); n != want {
+					b.Fatalf("expected %d prunable roots, got %d", want, n)
+				}
+			}
+		})
+		b.Run(fmt.Sprintf("garbage_%d/lookup", garbagePct), func(b *testing.B) {
+			b.SetBytes(oneTB)
+			for b.Loop() {
+				if n := prunableIn(roots); n != want {
+					b.Fatalf("expected %d prunable roots, got %d", want, n)
+				}
+			}
+		})
+
+	}
 }

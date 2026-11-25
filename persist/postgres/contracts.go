@@ -831,6 +831,60 @@ func (tx *updateTx) UpdateContractRenewedTo(contractID types.FileContractID, ren
 	return nil
 }
 
+// contractHostAndSectorsMap returns the host ID and contract_sectors_map ID of
+// a contract.
+func contractHostAndSectorsMap(ctx context.Context, tx *txn, contractID types.FileContractID) (hostID, csmID int64, err error) {
+	err = tx.QueryRow(ctx, `
+		SELECT c.host_id, csm.id
+		FROM contract_sectors_map csm
+		INNER JOIN contracts c ON c.contract_id = csm.contract_id
+		WHERE csm.contract_id = $1
+	`, sqlHash256(contractID)).Scan(&hostID, &csmID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, 0, fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
+	} else if err != nil {
+		return 0, 0, fmt.Errorf("failed to fetch contract host and sectors map ID: %w", err)
+	}
+	return hostID, csmID, nil
+}
+
+// ContractRootsToKeep returns the roots that must not be pruned from the
+// contract: those pinned to it and those unpinned on its host.
+func (s *Store) ContractRootsToKeep(contractID types.FileContractID) ([]types.Hash256, error) {
+	var keep []types.Hash256
+	err := s.transaction(func(ctx context.Context, tx *txn) error {
+		keep = keep[:0] // reuse same slice if transaction retries
+
+		hostID, csmID, err := contractHostAndSectorsMap(ctx, tx, contractID)
+		if err != nil {
+			return err
+		}
+
+		rows, err := tx.Query(ctx, `
+			SELECT sector_root FROM sectors WHERE contract_sectors_map_id = $1
+			UNION ALL
+			SELECT sector_root FROM sectors WHERE host_id = $2 AND contract_sectors_map_id IS NULL
+		`, csmID, hostID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch contract roots: %w", err)
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var root sqlHash256
+			if err := rows.Scan(&root); err != nil {
+				return fmt.Errorf("failed to scan root: %w", err)
+			}
+			keep = append(keep, types.Hash256(root))
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		return nil, err
+	}
+	return keep, nil
+}
+
 // PrunableContractRoots diffs the given roots with the roots in the database
 // and returns the roots that can be pruned.
 func (s *Store) PrunableContractRoots(contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error) {
@@ -843,17 +897,9 @@ func (s *Store) PrunableContractRoots(contractID types.FileContractID, roots []t
 	if err := s.transaction(func(ctx context.Context, tx *txn) error {
 		prunable = prunable[:0] // reuse same slice if transaction retries
 
-		var wantedHostID, wantedCSMID int64
-		err := tx.QueryRow(ctx, `
-			SELECT c.host_id, csm.id
-			FROM contract_sectors_map csm
-			INNER JOIN contracts c ON c.contract_id = csm.contract_id
-			WHERE csm.contract_id = $1
-		`, sqlHash256(contractID)).Scan(&wantedHostID, &wantedCSMID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("contract %q: %w", contractID, contracts.ErrNotFound)
-		} else if err != nil {
-			return fmt.Errorf("failed to fetch contract host and sectors map ID: %w", err)
+		wantedHostID, wantedCSMID, err := contractHostAndSectorsMap(ctx, tx, contractID)
+		if err != nil {
+			return err
 		}
 
 		// scoped to the contract's index range instead of the global sector_root

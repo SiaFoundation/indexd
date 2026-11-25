@@ -369,7 +369,7 @@ func TestPruneContractRevisedBetweenBatches(t *testing.T) {
 	}
 
 	// first batch frees r2, r3 which get replaced by r7, r6
-	if n, done, err := cm.PruneContractBatch(context.Background(), fcid, 0); err != nil {
+	if n, done, err := cm.PruneContractBatch(context.Background(), fcid, 0, nil); err != nil {
 		t.Fatal(err)
 	} else if n != 2 || done {
 		t.Fatalf("expected 2 pruned and not done, got %d %t", n, done)
@@ -386,7 +386,7 @@ func TestPruneContractRevisedBetweenBatches(t *testing.T) {
 	assertFilesize(7)
 
 	// second batch must see the new filesize, it covers r4, r5, r8 and frees r5
-	if n, done, err := cm.PruneContractBatch(context.Background(), fcid, 3); err != nil {
+	if n, done, err := cm.PruneContractBatch(context.Background(), fcid, 3, nil); err != nil {
 		t.Fatal(err)
 	} else if n != 1 || done {
 		t.Fatalf("expected 1 pruned and not done, got %d %t", n, done)
@@ -398,7 +398,7 @@ func TestPruneContractRevisedBetweenBatches(t *testing.T) {
 	assertFilesize(6)
 
 	// third batch is past the end
-	if n, done, err := cm.PruneContractBatch(context.Background(), fcid, 6); err != nil {
+	if n, done, err := cm.PruneContractBatch(context.Background(), fcid, 6, nil); err != nil {
 		t.Fatal(err)
 	} else if n != 0 || !done {
 		t.Fatalf("expected 0 pruned and done, got %d %t", n, done)

@@ -134,6 +134,7 @@ type (
 		MarkUnrenewableContractsBad(maxProofHeight uint64) error
 		MarkSectorsUnpinnable(threshold time.Time) error
 		PinSectors(contractID types.FileContractID, roots []types.Hash256) error
+		ContractRootsToKeep(contractID types.FileContractID) ([]types.Hash256, error)
 		PrunableContractRoots(contractID types.FileContractID, roots []types.Hash256) ([]types.Hash256, error)
 		PruneExpiredContractElements(maxBlocksSinceExpiry uint64) error
 		PruneContractSectorsMap(maxBlocksSinceExpiry uint64) error
