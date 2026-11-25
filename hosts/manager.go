@@ -7,8 +7,10 @@ import (
 	"math"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	proto4 "go.sia.tech/core/rhp/v4"
 	"go.sia.tech/core/types"
@@ -910,6 +912,8 @@ func validateAddress(na chain.NetAddress) error {
 	}
 	if na.Address == "" {
 		return fmt.Errorf("empty address")
+	} else if !utf8.ValidString(na.Address) || strings.ContainsRune(na.Address, 0) {
+		return fmt.Errorf("address must be valid UTF-8 without NUL bytes")
 	}
 	host, portStr, err := net.SplitHostPort(na.Address)
 	if err != nil {
