@@ -1,3 +1,10 @@
+## 0.6.5 (2026-11-25)
+
+### Fixes
+
+- Update core from v0.21.8 to v0.21.9.
+- Update coreutils from v0.25.3 to v0.25.4.
+
 ## 0.6.4 (2026-11-19)
 
 ### Features
