@@ -333,7 +333,7 @@ func sharingKeyID(ctx context.Context, tx *txn, sharingKey types.PublicKey) (key
 // SharingKeyObject returns a single object attached to the sharing key with its
 // encryption keys re-sealed under the sharing key and its slabs decorated with
 // sectors.
-func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
+func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey slabs.ObjectID) (obj slabs.SealedObject, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		o, err := sharingKeyObject(ctx, tx, sharingKey, objectKey)
 		if err != nil {
@@ -353,7 +353,7 @@ func (s *Store) SharingKeyObject(sharingKey types.PublicKey, objectKey types.Has
 // to the sharing key in slab_index order, starting at slice index cursor. It
 // returns sharing.ErrSharedObjectNotFound if the object is not attached to the
 // sharing key or was deleted while the page was being read.
-func (s *Store) SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey types.Hash256, cursor int64, limit int) (objectSlabs []slabs.SlabSlice, err error) {
+func (s *Store) SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey slabs.ObjectID, cursor int64, limit int) (objectSlabs []slabs.SlabSlice, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		objectID, err := sharingKeyObjectID(ctx, tx, sharingKey, objectKey)
 		if err != nil {
@@ -374,7 +374,7 @@ func (s *Store) SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey type
 
 // sharingKeyObject returns an object attached to the sharing key and its
 // database ID, without loading its slabs.
-func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, objectKey types.Hash256) (dbObject, error) {
+func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, objectKey slabs.ObjectID) (dbObject, error) {
 	sharingKeyID, ownerID, err := sharingKeyID(ctx, tx, sharingKey)
 	if err != nil {
 		return dbObject{}, err
@@ -407,7 +407,7 @@ func sharingKeyObject(ctx context.Context, tx *txn, sharingKey types.PublicKey, 
 
 // sharingKeyObjectID returns the database ID of an object attached to the
 // sharing key.
-func sharingKeyObjectID(ctx context.Context, tx *txn, sharingKey types.PublicKey, objectKey types.Hash256) (objectID int64, err error) {
+func sharingKeyObjectID(ctx context.Context, tx *txn, sharingKey types.PublicKey, objectKey slabs.ObjectID) (objectID int64, err error) {
 	sharingKeyID, ownerID, err := sharingKeyID(ctx, tx, sharingKey)
 	if err != nil {
 		return 0, err
@@ -454,7 +454,7 @@ func (s *Store) SharingAccountKey(sharingKey types.PublicKey) (key types.Private
 }
 
 // DeleteSharedObject detaches an object from one of the account's sharing keys.
-func (s *Store) DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey types.Hash256) error {
+func (s *Store) DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey slabs.ObjectID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {

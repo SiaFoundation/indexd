@@ -8,6 +8,7 @@ import (
 	"go.sia.tech/core/types"
 	"go.sia.tech/indexd/contracts"
 	"go.sia.tech/indexd/sharing"
+	"go.sia.tech/indexd/slabs"
 	"go.sia.tech/indexd/testutils"
 	"go.uber.org/zap/zaptest"
 	"lukechampine.com/frand"
@@ -93,7 +94,7 @@ func TestManager(t *testing.T) {
 	// a shared object with an invalid signature is rejected before the store
 	shareKeyPriv := types.GeneratePrivateKey()
 	sharedReq := sharing.SharedObjectRequest{
-		ObjectID:         types.Hash256(frand.Entropy256()),
+		ObjectID:         slabs.ObjectID(frand.Entropy256()),
 		EncryptedDataKey: frand.Bytes(sharing.EncryptionKeySize),
 	}
 	if err := m.AddSharedObject(acc, shareKeyPriv.PublicKey(), sharedReq); !errors.Is(err, sharing.ErrInvalidRequest) {
@@ -105,7 +106,7 @@ func TestManager(t *testing.T) {
 	if err := m.AddSharedObject(acc, shareKeyPriv.PublicKey(), sharedReq); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
 		t.Fatalf("expected ErrSharingKeyNotFound, got %v", err)
 	}
-	if err := m.DeleteSharedObject(acc, pk, types.Hash256(frand.Entropy256())); !errors.Is(err, sharing.ErrSharedObjectNotFound) {
+	if err := m.DeleteSharedObject(acc, pk, slabs.ObjectID(frand.Entropy256())); !errors.Is(err, sharing.ErrSharedObjectNotFound) {
 		t.Fatalf("expected ErrSharedObjectNotFound, got %v", err)
 	}
 

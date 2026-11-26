@@ -3,6 +3,7 @@ package slabs
 import (
 	"errors"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -83,28 +84,35 @@ func TestSealedObjectSize(t *testing.T) {
 }
 
 func TestPinObjectRequestValidateIntegerBounds(t *testing.T) {
+	sk := types.GeneratePrivateKey()
 	req := PinObjectRequest{
 		EncryptedDataKey: frand.Bytes(72),
 		Slabs:            []ObjectSlab{{ID: SlabID{1}, Offset: math.MaxInt32, Length: math.MaxInt32}},
 	}
-	req.ID = pinnedObjectID(req.Slabs)
-	if err := req.Validate(); err != nil {
+	req.ID = pinnedObjectID(slices.Values(req.Slabs))
+	req.DataSignature = sk.SignHash(req.DataSigHash())
+	req.MetadataSignature = sk.SignHash(req.MetaSigHash())
+	if err := req.Validate(sk.PublicKey()); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestPinObjectRequestValidateDuplicateSlabs(t *testing.T) {
+	sk := types.GeneratePrivateKey()
 	req := PinObjectRequest{
 		EncryptedDataKey: frand.Bytes(72),
 		Slabs:            []ObjectSlab{{ID: SlabID{1}, Length: 1}, {ID: SlabID{1}, Offset: 1, Length: 1}},
 	}
-	req.ID = pinnedObjectID(req.Slabs)
-	if err := req.Validate(); !errors.Is(err, ErrObjectDuplicateSlab) {
+	req.ID = pinnedObjectID(slices.Values(req.Slabs))
+	req.DataSignature = sk.SignHash(req.DataSigHash())
+	req.MetadataSignature = sk.SignHash(req.MetaSigHash())
+	if err := req.Validate(sk.PublicKey()); !errors.Is(err, ErrObjectDuplicateSlab) {
 		t.Fatalf("expected %v, got %v", ErrObjectDuplicateSlab, err)
 	}
 }
 
 func TestPinObjectRequestValidateOpaqueFields(t *testing.T) {
+	sk := types.GeneratePrivateKey()
 	obj := SealedObject{
 		EncryptedMetadata: []byte("opaque metadata"),
 		Slabs:             []SlabSlice{{EncryptionKey: frand.Entropy256(), MinShards: 1, Length: 1}},
@@ -124,7 +132,9 @@ func TestPinObjectRequestValidateOpaqueFields(t *testing.T) {
 	} {
 		req.EncryptedDataKey = frand.Bytes(tt.dataKeySize)
 		req.EncryptedMetadataKey = frand.Bytes(tt.metadataKeySize)
-		err := req.Validate()
+		req.DataSignature = sk.SignHash(req.DataSigHash())
+		req.MetadataSignature = sk.SignHash(req.MetaSigHash())
+		err := req.Validate(sk.PublicKey())
 		if tt.valid && err != nil || !tt.valid && !errors.Is(err, ErrInvalidObjectRequest) {
 			t.Fatalf("key lengths %d/%d: valid=%v, got %v", tt.dataKeySize, tt.metadataKeySize, tt.valid, err)
 		}

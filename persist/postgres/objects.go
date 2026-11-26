@@ -30,12 +30,12 @@ const sqlObjectSlabs = `
 // slabs, which are loaded separately.
 type dbObject struct {
 	id  int64
-	key types.Hash256
+	key slabs.ObjectID
 	slabs.SealedObjectWithoutSlabs
 }
 
 // SharedObject retrieves the shared object with the given key for the given account.
-func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error) {
+func (s *Store) SharedObject(key slabs.ObjectID) (obj slabs.SharedObject, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		obj = slabs.SharedObject{} // reset if transaction retries
 
@@ -58,7 +58,7 @@ func (s *Store) SharedObject(key types.Hash256) (obj slabs.SharedObject, _ error
 }
 
 // Object retrieves the object with the given key for the given account.
-func (s *Store) Object(account proto.Account, key types.Hash256) (obj slabs.SealedObject, _ error) {
+func (s *Store) Object(account proto.Account, key slabs.ObjectID) (obj slabs.SealedObject, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -172,7 +172,7 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 	}
 
 	objectKeys := make([]sqlHash256, 0, len(events))
-	eventByKey := make(map[types.Hash256]int, len(events))
+	eventByKey := make(map[slabs.ObjectID]int, len(events))
 	for i := range events {
 		if events[i].Deleted {
 			continue
@@ -217,7 +217,7 @@ func listObjectEvents(ctx context.Context, tx *txn, accountID int64, cursor slab
 // ObjectSlabs returns a page of the object's slab slices in slab_index order,
 // starting at slice index cursor. It returns slabs.ErrObjectNotFound if the
 // object does not exist or was deleted while the page was being read.
-func (s *Store) ObjectSlabs(account proto.Account, key types.Hash256, cursor int64, limit int) (objectSlabs []slabs.SlabSlice, err error) {
+func (s *Store) ObjectSlabs(account proto.Account, key slabs.ObjectID, cursor int64, limit int) (objectSlabs []slabs.SlabSlice, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -285,7 +285,7 @@ func listObjectSlabs(ctx context.Context, tx *txn, objectID, cursor int64, limit
 // Slabs that were referenced by the object and are no longer referenced by any
 // of the account's objects are unpinned and queued for deletion by
 // PruneDeletedSlabs.
-func (s *Store) DeleteObject(account proto.Account, objectKey types.Hash256) error {
+func (s *Store) DeleteObject(account proto.Account, objectKey slabs.ObjectID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		accountID, _, err := accountID(ctx, tx, account)
 		if err != nil {
@@ -398,7 +398,7 @@ func (s *Store) ObjectsForSlab(slabID slabs.SlabID) (objects []slabs.SlabObject,
 // object with the given key, along with their connect keys. Space pins include
 // the space key and its owner's account. It returns slabs.ErrObjectNotFound if
 // no account or space has pinned an object with the key.
-func (s *Store) ObjectAccounts(objectKey types.Hash256, offset, limit int) (objectAccounts []slabs.ObjectAccount, _ error) {
+func (s *Store) ObjectAccounts(objectKey slabs.ObjectID, offset, limit int) (objectAccounts []slabs.ObjectAccount, _ error) {
 	err := s.transaction(func(ctx context.Context, tx *txn) error {
 		objectAccounts = objectAccounts[:0] // reuse same slice if transaction retries
 

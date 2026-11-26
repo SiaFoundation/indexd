@@ -40,8 +40,8 @@ func validateAccountAndSpaceKeys(account proto.Account, key types.PublicKey) err
 	return validatePublicKey("space key", key)
 }
 
-func validateObjectKey(key types.Hash256) error {
-	if key == (types.Hash256{}) {
+func validateObjectKey(key slabs.ObjectID) error {
+	if key == (slabs.ObjectID{}) {
 		return fmt.Errorf("%w: object key is empty", ErrInvalidRequest)
 	}
 	return nil

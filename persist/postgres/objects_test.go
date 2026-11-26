@@ -519,7 +519,7 @@ func TestListObjectsRegression(t *testing.T) {
 	}
 
 	// add multiple objects
-	var objectIDs []types.Hash256
+	var objectIDs []slabs.ObjectID
 	for range 3 {
 		obj := store.pinRandomObject(t, acc, randomSlabs())
 		objectIDs = append(objectIDs, obj.ID())
@@ -806,7 +806,7 @@ func TestListObjectsLatePinCommit(t *testing.T) {
 
 // eventPosition returns the position of the given object's event, or nil if it
 // has not been published yet.
-func (s *Store) eventPosition(t testing.TB, obj types.Hash256) *time.Time {
+func (s *Store) eventPosition(t testing.TB, obj slabs.ObjectID) *time.Time {
 	t.Helper()
 
 	var position *time.Time
@@ -1368,7 +1368,7 @@ func TestObjectAccounts(t *testing.T) {
 	// create an object on acc3 referencing only slab2
 	obj2 := store.pinRandomObject(t, acc3, []slabs.SlabSlice{slab2.Slice(0, 100)})
 
-	assertObjectAccounts := func(objectKey types.Hash256, offset, limit int, expected []proto.Account) {
+	assertObjectAccounts := func(objectKey slabs.ObjectID, offset, limit int, expected []proto.Account) {
 		t.Helper()
 		objectAccounts, err := store.ObjectAccounts(objectKey, offset, limit)
 		if err != nil {
@@ -1768,7 +1768,7 @@ func TestParallelObjectDeletion(t *testing.T) {
 		obj2 := store.pinRandomObject(t, acc, []slabs.SlabSlice{shared.Slice(0, 100), shared.Slice(100, 200)})
 
 		errs := make(chan error, 2)
-		for _, key := range []types.Hash256{obj1.ID(), obj2.ID()} {
+		for _, key := range []slabs.ObjectID{obj1.ID(), obj2.ID()} {
 			go func() {
 				errs <- store.DeleteObject(acc, key)
 			}()

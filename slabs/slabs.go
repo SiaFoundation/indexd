@@ -136,7 +136,7 @@ type (
 	// SlabObject identifies an object that references a slab.
 	SlabObject struct {
 		Account  proto.Account
-		ObjectID types.Hash256
+		ObjectID ObjectID
 		SpaceKey types.PublicKey `json:"spaceKey,omitzero"`
 	}
 )

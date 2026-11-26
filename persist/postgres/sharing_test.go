@@ -198,7 +198,7 @@ func TestPruneExpiredSharingKeys(t *testing.T) {
 
 	if _, err := store.SharedObjectsWithoutSlabs(expiredPK, 0, 10); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
 		t.Fatalf("expected expired key to be filtered from listing without slabs, got %v", err)
-	} else if _, err := store.SharingKeyObjectSlabs(expiredPK, types.Hash256(frand.Entropy256()), 0, 10); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
+	} else if _, err := store.SharingKeyObjectSlabs(expiredPK, slabs.ObjectID(frand.Entropy256()), 0, 10); !errors.Is(err, sharing.ErrSharingKeyNotFound) {
 		t.Fatalf("expected expired key to be filtered from slab listing, got %v", err)
 	}
 
@@ -335,7 +335,7 @@ func TestSharedObjectRequest(t *testing.T) {
 	}
 
 	badReq := req
-	badReq.ObjectID = types.Hash256(frand.Entropy256())
+	badReq.ObjectID = slabs.ObjectID(frand.Entropy256())
 	if err := store.AddSharedObject(acc, skPK, badReq); !errors.Is(err, slabs.ErrObjectNotFound) {
 		t.Fatalf("expected ErrObjectNotFound, got %v", err)
 	}
@@ -414,7 +414,7 @@ func (s *Store) addTestSharingKey(t testing.TB, acc proto.Account, description s
 	return pk
 }
 
-func attachTestObject(t testing.TB, store *Store, acc proto.Account, sharingKey types.PublicKey, objectID types.Hash256) {
+func attachTestObject(t testing.TB, store *Store, acc proto.Account, sharingKey types.PublicKey, objectID slabs.ObjectID) {
 	t.Helper()
 	if err := store.AddSharedObject(acc, sharingKey, sharing.SharedObjectRequest{
 		ObjectID:          objectID,
@@ -454,7 +454,7 @@ func TestSharingKeyObjects(t *testing.T) {
 	store.addTestContract(t, hk)
 
 	sharingKey := store.addTestSharingKey(t, acc, "objects")
-	want := make(map[types.Hash256]bool)
+	want := make(map[slabs.ObjectID]bool)
 	for range 3 {
 		obj := store.pinTestObject(t, acc, hk)
 		attachTestObject(t, store, acc, sharingKey, obj.ID())

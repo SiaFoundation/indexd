@@ -138,25 +138,25 @@ type (
 		PruneDeletedSlabs(limit int) (int, error)
 
 		// Object methods
-		Object(account proto.Account, key types.Hash256) (SealedObject, error)
-		DeleteObject(account proto.Account, objectKey types.Hash256) error
+		Object(account proto.Account, key ObjectID) (SealedObject, error)
+		DeleteObject(account proto.Account, objectKey ObjectID) error
 		PinObject(account proto.Account, obj PinObjectRequest) error
 		ListObjects(account proto.Account, cursor Cursor, limit int) ([]ObjectEvent, error)
 		ListObjectsWithoutSlabs(account proto.Account, cursor Cursor, limit int) ([]ObjectEventWithoutSlabs, error)
-		ObjectSlabs(account proto.Account, key types.Hash256, cursor int64, limit int) ([]SlabSlice, error)
+		ObjectSlabs(account proto.Account, key ObjectID, cursor int64, limit int) ([]SlabSlice, error)
 		ObjectStats() (ObjectStats, error)
 		PublishObjectEvents() error
-		SharedObject(key types.Hash256) (SharedObject, error)
+		SharedObject(key ObjectID) (SharedObject, error)
 
 		// Blocklist methods
-		BlockObject(objectKey types.Hash256, reason string) error
-		UnblockObject(objectKey types.Hash256) error
-		BlockedObject(objectKey types.Hash256) (BlockedObject, error)
+		BlockObject(objectKey ObjectID, reason string) error
+		UnblockObject(objectKey ObjectID) error
+		BlockedObject(objectKey ObjectID) (BlockedObject, error)
 		BlockedObjects(offset, limit int) ([]BlockedObject, error)
 
 		ObjectsForSlab(slabID SlabID) ([]SlabObject, error)
 		DeleteSlabObject(obj SlabObject) error
-		ObjectAccounts(objectKey types.Hash256, offset, limit int) ([]ObjectAccount, error)
+		ObjectAccounts(objectKey ObjectID, offset, limit int) ([]ObjectAccount, error)
 		SectorStats() (SectorsStats, error)
 	}
 

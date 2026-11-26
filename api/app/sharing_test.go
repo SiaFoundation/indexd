@@ -65,7 +65,7 @@ func TestSharingKeys(t *testing.T) {
 		},
 	}
 	obj.Sign(sk1)
-	if err := appClient.PinObject(ctx, sk1, obj); err != nil {
+	if err := appClient.PinObject(ctx, sk1, obj.PinRequest()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -270,7 +270,7 @@ func TestSharingKeys(t *testing.T) {
 		t.Fatalf("expected reassembled object ID %v, got %v", withoutSlabs[0].ObjectID, reassembled.ID())
 	}
 
-	if _, err := appClient.SharedObjectSlabs(ctx, shareKeyPriv, types.Hash256(frand.Entropy256()), 0, 1); err == nil {
+	if _, err := appClient.SharedObjectSlabs(ctx, shareKeyPriv, slabs.ObjectID(frand.Entropy256()), 0, 1); err == nil {
 		t.Fatal("expected error fetching slabs of an object not attached to the sharing key")
 	} else {
 		assertStatus(t, err, http.StatusNotFound)
@@ -334,7 +334,7 @@ func TestSharingKeys(t *testing.T) {
 	}
 
 	unknown := sharedReq
-	unknown.ObjectID = types.Hash256(frand.Entropy256())
+	unknown.ObjectID = slabs.ObjectID(frand.Entropy256())
 	unknown.Sign(shareKeyPriv)
 	if err := appClient.AddSharedObject(ctx, sk1, shareKey, unknown); err == nil {
 		t.Fatal("expected error attaching unknown object")

@@ -31,9 +31,9 @@ type (
 		DeleteSpaceMember(account proto.Account, key types.PublicKey, member proto.Account) error
 		PinSpaceSlabs(account proto.Account, key types.PublicKey, nextIntegrityCheck time.Time, toPin ...slabs.SlabPinParams) ([]slabs.SlabID, error)
 		PinSpaceObject(account proto.Account, key types.PublicKey, obj slabs.PinObjectRequest) error
-		DeleteSpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) error
-		SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
-		SpaceObjectSlabs(account proto.Account, key types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
+		DeleteSpaceObject(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID) error
+		SpaceObject(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID) (slabs.SealedObject, error)
+		SpaceObjectSlabs(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID, cursor int64, limit int) ([]slabs.SlabSlice, error)
 		ListSpaceObjects(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEvent, error)
 		ListSpaceObjectsWithoutSlabs(account proto.Account, key types.PublicKey, cursor slabs.Cursor, limit int) ([]slabs.ObjectEventWithoutSlabs, error)
 	}
@@ -288,7 +288,7 @@ func (a *app) handleGETSpaceObjects(jc jape.Context, pk types.PublicKey) {
 
 func (a *app) handleGETSpaceObject(jc jape.Context, pk types.PublicKey) {
 	var key types.PublicKey
-	var objectKey types.Hash256
+	var objectKey slabs.ObjectID
 	if jc.DecodeParam("key", &key) != nil || jc.DecodeParam("objectkey", &objectKey) != nil {
 		return
 	}
@@ -301,7 +301,7 @@ func (a *app) handleGETSpaceObject(jc jape.Context, pk types.PublicKey) {
 
 func (a *app) handleGETSpaceObjectSlabs(jc jape.Context, pk types.PublicKey) {
 	var key types.PublicKey
-	var objectKey types.Hash256
+	var objectKey slabs.ObjectID
 	if jc.DecodeParam("key", &key) != nil || jc.DecodeParam("objectkey", &objectKey) != nil {
 		return
 	}
@@ -318,7 +318,7 @@ func (a *app) handleGETSpaceObjectSlabs(jc jape.Context, pk types.PublicKey) {
 
 func (a *app) handleDELETESpaceObject(jc jape.Context, pk types.PublicKey) {
 	var key types.PublicKey
-	var objectKey types.Hash256
+	var objectKey slabs.ObjectID
 	if jc.DecodeParam("key", &key) != nil || jc.DecodeParam("objectkey", &objectKey) != nil {
 		return
 	}

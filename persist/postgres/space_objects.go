@@ -86,7 +86,7 @@ func (s *Store) PinSpaceObject(account proto.Account, key types.PublicKey, obj s
 
 // DeleteSpaceObject removes an object from a space and releases storage no longer
 // used by the owner's objects. Account must have delete permission.
-func (s *Store) DeleteSpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) error {
+func (s *Store) DeleteSpaceObject(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID) error {
 	return s.transaction(func(ctx context.Context, tx *txn) error {
 		id, ownerID, _, err := spaceAccess(ctx, tx, account, key, spaces.Delete, false)
 		if err != nil {
@@ -96,7 +96,7 @@ func (s *Store) DeleteSpaceObject(account proto.Account, key types.PublicKey, ob
 	})
 }
 
-func (s *Store) deleteSpaceObject(ctx context.Context, tx *txn, id, ownerID int64, objectKey types.Hash256) error {
+func (s *Store) deleteSpaceObject(ctx context.Context, tx *txn, id, ownerID int64, objectKey slabs.ObjectID) error {
 	var objectID int64
 	err := tx.QueryRow(ctx, `SELECT id FROM space_objects WHERE space_id = $1 AND object_key = $2 FOR UPDATE`, id, sqlHash256(objectKey)).Scan(&objectID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -188,7 +188,7 @@ func (s *Store) ListSpaceObjectsWithoutSlabs(account proto.Account, key types.Pu
 }
 
 // SpaceObjectSlabs returns slab slices starting at cursor. Read access is required.
-func (s *Store) SpaceObjectSlabs(account proto.Account, key types.PublicKey, objectKey types.Hash256, cursor int64, limit int) (result []slabs.SlabSlice, err error) {
+func (s *Store) SpaceObjectSlabs(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID, cursor int64, limit int) (result []slabs.SlabSlice, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
 		if err != nil {
@@ -218,7 +218,7 @@ func (s *Store) SpaceObjectSlabs(account proto.Account, key types.PublicKey, obj
 
 // SpaceObject returns an object in a space. Account must have read permission,
 // and the object must not be blocked.
-func (s *Store) SpaceObject(account proto.Account, key types.PublicKey, objectKey types.Hash256) (object slabs.SealedObject, err error) {
+func (s *Store) SpaceObject(account proto.Account, key types.PublicKey, objectKey slabs.ObjectID) (object slabs.SealedObject, err error) {
 	err = s.transaction(func(ctx context.Context, tx *txn) error {
 		id, _, _, err := spaceAccess(ctx, tx, account, key, spaces.Read, true)
 		if err != nil {
@@ -358,7 +358,7 @@ func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor s
 		return nil, nil, err
 	}
 	keys := make([]sqlHash256, 0, len(events))
-	byKey := make(map[types.Hash256]int, len(events))
+	byKey := make(map[slabs.ObjectID]int, len(events))
 	for i, event := range events {
 		if !event.Deleted {
 			keys = append(keys, sqlHash256(event.Key))
@@ -378,7 +378,7 @@ func listSpaceObjectEvents(ctx context.Context, tx *txn, spaceID int64, cursor s
 	err = forEachRow(rows, func(row pgx.CollectableRow) error {
 		var id int64
 		var obj slabs.SealedObjectWithoutSlabs
-		var key types.Hash256
+		var key slabs.ObjectID
 		if err := row.Scan(&id, (*sqlHash256)(&key), &obj.EncryptedDataKey, &obj.EncryptedMetadataKey,
 			&obj.EncryptedMetadata, (*sqlSignature)(&obj.DataSignature), (*sqlSignature)(&obj.MetadataSignature), &obj.CreatedAt, &obj.UpdatedAt, &obj.Size); err != nil {
 			return err

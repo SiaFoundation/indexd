@@ -249,7 +249,7 @@ func (c *Client) SlabIDs(ctx context.Context, appKey types.PrivateKey, opts ...a
 }
 
 // Object retrieves the object with the given key for the given account.
-func (c *Client) Object(ctx context.Context, appKey types.PrivateKey, objectID types.Hash256) (resp slabs.SealedObject, err error) {
+func (c *Client) Object(ctx context.Context, appKey types.PrivateKey, objectID slabs.ObjectID) (resp slabs.SealedObject, err error) {
 	err = c.signedRequest(ctx, appKey, http.MethodGet, fmt.Sprintf("/objects/%s", objectID), nil, &resp)
 	return
 }
@@ -270,7 +270,7 @@ func (c *Client) ListObjectsWithoutSlabs(ctx context.Context, appKey types.Priva
 
 // ObjectSlabs returns a page of the object's slab slices, starting at slice
 // index cursor. A page shorter than limit is the last one.
-func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objectID types.Hash256, cursor int64, limit int) (resp []slabs.SlabSlice, err error) {
+func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objectID slabs.ObjectID, cursor int64, limit int) (resp []slabs.SlabSlice, err error) {
 	values := url.Values{}
 	values.Set("cursor", fmt.Sprint(cursor))
 	values.Set("limit", fmt.Sprint(limit))
@@ -280,15 +280,15 @@ func (c *Client) ObjectSlabs(ctx context.Context, appKey types.PrivateKey, objec
 
 // PinObject pins the object to the given account. If an object with
 // the given key exists for an account, it is overwritten.
-func (c *Client) PinObject(ctx context.Context, appKey types.PrivateKey, obj slabs.SealedObject) (err error) {
-	err = c.signedRequest(ctx, appKey, http.MethodPost, "/objects", obj.PinRequest(), nil)
+func (c *Client) PinObject(ctx context.Context, appKey types.PrivateKey, obj slabs.PinObjectRequest) (err error) {
+	err = c.signedRequest(ctx, appKey, http.MethodPost, "/objects", obj, nil)
 	return
 }
 
 // DeleteObject deletes the object with the given key for the given account.
 // Slabs that were referenced by the object and are no longer referenced by any
 // of the account's objects are unpinned and queued for deletion.
-func (c *Client) DeleteObject(ctx context.Context, appKey types.PrivateKey, key types.Hash256) (err error) {
+func (c *Client) DeleteObject(ctx context.Context, appKey types.PrivateKey, key slabs.ObjectID) (err error) {
 	err = c.signedRequest(ctx, appKey, http.MethodDelete, fmt.Sprintf("/objects/%s", key), nil, nil)
 	return
 }
@@ -336,7 +336,7 @@ func (c *Client) AddSharedObject(ctx context.Context, appKey types.PrivateKey, s
 }
 
 // DeleteSharedObject detaches an object from one of the account's sharing keys.
-func (c *Client) DeleteSharedObject(ctx context.Context, appKey types.PrivateKey, sharingKey types.PublicKey, objectKey types.Hash256) error {
+func (c *Client) DeleteSharedObject(ctx context.Context, appKey types.PrivateKey, sharingKey types.PublicKey, objectKey slabs.ObjectID) error {
 	return c.signedRequest(ctx, appKey, http.MethodDelete, fmt.Sprintf("/sharing/%s/objects/%s", sharingKey, objectKey), nil, nil)
 }
 
@@ -397,7 +397,7 @@ func (c *Client) SharedObjectsWithoutSlabs(ctx context.Context, sharingKey types
 
 // SharedObjectByID retrieves a single object the sharing key grants access to.
 // The request is signed with the sharing key's private key.
-func (c *Client) SharedObjectByID(ctx context.Context, sharingKey types.PrivateKey, objectKey types.Hash256) (obj slabs.SealedObject, err error) {
+func (c *Client) SharedObjectByID(ctx context.Context, sharingKey types.PrivateKey, objectKey slabs.ObjectID) (obj slabs.SealedObject, err error) {
 	err = c.signedRequest(ctx, sharingKey, http.MethodGet, fmt.Sprintf("/shared/objects/%s", objectKey), nil, &obj)
 	return
 }
@@ -406,7 +406,7 @@ func (c *Client) SharedObjectByID(ctx context.Context, sharingKey types.PrivateK
 // key grants access to, starting at slice index cursor. A page shorter than
 // limit is the last one. The request is signed with the sharing key's private
 // key.
-func (c *Client) SharedObjectSlabs(ctx context.Context, sharingKey types.PrivateKey, objectID types.Hash256, cursor int64, limit int) (resp []slabs.SlabSlice, err error) {
+func (c *Client) SharedObjectSlabs(ctx context.Context, sharingKey types.PrivateKey, objectID slabs.ObjectID, cursor int64, limit int) (resp []slabs.SlabSlice, err error) {
 	values := url.Values{}
 	values.Set("cursor", fmt.Sprint(cursor))
 	values.Set("limit", fmt.Sprint(limit))
@@ -428,7 +428,7 @@ func (c *Client) SharedHosts(ctx context.Context, sharingKey types.PrivateKey, o
 
 // CreateSharedObjectURL generates a signed URL for accessing the object with the given
 // key. The URL is valid until the specified validUntil time.
-func (c *Client) CreateSharedObjectURL(ctx context.Context, appKey types.PrivateKey, objectKey types.Hash256, masterKey []byte, validUntil time.Time) (string, error) {
+func (c *Client) CreateSharedObjectURL(ctx context.Context, appKey types.PrivateKey, objectKey slabs.ObjectID, masterKey []byte, validUntil time.Time) (string, error) {
 	u, _, err := sign(appKey, validUntil, http.MethodGet, fmt.Sprintf("%s/objects/%s/shared", c.baseURL, objectKey), nil)
 	if err != nil {
 		return "", fmt.Errorf("failed to sign request: %w", err)

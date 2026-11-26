@@ -20,13 +20,13 @@ type (
 		SharingKeys(account proto.Account, offset, limit int) ([]Key, error)
 		DeleteSharingKey(account proto.Account, publicKey types.PublicKey) error
 		AddSharedObject(account proto.Account, sharingKey types.PublicKey, req SharedObjectRequest) error
-		DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey types.Hash256) error
+		DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey slabs.ObjectID) error
 		PruneExpiredSharingKeys(cutoff time.Time) error
 
 		SharedObjects(sharingKey types.PublicKey, offset, limit int) ([]slabs.SealedObject, error)
 		SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, limit int) ([]ObjectWithoutSlabs, error)
-		SharingKeyObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error)
-		SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error)
+		SharingKeyObject(sharingKey types.PublicKey, objectKey slabs.ObjectID) (slabs.SealedObject, error)
+		SharingKeyObjectSlabs(sharingKey types.PublicKey, objectKey slabs.ObjectID, cursor int64, limit int) ([]slabs.SlabSlice, error)
 		SharingAccountKey(sharingKey types.PublicKey) (types.PrivateKey, error)
 	}
 
@@ -124,7 +124,7 @@ func (m *Manager) AddSharedObject(account proto.Account, sharingKey types.Public
 }
 
 // DeleteSharedObject detaches an object from one of the account's sharing keys.
-func (m *Manager) DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey types.Hash256) error {
+func (m *Manager) DeleteSharedObject(account proto.Account, sharingKey types.PublicKey, objectKey slabs.ObjectID) error {
 	return m.store.DeleteSharedObject(account, sharingKey, objectKey)
 }
 
@@ -162,12 +162,12 @@ func (m *Manager) SharedObjectsWithoutSlabs(sharingKey types.PublicKey, offset, 
 
 // SharedObjectSlabs returns a page of the slab slices of an object attached to
 // the sharing key, starting at slice index cursor.
-func (m *Manager) SharedObjectSlabs(sharingKey types.PublicKey, objectKey types.Hash256, cursor int64, limit int) ([]slabs.SlabSlice, error) {
+func (m *Manager) SharedObjectSlabs(sharingKey types.PublicKey, objectKey slabs.ObjectID, cursor int64, limit int) ([]slabs.SlabSlice, error) {
 	return m.store.SharingKeyObjectSlabs(sharingKey, objectKey, cursor, limit)
 }
 
 // SharedObject returns a single object attached to the sharing key.
-func (m *Manager) SharedObject(sharingKey types.PublicKey, objectKey types.Hash256) (slabs.SealedObject, error) {
+func (m *Manager) SharedObject(sharingKey types.PublicKey, objectKey slabs.ObjectID) (slabs.SealedObject, error) {
 	return m.store.SharingKeyObject(sharingKey, objectKey)
 }
 

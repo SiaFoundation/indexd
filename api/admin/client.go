@@ -348,7 +348,7 @@ func (c *Client) HostsBlocklistRemove(ctx context.Context, hostKey types.PublicK
 // ObjectAccounts returns the accounts that have pinned an object with the given
 // key, along with their connect keys. Space pins include the space key and its
 // owner's account.
-func (c *Client) ObjectAccounts(ctx context.Context, objectKey types.Hash256, opts ...api.URLQueryParameterOption) (objectAccounts []slabs.ObjectAccount, err error) {
+func (c *Client) ObjectAccounts(ctx context.Context, objectKey slabs.ObjectID, opts ...api.URLQueryParameterOption) (objectAccounts []slabs.ObjectAccount, err error) {
 	values := url.Values{}
 	for _, opt := range opts {
 		opt(values)
@@ -368,7 +368,7 @@ func (c *Client) ObjectsBlocklist(ctx context.Context, opts ...api.URLQueryParam
 }
 
 // ObjectBlocklistAdd adds the given object key to the blocklist.
-func (c *Client) ObjectBlocklistAdd(ctx context.Context, objectKey types.Hash256, reason string) (err error) {
+func (c *Client) ObjectBlocklistAdd(ctx context.Context, objectKey slabs.ObjectID, reason string) (err error) {
 	err = c.c.PUT(ctx, fmt.Sprintf("/objects/blocklist/%s", objectKey), ObjectBlocklistRequest{
 		Reason: reason,
 	})
@@ -376,13 +376,13 @@ func (c *Client) ObjectBlocklistAdd(ctx context.Context, objectKey types.Hash256
 }
 
 // ObjectBlocklistEntry returns the blocklist entry for the given object key.
-func (c *Client) ObjectBlocklistEntry(ctx context.Context, objectKey types.Hash256) (blocked slabs.BlockedObject, err error) {
+func (c *Client) ObjectBlocklistEntry(ctx context.Context, objectKey slabs.ObjectID) (blocked slabs.BlockedObject, err error) {
 	err = c.c.GET(ctx, fmt.Sprintf("/objects/blocklist/%s", objectKey), &blocked)
 	return
 }
 
 // ObjectBlocklistRemove removes the object with the given key from the blocklist.
-func (c *Client) ObjectBlocklistRemove(ctx context.Context, objectKey types.Hash256) (err error) {
+func (c *Client) ObjectBlocklistRemove(ctx context.Context, objectKey slabs.ObjectID) (err error) {
 	err = c.c.DELETE(ctx, fmt.Sprintf("/objects/blocklist/%s", objectKey))
 	return
 }

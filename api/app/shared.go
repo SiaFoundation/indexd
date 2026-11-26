@@ -58,7 +58,7 @@ func (a *app) handleGETSharedObjects(jc jape.Context, key sharing.Key) {
 }
 
 func (a *app) handleGETSharedObject(jc jape.Context, key sharing.Key) {
-	var objectKey types.Hash256
+	var objectKey slabs.ObjectID
 	if jc.DecodeParam("id", &objectKey) != nil {
 		return
 	}
@@ -80,7 +80,7 @@ func (a *app) handleGETSharedObject(jc jape.Context, key sharing.Key) {
 }
 
 func (a *app) handleGETSharedObjectSlabs(jc jape.Context, key sharing.Key) {
-	var objectKey types.Hash256
+	var objectKey slabs.ObjectID
 	if jc.DecodeParam("id", &objectKey) != nil {
 		return
 	}
